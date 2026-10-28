@@ -1,0 +1,189 @@
+{
+  "schema": 1,
+  "label": "depois-real-parte3",
+  "mode": "real",
+  "startedAt": "2026-10-16T00:17:13.501Z",
+  "commit": "22cae3fd",
+  "runs": [
+    {
+      "id": "L11-formulario-multietapas",
+      "outcome": "error",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8795/etapas.html",
+      "steps": 1,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 2287,
+      "stepMs": [
+        2287
+      ],
+      "phases": {
+        "jevMs": 525,
+        "snapshotMs": 3,
+        "actionMs": 1720,
+        "waitMs": 0,
+        "otherMs": 39
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Preencha o pedido de teste nas três etapas (dados, endereço, revisão) e envie.\": ERRO\nA ação falhou; veja o motivo acima e continue você.\n\nPassos:\ndigitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)\ndigitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)\n1. falhou: não há valor para text field \"Nome\": passe --fill \"<campo>=<valor>\"\n\nTEMPOS: {\"jev\":525,\"snapshot\":3,\"acao\":1720,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":2249}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — pedido de teste\" http://localhost:8795/etapas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Etapa 1 de 3 — Dados\" [level=1]\n  - textbox \"Nome\" [ref=e1] value=\"Maria Teste\"\n  - textbox \"E-mail\" [ref=e2] [focused] value=\"maria@teste.com\"\n  - button \"Próximo\" [ref=e3]",
+      "probes": 1
+    },
+    {
+      "id": "L12-garantia-na-foto",
+      "outcome": "unsure",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8795/foto-garantia.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2856,
+      "stepMs": [
+        2856
+      ],
+      "phases": {
+        "jevMs": 1814,
+        "snapshotMs": 5,
+        "actionMs": 999,
+        "waitMs": 0,
+        "otherMs": 38
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Clique no botão «Garantia estendida» que aparece no meio da foto do produto.\": PAROU (Jev sem certeza)\nO Jev não tem certeza do próximo passo (stuck, p=0.37, fim p=0.01, 298 ms). Continue você, com `snapshot` e `click`, ou diga no objetivo a escolha que falta. A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar.\n\nPassos:\n1. tocou pela foto no ponto (365, 330) (existe p=1.00, caixa conf=0.93, 403 ms)\nA foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).\n\nTEMPOS: {\"jev\":599,\"snapshot\":5,\"acao\":999,\"espera\":0,\"foto\":1215,\"consultas\":2,\"fotos\":1,\"total\":2819}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — foto do produto\" http://localhost:8795/foto-garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - text \"GARANTIA ABERTA\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n  - text \"Tênis de corrida Aero. R$ 399,90\"\n  - button \"Comprar\" [ref=e3]",
+      "probes": 3
+    },
+    {
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8795/rolar.html",
+      "steps": 5,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 4099,
+      "stepMs": [
+        746,
+        995,
+        992,
+        1005
+      ],
+      "phases": {
+        "jevMs": 1503,
+        "snapshotMs": 6,
+        "actionMs": 2548,
+        "waitMs": 0,
+        "otherMs": 42
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Role até o fim da página e clique em Assinar.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. rolou a página (p=0.98, fim p=0.00, 291 ms, passo 746 ms)\n2. rolou a página (p=0.93, fim p=0.00, 297 ms, passo 995 ms)\n3. rolou a página (p=0.96, fim p=0.00, 288 ms, passo 992 ms)\n4. clicou button \"Assinar\" (p=0.91, fim p=0.03, 293 ms, passo 1005 ms)\n5. objetivo atingido (pergunta direta p=0.99)\n\nTEMPOS: {\"jev\":1503,\"snapshot\":6,\"acao\":2548,\"espera\":0,\"foto\":0,\"consultas\":5,\"fotos\":0,\"total\":4057}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — novidades\" http://localhost:8795/rolar.html\nviewport: 1908×1120 · scroll 1334/2454\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Novidades da semana\" [level=1]\n  - text \"Novidade número 1: mais um lançamento da semana. Novidade número 2: mais um lançamento da semana. Novidade número 3: mais um lançamento da semana. Novidade número 4: mais um lançamento da semana. Nov…\"\n  - button \"Assinar\" [ref=e1] [focused]\n  - text \"ASSINADO\"",
+      "probes": 5
+    },
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Brasil",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1885,
+      "stepMs": [
+        1885
+      ],
+      "phases": {
+        "jevMs": 1709,
+        "snapshotMs": 136,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 40
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\n1. sem caminho (p=0.54, fim p=0.00, 351 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.89, caixa conf=0.52, 492 ms).\n\nTEMPOS: {\"jev\":362,\"snapshot\":136,\"acao\":0,\"espera\":0,\"foto\":1347,\"consultas\":1,\"fotos\":1,\"total\":1849}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Brasil – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Brasil\nviewport: 1908×1120 · scroll 0/54580\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Brasil#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - text \"mover para a barra lateral\"\n    - text \"Página principal\"\n    - text \"Conteúdo destacado\"\n    - text \"Eventos atuais\"\n    - text \"Esplanada\"\n    - text \"Página aleatória\"\n    - text \"Portais\"\n    - text \"Páginas especiais\"\n    - text \"Informar um erro\"\n    - text \"Colaboração\"\n    - text \"Boas-vindas\"\n    - text \"Ajuda\"\n    - text \"Páginas de testes públicas\"\n    - text \"Portal comunitário\"\n    - text \"Mudanças recentes\"\n    - text \"Manutenção\"\n    - text \"Criar página\"\n    - text \"Páginas novas\"\n    - text \"Contato\"\n  - link [ref=e3] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e4]\n      - button \"Procurar\" [ref=e5]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e6] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e7] → /w/index.php?title=Especial:Criar_conta&returnto=Brasil\n      - listitem\n        - link \"Iniciar sessão\" [ref=e8] → /w/index.php?title=Especial:Entrar&returnto=Brasil\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Esconder Conteúdos\" [ref=e9]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e10] → /wiki/Brasil#\n    - listitem\n      - link \"Etimologia\" [ref=e11] → /wiki/Brasil#Etimologia\n      - list \"toc etimologia sublist\"\n    - listitem\n      - link \"História\" [ref=e12] → /wiki/Brasil#Hist%C3%B3ria\n      - button \"Alternar a subsecção História\" [ref=e13]\n      - list \"toc sublist\"\n    - listitem\n      - link \"Geografia\" [ref=e14] → /wiki/Brasil#Geografia\n      - button \"Alternar a subsecção Geografia\" [ref=e15]\n      - list \"toc geografia sublist\"\n    - listitem\n      - link \"Demografia\" [ref=e16] → /wiki/Brasil#Demografia\n      - button \"Alternar a subsecção Demografia\" [ref=e17]\n      - list \"toc demografia sublist\"\n    - listitem\n      - link \"Governo e política\" [ref=e18] → /wiki/Brasil#Governo_e_pol%C3%ADtica\n      - button \"Alternar a subsecção Governo e política\" [ref=e19]\n      - list \"toc governo sublist\"\n    - listitem\n      - link \"Subdivisões\" [ref=e20] → /wiki/Brasil#Subdivis%C3%B5es\n      - list \"toc sublist\"\n    - listitem\n      - link \"Economia\" [ref=e21] → /wiki/Brasil#Economia\n      - button \"Alternar a subsecção Economia\" [ref=e22]\n      - list \"toc economia sublist\"\n    - listitem\n      - link \"Infraestrutura\" [ref=e23] → /wiki/Brasil#Infraestrutura\n      - button \"Alternar a subsecção Infraestrutura\" [ref=e24]\n      - list \"toc infraestrutura sublist\"\n    - listitem\n      - link \"Cultura\" [ref=e25] → /wiki/Brasil#Cultura\n      - button \"Alternar a subsecção Cultura\" [ref=e26]\n      - list \"toc cultura sublist\"\n    - listitem\n      - link \"Ver também\" [ref=e27] → /wiki/Brasil#Ver_tamb%C3%A9m\n      - list \"toc ver sublist\"\n    - listitem\n      - link \"Notas e referências\" [ref=e28] → /wiki/Brasil#Notas_e_refer%C3%AAncias\n      - button \"Alternar a subsecção Notas e referências\" [ref=e29]\n      - list \"toc notas sublist\"\n    - listitem\n      - link \"Ligações externas\" [ref=e30] → /wiki/Brasil#Liga%C3%A7%C3%B5es_externas\n      - list \"toc externas sublist\"\n- main\n  - banner \"no font mode scale\"\n    - heading \"Brasil\" [level=1]\n    - button \"304 idiomas\" [ref=e31]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e32] → /wiki/Brasil\n      - listitem\n        - link \"Discussão\" [ref=e33] → /wiki/Discuss%C3%A3o:Brasil\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e34] → /wiki/Brasil\n      - listitem\n        - link \"Ver código fonte\" [ref=e35] → /w/index.php?title=Brasil&action=edit\n      - listitem\n        - link \"Ver histórico\" [ref=e36] → /w/index.php?title=Brasil&action=history\n  - navigation \"Ferramentas de página\"\n    - button \"Ferramentas\" [ref=e37]\n    - text \"Ferramentas\"\n    - text \"mover para a barra lateral\"\n    - text \"Geral\"\n    - text \"Páginas afluentes\"\n    - text \"Alteraçõe",
+      "probes": 2
+    },
+    {
+      "id": "P03-saucedemo-carrinho",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/cart.html",
+      "steps": 3,
+      "autoFills": 2,
+      "photos": 1,
+      "totalMs": 4786,
+      "stepMs": [
+        2408
+      ],
+      "phases": {
+        "jevMs": 2247,
+        "snapshotMs": 6,
+        "actionMs": 2494,
+        "waitMs": 0,
+        "otherMs": 39
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho e abra o carrinho. Não finalize nada.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=0.99, fim p=0.00, 292 ms, passo 2408 ms)\n2. tocou pela foto no ponto (1843, 22) (existe p=0.91, caixa conf=0.65, 438 ms)\n3. concluído (p=0.68, fim p=0.71, 330 ms)\n\nTEMPOS: {\"jev\":931,\"snapshot\":6,\"acao\":2494,\"espera\":0,\"foto\":1316,\"consultas\":3,\"fotos\":1,\"total\":4751}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/cart.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 2 items\" [ref=e2]\n  - text \"Your Cart\"\n- main \"cart contents container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Bike Light\" [ref=e3] → /cart.html#\n  - text \"A red light isn't the desired state in testing but it sure helps when riding your bike at night. Water-resistant with 3 lighting modes, 1 AAA battery included.\"\n  - text \"$\"\n  - text \"9.99\"\n  - button \"Remove\" [ref=e4]\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e5] → /cart.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e6]\n  - button \"Continue Shopping\" [ref=e7]\n  - button \"Checkout\" [ref=e8]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e9] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e10] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e11] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 4
+    },
+    {
+      "id": "P04-saucedemo-checkout",
+      "outcome": "unsure",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/inventory.html",
+      "steps": 1,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 3989,
+      "stepMs": [
+        2296
+      ],
+      "phases": {
+        "jevMs": 1977,
+        "snapshotMs": 3,
+        "actionMs": 1970,
+        "waitMs": 0,
+        "otherMs": 39
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.\": PAROU (Jev sem certeza)\nO Jev não tem certeza do próximo passo (click e2, p=0.30, fim p=0.00, 321 ms). Continue você, com `snapshot` e `click`, ou diga no objetivo a escolha que falta. A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=0.99, fim p=0.00, 317 ms, passo 2296 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.94, caixa conf=0.44, 429 ms).\n\nTEMPOS: {\"jev\":650,\"snapshot\":3,\"acao\":1970,\"espera\":0,\"foto\":1327,\"consultas\":2,\"fotos\":1,\"total\":3954}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/inventory.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 2 items\" [ref=e2]\n  - text \"Products\"\n  - clickable \"select container\" [ref=e3]\n- main \"inventory container\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e4] → /inventory.html#\n  - button \"View details for Sauce Labs Backpack\" [ref=e5] → /inventory.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e6]\n  - button \"View details for Sauce Labs Bike Light\" [ref=e7] → /inventory.html#\n  - button \"View details for Sauce Labs Bike Light\" [ref=e8] → /inventory.html#\n  - text \"A red light isn't the desired state in testing but it sure helps when riding your bike at night. Water-resistant with 3 lighting modes, 1 AAA battery included.\"\n  - text \"$\"\n  - text \"9.99\"\n  - button \"Remove\" [ref=e9]\n  - button \"View details for Sauce Labs Bolt T-Shirt\" [ref=e10] → /inventory.html#\n  - button \"View details for Sauce Labs Bolt T-Shirt\" [ref=e11] → /inventory.html#\n  - text \"Get your testing superhero on with the Sauce Labs bolt T-shirt. From American Apparel, 100% ringspun combed cotton, heather gray with red bolt.\"\n  - text \"$\"\n  - text \"15.99\"\n  - button \"Add to cart\" [ref=e12]\n  - button \"View details for Sauce Labs Fleece Jacket\" [ref=e13] → /inventory.html#\n  - button \"View details for Sauce Labs Fleece Jacket\" [ref=e14] → /inventory.html#\n  - text \"It's not every day that you come across a midweight quarter-zip fleece jacket capable of handling everything from a relaxing day outdoors to a busy day at the office.\"\n  - text \"$\"\n  - text \"49.99\"\n  - button \"Add to cart\" [ref=e15]\n  - button \"View details for Sauce Labs Onesie\" [ref=e16] → /inventory.html#\n  - button \"View details for Sauce Labs Onesie\" [ref=e17] → /inventory.html#\n  - text \"Rib snap infant onesie for the junior automation engineer in development. Reinforced 3-snap bottom closure, two-needle hemmed sleeved and bottom won't unravel.\"\n  - text \"$\"\n  - text \"7.99\"\n  - button \"Add to cart\" [ref=e18]\n  - button \"View details for Test.allTheThings() T-Shirt (Red)\" [ref=e19] → /inventory.html#\n  - button \"View details for Test.allTheThings() T-Shirt (Red)\" [ref=e20] → /inventory.html#\n  - text \"This classic Sauce Labs t-shirt is perfect to wear when cozying up to your keyboard to automate a few tests. Super-soft and comfy ringspun combed cotton.\"\n  - text \"$\"\n  - text \"15.99\"\n  - button \"Add to cart\" [ref=e21]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e22] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e23] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e24] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 3
+    }
+  ],
+  "summary": {
+    "tasks": 6,
+    "completed": 3,
+    "completedRate": 0.5,
+    "confirmed": 2,
+    "falseDone": 0,
+    "falseUnsure": 1,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 2,
+    "medianSteps": 1,
+    "medianTotalMs": 3422.5,
+    "medianStepMs": 1885,
+    "share": {
+      "jevMs": 0.4911566676715908,
+      "snapshotMs": 0.007989146819415134,
+      "actionMs": 0.4889458345894885,
+      "waitMs": 0,
+      "otherMs": 0.011908350919505577
+    },
+    "outcomes": {
+      "error": 1,
+      "unsure": 2,
+      "done": 2,
+      "stuck": 1
+    }
+  }
+}

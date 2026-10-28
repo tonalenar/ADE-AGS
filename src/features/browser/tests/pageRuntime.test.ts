@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   callerOf, displayPath, formatConsoleArgs, formatValue, MAX_TEXT, toTransferable,
 } from "../page/serialize";
-import { formatNode, formatSnapshot, parseKeyCombo, parseTarget } from "../page/snapshotFormat";
+import { distanceToBox, farFromWindow, formatNode, formatSnapshot, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest } from "../page/snapshotFormat";
 
 describe("formatValue", () => {
   it("muestra los primitivos como una consola", () => {
@@ -148,8 +148,82 @@ describe("snapshot", () => {
       "viewport: 375×667 · scroll 0/2000",
       "",
       '- heading "Hola" [level=1]',
-      "… 12 nodos más (pedí el snapshot completo o hacé scroll)",
+      "… 12 nós omitidos (peça o snapshot completo ou role a página)",
     ]);
+  });
+});
+
+describe("toque por foto: o controle mais perto do ponto", () => {
+  // A barra da página de teste: perfil em 1162–1210 e carrinho em 1234–1282, ambos de 48 px.
+  const profile = { left: 1162, top: 30, right: 1210, bottom: 78 };
+  const cart = { left: 1234, top: 30, right: 1282, bottom: 78 };
+
+  it("a distância é zero dentro da caixa e cresce para fora", () => {
+    expect(distanceToBox(cart, 1250, 50)).toBe(0);
+    expect(distanceToBox(cart, 1227, 54)).toBe(7);
+    expect(distanceToBox(cart, 1227, 85)).toBeCloseTo(Math.hypot(7, 7));
+  });
+
+  it("o ponto no vazio ao lado do carrinho (o erro real da foto) vai para o carrinho, não para o perfil", () => {
+    expect(snapToNearest([profile, cart], 1227, 54)).toEqual({ index: 1 });
+  });
+
+  it("dentro de um controle fica nele; entre contêineres, no menor", () => {
+    expect(snapToNearest([profile, cart], 1190, 50)).toEqual({ index: 0 });
+    const toolbar = { left: 1100, top: 20, right: 1300, bottom: 90 };
+    expect(snapToNearest([toolbar, cart], 1250, 50)).toEqual({ index: 1 });
+  });
+
+  it("longe de tudo não toca; entre dois à mesma distância não adivinha", () => {
+    expect(snapToNearest([profile, cart], 600, 300)).toBeNull();
+    expect(snapToNearest([profile, cart], 1222, 54)).toEqual({ ambiguous: true });
+  });
+});
+
+describe("opções de uma lista no snapshot", () => {
+  it("a lista mostra o que se pode escolher", () => {
+    const line = formatNode({ depth: 0, role: "combobox", name: "Classificar por", ref: "e12", states: [], value: "Em destaque", options: ["Em destaque", "Preço: do menor ao maior"] });
+    expect(line).toBe('- combobox "Classificar por" [ref=e12] value="Em destaque" options=["Em destaque","Preço: do menor ao maior"]');
+  });
+
+  it("sem opções, a linha é a de sempre", () => {
+    expect(formatNode({ depth: 0, role: "button", name: "Ir", ref: "e1", states: [] })).toBe('- button "Ir" [ref=e1]');
+  });
+});
+
+describe("nome de um elemento sem nome, pelo id", () => {
+  it("ids com palavras viram uma pista legível", () => {
+    expect(humanizeId("nav-search-submit-button")).toBe("nav search submit button");
+    expect(humanizeId("shoppingCartLink")).toBe("shopping cart link");
+    expect(humanizeId("add_to_cart")).toBe("add to cart");
+  });
+
+  it("uma palavra só, lixo gerado ou números não são pista", () => {
+    for (const raw of ["button", "a-autoid-3-announce", "x9f2kq7", "12345", "", null, undefined, "css-1x2y3z-btn-aqwrtkd"]) {
+      expect(humanizeId(raw as string | null | undefined), String(raw)).toBe("");
+    }
+  });
+});
+
+describe("pontos para clicar num elemento", () => {
+  it("o centro vem primeiro, e os outros ficam dentro do elemento", () => {
+    const rect = { left: 100, top: 50, width: 200, height: 40 };
+    const points = probePoints(rect);
+    expect(points[0]).toEqual({ x: 200, y: 70 });
+    for (const p of points) {
+      expect(p.x).toBeGreaterThanOrEqual(100);
+      expect(p.x).toBeLessThanOrEqual(300);
+      expect(p.y).toBeGreaterThanOrEqual(50);
+      expect(p.y).toBeLessThanOrEqual(90);
+    }
+    expect(new Set(points.map((p) => `${p.x},${p.y}`)).size).toBe(points.length);
+  });
+
+  it("um elemento minúsculo não gera pontos fora dele", () => {
+    for (const p of probePoints({ left: 10, top: 10, width: 3, height: 3 })) {
+      expect(p.x).toBeGreaterThanOrEqual(10);
+      expect(p.x).toBeLessThanOrEqual(13);
+    }
   });
 });
 
@@ -172,6 +246,8 @@ describe("parseTarget", () => {
   it("solo e + número es un ref", () => {
     expect(parseTarget("e12x").kind).toBe("css");
     expect(parseTarget("@120.5,40")).toEqual({ kind: "point", x: 120.5, y: 40 });
+    expect(parseTarget("@e63")).toEqual({ kind: "ref", ref: "e63" });
+    expect(parseTarget("@u3")).toEqual({ kind: "ref", ref: "u3" });
     expect(parseTarget("@x,y").kind).toBe("css");
     expect(parseTarget(".e12").kind).toBe("css");
   });
@@ -187,5 +263,31 @@ describe("parseKeyCombo", () => {
   it("la tecla + también se puede apretar", () => {
     expect(parseKeyCombo("Control++")).toMatchObject({ key: "+", ctrlKey: true });
     expect(parseKeyCombo("+").key).toBe("+");
+  });
+});
+
+describe("farFromWindow (o snapshot do piloto só traz o que está perto da janela)", () => {
+  const at = (top: number, height = 40) => ({ top, bottom: top + height, width: 200, height });
+  it("na janela, meia tela acima e uma abaixo: perto", () => {
+    expect(farFromWindow(at(100), 800)).toBe(false);
+    expect(farFromWindow(at(-300), 800)).toBe(false); // acima, dentro de meia tela
+    expect(farFromWindow(at(1500), 800)).toBe(false); // abaixo, dentro de uma tela
+  });
+  it("muito abaixo ou muito acima: longe (os resultados de uma página longa entram, o rodapé não)", () => {
+    expect(farFromWindow(at(5000), 800)).toBe(true);
+    expect(farFromWindow(at(-900), 800)).toBe(true);
+  });
+  it("sem medidas, ou fixo/sticky, nunca é longe", () => {
+    expect(farFromWindow({ top: 9000, bottom: 9000, width: 0, height: 0 }, 800)).toBe(false);
+    expect(farFromWindow(at(9000), 800, "fixed")).toBe(false);
+    expect(farFromWindow(at(9000), 800, "sticky")).toBe(false);
+    expect(farFromWindow(at(9000), 800, "absolute")).toBe(true);
+  });
+});
+
+describe("alvo @x,y#2 (o outro ícone sem nome)", () => {
+  it("é um ponto marcado como segundo toque", () => {
+    expect(parseTarget("@120,40")).toEqual({ kind: "point", x: 120, y: 40 });
+    expect(parseTarget("@120.5,40#2")).toEqual({ kind: "point", x: 120.5, y: 40, second: true });
   });
 });

@@ -28,7 +28,9 @@ use crate::database::DbConnection;
 const XP_KEY: &str = "pet.xp";
 const SEEN_KEY: &str = "pet.seen";
 /// Cada cuánto se mira el total.
-const TICK: Duration = Duration::from_secs(60);
+/// Cada vuelta suma el consumo de la semana de los transcripts; el XP del pet no necesita más que
+/// esto. Era cada 60 s y cada vuelta recorría y sumaba todos los registros de la semana.
+const TICK: Duration = Duration::from_secs(5 * 60);
 /// Un tope para el nivel: más allá no hay más formas, y evita desbordes con números absurdos.
 pub const MAX_LEVEL: u32 = 99;
 /// Tokens del primer nivel: el escalón crece de ahí con `LEVEL_POWER`.

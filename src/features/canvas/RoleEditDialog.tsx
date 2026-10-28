@@ -24,12 +24,13 @@ import { DEFAULT_EFFORTS, readTuning, retune, tuningChanged } from "./tabTuning"
  * deixa mudar o esforço e, no Codex, o modo Fast. Esforço e Fast ficam no comando do agente: mudar reinicia o agente
  * e retoma a mesma conversa.
  */
-export function RoleEditDialog({ name, label, subagent, tab, onClose, onSave }: {
+export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onClose, onSave }: {
   name: string;
   /** O rótulo da função que está no canvas, se houver. */
   label?: string;
   subagent: boolean;
   tab: Tab;
+  tunable?: boolean;
   onClose: () => void;
   onSave: (choice: AgentRoleChoice) => void;
 }) {
@@ -37,7 +38,7 @@ export function RoleEditDialog({ name, label, subagent, tab, onClose, onSave }: 
   const [roles, setRoles] = useState<CanvasRole[] | null>(null);
   const [choice, setChoice] = useState<AgentRoleChoice>({ roleId: null, subagent });
   const accountLabel = useSquadAccountLabel();
-  const isAgent = tab.agentId !== SHELL_AGENT_ID;
+  const isAgent = tunable && tab.agentId !== SHELL_AGENT_ID;
   const before = useMemo(() => readTuning(tab.agentId, tab.command), [tab.agentId, tab.command]);
   const [effort, setEffort] = useState<string | null>(before.effort);
   const [fast, setFast] = useState(before.fast);

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button, Input, Switch, TrashIcon } from "neogestify-ui-components";
+import { Button, Input, Switch, TrashIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AccountCapableAgent } from "@/features/accounts/types";

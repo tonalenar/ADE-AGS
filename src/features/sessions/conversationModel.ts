@@ -263,14 +263,43 @@ export function activeAgentWork(tabs: Tab[], isWorking: (tabId: string) => boole
 
 /**
  * Título de uma conversa: o título personalizado (aparado, até 120) > o título (aparado) >
- * o título do primeiro terminal (até 60) > "Nova conversa". Nunca vazio.
+ * o título do orquestrador, ou do primeiro terminal sem coroa (até 60) > "Nova conversa". Nunca vazio.
  */
 export function conversationTitle(row: ConversationRow, terminals: TerminalSnapshot[]): string {
   const custom = cleanText(row.customTitle, CUSTOM_MAX);
   if (custom) return custom;
   const title = typeof row.title === "string" ? row.title.trim() : "";
-  if (title) return title;
-  return cleanText(terminals[0]?.title, TITLE_MAX) || FALLBACK_TITLE;
+  if (title && !isAdeNoticeTitle(title)) return title;
+  const lead = cleanText(pickRestoreOrder(terminals)[0]?.title, TITLE_MAX);
+  return lead && !isAdeNoticeTitle(lead) ? lead : FALLBACK_TITLE;
+}
+
+/**
+ * Um título que é, na verdade, um aviso do ADE (`[ADE AGS] NAVEGADOR: …`) ou o resumo que a TUI fez dele
+ * ("Navegador ags portal no canvas"). Ao abrir um agente o aviso era a primeira mensagem e virava o nome da
+ * conversa; o backend já não usa mais (`session/title.rs`), e isto esconde os que ficaram gravados. Pura.
+ */
+export function isAdeNoticeTitle(title: string): boolean {
+  const t = title.trim();
+  return t.startsWith("[ADE AGS]") || t.startsWith("[AGS]") || /ags portal|navegador ags|subagente deste time|orquestrador deste canvas/i.test(t);
+}
+
+/**
+ * De quem vem o título de uma conversa: do orquestrador, sempre que houver um, mesmo que ele ainda não tenha
+ * título; sem coroa, do primeiro terminal aberto que não seja subagente. Os outros nunca dão o título: o que um
+ * subagente recebe é a tarefa que o orquestrador mandou ("Tarefa: …"), não o assunto da conversa. Pura.
+ */
+export function titleSources<T extends { id: string; agentId: string; openedAt?: number }>(
+  tabs: T[],
+  board: { orchestrators: string[]; subagents: string[] } | undefined,
+): T[] {
+  const agents = tabs.filter((tab) => tab.agentId !== SHELL_AGENT_ID);
+  const crowned = agents.filter((tab) => board?.orchestrators.includes(tab.id));
+  if (crowned.length > 0) return crowned;
+  const lead = agents
+    .filter((tab) => !board?.subagents.includes(tab.id))
+    .sort((a, b) => (a.openedAt ?? 0) - (b.openedAt ?? 0))[0];
+  return lead ? [lead] : [];
 }
 
 /**

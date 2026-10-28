@@ -32,7 +32,13 @@ pub struct UpdateDef {
     pub package: Option<&'static str>,
     pub check: Option<FixedCommand>,
     pub update: Option<FixedCommand>,
+    /// O mesmo pacote instalado com `bun add --global`: o bun não roda scripts de instalação
+    /// de pacotes que não estão no `trustedDependencies`, o equivalente ao `--ignore-scripts`.
+    pub bun_update: Option<FixedCommand>,
 }
+/// O bin global do bun (`~/.bun/bin`) e o que ele tem instalado. Fixos, sem argumento externo.
+pub const BUN_BIN: FixedCommand = FixedCommand { program: "bun", args: &["pm", "bin", "--global"] };
+pub const BUN_LIST: FixedCommand = FixedCommand { program: "bun", args: &["pm", "ls", "--global"] };
 macro_rules! npm_def {
     ($id:literal, $pkg:literal) => {
         UpdateDef {
@@ -53,6 +59,10 @@ macro_rules! npm_def {
                     $pkg,
                 ],
             }),
+            bun_update: Some(FixedCommand {
+                program: "bun",
+                args: &["add", "--global", concat!($pkg, "@latest")],
+            }),
         }
     };
 }
@@ -69,6 +79,8 @@ pub const UPDATE_TABLE: &[UpdateDef] = &[
             program: "claude",
             args: &["update"],
         }),
+        // O nativo se atualiza sozinho com `claude update`; pelo bun ele não é suportado.
+        bun_update: None,
     },
     npm_def!("codex", "@openai/codex"),
     // Gemini is absent locally: npm mechanism verified, Gemini-specific help unverified.
@@ -79,24 +91,36 @@ pub const UPDATE_TABLE: &[UpdateDef] = &[
         package: None,
         check: None,
         update: None,
+        bun_update: None,
     },
     UpdateDef {
         agent_id: "antigravity",
         package: None,
         check: None,
         update: None,
+        bun_update: None,
     },
     UpdateDef {
         agent_id: "kimi-code",
         package: None,
         check: None,
         update: None,
+        bun_update: None,
+    },
+    UpdateDef {
+        // Instalado por git no home do Hermes; ele mesmo se atualiza com `hermes update`.
+        agent_id: "hermes",
+        package: None,
+        check: None,
+        update: None,
+        bun_update: None,
     },
     UpdateDef {
         agent_id: "bash",
         package: None,
         check: None,
         update: None,
+        bun_update: None,
     },
 ];
 pub fn update_def(id: &str) -> Option<&'static UpdateDef> {
@@ -114,6 +138,9 @@ pub struct AgentUpdateInfo {
     pub can_auto_update: bool,
     pub busy: bool,
     pub reason: Option<String>,
+    /// Como o agente foi instalado, quando é um jeito que a ADE sabe atualizar: `native`
+    /// (Claude nativo), `npm` ou `bun`. Escolhe o comando de atualizar.
+    pub install: Option<String>,
 }
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -206,7 +233,9 @@ impl UpdateExecutor for OfficialExecutor {
     fn execute(&self, spec: FixedCommand, timeout: Duration) -> Result<String, String> {
         if !UPDATE_TABLE
             .iter()
-            .any(|d| d.check == Some(spec) || d.update == Some(spec))
+            .any(|d| d.check == Some(spec) || d.update == Some(spec) || d.bun_update == Some(spec))
+            && spec != BUN_BIN
+            && spec != BUN_LIST
             && spec
                 != (FixedCommand {
                     program: "npm",
@@ -241,6 +270,9 @@ impl UpdateExecutor for OfficialExecutor {
                 return Err("not_npm".into());
             }
             crate::util::spawn::hidden_command(path)
+        } else if spec.program == "bun" {
+            // `bun.exe` é um binário de verdade, não um shim `.cmd`: roda direto, sem shell.
+            crate::util::spawn::hidden_command(crate::util::find_program("bun").ok_or("failed")?)
         } else {
             return Err("no_updater".into());
         };
@@ -259,11 +291,8 @@ impl UpdateExecutor for OfficialExecutor {
 }
 /// Bounded pipes and process containment: children cannot keep readers blocking on timeout.
 pub fn execute_process(cmd: &mut Command, timeout: Duration) -> io::Result<String> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
+    // Quem chama pode ter montado o comando por fora do helper: garante o `CREATE_NO_WINDOW`.
+    crate::util::spawn::apply_window(cmd, crate::util::spawn::WindowMode::Hidden);
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -392,6 +421,56 @@ pub fn npm_install_matches(agent: &super::AgentInfo, def: &UpdateDef, root: &str
     }
 }
 
+/// A versão de `package` na listagem de `bun pm ls --global` (`├── @openai/codex@0.164.0`). Pura.
+pub fn bun_global_version(listing: &str, package: &str) -> Option<String> {
+    let prefix = format!("{package}@");
+    listing.split_whitespace().find_map(|token| {
+        let version = token.strip_prefix(&prefix)?;
+        (!version.is_empty() && version.chars().all(|c| c.is_ascii_alphanumeric() || ".-+".contains(c)))
+            .then(|| version.to_string())
+    })
+}
+
+/// O agente detectado é o do bun: o executável está no bin global do bun e o pacote consta
+/// na listagem global dele. Qualquer dúvida = não (fail closed, como no npm).
+pub fn bun_install_matches(agent: &super::AgentInfo, def: &UpdateDef, bin: &str, listing: &str) -> bool {
+    let (Some(package), Some(path)) = (def.package, agent.path.as_ref()) else {
+        return false;
+    };
+    let bin = PathBuf::from(bin.trim());
+    let same_dir = PathBuf::from(path).parent().is_some_and(|dir| {
+        dir == bin
+            || std::fs::canonicalize(dir)
+                .ok()
+                .zip(std::fs::canonicalize(&bin).ok())
+                .is_some_and(|(a, b)| a == b)
+    });
+    same_dir && bun_global_version(listing, package).is_some()
+}
+
+/// Como o agente foi instalado, se for um jeito que a ADE sabe atualizar.
+fn install_method(agent: &super::AgentInfo, def: &UpdateDef, exec: &impl UpdateExecutor) -> Option<&'static str> {
+    if agent.id == "claude-code" {
+        return agent
+            .path
+            .as_ref()
+            .is_some_and(|p| native_claude_path(std::path::Path::new(p)))
+            .then_some("native");
+    }
+    def.package?;
+    let npm = exec
+        .execute(FixedCommand { program: "npm", args: &["root", "--global"] }, CHECK_TIMEOUT)
+        .ok()
+        .is_some_and(|root| npm_install_matches(agent, def, &root));
+    if npm {
+        return Some("npm");
+    }
+    let bun = def.bun_update.is_some()
+        && exec.execute(BUN_BIN, CHECK_TIMEOUT).ok().zip(exec.execute(BUN_LIST, CHECK_TIMEOUT).ok())
+            .is_some_and(|(bin, listing)| bun_install_matches(agent, def, &bin, &listing));
+    bun.then_some("bun")
+}
+
 pub fn busy_reason(conn: &rusqlite::Connection, id: &str) -> Result<Option<&'static str>, String> {
     busy_reason_with(conn, id, false)
 }
@@ -487,26 +566,10 @@ fn check_one(
         .check
         .and_then(|c| exec.execute(c, CHECK_TIMEOUT).ok())
         .and_then(|s| serde_json::from_str::<String>(&s).ok());
-    let npm = if agent.id == "claude-code" {
-        agent
-            .path
-            .as_ref()
-            .is_some_and(|p| native_claude_path(std::path::Path::new(p)))
-    } else {
-        def.package.is_some()
-            && exec
-                .execute(
-                    FixedCommand {
-                        program: "npm",
-                        args: &["root", "--global"],
-                    },
-                    CHECK_TIMEOUT,
-                )
-                .ok()
-                .is_some_and(|root| npm_install_matches(agent, def, &root))
-    };
-    let reason = busy
-        .or(policy_reason(false, false, npm, def.update.is_some()))
+    let install = install_method(agent, def, exec);
+    // Os impedimentos que fechar terminais não resolve vêm ANTES de "terminal aberto": senão o
+    // "Atualizar" fechava as abas do agente para depois falhar com `not_npm`.
+    let reason = policy_reason(false, false, install.is_some(), def.update.is_some())
         .or(
             if latest.is_none()
                 || agent
@@ -521,7 +584,8 @@ fn check_one(
                 None
             },
         )
-        .or(if elevated() { Some("no_updater") } else { None });
+        .or(if elevated() { Some("no_updater") } else { None })
+        .or(busy);
     AgentUpdateInfo {
         agent_id: agent.id.clone(),
         label: agent.label.clone(),
@@ -536,6 +600,7 @@ fn check_one(
         can_auto_update: reason.is_none() && !elevated(),
         busy: matches!(busy, Some("busy_terminal" | "busy_mission")),
         reason: reason.map(str::to_string),
+        install: install.map(str::to_string),
     }
 }
 #[tauri::command]
@@ -582,7 +647,11 @@ pub fn update_with_executor(
         result.error = Some("failed".into());
         return result;
     }
-    let Some(command) = update_def(id).and_then(|d| d.update) else {
+    let command = update_def(id).and_then(|d| match info.install.as_deref() {
+        Some("bun") => d.bun_update,
+        _ => d.update,
+    });
+    let Some(command) = command else {
         result.error = Some("no_updater".into());
         return result;
     };
@@ -620,7 +689,9 @@ pub async fn agent_update(
             let info=check_one(agent,busy,&OfficialExecutor);
             let mut result=update_with_executor(&agent_id,&info,&OfficialExecutor);
             if result.ok {
-                result.new_version=if agent_id=="claude-code" {OfficialExecutor.execute(FixedCommand {program:"claude",args:&["--version"]},CHECK_TIMEOUT).ok().and_then(|s|super::version_line(s.as_bytes(),&[]))} else {
+                result.new_version=if agent_id=="claude-code" {OfficialExecutor.execute(FixedCommand {program:"claude",args:&["--version"]},CHECK_TIMEOUT).ok().and_then(|s|super::version_line(s.as_bytes(),&[]))} else if info.install.as_deref()==Some("bun") {
+                    OfficialExecutor.execute(BUN_LIST,CHECK_TIMEOUT).ok().zip(update_def(&agent_id).and_then(|d|d.package)).and_then(|(listing,package)|bun_global_version(&listing,package))
+                } else {
                     OfficialExecutor.execute(FixedCommand {program:"npm",args:&["root","--global"]},CHECK_TIMEOUT).ok().and_then(|root|update_def(&agent_id).and_then(|d|d.package).and_then(|package|std::fs::read(PathBuf::from(root.trim()).join(package).join("package.json")).ok())).and_then(|raw|serde_json::from_slice::<serde_json::Value>(&raw).ok()).and_then(|m|m["version"].as_str().map(str::to_string))
                 };
             } result

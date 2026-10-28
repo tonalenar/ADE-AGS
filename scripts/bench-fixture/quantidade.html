@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — quantidade</title>
+<!-- L15 (negativa): «Quantidade» não é uma busca; o piloto não deve apertar Enter nela. A página marca qualquer Enter. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Fone Bluetooth</h1>
+  <label for="qty">Quantidade</label>
+  <input id="qty" type="text" value="">
+  <button onclick="document.getElementById('status').textContent = 'Quantidade: ' + document.getElementById('qty').value + ' · atualizado'">Atualizar carrinho</button>
+  <div id="status"></div>
+</main>
+<script>
+  document.getElementById('qty').addEventListener('keydown', (e) => { if (e.key === 'Enter') document.getElementById('status').textContent = 'ENTER PRESSED'; });
+</script>
+</html>

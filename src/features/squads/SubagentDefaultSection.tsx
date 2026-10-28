@@ -34,7 +34,7 @@ export function SubagentDefaultSection({ roster, onRoster, value, onChange }: {
             onChange={(event) => onChange(event.target.value ? { agentId: event.target.value, model: null, reasoningEffort: null, fastMode: false } : null)}>
             <option value="">{t("squads.subagent.auto")}</option>
             {agentId && !agent && <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>}
-            {roster?.agents.filter((entry) => entry.launchable).map((entry) => (
+            {roster?.agents.filter((entry) => entry.launchable && entry.agentId !== "gemini-desktop").map((entry) => (
               <option key={entry.agentId} value={entry.agentId}>{entry.label}</option>
             ))}
           </PopupSelect>

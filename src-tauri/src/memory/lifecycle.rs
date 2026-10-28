@@ -190,6 +190,47 @@ pub fn promote_draft(
     Ok(result)
 }
 
+/// Uma nota do quadro da missão, como `ags swarm read` mostra.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SwarmNote {
+    /// A posição no quadro (1 = a mais antiga): é o número que a equipe cita ("quadro #3").
+    pub n: usize,
+    pub id: String,
+    pub kind: String,
+    pub body: String,
+    pub created_at: i64,
+}
+
+/// O quadro da missão: as notas de sessão (regras, contratos, mocks, decisões), na ordem em que
+/// foram publicadas. Antes só havia como escrever; a equipe reenviava o mesmo bloco de regras em cada
+/// `tell` (11% do texto entre agentes era repetição) porque não tinha onde ler.
+pub fn swarm_read(conn: &Connection, workspace: &str, mission: &str) -> Result<Vec<SwarmNote>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, kind, body, created_at FROM memory_swarm_notes WHERE workspace_id=?1 AND mission_id=?2 ORDER BY created_at, rowid")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![workspace, mission], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?, r.get::<_, i64>(3)?)))
+        .map_err(|e| e.to_string())?;
+    Ok(rows
+        .flatten()
+        .enumerate()
+        .map(|(i, (id, kind, body, created_at))| SwarmNote { n: i + 1, id, kind, body, created_at })
+        .collect())
+}
+
+/// O quadro como texto para o terminal. Pura.
+pub fn render_board(notes: &[SwarmNote]) -> String {
+    if notes.is_empty() {
+        return "O quadro da missão está vazio. Publique com `ags swarm note --file <arquivo>`.".into();
+    }
+    notes
+        .iter()
+        .map(|n| format!("#{} [{}] {}", n.n, if n.kind == "question" { "pergunta" } else { "nota" }, n.body.trim()))
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
 pub fn swarm_write(
     conn: &Connection,
     workspace: &str,

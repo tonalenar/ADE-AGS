@@ -64,6 +64,20 @@ export type AntigravityAccountDiscovery = {
 export const discoverAntigravityAccount = (accountId: string, force = true) =>
   invoke<AntigravityAccountDiscovery>("antigravity_account_discovery", { accountId, force });
 
+/** Una janela de cota do `agy /usage`: quanto já foi USADO (0–100) e quando reinicia. */
+export type AgyWindow = {
+  id: string;
+  kind: "weekly" | "session" | "daily" | "monthly" | "other";
+  durationSeconds?: number;
+  usedPct: number;
+  resetsAt?: string;
+};
+export type AgyGroup = { name: string; description?: string; windows: AgyWindow[] };
+export type AgyUsage = { installed: boolean; groups: AgyGroup[]; fetchedAt: number; cached: boolean };
+
+/** A cota do login local do `agy`, por grupo de modelos (ver `usage::agy`). `force` ausente vai ao vivo. */
+export const antigravityCliUsage = (force = true) => invoke<AgyUsage>("antigravity_cli_usage", { force });
+
 /** Cupo, mail y plan de una cuenta de Codex. `force` ausente va en vivo, como el popover. */
 export const codexAccountUsage = (accountId: string, force = true) =>
   invoke<CodexUsage>("codex_account_usage", { accountId, force });

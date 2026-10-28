@@ -1,0 +1,251 @@
+{
+  "schema": 2,
+  "label": "v2-base-real-sondas",
+  "mode": "real",
+  "startedAt": "2026-10-16T18:48:18.728Z",
+  "commit": "ee709f56",
+  "seed": 1,
+  "repeat": 1,
+  "order": "da lista",
+  "runs": [
+    {
+      "id": "P05-amazon-busca-adicionar",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://www.amazon.com.br/",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1511,
+      "stepMs": [
+        1511
+      ],
+      "phases": {
+        "jevMs": 1462,
+        "snapshotMs": 2,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 47
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por caneca e, no primeiro resultado, clique em Adicionar ao carrinho. Não finalize a compra.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\n1. sem caminho (p=0.62, fim p=0.00, 291 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.99, caixa conf=0.08, 393 ms).\n\nTEMPOS: {\"jev\":296,\"snapshot\":2,\"acao\":0,\"espera\":0,\"foto\":1166,\"consultas\":1,\"fotos\":1,\"total\":1464}\njanela: lag máx 4 ms (p95 4 ms)\nJANELA: {\"lagMaxMs\":4,\"lagP95Ms\":4,\"samples\":15,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: https://www.amazon.com.br/\nviewport: 1920×1120 · scroll 0/1120\n\n(la página no tiene contenido visible)",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1511
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [],
+        "latencyMs": [
+          291
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "window": {
+        "lagMaxMs": 4
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 0
+    },
+    {
+      "id": "P06-amazon-produto-adicionar",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://www.amazon.com.br/",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1449,
+      "stepMs": [
+        1449
+      ],
+      "phases": {
+        "jevMs": 1404,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 45
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por livro, abra o primeiro resultado e, na página do produto, clique em Adicionar ao carrinho. Não finalize a compra.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\n1. sem caminho (p=0.61, fim p=0.00, 306 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.99, caixa conf=0.16, 320 ms).\n\nTEMPOS: {\"jev\":311,\"snapshot\":0,\"acao\":0,\"espera\":0,\"foto\":1093,\"consultas\":1,\"fotos\":1,\"total\":1406}\njanela: lag máx 4 ms (p95 4 ms)\nJANELA: {\"lagMaxMs\":4,\"lagP95Ms\":4,\"samples\":14,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: https://www.amazon.com.br/\nviewport: 1920×1120 · scroll 0/1120\n\n- text \"Max challenge attempts exceeded. Please refresh the page to try again!\"",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1449
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [],
+        "latencyMs": [
+          306
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "window": {
+        "lagMaxMs": 4
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 1
+    }
+  ],
+  "summary": {
+    "tasks": 2,
+    "completed": 0,
+    "completedRate": 0,
+    "confirmed": 0,
+    "falseDone": 0,
+    "falseUnsure": 0,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 1,
+    "medianSteps": 1,
+    "medianTotalMs": 1480,
+    "medianStepMs": 1480,
+    "share": {
+      "jevMs": 0.9682432432432433,
+      "snapshotMs": 0.0006756756756756757,
+      "actionMs": 0,
+      "waitMs": 0,
+      "otherMs": 0.031081081081081083
+    },
+    "outcomes": {
+      "stuck": 2
+    }
+  },
+  "v2": {
+    "gate": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "local": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "public": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "probe": {
+      "runs": 2,
+      "tasks": 2,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "violations": 0,
+      "stepP50": 1480,
+      "stepP95": 1507.9,
+      "actP50": 1480,
+      "actP95": 1507.9,
+      "actsPerTask": 1,
+      "windowHangs": 0,
+      "lagMaxMs": 4,
+      "queriesPerTask": 1,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": 298.5,
+      "queryLatencyP95": 305.25
+    },
+    "tasks": [
+      {
+        "id": "P05-amazon-busca-adicionar",
+        "kind": "public",
+        "probe": true,
+        "runs": 1,
+        "successes": 0,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1511,
+        "stepP95": 1511,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": null
+      },
+      {
+        "id": "P06-amazon-produto-adicionar",
+        "kind": "public",
+        "probe": true,
+        "runs": 1,
+        "successes": 0,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1449,
+        "stepP95": 1449,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": null
+      }
+    ]
+  },
+  "digest": "4c141a66"
+}

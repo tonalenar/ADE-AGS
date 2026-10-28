@@ -1,6 +1,6 @@
 [package]
 name = "ade-ags"
-version = "1.8.7"
+version = "1.10.0"
 description = "ADE AGS — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
@@ -50,6 +50,7 @@ serde_json = "1"
 portable-pty = "0.8"
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
 
 # Fase 0 — Persistencia SQLite
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -73,7 +74,12 @@ symlink = "0.1"
 # Fase 6 — Marketplace de skills (registries remotos)
 # rustls en vez de la TLS nativa del sistema: evita depender de libssl/openssl-dev
 # instalado en la máquina del usuario para poder compilar/correr.
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream", "http2"] }
+# El proxy de la vista previa descomprime el HTML gzip/deflate que un sitio manda aunque se le pidió identity.
+flate2 = "1"
+# ...e também o brotli e o zstd (Fase 1.5, I3): puro Rust, sem compilar C.
+brotli-decompressor = "6"
+ruzstd = "0.8"
 
 # Buscador de texto del panel derecho. `ignore` es el recorrido de ripgrep: respeta
 # `.gitignore` sin tener que invocar a git por cada carpeta, y trae los globs de
@@ -140,19 +146,35 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Console",
     "Win32_System_Pipes",
     "Win32_System_Threading",
+    # Janelas nativas: o Gemini Desktop encaixado (`desktop_apps::native`) e o diálogo de erro fatal.
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Accessibility",
 ] }
 # Capturas del navegador (ver preview::snapshot): WebView2 entrega el PNG en un IStream.
 # Misma regla que arriba: las versiones que ya trae wry.
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Registry", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Graphics_Gdi", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_System_Registry", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_Accessibility"] }
 # Explicit identity and activation callbacks in dev as well as installed builds.
 tauri-winrt-notification = "0.8.1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# Só para fabricar HTML em brotli nos testes do proxy (já está no Cargo.lock, vem do tauri-utils).
+brotli = "9"
 
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Release: antes valia o padrão (sem LTO, 16 codegen-units, com símbolos), e o ade-ags.exe tinha
+# 40,2 MB. LTO "thin" + 1 codegen-unit deixam o binário menor e o código mais rápido, à custa de um
+# build de release mais demorado; `strip` tira os símbolos do executável. `panic` continua
+# "unwind" de propósito: o app se recupera de mutex envenenado (`into_inner()`) em mais de cem
+# pontos, e com "abort" qualquer pânico numa thread derrubaria o app inteiro.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

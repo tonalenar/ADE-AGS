@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — resultados</title>
+<!-- N01: o primeiro resultado é um anúncio («Patrocinado»); o objetivo pede o primeiro orgânico. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main id="main">
+  <h1>Resultados para: caneca</h1>
+  <div data-component-type="sp-sponsored-result" aria-label="Patrocinado">
+    <small>Patrocinado</small>
+    <p><a href="?p=termica">Caneca Térmica Premium</a> R$ 39,90</p>
+  </div>
+  <div data-component-type="s-search-result">
+    <p><a href="?p=ceramica">Caneca de Cerâmica Branca</a> R$ 39,90</p>
+  </div>
+  <div data-component-type="s-search-result">
+    <p><a href="?p=esmaltada">Caneca Esmaltada Retrô</a> R$ 39,90</p>
+  </div>
+</main>
+<script>
+  const names = { termica: "Caneca Térmica Premium", ceramica: "Caneca de Cerâmica Branca", esmaltada: "Caneca Esmaltada Retrô" };
+  const p = new URLSearchParams(location.search).get("p");
+  if (p && names[p]) {
+    document.title = names[p] + " — ShopMart";
+    document.getElementById("main").innerHTML = '<a href="anuncios-busca.html">Voltar aos resultados</a><h1>Produto: ' + names[p] + "</h1><p>R$ 39,90</p>";
+  }
+</script>
+</html>

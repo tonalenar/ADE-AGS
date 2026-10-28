@@ -1,7 +1,7 @@
 /** Comandos de las misiones. Crear y editar solo escriben la base; lanzar es `startMission`. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { MergeOutcome, Mission, MissionDetail, MissionInput, MissionReview, MissionSummary, TerminalDeliveryInput } from "./types";
+import type { MergeOutcome, Mission, MissionDetail, MissionInput, MissionReview, MissionSummary, TerminalDeliveryInput, TerminalTestResult } from "./types";
 
 export const listMissions = (workspaceId: string) =>
   invoke<MissionSummary[]>("mission_list", { workspaceId });
@@ -52,6 +52,10 @@ export const checkMissionDuplicateInput = (
   });
 
 /** Da por terminada una misión en terminales. */
+/** O que o diálogo "Finalizar" já traz preenchido (testes registrados e o último PR citado). */
+export const missionDeliveryHint = (missionId: string) =>
+  invoke<{ testResult: TerminalTestResult | null; pullRequest: string | null }>("mission_delivery_hint", { missionId });
+
 export const finishMissionTerminals = (missionId: string, delivery: TerminalDeliveryInput) =>
   invoke<Mission>("mission_finish_terminals", { missionId, delivery });
 

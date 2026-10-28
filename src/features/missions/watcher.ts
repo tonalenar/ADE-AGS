@@ -3,16 +3,17 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { useCanvasStore } from "@/features/canvas/store";
-import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt, sustainedTabIds as sustainedNow } from "@/features/terminal/activity";
+import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt, outputCount, sustainedTabIds as sustainedNow } from "@/features/terminal/activity";
 import { onPromptSubmitted, pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
+import { startStructuredState, workingWith } from "@/features/terminal/structuredState";
 import { useTabsStore } from "@/features/tabs/store";
 
 import { isFinalDelivery, noteDelivery, noteSustained } from "../bot/arcadeSignals";
 import { sustainedTabIds } from "@/features/terminal/activity";
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
-import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
+import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking, tickMs } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
-import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
+import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, isWorking, markAlerted, stallMessage, uiBehindUntil, type PeerMessage, type PendingTasks } from "./stalled";
 import { useMissionsStore } from "./store";
 import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
@@ -44,6 +45,8 @@ export interface PeerTimingEvent {
 export function useMissionWatcher(): void {
   // O Vigia de cada missão é acordado pelo app quando alguém fica sem saída (ver `vigia.ts`).
   useVigiaDriver();
+  // O estado lido dos transcripts (Claude Code/Codex), para o Vigia e os detectores de parado.
+  useEffect(() => startStructuredState(), []);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const tabs = useTabsStore((s) => s.tabs);
   const missions = useMissionsStore((s) => s.missions);
@@ -134,7 +137,7 @@ export function useMissionWatcher(): void {
       for (const mission of next.keys()) published.add(mission);
     };
     const off = listen<PeerMessage>("cc-peer-message", (e) => {
-      pending = applyMessage(pending, e.payload, isLead);
+      pending = applyMessage(pending, e.payload, isLead, outputCount);
       const applied = applyLeadMessage(asks, e.payload, isLead, leadTabOf(e.payload.fromTabId));
       asks = applied.pending;
       // Una espera que ya se avisó se cierra con su duración total: es la métrica de "tiempo sin respuesta".
@@ -161,7 +164,7 @@ export function useMissionWatcher(): void {
       const probe = {
         now,
         isActive: (id: string) => active.has(id),
-        isWorking: (id: string) => working.has(id),
+        isWorking: (id: string) => workingWith(id, working.has(id)),
         lastOutputAt,
         lastInputAt,
         screen: (id: string) => screenOf(id)?.lines ?? null,
@@ -178,8 +181,15 @@ export function useMissionWatcher(): void {
       });
       if (sent.length > 0) asks = markLeadAlerted(asks, sent);
     };
+    // Nosso lado atrasado (janela escondida, tic que chegou tarde): o silêncio só conta depois disso.
+    let behindUntil: number | undefined;
+    let lastTickAt: number | undefined;
+    // `setInterval` aqui não sobrepõe: o tic é síncrono (nada é aguardado), então um não começa antes
+    // do outro acabar. O atraso entre tics é medido e vira `uiBehindUntil`.
     const timer = setInterval(() => {
       const tickNow = Date.now();
+      behindUntil = uiBehindUntil(behindUntil, lastTickAt, tickNow, typeof document !== "undefined" && document.hidden, STALL_CHECK_MS);
+      lastTickAt = tickNow;
       try {
         runLeadStall(tickNow);
       } finally {
@@ -204,6 +214,9 @@ export function useMissionWatcher(): void {
         lastOutputAt,
         lastInputAt,
         screen: (id) => screenOf(id)?.lines ?? null,
+        working: (id, lines) => workingWith(id, isWorking(lines)),
+        outputCount,
+        uiBehindUntil: behindUntil,
       }, stallMs);
       const sent = stalls.filter((s) => {
         // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
@@ -237,6 +250,7 @@ export function useMissionWatcher(): void {
       }
     };
     let ticks = 0;
+    let lastTick: number | undefined;
     const flush = () => {
       for (const [id, ms] of pending) invoke("mission_active_add", { missionId: id, ms }).catch(() => undefined);
       pending = new Map();
@@ -245,7 +259,9 @@ export function useMissionWatcher(): void {
       measureTurns();
       const { index: tabToMission, missions: all } = live.current;
       const running = new Set(all.filter((m) => m.status === "running").map((m) => m.id));
-      pending = accumulate(pending, sampleWorking(tabToMission, running), ACTIVE_TICK_MS);
+      const now = Date.now();
+      pending = accumulate(pending, sampleWorking(tabToMission, running, now), tickMs(lastTick, now));
+      lastTick = now;
       ticks += 1;
       if (ticks * ACTIVE_TICK_MS >= ACTIVE_FLUSH_MS) {
         ticks = 0;

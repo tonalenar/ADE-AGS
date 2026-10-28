@@ -153,6 +153,12 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// El iframe del Portal va reducido por `transform` y dentro del zoom del canvas. En esa pila el
+/// Chrome rasteriza en baja resolución toda capa con `backdrop-filter` (panel de vidrio esmerilado):
+/// el texto del panel sale borroso (0,25 de la nitidez nativa, medido). Sin el desenfoque del fondo
+/// el panel sigue translúcido y el texto vuelve a 1,0.
+const NO_BACKDROP_BLUR: &str = "(function(){try{var s=document.createElement('style');s.textContent='*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}';(document.head||document.documentElement).appendChild(s)}catch(e){}})();";
+
 async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
     if !request_is_ours(&req, ctx.proxy_port) {
         return plain_status(403);
@@ -161,8 +167,9 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
         // Adelante, el origen REAL de la página: el runtime lo necesita para saber qué
         // pedidos van a su propio servidor y cuáles a otro (ver `cors.rs`).
         let prelude = format!(
-            "self.__ags_target={};\n",
-            serde_json::to_string(&ctx.target_origin).unwrap_or_else(|_| "null".into())
+            "self.__ags_target={};\n{}\n",
+            serde_json::to_string(&ctx.target_origin).unwrap_or_else(|_| "null".into()),
+            NO_BACKDROP_BLUR
         );
         let script = PICKER.read().map(|p| p.clone()).unwrap_or_default();
         return Response::builder()
@@ -410,7 +417,71 @@ fn upstream_request_headers(req: &Request<Incoming>, ctx: &Ctx) -> (reqwest::hea
         (None, Some(browser)) => shown.push(Header::noted(COOKIE.as_str(), browser, HeaderNote::Removed)),
         (None, None) => {}
     }
+    // Sin pedir `identity`, hay sitios (Amazon) que devuelven el HTML comprimido igual: el proxy no lo
+    // tocaba, el runtime no se inyectaba y la página nunca avisaba que cargó.
+    headers.insert(reqwest::header::ACCEPT_ENCODING, HeaderValue::from_static("identity"));
     (headers, shown, jar)
+}
+
+/// Las codificaciones que el proxy sabe deshacer para inyectar el runtime en el HTML.
+pub(crate) fn can_inflate(encoding: &str) -> bool {
+    matches!(encoding.to_ascii_lowercase().as_str(), "gzip" | "x-gzip" | "deflate" | "br" | "zstd")
+}
+
+/// Descomprime un HTML que el servidor mandó comprimido (`gzip`, `deflate`, `br` o `zstd`) aunque se le pidió `identity`.
+/// Con un tope, para que un cuerpo malicioso no llene la memoria.
+pub(crate) fn inflate(bytes: &[u8], encoding: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+    const LIMIT: u64 = 64 * 1024 * 1024;
+    let mut out = Vec::new();
+    let ok = match encoding.to_ascii_lowercase().as_str() {
+        "deflate" => {
+            flate2::read::ZlibDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok()
+                || { out.clear(); flate2::read::DeflateDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok() }
+        }
+        "gzip" | "x-gzip" => flate2::read::GzDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok(),
+        "br" => brotli_decompressor::Decompressor::new(bytes, 4096).take(LIMIT).read_to_end(&mut out).is_ok(),
+        "zstd" => ruzstd::decoding::StreamingDecoder::new(bytes)
+            .is_ok_and(|mut decoder| (&mut decoder).take(LIMIT).read_to_end(&mut out).is_ok()),
+        _ => false,
+    };
+    ok.then_some(out)
+}
+
+/// Cuánto dura la marca de «verificación anti-robot en curso» sin que llegue una página normal de ese origen.
+const CHALLENGE_TTL: Duration = Duration::from_secs(90);
+
+/// Origen de destino → cuándo y con qué acción respondió un desafío anti-robot (AWS WAF).
+static CHALLENGES: LazyLock<std::sync::Mutex<HashMap<String, (Instant, String)>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+/// `202` + `x-amzn-waf-action`: AWS WAF no entregó la página, entregó un desafío en JS que se resuelve y recarga (plan v2,
+/// I4). Devuelve la acción (`challenge`, `captcha`). Pura.
+pub(crate) fn waf_challenge_action(status: u16, headers: &hyper::HeaderMap) -> Option<String> {
+    if status != 202 {
+        return None;
+    }
+    let action = headers.get("x-amzn-waf-action")?.to_str().ok()?.trim();
+    Some(if action.is_empty() { "challenge".to_string() } else { action.to_ascii_lowercase() })
+}
+
+fn set_challenge(target_origin: &str, action: Option<String>) {
+    let Ok(mut marks) = CHALLENGES.lock() else { return };
+    match action {
+        Some(action) => {
+            marks.insert(target_origin.to_string(), (Instant::now(), action));
+        }
+        None => {
+            marks.remove(target_origin);
+        }
+    }
+}
+
+/// La acción del desafío anti-robot en curso para ese origen (o `None`: no hay, o ya pasó `CHALLENGE_TTL`).
+pub(crate) fn challenge_in_progress(target_origin: &str) -> Option<String> {
+    let marks = CHALLENGES.lock().ok()?;
+    let (at, action) = marks.get(target_origin.trim_end_matches('/'))?;
+    (at.elapsed() < CHALLENGE_TTL).then(|| action.clone())
 }
 
 fn plain_status(status: u16) -> Response<Body> {
@@ -564,7 +635,14 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
         .and_then(|v| v.to_str().ok())
         .filter(|e| !e.eq_ignore_ascii_case("identity"))
         .map(str::to_string);
-    let is_html = content_type.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("text/html")) && encoding.is_none();
+    let html_type = content_type.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("text/html"));
+    // Un desafío anti-robot (202 + x-amzn-waf-action) deja una marca; la primera página HTML normal del origen la quita.
+    if html_type {
+        set_challenge(&ctx.target_origin, waf_challenge_action(status.as_u16(), upstream.headers()));
+    }
+    // Un HTML comprimido (gzip, deflate, br, zstd) se descomprime acá para poder inyectarle el runtime; otra codificación pasa tal cual.
+    let inflate_as = encoding.clone().filter(|e| html_type && can_inflate(e));
+    let is_html = html_type && (encoding.is_none() || inflate_as.is_some());
 
     let mut builder = Response::builder().status(status);
     let mut response_headers = Vec::new();
@@ -577,7 +655,7 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
             set_cookies.push(text);
             continue;
         }
-        if skip_response_header(name.as_str()) || (is_html && *name == CONTENT_LENGTH) {
+        if skip_response_header(name.as_str()) || (is_html && *name == CONTENT_LENGTH) || (inflate_as.is_some() && *name == CONTENT_ENCODING) {
             let note = (!is_hop_by_hop(name.as_str())).then_some(HeaderNote::Removed);
             response_headers.push(Header { name: name.as_str().to_string(), value: text, note });
             continue;
@@ -618,6 +696,17 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
                 ctx.log.finish(seq, Finish::failed(kind, message.clone(), elapsed_ms(started)));
                 return error_page(502, &ctx.target_origin, &message);
             }
+        };
+        let bytes = match &inflate_as {
+            Some(kind) => match inflate(&bytes, kind) {
+                Some(plain) => Bytes::from(plain),
+                None => {
+                    let message = format!("no se pudo descomprimir el HTML ({kind})");
+                    ctx.log.finish(seq, Finish::failed(ErrorKind::Body, message.clone(), elapsed_ms(started)));
+                    return error_page(502, &ctx.target_origin, &message);
+                }
+            },
+            None => bytes,
         };
         if seq != 0 {
             let (captured, truncated) = clip(&bytes, MAX_RESPONSE_BODY);

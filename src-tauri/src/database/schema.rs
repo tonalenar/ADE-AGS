@@ -22,6 +22,26 @@ fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
 }
 
+/// Frase que a pessoa vê quando a base veio de uma build mais nova que esta.
+pub(crate) fn newer_db_message(found: i32) -> String {
+    format!(
+        "Este banco é de uma versão mais nova do ADE AGS (v{found}); esta versão do app só          conhece até a v{SCHEMA_VERSION}. Atualize o app para abrir seus dados. Nada foi alterado no banco."
+    )
+}
+
+/// Recusa uma base estampada por uma build mais nova. Migrar para trás não existe: rodar
+/// as migrações e regravar `user_version` com o número desta build "rebaixaria" a base
+/// em silêncio, e a build nova depois pularia as migrações que já achava aplicadas.
+pub(crate) fn refuse_newer(version: i32) -> SqlResult<()> {
+    if version > SCHEMA_VERSION {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            Some(newer_db_message(version)),
+        ));
+    }
+    Ok(())
+}
+
 fn set_user_version(conn: &Connection, v: i32) -> SqlResult<()> {
     // `PRAGMA` no acepta parámetros, y `v` es una constante nuestra, no entrada de nadie.
     conn.execute_batch(&format!("PRAGMA user_version = {v};"))
@@ -77,6 +97,8 @@ fn detect_legacy_version(conn: &Connection) -> i32 {
 /// workspaces de alguien.
 pub fn migrate(conn: &Connection) -> SqlResult<()> {
     let mut version = user_version(conn)?;
+    // Antes de qualquer `ALTER` ou `set_user_version`: uma base mais nova sai intacta.
+    refuse_newer(version)?;
     if version == 0 {
         version = detect_legacy_version(conn);
     }
@@ -1173,6 +1195,20 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY(entry_id, revision)
     );")?;
+    // De que repositório é cada memória (ver `memory::repo_scope`). Sem subir user_version, como as
+    // outras aditivas daqui. O preenchimento roda uma vez, quando a coluna nasce; uma falha nele não
+    // impede abrir a base (as memórias ficam sem chave e valem em todos os repositórios, como antes).
+    if table_exists(conn, "memory_entries") && !has_column(conn, "memory_entries", "source_mission") {
+        conn.execute_batch("ALTER TABLE memory_entries ADD COLUMN source_mission TEXT;")?;
+    }
+    if table_exists(conn, "memory_entries") && !has_column(conn, "memory_entries", "repo_key") {
+        conn.execute_batch("ALTER TABLE memory_entries ADD COLUMN repo_key TEXT;")?;
+        if table_exists(conn, "missions") {
+            if let Err(error) = crate::memory::repo_scope::backfill(conn) {
+                eprintln!("[memory] não foi possível preencher o repositório das memórias: {error}");
+            }
+        }
+    }
     // Teto de correção. Sem subir user_version: o migrate inteiro roda em toda abertura
     // e os testes cravam a versão 41. Colunas novas têm default para as tasks já gravadas.
     if table_exists(conn, "tasks") {
@@ -1249,6 +1285,16 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     if table_exists(conn, "squads") && !has_column(conn, "squads", "extra_members") {
         conn.execute_batch("ALTER TABLE squads ADD COLUMN extra_members TEXT NOT NULL DEFAULT '[]';")?;
     }
+    // Fila persistente das mensagens entre agentes (`peer_queue`): id, estado e ordem de cada
+    // mensagem, para a entrega sobreviver ao reinício. Só aditiva e sem subir user_version, como as
+    // outras daqui (subir força o backup VACUUM e quebra os testes que cravam a versão).
+    crate::peer_queue::migrate(conn)?;
+    // Pendências dos integrantes (aprovações e perguntas vistas pelo canal estruturado, ver `canal`):
+    // também só aditiva e sem subir user_version.
+    crate::canal::migrate(conn)?;
+    // Pontos de restauração das abas (`tab_checkpoints`): fichas das fotos em refs escondidas. Só
+    // aditiva, sem subir user_version.
+    crate::tab_checkpoints::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

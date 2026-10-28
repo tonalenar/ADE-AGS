@@ -195,6 +195,12 @@ pub(crate) fn violations(path: &str, src: &str) -> Vec<String> {
             i += "hidden_command(\"cmd\")".len();
             continue;
         }
+        // Flag de janela feita à mão: o modo vem de `spawn::apply_window`/`WindowMode`.
+        if skip_until.is_none() && src[i..].starts_with(".creation_flags(") {
+            found.push(format!("{path}:{line}: creation_flags fora de util/spawn.rs"));
+            i += ".creation_flags(".len();
+            continue;
+        }
         if skip_until.is_none() && src[i..].starts_with("Command::new") {
             let tokio = i >= "tokio::process::".len() && src[..i].ends_with("tokio::process::");
             let kind = if tokio { "tokio::process::Command::new" } else { "Command::new" };
@@ -359,5 +365,14 @@ mod tests {
         let found = violations("src/exemplo.rs", src);
         assert_eq!(found.len(), 1, "{found:?}");
         assert!(found[0].contains(":2:"), "{found:?}");
+    }
+
+    #[test]
+    fn creation_flags_a_mao_e_violacao_fora_do_helper() {
+        let src = "fn x(c: &mut Cmd) { c.creation_flags(0x0800_0000); }
+";
+        let fora = violations("src/foo.rs", src);
+        assert!(fora.iter().any(|item| item.contains("creation_flags")), "{fora:?}");
+        assert!(violations("src/util/spawn.rs", src).is_empty());
     }
 }

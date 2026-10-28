@@ -74,6 +74,107 @@ pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(root))
 }
 
+/// O commit atual do repo (um sha, não `HEAD`: gravado como base, `HEAD` andaria junto com o
+/// worktree e o affected não veria nada commitado).
+pub fn head_commit(repo: &Path) -> Option<String> {
+    git(repo, &["rev-parse", "HEAD"], GIT_FAST).ok().filter(|sha| !sha.is_empty())
+}
+
+/// Chave de config da branch (`branch.<nome>.agsbase`) com a base de onde o worktree de uma missão
+/// saiu. O `ags test affected` lê a mesma base: se o worktree nasce de `origin/dev` e o affected
+/// compara com `origin/master`, todo o trabalho já integrado na dev vira "mudado" e cada chamada
+/// roda a suíte cheia.
+pub const BASE_CONFIG_KEY: &str = "agsbase";
+
+/// Branches de integração de git-flow que valem como base quando contêm o padrão do remoto.
+const INTEGRATION_BRANCHES: [&str; 2] = ["origin/dev", "origin/develop"];
+
+/// Os candidatos a base, na ordem de preferência. Pura.
+///
+/// - `configured`: a escolha do usuário (`missions.base_ref`), se resolve.
+/// - `upstream`: o upstream remoto da branch aberta no projeto (o usuário trabalha em cima dele).
+/// - `integration`: `origin/dev`/`origin/develop` que CONTÉM o padrão do remoto (git-flow: o
+///   trabalho do dia a dia está nela, o `master` só recebe as releases).
+/// - `default`: o padrão do remoto (`origin/HEAD`, ou `origin/master`/`origin/main`).
+/// - Nenhum: `None` (repo sem remoto; quem chama decide — a missão parte do commit atual).
+pub fn choose_base(configured: Option<String>, upstream: Option<String>, integration: Option<String>, default: Option<String>) -> Option<String> {
+    configured.or(upstream).or(integration).or(default)
+}
+
+fn resolves(repo: &Path, rev: &str) -> bool {
+    git(repo, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")], GIT_FAST).is_ok()
+}
+
+/// De onde sai o worktree de uma missão (e contra o que o affected compara). `use_upstream`
+/// deve ser `false` dentro de um worktree de agente: o upstream dele é a própria branch publicada,
+/// e comparar com ela pularia testes do que ainda não foi integrado.
+pub fn resolve_base(repo: &Path, configured: Option<&str>, use_upstream: bool) -> Option<String> {
+    let configured = configured.map(str::trim).filter(|r| !r.is_empty() && resolves(repo, r)).map(str::to_string);
+    let upstream = if use_upstream && configured.is_none() {
+        git(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], GIT_FAST)
+            .ok()
+            .filter(|u| !u.is_empty() && resolves(repo, u))
+    } else {
+        None
+    };
+    let default = git(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], GIT_FAST)
+        .ok()
+        .filter(|r| resolves(repo, r))
+        .or_else(|| ["origin/master", "origin/main"].into_iter().find(|r| resolves(repo, r)).map(str::to_string));
+    let integration = INTEGRATION_BRANCHES
+        .into_iter()
+        .find(|cand| {
+            resolves(repo, cand)
+                && default.as_deref().is_none_or(|d| git(repo, &["merge-base", "--is-ancestor", d, cand], GIT_FAST).is_ok())
+        })
+        .map(str::to_string);
+    choose_base(configured, upstream, integration, default)
+}
+
+/// A base gravada na branch do worktree (`branch.<atual>.agsbase`), se ainda resolve.
+pub fn recorded_base(worktree: &Path) -> Option<String> {
+    let branch = git(worktree, &["symbolic-ref", "--quiet", "--short", "HEAD"], GIT_FAST).ok()?;
+    let base = git(worktree, &["config", "--get", &format!("branch.{branch}.{BASE_CONFIG_KEY}")], GIT_FAST).ok()?;
+    let base = base.trim().to_string();
+    (!base.is_empty() && resolves(worktree, &base)).then_some(base)
+}
+
+/// Grava a base na branch do worktree. Melhor esforço: sem ela o affected cai em `resolve_base`.
+///
+/// Os worktrees de um repositório dividem o mesmo `.git/config`, e a comparação de modelos (e o time
+/// de uma missão) cria vários em paralelo: duas gravações ao mesmo tempo disputam o `config.lock` e
+/// uma falhava calada (no CI do Linux, mais rápido, a base de um dos worktrees sumia). Por isso as
+/// gravações passam por uma trava do processo e tentam de novo se o git acusar trava de arquivo.
+pub fn record_base(worktree: &Path, branch: &str, base: &str) {
+    static CONFIG_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let key = format!("branch.{branch}.{BASE_CONFIG_KEY}");
+    let _turn = CONFIG_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    for wait in [0u64, 100, 300, 800] {
+        if wait > 0 {
+            std::thread::sleep(Duration::from_millis(wait));
+        }
+        match git(worktree, &["config", &key, base], GIT_FAST) {
+            Ok(_) => return,
+            Err(e) if e.to_lowercase().contains("lock") => continue,
+            Err(_) => return,
+        }
+    }
+}
+
+/// `git fetch origin` curto e sem prompt, para a base da missão não sair dias atrás. Melhor
+/// esforço: sem rede (ou sem remoto) segue com o que já está no repo.
+pub fn fetch_origin_quietly(repo: &Path) {
+    if git(repo, &["remote", "get-url", "origin"], GIT_FAST).is_err() {
+        return;
+    }
+    let dir = external_path(repo);
+    let mut cmd = crate::util::spawn::hidden_command("git");
+    cmd.arg("-C").arg(&dir).args(["fetch", "--quiet", "--no-tags", "origin"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never");
+    let _ = output_with_timeout(&mut cmd, GIT_FAST);
+}
+
 /// La parte legible del nombre de rama, sacada del título de la tarea.
 pub fn branch_slug(title: &str) -> String {
     let mut slug = String::new();
@@ -116,6 +217,21 @@ pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) ->
     let short = Uuid::new_v4().simple().to_string()[..8].to_string();
     let branch = format!("{BRANCH_PREFIX}{}-{short}", branch_slug(title));
     add_worktree(base, project_cwd, &short, &branch, Some(start))
+}
+
+/// Worktree numa branch NOVA com nome escolhido por quem chama (a comparação de modelos usa
+/// `cmp/<slug>-<id>/<pick>`, fora do prefixo `cc/`). Recusa nome vazio ou começando com `-`
+/// (viraria flag do git); o resto das regras de nome o próprio `git worktree add -b` confere.
+pub fn create_named(base: &Path, project_cwd: &Path, branch: &str, start: &str) -> Result<Worktree, String> {
+    if branch.trim().is_empty() || branch.starts_with('-') || start.starts_with('-') {
+        return Err("Nome de branch ou origem inválido.".into());
+    }
+    let repo = repo_root(project_cwd)?;
+    if git(&repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], GIT_FAST).is_ok() {
+        return Err(format!("A branch '{branch}' já existe."));
+    }
+    let short = Uuid::new_v4().simple().to_string()[..8].to_string();
+    add_worktree(base, project_cwd, &short, branch, Some(start))
 }
 
 /// Worktree sobre una rama que ya existe (la del usuario, no una nueva). Se niega si esa
@@ -185,6 +301,10 @@ fn add_worktree(base: &Path, project_cwd: &Path, short: &str, branch: &str, star
     let root = external_path(&base.join(short));
 
     std::fs::create_dir_all(base).map_err(|e| e.to_string())?;
+    // Uma branch que já existia antes do `-b` é do usuário: se o `worktree add` falhar por causa
+    // dela, a limpeza abaixo não pode apagá-la.
+    let existed = start.is_some()
+        && git(&repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], GIT_FAST).is_ok();
     let root_arg = root.to_string_lossy();
     let result = match start {
         Some(start) => git(&repo, &["worktree", "add", "-b", branch, &root_arg, start], GIT_SLOW),
@@ -195,7 +315,7 @@ fn add_worktree(base: &Path, project_cwd: &Path, short: &str, branch: &str, star
         // rama recién creada sin worktree: se limpia para no acumular ramas huérfanas en cada reintento.
         // Una rama que ya existía es del usuario y no se toca.
         let _ = git(&repo, &["worktree", "prune"], GIT_SLOW);
-        if start.is_some() && !root.exists() {
+        if start.is_some() && !existed && !root.exists() {
             let _ = git(&repo, &["branch", "-D", branch], GIT_SLOW);
         }
         return Err(e);

@@ -379,7 +379,8 @@ pub fn correction_brief(round: i64, max: i64, full_gate: bool, failure: &str) ->
         out.push_str(
             "\nEsta é a ÚLTIMA rodada. Ela termina no gate completo, com a suíte inteira, não só no teste afetado. \
 Se já existir pull request, `gh pr checks <número> --watch` É o gate: não repita a suíte localmente. \
-Sem PR, rode pelo `ags` (registra o resultado e reaproveita um verde da mesma árvore) e anote como passou, \
+Sem PR, rode pelo `ags` (registra o resultado e reaproveita um verde da mesma árvore; o app aceita esse verde \
+registrado como gate, então NÃO use --force) e anote como passou, \
 no resultado ou no task_handoff (tests com status passed):\n\
 - ags test run rust\n\
 - ags test run tsc\n\
@@ -717,8 +718,10 @@ pub fn full_gate_satisfied(result: &str, handoff: Option<&super::handoff::Struct
         }
     }
     let blob = format!("{}\n{}", result.to_lowercase(), passed.join("\n"));
-    let ci = blob.contains("gh pr checks")
-        && (blob.contains("pass") || blob.contains("success") || blob.contains("verde") || blob.contains("ok"));
+    let ci = (blob.contains("gh pr checks")
+        && (blob.contains("pass") || blob.contains("success") || blob.contains("verde") || blob.contains("ok")))
+        // O aviso que o `ags ci watch` cola no terminal.
+        || (blob.contains("ci do pr") && blob.contains("terminou: verde"));
     if ci {
         return true;
     }
@@ -1003,6 +1006,9 @@ mod tests {
             None,
         ));
         assert!(full_gate_satisfied("gh pr checks 12 --watch: pass", None));
+        // O aviso do `ags ci watch` também conta, e um CI vermelho não.
+        assert!(full_gate_satisfied("[AGS] CI do PR #12 terminou: VERDE (7 checks passaram).", None));
+        assert!(!full_gate_satisfied("[AGS] CI do PR #12 terminou: 1 FALHOU (lint); 6 passaram.", None));
         let brief = correction_brief(2, 2, true, "assertion falhou");
         assert!(brief.contains("ÚLTIMA"));
         assert!(brief.contains("ags test run rust"));

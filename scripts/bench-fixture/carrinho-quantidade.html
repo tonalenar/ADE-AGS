@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — carrinho</title>
+<!--
+  N09: cada «Aumentar quantidade» salva no servidor (fetch com `?xhr=<ms>`, padrão 700) e só então a tela mostra a nova
+  quantidade. Lida antes, a quantidade parece não ter mudado — e um segundo clique vira uma terceira unidade.
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Seu carrinho</h1>
+  <h2>Caneca Azul</h2>
+  <p id="qty">Quantidade: 1</p>
+  <button id="menos">Diminuir quantidade</button>
+  <button id="mais">Aumentar quantidade</button>
+  <p id="saving" hidden>Salvando…</p>
+  <p id="total">Carrinho: 1 item</p>
+</main>
+<script>
+  const delay = Number(new URLSearchParams(location.search).get("xhr") ?? "700");
+  let server = 1;
+  let pending = 0;
+  const paint = (n) => {
+    document.getElementById("qty").textContent = "Quantidade: " + n;
+    document.getElementById("total").textContent = "Carrinho: " + n + (n === 1 ? " item" : " itens");
+    document.getElementById("saving").hidden = pending === 0;
+  };
+  const change = async (delta) => {
+    server = Math.max(1, server + delta);
+    const wanted = server;
+    pending++;
+    paint(Number(document.getElementById("qty").textContent.split(": ")[1]));
+    const answer = await (await fetch("/api/carrinho?quantidade=" + wanted + "&delay=" + delay)).json();
+    pending--;
+    paint(answer.quantidade);
+  };
+  document.getElementById("mais").onclick = () => change(1);
+  document.getElementById("menos").onclick = () => change(-1);
+</script>
+</html>

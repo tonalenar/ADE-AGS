@@ -6,7 +6,8 @@ import { accountProblemKey } from "@/features/accounts/problem";
 import type { AgentAccount, QuotaWindow } from "@/features/accounts/types";
 
 import { RING_COLORS, Ring } from "./Ring";
-import { useUsageStore } from "./usageStore";
+import { agyTopPercent } from "./antigravityQuota";
+import { AGY_KEY, useUsageStore } from "./usageStore";
 
 // ── Piezas ──────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@ export function untilText(at: number | null, now: number, t: (k: string, o?: Rec
 
 /** El encabezado de cada agente: icono, nombre, cuenta y un anillo grande con el uso. */
 function Head({ account, plan, percent, color, children }: {
-  account: AgentAccount; plan: string | null; percent: number | null; color: string; children?: React.ReactNode;
+  account: Pick<AgentAccount, "agentId" | "name" | "label">; plan: string | null; percent: number | null; color: string; children?: React.ReactNode;
 }) {
   const { t } = useTranslation();
   const Icon = agentIcon(account.agentId, account.agentId);
@@ -260,12 +261,62 @@ function AntigravitySection({ account }: { account: AgentAccount }) {
   );
 }
 
+const toEpoch = (iso?: string) => {
+  const ms = iso ? Date.parse(iso) : NaN;
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+};
+
+/**
+ * O login local do `agy`: a cota por grupo de modelos (Gemini, Claude/GPT, Argon…), cada um com
+ * as janelas semanal e de 5 horas, como o `agy /usage` informa. Sem `agy` a seção não aparece.
+ */
+function AgySection() {
+  const { t } = useTranslation();
+  const entry = useUsageStore((st) => st.agy);
+  const busy = useUsageStore((st) => !!st.busy[AGY_KEY]);
+  const load = () => void useUsageStore.getState().refreshAgy(true);
+  const groups = entry.usage?.groups ?? null;
+  const live = groups !== null && (entry.usage?.fetchedAt ?? 0) > 0;
+  const now = Math.floor(Date.now() / 1000);
+  const color = RING_COLORS.gemini;
+  const account = { agentId: "antigravity", name: t("canvas.usage.agyAccount"), label: null };
+  return (
+    <section className="px-4 py-4 space-y-3.5">
+      <Head account={account} plan={null} percent={agyTopPercent(groups)} color={color}>
+        <RefreshButton busy={busy} onClick={load} label={t("canvas.usage.refresh")} />
+      </Head>
+      {entry.failed && !live ? (
+        <Notice tone="warn" action={<RefreshButton busy={busy} onClick={load} label={t("canvas.usage.retry")} />}>{t("canvas.usage.agyFailed")}</Notice>
+      ) : !live ? <Skeleton /> : groups.length === 0 ? (
+        <Notice>{t("canvas.usage.agyEmpty")}</Notice>
+      ) : (
+        <>
+          {groups.map((g) => (
+            <div key={g.name} className="space-y-2">
+              <div title={g.description} className="truncate text-[11px] font-semibold text-gray-500 dark:text-gray-400">{g.name}</div>
+              {g.windows.map((w) => (
+                <Meter key={w.id} label={t(`canvas.usage.window.${w.kind}`, { defaultValue: w.id })} percent={Math.round(w.usedPct)}
+                  resets={untilText(toEpoch(w.resetsAt), now, t)} color={color} />
+              ))}
+            </div>
+          ))}
+          <div className="text-[10px] text-gray-400 dark:text-gray-500">
+            {t("canvas.usage.updated", { ago: ago(now - (entry.usage?.fetchedAt ?? now), t) })}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 /** Todas las cuentas con sesión, una debajo de otra. Los datos viven en `usageStore`. */
 export function UsageBoard({ accounts }: { accounts: AgentAccount[] }) {
   const { t } = useTranslation();
-  if (accounts.length === 0) return <p className="p-5 text-[12px] text-gray-500 dark:text-gray-400">{t("canvas.dock.noAccounts")}</p>;
+  const agy = useUsageStore((st) => st.agy.usage?.installed ?? false);
+  if (accounts.length === 0 && !agy) return <p className="p-5 text-[12px] text-gray-500 dark:text-gray-400">{t("canvas.dock.noAccounts")}</p>;
   return (
     <div className="divide-y divide-gray-100 dark:divide-white/6">
+      {agy && <AgySection />}
       {accounts.map((a) => (
         <div key={a.id}>
           {a.agentId === "claude-code" ? <ClaudeSection account={a} /> : a.agentId === "codex" ? <CodexSection account={a} /> : a.agentId === "antigravity" ? <AntigravitySection account={a} /> : <OtherSection account={a} />}

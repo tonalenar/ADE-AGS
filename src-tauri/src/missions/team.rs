@@ -54,7 +54,7 @@ fn validate_members(members: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, name: &str, base: &Path) -> Result<TeamWorkspace, String> {
+fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, name: &str, base: &Path, start: &str) -> Result<TeamWorkspace, String> {
     let existing: Option<(String, String, String)> = db.lock().map_err(|e| e.to_string())?.query_row(
         "SELECT cwd, root, branch FROM mission_team_workspaces WHERE mission_id=?1 AND name=?2",
         params![mission.id, name], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -68,7 +68,8 @@ fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, nam
             row
         }
         None => {
-            let wt = crate::runs::worktrees::create_from(base, Path::new(&mission.cwd), &format!("mission-{}-{name}", mission.id), "origin/master")?;
+            let wt = crate::runs::worktrees::create_from(base, Path::new(&mission.cwd), &format!("mission-{}-{name}", mission.id), start)?;
+            crate::runs::worktrees::record_base(&wt.root, &wt.branch, start);
             let row = (wt.task_cwd.to_string_lossy().into_owned(), wt.root.to_string_lossy().into_owned(), wt.branch);
             // Persist ownership before optional dependency setup, so retry reuses it.
             db.lock().map_err(|e| e.to_string())?.execute("INSERT INTO mission_team_workspaces (mission_id,name,cwd,root,branch) VALUES (?1,?2,?3,?4,?5)",
@@ -83,9 +84,46 @@ fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, nam
     let target = crate::floors::cargo_target_dir(&repo, Path::new(&root), configured.as_deref());
     let cargo_target_dir = target.path.to_string_lossy().into_owned();
     let (shell, label) = crate::floors::worktree_shell();
-    let environment = crate::floors::worktree_environment_block(&root, &cargo_target_dir, &label, shell, &node_modules, target.mode);
+    let environment = crate::floors::worktree_environment_block(&root, &cargo_target_dir, &label, shell, &node_modules, target.mode)
+        + &crate::testspeed::project::environment_note(&crate::testspeed::project::detect(Path::new(&root)));
     Ok(TeamWorkspace { name: name.into(), cwd, root, branch, cargo_target_dir,
         prelaunch: crate::floors::cargo_target_prelaunch(&target.path), environment })
+}
+
+/// Pré-aprova a pasta dos worktrees em cada conta do Claude Code, para o diálogo "confia nesta
+/// pasta?" não travar os terminais da missão. Melhor esforço: não impede a missão.
+pub(crate) fn trust_claude_worktrees(db: &crate::database::DbConnection, base: &std::path::Path) {
+    let dirs: Vec<String> = db
+        .lock()
+        .ok()
+        .and_then(|conn| {
+            let mut stmt = conn.prepare("SELECT dir FROM agent_accounts WHERE agent_id = 'claude-code'").ok()?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).ok()?;
+            Some(rows.flatten().collect())
+        })
+        .unwrap_or_default();
+    crate::usage::trust::trust_worktrees_root(base, &dirs);
+}
+
+/// Setting com a base dos worktrees das missões (uma ref git: `origin/dev`, `main`…). Vazio = automático.
+pub(crate) const BASE_REF_SETTING: &str = "missions.base_ref";
+
+/// De onde saem os worktrees da missão: a base que o usuário escolheu, senão a resolvida pelo repo
+/// (upstream da branch aberta, `origin/dev` de git-flow, padrão do remoto, ou `HEAD` sem remoto).
+/// Antes era `origin/master` fixo: no ADE-AGS isso partia 150+ commits atrás da dev, custava uma
+/// rodada de merge no começo e fazia todo `ags test affected` virar suíte cheia. `fetch` busca o
+/// remoto antes (uma vez por equipe, não por integrante).
+fn mission_start(db: &crate::database::DbConnection, mission: &super::Mission, fetch: bool) -> String {
+    let Ok(repo) = crate::runs::worktrees::repo_root(Path::new(&mission.cwd)) else {
+        return "HEAD".into();
+    };
+    if fetch {
+        crate::runs::worktrees::fetch_origin_quietly(&repo);
+    }
+    let configured = crate::database::get_setting(db, BASE_REF_SETTING).ok().flatten();
+    crate::runs::worktrees::resolve_base(&repo, configured.as_deref(), true)
+        .or_else(|| crate::runs::worktrees::head_commit(&repo))
+        .unwrap_or_else(|| "HEAD".into())
 }
 
 /// Recruits inherit the same isolation as the initial team, not the lead's cwd.
@@ -97,7 +135,9 @@ pub(crate) fn prepare_recruit(db: &crate::database::DbConnection, mission_id: &s
         super::store::get(&conn, mission_id)?.ok_or("Missão não encontrada.")?
     };
     let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
-    prepare_one(db, &mission, name, &base)
+    trust_claude_worktrees(&db, &base);
+    let start = mission_start(db, &mission, false);
+    prepare_one(db, &mission, name, &base, &start)
 }
 
 #[tauri::command]
@@ -113,16 +153,18 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
             super::store::get(&conn, &mission_id)?.ok_or("Missão não encontrada.")?
         };
         let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
+        trust_claude_worktrees(&db, &base);
+        let start = mission_start(&db, &mission, true);
         // Los worktrees se crean en paralelo (cada `git worktree add` hace un checkout completo y en
         // serie eran ~1 s por integrante antes de que se abriera el canvas). Si git no logra un lock
         // compartido, se reintenta ese integrante.
         let workspaces = std::thread::scope(|scope| {
             let handles: Vec<_> = members.iter().map(|name| {
-                let (db, mission, base) = (&db, &mission, &base);
+                let (db, mission, base, start) = (&db, &mission, &base, start.as_str());
                 scope.spawn(move || {
                     let mut last = Err(String::new());
                     for attempt in 0..RETRY_BACKOFF_MS.len() + 1 {
-                        last = prepare_one(db, mission, name, base);
+                        last = prepare_one(db, mission, name, base, start);
                         match &last {
                             Err(e) if is_transient_git_error(e) && attempt < RETRY_BACKOFF_MS.len() => {
                                 std::thread::sleep(std::time::Duration::from_millis(RETRY_BACKOFF_MS[attempt]));

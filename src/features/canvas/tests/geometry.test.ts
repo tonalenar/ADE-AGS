@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BORDER, GAP, HEADER_H, LIVE_MIN_ZOOM, NODE_DEFAULT, facingSides, focusViewport, intersects, isLive, isValidViewport, nextFreeBox, safeViewport, terminalRect } from "../geometry";
+import { BORDER, GAP, HEADER_H, LIVE_MIN_ZOOM, NODE_DEFAULT, facingSides, focusViewport, intersects, isLive, isValidViewport, nextFreeBox, revealViewport, safeViewport, terminalRect } from "../geometry";
 
 describe("isLive", () => {
   it("viva desde LIVE_MIN_ZOOM hasta el 100 %; más alejado, vista previa", () => {
@@ -111,5 +111,45 @@ describe("safeViewport", () => {
     const v = { x: -285, y: 266, zoom: 0.75 };
     expect(safeViewport(v)).toBe(v);
     expect(isValidViewport(v)).toBe(true);
+  });
+});
+
+describe("revealViewport: o nó inteiro na tela", () => {
+  const screen = { width: 1400, height: 900 };
+  const onScreen = (box: { x: number; y: number; w: number; h: number }, vp: { x: number; y: number; zoom: number }) => ({
+    left: box.x * vp.zoom + vp.x, top: box.y * vp.zoom + vp.y, right: (box.x + box.w) * vp.zoom + vp.x, bottom: (box.y + box.h) * vp.zoom + vp.y,
+  });
+
+  it("um nó alto demais encolhe até caber, deixando a barra de cima e a dock de fora", () => {
+    const box = { x: 500, y: 100, w: 640, h: 895 };
+    const vp = revealViewport(box, screen.width, screen.height);
+    const rect = onScreen(box, vp);
+    expect(vp.zoom).toBeLessThan(1);
+    expect(rect.top).toBeGreaterThanOrEqual(70 - 1);
+    expect(rect.bottom).toBeLessThanOrEqual(screen.height - 120 + 1);
+    expect(rect.left).toBeGreaterThanOrEqual(0);
+    expect(rect.right).toBeLessThanOrEqual(screen.width);
+  });
+
+  it("para a foto do piloto, o nó pequeno cresce até encher a tela (passa do 100 %)", () => {
+    const box = { x: 0, y: 0, w: 400, h: 240 };
+    const vp = revealViewport(box, screen.width, screen.height, undefined, 4);
+    expect(vp.zoom).toBeGreaterThan(2.5);
+    const rect = onScreen(box, vp);
+    expect(rect.left).toBeGreaterThanOrEqual(0);
+    expect(rect.right).toBeLessThanOrEqual(screen.width);
+    expect(rect.bottom).toBeLessThanOrEqual(screen.height - 120 + 1);
+  });
+
+  it("um nó pequeno fica a 100 %, centrado", () => {
+    const box = { x: 0, y: 0, w: 400, h: 300 };
+    const vp = revealViewport(box, screen.width, screen.height);
+    expect(vp.zoom).toBe(1);
+    const rect = onScreen(box, vp);
+    expect((rect.left + rect.right) / 2).toBeCloseTo(screen.width / 2, 0);
+  });
+
+  it("nunca passa do zoom mínimo do canvas", () => {
+    expect(revealViewport({ x: 0, y: 0, w: 20000, h: 20000 }, 1400, 900).zoom).toBe(0.15);
   });
 });

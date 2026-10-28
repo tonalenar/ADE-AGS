@@ -128,7 +128,7 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
       className={`flex flex-col gap-0.5 shrink-0 py-1.5 overflow-y-auto overflow-x-hidden
         transition-[width] duration-150
         ${expanded ? "items-stretch px-2" : "items-center"}
-        bg-gray-100/80 dark:bg-surface-deep/75 backdrop-blur-xl
+        bg-gray-100/80 dark:bg-surface-deep/75
         border-r border-gray-200 dark:border-white/[0.08]`}
     >
       <RailButton

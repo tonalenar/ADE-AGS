@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — caneca</title>
+<!--
+  N10: o benchmark roda o MESMO `act` duas vezes (o agente que repete, rodada 5 do plano). Cada clique soma uma unidade:
+  o critério («Carrinho: 1 item») só vale se o segundo `act` não adicionar de novo.
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Caneca Azul</h1>
+  <p>R$ 29,90</p>
+  <button id="add">Adicionar ao carrinho</button>
+  <p id="status">Carrinho: 0 itens</p>
+</main>
+<script>
+  let count = 0;
+  document.getElementById("add").onclick = () => {
+    count += 1;
+    document.getElementById("status").textContent = "Carrinho: " + count + (count === 1 ? " item" : " itens");
+  };
+</script>
+</html>

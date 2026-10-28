@@ -66,9 +66,17 @@ export interface BrowserView extends ViewBase {
   touch?: boolean;
   /** O zoom da página (1 = 100%). Ausente = 100%. Não muda o tamanho do navegador, só o da página. */
   zoom?: number;
+  /** Mostra um Chrome de verdade (perfil próprio do app) em vez da página pelo proxy: é onde
+   *  dá para entrar em sites que recusam navegador embutido, como a conta Google. Protótipo. */
+  realChrome?: boolean;
 }
 
-export type ViewTab = FileView | DiffView | BrowserView;
+export interface DesktopAppView extends ViewBase {
+  kind: "desktop";
+  app: "gemini";
+}
+
+export type ViewTab = FileView | DiffView | BrowserView | DesktopAppView;
 
 /** Qué muestra una tab, sin su identidad. `Omit` a secas no reparte sobre la unión. */
 export type ViewTarget = ViewTab extends infer V ? (V extends ViewTab ? Omit<V, "id" | "title"> : never) : never;
@@ -159,6 +167,11 @@ export function toPersisted(views: ViewTab[]): ViewTab[] {
  * exigir el `http://` es hacer tipear lo obvio. Un host sin puerto ni esquema se asume
  * `https`, salvo que sea local.
  */
+/** `about:blank` (ou `about:`): uma página vazia, não um endereço. Um agente cria um portal «vazio» assim. */
+export function isBlankUrl(input: string): boolean {
+  return /^about:(blank)?\/?$/i.test(input.trim());
+}
+
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (!text) return null;
@@ -199,7 +212,7 @@ export function viewLabels(views: ViewTab[]): Map<string, { title: string; hint:
   const byTitle = new Map<string, ViewTab[]>();
   // Uma aba sem `path` (de um tipo que esta versão não conhece, salva por outra) não tem pasta para
   // diferenciar: fica só com o título, em vez de derrubar a tela.
-  const hasPath = (v: ViewTab): v is Exclude<ViewTab, BrowserView> => v.kind !== "browser" && typeof (v as { path?: unknown }).path === "string";
+  const hasPath = (v: ViewTab): v is Exclude<ViewTab, BrowserView | DesktopAppView> => v.kind !== "browser" && typeof (v as { path?: unknown }).path === "string";
   for (const v of views) {
     if (!hasPath(v)) continue;
     const list = byTitle.get(clashKey(v)) ?? [];

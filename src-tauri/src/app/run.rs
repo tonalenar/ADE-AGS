@@ -39,6 +39,10 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         // Las rotinas se disparan solas, con la app abierta (ver `routines`). En modo
         // headless no hay ventanas: no habría a quién avisar ni terminal donde escribir.
         crate::ipc::start_routine_scheduler(app.clone());
+        // A fila das mensagens entre agentes volta a andar de onde parou (ver `peer_queue`).
+        crate::ipc::start_peer_queue(app.clone());
+        // O canal estruturado: o estado de cada aba de Claude Code/Codex lido do transcript (ver `canal`).
+        crate::ipc::start_canal(app.clone());
         // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
         crate::pet::start(app.clone());
     }
@@ -51,12 +55,17 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::desktop_apps::configure_host_dpi();
     // Antes que nada abra la base: ~/.controlcode (nombre anterior) pasa a ~/.ags sin perder datos.
     crate::util::legacy::migrate_on_startup();
     // Si hay que subir el schema, acá solo se abre el archivo. La copia y la migración
     // corren después de que la ventana puede pintarse (ver `setup`).
-    let (db_conn, _upgrade_pending) =
-        crate::database::prepare_db().expect("Failed to initialize SQLite database");
+    // Uma falha aqui (inclusive uma base de versão mais nova que este binário) precisa ser
+    // lida: no release do Windows um `expect` sumiria sem janela nem console.
+    let (db_conn, _upgrade_pending) = match crate::database::prepare_db() {
+        Ok(ready) => ready,
+        Err(error) => super::fatal::exit_with_startup_error(&error.to_string()),
+    };
     // El hilo espera `db_is_ready`: no checkpointa mientras el splash corre el
     // `VACUUM INTO` y la migración. Después mira el `-wal` cada 30 s, fuera del purge.
     crate::database::spawn_wal_maintenance(db_conn.clone());
@@ -81,6 +90,25 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::desktop_apps::gemini_desktop_status,
+            crate::desktop_apps::gemini_desktop_attach,
+            crate::desktop_apps::gemini_desktop_layout,
+            crate::desktop_apps::gemini_desktop_detach,
+            crate::desktop_apps::gemini_desktop_tasks,
+            crate::desktop_apps::gemini_desktop_consult_create,
+            crate::desktop_apps::gemini_desktop_task_update,
+            crate::desktop_apps::gemini_desktop_task_retry,
+            crate::desktop_apps::gemini_desktop_execute,
+            crate::desktop_apps::participant::gemini_desktop_apply_plan,
+            crate::ipc::commands::peers::gemini_desktop_peer_send,
+            crate::real_browser::real_browser_open,
+            crate::real_browser::real_browser_place,
+            crate::real_browser::real_browser_navigate,
+            crate::real_browser::real_browser_history,
+            crate::real_browser::real_browser_close,
+            crate::real_browser::real_browser_focus,
+            crate::real_browser::real_browser_post,
+            crate::real_browser::real_browser_screenshot,
             crate::design::design_create,
             crate::design::design_delete,
             crate::design::design_archive,
@@ -102,6 +130,7 @@ pub fn run() {
             crate::terminal::pty_snapshot,
             crate::missions::vigia::vigia_check,
             crate::missions::vigia::vigia_report,
+            crate::missions::vigia::vigia_notify_user,
             crate::terminal::pty_output_total,
             crate::terminal::pty_for_tab,
             crate::terminal::pty_write,
@@ -114,6 +143,15 @@ pub fn run() {
             crate::canvas::assets::canvas_asset_save,
             crate::canvas::assets::canvas_asset_load,
             // Pisos: worktrees aislados del proyecto, cada uno con su canvas
+            crate::compare::compare_check,
+            crate::compare::compare_prepare,
+            crate::compare::compare_attach,
+            crate::compare::compare_list,
+            crate::compare::compare_status,
+            crate::compare::compare_diff,
+            crate::compare::compare_keep,
+            crate::compare::compare_remove,
+            crate::compare::compare_finish,
             crate::floors::floor_list,
             crate::floors::floor_create,
             crate::floors::floor_delete,
@@ -123,6 +161,7 @@ pub fn run() {
             // El pet sube de nivel con los tokens de los agentes
             crate::missions::mission_start_terminals,
             crate::missions::mission_finish_terminals,
+            crate::missions::mission_delivery_hint,
             crate::missions::mission_redeliver,
             crate::missions::mission_check_duplicate,
             crate::missions::mission_check_duplicate_input,
@@ -138,6 +177,13 @@ pub fn run() {
             crate::runs::checkpoints::run_rollback_preview,
             crate::runs::checkpoints::run_rollback,
             crate::runs::checkpoints::run_checkpoint_create,
+            crate::tab_checkpoints::tab_checkpoint_auto,
+            crate::tab_checkpoints::tab_checkpoint_create,
+            crate::tab_checkpoints::tab_checkpoints_list,
+            crate::tab_checkpoints::tab_checkpoint_diff,
+            crate::tab_checkpoints::tab_checkpoint_restore,
+            crate::tab_checkpoints::tab_checkpoints_delete,
+            crate::tab_checkpoints::tab_checkpoints_prune,
             crate::runs::checkpoints::run_restore_checkpoint,
             crate::pet::pet_status,
             crate::ipc::commands::pool::pool_list_all,
@@ -153,6 +199,13 @@ pub fn run() {
             crate::android::android_key,
             crate::android::android_text,
             // Rotinas: mensajes programados a un agente o al usuario
+            crate::ipc::commands::peer_queue::peer_queue_counts,
+            crate::ipc::commands::peer_queue::peer_queue_list,
+            crate::ipc::commands::peer_queue::peer_queue_edit,
+            crate::ipc::commands::peer_queue::peer_queue_move,
+            crate::ipc::commands::peer_queue::peer_queue_cancel,
+            crate::ipc::commands::peer_queue::peer_queue_send_now,
+            crate::ipc::commands::canal::structured_state_all,
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
             crate::ipc::commands::routine::routine_set_catch_up,
@@ -199,6 +252,10 @@ pub fn run() {
             crate::session::get_session_title,
             // Gestión de ventanas
             crate::window::restore_deferred_windows,
+            crate::window::app_window_ready,
+            crate::window::app_boot_progress,
+            crate::window::app_boot_step,
+            crate::window::app_boot_done,
             crate::window::open_new_window,
             crate::window::broadcast_event,
             crate::window::get_home_dir,
@@ -269,6 +326,10 @@ pub fn run() {
             crate::forge::forge_checkout_pull,
             crate::forge::forge_releases,
             crate::forge::forge_labels,
+            // Guia de revisão de PR por IA (só lê o PR; nunca escreve no GitHub)
+            crate::forge::forge_pull_files,
+            crate::forge::review_guide_get,
+            crate::forge::review_guide_generate,
             // Sincronización de skills y configuración por un repo privado
             crate::sync::sync_status,
             crate::sync::sync_setup,
@@ -402,6 +463,7 @@ pub fn run() {
             crate::accounts::antigravity_oauth::antigravity_oauth_cancel,
             crate::accounts::antigravity_oauth::antigravity_oauth_verify,
             crate::accounts::antigravity_access::antigravity_account_discovery,
+            crate::usage::agy::antigravity_cli_usage,
             crate::usage::agent_account_usage,
             crate::usage::claude_live_usage,
             crate::usage::mission_tokens,
@@ -422,6 +484,7 @@ pub fn run() {
             crate::database::db_get_setting,
             crate::database::db_set_setting,
             crate::decisions::commands::decision_settings_get,
+            crate::decisions::jev_models::decision_jev_models,
             crate::decisions::commands::decision_settings_set,
             crate::decisions::commands::decision_key_set,
             crate::decisions::commands::decision_key_clear,
@@ -433,6 +496,7 @@ pub fn run() {
             crate::decisions::delivery::decision_classify_report,
             crate::decisions::routing::decision_route_turn,
             crate::decisions::browse::decision_pick_step,
+            crate::decisions::browse::decision_preconnect,
             crate::decisions::vision::decision_pick_visual,
             crate::database::db_boot_status,
             // Gestión de skills (symlinks globales)
@@ -454,6 +518,8 @@ pub fn run() {
             crate::skills::check_session_skills,
             crate::skills::restore_session_skills,
             crate::ipc::bridge::cli_respond,
+            crate::ipc::bridge::ui_heartbeat,
+            crate::ipc::bridge::portal_act_progress,
             crate::ipc::mcp::tab_browser_mcp,
             crate::runs::run_start_orchestration,
             crate::runs::run_cancel_run,
@@ -474,6 +540,9 @@ pub fn run() {
             crate::database::db_delete_session_history,
             crate::session::session_markdown,
             crate::session::export_session_markdown,
+            // Painel lateral da aba ativa: contexto usado e conectores MCP
+            crate::session::panel::tab_context_usage,
+            crate::session::panel::tab_connectors,
             crate::agents::list_custom_agents,
             crate::agents::upsert_custom_agent,
             crate::agents::delete_custom_agent,
@@ -500,6 +569,10 @@ pub fn run() {
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let label = window.label().to_string();
+                // A janelinha de abertura não guarda nada: fecha direto.
+                if label == crate::window::SPLASH_LABEL {
+                    return;
+                }
                 // Un cierre que pide el sistema se frena para guardar con progreso; el
                 // frontend cierra de verdad al terminar (ver `window::close_guard`).
                 use crate::window::close_guard::{Decision, decide};
@@ -514,6 +587,11 @@ pub fn run() {
                         api.prevent_close();
                         return;
                     }
+                }
+                if let Err(error) = crate::desktop_apps::release_window(&label) {
+                    api.prevent_close();
+                    let _ = window.emit("gemini-desktop-error", error);
+                    return;
                 }
                 if let Some(db) = window.app_handle().try_state::<DbConnection>() {
                     let _ = crate::database::db_mark_window_closed(label, db);
@@ -539,15 +617,24 @@ pub fn run() {
         })
         .setup(|app| {
             crate::memory::repo_sync::install(app);
+            // Os envios às abas (peers, `ags tab send`, chat…) tiram um ponto de restauração antes.
+            crate::tab_checkpoints::install(app.handle());
             // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
             // se guardan acá (ver `preview/site.rs`): el motor del webview no los conserva.
-            if let Ok(dir) = app.path().app_data_dir() {
+            if let Ok(dir) = crate::util::datadir::app_data_dir(app.handle()) {
                 crate::preview::set_state_dir(dir.join("browser-state"));
             }
 
             // Avisos del sistema para lo que pasa con la app en segundo plano (ver `notifier`).
             crate::notifier::start(app.handle().clone());
+            // Abre a conexão com o Jev (se o piloto está ligado) antes do primeiro `act`.
+            crate::decisions::browse::preconnect_at_start(app.handle().clone());
+            // O modelo do Jev fixado numa versão sobe sozinho: confere ao abrir e uma vez por dia (ver `jev_models`).
+            crate::decisions::jev_models::start(app.handle().clone());
             app.manage(crate::window::DeferredRestore::empty());
+            // A abertura: a janelinha do robô na frente, a principal carregando escondida (ver `window::splash`).
+            crate::window::open_splash(app.handle());
+            crate::window::arm_fallback(app.handle());
 
             // Upgrade de schema: la ventana ya puede pintarse (el frontend muestra
             // "actualizando datos" y no monta la home). La copia y la migración siguen
@@ -584,14 +671,9 @@ pub fn run() {
             // si hay varias ventanas abiertas y se intenta salir de la app entera, se pausa
             // la salida y se le pregunta al frontend si quiere cerrar todo o solo la actual.
             if let tauri::RunEvent::Exit = event {
-                // Sin esto quedaría un handshake apuntando a un puerto muerto, y la CLI
-                // reportaría "no se pudo conectar" en vez de "la app no está corriendo".
-                crate::ipc::cleanup();
-                // Sin esto, cerrar la app deja corriendo lo que hayan lanzado los agentes
-                // (servidores de desarrollo, watchers). El registry de PTYs es un
-                // `lazy_static` y Rust no corre destructores de estáticos al salir, así
-                // que el `Drop` que limpia cada grupo hay que dispararlo a mano.
-                crate::terminal::kill_all_sessions();
+                // Handshake do IPC e sessões PTY: a mesma limpeza do "fechar tudo" e dos
+                // sinais, uma vez só. Ver `app/shutdown.rs`.
+                super::shutdown_once();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let windows = app_handle.webview_windows();
@@ -605,7 +687,12 @@ pub fn run() {
                     // le dio paso, no se frena otra vez.
                     use crate::window::close_guard::{Decision, decide};
                     match decide(label) {
-                        Decision::Close => {}
+                        Decision::Close => {
+                            if let Err(error) = crate::desktop_apps::release_window(label) {
+                                api.prevent_exit();
+                                let _ = app_handle.emit("gemini-desktop-error", error);
+                            }
+                        }
                         Decision::Save => {
                             api.prevent_exit();
                             let _ = app_handle.emit("cc-close-requested", label);

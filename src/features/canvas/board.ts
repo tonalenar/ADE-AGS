@@ -39,11 +39,17 @@ export interface CanvasPortal {
   url: string;
   box: Box;
   /** `android` = la pantalla de un emulador o teléfono (ver `DeviceNode`), no un navegador. */
-  kind?: "android";
+  kind?: "android" | "gemini";
   /** El dispositivo de adb que muestra; sin él, el único que haya. */
   serial?: string;
   /** El emulador (AVD) que arranca. */
   avd?: string;
+  /** A resolução com que a página é renderizada (a que ela "vê"), independente do tamanho do nó: o nó só a mostra reduzida. */
+  viewport?: { width: number; height: number };
+  /** "Celular solto": o navegador sem a janela, só o aparelho deste modelo (ver `browser/devices.ts`). Ausente = a janela. */
+  device?: string;
+  /** O Portal mostra um Chrome de verdade (ver `browser/RealBrowserView`). Ausente = o navegador pelo proxy. */
+  realChrome?: boolean;
 }
 
 export const PORTAL_PREFIX = "portal-";
@@ -147,12 +153,13 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   // não sabe que ela é deste canvas). Antes a aresta sumia e o integrante saía de `ags peers` com a
   // aba viva: o orquestrador deixava de conseguir falar com ele.
   const edges = board.edges.filter((e) => (alive(e.a) && alive(e.b)) || (anywhere.has(e.a) && anywhere.has(e.b)));
-  const orchestrators = board.orchestrators.filter((id) => open.has(id));
+  const participant = (id: string) => open.has(id) || board.portals[id]?.kind === "gemini";
+  const orchestrators = board.orchestrators.filter(participant);
   // El papel de una tab cerrada se va con ella.
   const roleIds = Object.keys(board.roles);
-  const roles = roleIds.every((id) => open.has(id))
+  const roles = roleIds.every(participant)
     ? board.roles
-    : Object.fromEntries(Object.entries(board.roles).filter(([id]) => open.has(id)));
+    : Object.fromEntries(Object.entries(board.roles).filter(([id]) => participant(id)));
   const subagents = board.subagents.every((id) => open.has(id)) ? board.subagents : board.subagents.filter((id) => open.has(id));
 
   if (
@@ -182,9 +189,10 @@ export function buildMissionTeam(
   members: { tabId: string; roleId?: string | null; subagent?: boolean }[],
 ): Board {
   const ids = [leadId, ...members.map((m) => m.tabId)];
-  let next = reconcile(board, ids, ids);
+  const terminalIds = ids.filter((id) => board.portals[id]?.kind !== "gemini");
+  let next = reconcile(board, terminalIds, terminalIds);
   next = { ...next, orchestrators: next.orchestrators.includes(leadId) ? next.orchestrators : [...next.orchestrators, leadId] };
-  next = placeInGrid(next, ids);
+  next = placeInGrid(next, terminalIds);
   for (const m of members) {
     next = addEdge(next, leadId, m.tabId);
     if (m.roleId) next = { ...next, roles: { ...next.roles, [m.tabId]: m.roleId } };
@@ -288,6 +296,41 @@ export function setRole(board: Board, tabId: string, role: string | null, subage
   const roles = label ? { ...rest, [tabId]: label } : rest;
   const others = board.subagents.filter((id) => id !== tabId);
   return { ...board, roles, subagents: subagent ? [...others, tabId] : others };
+}
+
+/**
+ * Leva terminais de um canvas para outro (a pasta → a conversa dela), com o lugar de cada um, as ligações que
+ * tocam neles, o papel, a coroa de orquestrador e a marca de subagente. Um canvas de destino ainda vazio herda a
+ * vista do de origem, para a tela não pular. Pura.
+ */
+export function moveTerminals(from: Board, to: Board, ids: string[]): { from: Board; to: Board } {
+  const moving = new Set(ids.filter((id) => id in from.nodes));
+  if (moving.size === 0) return { from, to };
+  const touches = (e: CanvasEdge) => moving.has(e.a) || moving.has(e.b);
+  const pick = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => moving.has(id)));
+  const drop = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => !moving.has(id)));
+  const known = new Set(to.edges.map((e) => [e.a, e.b].sort().join("|")));
+  const edges = from.edges.filter((e) => touches(e) && !known.has([e.a, e.b].sort().join("|")));
+  const empty = Object.keys(to.nodes).length === 0;
+  return {
+    from: {
+      ...from,
+      nodes: drop(from.nodes),
+      edges: from.edges.filter((e) => !touches(e)),
+      roles: drop(from.roles),
+      subagents: from.subagents.filter((id) => !moving.has(id)),
+      orchestrators: from.orchestrators.filter((id) => !moving.has(id)),
+    },
+    to: {
+      ...to,
+      nodes: { ...to.nodes, ...pick(from.nodes) },
+      edges: [...to.edges, ...edges],
+      roles: { ...to.roles, ...pick(from.roles) },
+      subagents: [...to.subagents, ...from.subagents.filter((id) => moving.has(id) && !to.subagents.includes(id))],
+      orchestrators: [...to.orchestrators, ...from.orchestrators.filter((id) => moving.has(id) && !to.orchestrators.includes(id))],
+      viewport: empty ? from.viewport : to.viewport,
+    },
+  };
 }
 
 export function toggleOrchestrator(board: Board, tabId: string): Board {
@@ -496,6 +539,14 @@ export function removeNote(board: Board, id: string): Board {
 // ── Portales ────────────────────────────────────────────────────────
 
 export const PORTAL_SIZE = { w: 640, h: 440 };
+
+/**
+ * Um navegador aberto por um agente nasce num nó maior que o padrão e SEM resolução forçada: a página usa o tamanho
+ * do nó (~1200 px, layout de desktop) em escala 1:1. Antes nascia em 1920×1080 e ia encolhida a 0,6× dentro do nó;
+ * com o canvas afastado o texto virava 6–8 px na tela e ficava borrado (nenhum navegador desenha letra nítida desse
+ * tamanho). A pessoa ainda escolhe uma resolução na barra do navegador quando quiser.
+ */
+export const AGENT_PORTAL_SIZE = { w: 1200, h: 840 } as const;
 /** Un teléfono es alto y angosto. */
 export const PHONE_SIZE = { w: 320, h: 640 };
 export const PHONE_MIN = { w: 240, h: 420 };
@@ -528,11 +579,11 @@ export function uniquePortalName(board: Board, wanted: string, except?: string):
 /** Agrega un portal; con `near`, a la derecha de ese nodo y conectado a él. */
 export function addPortal(
   board: Board,
-  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number } },
+  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } },
 ): { board: Board; name: string } {
   const android = portal.kind === "android";
-  const size = portal.size ?? (android ? PHONE_SIZE : PORTAL_SIZE);
-  const name = uniquePortalName(board, portal.name ?? (android ? "Android" : "Portal"));
+  const size = portal.size ?? (android ? PHONE_SIZE : portal.kind === "gemini" ? { w: 1000, h: 700 } : PORTAL_SIZE);
+  const name = uniquePortalName(board, portal.name ?? (android ? "Android" : portal.kind === "gemini" ? "Gemini Desktop" : "Portal"));
   const others = allBoxes(board);
   const anchor = portal.near ? boxOf(board, portal.near) : undefined;
   let box: Box;
@@ -546,7 +597,12 @@ export function addPortal(
   } else {
     box = nextFreeBox(others, size);
   }
-  const made: CanvasPortal = { name, url: portal.url ?? "", box, ...(android ? { kind: "android" as const, ...(portal.avd ? { avd: portal.avd } : {}) } : {}) };
+  const made: CanvasPortal = {
+    name, url: portal.url ?? "", box,
+    ...(android ? { kind: "android" as const, ...(portal.avd ? { avd: portal.avd } : {}) } : {}),
+    ...(portal.kind === "gemini" ? { kind: "gemini" as const } : {}),
+    ...(!android && portal.viewport ? { viewport: portal.viewport } : {}),
+  };
   const next = { ...board, portals: { ...board.portals, [portal.id]: made } };
   return { board: anchor && portal.near ? addEdge(next, portal.near, portal.id) : next, name };
 }
@@ -563,7 +619,9 @@ export function removePortal(board: Board, id: string): Board {
   if (!(id in board.portals)) return board;
   const portals = { ...board.portals };
   delete portals[id];
-  return { ...board, portals, edges: board.edges.filter((e) => e.a !== id && e.b !== id) };
+  const roles = { ...board.roles };
+  delete roles[id];
+  return { ...board, portals, roles, orchestrators: board.orchestrators.filter((o) => o !== id), edges: board.edges.filter((e) => e.a !== id && e.b !== id) };
 }
 
 // ── Textos, imágenes y trazos ───────────────────────────────────────

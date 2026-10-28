@@ -2,7 +2,8 @@ import { useCallback, useEffect, useId, useMemo, useState, type ReactNode } from
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { dateLocale } from "@/i18n/dateLocale";
 import { useTabsStore } from "@/features/tabs/store";
 import { boardKeyOfTab, useActiveBoardKey } from "./store";

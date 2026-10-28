@@ -1,0 +1,108 @@
+{
+  "format": "ade-replay",
+  "version": 1,
+  "id": "opencode-trabalhando",
+  "agent": "opencode",
+  "title": "OpenCode trabalhando: ■■⬝⬝⬝⬝⬝⬝ esc interrupt",
+  "origin": {
+    "kind": "synthesized",
+    "basis": "Rodapé de trabalho do OpenCode citado em tabs.rs (working_in e teste rodape_de_trabalho_conta_como_enviado); tela alternativa do opentui desenhada por posição.",
+    "recordedAt": null,
+    "platform": null,
+    "tuiVersion": null
+  },
+  "terminal": {
+    "cols": 100,
+    "rows": 30
+  },
+  "task": {
+    "atMs": 0
+  },
+  "chunks": [
+    {
+      "atMs": 0,
+      "data": "\u001b[?1049h\u001b[2J\u001b[2;3H\u001b[1mRevisão do parser\u001b[0m\u001b[4;1H\u001b[38;2;250;178;131m┃\u001b[0m  Olá! Em que posso ajudar neste projeto?\u001b[24;1H\u001b[38;2;250;178;131m┃\u001b[0m\u001b[25;1H\u001b[38;2;250;178;131m┃\u001b[0m  \u001b[2mAsk anything…\u001b[0m\u001b[26;1H\u001b[38;2;250;178;131m┃\u001b[0m\u001b[27;1H\u001b[38;2;250;178;131m┃\u001b[0m  \u001b[38;2;250;178;131mBuild\u001b[0m  Claude Haiku 5.5 \u001b[2mAnthropic\u001b[0m\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m■■⬝⬝⬝⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H"
+    },
+    {
+      "atMs": 200,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝■■⬝⬝⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 400,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝■■⬝⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 600,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝■■⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 800,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝⬝■■⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 1000,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝⬝⬝■■⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 1200,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝⬝⬝⬝■■\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 1400,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m■⬝⬝⬝⬝⬝⬝■\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 1600,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m■■⬝⬝⬝⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 1800,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝■■⬝⬝⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 2000,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝■■⬝⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 2200,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝■■⬝⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 2400,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝⬝■■⬝⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 2600,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝⬝⬝■■⬝\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 2800,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m⬝⬝⬝⬝⬝⬝■■\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    },
+    {
+      "atMs": 3000,
+      "data": "\u001b[?25l\u001b[29;1H\u001b[2K  \u001b[38;2;250;178;131m■⬝⬝⬝⬝⬝⬝■\u001b[0m  \u001b[2mesc interrupt\u001b[0m\u001b[25;4H\u001b[?25h"
+    }
+  ],
+  "checkpoints": [
+    {
+      "atMs": 3100,
+      "label": "barra animada e esc interrupt no rodapé",
+      "expect": {
+        "working": true,
+        "pastePending": false,
+        "waitingApproval": false,
+        "stalled": false,
+        "screenContains": "esc interrupt"
+      }
+    },
+    {
+      "atMs": 200000,
+      "label": "rodapé de trabalho parado há mais de 3 min: não é parado",
+      "expect": {
+        "working": true,
+        "stalled": false
+      }
+    }
+  ]
+}

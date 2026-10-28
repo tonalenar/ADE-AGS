@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(), send: vi.fn(), listener: undefined as undefined | ((e: { payload: { kind: string; fromTabId: string; toTabId: string | null; text: string; atMs: number } }) => void),
   startedAt: 1000,
+  active: true,
 }));
 vi.mock("react", () => ({ useEffect: (effect: () => unknown) => effect() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -15,7 +16,7 @@ vi.mock("@/features/tabs/store", () => ({ useTabsStore: { getState: () => ({ tab
 ], detectedAgents: [{ id: "claude-code", available: true }] }) } }));
 vi.mock("../store", () => ({ useMissionsStore: { getState: () => ({ missions: [{ id: "m", status: "running", startedAt: mocks.startedAt, title: "M" }] }) } }));
 vi.mock("../groups", () => ({ missionIndex: () => ({}), tabsByMission: () => ({ m: ["lead", "back"] }) }));
-vi.mock("../vigiaSwitch", () => ({ useVigiaSwitch: { getState: () => ({ enabled: true }) } }));
+vi.mock("../vigiaSwitch", () => ({ useVigiaSwitch: { getState: () => ({ enabled: true }) }, vigiaActive: () => mocks.active }));
 vi.mock("@/features/terminal/activity", () => ({ lastOutputAt: (id: string) => id === "lead" ? Date.now() : Date.now() - 91_000 }));
 vi.mock("@/features/terminal/terminalRegistry", () => ({ screenOf: () => null, sendWhenReady: mocks.send }));
 vi.mock("@/shared/brand/botToastStore", () => ({ showBotToast: vi.fn() }));
@@ -32,9 +33,47 @@ describe("Vigia: entrega final e confirmação de envio", () => {
     vi.setSystemTime(1_000_000);
     localStorage.clear();
     mocks.startedAt = 1000;
+    mocks.active = true;
     mocks.invoke.mockImplementation(() => Promise.resolve([]));
   });
   afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("desligado no meio da consulta ao modelo, não cutuca ninguém (checado logo antes de agir)", async () => {
+    let resolve!: (actions: { to: string; message: string }[]) => void;
+    mocks.invoke.mockReturnValue(new Promise((r) => { resolve = r; }));
+    const { vigiaTick } = await import("../vigia");
+    void vigiaTick();
+    mocks.active = false;
+    resolve([{ to: "Backend", message: "Reporte o resultado." }, { to: "usuario", message: "Decida." }]);
+    await flush();
+    expect(mocks.send).not.toHaveBeenCalled();
+    expect(mocks.invoke.mock.calls.filter(([command]) => command !== "vigia_check")).toHaveLength(0);
+  });
+
+  it("a cutucada leva a rechecagem para a hora de colar: desligado ou ocupado, não cola", async () => {
+    mocks.startedAt = (Date.now() - 6 * 60_000) / 1000;
+    const { vigiaTick } = await import("../vigia");
+    void vigiaTick();
+    expect(mocks.send).toHaveBeenCalledTimes(1);
+    const timing = mocks.send.mock.calls[0][2];
+    expect(timing.guard()).toBe(true);
+    mocks.active = false;
+    expect(timing.guard()).toBe(false);
+  });
+
+  it("o ciclo termina só depois da consulta ao modelo", async () => {
+    let resolve!: (actions: { to: string; message: string }[]) => void;
+    mocks.invoke.mockReturnValue(new Promise((r) => { resolve = r; }));
+    const { vigiaTick } = await import("../vigia");
+    let done = false;
+    void vigiaTick().then(() => { done = true; });
+    await flush();
+    expect(done).toBe(false);
+    resolve([]);
+    await flush();
+    await flush();
+    expect(done).toBe(true);
+  });
 
   it("status não tira o integrante da observação, entrega final tira", async () => {
     const { useVigiaDriver, vigiaTick } = await import("../vigia");

@@ -4,16 +4,21 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
-import { initTabsPersistence } from "@/features/tabs/persistence";
+import { initTabsPersistence, waitForHydration } from "@/features/tabs/persistence";
 import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
+import { CompareHost } from "@/features/compare/CompareHost";
 import { initCanvasSync } from "@/features/canvas/store";
+import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
+import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckpointsCapture";
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
-import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
+import { ExplorerDrawer } from "@/features/sidePanel/ExplorerDrawer";
+import { PanelButtons } from "@/features/sidePanel/PanelButtons";
+import { SessionPanel } from "@/features/sidePanel/SessionPanel";
 import { RouteModal } from "@/app/RouteModal";
 import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
 import { EditorArea } from "@/features/tabs/EditorArea";
@@ -35,12 +40,13 @@ import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
 import { BotToastHost } from "@/shared/brand/BotToastHost";
 import { AppConfirmHost } from "@/shared/ui/AppConfirmHost";
-import { BotPanel } from "@/features/bot/BotPanel";
+import { BotPanel } from "@/features/bot/LazyBotPanel";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { restoreDeferredWindowsAfterFirstFrame } from "@/app/afterFirstFrame";
+import { followAppBoot } from "@/app/splash";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
@@ -70,6 +76,8 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 export function AppShell() {
   useFileDropToTerminal();
   useSessionCheckpoints();
+  // Ponto de restauração dos arquivos a cada mensagem num agente, e a limpeza das abas fechadas.
+  useTabCheckpointsCapture();
   const tabs = useTabsStore((s) => s.tabs);
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
   const activateTab = useTabsStore((s) => s.activateTab);
@@ -91,6 +99,7 @@ export function AppShell() {
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
   const railExpanded = useUiStore((s) => s.railExpanded);
+  const sidePanelHidden = useUiStore((s) => s.sidePanelHidden);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const accountsOpen = useUiStore((s) => s.accountsOpen);
@@ -142,7 +151,9 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    detectAgents().then(setDetectedAgents);
+    const agentsReady = detectAgents().then(setDetectedAgents);
+    // A tela de carregamento segue o resto do boot daqui: tabs hidratadas, agentes detectados.
+    void followAppBoot({ tabsHydrated: waitForHydration(), agentsReady });
     // Las TUIs custom viven en SQLite (el backend también las consulta), así que hay que
     // traerlas explícitamente en cada ventana en vez de que se rehidraten solas.
     useAgentsStore.getState().loadCustomAgents().catch(console.error);
@@ -176,6 +187,8 @@ export function AppShell() {
     initLayoutSync(myLabel);
     // El canvas de agentes: posiciones y conexiones, por carpeta (ver features/canvas).
     initCanvasSync(myLabel);
+    // O orquestrador sabe quem está no time dele, venha o time de onde vier (ver `orchestratorAnnounce`).
+    initOrchestratorAnnouncements();
     loadWindowState(myLabel)
       .then((restored) => {
         if (restored) {
@@ -258,7 +271,8 @@ export function AppShell() {
           la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
       <div className="flex shrink-0">
         <SideHead width={sideWidth} />
-        <TabBar showLights={workspacesCollapsed && !railExpanded} />
+        <TabBar showLights={workspacesCollapsed && !railExpanded}
+          trailing={<PanelButtons changes={activeRepo?.changedCount ?? 0} />} />
       </div>
 
       <div className="relative flex flex-1 min-h-0">
@@ -311,14 +325,18 @@ export function AppShell() {
             className="absolute inset-0 z-[35] pointer-events-none"
             style={{ transform: "translateZ(0)" }}
           />
-        </div>
 
-        {/* Derecha: los archivos del workspace activo. */}
-        <ExplorerPanel
-          cwd={activeTab?.cwd ?? null}
-          repo={activeRepo}
-          title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
-        />
+          {/* Arquivos, busca e git: uma gaveta por cima do conteúdo, aberta pelos botões do topo. */}
+          <ExplorerDrawer
+            cwd={activeTab?.cwd ?? null}
+            repo={activeRepo}
+            title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
+          />
+
+          {/* O painel da sessão do agente ativo (ambiente, contexto, conectores, alterações, tarefas):
+              cartões flutuando no canto de cima, sem coluna — o conteúdo fica com a largura toda. */}
+          {!sidePanelHidden && isWorkspace && activeTab && <SessionPanel tab={activeTab} repo={activeRepo} />}
+        </div>
 
         {/* Onde as telas cheias se montam (ver `pageHost`): tudo à direita do riel, por cima
             dos painéis e da área de trabalho. Sempre montado e vazio, sem pegar cliques; as
@@ -330,6 +348,7 @@ export function AppShell() {
       <StatusBar repo={activeRepo} />
 
       <CommandPalette />
+      <CompareHost />
     </div>
   );
 }

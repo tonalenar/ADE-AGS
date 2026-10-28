@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { create } from "zustand";
 import { BoxIcon, Button, CloseIcon, CopyIcon, IconReset } from "neogestify-ui-components";
 
-import { SplitDownIcon, SplitRightIcon } from "@/app/icons";
+import { SplitDownIcon, SplitRightIcon, TagIcon, UndoIcon } from "@/app/icons";
 import { applyTabRole } from "@/features/canvas/applyRole";
 import { clearPlacement, takePlacement } from "@/features/canvas/placement";
 import { canvasActions } from "@/features/canvas/store";
@@ -20,9 +20,12 @@ import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
-import { memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
+import { MEMORY_SUGGEST_HINT, memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
 import { BROWSER_HINT } from "@/features/canvas/portalNotice";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { CheckpointsDialog } from "@/features/tabCheckpoints/CheckpointsDialog";
+import { tabCheckpointCreate } from "@/features/tabCheckpoints/ipc";
+import { AlertaToast } from "@/shared/ui/alerts";
 import i18n from "@/i18n";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
@@ -43,6 +46,8 @@ interface TabActionsState {
    *  con sus skills y comandos previos) o trabajar un issue (el agente nuevo recibe
    *  `prompt` apenas arranca). */
   wizardFor: WizardFor | null;
+  /** A aba com o diálogo de pontos de restauração aberto. */
+  checkpointsFor: string | null;
 }
 
 const useTabActions = create<TabActionsState>(() => ({
@@ -51,6 +56,7 @@ const useTabActions = create<TabActionsState>(() => ({
   skillTarget: null,
   wizardOpen: false,
   wizardFor: null,
+  checkpointsFor: null,
 }));
 
 interface WizardFor {
@@ -59,6 +65,9 @@ interface WizardFor {
   skillIds?: string[];
   prelaunch?: PrelaunchStep[];
   prompt?: string;
+  /** Como `prompt`, mas só pré-preenchido na caixa do agente, sem enviar: a pessoa edita e
+   *  manda (ver «Perguntar sobre isto» no guia de revisão). Com `draft`, `prompt` é ignorado. */
+  draft?: string;
 }
 
 /** Abre el asistente de agente nuevo en `cwd`; lo que se elija arranca con `prompt`. */
@@ -66,6 +75,21 @@ export const openNewAgentWith = (wizardFor: WizardFor) => useTabActions.setState
 
 export const openTabMenu = (key: string, x: number, y: number) => useTabActions.setState({ menu: { key, x, y } });
 export const openNewAgentWizard = () => useTabActions.setState({ wizardOpen: true });
+/** Abre os pontos de restauração da aba (a linha do tempo, ver diff, voltar). */
+export const openTabCheckpoints = (tabId: string) => useTabActions.setState({ checkpointsFor: tabId });
+
+/** "Marcar ponto" direto do menu: o resultado num aviso curto. */
+async function markCheckpoint(tab: Tab): Promise<void> {
+  try {
+    const out = await tabCheckpointCreate(tab.id, tab.cwd);
+    const text = out.status === "created" ? i18n.t("tabCheckpoints.marked", { seq: out.checkpoint.seq })
+      : out.status === "unchanged" ? i18n.t("tabCheckpoints.unchanged", { seq: out.checkpoint.seq })
+        : i18n.t("tabCheckpoints.notRepo");
+    void AlertaToast(i18n.t("tabCheckpoints.mark"), text, out.status === "notRepo" ? "warning" : "success");
+  } catch (e) {
+    void AlertaToast(i18n.t("tabCheckpoints.mark"), String(e), "error");
+  }
+}
 
 export async function requestCloseItem(key: string): Promise<void> {
   if (isAgentKey(key)) {
@@ -120,8 +144,9 @@ export function splitWithItem(key: string, side: SplitSide): void {
 export function TabDialogs() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { menu, closingDirty, skillTarget, wizardOpen, wizardFor } = useTabActions();
+  const { menu, closingDirty, skillTarget, wizardOpen, wizardFor, checkpointsFor } = useTabActions();
   const tabs = useTabsStore((s) => s.tabs);
+  const checkpointsTab = checkpointsFor ? tabs.find((x) => x.id === checkpointsFor) : undefined;
   const activeTab = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId));
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const views = useViewTabsStore((s) => s.views);
@@ -154,6 +179,19 @@ export function TabDialogs() {
         label: tab.sessionId ? t("tabs.restart") : t("tabs.restartFresh"),
         icon: <IconReset className="w-4 h-4" />,
         onSelect: () => restartAgent(tab.id),
+      },
+      // Pontos de restauração dos arquivos da pasta (um a cada mensagem): ver o que mudou e voltar.
+      {
+        key: "checkpoints",
+        label: t("tabCheckpoints.menu"),
+        icon: <UndoIcon className="w-4 h-4" />,
+        onSelect: () => openTabCheckpoints(tab.id),
+      },
+      {
+        key: "checkpointMark",
+        label: t("tabCheckpoints.mark"),
+        icon: <TagIcon className="w-4 h-4" />,
+        onSelect: () => { void markCheckpoint(tab); },
       },
       // La terminal pelada no tiene skills ni TUI que cambiar: duplicarla es abrir otra.
       {
@@ -208,6 +246,8 @@ export function TabDialogs() {
 
       {skillTarget && <SkillPalette target={skillTarget} onClose={() => close({ skillTarget: null })} />}
 
+      {checkpointsTab && <CheckpointsDialog tab={checkpointsTab} onClose={() => close({ checkpointsFor: null })} />}
+
       <NewAgentDialog
         isOpen={(wizardOpen && activeTab !== undefined) || wizardFor !== null}
         cwd={wizardFor?.cwd ?? activeTab?.cwd ?? ""}
@@ -217,7 +257,8 @@ export function TabDialogs() {
         onClose={() => { clearPlacement(); close({ wizardOpen: false, wizardFor: null }); }}
         onConfirm={({ agent, skillIds, accountId, prelaunch, memoryBlock, role }) => {
           const cwd = wizardFor?.cwd ?? activeTab?.cwd;
-          const prompt = wizardFor?.prompt;
+          const draft = wizardFor?.draft;
+          const prompt = draft ?? wizardFor?.prompt;
           if (!cwd) return;
           const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
           // O terminal nasce no retângulo que a pessoa desenhou no canvas, se desenhou um.
@@ -241,10 +282,12 @@ export function TabDialogs() {
             applyTabRole(tabId, role).catch(() => null),
             wantsMemory ? tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).catch(() => null) : Promise.resolve(null),
           ]).then(([briefing, memory]) => {
-            // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele.
-            const hint = agent.id === "bash" ? null : `[ADE AGS] ${BROWSER_HINT}`;
+            // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele,
+            // e que pode sugerir memória ao projeto. Num rascunho o aviso fica de fora: é a pergunta da
+            // pessoa, não um briefing.
+            const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}\n${MEMORY_SUGGEST_HINT}`;
             const text = [briefing, startupText(memory, prompt), hint].filter(Boolean).join("\n\n");
-            if (text) sendWhenReady(tabId, text);
+            if (text) sendWhenReady(tabId, text, draft ? { draft: true } : undefined);
           });
         }}
       />

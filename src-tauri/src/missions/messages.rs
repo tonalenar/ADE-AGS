@@ -19,7 +19,8 @@ pub struct MissionMessage {
     pub id: i64,
     pub mission_id: String,
     pub at_ms: i64,
-    /// `tell` (aviso/tarefa) ou `ask` (pergunta que espera resposta).
+    /// `tell` (aviso/tarefa), `ask` (pergunta que espera resposta) ou `handoff` (entrega
+    /// estruturada; o JSON inteiro fica em `mission_handoffs`).
     pub kind: String,
     pub from_tab_id: String,
     pub from_name: String,
@@ -41,7 +42,15 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             to_name TEXT NOT NULL,
             text TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_mission_messages_mission ON mission_messages(mission_id, id);",
+        CREATE INDEX IF NOT EXISTS idx_mission_messages_mission ON mission_messages(mission_id, id);
+        CREATE TABLE IF NOT EXISTS mission_handoffs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id TEXT NOT NULL,
+            at_ms INTEGER NOT NULL,
+            from_name TEXT NOT NULL,
+            to_name TEXT NOT NULL,
+            payload TEXT NOT NULL
+        );",
     )
 }
 
@@ -75,19 +84,32 @@ pub fn record_vigia(conn: &Connection, boards: &Boards, lead: (&str, &str), text
     record_inner(conn, boards, "tell", (lead.0, "Vigia"), lead, text, at_ms, true)
 }
 
+/// Em que chat a mensagem entra. Na mesma missão ou conversa, nela; uma missão só fala dentro dela. Numa conversa
+/// (`c:`), o que um agente diz a outro de outra conversa (ou sem conversa) entra no chat de quem fala, ou no de
+/// quem recebe se quem fala não tem time: antes era descartada calada, e o chat ficava vazio com o orquestrador
+/// e o subagente em canvases diferentes. Pura.
+pub(crate) fn shared_scope(from: Option<String>, to: Option<String>) -> Option<String> {
+    let open = |scope: &Option<String>| scope.as_deref().map_or(true, |s| s.starts_with("c:"));
+    match (from, to) {
+        (Some(a), Some(b)) if a == b => Some(a),
+        (Some(a), to) if a.starts_with("c:") && open(&to) => Some(a),
+        (None, Some(b)) if b.starts_with("c:") => Some(b),
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_inner(
     conn: &Connection, boards: &Boards, kind: &str, from: (&str, &str), to: (&str, &str),
     text: &str, at_ms: i64, notice: bool,
 ) -> Result<bool, String> {
-    if !matches!(kind, "tell" | "ask") || text.trim().is_empty() || (from.0 == to.0 && !notice) {
+    if !matches!(kind, "tell" | "ask" | "handoff") || text.trim().is_empty() || (from.0 == to.0 && !notice) {
         return Ok(false);
     }
     // O chat da equipe vale para uma missão e também para uma conversa de projeto (`c:<id>`).
-    let Some(mission) = team_scope_of_tab(boards, from.0) else { return Ok(false) };
-    if team_scope_of_tab(boards, to.0).as_deref() != Some(mission.as_str()) {
+    let Some(mission) = shared_scope(team_scope_of_tab(boards, from.0), team_scope_of_tab(boards, to.0)) else {
         return Ok(false);
-    }
+    };
     migrate(conn).map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO mission_messages (mission_id, at_ms, kind, from_tab_id, from_name, to_tab_id, to_name, text) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -100,6 +122,43 @@ fn record_inner(
     )
     .map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Guarda uma entrega estruturada: o JSON inteiro (já validado) em `mission_handoffs` e o texto
+/// legível no chat da equipe. Devolve o id da entrega, ou `None` fora de missão.
+pub fn record_handoff(
+    conn: &Connection,
+    boards: &Boards,
+    from: (&str, &str),
+    to: (&str, &str),
+    readable: &str,
+    payload: &str,
+    at_ms: i64,
+) -> Result<Option<i64>, String> {
+    let Some(mission) = team_scope_of_tab(boards, from.0) else { return Ok(None) };
+    if !record_inner(conn, boards, "handoff", from, to, readable, at_ms, false)? {
+        return Ok(None);
+    }
+    conn.execute(
+        "INSERT INTO mission_handoffs (mission_id, at_ms, from_name, to_name, payload) VALUES (?1,?2,?3,?4,?5)",
+        params![mission, at_ms, from.1, to.1, payload],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Some(conn.last_insert_rowid()))
+}
+
+/// Uma entrega pelo id: (missão, de quem, JSON). Só leitura.
+pub fn handoff(conn: &Connection, id: i64) -> Result<Option<(String, String, String)>, String> {
+    migrate(conn).map_err(|e| e.to_string())?;
+    match conn.query_row(
+        "SELECT mission_id, from_name, payload FROM mission_handoffs WHERE id = ?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ) {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// As mensagens da missão depois de `after_id`, da mais antiga à mais nova.
@@ -157,6 +216,20 @@ mod tests {
     }
 
     #[test]
+    fn a_entrega_estruturada_fica_inteira_e_o_chat_mostra_o_texto() {
+        let conn = Connection::open_in_memory().unwrap();
+        let b = boards();
+        let id = record_handoff(&conn, &b, ("back", "Backend"), ("lead", "Orquestrador"), "Entrega: X", r#"{"version":1}"#, 5).unwrap().unwrap();
+        let (mission, from, payload) = handoff(&conn, id).unwrap().unwrap();
+        assert_eq!((mission.as_str(), from.as_str(), payload.as_str()), ("m1", "Backend", r#"{"version":1}"#));
+        let chat = list(&conn, "m1", 0, 10).unwrap();
+        assert_eq!((chat[0].kind.as_str(), chat[0].text.as_str()), ("handoff", "Entrega: X"));
+        // Fora da missão não grava nada.
+        assert_eq!(record_handoff(&conn, &b, ("ghost", "G"), ("lead", "O"), "x", "{}", 6).unwrap(), None);
+        assert_eq!(handoff(&conn, id + 1).unwrap(), None);
+    }
+
+    #[test]
     fn grava_so_entre_agentes_da_mesma_missao() {
         let conn = Connection::open_in_memory().unwrap();
         let b = boards();
@@ -210,5 +283,29 @@ mod tests {
         assert_eq!((all[0].from_tab_id.as_str(), all[0].to_tab_id.as_str()), ("lead", "lead"));
         assert_eq!(all[0].text, "**Vigia** — aviso");
         assert!(list(&conn, "m2", 0, 100).unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::shared_scope;
+
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_string())
+    }
+
+    #[test]
+    fn conversa_aceita_quem_esta_fora_e_missao_nao() {
+        assert_eq!(shared_scope(s("m:1"), s("m:1")), s("m:1"));
+        assert_eq!(shared_scope(s("c:a"), s("c:a")), s("c:a"));
+        // Orquestrador numa conversa, subagente noutra (ou sem): entra no chat de quem fala.
+        assert_eq!(shared_scope(s("c:a"), s("c:b")), s("c:a"));
+        assert_eq!(shared_scope(s("c:a"), None), s("c:a"));
+        assert_eq!(shared_scope(None, s("c:b")), s("c:b"));
+        // Missão só dentro dela.
+        assert_eq!(shared_scope(s("m:1"), s("m:2")), None);
+        assert_eq!(shared_scope(s("m:1"), s("c:a")), None);
+        assert_eq!(shared_scope(s("c:a"), s("m:1")), None);
+        assert_eq!(shared_scope(None, None), None);
     }
 }

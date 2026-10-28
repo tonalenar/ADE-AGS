@@ -20,6 +20,9 @@ struct PtySession {
     /// La tab de la app a la que pertenece (`ADE_TAB_ID`), para no dejar dos terminales vivos
     /// de la misma tab. `None` en los PTYs que no son de una tab.
     tab_id: Option<String>,
+    /// A pasta em que o processo nasceu (o `cwd` da aba). Os pontos de restauração tiram a foto
+    /// dela, e a restauração confere quem mais está na mesma pasta.
+    cwd: String,
     /// Token que este processo herda em `ADE_SESSION`. Sai do registro junto com o PTY.
     session_token: Option<String>,
     /// Perfil do Codex com o token, fora do argv. Some só quando o arquivo existe.
@@ -741,6 +744,7 @@ pub async fn pty_create(
             killer: child,
             group,
             tab_id: tab_id.clone(),
+            cwd: cwd.clone(),
             session_token: session_token.clone(),
             codex_profile,
         });
@@ -778,6 +782,8 @@ pub async fn pty_create(
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
+                    // Gravador dos testes por replay: desligado, é uma leitura atômica e volta.
+                    super::recorder::observe(id, &buf[..n]);
                     let data = text.push(&buf[..n]);
                     if !data.is_empty() {
                         app_clone.emit(&event_name, PtyDataPayload { data, end: Some(stream_end) }).ok();
@@ -824,6 +830,26 @@ pub fn pty_for_tab(tab_id: String) -> Option<u32> {
     newest_for_tab(reg.iter().map(|(id, s)| (*id, s.tab_id.as_deref())), &tab_id)
 }
 
+/// A aba e a pasta de um PTY vivo. `None` = o PTY não existe ou não é de uma aba.
+pub fn tab_and_cwd_of(id: u32) -> Option<(String, String)> {
+    let reg = registry();
+    let session = reg.get(&id)?;
+    Some((session.tab_id.clone()?, session.cwd.clone()))
+}
+
+/// Toda aba com terminal vivo e a pasta dele (a do terminal mais novo de cada aba).
+pub fn live_tab_dirs() -> Vec<(String, String)> {
+    let reg = registry();
+    let mut newest: std::collections::HashMap<String, (u32, String)> = std::collections::HashMap::new();
+    for (id, session) in reg.iter() {
+        let Some(tab) = session.tab_id.clone() else { continue };
+        if newest.get(&tab).is_none_or(|(seen, _)| seen < id) {
+            newest.insert(tab, (*id, session.cwd.clone()));
+        }
+    }
+    newest.into_iter().map(|(tab, (_, cwd))| (tab, cwd)).collect()
+}
+
 /// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin
 /// matar el proceso) y devuelve el scrollback acumulado para reproducirlo en el xterm nuevo.
 #[tauri::command]
@@ -852,6 +878,12 @@ pub fn output_total(id: u32) -> Option<u64> {
     buffers().get(&id).map(|b| b.total_bytes)
 }
 
+/// Colunas e linhas do PTY vivo (o gravador do replay guarda o tamanho junto com a saída).
+pub(crate) fn pty_size(id: u32) -> Option<(u16, u16)> {
+    let size = registry().get(&id)?.master.get_size().ok()?;
+    Some((size.cols, size.rows))
+}
+
 /// Bytes escritos desde que el PTY arrancó, sin copiar el scrollback. El guardado
 /// periódico lo usa para no pedir 3 MB de una tab cuyo buffer no creció.
 #[tauri::command]
@@ -869,6 +901,28 @@ fn copy_scrollback_bytes(id: u32) -> Option<(Vec<u8>, u64)> {
 
 pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
     copy_scrollback_bytes(id).map(|(data, total)| (String::from_utf8_lossy(&data).into_owned(), total))
+}
+
+/// Onde começa o fim de `data` com no máximo `max` bytes, sem cortar um caractere UTF-8 ao meio
+/// (os bytes de continuação `10xxxxxx` do começo ficam de fora). Pura.
+pub(crate) fn tail_start(data: &[u8], max: usize) -> usize {
+    let mut start = data.len().saturating_sub(max);
+    while start < data.len() && (data[start] & 0xC0) == 0x80 {
+        start += 1;
+    }
+    start
+}
+
+/// Só o fim do buffer do PTY (até `max_bytes`), como texto. Quem confere a tela (`peer tell`,
+/// o Vigia, o reenvio de Enter) quer de 4 a 64 KB, e `scrollback_of` clonava o buffer inteiro
+/// (até 3,5 MB) a cada 250 ms, com o lock que também segura as threads que leem os PTYs.
+pub fn tail_of(id: u32, max_bytes: usize) -> Option<String> {
+    let buffers = buffers();
+    let buffer = buffers.get(&id)?;
+    let start = tail_start(&buffer.data, max_bytes);
+    let bytes = buffer.data[start..].to_vec();
+    drop(buffers);
+    Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
@@ -938,19 +992,43 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
     // Em duas linhas de propósito: o `if let` segurava o registro durante o kill e o wait
     // (até ~300 ms), travando todas as outras terminais a cada agente fechado.
     let removed = registry().remove(&id);
-    if let Some(mut session) = removed {
+    if let Some(session) = removed {
         forget_session(&session);
-        // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
-        // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
-        // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
-        session.group.kill_all();
-        session.killer.kill().map_err(|e| format!("Kill error: {e}"))?;
-        // Se reclama el status para que el hijo no quede zombie: `kill` solo manda la
-        // señal, no espera a que el proceso muera de verdad.
-        let _ = session.killer.wait();
+        // Esperar o filho bloqueia: vai para uma thread de bloqueio, não para o runtime.
+        tokio::task::spawn_blocking(move || stop_session(session))
+            .await
+            .map_err(|e| format!("Kill error: {e}"))??;
     }
     buffers().remove(&id);
     Ok(())
+}
+
+/// Quanto o `pty_kill` espera o processo sair depois do sinal.
+const KILL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn stop_session(mut session: PtySession) -> Result<(), String> {
+    // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
+    // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
+    // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
+    session.group.kill_all();
+    // No Windows o Job Object já levou o processo, e `TerminateProcess` num processo morto
+    // falha com "acesso negado". Falhar ao matar só é erro se ele continua vivo.
+    let killed = session.killer.kill();
+    // Se reclama el status para que el hijo no quede zombie, mas com prazo: um processo que
+    // não sai não pode travar quem chamou (o "Atualizar" ficava parado em 8%).
+    let deadline = std::time::Instant::now() + KILL_WAIT;
+    loop {
+        if let Ok(Some(_)) = session.killer.try_wait() {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return match killed {
+                Err(e) => Err(format!("Kill error: {e}")),
+                Ok(()) => Err("Kill error: o processo não saiu".into()),
+            };
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
 }
 
 /// Mata todas las sesiones vivas y su descendencia. Se llama al salir de la app.

@@ -9,6 +9,7 @@ vi.mock("@/features/accounts/ipc", () => ({
   accountEnv: vi.fn(async () => ({})),
   codexAccountUsage: (id: string, force?: boolean) => codex(id, force),
   discoverAntigravityAccount: (id: string, force?: boolean) => discover(id, force),
+  antigravityCliUsage: vi.fn(async () => ({ installed: false, groups: [], fetchedAt: 0, cached: false })),
 }));
 
 vi.mock("@/features/accounts/usage", async () => {

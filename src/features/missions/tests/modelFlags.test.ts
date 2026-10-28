@@ -23,8 +23,13 @@ describe("withModel", () => {
   });
 
   it("agentes sin flags conocidos no reciben nada", () => {
-    expect(withModel("opencode", "opencode", "x", "high")).toBe("opencode");
     expect(withModel("bash", "bash", "x", "high")).toBe("bash");
+    expect(withModel("kimi-code", "kimi", "x", "high")).toBe("kimi");
+  });
+
+  it("OpenCode recebe só o modelo (provedor/modelo), sem esforço", () => {
+    expect(withModel("opencode", "opencode", "openai/gpt-4.1-mini", "high")).toBe("opencode --model openai/gpt-4.1-mini");
+    expect(withModel("opencode", "opencode", null, "high")).toBe("opencode");
   });
 
   it("no repite un flag que el comando ya trae", () => {

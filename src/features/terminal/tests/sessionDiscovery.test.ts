@@ -33,7 +33,19 @@ describe("startSessionDiscovery", () => {
 
     await vi.advanceTimersByTimeAsync(3000);
     expect(discover).toHaveBeenCalledTimes(1);
-    expect(discover).toHaveBeenCalledWith(OPTS);
+    expect(discover).toHaveBeenCalledWith({ ...OPTS, exclude: [] });
+  });
+
+  it("manda a lista atual das sessões que já são de outras abas, relida a cada tentativa", async () => {
+    let taken: string[] = ["outra-aba"];
+    discover.mockResolvedValue(null);
+    const stop = startSessionDiscovery({ ...OPTS, excludeIds: () => taken, onFound: vi.fn() });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(discover).toHaveBeenLastCalledWith({ ...OPTS, exclude: ["outra-aba"] });
+    taken = ["outra-aba", "achada-depois"];
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(discover).toHaveBeenLastCalledWith({ ...OPTS, exclude: ["outra-aba", "achada-depois"] });
+    stop();
   });
 
   it("al encontrarla avisa una sola vez y deja de sondear", async () => {
@@ -105,5 +117,19 @@ describe("startSessionDiscovery", () => {
 
     expect(onFound).not.toHaveBeenCalled();
     expect(discover).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("startSessionDiscovery — sessões de outras abas", () => {
+  it("manda a lista atual das sessões que já são de outras abas, relida a cada tentativa", async () => {
+    let taken: string[] = ["outra-aba"];
+    discover.mockResolvedValue(null);
+    const stop = startSessionDiscovery({ ...OPTS, excludeIds: () => taken, onFound: vi.fn() });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(discover).toHaveBeenLastCalledWith({ ...OPTS, exclude: ["outra-aba"] });
+    taken = ["outra-aba", "achada-depois"];
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(discover).toHaveBeenLastCalledWith({ ...OPTS, exclude: ["outra-aba", "achada-depois"] });
+    stop();
   });
 });

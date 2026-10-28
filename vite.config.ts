@@ -71,6 +71,7 @@ export default defineConfig(async () => ({
   test: {
     environment: "node",
     include: ["src/**/tests/*.test.{ts,tsx}"],
+    setupFiles: ["src/i18n/testSetup.ts"],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
@@ -114,6 +115,11 @@ export default defineConfig(async () => ({
     minify: isDebugBuild ? false : "esbuild",
     sourcemap: isDebugBuild,
     rollupOptions: {
+      // Duas páginas: o app e a janelinha de abertura (`splash.html`), que não carrega nada do app.
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        splash: fileURLToPath(new URL("./splash.html", import.meta.url)),
+      },
       output: {
         // Sin esto todo cae en un único chunk de ~900kB que hay que parsear entero antes
         // de pintar el primer frame. Separando las dependencias pesadas y estables, el

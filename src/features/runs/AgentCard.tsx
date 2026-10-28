@@ -267,7 +267,7 @@ ${task.cwd}` : task.cwd} className="truncate font-mono text-[10px] text-gray-400
           placement="top"
         >
           <Button variant="custom" onClick={onOpenPane} disabled={!task.sessionId || task.worktreeRemoved} className={ACTION}>
-            {live ? t("fleet.card.takeOver") : t("fleet.card.openPane")}
+            {task.agentId === "gemini-desktop" ? t("geminiDesktop.openPanel") : live ? t("fleet.card.takeOver") : t("fleet.card.openPane")}
           </Button>
         </Tooltip>
       </div>

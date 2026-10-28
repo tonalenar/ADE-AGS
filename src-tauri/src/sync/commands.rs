@@ -59,7 +59,7 @@ fn db(app: &AppHandle) -> Result<DbConnection, String> {
 }
 
 fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|e| e.to_string())
+    crate::util::datadir::app_data_dir(app)
 }
 
 fn get(conn: &Connection, key: &str) -> Option<String> {

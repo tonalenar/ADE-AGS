@@ -185,9 +185,8 @@ fn write_mcp_config(app: &AppHandle, task_id: &str) -> Option<PathBuf> {
 
 /// Dónde va el NDJSON crudo de una tarea.
 fn events_path_for(run_id: &str, task_id: &str) -> Result<PathBuf, String> {
-    let dir = dirs::home_dir()
+    let dir = crate::util::datadir::ags_home()
         .ok_or_else(|| "não foi possível localizar a pasta do usuário".to_string())?
-        .join(".ags")
         .join("runs")
         .join(run_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -207,6 +206,9 @@ pub struct LaunchExtras {
 /// Arranca la tarea en segundo plano. Vuelve en cuanto el proceso quedó lanzado; lo que
 /// pase después llega por eventos.
 pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), String> {
+    if task.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return crate::desktop_apps::participant::start(app, task, extras);
+    }
     // Se llama también desde afuera del runtime async: el hilo de una conexión del IPC (un
     // agente que despacha su plan) o un comando síncrono. Lanzar el proceso y la tarea que
     // lo espera necesita estar adentro de tokio.

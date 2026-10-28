@@ -33,7 +33,7 @@ fn ensure_default_workspace(conn: &Connection) -> SqlResult<()> {
     Ok(())
 }
 
-/// Siembra el registry público de ejemplo listado en plan.md (Fase 6) la primera vez que
+/// Siembra el registry público de ejemplo del plan original (Fase 6; `git log -- plan.md`) la primera vez que
 /// arranca la app, para que el marketplace no se vea vacío antes de que el usuario agregue
 /// el suyo. Sin `cache_json` todavía — se resuelve recién cuando el usuario visita la
 /// página de Marketplace y dispara el primer refresh (evita pegarle a la red en cada
@@ -106,8 +106,8 @@ fn ensure_default_settings(conn: &Connection) -> SqlResult<()> {
         |r| r.get(0),
     )?;
     if has_skills_dir == 0 {
-        let home = dirs::home_dir().expect("Cannot determine home directory");
-        let default_dir = home.join(".ags").join("skills");
+        let home = crate::util::datadir::ags_home().expect("Cannot determine home directory");
+        let default_dir = home.join("skills");
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('skills_dir', ?1)",
             [default_dir.to_string_lossy().to_string()],

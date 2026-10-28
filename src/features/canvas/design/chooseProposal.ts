@@ -1,4 +1,4 @@
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 import type { TFunction } from "i18next";
 
 import { designApi, type Artboard, type Design } from "./designApi";

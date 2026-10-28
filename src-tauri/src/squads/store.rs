@@ -35,6 +35,13 @@ pub(crate) fn validate_fast_input(agent_id: &str, fast: bool) -> Result<(), Stri
     Ok(())
 }
 
+fn validate_desktop(agent_id: &str, model: &Option<String>, complexity: Option<Complexity>, effort: &Option<String>) -> Result<(),String> {
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP && (model.is_some() || complexity.is_some() || effort.is_some()) {
+        return Err("Gemini Desktop uses the model and reasoning selected in its app; model/complexity/effort overrides are unavailable".into());
+    }
+    Ok(())
+}
+
 fn clean(value: &Option<String>) -> Option<String> {
     value
         .as_deref()
@@ -49,6 +56,10 @@ fn validate_provider(
     account_id: &Option<String>,
     lead: bool,
 ) -> Result<(), String> {
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        if account_id.is_some() { return Err("Gemini Desktop uses the account selected in its application".into()); }
+        return Ok(());
+    }
     if lead {
         if crate::agents::adapter_for(agent_id).is_none()
             || agent_id == crate::agents::SHELL_AGENT_ID
@@ -93,6 +104,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
     lead.agent_id = lead.agent_id.trim().to_string();
     validate_fast_input(&lead.agent_id, lead.fast_mode).map_err(|error| format!("lead: {error}"))?;
     lead.model = clean(&lead.model);
+    validate_desktop(&lead.agent_id, &lead.model, lead.complexity, &lead.reasoning_effort)?;
     validate_effort_input(lead.model.as_deref(), lead.complexity, lead.reasoning_effort.as_deref())?;
     if lead.model.is_some() && lead.complexity.is_some() {
         return Err("lead: specific model and complexity cannot be selected together".into());
@@ -118,6 +130,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
         member.agent_id = member.agent_id.trim().to_string();
         validate_fast_input(&member.agent_id, member.fast_mode).map_err(|error| format!("role '{}': {error}", member.role_id))?;
         member.model = clean(&member.model);
+        validate_desktop(&member.agent_id, &member.model, member.complexity, &member.reasoning_effort)?;
         validate_effort_input(member.model.as_deref(), member.complexity, member.reasoning_effort.as_deref())?;
         if member.model.is_some() && member.complexity.is_some() {
             return Err(format!("role '{}': specific model and complexity cannot be selected together", member.role_id));
@@ -237,6 +250,11 @@ fn assignment_status(
     model: Option<&str>,
     account_id: &Option<String>,
 ) -> rusqlite::Result<(AssignmentAvailability, Option<String>)> {
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return Ok(if cfg!(test) || crate::desktop_apps::status().installed {
+            (AssignmentAvailability::Available, None)
+        } else { (AssignmentAvailability::ProviderNotInstalled, Some("Gemini Desktop is not installed".into())) });
+    }
     let Some(adapter) = crate::agents::adapter_for(agent_id) else {
         return Ok((
             AssignmentAvailability::ProviderMissing,

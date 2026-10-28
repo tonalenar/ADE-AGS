@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use super::peers::{caller, open_tabs, peers, resolve_peer, OpenTab};
-use super::tabs::{pty_id_for_tab, submit_prompt, wait_until_quiet};
+use super::tabs::{pty_id_for_tab, submit_prompt_as, wait_until_quiet};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt};
 use crate::routines::{self, Routine};
@@ -63,7 +63,7 @@ pub(crate) fn fire(app: &AppHandle, routine: &Routine) -> Result<String, String>
     // No se interrumpe a quien está a mitad de un turno: se espera a que se calle.
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
     let text = if tab.agent_id == "bash" { routine.text.clone() } else { framed(routine) };
-    submit_prompt(pty, &text)?;
+    submit_prompt_as(pty, &text, "rotina")?;
     Ok(format!("enviada para {}", tab.name))
 }
 

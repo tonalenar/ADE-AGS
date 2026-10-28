@@ -310,6 +310,8 @@ export function usePetStatus(): PetStatus {
 /** El pet con su nivel y sus tokens, como en el panel lateral de la referencia. */
 export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: string }) {
   const { state } = useMascotState();
+  // Sempre vivo: em repouso ele flutua, pisca e o halo pulsa EM DEGRAUS (pixel art, ~4 quadros por segundo; ver
+  // `.ags-mascot--idle` em App.css), em vez de repintar o SVG com o desfoque do halo a cada quadro.
   const { t } = useTranslation();
   const busy = useAgentActivity((a) => a.count);
 

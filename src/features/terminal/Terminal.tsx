@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -10,11 +10,15 @@ import { useTheme } from "neogestify-ui-components";
 import "@xterm/xterm/css/xterm.css";
 
 import { isResumable } from "@/features/sessions/agentResume";
+import { useTabsStore } from "@/features/tabs/store";
 import { registerCapabilityResponders } from "@/features/terminal/terminalCapabilities";
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
+import { ExcerptAction } from "@/features/terminal/ExcerptAction";
+import { decodeOsc52 } from "@/features/terminal/osc52";
+import { scrollbackEnd } from "@/features/terminal/scrollbackEnd";
 import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -92,7 +96,7 @@ function mergeEnv(
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
-export function Terminal({
+function TerminalImpl({
   tabId,
   command = "bash",
   cwd,
@@ -116,6 +120,9 @@ export function Terminal({
   const startedRef = useRef(false);
   const scrollbackShown = useRef(false);
   const termRef = useRef<XTerm | null>(null);
+  // A caixa inteira e o xterm já aberto, para o botão "Enviar trecho…" (ver `ExcerptAction.tsx`).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [liveTerm, setLiveTerm] = useState<XTerm | null>(null);
   const { t } = useTranslation();
   const [status, setStatus] = useState<TerminalStatus>("connecting");
   const { theme } = useTheme();
@@ -255,11 +262,26 @@ export function Terminal({
     // Tab que no se escapa de la terminal, AltGr y los acentos (ver terminalKeys.ts).
     // En Claude Code (protocolo de Kitty) Ctrl+V lo pega el navegador: así llega la imagen del
     // portapapeles al `onPaste` de más abajo.
-    installTerminalKeyHandler(term, { browserPaste: agentId === "claude-code" });
+    // No OpenCode (que também usa o protocolo de Kitty) é igual: sem isto o xterm engolia o Ctrl+V e nada era colado.
+    // Copiar: com texto selecionado, Ctrl+C / Ctrl+Shift+C / Ctrl+Insert copiam para o sistema.
+    installTerminalKeyHandler(term, {
+      browserPaste: agentId === "claude-code" || !!agentId?.startsWith("opencode"),
+      getSelection: () => term.getSelection(),
+      copy: (text) => { void navigator.clipboard.writeText(text).catch(console.error); },
+    });
+    // O OpenCode captura o mouse e copia o que a pessoa seleciona por OSC 52 (só escrita; ver osc52.ts).
+    if (agentId) {
+      term.parser.registerOscHandler(52, (data) => {
+        const text = decodeOsc52(data);
+        if (text) void navigator.clipboard.writeText(text).catch(console.error);
+        return true;
+      });
+    }
     term.open(containerRef.current);
     termRef.current = term;
+    setLiveTerm(term);
     if (initialScrollback) {
-      term.write(initialScrollback);
+      term.write(initialScrollback + scrollbackEnd(term.rows));
       scrollbackShown.current = true;
     }
     const unregister = tabId ? registerTerminal(tabId, term) : undefined;
@@ -314,6 +336,8 @@ export function Terminal({
         // sistema: sin esto no se encontraría ninguna sesión y la tab se quedaría para
         // siempre sin título ni posibilidad de reanudar.
         accountId: accountId ?? null,
+        // As conversas que já são de outras abas (do mesmo agente): esta aba não pode adotá-las.
+        excludeIds: () => useTabsStore.getState().tabs.filter((t) => t.id !== tabId && t.sessionId).map((t) => t.sessionId as string),
         onFound: onSessionDiscovered,
       });
     };
@@ -391,7 +415,7 @@ export function Terminal({
         }
 
         if (initialScrollback && !scrollbackShown.current) {
-          term.write(initialScrollback);
+          term.write(initialScrollback + scrollbackEnd(term.rows));
           scrollbackShown.current = true;
         }
 
@@ -635,6 +659,7 @@ export function Terminal({
         ptyIdRef.current = null;
       }
       termRef.current = null;
+      setLiveTerm(null);
       unregister?.();
       term.dispose();
     };
@@ -691,6 +716,7 @@ export function Terminal({
     // que casi siempre sobran unos píxeles abajo y a la derecha que no llegan a una celda.
     // Con el mismo color que la terminal, esa franja no se ve.
     <div
+      ref={rootRef}
       className="relative flex flex-col h-full w-full"
       style={{ background: TERMINAL_THEMES[theme].background }}
     >
@@ -710,6 +736,27 @@ export function Terminal({
           style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}
         />
       </div>
+      {/* Por último e fora do contêiner do xterm: não mexe na montagem dele (desmontar mata o PTY). */}
+      {tabId && liveTerm && rootRef.current && <ExcerptAction tabId={tabId} term={liveTerm} host={rootRef.current} />}
     </div>
   );
 }
+
+/**
+ * Mesmas props, fora os callbacks? O efeito de montagem do terminal roda uma vez (`[]`) e guarda os
+ * callbacks daquele momento, então uma função nova a cada render do pai não muda nada aqui; sem isto,
+ * qualquer render do painel (ou cada quadro do paneo do canvas) re-renderizava todas as terminais.
+ * Pura.
+ */
+export function sameTerminalProps(a: TerminalProps, b: TerminalProps): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof TerminalProps)[]);
+  for (const key of keys) {
+    const x = a[key];
+    const y = b[key];
+    if (typeof x === "function" && typeof y === "function") continue;
+    if (!Object.is(x, y)) return false;
+  }
+  return true;
+}
+
+export const Terminal = memo(TerminalImpl, sameTerminalProps);

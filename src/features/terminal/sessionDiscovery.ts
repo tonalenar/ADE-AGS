@@ -29,6 +29,11 @@ export interface DiscoveryOptions {
   startedAfter: number;
   /** Cuenta con la que corre la tab: sus transcripts viven en SU carpeta, no en el home. */
   accountId: string | null;
+  /**
+   * As sessões que já são de OUTRAS abas abertas, lidas a cada tentativa (outra aba pode ter achado a sua entre uma e outra): a
+   * descoberta não as devolve. Dois agentes iguais na mesma pasta é o caso comum, e a segunda aba adotava a conversa da primeira.
+   */
+  excludeIds?: () => string[];
   onFound: (sessionId: string) => void;
 }
 
@@ -50,6 +55,7 @@ export function startSessionDiscovery(opts: DiscoveryOptions): () => void {
         cwd: opts.cwd,
         startedAfter: opts.startedAfter,
         accountId: opts.accountId,
+        exclude: opts.excludeIds?.() ?? [],
       });
       if (found) {
         if (!cancelled) opts.onFound(found);

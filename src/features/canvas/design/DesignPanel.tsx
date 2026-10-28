@@ -1,7 +1,8 @@
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { chooseOnBoard } from "./chooseProposal";
 import { BoardCard, designBtn as btn } from "./BoardCard";

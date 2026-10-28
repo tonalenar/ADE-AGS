@@ -1,0 +1,42 @@
+{
+  "format": "ade-replay",
+  "version": 1,
+  "id": "caixa-com-borda-colado",
+  "agent": "generic",
+  "title": "Marcador de colado dentro de uma caixa com borda (│ › [Pasted Content …] │)",
+  "origin": {
+    "kind": "synthesized",
+    "basis": "Tela da caixa com borda de pasteSubmit.test.ts (\"Dentro da caixa com borda\"), que o caminho do front (pasteStillPending) já trata.",
+    "recordedAt": null,
+    "platform": null,
+    "tuiVersion": null
+  },
+  "terminal": {
+    "cols": 100,
+    "rows": 30
+  },
+  "message": "Resumo da rodada: corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. corrija o teste de regressão do parser e rode a suíte afetada. ",
+  "chunks": [
+    {
+      "atMs": 0,
+      "data": "Agente pronto.\r\n\r\n╭────────────────────────────────────────────────────────────╮\r\n│ ›                                                          │\r\n╰────────────────────────────────────────────────────────────╯\r\n  \u001b[2menter to send\u001b[0m\r\n"
+    },
+    {
+      "atMs": 200,
+      "data": "\u001b[3A\u001b[2K\r│ › [Pasted Content 3904 chars]                              │\u001b[3B\r"
+    }
+  ],
+  "checkpoints": [
+    {
+      "atMs": 1500,
+      "since": 300,
+      "label": "Enter engolido: o marcador continua na caixa com borda",
+      "expect": {
+        "pastePending": true,
+        "working": false,
+        "enterRetry": true,
+        "screenContains": "[Pasted Content 3904 chars]"
+      }
+    }
+  ]
+}

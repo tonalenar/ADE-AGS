@@ -74,8 +74,41 @@ fn many_frontend_files_use_changed_flag_and_input_is_deduped() {
     let many: Vec<String> = (0..200).map(|i| format!("src/f{i}.ts")).collect();
     let plan = plan(&many);
     assert_eq!(plan.steps[2].args, [VITEST, "run", "--changed", "origin/master"]);
+    let rebased = super::plan(&many).with_changed_base("origin/dev");
+    assert_eq!(rebased.steps[2].args, [VITEST, "run", "--changed", "origin/dev"]);
     let dup = p(&["./src/a.ts", "src/a.ts"]);
     assert_eq!(dup.steps[2].args.len(), 4);
+}
+
+#[test]
+fn generic_repos_run_the_detected_suites_unless_only_docs_changed() {
+    use crate::testspeed::run::TestCommand;
+    let suites = vec![TestCommand { suite: "node".into(), program: "node".into(), args: vec!["--test".into()], cwd: ".".into() }];
+    let plan = plan_generic(&["server/index.js".into(), "README.md".into()], &suites);
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!((plan.steps[0].suite, plan.steps[0].args.clone(), plan.steps[0].cwd), ("node", vec!["--test".to_string()], None));
+    assert_eq!(plan.ignored, ["README.md"]);
+    assert!(plan_generic(&["docs/a.md".into(), ".claude/x".into()], &suites).is_empty());
+    assert!(plan_generic(&["server/index.js".into()], &[]).is_empty(), "sem suíte detectada, nada a rodar");
+}
+
+#[test]
+fn unsafe_inside_a_string_or_trailing_comment_is_not_unsafe_code() {
+    assert!(line_adds_unsafe("    unsafe { libc::kill(pid, 9) };"));
+    assert!(line_adds_unsafe("let p = \"x\"; unsafe { f() }"));
+    assert!(!line_adds_unsafe("    \"Suite completa em código unsafe ou COM\","));
+    assert!(!line_adds_unsafe("let a = \"um \\\" unsafe\";"), "aspas escapadas continuam dentro do texto");
+    assert!(!line_adds_unsafe("let x = 1; // unsafe aqui não"));
+}
+
+#[test]
+fn scripts_run_only_the_tests_that_read_them() {
+    let code = p(&["scripts/bench/core.ts"]);
+    assert!(!code.full);
+    assert_eq!(code.steps.last().unwrap().args, [VITEST, "related", "--run", "scripts/bench/core.ts"]);
+    let fixture = p(&["scripts/bench-fixture/abas.html"]);
+    assert_eq!(fixture.steps.last().unwrap().args, [VITEST, "related", "--run", "src/features/browser/tests/jevBench.test.ts"]);
+    assert!(p(&["scripts/window-rounds.ps1", "scripts/visual-fixture/a.html"]).is_empty());
 }
 
 #[test]

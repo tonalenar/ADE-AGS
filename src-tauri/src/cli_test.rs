@@ -409,6 +409,11 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
         if group == "user" || group == "forge" || group == "mcp" || group == "memory" {
             continue;
         }
+        // `replay.*` é o gravador de telas para os testes por replay: só de desenvolvimento, só responde com o app
+        // aberto com `ADE_AGS_REPLAY_RECORD=1`, e fica fora da ajuda de propósito (ver docs/ade-ags/REPLAY_TESTES.md).
+        if group == "replay" {
+            continue;
+        }
         // Como COMANDO, no en cualquier parte: buscar la palabra suelta daba por
         // documentado a `run` porque la ayuda decía "la app no corre".
         let listed = USAGE.lines().any(|line| {
@@ -630,5 +635,21 @@ fn peer_check_sem_destino_mostra_uso_antes_de_conectar_ao_app() {
     }
     for args in [parse("peer.check", &["Backend"]).unwrap(), parse("peer.check", &["--to", "Backend"]).unwrap()] {
         validate_usage("peer.check", &args).unwrap();
+    }
+}
+
+#[test]
+fn portal_close_leva_o_nome_do_portal_e_vem_na_ajuda() {
+    // `ags portal close Amazon`: o portal é o primeiro valor solto (plano v2, Fase 1.6, I6).
+    assert_eq!(parse("portal.close", &["Amazon"]).unwrap()["name"], "Amazon");
+    assert_eq!(parse("portal.close", &["--name", "portal-1"]).unwrap()["name"], "portal-1");
+    // `ags portal close` com o mesmo caminho de grupo que as demais ações do portal manda `from` do terminal.
+    let mut args = parse("portal.close", &["Amazon"]).unwrap();
+    caller_from("portal.close", &mut args, Some("real-tab".into()), None);
+    assert_eq!(args["from"], "real-tab");
+    // A ajuda documenta o comando e os estados de `ags portals`.
+    assert!(USAGE.contains("portal close <portal>"));
+    for estado in ["pronto", "carregando", "sem runtime", "oculto", "verificação anti-robô"] {
+        assert!(USAGE.contains(estado), "{estado}");
     }
 }

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — entrega</title>
+<!--
+  N05: campo com autocomplete. As sugestões chegam 600 ms depois de digitar (`?xhr=<ms>`); «Confirmar» com o texto solto
+  fecha a lista e pede uma cidade DA LISTA (como os combobox de verdade).
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Endereço de entrega</h1>
+  <input type="text" id="cidade" aria-label="Cidade" aria-autocomplete="list" aria-controls="lista" autocomplete="off">
+  <ul id="lista" role="listbox" hidden></ul>
+  <button id="ok">Confirmar</button>
+  <p id="status"></p>
+</main>
+<script>
+  const delay = Number(new URLSearchParams(location.search).get("xhr") ?? "600");
+  const input = document.getElementById("cidade");
+  const list = document.getElementById("lista");
+  let chosen = "";
+  let ticket = 0;
+  input.addEventListener("input", async () => {
+    chosen = "";
+    const mine = ++ticket;
+    const answer = await (await fetch("/api/sugestoes?tipo=cidade&q=" + encodeURIComponent(input.value) + "&delay=" + delay)).json();
+    if (mine !== ticket) return;
+    list.innerHTML = "";
+    for (const c of answer.options) {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.textContent = c;
+      li.onclick = () => { chosen = c; input.value = c; list.hidden = true; };
+      list.appendChild(li);
+    }
+    list.hidden = answer.options.length === 0;
+  });
+  document.getElementById("ok").onclick = () => {
+    ticket++;
+    list.hidden = true;
+    document.getElementById("status").textContent = chosen ? "Cidade escolhida: " + chosen : "Escolha uma cidade da lista de sugestões";
+  };
+</script>
+</html>

@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button, CloseIcon, Progress } from "neogestify-ui-components";
 
 import { ExternalIcon } from "@/app/icons";
-import { Markdown } from "@/shared/ui/Markdown";
+import { Markdown } from "@/shared/ui/LazyMarkdown";
 
 import { useUpdatesStore } from "./store";
 

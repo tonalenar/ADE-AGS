@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AlertaToast, Button } from "neogestify-ui-components";
+import { Button } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import {
   antigravityOAuthAccounts, antigravityOAuthConfig, cancelAntigravityOAuth, configureAntigravityOAuth, pollAntigravityOAuth,

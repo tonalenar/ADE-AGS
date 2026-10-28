@@ -9,6 +9,7 @@
 //! horas): eso no está en el transcript ni en ningún archivo local. Se informa el consumo,
 //! no el porcentaje restante — inventarlo sería peor que no mostrarlo.
 
+pub(crate) mod agy;
 mod claude;
 mod budget;
 mod opencode;
@@ -21,7 +22,7 @@ mod terminal;
 mod parse;
 mod pricing;
 mod screen;
-mod trust;
+pub(crate) mod trust;
 mod types;
 #[cfg(test)]
 mod test;

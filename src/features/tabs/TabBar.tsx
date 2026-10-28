@@ -37,7 +37,11 @@ const BAR_BUTTON = `flex items-center justify-center h-7 self-center shrink-0 ro
  */
 /** `showLights`: con el panel izquierdo plegado su encabezado queda en 48px y los tres
  *  botones de ventana no entran, así que se mudan acá, al principio de la tira. */
-export function TabBar({ showLights = false }: { showLights?: boolean }) {
+export function TabBar({ showLights = false, trailing }: {
+  showLights?: boolean;
+  /** O que vai no fim da franja, depois do modo (os botões dos painéis, ver `PanelButtons`). */
+  trailing?: React.ReactNode;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const tabs = useTabsStore((s) => s.tabs);
@@ -45,6 +49,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const views = useViewTabsStore((s) => s.views);
   const activeViewId = useViewTabsStore((s) => s.activeViewId);
   const openBrowser = useViewTabsStore((s) => s.openBrowser);
+  const openGemini = useViewTabsStore((s) => s.openGemini);
   const showTerminal = useViewTabsStore((s) => s.showTerminal);
   const layout = useWorkspaceLayout();
   // En el canvas no hay grupos: dividir no aplica.
@@ -80,7 +85,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         // Las pestañas van como pastillas dentro de la franja: un poco de aire arriba, abajo y
         // entre ellas (gap-1), y se estiran a la altura interior.
         className="cc-scroll-x flex items-stretch gap-1 px-1.5 py-1.5 flex-1 min-w-0 h-10
-          bg-gray-100/80 dark:bg-surface-deep/75 backdrop-blur-xl
+          bg-gray-100/80 dark:bg-surface-deep/75
           border-b border-gray-200 dark:border-white/[0.08]"
         style={{ position: "relative", zIndex: 0 }}
       >
@@ -138,6 +143,15 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         </Button>
         {activeTab && (
           <Button variant="icon"
+            onClick={() => { openGemini(activeTab.cwd); navigate("/workspace"); }}
+            title={t("geminiDesktop.open")}
+            aria-label={t("geminiDesktop.open")}
+            data-tauri-drag-region="false"
+            className={`${BAR_BUTTON} w-7 p-0`}
+          ><span aria-hidden="true" className="text-base text-blue-500">✦</span></Button>
+        )}
+        {activeTab && (
+          <Button variant="icon"
             // Un navegador es del workspace: se abre al lado de sus agentes, para probar lo
             // que están construyendo.
             onClick={() => {
@@ -168,6 +182,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         {/* El resto de la franja es para arrastrar la ventana. */}
         <div className="flex-1 h-full" data-tauri-drag-region />
         {activeTab && <ModeToggle />}
+        {trailing}
       </div>
 
       <TabDialogs />

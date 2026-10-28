@@ -486,7 +486,7 @@ fn kimi_de_una_cuenta_busca_sesiones_dentro_del_profile() {
     assert_ne!(kimi_root(None), account.0.join("sessions"));
 
     assert_eq!(
-        discover_session_id_sync("kimi-code", "/proj", 0, Some(&account.0), None).as_deref(),
+        discover_session_id_sync("kimi-code", "/proj", 0, Some(&account.0), None, &[]).as_deref(),
         Some("ses-cuenta"),
     );
     let title = get_session_title_sync(
@@ -628,7 +628,7 @@ fn gemini_de_una_cuenta_busca_en_punto_gemini_del_profile() {
     assert_ne!(system, account.0.join(".gemini"));
 
     assert_eq!(
-        discover_session_id_sync("gemini-cli", "/proj", 0, Some(&account.0), None).as_deref(),
+        discover_session_id_sync("gemini-cli", "/proj", 0, Some(&account.0), None, &[]).as_deref(),
         Some("ses-cuenta"),
     );
     let title = get_session_title_sync(
@@ -727,6 +727,29 @@ fn claude_user_lines(textos: &[&str]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[test]
+fn claude_title_lee_solo_lo_que_crecio_y_ve_el_summary_nuevo() {
+    let dir = std::env::temp_dir().join(format!("ags-title-inc-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    let user = |text: &str| format!("{{\"type\":\"user\",\"message\":{{\"content\":\"{text}\"}}}}\n");
+    std::fs::write(&path, user("primeira pergunta de verdade")).unwrap();
+    assert_eq!(super::title::claude_title(&path, "fb").title, "primeira pergunta de verdade");
+    // Linha pela metade (o agente ainda escrevendo): não conta e não se perde.
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    f.write_all(b"{\"type\":\"summary\",\"summ").unwrap();
+    assert_eq!(super::title::claude_title(&path, "fb").source, "first_message");
+    f.write_all(b"ary\":\"Resumo da conversa\"}\n").unwrap();
+    drop(f);
+    let r = super::title::claude_title(&path, "fb");
+    assert_eq!((r.title.as_str(), r.source.as_str()), ("Resumo da conversa", "summary"));
+    // Reescrito menor: recomeça do zero.
+    std::fs::write(&path, user("outra")).unwrap();
+    assert_eq!(super::title::claude_title(&path, "fb").title, "outra");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -874,4 +897,192 @@ fn activity_codex_distingue_tarea_ruido_y_mision() {
 
     d.write("perfil/sessions/2026/08/03/rollout-a.jsonl", &codex_rollout(ACT_ID, "/proj", &format!("{ctx}\n{mission}")));
     assert_eq!(session_activity("codex", "/proj", ACT_ID, Some(&profile), None), Some("mission"));
+}
+
+// ── Descoberta da sessão de uma aba: nascimento, ordem e exclusão ─────────────────────────────────────
+//
+// O piso temporal usava o `mtime`: toda conversa que já existia e continuava sendo escrita (feita fora do app, no mesmo
+// projeto, ou de outra aba) passava e, sendo a mais recente, ganhava. Agora vale o nascimento do arquivo. Os testes pausam de
+// verdade (a resolução do sistema de arquivos é de 1 s) porque a data de criação não se falsifica de forma portável.
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+}
+
+fn pause_one_second() {
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+}
+
+#[test]
+fn discovery_ignores_a_conversation_that_existed_before_the_tab_opened() {
+    let d = TempDir::new();
+    let outside = d.write("sessions/2026/outside.jsonl", &codex_rollout("outside", "/proj", ""));
+    pause_one_second();
+    let opened = now_secs();
+    // A conversa de fora continua sendo escrita depois de a aba abrir: tem o `mtime` mais recente, mas nasceu antes.
+    fs::OpenOptions::new().append(true).open(&outside).unwrap();
+    fs::write(&outside, codex_rollout("outside", "/proj", "mais uma mensagem")).unwrap();
+
+    assert_eq!(codex_session_file_in(&d.0, "/proj", Some(opened)), None, "a conversa que já existia não é a da aba");
+    // Sem piso (um título, não uma descoberta) continua valendo «a mais recente do cwd».
+    assert_eq!(codex_session_file_in(&d.0, "/proj", None), Some(outside));
+}
+
+#[test]
+fn discovery_takes_the_first_session_born_after_opening_not_the_newest() {
+    let d = TempDir::new();
+    let opened = now_secs();
+    let mine = d.write("sessions/2026/mine.jsonl", &codex_rollout("mine", "/proj", ""));
+    pause_one_second();
+    // Uma conversa de fora nasce depois e logo é a mais recente: a da aba é a que apareceu primeiro.
+    d.write("sessions/2026/later.jsonl", &codex_rollout("later", "/proj", ""));
+
+    assert_eq!(codex_session_file_in(&d.0, "/proj", Some(opened)), Some(mine));
+}
+
+#[test]
+fn discovery_skips_sessions_that_belong_to_other_tabs() {
+    let d = TempDir::new();
+    let opened = now_secs();
+    d.write("sessions/2026/first.jsonl", &codex_rollout("first", "/proj", ""));
+    pause_one_second();
+    let second = d.write("sessions/2026/second.jsonl", &codex_rollout("second", "/proj", ""));
+
+    // A outra aba já tem «first»: a segunda aba, aberta no mesmo pasta, não a adota.
+    let _guard = ExcludeGuard::set(&["first".to_string()]);
+    assert_eq!(codex_session_file_in(&d.0, "/proj", Some(opened)), Some(second));
+}
+
+#[test]
+fn gemini_discovery_also_skips_owned_sessions_and_old_conversations() {
+    let d = TempDir::new();
+    d.write("tmp/proj/.project_root", "/home/u/proj");
+    let old = d.write("tmp/proj/chats/session-old.jsonl", &gemini_chat("ses-old", "main", ""));
+    pause_one_second();
+    let opened = now_secs();
+    fs::write(&old, gemini_chat("ses-old", "main", "ainda escrevendo")).unwrap();
+    assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", Some(opened)), None);
+
+    d.write("tmp/proj/chats/session-taken.jsonl", &gemini_chat("ses-taken", "main", ""));
+    let mine = d.write("tmp/proj/chats/session-mine.jsonl", &gemini_chat("ses-mine", "main", ""));
+    let _guard = ExcludeGuard::set(&["ses-taken".to_string()]);
+    assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", Some(opened)), Some(mine));
+}
+
+#[test]
+fn the_exclusion_only_lives_while_the_discovery_runs() {
+    {
+        let _guard = ExcludeGuard::set(&["x".to_string()]);
+        assert!(is_excluded("x"));
+    }
+    assert!(!is_excluded("x"));
+}
+
+// ── Hermes Agent: sessões no SQLite `state.db` ─────────────────────────────────────────────────────────────
+
+fn hermes_fixture(rows: &[(&str, &str, &str, f64, Option<&str>)], messages: &[(&str, &str, &str)]) -> TempDir {
+    let d = TempDir::new();
+    let conn = rusqlite::Connection::open(d.0.join("state.db")).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, cwd TEXT, started_at REAL, title TEXT);
+         CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT);",
+    )
+    .unwrap();
+    for (id, source, cwd, started, title) in rows {
+        conn.execute("INSERT INTO sessions VALUES (?1, ?2, ?3, ?4, ?5)", rusqlite::params![id, source, cwd, started, title]).unwrap();
+    }
+    for (session, role, content) in messages {
+        conn.execute("INSERT INTO messages (session_id, role, content) VALUES (?1, ?2, ?3)", rusqlite::params![session, role, content]).unwrap();
+    }
+    d
+}
+
+#[test]
+fn hermes_discovery_takes_the_first_terminal_session_born_after_opening_in_this_folder() {
+    let d = hermes_fixture(
+        &[
+            ("velha", "cli", "/proj", 900.0, None),          // nasceu antes de a aba abrir
+            ("do-desktop", "desktop", "/proj", 1001.0, None), // do app desktop do Hermes, não de um terminal
+            ("outra-pasta", "cli", "/outra", 1002.0, None),
+            ("da-aba", "tui", "/proj/", 1003.5, None),       // barra final: mesma pasta
+            ("de-fora-depois", "cli", "/proj", 1010.0, None),
+        ],
+        &[],
+    );
+    assert_eq!(hermes_session_id(&d.0, "/proj", Some(1000)).as_deref(), Some("da-aba"));
+    // sem piso (um título), a mais recente do cwd
+    assert_eq!(hermes_session_id(&d.0, "/proj", None).as_deref(), Some("de-fora-depois"));
+    // a que já é de outra aba fica de fora
+    let _guard = ExcludeGuard::set(&["da-aba".to_string()]);
+    assert_eq!(hermes_session_id(&d.0, "/proj", Some(1000)).as_deref(), Some("de-fora-depois"));
+}
+
+#[test]
+fn hermes_title_prefers_its_own_title_then_the_first_user_message() {
+    let d = hermes_fixture(
+        &[("com-titulo", "cli", "/p", 1.0, Some("Mudar tema do Hermes")), ("sem-titulo", "cli", "/p", 2.0, None)],
+        &[("sem-titulo", "system", "você é o Hermes"), ("sem-titulo", "user", "arrumar o login do site")],
+    );
+    assert_eq!(hermes_title(&d.0, "com-titulo", "x").title, "Mudar tema do Hermes");
+    let first = hermes_title(&d.0, "sem-titulo", "x");
+    assert_eq!((first.title.as_str(), first.source.as_str()), ("arrumar o login do site", "first_message"));
+    assert_eq!(hermes_title(&d.0, "nao-existe", "Hermes — p").title, "Hermes — p");
+}
+
+#[test]
+fn hermes_without_a_database_finds_nothing() {
+    let d = TempDir::new();
+    assert_eq!(hermes_session_id(&d.0, "/p", Some(0)), None);
+    assert_eq!(hermes_user_texts(&d.0, "x"), None);
+}
+
+#[cfg(windows)]
+#[test]
+fn hermes_folders_compare_like_windows_does() {
+    assert!(hermes_same_dir(r"C:\Users\X\Proj", "c:/users/x/proj/"));
+    assert!(!hermes_same_dir(r"C:\Users\X\Proj", r"C:\Users\X\Proj2"));
+}
+
+/// SONDA REAL (só leitura) do `state.db` deste computador: `cargo test --lib sonda_real_hermes -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn sonda_real_hermes_state_db() {
+    let home = hermes_home(None);
+    let cwd = r"C:\Users\tonz1n\.antigravity\Auto Vale Oficial 04-06-2026\auto-vale-preven-es";
+    let latest = hermes_session_id(&home, cwd, None);
+    println!("home={} | sessão de terminal mais recente da pasta: {latest:?}", home.display());
+    if let Some(id) = latest {
+        let t = hermes_title(&home, &id, "fallback");
+        println!("título: {} ({})", t.title, t.source);
+    }
+}
+
+/// Os avisos que o ADE cola ao abrir um agente (`[ADE AGS] NAVEGADOR: …`) não viram o nome da conversa.
+#[test]
+fn claude_title_pula_os_avisos_do_ade_e_o_resumo_feito_deles() {
+    let d = TempDir::new();
+    let path = d.write(
+        "s.jsonl",
+        &claude_user_lines(&[
+            "[ADE AGS] NAVEGADOR: REUTILIZE o que você já tem — `ags portals` lista os seus",
+            "[ADE AGS] Você é um subagente deste time. O orquestrador vai definir o seu papel",
+            "[AGS] Briefing da missão",
+            "Refatorar o fluxo de login do portal",
+            "(a última linha sem quebra fica para a próxima leitura)",
+        ]),
+    );
+    let result = claude_title(&path, "sin título");
+    assert_eq!(result.title, "Refatorar o fluxo de login do portal");
+    assert_eq!(result.source, "first_message");
+}
+
+#[test]
+fn titulo_gerado_de_um_aviso_do_ade_e_fraco() {
+    assert!(echoes_ade_notice("Navegador ags portal no canvas"));
+    assert!(echoes_ade_notice("[ADE AGS] NAVEGADOR: REUT…"));
+    assert!(is_weak_title("Navegador ags portal no canvas", "OpenCode"));
+    // Quem trabalha no próprio ADE AGS pode ter o nome do app no título de verdade.
+    assert!(!echoes_ade_notice("Corrigir a janela de abertura do ADE AGS"));
+    assert!(is_noise_message("[ADE AGS] Você é o orquestrador deste canvas"));
+    assert!(!is_noise_message("Revisar o portal do cliente"));
 }

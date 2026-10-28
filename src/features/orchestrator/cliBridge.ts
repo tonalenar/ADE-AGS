@@ -1,13 +1,16 @@
+import { startWindowBeat } from "@/features/browser/windowBeat";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { useTabsStore } from "@/features/tabs/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-import { runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/features/browser/agentBridge";
+import type { BrowserRequest } from "@/features/browser/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
+import { comparablePath } from "@/features/tabs/viewTabs";
+import i18n from "@/i18n";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { getAutonomy } from "@/features/missions/autonomy";
@@ -16,6 +19,8 @@ import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
+import { AGENT_PORTAL_SIZE } from "@/features/canvas/board";
+import { orphanPortal } from "@/features/canvas/portalReuse";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -168,13 +173,19 @@ function ownerOf(args: Record<string, unknown>): ViewOwner | null {
   return { kind: "tab", id: owner.id, label: tab.title };
 }
 
+/**
+ * O piloto do navegador (agentBridge + jevPilot, ~130 KB) só quando um agente usa o navegador: antes
+ * vinha no entry, porque este arquivo é montado com o app.
+ */
+const browserBridge = () => import("@/features/browser/agentBridge");
+
 /** Un agente usando el navegador de su proyecto, desde el MCP (`ags mcp`). */
 async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
   const cwd = str(args, "cwd");
   if (!cwd) throw new Error("Falta a pasta do projeto");
   const request = args.request as BrowserRequest | undefined;
   if (!request || typeof request.op !== "string") throw new Error("Falta dizer o que fazer no navegador");
-  return { text: await runBrowserRequest(cwd, request, ownerOf(args)) };
+  return { text: await (await browserBridge()).runBrowserRequest(cwd, request, ownerOf(args)) };
 }
 
 /**
@@ -310,19 +321,51 @@ async function handlePortal(args: Record<string, unknown>) {
     const key = keyFor(near, cwd);
     const android = str(args, "kind") === "android";
     const created = canvasActions.addPortal(key, {
-      name: str(args, "name"), url: str(args, "url"), near, ...(android ? { kind: "android" as const, avd: str(args, "avd") } : {}),
+      name: str(args, "name"), url: str(args, "url"), near,
+      // Um navegador (não a tela de um Android) que um agente abre: num nó maior, sem resolução forçada (a página
+      // usa o tamanho do nó, nítida; ver `AGENT_PORTAL_SIZE`).
+      ...(android ? { kind: "android" as const, avd: str(args, "avd") } : { size: { ...AGENT_PORTAL_SIZE } }),
     });
     // O navegador só existe na tela se o canvas está à vista: quem pediu um navegador quer vê-lo.
     if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
     await flushSave(key);
     return created;
   }
+  // Antes de criar: o navegador que ficou no canvas sem dono (a aba que o usava fechou) passa a ser de quem pede.
+  if (op === "adopt") {
+    const cwd = str(args, "cwd");
+    const near = str(args, "near");
+    if (!cwd || !near) throw new Error("Faltam cwd ou near");
+    const key = keyFor(near, cwd);
+    const board = useCanvasStore.getState().boards[key];
+    const open = new Set(useTabsStore.getState().tabs.map((t) => t.id));
+    const id = board ? orphanPortal(board, open, str(args, "url")) : null;
+    if (!board || !id) return { id: null };
+    canvasActions.connect(key, id, near);
+    if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
+    await flushSave(key);
+    return { id, name: board.portals[id].name || id, url: board.portals[id].url ?? "" };
+  }
   if (op === "run") {
     const cwd = str(args, "cwd");
     const id = str(args, "id");
     const request = args.request as BrowserRequest | undefined;
     if (!cwd || !id || !request || typeof request.op !== "string") throw new Error("Faltam cwd, id ou request");
-    return { text: await runPortalRequest(id, cwd, request, ownerOf(args)) };
+    return { text: await (await browserBridge()).runPortalRequest(id, cwd, request, ownerOf(args)) };
+  }
+  // `ags portal close`: o agente limpa o que criou (a chave do canvas e o id vêm do backend, que já checou o permisso).
+  if (op === "close") {
+    const key = str(args, "key");
+    const id = str(args, "id");
+    if (!key || !id) throw new Error("Faltam key ou id");
+    canvasActions.removePortal(key, id);
+    await flushSave(key);
+    return { closed: id };
+  }
+  // `ags portals`: o estado de cada portal (carregando, sem runtime, oculto).
+  if (op === "states") {
+    const ids = Array.isArray(args.ids) ? args.ids.filter((i): i is string => typeof i === "string") : [];
+    return { states: (await browserBridge()).portalStates(ids) };
   }
   throw new Error(`Operação de portal desconhecida: ${op}`);
 }
@@ -368,7 +411,14 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
 /** Engancha esta ventana al puente. Devuelve la función para desengancharla. */
 export function initCliBridge(): () => void {
   let unlisten: UnlistenFn | undefined;
+  let geminiUnlisten: UnlistenFn | undefined;
   let disposed = false;
+  const stopBeat = startWindowBeat();
+
+  listen<{ cwd: string }>("gemini-desktop-consult-created", (event) => {
+    if (disposed || !useTabsStore.getState().tabs.some((tab) => comparablePath(tab.cwd) === comparablePath(event.payload.cwd))) return;
+    AlertaToast("Gemini Desktop", i18n.t("geminiDesktop.newConsult"), "info", 8000);
+  }).then((fn) => { if (disposed) fn(); else geminiUnlisten = fn; });
 
   listen<BridgeRequest>("cc-cli-request", async (event) => {
     const { requestId, targetLabel, command, args } = event.payload;
@@ -393,6 +443,8 @@ export function initCliBridge(): () => void {
 
   return () => {
     disposed = true;
+    stopBeat();
     unlisten?.();
+    geminiUnlisten?.();
   };
 }

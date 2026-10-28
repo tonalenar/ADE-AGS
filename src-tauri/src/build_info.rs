@@ -40,11 +40,6 @@ fn read_cli(path: &Path) -> Result<Value, String> {
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
     let mut child = command.spawn().map_err(|e| e.to_string())?;
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {

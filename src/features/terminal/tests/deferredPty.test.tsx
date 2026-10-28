@@ -100,8 +100,10 @@ vi.mock("@/features/browser/tabMcp", () => ({
   withBrowserMcp: async (command: string) => ({ command, env: {} }),
 }));
 vi.mock("@/features/canvas/store", () => ({ missionOfTab: () => null }));
+// O botão "Enviar trecho…" não entra no ciclo do PTY que este teste mede.
+vi.mock("@/features/terminal/ExcerptAction", () => ({ ExcerptAction: () => null }));
 
-import { Terminal } from "@/features/terminal/Terminal";
+import { Terminal, sameTerminalProps } from "@/features/terminal/Terminal";
 
 function ptyCreates(): unknown[][] {
   return mocks.invoke.mock.calls.filter((call) => call[0] === "pty_create");
@@ -172,5 +174,14 @@ describe("PTY só ao focar", () => {
 
     expect(ptyKills()).toHaveLength(1);
     expect(ptyKills()[0]?.[1]).toMatchObject({ id: 2 });
+  });
+});
+
+describe("Terminal: memo", () => {
+  it("callback novo não re-renderiza; prop de valor diferente sim", () => {
+    const base = { tabId: "t", cwd: "/tmp", isVisible: true, onReady: () => {}, onExit: () => {} };
+    expect(sameTerminalProps(base, { ...base, onReady: () => {}, onExit: () => {} })).toBe(true);
+    expect(sameTerminalProps(base, { ...base, isVisible: false })).toBe(false);
+    expect(sameTerminalProps(base, { ...base, onSessionDiscovered: () => {} })).toBe(false);
   });
 });

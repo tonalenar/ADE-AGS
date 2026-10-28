@@ -67,11 +67,14 @@ export async function updateAgentRestarting(agentId: string, deps: UpdateFlowDep
   const tabs = deps.tabs().filter((t) => t.agentId === agentId);
   if (tabs.length > 0) deps.onStage?.("closing", tabs.length);
 
+  // Un error al cerrar una terminal no corta el flujo (antes dejaba el globo clavado en 8 %):
+  // la verificación de abajo decide si quedó algo vivo. Sin respuesta = vivo, por las dudas.
+  const ptyOf = (tabId: string) => deps.ptyForTab(tabId).catch(() => -1);
   const killed: string[] = [];
   for (const tab of tabs) {
-    const pty = await deps.ptyForTab(tab.id);
+    const pty = await ptyOf(tab.id);
     if (pty !== null) {
-      await deps.ptyKill(pty);
+      if (pty >= 0) await deps.ptyKill(pty).catch(() => {});
       killed.push(tab.id);
     }
   }
@@ -85,7 +88,7 @@ export async function updateAgentRestarting(agentId: string, deps: UpdateFlowDep
       await deps.sleep(KILL_POLL_MS);
       waited += KILL_POLL_MS;
       const still: string[] = [];
-      for (const id of alive) if ((await deps.ptyForTab(id)) !== null) still.push(id);
+      for (const id of alive) if ((await ptyOf(id)) !== null) still.push(id);
       alive = still;
     }
     if (alive.length > 0) {

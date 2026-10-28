@@ -6,7 +6,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { CANVAS_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { useWorkMode } from "@/features/canvas/store";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
-import { buildResumeCommand, isResumable, resumeFailed } from "@/features/sessions/agentResume";
+import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable, newSessionId, resumeFailed } from "@/features/sessions/agentResume";
 
 export function TerminalPanel() {
   const { t } = useTranslation();
@@ -16,6 +16,10 @@ export function TerminalPanel() {
   const restartAgent = useTabsStore((s) => s.restartAgent);
   // Cuándo arrancó cada instancia de terminal: una retomada que muere enseguida es un `--resume` fallido.
   const startedAt = useRef(new Map<string, number>());
+  // Cómo arrancó cada instancia, decidido UNA vez al montarla: si retoma una sesión conocida o
+  // si abre una nueva con un id que eligió la app. Se guarda porque el id elegido se graba en
+  // la tab apenas el PTY nace, y desde ese render `tab.sessionId` ya no dice cómo arrancó.
+  const launch = useRef(new Map<string, { resuming: boolean; assignedId?: string }>());
   const activateTab = useTabsStore((s) => s.activateTab);
   // En el canvas el panel es transparente y no atrapa el puntero: abajo está el canvas, y
   // solo las terminales vivas (encima de sus nodos) reciben clicks.
@@ -38,10 +42,23 @@ export function TerminalPanel() {
       {tabs.map((tab) => {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
-        const isResuming = !!tab.sessionId && isResumable(tab.agentId);
         const key = agentKey(tab.id);
         const instance = `${tab.id}:${tab.restartNonce ?? 0}`;
         if (!startedAt.current.has(instance)) startedAt.current.set(instance, Date.now());
+        if (!launch.current.has(instance)) {
+          const resuming = !!tab.sessionId && isResumable(tab.agentId);
+          // Sesión nueva de una TUI que deja elegir el id: la app lo elige y lo graba en la tab.
+          // Así la conversación de la tab es la que nació en ella, y no "la más reciente de la
+          // carpeta" (que puede ser otra conversa del mismo proyecto, hecha fuera de la app).
+          // Con un PTY ya vivo (`ptyId`) no: el proceso que corre no arrancó con este id.
+          const assignedId =
+            !tab.sessionId && !tab.ptyId && canAssignSession(tab.agentId) ? newSessionId(tab.agentId) : undefined;
+          launch.current.set(instance, { resuming, assignedId });
+        }
+        const { resuming: isResuming, assignedId } = launch.current.get(instance)!;
+        const command = assignedId
+          ? buildAssignCommand(tab.agentId, tab.command, assignedId)
+          : buildResumeCommand(tab.agentId, tab.command, tab.sessionId);
         const placement = visible.get(key);
         if (placement) lastRect.current.set(key, placement.rect);
         const shown = placement !== undefined;
@@ -70,6 +87,8 @@ export function TerminalPanel() {
               pointerEvents: shown ? "auto" : "none",
               zIndex: shown ? 1 : 0,
             }}
+            // A escala do canvas, para o mouse da terminal acertar a célula (ver `scaledMouse.ts`).
+            data-term-scale={shown && placement?.rect?.scale ? placement.rect.scale : undefined}
             onPointerDownCapture={() => {
               if (placement?.groupId === CANVAS_GROUP) activateTab(tab.id);
               else if (placement?.groupId) focusGroup(placement.groupId);
@@ -80,7 +99,7 @@ export function TerminalPanel() {
               // su proceso) y monta otra, que relanza con `--resume`.
               key={`${tab.id}:${tab.restartNonce ?? 0}`}
               tabId={tab.id}
-              command={buildResumeCommand(tab.agentId, tab.command, tab.sessionId)}
+              command={command}
               cwd={tab.cwd}
               agentId={tab.agentId}
               accountId={tab.accountId}
@@ -90,8 +109,13 @@ export function TerminalPanel() {
               isActive={key === focusedItem && onWorkspace}
               isVisible={shown}
               openedAt={tab.openedAt}
-              knownSessionId={tab.sessionId}
-              onReady={(ptyId) => setPtyId(tab.id, ptyId)}
+              // Con el id elegido por la app no hay nada que descubrir: el sondeo por "la más
+              // reciente de la carpeta" es justamente lo que adoptaba conversas ajenas.
+              knownSessionId={tab.sessionId || assignedId}
+              onReady={(ptyId) => {
+                setPtyId(tab.id, ptyId);
+                if (assignedId && tab.sessionId !== assignedId) setSessionId(tab.id, assignedId);
+              }}
               onExit={(code) => {
                 // O `--resume` falhó (sesión borrada o id inválido): sin esto la pestaña quedaba
                 // muerta. Se descarta el id y se relanza de cero, con el scrollback guardado.

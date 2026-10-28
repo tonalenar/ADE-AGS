@@ -698,6 +698,7 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
         }
     }
 
+    agents.push(crate::desktop_apps::participant::roster_agent());
     Ok(Roster { agents })
 }
 

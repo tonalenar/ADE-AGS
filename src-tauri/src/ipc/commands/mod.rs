@@ -7,13 +7,16 @@ mod notes;
 mod notify;
 mod floor;
 pub mod chat;
-mod peers;
+pub(crate) mod peers;
+pub mod peer_queue;
 pub mod routine;
 mod role;
 mod portals;
+mod replay;
 mod devices;
 pub mod pool;
 mod browser;
+pub mod canal;
 mod dispatch;
 mod events;
 mod missions;
@@ -31,3 +34,6 @@ pub use dispatch::dispatch;
 pub(crate) use agents::{match_account_id, match_preset_id};
 #[cfg(test)]
 pub(crate) use tabs::{init_prompt, match_skill_ids, skill_names, InstalledSkill};
+
+#[cfg(test)]
+mod replay_test;

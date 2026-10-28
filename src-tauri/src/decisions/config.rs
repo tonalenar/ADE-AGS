@@ -19,6 +19,8 @@ pub const KEY_BROWSE_VISION: &str = "decisions.point.browser_vision";
 pub const KEY_SECONDARY_PROVIDER: &str = "decisions.secondary.provider";
 pub const KEY_SECONDARY_URL: &str = "decisions.secondary.base_url";
 pub const KEY_SECONDARY_MODEL: &str = "decisions.secondary.model";
+/// Ligado (o padrão, também quando nunca foi gravado): uma versão fixada do Jev sobe sozinha (ver `jev_models`).
+pub const KEY_MODEL_AUTO: &str = "decisions.model_auto_update";
 
 const SERVICE: &str = "ade-ags.decisions";
 const ACCOUNT: &str = "api-key";
@@ -72,14 +74,14 @@ impl ProviderKind {
     /// e ignora, mas o seletor oferece os checkpoints. O Jev exige um nome dele.
     pub fn models(self) -> &'static [&'static str] {
         match self {
-            Self::Jev => &["jev-latest", "jev-preview", "jev-1.13.0"],
+            Self::Jev => &["jev-latest", "jev-preview", super::jev_models::NEWEST_KNOWN],
             Self::None | Self::LayaLocal | Self::LayaStudio | Self::Clef => {
                 &["multilingual", "english", "typed-decisions"]
             }
         }
     }
 
-    /// `jev-latest` no Jev (hoje aponta para `jev-1.13.0`); `multilingual` nos outros.
+    /// `jev-latest` no Jev (o próprio Jev o aponta para a versão mais nova); `multilingual` nos outros.
     pub fn default_model(self) -> &'static str {
         match self {
             Self::Jev => "jev-latest",
@@ -87,10 +89,11 @@ impl ProviderKind {
         }
     }
 
-    /// Um nome que este provedor não aceita vira o padrão dele.
+    /// Um nome que este provedor não aceita vira o padrão dele. No Jev vale qualquer versão (`jev-1.15.0`): as novas
+    /// saem antes de o app conhecê-las, e antes uma versão fora da lista fixa voltava para `jev-latest` calada.
     pub fn coerce_model(self, model: &str) -> String {
         let model = model.trim();
-        if self.models().contains(&model) {
+        if self.models().contains(&model) || (self == Self::Jev && super::jev_models::version(model).is_some()) {
             model.to_string()
         } else {
             self.default_model().to_string()
@@ -160,6 +163,8 @@ pub struct Settings {
     pub browser_vision: bool,
     /// O segundo provedor da comparação. `None` = só o principal.
     pub secondary: Option<Endpoint>,
+    /// Uma versão fixada do Jev sobe sozinha para a mais nova (ver `jev_models`).
+    pub model_auto_update: bool,
 }
 
 impl Default for Settings {
@@ -180,6 +185,7 @@ impl Default for Settings {
             browser_pilot: false,
             browser_vision: false,
             secondary: None,
+            model_auto_update: true,
         }
     }
 }
@@ -279,6 +285,23 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
     {
         let _ = put(conn, KEY_MODEL, &model);
     }
+    settings.model_auto_update = !matches!(text(conn, KEY_MODEL_AUTO).as_deref(), Some("false") | Some("0"));
+    // Atualizar sozinho: uma versão fixada do Jev que já tem sucessora passa para ela (a lista vem da última consulta
+    // ao Jev e da mais nova que o app conhece) e fica gravada.
+    let model = match settings.provider {
+        ProviderKind::Jev if settings.model_auto_update => {
+            let candidates = super::jev_models::candidates(conn);
+            let names: Vec<&str> = candidates.iter().map(String::as_str).collect();
+            match super::jev_models::upgrade_for(&model, &names) {
+                Some(newer) => {
+                    let _ = put(conn, KEY_MODEL, &newer);
+                    newer
+                }
+                None => model,
+            }
+        }
+        _ => model,
+    };
     settings.model = model;
     settings.timeout_ms = text(conn, KEY_TIMEOUT)
         .and_then(|value| value.parse().ok())
@@ -329,6 +352,7 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
         (KEY_ROUTING, bool_text(settings.turn_routing)),
         (KEY_BROWSE, bool_text(settings.browser_pilot)),
         (KEY_BROWSE_VISION, bool_text(settings.browser_vision)),
+        (KEY_MODEL_AUTO, bool_text(settings.model_auto_update)),
     ];
     for (key, value) in rows {
         put(conn, key, &value)?;
@@ -475,6 +499,15 @@ fn scrub_keyring(message: String, key: &str) -> String {
     } else {
         format!("O cofre do sistema está indisponível: {message}")
     }
+}
+
+/// Um ajuste gravado, cru (para quem guarda o seu próprio estado ao lado dos ajustes, como `jev_models`).
+pub(super) fn stored_text(conn: &Connection, key: &str) -> Option<String> {
+    text(conn, key)
+}
+
+pub(super) fn store_text(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    put(conn, key, value)
 }
 
 fn flag(conn: &Connection, key: &str) -> bool {

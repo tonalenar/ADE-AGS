@@ -204,6 +204,9 @@ fn manual(roster: &Roster, req: &RouteRequest, now: i64) -> Result<Assignment, S
     let agent = roster
         .agent(agent_id)
         .ok_or_else(|| format!("'{agent_id}' no es un agente conocido"))?;
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP && req.model.is_some() {
+        return Err("Select the Gemini Desktop model in its application".into());
+    }
     if let Some(reason) = &agent.unavailable {
         return Err(reason.clone());
     }

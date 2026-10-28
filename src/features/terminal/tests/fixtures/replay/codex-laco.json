@@ -1,0 +1,122 @@
+{
+  "format": "ade-replay",
+  "version": 1,
+  "id": "codex-laco",
+  "agent": "codex",
+  "title": "Codex no laço de raciocínio vazio: o mesmo Working por 9 min, só o contador muda",
+  "origin": {
+    "kind": "synthesized",
+    "basis": "Laço do gpt-6.1-sol descrito no VIGIA.md (Laço do Codex) e modelado em vigiaLoop.ts; um quadro a cada 30 s (o tique do Vigia).",
+    "recordedAt": null,
+    "platform": null,
+    "tuiVersion": null
+  },
+  "terminal": {
+    "cols": 100,
+    "rows": 30
+  },
+  "chunks": [
+    {
+      "atMs": 0,
+      "data": "\u001b[2J\u001b[H\u001b[1m>_ OpenAI Codex\u001b[0m (v0.46.0)\r\n\r\n\u001b[2mmodel:\u001b[0m     gpt-6.1-sol medium   \u001b[2m/model to change\u001b[0m\r\n\u001b[2mdirectory:\u001b[0m ~\\ADE-AGS\r\n\r\n• Explorando o parser\r\n  └ Read parser.ts, lexer.ts\r\n\r\n\u001b[26;1H\u001b[2K\u001b[27;1H\u001b[2K› \u001b[28;1H\u001b[2K\u001b[29;1H\u001b[2K  \u001b[2mmedium · ~\\ADE-AGS\u001b[0m\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;255;255;255mW\u001b[38;2;255;255;255mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(12s • esc to interrupt)\u001b[0m\u001b[27;3H"
+    },
+    {
+      "atMs": 30000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;255;255;255mo\u001b[38;2;255;255;255mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 60000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;255;255;255mr\u001b[38;2;255;255;255mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(1m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 90000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;255;255;255mk\u001b[38;2;255;255;255mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(1m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 120000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;255;255;255mi\u001b[38;2;255;255;255mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(2m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 150000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;255;255;255mn\u001b[38;2;255;255;255mg\u001b[0m \u001b[2m(2m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 180000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;255;255;255mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;255;255;255mg\u001b[0m \u001b[2m(3m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 210000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;255;255;255mW\u001b[38;2;255;255;255mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(3m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 240000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;255;255;255mo\u001b[38;2;255;255;255mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(4m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 270000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;255;255;255mr\u001b[38;2;255;255;255mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(4m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 300000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;255;255;255mk\u001b[38;2;255;255;255mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(5m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 330000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;255;255;255mi\u001b[38;2;255;255;255mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(5m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 360000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;255;255;255mn\u001b[38;2;255;255;255mg\u001b[0m \u001b[2m(6m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 390000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;255;255;255mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;255;255;255mg\u001b[0m \u001b[2m(6m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 420000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;255;255;255mW\u001b[38;2;255;255;255mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(7m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 450000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;255;255;255mo\u001b[38;2;255;255;255mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(7m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 480000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;255;255;255mr\u001b[38;2;255;255;255mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(8m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 510000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;255;255;255mk\u001b[38;2;255;255;255mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(8m 42s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 540000,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;255;255;255mi\u001b[38;2;255;255;255mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(9m 12s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    }
+  ],
+  "checkpoints": [
+    {
+      "atMs": 30000,
+      "label": "começo: ainda não é laço",
+      "expect": {
+        "working": true,
+        "loopSuspect": false
+      }
+    },
+    {
+      "atMs": 240000,
+      "label": "4 min iguais: ainda não",
+      "expect": {
+        "working": true,
+        "loopSuspect": false
+      }
+    },
+    {
+      "atMs": 510000,
+      "label": "8,5 min iguais: suspeita de laço",
+      "expect": {
+        "working": true,
+        "loopSuspect": true
+      }
+    }
+  ]
+}

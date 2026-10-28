@@ -1,0 +1,2225 @@
+{
+  "schema": 2,
+  "label": "original-real-j2",
+  "mode": "real",
+  "startedAt": "2026-10-17T17:49:56.213Z",
+  "commit": "5ef9153f",
+  "seed": 1,
+  "repeat": 1,
+  "order": "da lista",
+  "runs": [
+    {
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/icones.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 1492,
+      "stepMs": [
+        746,
+        746
+      ],
+      "phases": {
+        "jevMs": 1310,
+        "snapshotMs": 3,
+        "actionMs": 133,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Abra o carrinho de compras: é o ícone do carrinho no canto superior direito da página.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:CART OPENED: texto «CART OPENED» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (1843, 56) (existe p=1.00, caixa conf=0.93, 395 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 292 ms, p95 292 ms · corpo mediano 4058 B (máx 4058 B) · 1304 tokens · 1 sem a pergunta de fim\nFOTO: 1 foto(s) · 1015 ms (captura 620 ms · Jev 395 ms) · 70% do act · passo 1: controle sem nome entre outros iguais (o texto apontava e1) → tocou\nTEMPOS: {\"jev\":295,\"snapshot\":3,\"acao\":133,\"espera\":0,\"foto\":1015,\"consultas\":1,\"fotos\":1,\"total\":1447,\"bytes\":[4058],\"tokens\":1304,\"consultaMs\":[292],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":395,\"fotoUsos\":[\"passo 1: controle sem nome entre outros iguais (o texto apontava e1) → tocou\"]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":14,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — ícones\" http://localhost:8765/icones.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n- main\n  - text \"CART OPENED\"\n  - button \"Contact\" [ref=e3]",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1492
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4058
+        ],
+        "latencyMs": [],
+        "tokens": 1304,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 0
+    },
+    {
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/lupa.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 1502,
+      "stepMs": [
+        751,
+        751
+      ],
+      "phases": {
+        "jevMs": 1317,
+        "snapshotMs": 2,
+        "actionMs": 132,
+        "waitMs": 0,
+        "otherMs": 51
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Abra a busca do site: clique na lupa no topo da página.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:SEARCH OPEN: texto «SEARCH OPEN» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (1728, 45) (existe p=1.00, caixa conf=0.89, 374 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 316 ms, p95 316 ms · corpo mediano 4067 B (máx 4067 B) · 1325 tokens · 1 sem a pergunta de fim\nFOTO: 1 foto(s) · 998 ms (captura 624 ms · Jev 374 ms) · 69% do act · passo 1: controle sem nome entre outros iguais (o texto apontava e2) → tocou\nTEMPOS: {\"jev\":319,\"snapshot\":2,\"acao\":132,\"espera\":0,\"foto\":998,\"consultas\":1,\"fotos\":1,\"total\":1453,\"bytes\":[4067],\"tokens\":1325,\"consultaMs\":[316],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":374,\"fotoUsos\":[\"passo 1: controle sem nome entre outros iguais (o texto apontava e2) → tocou\"]}\njanela: lag máx 10 ms (p95 10 ms)\nJANELA: {\"lagMaxMs\":10,\"lagP95Ms\":10,\"samples\":15,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — lupa\" http://localhost:8765/lupa.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - clickable [ref=e1]\n  - text \"ShopMart\"\n  - clickable [ref=e2]\n  - clickable [ref=e3]\n  - clickable [ref=e4]\n- main\n  - text \"SEARCH OPEN\"",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1502
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4067
+        ],
+        "latencyMs": [],
+        "tokens": 1325,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 10
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 1
+    },
+    {
+      "id": "L03-busca-com-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-enter.html?q=tenis",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 843,
+      "stepMs": [
+        843
+      ],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 4,
+        "actionMs": 791,
+        "waitMs": 0,
+        "otherMs": 48
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Pesquise por tênis no campo de busca da loja.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:q=tenis: endereço contém q=tenis\n  ✓ text:Resultados para: tenis: texto «Resultados para: tenis» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: nenhuma\nTEMPOS: {\"jev\":0,\"snapshot\":4,\"acao\":791,\"espera\":0,\"foto\":0,\"consultas\":0,\"fotos\":0,\"total\":796,\"bytes\":[],\"tokens\":0,\"consultaMs\":[],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":0,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":8,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (456 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8765/busca-enter.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1]\n  - text \"Resultados para: tenis\"",
+      "probes": 0,
+      "acts": 1,
+      "actMs": [
+        843
+      ],
+      "queries": {
+        "count": 0,
+        "bytes": [],
+        "latencyMs": [],
+        "tokens": 0,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 2
+    },
+    {
+      "id": "L04-busca-com-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-botao.html?q=tenis",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 848,
+      "stepMs": [
+        848
+      ],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 2,
+        "actionMs": 797,
+        "waitMs": 0,
+        "otherMs": 49
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Pesquise por tênis na loja.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:q=tenis: endereço contém q=tenis\n  ✓ text:Resultados para: tenis: texto «Resultados para: tenis» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: nenhuma\nTEMPOS: {\"jev\":0,\"snapshot\":2,\"acao\":797,\"espera\":0,\"foto\":0,\"consultas\":0,\"fotos\":0,\"total\":800,\"bytes\":[],\"tokens\":0,\"consultaMs\":[],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":0,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 7 ms (p95 7 ms)\nJANELA: {\"lagMaxMs\":7,\"lagP95Ms\":7,\"samples\":8,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (457 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8765/busca-botao.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1]\n    - button \"Buscar\" [ref=e2]\n  - text \"Resultados para: tenis\"",
+      "probes": 0,
+      "acts": 1,
+      "actMs": [
+        848
+      ],
+      "queries": {
+        "count": 0,
+        "bytes": [],
+        "latencyMs": [],
+        "tokens": 0,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 7
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 3
+    },
+    {
+      "id": "L05-cookies",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/cookies.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 918,
+      "stepMs": [
+        430
+      ],
+      "phases": {
+        "jevMs": 607,
+        "snapshotMs": 3,
+        "actionMs": 262,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione a Mochila Urbana ao carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 1: texto «Carrinho: 1» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. e1 estava coberto: clicou button \"Recusar\", para tirar o que cobria a página (p=0.95, 304 ms)\n2. clicou button \"Adicionar ao carrinho\" (p=0.97, 295 ms, passo 430 ms)\n2. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 2 consulta(s) · latência mediana 300 ms, p95 304 ms · corpo mediano 4120 B (máx 4184 B) · 2660 tokens · 2 sem a pergunta de fim\nTEMPOS: {\"jev\":607,\"snapshot\":3,\"acao\":262,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":873,\"bytes\":[4184,4055],\"tokens\":2660,\"consultaMs\":[304,295],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":2,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 2 ms (p95 2 ms)\nJANELA: {\"lagMaxMs\":2,\"lagP95Ms\":2,\"samples\":9,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — cookies\" http://localhost:8765/cookies.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 1\"\n  - button \"Adicionar ao carrinho\" [ref=e1] [focused]",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        918
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          4184,
+          4055
+        ],
+        "latencyMs": [
+          304,
+          295
+        ],
+        "tokens": 2660,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 2
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 4
+    },
+    {
+      "id": "L06-modal-newsletter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/modal.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 917,
+      "stepMs": [
+        448
+      ],
+      "phases": {
+        "jevMs": 603,
+        "snapshotMs": 3,
+        "actionMs": 264,
+        "waitMs": 0,
+        "otherMs": 47
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione a Mochila Urbana ao carrinho, sem assinar a newsletter.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 1: texto «Carrinho: 1» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. e1 estava coberto: clicou button \"Fechar\", para tirar o que cobria a página (p=0.97, 282 ms)\n2. clicou button \"Adicionar ao carrinho\" (p=0.86, 315 ms, passo 448 ms)\n2. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 2 consulta(s) · latência mediana 299 ms, p95 315 ms · corpo mediano 4137 B (máx 4192 B) · 2651 tokens · 2 sem a pergunta de fim\nTEMPOS: {\"jev\":603,\"snapshot\":3,\"acao\":264,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":871,\"bytes\":[4192,4081],\"tokens\":2651,\"consultaMs\":[282,315],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":2,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 3 ms (p95 3 ms)\nJANELA: {\"lagMaxMs\":3,\"lagP95Ms\":3,\"samples\":9,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — newsletter\" http://localhost:8765/modal.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 1\"\n  - button \"Adicionar ao carrinho\" [ref=e1] [focused]",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        917
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          4192,
+          4081
+        ],
+        "latencyMs": [
+          282,
+          315
+        ],
+        "tokens": 2651,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 3
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 5
+    },
+    {
+      "id": "L07-garantia-upsell",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/garantia.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 941,
+      "stepMs": [
+        437,
+        456
+      ],
+      "phases": {
+        "jevMs": 631,
+        "snapshotMs": 3,
+        "actionMs": 261,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione o Fone Bluetooth ao carrinho, sem a garantia estendida.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 1 · sem garantia: texto «Carrinho: 1 · sem garantia» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar ao carrinho\" (p=0.92, 304 ms, passo 437 ms)\n2. clicou button \"Continuar sem garantia\" (p=0.64, fim p=0.02, 321 ms, passo 456 ms)\n2. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 2 consulta(s) · latência mediana 313 ms, p95 321 ms · corpo mediano 4430 B (máx 4878 B) · 2843 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":631,\"snapshot\":3,\"acao\":261,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":897,\"bytes\":[3982,4878],\"tokens\":2843,\"consultaMs\":[304,321],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 3 ms (p95 3 ms)\nJANELA: {\"lagMaxMs\":3,\"lagP95Ms\":3,\"samples\":9,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — garantia\" http://localhost:8765/garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1 · sem garantia\"\n  - button \"Adicionar ao carrinho\" [ref=e1]",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        941
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          3982,
+          4878
+        ],
+        "latencyMs": [
+          304,
+          321
+        ],
+        "tokens": 2843,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 3
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 6
+    },
+    {
+      "id": "L08-produto-sem-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/produto-fone.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1274,
+      "stepMs": [
+        789,
+        428
+      ],
+      "phases": {
+        "jevMs": 595,
+        "snapshotMs": 13,
+        "actionMs": 621,
+        "waitMs": 0,
+        "otherMs": 45
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione o Fone Bluetooth ao carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:produto-fone: endereço contém produto-fone\n  ✓ text:Carrinho: 1: texto «Carrinho: 1» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou link \"Ver detalhes\" (p=0.86, 296 ms, passo 789 ms)\n2. clicou button \"Adicionar ao carrinho\" (p=1.00, fim p=0.00, 292 ms, passo 428 ms)\n2. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 2 consulta(s) · latência mediana 294 ms, p95 296 ms · corpo mediano 4545 B (máx 4715 B) · 2943 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":595,\"snapshot\":13,\"acao\":621,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":1230,\"bytes\":[4375,4715],\"tokens\":2943,\"consultaMs\":[296,292],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":12,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (141 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Fone Bluetooth — ShopMart\" http://localhost:8765/produto-fone.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n  - link \"Voltar ao catálogo\" [ref=e1] → /catalogo.html\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1\"\n  - button \"Adicionar ao carrinho\" [ref=e2] [focused]",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1274
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          4375,
+          4715
+        ],
+        "latencyMs": [
+          296,
+          292
+        ],
+        "tokens": 2943,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 7
+    },
+    {
+      "id": "L09-botoes-repetidos",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/repetidos.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 474,
+      "stepMs": [
+        427
+      ],
+      "phases": {
+        "jevMs": 295,
+        "snapshotMs": 4,
+        "actionMs": 132,
+        "waitMs": 0,
+        "otherMs": 43
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione a Cafeteira ao carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:No carrinho: Cafeteira: texto «No carrinho: Cafeteira» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar\" (p=1.00, 290 ms, passo 427 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 290 ms, p95 290 ms · corpo mediano 5065 B (máx 5065 B) · 1899 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":295,\"snapshot\":4,\"acao\":132,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":431,\"bytes\":[5065],\"tokens\":1899,\"consultaMs\":[290],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 6 ms (p95 6 ms)\nJANELA: {\"lagMaxMs\":6,\"lagP95Ms\":6,\"samples\":4,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — cozinha\" http://localhost:8765/repetidos.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Cozinha\" [level=1]\n  - text \"No carrinho: Cafeteira\"\n  - heading \"Chaleira Elétrica\" [level=3]\n  - text \"R$ 129,90\"\n  - button \"Adicionar\" [ref=e1]\n  - heading \"Cafeteira\" [level=3]\n  - text \"R$ 219,90\"\n  - button \"Adicionar\" [ref=e2] [focused]\n  - heading \"Liquidificador\" [level=3]\n  - text \"R$ 179,90\"\n  - button \"Adicionar\" [ref=e3]\n  - heading \"Torradeira\" [level=3]\n  - text \"R$ 99,90\"\n  - button \"Adicionar\" [ref=e4]\n  - heading \"Panela de Pressão\" [level=3]\n  - text \"R$ 149,90\"\n  - button \"Adicionar\" [ref=e5]\n  - heading \"Jogo de Facas\" [level=3]\n  - text \"R$ 89,90\"\n  - button \"Adicionar\" [ref=e6]\n  - heading \"Fritadeira\" [level=3]\n  - text \"R$ 399,90\"\n  - button \"Adicionar\" [ref=e7]\n  - heading \"Batedeira\" [level=3]\n  - text \"R$ 259,90\"\n  - button \"Adicionar\" [ref=e8]",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        474
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          5065
+        ],
+        "latencyMs": [
+          290
+        ],
+        "tokens": 1899,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 6
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 8
+    },
+    {
+      "id": "L10-lista-e-radio",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/selecao.html",
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1094,
+      "stepMs": [
+        589,
+        450
+      ],
+      "phases": {
+        "jevMs": 643,
+        "snapshotMs": 7,
+        "actionMs": 394,
+        "waitMs": 0,
+        "otherMs": 50
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Escolha o tamanho G, a entrega «Retirar na loja» e confirme.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Confirmado: tamanho G, Retirar na loja: texto «Confirmado: tamanho G, Retirar na loja» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\nescolheu em dropdown \"Tamanho\" (valor de Tamanho) (pelo nome do campo, sem o Jev)\n1. clicou radio option \"Retirar na loja\" (p=0.69, 323 ms, passo 589 ms)\n2. clicou button \"Confirmar\" (p=0.94, fim p=0.04, 313 ms, passo 450 ms)\n2. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 2 consulta(s) · latência mediana 318 ms, p95 323 ms · corpo mediano 5432 B (máx 5759 B) · 3675 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":643,\"snapshot\":7,\"acao\":394,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":1046,\"bytes\":[5105,5759],\"tokens\":3675,\"consultaMs\":[323,313],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 4 ms (p95 4 ms)\nJANELA: {\"lagMaxMs\":4,\"lagP95Ms\":4,\"samples\":10,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — opções\" http://localhost:8765/selecao.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Camiseta Básica\" [level=1]\n  - combobox \"Tamanho\" [ref=e1] value=\"G\" options=[\"Escolha…\",\"P\",\"M\",\"G\",\"GG\"]\n  - text \"Entrega\"\n  - radio \"Normal (5 dias)\" [ref=e2] [unchecked]\n  - radio \"Expressa (1 dia)\" [ref=e3] [unchecked]\n  - radio \"Retirar na loja\" [ref=e4] [checked]\n  - button \"Confirmar\" [ref=e5] [focused]\n  - text \"Confirmado: tamanho G, Retirar na loja\"",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1094
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          5105,
+          5759
+        ],
+        "latencyMs": [
+          323,
+          313
+        ],
+        "tokens": 3675,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 4
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 9
+    },
+    {
+      "id": "L11-formulario-multietapas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/etapas.html",
+      "steps": 4,
+      "autoFills": 4,
+      "photos": 0,
+      "totalMs": 1886,
+      "stepMs": [
+        704,
+        701,
+        430
+      ],
+      "phases": {
+        "jevMs": 916,
+        "snapshotMs": 9,
+        "actionMs": 915,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Preencha o pedido de teste nas três etapas (dados, endereço, revisão) e envie.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Pedido de teste enviado: texto «Pedido de teste enviado» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)\ndigitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)\n1. clicou button \"Próximo\" (p=0.47, 304 ms, passo 704 ms)\ndigitou em text field \"CEP\" (valor de CEP) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)\n2. clicou button \"Próximo\" (p=0.94, fim p=0.00, 306 ms, passo 701 ms)\n3. clicou button \"Enviar pedido de teste\" (p=0.99, fim p=0.00, 295 ms, passo 430 ms)\n3. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 3 consulta(s) · latência mediana 304 ms, p95 306 ms · corpo mediano 4981 B (máx 5049 B) · 4501 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":916,\"snapshot\":9,\"acao\":915,\"espera\":0,\"foto\":0,\"consultas\":3,\"fotos\":0,\"total\":1840,\"bytes\":[4227,4981,5049],\"tokens\":4501,\"consultaMs\":[304,306,295],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 6 ms (p95 6 ms)\nJANELA: {\"lagMaxMs\":6,\"lagP95Ms\":6,\"samples\":19,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — pedido de teste\" http://localhost:8765/etapas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Etapa 3 de 3 — Revisão\" [level=1]\n  - text \"Revise: Maria Teste, maria@teste.com, 01001000, Sao Paulo\"\n  - button \"Voltar\" [ref=e1]\n  - button \"Enviar pedido de teste\" [ref=e2] [focused]\n  - text \"Pedido de teste enviado\"",
+      "probes": 3,
+      "acts": 1,
+      "actMs": [
+        1886
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          4227,
+          4981,
+          5049
+        ],
+        "latencyMs": [
+          304,
+          306,
+          295
+        ],
+        "tokens": 4501,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 6
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 10
+    },
+    {
+      "id": "L12-garantia-na-foto",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/foto-garantia.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 1427,
+      "stepMs": [
+        713.5,
+        713.5
+      ],
+      "phases": {
+        "jevMs": 1246,
+        "snapshotMs": 4,
+        "actionMs": 131,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Clique no botão «Garantia estendida» que aparece no meio da foto do produto.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:GARANTIA ABERTA: texto «GARANTIA ABERTA» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (365, 342) (existe p=1.00, caixa conf=0.90, 326 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 296 ms, p95 296 ms · corpo mediano 4100 B (máx 4100 B) · 1322 tokens · 1 sem a pergunta de fim\nFOTO: 1 foto(s) · 947 ms (captura 621 ms · Jev 326 ms) · 69% do act · passo 1: o Jev não viu caminho no texto → tocou e cumpriu o objetivo\nTEMPOS: {\"jev\":299,\"snapshot\":4,\"acao\":131,\"espera\":0,\"foto\":947,\"consultas\":1,\"fotos\":1,\"total\":1381,\"bytes\":[4100],\"tokens\":1322,\"consultaMs\":[296],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":326,\"fotoUsos\":[\"passo 1: o Jev não viu caminho no texto → tocou e cumpriu o objetivo\"]}\njanela: lag máx 21 ms (p95 21 ms)\nJANELA: {\"lagMaxMs\":21,\"lagP95Ms\":21,\"samples\":14,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — foto do produto\" http://localhost:8765/foto-garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - text \"GARANTIA ABERTA\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n  - text \"Tênis de corrida Aero. R$ 399,90\"\n  - button \"Comprar\" [ref=e3]",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1427
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4100
+        ],
+        "latencyMs": [],
+        "tokens": 1322,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 21
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 11
+    },
+    {
+      "id": "L13-abas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/abas.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 474,
+      "stepMs": [
+        421
+      ],
+      "phases": {
+        "jevMs": 290,
+        "snapshotMs": 5,
+        "actionMs": 131,
+        "waitMs": 0,
+        "otherMs": 48
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Descubra o peso do produto abrindo a aba Especificações.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Peso: 1,2 kg: texto «Peso: 1,2 kg» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou tab \"Especificações\" (p=1.00, 287 ms, passo 421 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 287 ms, p95 287 ms · corpo mediano 4089 B (máx 4089 B) · 1341 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":290,\"snapshot\":5,\"acao\":131,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":426,\"bytes\":[4089],\"tokens\":1341,\"consultaMs\":[287],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 10 ms (p95 10 ms)\nJANELA: {\"lagMaxMs\":10,\"lagP95Ms\":10,\"samples\":5,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — detalhes do produto\" http://localhost:8765/abas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Liquidificador Turbo\" [level=1]\n  - tablist\n    - tab \"Descrição\" [ref=e1]\n    - tab \"Especificações\" [ref=e2] [selected] [focused]\n    - tab \"Avaliações\" [ref=e3]\n  - text \"Peso: 1,2 kg · Tensão: 127 V · Cor: preto\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        474
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4089
+        ],
+        "latencyMs": [
+          287
+        ],
+        "tokens": 1341,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 10
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 12
+    },
+    {
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rolar.html",
+      "steps": 5,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1865,
+      "stepMs": [
+        442,
+        419,
+        500,
+        451
+      ],
+      "phases": {
+        "jevMs": 1292,
+        "snapshotMs": 7,
+        "actionMs": 519,
+        "waitMs": 0,
+        "otherMs": 47
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Role até o fim da página e clique em Assinar.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:ASSINADO: texto «ASSINADO» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. rolou a página (p=1.00, 308 ms, passo 442 ms)\n2. rolou a página (p=0.97, fim p=0.00, 286 ms, passo 419 ms)\n3. rolou a página (p=0.97, fim p=0.00, 367 ms, passo 500 ms)\n4. clicou button \"Assinar\" (p=0.96, fim p=0.01, 319 ms, passo 451 ms)\n4. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 4 consulta(s) · latência mediana 314 ms, p95 367 ms · corpo mediano 4052 B (máx 4768 B) · 5107 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":1292,\"snapshot\":7,\"acao\":519,\"espera\":0,\"foto\":0,\"consultas\":4,\"fotos\":0,\"total\":1819,\"bytes\":[3421,4048,4056,4768],\"tokens\":5107,\"consultaMs\":[308,286,367,319],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":18,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — novidades\" http://localhost:8765/rolar.html\nviewport: 1908×1120 · scroll 1334/2454\n\n- banner\n- main\n  - text \"Novidade número 1: mais um lançamento da semana. Novidade número 2: mais um lançamento da semana. Novidade número 3: mais um lançamento da semana. Novidade número 4: mais um lançamento da semana. Nov…\"\n  - button \"Assinar\" [ref=e1] [focused]\n  - text \"ASSINADO\"\n… 2 nós fora da janela (role para ver)",
+      "probes": 4,
+      "acts": 1,
+      "actMs": [
+        1865
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          3421,
+          4048,
+          4056,
+          4768
+        ],
+        "latencyMs": [
+          308,
+          286,
+          367,
+          319
+        ],
+        "tokens": 5107,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 13
+    },
+    {
+      "id": "L15-quantidade-sem-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/quantidade.html",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 608,
+      "stepMs": [
+        562
+      ],
+      "phases": {
+        "jevMs": 295,
+        "snapshotMs": 3,
+        "actionMs": 265,
+        "waitMs": 0,
+        "otherMs": 45
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Defina a quantidade como 3 e clique em Atualizar carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Quantidade: 3 · atualizado: texto «Quantidade: 3 · atualizado» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Quantidade\" (valor de Quantidade) (pelo nome do campo, sem o Jev)\n1. clicou button \"Atualizar carrinho\" (p=0.96, 291 ms, passo 562 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 291 ms, p95 291 ms · corpo mediano 4055 B (máx 4055 B) · 1273 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":295,\"snapshot\":3,\"acao\":265,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":564,\"bytes\":[4055],\"tokens\":1273,\"consultaMs\":[291],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 6 ms (p95 6 ms)\nJANELA: {\"lagMaxMs\":6,\"lagP95Ms\":6,\"samples\":6,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — quantidade\" http://localhost:8765/quantidade.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - textbox \"Quantidade\" [ref=e1] value=\"3\"\n  - button \"Atualizar carrinho\" [ref=e2] [focused]\n  - text \"Quantidade: 3 · atualizado\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        608
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4055
+        ],
+        "latencyMs": [
+          291
+        ],
+        "tokens": 1273,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 6
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 14
+    },
+    {
+      "id": "L16-busca-com-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-checkout.html?q=tenis",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1257,
+      "stepMs": [
+        1206
+      ],
+      "phases": {
+        "jevMs": 291,
+        "snapshotMs": 4,
+        "actionMs": 913,
+        "waitMs": 0,
+        "otherMs": 49
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Pesquise por tênis na loja.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:q=tenis: endereço contém q=tenis\n  ✓ text:Resultados para: tenis: texto «Resultados para: tenis» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. clicou button \"Buscar\" (p=0.79, 288 ms, passo 1206 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 288 ms, p95 288 ms · corpo mediano 4002 B (máx 4002 B) · 1254 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":291,\"snapshot\":4,\"acao\":913,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":1210,\"bytes\":[4002],\"tokens\":1254,\"consultaMs\":[288],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 14 ms (p95 14 ms)\nJANELA: {\"lagMaxMs\":14,\"lagP95Ms\":14,\"samples\":12,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (452 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8765/busca-checkout.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - button \"Proceed to checkout\" [ref=e1]\n    - searchbox \"Buscar produtos\" [ref=e2]\n    - button \"Buscar\" [ref=e3]\n  - text \"Resultados para: tenis\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        1257
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4002
+        ],
+        "latencyMs": [
+          288
+        ],
+        "tokens": 1254,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 14
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 15
+    },
+    {
+      "id": "L17-comprar-agora-nao-pedido",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/comprar-agora.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 501,
+      "stepMs": [
+        449
+      ],
+      "phases": {
+        "jevMs": 318,
+        "snapshotMs": 4,
+        "actionMs": 131,
+        "waitMs": 0,
+        "otherMs": 48
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione o Fone Bluetooth.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 1: texto «Carrinho: 1» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar ao carrinho\" (p=1.00, 315 ms, passo 449 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 315 ms, p95 315 ms · corpo mediano 3945 B (máx 3945 B) · 1255 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":318,\"snapshot\":4,\"acao\":131,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":453,\"bytes\":[3945],\"tokens\":1255,\"consultaMs\":[315],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 3 ms (p95 3 ms)\nJANELA: {\"lagMaxMs\":3,\"lagP95Ms\":3,\"samples\":4,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — fone\" http://localhost:8765/comprar-agora.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1\"\n  - button \"Comprar agora\" [ref=e1]\n  - button \"Adicionar ao carrinho\" [ref=e2] [focused]",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        501
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          3945
+        ],
+        "latencyMs": [
+          315
+        ],
+        "tokens": 1255,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 3
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 16
+    },
+    {
+      "id": "N01-anuncio-primeiro-resultado",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-busca.html?p=ceramica",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1150,
+      "stepMs": [
+        1096
+      ],
+      "phases": {
+        "jevMs": 307,
+        "snapshotMs": 5,
+        "actionMs": 788,
+        "waitMs": 0,
+        "otherMs": 50
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Abra o primeiro resultado da busca por caneca que não seja patrocinado.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Produto: Caneca de Cerâmica Branca: texto «Produto: Caneca de Cerâmica Branca» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou link \"Caneca de Cerâmica Branca\" (p=1.00, 304 ms, passo 1096 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 304 ms, p95 304 ms · corpo mediano 4331 B (máx 4331 B) · 1429 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":307,\"snapshot\":5,\"acao\":788,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":1101,\"bytes\":[4331],\"tokens\":1429,\"consultaMs\":[304],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 6 ms (p95 6 ms)\nJANELA: {\"lagMaxMs\":6,\"lagP95Ms\":6,\"samples\":11,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (453 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Caneca de Cerâmica Branca — ShopMart\" http://localhost:8765/anuncios-busca.html?p=ceramica\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - link \"Voltar aos resultados\" [ref=e1] → /anuncios-busca.html\n  - heading \"Produto: Caneca de Cerâmica Branca\" [level=1]\n  - text \"R$ 39,90\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        1150
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4331
+        ],
+        "latencyMs": [
+          304
+        ],
+        "tokens": 1429,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 6
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 17
+    },
+    {
+      "id": "N02-anuncio-carrinho",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-carrinho.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 498,
+      "stepMs": [
+        449
+      ],
+      "phases": {
+        "jevMs": 317,
+        "snapshotMs": 3,
+        "actionMs": 132,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione ao carrinho o primeiro fone da lista que não seja patrocinado.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 1 item · Fone Bluetooth Lite: texto «Carrinho: 1 item · Fone Bluetooth Lite» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar Fone Bluetooth Lite ao carrinho\" (p=1.00, 314 ms, passo 449 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 314 ms, p95 314 ms · corpo mediano 4363 B (máx 4363 B) · 1424 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":317,\"snapshot\":3,\"acao\":132,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":454,\"bytes\":[4363],\"tokens\":1424,\"consultaMs\":[314],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 3 ms (p95 3 ms)\nJANELA: {\"lagMaxMs\":3,\"lagP95Ms\":3,\"samples\":5,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — fones\" http://localhost:8765/anuncios-carrinho.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fones de ouvido\" [level=1]\n  - text \"Carrinho: 1 item · Fone Bluetooth Lite\"\n  - text \"Patrocinado\"\n  - heading \"Fone Gamer RGB\" [level=2] [patrocinado]\n  - text \"R$ 99,90\"\n  - button \"Adicionar Fone Gamer RGB ao carrinho\" [ref=e1] [patrocinado]\n  - heading \"Fone Bluetooth Lite\" [level=2]\n  - text \"R$ 99,90\"\n  - button \"Adicionar Fone Bluetooth Lite ao carrinho\" [ref=e2] [focused]\n  - heading \"Fone com Fio Clássico\" [level=2]\n  - text \"R$ 99,90\"\n  - button \"Adicionar Fone com Fio Clássico ao carrinho\" [ref=e3]",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        498
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4363
+        ],
+        "latencyMs": [
+          314
+        ],
+        "tokens": 1424,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 3
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 18
+    },
+    {
+      "id": "N03-busca-lenta-xhr",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-lenta.html?xhr=8000&p=Caneca%20Azul",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 9640,
+      "stepMs": [
+        9589
+      ],
+      "phases": {
+        "jevMs": 322,
+        "snapshotMs": 4,
+        "actionMs": 9265,
+        "waitMs": 1,
+        "otherMs": 48
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Pesquise por caneca e abra o primeiro resultado.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Produto: Caneca Azul: texto «Produto: Caneca Azul» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)\n1. clicou link \"Caneca Azul\" (p=0.97, fim p=0.04, 317 ms, passo 9589 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 317 ms, p95 317 ms · corpo mediano 4896 B (máx 4896 B) · 1574 tokens\nTEMPOS: {\"jev\":322,\"snapshot\":4,\"acao\":9265,\"espera\":1,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":9593,\"bytes\":[4896],\"tokens\":1574,\"consultaMs\":[317],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":0,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 20 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":20,\"lagP95Ms\":5,\"samples\":96,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- digitar e enviar: esperou 8,5 s (1 pedido de rede) — assentou\n- depois da navegação (458 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8765/busca-lenta.html?xhr=8000&p=Caneca%20Azul\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Produto: Caneca Azul\" [level=1]\n  - text \"R$ 29,90\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        9640
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4896
+        ],
+        "latencyMs": [
+          317
+        ],
+        "tokens": 1574,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 20
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 19
+    },
+    {
+      "id": "N04-filtro-lento-xhr",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/filtro-lento.html?xhr=8000",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 9123,
+      "stepMs": [
+        8746
+      ],
+      "phases": {
+        "jevMs": 294,
+        "snapshotMs": 4,
+        "actionMs": 8452,
+        "waitMs": 0,
+        "otherMs": 373
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Mostre só os produtos com frete grátis.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Mostrando 3 produtos com frete grátis: texto «Mostrando 3 produtos com frete grátis» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou checkbox \"Frete grátis\" (p=0.97, 291 ms, passo 8746 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 291 ms, p95 291 ms · corpo mediano 3974 B (máx 3974 B) · 1262 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":294,\"snapshot\":4,\"acao\":8452,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":8750,\"bytes\":[3974],\"tokens\":1262,\"consultaMs\":[291],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 6 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":6,\"lagP95Ms\":5,\"samples\":87,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- clique: esperou 8,4 s (1 pedido de rede) — assentou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — canecas\" http://localhost:8765/filtro-lento.html?xhr=8000\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Canecas e garrafas\" [level=1]\n  - checkbox \"Frete grátis\" [ref=e1] [checked] [focused]\n  - text \"Mostrando 3 produtos com frete grátis\"\n  - text \"Caneca Azul · R$ 29,90\"\n  - text \"Garrafa Térmica · R$ 59,90\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        9123
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          3974
+        ],
+        "latencyMs": [
+          291
+        ],
+        "tokens": 1262,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 6
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 20
+    },
+    {
+      "id": "N05-autocomplete-cidade",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-cidade.html",
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2023,
+      "stepMs": [
+        1523,
+        453
+      ],
+      "phases": {
+        "jevMs": 627,
+        "snapshotMs": 5,
+        "actionMs": 1346,
+        "waitMs": 0,
+        "otherMs": 45
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Escolha a cidade São Paulo - SP na lista de sugestões e confirme.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Cidade escolhida: São Paulo - SP: texto «Cidade escolhida: São Paulo - SP» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)\n1. clicou option \"São Paulo - SP\" (p=0.98, 303 ms, passo 1523 ms)\n2. clicou button \"Confirmar\" (p=0.99, fim p=0.01, 315 ms, passo 453 ms)\n2. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 2 consulta(s) · latência mediana 309 ms, p95 315 ms · corpo mediano 4440 B (máx 4674 B) · 2822 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":627,\"snapshot\":5,\"acao\":1346,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":1979,\"bytes\":[4206,4674],\"tokens\":2822,\"consultaMs\":[303,315],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 7 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":7,\"lagP95Ms\":5,\"samples\":20,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- digitar: esperou 1,1 s (1 pedido de rede) — assentou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — entrega\" http://localhost:8765/autocomplete-cidade.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Endereço de entrega\" [level=1]\n  - textbox \"Cidade\" [ref=e1] value=\"São Paulo - SP\"\n  - button \"Confirmar\" [ref=e2] [focused]\n  - text \"Cidade escolhida: São Paulo - SP\"",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        2023
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          4206,
+          4674
+        ],
+        "latencyMs": [
+          303,
+          315
+        ],
+        "tokens": 2822,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 7
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 21
+    },
+    {
+      "id": "N06-autocomplete-busca",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-busca.html?q=fone%20bluetooth",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1591,
+      "stepMs": [
+        1543
+      ],
+      "phases": {
+        "jevMs": 306,
+        "snapshotMs": 4,
+        "actionMs": 1236,
+        "waitMs": 0,
+        "otherMs": 45
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Pesquise por fone e escolha a sugestão «fone bluetooth» na lista.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Resultados para: fone bluetooth: texto «Resultados para: fone bluetooth» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. clicou option \"fone bluetooth\" (p=1.00, 303 ms, passo 1543 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 303 ms, p95 303 ms · corpo mediano 4180 B (máx 4180 B) · 1334 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":306,\"snapshot\":4,\"acao\":1236,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":1546,\"bytes\":[4180],\"tokens\":1334,\"consultaMs\":[303],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 17 ms (p95 17 ms)\nJANELA: {\"lagMaxMs\":17,\"lagP95Ms\":17,\"samples\":16,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- digitar: esperou 1,1 s (1 pedido de rede) — assentou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8765/autocomplete-busca.html?q=fone%20bluetooth\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1] [focused] value=\"fone bluetooth\"\n  - heading \"Resultados para: fone bluetooth\" [level=1]",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        1591
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4180
+        ],
+        "latencyMs": [
+          303
+        ],
+        "tokens": 1334,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 17
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 22
+    },
+    {
+      "id": "N07-rerender-lista",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rerender-lista.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 521,
+      "stepMs": [
+        467
+      ],
+      "phases": {
+        "jevMs": 336,
+        "snapshotMs": 4,
+        "actionMs": 131,
+        "waitMs": 0,
+        "otherMs": 50
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione o Fone Bluetooth ao carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:No carrinho: Fone Bluetooth: texto «No carrinho: Fone Bluetooth» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar Fone Bluetooth ao carrinho\" (p=1.00, 333 ms, passo 467 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 333 ms, p95 333 ms · corpo mediano 4344 B (máx 4344 B) · 1407 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":336,\"snapshot\":4,\"acao\":131,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":472,\"bytes\":[4344],\"tokens\":1407,\"consultaMs\":[333],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 7 ms (p95 7 ms)\nJANELA: {\"lagMaxMs\":7,\"lagP95Ms\":7,\"samples\":5,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — mais vendidos\" http://localhost:8765/rerender-lista.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mais vendidos agora\" [level=1]\n  - text \"No carrinho: Fone Bluetooth\"\n  - heading \"Teclado Mecânico\" [level=2]\n  - button \"Adicionar Teclado Mecânico ao carrinho\" [ref=e1]\n  - heading \"Fone Bluetooth\" [level=2]\n  - button \"Adicionar Fone Bluetooth ao carrinho\" [ref=e2] [focused]\n  - heading \"Mouse Sem Fio\" [level=2]\n  - button \"Adicionar Mouse Sem Fio ao carrinho\" [ref=e3]\n  - heading \"Webcam HD\" [level=2]\n  - button \"Adicionar Webcam HD ao carrinho\" [ref=e4]",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        521
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4344
+        ],
+        "latencyMs": [
+          333
+        ],
+        "tokens": 1407,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 7
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 23
+    },
+    {
+      "id": "N08-rerender-remover",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rerender-carrinho.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 494,
+      "stepMs": [
+        445
+      ],
+      "phases": {
+        "jevMs": 312,
+        "snapshotMs": 3,
+        "actionMs": 133,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Remova o Cabo USB do carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Removido: Cabo USB: texto «Removido: Cabo USB» presente\n  ✓ text:2 itens: texto «2 itens» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Remover Cabo USB\" (p=1.00, 309 ms, passo 445 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 309 ms, p95 309 ms · corpo mediano 4101 B (máx 4101 B) · 1328 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":312,\"snapshot\":3,\"acao\":133,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":449,\"bytes\":[4101],\"tokens\":1328,\"consultaMs\":[309],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":5,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — carrinho\" http://localhost:8765/rerender-carrinho.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Seu carrinho\" [level=1]\n  - text \"2 itens\"\n  - heading \"Mouse Sem Fio\" [level=2]\n  - button \"Remover Mouse Sem Fio\" [ref=e1] [focused]\n  - heading \"Capa de Celular\" [level=2]\n  - button \"Remover Capa de Celular\" [ref=e2]\n  - text \"Removido: Cabo USB\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        494
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4101
+        ],
+        "latencyMs": [
+          309
+        ],
+        "tokens": 1328,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 24
+    },
+    {
+      "id": "N09-carrinho-quantidade",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-quantidade.html?xhr=700",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2062,
+      "stepMs": [
+        1681
+      ],
+      "phases": {
+        "jevMs": 522,
+        "snapshotMs": 3,
+        "actionMs": 1159,
+        "waitMs": 0,
+        "otherMs": 378
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Deixe 2 unidades da Caneca Azul no carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 2 itens: texto «Carrinho: 2 itens» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Aumentar quantidade\" (p=1.00, 519 ms, passo 1681 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 519 ms, p95 519 ms · corpo mediano 4030 B (máx 4030 B) · 1285 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":522,\"snapshot\":3,\"acao\":1159,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":1684,\"bytes\":[4030],\"tokens\":1285,\"consultaMs\":[519],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":17,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- clique: esperou 1,2 s (1 pedido de rede) — assentou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — carrinho\" http://localhost:8765/carrinho-quantidade.html?xhr=700\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Seu carrinho\" [level=1]\n  - heading \"Caneca Azul\" [level=2]\n  - text \"Quantidade: 2\"\n  - button \"Diminuir quantidade\" [ref=e1]\n  - button \"Aumentar quantidade\" [ref=e2] [focused]\n  - text \"Carrinho: 2 itens\"",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        2062
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          4030
+        ],
+        "latencyMs": [
+          519
+        ],
+        "tokens": 1285,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 25
+    },
+    {
+      "id": "N10-carrinho-idempotente",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-idempotente.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 840,
+      "stepMs": [
+        435,
+        359
+      ],
+      "phases": {
+        "jevMs": 609,
+        "snapshotMs": 6,
+        "actionMs": 134,
+        "waitMs": 0,
+        "otherMs": 91
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Adicione a Caneca Azul ao carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 1 item: texto «Carrinho: 1 item» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar ao carrinho\" (p=0.99, 298 ms, passo 435 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 298 ms, p95 298 ms · corpo mediano 3930 B (máx 3930 B) · 1248 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":301,\"snapshot\":3,\"acao\":134,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":438,\"bytes\":[3930],\"tokens\":1248,\"consultaMs\":[298],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 6 ms (p95 6 ms)\nJANELA: {\"lagMaxMs\":6,\"lagP95Ms\":6,\"samples\":5,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — caneca\" http://localhost:8765/carrinho-idempotente.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Caneca Azul\" [level=1]\n  - text \"R$ 29,90\"\n  - button \"Adicionar ao carrinho\" [ref=e1] [focused]\n  - text \"Carrinho: 1 item\"\n\nact \"Adicione a Caneca Azul ao carrinho.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ text:Carrinho: 1 item: texto «Carrinho: 1 item» presente\nO Jev considera o objetivo atingido e os critérios --expect conferem na página. Confira abaixo.\n\nPassos:\n1. objetivo atingido (pergunta direta p=0.99)\n\nCONSULTAS: 1 consulta(s) · latência mediana 305 ms, p95 305 ms · corpo mediano 4697 B (máx 4697 B) · 1484 tokens\nTEMPOS: {\"jev\":308,\"snapshot\":3,\"acao\":0,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":311,\"bytes\":[4697],\"tokens\":1484,\"consultaMs\":[305],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":0,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":3,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — caneca\" http://localhost:8765/carrinho-idempotente.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Caneca Azul\" [level=1]\n  - text \"R$ 29,90\"\n  - button \"Adicionar ao carrinho\" [ref=e1] [focused]\n  - text \"Carrinho: 1 item\"",
+      "probes": 2,
+      "acts": 2,
+      "actMs": [
+        481,
+        359
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          3930,
+          4697
+        ],
+        "latencyMs": [
+          298
+        ],
+        "tokens": 2732,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 6
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 26
+    },
+    {
+      "id": "P01-wikipedia-busca",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Alan_Turing",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 863,
+      "stepMs": [
+        863
+      ],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 73,
+        "actionMs": 670,
+        "waitMs": 0,
+        "otherMs": 120
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Pesquise por Alan Turing e abra o artigo.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:/wiki/Alan_Turing: endereço contém /wiki/Alan_Turing\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Pesquisar na Wikipédia\" (valor de Pesquisar) e apertou Enter (pelo nome do campo, sem o Jev)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: nenhuma\nTEMPOS: {\"jev\":0,\"snapshot\":73,\"acao\":670,\"espera\":0,\"foto\":0,\"consultas\":0,\"fotos\":0,\"total\":748,\"bytes\":[],\"tokens\":0,\"consultaMs\":[],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":0,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 8 ms (p95 8 ms)\nJANELA: {\"lagMaxMs\":8,\"lagP95Ms\":8,\"samples\":7,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (358 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Alan Turing – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Alan_Turing\nviewport: 1908×1120 · scroll 0/23920\n(resumo: a página é grande; vêm primeiro as linhas do objetivo, a camada de cima e a região principal)\n\n… 92 linhas omitidas\n          - link \"Condenação por atentado ao pudor\" [ref=e29] → /wiki/Alan_Turing#Condena%C3%A7%C3%A3o_por_atentado_ao_pudor\n… 37 linhas omitidas\n- main\n  - banner \"no font mode scale\"\n    - heading \"Alan Turing\" [level=1]\n    - button \"163 idiomas\" [ref=e44]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e45] → /wiki/Alan_Turing\n      - listitem\n        - link \"Discussão\" [ref=e46] → /wiki/Discuss%C3%A3o:Alan_Turing\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e47] → /wiki/Alan_Turing\n      - listitem\n        - link \"Editar\" [ref=e48] → https://pt.wikipedia.org/w/index.php?title=Especial:Entrar&returnto=Alan_Turing\n      - listitem\n        - link \"Ver histórico\" [ref=e49] → /w/index.php?title=Alan_Turing&action=history\n  - navigation \"Ferramentas de página\"\n    - button \"Ferramentas\" [ref=e50]\n    - text \"Ferramentas\"\n    - text \"mover para a barra lateral\"\n    - text \"Geral\"\n    - text \"Páginas afluentes\"\n    - text \"Alterações relacionadas\"\n    - text \"Enviar ficheiro\"\n    - text \"Hiperligação permanente\"\n    - text \"Informação da página\"\n    - text \"Citar esta página\"\n    - text \"Obter URL encurtado\"\n    - text \"Mudar para o analisador sintático antigo\"\n    - text \"Imprimir/exportar\"\n    - text \"Criar um livro\"\n    - text \"Transferir como PDF\"\n    - text \"Versão para impressão\"\n    - text \"Noutros projetos\"\n    - text \"Abstract Wikipedia\"\n    - text \"Wikimedia Commons\"\n    - text \"Wikiquote\"\n    - text \"Elemento Wikidata\"\n  - navigation \"Aparência\"\n    - text \"Aparência\"\n    - button \"Esconder Aparência\" [ref=e51]\n  - link \"Este é um artigo bom. Clique aqui para mais informações.\" [ref=e52] → https://pt.wikipedia.org/wiki/Wikip%C3%A9dia:Artigos_bons\n  - table\n    - row\n      - columnheader \"Alan Turing\"\n    - row\n      - cell\n        - link [ref=e53] → https://pt.wikipedia.org/wiki/Ficheiro:Alan_Turing_(1951).jpg\n        - text \"Turing em 1951\"\n    - row\n      - columnheader \"Nome completo\"\n      - cell \"Alan Mathison Turing\"\n    - row\n      - columnheader \"Conhecido(a) por\"\n      - cell\n        - text \"Lista\"\n    - row\n      - columnheader \"Nascimento\"\n      - cell\n        - link \"23 de junho\" [ref=e54] → https://pt.wikipedia.org/wiki/23_de_junho#Nascimentos\n        - text \"de\"\n        - link \"1912\" [ref=e55] → https://pt.wikipedia.org/wiki/1912\n        - link \"Maida Vale\" [ref=e56] → https://pt.wikipedia.org/wiki/Maida_Vale\n        - text \",\"\n        - link \"Londres\" [ref=e57] → https://pt.wikipedia.org/wiki/Londres\n    - row\n      - columnheader \"Morte\"\n      - cell\n        - link \"7 de junho\" [ref=e58] → https://pt.wikipedia.org/wiki/7_de_junho\n        - text \"de\"\n        - link \"1954\" [ref=e59] → https://pt.wikipedia.org/wiki/1954\n        - text \"(41\"\n        - text \"anos)\"\n        - text \"Wilmslow,\"\n        - link \"Cheshire\" [ref=e60] → https://pt.wikipedia.org/wiki/Cheshire\n        … 75 linhas omitidas\n        - link [ref=e79] → https://pt.wikipedia.org/wiki/Ficheiro:Alan_Turing_signature.svg\n        … 37 linhas omitidas\n            - link \"Alan Turing\" [ref=e92] → https://pt.wikipedia.org/wiki/Alan_Turing\n  … 11 linhas omitidas\n  - text \"Alan Mathison Turing\"\n  … 15 linhas omitidas\n  - link \"[1]\" [ref=e104] → /wiki/Alan_Turing#cite_note-1\n  … 22 linhas omitidas\n  - link \"[2]\" [ref=e116] → /wiki/Alan_Turing#cite_note-frs-2\n  - link \"[3]\" [ref=e117] → /wiki/Alan_Turing#cite_note-AFP-3\n  - link \"[4]\" [ref=e118] → /wiki/Alan_Turing#cite_note-4\n  … 3 linhas omitidas\n  - link \"[5]\" [ref=e120] → /wiki/Alan_Turing#cite_note-5\n  … 30 linhas omitidas\n  - link \"[6]\" [ref=e135] → /wiki/Alan_Turing#cite_note-6\n  … 1 linhas omitidas\n  - link ",
+      "probes": 0,
+      "acts": 1,
+      "actMs": [
+        863
+      ],
+      "queries": {
+        "count": 0,
+        "bytes": [],
+        "latencyMs": [],
+        "tokens": 0,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 8
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 27
+    },
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Portugal",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1520,
+      "stepMs": [
+        1011
+      ],
+      "phases": {
+        "jevMs": 347,
+        "snapshotMs": 480,
+        "actionMs": 509,
+        "waitMs": 0,
+        "otherMs": 184
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:/wiki/Portugal: endereço contém /wiki/Portugal\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\n1. o link exato do objetivo estava fora da janela: li a página inteira\n1. clicou link \"Portugal\" (p=1.00, 342 ms, passo 1011 ms)\n1. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 1 consulta(s) · latência mediana 342 ms, p95 342 ms · corpo mediano 18989 B (máx 18989 B) · 7917 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":347,\"snapshot\":480,\"acao\":509,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":1354,\"bytes\":[18989],\"tokens\":7917,\"consultaMs\":[342],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":13,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (414 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Portugal – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Portugal\nviewport: 1908×1120 · scroll 0/47076\n(resumo: a página é grande; vêm primeiro as linhas do objetivo, a camada de cima e a região principal)\n\n… 84 linhas omitidas\n- main\n  - banner \"no font mode scale\"\n    - heading \"Portugal\" [level=1]\n    - button \"300 idiomas\" [ref=e30]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e31] → /wiki/Portugal\n      - listitem\n        - link \"Discussão\" [ref=e32] → /wiki/Discuss%C3%A3o:Portugal\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e33] → /wiki/Portugal\n      - listitem\n        - link \"Ver código fonte\" [ref=e34] → /w/index.php?title=Portugal&action=edit\n      - listitem\n        - link \"Ver histórico\" [ref=e35] → /w/index.php?title=Portugal&action=history\n  - navigation \"Ferramentas de página\"\n    - button \"Ferramentas\" [ref=e36]\n    - text \"Ferramentas\"\n    - text \"mover para a barra lateral\"\n    - text \"Geral\"\n    - text \"Páginas afluentes\"\n    - text \"Alterações relacionadas\"\n    - text \"Enviar ficheiro\"\n    - text \"Hiperligação permanente\"\n    - text \"Informação da página\"\n    - text \"Citar esta página\"\n    - text \"Obter URL encurtado\"\n    - text \"Mudar para o analisador sintático antigo\"\n    - text \"Imprimir/exportar\"\n    - text \"Criar um livro\"\n    - text \"Transferir como PDF\"\n    - text \"Versão para impressão\"\n    - text \"Noutros projetos\"\n    - text \"Abstract Wikipedia\"\n    - text \"Wikimedia Commons\"\n    - text \"Wikinotícias\"\n    - text \"Wikiquote\"\n    - text \"Wikivoyage\"\n    - text \"Elemento Wikidata\"\n  - navigation \"Aparência\"\n    - text \"Aparência\"\n    - button \"Esconder Aparência\" [ref=e37]\n  - link \"38° 43′ N, 9° 09′ O\" [ref=e38] → /wiki/Especial:Map/13/38.717/-9.15/pt\n  - link \"Este é um artigo destacado. Clique aqui para mais informações.\" [ref=e39] → https://pt.wikipedia.org/wiki/Wikip%C3%A9dia:Artigos_destacados\n  - text \"Nota:\"\n  - text \"Para outros significados, veja\"\n  - link \"Portugal (desambiguação)\" [ref=e40] → https://pt.wikipedia.org/wiki/Portugal_(desambigua%C3%A7%C3%A3o)\n  - text \".\"\n  - table \"ib country\"\n    - row\n      - columnheader \"República Portuguesa Portugal\"\n    - row\n      - cell\n        - link \"Bandeira de Portugal\" [ref=e41] → https://pt.wikipedia.org/wiki/Ficheiro:Flag_of_Portugal_(official).svg\n        - link \"Bandeira\" [ref=e42] → https://pt.wikipedia.org/wiki/Bandeira_de_Portugal\n        - link \"Selo da República Portuguesa\" [ref=e43] → https://pt.wikipedia.org/wiki/Ficheiro:Coat_of_arms_of_Portugal.svg\n        - link \"Brasão de armas\" [ref=e44] → https://pt.wikipedia.org/wiki/Bras%C3%A3o_de_armas_de_Portugal\n    - row\n      - cell\n        - text \"Hino:\"\n        - link \"A Portuguesa\" [ref=e45] → https://pt.wikipedia.org/wiki/A_Portuguesa\n    - row\n      - cell\n        - link \"Localização de Portugal (em verde)na União Europeia (em verde claro)\" [ref=e46] → https://pt.wikipedia.org/wiki/Ficheiro:EU-Portugal_(orthographic_projection).svg\n        - text \"Localização de Portugal (\"\n        - text \"em verde\"\n        - text \")\"\n        - text \"na\"\n        - link \"União Europeia\" [ref=e47] → https://pt.wikipedia.org/wiki/Uni%C3%A3o_Europeia\n        - text \"(\"\n        - text \"em verde claro\"\n        - text \")\"\n    - row\n      - columnheader \"Capital\"\n      - cell\n        - link \"Lisboa\" [ref=e48] → https://pt.wikipedia.org/wiki/Lisboa\n        - clickable \"mostrar a localidade num mapa interactivo\" [ref=e49]\n        - link \"38° 42' N 9° 10' O\" [ref=e50] → http://tools.wmflabs.org/geohack/geohack.php?language=pt&pagename=Portugal&params=38_42_0_N_9_10_0_W\n    - row\n      - columnheader \"Maior cidade\"\n      - cell\n        - link \"Lisboa\" [ref=e51] → https://p",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        1520
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          18989
+        ],
+        "latencyMs": [
+          342
+        ],
+        "tokens": 7917,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 28
+    },
+    {
+      "id": "P03-saucedemo-carrinho",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/cart.html",
+      "steps": 4,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 3211,
+      "stepMs": [
+        723,
+        488,
+        433
+      ],
+      "phases": {
+        "jevMs": 917,
+        "snapshotMs": 12,
+        "actionMs": 721,
+        "waitMs": 0,
+        "otherMs": 1561
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho e abra o carrinho. Não finalize nada.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:/cart.html: endereço contém /cart.html\n  ✓ text:Sauce Labs Backpack: texto «Sauce Labs Backpack» presente\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, 310 ms, passo 723 ms)\n2. clicou button \"Add to cart\" (p=0.92, fim p=0.00, 302 ms, passo 488 ms)\n3. clicou button \"Cart, 1 items\" (p=0.83, fim p=0.06, 296 ms, passo 433 ms)\n3. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 3 consulta(s) · latência mediana 302 ms, p95 310 ms · corpo mediano 9722 B (máx 9751 B) · 7956 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":917,\"snapshot\":12,\"acao\":721,\"espera\":0,\"foto\":0,\"consultas\":3,\"fotos\":0,\"total\":1653,\"bytes\":[4343,9751,9722],\"tokens\":7956,\"consultaMs\":[310,302,296],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 6 ms (p95 6 ms)\nJANELA: {\"lagMaxMs\":6,\"lagP95Ms\":6,\"samples\":17,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/cart.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Your Cart\"\n- main \"cart contents container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /cart.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e4]\n  - button \"Continue Shopping\" [ref=e5]\n  - button \"Checkout\" [ref=e6]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e7] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e8] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e9] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 3,
+      "acts": 1,
+      "actMs": [
+        3211
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          4343,
+          9751,
+          9722
+        ],
+        "latencyMs": [
+          310,
+          302,
+          296
+        ],
+        "tokens": 7956,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 6
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 29
+    },
+    {
+      "id": "P04-saucedemo-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/checkout-step-two.html",
+      "steps": 6,
+      "autoFills": 5,
+      "photos": 0,
+      "totalMs": 4513,
+      "stepMs": [
+        691,
+        471,
+        442,
+        455,
+        882
+      ],
+      "phases": {
+        "jevMs": 1540,
+        "snapshotMs": 17,
+        "actionMs": 1393,
+        "waitMs": 0,
+        "otherMs": 1563
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "verified",
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.\": FEITO (verificado)\nCONFERÊNCIA:\n  ✓ url:checkout-step-two: endereço contém checkout-step-two\nOs critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=0.99, 288 ms, passo 691 ms)\n2. clicou button \"Add to cart\" (p=0.86, fim p=0.00, 309 ms, passo 471 ms)\n3. clicou button \"Cart, 1 items\" (p=0.83, fim p=0.00, 306 ms, passo 442 ms)\n4. clicou button \"Checkout\" (p=0.97, fim p=0.00, 321 ms, passo 455 ms)\ndigitou em text field \"First Name\" (valor de First Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Last Name\" (valor de Last Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Zip/Postal Code\" (valor de Postal Code) (pelo nome do campo, sem o Jev)\n5. clicou button \"Continue\" (p=0.99, fim p=0.01, 292 ms, passo 882 ms)\n5. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev\n\nCONSULTAS: 5 consulta(s) · latência mediana 306 ms, p95 321 ms · corpo mediano 6005 B (máx 9907 B) · 11968 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":1540,\"snapshot\":17,\"acao\":1393,\"espera\":0,\"foto\":0,\"consultas\":5,\"fotos\":0,\"total\":2957,\"bytes\":[4499,9907,9878,6005,6001],\"tokens\":11968,\"consultaMs\":[288,309,306,321,292],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":0,\"fotoUsos\":[]}\njanela: lag máx 9 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":9,\"lagP95Ms\":5,\"samples\":30,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/checkout-step-two.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Checkout: Overview\"\n- main \"checkout summary container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /checkout-step-two.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$29.99\"\n  - text \"Payment Information:\"\n  - text \"SauceCard #31337\"\n  - text \"Shipping Information:\"\n  - text \"Free Pony Express Delivery!\"\n  - text \"Price Total\"\n  - text \"Item total: $\"\n  - text \"29.99\"\n  - text \"Tax: $\"\n  - text \"2.40\"\n  - text \"Total: $\"\n  - text \"32.39\"\n  - button \"Cancel\" [ref=e4]\n  - button \"Finish\" [ref=e5]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e6] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e7] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e8] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 5,
+      "acts": 1,
+      "actMs": [
+        4513
+      ],
+      "queries": {
+        "count": 5,
+        "bytes": [
+          4499,
+          9907,
+          9878,
+          6005,
+          6001
+        ],
+        "latencyMs": [
+          288,
+          309,
+          306,
+          321,
+          292
+        ],
+        "tokens": 11968,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 9
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 30
+    },
+    {
+      "id": "P05-amazon-busca-adicionar",
+      "outcome": "crash",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://www.amazon.com.br/",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1460,
+      "stepMs": [
+        1460
+      ],
+      "phases": {
+        "jevMs": 1303,
+        "snapshotMs": 3,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 154
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "[verificação anti-robô em andamento (challenge): o site entregou um desafio em vez da página. Espere uns segundos (`ags portal wait <portal> --idle`) e leia de novo; não é uma página parada nem um erro do portal.]\nact \"Pesquise por caneca e, no primeiro resultado, clique em Adicionar ao carrinho. Não finalize a compra.\": PAROU\nCONFERÊNCIA:\n  ✗ text:/adicionado ao carrinho|added to cart/: texto «/adicionado ao carrinho|added to cart/» não está na página\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\n1. sem caminho (p=0.58, 293 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.99, caixa conf=0.26, 358 ms).\n\nCONSULTAS: 1 consulta(s) · latência mediana 293 ms, p95 293 ms · corpo mediano 3230 B (máx 3230 B) · 1030 tokens · 1 sem a pergunta de fim\nFOTO: 1 foto(s) · 1005 ms (captura 647 ms · Jev 358 ms) · 77% do act · passo 1: o Jev não viu caminho no texto → A reserva visual também não achou um controle seguro na foto\nTEMPOS: {\"jev\":298,\"snapshot\":3,\"acao\":0,\"espera\":0,\"foto\":1005,\"consultas\":1,\"fotos\":1,\"total\":1307,\"bytes\":[3230],\"tokens\":1030,\"consultaMs\":[293],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":358,\"fotoUsos\":[\"passo 1: o Jev não viu caminho no texto → A reserva visual também não achou um controle seguro na foto\"]}\njanela: lag máx 7 ms (p95 7 ms)\nJANELA: {\"lagMaxMs\":7,\"lagP95Ms\":7,\"samples\":13,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: https://www.amazon.com.br/\nviewport: 1920×1120 · scroll 0/1120\n\n(la página no tiene contenido visible)",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1460
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          3230
+        ],
+        "latencyMs": [
+          293
+        ],
+        "tokens": 1030,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 7
+      },
+      "note": "relatório do act não reconhecido",
+      "windowHang": false,
+      "rep": 0,
+      "order": 31
+    },
+    {
+      "id": "P06-amazon-produto-adicionar",
+      "outcome": "crash",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://www.amazon.com.br/",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1304,
+      "stepMs": [
+        1304
+      ],
+      "phases": {
+        "jevMs": 1255,
+        "snapshotMs": 2,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 47
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "[verificação anti-robô em andamento (challenge): o site entregou um desafio em vez da página. Espere uns segundos (`ags portal wait <portal> --idle`) e leia de novo; não é uma página parada nem um erro do portal.]\nact \"Pesquise por livro, abra o primeiro resultado e, na página do produto, clique em Adicionar ao carrinho. Não finalize a compra.\": PAROU\nCONFERÊNCIA:\n  ✗ text:/adicionado ao carrinho|added to cart/: texto «/adicionado ao carrinho|added to cart/» não está na página\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\n1. sem caminho (p=0.65, 310 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=1.00, caixa conf=0.10, 324 ms).\n\nCONSULTAS: 1 consulta(s) · latência mediana 310 ms, p95 310 ms · corpo mediano 3256 B (máx 3256 B) · 1035 tokens · 1 sem a pergunta de fim\nFOTO: 1 foto(s) · 943 ms (captura 619 ms · Jev 324 ms) · 75% do act · passo 1: o Jev não viu caminho no texto → A reserva visual também não achou um controle seguro na foto\nTEMPOS: {\"jev\":312,\"snapshot\":2,\"acao\":0,\"espera\":0,\"foto\":943,\"consultas\":1,\"fotos\":1,\"total\":1257,\"bytes\":[3256],\"tokens\":1035,\"consultaMs\":[310],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1,\"fotoJev\":324,\"fotoUsos\":[\"passo 1: o Jev não viu caminho no texto → A reserva visual também não achou um controle seguro na foto\"]}\njanela: lag máx 4 ms (p95 4 ms)\nJANELA: {\"lagMaxMs\":4,\"lagP95Ms\":4,\"samples\":13,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: https://www.amazon.com.br/\nviewport: 1920×1120 · scroll 0/1120\n\n(la página no tiene contenido visible)",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1304
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          3256
+        ],
+        "latencyMs": [
+          310
+        ],
+        "tokens": 1035,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 4
+      },
+      "note": "relatório do act não reconhecido",
+      "windowHang": false,
+      "rep": 0,
+      "order": 32
+    }
+  ],
+  "summary": {
+    "tasks": 33,
+    "completed": 31,
+    "completedRate": 0.9393939393939394,
+    "confirmed": 31,
+    "falseDone": 0,
+    "falseUnsure": 0,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 2.4242424242424243,
+    "medianSteps": 2,
+    "medianTotalMs": 1257,
+    "medianStepMs": 575.5,
+    "share": {
+      "jevMs": 0.33758920418033617,
+      "snapshotMs": 0.011972807521899415,
+      "actionMs": 0.5557039943179897,
+      "waitMs": 0.000016910745087428552,
+      "otherMs": 0.09471708323468732
+    },
+    "outcomes": {
+      "done": 31,
+      "crash": 2
+    }
+  },
+  "v2": {
+    "gate": {
+      "runs": 31,
+      "tasks": 31,
+      "successes": 31,
+      "successRate": 1,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 531,
+      "stepP95": 1618.8999999999996,
+      "actP50": 1122,
+      "actP95": 6587.499999999996,
+      "actsPerTask": 1.032258064516129,
+      "windowHangs": 0,
+      "lagMaxMs": 21,
+      "queriesPerTask": 1.4838709677419355,
+      "tokensPerTask": 2573.9032258064517,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": 4337,
+      "bytesPerQueryP95": 9846.25,
+      "queryLatencyP50": 304,
+      "queryLatencyP95": 341.54999999999995
+    },
+    "local": {
+      "runs": 27,
+      "tasks": 27,
+      "successes": 27,
+      "successRate": 1,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 531,
+      "stepP95": 2034.24999999998,
+      "actP50": 1017.5,
+      "actP95": 6651.64999999999,
+      "actsPerTask": 1.037037037037037,
+      "windowHangs": 0,
+      "lagMaxMs": 21,
+      "queriesPerTask": 1.3703703703703705,
+      "tokensPerTask": 1924.0740740740741,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": 4184,
+      "bytesPerQueryP95": 5073,
+      "queryLatencyP50": 304,
+      "queryLatencyP95": 346.59999999999997
+    },
+    "public": {
+      "runs": 4,
+      "tasks": 4,
+      "successes": 4,
+      "successRate": 1,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 589.5,
+      "stepP95": 952.9499999999998,
+      "actP50": 2365.5,
+      "actP95": 4317.7,
+      "actsPerTask": 1,
+      "windowHangs": 0,
+      "lagMaxMs": 9,
+      "queriesPerTask": 2.25,
+      "tokensPerTask": 6960.25,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": 9722,
+      "bytesPerQueryP95": 15356.199999999997,
+      "queryLatencyP50": 306,
+      "queryLatencyP95": 333.59999999999997
+    },
+    "probe": {
+      "runs": 2,
+      "tasks": 2,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 1382,
+      "stepP95": 1452.2,
+      "actP50": 1382,
+      "actP95": 1452.2,
+      "actsPerTask": 1,
+      "windowHangs": 0,
+      "lagMaxMs": 7,
+      "queriesPerTask": 1,
+      "tokensPerTask": 1032.5,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": 3243,
+      "bytesPerQueryP95": 3254.7,
+      "queryLatencyP50": 301.5,
+      "queryLatencyP95": 309.15
+    },
+    "tasks": [
+      {
+        "id": "L01-icones-sem-nome",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 746,
+        "stepP95": 746,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1304
+      },
+      {
+        "id": "L02-lupa-entre-iguais",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 751,
+        "stepP95": 751,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1325
+      },
+      {
+        "id": "L03-busca-com-enter",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 843,
+        "stepP95": 843,
+        "actsPerTask": 1,
+        "queriesPerTask": 0,
+        "tokensPerTask": 0
+      },
+      {
+        "id": "L04-busca-com-botao",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 848,
+        "stepP95": 848,
+        "actsPerTask": 1,
+        "queriesPerTask": 0,
+        "tokensPerTask": 0
+      },
+      {
+        "id": "L05-cookies",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 430,
+        "stepP95": 430,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 2660
+      },
+      {
+        "id": "L06-modal-newsletter",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 448,
+        "stepP95": 448,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 2651
+      },
+      {
+        "id": "L07-garantia-upsell",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 446.5,
+        "stepP95": 455.05,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 2843
+      },
+      {
+        "id": "L08-produto-sem-botao",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 608.5,
+        "stepP95": 770.95,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 2943
+      },
+      {
+        "id": "L09-botoes-repetidos",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 427,
+        "stepP95": 427,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1899
+      },
+      {
+        "id": "L10-lista-e-radio",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 519.5,
+        "stepP95": 582.05,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 3675
+      },
+      {
+        "id": "L11-formulario-multietapas",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 701,
+        "stepP95": 703.7,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 4501
+      },
+      {
+        "id": "L12-garantia-na-foto",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 713.5,
+        "stepP95": 713.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1322
+      },
+      {
+        "id": "L13-abas",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 421,
+        "stepP95": 421,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1341
+      },
+      {
+        "id": "L14-rolar-ate-o-fim",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 446.5,
+        "stepP95": 492.65,
+        "actsPerTask": 1,
+        "queriesPerTask": 4,
+        "tokensPerTask": 5107
+      },
+      {
+        "id": "L15-quantidade-sem-enter",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 562,
+        "stepP95": 562,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1273
+      },
+      {
+        "id": "L16-busca-com-checkout",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1206,
+        "stepP95": 1206,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1254
+      },
+      {
+        "id": "L17-comprar-agora-nao-pedido",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 449,
+        "stepP95": 449,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1255
+      },
+      {
+        "id": "N01-anuncio-primeiro-resultado",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1096,
+        "stepP95": 1096,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1429
+      },
+      {
+        "id": "N02-anuncio-carrinho",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 449,
+        "stepP95": 449,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1424
+      },
+      {
+        "id": "N03-busca-lenta-xhr",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 9589,
+        "stepP95": 9589,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1574
+      },
+      {
+        "id": "N04-filtro-lento-xhr",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 8746,
+        "stepP95": 8746,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1262
+      },
+      {
+        "id": "N05-autocomplete-cidade",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 988,
+        "stepP95": 1469.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 2822
+      },
+      {
+        "id": "N06-autocomplete-busca",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1543,
+        "stepP95": 1543,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1334
+      },
+      {
+        "id": "N07-rerender-lista",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 467,
+        "stepP95": 467,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1407
+      },
+      {
+        "id": "N08-rerender-remover",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 445,
+        "stepP95": 445,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1328
+      },
+      {
+        "id": "N09-carrinho-quantidade",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1681,
+        "stepP95": 1681,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1285
+      },
+      {
+        "id": "N10-carrinho-idempotente",
+        "kind": "local",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 397,
+        "stepP95": 431.2,
+        "actsPerTask": 2,
+        "queriesPerTask": 2,
+        "tokensPerTask": 2732
+      },
+      {
+        "id": "P01-wikipedia-busca",
+        "kind": "public",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 863,
+        "stepP95": 863,
+        "actsPerTask": 1,
+        "queriesPerTask": 0,
+        "tokensPerTask": 0
+      },
+      {
+        "id": "P02-wikipedia-link",
+        "kind": "public",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1011,
+        "stepP95": 1011,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 7917
+      },
+      {
+        "id": "P03-saucedemo-carrinho",
+        "kind": "public",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 488,
+        "stepP95": 699.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 7956
+      },
+      {
+        "id": "P04-saucedemo-checkout",
+        "kind": "public",
+        "probe": false,
+        "runs": 1,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 471,
+        "stepP95": 843.8,
+        "actsPerTask": 1,
+        "queriesPerTask": 5,
+        "tokensPerTask": 11968
+      },
+      {
+        "id": "P05-amazon-busca-adicionar",
+        "kind": "public",
+        "probe": true,
+        "runs": 1,
+        "successes": 0,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1460,
+        "stepP95": 1460,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1030
+      },
+      {
+        "id": "P06-amazon-produto-adicionar",
+        "kind": "public",
+        "probe": true,
+        "runs": 1,
+        "successes": 0,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1304,
+        "stepP95": 1304,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 1035
+      }
+    ]
+  },
+  "digest": "6ec15f90"
+}

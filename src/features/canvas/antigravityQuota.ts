@@ -1,4 +1,11 @@
-import type { AntigravityAccountDiscovery } from "@/features/accounts/ipc";
+import type { AgyGroup, AntigravityAccountDiscovery } from "@/features/accounts/ipc";
+
+/** O anel do `agy`: a janela mais gasta de todos os grupos, arredondada. `null` = nenhuma. Pura. */
+export function agyTopPercent(groups: AgyGroup[] | null | undefined): number | null {
+  let top: number | null = null;
+  for (const g of groups ?? []) for (const w of g.windows) if (Number.isFinite(w.usedPct)) top = Math.max(top ?? 0, w.usedPct);
+  return top === null ? null : Math.round(Math.max(0, Math.min(100, top)));
+}
 
 /** Una barra por modelo con cupo informado: cuánto se USÓ (no cuánto queda) y cuándo se reinicia. */
 export interface ModelMeter {

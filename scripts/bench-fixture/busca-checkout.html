@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — busca</title>
+<!--
+  L16 (negativa): uma busca numa página com «Proceed to checkout». O botão Buscar é type=button; o 1.º botão de envio do
+  formulário é o do checkout, então Enter no campo INICIARIA o checkout. O piloto não deve apertar Enter aqui.
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <form onsubmit="event.preventDefault(); document.getElementById('status').textContent = 'CHECKOUT INICIADO';">
+    <button type="submit" class="red" style="display: block; margin-bottom: 16px;">Proceed to checkout</button>
+    <input type="search" id="q" placeholder="Buscar produtos" aria-label="Buscar produtos" size="40">
+    <button type="button" onclick="location.search = '?q=' + encodeURIComponent(document.getElementById('q').value)">Buscar</button>
+  </form>
+  <div id="status"></div>
+</main>
+<script>
+  const q = new URLSearchParams(location.search).get('q');
+  if (q) document.getElementById('status').textContent = 'Resultados para: ' + q;
+</script>
+</html>

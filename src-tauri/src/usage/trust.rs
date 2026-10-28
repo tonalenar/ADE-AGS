@@ -127,6 +127,24 @@ pub(super) fn trust_dir(config_path: &Path, dir: &str) -> Result<(), String> {
     write_atomic(config_path, &body)
 }
 
+/// Pré-aprova a pasta dos worktrees das missões na conta principal do Claude Code.
+///
+/// Os terminais de uma missão abrem o Claude num worktree novo a cada vez; sem isto a TUI
+/// para em "Is this a project you trust?" (com "No, exit" marcado) e o time inteiro fica
+/// parado. A TUI herda a confiança das pastas pai, então basta a raiz. Melhor esforço:
+/// uma falha aqui não impede a missão, só deixa o diálogo aparecer.
+pub(crate) fn trust_worktrees_root(base: &Path, account_dirs: &[String]) {
+    let _ = std::fs::create_dir_all(base);
+    let base = base.to_string_lossy();
+    // Cada conta do Claude Code tem o seu `.claude.json` (CLAUDE_CONFIG_DIR): sem isto, um
+    // membro do Squad que usa uma conta própria continuava parado no diálogo.
+    let configs = std::iter::once(config_file(None))
+        .chain(account_dirs.iter().map(|dir| config_file(Some(dir))));
+    for config in configs.flatten() {
+        let _ = trust_dir(&config, &base);
+    }
+}
+
 /// Escribe reemplazando el archivo entero de una sola vez.
 ///
 /// Primero a un temporal al lado y después un `rename`: si la app se cae a mitad de la
