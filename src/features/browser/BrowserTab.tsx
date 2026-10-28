@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, TrashIcon } from "neogestify-ui-components";
 
 import {
-  AccountCircleIcon, BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
+  BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
 import { neighbors } from "@/features/canvas/board";
 import { useCanvasStore } from "@/features/canvas/store";
@@ -36,8 +36,7 @@ import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { isGoogleSignIn, loginStartUrl, portalRect, shouldOpenInRealChrome, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserLoginPlace, realBrowserPost, realBrowserSend, realBrowserShot, sameRect, type PortalRect } from "./realBrowser";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { shouldOpenInRealChrome, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
@@ -127,54 +126,6 @@ export function BrowserTab({ view, active, device = null }: {
   realRef.current = real;
   const viewRealRef = useRef(view.realChrome);
   viewRealRef.current = view.realChrome;
-  const viewUrlRef = useRef(view.url);
-  viewUrlRef.current = view.url;
-  // Login numa conta: o perfil está aberto num Chrome comum, numa janela própria. Ao fechá-la, o
-  // Portal volta (`realKey` remonta a vista, que reabre o perfil já com a sessão).
-  const [loggingIn, setLoggingIn] = useState(false);
-  const [realKey, setRealKey] = useState(0);
-  // Durante o login, a janela do Chrome fica em cima do Portal: acompanha o Portal a cada quadro (canvas
-  // arrastado, zoom, painel aberto) e a janela do app quando ela se move. Fora de vista, ela se esconde.
-  useEffect(() => {
-    if (!loggingIn) return;
-    let last: PortalRect | undefined;
-    let frame = 0;
-    const tick = () => {
-      const rect = portalRect(column.current);
-      if (last === undefined || !sameRect(rect, last)) {
-        last = rect;
-        realBrowserLoginPlace(rect).catch(() => undefined);
-      }
-      frame = requestAnimationFrame(tick);
-    };
-    frame = requestAnimationFrame(tick);
-    const moved = getCurrentWindow().onMoved(() => { last = undefined; });
-    return () => {
-      cancelAnimationFrame(frame);
-      moved.then((off) => off());
-      realBrowserLoginPlace(null).catch(() => undefined);
-    };
-  }, [loggingIn]);
-  useEffect(() => {
-    const off = listen("real-browser-login-done", () => {
-      // Volta fora da página de login: nela o Portal só mostraria o aviso de novo.
-      if (isGoogleSignIn(viewUrlRef.current)) {
-        const url = "https://myaccount.google.com/";
-        setAddress(url);
-        updateView(view.id, { url, title: "myaccount.google.com" });
-      }
-      setLoggingIn(false);
-      setRealKey((k) => k + 1);
-    });
-    return () => { off.then((f) => f()); };
-  }, [updateView, view.id]);
-  const startLogin = () => {
-    setLoggingIn(true);
-    realBrowserLogin(loginStartUrl(address), portalRect(column.current)).catch((e) => {
-      setLoggingIn(false);
-      setError(String(e));
-    });
-  };
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [picks, setPicks] = useState<PickedElement[]>([]);
@@ -316,11 +267,22 @@ export function BrowserTab({ view, active, device = null }: {
       return t("browser.invalidUrl");
     }
     if (realRef.current || shouldOpenInRealChrome(url, viewRealRef.current)) {
-      // Quem navega é a vista do Chrome real, quando a URL dela muda (ou ao terminar de abrir). Um site de
-      // fora liga o Chrome real sozinho (ver `shouldOpenInRealChrome`): a pessoa pode desligar no botão.
+      // No navegador nativo só isto navega (como a barra do T3): a URL que a página informa nunca volta como
+      // navegação. Ainda fechado, ele abre já nesta URL. Um site de fora liga o navegador nativo sozinho (ver
+      // `shouldOpenInRealChrome`): a pessoa pode desligar no botão.
       setAddress(url);
       setError(null);
-      updateView(view.id, realRef.current ? { url, title: new URL(url).host } : { url, title: new URL(url).host, realChrome: true });
+      if (realRef.current) {
+        try {
+          await realBrowserNavigate(view.id, url);
+        } catch (e) {
+          setError(String(e));
+          return String(e);
+        }
+        updateView(view.id, { url, title: new URL(url).host });
+      } else {
+        updateView(view.id, { url, title: new URL(url).host, realChrome: true });
+      }
       return null;
     }
     try {
@@ -367,8 +329,7 @@ export function BrowserTab({ view, active, device = null }: {
     },
     history: (action) => {
       if (realRef.current) {
-        if (action === "reload") realBrowserSend(view.id, "Page.reload", {}).catch(() => undefined);
-        else realBrowserHistory(view.id, action === "back" ? -1 : 1).catch(() => undefined);
+        realBrowserHistory(view.id, action === "reload" ? 0 : action === "back" ? -1 : 1).catch(() => undefined);
         return;
       }
       if (action === "reload") reload();
@@ -830,7 +791,7 @@ export function BrowserTab({ view, active, device = null }: {
         <ArrowRightIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
       <ToolButton label={t("browser.reload")} disabled={!target && !real}
-        onClick={() => real ? realBrowserSend(view.id, "Page.reload", {}).catch(console.error) : reload()}>
+        onClick={() => real ? realBrowserHistory(view.id, 0).catch(console.error) : reload()}>
         <RefreshIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
     </>
@@ -893,11 +854,6 @@ export function BrowserTab({ view, active, device = null }: {
         onClick={() => updateView(view.id, { realChrome: !real })}>
         <GlobeIcon className="w-4 h-4" />
       </ToolButton>
-      {real && (
-        <ToolButton label={t("browser.real.loginHint")} active={loggingIn} disabled={loggingIn} onClick={startLogin}>
-          <AccountCircleIcon className="w-4 h-4" />
-        </ToolButton>
-      )}
       <ZoomControl zoom={zoom} disabled={(!target && !real) || !!frozen}
         onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
       <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
@@ -978,9 +934,9 @@ export function BrowserTab({ view, active, device = null }: {
   return (
     <div ref={root} className={`flex flex-col h-full min-h-0 transition-colors duration-300 ${device ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
       {/* No login, a barra que vale é a da janela do Chrome (é nela que se confere o endereço): a do Portal some. */}
-      {device || (real && loggingIn) ? null : toolbar}
+      {device ? null : toolbar}
 
-      {viewport && !device && !(real && loggingIn) && (
+      {viewport && !device && (
         // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
           <DeviceBar
@@ -1003,27 +959,11 @@ export function BrowserTab({ view, active, device = null }: {
       <div className={`flex flex-1 min-h-0 ${compact ? "flex-col" : ""}`}>
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
-          {real && loggingIn ? (
-            <div className="flex flex-1 flex-col gap-3 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
-              <p className="max-w-sm">{t("browser.real.loggingIn")}</p>
-              <Button variant="custom" onClick={() => realBrowserLoginFinish().catch((e) => setError(String(e)))}
-                className="px-3 h-8 rounded-full text-[12px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
-                {t("browser.real.loginDone")}
-              </Button>
-            </div>
-          ) : real && isGoogleSignIn(address) ? (
-            <div className="flex flex-1 flex-col gap-3 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
-              <p className="max-w-sm">{t("browser.real.signInHere")}</p>
-              <Button variant="custom" onClick={startLogin}
-                className="px-3 h-8 rounded-full text-[12px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
-                {t("browser.real.login")}
-              </Button>
-            </div>
-          ) : real ? (
-            <RealBrowserView key={realKey} viewId={view.id} url={view.url} zoom={zoom} script={INJECTED} onError={setError}
+          {real ? (
+            <RealBrowserView viewId={view.id} url={view.url} zoom={zoom} script={INJECTED} onError={setError}
               onUrl={(u) => {
                 setAddress(u);
-                try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* chrome://, about: */ }
+                try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* about:blank */ }
               }} />
           ) : target ? (
             <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom} device={device}>
