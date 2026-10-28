@@ -67,7 +67,7 @@ const Divider = () => <span aria-hidden className="w-px h-5 mx-0.5 bg-black/10 d
  * volver a "seleccionar".
  */
 export function CanvasToolbar({
-  tool, onTool, armed, onArm, lastPlaced, defaultSize, onUseSize, onResetSize, onImage, style, onStyle, onUndo, canUndo,
+  tool, onTool, armed, onArm, lastPlaced, defaultSize, onUseSize, onResetSize, onImage, onGemini, style, onStyle, onUndo, canUndo,
 }: {
   tool: Tool;
   onTool: (tool: Tool) => void;
@@ -81,6 +81,7 @@ export function CanvasToolbar({
   onUseSize: () => void;
   onResetSize: () => void;
   onImage: () => void;
+  onGemini?: () => void;
   style: DrawStyle;
   onStyle: (style: DrawStyle) => void;
   onUndo: () => void;
@@ -101,6 +102,7 @@ export function CanvasToolbar({
         <ToolButton label={t("canvas.tool.portal")} active={armed === "portal"} onClick={() => { onTool("select"); onArm(armed === "portal" ? null : "portal"); }}>{ICONS.portal}</ToolButton>
         <ToolButton label={t("canvas.tool.device")} active={armed === "device"} onClick={() => { onTool("select"); onArm(armed === "device" ? null : "device"); }}>{ICONS.device}</ToolButton>
         <ToolButton label={t("canvas.tool.text")} active={armed === "text"} onClick={() => { onTool("select"); onArm(armed === "text" ? null : "text"); }}>{ICONS.text}</ToolButton>
+        {onGemini && <ToolButton label={t("geminiDesktop.open")} onClick={onGemini}><span aria-hidden="true">✦</span></ToolButton>}
         <Divider />
         <ToolButton label={t("canvas.tool.draw")} active={drawing} onClick={() => { onArm(null); onTool(tool === "draw" ? "select" : "draw"); }}>{ICONS.draw}</ToolButton>
       </div>

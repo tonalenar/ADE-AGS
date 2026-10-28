@@ -282,12 +282,12 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
   return (
     <div className="grid grid-cols-1 gap-y-3.5 pt-1">
       <Field label={t("squads.form.provider")}>
-        <PopupSelect className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, reasoningEffort: null, fastMode: false, accountId: null, autoAccount: true })}>
+        <PopupSelect className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, complexity: null, reasoningEffort: null, fastMode: false, accountId: null, autoAccount: true })}>
           <option value="">{t("squads.form.chooseProvider")}</option>
           {agentId && (!roster || !roster.agents.some((agent) => agent.agentId === agentId)) && (
             <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>
           )}
-          {roster?.agents.filter((agent) => lead || agent.capabilities.headless).map((agent) => (
+          {roster?.agents.filter((agent) => lead || agent.capabilities.headless || agent.agentId === "gemini-desktop").map((agent) => (
             <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, lead)}>
               {agent.label}
             </option>
@@ -298,14 +298,14 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
           <span className="text-[10px] text-amber-700 dark:text-amber-300">{selectedAgent.unavailable ?? t("squads.unavailable")}</span>
         )}
       </Field>
-      <ModelSelector roster={roster} agentId={agentId} accountId={accountId} autoAccount={autoAccount}
-        model={model} reasoningEffort={reasoningEffort} complexity={complexity} onChange={onChange} onRoster={onRoster} />
+      {agentId === "gemini-desktop" ? <p className="text-xs text-blue-600 dark:text-blue-300">{t("geminiDesktop.squadHint")}</p> : <ModelSelector roster={roster} agentId={agentId} accountId={accountId} autoAccount={autoAccount}
+        model={model} reasoningEffort={reasoningEffort} complexity={complexity} onChange={onChange} onRoster={onRoster} />}
       {agentId === "codex" && (
         <FastSwitch checked={fastMode === true} model={model} catalog={modelsForAccount(selectedAgent, accountId, autoAccount)}
           onChange={(fast) => onChange({ fastMode: fast })} />
       )}
       <Field group label={t("squads.form.account")}>
-        {agentId ? (
+        {agentId === "gemini-desktop" ? <span className="text-xs">{t("geminiDesktop.appAccount")}</span> : agentId ? (
           <AccountPickerStep agentId={agentId} value={accountValue}
             onChange={(value) => {
               const nextAuto = value === AUTO_ACCOUNT;

@@ -2,13 +2,14 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { Mission } from "../types";
 import type { Squad } from "@/features/squads/types";
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), addTab: vi.fn(), send: vi.fn(), board: vi.fn() }));
+const mocks = vi.hoisted(() => ({ invoke: vi.fn(), addTab: vi.fn(), send: vi.fn(), board: vi.fn(), addPortal: vi.fn(), openGemini: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@/features/accounts/store", () => ({ useAccountsStore: { getState: () => ({ accounts: [] }) } }));
 vi.mock("@/features/tabs/store", () => ({ useTabsStore: { getState: () => ({
   addTab: mocks.addTab, activateTab: vi.fn(), detectedAgents: [{ id: "codex", command: "codex", available: true }],
 }) } }));
-vi.mock("@/features/canvas/store", () => ({ canvasActions: { buildMissionTeam: mocks.board }, missionBoardKey: () => "mission-board", setWorkMode: vi.fn() }));
+vi.mock("@/features/canvas/store", () => ({ canvasActions: { buildMissionTeam: mocks.board, addPortal: mocks.addPortal }, missionBoardKey: () => "mission-board", setWorkMode: vi.fn() }));
+vi.mock("@/features/tabs/viewStore", () => ({ useViewTabsStore: { getState: () => ({openGemini:mocks.openGemini}) } }));
 vi.mock("@/features/terminal/terminalRegistry", () => ({ sendWhenReady: mocks.send }));
 vi.mock("../autonomy", () => ({ getAutonomy: () => "safe", withAutonomy: (_id: string, command: string) => command }));
 vi.mock("../turns", () => ({ missionTurns: { start: vi.fn() } }));
@@ -21,7 +22,20 @@ const workspace = (name: string, path: string) => ({ name, cwd: path, root: path
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.addTab.mockReset();
+  mocks.addPortal.mockReturnValue({id:"portal-gemini"});
   mocks.addTab.mockReturnValueOnce("lead").mockReturnValueOnce("member");
+});
+
+it("starts a local-app Gemini lead alongside a real worker without launching a Gemini PTY", async () => {
+  mocks.invoke.mockResolvedValueOnce({installed:true}).mockResolvedValueOnce({workspaces:[workspace("Orquestrador","C:/wt/lead"),workspace("Backend","C:/wt/backend")],precheck:"",memory:""}).mockResolvedValue({});
+  const desktopSquad = {...squad,lead:{...squad.lead,agentId:"gemini-desktop"}};
+  const result = await startMissionInTerminals(mission,desktopSquad,[{id:"backend",label:"Backend",description:"API",instructions:"Build API"}]);
+  expect(result.leadTabId).toBe("portal-gemini");
+  expect(mocks.addTab).toHaveBeenCalledTimes(1);
+  expect(mocks.addTab.mock.calls[0][0].agent.id).toBe("codex");
+  expect(mocks.openGemini).toHaveBeenCalledWith(mission.cwd);
+  expect(mocks.invoke.mock.calls.find(([command]) => command==="gemini_desktop_consult_create")?.[1].prompt).toContain("INTEGRAÇÃO ADE PELO GEMINI DESKTOP");
 });
 
 it("prepares isolation before starting, launches each pane in its own cwd and includes known context", async () => {

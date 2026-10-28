@@ -94,7 +94,7 @@ pub(crate) struct OpenTab {
 pub(super) fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
     let listed = tab_list(app)?;
     let rows = listed.get("tabs").and_then(Value::as_array).cloned().unwrap_or_default();
-    Ok(rows
+    let mut tabs: Vec<OpenTab> = rows
         .iter()
         .filter_map(|r| {
             let id = r.get("id")?.as_str()?.to_string();
@@ -115,7 +115,74 @@ pub(super) fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
                 window: r.get("window").and_then(Value::as_str).unwrap_or("").to_string(),
             })
         })
-        .collect())
+        .collect();
+    for (key, board) in crate::canvas::load_boards() {
+        let Some((window, scope)) = key.split_once('|') else { continue };
+        let cwd = scope.split("#m:").next().unwrap_or(scope);
+        for (id, portal) in board.portals {
+            if portal.kind.as_deref()!=Some("gemini") || tabs.iter().any(|t|t.id==id) { continue; }
+            tabs.push(OpenTab { id, name:portal.name, agent:"Gemini Desktop · aplicativo local".into(),
+                agent_id:crate::desktop_apps::GEMINI_DESKTOP.into(),cwd:cwd.into(),window:window.into() });
+        }
+    }
+    Ok(tabs)
+}
+
+fn queue_gemini(app: &AppHandle, target: &OpenTab, kind: &str, from: &str, name: &str, text: &str) -> Result<Value,String> {
+    let result = crate::desktop_apps::task_dispatch(app,"consult",&json!({"cwd":target.cwd,"prompt":format!("Mensagem de {name} (ADE id: {from}):\n{text}\n\nResponda diretamente ao agente. Não afirme ter usado ferramentas da ADE nem executado ações que não realizou.")}))?;
+    emit_peer_message(app,kind,from,Some(&target.id),Some(text),Some(text));
+    let mode = result.get("mode").and_then(Value::as_str).unwrap_or("queued");
+    Ok(json!({"peer":describe(target),"sent":false,"queued":true,"finished":false,"mode":mode,"consult":result,
+        "message":if mode=="automatic" { "Queued for delivery through the connected Gemini Desktop session. Its reply will be captured automatically. Read the consultation id with ags gemini result." } else { "Queued until Gemini Desktop is connected. Read the consultation id with ags gemini result." }}))
+}
+
+fn wait_for_gemini_reply(app: &AppHandle, target: &OpenTab, queued: Value, timeout: Duration) -> Result<Value, String> {
+    let status = crate::desktop_apps::status();
+    let owner_cwd = if status.attached {
+        open_tabs(app)?.into_iter().find(|tab| Some(tab.id.as_str()) == status.owner_view.as_deref()).map(|tab| tab.cwd)
+    } else { None };
+    let same_workspace = status.owner_view.as_deref() == Some(target.id.as_str()) || owner_cwd.as_deref().is_some_and(|cwd| {
+        let owner = std::path::Path::new(cwd).canonicalize().unwrap_or_else(|_| cwd.into());
+        let target_path = std::path::Path::new(&target.cwd).canonicalize().unwrap_or_else(|_| target.cwd.clone().into());
+        owner.to_string_lossy().eq_ignore_ascii_case(&target_path.to_string_lossy())
+    });
+    if !status.attached || !same_workspace {
+        return Ok(queued);
+    }
+    let id = queued.pointer("/consult/task/id").and_then(Value::as_str)
+        .ok_or("Gemini consultation id was not returned")?.to_string();
+    let started = Instant::now();
+    loop {
+        let result = crate::desktop_apps::task_dispatch(app, "result", &json!({"cwd":target.cwd,"id":id}))?;
+        let task = result.get("task").ok_or("Gemini consultation result is unavailable")?;
+        let state = task.get("status").and_then(Value::as_str).unwrap_or("queued");
+        let response = task.get("response").and_then(Value::as_str).unwrap_or("");
+        if state == "completed" {
+            return Ok(json!({"peer":describe(target),"sent":true,"finished":true,"status":"finished","mode":"automatic",
+                "reply":[{"text":response}],"consultId":id}));
+        }
+        if state == "failed" || state == "cancelled" {
+            return Ok(json!({"peer":describe(target),"sent":true,"finished":false,"status":state,"mode":"automatic",
+                "reply":[],"error":task.get("error").cloned().unwrap_or(Value::Null),"consultId":id}));
+        }
+        if state == "working" && !response.is_empty() && task.get("role").and_then(Value::as_str) == Some("lead") {
+            return Ok(json!({"peer":describe(target),"sent":true,"finished":false,"status":"awaiting_plan_approval","mode":"automatic",
+                "reply":[{"text":response}],"consultId":id}));
+        }
+        if started.elapsed() >= timeout {
+            return Ok(json!({"peer":describe(target),"sent":true,"finished":false,"queued":true,"status":"timed_out","mode":"automatic",
+                "reply":[],"consultId":id,"note":"Gemini is still working. Read the consultation result later with ags gemini result."}));
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+}
+
+#[tauri::command]
+pub async fn gemini_desktop_peer_send(app: AppHandle, window: tauri::WebviewWindow, from: String, to: String, text: String) -> Result<Value,String> {
+    if text.trim().is_empty() || text.len()>65536 { return Err("Message must contain 1–65536 bytes".into()); }
+    let owned = crate::canvas::load_boards().iter().any(|(key,b)|key.starts_with(&format!("{}|",window.label())) && b.portals.get(&from).is_some_and(|p|p.kind.as_deref()==Some("gemini")));
+    if !owned { return Err("Gemini node does not belong to this window".into()); }
+    tauri::async_runtime::spawn_blocking(move ||peer_tell(&app,&json!({"from":from,"to":to,"text":text}))).await.map_err(|e|e.to_string())?
 }
 
 pub(super) fn caller(args: &Value) -> Result<String, String> {
@@ -671,6 +738,9 @@ pub(super) fn peer_check(app: &AppHandle, args: &Value) -> Result<Value, String>
     let to = arg_str(args, "to")?;
     let (_, list) = peers(app, &from)?;
     let target = resolve_peer(&list, &to)?;
+    if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return Ok(json!({"peer":describe(target),"mode":"assisted","message":"Read the consultation returned by peer ask/tell using ags gemini result <id>. No terminal screen is available."}));
+    }
     let status = asks().lock().ok().and_then(|all| all.get(&target.id).cloned());
     let lines = arg_u64_opt(args, "lines").unwrap_or(60).clamp(1, 400);
     let shown = screen(app, target, None, lines)?;
@@ -718,6 +788,10 @@ fn notify_orchestrator(app: &AppHandle, from: &str, from_name: &str, peers: &[Op
     let Some(lead) = peers.iter().find(|peer| peer.id != from && crate::canvas::is_orchestrator(&boards, &peer.id)) else {
         return;
     };
+    if lead.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        let _ = queue_gemini(app,lead,"tell",from,from_name,message);
+        return;
+    }
     let Ok(pty) = pty_id_for_tab(app, &lead.id, Some(&lead.window)) else { return };
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(20), false);
     if submit_prompt(pty, &outgoing(from_name, message, false, false)).is_ok() {
@@ -731,7 +805,6 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let text = arg_str(args, "text")?;
     let (me, list) = peers(app, &from)?;
     let target = resolve_peer(&list, &to)?;
-    let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
     let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
     let prepared = prepare_canvas_tell(app, &from, &from_name, target, &text)?;
     let text = match prepared {
@@ -749,6 +822,8 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
         TellBody::Send(body) => body,
     };
 
+    if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP { return queue_gemini(app,target,"tell",&from,&from_name,&text); }
+    let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
     // Não se interrompe quem está no meio de um turno, mas também não se prende o remetente:
     // quieto em poucos segundos, vai já; senão entra na fila do destino e é entregue quando ele
     // terminar o turno (ver `deliver_now_or_queue`).
@@ -829,6 +904,10 @@ pub(crate) fn parse_batch(raw: &Value) -> Result<Vec<(String, String)>, String> 
 /// Uma pergunta a um agente conectado, esperando o turno dele. É o que `peer ask` faz com
 /// um destino e o que `peer ask --batch` faz com vários ao mesmo tempo.
 fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, text: &str, timeout: Duration, raw: bool) -> Result<Value, String> {
+    if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        let queued = queue_gemini(app,target,"ask",from_id,from_name,text)?;
+        return wait_for_gemini_reply(app,target,queued,timeout);
+    }
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
     let started_ms = crate::util::now_ts_ms();
     let started = Instant::now();

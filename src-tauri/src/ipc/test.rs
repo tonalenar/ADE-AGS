@@ -829,6 +829,14 @@ fn lo_que_manda_el_puente_mcp_lo_atienden_el_despachador_y_el_frontend() {
     assert!(orchestration.len() >= 9, "{orchestration:?}");
     for command in orchestration {
         assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
+        if let Some(operation) = command.strip_prefix("gemini.") {
+            assert!(
+                include_str!("commands/dispatch.rs").contains(&format!("crate::desktop_apps::task_dispatch(app, \"{operation}\"")),
+                "el despachador no deriva {command} al escritorio"
+            );
+            assert!(include_str!("../desktop_apps/tasks.rs").contains(&format!("\"{operation}\" =>")), "el escritorio no atiende {command}");
+            continue;
+        }
         assert!(
             include_str!("../runs/orchestration.rs").contains(&format!("\"{command}\"")),
             "la orquestación no atiende {command}"

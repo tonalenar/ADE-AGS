@@ -60,6 +60,7 @@ fn valid_key(key: &str) -> bool {
 /// Codex structured output requires closed objects and every property in required.
 /// Reject incompatible schemas without rewriting their meaning or launching inference.
 pub fn validate_result_schema(agent: &str, schema: &serde_json::Value) -> Result<(), String> {
+    if agent == crate::desktop_apps::GEMINI_DESKTOP { return Err("Gemini Desktop cannot enforce result_schema".into()); }
     if agent != "codex" { return Ok(()); }
     if schema.get("type").and_then(serde_json::Value::as_str) != Some("object") {
         return Err("result_schema do Codex: a raiz deve ter type=object".into());

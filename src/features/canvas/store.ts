@@ -25,9 +25,12 @@ interface CanvasState {
   /** Dónde dibujar cada terminal viva del canvas visible, por id de tab. Lo calcula
    *  `CanvasView` en cada movimiento y lo lee `TerminalPanel`. */
   liveRects: Record<string, Rect>;
+  desktopRects: Record<string, Rect>;
+  desktopFocus: { key: string; id: string; nonce: number } | null;
 }
 
-export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {} }));
+export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, desktopRects: {}, desktopFocus: null }));
+let desktopFocusSequence = 0;
 
 let windowLabel = "main";
 
@@ -123,7 +126,7 @@ export function parseGrids(raw: string | null): Record<string, boolean> {
 
 export function setWorkMode(key: string, mode: WorkMode): void {
   const modes = { ...useCanvasStore.getState().modes, [key]: mode };
-  useCanvasStore.setState({ modes, liveRects: {} });
+  useCanvasStore.setState({ modes, liveRects: {}, desktopRects: {} });
   try {
     localStorage.setItem(MODES_KEY, JSON.stringify(modes));
   } catch {
@@ -143,6 +146,7 @@ function updateBoard(key: string, fn: (b: Board) => Board): void {
 }
 
 export const canvasActions = {
+  focusDesktop: (key: string, id: string) => useCanvasStore.setState({ desktopFocus: { key, id, nonce: ++desktopFocusSequence } }),
   moveNode: (key: string, id: string, patch: Partial<Box>) =>
     updateBoard(key, (b) => {
       const note = b.notes[id];
@@ -185,7 +189,9 @@ export const canvasActions = {
   unstackNote: (key: string, id: string) => updateBoard(key, (b) => unstack(b, id)),
   /** Crea un portal y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectado a él. */
-  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number } }) => {
+  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini"; avd?: string; size?: { w: number; h: number } }) => {
+    const existing = portal.kind === "gemini" && Object.entries(useCanvasStore.getState().boards[key]?.portals ?? {}).find(([, p]) => p.kind === "gemini");
+    if (existing) return { id: existing[0], name: existing[1].name };
     const id = `${PORTAL_PREFIX}${crypto.randomUUID()}`;
     let name = "";
     updateBoard(key, (b) => {

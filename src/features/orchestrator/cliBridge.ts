@@ -8,6 +8,8 @@ import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/features/browser/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
+import { comparablePath } from "@/features/tabs/viewTabs";
+import i18n from "@/i18n";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { getAutonomy } from "@/features/missions/autonomy";
@@ -368,7 +370,13 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
 /** Engancha esta ventana al puente. Devuelve la función para desengancharla. */
 export function initCliBridge(): () => void {
   let unlisten: UnlistenFn | undefined;
+  let geminiUnlisten: UnlistenFn | undefined;
   let disposed = false;
+
+  listen<{ cwd: string }>("gemini-desktop-consult-created", (event) => {
+    if (disposed || !useTabsStore.getState().tabs.some((tab) => comparablePath(tab.cwd) === comparablePath(event.payload.cwd))) return;
+    AlertaToast("Gemini Desktop", i18n.t("geminiDesktop.newConsult"), "info", 8000);
+  }).then((fn) => { if (disposed) fn(); else geminiUnlisten = fn; });
 
   listen<BridgeRequest>("cc-cli-request", async (event) => {
     const { requestId, targetLabel, command, args } = event.payload;
@@ -394,5 +402,6 @@ export function initCliBridge(): () => void {
   return () => {
     disposed = true;
     unlisten?.();
+    geminiUnlisten?.();
   };
 }

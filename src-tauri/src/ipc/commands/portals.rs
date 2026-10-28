@@ -47,6 +47,7 @@ fn reachable(boards: &Boards, from: &str) -> Vec<Reachable> {
         .into_iter()
         .filter_map(|(key, id)| {
             let portal = boards.get(&key)?.portals.get(&id)?.clone();
+            if portal.kind.as_deref() == Some("gemini") { return None; }
             Some(Reachable { key, id, portal })
         })
         .collect()

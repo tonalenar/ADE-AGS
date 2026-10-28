@@ -51,6 +51,7 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::desktop_apps::configure_host_dpi();
     // Antes que nada abra la base: ~/.controlcode (nombre anterior) pasa a ~/.ags sin perder datos.
     crate::util::legacy::migrate_on_startup();
     // Si hay que subir el schema, acá solo se abre el archivo. La copia y la migración
@@ -81,6 +82,17 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::desktop_apps::gemini_desktop_status,
+            crate::desktop_apps::gemini_desktop_attach,
+            crate::desktop_apps::gemini_desktop_layout,
+            crate::desktop_apps::gemini_desktop_detach,
+            crate::desktop_apps::gemini_desktop_tasks,
+            crate::desktop_apps::gemini_desktop_consult_create,
+            crate::desktop_apps::gemini_desktop_task_update,
+            crate::desktop_apps::gemini_desktop_task_retry,
+            crate::desktop_apps::gemini_desktop_execute,
+            crate::desktop_apps::participant::gemini_desktop_apply_plan,
+            crate::ipc::commands::peers::gemini_desktop_peer_send,
             crate::design::design_create,
             crate::design::design_delete,
             crate::design::design_archive,
@@ -515,6 +527,11 @@ pub fn run() {
                         return;
                     }
                 }
+                if let Err(error) = crate::desktop_apps::release_window(&label) {
+                    api.prevent_close();
+                    let _ = window.emit("gemini-desktop-error", error);
+                    return;
+                }
                 if let Some(db) = window.app_handle().try_state::<DbConnection>() {
                     let _ = crate::database::db_mark_window_closed(label, db);
                 }
@@ -605,7 +622,12 @@ pub fn run() {
                     // le dio paso, no se frena otra vez.
                     use crate::window::close_guard::{Decision, decide};
                     match decide(label) {
-                        Decision::Close => {}
+                        Decision::Close => {
+                            if let Err(error) = crate::desktop_apps::release_window(label) {
+                                api.prevent_exit();
+                                let _ = app_handle.emit("gemini-desktop-error", error);
+                            }
+                        }
                         Decision::Save => {
                             api.prevent_exit();
                             let _ = app_handle.emit("cc-close-requested", label);

@@ -77,6 +77,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         }
     }
     let result = match command {
+        "gemini.status" => crate::desktop_apps::task_dispatch(app, "status", args),
+        "gemini.consult" => crate::desktop_apps::task_dispatch(app, "consult", args),
+        "gemini.result" => crate::desktop_apps::task_dispatch(app, "result", args),
         "design.create" => design_command(app, command, args),
         "design.delete" => design_command(app, command, args),
         "design.archive" => design_command(app, command, args),

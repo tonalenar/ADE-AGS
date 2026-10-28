@@ -68,7 +68,12 @@ export interface BrowserView extends ViewBase {
   zoom?: number;
 }
 
-export type ViewTab = FileView | DiffView | BrowserView;
+export interface DesktopAppView extends ViewBase {
+  kind: "desktop";
+  app: "gemini";
+}
+
+export type ViewTab = FileView | DiffView | BrowserView | DesktopAppView;
 
 /** Qué muestra una tab, sin su identidad. `Omit` a secas no reparte sobre la unión. */
 export type ViewTarget = ViewTab extends infer V ? (V extends ViewTab ? Omit<V, "id" | "title"> : never) : never;
@@ -186,13 +191,13 @@ export function viewLabels(views: ViewTab[]): Map<string, { title: string; hint:
   const clashKey = (v: ViewTab) => `${v.kind}:${v.title}`;
   const byTitle = new Map<string, ViewTab[]>();
   for (const v of views) {
-    if (v.kind === "browser") continue;
+    if (v.kind === "browser" || v.kind === "desktop") continue;
     const list = byTitle.get(clashKey(v)) ?? [];
     list.push(v);
     byTitle.set(clashKey(v), list);
   }
   for (const v of views) {
-    if (v.kind === "browser") {
+    if (v.kind === "browser" || v.kind === "desktop") {
       out.set(v.id, { title: v.title, hint: null });
       continue;
     }

@@ -43,6 +43,7 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
     catch (cause) { setError(String(cause)); }
     finally { setLoading(false); }
   };
+  if (agentId === "gemini-desktop") return <p className="text-xs text-blue-600 dark:text-blue-300">{t("geminiDesktop.squadHint")}</p>;
   return <div className="flex flex-col gap-2" role="group" aria-label={t("squads.form.modelMode")}>
     <label htmlFor={`${id}-mode`} className="text-[12px] font-medium text-gray-600 dark:text-gray-300">{t("squads.form.modelMode")}</label>
     <PopupSelect className="w-full" id={`${id}-mode`} value={mode} disabled={!agentId}

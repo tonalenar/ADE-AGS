@@ -7,6 +7,8 @@ import { detectAgents } from "@/features/agents/ipc";
 import { accountProblemText } from "@/features/accounts/problem";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { comparablePath } from "@/features/tabs/viewTabs";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { HandoffView } from "./HandoffView";
@@ -95,6 +97,20 @@ export function FleetPage() {
   const openInTerminal = async (task: Task) => {
     setNotice(null);
     try {
+      if (task.agentId === "gemini-desktop") {
+        const cwd = runs.find((r) => r.id === task.runId)?.cwd ?? task.cwd;
+        const tabsState = useTabsStore.getState();
+        const tab = tabsState.tabs.find((t) => comparablePath(t.cwd) === comparablePath(cwd));
+        if (tab) tabsState.activateTab(tab.id);
+        else {
+          const shell = tabsState.detectedAgents.find((a) => a.id === "bash");
+          if (!shell) throw new Error("Abra um terminal deste workspace para acessar o painel Gemini.");
+          tabsState.addTab({cwd,agent:shell});
+        }
+        useViewTabsStore.getState().openGemini(cwd);
+        navigate("/workspace");
+        return;
+      }
       const ready = await handOffTask(task.id);
       if (!ready.sessionId) return;
       const agent = (await detectAgents()).find((a) => a.id === ready.agentId);

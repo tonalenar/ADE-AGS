@@ -11,6 +11,7 @@ mod bus;
 mod database;
 mod decisions;
 mod design;
+pub mod desktop_apps;
 pub mod build_info;
 #[cfg_attr(not(test), allow(dead_code))]
 mod build_fingerprint;

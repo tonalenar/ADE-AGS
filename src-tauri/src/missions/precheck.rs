@@ -304,6 +304,9 @@ mod test;
 pub(crate) fn validate_launch(roster: &crate::runs::roster::Roster, assignment: &crate::runs::routing::Assignment, now: i64) -> Result<(), String> {
     use crate::runs::roster::{ModelAvailability, ModelDiscoveryState};
     let agent = roster.agent(&assignment.agent_id).ok_or("missions.error.agentMissing")?;
+    if assignment.agent_id == crate::desktop_apps::GEMINI_DESKTOP && (assignment.model.is_some() || assignment.account_id.is_some()) {
+        return Err("Choose the Gemini Desktop model and account in its application".into());
+    }
     if !agent.installed { return Err("missions.error.agentMissing".into()); }
     let account = if agent.capabilities.accounts || !agent.accounts.is_empty() {
         // An absent system/default account is missing login state, not an accountless
