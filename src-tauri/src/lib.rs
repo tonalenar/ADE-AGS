@@ -21,6 +21,7 @@ mod floors;
 mod floors_land;
 mod forge;
 mod graphify;
+mod jev_tools;
 pub mod ipc;
 mod marketplace;
 mod memory;

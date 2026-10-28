@@ -39,7 +39,8 @@ import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 import { checkExpectation, parseExpectations, verifyReport } from "./expect";
 import { summarizeSnapshot } from "./finalSummary";
-import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type ParsedPage, type PilotDeps, type PilotResult } from "./jevPilot";
+import { cartCount, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, type ParsedPage, type PilotDeps, type PilotResult } from "./jevPilot";
+import { formatNotSaved, formatRun, formatSaved, parseInputs, parseReadSpec, recordingDeps, runTool, toolFrom, type JevTool } from "./jevTools";
 import { bareUrl, createLedger, forgetLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
 import { backendSink, withProgress } from "./actProgress";
 import { beginWindowMeasure } from "./windowBeat";
@@ -725,7 +726,12 @@ async function execute(
         return parsedExpects.every((e) => checkExpectation(e, page).ok);
       };
       const deps = { ...pilotDeps(host, waits, ledger), expectsMet };
-      const piloted = portalId ? withProgress(deps, backendSink(portalId)) : deps;
+      // `--save <nome>`: grava o caminho que o Jev achar e, se der certo, salva como ferramenta (ver `jevTools.ts`).
+      const save = str(request, "save");
+      const readSpec = save ? parseReadSpec(str(request, "read")) : null;
+      const recorder = save ? recordingDeps(deps, parseFills(fills)) : null;
+      const observed = recorder ? recorder.deps : deps;
+      const piloted = portalId ? withProgress(observed, backendSink(portalId)) : observed;
       let result: Awaited<ReturnType<typeof runPilot>> | undefined;
       try {
         result = await runPilot(goal, fills, num(request, "steps"), piloted);
@@ -735,7 +741,32 @@ async function execute(
       }
       // O resumo final traz o objetivo e a região principal antes do menu (O4), em vez do começo da página.
       const text = formatResult(goal, { ...result, window: await endMeasure(), finalSnapshot: summarizeSnapshot(result.finalSnapshot, goal) });
-      return verifyAct(host, waitsReport(text, waits), goal, result.outcome, expects);
+      const verified = await verifyAct(host, waitsReport(text, waits), goal, result.outcome, expects);
+      if (!save || !recorder || !readSpec) return verified;
+      const saved = await saveTool(save, goal, result, recorder.recording(), parseFills(fills), readSpec, expectsMet, bool(request, "replace"));
+      return `${verified}\n\n${saved}`;
+    }
+    case "run-tool": {
+      const tool = request.tool as JevTool | undefined;
+      if (!tool || typeof tool !== "object") throw new Error("Faltou a ferramenta.");
+      const inputs = parseInputs(Array.isArray(request.inputs) ? request.inputs.filter((i): i is string => typeof i === "string") : []);
+      const piloted = pilotDeps(host);
+      const result = await runTool(tool, inputs, {
+        navigate: async (url) => {
+          const mark = host.loadCount();
+          await host.navigate(url);
+          await host.waitForLoad(mark, 20_000);
+          try { await inPage(host, { op: "settle", fast: true, ceilingMs: 8_000 }, false); } catch { /* segue */ }
+        },
+        snapshot: () => inPage(host, { op: "snapshot", all: true, inView: false }, false),
+        click: piloted.click,
+        type: piloted.type,
+        select: piloted.select,
+        scroll: piloted.scroll,
+        evaluate: async (code) => JSON.parse(await inPage(host, { op: "eval", code }, false)),
+      });
+      piloted.finish(null);
+      return formatRun(tool, result);
     }
     default:
       throw new Error(`O navegador não sabe fazer '${op}'.`);
@@ -765,10 +796,38 @@ export async function runBrowserRequest(
  */
 export const PORTAL_OPS = new Set([
   "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
-  "wait", "screenshot", "console", "layout", "act", "reset",
+  "wait", "screenshot", "console", "layout", "act", "reset", "run-tool",
 ]);
 
 /** Confere o `act` contra a página como ficou (um snapshot completo, não só o que está à vista). Nunca lança: sem leitura, o relatório sai como estava. */
+/**
+ * Salva a gravação de um `act --save` como ferramenta, se o `act` chegou ao objetivo (e os `--expect` valem). Nunca lança:
+ * o `act` já foi feito, e o agente lê no relatório por que a ferramenta não foi salva.
+ */
+async function saveTool(
+  name: string,
+  goal: string,
+  result: PilotResult,
+  recording: ReturnType<ReturnType<typeof recordingDeps>["recording"]>,
+  fills: [string, string][],
+  read: ReturnType<typeof parseReadSpec>,
+  expectsMet: (() => Promise<boolean>) | undefined,
+  replace: boolean,
+): Promise<string> {
+  const why: string[] = [];
+  if (result.outcome !== "done") why.push(`o Jev não chegou ao objetivo (${result.outcome}): só um caminho que deu certo vira ferramenta`);
+  if (expectsMet && !(await expectsMet().catch(() => false))) why.push("os --expect não valem na página final");
+  if (why.length > 0) return formatNotSaved(name, why);
+  const built = toolFrom(name, goal, recording, fills, read);
+  if ("problems" in built) return formatNotSaved(name, built.problems);
+  try {
+    await invoke("jev_tool_save", { tool: built.tool, replace });
+  } catch (e) {
+    return formatNotSaved(name, [String(e)]);
+  }
+  return formatSaved(built.tool);
+}
+
 async function verifyAct(host: BrowserHost, report: string, goal: string, outcome: PilotResult["outcome"], expects: string[]): Promise<string> {
   if (outcome === "off" || outcome === "error" || (outcome !== "done" && expects.length === 0)) return report;
   try {

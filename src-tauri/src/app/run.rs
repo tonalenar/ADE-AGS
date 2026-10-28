@@ -92,6 +92,7 @@ pub fn run() {
         .register_uri_scheme_protocol("agsframe", |_ctx, request| crate::real_browser::frame_protocol(&request))
         .invoke_handler(tauri::generate_handler![
             crate::real_browser::real_browser_open,
+            crate::jev_tools::jev_tool_save,
             crate::real_browser::real_browser_send,
             crate::real_browser::real_browser_history,
             crate::real_browser::real_browser_close,
