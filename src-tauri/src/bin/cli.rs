@@ -211,9 +211,9 @@ MISSÕES (também sem interface: `ade-ags --headless`)
                                               Busca a memória vigente agora ou nesse instante (datas em UTC)
   memory history --mission <id> --key <nome> --scope workspace|mission
                                               Revisões aprovadas e seus intervalos de validade
-  memory suggest --mission <id> --key <nome> --body \"...\" [--scope workspace|mission]
+  memory suggest [--mission <id>] --key <nome> --body \"...\" [--scope workspace|mission]
                  [--kind decision|constraint|finding|file|note] [--priority 0-3]
-                                              SUGERE uma memória (fica pendente; o usuário aprova)
+                                              SUGERE uma memória (fica pendente; o usuário aprova); fora de missão, só --scope workspace
   mission accept <id> <tarefa>                Junta na integração da missão
   mission apply <id>                          Leva o aceito para o projeto
   mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]
@@ -297,6 +297,11 @@ SERVIDOR MCP (não é você quem digita: o app o inicia)
   O app o adiciona sozinho ao comando de cada tab do Claude Code, com um
   `--mcp-config` escrito em ~/.ags/mcp/. Não precisa instalar o CLI para
   funcionar: o arquivo aponta para o binário que vem dentro do app.
+
+GEMINI DESKTOP (Windows; consultas assistidas)
+  gemini status                               Estado do aplicativo original
+  gemini consult --cwd . --prompt \"...\"        Registrar um pedido para o painel Gemini
+  gemini result <id>                          Ler o estado e a resposta entregue
 
 OUTROS
   app status                                  Versão e estado do app
@@ -443,7 +448,7 @@ pub(crate) fn main() -> ExitCode {
         }
     } else { parsed };
     let mut parsed=parsed;
-    if command.starts_with("worktrees.") {
+    if command.starts_with("worktrees.") || command == "gemini.consult" {
         let requested=parsed.get("cwd").and_then(Value::as_str).unwrap_or(".");
         match std::path::absolute(requested) {
             Ok(path)=>{parsed["cwd"]=Value::String(path.to_string_lossy().into_owned());},
@@ -793,6 +798,7 @@ fn run_defaults(mut args: Value, shell_cwd: &std::path::Path) -> Result<Value, S
 
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
+        "gemini.result" => &["id"],
         "test.run" => &["suite"],
         "design.create" => &["title"],
         "design.get" | "design.delete" | "design.archive" | "design.approve.all" => &["designId"],

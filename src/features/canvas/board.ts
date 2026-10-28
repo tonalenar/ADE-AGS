@@ -39,7 +39,7 @@ export interface CanvasPortal {
   url: string;
   box: Box;
   /** `android` = la pantalla de un emulador o teléfono (ver `DeviceNode`), no un navegador. */
-  kind?: "android";
+  kind?: "android" | "gemini";
   /** El dispositivo de adb que muestra; sin él, el único que haya. */
   serial?: string;
   /** El emulador (AVD) que arranca. */
@@ -153,12 +153,13 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   // não sabe que ela é deste canvas). Antes a aresta sumia e o integrante saía de `ags peers` com a
   // aba viva: o orquestrador deixava de conseguir falar com ele.
   const edges = board.edges.filter((e) => (alive(e.a) && alive(e.b)) || (anywhere.has(e.a) && anywhere.has(e.b)));
-  const orchestrators = board.orchestrators.filter((id) => open.has(id));
+  const participant = (id: string) => open.has(id) || board.portals[id]?.kind === "gemini";
+  const orchestrators = board.orchestrators.filter(participant);
   // El papel de una tab cerrada se va con ella.
   const roleIds = Object.keys(board.roles);
-  const roles = roleIds.every((id) => open.has(id))
+  const roles = roleIds.every(participant)
     ? board.roles
-    : Object.fromEntries(Object.entries(board.roles).filter(([id]) => open.has(id)));
+    : Object.fromEntries(Object.entries(board.roles).filter(([id]) => participant(id)));
   const subagents = board.subagents.every((id) => open.has(id)) ? board.subagents : board.subagents.filter((id) => open.has(id));
 
   if (
@@ -188,9 +189,10 @@ export function buildMissionTeam(
   members: { tabId: string; roleId?: string | null; subagent?: boolean }[],
 ): Board {
   const ids = [leadId, ...members.map((m) => m.tabId)];
-  let next = reconcile(board, ids, ids);
+  const terminalIds = ids.filter((id) => board.portals[id]?.kind !== "gemini");
+  let next = reconcile(board, terminalIds, terminalIds);
   next = { ...next, orchestrators: next.orchestrators.includes(leadId) ? next.orchestrators : [...next.orchestrators, leadId] };
-  next = placeInGrid(next, ids);
+  next = placeInGrid(next, terminalIds);
   for (const m of members) {
     next = addEdge(next, leadId, m.tabId);
     if (m.roleId) next = { ...next, roles: { ...next.roles, [m.tabId]: m.roleId } };
@@ -577,11 +579,11 @@ export function uniquePortalName(board: Board, wanted: string, except?: string):
 /** Agrega un portal; con `near`, a la derecha de ese nodo y conectado a él. */
 export function addPortal(
   board: Board,
-  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } },
+  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } },
 ): { board: Board; name: string } {
   const android = portal.kind === "android";
-  const size = portal.size ?? (android ? PHONE_SIZE : PORTAL_SIZE);
-  const name = uniquePortalName(board, portal.name ?? (android ? "Android" : "Portal"));
+  const size = portal.size ?? (android ? PHONE_SIZE : portal.kind === "gemini" ? { w: 1000, h: 700 } : PORTAL_SIZE);
+  const name = uniquePortalName(board, portal.name ?? (android ? "Android" : portal.kind === "gemini" ? "Gemini Desktop" : "Portal"));
   const others = allBoxes(board);
   const anchor = portal.near ? boxOf(board, portal.near) : undefined;
   let box: Box;
@@ -598,6 +600,7 @@ export function addPortal(
   const made: CanvasPortal = {
     name, url: portal.url ?? "", box,
     ...(android ? { kind: "android" as const, ...(portal.avd ? { avd: portal.avd } : {}) } : {}),
+    ...(portal.kind === "gemini" ? { kind: "gemini" as const } : {}),
     ...(!android && portal.viewport ? { viewport: portal.viewport } : {}),
   };
   const next = { ...board, portals: { ...board.portals, [portal.id]: made } };
@@ -616,7 +619,9 @@ export function removePortal(board: Board, id: string): Board {
   if (!(id in board.portals)) return board;
   const portals = { ...board.portals };
   delete portals[id];
-  return { ...board, portals, edges: board.edges.filter((e) => e.a !== id && e.b !== id) };
+  const roles = { ...board.roles };
+  delete roles[id];
+  return { ...board, portals, roles, orchestrators: board.orchestrators.filter((o) => o !== id), edges: board.edges.filter((e) => e.a !== id && e.b !== id) };
 }
 
 // ── Textos, imágenes y trazos ───────────────────────────────────────

@@ -55,6 +55,7 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::desktop_apps::configure_host_dpi();
     // Antes que nada abra la base: ~/.controlcode (nombre anterior) pasa a ~/.ags sin perder datos.
     crate::util::legacy::migrate_on_startup();
     // Si hay que subir el schema, acá solo se abre el archivo. La copia y la migración
@@ -89,6 +90,17 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::desktop_apps::gemini_desktop_status,
+            crate::desktop_apps::gemini_desktop_attach,
+            crate::desktop_apps::gemini_desktop_layout,
+            crate::desktop_apps::gemini_desktop_detach,
+            crate::desktop_apps::gemini_desktop_tasks,
+            crate::desktop_apps::gemini_desktop_consult_create,
+            crate::desktop_apps::gemini_desktop_task_update,
+            crate::desktop_apps::gemini_desktop_task_retry,
+            crate::desktop_apps::gemini_desktop_execute,
+            crate::desktop_apps::participant::gemini_desktop_apply_plan,
+            crate::ipc::commands::peers::gemini_desktop_peer_send,
             crate::real_browser::real_browser_open,
             crate::real_browser::real_browser_place,
             crate::real_browser::real_browser_navigate,
@@ -451,6 +463,7 @@ pub fn run() {
             crate::accounts::antigravity_oauth::antigravity_oauth_cancel,
             crate::accounts::antigravity_oauth::antigravity_oauth_verify,
             crate::accounts::antigravity_access::antigravity_account_discovery,
+            crate::usage::agy::antigravity_cli_usage,
             crate::usage::agent_account_usage,
             crate::usage::claude_live_usage,
             crate::usage::mission_tokens,
@@ -527,6 +540,9 @@ pub fn run() {
             crate::database::db_delete_session_history,
             crate::session::session_markdown,
             crate::session::export_session_markdown,
+            // Painel lateral da aba ativa: contexto usado e conectores MCP
+            crate::session::panel::tab_context_usage,
+            crate::session::panel::tab_connectors,
             crate::agents::list_custom_agents,
             crate::agents::upsert_custom_agent,
             crate::agents::delete_custom_agent,
@@ -571,6 +587,11 @@ pub fn run() {
                         api.prevent_close();
                         return;
                     }
+                }
+                if let Err(error) = crate::desktop_apps::release_window(&label) {
+                    api.prevent_close();
+                    let _ = window.emit("gemini-desktop-error", error);
+                    return;
                 }
                 if let Some(db) = window.app_handle().try_state::<DbConnection>() {
                     let _ = crate::database::db_mark_window_closed(label, db);
@@ -666,7 +687,12 @@ pub fn run() {
                     // le dio paso, no se frena otra vez.
                     use crate::window::close_guard::{Decision, decide};
                     match decide(label) {
-                        Decision::Close => {}
+                        Decision::Close => {
+                            if let Err(error) = crate::desktop_apps::release_window(label) {
+                                api.prevent_exit();
+                                let _ = app_handle.emit("gemini-desktop-error", error);
+                            }
+                        }
                         Decision::Save => {
                             api.prevent_exit();
                             let _ = app_handle.emit("cc-close-requested", label);
