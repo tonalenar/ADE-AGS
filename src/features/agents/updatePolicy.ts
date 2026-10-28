@@ -16,6 +16,8 @@ export interface AgentUpdateInfo {
   canAutoUpdate: boolean;
   busy: boolean;
   reason: AgentUpdateReason | string | null;
+  /** Como foi instalado, quando a ADE sabe atualizar: `native`, `npm` ou `bun`. */
+  install?: "native" | "npm" | "bun" | null;
 }
 
 export interface AgentUpdateResult {

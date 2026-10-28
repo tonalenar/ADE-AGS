@@ -203,6 +203,9 @@ fn se_lee_lo_que_dicen_las_clis_sobre_el_login() {
     assert_eq!(parse_codex_status(true, "Logged in using ChatGPT\n").status, HealthStatus::Ok);
     let codex_sin = parse_codex_status(false, "WARNING: proceeding, even though…\nNot logged in\n");
     assert_eq!((codex_sin.status, codex_sin.detail.as_str()), (HealthStatus::NotLoggedIn, "Not logged in"));
+    // 0.164 cambió la línea de la API key: ya no empieza con "Logged in".
+    assert_eq!(parse_codex_status(true, "API key configured - sk-prueb***-1234\n").status, HealthStatus::Ok);
+    assert_eq!(parse_codex_status(false, "API key configured - sk-prueb***-1234\n").status, HealthStatus::NotLoggedIn);
 
     // `opencode auth list` (1.18), con sus colores.
     let con = parse_opencode_list("\u{1b}[34m●\u{1b}[39m  OpenCode Go \u{1b}[90mapi\n\u{1b}[90m└\u{1b}[39m  5 credentials\n");

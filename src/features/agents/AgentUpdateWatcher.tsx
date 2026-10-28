@@ -11,7 +11,7 @@ import { ptyForTab, ptyKill } from "@/features/terminal/ipc";
 import { exitAllWithSave } from "@/app/closeWithSave";
 
 import { agentUpdate, agentUpdatesCheck, agentUpdateWorkRunning, detectAgents } from "./ipc";
-import { updateAgentRestarting } from "./updateFlow";
+import { updateAgentRestarting, type UpdateFlowOutcome } from "./updateFlow";
 import { creep, STAGE_START, versionLine } from "./updateProgress";
 import {
   AUTO_CHECK_INTERVAL_MS,
@@ -71,6 +71,7 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
     if (creeping !== undefined) window.clearInterval(creeping);
     creeping = undefined;
   };
+  // Lo que sea que tire el flujo vuelve como fallo: el globo de progreso nunca queda colgado.
   const outcome = await updateAgentRestarting(info.agentId, {
     tabs: () => useTabsStore.getState().tabs,
     ptyForTab,
@@ -98,7 +99,13 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
         setProgress(current);
       }
     },
-  }).finally(stopCreeping);
+  })
+    .catch((error): UpdateFlowOutcome => ({
+      result: { agentId: info.agentId, ok: false, output: String(error), newVersion: null, error: "failed" },
+      reopened: 0,
+      appRestarting: false,
+    }))
+    .finally(stopCreeping);
   // Con reinicio de la app el globo queda en 100% hasta que la app se cierra; si no, se retira.
   if (!outcome.appRestarting) useBotToastStore.getState().dismiss(progressId);
   if (!outcome.appRestarting) announceResult(t, info.label, outcome.result);
@@ -139,14 +146,17 @@ export function AgentUpdateWatcher() {
           getSetting(AUTO_UPDATE_SETTING_KEY).then(isAutoUpdateEnabled).catch(() => false),
         ]);
         if (cancelled) return;
+        // Automático: actualiza solo los ociosos. Los que tienen una terminal abierta no se
+        // tocan solos, pero reciben el mismo aviso con el botón (antes no pasaba nada).
+        const handled = new Set<string>();
         if (auto) {
           for (const info of selectAutoUpdateTargets(infos)) {
             if (cancelled) return;
+            handled.add(info.agentId);
             await runUpdate(info).catch(console.error);
           }
-          return;
         }
-        for (const info of selectToastTargets(infos, notified)) {
+        for (const info of selectToastTargets(infos.filter((i) => !handled.has(i.agentId)), notified)) {
           notified.add(notifyKey(info));
           showBotToast({
             title: info.label,
