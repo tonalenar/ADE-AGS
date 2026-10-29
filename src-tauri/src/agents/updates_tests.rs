@@ -9,7 +9,7 @@ use crate::agents::AgentInfo;
 /// (1) Teste da tabela pura:
 /// - Cada agente de fábrica tem entrada na tabela com checar/atualizar oficiais quando aplicável.
 /// - Comandos são estáticos (sem shell interpolado, sem argumentos vindos de usuário/rede).
-/// - Agentes sem atualizador de fábrica (antigravity, kimi-code, bash) têm check/update como None.
+/// - Agentes sem atualizador de fábrica (opencode, antigravity, kimi-code, hermes, cursor, bash) têm check/update como None.
 /// - Política de não-npm: quando o agente não veio do npm, can_auto_update é negado com motivo "not_npm".
 #[test]
 fn test_update_table_factory_agents() {
@@ -55,7 +55,7 @@ fn test_update_table_factory_agents() {
                     &["install", "--global", "--ignore-scripts", "--no-audit", "--no-fund", "@google/gemini-cli"]
                 );
             }
-            "opencode" | "antigravity" | "kimi-code" | "hermes" | "bash" => {
+            "opencode" | "antigravity" | "kimi-code" | "hermes" | "cursor" | "bash" => {
                 assert_eq!(def.package, None);
                 assert_eq!(def.check, None);
                 assert_eq!(def.update, None);
@@ -459,4 +459,41 @@ fn ao_vivo_reconhece_o_codex_do_bun() {
     eprintln!("codex={} bin={} versão={:?}", path.display(), bin.trim(), bun_global_version(&listing, "@openai/codex"));
     assert!(bun_install_matches(&agent, def, &bin, &listing));
     assert_eq!(install_method(&agent, def, &OfficialExecutor), Some("bun"));
+}
+
+#[test]
+fn a_instalacao_so_roda_o_pacote_conhecido() {
+    let npm = choose_install("codex", false, true).expect("codex via npm");
+    assert_eq!(npm.program, "npm");
+    assert_eq!(
+        npm.args,
+        &["install", "--global", "--ignore-scripts", "--no-audit", "--no-fund", "@openai/codex"]
+    );
+    let bun = choose_install("gemini-cli", true, true).expect("gemini prefere bun");
+    assert_eq!(bun.program, "bun");
+    assert_eq!(bun.args, &["add", "--global", "@google/gemini-cli@latest"]);
+    let kimi = choose_install("kimi-code", false, true).expect("kimi via npm");
+    assert_eq!(kimi.args.last().copied(), Some("@moonshot-ai/kimi-code"));
+
+    for id in ["claude-code", "opencode", "hermes", "cursor", "antigravity", "bash"] {
+        assert_eq!(choose_install(id, true, true), None, "{id} não instala sozinho");
+    }
+
+    let mock = MockExecutor::new(Ok("added".into()));
+    let ok = install_with_executor("codex", false, false, true, &mock);
+    assert!(ok.ok);
+    assert_eq!(mock.executed.lock().unwrap().len(), 1);
+
+    let blocked = install_with_executor("cursor", false, true, true, &mock);
+    assert_eq!(blocked.error.as_deref(), Some("no_installer"));
+    let present = install_with_executor("codex", true, false, true, &mock);
+    assert_eq!(present.error.as_deref(), Some("already_installed"));
+    assert_eq!(mock.executed.lock().unwrap().len(), 1, "não roda de novo");
+
+    let offer = install_offer("opencode", true, true);
+    assert!(!offer.can_install);
+    assert_eq!(offer.manual.as_deref(), Some("npm install -g @opencode/cli"));
+    let missing_node = install_offer("codex", false, false);
+    assert!(missing_node.needs_runtime);
+    assert!(!missing_node.can_install);
 }

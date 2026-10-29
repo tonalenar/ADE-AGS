@@ -213,7 +213,16 @@ static CODEX: Codex = Codex;
 static OPENCODE: OpenCode = OpenCode;
 static KIMI: Kimi = Kimi;
 static HERMES: Hermes = Hermes;
+static CURSOR: Cursor = Cursor;
 static BASH: Bash = Bash;
+
+struct Cursor;
+
+impl AgentAdapter for Cursor {
+    fn def(&self) -> &'static AgentDef {
+        row("cursor")
+    }
+}
 
 /// El mismo orden que [`super::registry::AGENTS`]. La detección y el catálogo del frontend
 /// dependen de ese orden.
@@ -227,7 +236,7 @@ impl AgentAdapter for Antigravity {
     }
 }
 static ANTIGRAVITY: Antigravity = Antigravity;
-static ADAPTERS: [&dyn AgentAdapter; 8] = [&CLAUDE, &GEMINI, &CODEX, &OPENCODE, &KIMI, &HERMES, &ANTIGRAVITY, &BASH];
+static ADAPTERS: [&dyn AgentAdapter; 9] = [&CLAUDE, &GEMINI, &CODEX, &OPENCODE, &KIMI, &HERMES, &ANTIGRAVITY, &CURSOR, &BASH];
 
 /// Todos los providers de fábrica. No aloca: son estáticos.
 pub fn adapters() -> &'static [&'static dyn AgentAdapter] {

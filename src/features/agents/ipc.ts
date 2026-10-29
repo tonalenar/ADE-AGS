@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AgentInfo } from "@/features/tabs/types";
 
 import type { CustomAgent, CustomAgentDraft } from "./types";
+import type { AgentInstallOffer } from "./installPolicy";
 import type { AgentUpdateInfo, AgentUpdateResult } from "./updatePolicy";
 
 /** Qué TUIs de las soportadas de fábrica están instaladas en esta máquina. */
@@ -52,6 +53,12 @@ export const importLegacyCustomAgents = (agents: unknown[]) =>
   invoke<void>("import_legacy_custom_agents", { agents });
 
 export const agentUpdatesCheck = () => invoke<AgentUpdateInfo[]>("agent_updates_check");
+
+/** Quais CLIs ausentes a ADE instala sozinha, e o comando que ela só mostra. */
+export const agentInstallOffers = () => invoke<AgentInstallOffer[]>("agent_install_offers");
+
+export const agentInstall = (agentId: string) =>
+  invoke<AgentUpdateResult>("agent_install", { agentId });
 
 /** `terminalsReleased`: la pantalla ya cerró los procesos del agente (ver `updateFlow.ts`). */
 export const agentUpdate = (agentId: string, terminalsReleased = false) =>

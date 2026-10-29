@@ -172,6 +172,27 @@ fn un_programa_se_encuentra_en_el_path_sin_which() {
     std::fs::remove_dir_all(&root).ok();
 }
 
+/// O Claude do app e o Cursor Agent não ficam no PATH. Vale a versão mais nova do Claude,
+/// e só um arquivo executável.
+#[cfg(unix)]
+#[test]
+fn claude_e_cursor_empacotados_fora_do_path() {
+    use super::path_env::{bundled_executable, newest_claude_desktop};
+
+    let root = temp_dir("bundle");
+    let old = root.join("2.1.308/aaaa/claude.app/Contents/MacOS/claude");
+    let new = root.join("2.1.309/bbbb/claude.app/Contents/MacOS/claude");
+    executable(&old);
+    executable(&new);
+    assert_eq!(newest_claude_desktop(&root), Some(new));
+
+    let agent = root.join("cursor-agent");
+    assert_eq!(bundled_executable(&agent), None);
+    executable(&agent);
+    assert_eq!(bundled_executable(&agent).as_deref(), Some(agent.as_path()));
+    std::fs::remove_dir_all(&root).ok();
+}
+
 /// En Windows npm deja `opencode.cmd`, no `opencode.exe`. Buscar con las extensiones de
 /// `PATHEXT` es lo que permite lanzarlo: el `Command` de Rust solo completa `.exe`.
 #[cfg(unix)]

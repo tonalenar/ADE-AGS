@@ -376,6 +376,25 @@ pub const AGENTS: &[AgentDef] = &[
         mcp: McpStyle::None,
     },
     AgentDef {
+        // Cursor Agent (`cursor-agent`). O binário do app do Cursor (`cursor`) só abre o editor.
+        // Login: `cursor-agent login`. Não há variável verificada que isole a conta, nem formato
+        // de sessão em disco, nem jeito confirmado de injetar o MCP da ADE: a aba abre o agent,
+        // as skills do projeto vão para `.cursor/skills`, e o resto fica desligado de propósito.
+        id: "cursor",
+        label: "Cursor",
+        command: "cursor-agent",
+        launch_args: None,
+        version_flag: "--version",
+        skills_dir: Some(".cursor/skills"),
+        profile: None,
+        resume: None,
+        assign_session: None,
+        assign_id_prefix: "",
+        sessions: SessionSource::None,
+        models: ModelSource::Unknown,
+        mcp: McpStyle::None,
+    },
+    AgentDef {
         // No es una TUI de agente: es la salida de emergencia a una terminal pelada. Está
         // en la tabla porque el resto de la app la trata como un agente más (tiene id,
         // icono y tabs), pero no gestiona skills ni cuentas ni sesiones.

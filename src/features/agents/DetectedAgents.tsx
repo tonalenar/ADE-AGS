@@ -3,11 +3,15 @@ import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
 
+import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
+import { useAccountsStore } from "@/features/accounts/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
+import { AgentConnectPanel } from "./AgentConnectPanel";
 import { reasonText, runAgentUpdate } from "./AgentUpdateWatcher";
-import { agentSearchPath, agentUpdatesCheck, detectAgents, type SearchPath } from "./ipc";
+import { installRowState, type AgentInstallOffer } from "./installPolicy";
+import { agentInstall, agentInstallOffers, agentSearchPath, agentUpdatesCheck, detectAgents, type SearchPath } from "./ipc";
 import { updateButtonState, type AgentUpdateInfo } from "./updatePolicy";
 
 /**
@@ -28,15 +32,52 @@ export function DetectedAgents() {
   const [showPath, setShowPath] = useState(false);
   const [updates, setUpdates] = useState<Record<string, AgentUpdateInfo>>({});
   const [updating, setUpdating] = useState<string | null>(null);
+  const [offers, setOffers] = useState<Record<string, AgentInstallOffer>>({});
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [loginFor, setLoginFor] = useState<string | null>(null);
+  const loadAccounts = useAccountsStore((s) => s.load);
+  const accounts = useAccountsStore((s) => s.accounts);
+  const systemAccounts = useAccountsStore((s) => s.systemAccounts);
+
+  useEffect(() => { loadAccounts().catch(() => undefined); }, [loadAccounts]);
 
   const refreshUpdates = () =>
     agentUpdatesCheck()
       .then((list) => setUpdates(Object.fromEntries(list.map((u) => [u.agentId, u]))))
       .catch(() => setUpdates({}));
 
+  const refreshOffers = () =>
+    agentInstallOffers()
+      .then((list) => setOffers(Object.fromEntries(list.map((o) => [o.agentId, o]))))
+      .catch(() => setOffers({}));
+
   useEffect(() => {
     refreshUpdates();
+    refreshOffers();
   }, []);
+
+  const installError = (code: string | null) =>
+    t(`settings.tuis.install.reason.${code ?? "failed"}`, { defaultValue: t("settings.tuis.install.reason.failed") });
+
+  const runInstall = async (agentId: string, label: string) => {
+    setInstalling(agentId);
+    try {
+      const result = await agentInstall(agentId);
+      if (result.ok) {
+        AlertaToast(label, t("settings.tuis.install.done", { label }), "success", 5000);
+        setDetectedAgents(await detectAgents(true));
+        refreshOffers();
+        await loadAccounts();
+      } else {
+        AlertaToast(label, t("settings.tuis.install.failed", { label, error: installError(result.error) }), "error", 8000);
+      }
+    } catch (err) {
+      AlertaToast(label, t("settings.tuis.install.failed", { label, error: String(err) }), "error", 8000);
+    } finally {
+      setInstalling(null);
+    }
+  };
 
   const runUpdate = async (info: AgentUpdateInfo) => {
     setUpdating(info.agentId);
@@ -60,6 +101,7 @@ export function DetectedAgents() {
     try {
       setDetectedAgents(await detectAgents(true));
       refreshUpdates();
+      refreshOffers();
     } catch (e) {
       AlertaToast(t("settings.tuis.detected"), String(e), "error", 6000);
     } finally {
@@ -96,50 +138,101 @@ export function DetectedAgents() {
           const info = updates[agent.id];
           const btn = info ? updateButtonState(info, updating !== null) : null;
           const why = btn?.disabledReason ? reasonText(t, btn.disabledReason) : undefined;
+          const open = openId === agent.id;
+          const install = installRowState(agent.available, offers[agent.id], installing !== null || updating !== null);
+          const linked = agent.id === "antigravity"
+            ? null
+            : [...systemAccounts, ...accounts].filter((a) => a.agentId === agent.id).length;
           return (
-          <div key={agent.id} className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg
-            bg-gray-100/70 dark:bg-white/4">
-            {agent.available ? (
-              <CheckCircleIcon className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
-            ) : (
-              <span className="w-1.5 h-1.5 mx-1 rounded-full shrink-0 bg-gray-300 dark:bg-white/20" />
-            )}
-            <span className="w-28 shrink-0 truncate text-[12px] text-gray-800 dark:text-gray-100" title={agent.label}>
-              {agent.label}
-            </span>
-            <span className={`flex-1 min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/35
-              ${agent.available ? "font-mono" : ""}`} title={agent.available ? agent.path ?? agent.command : t("settings.tuis.notFound", { command: agent.command })}>
-              {agent.available
-                ? agent.path ?? agent.command
-                : t("settings.tuis.notFound", { command: agent.command })}
-            </span>
-            {agent.version && (
-              <span className="shrink-0 max-w-40 truncate text-[10.5px] text-gray-400 dark:text-white/35" title={agent.version}>
-                {agent.version}
+          <div key={agent.id} className="flex flex-col gap-1">
+            <div className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg
+              bg-gray-100/70 dark:bg-white/4">
+              {agent.available ? (
+                <CheckCircleIcon className="w-3.5 h-3.5 shrink-0 text-emerald-500" />
+              ) : (
+                <span className="w-1.5 h-1.5 mx-1 rounded-full shrink-0 bg-gray-300 dark:bg-white/20" />
+              )}
+              <span className="w-28 shrink-0 truncate text-[12px] text-gray-800 dark:text-gray-100" title={agent.label}>
+                {agent.label}
               </span>
-            )}
-            {info && btn?.visible && (
-              <>
-                <span className="shrink-0 text-[10.5px] text-emerald-600 dark:text-emerald-400">
-                  {t("agents.update.latest", { version: info.latestVersion })}
+              <span className={`flex-1 min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/35
+                ${agent.available ? "font-mono" : ""}`} title={agent.available ? agent.path ?? agent.command : t("settings.tuis.notFound", { command: agent.command })}>
+                {agent.available
+                  ? agent.path ?? agent.command
+                  : t("settings.tuis.notFound", { command: agent.command })}
+              </span>
+              {agent.version && (
+                <span className="shrink-0 max-w-40 truncate text-[10.5px] text-gray-400 dark:text-white/35" title={agent.version}>
+                  {agent.version}
                 </span>
-                <span title={why}>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={!btn.enabled}
-                    onClick={() => runUpdate(info)}
-                    leftIcon={updating === agent.id ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
-                  >
-                    {updating === agent.id ? t("agents.update.running") : t("agents.update.action")}
-                  </Button>
+              )}
+              {linked !== null && (
+                <span className="shrink-0 text-[10.5px] text-gray-400 dark:text-white/35">
+                  {linked === 0
+                    ? t("settings.tuis.connect.none")
+                    : t("settings.tuis.connect.count", { count: linked })}
                 </span>
-              </>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-expanded={open}
+                onClick={() => setOpenId(open ? null : agent.id)}
+              >
+                {open ? t("settings.tuis.connect.close") : t("settings.tuis.connect")}
+              </Button>
+              {install.kind === "button" && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={!install.enabled}
+                  onClick={() => runInstall(agent.id, agent.label)}
+                  leftIcon={installing === agent.id ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
+                >
+                  {installing === agent.id ? t("settings.tuis.install.running") : t("settings.tuis.install.action")}
+                </Button>
+              )}
+              {info && btn?.visible && (
+                <>
+                  <span className="shrink-0 text-[10.5px] text-emerald-600 dark:text-emerald-400">
+                    {t("agents.update.latest", { version: info.latestVersion })}
+                  </span>
+                  <span title={why}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={!btn.enabled}
+                      onClick={() => runUpdate(info)}
+                      leftIcon={updating === agent.id ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
+                    >
+                      {updating === agent.id ? t("agents.update.running") : t("agents.update.action")}
+                    </Button>
+                  </span>
+                </>
+              )}
+            </div>
+            {install.kind === "manual" && (
+              <p className="px-3 text-[10.5px] leading-relaxed text-gray-500 dark:text-white/40">
+                {t("settings.tuis.install.manual", { command: install.command })}
+              </p>
             )}
+            {install.kind === "runtime" && (
+              <p className="px-3 text-[10.5px] leading-relaxed text-gray-500 dark:text-white/40">
+                {t("settings.tuis.install.runtime")}
+              </p>
+            )}
+            {install.kind === "app" && (
+              <p className="px-3 text-[10.5px] leading-relaxed text-gray-500 dark:text-white/40">
+                {t("settings.tuis.install.app", { command: agent.command })}
+              </p>
+            )}
+            {open && <AgentConnectPanel agent={agent} onLogin={setLoginFor} />}
           </div>
           );
         })}
       </div>
+
+      {loginFor && <AddAccountDialog agentId={loginFor} onClose={() => setLoginFor(null)} />}
 
       {/* Cuando falta alguna, lo que sirve es saber dónde se buscó: la carpeta donde la
           instalaste tiene que estar en esta lista. */}

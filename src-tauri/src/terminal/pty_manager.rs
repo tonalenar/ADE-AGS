@@ -307,12 +307,27 @@ fn direct_launch(command: &str) -> Result<CommandBuilder, String> {
     }
     #[cfg(not(windows))]
     {
-        let mut cmd = CommandBuilder::new(program);
+        // O PTY só procura o nome no PATH dele. A detecção também acha o binário
+        // empacotado (Claude, Cursor). Sem a rota absoluta, a lista mostra o programa
+        // e o terminal responde que ele não existe.
+        let resolved = resolved_program(program);
+        let mut cmd = CommandBuilder::new(&resolved);
         for arg in parts {
             cmd.arg(arg);
         }
         Ok(cmd)
     }
+}
+
+/// Caminho com que o PTY abre o programa. Absoluto fica como está. Nome solto usa a
+/// mesma busca da lista (`find_program`); se ela não achar, o nome segue para o PTY.
+#[cfg(not(windows))]
+fn resolved_program(program: &str) -> std::path::PathBuf {
+    let path = std::path::Path::new(program);
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    crate::util::find_program(program).unwrap_or_else(|| path.to_path_buf())
 }
 
 /// El shell que ejecuta el script.
