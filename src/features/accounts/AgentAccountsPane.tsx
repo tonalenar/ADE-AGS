@@ -4,6 +4,7 @@ import {
   AddIcon, Avatar, Badge, Button, EmptyState, InfoIcon, Input, Tooltip, TrashIcon, UserIcon,
 } from "neogestify-ui-components";
 
+import { accountFormMode } from "@/features/agents/accountConnect";
 import { useAccountsStore } from "@/features/accounts/store";
 import type {
   AccountCapableAgent, AccountLimits, AccountUsageSummary, AgentAccount,
@@ -291,6 +292,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
     () => accounts.filter((a) => a.agentId === agent.agentId),
     [accounts, agent.agentId]
   );
+  const canAdd = accountFormMode(agent.agentId, agent.installed) !== "blocked";
   const system = useMemo(
     () => systemAccounts.filter((a) => a.agentId === agent.agentId),
     [systemAccounts, agent.agentId]
@@ -341,7 +343,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
         <Tooltip content={t("settings.accounts.add")} placement="bottom">
           <Button variant="icon"
             onClick={() => setAdding(true)}
-            disabled={!agent.installed}
+            disabled={!canAdd}
             aria-label={t("settings.accounts.add")}
             className="cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
               text-gray-400 dark:text-white/35
@@ -370,11 +372,12 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
             className="m-auto"
             icon={<UserIcon className="w-7 h-7" />}
             title={t("settings.accounts.emptyForAgent")}
+            description={!canAdd ? t("settings.accounts.add.needsProgram") : undefined}
             action={
               <Button
                 variant="primary"
                 size="sm"
-                disabled={!agent.installed}
+                disabled={!canAdd}
                 onClick={() => setAdding(true)}
               >
                 {t("settings.accounts.add")}

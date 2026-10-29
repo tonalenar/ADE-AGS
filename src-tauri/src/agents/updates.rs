@@ -39,6 +39,23 @@ pub struct UpdateDef {
 /// O bin global do bun (`~/.bun/bin`) e o que ele tem instalado. Fixos, sem argumento externo.
 pub const BUN_BIN: FixedCommand = FixedCommand { program: "bun", args: &["pm", "bin", "--global"] };
 pub const BUN_LIST: FixedCommand = FixedCommand { program: "bun", args: &["pm", "ls", "--global"] };
+/// Primeira instalação do Kimi. O pacote é o da documentação oficial (`npm install -g`);
+/// os flags são os mesmos do Codex e do Gemini. Não entra na atualização automática.
+const KIMI_INSTALL_NPM: FixedCommand = FixedCommand {
+    program: "npm",
+    args: &[
+        "install",
+        "--global",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        "@moonshot-ai/kimi-code",
+    ],
+};
+const KIMI_INSTALL_BUN: FixedCommand = FixedCommand {
+    program: "bun",
+    args: &["add", "--global", "@moonshot-ai/kimi-code@latest"],
+};
 macro_rules! npm_def {
     ($id:literal, $pkg:literal) => {
         UpdateDef {
@@ -110,6 +127,14 @@ pub const UPDATE_TABLE: &[UpdateDef] = &[
     UpdateDef {
         // Instalado por git no home do Hermes; ele mesmo se atualiza com `hermes update`.
         agent_id: "hermes",
+        package: None,
+        check: None,
+        update: None,
+        bun_update: None,
+    },
+    UpdateDef {
+        // O próprio CLI atualiza com `cursor-agent update`. Sem checagem só de leitura verificada.
+        agent_id: "cursor",
         package: None,
         check: None,
         update: None,
@@ -225,28 +250,33 @@ pub fn policy_reason(
     }
 }
 
+fn official_command(spec: FixedCommand) -> bool {
+    UPDATE_TABLE
+        .iter()
+        .any(|d| d.check == Some(spec) || d.update == Some(spec) || d.bun_update == Some(spec))
+        || spec == KIMI_INSTALL_NPM
+        || spec == KIMI_INSTALL_BUN
+        || spec == BUN_BIN
+        || spec == BUN_LIST
+        || spec
+            == (FixedCommand {
+                program: "npm",
+                args: &["root", "--global"],
+            })
+        || spec
+            == (FixedCommand {
+                program: "claude",
+                args: &["--version"],
+            })
+}
+
 pub trait UpdateExecutor {
     fn execute(&self, command: FixedCommand, timeout: Duration) -> Result<String, String>;
 }
 pub struct OfficialExecutor;
 impl UpdateExecutor for OfficialExecutor {
     fn execute(&self, spec: FixedCommand, timeout: Duration) -> Result<String, String> {
-        if !UPDATE_TABLE
-            .iter()
-            .any(|d| d.check == Some(spec) || d.update == Some(spec) || d.bun_update == Some(spec))
-            && spec != BUN_BIN
-            && spec != BUN_LIST
-            && spec
-                != (FixedCommand {
-                    program: "npm",
-                    args: &["root", "--global"],
-                })
-            && spec
-                != (FixedCommand {
-                    program: "claude",
-                    args: &["--version"],
-                })
-        {
+        if !official_command(spec) {
             return Err("failed".into());
         }
         let mut cmd = if spec.program == "npm" {
@@ -703,6 +733,159 @@ pub async fn agent_update(
             let _=conn.execute("INSERT INTO agent_update_log(agent_id,ok,error,output,new_version) VALUES(?1,?2,?3,?4,?5)",rusqlite::params![result.agent_id,result.ok,result.error,result.output,result.new_version]);
         } result
     }).await.unwrap_or(AgentUpdateResult {agent_id:fallback,ok:false,output:String::new(),new_version:None,error:Some("failed".into())})
+}
+
+/// npm e bun que instalam do zero, e o texto do instalador que a ADE não executa.
+///
+/// Só entra aqui um `npm install` / `bun add` já fixo na tabela, com `--ignore-scripts`.
+/// Instalador remoto (`curl | bash`, script do editor) fica em `manual` e a tela só mostra.
+pub fn install_slots(id: &str) -> (Option<FixedCommand>, Option<FixedCommand>, Option<&'static str>) {
+    if let Some(def) = update_def(id) {
+        let npm = def.update.filter(|c| c.program == "npm" && c.args.first().copied() == Some("install"));
+        if npm.is_some() || def.bun_update.is_some() {
+            return (npm, def.bun_update, None);
+        }
+    }
+    match id {
+        "kimi-code" => (Some(KIMI_INSTALL_NPM), Some(KIMI_INSTALL_BUN), None),
+        "claude-code" => (None, None, Some("npm install -g @anthropic-ai/claude-code")),
+        "opencode" => (None, None, Some("npm install -g @opencode/cli")),
+        "hermes" => (
+            None,
+            None,
+            Some(if cfg!(windows) {
+                "irm https://hermes-agent.nousresearch.com/install.ps1 | iex"
+            } else {
+                "curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash"
+            }),
+        ),
+        "cursor" => (
+            None,
+            None,
+            Some(if cfg!(windows) {
+                "irm 'https://cursor.com/install?win32=true' | iex"
+            } else {
+                "curl https://cursor.com/install -fsS | bash"
+            }),
+        ),
+        _ => (None, None, None),
+    }
+}
+
+pub fn choose_install(id: &str, bun_ok: bool, npm_ok: bool) -> Option<FixedCommand> {
+    let (npm, bun, _) = install_slots(id);
+    if bun_ok {
+        if let Some(cmd) = bun {
+            return Some(cmd);
+        }
+    }
+    if npm_ok { npm } else { None }
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentInstallOffer {
+    pub agent_id: String,
+    pub can_install: bool,
+    pub needs_runtime: bool,
+    pub manual: Option<String>,
+}
+
+pub fn install_offer(id: &str, bun_ok: bool, npm_ok: bool) -> AgentInstallOffer {
+    let (npm, bun, manual) = install_slots(id);
+    let can = choose_install(id, bun_ok, npm_ok).is_some();
+    AgentInstallOffer {
+        agent_id: id.into(),
+        can_install: can,
+        needs_runtime: !can && (npm.is_some() || bun.is_some()),
+        manual: if can { None } else { manual.map(str::to_string) },
+    }
+}
+
+pub fn install_with_executor(
+    id: &str,
+    available: bool,
+    bun_ok: bool,
+    npm_ok: bool,
+    exec: &impl UpdateExecutor,
+) -> AgentUpdateResult {
+    let mut result = AgentUpdateResult {
+        agent_id: id.into(),
+        ok: false,
+        output: String::new(),
+        new_version: None,
+        error: None,
+    };
+    if available {
+        result.error = Some("already_installed".into());
+        return result;
+    }
+    let Some(command) = choose_install(id, bun_ok, npm_ok) else {
+        let (npm, bun, _) = install_slots(id);
+        result.error = Some(if npm.is_some() || bun.is_some() { "need_npm" } else { "no_installer" }.into());
+        return result;
+    };
+    match exec.execute(command, UPDATE_TIMEOUT) {
+        Ok(output) => {
+            result.ok = true;
+            result.output = summarize(&output);
+        }
+        Err(e) => {
+            result.output = summarize(e.strip_prefix("failed:").unwrap_or(&e));
+            result.error = Some(if e == "timeout" { "timeout" } else { "failed" }.into());
+        }
+    }
+    result
+}
+
+fn runtime_present() -> (bool, bool) {
+    let bun_ok = crate::util::find_program("bun").is_some();
+    let npm_ok = crate::util::find_program("npm").is_some() && crate::util::find_program("node").is_some();
+    (bun_ok, npm_ok)
+}
+
+#[tauri::command]
+pub fn agent_install_offers() -> Vec<AgentInstallOffer> {
+    let (bun_ok, npm_ok) = runtime_present();
+    crate::agents::registry::AGENTS
+        .iter()
+        .filter(|a| a.id != "bash")
+        .map(|a| install_offer(a.id, bun_ok, npm_ok))
+        .collect()
+}
+
+#[tauri::command]
+pub async fn agent_install(agent_id: String) -> AgentUpdateResult {
+    let agents = super::detect_agents(Some(true)).await.unwrap_or_default();
+    let fallback = agent_id.clone();
+    tokio::task::spawn_blocking(move || {
+        let failure = |reason: &str| AgentUpdateResult {
+            agent_id: agent_id.clone(),
+            ok: false,
+            output: String::new(),
+            new_version: None,
+            error: Some(reason.into()),
+        };
+        let Ok(_gate) = UPDATE_GATE.try_write() else {
+            return failure("running");
+        };
+        if elevated() {
+            return failure("failed");
+        }
+        let available = agents.iter().any(|a| a.id == agent_id && a.available);
+        let (bun_ok, npm_ok) = runtime_present();
+        let result = install_with_executor(&agent_id, available, bun_ok, npm_ok, &OfficialExecutor);
+        eprintln!("agent_install agent={} ok={} error={:?}", result.agent_id, result.ok, result.error);
+        result
+    })
+    .await
+    .unwrap_or(AgentUpdateResult {
+        agent_id: fallback,
+        ok: false,
+        output: String::new(),
+        new_version: None,
+        error: Some("failed".into()),
+    })
 }
 
 #[cfg(test)]

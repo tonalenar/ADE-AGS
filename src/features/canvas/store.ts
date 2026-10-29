@@ -207,7 +207,7 @@ export const canvasActions = {
   unstackNote: (key: string, id: string) => updateBoard(key, (b) => unstack(b, id)),
   /** Crea un portal y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectado a él. */
-  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } }) => {
+  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini" | "ios"; avd?: string; udid?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } }) => {
     const existing = portal.kind === "gemini" && Object.entries(useCanvasStore.getState().boards[key]?.portals ?? {}).find(([, p]) => p.kind === "gemini");
     if (existing) return { id: existing[0], name: existing[1].name };
     const id = `${PORTAL_PREFIX}${crypto.randomUUID()}`;

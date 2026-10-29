@@ -97,6 +97,26 @@ fn sin_pasos_se_lanza_el_binario_directo_sin_shell() {
     assert_eq!(argv, vec!["ade-test-missing-agent", "--resume", "abc"]);
 }
 
+/// Um caminho absoluto não volta a ser só o nome: o PTY não procura fora do PATH.
+#[cfg(unix)]
+#[test]
+fn una_ruta_absoluta_se_lanza_tal_cual() {
+    let dir = std::env::temp_dir().join(format!("ags-launch-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let bin = dir.join("ags-cursor-fake");
+    std::fs::write(&bin, "#!/bin/sh\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(&bin).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&bin, perms).unwrap();
+    let cmd = build_launch(&format!("{} --version", bin.display()), &[]).unwrap();
+    let argv: Vec<String> =
+        cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    assert_eq!(argv[0], bin.to_string_lossy());
+    assert_eq!(argv[1], "--version");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// Con pre-comandos, el comando entero viaja como UN argumento del shell. Eso también
 /// hace que el `split_whitespace` de arriba no llegue a partirlo.
 #[test]

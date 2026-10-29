@@ -24,6 +24,14 @@ export function portalConnectedNotice(board: Board, a: string, b: string): { age
   if (!portalId || !agent || !(agent in board.nodes)) return null;
   const portal = board.portals[portalId];
   if (!portal || portal.kind === "android") return null;
+  if (portal.kind === "ios") {
+    return {
+      agent,
+      text: `[ADE AGS] O simulador iOS "${portal.name}" do canvas foi conectado a você. `
+        + `Pilote com \`ags device shot "${portal.name}"\` (foto + tamanho em pontos), \`tap --x --y\`, \`swipe\`, \`type\`, \`key\`, \`button home\`, \`open <url>\` (Safari do aparelho) e \`launch <bundle>\`. `
+        + `A pessoa conversa com você pelo painel do simulador: responda lá com \`ags device say "${portal.name}" "…"\`.`,
+    };
+  }
   const where = portal.url ? ` (${portal.url})` : "";
   return {
     agent,

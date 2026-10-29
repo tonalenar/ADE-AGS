@@ -33,6 +33,7 @@ const ICONS = {
   folder: <Svg><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></Svg>,
   portal: <Svg><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" /></Svg>,
   device: <Svg><rect x="7" y="2.5" width="10" height="19" rx="2" /><path d="M11 18.5h2" /></Svg>,
+  simulator: <Svg><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M10.5 5h3M11 18.5h2" /></Svg>,
   text: <span className="text-[15px] font-semibold leading-none">Aa</span>,
   draw: <Svg><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1Z" /><path d="M14 7l3 3" /></Svg>,
   erase: <Svg><path d="M7 20h11M5 13l8-8a2 2 0 0 1 3 0l3 3a2 2 0 0 1 0 3l-8 8H9l-4-4a2 2 0 0 1 0-2Z" /><path d="M9 9l6 6" /></Svg>,
@@ -104,6 +105,7 @@ export function CanvasToolbar({
         <ToolButton label={t("canvas.tool.folder")} active={armed === "folder"} onClick={() => { onTool("select"); onArm(armed === "folder" ? null : "folder"); }}>{ICONS.folder}</ToolButton>
         <ToolButton label={t("canvas.tool.portal")} active={armed === "portal"} onClick={() => { onTool("select"); onArm(armed === "portal" ? null : "portal"); }}>{ICONS.portal}</ToolButton>
         <ToolButton label={t("canvas.tool.device")} active={armed === "device"} onClick={() => { onTool("select"); onArm(armed === "device" ? null : "device"); }}>{ICONS.device}</ToolButton>
+        <ToolButton label={t("canvas.tool.simulator")} active={armed === "simulator"} onClick={() => { onTool("select"); onArm(armed === "simulator" ? null : "simulator"); }}>{ICONS.simulator}</ToolButton>
         <ToolButton label={t("canvas.tool.text")} active={armed === "text"} onClick={() => { onTool("select"); onArm(armed === "text" ? null : "text"); }}>{ICONS.text}</ToolButton>
         {onGemini && <ToolButton label={t("geminiDesktop.open")} onClick={onGemini}><span aria-hidden="true">✦</span></ToolButton>}
         <Divider />

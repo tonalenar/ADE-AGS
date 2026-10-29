@@ -34,6 +34,9 @@ import { ImageNode, TextNode, type ImageFlowNode, type TextFlowNode } from "./Ex
 import { DeviceNode } from "./DeviceNode";
 import { GeminiDesktopNode } from "@/features/desktopApps/GeminiDesktopNode";
 import { focusGeminiViewport, geminiCanvasRect } from "@/features/desktopApps/geometry";
+import { SimulatorNode } from "@/features/simulator/SimulatorNode";
+import { DEFAULT_SCREEN, nodeSize, SIM_SCALE } from "@/features/simulator/geometry";
+import { refreshDevices, useSimulatorStore } from "@/features/simulator/store";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
@@ -173,7 +176,8 @@ const noteSig = (n: NoteFlowNode) => [
   n.data.stack.map((s) => s.id + s.name).join(","), n.data.others.map((o) => o.id + o.name).join(","),
 ].join("|");
 const portalSig = (n: PortalFlowNode) =>
-  [n.id, n.data.portal.name, n.data.portal.url, boxSig(n.data.portal.box), n.selected, n.data.links, n.data.cwd].join("|");
+  [n.id, n.data.portal.name, n.data.portal.url, boxSig(n.data.portal.box), n.selected, n.data.links, n.data.cwd,
+    n.data.portal.kind, n.data.portal.udid, n.data.portal.chat].join("|");
 
 const textSig = (n: TextFlowNode) => [n.id, n.data.text.text, n.data.text.size, boxSig(n.data.text.box), n.selected].join("|");
 const folderSig = (n: FolderFlowNode) =>
@@ -589,6 +593,19 @@ function CanvasInner() {
       case "device":
         setSelectedNote(canvasActions.addPortal(key, { name: t("canvas.device.defaultName"), kind: "android", at, size }).id);
         break;
+      case "simulator": {
+        // O primeiro iPhone do Xcode (o ligado, se houver); a pessoa troca na barra. O tamanho é o do aparelho.
+        await refreshDevices();
+        const devices = useSimulatorStore.getState().devices;
+        const device = devices.find((d) => d.state === "booted" && d.family === "iphone") ?? devices.find((d) => d.family === "iphone") ?? devices[0];
+        const screen = device ? { width: device.width, height: device.height, family: device.family } : DEFAULT_SCREEN;
+        const made = canvasActions.addPortal(key, {
+          name: device?.name ?? t("simulator.defaultName"), kind: "ios", udid: device?.udid, at,
+          size: nodeSize(screen, SIM_SCALE.initial, false),
+        });
+        setSelectedNote(made.id);
+        break;
+      }
       case "text":
         setSelectedNote(canvasActions.addText(key, at, size));
         break;
@@ -1367,6 +1384,7 @@ const PortalBody = memo(function PortalBody({ view, active, device }: { view: Br
 const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowNode>) {
   const { data, selected } = props;
   if (data.portal.kind === "gemini") return <GeminiDesktopNode id={data.id} cwd={data.cwd} portal={data.portal} selected={!!selected} />;
+  if (data.portal.kind === "ios") return <SimulatorNode id={data.id} portal={data.portal} selected={!!selected} />;
   return data.portal.kind === "android"
     ? <DeviceNode id={data.id} portal={data.portal} links={data.links} selected={!!selected} />
     : <PortalNode {...props} />;

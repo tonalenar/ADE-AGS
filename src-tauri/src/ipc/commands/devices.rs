@@ -1,4 +1,4 @@
-//! Dispositivos Android del canvas, para los agentes: `ags device list|create|start|tap|swipe|type|key|launch|shot|tree`.
+//! Dispositivos Android del canvas, para los agentes: `ags device list|create|start|tap|swipe|type|key|launch|close|shot|tree`.
 //!
 //! Un dispositivo es un portal del canvas de tipo `android` (ver `crate::canvas::Portal`): su
 //! nodo muestra la pantalla de un emulador o un teléfono, y los agentes conectados con él lo
@@ -20,7 +20,8 @@ use crate::canvas::{self, Portal};
 use crate::ipc::bridge::{ask_frontend_within, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt};
 
-pub(crate) const ACTIONS: &[&str] = &["tap", "swipe", "type", "key", "launch", "shot", "tree", "start"];
+/// `open`, `button` e `say` só existem no simulador iOS (ver `simulators`).
+pub(crate) const ACTIONS: &[&str] = &["tap", "swipe", "type", "key", "launch", "close", "shot", "tree", "start", "open", "button", "say"];
 
 /// Cuánto se espera a que un emulador recién arrancado termine de iniciar.
 const BOOT_WAIT: Duration = Duration::from_secs(120);
@@ -37,7 +38,7 @@ fn reachable(from: &str) -> Vec<Reachable> {
         .into_iter()
         .filter_map(|(key, id)| {
             let portal = boards.get(&key)?.portals.get(&id)?.clone();
-            (portal.kind.as_deref() == Some("android")).then_some(Reachable { id, portal })
+            matches!(portal.kind.as_deref(), Some("android") | Some("ios")).then_some(Reachable { id, portal })
         })
         .collect()
 }
@@ -67,7 +68,10 @@ fn resolve<'a>(list: &'a [Reachable], wanted: &str) -> Result<&'a Reachable, Str
 }
 
 fn describe(d: &Reachable) -> Value {
-    json!({ "id": d.id, "name": d.portal.name, "serial": d.portal.serial, "avd": d.portal.avd })
+    if d.portal.kind.as_deref() == Some("ios") {
+        return json!({ "id": d.id, "name": d.portal.name, "kind": "ios", "udid": d.portal.udid });
+    }
+    json!({ "id": d.id, "name": d.portal.name, "kind": "android", "serial": d.portal.serial, "avd": d.portal.avd })
 }
 
 /// Un número que puede llegar como número (flag) o como texto.
@@ -130,6 +134,8 @@ pub(super) fn device_list(_app: &AppHandle, args: &Value) -> Result<Value, Strin
         // Lo que `adb` ve ahora (el de cada nodo se elige en el canvas) y los emuladores que se pueden arrancar.
         "online": online,
         "avds": android::avds(),
+        // Os iPhones e iPads do Xcode (só no macOS), para `ags device create --ios <nome>`.
+        "ios": crate::simulator::ops::devices().unwrap_or_default(),
     }))
 }
 
@@ -140,7 +146,17 @@ pub(super) fn device_create(app: &AppHandle, args: &Value) -> Result<Value, Stri
         .into_iter()
         .find(|t| t.id == from)
         .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())?;
-    let mut req = json!({ "op": "create", "cwd": me.cwd, "near": me.id, "kind": "android" });
+    // `--ios [aparelho]`: o simulador iOS (sem valor = o primeiro iPhone do Xcode).
+    let ios = args.get("ios").filter(|v| !v.is_null() && *v != &json!(false));
+    let mut req = json!({ "op": "create", "cwd": me.cwd, "near": me.id, "kind": if ios.is_some() { "ios" } else { "android" } });
+    if let Some(wanted) = ios {
+        let list = crate::simulator::ops::devices()?;
+        let device = match wanted.as_str().filter(|w| !w.trim().is_empty() && *w != "true") {
+            Some(w) => crate::simulator::model::pick(&list, w.trim())?,
+            None => list.first().ok_or("O Xcode não tem nenhum iPhone ou iPad instalado.")?,
+        };
+        req["udid"] = json!(device.udid);
+    }
     if let Some(name) = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty()) {
         req["name"] = json!(name.trim());
     }
@@ -159,6 +175,12 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
     let mine = reachable(&from);
     let target = resolve(&mine, &arg_str(args, "name")?)?;
 
+    if target.portal.kind.as_deref() == Some("ios") {
+        return super::simulators::action(_app, &from, &target.id, &target.portal, args, action, shots_dir()?);
+    }
+    if matches!(action, "open" | "button" | "say") {
+        return Err(format!("`ags device {action}` é só do simulador iOS; no Android use `key`/`launch`."));
+    }
     if action == "start" {
         return start(target, args);
     }
@@ -204,6 +226,11 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
             let package = arg_str(args, "package")?;
             android::launch(&serial, &package)?;
             Ok(json!({ "device": who, "launched": package }))
+        }
+        "close" => {
+            let package = arg_str(args, "package")?;
+            android::close(&serial, &package)?;
+            Ok(json!({ "device": who, "closed": package }))
         }
         "shot" => {
             let png = android::screenshot(&serial)?;

@@ -35,6 +35,7 @@ mod prelaunch;
 mod preview;
 mod real_browser;
 mod roles;
+mod simulator;
 mod routines;
 mod runs;
 mod scm;

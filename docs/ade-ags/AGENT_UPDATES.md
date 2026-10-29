@@ -13,7 +13,8 @@ Código: `src-tauri/src/agents/updates.rs` (Rust), `src/features/agents/updatePo
 | Gemini CLI | `npm view @google/gemini-cli version --json` | `npm install --global --ignore-scripts --no-audit --no-fund @google/gemini-cli` | Idem. |
 | OpenCode | nenhum | nenhum | `no_updater`: só avisa. |
 | Antigravity (agy) | nenhum | nenhum | `no_updater`: só avisa. |
-| Kimi Code, bash | nenhum | nenhum | `no_updater`. |
+| Cursor | nenhum | nenhum | Sem checagem só de leitura. No macOS a lista acha o `cursor-agent` do app, fora do PATH. Sem sessão, conta isolada nem MCP. |
+| Kimi Code, bash | nenhum | nenhum | `no_updater`. O Kimi tem instalação inicial; o bash não. |
 
 Origem npm confirmada por três sinais: raiz global do npm, shim do executável e manifest do pacote.
 Os comandos npm rodam sem shell (`node npm-cli.js ...`). Todos os argumentos vêm da tabela fixa
@@ -38,6 +39,18 @@ Resultado de `agent_update` também pode trazer `timeout` ou `failed` em `error`
 7. Modo automático é opt-in (`agents.autoUpdate`, padrão desligado): checa ao abrir e a cada 6 h e
    atualiza só agentes com `canAutoUpdate` e sem `busy`. Desligado: só mostra o aviso
    "Codex 0.160.0 disponível — Atualizar".
+
+## Onde a lista acha o programa no macOS
+
+Um app aberto pelo Dock não herda o PATH do shell. Além desse PATH e das pastas conhecidas (`~/.local/bin`, `~/.bun/bin` e as outras de `known_dirs`), no macOS a busca também olha o Claude mais novo em `~/Library/Application Support/Claude/claude-code/<versão>/…/claude` e o `cursor-agent` estável do Cursor. O terminal abre esse caminho absoluto: o PTY, sozinho, só procura o nome no PATH dele. `claude update` continua restrito à cópia nativa `~/.local/bin/claude`.
+
+## Instalar uma CLI que ainda não está na máquina
+
+Na lista de Agentes, quem falta ganha **Instalar CLI** quando o comando já é o `npm install` / `bun add` fixo da tabela, com `--ignore-scripts`: Codex, Gemini e, na primeira instalação, Kimi (`@moonshot-ai/kimi-code`, o pacote da documentação oficial). Comandos: `agent_install_offers()` e `agent_install(agent_id)`.
+
+Claude, OpenCode, Hermes e Cursor não entram nesse botão. O instalador deles é um script remoto ou um pacote cujo postinstall baixa o binário. A linha mostra o comando oficial e a ADE não o executa. O Antigravity não tem instalador de CLI verificado: a linha pede o aplicativo, de onde sai o `agy`.
+
+A instalação usa o mesmo portão da atualização (uma por vez, sem privilégio elevado, timeout de 5 min). Não roda se a CLI já foi encontrada.
 
 ## O que foi verificado e o que não
 

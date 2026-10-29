@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, EmptyState, UserIcon } from "neogestify-ui-components";
 
@@ -75,12 +75,9 @@ export function AccountsManager({ focus }: { focus?: AccountsSection | null }) {
     loadGit().catch((e) => setError(String(e)));
   }, [loadAgents, loadGit]);
 
-  /** TUIs que se muestran: las instaladas, más las que ya tengan cuentas creadas (para no
-   *  esconder cuentas existentes si la TUI se desinstaló). */
-  const shown = useMemo(
-    () => capable.filter((c) => c.installed || accounts.some((a) => a.agentId === c.agentId)),
-    [capable, accounts]
-  );
+  // Todas as que têm perfil, instaladas ou não. Esconder a que não foi achada tirava
+  // da tela o único lugar para ligar a conta na mão.
+  const shown = capable;
 
   // Se elige algo solo: la pantalla arranca mostrando algo en vez de un hueco.
   useEffect(() => {

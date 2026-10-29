@@ -103,6 +103,7 @@ fn el_registro_conserva_los_valores_que_estaban_repartidos() {
         e("hermes", "hermes", None, None, Some("--resume {session}")),
         // bash no es una TUI de agente: no gestiona skills, ni cuentas, ni sesiones.
         e("antigravity", "agy", None, None, None),
+        e("cursor", "cursor-agent", Some(".cursor/skills"), None, None),
         e("bash", if cfg!(windows) { "powershell" } else { "bash" }, None, None, None),
     ];
 
@@ -214,6 +215,7 @@ fn orchestration_capability_requires_implemented_ade_mcp() {
         ("gemini-cli", false),
         ("kimi-code", false),
         ("antigravity", true),
+        ("cursor", false),
         ("bash", false),
     ] {
         let caps = super::adapter_for(id).unwrap().capabilities();

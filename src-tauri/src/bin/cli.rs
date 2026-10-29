@@ -106,15 +106,20 @@ POOLS DE CONTAS — repartir entre várias contas de uma TUI com uma estratégia
   Pedem-se onde iria uma conta: tab create --agent claude-code --account pool:Trabalho, ou o
   \"account\" de uma tarefa de um plano / de um membro de um Squad (pool:Trabalho).
 
-DISPOSITIVOS ANDROID DO CANVAS — um emulador ou telefone conectado a este terminal (por adb)
-  devices                                     Os que você controla, o que o adb vê e os emuladores (AVD)
-  device create [<nome>] [--avd <avd>]        Cria um ao seu lado, já conectado
+DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simulador iOS conectado a este terminal
+  devices                                     Os que você controla, o que o adb vê, os emuladores (AVD) e os iPhones/iPads do Xcode
+  device create [<nome>] [--avd <avd>]        Cria um ao seu lado, já conectado · --ios [\"iPhone 18 Pro Max\"] = simulador iOS
   device start <dispositivo> [--avd <avd>]    Liga o emulador e espera terminar de iniciar
   device tap <dispositivo> --x N --y N        Toca · ou --text \"Entrar\" (procura o elemento na tela)
   device swipe <dispositivo> --dir up|down|left|right   · ou --x1 --y1 --x2 --y2 [--ms 300]
   device type <dispositivo> \"texto\"          Digita (só ASCII) · device key <d> back|home|enter|...
   device launch <dispositivo> <pacote>        Abre um app (com.android.settings)
+  device close <dispositivo> <pacote>         Fecha o app (com.apple.mobilesafari no iOS)
   device shot|tree <dispositivo>              Captura (devolve o caminho do PNG) · elementos com seu texto e onde tocar
+  Só no iOS (coordenadas em pontos do iOS, as do `shot`):
+  device open <dispositivo> <url>             Abre a URL no Safari do aparelho (localhost funciona)
+  device button <dispositivo> home|lock|side|siri   Aperta um botão físico
+  device say <dispositivo> \"mensagem\"         Responde na conversa do simulador (a pessoa e os outros agentes veem)
 
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
   portals                                     Os portais que você controla, cada um com seu estado: pronto, carregando, sem runtime,
@@ -879,7 +884,10 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "device.start" | "device.shot" | "device.tree" => &["name"],
         "device.type" => &["name", "text"],
         "device.key" => &["name", "key"],
-        "device.launch" => &["name", "package"],
+        "device.launch" | "device.close" => &["name", "package"],
+        "device.open" => &["name", "url"],
+        "device.button" => &["name", "button"],
+        "device.say" => &["name", "text"],
         "device.tap" | "device.swipe" => &["name"],
         "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
         | "portal.layout" | "portal.reset" => &["name"],

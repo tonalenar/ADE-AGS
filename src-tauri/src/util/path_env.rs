@@ -417,7 +417,71 @@ fn nvm_bins(versions: &Path) -> Vec<PathBuf> {
 /// lanzar `opencode` a secas fallaba aunque `where` lo encontrara. Con la ruta completa
 /// del `.cmd` funciona.
 pub fn find_program(name: &str) -> Option<PathBuf> {
-    find_in(name, std::env::var_os("PATH"), &extensions())
+    find_in(name, std::env::var_os("PATH"), &extensions()).or_else(|| bundled_program(name))
+}
+
+/// Programa que o instalador gráfico deixa fora do PATH.
+///
+/// No macOS o Claude Code do app fica em `~/Library/Application Support/Claude/claude-code/<versão>/…/claude`,
+/// e o Cursor Agent em `…/cursor-agent-worker/…/bin/cursor-agent`. Nenhum dos dois entra no PATH do Dock.
+/// A versão mais nova do Claude ganha. Nos outros sistemas, só o PATH.
+fn bundled_program(name: &str) -> Option<PathBuf> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = dirs::home_dir()?;
+        return match name {
+            "claude" => newest_claude_desktop(
+                &home.join("Library/Application Support/Claude/claude-code"),
+            ),
+            "cursor-agent" => bundled_executable(&home.join(
+                "Library/Application Support/Cursor/User/globalStorage/anysphere.cursor-agent-worker/agent-cli/.local/bin/cursor-agent",
+            )),
+            _ => None,
+        };
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = name;
+        None
+    }
+}
+
+/// O `claude` mais novo dentro da árvore do app (`<versão>/<hash>/claude.app/Contents/MacOS/claude`).
+pub(crate) fn newest_claude_desktop(root: &Path) -> Option<PathBuf> {
+    let mut found: Vec<(Vec<u64>, PathBuf)> = Vec::new();
+    let entries = std::fs::read_dir(root).ok()?;
+    for ver in entries.flatten() {
+        let name = ver.file_name().to_string_lossy().to_string();
+        let Some(semver) = dotted_version(&name) else { continue };
+        let hashes = match std::fs::read_dir(ver.path()) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for hash in hashes.flatten() {
+            let bin = hash
+                .path()
+                .join("claude.app")
+                .join("Contents")
+                .join("MacOS")
+                .join("claude");
+            if is_executable(&bin) {
+                found.push((semver.clone(), bin));
+            }
+        }
+    }
+    found.sort_by(|a, b| b.0.cmp(&a.0));
+    found.into_iter().next().map(|(_, path)| path)
+}
+
+fn dotted_version(name: &str) -> Option<Vec<u64>> {
+    if name.is_empty() {
+        return None;
+    }
+    name.split('.').map(|part| part.parse::<u64>().ok()).collect()
+}
+
+pub(crate) fn bundled_executable(path: &Path) -> Option<PathBuf> {
+    is_executable(path).then(|| path.to_path_buf())
 }
 
 /// Dónde está un programa en un PATH dado, en vez del del proceso.

@@ -1,6 +1,6 @@
 [package]
 name = "ade-ags"
-version = "1.10.0"
+version = "1.11.0"
 description = "ADE AGS — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
@@ -120,9 +120,13 @@ cairo-rs = { version = "0.18", features = ["png"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSData", "NSDictionary", "NSError", "NSString"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSString", "NSUUID", "NSValue"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
+# Simulador iOS (ver simulator::native): as classes privadas do CoreSimulator/SimulatorKit se chamam pelo runtime
+# (`msg_send!`) e a tela é uma NSView nossa. Mesmas versões que o tauri/wry já trazem no lock.
+objc2 = "0.6"
+dispatch2 = "0.3"
 
 # Job Objects: el equivalente en Windows del cgroup que se usa en Linux para que la
 # descendencia de una tab muera con ella (ver terminal::containment).

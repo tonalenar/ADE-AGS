@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ade-ags"
-version = "1.10.0"
+version = "1.11.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -16,6 +16,7 @@ dependencies = [
  "cc",
  "chrono",
  "dirs 5.0.1",
+ "dispatch2",
  "dunce",
  "flate2",
  "futures-util",
@@ -26,6 +27,7 @@ dependencies = [
  "keyring",
  "lazy_static",
  "libc",
+ "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-web-kit",

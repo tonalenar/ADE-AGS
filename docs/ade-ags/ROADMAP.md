@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## CLIs fora do PATH e instalação pela ADE
+
+No macOS a lista e o terminal acham o Claude do aplicativo e o `cursor-agent` sem estarem no PATH. O Cursor entra na fábrica sem sessão, conta isolada nem MCP. A tela de Agentes instala Codex, Gemini e Kimi com o comando npm/bun já fixo; Claude, OpenCode, Hermes, Cursor e Antigravity só mostram o comando, sem executá-lo. Detalhe em [AGENT_UPDATES.md](./AGENT_UPDATES.md).
+
 ## Canal estruturado em paralelo ao terminal
 
 O estado das abas de Claude Code e Codex lido do transcript que a própria TUI grava (turno aberto ou
@@ -340,6 +344,10 @@ Redução drástica do tempo de feedback de testes para agentes e humanos atrav�
 - **Ponto 3 (Regras de Execução e CI):** Agentes proibidos de executar suíte completa local de forma recorrente; acompanhamento de PR exclusivamente via `gh pr checks <n> --watch` (sem polling com sleep); suíte completa local restrita a operações de alto risco (migrações de banco, `unsafe`/COM e alterações de schema).
 - **Ponto 4 (Testes Afetados e Cache de Resultados):** Comandos `ags test affected` e `ags test run <suite>`, mapeando arquivos modificados desde `origin/master` e gravando execuções verdes limpas na tabela `test_results` para retorno instantâneo (0ms em cache hit).
 - **Ponto 5 (QA em Fluxo):** Briefing atualizado para validação contínua a cada entrega de integrante (`ags peer tell`) com `ags test affected`; orquestrador notifica o QA a cada entrega; validação final consolidada em UMA única execução completa antes da entrega (ou delegação ao CI); métrica "tempo de espera do QA" (`qaWaitMs`) exposta em `ags mission timings`.
+
+## Simulador iOS no canvas
+
+iPhones e iPads do Xcode ligados sem o app Simulator, soltos no canvas com a barra flutuante e a conversa com os agentes conectados. A tela é a `IOSurface` do simulador numa camada nativa, sem cópia; o toque vai pelo HID do SimulatorKit; os agentes pilotam com `ags device …`. No modo leve, o iOS sobe sem os serviços pesados (Siri, widgets, iCloud, Spotlight…): medido no iPhone 17, de 495% para 1% de CPU depois do boot. Os quadros chegam numa fila própria, fora da thread da interface. Como funciona, leveza e o que falta: [SIMULADOR_IOS.md](./SIMULADOR_IOS.md).
 
 ## Portal com Chrome real
 

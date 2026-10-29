@@ -1,6 +1,6 @@
 import { MonitorIcon, BoxIcon } from "neogestify-ui-components";
 
-import { CodexIcon, HermesAgentIcon, OpenCodeIcon } from "./brandIcons";
+import { CodexIcon, CursorIcon, HermesAgentIcon, OpenCodeIcon } from "./brandIcons";
 import { AntigravityColorIcon, ClaudeCodeColorIcon, GeminiColorIcon, KimiColorIcon } from "./brandColorIcons";
 
 type AgentIconComponent = (props: { className: string }) => React.JSX.Element;
@@ -17,6 +17,7 @@ const BY_ID: Record<string, AgentIconComponent> = {
   opencode: OpenCodeIcon,
   "kimi-code": KimiColorIcon,
   hermes: HermesAgentIcon,
+  cursor: CursorIcon,
   antigravity: AntigravityColorIcon,
   bash: MonitorIcon,
 };
@@ -29,6 +30,8 @@ const BY_COMMAND_HINT: [string, AgentIconComponent][] = [
   ["opencode", OpenCodeIcon],
   ["kimi", KimiColorIcon],
   ["hermes", HermesAgentIcon],
+  ["cursor-agent", CursorIcon],
+  ["cursor", CursorIcon],
   ["antigravity", AntigravityColorIcon],
   ["agy", AntigravityColorIcon],
   ["bash", MonitorIcon],
