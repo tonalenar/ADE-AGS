@@ -1,6 +1,6 @@
 [package]
 name = "ade-ags"
-version = "1.10.0"
+version = "1.11.0"
 description = "ADE AGS — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
