@@ -32,6 +32,11 @@ export const simulatorPriority = (udid: string, light: boolean) => invoke<number
 
 export const simulatorShutdown = (udid: string) => invoke<void>("simulator_shutdown", { udid });
 
+/** O ciclo de vida (ver `simulator::lifecycle`): hibernar depois de `hibernateMinutes` fora de vista (0 = nunca),
+ *  um aparelho por vez e o modo leve. */
+export const simulatorSettings = (hibernateMinutes: number, single: boolean, light: boolean) =>
+  invoke<void>("simulator_settings", { hibernateMinutes, single, light });
+
 /** `home`, `lock`, `side` ou `siri`. */
 export const simulatorButton = (udid: string, name: string) => invoke<void>("simulator_button", { udid, name });
 

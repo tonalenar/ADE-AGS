@@ -3534,7 +3534,7 @@
   "simulator.zoom": "Tamanho",
   "simulator.smaller": "Diminuir o aparelho",
   "simulator.bigger": "Aumentar o aparelho",
-  "simulator.light": "Modo leve: o iOS roda com prioridade baixa e não disputa a CPU com a ADE e o resto do Mac",
+  "simulator.light": "Modo leve: o iOS liga sem Siri, widgets, iCloud, Spotlight e outros serviços pesados, e com prioridade baixa para não disputar a CPU com a ADE",
   "simulator.lightShort": "Modo leve",
   "simulator.shutdown": "Desligar o aparelho",
   "simulator.shutDownLine": "O aparelho foi desligado.",
@@ -3555,8 +3555,16 @@
   "simulator.chat.attach": "Anexar a tela atual",
   "simulator.chat.attached": "tela atual anexada",
   "simulator.chat.send": "Enviar a {{count}}",
-  "simulator.lightOn": "Modo leve ligado: {{count}} processos do iOS em prioridade baixa.",
-  "simulator.lightOff": "Modo leve desligado: o iOS voltou à prioridade normal ({{count}} processos).",
+  "simulator.lightOn": "Modo leve ligado: {{count}} processos do iOS em prioridade baixa. Os serviços pesados saem quando o aparelho religar.",
+  "simulator.lightOff": "Modo leve desligado: o iOS voltou à prioridade normal ({{count}} processos). Os serviços voltam quando o aparelho religar.",
   "simulator.lightOnNext": "Modo leve ligado: vale quando o aparelho ligar.",
-  "simulator.lightOffNext": "Modo leve desligado: vale quando o aparelho ligar."
+  "simulator.lightOffNext": "Modo leve desligado: vale quando o aparelho ligar.",
+  "simulator.paused.title": "Pausado para economizar",
+  "simulator.paused.hint": "Ficou fora de vista e foi desligado sem perder dados.",
+  "simulator.paused.single": "Outro aparelho foi ligado (um por vez).",
+  "simulator.paused.resume": "Retomar",
+  "simulator.hibernate": "Hibernar quando fora de vista",
+  "simulator.hibernateNever": "Nunca",
+  "simulator.hibernateMin": "{{count}} min",
+  "simulator.single": "Um aparelho ligado por vez"
 }

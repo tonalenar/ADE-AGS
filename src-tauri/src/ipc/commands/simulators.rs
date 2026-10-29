@@ -60,9 +60,11 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
     let udid = udid_of(portal)?;
     if action == "start" {
         ops::boot(&udid, true)?;
+        crate::simulator::lifecycle::booted(app, &udid);
         activity(app, id, &agent, "action", "start");
         return Ok(json!({ "device": who, "started": true }));
     }
+    crate::simulator::lifecycle::used(&udid);
     if !ops::booted(&udid)? {
         return Err(format!("O simulador '{}' está desligado. Ligue com `ags device start \"{}\"`.", portal.name, portal.name));
     }

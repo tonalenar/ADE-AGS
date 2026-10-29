@@ -6,6 +6,8 @@
 
 pub mod model;
 mod commands;
+pub mod lifecycle;
+pub mod slim;
 #[cfg(target_os = "macos")]
 pub mod native;
 #[cfg(test)]

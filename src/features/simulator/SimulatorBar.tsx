@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { SIM_BAR_H } from "./geometry";
+import { HIBERNATE_OPTIONS } from "./prefs";
 import type { SimDevice } from "./ipc";
 
 const icon = "w-[15px] h-[15px]";
@@ -114,6 +115,8 @@ export interface SimBarActions {
   onScale: (direction: 1 | -1) => void;
   onLight: () => void;
   onShutdown: () => void;
+  onHibernate: (minutes: number) => void;
+  onSingle: () => void;
   onClose: () => void;
 }
 
@@ -122,13 +125,15 @@ export interface SimBarActions {
  * arrastam (`nodrag`). `full` = a conversa está aberta e a barra cobre o bloco inteiro (aparelho + conversa);
  * compacta, ela tem a largura do aparelho e o zoom, o modo leve, desligar e fechar vão para o "⋯".
  */
-export function SimulatorBar({ full, devices, current, state, scale, light, agents, chatOpen, closeArmed, actions }: {
+export function SimulatorBar({ full, devices, current, state, scale, light, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
   full: boolean;
   devices: SimDevice[];
   current: SimDevice | undefined;
   state: SimDevice["state"] | "error";
   scale: number;
   light: boolean;
+  hibernateMin: number;
+  single: boolean;
   agents: number;
   chatOpen: boolean;
   closeArmed: boolean;
@@ -200,6 +205,20 @@ export function SimulatorBar({ full, devices, current, state, scale, light, agen
                 {ICONS.light}<span className="flex-1">{t("simulator.lightShort")}</span>{light && <span aria-hidden>✓</span>}
               </button>
             )}
+            <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-white/55">{t("simulator.hibernate")}</div>
+            <div role="radiogroup" aria-label={t("simulator.hibernate")} className="mx-1.5 mb-1 flex overflow-hidden rounded-lg ring-1 ring-white/10">
+              {HIBERNATE_OPTIONS.map((min) => (
+                <button key={min} type="button" role="radio" aria-checked={hibernateMin === min} onClick={() => actions.onHibernate(min)}
+                  className={`cc-t h-7 flex-1 text-[11.5px] ${hibernateMin === min ? "bg-white/12 text-white" : "text-white/60 hover:bg-white/6"}`}>
+                  {min === 0 ? t("simulator.hibernateNever") : t("simulator.hibernateMin", { count: min })}
+                </button>
+              ))}
+            </div>
+            <button type="button" role="menuitemcheckbox" aria-checked={single} onClick={actions.onSingle}
+              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">
+              <span className="flex-1">{t("simulator.single")}</span>{single && <span aria-hidden>✓</span>}
+            </button>
+            <div className="mx-1.5 my-1 h-px bg-white/8" />
             <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onShutdown(); }}
               className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
               {t("simulator.shutdown")}

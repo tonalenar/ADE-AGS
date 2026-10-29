@@ -105,6 +105,7 @@ pub fn run() {
             crate::simulator::simulator_boot,
             crate::simulator::simulator_shutdown,
             crate::simulator::simulator_priority,
+            crate::simulator::simulator_settings,
             crate::simulator::simulator_button,
             crate::simulator::simulator_open_url,
             crate::simulator::simulator_screenshot,

@@ -755,6 +755,10 @@ ags device say iPhone "Login fixed: the button no longer hides under the keyboar
   the current screen attached). Answer there with `ags device say`, not in your terminal only;
   the other connected agents and the user see it, together with the actions you took.
 - `tree` and `tap --text` are not available on iOS yet: take a `shot` and tap by points.
+- **Light mode** (the default, ⚡ on the node's bar) boots iOS without Siri, widgets, Spotlight,
+  iCloud sign-in, Mail/Calendar/Contacts sync, Health, Maps, News and iMessage. Push, purchases,
+  the App Store, Safari and universal links still work. If the app under test needs one of the
+  services that are off, ask the user to turn ⚡ off: the change takes effect when the device reboots.
 
 ### Telling the user
 

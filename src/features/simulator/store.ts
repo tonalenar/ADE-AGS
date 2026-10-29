@@ -21,12 +21,14 @@ interface SimulatorState {
   error: string | null;
   /** A conversa de cada nó (por id do nó). Só na memória: some ao fechar o app. */
   lines: Record<string, SimLine[]>;
+  /** Aparelhos desligados por economia (`hibernated`: ficou fora de vista; `single`: outro foi ligado). */
+  paused: Record<string, "hibernated" | "single">;
 }
 
 /** Quantas linhas cada conversa guarda. */
 const KEEP = 200;
 
-export const useSimulatorStore = create<SimulatorState>(() => ({ devices: [], loaded: false, error: null, lines: {} }));
+export const useSimulatorStore = create<SimulatorState>(() => ({ devices: [], loaded: false, error: null, lines: {}, paused: {} }));
 
 let loading: Promise<void> | null = null;
 
@@ -45,7 +47,11 @@ export function deviceByUdid(devices: SimDevice[], udid: string | undefined): Si
 
 /** Marca o estado de um aparelho sem reler a lista inteira (ligou, desligou). */
 export function setDeviceState(udid: string, state: SimDevice["state"]) {
-  useSimulatorStore.setState((s) => ({ devices: s.devices.map((d) => (d.udid === udid ? { ...d, state } : d)) }));
+  useSimulatorStore.setState((s) => {
+    const paused = { ...s.paused };
+    if (state === "booted") delete paused[udid];
+    return { devices: s.devices.map((d) => (d.udid === udid ? { ...d, state } : d)), paused };
+  });
 }
 
 export function addLine(node: string, line: Omit<SimLine, "id">) {
@@ -67,4 +73,10 @@ export function listenActivity() {
     // Um agente ligou o aparelho (`ags device start`): o nó precisa saber para mostrar a tela.
     if (kind === "action" && text.startsWith("start")) void refreshDevices();
   }).catch(() => { listening = false; });
+  // O backend desligou um aparelho por economia (hibernou, ou outro foi ligado com "um por vez").
+  listen<{ udid: string; state: SimDevice["state"]; reason: "hibernated" | "single" }>("simulator-state", (e) => {
+    const { udid, state, reason } = e.payload;
+    setDeviceState(udid, state);
+    useSimulatorStore.setState((s) => ({ paused: { ...s.paused, [udid]: reason } }));
+  }).catch(() => undefined);
 }

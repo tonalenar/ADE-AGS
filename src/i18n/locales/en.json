@@ -3534,7 +3534,7 @@
   "simulator.zoom": "Size",
   "simulator.smaller": "Make the device smaller",
   "simulator.bigger": "Make the device bigger",
-  "simulator.light": "Light mode: iOS runs at low priority and doesn't compete for CPU with ADE and the rest of the Mac",
+  "simulator.light": "Light mode: iOS boots without Siri, widgets, iCloud, Spotlight and other heavy services, at low priority so it doesn't compete for CPU with ADE",
   "simulator.lightShort": "Light mode",
   "simulator.shutdown": "Shut down the device",
   "simulator.shutDownLine": "The device was shut down.",
@@ -3555,8 +3555,16 @@
   "simulator.chat.attach": "Attach the current screen",
   "simulator.chat.attached": "current screen attached",
   "simulator.chat.send": "Send to {{count}}",
-  "simulator.lightOn": "Light mode on: {{count}} iOS processes at low priority.",
-  "simulator.lightOff": "Light mode off: iOS is back at normal priority ({{count}} processes).",
+  "simulator.lightOn": "Light mode on: {{count}} iOS processes at low priority. Heavy services go away when the device restarts.",
+  "simulator.lightOff": "Light mode off: iOS is back at normal priority ({{count}} processes). Services come back when the device restarts.",
   "simulator.lightOnNext": "Light mode on: applies when the device boots.",
-  "simulator.lightOffNext": "Light mode off: applies when the device boots."
+  "simulator.lightOffNext": "Light mode off: applies when the device boots.",
+  "simulator.paused.title": "Paused to save resources",
+  "simulator.paused.hint": "It was out of view and shut down without losing data.",
+  "simulator.paused.single": "Another device was booted (one at a time).",
+  "simulator.paused.resume": "Resume",
+  "simulator.hibernate": "Hibernate when out of view",
+  "simulator.hibernateNever": "Never",
+  "simulator.hibernateMin": "{{count}} min",
+  "simulator.single": "One device on at a time"
 }

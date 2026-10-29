@@ -118,15 +118,6 @@ pub mod blocks {
         const ENCODING_CSTR: &'static CStr = c"v16@?0@\"<SimScreenProperties>\"8";
     }
 
-    /// `void (^)(NSArray *)`: os retângulos que mudaram.
-    pub struct Damage;
-    // SAFETY: idem.
-    unsafe impl ManualBlockEncoding for Damage {
-        type Arguments = (*mut AnyObject,);
-        type Return = ();
-        const ENCODING_CSTR: &'static CStr = c"v16@?0@\"NSArray\"8";
-    }
-
     /// `void (^)(NSError *)`: o envio de HID terminou.
     pub struct Done;
     // SAFETY: idem.

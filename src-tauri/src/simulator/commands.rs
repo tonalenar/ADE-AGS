@@ -1,7 +1,13 @@
 //! Comandos Tauri do simulador. Os que falam com o CoreSimulator bloqueiam (`async`: fora da thread da
 //! interface); os que mexem na tela da janela vão para ela por `with_webview`.
 
-use tauri::{Runtime, Webview};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use tauri::{AppHandle, Runtime, Webview};
+
+use super::lifecycle;
 
 use super::model::{Device, Place};
 use super::ops;
@@ -13,8 +19,30 @@ pub fn simulator_devices() -> Result<Vec<Device>, String> {
 
 /// Liga o aparelho (sem persist: desliga junto com a ADE). `light` = o iOS na prioridade baixa.
 #[tauri::command(async)]
-pub fn simulator_boot(udid: String, light: Option<bool>) -> Result<(), String> {
-    ops::boot(&udid, light.unwrap_or(true))
+pub fn simulator_boot(app: AppHandle, udid: String, light: Option<bool>) -> Result<(), String> {
+    ops::boot(&udid, light.unwrap_or(true))?;
+    lifecycle::booted(&app, &udid);
+    Ok(())
+}
+
+/// As preferências do ciclo de vida (ver `lifecycle`): hibernar depois de `hibernate_minutes` fora de vista
+/// (0 = nunca), um aparelho por vez e o modo leve.
+#[tauri::command]
+pub fn simulator_settings(app: AppHandle, hibernate_minutes: u32, single: bool, light: bool) {
+    let hibernate_after = (hibernate_minutes > 0).then(|| Duration::from_secs(u64::from(hibernate_minutes) * 60));
+    lifecycle::set_settings(&app, lifecycle::Settings { hibernate_after, single, light });
+}
+
+/// Qual aparelho cada tela aberta mostra (as posições chegam pelo id da tela).
+fn screens() -> &'static Mutex<HashMap<String, String>> {
+    static S: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+fn seen(id: &str, visible: bool) {
+    if let Some(udid) = screens().lock().ok().and_then(|m| m.get(id).cloned()) {
+        lifecycle::seen(&udid, visible);
+    }
 }
 
 /// Liga ou desliga o modo leve num aparelho já ligado: a prioridade do iOS muda na hora.
@@ -25,6 +53,7 @@ pub fn simulator_priority(udid: String, light: bool) -> Result<usize, String> {
 
 #[tauri::command(async)]
 pub fn simulator_shutdown(udid: String) -> Result<(), String> {
+    lifecycle::forget(&udid);
     ops::shutdown(&udid)
 }
 
@@ -47,6 +76,10 @@ pub fn simulator_screenshot(udid: String) -> Result<String, String> {
 /// Mostra a tela do aparelho `udid` na janela, como a tela `id` (um nó do canvas ou uma aba), em `place`.
 #[tauri::command]
 pub async fn simulator_attach<R: Runtime>(webview: Webview<R>, id: String, udid: String, place: Place) -> Result<(), String> {
+    if let Ok(mut map) = screens().lock() {
+        map.insert(id.clone(), udid.clone());
+    }
+    lifecycle::seen(&udid, place.visible.is_some());
     #[cfg(target_os = "macos")]
     {
         let (screen, hid) = tokio::task::spawn_blocking(move || super::native::connect(&udid)).await.map_err(|e| e.to_string())??;
@@ -70,6 +103,7 @@ pub async fn simulator_attach<R: Runtime>(webview: Webview<R>, id: String, udid:
 /// Onde a tela está agora (o canvas moveu, deu zoom, um menu abriu por cima). Sem resposta: vai a cada mudança.
 #[tauri::command]
 pub fn simulator_place<R: Runtime>(webview: Webview<R>, id: String, place: Place) -> Result<(), String> {
+    seen(&id, place.visible.is_some());
     #[cfg(target_os = "macos")]
     {
         webview
@@ -89,6 +123,10 @@ pub fn simulator_place<R: Runtime>(webview: Webview<R>, id: String, place: Place
 /// Tira a tela `id` da janela (o aparelho continua ligado).
 #[tauri::command]
 pub fn simulator_detach<R: Runtime>(webview: Webview<R>, id: String) -> Result<(), String> {
+    seen(&id, false);
+    if let Ok(mut map) = screens().lock() {
+        map.remove(&id);
+    }
     #[cfg(target_os = "macos")]
     {
         webview.with_webview(move |_| super::native::view::detach(&id)).map_err(|e| e.to_string())

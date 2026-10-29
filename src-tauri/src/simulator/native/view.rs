@@ -6,15 +6,18 @@
 //! parte à vista e os buracos onde há algo do app por cima (menus, diálogos). Fora dela a tela não aparece nem
 //! recebe toque. O toque e o teclado vão da própria view para o HID, sem passar pelo JavaScript.
 //!
-//! Tudo aqui roda na thread da interface (as views e os callbacks da tela, registrados na fila principal).
+//! As views, a máscara e o toque rodam na thread da interface. Os quadros não: chegam numa fila própria de
+//! prioridade alta (`frame_queue`), porque o serviço do simulador espera o callback voltar antes de mandar o
+//! próximo, e com a interface ocupada os quadros atrasavam e chegavam juntos (o "engasgo").
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use block2::RcBlock;
-use dispatch2::DispatchQueue;
+use dispatch2::{DispatchQoS, DispatchQueue, DispatchQueueAttr, DispatchRetained, DispatchTime};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly};
@@ -23,9 +26,14 @@ use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use super::hid::{Hid, Phase};
 use super::kit::{CGPoint, CGSize};
-use super::objc::{blocks, call, class, ns_string};
+use super::objc::{blocks, call, class, ns_string, retain, Shared};
 use super::screen::Screen;
 use crate::simulator::model::{self, Place, Rect};
+
+#[link(name = "IOSurface", kind = "framework")]
+unsafe extern "C" {
+    fn IOSurfaceGetSeed(buffer: *const c_void) -> u32;
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -113,6 +121,7 @@ define_class!(
             self.scroll(event);
         }
 
+
         #[unsafe(method(cursorUpdate:))]
         fn cursor_update(&self, _event: &NSEvent) {
             // SAFETY: NSCursor público.
@@ -196,7 +205,7 @@ impl ScreenView {
         // NSEventPhase: began 1, changed 4, ended 8, cancelled 16. Momento (`momentumPhase`) fica de fora.
         const BEGAN: usize = 0x1;
         const ENDED: usize = 0x8 | 0x10;
-        let phase = event.phase().0 as usize;
+        let phase = event.phase().0;
         if event.momentumPhase().0 != 0 || self.ivars().touching.get() {
             return;
         }
@@ -277,20 +286,6 @@ impl ScreenView {
         }
     }
 
-    /// Mostra outra superfície (o iOS troca ao girar ou mudar de modo).
-    fn show(&self, surface: *mut c_void) {
-        if surface.is_null() {
-            return;
-        }
-        // SAFETY: uma IOSurface é conteúdo válido de CALayer.
-        unsafe { call!(self.layer(), sel!(setContents:), surface as *mut AnyObject => *mut AnyObject; -> ()) };
-    }
-
-    fn changed(&self) {
-        // SAFETY: CALayer público.
-        unsafe { call!(self.layer(), sel!(setContentsChanged); -> ()) };
-    }
-
     /// O que da tela aparece: o retângulo arredondado da tela, cortado na parte à vista e sem os buracos (menus,
     /// diálogos do app por cima). Vira a máscara da camada e a área de toque. O caminho sai das operações
     /// booleanas do CoreGraphics. A camada de uma view virada (`isFlipped`) já vem com a geometria virada pelo
@@ -327,10 +322,126 @@ impl ScreenView {
     }
 }
 
+/// A fila dos quadros: serial e na prioridade da interface, mas fora dela.
+fn frame_queue() -> &'static DispatchQueue {
+    static QUEUE: OnceLock<DispatchRetained<DispatchQueue>> = OnceLock::new();
+    QUEUE.get_or_init(|| {
+        let attr = DispatchQueueAttr::with_qos_class(DispatchQueueAttr::SERIAL, DispatchQoS::UserInteractive, 0);
+        DispatchQueue::new("ade.simulator.frames", Some(&attr))
+    })
+}
+
+/// Depois de um aviso de quadro, quando conferir de novo se a superfície mudou: em ~13% dos avisos o seed da
+/// `IOSurface` só muda 1–16 ms depois (medição do serve-sim, da Expo).
+const RECHECK_MS: [u64; 6] = [1, 1, 2, 4, 8, 16];
+
+/// O que a fila de quadros mexe: a camada da view e a superfície que ela mostra. Só a fila de quadros chama
+/// os métodos daqui; a camada é retida, então um aviso atrasado depois de fechar a tela não pega nada solto.
+struct Presenter {
+    layer: Shared,
+    screen: Shared,
+    surface: Mutex<Option<Shared>>,
+    seed: AtomicU32,
+    /// Já há uma reconferência marcada: avisos que chegam no meio ficam por conta dela.
+    pending: AtomicBool,
+}
+
+/// Uma transação explícita do Core Animation: fora da thread da interface não há runloop para fechar a
+/// implícita. Sem animação (`setDisableActions`).
+///
+/// # Safety
+/// `work` só mexe em camadas.
+unsafe fn transaction(work: impl FnOnce()) {
+    unsafe {
+        let ca = class(c"CATransaction").expect("QuartzCore");
+        call!(ca, sel!(begin); -> ());
+        call!(ca, sel!(setDisableActions:), true => bool; -> ());
+        work();
+        call!(ca, sel!(commit); -> ());
+    }
+}
+
+impl Presenter {
+    fn seed_now(&self) -> Option<u32> {
+        let surface = self.surface.lock().ok()?;
+        // SAFETY: a superfície guardada é uma IOSurface retida.
+        surface.as_ref().map(|s| unsafe { IOSurfaceGetSeed(s.ptr() as *const c_void) })
+    }
+
+    fn present(&self) {
+        // SAFETY: CALayer público, numa transação explícita.
+        unsafe { transaction(|| call!(self.layer.ptr(), sel!(setContentsChanged); -> ())) };
+        count_frame();
+    }
+
+    /// A superfície nova (o iOS troca ao girar ou mudar de modo); `None` = ler a atual da tela (ida e volta
+    /// XPC: por isso fica guardada e só se lê de novo quando o serviço avisa que mudou).
+    fn set_surface(&self, surface: Option<*mut AnyObject>) {
+        let ptr = surface.unwrap_or_else(|| {
+            // SAFETY: `framebufferSurface` é do protocolo SimDisplayIOSurfaceRenderable, que a tela implementa.
+            unsafe {
+                let s = call!(self.screen.ptr(), sel!(framebufferSurface); -> *mut AnyObject);
+                if s.is_null() { call!(self.screen.ptr(), sel!(maskedFramebufferSurface); -> *mut AnyObject) } else { s }
+            }
+        });
+        // SAFETY: nulo ou uma IOSurface viva (o callback a entrega +0).
+        let Some(surface) = (unsafe { retain(ptr) }) else { return };
+        let surface = Shared(surface);
+        // SAFETY: uma IOSurface é conteúdo válido de CALayer.
+        unsafe { transaction(|| call!(self.layer.ptr(), sel!(setContents:), surface.ptr() => *mut AnyObject; -> ())) };
+        // SAFETY: idem `seed_now`.
+        self.seed.store(unsafe { IOSurfaceGetSeed(surface.ptr() as *const c_void) }, Ordering::Relaxed);
+        if let Ok(mut current) = self.surface.lock() {
+            *current = Some(surface);
+        }
+        count_frame();
+    }
+
+    /// Quadro novo: mostra se a superfície já mudou; senão reconfere logo depois.
+    fn frame(self: &Arc<Self>) {
+        if self.pending.load(Ordering::Relaxed) {
+            return;
+        }
+        if !self.advance() {
+            self.pending.store(true, Ordering::Relaxed);
+            self.recheck(0);
+        }
+    }
+
+    /// Mostra o quadro se o seed andou. Devolve se andou.
+    fn advance(&self) -> bool {
+        match self.seed_now() {
+            Some(seed) if seed != self.seed.load(Ordering::Relaxed) => {
+                self.seed.store(seed, Ordering::Relaxed);
+                self.present();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn recheck(self: &Arc<Self>, attempt: usize) {
+        let Some(ms) = RECHECK_MS.get(attempt) else {
+            self.pending.store(false, Ordering::Relaxed);
+            return;
+        };
+        let this = self.clone();
+        let when = DispatchTime::NOW.time((*ms * 1_000_000) as i64);
+        let _ = frame_queue().after(when, move || {
+            if this.advance() {
+                this.pending.store(false, Ordering::Relaxed);
+            } else {
+                this.recheck(attempt + 1);
+            }
+        });
+    }
+}
+
 /// Uma tela aberta: a view, a tela do simulador e os registros de callback (vivos enquanto à vista).
 struct Entry {
     view: Retained<ScreenView>,
     screen: Screen,
+    presenter: Arc<Presenter>,
     uuid: Retained<AnyObject>,
     listening: Cell<bool>,
 }
@@ -338,31 +449,67 @@ struct Entry {
 thread_local! {
     /// Só na thread da interface (as views são dela).
     static SCREENS: RefCell<HashMap<String, Entry>> = RefCell::new(HashMap::new());
+    /// O pedido ao macOS de latência baixa (sem App Nap nem timers agrupados), enquanto alguma tela está à vista.
+    static ACTIVITY: RefCell<(usize, Option<Retained<AnyObject>>)> = const { RefCell::new((0, None)) };
+}
+
+/// `NSActivityUserInitiatedAllowingIdleSystemSleep | NSActivityLatencyCritical`: o Mac ainda dorme sozinho.
+const ACTIVITY_OPTIONS: u64 = 0x00EF_FFFF | 0xFF_0000_0000;
+
+/// Uma tela entrou (`true`) ou saiu de vista: a primeira pede a atividade ao macOS, a última a devolve.
+fn activity(visible: bool) {
+    ACTIVITY.with(|a| {
+        let mut a = a.borrow_mut();
+        a.0 = if visible { a.0 + 1 } else { a.0.saturating_sub(1) };
+        // SAFETY: NSProcessInfo público; o token devolvido vem +0 (autorelease) e é retido para devolver depois.
+        unsafe {
+            let info = call!(class(c"NSProcessInfo").expect("Foundation"), sel!(processInfo); -> *mut AnyObject);
+            if a.0 > 0 && a.1.is_none() {
+                let reason = ns_string("Simulador iOS à vista");
+                let token = call!(info, sel!(beginActivityWithOptions:reason:), ACTIVITY_OPTIONS => u64,
+                    Retained::as_ptr(&reason) as *mut AnyObject => *mut AnyObject; -> *mut AnyObject);
+                a.1 = retain(token);
+                debug("pediu latência baixa ao macOS");
+            } else if a.0 == 0 {
+                if let Some(token) = a.1.take() {
+                    call!(info, sel!(endActivity:), Retained::as_ptr(&token) as *mut AnyObject => *mut AnyObject; -> ());
+                    debug("devolveu a latência baixa");
+                }
+            }
+        }
+    });
 }
 
 /// `ADE_SIMULATOR_FPS=1`: escreve no log quantos quadros por segundo chegam à camada (para separar engasgo do
 /// iOS de engasgo da exibição). Desligado, custa uma leitura de `OnceLock`.
+fn debug_on() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("ADE_SIMULATOR_FPS").is_some())
+}
+
+fn debug(what: &str) {
+    if debug_on() {
+        eprintln!("[simulator] {what}");
+    }
+}
+
 fn count_frame() {
-    use std::sync::OnceLock;
     use std::time::Instant;
-    static ON: OnceLock<bool> = OnceLock::new();
-    if !*ON.get_or_init(|| std::env::var_os("ADE_SIMULATOR_FPS").is_some()) {
+    if !debug_on() {
         return;
     }
-    thread_local! {
-        static WINDOW: Cell<(u32, Option<Instant>)> = const { Cell::new((0, None)) };
+    // A fila de quadros é serial, mas pode rodar em threads diferentes: a contagem não é por thread.
+    static WINDOW: Mutex<(u32, Option<Instant>)> = Mutex::new((0, None));
+    let Ok(mut w) = WINDOW.lock() else { return };
+    let (count, start) = *w;
+    let start = start.unwrap_or_else(Instant::now);
+    let elapsed = start.elapsed().as_secs_f64();
+    if elapsed >= 1.0 {
+        eprintln!("[simulator] {:.0} atualizações/s", f64::from(count + 1) / elapsed);
+        *w = (0, Some(Instant::now()));
+    } else {
+        *w = (count + 1, Some(start));
     }
-    WINDOW.with(|w| {
-        let (count, start) = w.get();
-        let start = start.unwrap_or_else(Instant::now);
-        let elapsed = start.elapsed().as_secs_f64();
-        if elapsed >= 1.0 {
-            eprintln!("[simulator] {:.0} quadros/s", f64::from(count + 1) / elapsed);
-            w.set((0, Some(Instant::now())));
-        } else {
-            w.set((count + 1, Some(start)));
-        }
-    });
 }
 
 fn new_uuid() -> Retained<AnyObject> {
@@ -379,48 +526,42 @@ fn listen(entry: &Entry) {
         return;
     }
     let screen = entry.screen.obj.ptr();
-    let view_frame = entry.view.clone();
-    let view_damage = entry.view.clone();
-    let view_surface = entry.view.clone();
-    let frame = RcBlock::with_encoding::<_, _, _, blocks::Frame>(move || {
-        view_frame.changed();
-        count_frame();
-    });
-    let damage = RcBlock::with_encoding::<_, _, _, blocks::Damage>(move |_rects: *mut AnyObject| view_damage.changed());
+    let on_frame = entry.presenter.clone();
+    let on_surface = entry.presenter.clone();
+    debug("ouvindo os quadros");
+    activity(true);
+    // Um aviso por quadro que o iOS apresenta (60/s com animação). O de retângulos de dano não entra: chega várias
+    // vezes por quadro, e registrado com o mesmo UUID substituía este (o quadro nunca chegava).
+    let frame = RcBlock::with_encoding::<_, _, _, blocks::Frame>(move || on_frame.frame());
     let surfaces = RcBlock::with_encoding::<_, _, _, blocks::Surfaces>(move |unmasked: *mut AnyObject, masked: *mut AnyObject| {
-        view_surface.show(if unmasked.is_null() { masked } else { unmasked } as *mut c_void);
-        view_surface.changed();
+        on_surface.set_surface(Some(if unmasked.is_null() { masked } else { unmasked }));
     });
     let properties = RcBlock::with_encoding::<_, _, _, blocks::Properties>(|_properties: *mut AnyObject| {});
-    let main = DispatchQueue::main() as *const DispatchQueue as *mut AnyObject;
+    let queue = frame_queue() as *const DispatchQueue as *mut AnyObject;
     let uuid = Retained::as_ptr(&entry.uuid) as *mut AnyObject;
     // SAFETY: assinaturas dos protocolos SimScreen e SimDisplayRenderable conferidas no binário; o proxy copia os
-    // blocos. A fila é a principal: os callbacks mexem na camada.
+    // blocos. Os callbacks rodam na fila de quadros e só mexem na camada, em transação explícita.
     unsafe {
         call!(screen, sel!(registerScreenCallbacksWithUUID:callbackQueue:frameCallback:surfacesChangedCallback:propertiesChangedCallback:),
-            uuid => *mut AnyObject, main => *mut AnyObject, &*frame as *const _ as *mut c_void => *mut c_void,
+            uuid => *mut AnyObject, queue => *mut AnyObject, &*frame as *const _ as *mut c_void => *mut c_void,
             &*surfaces as *const _ as *mut c_void => *mut c_void, &*properties as *const _ as *mut c_void => *mut c_void; -> ());
-        if super::objc::responds(screen, sel!(registerCallbackWithUUID:damageRectanglesCallback:)) {
-            call!(screen, sel!(registerCallbackWithUUID:damageRectanglesCallback:), uuid => *mut AnyObject, &*damage as *const _ as *mut c_void => *mut c_void; -> ());
-        }
     }
     // O quadro atual: o callback de superfície só vem quando ela muda.
-    entry.view.show(entry.screen.surface());
-    entry.view.changed();
+    let presenter = entry.presenter.clone();
+    frame_queue().exec_async(move || presenter.set_surface(None));
 }
 
 fn stop(entry: &Entry) {
     if !entry.listening.replace(false) {
         return;
     }
+    debug("parou de ouvir os quadros");
+    activity(false);
     let screen = entry.screen.obj.ptr();
     let uuid = Retained::as_ptr(&entry.uuid) as *mut AnyObject;
     // SAFETY: os mesmos protocolos de `listen`.
     unsafe {
         call!(screen, sel!(unregisterScreenCallbacksWithUUID:), uuid => *mut AnyObject; -> ());
-        if super::objc::responds(screen, sel!(unregisterDamageRectanglesCallbackWithUUID:)) {
-            call!(screen, sel!(unregisterDamageRectanglesCallbackWithUUID:), uuid => *mut AnyObject; -> ());
-        }
     }
 }
 
@@ -465,7 +606,13 @@ pub unsafe fn attach(webview: *mut c_void, id: &str, screen: Screen, hid: Arc<Hi
         call!(Retained::as_ptr(&superview) as *mut AnyObject, sel!(addSubview:positioned:relativeTo:),
             Retained::as_ptr(&view) as *mut AnyObject => *mut AnyObject, 1isize => isize, webview as *const NSView as *mut AnyObject => *mut AnyObject; -> ());
     }
-    let entry = Entry { view, screen, uuid: new_uuid(), listening: Cell::new(false) };
+    // SAFETY: a camada e a tela estão vivas; `retain` as guarda para a fila de quadros.
+    let (layer, screen_obj) = unsafe { (retain(view.layer()), retain(screen.obj.ptr())) };
+    let (Some(layer), Some(screen_obj)) = (layer, screen_obj) else { return Err("A tela do simulador não tem camada.".into()) };
+    let presenter = Arc::new(Presenter {
+        layer: Shared(layer), screen: Shared(screen_obj), surface: Mutex::new(None), seed: AtomicU32::new(0), pending: AtomicBool::new(false),
+    });
+    let entry = Entry { view, screen, presenter, uuid: new_uuid(), listening: Cell::new(false) };
     apply(&entry, webview, place);
     SCREENS.with(|s| s.borrow_mut().insert(id.to_string(), entry));
     Ok(())

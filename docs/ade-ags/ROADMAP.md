@@ -347,7 +347,7 @@ Redução drástica do tempo de feedback de testes para agentes e humanos atrav�
 
 ## Simulador iOS no canvas
 
-iPhones e iPads do Xcode ligados sem o app Simulator, soltos no canvas com a barra flutuante e a conversa com os agentes conectados. A tela é a `IOSurface` do simulador numa camada nativa, sem cópia; o toque vai pelo HID do SimulatorKit; os agentes pilotam com `ags device …`. Como funciona, leveza e o que falta: [SIMULADOR_IOS.md](./SIMULADOR_IOS.md).
+iPhones e iPads do Xcode ligados sem o app Simulator, soltos no canvas com a barra flutuante e a conversa com os agentes conectados. A tela é a `IOSurface` do simulador numa camada nativa, sem cópia; o toque vai pelo HID do SimulatorKit; os agentes pilotam com `ags device …`. No modo leve, o iOS sobe sem os serviços pesados (Siri, widgets, iCloud, Spotlight…): medido no iPhone 17, de 495% para 1% de CPU depois do boot. Os quadros chegam numa fila própria, fora da thread da interface. Como funciona, leveza e o que falta: [SIMULADOR_IOS.md](./SIMULADOR_IOS.md).
 
 ## Portal com Chrome real
 

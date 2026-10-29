@@ -14,7 +14,7 @@ import { SimulatorBar } from "./SimulatorBar";
 import { SimulatorChat, type SimAgent } from "./SimulatorChat";
 import { SimulatorScreen } from "./SimulatorScreen";
 import { addLine, deviceByUdid, listenActivity, refreshDevices, setDeviceState, useSimulatorStore } from "./store";
-import { useSimulatorPrefs } from "./prefs";
+import { syncSimulatorPrefs, useSimulatorPrefs } from "./prefs";
 
 const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-accent-400! dark:bg-accent-500!";
 
@@ -31,16 +31,30 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const key = useActiveBoardKey();
   const devices = useSimulatorStore((s) => s.devices);
   const loaded = useSimulatorStore((s) => s.loaded);
-  const board = useCanvasStore((s) => (key ? s.boards[key] : undefined));
-  const tabs = useTabsStore((s) => s.tabs);
+  // Só o que o nó usa, como texto estável: assinar o board ou as abas inteiras re-renderizava o simulador a cada
+  // arrasto de outro nó do canvas e a cada mudança de status de aba.
+  const linked = useCanvasStore((s) => {
+    const board = key ? s.boards[key] : undefined;
+    return board ? neighbors(board, id).filter((other) => !isPortalId(other) && !isNoteId(other)).join("\n") : "";
+  });
+  const agentsKey = useTabsStore((s) => linked.split("\n").filter(Boolean).flatMap((tabId) => {
+    const tab = s.tabs.find((x) => x.id === tabId);
+    return tab ? [`${tab.id}\t${tab.title}\t${String(tab.agentId)}`] : [];
+  }).join("\n"));
   const light = useSimulatorPrefs((s) => s.light);
+  const hibernateMin = useSimulatorPrefs((s) => s.hibernateMin);
+  const single = useSimulatorPrefs((s) => s.single);
+  const paused = useSimulatorStore((s) => (portal.udid ? s.paused[portal.udid] : undefined));
   const [booting, setBooting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closeArmed, setCloseArmed] = useState(false);
 
   useEffect(() => {
     listenActivity();
-    if (!loaded) void refreshDevices();
+    if (!loaded) {
+      syncSimulatorPrefs();
+      void refreshDevices();
+    }
   }, [loaded]);
 
   const current = deviceByUdid(devices, portal.udid);
@@ -51,15 +65,10 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const state: SimDevice["state"] | "error" = error ? "error" : booting ? "booting" : current?.state ?? "shutdown";
   const booted = current?.state === "booted";
 
-  const agents: SimAgent[] = useMemo(() => {
-    if (!board) return [];
-    return neighbors(board, id)
-      .filter((other) => !isPortalId(other) && !isNoteId(other))
-      .flatMap((other) => {
-        const tab = tabs.find((x) => x.id === other);
-        return tab ? [{ id: tab.id, name: tab.title, agentId: String(tab.agentId) }] : [];
-      });
-  }, [board, id, tabs]);
+  const agents: SimAgent[] = useMemo(() => agentsKey.split("\n").filter(Boolean).map((row) => {
+    const [tabId, name, agentId] = row.split("\t");
+    return { id: tabId, name, agentId };
+  }), [agentsKey]);
 
   // O box gravado acompanha o bloco: trocar de aparelho, abrir a conversa ou mudar o zoom muda o tamanho do nó.
   const resize = (nextScreen: SimScreen, nextScale: number, nextChat: boolean, patch: Partial<CanvasPortal> = {}) => {
@@ -116,7 +125,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     onScale: (direction: 1 | -1) => resize(screen, stepScale(screen, scale, direction), chat),
     onLight: async () => {
       const next = !light;
-      useSimulatorPrefs.getState().setLight(next);
+      useSimulatorPrefs.getState().set({ light: next });
       if (!booted || !portal.udid) {
         void AlertaToast(portal.name, t(next ? "simulator.lightOnNext" : "simulator.lightOffNext"), "info", 3500);
         return;
@@ -138,6 +147,8 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
         fail(e);
       }
     },
+    onHibernate: (minutes: number) => useSimulatorPrefs.getState().set({ hibernateMin: minutes }),
+    onSingle: () => useSimulatorPrefs.getState().set({ single: !single }),
     onClose: () => {
       if (!closeArmed) {
         setCloseArmed(true);
@@ -156,6 +167,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
       <div className="flex h-full w-full flex-col" style={{ gap: SIM_GAP_Y }}>
         <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light}
+          hibernateMin={hibernateMin} single={single}
           agents={agents.length} chatOpen={chat} closeArmed={closeArmed} actions={actions} />
         <div className="flex min-h-0 flex-1" style={{ gap: SIM_GAP_X }}>
           <div className="relative shrink-0 bg-gradient-to-br from-surface-overlay via-surface to-surface-raised"
@@ -170,14 +182,17 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
                 <SimulatorScreen screenId={id} udid={portal.udid} radius={phone.screenRadius} onError={fail} />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
-                  <span className="text-[13px] font-semibold text-white">{current?.name ?? t("simulator.pick")}</span>
+                  {paused && !booting && <span aria-hidden className="text-[22px] text-accent-300">☾</span>}
+                  <span className="text-[13px] font-semibold text-white">{paused && !booting ? t("simulator.paused.title") : current?.name ?? t("simulator.pick")}</span>
                   <span className="text-[11.5px] leading-snug text-gray-400">
-                    {booting ? t("simulator.booting") : current ? `${current.runtime} · ${t("simulator.offHint")}` : t("simulator.pickHint")}
+                    {booting ? t("simulator.booting")
+                      : paused ? t(paused === "single" ? "simulator.paused.single" : "simulator.paused.hint")
+                      : current ? `${current.runtime} · ${t("simulator.offHint")}` : t("simulator.pickHint")}
                   </span>
                   {!booting && current && (
                     <button type="button" onClick={() => void boot()}
                       className="cc-t h-8 rounded-lg bg-accent-600 px-4 text-[12.5px] font-medium text-white hover:bg-accent-500">
-                      {t("simulator.boot")}
+                      {paused ? t("simulator.paused.resume") : t("simulator.boot")}
                     </button>
                   )}
                   {!booting && current && <span className="text-[10.5px] text-gray-500">{t("simulator.bootHint")}</span>}

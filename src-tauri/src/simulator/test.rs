@@ -102,3 +102,47 @@ fn a_arvore_do_ios_sai_do_launchd_sim_do_aparelho() {
     let real = "81034     1 launchd_sim /Users/x/Library/Developer/CoreSimulator/Devices/AAA/data/var/run/launchd_bootstrap.plist\n81100 81034 /cryptex/SpringBoard\n";
     assert_eq!(process_tree(real, "AAA"), vec![81034, 81100]);
 }
+
+#[test]
+fn hiberna_so_fora_de_vista_depois_do_prazo() {
+    use super::lifecycle::due;
+    use std::time::{Duration, Instant};
+    let start = Instant::now();
+    let later = start + Duration::from_secs(600);
+    let ten = Some(Duration::from_secs(600));
+    assert!(due(later, start, false, ten));
+    assert!(!due(later, start, true, ten), "à vista nunca hiberna");
+    assert!(!due(start + Duration::from_secs(599), start, false, ten));
+    assert!(!due(later, start, false, None), "nunca = nunca");
+}
+
+#[test]
+fn a_prioridade_e_baixa_no_boot_e_fora_de_vista_e_normal_quando_se_olha() {
+    use super::lifecycle::wanted_nice;
+    use std::time::Duration;
+    let settled = Duration::from_secs(600);
+    assert_eq!(wanted_nice(true, true, settled), 0);
+    assert_eq!(wanted_nice(true, false, settled), 10);
+    assert_eq!(wanted_nice(true, true, Duration::from_secs(30)), 10, "no pico do boot, baixa mesmo à vista");
+    assert_eq!(wanted_nice(false, false, settled), 0, "sem modo leve, sempre normal");
+}
+
+#[test]
+fn o_modo_leve_desliga_cada_servico_uma_vez_e_o_caminho_e_seguro() {
+    use super::slim;
+    let mut seen = std::collections::HashSet::new();
+    for label in slim::LABELS {
+        assert!(seen.insert(*label), "rótulo repetido: {label}");
+        assert!(label.starts_with("com.apple."), "{label}");
+    }
+    assert_eq!(slim::LABELS.len(), 143);
+    // Os que ficam ligados de propósito (sem eles o iOS fica tentando subir de novo, ou quebra quem testa app).
+    for keep in ["com.apple.assistantd", "com.apple.gamed", "com.apple.sharingd", "com.apple.apsd", "com.apple.storekitd"] {
+        assert!(!seen.contains(keep), "{keep} não pode sair");
+    }
+    let (file, original) = slim::paths("B3DECAAB-8989-4EF2-B77D-C045E026E198").unwrap();
+    assert_eq!(file.to_string_lossy(), "/private/var/tmp/com.apple.CoreSimulator.SimDevice.B3DECAAB-8989-4EF2-B77D-C045E026E198/disabled.plist");
+    assert!(original.ends_with("disabled.ade-original.plist"));
+    assert!(slim::paths("../../etc").is_none());
+    assert!(slim::paths("B3DECAAB-8989-4EF2-B77D-C045E026E19/").is_none());
+}

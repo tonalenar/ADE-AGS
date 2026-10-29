@@ -1,7 +1,6 @@
 //! A tela principal do aparelho: a porta de IO que é um `SimScreen` do tipo LCD. Dela saem a `IOSurface` que o
 //! iOS desenha (a mesma memória da GPU, sem cópia) e os avisos de quadro novo, só quando algo muda na tela.
 
-use std::ffi::c_void;
 use std::time::{Duration, Instant};
 
 use objc2::rc::autoreleasepool;
@@ -71,15 +70,6 @@ pub fn lcd(device: &Shared, wait: Duration) -> Result<Screen, String> {
 }
 
 impl Screen {
-    /// A superfície atual: a sem máscara (retangular); os cantos arredondados são da camada.
-    pub fn surface(&self) -> *mut c_void {
-        // SAFETY: `framebufferSurface` é do protocolo SimDisplayIOSurfaceRenderable, que a tela implementa.
-        unsafe {
-            let s = call!(self.obj.ptr(), sel!(framebufferSurface); -> *mut AnyObject);
-            if s.is_null() { call!(self.obj.ptr(), sel!(maskedFramebufferSurface); -> *mut AnyObject) as *mut c_void } else { s as *mut c_void }
-        }
-    }
-
     /// O tamanho em pontos do iOS (o que os agentes usam).
     pub fn points(&self) -> (f64, f64) {
         (self.pixels.0 / self.scale, self.pixels.1 / self.scale)

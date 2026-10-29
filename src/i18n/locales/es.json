@@ -3534,7 +3534,7 @@
   "simulator.zoom": "Tamaño",
   "simulator.smaller": "Achicar el dispositivo",
   "simulator.bigger": "Agrandar el dispositivo",
-  "simulator.light": "Modo liviano: iOS corre con prioridad baja y no compite por la CPU con ADE y el resto del Mac",
+  "simulator.light": "Modo liviano: iOS arranca sin Siri, widgets, iCloud, Spotlight y otros servicios pesados, y con prioridad baja para no competir por la CPU con ADE",
   "simulator.lightShort": "Modo liviano",
   "simulator.shutdown": "Apagar el dispositivo",
   "simulator.shutDownLine": "El dispositivo se apagó.",
@@ -3555,8 +3555,16 @@
   "simulator.chat.attach": "Adjuntar la pantalla actual",
   "simulator.chat.attached": "pantalla actual adjunta",
   "simulator.chat.send": "Enviar a {{count}}",
-  "simulator.lightOn": "Modo liviano activado: {{count}} procesos de iOS con prioridad baja.",
-  "simulator.lightOff": "Modo liviano desactivado: iOS volvió a la prioridad normal ({{count}} procesos).",
+  "simulator.lightOn": "Modo liviano activado: {{count}} procesos de iOS con prioridad baja. Los servicios pesados salen cuando el dispositivo se reinicie.",
+  "simulator.lightOff": "Modo liviano desactivado: iOS volvió a la prioridad normal ({{count}} procesos). Los servicios vuelven cuando el dispositivo se reinicie.",
   "simulator.lightOnNext": "Modo liviano activado: vale cuando el dispositivo encienda.",
-  "simulator.lightOffNext": "Modo liviano desactivado: vale cuando el dispositivo encienda."
+  "simulator.lightOffNext": "Modo liviano desactivado: vale cuando el dispositivo encienda.",
+  "simulator.paused.title": "Pausado para ahorrar",
+  "simulator.paused.hint": "Quedó fuera de vista y se apagó sin perder datos.",
+  "simulator.paused.single": "Se encendió otro dispositivo (uno a la vez).",
+  "simulator.paused.resume": "Retomar",
+  "simulator.hibernate": "Hibernar fuera de vista",
+  "simulator.hibernateNever": "Nunca",
+  "simulator.hibernateMin": "{{count}} min",
+  "simulator.single": "Un dispositivo encendido a la vez"
 }

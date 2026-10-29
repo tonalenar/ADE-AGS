@@ -4,9 +4,11 @@
 
 pub(crate) mod objc;
 mod device;
+mod dtu;
 pub mod hid;
 mod kit;
 pub mod screen;
+mod slim;
 pub mod view;
 
 use std::sync::Arc;
@@ -18,14 +20,32 @@ use crate::simulator::model::{self, Device};
 const SCREEN_WAIT: Duration = Duration::from_secs(60);
 
 pub fn devices() -> Result<Vec<Device>, String> {
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    SWEPT.call_once(slim::restore_leftovers);
     device::list()
 }
 
-/// Liga, espera a tela existir e, no modo leve, põe o iOS na prioridade baixa ([`set_priority`]).
+/// Liga e espera a tela existir. No modo leve, com o aparelho desligado, sobe sem os serviços pesados do iOS
+/// (`simulator::slim`: o arquivo original volta logo que a tela existe) e com prioridade baixa ([`set_priority`]).
 pub fn boot(udid: &str, light: bool) -> Result<(), String> {
     let dev = device::find(udid)?;
-    device::boot(&dev)?;
-    screen::lcd(&dev, SCREEN_WAIT)?;
+    let slimmed = light && device::state(&dev) == model::STATE_SHUTDOWN && match slim::apply(udid) {
+        Ok(_) => true,
+        Err(e) => {
+            eprintln!("[simulator] modo leve sem a lista de serviços: {e}");
+            false
+        }
+    };
+    let ready = device::boot(&dev).and_then(|()| screen::lcd(&dev, SCREEN_WAIT).map(|_| ()));
+    if slimmed {
+        // A porta da tela é do lado do Mac e pode surgir antes do `launchd_sim` ler o arquivo. Ele lê antes
+        // de abrir o primeiro serviço: com filhos já rodando, já leu.
+        if ready.is_ok() {
+            launchd_started(udid, Duration::from_secs(30));
+        }
+        slim::restore(udid);
+    }
+    ready?;
     if light {
         set_priority(udid, LIGHT_NICE)?;
     }
@@ -119,6 +139,18 @@ fn ios_processes(udid: &str) -> Result<Vec<u32>, String> {
     cmd.args(["-axo", "pid=,ppid=,command="]);
     let out = crate::util::spawn::output(&mut cmd, Duration::from_secs(5)).map_err(|e| e.to_string())?;
     Ok(model::process_tree(&String::from_utf8_lossy(&out.stdout), udid))
+}
+
+/// Espera o `launchd_sim` do aparelho abrir os primeiros serviços (até `wait`).
+fn launchd_started(udid: &str, wait: Duration) {
+    let until = std::time::Instant::now() + wait;
+    while std::time::Instant::now() < until {
+        if ios_processes(udid).map(|p| p.len() > 5).unwrap_or(false) {
+            return;
+        }
+        // O `launchd_sim` não avisa quando sobe: é o mesmo caso da porta da tela em `screen::lcd`.
+        std::thread::park_timeout(Duration::from_millis(150));
+    }
 }
 
 /// Põe o iOS do aparelho na prioridade `nice` (0 = normal, 10 = baixa): com o iOS ocupado (papel de parede
