@@ -63,6 +63,15 @@ export function KimiIcon({ className }: IconProps) {
   );
 }
 
+/** Cursor Agent. */
+export function CursorIcon({ className }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M4.2 2.6c-.8.4-1 1.4-.6 2.2l6.2 16.4c.4 1 1.6 1.2 2.4.4l2.4-2.1 3.2 2.8c.7.6 1.8.2 2-.8l.3-1.2c.2-.7-.3-1.3-1-1.4l-3.1-.5 2.2-2.4c.7-.8.2-2-.9-2.2L4.2 2.6z" />
+    </svg>
+  );
+}
+
 /** Hermes Agent (Nous Research). */
 export function HermesAgentIcon({ className }: IconProps) {
   return (

@@ -51,6 +51,7 @@ export function vendorOf(id: string): string | null {
   if (id.startsWith("opencode")) return "SST";
   if (id.startsWith("kimi")) return "Moonshot";
   if (id.startsWith("hermes")) return "Nous Research";
+  if (id.startsWith("cursor")) return "Cursor";
   return null;
 }
 
@@ -69,5 +70,6 @@ export function agentName(id: string): string {
   if (id.startsWith("opencode")) return "OpenCode";
   if (id.startsWith("kimi")) return "Kimi";
   if (id.startsWith("hermes")) return "Hermes";
+  if (id.startsWith("cursor")) return "Cursor";
   return id;
 }

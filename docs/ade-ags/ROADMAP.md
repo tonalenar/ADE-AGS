@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## CLIs fora do PATH e instalação pela ADE
+
+No macOS a lista e o terminal acham o Claude do aplicativo e o `cursor-agent` sem estarem no PATH. O Cursor entra na fábrica sem sessão, conta isolada nem MCP. A tela de Agentes instala Codex, Gemini e Kimi com o comando npm/bun já fixo; Claude, OpenCode, Hermes, Cursor e Antigravity só mostram o comando, sem executá-lo. Detalhe em [AGENT_UPDATES.md](./AGENT_UPDATES.md).
+
 ## Canal estruturado em paralelo ao terminal
 
 O estado das abas de Claude Code e Codex lido do transcript que a própria TUI grava (turno aberto ou

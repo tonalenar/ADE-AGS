@@ -203,6 +203,33 @@ fn hermes_recebe_o_mcp_numa_config_gerenciada_que_so_traz_o_ags() {
 }
 
 #[test]
+fn cursor() {
+    let agent = adapter("cursor");
+    let def = agent.def();
+    let caps = agent.capabilities();
+
+    assert_eq!(def.id, "cursor");
+    assert_eq!(def.command, "cursor-agent");
+    assert_eq!(def.label, "Cursor");
+    assert_eq!(def.skills_dir, Some(".cursor/skills"));
+    assert!(def.profile.is_none());
+    assert!(def.resume.is_none());
+    assert_eq!(def.sessions, SessionSource::None);
+    assert_eq!(def.mcp, McpStyle::None);
+    assert!(agent.account_env("/tmp/cursor").is_none());
+
+    assert!(caps.skills);
+    assert!(!caps.accounts);
+    assert!(!caps.sessions);
+    assert!(!caps.resume);
+    assert!(!caps.mcp);
+    assert!(!caps.models);
+    assert!(!caps.headless);
+    assert!(!caps.orchestration);
+    assert!(agent.headless().is_none());
+}
+
+#[test]
 fn bash_no_finge_capabilities_de_agente() {
     let agent = adapter("bash");
     let caps = agent.capabilities();

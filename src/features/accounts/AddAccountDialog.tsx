@@ -4,7 +4,9 @@ import {
   Badge, Button, Input,
 } from "neogestify-ui-components";
 
+import { accountFormMode, programPresent } from "@/features/agents/accountConnect";
 import { useAccountsStore } from "@/features/accounts/store";
+import { useTabsStore } from "@/features/tabs/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -39,9 +41,6 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const checkHealth = useAccountsStore((s) => s.checkHealth);
   const load = useAccountsStore((s) => s.load);
   const [name, setName] = useState("");
-  // Claude Code y Codex también aceptan una API key (ver `create_agent_api_key_account`):
-  // sin terminal de login, la key se guarda y se verifica enseguida.
-  const acceptsApiKey = agentId === "claude-code" || agentId === "codex";
   const [mode, setMode] = useState<"login" | "api_key">("login");
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
@@ -51,10 +50,13 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const [created, setCreated] = useState<AgentAccount | null>(null);
 
   const agent = capable.find((c) => c.agentId === agentId);
+  const seen = useTabsStore((s) => s.detectedAgents.some((a) => a.id === agentId && a.available));
   const taken = accounts.some((a) => a.agentId === agentId && a.name === name.trim());
-
-  const usingKey = acceptsApiKey && mode === "api_key";
-  const canCreate = !!agent && !!name.trim() && !taken && (!usingKey || apiKey.trim().length > 0);
+  const form = agent ? accountFormMode(agentId, programPresent(agent.installed, seen)) : "blocked";
+  const showKey = form === "api-key" || form === "both";
+  const showLogin = form === "login" || form === "both";
+  const usingKey = showKey && (form === "api-key" || mode === "api_key");
+  const canCreate = !!agent && form !== "blocked" && !!name.trim() && !taken && (!usingKey || apiKey.trim().length > 0);
 
   const handleCreate = async () => {
     setBusy(true);
@@ -138,6 +140,10 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
         <p className="text-[12px] text-gray-500 dark:text-gray-400">
           {t("settings.accounts.add.noneInstalled")}
         </p>
+      ) : form === "blocked" ? (
+        <p className="text-[12px] text-gray-500 dark:text-gray-400">
+          {t("settings.accounts.add.needsProgram")}
+        </p>
       ) : (
         <div className="flex flex-col gap-3">
           {/* Para qué servicio es. Va como dato, no como elección: es lo que estabas
@@ -171,7 +177,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
             helperText={t("settings.accounts.add.nameHelper", { envVar: agent.envVar })}
           />
 
-          {acceptsApiKey && (
+          {showKey && showLogin && (
             <div className="flex gap-1.5" role="radiogroup">
               {(["login", "api_key"] as const).map((m) => (
                 <Button

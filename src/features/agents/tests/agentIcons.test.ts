@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { BoxIcon, MonitorIcon } from "neogestify-ui-components";
 
 import { agentIcon } from "../agentIcons";
-import { CodexIcon, HermesAgentIcon, OpenCodeIcon } from "../brandIcons";
+import { CodexIcon, CursorIcon, HermesAgentIcon, OpenCodeIcon } from "../brandIcons";
 import { AntigravityColorIcon, ClaudeCodeColorIcon, GeminiColorIcon, KimiColorIcon } from "../brandColorIcons";
 
 describe("ícones dos agentes", () => {
@@ -14,6 +14,7 @@ describe("ícones dos agentes", () => {
     expect(agentIcon("opencode")).toBe(OpenCodeIcon);
     expect(agentIcon("kimi-code")).toBe(KimiColorIcon);
     expect(agentIcon("hermes")).toBe(HermesAgentIcon);
+    expect(agentIcon("cursor")).toBe(CursorIcon);
     expect(agentIcon("bash")).toBe(MonitorIcon);
   });
 
