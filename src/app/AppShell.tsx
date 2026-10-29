@@ -24,7 +24,8 @@ import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
 import { EditorArea } from "@/features/tabs/EditorArea";
 import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
 import { initViewTabsPersistence } from "@/features/tabs/viewStore";
-import { useUiStore } from "@/app/uiStore";
+import { useChatShell, useUiStore } from "@/app/uiStore";
+import { ChatShell } from "@/features/chat/ChatShell";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
@@ -105,6 +106,8 @@ export function AppShell() {
   const accountsOpen = useUiStore((s) => s.accountsOpen);
   const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
   const setSettingsSection = useUiStore((s) => s.setSettingsSection);
+  // O modo chat: a casca de conversas por cima do workspace, que continua montado por baixo.
+  const chat = useChatShell();
 
   // Configurações e Contas são a rota `/settings`. Os pedidos de abrir (atalho, paleta, botões)
   // chegam como flags no store; aqui viram navegação e se apagam.
@@ -269,7 +272,9 @@ export function AppShell() {
       {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
           donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a
           la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
-      <div className="flex shrink-0">
+      {/* No chat estas peças ficam montadas e só saem do layout (`hidden`): a casca do chat
+          tem a sua barra de título e a sua sidebar. */}
+      <div className={chat ? "hidden" : "flex shrink-0"}>
         <SideHead width={sideWidth} />
         <TabBar showLights={workspacesCollapsed && !railExpanded}
           trailing={<PanelButtons changes={activeRepo?.changedCount ?? 0} />} />
@@ -279,8 +284,10 @@ export function AppShell() {
         {/* Izquierda: los AGENTES. Es lo primero que se ve porque en un entorno de
             desarrollo para agentes lo primero es qué está corriendo; el árbol de
             archivos es el panel secundario y va del otro lado. */}
-        <ActivityRail agentCount={tabs.length} width={RAIL_W} />
-        {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
+        <div className={chat ? "hidden" : "contents"}>
+          <ActivityRail agentCount={tabs.length} width={RAIL_W} />
+          {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
+        </div>
 
         <div className="relative flex-1 min-w-0 overflow-hidden">
           {/* Las terminales y las demás tabs, siempre montadas para preservar los PTYs, en
@@ -290,8 +297,11 @@ export function AppShell() {
               position: "absolute",
               inset: 0,
               // También visible detrás de un modal de ruta: es el punto de que sea modal.
-              visibility: isWorkspace || asModal ? "visible" : "hidden",
-              zIndex: 0,
+              visibility: chat || isWorkspace || asModal ? "visible" : "hidden",
+              // No chat a área fica POR CIMA da casca, sem pegar o puntero: só o terminal da conversa
+              // aberta aparece (e recebe cliques), no espaço que a tela da conversa reservou.
+              zIndex: chat ? 20 : 0,
+              pointerEvents: chat ? "none" : undefined,
             }}
           >
             <EditorArea />
@@ -301,7 +311,9 @@ export function AppShell() {
               scrollea por dentro (encabezado fijo arriba, atajos fijos abajo, la lista en
               el medio). Un scroll acá afuera además reservaría su carril a la derecha de
               TODAS las páginas, incluidas las que no lo necesitan. */}
-          {!isWorkspace && !fullPage && (
+          {chat && <ChatShell groups={groups} />}
+
+          {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
               <Outlet context={{ groups } satisfies ShellOutletContext} />
             </div>
@@ -335,17 +347,19 @@ export function AppShell() {
 
           {/* O painel da sessão do agente ativo (ambiente, contexto, conectores, alterações, tarefas):
               cartões flutuando no canto de cima, sem coluna — o conteúdo fica com a largura toda. */}
-          {!sidePanelHidden && isWorkspace && activeTab && <SessionPanel tab={activeTab} repo={activeRepo} />}
+          {!chat && !sidePanelHidden && isWorkspace && activeTab && <SessionPanel tab={activeTab} repo={activeRepo} />}
         </div>
 
         {/* Onde as telas cheias se montam (ver `pageHost`): tudo à direita do riel, por cima
             dos painéis e da área de trabalho. Sempre montado e vazio, sem pegar cliques; as
             terminais por baixo não mudam de tamanho, então os agentes nem percebem. */}
         <div id={PAGE_HOST_ID} className="absolute top-0 bottom-0 right-0 z-30 pointer-events-none"
-          style={{ left: RAIL_W }} />
+          style={{ left: chat ? 0 : RAIL_W }} />
       </div>
 
-      <StatusBar repo={activeRepo} />
+      <div className={chat ? "hidden" : "contents"}>
+        <StatusBar repo={activeRepo} />
+      </div>
 
       <CommandPalette />
       <CompareHost />

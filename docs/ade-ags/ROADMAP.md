@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## Modo chat (estilo T3 Code), experimental
+
+Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações → Avançado. Na F1 cada conversa é uma aba de agente, e o terminal dela aparece na tela da conversa sem remontar. O composer escolhe pasta, agente, modelo, esforço, conta e permissão. `Chat | Abas | Canvas` e Ctrl+Shift+L alternam. Detalhes em [MODO_CHAT.md](./MODO_CHAT.md).
+
 ## CLIs fora do PATH e instalação pela ADE
 
 No macOS a lista e o terminal acham o Claude do aplicativo e o `cursor-agent` sem estarem no PATH. O Cursor entra na fábrica sem sessão, conta isolada nem MCP. A tela de Agentes instala Codex, Gemini e Kimi com o comando npm/bun já fixo; Claude, OpenCode, Hermes, Cursor e Antigravity só mostram o comando, sem executá-lo. Detalhe em [AGENT_UPDATES.md](./AGENT_UPDATES.md).

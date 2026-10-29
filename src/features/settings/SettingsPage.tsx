@@ -28,6 +28,7 @@ import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
+import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
@@ -198,7 +199,7 @@ export function SettingsPage() {
     terminal: labels.terminal,
     shortcuts: labels.shortcuts,
     decisions: [labels.decisions, t("settings.decisions.provider"), "laya", "jev"].join(" "),
-    advanced: [labels.advanced, ...advancedTabs.map((x) => x.label)].join(" "),
+    advanced: [labels.advanced, ...advancedTabs.map((x) => x.label), t("chat.settings.title")].join(" "),
   }), [t]); // eslint-disable-line react-hooks/exhaustive-deps
   const q = filter.trim().toLocaleLowerCase();
   const matches = (id: SettingsSectionId) => !q || terms[id].toLocaleLowerCase().includes(q);
@@ -418,6 +419,7 @@ export function SettingsPage() {
 
           {section === "advanced" && (
             <>
+              <ChatModeSetting />
               <SubTabs items={advancedTabs} value={advancedTab} onChange={setAdvancedTab} />
               {advancedTab === "cli" && <CliInstallSection />}
               {advancedTab === "graphify" && <GraphifySection />}

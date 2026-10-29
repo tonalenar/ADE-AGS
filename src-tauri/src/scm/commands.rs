@@ -655,3 +655,42 @@ pub async fn scm_delete_tag(root: String, name: String) -> Result<(), ScmError> 
     })
     .await
 }
+
+/// O teto do diff de trabalho mandado à janela: um diff maior que isso é lido no editor de diff.
+const WORKING_DIFF_MAX: usize = 512 * 1024;
+
+/// O que a pasta mudou desde o último commit, em texto (`git diff HEAD`), para o painel Diff do
+/// modo chat. Os arquivos novos (sem rastrear) não entram no texto: vêm do `scm_status`.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingDiff {
+    pub root: String,
+    pub text: String,
+    pub truncated: bool,
+}
+
+/// Corta `text` em `max` bytes sem partir um caractere. Pura.
+pub(crate) fn clip_diff(mut text: String, max: usize) -> (String, bool) {
+    if text.len() <= max {
+        return (text, false);
+    }
+    let mut end = max;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text.truncate(end);
+    (text, true)
+}
+
+#[tauri::command]
+pub async fn scm_working_diff(cwd: String) -> Result<Option<WorkingDiff>, ScmError> {
+    blocking(move || {
+        let Some(root) = repo_root(&cwd) else { return Ok(None) };
+        // Sem commit ainda não há HEAD: aí o que existe é o que está no índice.
+        let raw = run_text(&root, &["diff", "HEAD", "--no-color", "--no-ext-diff", "-M"], LOCAL)
+            .or_else(|_| run_text(&root, &["diff", "--cached", "--no-color", "--no-ext-diff", "-M"], LOCAL))?;
+        let (text, truncated) = clip_diff(raw, WORKING_DIFF_MAX);
+        Ok(Some(WorkingDiff { root, text, truncated }))
+    })
+    .await
+}

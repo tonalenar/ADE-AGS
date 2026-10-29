@@ -13,6 +13,7 @@ import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
+import { useChatShell } from "@/app/uiStore";
 
 /**
  * Donde se dibujan las tabs de archivo, diff y navegador: encima de las terminales.
@@ -46,7 +47,9 @@ export function ViewTabsHost() {
   const desktopNode = mode === "canvas" && portals ? Object.entries(portals).find(([, p]) => p.kind === "gemini") : undefined;
   const desktopRect = desktopNode && desktopRects[desktopNode[0]];
   const boardCwd = boardKey?.split("|").slice(1).join("|").split("#m:")[0];
-  const placementOf = (view: ViewTab) => view.kind === "desktop" && mode === "canvas"
+  // No chat nenhuma vista aparece (nem o Gemini Desktop do canvas): só o terminal da conversa.
+  const chat = useChatShell();
+  const placementOf = (view: ViewTab) => view.kind === "desktop" && mode === "canvas" && !chat
     ? (desktopRect && !activeViewId && boardCwd === comparablePath(view.cwd) ? { groupId: "canvas", rect: desktopRect } : undefined)
     : visible.get(viewKey(view.id));
 

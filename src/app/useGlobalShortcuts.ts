@@ -27,6 +27,8 @@ export function useGlobalShortcuts() {
     const onKeyDown = (e: KeyboardEvent) => {
       const shortcut = matchShortcut(e);
       if (!shortcut) return;
+      // Com o modo chat desligado o acorde não é nosso: segue para o terminal.
+      if (shortcut.action.kind === "toggleChat" && !useUiStore.getState().chatMode) return;
 
       // Se corta acá SIEMPRE que el acorde sea nuestro, aunque después no haya nada que
       // hacer (ciclar sin tabs): si no, el acorde seguiría viaje hasta la terminal y el
@@ -42,6 +44,14 @@ export function useGlobalShortcuts() {
         const { zoom, setZoom } = useTerminalPrefsStore.getState();
         const { delta } = shortcut.action;
         setZoom(delta === 0 ? TERMINAL_ZOOM.default : zoom + delta * TERMINAL_ZOOM.step);
+        return;
+      }
+
+      if (shortcut.action.kind === "toggleChat") {
+        const { shellMode, setShellMode } = useUiStore.getState();
+        setShellMode(shellMode === "chat" ? "workspace" : "chat");
+        // Voltando às abas, o fundo é o workspace (sem abas, o AppShell manda para a inicial).
+        if (shellMode === "chat" && tabs.length > 0) navigate(WORKSPACE_PATH);
         return;
       }
 

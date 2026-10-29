@@ -218,6 +218,7 @@ pub fn run() {
             crate::ipc::commands::peer_queue::peer_queue_cancel,
             crate::ipc::commands::peer_queue::peer_queue_send_now,
             crate::ipc::commands::canal::structured_state_all,
+            crate::ipc::commands::canal::conversation_timeline,
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
             crate::ipc::commands::routine::routine_set_catch_up,
@@ -293,6 +294,7 @@ pub fn run() {
             crate::explorer::explorer_file_stat,
             // Control de versiones (panel derecho)
             crate::scm::scm_status,
+            crate::scm::scm_working_diff,
             crate::scm::scm_init,
             crate::scm::scm_stage,
             crate::scm::scm_unstage,
