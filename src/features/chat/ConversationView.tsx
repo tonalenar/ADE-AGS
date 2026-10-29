@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { agentIcon } from "@/features/agents/agentIcons";
 import { readTuning } from "@/features/canvas/tabTuning";
 import { answerTerminalPrompt, useTerminalPrompts } from "@/features/canvas/useTerminalPrompts";
 import type { PermissionPrompt } from "@/features/canvas/terminalPrompts";
@@ -9,8 +8,10 @@ import { useTabsStore } from "@/features/tabs/store";
 import { sendKeysToTab } from "@/features/terminal/terminalRegistry";
 
 import { AccessMenu } from "./AccessMenu";
-import { sendToConversation } from "./chatActions";
-import { readAccess, type ConversationCard } from "./chatModel";
+import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
+import { retuneConversationTab, sendToConversation } from "./chatActions";
+import { BotIcon } from "./chatIcons";
+import { accessModesFor, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { ChatComposer } from "./ChatComposer";
 import { useChatLive } from "./liveStore";
 import { ContextStrip } from "./NewConversation";
@@ -59,12 +60,22 @@ export function ConversationView({ card }: { card: ConversationCard }) {
   const terminalOpen = useTerminalOpen(card);
   const slotRef = useRef<HTMLDivElement>(null);
   const command = useTabsStore((s) => s.tabs.find((tab) => tab.id === card.tabId)?.command ?? "");
+  const agentInfo = useTabsStore((s) => s.detectedAgents.find((a) => a.id === card.agentId))
+    ?? { id: card.agentId, label: card.agentLabel, command: "", available: true };
   const tuning = useMemo(() => readTuning(card.agentId, command), [card.agentId, command]);
   const access = useMemo(() => readAccess(card.agentId, command), [card.agentId, command]);
   const working = useChatLive((s) => s.phase[card.tabId] === "working");
   const prompts = useTerminalPrompts(useMemo(() => [{ id: card.tabId, name: card.title }], [card.tabId, card.title]), true);
   const approval: PermissionPrompt | null = prompts[0]?.prompt ?? null;
-  const Icon = agentIcon(card.agentId);
+  // Trocar reinicia o agente (retomando a sessão): nunca no meio de um turno.
+  const locked = working || !!approval;
+  const retune = (patch: Partial<{ model: string | null; effort: string | null; access: ChatAccess; plan: boolean }>) =>
+    retuneConversationTab(card.tabId, {
+      model: patch.model !== undefined ? patch.model : tuning.model,
+      effort: patch.effort !== undefined ? patch.effort : tuning.effort,
+      access: patch.access ?? access.access,
+      plan: patch.plan ?? access.plan,
+    });
 
   const measure = useCallback(() => setChatSlot(rectIn(slotRef.current)), []);
   useLayoutEffect(() => measure());
@@ -96,10 +107,21 @@ export function ConversationView({ card }: { card: ConversationCard }) {
       <ApprovalButton primary onClick={() => answer("allow")}>{t("chat.approval.allow")}</ApprovalButton>
     </div>
   ) : (
-    <span title={t("chat.composer.modelFixed")} className="flex items-center gap-1.5 h-7 px-2 text-[14px] font-medium text-gray-900/85 dark:text-white/85">
-      <Icon className="w-4 h-4" />{tuning.model ?? t("chat.model.default")}
-      {tuning.effort && <span className="-ml-0.5 text-gray-500 dark:text-white/45">{t(`chat.effort.${tuning.effort}`, { defaultValue: tuning.effort })}</span>}
-    </span>
+    <div title={locked ? t("chat.composer.lockedWhileWorking") : t("chat.composer.retuneHint")} className="flex items-center gap-0.5">
+      <AgentModelPicker agents={[agentInfo]} showAccount={false} disabled={locked}
+        value={{ agentId: card.agentId, model: tuning.model, effort: tuning.effort, account: null }}
+        onChange={(v) => retune({ model: v.model })} />
+      <EffortMenu agentId={card.agentId} model={tuning.model} account={null} value={tuning.effort} disabled={locked}
+        onChange={(effort) => retune({ effort })} />
+      {planSupported(card.agentId) && (
+        <button type="button" disabled={locked} onClick={() => retune({ plan: !access.plan })} aria-pressed={access.plan}
+          title={access.plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
+          className="flex items-center gap-1.5 h-7 px-2 rounded-lg text-[14px] font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">
+          <BotIcon className="w-4 h-4 text-gray-500 dark:text-white/45" />
+          {access.plan ? t("chat.plan.plan") : t("chat.plan.build")}
+        </button>
+      )}
+    </div>
   );
 
   const composer = (
@@ -109,8 +131,9 @@ export function ConversationView({ card }: { card: ConversationCard }) {
         onSubmit={(text) => { sendToConversation(card.tabId, text); }}
         onStop={working && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
         controls={controls} />
-      <ContextStrip branch={card.branch}>
-        <AccessMenu value={access.plan ? "ask" : access.access} available={[]} />
+      <ContextStrip branch={card.branch} worktree={card.isWorktree}>
+        <AccessMenu value={access.plan ? "ask" : access.access} available={accessModesFor(card.agentId)}
+          onChange={locked ? undefined : (next) => retune({ access: next, plan: false })} />
       </ContextStrip>
     </div>
   );

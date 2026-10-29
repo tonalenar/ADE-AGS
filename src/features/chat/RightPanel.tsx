@@ -1,13 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 
 import { FilesView } from "@/features/explorer/FilesView";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { comparablePath } from "@/features/tabs/viewTabs";
 
 import { MaximizeIcon } from "./chatIcons";
 import { parseUnifiedDiff, type FileDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
-import { setRightPanel, togglePanelMaximized, useChatStore, type RightPanelTab } from "./store";
+import { CHAT_SHELL_ATTR } from "./ConversationView";
+import { setChatBrowser, setRightPanel, togglePanelMaximized, useChatStore, type RightPanelTab } from "./store";
 
 /** A largura do painel (a padrão do T3 Code). */
 export const RIGHT_PANEL_W = 540;
@@ -24,6 +27,7 @@ export function RightPanel({ tabId, cwd, project }: { tabId: string | null; cwd:
   const tabs: { id: RightPanelTab; label: string }[] = [
     { id: "diff", label: t("chat.panel.diff") },
     { id: "files", label: t("chat.panel.files") },
+    { id: "browser", label: t("chat.panel.browser") },
   ];
   return (
     <aside aria-label={t("chat.panel.label")}
@@ -44,7 +48,9 @@ export function RightPanel({ tabId, cwd, project }: { tabId: string | null; cwd:
         </button>
       </div>
       <div className="flex-1 min-h-0 flex flex-col border-t border-gray-200 dark:border-white/[0.08]">
-        {panel === "diff" ? <DiffView tabId={tabId} cwd={cwd} /> : cwd && <FilesView cwd={cwd} repo={null} title={project} />}
+        {panel === "diff" && <DiffView tabId={tabId} cwd={cwd} />}
+        {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}
+        {panel === "browser" && cwd && <BrowserSurface cwd={cwd} />}
       </div>
     </aside>
   );
@@ -118,4 +124,44 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
       </div>
     </div>
   );
+}
+
+/**
+ * A aba Navegador: o navegador do ADE (o mesmo das abas e do canvas) para a pasta da conversa. Como o
+ * terminal, ele não é montado aqui: esta tela reserva o espaço e publica, e o `ViewTabsHost` o
+ * desenha por cima. Reaproveita o navegador que a pasta já tiver; senão abre um.
+ */
+function BrowserSurface({ cwd }: { cwd: string }) {
+  const slotRef = useRef<HTMLDivElement>(null);
+  const existing = useViewTabsStore((s) =>
+    s.views.find((v) => v.kind === "browser" && !v.owner && comparablePath(v.cwd) === comparablePath(cwd))?.id ?? null);
+  const [viewId, setViewId] = useState<string | null>(existing);
+
+  useEffect(() => {
+    if (existing) setViewId(existing);
+    else setViewId(useViewTabsStore.getState().openBrowser(cwd, "", { activate: false }));
+  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- um navegador por pasta, criado uma vez
+
+  const measure = useCallback(() => {
+    const el = slotRef.current;
+    const base = el?.closest(`[${CHAT_SHELL_ATTR}]`);
+    if (!el || !base || !viewId) return setChatBrowser(null);
+    const r = el.getBoundingClientRect();
+    const b = base.getBoundingClientRect();
+    setChatBrowser({ viewId, rect: { left: Math.round(r.left - b.left), top: Math.round(r.top - b.top), width: Math.round(r.width), height: Math.round(r.height) } });
+  }, [viewId]);
+
+  useLayoutEffect(() => measure());
+  useEffect(() => {
+    const el = slotRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    const base = el.closest(`[${CHAT_SHELL_ATTR}]`);
+    if (base) observer.observe(base);
+    return () => observer.disconnect();
+  }, [measure]);
+  useEffect(() => () => setChatBrowser(null), []);
+
+  return <div ref={slotRef} className="flex-1 min-h-0" />;
 }

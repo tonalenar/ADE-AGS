@@ -34,3 +34,16 @@ describe("chatPlacements (casca do modo chat)", () => {
     expect([...p.visible.keys()].sort()).toEqual([agentKey("a"), agentKey("b")]);
   });
 });
+
+describe("navegador do painel direito no chat", () => {
+  const rect = { left: 900, top: 52, width: 540, height: 800 };
+  it("aparece no seu espaço; o teclado fica com o terminal se a gaveta está aberta", async () => {
+    const { viewKey } = await import("@/features/tabs/layout/layoutTree");
+    const both = chatPlacements(slot, "a", { viewId: "b1", rect });
+    expect(both.visible.get(viewKey("b1"))).toEqual({ groupId: CHAT_GROUP, rect });
+    expect(both.focusedItem).toBe(agentKey("a"));
+    const onlyBrowser = chatPlacements(null, "a", { viewId: "b1", rect });
+    expect([...onlyBrowser.visible.keys()]).toEqual([viewKey("b1")]);
+    expect(onlyBrowser.focusedItem).toBe(viewKey("b1"));
+  });
+});

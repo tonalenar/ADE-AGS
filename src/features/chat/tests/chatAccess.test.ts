@@ -60,3 +60,16 @@ describe("store ao vivo", () => {
     expect(s).toEqual({ phase: {}, question: {}, awaiting: {} });
   });
 });
+
+describe("trocar numa conversa aberta", async () => {
+  const { retuneConversation, stripChatFlags } = await import("@/features/chat/chatModel");
+  it("tira modelo, esforço, Fast e permissão e põe a escolha nova", () => {
+    const before = "claude --verbose --dangerously-skip-permissions --model opus --effort high";
+    expect(stripChatFlags(before)).toBe("claude --verbose");
+    expect(retuneConversation("claude-code", before, { model: "sonnet", effort: null, access: "ask" })).toBe("claude --verbose --model sonnet");
+  });
+  it("Codex: -m e os -c de esforço e Fast saem; o resto fica", () => {
+    expect(stripChatFlags("codex -m gpt-6.1-sol -c model_reasoning_effort=high -c features.fast_mode=false -c other=1"))
+      .toBe("codex -c other=1");
+  });
+});

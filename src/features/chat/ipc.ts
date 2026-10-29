@@ -17,3 +17,6 @@ export interface WorkingDiff {
 
 /** O `git diff HEAD` da pasta (`scm/commands.rs`, `scm_working_diff`). `null` = fora de um repo. */
 export const scmWorkingDiff = (cwd: string) => invoke<WorkingDiff | null>("scm_working_diff", { cwd });
+
+/** Um worktree novo para uma conversa (`conversa.rs`): onde o agente roda e a branch criada. */
+export const chatNewWorktree = (cwd: string, title: string) => invoke<{ cwd: string; branch: string }>("chat_new_worktree", { cwd, title });

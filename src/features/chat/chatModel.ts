@@ -130,6 +130,8 @@ export interface ConversationCard {
   project: string;
   cwd: string;
   branch: string | null;
+  /** A pasta é um worktree (não o checkout principal do repo). */
+  isWorktree: boolean;
   agentId: string;
   agentLabel: string;
   /** Sem PTY ainda: o agente está subindo. */
@@ -155,6 +157,7 @@ export function conversationCards(groups: RepoGroup[]): ConversationCard[] {
           project: ws.title,
           cwd: ws.cwd,
           branch: ws.branch,
+          isWorktree: ws.isWorktree,
           agentId: agent.agentId,
           agentLabel: agent.agentLabel,
           starting: agent.status === "starting",
@@ -165,4 +168,29 @@ export function conversationCards(groups: RepoGroup[]): ConversationCard[] {
     }
   }
   return cards.sort((a, b) => b.openedAt - a.openedAt);
+}
+
+/** Flags que `chatCommand` põe (e o que mais fixar modelo, esforço ou permissão): os que levam valor e os soltos. */
+const VALUED = new Set(["--model", "-m", "--effort", "--permission-mode", "--approval-mode"]);
+const BARE = new Set(["--dangerously-skip-permissions", "--dangerously-bypass-approvals-and-sandbox", "--yolo", "--approve-for-me"]);
+const CONFIG_KEYS = /^(model_reasoning_effort|service_tier|features\.fast_mode)=/;
+
+/** O comando sem modelo, esforço, Fast e permissão: o que sobra é o agente com o resto dos flags. Pura. */
+export function stripChatFlags(command: string): string {
+  const parts = command.trim().split(/\s+/).filter(Boolean);
+  const out: string[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]!;
+    const next = parts[i + 1];
+    if (VALUED.has(part) && next !== undefined) { i += 1; continue; }
+    if (BARE.has(part)) continue;
+    if (part === "-c" && next && CONFIG_KEYS.test(next)) { i += 1; continue; }
+    out.push(part);
+  }
+  return out.join(" ");
+}
+
+/** O comando de uma conversa aberta com a escolha nova (modelo, esforço, permissão). Pura. */
+export function retuneConversation(agentId: string, command: string, choice: LaunchChoice): string {
+  return chatCommand(agentId, stripChatFlags(command), choice);
 }

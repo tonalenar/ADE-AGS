@@ -7,9 +7,10 @@ import { useUiStore } from "@/app/uiStore";
 import { agentIcon } from "@/features/agents/agentIcons";
 
 import { newConversation, openConversation } from "./chatActions";
-import { ChevronRightIcon, FilterIcon, FolderPlusIcon, NewChatIcon, PullRequestIcon, SearchIcon, SettingsIcon, SidebarIcon, UsageIcon } from "./chatIcons";
+import { CheckIcon, ChevronRightIcon, ClockIcon, FilterIcon, FolderPlusIcon, NewChatIcon, PullRequestIcon, SearchIcon, SettingsIcon, SidebarIcon, UsageIcon } from "./chatIcons";
 import { projectTone, type ChatProject, type ConversationCard } from "./chatModel";
 import { useChatLive } from "./liveStore";
+import { reopenSettled, settleConversation, snoozeConversation, unsnoozeConversation, useShelf } from "./shelf";
 import { usePopover } from "./usePopover";
 
 /** A largura da sidebar (a padrão do T3 Code). */
@@ -42,11 +43,17 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
   const [query, setQuery] = useState("");
   const [folder, setFolder] = useState<string | null>(null);
   const [closedOpen, setClosedOpen] = useState(false);
+  const [snoozedOpen, setSnoozedOpen] = useState(false);
+  const snoozedIds = useShelf((s) => s.snoozed);
+  const settled = useShelf((s) => s.settled);
   const folders = useMemo(() => [...new Set(cards.map((c) => c.project))], [cards]);
-  const shown = useMemo(() => {
+  const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
     return cards.filter((c) => (!folder || c.project === folder) && (!q || `${c.title} ${c.project} ${c.agentLabel}`.toLowerCase().includes(q)));
   }, [cards, query, folder]);
+  const shown = matches.filter((c) => !snoozedIds.includes(c.tabId));
+  const snoozed = matches.filter((c) => snoozedIds.includes(c.tabId));
+  const doneCount = settled.length + closed.length;
 
   return (
     <aside aria-label={t("chat.sidebar.label")} style={{ width: CHAT_SIDEBAR_W }}
@@ -81,16 +88,29 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
         ))}
       </nav>
 
-      {closed.length > 0 && (
+      {snoozed.length > 0 && (
         <div className="px-2 pt-1">
-          <button type="button" aria-expanded={closedOpen} onClick={() => setClosedOpen(!closedOpen)}
-            className="w-full flex items-center h-8 px-2 rounded-md text-[13px] font-medium text-gray-500 dark:text-white/45 hover:bg-white dark:hover:bg-white/[0.05]">
-            <span className="flex-1 text-left">{t("chat.sidebar.closed")}</span>
-            <span className="tabular-nums mr-1.5">{closed.length}</span>
-            <ChevronRightIcon className={`w-3 h-3 transition-transform ${closedOpen ? "rotate-90" : ""}`} />
-          </button>
-          {closedOpen && (
+          <SectionHeader label={t("chat.sidebar.snoozed")} count={snoozed.length} open={snoozedOpen} onToggle={() => setSnoozedOpen(!snoozedOpen)} />
+          {snoozedOpen && (
             <div className="max-h-40 cc-scroll flex flex-col">
+              {snoozed.map((c) => (
+                <SlimRow key={c.tabId} name={c.project} title={c.title} agentId={c.agentId}
+                  onOpen={() => { unsnoozeConversation(c.tabId); openConversation(c.tabId); }} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {doneCount > 0 && (
+        <div className="px-2 pt-1">
+          <SectionHeader label={t("chat.sidebar.closed")} count={doneCount} open={closedOpen} onToggle={() => setClosedOpen(!closedOpen)} />
+          {closedOpen && (
+            <div className="max-h-48 cc-scroll flex flex-col">
+              {settled.map((e) => (
+                <SlimRow key={e.id} name={e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? e.cwd} title={e.title} agentId={e.agentId}
+                  onOpen={() => reopenSettled(e.id)} />
+              ))}
               {closed.map((p) => (
                 <button key={p.cwd} type="button" onClick={() => onReopen(p.cwd)} title={t("chat.sidebar.reopen", { name: p.name })}
                   className="h-9 shrink-0 flex items-center gap-2.5 px-2.5 rounded-md text-left text-[13px] text-gray-600 dark:text-white/60 hover:bg-white dark:hover:bg-white/[0.05]">
@@ -137,8 +157,9 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
         ? { label: t("chat.status.working"), tone: "text-accent-700 dark:text-accent-400", dash: "5 3" }
         : null;
   return (
-    <button type="button" onClick={() => openConversation(card.tabId)} aria-current={selected ? "page" : undefined} title={card.cwd}
-      className={`w-full h-[78px] shrink-0 flex flex-col justify-between px-2 py-2.5 rounded-md text-left
+    <div role="button" tabIndex={0} onClick={() => openConversation(card.tabId)} aria-current={selected ? "page" : undefined} title={card.cwd}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openConversation(card.tabId); } }}
+      className={`group w-full h-[78px] shrink-0 flex flex-col justify-between px-2 py-2.5 rounded-md text-left cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent-500/70
         ${selected
           ? "bg-white dark:bg-white/[0.11] ring-1 ring-inset ring-gray-200 dark:ring-transparent"
           : "hover:bg-white dark:hover:bg-white/[0.08]"}`}>
@@ -146,11 +167,15 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
         <ProjectBadge name={card.project} />
         <span className="flex-1 min-w-0 truncate">{card.project}</span>
         {status && (
-          <span className={`shrink-0 inline-flex items-center gap-1 ${status.tone}`}>
+          <span className={`shrink-0 inline-flex items-center gap-1 group-hover:hidden ${status.tone}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeDasharray={status.dash} className="w-3.5 h-3.5" aria-hidden="true"><circle cx="12" cy="12" r="9" /></svg>
             {status.label}
           </span>
         )}
+        <span className="hidden group-hover:inline-flex shrink-0 items-center gap-0.5 -my-1">
+          <CardAction label={t("chat.sidebar.snooze")} onClick={() => snoozeConversation(card.tabId)}><ClockIcon className="w-3.5 h-3.5" /></CardAction>
+          <CardAction label={t("chat.sidebar.settle")} onClick={() => { void settleConversation(card.tabId); }}><CheckIcon className="w-3.5 h-3.5" /></CardAction>
+        </span>
       </span>
       <span className="truncate text-[14px] font-medium text-gray-900 dark:text-white">{card.title}</span>
       <span className="flex items-center gap-2 text-[12px] text-gray-500 dark:text-white/45">
@@ -164,6 +189,41 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
         <span className="flex-1" />
         <Icon className="w-3.5 h-3.5 shrink-0" />
       </span>
+    </div>
+  );
+}
+
+/** Um botão no canto do cartão (Adiar, Concluir): não abre a conversa. */
+function CardAction({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button type="button" aria-label={label} title={label}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      className="w-6 h-6 flex items-center justify-center rounded text-gray-500 dark:text-white/50 hover:bg-gray-200/70 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
+      {children}
+    </button>
+  );
+}
+
+function SectionHeader({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) {
+  return (
+    <button type="button" aria-expanded={open} onClick={onToggle}
+      className="w-full flex items-center h-8 px-2 rounded-md text-[13px] font-medium text-gray-500 dark:text-white/45 hover:bg-white dark:hover:bg-white/[0.05]">
+      <span className="flex-1 text-left">{label}</span>
+      <span className="tabular-nums mr-1.5">{count}</span>
+      <ChevronRightIcon className={`w-3 h-3 transition-transform ${open ? "rotate-90" : ""}`} />
+    </button>
+  );
+}
+
+/** Linha fina das seções de baixo (Adiadas, Concluídas): pasta apagada até o hover, título e agente. */
+function SlimRow({ name, title, agentId, onOpen }: { name: string; title: string; agentId: string; onOpen: () => void }) {
+  const Icon = agentIcon(agentId);
+  return (
+    <button type="button" onClick={onOpen} title={title}
+      className="group h-9 shrink-0 flex items-center gap-2.5 px-2.5 rounded-md text-left text-[13px] text-gray-600 dark:text-white/60 hover:bg-white dark:hover:bg-white/[0.05]">
+      <span className="opacity-40 grayscale group-hover:opacity-100 group-hover:grayscale-0"><ProjectBadge name={name} size="sm" /></span>
+      <span className="flex-1 truncate">{title}</span>
+      <Icon className="w-3.5 h-3.5 shrink-0 opacity-60" />
     </button>
   );
 }

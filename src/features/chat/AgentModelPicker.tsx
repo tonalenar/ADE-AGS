@@ -82,11 +82,14 @@ interface Row {
  * O seletor da prancheta 3 (o do T3 Code): popover de 360×346 com o trilho de agentes (e os
  * favoritos) à esquerda e a lista de modelos com busca à direita; a conta no rodapé (do ADE).
  */
-export function AgentModelPicker({ agents, value, onChange, shortcutHint }: {
+export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, disabled = false }: {
   agents: AgentInfo[];
   value: AgentModelValue;
   onChange: (next: AgentModelValue) => void;
   shortcutHint?: string;
+  /** Numa conversa aberta a conta não muda (a sessão mora na pasta da conta). */
+  showAccount?: boolean;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
@@ -127,7 +130,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint }: {
 
   return (
     <div ref={ref} className="relative">
-      <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)} title={shortcutHint}
+      <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => !disabled && setOpen(!open)} title={shortcutHint} disabled={disabled}
         className={`flex items-center gap-1.5 h-7 px-2 rounded-lg text-[14px] font-medium text-gray-900/85 dark:text-white/85
           hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
         <Icon className="w-4 h-4 shrink-0" />
@@ -197,7 +200,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint }: {
               )}
               {!roster && tab !== "fav" && <p className="px-2 py-3 text-[12.5px] text-gray-400 dark:text-white/40">{t("chat.picker.loading")}</p>}
             </div>
-            <div className="flex items-center gap-2 h-9 shrink-0 px-3 border-t border-gray-200 dark:border-white/[0.08] text-[12px] text-gray-500 dark:text-white/45">
+            {showAccount && <div className="flex items-center gap-2 h-9 shrink-0 px-3 border-t border-gray-200 dark:border-white/[0.08] text-[12px] text-gray-500 dark:text-white/45">
               <span className="flex-1">{t("chat.picker.account")}</span>
               {tabAgent && (
                 <PopupSelect value={tabAgent.id === value.agentId ? value.account ?? "" : ""} aria-label={t("chat.picker.account")}
@@ -210,7 +213,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint }: {
                   {pools.map((p) => <option key={p.id} value={poolValue(p.name)}>{t("chat.picker.pool", { name: p.name })}</option>)}
                 </PopupSelect>
               )}
-            </div>
+            </div>}
           </div>
         </div>
       )}
@@ -232,12 +235,13 @@ function RailButton({ label, on, onClick, children }: { label: string; on: boole
  * O esforço, num menu à parte (a palavra cinza ao lado do modelo, como no T3). Só aparece nos
  * agentes em que o esforço vira flag.
  */
-export function EffortMenu({ agentId, model, account, value, onChange }: {
+export function EffortMenu({ agentId, model, account, value, onChange, disabled = false }: {
   agentId: string | null;
   model: string | null;
   account: string | null;
   value: string | null;
   onChange: (effort: string | null) => void;
+  disabled?: boolean;
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
@@ -248,7 +252,7 @@ export function EffortMenu({ agentId, model, account, value, onChange }: {
   const label = (e: string) => t(`chat.effort.${e}`, { defaultValue: e });
   return (
     <div ref={ref} className="relative -ml-1.5">
-      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}
+      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => !disabled && setOpen(!open)} disabled={disabled}
         className={`h-7 px-1.5 rounded-lg text-[14px] font-medium text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
         {value ? label(value) : t("chat.effort.default")}
       </button>

@@ -3708,5 +3708,16 @@
   "chat.details.access": "Permissions",
   "chat.details.folder": "Folder",
   "chat.details.branch": "Branch",
-  "chat.details.session": "Session"
+  "chat.details.session": "Session",
+  "chat.panel.browser": "Browser",
+  "chat.composer.lockedWhileWorking": "To change it, wait for the agent to finish the turn.",
+  "chat.composer.retuneHint": "Changing restarts the agent, resuming the same conversation.",
+  "chat.sidebar.snoozed": "Snoozed",
+  "chat.sidebar.snooze": "Snooze",
+  "chat.sidebar.settle": "Settle (closes the agent; can be reopened)",
+  "chat.workspace.title": "Where the conversation runs",
+  "chat.workspace.worktree": "Worktree",
+  "chat.workspace.newWorktree": "New worktree",
+  "chat.workspace.currentHint": "In the folder as it is, uncommitted changes included.",
+  "chat.workspace.newHint": "A copy of the last commit on its own branch; your checkout is untouched."
 }

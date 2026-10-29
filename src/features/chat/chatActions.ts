@@ -7,7 +7,7 @@ import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
 import type { AgentInfo } from "@/features/tabs/types";
 import { pasteIntoTab, sendWhenReady } from "@/features/terminal/terminalRegistry";
 
-import { chatCommand, conversationTitle, type LaunchChoice } from "./chatModel";
+import { chatCommand, conversationTitle, retuneConversation, type LaunchChoice } from "./chatModel";
 import { setComposing } from "./store";
 
 export interface StartConversation extends LaunchChoice {
@@ -90,4 +90,20 @@ export async function reopenFolder(cwd: string): Promise<void> {
     if (saved.skillIds.length > 0) registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, tabs.workspaceId, saved.skillIds));
   }
   if (first) openConversation(first);
+}
+
+/**
+ * Troca o modelo, o esforço ou a permissão de uma conversa aberta. Os flags vivem no comando da aba,
+ * então o agente reinicia retomando a mesma sessão (`restartAgent`: o `--resume` da TUI) — a
+ * conversa continua, com a escolha nova. Sem mudança, não reinicia nada.
+ */
+export function retuneConversationTab(tabId: string, choice: LaunchChoice): boolean {
+  const tabs = useTabsStore.getState();
+  const tab = tabs.tabs.find((t) => t.id === tabId);
+  if (!tab) return false;
+  const command = retuneConversation(tab.agentId, tab.command, choice);
+  if (command === tab.command) return false;
+  tabs.updateTab(tabId, { command });
+  tabs.restartAgent(tabId);
+  return true;
 }

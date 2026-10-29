@@ -11,8 +11,9 @@ import { baseName } from "@/features/workspaces/workspaceTree";
 import { AccessMenu } from "./AccessMenu";
 import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
 import { startConversation } from "./chatActions";
-import { BotIcon, BranchIcon, ChevronDownIcon, FolderIcon } from "./chatIcons";
-import { accessModesFor, planSupported, type ChatProject } from "./chatModel";
+import { BotIcon, BranchIcon, CheckIcon, ChevronDownIcon, FolderGitIcon, FolderIcon } from "./chatIcons";
+import { accessModesFor, conversationTitle, planSupported, type ChatProject } from "./chatModel";
+import { chatNewWorktree } from "./ipc";
 import { loadChatPrefs, saveChatPrefs, type ChatPrefs } from "./chatPrefs";
 import { ChatComposer } from "./ChatComposer";
 import { usePopover } from "./usePopover";
@@ -77,8 +78,12 @@ export function NewConversation({ projects, folder, onFolder }: {
     if (!project) { setError(t("chat.new.noFolder")); return false; }
     if (!agent) { setError(t("chat.agent.none")); return false; }
     try {
+      // Num worktree novo o agente roda numa cópia do repo, na sua branch (ver `conversa.rs`).
+      const cwd = prefs.worktree
+        ? (await chatNewWorktree(project.cwd, conversationTitle(prompt) ?? project.name)).cwd
+        : project.cwd;
       await startConversation({
-        cwd: project.cwd,
+        cwd,
         agent,
         prompt,
         model: mine ? prefs.model : null,
@@ -132,7 +137,8 @@ export function NewConversation({ projects, folder, onFolder }: {
               )}
             </>
           } />
-        <ContextStrip branch={project?.branch ?? null}>
+        <ContextStrip branch={project?.branch ?? null}
+          workspace={<WorkspaceMenu worktree={prefs.worktree} onChange={(worktree) => update({ worktree })} />}>
           <AccessMenu value={access} available={modes} onChange={(next) => update({ access: next })} />
         </ContextStrip>
         {error && <p role="alert" className="mt-3 px-2 text-[12.5px] text-red-600 dark:text-red-400">{error}</p>}
@@ -142,11 +148,23 @@ export function NewConversation({ projects, folder, onFolder }: {
 }
 
 /** A faixa embaixo do composer: o workspace (por enquanto sempre o checkout atual), a branch e, à direita, as permissões. */
-export function ContextStrip({ branch, children }: { branch: string | null; children: React.ReactNode }) {
+export function ContextStrip({ branch, workspace, worktree = false, children }: {
+  branch: string | null;
+  /** O seletor de workspace (conversa nova); sem ele, só o rótulo. */
+  workspace?: React.ReactNode;
+  /** A conversa roda num worktree. */
+  worktree?: boolean;
+  children: React.ReactNode;
+}) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-0.5 px-2 pt-2 text-[12px] text-gray-500 dark:text-white/45">
-      <span className="flex items-center gap-1.5 h-6 px-1.5"><FolderIcon className="w-3.5 h-3.5" />{t("chat.new.currentCheckout")}</span>
+      {workspace ?? (
+        <span className="flex items-center gap-1.5 h-6 px-1.5">
+          {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
+          {worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")}
+        </span>
+      )}
       {branch && <span className="flex items-center gap-1.5 h-6 px-1.5 font-mono text-[11.5px]"><BranchIcon className="w-3.5 h-3.5" />{branch}</span>}
       <span className="flex-1" />
       {children}
@@ -191,5 +209,43 @@ function ProjectPicker({ project, projects, onPick, onBrowse }: {
         </div>
       )}
     </span>
+  );
+}
+
+/** Onde a conversa nova roda: no checkout atual da pasta ou num worktree novo (branch própria). */
+function WorkspaceMenu({ worktree, onChange }: { worktree: boolean; onChange: (worktree: boolean) => void }) {
+  const { t } = useTranslation();
+  const { open, setOpen, ref } = usePopover();
+  const options = [
+    { value: false, icon: FolderIcon, label: t("chat.new.currentCheckout"), hint: t("chat.workspace.currentHint") },
+    { value: true, icon: FolderGitIcon, label: t("chat.workspace.newWorktree"), hint: t("chat.workspace.newHint") },
+  ];
+  const current = options.find((o) => o.value === worktree)!;
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 h-6 px-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-white/[0.07] hover:text-gray-800 dark:hover:text-white/80 ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
+        <current.icon className="w-3.5 h-3.5" />{current.label}
+      </button>
+      {open && (
+        <div role="menu" aria-label={t("chat.workspace.title")}
+          className="absolute left-0 top-full mt-1.5 z-50 w-72 p-1.5 rounded-lg bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
+            shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
+          <div className="px-2 pt-1 pb-1.5 text-[12px] font-medium text-gray-500 dark:text-white/45">{t("chat.workspace.title")}</div>
+          {options.map((o) => (
+            <button key={String(o.value)} type="button" role="menuitemradio" aria-checked={o.value === worktree}
+              onClick={() => { onChange(o.value); setOpen(false); }}
+              className="w-full flex items-start gap-2 px-2 py-1.5 rounded-md text-left hover:bg-gray-100 dark:hover:bg-white/[0.07]">
+              <o.icon className="w-4 h-4 mt-0.5 shrink-0 text-gray-500 dark:text-white/45" />
+              <span className="flex-1 min-w-0">
+                <span className="block text-[13.5px] font-medium text-gray-900 dark:text-white">{o.label}</span>
+                <span className="block text-[12px] text-gray-500 dark:text-white/45">{o.hint}</span>
+              </span>
+              {o.value === worktree && <CheckIcon className="w-3.5 h-3.5 mt-0.5 text-gray-900 dark:text-white" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

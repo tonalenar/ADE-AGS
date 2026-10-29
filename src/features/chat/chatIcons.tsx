@@ -57,3 +57,5 @@ export function StarIcon({ className = "w-4 h-4", filled = false }: IconProps & 
 export function StopIcon({ className = "w-2.5 h-2.5" }: IconProps) {
   return <svg viewBox="0 0 10 10" className={className} aria-hidden="true"><rect width="10" height="10" rx="2" fill="currentColor" /></svg>;
 }
+export const ClockIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
+export const FolderGitIcon = (p: IconProps) => <Svg {...p}><path d="M20 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z" /><circle cx="12" cy="13" r="2" /><path d="M14 13h4M6 13h4" /></Svg>;

@@ -377,12 +377,14 @@ export const CHAT_GROUP = "chat";
  * reservou; sem espaço (a tela de conversa nova, por exemplo) nenhum. Arquivos, diffs e navegadores
  * ficam montados e escondidos: voltar às abas não perde nada.
  */
-export function chatPlacements(slot: Rect | null, activeTabId: string | null): Placements {
+export function chatPlacements(slot: Rect | null, activeTabId: string | null, browser: { viewId: string; rect: Rect } | null = null): Placements {
   const visible = new Map<string, Placement>();
-  if (!slot || !activeTabId) return { visible, focusedItem: null };
-  const key = agentKey(activeTabId);
-  visible.set(key, { groupId: CHAT_GROUP, rect: slot });
-  return { visible, focusedItem: key };
+  const terminal = slot && activeTabId ? agentKey(activeTabId) : null;
+  if (terminal) visible.set(terminal, { groupId: CHAT_GROUP, rect: slot });
+  // O navegador da aba Navegador do painel direito. O teclado vai ao terminal se a gaveta dele está aberta.
+  const page = browser ? viewKey(browser.viewId) : null;
+  if (browser && page) visible.set(page, { groupId: CHAT_GROUP, rect: browser.rect });
+  return { visible, focusedItem: terminal ?? page };
 }
 
 interface PlacementInput {
@@ -393,15 +395,15 @@ interface PlacementInput {
   mode: WorkMode;
   liveRects: Record<string, Rect>;
   grid: string[] | null;
-  /** A casca do chat na tela, com o espaço do terminal da conversa. Ausente = workspace. */
-  chat?: { slot: Rect | null } | null;
+  /** A casca do chat na tela, com o espaço do terminal da conversa e o do navegador. Ausente = workspace. */
+  chat?: { slot: Rect | null; browser?: { viewId: string; rect: Rect } | null } | null;
 }
 
 /** La misma cuenta que `usePlacements`, sin hooks: el guardado periódico la lee del store. */
 export function placementsFrom(input: PlacementInput): Placements {
   const { layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat } = input;
   // A casca do chat passa na frente do modo da pasta: as abas e o canvas estão escondidos.
-  if (chat) return chatPlacements(chat.slot, activeTabId);
+  if (chat) return chatPlacements(chat.slot, activeTabId, chat.browser ?? null);
   if (mode === "canvas") return canvasPlacements(liveRects, activeTabId, activeViewId);
   if (grid) {
     const visible = new Map<string, Placement>();
@@ -442,7 +444,8 @@ export function usePlacements(): Placements {
   const grid = useMissionGrid();
   const chatOn = useUiStore(chatShellOn);
   const chatSlot = useChatStore((s) => s.slot);
-  return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat: chatOn ? { slot: chatSlot } : null });
+  const chatBrowser = useChatStore((s) => s.browser);
+  return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat: chatOn ? { slot: chatSlot, browser: chatBrowser } : null });
 }
 
 /** Lo que está en pantalla ahora, leído de los stores (sin suscribir un componente). */
@@ -461,7 +464,7 @@ export function currentPlacements(): Placements {
   const mode: WorkMode = key ? canvas.modes[key] ?? "tabs" : "tabs";
   const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
   const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), mode, tabIds });
-  const chat = chatShellOn(useUiStore.getState()) ? { slot: useChatStore.getState().slot } : null;
+  const chat = chatShellOn(useUiStore.getState()) ? { slot: useChatStore.getState().slot, browser: useChatStore.getState().browser } : null;
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects: canvas.liveRects, grid, chat });
 }
 

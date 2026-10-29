@@ -3708,5 +3708,16 @@
   "chat.details.access": "Permisos",
   "chat.details.folder": "Carpeta",
   "chat.details.branch": "Branch",
-  "chat.details.session": "Sesión"
+  "chat.details.session": "Sesión",
+  "chat.panel.browser": "Navegador",
+  "chat.composer.lockedWhileWorking": "Para cambiarlo, espera que el agente termine el turno.",
+  "chat.composer.retuneHint": "Cambiarlo reinicia el agente retomando la misma conversación.",
+  "chat.sidebar.snoozed": "Pospuestas",
+  "chat.sidebar.snooze": "Posponer",
+  "chat.sidebar.settle": "Concluir (cierra el agente; se puede reabrir)",
+  "chat.workspace.title": "Dónde corre la conversación",
+  "chat.workspace.worktree": "Worktree",
+  "chat.workspace.newWorktree": "Nuevo worktree",
+  "chat.workspace.currentHint": "En la carpeta tal como está, con lo no commiteado.",
+  "chat.workspace.newHint": "Una copia del último commit en su propia rama; no toca tu checkout."
 }

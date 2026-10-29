@@ -14,11 +14,13 @@ export interface ChatPrefs {
   access: ChatAccess;
   /** Começar no modo Plano. */
   plan: boolean;
+  /** Abrir a conversa num worktree novo em vez do checkout atual. */
+  worktree: boolean;
 }
 
 const KEY = "cc-chat-prefs";
 
-export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false };
+export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, worktree: false };
 
 const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : null);
 
@@ -34,6 +36,7 @@ export function parseChatPrefs(raw: unknown): ChatPrefs {
     accountId: str(o.accountId),
     access: o.access === "ask" || o.access === "edits" || o.access === "full" ? o.access : "safe",
     plan: o.plan === true,
+    worktree: o.worktree === true,
   };
 }
 

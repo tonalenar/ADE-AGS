@@ -24,11 +24,13 @@ interface ChatState {
   panel: RightPanelTab | null;
   /** O painel ocupa a área toda (a conversa some), como o "Maximizar" do T3. */
   panelMaximized: boolean;
+  /** O navegador da aba Navegador e onde desenhá-lo (como o terminal: por slot, sem remontar). */
+  browser: { viewId: string; rect: Rect } | null;
 }
 
-export type RightPanelTab = "diff" | "files";
+export type RightPanelTab = "diff" | "files" | "browser";
 
-export const useChatStore = create<ChatState>(() => ({ slot: null, composing: false, terminalOpen: {}, panel: null, panelMaximized: false }));
+export const useChatStore = create<ChatState>(() => ({ slot: null, composing: false, terminalOpen: {}, panel: null, panelMaximized: false, browser: null }));
 
 const sameRect = (a: Rect | null, b: Rect | null) =>
   a === b || (!!a && !!b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);
@@ -59,4 +61,11 @@ export function toggleRightPanel(): void {
 
 export function togglePanelMaximized(): void {
   useChatStore.setState((s) => ({ panelMaximized: !s.panelMaximized }));
+}
+
+/** Publica (ou tira) o navegador da aba Navegador. Só muda o store se algo mudou. */
+export function setChatBrowser(browser: { viewId: string; rect: Rect } | null): void {
+  const prev = useChatStore.getState().browser;
+  if (prev === browser || (prev && browser && prev.viewId === browser.viewId && sameRect(prev.rect, browser.rect))) return;
+  useChatStore.setState({ browser });
 }
