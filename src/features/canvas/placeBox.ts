@@ -6,7 +6,7 @@
 import { FOLDER_MIN, FOLDER_SIZE, NOTE_MIN, NOTE_SIZE, PHONE_MIN, PHONE_SIZE, PORTAL_MIN, PORTAL_SIZE, TEXT_DEFAULT } from "./board";
 import { NODE_DEFAULT, NODE_MIN, type Box } from "./geometry";
 
-export type PlaceKind = "terminal" | "note" | "portal" | "device" | "text" | "folder";
+export type PlaceKind = "terminal" | "note" | "portal" | "device" | "simulator" | "text" | "folder";
 
 export interface Size {
   w: number;
@@ -27,6 +27,8 @@ export const KIND_MIN: Record<PlaceKind, Size> = {
   note: NOTE_MIN,
   portal: PORTAL_MIN,
   device: PHONE_MIN,
+  // O simulador iOS tem o tamanho do aparelho (ver `simulator/geometry.ts`): o arrasto só escolhe onde.
+  simulator: PHONE_MIN,
   text: { w: 80, h: 36 },
   folder: FOLDER_MIN,
 };
@@ -37,6 +39,7 @@ export const KIND_DEFAULT: Record<PlaceKind, Size> = {
   note: NOTE_SIZE,
   portal: PORTAL_SIZE,
   device: PHONE_SIZE,
+  simulator: PHONE_SIZE,
   text: { w: TEXT_DEFAULT.w, h: Math.round(TEXT_DEFAULT.size * 2.6) },
   folder: FOLDER_SIZE,
 };

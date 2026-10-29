@@ -14,6 +14,7 @@ mod role;
 mod portals;
 mod replay;
 mod devices;
+pub mod simulators;
 pub mod pool;
 mod browser;
 pub mod canal;

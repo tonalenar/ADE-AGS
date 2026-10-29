@@ -93,3 +93,10 @@ fn un_paquete_con_caracteres_raros_se_rechaza() {
     assert!(launch("x", "com.a; reboot").is_err());
     assert!(launch("x", "").is_err());
 }
+
+#[test]
+fn fechar_um_app_rejeita_o_mesmo_pacote_que_abrir() {
+    assert!(close("x", "com.a; reboot").is_err());
+    assert!(close("x", "").is_err());
+    assert!(check_package("com.android.chrome").is_ok());
+}

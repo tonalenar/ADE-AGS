@@ -264,16 +264,28 @@ pub fn boot_completed(serial: &str) -> bool {
     adb_text(Some(serial), &["shell", "getprop", "sys.boot_completed"], FAST).is_ok_and(|v| v.trim() == "1")
 }
 
-/// Abre una app por su paquete (`com.android.settings`).
-pub fn launch(serial: &str, package: &str) -> Result<(), String> {
+/// O nome de pacote vai para o `adb shell`, que junta tudo numa linha: só letras, dígitos, `.` e `_`.
+pub(crate) fn check_package(package: &str) -> Result<(), String> {
     if package.is_empty() || !package.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_')) {
         return Err("Nome de pacote inválido (algo como com.android.settings).".into());
     }
+    Ok(())
+}
+
+/// Abre una app por su paquete (`com.android.settings`).
+pub fn launch(serial: &str, package: &str) -> Result<(), String> {
+    check_package(package)?;
     let out = adb_text(Some(serial), &["shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"], SLOW)?;
     if out.contains("No activities found") || out.contains("monkey aborted") {
         return Err(format!("O pacote '{package}' não está instalado ou não tem tela inicial."));
     }
     Ok(())
+}
+
+/// Fecha o app (`am force-stop`): some da tela e dos processos.
+pub fn close(serial: &str, package: &str) -> Result<(), String> {
+    check_package(package)?;
+    adb(Some(serial), &["shell", "am", "force-stop", package], FAST).map(|_| ())
 }
 
 // ── Árbol de accesibilidad ──────────────────────────────────────────

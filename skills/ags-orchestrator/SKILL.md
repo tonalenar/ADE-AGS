@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.32.0
+version: 1.33.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -715,6 +715,7 @@ ags devices                                  # yours, what adb sees, and the emu
 ags device create Pixel --avd Pixel_8        # next to you, already connected
 ags device start Pixel                       # boots its emulator and waits until it is ready
 ags device launch Pixel com.android.settings # open an app by package name
+ags device close Pixel com.android.chrome    # close an app (force-stop)
 ags device tree Pixel                        # one line per element: text, @(x,y) where to tap
 ags device tap Pixel --text "Wi-Fi"          # finds the element by text/description/id, or --x 540 --y 1200
 ags device swipe Pixel --dir up              # or --x1 --y1 --x2 --y2 [--ms 300]
@@ -728,6 +729,32 @@ ags device shot Pixel                        # returns the path of a PNG you can
   is used automatically.
 - Not available: installing or uninstalling apps, shell access, file transfer. There is no delete
   command: closing the node stays with the user.
+
+### iOS simulators on the canvas (macOS)
+
+An iOS simulator node is a loose iPhone or iPad from Xcode, booted without the Simulator app and
+shown live on the canvas. Same rules as Android: you drive the ones **connected to you**, by name.
+Coordinates are **iOS points** (the `width`/`height` that `shot` returns), not pixels.
+
+```bash
+ags device create iPhone --ios "iPhone 18 Pro Max"   # next to you, connected (bare --ios = first iPhone)
+ags device start iPhone                       # boots it (light mode) and waits for the screen
+ags device open iPhone localhost:5173/login   # opens the URL in the device's Safari (the Mac's localhost works)
+ags device launch iPhone com.apple.Preferences  # open an app by bundle id
+ags device close iPhone com.apple.mobilesafari  # close an app (like swiping it away)
+ags device shot iPhone                        # PNG path + screen size in points; read it before tapping
+ags device tap iPhone --x 201 --y 610         # points; `--text` is not available on iOS yet
+ags device swipe iPhone --dir up              # or --x1 --y1 --x2 --y2 [--ms 300]
+ags device type iPhone "ton@example.com"      # US keyboard ASCII only
+ags device key iPhone enter                   # enter, escape, delete, tab, space, up/down/left/right
+ags device button iPhone home                 # home, lock, side, siri
+ags device say iPhone "Login fixed: the button no longer hides under the keyboard."
+```
+
+- The node has a **chat**: what the user writes there reaches every agent connected to it (with
+  the current screen attached). Answer there with `ags device say`, not in your terminal only;
+  the other connected agents and the user see it, together with the actions you took.
+- `tree` and `tap --text` are not available on iOS yet: take a `shot` and tap by points.
 
 ### Telling the user
 

@@ -85,7 +85,8 @@ pub struct Portal {
     #[serde(default, rename = "box")]
     pub r#box: Value,
     /// `android` = en vez de un navegador, la pantalla de un emulador o teléfono (ver
-    /// `crate::android` y `ipc::commands::devices`). Ausente = un navegador.
+    /// `crate::android` y `ipc::commands::devices`). `ios` = o simulador iOS solto (ver `crate::simulator`).
+    /// Ausente = un navegador.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
     /// El dispositivo de `adb` que muestra (`emulator-5554`). Ausente = el único que haya.
@@ -103,6 +104,12 @@ pub struct Portal {
     /// O Portal mostra o navegador nativo (`real_browser`, um WebView2 na janela); só o frontend lê.
     #[serde(default, rename = "realChrome", skip_serializing_if = "Option::is_none")]
     pub real_chrome: Option<bool>,
+    /// O aparelho do Xcode que um nó `ios` mostra (UDID do CoreSimulator).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub udid: Option<String>,
+    /// O nó `ios` está com a conversa com os agentes aberta; só o frontend lê.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<bool>,
 }
 
 pub const PORTAL_PREFIX: &str = "portal-";
