@@ -345,6 +345,10 @@ Redução drástica do tempo de feedback de testes para agentes e humanos atrav�
 - **Ponto 4 (Testes Afetados e Cache de Resultados):** Comandos `ags test affected` e `ags test run <suite>`, mapeando arquivos modificados desde `origin/master` e gravando execuções verdes limpas na tabela `test_results` para retorno instantâneo (0ms em cache hit).
 - **Ponto 5 (QA em Fluxo):** Briefing atualizado para validação contínua a cada entrega de integrante (`ags peer tell`) com `ags test affected`; orquestrador notifica o QA a cada entrega; validação final consolidada em UMA única execução completa antes da entrega (ou delegação ao CI); métrica "tempo de espera do QA" (`qaWaitMs`) exposta em `ags mission timings`.
 
+## Simulador iOS no canvas
+
+iPhones e iPads do Xcode ligados sem o app Simulator, soltos no canvas com a barra flutuante e a conversa com os agentes conectados. A tela é a `IOSurface` do simulador numa camada nativa, sem cópia; o toque vai pelo HID do SimulatorKit; os agentes pilotam com `ags device …`. No modo leve, o iOS sobe sem os serviços pesados (Siri, widgets, iCloud, Spotlight…): medido no iPhone 17, de 495% para 1% de CPU depois do boot. Os quadros chegam numa fila própria, fora da thread da interface. Como funciona, leveza e o que falta: [SIMULADOR_IOS.md](./SIMULADOR_IOS.md).
+
 ## Portal com Chrome real
 
 O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro do app: tela por screencast, login do Google numa janela de Chrome comum encaixada sobre o Portal, uma janela por Portal, zoom, barra de rolagem sobreposta, e o Jev pilotando com cliques e teclas de verdade (`isTrusted`). Desenho, decisões (sem esconder a automação) e limites: [PORTAL_CHROME_REAL.md](./PORTAL_CHROME_REAL.md).

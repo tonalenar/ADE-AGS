@@ -38,8 +38,13 @@ export interface CanvasPortal {
   name: string;
   url: string;
   box: Box;
-  /** `android` = la pantalla de un emulador o teléfono (ver `DeviceNode`), no un navegador. */
-  kind?: "android" | "gemini";
+  /** `android` = la pantalla de un emulador o teléfono (ver `DeviceNode`), no un navegador. `gemini` = o Gemini Desktop. `ios` = o simulador iOS
+   *  solto (ver `simulator/SimulatorNode`). */
+  kind?: "android" | "gemini" | "ios";
+  /** O aparelho do Xcode que o nó `ios` mostra. */
+  udid?: string;
+  /** O nó `ios` está com a conversa com os agentes aberta. */
+  chat?: boolean;
   /** El dispositivo de adb que muestra; sin él, el único que haya. */
   serial?: string;
   /** El emulador (AVD) que arranca. */
@@ -579,11 +584,12 @@ export function uniquePortalName(board: Board, wanted: string, except?: string):
 /** Agrega un portal; con `near`, a la derecha de ese nodo y conectado a él. */
 export function addPortal(
   board: Board,
-  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } },
+  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini" | "ios"; avd?: string; udid?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } },
 ): { board: Board; name: string } {
   const android = portal.kind === "android";
-  const size = portal.size ?? (android ? PHONE_SIZE : portal.kind === "gemini" ? { w: 1000, h: 700 } : PORTAL_SIZE);
-  const name = uniquePortalName(board, portal.name ?? (android ? "Android" : portal.kind === "gemini" ? "Gemini Desktop" : "Portal"));
+  const ios = portal.kind === "ios";
+  const size = portal.size ?? (android || ios ? PHONE_SIZE : PORTAL_SIZE);
+  const name = uniquePortalName(board, portal.name ?? (android ? "Android" : ios ? "iPhone" : "Portal"));
   const others = allBoxes(board);
   const anchor = portal.near ? boxOf(board, portal.near) : undefined;
   let box: Box;
@@ -601,7 +607,8 @@ export function addPortal(
     name, url: portal.url ?? "", box,
     ...(android ? { kind: "android" as const, ...(portal.avd ? { avd: portal.avd } : {}) } : {}),
     ...(portal.kind === "gemini" ? { kind: "gemini" as const } : {}),
-    ...(!android && portal.viewport ? { viewport: portal.viewport } : {}),
+    ...(ios ? { kind: "ios" as const, ...(portal.udid ? { udid: portal.udid } : {}) } : {}),
+    ...(!android && !ios && portal.viewport ? { viewport: portal.viewport } : {}),
   };
   const next = { ...board, portals: { ...board.portals, [portal.id]: made } };
   return { board: anchor && portal.near ? addEdge(next, portal.near, portal.id) : next, name };

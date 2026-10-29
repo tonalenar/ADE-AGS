@@ -1,46 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
 import { placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
-
-/** O que do app pode ficar por cima da página: menus, diálogos, dicas, o painel lateral. */
-const OVERLAYS = '[role="dialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-radix-popper-content-wrapper], [data-session-panel], [data-over-webview]';
-/** A grade de pontos que procura o que está por cima (outro nó do canvas, um popover sem papel ARIA). */
-const GRID = { cols: 12, rows: 8 };
-/** De quanto em quanto tempo procurar o que está por cima (o lugar do Portal é medido a cada quadro). */
-const COVER_MS = 120;
-
-function boxOf(el: Element): Box {
-  const r = el.getBoundingClientRect();
-  return { x: r.left, y: r.top, width: r.width, height: r.height };
-}
-
-/** Os ancestrais que recortam o que passa da borda deles (o canvas, a área de conteúdo). */
-function clippingAncestors(el: HTMLElement): HTMLElement[] {
-  const out: HTMLElement[] = [];
-  for (let p = el.parentElement; p; p = p.parentElement) {
-    const s = getComputedStyle(p);
-    if (s.overflowX !== "visible" || s.overflowY !== "visible") out.push(p);
-  }
-  return out;
-}
-
-/** O que do app está por cima do Portal `el`: o maior bloco acima dele que não o contém. */
-function coversOf(el: HTMLElement, rect: Box): Box[] {
-  const found = new Set<Element>();
-  for (const overlay of document.querySelectorAll(OVERLAYS)) {
-    if (!overlay.contains(el) && !el.contains(overlay)) found.add(overlay);
-  }
-  for (let i = 0; i < GRID.cols; i++) {
-    for (let j = 0; j < GRID.rows; j++) {
-      const hit = document.elementFromPoint(rect.x + ((i + 0.5) * rect.width) / GRID.cols, rect.y + ((j + 0.5) * rect.height) / GRID.rows);
-      if (!hit || hit === el || el.contains(hit) || hit.contains(el)) continue;
-      let top = hit;
-      while (top.parentElement && !top.parentElement.contains(el)) top = top.parentElement;
-      found.add(top);
-    }
-  }
-  return [...found].map(boxOf).filter((b) => b.width > 0 && b.height > 0);
-}
 
 /**
  * O lugar do navegador nativo do Portal. A página é um WebView2 por cima da janela (ver `real_browser`): este

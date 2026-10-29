@@ -20,6 +20,7 @@ import { screenOf } from "@/features/terminal/terminalRegistry";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
 import { AGENT_PORTAL_SIZE } from "@/features/canvas/board";
+import { DEFAULT_SCREEN, nodeSize, SIM_SCALE } from "@/features/simulator/geometry";
 import { orphanPortal } from "@/features/canvas/portalReuse";
 
 /**
@@ -320,11 +321,14 @@ async function handlePortal(args: Record<string, unknown>) {
     if (!cwd || !near) throw new Error("Faltam cwd ou near");
     const key = keyFor(near, cwd);
     const android = str(args, "kind") === "android";
+    const ios = str(args, "kind") === "ios";
     const created = canvasActions.addPortal(key, {
       name: str(args, "name"), url: str(args, "url"), near,
       // Um navegador (não a tela de um Android) que um agente abre: num nó maior, sem resolução forçada (a página
-      // usa o tamanho do nó, nítida; ver `AGENT_PORTAL_SIZE`).
-      ...(android ? { kind: "android" as const, avd: str(args, "avd") } : { size: { ...AGENT_PORTAL_SIZE } }),
+      // usa o tamanho do nó, nítida; ver `AGENT_PORTAL_SIZE`). O simulador iOS nasce do tamanho do aparelho.
+      ...(android ? { kind: "android" as const, avd: str(args, "avd") }
+        : ios ? { kind: "ios" as const, udid: str(args, "udid"), size: nodeSize(DEFAULT_SCREEN, SIM_SCALE.initial, false) }
+        : { size: { ...AGENT_PORTAL_SIZE } }),
     });
     // O navegador só existe na tela se o canvas está à vista: quem pediu um navegador quer vê-lo.
     if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
