@@ -91,6 +91,8 @@ pub fn run() {
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
             crate::ai_memory::ai_memory_probe,
+            crate::ai_memory::ai_memory_migrate,
+            crate::ai_memory::ai_memory_migration_report,
             crate::ai_memory::ai_memory_status,
             crate::ai_memory::ai_memory_handoffs,
             crate::ai_memory::ai_memory_recent,

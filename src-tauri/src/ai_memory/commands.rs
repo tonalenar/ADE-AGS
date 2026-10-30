@@ -1,7 +1,10 @@
 use super::{
     client::{Client, Read},
+    migracao::{self, MigrationRow, MigrationSummary},
     types::*,
 };
+use crate::database::DbConnection;
+use crate::util::path_env;
 
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> Result<T, String> + Send + 'static,
@@ -64,4 +67,24 @@ pub async fn ai_memory_sessions(
     })
     .await?;
     client.sessions(workspace, project).await
+}
+
+/// Copia as memórias aprovadas do workspace para a wiki do ai-memory (cópia única, idempotente).
+#[tauri::command]
+pub async fn ai_memory_migrate(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<MigrationSummary, String> {
+    let db = db.inner().clone();
+    blocking(move || migracao::migrate(&db, &workspace_id, path_env::find_program("ai-memory")))
+        .await
+}
+
+/// Registro da cópia do workspace, sem o corpo das memórias.
+#[tauri::command]
+pub fn ai_memory_migration_report(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<MigrationRow>, String> {
+    migracao::report(&db, &workspace_id)
 }
