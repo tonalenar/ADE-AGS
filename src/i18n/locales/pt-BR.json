@@ -4222,5 +4222,6 @@
   "chat.team.feed.deliveries_one": "{{count}} entrega",
   "chat.team.feed.deliveries_other": "{{count}} entregas",
   "chat.team.feed.busy_one": "{{count}} em andamento",
-  "chat.team.feed.busy_other": "{{count}} em andamento"
+  "chat.team.feed.busy_other": "{{count}} em andamento",
+  "chat.team.node.title": "Estado e permissão no time"
 }
