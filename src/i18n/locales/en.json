@@ -3596,5 +3596,18 @@
   "aiMemory.sessionLine": "{{agent}}, last active at {{when}}",
   "aiMemory.sessionCurrent": "current",
   "aiMemory.sessionHandedOff": "left a handoff",
-  "aiMemory.sessionEnded": "ended"
+  "aiMemory.sessionEnded": "ended",
+  "aiMemory.migration.title": "ADE's old memory",
+  "aiMemory.migration.hint": "Copies ADE's approved memories into the ai-memory wiki. Nothing is deleted or overwritten; secrets are never copied.",
+  "aiMemory.migration.run": "Copy to ai-memory",
+  "aiMemory.migration.again": "Copy what is missing",
+  "aiMemory.migration.running": "Copying…",
+  "aiMemory.migration.summary": "{{written}} copied now, {{already}} were already there, {{left}} left out.",
+  "aiMemory.migration.stopped": "The copy stopped early: {{reason}}",
+  "aiMemory.migration.never": "No copy has been made yet.",
+  "aiMemory.migration.copied": "Copied ({{count}})",
+  "aiMemory.migration.left.skipped_secret": "Left out because they look like secrets ({{count}})",
+  "aiMemory.migration.left.conflict": "Left out: a page already existed at the same path ({{count}})",
+  "aiMemory.migration.left.divergent": "Left out: the page changed after the copy ({{count}})",
+  "aiMemory.migration.left.failed": "Failed ({{count}})"
 }

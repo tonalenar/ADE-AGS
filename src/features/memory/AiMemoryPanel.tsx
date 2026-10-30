@@ -6,6 +6,7 @@ import { PopupSelect } from "@/shared/ui/PopupSelect";
 
 import { formatCreatedAt, groupPendingHandoffs, guessProject, parseSnippet, projectKey } from "./aiMemory";
 import type { AiMemoryHandoff, AiMemoryPage, AiMemoryProbe, AiMemoryProject, AiMemoryRecentPage, AiMemorySession } from "./aiMemory";
+import { AiMemoryMigration } from "./AiMemoryMigration";
 import { aiMemoryHandoffs, aiMemoryProbe, aiMemoryProjects, aiMemoryReadPage, aiMemoryRecent, aiMemorySessions } from "./aiMemoryIpc";
 
 interface Loaded {
@@ -88,7 +89,7 @@ function Sessions({ cwd }: { cwd: string }) {
  * Painel "Memória" do ai-memory (somente leitura): wiki do projeto da pasta, handoffs pendentes e
  * últimas sessões. Tudo vem do binário pelo envelope UNTRUSTED e é mostrado como texto, nunca HTML.
  */
-export function AiMemoryPanel({ cwd }: { cwd: string }) {
+export function AiMemoryPanel({ cwd, workspaceId }: { cwd: string; workspaceId?: string | null }) {
   const { t, i18n } = useTranslation();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -186,6 +187,8 @@ export function AiMemoryPanel({ cwd }: { cwd: string }) {
                 </div>
               ))}
           </div>
+
+          {workspaceId && <AiMemoryMigration workspaceId={workspaceId} cwd={cwd} />}
 
           <div>
             <h4 className="mb-1 font-semibold">{t("aiMemory.sessions")}</h4>

@@ -3596,5 +3596,18 @@
   "aiMemory.sessionLine": "{{agent}}, última actividad el {{when}}",
   "aiMemory.sessionCurrent": "actual",
   "aiMemory.sessionHandedOff": "dejó un handoff",
-  "aiMemory.sessionEnded": "terminada"
+  "aiMemory.sessionEnded": "terminada",
+  "aiMemory.migration.title": "Memoria antigua de ADE",
+  "aiMemory.migration.hint": "Copia las memorias aprobadas de ADE a la wiki de ai-memory. No se borra ni se sobrescribe nada; los secretos nunca se copian.",
+  "aiMemory.migration.run": "Copiar a ai-memory",
+  "aiMemory.migration.again": "Copiar lo que falta",
+  "aiMemory.migration.running": "Copiando…",
+  "aiMemory.migration.summary": "{{written}} copiadas ahora, {{already}} ya estaban, {{left}} quedaron fuera.",
+  "aiMemory.migration.stopped": "La copia se detuvo antes de terminar: {{reason}}",
+  "aiMemory.migration.never": "Todavía no se hizo ninguna copia.",
+  "aiMemory.migration.copied": "Copiadas ({{count}})",
+  "aiMemory.migration.left.skipped_secret": "Fuera por parecer secretos ({{count}})",
+  "aiMemory.migration.left.conflict": "Fuera: ya había una página con la misma ruta ({{count}})",
+  "aiMemory.migration.left.divergent": "Fuera: la página cambió después de la copia ({{count}})",
+  "aiMemory.migration.left.failed": "Fallaron ({{count}})"
 }

@@ -182,3 +182,46 @@ export function guessProject(projects: readonly AiMemoryProject[], cwd: string):
 
 /** Chave estável de um projeto para a escolha no painel. */
 export const projectKey = (p: AiMemoryProject) => `${p.workspace_name}/${p.project_name}`;
+
+/** Resumo de uma execução da cópia (`src-tauri/src/ai_memory/migracao.rs`). */
+export interface AiMemoryMigrationSummary {
+  written: number;
+  skipped_secret: number;
+  conflict: number;
+  divergent: number;
+  failed: number;
+  already: number;
+  /** Por que nada foi copiado (ex.: sem pasta). */
+  reason: string | null;
+  /** Por que a cópia parou antes do fim (ex.: servidor fora do ar). */
+  stopped: string | null;
+}
+
+export type AiMemoryMigrationStatus = "written" | "skipped_secret" | "conflict" | "divergent" | "failed";
+
+/** Uma linha do registro da cópia, sem o corpo da memória. */
+export interface AiMemoryMigrationRow {
+  entry_id: string;
+  /** Chave da memória no ADE; ausente em backends antigos. */
+  key?: string | null;
+  revision: number;
+  status: AiMemoryMigrationStatus | string;
+  reason: string | null;
+  wiki_path: string | null;
+  aim_workspace: string | null;
+  aim_project: string | null;
+  migrated_at: number;
+}
+
+export const MIGRATION_STATUSES: readonly AiMemoryMigrationStatus[] = ["written", "skipped_secret", "conflict", "divergent", "failed"];
+
+/** Separa o registro em copiadas e em "ficou de fora", agrupadas por status, na ordem de MIGRATION_STATUSES. */
+export function splitMigrationReport(rows: readonly AiMemoryMigrationRow[]) {
+  const copied = rows.filter((r) => r.status === "written");
+  const left = MIGRATION_STATUSES.filter((s) => s !== "written")
+    .map((status) => ({ status, rows: rows.filter((r) => r.status === status) }))
+    .filter((g) => g.rows.length > 0);
+  const unknown = rows.filter((r) => !MIGRATION_STATUSES.includes(r.status as AiMemoryMigrationStatus));
+  if (unknown.length > 0) left.push({ status: "failed", rows: unknown });
+  return { copied, left };
+}

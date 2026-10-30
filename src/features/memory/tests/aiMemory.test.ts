@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCreatedAt, groupPendingHandoffs, guessProject, parseSnippet, type AiMemoryHandoff } from "../aiMemory";
+import { formatCreatedAt, groupPendingHandoffs, guessProject, parseSnippet, splitMigrationReport, type AiMemoryHandoff } from "../aiMemory";
 
 describe("parseSnippet (snippet do ai-memory search --json)", () => {
   it("destaca o <mark> do fixture real e mantém o resto como texto", () => {
@@ -133,5 +133,20 @@ describe("guessProject", () => {
   it("devolve null quando nenhum bate ou a pasta é vazia", () => {
     expect(guessProject([project("w", "app", null)], "/x/outra")).toBeNull();
     expect(guessProject([project("w", "app", null)], "")).toBeNull();
+  });
+});
+
+describe("splitMigrationReport", () => {
+  const row = (entry_id: string, status: string) =>
+    ({ entry_id, revision: 1, status, reason: null, wiki_path: null, aim_workspace: null, aim_project: null, migrated_at: 0 });
+
+  it("separa copiadas e agrupa o resto por motivo, na ordem fixa", () => {
+    const { copied, left } = splitMigrationReport([row("a", "failed"), row("b", "written"), row("c", "skipped_secret"), row("d", "failed")]);
+    expect(copied.map((r) => r.entry_id)).toEqual(["b"]);
+    expect(left.map((g) => [g.status, g.rows.map((r) => r.entry_id)])).toEqual([["skipped_secret", ["c"]], ["failed", ["a", "d"]]]);
+  });
+
+  it("status desconhecido não some: vai para falhas", () => {
+    expect(splitMigrationReport([row("x", "novo")]).left).toEqual([{ status: "failed", rows: [row("x", "novo")] }]);
   });
 });
