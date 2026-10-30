@@ -3798,5 +3798,19 @@
   "chat.accounts.window": "Janela atual",
   "chat.accounts.week": "Esta semana",
   "chat.accounts.pools": "Pools de contas",
-  "chat.accounts.more": "Limites, chaves e contas do git"
+  "chat.accounts.more": "Limites, chaves e contas do git",
+  "settings.decisions.mode.shadow": "Sombra",
+  "settings.decisions.mode.help": "Ajuda",
+  "settings.decisions.mode.suggest": "Sugere",
+  "settings.decisions.mode.decide": "Decide",
+  "settings.decisions.summary": "Relatório do modo sombra",
+  "settings.decisions.summaryEmpty": "Ligue um ponto para começar a medir. Cada consulta usa cota.",
+  "settings.decisions.summaryMeasuring": "Medindo. O detalhe por ponto fica no relatório abaixo.",
+  "settings.decisions.sample": "Amostra",
+  "settings.decisions.promoteHint": "Promover de sombra para ativo exige concordância ≥ 90% e revisão das discordâncias.",
+  "settings.decisions.where": "Onde o Jev age",
+  "settings.decisions.whereMemory": "Aprovar memória: a sugestão vem pré-selecionada; quem clica é você.",
+  "settings.decisions.whereVigia": "Missões: confirma um relatório final que a regra do Vigia não reconheceu.",
+  "settings.decisions.whereRouting": "Equipe: uma mensagem sem @ ganha um chip de destinatário; você escolhe.",
+  "settings.decisions.whereBrowser": "Navegador: com ags portal act, escolhe a próxima operação e o elemento."
 }

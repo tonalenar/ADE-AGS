@@ -5,6 +5,8 @@ import { useTranslation } from "react-i18next";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
+import { useSettingsLook } from "@/features/settings/settingsLook";
+import { POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
 import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
@@ -19,6 +21,29 @@ const POINT_LABEL: Record<string, string> = {
   browser_step: "settings.decisions.point.browser",
   browser_vision: "settings.decisions.point.browserVision",
 };
+
+const MODE_TONE: Record<PointMode, string> = {
+  shadow: "bg-gray-100 text-gray-600 dark:bg-white/[0.06] dark:text-white/60",
+  help: "bg-accent-500/10 text-accent-700 dark:text-accent-300",
+  suggest: "bg-violet-500/10 text-violet-700 dark:text-violet-300",
+  decide: "bg-amber-500/10 text-amber-800 dark:text-amber-300",
+};
+
+/** O selo do modo de um ponto (prancheta 7). */
+function ModeBadge({ point }: { point: string }) {
+  const { t } = useTranslation();
+  const mode = POINT_MODE[point];
+  if (!mode) return null;
+  return <span className={`shrink-0 text-[11px] font-medium px-1.5 py-px rounded-[5px] ${MODE_TONE[mode]}`}>{t(`settings.decisions.mode.${mode}`)}</span>;
+}
+
+/** No chat, os títulos dos blocos são os nomes pequenos acima dos cartões. */
+function Heading({ children }: { children: React.ReactNode }) {
+  const chat = useSettingsLook() === "chat";
+  return chat
+    ? <h2 className="m-0 mx-1 text-[13px] font-medium text-gray-500 dark:text-white/50">{children}</h2>
+    : <h3 className="px-1 pt-1 text-[12px] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-white/40">{children}</h3>;
+}
 
 const FIELD = "h-8 rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] text-gray-900 outline-none transition-shadow placeholder:text-gray-400 focus:border-accent-500 focus:ring-[3px] focus:ring-accent-500/25 dark:border-white/15 dark:bg-surface-raised dark:text-gray-100 dark:placeholder:text-white/30";
 const BTN = "h-8 rounded-lg border border-gray-300 px-3 text-[13px] text-gray-800 transition-colors hover:bg-gray-100 disabled:opacity-50 dark:border-white/15 dark:text-gray-100 dark:hover:bg-white/8";
@@ -184,6 +209,7 @@ export function DecisionsSection() {
   );
   const providerLabel = (id: DecisionProviderId) => t(`settings.decisions.provider.${id === "laya_local" ? "layaLocal" : id === "laya_studio" ? "layaStudio" : id}`);
   const active = settings.enabled && settings.provider !== "none";
+  const chat = useSettingsLook() === "chat";
   const secondaryOn = settings.secondaryProvider !== "none";
   const sameAsPrimary = secondaryOn && settings.secondaryProvider === settings.provider
     && settings.secondaryBaseUrl.trim() === settings.baseUrl.trim()
@@ -279,12 +305,10 @@ export function DecisionsSection() {
   const pointName = (point: string) => (POINT_LABEL[point] ? t(POINT_LABEL[point]) : point);
   const providerName = (id: string) => (PROVIDERS.includes(id as DecisionProviderId) ? providerLabel(id as DecisionProviderId) : id);
 
-  return (
-    <SettingsSection
-      title={t("settings.decisions")}
-      description={t("settings.decisions.desc")}
-      action={<StatusPill on={active} label={t(active ? "settings.decisions.status.on" : "settings.decisions.status.off")} />}
-    >
+  const pill = <StatusPill on={active} label={t(active ? "settings.decisions.status.on" : "settings.decisions.status.off")} />;
+  const body = (
+    <>
+      {chat && <div className="flex items-center gap-2"><span className="flex-1"><Heading>{t("settings.decisions.provider")}</Heading></span>{pill}</div>}
       <SettingsGroup>
         <SettingsToggleRow
           checked={settings.enabled}
@@ -368,7 +392,7 @@ export function DecisionsSection() {
         />
       </SettingsGroup>
 
-      <h3 className="px-1 pt-1 text-[12px] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-white/40">{t("settings.decisions.compare.title")}</h3>
+      <Heading>{t("settings.decisions.compare.title")}</Heading>
       <p className="px-1 text-[12px] text-gray-500 dark:text-white/45">{t("settings.decisions.compare.hint")}</p>
       <SettingsGroup>
         <SettingsRow label={t("settings.decisions.compare.provider")}>
@@ -434,17 +458,17 @@ export function DecisionsSection() {
         </p>
       )}
 
-      <h3 className="px-1 pt-1 text-[12px] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-white/40">{t("settings.decisions.group.points")}</h3>
+      <Heading>{t("settings.decisions.group.points")}</Heading>
       <SettingsGroup>
-        <SettingsToggleRow checked={settings.memoryApproval} onChange={(memoryApproval) => setSettings({ ...settings, memoryApproval })} label={t("settings.decisions.point.memory")} description={t("settings.decisions.point.memoryHint")} />
-        <SettingsToggleRow checked={settings.dreamTriage} onChange={(dreamTriage) => setSettings({ ...settings, dreamTriage })} label={t("settings.decisions.point.dream")} description={t("settings.decisions.point.dreamHint")} />
-        <SettingsToggleRow checked={settings.fleetGate} onChange={(fleetGate) => setSettings({ ...settings, fleetGate })} label={t("settings.decisions.point.fleet")} description={t("settings.decisions.point.fleetHint")} />
-        <SettingsToggleRow checked={settings.missionGate} onChange={(missionGate) => setSettings({ ...settings, missionGate })} label={t("settings.decisions.point.mission")} description={t("settings.decisions.point.missionHint")} />
-        <SettingsToggleRow checked={settings.deliveryGate} onChange={(deliveryGate) => setSettings({ ...settings, deliveryGate })} label={t("settings.decisions.point.delivery")} description={t("settings.decisions.point.deliveryHint")} />
-        <SettingsToggleRow checked={settings.memoryRelevance} onChange={(memoryRelevance) => setSettings({ ...settings, memoryRelevance })} label={t("settings.decisions.point.relevance")} description={t("settings.decisions.point.relevanceHint")} />
-        <SettingsToggleRow checked={settings.turnRouting} onChange={(turnRouting) => setSettings({ ...settings, turnRouting })} label={t("settings.decisions.point.routing")} description={t("settings.decisions.point.routingHint")} />
-        <SettingsToggleRow checked={settings.browserPilot} onChange={(browserPilot) => setSettings({ ...settings, browserPilot })} label={t("settings.decisions.point.browser")} description={t("settings.decisions.point.browserHint")} />
-        <SettingsToggleRow checked={settings.browserVision} onChange={(browserVision) => setSettings({ ...settings, browserVision })} label={t("settings.decisions.point.browserVision")} description={t("settings.decisions.point.browserVisionHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="memory_approval" />} checked={settings.memoryApproval} onChange={(memoryApproval) => setSettings({ ...settings, memoryApproval })} label={t("settings.decisions.point.memory")} description={t("settings.decisions.point.memoryHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="dream_triage" />} checked={settings.dreamTriage} onChange={(dreamTriage) => setSettings({ ...settings, dreamTriage })} label={t("settings.decisions.point.dream")} description={t("settings.decisions.point.dreamHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="fleet_gate" />} checked={settings.fleetGate} onChange={(fleetGate) => setSettings({ ...settings, fleetGate })} label={t("settings.decisions.point.fleet")} description={t("settings.decisions.point.fleetHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="mission_gate" />} checked={settings.missionGate} onChange={(missionGate) => setSettings({ ...settings, missionGate })} label={t("settings.decisions.point.mission")} description={t("settings.decisions.point.missionHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="delivery_gate" />} checked={settings.deliveryGate} onChange={(deliveryGate) => setSettings({ ...settings, deliveryGate })} label={t("settings.decisions.point.delivery")} description={t("settings.decisions.point.deliveryHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="memory_relevance" />} checked={settings.memoryRelevance} onChange={(memoryRelevance) => setSettings({ ...settings, memoryRelevance })} label={t("settings.decisions.point.relevance")} description={t("settings.decisions.point.relevanceHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="turn_routing" />} checked={settings.turnRouting} onChange={(turnRouting) => setSettings({ ...settings, turnRouting })} label={t("settings.decisions.point.routing")} description={t("settings.decisions.point.routingHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="browser_step" />} checked={settings.browserPilot} onChange={(browserPilot) => setSettings({ ...settings, browserPilot })} label={t("settings.decisions.point.browser")} description={t("settings.decisions.point.browserHint")} />
+        <SettingsToggleRow badge={<ModeBadge point="browser_vision" />} checked={settings.browserVision} onChange={(browserVision) => setSettings({ ...settings, browserVision })} label={t("settings.decisions.point.browserVision")} description={t("settings.decisions.point.browserVisionHint")} />
       </SettingsGroup>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -548,6 +572,52 @@ export function DecisionsSection() {
           </div>
         )}
       </SettingsSection>
-    </SettingsSection>
+    </>
+  );
+
+  if (!chat) {
+    return (
+      <SettingsSection title={t("settings.decisions")} description={t("settings.decisions.desc")} action={pill}>
+        {body}
+      </SettingsSection>
+    );
+  }
+  // Prancheta 7: o provedor e os pontos à esquerda; o resumo do modo sombra e onde o Jev age, à direita.
+  const summary = shadowSummary(report?.points ?? []);
+  return (
+    <div className="flex flex-wrap items-start gap-7">
+      <div className="flex-[999_1_560px] min-w-0 flex flex-col gap-4">{body}</div>
+      <aside className="flex-[1_1_300px] min-w-0 flex flex-col gap-4">
+        <section aria-label={t("settings.decisions.summary")} className="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] p-4">
+          <h2 className="m-0 mb-1 text-[14px] font-semibold">{t("settings.decisions.summary")}</h2>
+          <p className="m-0 mb-3 text-[13px] text-gray-500 dark:text-white/50">{t(summary.sample > 0 ? "settings.decisions.summaryMeasuring" : "settings.decisions.summaryEmpty")}</p>
+          <div className="grid grid-cols-2 gap-2.5 text-[12px] text-gray-500 dark:text-white/50">
+            <SummaryStat label={t("settings.decisions.agreement")} value={summary.agreement === null ? "—" : pct(summary.agreement)} />
+            <SummaryStat label={t("settings.decisions.latency")} value={summary.p50Ms === null ? "—" : `${summary.p50Ms} / ${summary.p95Ms ?? "—"} ms`} />
+            <SummaryStat label={t("settings.decisions.errors")} value={summary.errorRate === null ? "—" : pct(summary.errorRate)} />
+            <SummaryStat label={t("settings.decisions.sample")} value={String(summary.sample)} />
+          </div>
+          <p className="m-0 mt-2.5 text-[12px] text-gray-400 dark:text-white/40">{t("settings.decisions.promoteHint")}</p>
+        </section>
+        <section aria-label={t("settings.decisions.where")} className="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] p-4">
+          <h2 className="m-0 mb-2 text-[14px] font-semibold">{t("settings.decisions.where")}</h2>
+          <ul className="m-0 pl-[18px] text-[13px] leading-[1.55] text-gray-600 dark:text-white/65 flex flex-col gap-1">
+            <li>{t("settings.decisions.whereMemory")}</li>
+            <li>{t("settings.decisions.whereVigia")}</li>
+            <li>{t("settings.decisions.whereRouting")}</li>
+            <li>{t("settings.decisions.whereBrowser")}</li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="p-2.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
+      {label}
+      <div className="text-[18px] font-semibold text-gray-900 dark:text-white">{value}</div>
+    </div>
   );
 }

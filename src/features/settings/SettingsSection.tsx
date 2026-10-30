@@ -113,9 +113,11 @@ export function SettingsRow({ label, hint, children }: {
  * `role="switch"`: Espacio y Enter lo alternan y el foco se ve. `children` va debajo de la
  * fila, para avisos del mismo ajuste.
  */
-export function SettingsToggleRow({ label, description, checked, disabled = false, onChange, children }: {
+export function SettingsToggleRow({ label, description, checked, disabled = false, onChange, badge, children }: {
   label: string;
   description?: string;
+  /** Um selo ao lado do nome (o modo de um ponto do Jev, por exemplo). */
+  badge?: React.ReactNode;
   checked: boolean;
   disabled?: boolean;
   onChange: (next: boolean) => void;
@@ -128,7 +130,10 @@ export function SettingsToggleRow({ label, description, checked, disabled = fals
       <div className="flex flex-col gap-1 px-4 py-3.5">
         <div className="flex items-center justify-between gap-4">
           <span className="flex flex-col gap-0.5 min-w-0">
-            <span id={labelId} className="text-[14px] font-medium text-gray-900 dark:text-white">{label}</span>
+            <span className="flex items-center gap-2">
+              <span id={labelId} className="text-[14px] font-medium text-gray-900 dark:text-white">{label}</span>
+              {badge}
+            </span>
             {description && <span className="text-[13px] text-gray-500 dark:text-white/50">{description}</span>}
           </span>
           <ChatSwitch labelId={labelId} checked={checked} disabled={disabled} onChange={onChange} />
@@ -141,7 +146,10 @@ export function SettingsToggleRow({ label, description, checked, disabled = fals
     <div className="flex flex-col gap-1 px-3 py-2.5">
       <div className="flex items-center justify-between gap-4">
         <span className="flex flex-col gap-px min-w-0">
-          <span id={labelId} className="text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{label}</span>
+          <span className="flex items-center gap-1.5">
+            <span id={labelId} className="text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{label}</span>
+            {badge}
+          </span>
           {description && (
             <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{description}</span>
           )}

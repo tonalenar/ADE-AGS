@@ -3798,5 +3798,19 @@
   "chat.accounts.window": "Current window",
   "chat.accounts.week": "This week",
   "chat.accounts.pools": "Account pools",
-  "chat.accounts.more": "Limits, keys and git accounts"
+  "chat.accounts.more": "Limits, keys and git accounts",
+  "settings.decisions.mode.shadow": "Shadow",
+  "settings.decisions.mode.help": "Helps",
+  "settings.decisions.mode.suggest": "Suggests",
+  "settings.decisions.mode.decide": "Decides",
+  "settings.decisions.summary": "Shadow mode report",
+  "settings.decisions.summaryEmpty": "Turn a point on to start measuring. Each query uses quota.",
+  "settings.decisions.summaryMeasuring": "Measuring. The per-point detail is in the report below.",
+  "settings.decisions.sample": "Sample",
+  "settings.decisions.promoteHint": "Promoting from shadow to active takes ≥ 90% agreement and reviewing the disagreements.",
+  "settings.decisions.where": "Where Jev acts",
+  "settings.decisions.whereMemory": "Memory approval: the suggestion comes preselected; you click.",
+  "settings.decisions.whereVigia": "Missions: confirms a final report the Vigia rule missed.",
+  "settings.decisions.whereRouting": "Team: a message without @ gets a recipient chip; you choose.",
+  "settings.decisions.whereBrowser": "Browser: with ags portal act, picks the next operation and element."
 }

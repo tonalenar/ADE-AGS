@@ -283,7 +283,7 @@ export function SettingsPage() {
 
       {/* ══ a seção aberta ════════════════════════════════════════════════ */}
       <main className={chat ? "cc-scroll min-w-0 flex-1 px-6 sm:px-12 pt-4 pb-12" : "cc-scroll min-w-0 flex-1 px-8 py-6"}>
-        <div className={chat ? "max-w-[736px] mx-auto flex flex-col gap-7" : "max-w-[760px]"}>
+        <div className={chat ? `${section === "decisions" ? "max-w-[1040px]" : "max-w-[736px]"} mx-auto flex flex-col gap-7` : "max-w-[760px]"}>
           {/* No chat (prancheta 5) a página tem título e subtítulo; os cartões vêm abaixo. */}
           {chat && (
             <div>
