@@ -20,6 +20,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
 import { useWorkMode } from "@/features/canvas/store";
 import { GRID_SLOT, gridColumns, useMissionGrid } from "@/features/canvas/gridMode";
+import { TeamTabMarks } from "@/features/chat/team/TeamTabMarks";
 import { useChatShell } from "@/app/uiStore";
 
 // @xyflow/react pesa y solo hace falta en la vista canvas. Un import estático lo metía en
@@ -155,7 +156,8 @@ function MissionGrid({ ids }: { ids: string[] }) {
               title={t("canvas.grid.focus", { name: title })} aria-label={t("canvas.grid.focus", { name: title })}
               className={`pointer-events-auto cursor-pointer shrink-0 h-6 px-2 flex items-center truncate text-left text-[11px] font-medium
                 bg-gray-100 dark:bg-gray-900 ${active ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"}`}>
-              {title}
+              <span className="min-w-0 truncate">{title}</span>
+              <span className="ml-2"><TeamTabMarks tabId={id} /></span>
             </button>
             <div data-slot={GRID_SLOT + id} className="relative flex-1 min-h-0" />
           </div>
