@@ -607,6 +607,7 @@ fn relatorio_traz_o_registro_do_workspace_sem_corpo() {
 
     assert_eq!(linhas.len(), 1, "{linhas:?}");
     assert_eq!(linhas[0].status, "written");
+    assert_eq!(linhas[0].key.as_deref(), Some("chave-e1"), "a chave vem de memory_entries");
     assert_eq!(linhas[0].wiki_path.as_deref(), Some("ade/memoria/e1.md"));
     assert_eq!(linhas[0].aim_workspace.as_deref(), Some("WS-FAKE"));
     assert_eq!(linhas[0].aim_project.as_deref(), Some("projeto-fake"));

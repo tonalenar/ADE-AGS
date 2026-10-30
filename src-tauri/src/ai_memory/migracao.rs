@@ -36,6 +36,8 @@ pub struct MigrationSummary {
 #[derive(Debug, Serialize, PartialEq, Eq)]
 pub struct MigrationRow {
     pub entry_id: String,
+    /// Chave da memória (`memory_entries.key`), só leitura. Não é o corpo.
+    pub key: Option<String>,
     pub revision: i64,
     pub status: String,
     pub reason: Option<String>,
@@ -138,26 +140,31 @@ pub fn migrate(
     Ok(summary)
 }
 
-/// Linhas do registro do workspace, sem o corpo.
+/// Linhas do registro do workspace, com a chave da memória e sem o corpo.
 pub fn report(db: &DbConnection, workspace_id: &str) -> Result<Vec<MigrationRow>, String> {
     let conn = db.lock().map_err(|_| "banco indisponível".to_string())?;
     let mut stmt = conn
         .prepare(
-            "SELECT entry_id, revision, status, reason, wiki_path, aim_workspace, aim_project, migrated_at
-             FROM ai_memory_migration WHERE ade_workspace_id = ?1 ORDER BY migrated_at, entry_id, revision",
+            "SELECT m.entry_id, e.key, m.revision, m.status, m.reason, m.wiki_path, m.aim_workspace,
+                    m.aim_project, m.migrated_at
+             FROM ai_memory_migration m
+             LEFT JOIN memory_entries e ON e.id = m.entry_id
+             WHERE m.ade_workspace_id = ?1
+             ORDER BY m.migrated_at, m.entry_id, m.revision",
         )
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([workspace_id], |r| {
             Ok(MigrationRow {
                 entry_id: r.get(0)?,
-                revision: r.get(1)?,
-                status: r.get(2)?,
-                reason: r.get(3)?,
-                wiki_path: r.get(4)?,
-                aim_workspace: r.get(5)?,
-                aim_project: r.get(6)?,
-                migrated_at: r.get(7)?,
+                key: r.get(1)?,
+                revision: r.get(2)?,
+                status: r.get(3)?,
+                reason: r.get(4)?,
+                wiki_path: r.get(5)?,
+                aim_workspace: r.get(6)?,
+                aim_project: r.get(7)?,
+                migrated_at: r.get(8)?,
             })
         })
         .map_err(|e| e.to_string())?;
