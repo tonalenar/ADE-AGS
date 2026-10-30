@@ -4214,5 +4214,13 @@
   "chat.team.form.effort": "Effort",
   "chat.tool.infra_one": "Coordinated the team · {{count}} command",
   "chat.tool.infra_other": "Coordinated the team · {{count}} commands",
-  "chat.picker.opencodeNone": "No provider connected in OpenCode. Connect one in the terminal with:"
+  "chat.picker.opencodeNone": "No provider connected in OpenCode. Connect one in the terminal with:",
+  "chat.tool.script": "script",
+  "chat.team.feed.title": "Team",
+  "chat.team.feed.delegations_one": "{{count}} delegation",
+  "chat.team.feed.delegations_other": "{{count}} delegations",
+  "chat.team.feed.deliveries_one": "{{count}} delivery",
+  "chat.team.feed.deliveries_other": "{{count}} deliveries",
+  "chat.team.feed.busy_one": "{{count}} in progress",
+  "chat.team.feed.busy_other": "{{count}} in progress"
 }

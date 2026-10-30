@@ -15,6 +15,7 @@ import { parsePeerEnvelope, senderAgent } from "./peerEnvelope";
 import type { PendingSend } from "./pending";
 import { displayUserText } from "./userMessage";
 import { isFresh } from "./streaming";
+import { commandTitle } from "./toolTitle";
 import { fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
@@ -298,16 +299,27 @@ function ToolRow({ tool }: { tool: TimelineItem }) {
   const [open, setOpen] = useState(false);
   const kind = tool.tool ?? "other";
   const Icon = TOOL_ICON[kind];
-  const target = kind === "todo" ? t("chat.tool.todoCount", { count: Number(tool.label ?? 0) }) : tool.path ? fileName(tool.path) : tool.label ?? "";
-  const canOpen = !!tool.output;
+  // O comando aparece sem o invólucro do shell e numa linha só (programa em destaque); o inteiro
+  // fica no tooltip e no conteúdo expandido.
+  const command = kind === "command" ? commandTitle(tool.label ?? "") : null;
+  const target = command ? "" : kind === "todo" ? t("chat.tool.todoCount", { count: Number(tool.label ?? 0) }) : tool.path ? fileName(tool.path) : tool.label ?? "";
+  const longCommand = !!command && (command.script || command.full.includes("\n") || command.full.length > 90);
+  const canOpen = !!tool.output || longCommand;
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => canOpen && setOpen(!open)} aria-expanded={canOpen ? open : undefined}
-        title={tool.path ?? tool.label}
+        title={command?.full || tool.path || tool.label}
         className={`group flex items-center gap-2.5 min-h-[26px] text-left text-chat-ui text-gray-600 dark:text-white/60 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
         <Icon className={`w-4 h-4 shrink-0 ${tool.status === "error" || tool.status === "denied" ? "text-red-500 dark:text-red-400" : "text-gray-400 dark:text-white/40"}`} />
         <span className="shrink-0">{t(VERB[kind])}</span>
-        {target && <span className={`min-w-0 truncate ${kind === "command" || tool.path ? "font-mono text-chat-code" : ""} text-gray-800 dark:text-white/80`}>{target}</span>}
+        {command && (
+          <span className="min-w-0 flex-1 truncate whitespace-nowrap font-mono text-chat-code text-gray-500 dark:text-white/50">
+            <span className="font-medium text-gray-800 dark:text-white/85">{command.program}</span>
+            {command.rest && <> {command.rest}</>}
+            {command.script && <span className="text-gray-400 dark:text-white/35"> · {t("chat.tool.script")}</span>}
+          </span>
+        )}
+        {target && <span className={`min-w-0 truncate ${tool.path ? "font-mono text-chat-code" : ""} text-gray-800 dark:text-white/80`}>{target}</span>}
         {(tool.added ?? 0) + (tool.removed ?? 0) > 0 && (
           <span className="shrink-0 font-mono text-chat-code">
             <span className="text-emerald-600 dark:text-emerald-400">+{tool.added ?? 0}</span>{" "}
@@ -319,6 +331,12 @@ function ToolRow({ tool }: { tool: TimelineItem }) {
         {tool.status === "denied" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.denied")}</span>}
         {canOpen && <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
       </button>
+      {open && command && longCommand && (
+        <pre className="m-0 ml-[26px] mt-1 max-h-48 overflow-auto rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
+          bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-800 dark:text-white/80">
+          {command.full}
+        </pre>
+      )}
       {open && tool.output && (
         <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-white/70">

@@ -4214,5 +4214,13 @@
   "chat.team.form.effort": "Esforço",
   "chat.tool.infra_one": "Coordenou o time · {{count}} comando",
   "chat.tool.infra_other": "Coordenou o time · {{count}} comandos",
-  "chat.picker.opencodeNone": "Nenhum provedor conectado no OpenCode. Conecte um no terminal com:"
+  "chat.picker.opencodeNone": "Nenhum provedor conectado no OpenCode. Conecte um no terminal com:",
+  "chat.tool.script": "script",
+  "chat.team.feed.title": "Time",
+  "chat.team.feed.delegations_one": "{{count}} delegação",
+  "chat.team.feed.delegations_other": "{{count}} delegações",
+  "chat.team.feed.deliveries_one": "{{count}} entrega",
+  "chat.team.feed.deliveries_other": "{{count}} entregas",
+  "chat.team.feed.busy_one": "{{count}} em andamento",
+  "chat.team.feed.busy_other": "{{count}} em andamento"
 }
