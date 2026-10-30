@@ -18,6 +18,25 @@ pub fn thread_id_of(member: &str) -> Option<&str> {
     member.strip_prefix(THREAD_PREFIX).filter(|id| !id.is_empty())
 }
 
+/// Por que o turno de uma conversa acabou SEM fala nova, para o `peer ask` não esperar o prazo inteiro.
+/// Lê só o que ficou gravado: o `turnEnd` depois da última mensagem da pessoa/colega (erro, interrompido
+/// ou concluído sem texto) ou o processo morto. `None` = ainda não dá para dizer (o turno pode nem ter
+/// começado). Pura.
+pub fn stopped_reason(items: &[crate::canal::timeline::Item], alive: bool) -> Option<String> {
+    use crate::canal::timeline::ItemKind;
+    let from = items.iter().rposition(|i| i.kind == ItemKind::User).map_or(0, |at| at + 1);
+    let end = items[from..].iter().rev().find(|i| i.kind == ItemKind::TurnEnd);
+    match end {
+        Some(end) => Some(match (end.text.as_deref().map(str::trim).filter(|t| !t.is_empty()), end.interrupted) {
+            (Some(error), _) => format!("O turno terminou com erro: {error}"),
+            (None, Some(true)) => "O turno foi interrompido antes de haver resposta.".to_string(),
+            (None, _) => "O turno terminou sem nenhuma resposta escrita.".to_string(),
+        }),
+        None if !alive => Some("A conversa fechou antes de responder.".to_string()),
+        None => None,
+    }
+}
+
 /// O que o integrante pode fazer sem perguntar. É a política do papel no time: vale para os pedidos
 /// que chegam à caixa de Permissões e para a conversa nova aberta pelo time. Não muda os flags de
 /// uma TUI que já estava aberta (lá a política só restringe, pela caixa).

@@ -318,3 +318,37 @@ fn o_briefing_do_subagente_usa_a_frase_do_canvas_e_o_resumo_o_marca() {
     assert!(!model::member_briefing("Claude Code", &plain, "").contains("subagente"));
     assert!(model::roster_notice(&[me]).contains("QA; supervisionado; subagente"));
 }
+
+fn item(kind: crate::canal::timeline::ItemKind, id: &str) -> crate::canal::timeline::Item {
+    crate::canal::timeline::Item::new(kind, id.to_string(), None)
+}
+
+fn turn_end(id: &str, interrupted: bool, error: Option<&str>) -> crate::canal::timeline::Item {
+    let mut end = item(crate::canal::timeline::ItemKind::TurnEnd, id);
+    end.interrupted = Some(interrupted);
+    end.text = error.map(str::to_string);
+    end
+}
+
+#[test]
+fn o_ask_a_conversa_que_errou_cai_ou_foi_interrompida_sai_com_o_motivo() {
+    use crate::canal::timeline::ItemKind::{Assistant, User};
+    let ask = || item(User, "u1");
+    // Turno que falhou: o erro do `turnEnd` é o motivo.
+    let falhou = vec![ask(), turn_end("end:t1", false, Some("API fora do ar"))];
+    let reason = model::stopped_reason(&falhou, true).unwrap();
+    assert!(reason.contains("API fora do ar") && reason.contains("erro"), "{reason}");
+    // Interrompido: diz que foi interrompido, sem culpar o agente.
+    let parado = vec![ask(), turn_end("end:t1", true, None)];
+    assert!(model::stopped_reason(&parado, true).unwrap().contains("interrompido"));
+    // Turno que fechou sem escrever nenhuma fala.
+    let mudo = vec![ask(), turn_end("end:t1", false, None)];
+    assert!(model::stopped_reason(&mudo, true).unwrap().contains("sem nenhuma resposta"));
+    // Processo morto sem `turnEnd`: a conversa fechou.
+    assert!(model::stopped_reason(&[ask()], false).unwrap().contains("fechou"));
+    // Ainda vivo e sem `turnEnd` da pergunta: não dá para dizer (o turno pode nem ter começado).
+    assert_eq!(model::stopped_reason(&[ask()], true), None);
+    // O `turnEnd` de um turno ANTERIOR à pergunta não conta.
+    let velho = vec![item(User, "u0"), item(Assistant, "a0"), turn_end("end:t0", false, Some("erro antigo")), ask()];
+    assert_eq!(model::stopped_reason(&velho, true), None, "o erro antigo não é desta pergunta");
+}

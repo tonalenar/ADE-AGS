@@ -1507,7 +1507,8 @@ fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str
         _ => return Ok(tell_reply(describe(target), &sent)),
     }
     emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary));
-    let (finished, reply) = super::team::await_reply(app, thread, before, timeout);
+    let awaited = super::team::await_reply(app, thread, before, timeout);
+    let (finished, reply) = (awaited.finished, awaited.reply);
     if let (true, Some(reply)) = (finished, reply.as_deref()) {
         log_reply(app, &target.id, from_id, reply);
     }
@@ -1520,7 +1521,11 @@ fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str
         "reply": reply.map(|r| crate::util::untrusted::untrusted_block(&format!("peer:{}", target.name), &r)).unwrap_or_default(),
         "messageId": sent.message.id,
     });
-    if !finished {
+    if let Some(reason) = awaited.stopped {
+        // O turno acabou sem resposta: diga o motivo em vez de esperar o prazo e mandar "não pergunte de novo".
+        out["stopped"] = json!(reason);
+        out["note"] = json!(format!("{0} não respondeu: {reason} A mensagem foi entregue; decida com a pessoa se vale perguntar de novo.", target.name));
+    } else if !finished {
         out["note"] = json!(format!("O prazo acabou e {0} ainda não terminou o turno: a mensagem foi entregue, e a resposta chega por `ags peer tell` dele. Não pergunte de novo.", target.name));
     }
     Ok(out)

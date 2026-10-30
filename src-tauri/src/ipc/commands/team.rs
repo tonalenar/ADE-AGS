@@ -133,27 +133,43 @@ pub(super) fn assistant_count(app: &AppHandle, thread_id: &str) -> usize {
         .unwrap_or(0)
 }
 
-/// Espera o turno da conversa acabar com uma fala nova do agente (depois de `before` falas), sem
-/// polling. `(terminou, a última fala nova)`.
-pub(super) fn await_reply(app: &AppHandle, thread_id: &str, before: usize, timeout: Duration) -> (bool, Option<String>) {
+/// Como a espera de um `peer ask` a uma conversa acabou.
+pub(super) struct Awaited {
+    /// O turno acabou (com resposta ou sem ela: veja `stopped`).
+    pub finished: bool,
+    /// A última fala nova do agente.
+    pub reply: Option<String>,
+    /// Por que o turno acabou sem fala nova (erro, interrompido, conversa fechada). Só quando é verdade.
+    pub stopped: Option<String>,
+}
+
+/// Espera o turno da conversa acabar, sem polling, e para no que vier primeiro: uma fala nova depois de
+/// `before` falas, o fim do turno sem fala (erro, interrompido, processo que caiu: `stopped`) ou o prazo.
+/// Acorda também com o `closed`, que vai ao mesmo tópico do barramento.
+pub(super) fn await_reply(app: &AppHandle, thread_id: &str, before: usize, timeout: Duration) -> Awaited {
     let deadline = Instant::now() + timeout;
     let filter = crate::bus::Filter { topics: vec![super::conversas::BUS_TOPIC.into()], ..Default::default() };
     let mut after = crate::bus::since(u64::MAX, &filter, 1).last_seq;
-    let Ok(db) = db(app) else { return (false, None) };
+    let Ok(db) = db(app) else { return Awaited { finished: false, reply: None, stopped: None } };
     loop {
-        let replies: Vec<String> = crate::conversa::api::items(&db, thread_id)
-            .unwrap_or_default()
-            .into_iter()
+        let items = crate::conversa::api::items(&db, thread_id).unwrap_or_default();
+        let replies: Vec<String> = items
+            .iter()
             .filter(|i| i.kind == crate::canal::timeline::ItemKind::Assistant)
             .skip(before)
-            .filter_map(|i| i.text)
+            .filter_map(|i| i.text.clone())
             .collect();
-        let working = crate::conversa::api::status(thread_id).working;
-        if !working && !replies.is_empty() {
-            return (true, replies.last().cloned());
+        let status = crate::conversa::api::status(thread_id);
+        if !status.working {
+            if !replies.is_empty() {
+                return Awaited { finished: true, reply: replies.last().cloned(), stopped: None };
+            }
+            if let Some(reason) = model::stopped_reason(&items, status.alive) {
+                return Awaited { finished: true, reply: None, stopped: Some(reason) };
+            }
         }
         if Instant::now() >= deadline {
-            return (false, replies.last().cloned());
+            return Awaited { finished: false, reply: replies.last().cloned(), stopped: None };
         }
         let page = crate::bus::wait(after, &filter, 50, deadline.saturating_duration_since(Instant::now()));
         after = page.last_seq;
