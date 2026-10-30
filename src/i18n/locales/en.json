@@ -3582,6 +3582,7 @@
   "aiMemory.wikiEmpty": "No pages yet.",
   "aiMemory.closePage": "Close",
   "aiMemory.expired": "This page passed its decay deadline. Nothing was deleted.",
+  "aiMemory.decayNote": "ADE only warns: it deletes nothing. ai-memory may delete expired or cold pages on its own schedule (default: every 24 h). To turn it off, set forget_sweep_interval_secs = 0 in the ai-memory config.",
   "aiMemory.handoffs": "Pending handoffs",
   "aiMemory.handoffsEmpty": "No pending handoffs.",
   "aiMemory.handoffsTo": "For {{agent}}",

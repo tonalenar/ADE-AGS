@@ -3582,6 +3582,7 @@
   "aiMemory.wikiEmpty": "Nenhuma página ainda.",
   "aiMemory.closePage": "Fechar",
   "aiMemory.expired": "Esta página venceu o prazo do decaimento. Nada foi apagado.",
+  "aiMemory.decayNote": "O ADE só avisa: não apaga nada. O ai-memory pode apagar páginas vencidas ou frias no agendamento dele (padrão: a cada 24 h). Para desligar, defina forget_sweep_interval_secs = 0 na configuração do ai-memory.",
   "aiMemory.handoffs": "Handoffs pendentes",
   "aiMemory.handoffsEmpty": "Nenhum handoff pendente.",
   "aiMemory.handoffsTo": "Para {{agent}}",

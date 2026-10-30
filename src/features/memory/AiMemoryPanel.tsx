@@ -144,6 +144,7 @@ export function AiMemoryPanel({ cwd, workspaceId }: { cwd: string; workspaceId?:
         <div className="grid gap-3">
           <div>
             <h4 className="mb-1 font-semibold">{t("aiMemory.wiki")}</h4>
+            <p className="mb-1 text-gray-500">{t("aiMemory.decayNote")}</p>
             {loaded.pages.length === 0
               ? <p className="text-gray-500">{t("aiMemory.wikiEmpty")}</p>
               : (

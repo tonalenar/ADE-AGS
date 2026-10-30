@@ -220,4 +220,41 @@ describe("AiMemoryPanel", () => {
     expect(host.querySelector("img")).toBeNull();
     expect(host.querySelector("script")).toBeNull();
   });
+
+  it("estado ok mostra o aviso fixo de decaimento: o ADE só avisa e não apaga", async () => {
+    route({
+      ai_memory_probe: () => envelope(probeOk(false)),
+      ai_memory_recent: () => envelope([]),
+      ai_memory_handoffs: () => envelope([]),
+    });
+
+    await render();
+
+    expect(host.textContent).toContain("aiMemory.decayNote");
+  });
+
+  it("o aviso de decaimento não aparece quando o binário não está pronto", async () => {
+    route({
+      ai_memory_probe: () => envelope({ state: "missing", version: null, installation_instruction: "Instale.", status: null, sessions_supported: false }),
+    });
+
+    await render();
+
+    expect(host.textContent).not.toContain("aiMemory.decayNote");
+  });
+
+  it("página vencida (expired: true) mostra que o prazo passou e que nada foi apagado", async () => {
+    route({
+      ai_memory_probe: () => envelope(probeOk(false)),
+      ai_memory_recent: () => envelope(recentFixture),
+      ai_memory_handoffs: () => envelope([]),
+      ai_memory_read_page: () => envelope({ ...readPageFixture, expired: true }),
+    });
+
+    await render();
+    const pageButton = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes("Probe"));
+    await act(async () => { pageButton!.click(); });
+
+    expect(host.querySelector("article")?.textContent).toContain("aiMemory.expired");
+  });
 });
