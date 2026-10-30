@@ -18,9 +18,9 @@ export const aiMemoryReadPage = (cwd: string, path: string) =>
 export const aiMemoryProjects = (cwd: string) =>
   invoke<AiMemoryUntrusted<AiMemoryProject[]>>("ai_memory_projects", { cwd });
 
-/** Sessões de um projeto escolhido explicitamente (o servidor não sabe a pasta da aba nesse caminho). */
-export const aiMemorySessions = (workspace: string, project: string) =>
-  invoke<AiMemoryUntrusted<AiMemorySession[]>>("ai_memory_sessions", { workspace, project });
+/** Sessões de um projeto escolhido explicitamente; `cwd` é a pasta da aba, só para localizar o binário e o servidor. */
+export const aiMemorySessions = (cwd: string, workspace: string, project: string) =>
+  invoke<AiMemoryUntrusted<AiMemorySession[]>>("ai_memory_sessions", { cwd, workspace, project });
 
 /** Cópia única e idempotente das memórias aprovadas do ADE para o wiki do ai-memory. */
 export const aiMemoryMigrate = (workspaceId: string, cwd: string) =>

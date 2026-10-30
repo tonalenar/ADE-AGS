@@ -127,7 +127,7 @@ describe("AiMemoryPanel", () => {
     await act(async () => {});
 
     expect(invoke).toHaveBeenCalledWith("ai_memory_projects", { cwd });
-    expect(invoke).toHaveBeenCalledWith("ai_memory_sessions", { workspace: "ade-test", project: "probe" });
+    expect(invoke).toHaveBeenCalledWith("ai_memory_sessions", { cwd, workspace: "ade-test", project: "probe" });
     expect(host.textContent).toContain('aiMemory.sessionLine {"agent":"codex","when":"2024-01-01T00:00:00Z"}');
     expect(host.textContent).not.toContain("aiMemory.sessionsSoon");
   });

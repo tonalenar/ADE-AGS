@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { pendingForClaude, requestContinuity, takeContinuity } from "../continuity";
+import { pendingForClaude, peekContinuity, requestContinuity, takeContinuity } from "../continuity";
 import type { AiMemoryHandoff } from "@/features/memory/aiMemory";
 
 const row = (id: string, cwd: string | null, to_agent: string | null = null): AiMemoryHandoff => ({
@@ -13,6 +13,15 @@ describe("continuidade apenas em nova aba", () => {
     expect(takeContinuity("new-tab")).toBe(true);
     expect(takeContinuity("new-tab")).toBe(false);
     expect(takeContinuity()).toBe(false);
+  });
+  it("espiar não consome: se o ptyCreate falhar, a nova tentativa ainda leva a continuidade", () => {
+    requestContinuity("retry-tab");
+    expect(peekContinuity("retry-tab")).toBe(true);
+    expect(peekContinuity("retry-tab")).toBe(true);
+    expect(peekContinuity("outra")).toBe(false);
+    expect(peekContinuity()).toBe(false);
+    expect(takeContinuity("retry-tab")).toBe(true);
+    expect(peekContinuity("retry-tab")).toBe(false);
   });
   it("isola pasta, fronteira de caminho e destinatário", () => {
     const rows = [row("same", "/repo/app/", "claude-code"), row("ancestor", "/repo"),

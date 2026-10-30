@@ -33,7 +33,7 @@ import { reconcileTabSkills } from "@/features/skills/ipc";
 import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { missionOfTab } from "@/features/canvas/store";
 import { homeDir } from "@/shared/ipc/window";
-import { takeContinuity } from "@/features/tabs/continuity";
+import { peekContinuity, takeContinuity } from "@/features/tabs/continuity";
 import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptySnapshot, ptyWrite, savePastedImage } from "./ipc";
 import { createPtyReplay } from "./ptyReplay";
 import { clearPtyLaunch, ptyLaunchRequested, subscribePtyLaunch } from "./ptyLaunch";
@@ -524,8 +524,9 @@ function TerminalImpl({
             tabId ? { ADE_TAB_ID: tabId, ...(missionId ? { ADE_MISSION_ID: missionId } : {}) } : undefined
           ),
           prelaunch: resolvedPrelaunch,
-          ...(takeContinuity(tabId) ? { aiMemoryContinuity: true } : {}),
+          ...(peekContinuity(tabId) ? { aiMemoryContinuity: true } : {}),
         });
+        takeContinuity(tabId); // o PTY nasceu: a intenção foi usada. Numa falha ela fica para a nova tentativa.
         ptyIdRef.current = ptyId;
         sentSize = `${createdCols}x${createdRows}`;
         if (term.cols !== createdCols || term.rows !== createdRows) {

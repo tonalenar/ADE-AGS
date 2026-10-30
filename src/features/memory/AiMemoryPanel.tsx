@@ -53,11 +53,11 @@ function Sessions({ cwd }: { cwd: string }) {
     setSessions(null);
     if (!project) return;
     let alive = true;
-    aiMemorySessions(project.workspace_name, project.project_name)
+    aiMemorySessions(cwd, project.workspace_name, project.project_name)
       .then((r) => { if (alive) setSessions(r.data); })
       .catch((e) => { if (alive) setError(String(e)); });
     return () => { alive = false; };
-  }, [projects, selected]);
+  }, [projects, selected, cwd]);
 
   if (error) return <p className="text-red-500" role="alert">{t("aiMemory.error", { error })}</p>;
   if (!projects) return <p className="text-gray-500" role="status">{t("aiMemory.loading")}</p>;

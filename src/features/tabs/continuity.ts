@@ -6,6 +6,10 @@ export function requestContinuity(tabId: string): void {
   if (pending.size >= 128) pending.delete(pending.values().next().value!);
   pending.add(tabId);
 }
+/** Só olha: quem cria o PTY consome (`takeContinuity`) depois que ele nasceu, para uma falha não perder a intenção. */
+export function peekContinuity(tabId?: string): boolean {
+  return tabId ? pending.has(tabId) : false;
+}
 export function takeContinuity(tabId?: string): boolean {
   return tabId ? pending.delete(tabId) : false;
 }
