@@ -135,7 +135,7 @@ pub fn link(conn: &Connection, team_id: &str, mut new: NewMember, by_agent: bool
         model::agent_may_set(current.as_ref().map(|c| c.policy), policy)?;
     }
     if let Some(row) = current {
-        let patch = MemberPatch { role: Some(new.role), policy: Some(policy), ..Default::default() };
+        let patch = MemberPatch { role: Some(new.role), policy: Some(policy), subagent: new.subagent, ..Default::default() };
         store::patch_member(conn, &row.member, &patch, now)?;
         return store::member(conn, &member)?.ok_or_else(|| "O integrante sumiu.".to_string());
     }
@@ -172,17 +172,17 @@ pub fn update(conn: &Connection, team_id: &str, member: &str, patch: MemberPatch
 /// Os nomes dos integrantes para os textos dos agentes. `name_of` dá o nome atual (o título da aba ou
 /// da conversa); sem ele, o rótulo gravado.
 pub fn roster_notice(team: &TeamView, name_of: impl Fn(&str) -> Option<String>, role_label: impl Fn(&str) -> String) -> String {
-    let names: Vec<(String, String, String, Policy, Option<String>)> = team
+    let names: Vec<(String, String, String, Policy, Option<String>, bool)> = team
         .members
         .iter()
         .map(|m| {
             let name = name_of(&m.member).unwrap_or_else(|| label_or(&m.label, &m.member).to_string());
-            (name, m.agent_id.clone(), role_label(&m.role), m.policy, m.branch.clone())
+            (name, m.agent_id.clone(), role_label(&m.role), m.policy, m.branch.clone(), m.subagent)
         })
         .collect();
     let named: Vec<Named<'_>> = names
         .iter()
-        .map(|(name, agent, role, policy, branch)| Named { name, agent, role, policy: *policy, branch: branch.as_deref() })
+        .map(|(name, agent, role, policy, branch, subagent)| Named { name, agent, role, policy: *policy, branch: branch.as_deref(), subagent: *subagent })
         .collect();
     model::roster_notice(&named)
 }

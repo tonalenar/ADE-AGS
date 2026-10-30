@@ -76,6 +76,8 @@ pub struct LinkInput {
     pub worktree: Option<String>,
     #[serde(default)]
     pub origin: Option<String>,
+    #[serde(default)]
+    pub subagent: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -98,7 +100,7 @@ pub fn role_info(role: &str) -> (String, String) {
 
 /// O briefing de quem entra. Pura sobre o papel já resolvido.
 pub fn briefing_for(orchestrator: &str, member: &MemberRow, role_label: &str, instructions: &str) -> String {
-    let me = Named { name: &member.label, agent: &member.agent_id, role: role_label, policy: member.policy, branch: member.branch.as_deref() };
+    let me = Named { name: &member.label, agent: &member.agent_id, role: role_label, policy: member.policy, branch: member.branch.as_deref(), subagent: member.subagent };
     model::member_briefing(orchestrator, &me, instructions)
 }
 
@@ -117,6 +119,7 @@ pub fn chat_team_link(app: AppHandle, db: State<'_, DbConnection>, input: LinkIn
         branch: input.branch,
         worktree: input.worktree,
         origin: input.origin.unwrap_or_else(|| "existing".into()),
+        subagent: input.subagent,
     };
     let (member, orchestrator) = {
         let conn = lock(&db)?;
@@ -149,6 +152,8 @@ pub struct UpdateInput {
     pub policy: Option<String>,
     #[serde(default)]
     pub label: Option<String>,
+    #[serde(default)]
+    pub subagent: Option<bool>,
 }
 
 #[tauri::command]
@@ -158,6 +163,7 @@ pub fn chat_team_update(app: AppHandle, db: State<'_, DbConnection>, input: Upda
         role: input.role.map(|r| model::role_id(&roles, &r).unwrap_or_else(|| r.trim().to_string())),
         policy: input.policy.as_deref().map(Policy::parse).transpose()?,
         label: input.label.map(|l| model::clean_label(&l)),
+        subagent: input.subagent,
         ..Default::default()
     };
     let row = api::update(&*lock(&db)?, &input.team_id, &input.member, patch, false, crate::util::now_ts_ms())?;

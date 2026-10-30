@@ -189,7 +189,7 @@ fn os_papeis_do_time_aceitam_os_apelidos_da_prancheta() {
 
 #[test]
 fn o_briefing_diz_o_papel_a_branch_e_como_responder() {
-    let me = model::Named { name: "Codex", agent: "codex", role: "Frontend", policy: Policy::Edits, branch: Some("team/ui") };
+    let me = model::Named { name: "Codex", agent: "codex", role: "Frontend", policy: Policy::Edits, branch: Some("team/ui"), subagent: false };
     let text = model::member_briefing("Claude Code", &me, "Faça a UI.");
     assert!(text.contains("time de Claude Code como Frontend"));
     assert!(text.contains("aceita edições"));
@@ -249,4 +249,72 @@ fn o_nome_vem_do_titulo_da_aba_gravada() {
     assert_eq!(api::orchestrator_peer_name(&conn, &row), "Claude Code — autovale-expo");
     let gone = TeamRow { orchestrator: "tab-sumiu".into(), ..row };
     assert_eq!(api::orchestrator_peer_name(&conn, &gone), "Claude Code", "aba que sumiu: o rótulo");
+}
+
+#[test]
+fn subagente_nasce_marcado_e_persiste() {
+    let conn = db();
+    let id = team(&conn, "tab-1");
+    let mut sub = member("tab-2", "qa");
+    sub.subagent = Some(true);
+    let row = api::link(&conn, &id, sub, false, 2).unwrap();
+    assert!(row.subagent, "ligado como subagente");
+    assert!(!api::link(&conn, &id, member("tab-3", "qa"), false, 3).unwrap().subagent, "sem dizer nada, não é subagente");
+    assert!(store::member(&conn, "tab-2").unwrap().unwrap().subagent, "lido de volta do banco");
+}
+
+#[test]
+fn ligar_de_novo_sem_dizer_mantem_a_marca_e_dizendo_troca() {
+    let conn = db();
+    let id = team(&conn, "tab-1");
+    let mut sub = member("tab-2", "qa");
+    sub.subagent = Some(true);
+    api::link(&conn, &id, sub, false, 2).unwrap();
+    let kept = api::link(&conn, &id, member("tab-2", "backend"), false, 3).unwrap();
+    assert!(kept.subagent, "relink sem --subagent não desmarca");
+    let mut off = member("tab-2", "backend");
+    off.subagent = Some(false);
+    assert!(!api::link(&conn, &id, off, false, 4).unwrap().subagent);
+}
+
+#[test]
+fn update_liga_e_desliga_a_marca_sem_mexer_no_resto() {
+    let conn = db();
+    let id = team(&conn, "tab-1");
+    api::link(&conn, &id, member("tab-2", "frontend"), false, 2).unwrap();
+    let patch = MemberPatch { subagent: Some(true), ..Default::default() };
+    let row = api::update(&conn, &id, "tab-2", patch, false, 3).unwrap();
+    assert!(row.subagent);
+    assert_eq!(row.role, "frontend", "o papel não muda");
+    let row = api::update(&conn, &id, "tab-2", MemberPatch { role: Some("qa".into()), ..Default::default() }, false, 4).unwrap();
+    assert!(row.subagent, "mudar o papel não desmarca");
+    let row = api::update(&conn, &id, "tab-2", MemberPatch { subagent: Some(false), ..Default::default() }, false, 5).unwrap();
+    assert!(!row.subagent);
+}
+
+#[test]
+fn a_migracao_acrescenta_a_coluna_a_uma_tabela_antiga_sem_perder_linhas() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE chat_team (id TEXT PRIMARY KEY, orchestrator TEXT NOT NULL UNIQUE, agent_id TEXT NOT NULL DEFAULT '', label TEXT NOT NULL DEFAULT '', cwd TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+         CREATE TABLE chat_team_member (team_id TEXT NOT NULL REFERENCES chat_team(id) ON DELETE CASCADE, member TEXT NOT NULL UNIQUE, agent_id TEXT NOT NULL DEFAULT '', label TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', model TEXT, policy TEXT NOT NULL DEFAULT 'ask', branch TEXT, worktree TEXT, origin TEXT NOT NULL DEFAULT 'existing', position INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+         INSERT INTO chat_team VALUES ('t1','tab-1','claude-code','Claude','/r','',1,1);
+         INSERT INTO chat_team_member VALUES ('t1','tab-2','codex','Codex','qa',NULL,'ask',NULL,NULL,'existing',0,1,1);",
+    )
+    .unwrap();
+    store::migrate(&conn).unwrap();
+    store::migrate(&conn).unwrap();
+    let old = store::member(&conn, "tab-2").unwrap().expect("a linha antiga continua");
+    assert!(!old.subagent, "linha antiga entra como não subagente");
+    assert_eq!(old.role, "qa");
+}
+
+#[test]
+fn o_briefing_do_subagente_usa_a_frase_do_canvas_e_o_resumo_o_marca() {
+    let me = model::Named { name: "Codex", agent: "codex", role: "QA", policy: Policy::Ask, branch: None, subagent: true };
+    let text = model::member_briefing("Claude Code", &me, "");
+    assert!(text.contains("Você é um subagente: execute as tarefas que o orquestrador enviar e responda com `ags peer tell`."));
+    let plain = model::Named { subagent: false, ..me.clone() };
+    assert!(!model::member_briefing("Claude Code", &plain, "").contains("subagente"));
+    assert!(model::roster_notice(&[me]).contains("QA; supervisionado; subagente"));
 }

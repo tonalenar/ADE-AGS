@@ -183,6 +183,8 @@ pub struct Named<'a> {
     pub role: &'a str,
     pub policy: Policy,
     pub branch: Option<&'a str>,
+    /// Marcado como subagente (o interruptor do canvas): só executa o que o orquestrador envia.
+    pub subagent: bool,
 }
 
 /// O que o integrante recebe ao entrar no time: quem é o orquestrador, o papel, a política e a regra
@@ -198,6 +200,10 @@ pub fn member_briefing(orchestrator: &str, me: &Named<'_>, instructions: &str) -
     }
     if !instructions.trim().is_empty() {
         out.push_str(&format!(" Seu papel: {}", instructions.trim()));
+    }
+    if me.subagent {
+        // A mesma frase do canvas (`agentRole.ts::roleBriefing`).
+        out.push_str(" Você é um subagente: execute as tarefas que o orquestrador enviar e responda com `ags peer tell`.");
     }
     out.push_str(&format!(
         " Não explore nem edite antes de receber a tarefa de {orchestrator}. Responda e avise com `ags peer tell \"{orchestrator}\" \"...\"`; \
@@ -215,7 +221,8 @@ pub fn roster_notice(members: &[Named<'_>]) -> String {
         .iter()
         .map(|m| {
             let branch = m.branch.filter(|b| !b.is_empty()).map(|b| format!(", {b}")).unwrap_or_default();
-            format!("{} ({}; {}; {}{branch})", m.name, m.agent, m.role, policy_phrase(m.policy))
+            let subagent = if m.subagent { "; subagente" } else { "" };
+            format!("{} ({}; {}; {}{subagent}{branch})", m.name, m.agent, m.role, policy_phrase(m.policy))
         })
         .collect::<Vec<_>>()
         .join(", ");

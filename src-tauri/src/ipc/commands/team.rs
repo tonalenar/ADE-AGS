@@ -192,7 +192,7 @@ fn describe_team(view: &api::TeamView, tabs: &[OpenTab]) -> Value {
             let working = model::thread_id_of(&m.member).map(|t| crate::conversa::api::status(t).working).unwrap_or_else(|| crate::canal::busy(&m.member));
             json!({
                 "id": m.member, "name": name_of(&m.member).unwrap_or_else(|| m.label.clone()), "agent": m.agent_id,
-                "role": m.role, "roleLabel": role_label(&m.role), "policy": m.policy, "model": m.model, "branch": m.branch,
+                "role": m.role, "roleLabel": role_label(&m.role), "subagent": m.subagent, "policy": m.policy, "model": m.model, "branch": m.branch,
                 "worktree": m.worktree, "open": name_of(&m.member).is_some(), "working": working,
                 // O que a política deixa passar sem a pessoa (risco alto sempre vai a ela).
                 "auto": auto_of(m.policy),
@@ -291,6 +291,15 @@ fn me_of(app: &AppHandle, from: &str) -> Result<OpenTab, String> {
     peers::open_tabs(app)?.into_iter().find(|t| t.id == from).ok_or_else(|| "A sua conversa não está aberta em nenhuma janela.".to_string())
 }
 
+/// `--subagent` (sem valor = ligado) ou `--subagent false`; ausente = não disse (`None`).
+fn arg_subagent(args: &Value) -> Option<bool> {
+    match args.get("subagent")? {
+        Value::Bool(b) => Some(*b),
+        Value::String(s) => Some(!matches!(s.trim().to_ascii_lowercase().as_str(), "false" | "0" | "no" | "off")),
+        _ => None,
+    }
+}
+
 fn parse_role(raw: Option<String>) -> Result<Option<String>, String> {
     let Some(raw) = raw.filter(|r| !r.trim().is_empty()) else { return Ok(None) };
     let roles = crate::canvas::roles::all();
@@ -311,7 +320,7 @@ fn brief(app: &AppHandle, me: &OpenTab, target: &OpenTab, text: &str) -> bool {
     sent.is_ok_and(|s| matches!(s.delivery, Delivery::Now | Delivery::Queued))
 }
 
-/// `ags team link <nome> [--role <papel>] [--policy read|ask] [--branch <b>]`.
+/// `ags team link <nome> [--role <papel>] [--policy read|ask] [--branch <b>] [--subagent]`.
 pub(super) fn team_link(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = peers::caller(args)?;
     let db = db(app)?;
@@ -330,6 +339,7 @@ pub(super) fn team_link(app: &AppHandle, args: &Value) -> Result<Value, String> 
         policy,
         branch,
         origin: "existing".into(),
+        subagent: arg_subagent(args),
         ..Default::default()
     };
     let member = with_conn(&db, |conn| api::link(conn, &team.team.id, new, true, crate::util::now_ts_ms()))?;
@@ -372,14 +382,15 @@ pub(super) fn team_role(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let target = peers::resolve_peer(&list, &arg_str(args, "to")?)?.clone();
     let role = parse_role(arg_str_opt(args, "role"))?;
     let policy = arg_str_opt(args, "policy").as_deref().map(model::Policy::parse).transpose()?;
-    if role.is_none() && policy.is_none() {
-        return Err("Diga o papel (ou --policy): ags team role <nome> <papel>".into());
+    let subagent = arg_subagent(args);
+    if role.is_none() && policy.is_none() && subagent.is_none() {
+        return Err("Diga o papel (ou --policy, ou --subagent): ags team role <nome> <papel>".into());
     }
-    let patch = store::MemberPatch { role: role.clone(), policy, ..Default::default() };
+    let patch = store::MemberPatch { role: role.clone(), policy, subagent, ..Default::default() };
     let member = with_conn(&db, |conn| api::update(conn, &team.team.id, &target.id, patch, true, crate::util::now_ts_ms()))?;
     crate::chat_team::announce(app, &team.team.id);
     let synced = sync_canvas(app, &team.team.id, window_of(Some(&me)).as_deref(), None);
-    let briefed = role.is_some() && {
+    let briefed = (role.is_some() || subagent.is_some()) && {
         let (label, instructions) = crate::chat_team::role_info(&member.role);
         brief(app, &me, &target, &crate::chat_team::briefing_for(&me.name, &member, &label, &instructions))
     };

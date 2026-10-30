@@ -34,10 +34,20 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             origin TEXT NOT NULL DEFAULT 'existing',
             position INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
-            updated_at INTEGER NOT NULL
+            updated_at INTEGER NOT NULL,
+            subagent INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_chat_team_member_team ON chat_team_member(team_id, position);",
-    )
+    )?;
+    // Tabela criada antes do interruptor "Subagente": a coluna entra depois, sem apagar nada e sem
+    // subir o user_version (como as outras aditivas do banco).
+    let has_subagent = conn
+        .prepare("SELECT 1 FROM pragma_table_info('chat_team_member') WHERE name = 'subagent'")?
+        .exists([])?;
+    if !has_subagent {
+        conn.execute("ALTER TABLE chat_team_member ADD COLUMN subagent INTEGER NOT NULL DEFAULT 0", [])?;
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -73,6 +83,8 @@ pub struct MemberRow {
     pub position: i64,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Marcado como subagente: apoio que executa o que o orquestrador envia (o mesmo interruptor do canvas).
+    pub subagent: bool,
 }
 
 /// O que se grava ao ligar alguém.
@@ -87,6 +99,8 @@ pub struct NewMember {
     pub branch: Option<String>,
     pub worktree: Option<String>,
     pub origin: String,
+    /// `None` = não disse: nasce como não subagente e, se já estava no time, fica como está.
+    pub subagent: Option<bool>,
 }
 
 /// O que muda num integrante já ligado (`None` = fica como está).
@@ -97,10 +111,11 @@ pub struct MemberPatch {
     pub label: Option<String>,
     pub model: Option<Option<String>>,
     pub branch: Option<Option<String>>,
+    pub subagent: Option<bool>,
 }
 
 const TEAM_COLUMNS: &str = "id, orchestrator, agent_id, label, cwd, title, created_at, updated_at";
-const MEMBER_COLUMNS: &str = "team_id, member, agent_id, label, role, model, policy, branch, worktree, origin, position, created_at, updated_at";
+const MEMBER_COLUMNS: &str = "team_id, member, agent_id, label, role, model, policy, branch, worktree, origin, position, created_at, updated_at, subagent";
 
 fn team_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamRow> {
     Ok(TeamRow {
@@ -132,6 +147,7 @@ fn member_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemberRow> {
         position: r.get(10)?,
         created_at: r.get(11)?,
         updated_at: r.get(12)?,
+        subagent: r.get::<_, i64>(13)? != 0,
     })
 }
 
@@ -211,10 +227,10 @@ pub fn insert_member(conn: &Connection, team_id: &str, new: &NewMember, policy: 
         .query_row("SELECT COALESCE(MAX(position) + 1, 0) FROM chat_team_member WHERE team_id = ?1", [team_id], |r| r.get(0))
         .map_err(err)?;
     conn.execute(
-        &format!("INSERT INTO chat_team_member ({MEMBER_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12)"),
+        &format!("INSERT INTO chat_team_member ({MEMBER_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?12,?13)"),
         params![
             team_id, new.member, new.agent_id, new.label, new.role, new.model, policy.as_str(), new.branch, new.worktree,
-            new.origin, position, now
+            new.origin, position, now, new.subagent.unwrap_or(false)
         ],
     )
     .map_err(err)?;
@@ -229,9 +245,10 @@ pub fn patch_member(conn: &Connection, member: &str, patch: &MemberPatch, now: i
     let label = patch.label.clone().unwrap_or(before.label);
     let model = patch.model.clone().unwrap_or(before.model);
     let branch = patch.branch.clone().unwrap_or(before.branch);
+    let subagent = patch.subagent.unwrap_or(before.subagent);
     conn.execute(
-        "UPDATE chat_team_member SET role = ?1, policy = ?2, label = ?3, model = ?4, branch = ?5, updated_at = ?6 WHERE member = ?7",
-        params![role, policy.as_str(), label, model, branch, now, member],
+        "UPDATE chat_team_member SET role = ?1, policy = ?2, label = ?3, model = ?4, branch = ?5, subagent = ?6, updated_at = ?7 WHERE member = ?8",
+        params![role, policy.as_str(), label, model, branch, subagent, now, member],
     )
     .map_err(err)?;
     touch(conn, &before.team_id, now)?;
