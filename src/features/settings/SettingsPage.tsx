@@ -18,6 +18,7 @@ import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
 import { MemoryRail } from "@/features/settings/MemoryRail";
 import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
+import { AiMemoryPanel } from "@/features/memory/AiMemoryPanel";
 import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
@@ -407,9 +408,12 @@ export function SettingsPage() {
           )}
 
           {section === "memory" && (
-            workspaceId
-              ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
-              : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>
+            <>
+              <AiMemoryPanel cwd={activeCwd} />
+              {workspaceId
+                ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
+                : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>}
+            </>
           )}
 
           {section === "terminal" && <TerminalSection />}

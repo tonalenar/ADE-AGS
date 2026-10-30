@@ -81,3 +81,63 @@ export function groupPendingHandoffs(list: readonly AiMemoryHandoff[]): AiMemory
     return a.toAgent.localeCompare(b.toAgent);
   });
 }
+
+// Tipos do conector Rust (`src-tauri/src/ai_memory/types.rs`); contrato em docs/ade-ags/AI_MEMORY_CONNECTOR.md.
+
+/** Tudo que vem do ai-memory chega neste envelope: é dado não confiável, mostrado só como texto. */
+export interface AiMemoryUntrusted<T> {
+  source: "ai-memory";
+  trust: "UNTRUSTED";
+  data: T;
+}
+
+export interface AiMemoryCounts {
+  pages_latest: number;
+  pages_all: number;
+  sessions: number;
+  observations: number;
+}
+
+export interface AiMemoryProvider {
+  status: string;
+  provider: string | null;
+  model: string | null;
+  dim: number | null;
+}
+
+export interface AiMemoryStatus {
+  version: string;
+  counts: AiMemoryCounts;
+  client: { version: string } | null;
+  providers: { embedding: AiMemoryProvider | null; llm: AiMemoryProvider | null } | null;
+  capture_mode: string | null;
+}
+
+export type AiMemoryProbeState = "missing" | "outdated" | "server_down" | "ok";
+
+export interface AiMemoryProbe {
+  state: AiMemoryProbeState;
+  version: string | null;
+  installation_instruction: string | null;
+  status: AiMemoryStatus | null;
+  sessions_supported: boolean;
+}
+
+export interface AiMemoryRecentPage {
+  path: string;
+  title: string;
+  snippet: string;
+  updated_at: string;
+  workspace: string | null;
+  project: string | null;
+}
+
+export interface AiMemoryPage {
+  path: string;
+  workspace: string;
+  project: string;
+  title: string | null;
+  body: string;
+  frontmatter: unknown;
+  expired: boolean;
+}

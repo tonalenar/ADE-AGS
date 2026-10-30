@@ -1,6 +1,6 @@
 # Conector de leitura do ai-memory
 
-O conector opcional executa somente a CLI externa `ai-memory`, versão mínima **3.3.0**. Não instala o binário, inicia servidor, captura sessões, registra hooks/MCP, aceita bastões ou importa memória. O frontend deve chamá-lo somente após o opt-in do usuário. O armazenamento externo permanece separado da memória aprovada do ADE.
+O conector executa somente a CLI externa `ai-memory`, versão mínima **3.3.0**. Não instala o binário, inicia servidor, captura sessões, registra hooks/MCP, aceita bastões ou importa memória. O ai-memory é a memória de longo prazo do ADE ([decisão](../decisoes/AI_MEMORY.md)); o SQLite de memória antigo fica só leitura, como fonte da migração. O painel aparece em Ajustes → Memória (`src/features/memory/AiMemoryPanel.tsx`).
 
 ## Comandos Tauri
 
