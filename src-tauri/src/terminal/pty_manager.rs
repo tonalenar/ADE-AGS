@@ -684,31 +684,29 @@ pub async fn pty_create(
         .map(|value| crate::ai_memory::tabs::enabled(value.as_deref()))
         .unwrap_or(false);
     let argv = split_command(&command);
-    if let (Some(tab), Some(dir)) = (
-        tab_id.as_deref(),
-        crate::util::datadir::ags_home().map(|h| h.join("mcp")),
-    ) {
-        crate::ai_memory::tabs::remove_owned_server(&dir, tab);
+    let mcp_dir = crate::util::datadir::ags_home().map(|h| h.join("mcp"));
+    if let (Some(tab), Some(dir)) = (tab_id.as_deref(), mcp_dir.as_deref()) {
+        crate::ai_memory::tabs::remove_owned_server(dir, tab);
     }
     if enabled
         && let (Some(tab), Some(agent), Some(dir), Some(home)) = (
-            tab_id.as_deref(),
+            tab_id.clone(),
             argv.first()
                 .and_then(|p| crate::ai_memory::tabs::agent_from_program(p)),
-            crate::util::datadir::ags_home().map(|h| h.join("mcp")),
+            mcp_dir.clone(),
             dirs::home_dir(),
         )
-        && let Some(binary) = crate::ai_memory::tabs::supported_binary(std::path::Path::new(&cwd))
     {
-        let extras = env.as_ref().cloned().unwrap_or_default();
-        let settings = crate::ai_memory::tabs::user_settings(&home, &extras);
-        continuity_hooks = crate::ai_memory::tabs::configured_hooks(&settings);
-        continuity_binary = Some(binary.clone());
-        match crate::ai_memory::tabs::prepare(&binary, &dir, tab, agent, &argv, &extras, &settings)
-        {
-            Ok(plan) => memory = plan,
-            Err(_) => eprintln!("[ade-ags] integração ai-memory indisponível nesta nova aba"),
-        }
+        // `--version` do ai-memory e a escrita dos arquivos da aba bloqueiam. O guard de atualização
+        // acima não atravessa um `.await`, então usa-se `block_in_place`: o runtime move as outras
+        // tarefas desta thread enquanto o processo roda.
+        let (extras, cwd_path) = (env.clone().unwrap_or_default(), std::path::PathBuf::from(&cwd));
+        let prepared = tokio::task::block_in_place(|| {
+            crate::ai_memory::tabs::prepare_new_tab(&tab, agent, &dir, &home, &cwd_path, &argv, &extras)
+        });
+        continuity_hooks = prepared.hooks_configured;
+        continuity_binary = prepared.binary;
+        memory = prepared.plan;
     }
     let mut cmd = if ai_memory_continuity.unwrap_or(false) {
         if !enabled || tab_id.is_none() || (memory.settings_file.is_none() && !continuity_hooks) {
@@ -719,14 +717,8 @@ pub async fn pty_create(
         let executable = crate::util::path_env::find_program(native_program)
             .unwrap_or_else(|| std::path::PathBuf::from(native_program));
         let wrapped = crate::ai_memory::continuation::argv(&binary, &executable, &argv, &memory.args)?;
-        if steps.is_empty() {
-            let mut cmd = CommandBuilder::new(&wrapped[0]);
-            cmd.args(&wrapped[1..]);
-            cmd
-        } else {
-            let quoted = crate::ai_memory::tabs::shell_args(&wrapped)?;
-            build_launch(&quoted, &steps)?
-        }
+        // Mesmo caminho dos outros lançamentos: resolução do programa, regras do Windows e pré-comandos.
+        build_launch(&crate::ai_memory::tabs::shell_args(&wrapped)?, &steps)?
     } else if steps.is_empty() {
         let mut cmd = build_launch(&command, &steps)?;
         cmd.args(&memory.args);
@@ -736,11 +728,8 @@ pub async fn pty_create(
             Ok(args) => build_launch(&format!("{command} {args}"), &steps)?,
             Err(_) => {
                 memory = Default::default();
-                if let (Some(tab), Some(dir)) = (
-                    tab_id.as_deref(),
-                    crate::util::datadir::ags_home().map(|h| h.join("mcp")),
-                ) {
-                    crate::ai_memory::tabs::remove_owned_server(&dir, tab);
+                if let (Some(tab), Some(dir)) = (tab_id.as_deref(), mcp_dir.as_deref()) {
+                    crate::ai_memory::tabs::remove_owned_server(dir, tab);
                 }
                 eprintln!("[ade-ags] ai-memory omitido: argumentos incompatíveis com o prelaunch");
                 build_launch(&command, &steps)?

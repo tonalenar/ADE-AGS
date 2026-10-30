@@ -101,16 +101,10 @@ where
                 "Prazo da conversa stdio excedido.",
             ))
         });
-    // Uma resposta não precisa esperar o servidor fechar espontaneamente.
+    // Uma resposta não precisa esperar o servidor fechar espontaneamente. Se o filho demorar a ser
+    // recolhido, `kill_on_drop` o encerra ao sair daqui: a resposta já obtida não se perde por isso.
     let _ = child.start_kill();
-    tokio::time::timeout(Duration::from_secs(2), child.wait())
-        .await
-        .map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Não foi possível recolher o processo stdio.",
-            )
-        })??;
+    let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await;
     result
 }
 
