@@ -7,7 +7,11 @@ export function usePopover<T extends HTMLElement = HTMLDivElement>() {
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (!ref.current || ref.current.contains(e.target as Node)) return;
+      // O menu de um seletor (PopupSelect) é desenhado num portal, fora deste contêiner. Clicar nele
+      // não é sair do popover: fechar aqui desmontaria o seletor antes da escolha ser registrada.
+      if ((e.target as Element).closest?.("[data-popup-menu]")) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);

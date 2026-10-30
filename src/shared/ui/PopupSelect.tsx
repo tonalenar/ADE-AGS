@@ -210,6 +210,7 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
       {open && pos && createPortal(
         <div
           ref={menuRef}
+          data-popup-menu=""
           id={listId}
           role="listbox"
           tabIndex={-1}
