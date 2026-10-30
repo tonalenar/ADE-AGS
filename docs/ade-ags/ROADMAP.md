@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## Conector opcional de leitura do ai-memory
+
+Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões via MCP ficam fora desta fase. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
+
 ## CLIs fora do PATH e instalação pela ADE
 
 No macOS a lista e o terminal acham o Claude do aplicativo e o `cursor-agent` sem estarem no PATH. O Cursor entra na fábrica sem sessão, conta isolada nem MCP. A tela de Agentes instala Codex, Gemini e Kimi com o comando npm/bun já fixo; Claude, OpenCode, Hermes, Cursor e Antigravity só mostram o comando, sem executá-lo. Detalhe em [AGENT_UPDATES.md](./AGENT_UPDATES.md).
