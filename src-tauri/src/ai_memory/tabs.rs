@@ -260,3 +260,15 @@ pub(crate) fn remove_owned_server(dir: &Path, tab_id: &str) {
         let _ = std::fs::write(path, config.to_string());
     }
 }
+
+/// Só um hook reconhecido em JSON válido permite dispensar nosso arquivo.
+pub(crate) fn configured_hooks(paths: &[PathBuf]) -> bool {
+    paths.iter().any(|path| {
+        std::fs::read(path)
+            .ok()
+            .filter(|b| b.len() <= 2 * 1024 * 1024)
+            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
+            .and_then(|value| value.get("hooks")?.get("SessionStart").map(carries_hooks))
+            .unwrap_or(false)
+    })
+}

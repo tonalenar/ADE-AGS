@@ -552,4 +552,69 @@ while :; do :; done
         assert!(alive.exists());
         assert!(!dead.exists());
     }
+    #[test]
+    fn continuidade_preserva_args_nativos_e_injeta_hooks_uma_vez() {
+        let fake = Fake::new("unused", "exit 99");
+        let native = vec!["claude".into(), "--model".into(), "modelo-do-perfil".into()];
+        let plan = crate::ai_memory::tabs::prepare(
+            &fake.program,
+            &fake.root,
+            "continuity",
+            "claude",
+            &native,
+            &std::collections::HashMap::new(),
+            &[],
+        )
+        .unwrap();
+        let exe = fake.root.join("claude nativo");
+        let args =
+            crate::ai_memory::continuation::argv(&fake.program, &exe, &native, &plan.args).unwrap();
+        assert_eq!(
+            &args[1..6],
+            &[
+                "run",
+                "--no-autowire",
+                "--no-exit-prompt",
+                "--require-server",
+                "--executable"
+            ]
+        );
+        assert_eq!(args[6], exe.to_string_lossy());
+        assert_eq!(&args[7..10], &["claude", "--model", "modelo-do-perfil"]);
+        for flag in ["--settings", "--mcp-config"] {
+            assert_eq!(args.iter().filter(|a| a.as_str() == flag).count(), 1);
+        }
+        assert!(
+            !args
+                .iter()
+                .any(|a| ["accept", "--yolo", "--fresh", "--session-id"].contains(&a.as_str()))
+        );
+        let settings = plan.settings_file.as_ref().unwrap();
+        let data: serde_json::Value = serde_json::from_slice(&fs::read(settings).unwrap()).unwrap();
+        assert!(
+            data["hooks"]["SessionStart"][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap()
+                .contains("hook --event session-start")
+        );
+        drop(plan);
+    }
+
+    #[test]
+    fn continuidade_recusa_destinos_sem_escopo_e_nao_confunde_config_invalida_com_hook() {
+        let fake = Fake::new("unused", "exit 99");
+        for name in ["codex", "opencode", "bash"] {
+            assert!(
+                crate::ai_memory::continuation::argv(&fake.program, &fake.program, &[name.into()], &[])
+                    .is_err()
+            );
+        }
+        let settings = fake.root.join("settings.json");
+        fs::write(&settings, "invalid").unwrap();
+        assert!(!crate::ai_memory::tabs::configured_hooks(
+            std::slice::from_ref(&settings)
+        ));
+        fs::write(&settings, r#"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"ai-memory hook --event session-start"}]}]}}"#).unwrap();
+        assert!(crate::ai_memory::tabs::configured_hooks(&[settings]));
+    }
 }

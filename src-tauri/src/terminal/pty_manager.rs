@@ -633,6 +633,8 @@ pub(crate) fn open_pty(size: PtySize) -> Result<portable_pty::PtyPair, String> {
 /// y no vuelven a redibujar bien tras un `SIGWINCH` post-arranque — quedaban con
 /// contenido cortado/desbordado hasta el primer redibujado manual. Con el tamaño correcto
 /// desde el primer byte, ese problema no llega a existir.
+// O contrato IPC mantém campos planos e o AppHandle é fornecido pelo Tauri.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn pty_create(
     command: String,
@@ -646,6 +648,8 @@ pub async fn pty_create(
     // `prelaunch`: comandos a ejecutar antes del agente, ya resueltos y en orden (ver el
     // módulo `prelaunch`). Vacío = se lanza igual que siempre, sin ningún intermediario.
     prelaunch: Option<Vec<String>>,
+    // Só nasce após confirmação explícita no preview; nunca se aplica a PTY vivo.
+    ai_memory_continuity: Option<bool>,
     app: AppHandle,
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
@@ -671,6 +675,8 @@ pub async fn pty_create(
     };
     let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile.as_ref().and(codex_profile_name.as_deref()));
     let mut memory = crate::ai_memory::tabs::TabInjection::default();
+    let mut continuity_binary = None;
+    let mut continuity_hooks = false;
     let enabled = app
         .try_state::<crate::database::DbConnection>()
         .map(|db| crate::database::get_setting(&db, crate::ai_memory::tabs::TABS_SETTING))
@@ -696,13 +702,32 @@ pub async fn pty_create(
     {
         let extras = env.as_ref().cloned().unwrap_or_default();
         let settings = crate::ai_memory::tabs::user_settings(&home, &extras);
+        continuity_hooks = crate::ai_memory::tabs::configured_hooks(&settings);
+        continuity_binary = Some(binary.clone());
         match crate::ai_memory::tabs::prepare(&binary, &dir, tab, agent, &argv, &extras, &settings)
         {
             Ok(plan) => memory = plan,
             Err(_) => eprintln!("[ade-ags] integração ai-memory indisponível nesta nova aba"),
         }
     }
-    let mut cmd = if steps.is_empty() {
+    let mut cmd = if ai_memory_continuity.unwrap_or(false) {
+        if !enabled || tab_id.is_none() || (memory.settings_file.is_none() && !continuity_hooks) {
+            return Err("Não foi possível preparar hooks seguros para a continuidade; a aba de origem permanece aberta.".into());
+        }
+        let binary = continuity_binary.ok_or("ai-memory 3.3.0 ou superior é necessário para continuar.")?;
+        let native_program = argv.first().ok_or("Comando do agente ausente.")?;
+        let executable = crate::util::path_env::find_program(native_program)
+            .unwrap_or_else(|| std::path::PathBuf::from(native_program));
+        let wrapped = crate::ai_memory::continuation::argv(&binary, &executable, &argv, &memory.args)?;
+        if steps.is_empty() {
+            let mut cmd = CommandBuilder::new(&wrapped[0]);
+            cmd.args(&wrapped[1..]);
+            cmd
+        } else {
+            let quoted = crate::ai_memory::tabs::shell_args(&wrapped)?;
+            build_launch(&quoted, &steps)?
+        }
+    } else if steps.is_empty() {
         let mut cmd = build_launch(&command, &steps)?;
         cmd.args(&memory.args);
         cmd
