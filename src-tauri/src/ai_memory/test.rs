@@ -388,4 +388,176 @@ while :; do :; done
                 .is_err()
         );
     }
+    #[test]
+    fn claude_soma_mcp_preserva_ags_e_remove_settings_ao_encerrar() {
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let dir = fake.root.join("mcp");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("tab-abc.json");
+        fs::write(
+            &path,
+            r#"{"mcpServers":{"ags":{"command":"ags"}},"future":true}"#,
+        )
+        .unwrap();
+        let argv = vec![
+            "claude".into(),
+            "--mcp-config".into(),
+            path.to_string_lossy().into_owned(),
+        ];
+        let plan = crate::ai_memory::tabs::prepare(
+            &fake.program,
+            &dir,
+            "abc",
+            "claude",
+            &argv,
+            &Default::default(),
+            &[],
+        )
+        .unwrap();
+        assert!(!plan.args.contains(&"--mcp-config".to_string()));
+        let config: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(config["mcpServers"]["ags"]["command"], "ags");
+        assert_eq!(
+            config["mcpServers"]["ai-memory"]["args"],
+            serde_json::json!(["mcp-bridge"])
+        );
+        let settings = plan.settings_file.clone().unwrap();
+        let hooks: serde_json::Value =
+            serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+        assert_eq!(hooks["hooks"].as_object().unwrap().len(), 9);
+        assert_eq!(hooks["hooks"]["SessionEnd"][0]["hooks"][0]["timeout"], 15);
+        assert!(
+            hooks
+                .to_string()
+                .contains("hook --event session-start --agent claude-code")
+        );
+        assert!(!hooks.to_string().contains("--server-url"));
+        assert!(!hooks.to_string().contains(".sh"));
+        drop(plan);
+        assert!(!settings.exists());
+        crate::ai_memory::tabs::remove_owned_server(&dir, "abc");
+        let config: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert!(config["mcpServers"].get("ai-memory").is_none());
+        assert!(config["mcpServers"].get("ags").is_some());
+    }
+
+    #[test]
+    fn hooks_globais_ou_do_perfil_e_settings_explicito_nao_sao_duplicados() {
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let settings = fake.root.join("settings.json");
+        let bytes = r#"{"hooks":{"SessionStart":[{"hooks":[{"command":"ai-memory hook --event session-start --agent claude-code"}]}]}}"#;
+        fs::write(&settings, bytes).unwrap();
+        let plan = crate::ai_memory::tabs::prepare(
+            &fake.program,
+            &fake.root.join("mcp"),
+            "abc",
+            "claude",
+            &[],
+            &Default::default(),
+            &[settings.clone()],
+        )
+        .unwrap();
+        assert!(plan.settings_file.is_none());
+        assert_eq!(fs::read_to_string(settings).unwrap(), bytes);
+        let plan = crate::ai_memory::tabs::prepare(
+            &fake.program,
+            &fake.root.join("mcp"),
+            "abc",
+            "claude",
+            &["--settings".into(), "user.json".into()],
+            &Default::default(),
+            &[],
+        )
+        .unwrap();
+        assert!(plan.settings_file.is_none());
+    }
+
+    #[test]
+    fn opencode_mescla_config_inline_e_codex_so_recebe_mcp_sem_hooks() {
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let env = std::collections::HashMap::from([(
+            "OPENCODE_CONFIG_CONTENT".into(),
+            r#"{"mcp":{"ags":{"type":"local","command":["ags"]}},"permission":{"bash":"ask"}}"#
+                .into(),
+        )]);
+        let dir = fake.root.join("mcp");
+        let plan =
+            crate::ai_memory::tabs::prepare(&fake.program, &dir, "abc", "opencode", &[], &env, &[])
+                .unwrap();
+        let config: serde_json::Value =
+            serde_json::from_str(&plan.env["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        assert_eq!(config["mcp"]["ags"]["command"], serde_json::json!(["ags"]));
+        assert_eq!(config["mcp"]["ai-memory"]["command"][2], "--no-session-id");
+        assert_eq!(config["permission"]["bash"], "ask");
+        assert!(plan.settings_file.is_none());
+        let plan =
+            crate::ai_memory::tabs::prepare(&fake.program, &dir, "abc", "codex", &[], &env, &[])
+                .unwrap();
+        assert_eq!(plan.args[0], "-c");
+        assert!(plan.args[1].starts_with("mcp_servers.ai-memory.command="));
+        assert_eq!(
+            plan.args[3],
+            "mcp_servers.ai-memory.args=['mcp-bridge','--no-session-id']"
+        );
+        assert!(plan.settings_file.is_none());
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn novo_pty_forca_autowire_desligado_e_versao_e_setting_controlam_injecao() {
+        assert!(crate::ai_memory::tabs::enabled(None));
+        assert!(!crate::ai_memory::tabs::enabled(Some("false")));
+        let mut command = portable_pty::CommandBuilder::new("fake");
+        command.env("AI_MEMORY_RUN_AUTOWIRE", "true");
+        crate::ai_memory::tabs::protect_pty_env(&mut command);
+        assert_eq!(
+            command.get_env("AI_MEMORY_RUN_AUTOWIRE"),
+            Some(std::ffi::OsStr::new("false"))
+        );
+        let old = Fake::new("ai-memory 3.2.9", "exit 99");
+        assert!(!crate::ai_memory::tabs::supported_program(
+            &old.program,
+            &old.cwd
+        ));
+        let script = fs::read_to_string(&old.program)
+            .unwrap()
+            .replace("ai-memory 3.2.9", "ai-memory 3.3.0+build");
+        fs::write(&old.program, script).unwrap();
+        assert!(crate::ai_memory::tabs::supported_program(
+            &old.program,
+            &old.cwd
+        ));
+        let good = Fake::new("ai-memory 3.3.0", "exit 99");
+        assert!(crate::ai_memory::tabs::supported_program(
+            &good.program,
+            &good.cwd
+        ));
+        assert!(crate::ai_memory::tabs::supported_program(
+            &good.program,
+            &good.cwd
+        ));
+        assert_eq!(
+            fs::read_to_string(good.root.join("argv")).unwrap(),
+            "--version\n"
+        );
+        assert_eq!(
+            crate::ai_memory::tabs::agent_from_program("/opt/claude"),
+            Some("claude")
+        );
+        assert_eq!(crate::ai_memory::tabs::agent_from_program("agy"), None);
+    }
+
+    #[test]
+    fn barrido_preserva_settings_de_aba_viva_e_remove_os_orfaos() {
+        let fake = Fake::new("unused", "exit 99");
+        let alive = fake.root.join("tab-alive.ai-memory-123.settings.json");
+        let dead = fake.root.join("tab-dead.ai-memory-456.settings.json");
+        fs::write(&alive, "{}").unwrap();
+        fs::write(&dead, "{}").unwrap();
+        let db = rusqlite::Connection::open_in_memory().unwrap();
+        db.execute_batch("CREATE TABLE tabs(id TEXT); CREATE TABLE tasks(id TEXT); INSERT INTO tabs VALUES ('alive');").unwrap();
+        assert_eq!(crate::ipc::mcp::sweep_configs_in(&fake.root, &db), 1);
+        assert!(alive.exists());
+        assert!(!dead.exists());
+    }
 }

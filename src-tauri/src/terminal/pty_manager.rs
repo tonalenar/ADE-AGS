@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -27,6 +27,7 @@ struct PtySession {
     session_token: Option<String>,
     /// Perfil do Codex com o token, fora do argv. Some só quando o arquivo existe.
     codex_profile: Option<std::path::PathBuf>,
+    ai_memory_settings: Option<std::path::PathBuf>,
 }
 
 /// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
@@ -599,6 +600,9 @@ fn restrict_to_user(_path: &std::path::Path) -> Result<(), String> {
 }
 
 fn forget_session(session: &PtySession) {
+    if let Some(path) = &session.ai_memory_settings {
+        let _ = std::fs::remove_file(path);
+    }
     if let Some(token) = &session.session_token {
         super::release_token(token);
     }
@@ -666,7 +670,63 @@ pub async fn pty_create(
         _ => None,
     };
     let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile.as_ref().and(codex_profile_name.as_deref()));
-    let mut cmd = build_launch(&command, &steps)?;
+    let mut memory = crate::ai_memory::tabs::TabInjection::default();
+    let enabled = app
+        .try_state::<crate::database::DbConnection>()
+        .map(|db| crate::database::get_setting(&db, crate::ai_memory::tabs::TABS_SETTING))
+        .and_then(Result::ok)
+        .map(|value| crate::ai_memory::tabs::enabled(value.as_deref()))
+        .unwrap_or(false);
+    let argv = split_command(&command);
+    if let (Some(tab), Some(dir)) = (
+        tab_id.as_deref(),
+        crate::util::datadir::ags_home().map(|h| h.join("mcp")),
+    ) {
+        crate::ai_memory::tabs::remove_owned_server(&dir, tab);
+    }
+    if enabled
+        && let (Some(tab), Some(agent), Some(dir), Some(home)) = (
+            tab_id.as_deref(),
+            argv.first()
+                .and_then(|p| crate::ai_memory::tabs::agent_from_program(p)),
+            crate::util::datadir::ags_home().map(|h| h.join("mcp")),
+            dirs::home_dir(),
+        )
+        && let Some(binary) = crate::ai_memory::tabs::supported_binary(std::path::Path::new(&cwd))
+    {
+        let mut extras = env.as_ref().cloned().unwrap_or_default();
+        if !extras.contains_key("OPENCODE_CONFIG_CONTENT")
+            && let Ok(raw) = std::env::var("OPENCODE_CONFIG_CONTENT")
+        {
+            extras.insert("OPENCODE_CONFIG_CONTENT".into(), raw);
+        }
+        let settings = crate::ai_memory::tabs::user_settings(&home, &extras);
+        match crate::ai_memory::tabs::prepare(&binary, &dir, tab, agent, &argv, &extras, &settings)
+        {
+            Ok(plan) => memory = plan,
+            Err(_) => eprintln!("[ade-ags] integração ai-memory indisponível nesta nova aba"),
+        }
+    }
+    let mut cmd = if steps.is_empty() {
+        let mut cmd = build_launch(&command, &steps)?;
+        cmd.args(&memory.args);
+        cmd
+    } else {
+        match crate::ai_memory::tabs::shell_args(&memory.args) {
+            Ok(args) => build_launch(&format!("{command} {args}"), &steps)?,
+            Err(_) => {
+                memory = Default::default();
+                if let (Some(tab), Some(dir)) = (
+                    tab_id.as_deref(),
+                    crate::util::datadir::ags_home().map(|h| h.join("mcp")),
+                ) {
+                    crate::ai_memory::tabs::remove_owned_server(&dir, tab);
+                }
+                eprintln!("[ade-ags] ai-memory omitido: argumentos incompatíveis com o prelaunch");
+                build_launch(&command, &steps)?
+            }
+        }
+    };
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -697,6 +757,11 @@ pub async fn pty_create(
         }
         cmd.env(k, v);
     }
+    for (k, v) in &memory.env {
+        cmd.env(k, v);
+    }
+    // Nunca permite que autowire reescreva configurações globais, nem com opt-out.
+    crate::ai_memory::tabs::protect_pty_env(&mut cmd);
     if let Some(tab) = &tab_id {
         cmd.env("ADE_TAB_ID", tab);
     }
@@ -762,6 +827,7 @@ pub async fn pty_create(
             cwd: cwd.clone(),
             session_token: session_token.clone(),
             codex_profile,
+            ai_memory_settings: memory.settings_file.take(),
         });
         (old, removed)
     };
