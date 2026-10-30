@@ -1400,7 +1400,8 @@ fn peer_schemas() -> Vec<Value> {
                 "to": { "type": "string", "description": "The conversation's name or id." },
                 "role": { "type": "string", "description": "frontend (UI), backend, qa (tests), reviewer, researcher, devops or generalist." },
                 "policy": { "type": "string", "enum": ["read", "ask"], "description": "read: read-only; ask (default): the person approves edits and commands." },
-                "branch": { "type": "string", "description": "Optional branch the member works on (e.g. team/ui)." }
+                "branch": { "type": "string", "description": "Optional branch the member works on (e.g. team/ui)." },
+                "subagent": { "type": "boolean", "description": "Mark the member as a subagent: support that only executes what you send and answers with `ags peer tell`." }
             }, "required": ["to"] },
         }),
         json!({
@@ -1416,7 +1417,8 @@ fn peer_schemas() -> Vec<Value> {
             "inputSchema": { "type": "object", "properties": {
                 "to": { "type": "string", "description": "The member's name or id." },
                 "role": { "type": "string", "description": "The new role." },
-                "policy": { "type": "string", "enum": ["read", "ask"], "description": "Optional lower policy." }
+                "policy": { "type": "string", "enum": ["read", "ask"], "description": "Optional lower policy." },
+                "subagent": { "type": "boolean", "description": "Optional: mark (true) or unmark (false) the member as a subagent." }
             }, "required": ["to"] },
         }),
     ]

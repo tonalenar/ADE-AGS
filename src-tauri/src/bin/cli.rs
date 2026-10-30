@@ -102,9 +102,9 @@ TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por proto
   team link <nome> [--role <papel>]           Liga ao time uma conversa da sua pasta (aba ou conversa por protocolo):
                [--policy read|ask]            · cria a corda, manda o papel; papéis: frontend (UI), backend, qa (testes),
                [--branch team/ui]               reviewer, researcher, devops, generalist. Política: no máximo ask —
-                                                só a pessoa aumenta (painel Time)
+               [--subagent]                     só a pessoa aumenta (painel Time). --subagent marca apoio que só executa o que você enviar
   team unlink <nome>                          Tira do time (a corda sai; a conversa continua aberta)
-  team role <nome> <papel> [--policy read]    Troca o papel (e só baixa a política)
+  team role <nome> <papel> [--policy read]    Troca o papel (e só baixa a política); [--subagent [false]] liga ou desliga a marca
   Delegue com peer tell/ask/deliver, como numa missão: as conversas por protocolo recebem como mensagem
 
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
