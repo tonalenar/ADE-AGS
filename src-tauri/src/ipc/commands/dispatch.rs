@@ -190,6 +190,16 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "routine.run" => routine_run(app, args),
         "routine.delete" => routine_delete(app, args),
         // Chat con el usuario (ver `chat`).
+        // As conversas por protocolo do modo chat (ver `conversas`).
+        "chat.list" => super::conversas::chat_list(app, args),
+        "chat.new" => super::conversas::chat_new(app, args),
+        "chat.send" => super::conversas::chat_send(app, args),
+        "chat.show" => super::conversas::chat_show(app, args),
+        "chat.wait" => super::conversas::chat_wait(app, args),
+        "chat.stop" => super::conversas::chat_stop(app, args),
+        "chat.pending" => super::conversas::chat_pending(app, args),
+        "chat.open" => super::conversas::chat_open(app, args),
+        "chat.settle" => super::conversas::chat_settle(app, args),
         "say.send" => chat_say(app, args),
         "recall.get" => chat_recall(app, args),
         "agent.list" => agent_list(app),

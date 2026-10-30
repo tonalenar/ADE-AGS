@@ -59,7 +59,7 @@ impl Session {
         self.turn.lock().ok().and_then(|t| t.clone())
     }
 
-    fn set_turn(&self, turn: Option<String>) {
+    pub(crate) fn set_turn(&self, turn: Option<String>) {
         if let Ok(mut t) = self.turn.lock() {
             *t = turn;
         }
@@ -134,6 +134,11 @@ pub fn close(thread_id: &str) {
 fn emit(app: &AppHandle, thread_id: &str, kind: &str, mut payload: Value) {
     payload["threadId"] = json!(thread_id);
     payload["type"] = json!(kind);
+    // O que muda o "está esperando o quê" vai também ao barramento: é o que acorda `ags chat wait`.
+    if matches!(kind, "phase" | "request" | "requestResolved" | "closed") {
+        let data = json!({ "threadId": thread_id, "type": kind, "phase": payload.get("phase") });
+        crate::bus::publish(Some(app), crate::bus::Publish::new(crate::ipc::commands::conversas::BUS_TOPIC).data(data));
+    }
     let _ = app.emit(EVENT, payload);
 }
 

@@ -84,7 +84,18 @@ pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &st
     if let Some(effort) = &row.effort {
         params["effort"] = json!(effort);
     }
-    session.request("turn/start", params).await?;
+    let started = session.request("turn/start", params).await?;
+    // O turno conta como aberto já na resposta (o aviso `turn/started` pode chegar depois): quem
+    // perguntar o estado logo em seguida (`ags chat wait`) não o vê parado.
+    // Se o turno já acabou (o aviso chegou antes desta resposta), não reabre.
+    if let Some(turn) = started.pointer("/turn/id").and_then(Value::as_str) {
+        let finished = db.lock().ok()
+            .and_then(|conn| store::run_status(&conn, thread_id, turn).ok().flatten())
+            .is_some_and(|s| s != "inProgress");
+        if session.turn().is_none() && !finished {
+            session.set_turn(Some(turn.to_string()));
+        }
+    }
     Ok(())
 }
 

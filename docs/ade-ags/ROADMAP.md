@@ -2,7 +2,12 @@
 
 ## Modo chat (estilo T3 Code), experimental
 
-Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações → Avançado. Na F1 cada conversa é uma aba de agente, e o terminal dela aparece na tela da conversa sem remontar. O composer escolhe pasta, agente, modelo, esforço, conta e permissão. `Chat | Abas | Canvas` e Ctrl+Shift+L alternam. Detalhes em [MODO_CHAT.md](./MODO_CHAT.md).
+Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações → Modo chat. `Chat | Abas | Canvas` e Ctrl+Shift+L alternam. Detalhes em [MODO_CHAT.md](./MODO_CHAT.md).
+
+- **Conversas por TUI:** cada uma é uma aba de agente, lida do transcript numa timeline; o terminal fica numa gaveta, sem remontar.
+- **Conversas por protocolo:** o Codex fala direto pelo `codex app-server`, com aprovações e perguntas no chat.
+- **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat.
+- **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
 
 ## CLIs fora do PATH e instalação pela ADE
 

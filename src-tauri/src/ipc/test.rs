@@ -452,7 +452,11 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(task.iter().any(|name| name == "memory_workspace_history"));
     assert!(!tab.iter().any(|name| name.starts_with("memory_")));
     let task_without_memory: Vec<_> = task[1..].iter().filter(|name| !name.starts_with("memory_")).cloned().collect();
-    assert_eq!(task_without_memory, tab);
+    // As conversas do modo chat (`chat_*`) são só das abas: uma tarefa da frota não abre conversa.
+    let chat: Vec<String> = tab.iter().filter(|name| name.starts_with("chat_")).cloned().collect();
+    assert!(!task.iter().any(|name| name.starts_with("chat_")));
+    let tab_without_chat: Vec<_> = tab.iter().filter(|name| !name.starts_with("chat_")).cloned().collect();
+    assert_eq!(task_without_memory, tab_without_chat);
 
     // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece,
     // menos lo que saca datos de la máquina (subir un archivo, correr código en la página):
@@ -478,7 +482,8 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(git_read.iter().all(|n| git.contains(n)), "{git_read:?}");
     assert!(!git_read.iter().any(|n| n.ends_with("git_push") || n.ends_with("_create")));
     // + 2: `browser_upload` y `browser_eval`, que se ofrecen pero no se aprueban solas.
-    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1, offered.len());
+    // + chat: as do modo chat, que se oferecem nas abas e não se aprovam sozinhas.
+    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1 + chat.len(), offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -969,4 +974,79 @@ fn el_token_se_compara_entero() {
     assert!(!token_matches("abc-124", "abc-123"));
     assert!(!token_matches("abc-12", "abc-123"));
     assert!(!token_matches("", "abc-123"));
+}
+
+// ── `ags chat`: as conversas do modo chat ──────────────────────────────────────
+
+#[test]
+fn a_ajuda_e_o_front_conhecem_os_comandos_do_chat() {
+    let cli = include_str!("../bin/cli.rs");
+    for verbo in ["chat list", "chat new", "chat send", "chat wait", "chat show", "chat stop", "chat pending", "chat open", "chat settle"] {
+        assert!(cli.contains(verbo), "a ajuda não menciona '{verbo}'");
+    }
+    let bridge = include_str!("../../../src/features/orchestrator/cliBridge.ts");
+    assert!(bridge.contains("case \"chat.open\""), "o frontend não atende chat.open");
+    // Responder à aprovação do agente da conversa é da pessoa: não há comando para isso.
+    assert!(!dispatched_commands().iter().any(|c| c == "chat.answer"));
+    // Cada tool `chat_*` do MCP nomeia um comando que o despachador atende.
+    let dispatched = dispatched_commands();
+    let chat_tools: Vec<&str> = include_str!("mcp.rs").split("ipc: \"").skip(1).filter_map(|r| r.split('"').next()).collect();
+    assert_eq!(chat_tools.len(), 7, "{chat_tools:?}");
+    for command in chat_tools {
+        assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
+    }
+}
+
+#[test]
+fn o_titulo_da_conversa_e_a_primeira_linha_curta() {
+    use super::commands::conversas::title_of;
+    assert_eq!(title_of("\n  arrume o login\nmais contexto"), "arrume o login");
+    assert_eq!(title_of(&"x".repeat(80)).chars().count(), 61);
+    assert_eq!(title_of("   "), "Conversa");
+}
+
+#[test]
+fn a_ultima_resposta_e_a_ultima_fala_do_agente() {
+    use super::commands::conversas::last_reply;
+    use crate::canal::timeline::{Item, ItemKind};
+    let item = |kind, id: &str, text: &str| Item { text: Some(text.into()), ..Item::new(kind, id.into(), None) };
+    let items = [item(ItemKind::User, "u", "oi"), item(ItemKind::Assistant, "a1", "primeira"), item(ItemKind::Assistant, "a2", "segunda"), item(ItemKind::User, "u2", "e aí?")];
+    assert_eq!(last_reply(&items).as_deref(), Some("segunda"));
+    assert_eq!(last_reply(&items[..1]), None);
+}
+
+#[test]
+fn as_tools_do_chat_aparecem_nas_abas_e_so_as_de_leitura_para_qa() {
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let names = |role: Option<&str>| -> Vec<String> {
+        let ctx = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: role.map(str::to_string) };
+        let (out, _) = mcp_session(&ctx, &[list.clone()], |_, _| Ok(json!({})));
+        out[0]["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str().map(str::to_string)).filter(|n| n.starts_with("chat_")).collect()
+    };
+    let all = names(None);
+    for tool in ["chat_list", "chat_new", "chat_send", "chat_wait", "chat_show", "chat_stop", "chat_pending"] {
+        assert!(all.iter().any(|n| n == tool), "falta {tool}");
+    }
+    let qa = names(Some("QA"));
+    assert!(qa.iter().any(|n| n == "chat_show"));
+    assert!(!qa.iter().any(|n| n == "chat_new" || n == "chat_send" || n == "chat_stop"), "{qa:?}");
+}
+
+#[test]
+fn a_conversa_nova_pelo_mcp_abre_na_pasta_de_quem_pede() {
+    let ctx = McpContext::Cwd { cwd: "/meu/projeto".into(), tab: None, mission: None, role: None };
+    let call = |args: serde_json::Value| json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "chat_new", "arguments": args } });
+    let (_, sent) = mcp_session(&ctx, &[call(json!({ "text": "oi" }))], |_, _| Ok(json!({ "thread": { "id": "t" } })));
+    assert_eq!(sent[0].0, "chat.new");
+    assert_eq!(sent[0].1["cwd"], "/meu/projeto");
+    let (_, sent) = mcp_session(&ctx, &[call(json!({ "text": "oi", "cwd": "/outra" }))], |_, _| Ok(json!({})));
+    assert_eq!(sent[0].1["cwd"], "/outra");
+}
+
+#[test]
+fn as_tools_do_chat_dizem_se_leem_ou_escrevem() {
+    assert_eq!(super::mcp::annotations("chat_show")["readOnlyHint"], true);
+    assert_eq!(super::mcp::annotations("chat_wait")["readOnlyHint"], true);
+    assert_eq!(super::mcp::annotations("chat_new")["readOnlyHint"], false);
+    assert_eq!(super::mcp::annotations("chat_new")["destructiveHint"], false);
 }

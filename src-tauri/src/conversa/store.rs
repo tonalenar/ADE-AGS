@@ -177,6 +177,11 @@ pub fn upsert_run(conn: &Connection, thread_id: &str, run_id: &str, status: &str
     .map(|_| ())
 }
 
+/// O status gravado de um turno (`inProgress`, `completed`, `interrupted`, `failed`), se houver.
+pub fn run_status(conn: &Connection, thread_id: &str, run_id: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row("SELECT status FROM chat_run WHERE thread_id = ?1 AND id = ?2", params![thread_id, run_id], |r| r.get(0)).optional()
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RequestRow {

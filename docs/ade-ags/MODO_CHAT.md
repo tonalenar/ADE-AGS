@@ -86,6 +86,12 @@ Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, s
 
   Trocar o acesso fecha o processo; a próxima mensagem retoma a thread com o sandbox novo. Modelo e esforço valem no próximo turno.
 - **Front (`src/features/chat/structured/`):** o store ao vivo, os cartões (chave `thread:<id>`) e a `StructuredConversationView`. A tela usa a mesma `TimelineView`, o mesmo composer e os mesmos menus da conversa por TUI. Aprovações e perguntas se respondem nos botões do composer; parar interrompe o turno.
+- **CLI e MCP (etapa 5):** `ags chat list|new|send|wait|show|stop|pending|open|settle` e as tools `chat_*` nas abas (handlers em `src-tauri/src/ipc/commands/conversas.rs`, sobre o mesmo `conversa::api` da tela).
+  - Uma conversa aberta por agente começa **supervisionada** (`access: ask`).
+  - `chat wait` dorme no barramento (`chat.changed`), sem polling, até o turno acabar ou o agente pedir algo à pessoa.
+  - Responder às aprovações e perguntas do agente da conversa **não** tem comando: é da pessoa, na tela.
+  - `chat open` liga a casca do chat e mostra a conversa (pela ponte do front, `cliBridge.ts`).
+  - Papéis só de leitura (QA) recebem só `chat_list`, `chat_show`, `chat_wait` e `chat_pending`; tarefas da frota não recebem as tools do chat.
 - **Ainda não:** Claude Code, ACP (Gemini, Kimi) e OpenCode por protocolo; reverter turno; anexos de imagem.
 
 ## Como não derruba terminais

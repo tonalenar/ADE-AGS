@@ -190,6 +190,19 @@ OBSERVAR TABS (modo push — evita o polling)
   watch list                                  Tabs observadas e o limite vigente
   watch wait [--timeout 300] [--max 20]       Espera até alguma ter novidades
 
+CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo; hoje o Codex)
+  chat list [--all]                           Conversas ativas (--all: também as concluídas)
+  chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
+           [--agent codex] [--model ...] [--effort ...] [--title ...] [--account <id>]
+           [--access ask|safe|full]           · ask (padrão): a pessoa aprova o que o agente roda
+  chat send <id> \"...\"                        Manda outra mensagem (no meio de um turno, entra nele)
+  chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
+  chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente
+  chat stop <id>                              Interrompe o turno em andamento
+  chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela)
+  chat open <id>                              Mostra a conversa na tela do modo chat
+  chat settle <id> [--reopen]                 Conclui (o agente fecha; reabrir retoma a mesma thread)
+
 EVENTOS (o barramento da frota e das missões)
   events since [--after <seq>] [filtros]      O que aconteceu depois desse número
   events wait --after <seq> [--timeout 60] [filtros]
@@ -435,6 +448,23 @@ pub(crate) fn main() -> ExitCode {
             Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
         };
         design_defaults(&command, parsed, &cwd)
+    } else { parsed };
+    // `ags chat new` abre a conversa na pasta da shell, não na do app.
+    let parsed = if command == "chat.new" {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                eprintln!("Não foi possível ler a pasta atual: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        match run_defaults(parsed, &cwd) {
+            Ok(args) => args,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
     } else { parsed };
     let parsed = if command.starts_with("run.") {
         let cwd = match std::env::current_dir() {
@@ -849,6 +879,10 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.
         "floor.create" => &["name"],
         "say.send" => &["text"],
+        // `ags chat new "..."`, `ags chat send <id> "..."`, `ags chat wait <id>`.
+        "chat.new" => &["text"],
+        "chat.send" => &["thread", "text"],
+        "chat.show" | "chat.wait" | "chat.stop" | "chat.pending" | "chat.open" | "chat.settle" => &["thread"],
         "recall.get" => &["thread"],
         "memory.search" => &["query"],
         "memory.open" => &["path"],
@@ -1090,7 +1124,7 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" | "maxParallel" => {
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" | "maxParallel" | "last" => {
             raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
         }
         _ => Value::String(raw.to_string()),
@@ -1146,6 +1180,12 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(requested + 90)
         }
         "peer.tell" => Duration::from_secs(90),
+        // `chat wait` bloqueia até o turno acabar (tope 1 h); abrir a conversa sobe o agente e começa o turno.
+        "chat.wait" => {
+            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(1, 3600);
+            Duration::from_secs(requested + 15)
+        }
+        "chat.new" | "chat.send" | "chat.stop" => Duration::from_secs(150),
         "fix.list" | "fix.decide" => Duration::from_secs(60),
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
