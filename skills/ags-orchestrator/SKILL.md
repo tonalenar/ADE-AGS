@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.38.0
+version: 1.39.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -954,7 +954,9 @@ ags peer deliver --file handoff.json            # a member's final delivery (Han
   ```bash
   ags team create [--title "..."]      # only if the person already crowned you on the canvas
   ags team link "Kimi" --role qa --policy read   # sends the member its role; policy at most `ask`
+  ags team link "Kimi" --role qa --subagent      # born as a subagent: only executes what you send
   ags team role "Kimi" reviewer          # change the role (a policy can only go down)
+  ags team role "Kimi" --subagent false  # unmark the subagent flag
   ags team unlink "Kimi"                 # the link goes; the conversation stays open
   ```
 
