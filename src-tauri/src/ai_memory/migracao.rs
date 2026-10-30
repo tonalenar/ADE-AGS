@@ -286,7 +286,8 @@ fn process(client: &Client, cand: &Candidate, recorded: &Recorded) -> Result<Out
     }
     let path = wiki_path(cand);
     let body = render_body(cand);
-    let body_sha = sha256_hex(body.as_bytes());
+    // O hash é do corpo normalizado, que é o que se compara com a página lida de volta.
+    let body_sha = sha256_hex(normalized(&body).as_bytes());
     let tags = tags_for(cand);
     let write = PageWrite {
         path: &path,
@@ -308,37 +309,63 @@ fn process(client: &Client, cand: &Candidate, recorded: &Recorded) -> Result<Out
     match client.find_page(&path)? {
         Some(page) => {
             let same = normalized(&page.body) == normalized(&body);
-            Ok(match (previous, same) {
-                (true, true) => Outcome::Already,
-                (true, false) => Outcome::Divergent,
+            match (previous, same) {
+                (true, true) => Ok(Outcome::Already),
+                (true, false) => Ok(Outcome::Divergent),
                 // Página igual à nossa sem registro: a cópia caiu antes de gravar o registro.
-                (false, true) => Outcome::Written {
+                (false, true) => Ok(Outcome::Written {
                     workspace: page.workspace,
                     project: page.project,
                     path,
                     body_sha,
-                },
-                (false, false) => Outcome::Conflict,
-            })
-        }
-        None => {
-            client.write_page(&write, body.clone().into_bytes())?;
-            Ok(match client.find_page(&path)? {
-                Some(page) if normalized(&page.body) == normalized(&body) => {
-                    Outcome::Written {
-                        workspace: page.workspace,
-                        project: page.project,
-                        path,
-                        body_sha,
+                }),
+                (false, false) => {
+                    // Nova revisão de uma memória já copiada: se a página ainda é exatamente a que
+                    // copiamos, ninguém a editou e ela pode receber a revisão atual.
+                    let untouched = earlier_copy_sha(recorded, cand)
+                        .is_some_and(|sha| sha == sha256_hex(normalized(&page.body).as_bytes()));
+                    if untouched {
+                        write_and_verify(client, &write, &body, body_sha)
+                    } else {
+                        Ok(Outcome::Conflict)
                     }
                 }
-                Some(_) => Outcome::Failed(
-                    "verificação: o ai-memory guardou um corpo diferente do enviado".into(),
-                ),
-                None => Outcome::Failed("a página não apareceu depois da escrita".into()),
-            })
+            }
         }
+        None => write_and_verify(client, &write, &body, body_sha),
     }
+}
+
+/// Hash do corpo que gravamos numa revisão anterior desta memória, se ela foi copiada.
+fn earlier_copy_sha<'a>(recorded: &'a Recorded, cand: &Candidate) -> Option<&'a str> {
+    recorded
+        .iter()
+        .filter(|((entry, revision), (status, _))| {
+            entry == &cand.entry_id && *revision < cand.revision && status == "written"
+        })
+        .max_by_key(|((_, revision), _)| *revision)
+        .map(|(_, (_, sha))| sha.as_str())
+}
+
+/// Escreve a página e lê de volta: só conta como copiada se o corpo guardado for o enviado.
+fn write_and_verify(
+    client: &Client,
+    write: &PageWrite<'_>,
+    body: &str,
+    body_sha: String,
+) -> Result<Outcome, String> {
+    client.write_page(write, body.as_bytes().to_vec())?;
+    let path = write.path.to_string();
+    Ok(match client.find_page(&path)? {
+        Some(page) if normalized(&page.body) == normalized(body) => Outcome::Written {
+            workspace: page.workspace,
+            project: page.project,
+            path,
+            body_sha,
+        },
+        Some(_) => Outcome::Failed("verificação: o ai-memory guardou um corpo diferente do enviado".into()),
+        None => Outcome::Failed("a página não apareceu depois da escrita".into()),
+    })
 }
 
 /// Grava o resultado no registro (sob lock próprio, curto) e soma na contagem.

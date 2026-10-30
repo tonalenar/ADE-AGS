@@ -376,6 +376,52 @@ fn pagina_editada_depois_da_copia_vira_divergente_e_nao_e_sobrescrita() {
     assert_eq!(fs::read_to_string(&path).unwrap(), "editada no ai-memory");
 }
 
+/// Aprova a revisão `revision` de uma memória que já existe e a torna a atual.
+fn approve_revision(env: &Env, id: &str, kind: &str, revision: i64, body: &str) {
+    env.with(|c| {
+        c.execute(
+            "INSERT INTO memory_revisions (entry_id, revision, status, operation, kind, priority, body,
+                                           content_hash, actor_kind, created_at, decided_at)
+             VALUES (?1, ?2, 'approved', 'update', ?3, 0, ?4, ?5, 'user', 1, 1)",
+            params![id, revision, kind, body, content_hash(kind, body)],
+        )
+        .unwrap();
+        c.execute("UPDATE memory_entries SET current_revision = ?2 WHERE id = ?1", params![id, revision]).unwrap();
+    });
+}
+
+#[test]
+fn nova_revisao_de_pagina_nao_editada_atualiza_a_wiki_em_vez_de_virar_conflito() {
+    let env = Env::new();
+    approved(&env, "e1", "decision", "versão um");
+    env.run().unwrap();
+    approve_revision(&env, "e1", "decision", 2, "versão dois");
+    let calls = env.write_calls();
+
+    let summary = env.run().unwrap();
+
+    assert_eq!(summary.conflict, 0, "{summary:?}");
+    assert_eq!(summary.written, 1, "{summary:?}");
+    assert_eq!(env.write_calls(), calls + 1);
+    assert!(fs::read_to_string(env.page("ade/memoria/e1.md")).unwrap().contains("versão dois"));
+}
+
+#[test]
+fn nova_revisao_com_pagina_editada_no_ai_memory_continua_conflito_sem_sobrescrever() {
+    let env = Env::new();
+    approved(&env, "e1", "decision", "versão um");
+    env.run().unwrap();
+    fs::write(env.page("ade/memoria/e1.md"), "editada pela pessoa").unwrap();
+    approve_revision(&env, "e1", "decision", 2, "versão dois");
+    let calls = env.write_calls();
+
+    let summary = env.run().unwrap();
+
+    assert_eq!(summary.conflict, 1, "{summary:?}");
+    assert_eq!(env.write_calls(), calls, "página editada nunca é sobrescrita");
+    assert_eq!(fs::read_to_string(env.page("ade/memoria/e1.md")).unwrap(), "editada pela pessoa");
+}
+
 #[test]
 fn verificacao_com_corpo_diferente_vira_failed() {
     let env = Env::new();
