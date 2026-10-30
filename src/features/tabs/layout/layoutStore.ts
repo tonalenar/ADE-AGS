@@ -8,6 +8,9 @@ import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { useChatStore } from "@/features/chat/store";
 import { gridPlacements, useMissionGrid } from "@/features/canvas/gridMode";
 import { gridTabs } from "@/features/canvas/gridMode";
+import { useTeamIndex } from "@/features/chat/team/teamIndex";
+import { teamGridIds } from "@/features/chat/team/teamModel";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore, useWorkMode, type WorkMode } from "@/features/canvas/store";
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
@@ -463,7 +466,8 @@ export function currentPlacements(): Placements {
   const key = active ? boardKeyOfTab(active, canvas.boards) : null;
   const mode: WorkMode = key ? canvas.modes[key] ?? "tabs" : "tabs";
   const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
-  const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), mode, tabIds });
+  const team = teamGridIds(useTeamIndex.getState().teams, activeTabId, tabs.filter((t) => t.agentId !== SHELL_AGENT_ID).map((t) => t.id));
+  const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), team, mode, tabIds });
   const chat = chatShellOn(useUiStore.getState()) ? { slot: useChatStore.getState().slot, browser: useChatStore.getState().browser } : null;
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects: canvas.liveRects, grid, chat });
 }
