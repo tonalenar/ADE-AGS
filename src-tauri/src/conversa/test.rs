@@ -454,3 +454,40 @@ mod claude {
         assert_eq!(api::status(&claude.id), api::ThreadStatus { alive: false, working: false });
     }
 }
+
+fn pending_request(conn: &rusqlite::Connection, id: &str, thread_id: &str) {
+    let row = RequestRow {
+        id: id.into(), thread_id: thread_id.into(), rpc_id: "7".into(), kind: "command".into(), item_id: None,
+        title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1,
+    };
+    store::insert_request(conn, &row).unwrap();
+}
+
+#[test]
+fn processo_que_cai_no_turno_vira_erro_e_o_fechado_de_proposito_vira_interrompido() {
+    // Fechado por nós (fechar a conversa, trocar o acesso): é interrupção, sem texto e sem aviso de erro.
+    let (parado, aviso) = super::turn::dropped(true, None, "Codex");
+    assert!(parado.interrupted && parado.error.is_none() && aviso.is_none());
+    // Caiu sozinho: não é a pessoa que parou, é erro com o motivo.
+    let (caiu, aviso) = super::turn::dropped(false, None, "Codex");
+    assert!(!caiu.interrupted);
+    assert_eq!(caiu.error.as_deref(), Some("O processo do Codex fechou no meio do turno"));
+    assert_eq!(aviso, caiu.error);
+    // Com o rabo do stderr, o motivo é ele.
+    let (com_stderr, _) = super::turn::dropped(false, Some("  panic: sem memória  "), "Claude");
+    assert_eq!(com_stderr.error.as_deref(), Some("panic: sem memória"));
+}
+
+#[test]
+fn o_fim_do_turno_que_caiu_grava_o_erro_no_item_e_expira_os_pedidos() {
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+    pending_request(&conn, "q1", "t1");
+    let (result, _) = super::turn::dropped(false, None, "Codex");
+    assert_eq!(super::turn::record_end(&conn, "t1", "r1", &result, 50), ["q1"]);
+    assert_eq!(store::run_status(&conn, "t1", "r1").unwrap().as_deref(), Some("failed"), "o turno não fica inProgress");
+    let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("o turnEnd é gravado");
+    assert_eq!((end.id.as_str(), end.interrupted, end.text.as_deref()), ("end:r1", Some(false), Some("O processo do Codex fechou no meio do turno")));
+    assert!(store::pending_requests(&conn, "t1").unwrap().is_empty());
+}

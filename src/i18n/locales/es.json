@@ -4255,5 +4255,8 @@
   "chat.summary.pull.draft": "borrador",
   "chat.summary.pull.merged": "fusionado",
   "chat.summary.pull.closed": "cerrado",
-  "chat.summary.pullOpen": "Abrir el pull request en el navegador"
+  "chat.summary.pullOpen": "Abrir el pull request en el navegador",
+  "chat.timeline.interruptedByYou": "Interrumpido por ti",
+  "chat.timeline.notDone": "No terminado",
+  "chat.timeline.stopped": "El agente se detuvo: {{reason}}"
 }

@@ -22,6 +22,23 @@ export type BodyRow =
   /** Uma pergunta do agente ainda sem resposta. */
   | { type: "question"; key: string; item: TimelineItem };
 
+/** Como o turno acabou. `error` é o texto do `turnEnd`: o motivo de um turno que falhou ou que o processo derrubou. */
+export interface TurnEnd {
+  durationMs: number | null;
+  interrupted: boolean;
+  error: string | null;
+  files: ChangedFile[];
+}
+
+/**
+ * O desfecho para a tela. Erro vence "interrompido": se o processo caiu, a pessoa não parou nada; só é
+ * "interrompido" o que ela mesma interrompeu.
+ */
+export function endOutcome(end: Pick<TurnEnd, "interrupted" | "error">): "error" | "interrupted" | "done" {
+  if (end.error) return "error";
+  return end.interrupted ? "interrupted" : "done";
+}
+
 export interface Turn {
   key: string;
   /** A mensagem da pessoa (ausente quando o arquivo começa no meio de um turno). */
@@ -33,7 +50,7 @@ export interface Turn {
   /** A última fala de um turno encerrado: fica fora do fold. */
   final: TimelineItem | null;
   /** `null` = turno em aberto. */
-  end: { durationMs: number | null; interrupted: boolean; files: ChangedFile[] } | null;
+  end: TurnEnd | null;
   /** O último plano que o agente publicou no turno (TodoWrite, `update_plan`). */
   plan: PlanStep[] | null;
 }
@@ -98,7 +115,7 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
       // Sem a duração no arquivo, a conta é do prompt até o fim.
       const start = current.user?.at ?? current.startedAt;
       const durationMs = item.durationMs ?? (start !== undefined && item.at !== undefined ? item.at - start : null);
-      current.end = { durationMs, interrupted: !!item.interrupted, files: changedFiles(tools) };
+      current.end = { durationMs, interrupted: !!item.interrupted, error: item.text?.trim() || null, files: changedFiles(tools) };
       // A última fala, se o turno terminou nela, sai do fold.
       const last = current.body[current.body.length - 1];
       if (last?.type === "assistant") {

@@ -16,7 +16,8 @@ import type { PendingSend } from "./pending";
 import { displayUserText } from "./userMessage";
 import { isFresh } from "./streaming";
 import { commandTitle } from "./toolTitle";
-import { fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
+import { TurnEndNotice } from "./TurnEndNotice";
+import { endOutcome, fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 
@@ -185,8 +186,10 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
         <button type="button" onClick={() => foldable && setOpen(!open)} aria-expanded={foldable ? open : undefined}
           className={`flex items-center gap-1.5 px-1 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
             ${foldable ? "hover:text-gray-800 dark:hover:text-white/75" : "cursor-default"}`}>
-          {turn.end.interrupted
-            ? t("chat.timeline.interrupted")
+          {endOutcome(turn.end) === "error"
+            ? t("chat.timeline.notDone")
+            : endOutcome(turn.end) === "interrupted"
+            ? t("chat.timeline.interruptedByYou")
             : turn.end.durationMs !== null
               ? t("chat.timeline.workedFor", { duration: formatDuration(turn.end.durationMs) })
               : t("chat.timeline.done")}
@@ -195,6 +198,7 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
       )}
       {(open || turn.end === null) && turn.body.map((row) => <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} />)}
       {turn.final && <AgentText item={turn.final} />}
+      {turn.end && <TurnEndNotice end={turn.end} />}
       {turn.end && turn.end.files.length > 0 && <div className="px-1"><ChangedFilesCard files={turn.end.files} /></div>}
     </>
   );

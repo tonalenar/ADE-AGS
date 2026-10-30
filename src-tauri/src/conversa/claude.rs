@@ -28,7 +28,7 @@ use crate::database::DbConnection;
 
 use super::claude_map::{self, Mapper, Out, Pending, Start};
 use super::events::emit;
-use super::store;
+use super::{store, turn};
 
 /// Quanto esperar a resposta de um pedido de controle (abrir, parar). O turno não tem prazo.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -303,11 +303,10 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     }
     if let Some(turn) = session.turn() {
         session.set_turn(None);
-        let result = claude_map::TurnResult { interrupted: true, ..Default::default() };
+        let tail = session.stderr.lock().ok().and_then(|t| t.iter().rev().find(|l| !l.trim().is_empty()).cloned());
+        let (result, message) = turn::dropped(killed, tail.as_deref(), "Claude");
         finish_turn(app, db, thread_id, &turn, &result);
-        if !killed {
-            let tail = session.stderr.lock().ok().and_then(|t| t.iter().rev().find(|l| !l.trim().is_empty()).cloned());
-            let message = tail.map(|l| clip(&l, 600)).unwrap_or_else(|| "O processo do Claude fechou no meio do turno".into());
+        if let Some(message) = message {
             emit(app, thread_id, "error", json!({ "message": message }));
         }
     }

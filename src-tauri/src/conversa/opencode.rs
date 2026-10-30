@@ -22,7 +22,6 @@ use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::canal::event::clip;
 use crate::database::DbConnection;
 
 use super::claude_map::TurnResult;
@@ -364,11 +363,10 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
     if let Some(turn_id) = session.take_turn() {
-        let result = TurnResult { interrupted: true, ..Default::default() };
+        let tail = session.stderr.lock().ok().and_then(|t| t.iter().rev().find(|l| !l.trim().is_empty()).cloned());
+        let (result, message) = turn::dropped(killed, tail.as_deref(), "OpenCode");
         turn::finish(app, db, thread_id, &turn_id, &result);
-        if !killed {
-            let tail = session.stderr.lock().ok().and_then(|t| t.iter().rev().find(|l| !l.trim().is_empty()).cloned());
-            let message = tail.map(|l| clip(&l, 600)).unwrap_or_else(|| "O processo do OpenCode fechou no meio do turno".into());
+        if let Some(message) = message {
             emit(app, thread_id, "error", json!({ "message": message }));
         }
     }

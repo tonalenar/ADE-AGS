@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changedFiles, fileName, formatDuration, openTurnStart, timelineTurns } from "@/features/chat/timeline/timelineModel";
+import { changedFiles, endOutcome, fileName, formatDuration, openTurnStart, timelineTurns } from "@/features/chat/timeline/timelineModel";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
 const user = (id: string, at?: number): TimelineItem => ({ kind: "user", id, at, text: `msg ${id}` });
@@ -25,7 +25,7 @@ describe("timelineTurns", () => {
     expect(turn!.body.map((r) => r.type)).toEqual(["assistant", "work", "assistant", "work"]);
     expect(turn!.body[1]!.type === "work" && turn!.body[1]!.tools.map((t) => t.id)).toEqual(["t1", "t2"]);
     expect(turn!.final?.id).toBe("a3");
-    expect(turn!.end).toEqual({ durationMs: 4200, interrupted: false, files: [{ path: "src/a.ts", added: 5, removed: 1 }] });
+    expect(turn!.end).toEqual({ durationMs: 4200, interrupted: false, error: null, files: [{ path: "src/a.ts", added: 5, removed: 1 }] });
   });
 
   it("sem duração no arquivo, mede do prompt até o fim; turno sem fim fica aberto", () => {
@@ -33,6 +33,23 @@ describe("timelineTurns", () => {
     expect(turns[0]!.end).toMatchObject({ durationMs: 5000, interrupted: true });
     expect(turns[1]!.end).toBeNull();
     expect(turns[1]!.body).toHaveLength(1);
+  });
+
+  it("o texto do fim de turno é o erro: fica no turno, e um turno com erro não é 'concluído'", () => {
+    const turns = timelineTurns([
+      user("u1", 1000), say("a1"), end("e1", { at: 2000, text: "  API fora do ar  " }),
+      user("u2", 3000), end("e2", { at: 4000, interrupted: true }),
+      user("u3", 5000), end("e3", { at: 6000, interrupted: false, text: "   " }),
+    ]);
+    expect(turns[0]!.end).toMatchObject({ error: "API fora do ar", interrupted: false });
+    expect(turns[1]!.end).toMatchObject({ error: null, interrupted: true });
+    expect(turns[2]!.end).toMatchObject({ error: null, interrupted: false });
+    expect(endOutcome(turns[0]!.end!)).toBe("error");
+    expect(endOutcome(turns[1]!.end!)).toBe("interrupted");
+    expect(endOutcome(turns[2]!.end!)).toBe("done");
+    // Falhou e foi marcado como interrompido: o erro vence, porque a pessoa não parou nada.
+    const both = timelineTurns([user("u1"), end("e1", { interrupted: true, text: "O processo caiu" })]);
+    expect(endOutcome(both[0]!.end!)).toBe("error");
   });
 
   it("pergunta em aberto vira um cartão; respondida some", () => {

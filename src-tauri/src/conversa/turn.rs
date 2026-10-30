@@ -40,14 +40,37 @@ pub fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: O
 /// entra na timeline.
 pub fn finish(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, result: &TurnResult) {
     let now = crate::util::now_ts_ms();
-    let expired = db.lock().ok().map(|conn| {
-        let _ = store::upsert_run(&conn, thread_id, turn, claude_map::run_status(result), None, Some(now), result.duration_ms);
-        store::expire_requests(&conn, thread_id).unwrap_or_default()
-    });
+    let expired = db.lock().ok().map(|conn| record_end(&conn, thread_id, turn, result, now));
     for id in expired.unwrap_or_default() {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
-    save_items(app, db, thread_id, Some(turn), vec![claude_map::turn_end(turn, result, Some(now))]);
+    emit(app, thread_id, "item", json!({ "item": claude_map::turn_end(turn, result, Some(now)) }));
+}
+
+/// A parte do `finish` que mexe no banco: o status do turno, os pedidos pendentes expirados (devolve os
+/// ids) e o `turnEnd` na timeline, com o erro no texto. Separada para testar sem a janela.
+pub fn record_end(conn: &rusqlite::Connection, thread_id: &str, turn: &str, result: &TurnResult, now: i64) -> Vec<String> {
+    let _ = store::upsert_run(conn, thread_id, turn, claude_map::run_status(result), None, Some(now), result.duration_ms);
+    let expired = store::expire_requests(conn, thread_id).unwrap_or_default();
+    let _ = store::upsert_item(conn, thread_id, Some(turn), &claude_map::turn_end(turn, result, Some(now)));
+    let _ = store::touch(conn, thread_id, now);
+    expired
+}
+
+/// O desfecho de um turno que o processo do agente deixou aberto ao fechar. Fechado de propósito
+/// (`killed`: fechar a conversa, trocar o acesso) é interrupção, sem erro. Caiu sozinho não foi a pessoa que
+/// parou: vira erro com o motivo (a última linha do stderr, se houver) e o mesmo texto vai ao aviso da janela.
+/// Pura.
+pub fn dropped(killed: bool, stderr_tail: Option<&str>, agent: &str) -> (TurnResult, Option<String>) {
+    if killed {
+        return (TurnResult { interrupted: true, ..Default::default() }, None);
+    }
+    let reason = stderr_tail
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|l| crate::canal::event::clip(l, 600))
+        .unwrap_or_else(|| format!("O processo do {agent} fechou no meio do turno"));
+    (TurnResult { error: Some(reason.clone()), ..Default::default() }, Some(reason))
 }
 
 /// A mensagem da pessoa na timeline, gravada ao mandar.
