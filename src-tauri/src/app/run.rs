@@ -97,6 +97,7 @@ pub fn run() {
             crate::ai_memory::ai_memory_search,
             crate::ai_memory::ai_memory_read_page,
             crate::ai_memory::ai_memory_projects,
+            crate::ai_memory::ai_memory_sessions,
             crate::desktop_apps::gemini_desktop_status,
             crate::desktop_apps::gemini_desktop_attach,
             crate::desktop_apps::gemini_desktop_layout,

@@ -2,7 +2,7 @@
 
 ## Conector opcional de leitura do ai-memory
 
-Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões via MCP ficam fora desta fase. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
+Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões recentes usam bridge MCP temporário com workspace/projeto explícitos e apenas `memory_briefing`. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
 
 ## CLIs fora do PATH e instalação pela ADE
 

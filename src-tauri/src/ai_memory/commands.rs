@@ -48,3 +48,20 @@ pub async fn ai_memory_read_page(cwd: String, path: String) -> Result<Untrusted<
 pub async fn ai_memory_projects(cwd: String) -> Result<Untrusted<Vec<Project>>, String> {
     blocking(move || Client::installed(&cwd)?.read(Read::Projects)).await
 }
+
+#[tauri::command]
+pub async fn ai_memory_sessions(
+    workspace: String,
+    project: String,
+) -> Result<Untrusted<Vec<Session>>, String> {
+    super::sessions::validate_scope(&workspace, &project)?;
+    let client = blocking(|| {
+        let cwd = std::env::current_dir()
+            .map_err(|_| "Não foi possível localizar a pasta do aplicativo.".to_string())?;
+        let client = Client::installed(&cwd.to_string_lossy())?;
+        client.ensure_supported()?;
+        Ok(client)
+    })
+    .await?;
+    client.sessions(workspace, project).await
+}

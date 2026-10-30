@@ -117,7 +117,7 @@ mod processo {
         fake.fixture("status-empty.json");
         let ok = fake.client().probe().unwrap();
         assert_eq!(ok.data.state, Availability::Ok);
-        assert!(!ok.data.sessions_supported);
+        assert!(ok.data.sessions_supported);
         assert_eq!(ok.data.status.unwrap().counts.sessions, 0);
         let offline = Fake::new("ai-memory 3.3.0", "printf secret-token >&2; exit 1")
             .client()
@@ -248,5 +248,144 @@ mod processo {
         let mut client = fake.client();
         client.timeout = std::time::Duration::ZERO;
         assert_eq!(client.probe().unwrap().data.state, Availability::ServerDown);
+    }
+    fn bridge(response: serde_json::Value) -> Fake {
+        let fake = Fake::new(
+            "ai-memory 3.3.0",
+            r#"
+[ "$1" = mcp-bridge ] && [ "$2" = --no-session-id ] && [ "$#" = 2 ] || exit 74
+root=$(dirname "$0")
+printf '%s' "$$" > "$root/pid"
+IFS= read -r line || exit 75
+printf '%s\n' "$line" >> "$root/requests"
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"fake","version":"1"},"capabilities":{}}}'
+IFS= read -r line || exit 76
+printf '%s\n' "$line" >> "$root/requests"
+IFS= read -r line || exit 77
+printf '%s\n' "$line" >> "$root/requests"
+cat "$root/response"
+printf '\n'
+while :; do :; done
+"#,
+        );
+        fs::write(
+            fake.root.join("response"),
+            serde_json::to_vec(&response).unwrap(),
+        )
+        .unwrap();
+        fake
+    }
+
+    fn briefing_reply(fixture: &str) -> serde_json::Value {
+        serde_json::json!({"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":fixture}]}})
+    }
+
+    fn assert_bridge_reaped(fake: &Fake) {
+        let pid = fs::read_to_string(fake.root.join("pid")).unwrap();
+        // `ps` apenas observa o PID que o fake registrou; não encerra processos.
+        let mut ps = crate::util::spawn::hidden_command("ps");
+        ps.args(["-p", &pid, "-o", "pid="]);
+        let result =
+            crate::util::spawn::output(&mut ps, std::time::Duration::from_secs(2)).unwrap();
+        assert!(result.stdout.is_empty(), "bridge não recolhido: {pid}");
+    }
+
+    #[tokio::test]
+    async fn bridge_fixo_le_fixture_real_e_recolhe_processo_ainda_aberto() {
+        let fake = bridge(briefing_reply(include_str!(
+            "fixtures/sessions-briefing.json"
+        )));
+        let result = fake
+            .client()
+            .sessions("ade-test".into(), "probe".into())
+            .await
+            .unwrap();
+        assert_eq!(result.trust, "UNTRUSTED");
+        assert!(result.data.is_empty());
+        let requests: Vec<serde_json::Value> = fs::read_to_string(fake.root.join("requests"))
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0]["method"], "initialize");
+        assert_eq!(requests[1]["method"], "notifications/initialized");
+        assert_eq!(requests[2]["method"], "tools/call");
+        assert_eq!(requests[2]["params"]["name"], "memory_briefing");
+        assert_eq!(requests[2]["params"]["arguments"]["workspace"], "ade-test");
+        assert_eq!(requests[2]["params"]["arguments"]["project"], "probe");
+        assert_bridge_reaped(&fake);
+    }
+
+    #[tokio::test]
+    async fn sessoes_sinteticas_preservam_metadados_e_ignoram_campos_futuros() {
+        let fake = bridge(briefing_reply(include_str!(
+            "fixtures/sessions-briefing-populated.json"
+        )));
+        let sessions = fake
+            .client()
+            .sessions("ade-test".into(), "probe".into())
+            .await
+            .unwrap()
+            .data;
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].agent_kind, "codex");
+        assert!(!sessions[0].ended);
+        assert!(!sessions[0].current);
+        assert!(
+            !serde_json::to_string(&sessions)
+                .unwrap()
+                .contains("future_field")
+        );
+        assert_bridge_reaped(&fake);
+    }
+
+    #[tokio::test]
+    async fn bridge_recusa_erro_mcp_e_escopo_diferente_e_sempre_recolhe() {
+        let mut wrong_scope: serde_json::Value =
+            serde_json::from_str(include_str!("fixtures/sessions-briefing.json")).unwrap();
+        wrong_scope["scope"]["project"] = serde_json::json!("outro-projeto");
+        for reply in [
+            serde_json::json!({"jsonrpc":"2.0","id":2,"error":{"message":"secret-token"}}),
+            serde_json::json!({"jsonrpc":"2.0","id":2,"result":{"isError":true,"content":[{"type":"text","text":"secret-token"}]}}),
+            briefing_reply(&wrong_scope.to_string()),
+            briefing_reply("not json"),
+            serde_json::json!({"jsonrpc":"2.0","id":99,"result":{}}),
+        ] {
+            let fake = bridge(reply);
+            let error = fake
+                .client()
+                .sessions("ade-test".into(), "probe".into())
+                .await
+                .unwrap_err();
+            assert!(!error.contains("secret-token"));
+            assert_bridge_reaped(&fake);
+        }
+    }
+
+    #[tokio::test]
+    async fn bridge_limita_prazo_e_nao_inicia_sem_par_de_escopo_valido() {
+        let fake = Fake::new("ai-memory 3.3.0", "while :; do :; done");
+        let mut client = fake.client();
+        for (workspace, project) in [
+            ("", "probe"),
+            ("ade-test", ""),
+            ("ade-test", "bad\nproject"),
+        ] {
+            assert!(
+                client
+                    .sessions(workspace.into(), project.into())
+                    .await
+                    .is_err()
+            );
+        }
+        assert!(!fake.root.join("argv").exists());
+        client.timeout = std::time::Duration::ZERO;
+        assert!(
+            client
+                .sessions("ade-test".into(), "probe".into())
+                .await
+                .is_err()
+        );
     }
 }

@@ -142,3 +142,17 @@ pub struct Project {
     #[serde(default)]
     pub last_updated: Option<String>,
 }
+
+/// Sessão externa; `ended=false` também pode significar trabalho ainda em uso.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Session {
+    pub session_id: String,
+    pub agent_kind: String,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    pub last_activity_at: String,
+    pub ended: bool,
+    pub handed_off: bool,
+    #[serde(default)]
+    pub current: bool,
+}

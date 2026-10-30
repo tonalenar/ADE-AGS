@@ -1,6 +1,6 @@
 # Conector de leitura do ai-memory
 
-O conector executa somente a CLI externa `ai-memory`, versão mínima **3.3.0**. Não instala o binário, inicia servidor, captura sessões, registra hooks/MCP, aceita bastões ou importa memória. O ai-memory é a memória de longo prazo do ADE ([decisão](../decisoes/AI_MEMORY.md)); o SQLite de memória antigo fica só leitura, como fonte da migração. O painel aparece em Ajustes → Memória (`src/features/memory/AiMemoryPanel.tsx`).
+O conector executa somente a CLI externa `ai-memory`, versão mínima **3.3.0**. Não instala o binário, inicia servidor HTTP, captura sessões, registra hooks/MCP, aceita bastões ou importa memória. O ai-memory é a memória de longo prazo do ADE ([decisão](../decisoes/AI_MEMORY.md)); o SQLite de memória antigo fica só leitura, como fonte da migração. O painel aparece em Ajustes → Memória (`src/features/memory/AiMemoryPanel.tsx`).
 
 ## Comandos Tauri
 
@@ -15,6 +15,7 @@ Todas as funções são assíncronas e retornam `Result<Untrusted<T>, String>`. 
 | `ai_memory_search` | `{cwd: string, query: string}` | `SearchHit[]` |
 | `ai_memory_read_page` | `{cwd: string, path: string}` | `Page` |
 | `ai_memory_projects` | `{cwd: string}` | `Project[]` |
+| `ai_memory_sessions` | `{workspace: string, project: string}` | `Session[]` |
 
 A pasta absoluta existente vem da aba selecionada. O processo recebe essa pasta em `current_dir` e `AI_MEMORY_HOST_CWD`; o override herdado `AI_MEMORY_SCOPE_CWD` é removido. Não há `--cwd` nessa release. O resolvedor nativo (`ai-memory-cli/src/commands/mod.rs::resolve_scope`) aplica markers `.ai-memory.toml`, rotas de home, identidade do remoto git e fallback pelo basename. O ADE deixa a CLI resolver, em vez de reimplementar parcialmente ou ler seus arquivos de configuração. Não confundir esse workspace com o id de workspace do ADE. `status` e `list-projects` são consultas globais do servidor selecionado pela CLI; não representam filtros por projeto.
 
@@ -27,7 +28,7 @@ interface Probe {
   version: string | null;
   installation_instruction: string | null;
   status: Status | null;
-  sessions_supported: false;
+  sessions_supported: true;
 }
 interface Counts { pages_latest: number; pages_all: number; sessions: number; observations: number }
 interface Provider { status: string; provider: string | null; model: string | null; dim: number | null }
@@ -54,6 +55,10 @@ interface Page {
   path: string; workspace: string; project: string; title: string | null;
   body: string; frontmatter: unknown; expired: boolean;
 }
+interface Session {
+  session_id: string; agent_kind: string; cwd: string | null;
+  last_activity_at: string; ended: boolean; handed_off: boolean; current: boolean;
+}
 interface Project {
   workspace_id: string | null; workspace_name: string;
   project_id: string | null; project_name: string;
@@ -71,18 +76,20 @@ Campos desconhecidos da CLI são ignorados e opcionais ausentes viram `null` (ou
 - Lista fechada de operações, até 50 resultados por lista/busca, consulta até 4096 bytes e caminho relativo até 1024 bytes. O terminador `--` separa a busca das flags. Não existe endpoint genérico que aceite argv arbitrário.
 - Respostas acima de 2 MiB são recusadas **depois** da coleta pelo helper existente; esse limite não é um teto de memória durante a leitura dos pipes.
 - Versões anteriores a 3.3.0 (inclusive pré-release de 3.3.0) não fazem leituras. Falha do subprocesso/status gera `server_down`; JSON incompatível nas leituras gera erro. A instrução de instalação é só texto com a release oficial e orientação de checksum.
-- Sessões recentes ficam **fora desta fase**, com `sessions_supported=false`. Não se inicia `mcp-bridge` nem se expõe uma ponte genérica: o servidor externo tem tools mutadoras. Uma implementação posterior deve permitir exclusivamente `memory_briefing`.
+- Sessões recentes usam apenas `mcp-bridge --no-session-id` temporário e a tool fixa `memory_briefing`. Não se expõe ponte genérica. `sessions_supported=true` indica suporte implementado; o servidor ainda precisa estar disponível. O prazo do diálogo é 10 segundos, mais até 2 segundos para recolher o filho. O leitor limita cada mensagem a 2 MiB durante a leitura e tolera até 16 notificações por resposta.
 
 ## Prova
 
 Fixtures reais normalizadas em `src-tauri/src/ai_memory/fixtures/`, com proveniência e checksum do pacote na pasta. Testes de parse são multiplataforma; os testes de subprocesso usam scripts fake em diretório temporário no Unix. Não chamam o ai-memory instalado, rede, modelo ou dados reais. Timeout usa prazo zero, sem espera real no teste. Windows e uso manual da UI não verificados nesta entrega. Desempenho de produto não medido.
 
-Verificado nesta entrega: `cargo test --lib ai_memory::` — 6 testes aprovados; `cargo clippy --lib` — sucesso, sem avisos em `src/ai_memory/` (o crate tem avisos herdados fora da mudança); `node scripts/test-lint.mjs` — nenhuma violação nova. O caso de metadados SemVer `3.3.0+local-build` foi reproduzido falhando antes de corrigir o comparador.
+Verificado nesta entrega: `cargo test --lib ai_memory::` — 10 testes aprovados; `cargo clippy --lib` — sucesso, sem avisos em `src/ai_memory/` (o crate tem avisos herdados fora da mudança); `node scripts/test-lint.mjs` — nenhuma violação nova. O caso de metadados SemVer `3.3.0+local-build` foi reproduzido falhando antes de corrigir o comparador.
 
-## Por que o bridge de sessões ainda não está exposto
+## Sessões por escopo explícito
 
 Na tag `v3.3.0`, `mcp-bridge --no-session-id` encaminha JSON-RPC ao servidor sem uma identidade de sessão e **sem transmitir o cwd** (`ai-memory-cli/src/commands/mcp_bridge.rs`, `upstream_config`). `memory_briefing` recebe `workspace` e `project` em `BriefingArgs`, mas não `cwd` (`ai-memory-mcp/src/server.rs:1647`). O teste upstream de roteamento nessa mesma fonte (`static client falls back to the server default and says so`, perto da linha 17514) demonstra que a consulta estática sem par explícito usa o projeto padrão do servidor. Isso não equivale à pasta da aba, mesmo com `current_dir` correto no processo do bridge.
 
-Por isso não se adicionou `ai_memory_sessions(cwd)` com parâmetros de escopo inferidos: poderia exibir sessões de outro projeto. A CLI de leitura não oferece um comando dedicado para exportar o resultado de `resolve_scope`. `doctor --json` inclui o par, porém também percorre sessões/configurações de vários agentes e não foi introduzido como dependência indireta de uma listagem de sessões. Extrair o escopo de uma página também não resolve projetos vazios nem sessões interrompidas que ainda não geraram página.
+A assinatura final é `ai_memory_sessions(workspace: String, project: String) -> Result<Untrusted<Vec<Session>>, String>`. O frontend obtém o par de `ai_memory_projects`, pré-seleciona pelo `project_name` que corresponde ao nome da pasta da aba e permite que a pessoa troque o projeto. O par deve ser preservado junto: nomes de projeto podem se repetir em workspaces diferentes. O backend recusa campos vazios, controles e valores acima de 512 bytes; não interpreta o par como argv nem tenta resolver por nome de pasta. A CLI usa sua configuração para conectar, sem porta fixa ou leitura de tokens pelo ADE. Esse endpoint não recebe cwd; usa o servidor configurado no contexto do aplicativo, sem selecionar outra rota por marker da aba.
 
-Um seguimento pode receber `workspace` e `project` explicitamente escolhidos pelo usuário dentre `ai_memory_projects`, além do cwd, ou usar um futuro resolvedor nativo de escopo. Só então deve abrir o bridge temporário, enviar `initialize` e a chamada de nome fixo `memory_briefing`, extrair `recent_sessions` e encerrar o processo próprio. Não deve disponibilizar `tools/call` genérico nem encaminhar nomes de tools recebidos do frontend. Até essa decisão, `sessions_supported=false` permanece o contrato honesto.
+O protocolo interno envia `initialize`, aguarda a resposta, envia a notificação obrigatória `notifications/initialized` e faz **somente uma** `tools/call`, com nome constante `memory_briefing`, par explícito e `recent_pages_limit=0`. Nunca encaminha nome de tool ou parâmetros RPC do frontend e não usa `doctor`. Descarta regras/páginas e retorna só `recent_sessions`; valida o workspace/projeto devolvidos antes de aceitar o resultado. Cada sessão mantém `ended` e `handed_off`: `ended=false` também pode indicar um agente ainda trabalhando, não uma interrupção confirmada.
+
+`util::spawn::with_stdio` abre o filho com stderr descartado, pipes e `kill_on_drop`, limita o diálogo por timeout e encerra/recolhe somente o PID que abriu, após resposta ou erro. O fake permanece aberto após responder, e os testes verificam que esse PID já não existe ao retornar. A fixture vazia de briefing é captura real da Fase 0; a fixture populada é uma derivação sintética explicitamente identificada. Nenhum teste executa o binário instalado, consulta a base real, chama modelo ou inicia serviço.

@@ -80,7 +80,7 @@ impl Client {
         })
     }
 
-    fn execute(&self, args: &[String]) -> io::Result<std::process::Output> {
+    fn command(&self, args: &[String]) -> io::Result<std::process::Command> {
         let program = external_path(
             self.program
                 .as_deref()
@@ -96,7 +96,11 @@ impl Client {
             .env_remove("AI_MEMORY_SCOPE_CWD")
             .env("AI_MEMORY_RUN_AUTOWIRE", "false")
             .env("AI_MEMORY_EMBEDDING_PROVIDER", "none");
-        spawn::output(&mut command, self.timeout)
+        Ok(command)
+    }
+
+    fn execute(&self, args: &[String]) -> io::Result<std::process::Output> {
+        spawn::output(&mut self.command(args)?, self.timeout)
     }
 
     fn version(&self) -> Result<String, Failure> {
@@ -160,6 +164,32 @@ impl Client {
             .map_err(|_| "O ai-memory retornou JSON incompatível.".into())
     }
 
+    pub fn ensure_supported(&self) -> Result<(), String> {
+        self.version()
+            .map(|_| ())
+            .map_err(|failure| failure.message())
+    }
+
+    pub async fn sessions(
+        &self,
+        workspace: String,
+        project: String,
+    ) -> Result<Untrusted<Vec<Session>>, String> {
+        super::sessions::validate_scope(&workspace, &project)?;
+        let command = self
+            .command(&["mcp-bridge".into(), "--no-session-id".into()])
+            .map_err(|_| "Não foi possível iniciar o bridge do ai-memory.".to_string())?;
+        spawn::with_stdio(command, self.timeout, |input, output| {
+            super::sessions::briefing(input, output, workspace, project)
+        })
+        .await
+        .map(Untrusted::new)
+        .map_err(|_| {
+            "Não foi possível consultar sessões do ai-memory (JSON-RPC, escopo ou prazo inválido)."
+                .into()
+        })
+    }
+
     pub fn read<T: DeserializeOwned>(&self, read: Read) -> Result<Untrusted<T>, String> {
         self.version().map_err(|failure| failure.message())?;
         self.json(read).map(Untrusted::new)
@@ -171,7 +201,7 @@ impl Client {
             version: None,
             installation_instruction: None,
             status: None,
-            sessions_supported: false,
+            sessions_supported: true,
         };
         match self.version() {
             Err(Failure::Io(error)) if error.kind() == io::ErrorKind::NotFound => {

@@ -71,6 +71,49 @@ pub fn into_tokio(mut command: Command) -> tokio::process::Command {
     tokio::process::Command::from(command)
 }
 
+/// Conversa stdio limitada por prazo; sempre encerra e recolhe somente o filho
+/// aberto aqui. stderr vai para o nulo para não vazar credenciais nem bloquear.
+pub async fn with_stdio<T, F, Fut>(command: Command, timeout: Duration, work: F) -> io::Result<T>
+where
+    F: FnOnce(tokio::process::ChildStdin, tokio::process::ChildStdout) -> Fut,
+    Fut: std::future::Future<Output = io::Result<T>>,
+{
+    let mut command = into_tokio(command);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    let mut child = command.spawn()?;
+    let input = child
+        .stdin
+        .take()
+        .ok_or_else(|| io::Error::other("stdin indisponível"))?;
+    let output = child
+        .stdout
+        .take()
+        .ok_or_else(|| io::Error::other("stdout indisponível"))?;
+    let result = tokio::time::timeout(timeout, work(input, output))
+        .await
+        .unwrap_or_else(|_| {
+            Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Prazo da conversa stdio excedido.",
+            ))
+        });
+    // Uma resposta não precisa esperar o servidor fechar espontaneamente.
+    let _ = child.start_kill();
+    tokio::time::timeout(Duration::from_secs(2), child.wait())
+        .await
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Não foi possível recolher o processo stdio.",
+            )
+        })??;
+    result
+}
+
 /// Como `Command::output()`, com prazo, kill do grupo e uma linha de log.
 pub fn output(cmd: &mut Command, timeout: Duration) -> io::Result<Output> {
     output_with_input(cmd, None, timeout)
