@@ -67,6 +67,18 @@ export function teamLedBy(teams: TeamView[], ref: string | null | undefined): Te
   return ref ? teams.find((t) => t.orchestrator === ref) ?? null : null;
 }
 
+/**
+ * Os terminais que a grade das Abas mostra para o time da aba ativa: o orquestrador e depois os
+ * integrantes, só os que são abas de agente abertas (uma conversa por protocolo não tem terminal).
+ * `null` = a aba ativa não é de um time. Pura.
+ */
+export function teamGridIds(teams: TeamView[], activeTabId: string | null | undefined, openAgentTabs: string[]): string[] | null {
+  const place = placeOf(teams, activeTabId);
+  if (!place) return null;
+  const open = new Set(openAgentTabs);
+  return [place.team.orchestrator, ...place.team.members.map((m) => m.member)].filter((ref) => !isThreadRef(ref) && open.has(ref));
+}
+
 /** Todas as conversas que estão em algum time (para o formulário não oferecer de novo). */
 export function takenRefs(teams: TeamView[]): Set<string> {
   return new Set(teams.flatMap((t) => [t.orchestrator, ...t.members.map((m) => m.member)]));

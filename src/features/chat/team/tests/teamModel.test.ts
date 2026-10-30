@@ -4,7 +4,7 @@ import type { TeamFeedItem, TeamMember, TeamView } from "../ipc";
 import {
   CLOSED, LEAD_ONLY_PREFIX, agentMono, applyMention, branchFor, conversationAccess, defaultPolicy, delegationCards, deliveries,
   memberState, mentionOptions, mentionQuery, orchestratorState, placeOf, rosterNotice, rosterRows, rosterSignature, routeMessage,
-  sidebarGrouping, stateTone, takenRefs, teamLedBy, type LiveInput,
+  sidebarGrouping, stateTone, takenRefs, teamGridIds, teamLedBy, type LiveInput,
 } from "../teamModel";
 
 function member(ref: string, agentId: string, role: string, extra: Partial<TeamMember> = {}): TeamMember {
@@ -163,5 +163,22 @@ describe("o modelo do cartão do integrante", () => {
     expect(withLive[1]!.model).toBe("claude-haiku-5-5 · xhigh");
     const without = rosterRows({ ...TEAM, members: [{ ...TEAM.members[0]!, model: "gpt-x" }] }, [], { ...base, modelOf: () => null });
     expect(without[1]!.model).toBe("gpt-x");
+  });
+});
+
+describe("a grade do time", () => {
+  const open = ["tab-lead", "tab-g", "tab-k", "solto"];
+  it("é o orquestrador e depois os integrantes que são abas abertas (a conversa por protocolo não tem terminal)", () => {
+    expect(teamGridIds([TEAM], "tab-g", open)).toEqual(["tab-lead", "tab-g", "tab-k"]);
+    expect(teamGridIds([TEAM], "tab-lead", open)).toEqual(["tab-lead", "tab-g", "tab-k"]);
+  });
+  it("aba fechada fica de fora e uma aba fora do time não abre a grade do time", () => {
+    expect(teamGridIds([TEAM], "tab-lead", ["tab-lead", "tab-k"])).toEqual(["tab-lead", "tab-k"]);
+    expect(teamGridIds([TEAM], "solto", open)).toBeNull();
+    expect(teamGridIds([TEAM], null, open)).toBeNull();
+  });
+  it("com o orquestrador por protocolo, só os integrantes", () => {
+    const threadLead: TeamView = { ...TEAM, orchestrator: "thread:lead" };
+    expect(teamGridIds([threadLead], "tab-g", open)).toEqual(["tab-g", "tab-k"]);
   });
 });

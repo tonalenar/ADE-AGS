@@ -19,6 +19,7 @@ import {
   type TeamFeedItem, type TeamPolicy, type TeamView,
 } from "./ipc";
 import { canvasPlan, runCanvasPlan } from "./teamCanvas";
+import { useTeamIndex } from "./teamIndex";
 import { projectCanvas, reversePlan, roleIdOfLabel, type CanvasProjection, type ReverseOp } from "./teamMirror";
 import { conversationAccess, defaultPolicy, TEAM_ROLES, type ComposerTarget } from "./teamModel";
 
@@ -41,6 +42,8 @@ interface TeamState {
 }
 
 export const useTeamStore = create<TeamState>(() => ({ teams: [], loaded: false, feeds: {}, targets: {}, told: {}, adding: {} }));
+// A grade das Abas lê a lista daqui, sem depender deste módulo (ver `teamIndex.ts`).
+useTeamStore.subscribe((state, prev) => { if (state.teams !== prev.teams) useTeamIndex.setState({ teams: state.teams }); });
 
 let started = false;
 
