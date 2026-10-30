@@ -3812,5 +3812,7 @@
   "settings.decisions.whereMemory": "Memory approval: the suggestion comes preselected; you click.",
   "settings.decisions.whereVigia": "Missions: confirms a final report the Vigia rule missed.",
   "settings.decisions.whereRouting": "Team: a message without @ gets a recipient chip; you choose.",
-  "settings.decisions.whereBrowser": "Browser: with ags portal act, picks the next operation and element."
+  "settings.decisions.whereBrowser": "Browser: with ags portal act, picks the next operation and element.",
+  "chat.panel.close": "Close {{name}}",
+  "chat.panel.add": "Open in the panel"
 }

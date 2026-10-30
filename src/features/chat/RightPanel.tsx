@@ -4,13 +4,16 @@ import { listen } from "@tauri-apps/api/event";
 
 import { FilesView } from "@/features/explorer/FilesView";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { comparablePath } from "@/features/tabs/viewTabs";
+import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
 
-import { MaximizeIcon } from "./chatIcons";
+import { useSimulatorStore } from "@/features/simulator/store";
+
+import { GlobeIcon, MaximizeIcon, PhoneIcon, PlusIcon, XIcon } from "./chatIcons";
 import { parseUnifiedDiff, type FileDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
 import { CHAT_SHELL_ATTR } from "./ConversationView";
-import { setChatBrowser, setRightPanel, togglePanelMaximized, useChatStore, type RightPanelTab } from "./store";
+import { addSurface, hostLabel, removeSurface, setChatBrowser, setRightPanel, SURFACES, togglePanelMaximized, useChatStore, type Surface } from "./store";
+import { usePopover } from "./usePopover";
 
 // Design e Dispositivos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
 const DesignPane = lazy(() => import("./DesignPane").then((m) => ({ default: m.DesignPane })));
@@ -27,26 +30,40 @@ export function RightPanel({ tabId, cwd, project }: { tabId: string | null; cwd:
   const { t } = useTranslation();
   const panel = useChatStore((s) => s.panel);
   const maximized = useChatStore((s) => s.panelMaximized);
+  const surfaces = useChatStore((s) => s.surfaces);
+  // As abas levam o nome do que mostram (prancheta 8): o endereço do navegador, o aparelho ligado.
+  const browserUrl = useViewTabsStore((s) =>
+    cwd ? s.views.find((v): v is Extract<ViewTab, { kind: "browser" }> => v.kind === "browser" && !v.owner && comparablePath(v.cwd) === comparablePath(cwd))?.url ?? null : null);
+  const device = useSimulatorStore((s) => s.devices.find((d) => d.state === "booted")?.name ?? null);
   if (!panel) return null;
-  const tabs: { id: RightPanelTab; label: string }[] = [
-    { id: "diff", label: t("chat.panel.diff") },
-    { id: "files", label: t("chat.panel.files") },
-    { id: "browser", label: t("chat.panel.browser") },
-    { id: "design", label: t("chat.panel.design") },
-    { id: "devices", label: t("chat.panel.devices") },
-  ];
+  const label = (surface: Surface) =>
+    surface === "browser" ? hostLabel(browserUrl) ?? t("chat.panel.browser")
+    : surface === "devices" ? device ?? t("chat.panel.devices")
+    : t(`chat.panel.${surface}`);
+  const icon = (surface: Surface) =>
+    surface === "browser" ? <GlobeIcon className="w-3 h-3 shrink-0" /> : surface === "devices" ? <PhoneIcon className="w-3 h-3 shrink-0" /> : null;
+  const tabCls = (on: boolean) => `h-6 max-w-40 px-2 rounded-md text-[12px] inline-flex items-center gap-1.5
+    ${on ? "bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-medium" : "text-gray-500 dark:text-white/45 hover:bg-gray-100/60 dark:hover:bg-white/[0.06]"}`;
   return (
     <aside aria-label={t("chat.panel.label")}
       style={maximized ? undefined : { width: RIGHT_PANEL_W }}
       className={`${maximized ? "flex-1" : "shrink"} min-w-[360px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
       <div role="tablist" data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-1 pl-2 pr-3">
-        {tabs.map((tab) => (
-          <button key={tab.id} type="button" role="tab" aria-selected={panel === tab.id} onClick={() => setRightPanel(tab.id)}
-            className={`h-6 max-w-36 px-2 rounded-md text-[12px] truncate
-              ${panel === tab.id ? "bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-medium" : "text-gray-500 dark:text-white/45 hover:bg-gray-100/60 dark:hover:bg-white/[0.06]"}`}>
-            {tab.label}
-          </button>
+        <button type="button" role="tab" aria-selected={panel === "diff"} onClick={() => setRightPanel("diff")} className={tabCls(panel === "diff")}>
+          {t("chat.panel.diff")}
+        </button>
+        {surfaces.map((surface) => (
+          <span key={surface} className="group relative inline-flex">
+            <button type="button" role="tab" aria-selected={panel === surface} onClick={() => setRightPanel(surface)} className={tabCls(panel === surface)}>
+              {icon(surface)}<span className="truncate">{label(surface)}</span>
+            </button>
+            <button type="button" onClick={() => removeSurface(surface)} aria-label={t("chat.panel.close", { name: label(surface) })}
+              className="hidden group-hover:flex absolute -right-1 -top-1 w-3.5 h-3.5 items-center justify-center rounded-full bg-gray-300 dark:bg-white/25 text-gray-700 dark:text-white">
+              <XIcon className="w-2.5 h-2.5" />
+            </button>
+          </span>
         ))}
+        <AddSurface open={surfaces} />
         <span data-tauri-drag-region className="flex-1 self-stretch" />
         <button type="button" onClick={togglePanelMaximized} aria-pressed={maximized} aria-label={t("chat.panel.maximize")} title={t("chat.panel.maximize")}
           className="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10">
@@ -133,6 +150,33 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
           {t("chat.panel.refresh")}
         </button>
       </div>
+    </div>
+  );
+}
+
+/** O "+" do painel: abre Navegador, Arquivos, Design ou Dispositivos (os que ainda não estão abertos). */
+function AddSurface({ open: opened }: { open: Surface[] }) {
+  const { t } = useTranslation();
+  const { open, setOpen, ref } = usePopover();
+  const missing = SURFACES.filter((s) => !opened.includes(s));
+  if (missing.length === 0) return null;
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen(!open)} aria-label={t("chat.panel.add")} title={t("chat.panel.add")} aria-expanded={open}
+        className="w-6 h-6 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10">
+        <PlusIcon className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div role="menu" className="absolute left-0 top-full mt-1 z-50 min-w-[160px] p-1 rounded-lg bg-white dark:bg-surface-raised
+          shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
+          {missing.map((s) => (
+            <button key={s} type="button" role="menuitem" onClick={() => { addSurface(s); setOpen(false); }}
+              className="w-full h-8 px-2 rounded-md text-left text-[13px] text-gray-800 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07]">
+              {t(`chat.panel.${s}`)}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

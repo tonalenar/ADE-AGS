@@ -28,11 +28,17 @@ interface ChatState {
   browser: { viewId: string; rect: Rect } | null;
   /** A conversa por protocolo aberta (ver `structured/`); `null` = a da aba ativa. */
   thread: string | null;
+  /** As superfícies abertas no painel direito, além do Diff, na ordem em que foram abertas (prancheta 8). */
+  surfaces: Surface[];
 }
+
+/** O que se abre no painel direito pelo "+" (o Diff está sempre lá). */
+export type Surface = Exclude<RightPanelTab, "diff">;
+export const SURFACES: Surface[] = ["browser", "files", "design", "devices"];
 
 export type RightPanelTab = "diff" | "files" | "browser" | "design" | "devices";
 
-export const useChatStore = create<ChatState>(() => ({ slot: null, composing: false, terminalOpen: {}, panel: null, panelMaximized: false, browser: null, thread: null }));
+export const useChatStore = create<ChatState>(() => ({ slot: null, composing: false, terminalOpen: {}, panel: null, panelMaximized: false, browser: null, thread: null, surfaces: ["browser"] }));
 
 const sameRect = (a: Rect | null, b: Rect | null) =>
   a === b || (!!a && !!b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);
@@ -55,6 +61,27 @@ export function setTerminalOpen(tabId: string, open: boolean): void {
 /** Abre o painel direito nesta aba; `null` fecha. */
 export function setRightPanel(panel: RightPanelTab | null): void {
   useChatStore.setState(panel ? { panel } : { panel: null, panelMaximized: false });
+}
+
+/** Abre uma superfície no painel (e mostra). */
+export function addSurface(surface: Surface): void {
+  useChatStore.setState((s) => ({ surfaces: s.surfaces.includes(surface) ? s.surfaces : [...s.surfaces, surface], panel: surface }));
+}
+
+/** Fecha uma superfície; se era a que estava à vista, volta ao Diff. */
+export function removeSurface(surface: Surface): void {
+  useChatStore.setState((s) => ({ surfaces: s.surfaces.filter((x) => x !== surface), panel: s.panel === surface ? "diff" : s.panel }));
+}
+
+/** O nome de uma aba de navegador: o host com a porta (`localhost:1420`); `null` sem endereço. Pura. */
+export function hostLabel(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return u.host || null;
+  } catch {
+    return null;
+  }
 }
 
 export function toggleRightPanel(): void {

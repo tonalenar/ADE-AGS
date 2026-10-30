@@ -3812,5 +3812,7 @@
   "settings.decisions.whereMemory": "Aprobar memoria: la sugerencia viene preseleccionada; quien hace clic eres tú.",
   "settings.decisions.whereVigia": "Misiones: confirma un informe final que la regla del Vigia no reconoció.",
   "settings.decisions.whereRouting": "Equipo: un mensaje sin @ recibe un chip de destinatario; tú eliges.",
-  "settings.decisions.whereBrowser": "Navegador: con ags portal act, elige la próxima operación y el elemento."
+  "settings.decisions.whereBrowser": "Navegador: con ags portal act, elige la próxima operación y el elemento.",
+  "chat.panel.close": "Cerrar {{name}}",
+  "chat.panel.add": "Abrir en el panel"
 }

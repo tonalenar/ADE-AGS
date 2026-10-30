@@ -59,10 +59,16 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 ## Telas no visual novo
 
 - **Telas cheias dentro da casca:** com o chat ligado, Configurações, Missões, Frota, Squads, Skills, Marketplace, Forge e Histórico abrem no lugar da conversa (`ChatPage`), não por cima (`RouteModal`). As rotas não mudam. Escape ou "Voltar ao chat" voltam à conversa.
-- **Configurações (prancheta 5):** a sidebar do chat vira o menu das seções (`SettingsSidebar`), em três grupos com busca. A página esconde o menu próprio e a coluna de memória.
-- **Seção "Modo chat":** saiu de Avançado e virou seção própria (`chat`), com o liga/desliga e dois padrões das conversas novas: worktree por conversa e começar no Plano (os mesmos valores que o composer lembra).
+- **Configurações (prancheta 5):** a sidebar do chat vira o menu das seções (`SettingsSidebar`), em três grupos com busca e o selo "Novo". A página esconde o menu próprio e a coluna de memória, e ganha título e subtítulo. As seções herdam o visual novo pelo `SettingsLookContext` (`settingsLook.ts`): cartões com borda, linhas de 14 px, chave azul e segmentado. Fora do chat nada muda.
+- **Seção "Modo chat":** saiu de Avançado e virou seção própria (`chat`).
+  - Ao abrir: o liga/desliga e o **modo inicial** (Chat, Abas ou Canvas; `uiStore.startMode`, aplicado na abertura por `startShell` e, para Abas/Canvas, pelo `AppShell` na pasta ativa).
+  - Novas conversas: agente e permissões padrão, worktree, Plano e "sem terminal" (os mesmos valores que o composer lembra, `chatPrefs`).
+  - Visual: a **largura da conversa** (Normal 736 px, Larga 960 px, Inteira; `chatLook.ts`, ao vivo).
+- **Seções novas:** Dispositivos (as preferências do simulador iOS e o Android) e Worktrees.
+- **Contas (prancheta 6):** no chat, os agentes em abas; as contas do escolhido num cartão com o estado e as barras de cota (janela atual e semana; cor por faixa em `accounts/meter.ts`); adicionar conta; os pools; e o gerenciador completo (limites, chaves, git) embaixo.
+- **Decisões (prancheta 7):** no chat, duas colunas. À esquerda o provedor, a comparação e os pontos com o selo do modo (`POINT_MODE`: Sombra, Ajuda, Sugere, Decide, como na tabela do `docs/agentes/JEV.md`); à direita o resumo do modo sombra (`shadowSummary`) e onde o Jev age.
 - **Espaços (prancheta 6):** nas outras telas a sidebar lista Conversas e os Espaços (`chatSpaces.ts`). Memória abre a seção das Configurações.
-- **Painel direito:** duas abas novas, carregadas sob demanda (puxam o canvas):
+- **Painel direito (prancheta 8):** o Diff fixo e as superfícies abertas (`useChatStore.surfaces`), cada uma com o nome do que mostra (o host do navegador, o aparelho ligado); o "+" abre as outras e cada aba fecha no "×". Design e Dispositivos são carregados sob demanda (puxam o canvas):
   - **Design:** o mesmo `DesignPanel` do canvas, com os designs da pasta da conversa;
   - **Dispositivos:** o simulador iOS (`SimulatorScreen`, a tela nativa) e o Android (quadros do `adb`, toque e deslizar), como os nós do canvas.
 
