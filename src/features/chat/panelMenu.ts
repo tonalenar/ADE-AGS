@@ -1,12 +1,13 @@
 import { DESKTOP_OS } from "@/app/platform";
 
 import type { Surface } from "./store";
+import { SUMMARY_KEY } from "./summary/summaryModel";
 
 /**
  * O menu "Abrir uma superfície" do painel direito (o estado vazio e o "+" do topo, como no T3 Code):
  * cada linha tem uma tecla de atalho, que vale com o foco no painel. Tudo puro, para testar sem tela.
  */
-export type PanelChoice = Surface | "diff" | "terminal" | "pr";
+export type PanelChoice = Surface | "summary" | "diff" | "terminal" | "pr";
 
 export interface PanelEntry {
   id: PanelChoice;
@@ -15,11 +16,12 @@ export interface PanelEntry {
 }
 
 /**
- * A ordem e as teclas. As do T3 ficam (B, T, F, D, P); o resto é do ADE: S de Design, I de iOS,
- * A de Android e O de Orquestrador para o Time (o M do T3 é "Device", que aqui são o I e o A, e o T
+ * A ordem e as teclas. As do T3 ficam (B, T, F, D, P); o resto é do ADE: R de Resumo (a superfície padrão),
+ * S de Design, I de iOS, A de Android e O de Orquestrador para o Time (o M do T3 é "Device", que aqui são o I e o A, e o T
  * já é do Terminal).
  */
 export const PANEL_ENTRIES: PanelEntry[] = [
+  { id: "summary", key: SUMMARY_KEY },
   { id: "browser", key: "b" },
   { id: "terminal", key: "t" },
   { id: "files", key: "f" },
