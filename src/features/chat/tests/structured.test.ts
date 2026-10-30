@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { ThreadRow } from "@/features/chat/structured/ipc";
-import { applyThreadEvent, EMPTY_LIVE, threadCards, threadIdOf, threadKey } from "@/features/chat/structured/model";
+import type { RequestRow, ThreadRow } from "@/features/chat/structured/ipc";
+import {
+  applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isPlanExit, menuAccess, questionOf, STRUCTURED_AGENTS, threadCards, threadIdOf, threadKey,
+  togglePlan,
+} from "@/features/chat/structured/model";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 const row = (over: Partial<ThreadRow> = {}): ThreadRow => ({
@@ -55,5 +58,44 @@ describe("conversa por protocolo: cartões", () => {
   it("a branch vem do painel quando a pasta está nele", () => {
     const groups = [{ workspaces: [{ cwd: "/home/eu/app", title: "app", branch: "feat/x", isWorktree: true }] }] as unknown as RepoGroup[];
     expect(threadCards([row()], groups, (id) => id, null)[0]).toMatchObject({ branch: "feat/x", isWorktree: true, active: false });
+  });
+});
+
+describe("conversa por protocolo: Claude Code e o Plano", () => {
+  const request = (over: Partial<RequestRow> = {}): RequestRow => ({
+    id: "q", threadId: "t1", kind: "command", itemId: "toolu_1", title: "", detail: "", options: [], state: "pending", createdAt: 1, ...over,
+  });
+
+  it("o Claude Code conversa por protocolo, como o Codex", () => {
+    expect(STRUCTURED_AGENTS.has("claude-code")).toBe(true);
+    expect(STRUCTURED_AGENTS.has("codex")).toBe(true);
+    expect(STRUCTURED_AGENTS.has("gemini-cli")).toBe(false);
+  });
+
+  it("o evento da conversa muda só o que veio (título ou acesso)", () => {
+    const base = row({ agentId: "claude-code", access: "plan" });
+    expect(applyThreadMeta(base, { access: "edits" })).toMatchObject({ access: "edits", title: "Arrumar login" });
+    expect(applyThreadMeta(base, { title: "Novo" })).toMatchObject({ access: "plan", title: "Novo" });
+  });
+
+  it("a saída do Plano se reconhece pela ferramenta; a aprovação comum e a do Codex não", () => {
+    expect(isPlanExit(request({ options: { tool: "ExitPlanMode" } }))).toBe(true);
+    expect(isPlanExit(request({ options: { tool: "Bash" } }))).toBe(false);
+    expect(isPlanExit(request({ options: [] }))).toBe(false);
+    expect(isPlanExit(null)).toBe(false);
+  });
+
+  it("a pergunta sai das opções só quando o pedido é pergunta", () => {
+    const options = [{ id: "Qual banco?", question: "Qual banco?", options: ["SQLite"] }];
+    expect(questionOf(request({ kind: "question", options }))).toEqual(options[0]);
+    expect(questionOf(request({ kind: "command", options: { tool: "Bash" } }))).toBeNull();
+    expect(questionOf(request({ kind: "question", options: { tool: "x" } }))).toBeNull();
+  });
+
+  it("desligar o Plano volta a Supervisionado, e o menu mostra esse modo enquanto planeja", () => {
+    expect(togglePlan("full")).toBe("plan");
+    expect(togglePlan("plan")).toBe("ask");
+    expect(menuAccess("plan")).toBe("ask");
+    expect(menuAccess("safe")).toBe("safe");
   });
 });

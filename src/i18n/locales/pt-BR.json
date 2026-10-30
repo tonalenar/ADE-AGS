@@ -3746,6 +3746,10 @@
   "chat.structured.command": "O agente quer rodar um comando",
   "chat.structured.fileChange": "O agente quer editar arquivos",
   "chat.structured.answer": "Responda a pergunta do agente",
-  "chat.settings.structured": "Codex sem terminal (app-server)",
-  "chat.settings.structuredHint": "As conversas novas com o Codex falam direto com ele: aprovações e perguntas chegam no chat, e parar interrompe o turno. Desligado, o Codex roda na TUI, como os outros agentes."
+  "chat.settings.structured": "Codex e Claude Code sem terminal",
+  "chat.settings.structuredHint": "As conversas novas com o Codex (app-server) e com o Claude Code (stream-json) falam direto com eles: aprovações, perguntas e a saída do Plano chegam no chat, e parar interrompe o turno. Desligado, eles rodam na TUI, como os outros agentes.",
+  "chat.structured.planReady": "O plano está pronto. Seguir com ele?",
+  "chat.structured.planKeep": "Continuar planejando",
+  "chat.structured.planEdits": "Aprovar e aceitar edições",
+  "chat.structured.planApprove": "Aprovar o plano"
 }

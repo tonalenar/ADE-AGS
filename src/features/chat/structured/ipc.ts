@@ -3,6 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import type { ChatAccess } from "../chatModel";
 import type { TimelineItem } from "../timeline/types";
 
+/**
+ * O acesso de uma conversa por protocolo: os modos do chat e, no Claude Code, o Plano (que lá é um
+ * modo de permissão, `--permission-mode plan`).
+ */
+export type ThreadAccess = ChatAccess | "plan";
+
 /** Espelho de `src-tauri/src/conversa/store.rs`. */
 export interface ThreadRow {
   id: string;
@@ -11,7 +17,7 @@ export interface ThreadRow {
   title: string;
   model: string | null;
   effort: string | null;
-  access: ChatAccess;
+  access: ThreadAccess;
   accountId: string | null;
   state: "active" | "settled";
   createdAt: number;
@@ -31,7 +37,8 @@ export interface RequestRow {
   itemId: string | null;
   title: string;
   detail: string;
-  options: QuestionOption[] | null;
+  /** Pergunta: as perguntas. Aprovação do Claude: a ferramenta (`{tool}`). Aprovação do Codex: `[]`. */
+  options: QuestionOption[] | { tool?: string } | null;
   state: "pending" | "answered" | "expired";
   createdAt: number;
 }
@@ -44,7 +51,7 @@ export interface ThreadStatus {
 export const chatThreads = () => invoke<ThreadRow[]>("chat_threads");
 
 export const chatThreadCreate = (input: {
-  agentId: string; cwd: string; title: string; model: string | null; effort: string | null; access: ChatAccess; accountId: string | null;
+  agentId: string; cwd: string; title: string; model: string | null; effort: string | null; access: ThreadAccess; accountId: string | null;
 }) => invoke<ThreadRow>("chat_thread_create", input);
 
 export const chatThreadSend = (threadId: string, text: string) => invoke<void>("chat_thread_send", { threadId, text });
@@ -53,7 +60,7 @@ export const chatThreadRequests = (threadId: string) => invoke<RequestRow[]>("ch
 export const chatThreadStatus = (threadId: string) => invoke<ThreadStatus>("chat_thread_status", { threadId });
 export const chatThreadInterrupt = (threadId: string) => invoke<void>("chat_thread_interrupt", { threadId });
 export const chatRequestAnswer = (requestId: string, choice: string) => invoke<boolean>("chat_request_answer", { requestId, choice });
-export const chatThreadRetune = (threadId: string, model: string | null, effort: string | null, access: ChatAccess) =>
+export const chatThreadRetune = (threadId: string, model: string | null, effort: string | null, access: ThreadAccess) =>
   invoke<ThreadRow>("chat_thread_retune", { threadId, model, effort, access });
 export const chatThreadRename = (threadId: string, title: string) => invoke<void>("chat_thread_rename", { threadId, title });
 export const chatThreadSettle = (threadId: string, settled: boolean) => invoke<void>("chat_thread_settle", { threadId, settled });

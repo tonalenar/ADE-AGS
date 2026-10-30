@@ -1,13 +1,12 @@
 import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 
-import type { ChatAccess } from "../chatModel";
 import { setComposing, useChatStore } from "../store";
 import {
   chatRequestAnswer, chatThreadCreate, chatThreadInterrupt, chatThreadItems, chatThreadRequests, chatThreadRetune, chatThreadSend,
-  chatThreadSettle, chatThreads, chatThreadStatus, type ThreadRow,
+  chatThreadSettle, chatThreads, chatThreadStatus, type ThreadAccess, type ThreadRow,
 } from "./ipc";
-import { applyThreadEvent, EMPTY_LIVE, type ThreadEvent, type ThreadLive } from "./model";
+import { applyThreadEvent, applyThreadMeta, EMPTY_LIVE, type ThreadEvent, type ThreadLive } from "./model";
 
 /**
  * As conversas por protocolo, ao vivo: a lista (do banco) e, por conversa aberta, a timeline, os
@@ -52,7 +51,7 @@ export function startStructured(): void {
       return;
     }
     if (event.type === "thread") {
-      useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? { ...t, title: event.title } : t)) }));
+      useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? applyThreadMeta(t, event) : t)) }));
       return;
     }
     patchLive(event.threadId, (live) => applyThreadEvent(live, event));
@@ -89,7 +88,7 @@ export interface NewThread {
   title: string;
   model: string | null;
   effort: string | null;
-  access: ChatAccess;
+  access: ThreadAccess;
   accountId: string | null;
 }
 
@@ -119,7 +118,7 @@ export function answerRequest(threadId: string, requestId: string, choice: strin
   chatRequestAnswer(requestId, choice).catch((e) => patchLive(threadId, (live) => ({ ...live, error: String(e) })));
 }
 
-export function retuneThread(id: string, model: string | null, effort: string | null, access: ChatAccess): void {
+export function retuneThread(id: string, model: string | null, effort: string | null, access: ThreadAccess): void {
   chatThreadRetune(id, model, effort, access)
     .then(upsertThread)
     .catch((e) => patchLive(id, (live) => ({ ...live, error: String(e) })));
