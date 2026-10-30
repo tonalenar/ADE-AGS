@@ -694,12 +694,7 @@ pub async fn pty_create(
         )
         && let Some(binary) = crate::ai_memory::tabs::supported_binary(std::path::Path::new(&cwd))
     {
-        let mut extras = env.as_ref().cloned().unwrap_or_default();
-        if !extras.contains_key("OPENCODE_CONFIG_CONTENT")
-            && let Ok(raw) = std::env::var("OPENCODE_CONFIG_CONTENT")
-        {
-            extras.insert("OPENCODE_CONFIG_CONTENT".into(), raw);
-        }
+        let extras = env.as_ref().cloned().unwrap_or_default();
         let settings = crate::ai_memory::tabs::user_settings(&home, &extras);
         match crate::ai_memory::tabs::prepare(&binary, &dir, tab, agent, &argv, &extras, &settings)
         {

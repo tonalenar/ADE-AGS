@@ -67,8 +67,6 @@ pub(crate) fn agent_from_program(program: &str) -> Option<&'static str> {
         .unwrap_or(&file);
     match stem {
         "claude" => Some("claude"),
-        "codex" => Some("codex"),
-        "opencode" => Some("opencode"),
         _ => None,
     }
 }
@@ -144,7 +142,7 @@ pub(crate) fn prepare(
     tab_id: &str,
     agent: &str,
     argv: &[String],
-    env: &HashMap<String, String>,
+    _env: &HashMap<String, String>,
     settings: &[PathBuf],
 ) -> Result<TabInjection, String> {
     let name = crate::ipc::mcp::tab_config_name(tab_id);
@@ -152,92 +150,58 @@ pub(crate) fn prepare(
         return Err("Identificador de aba inválido.".into());
     }
     // Flags depois de `--` virariam parte do prompt; não alteramos esse comando.
-    if agent != "opencode" && argv.iter().any(|arg| arg == "--") {
+    // Sem pin de escopo nativo, só Claude session-aware pode receber MCP.
+    if agent != "claude" || argv.iter().any(|arg| arg == "--") {
         return Ok(TabInjection::default());
     }
     let binary = crate::util::external_path(program)
         .to_string_lossy()
         .into_owned();
     let mut plan = TabInjection::default();
-    match agent {
-        "claude" => {
-            std::fs::create_dir_all(dir)
-                .map_err(|_| "Não foi possível preparar o MCP da aba.".to_string())?;
-            let config_path = dir.join(format!("{name}.json"));
-            let mut config = read_owned_config(&config_path)?;
-            let root = config
-                .as_object_mut()
-                .ok_or("Config MCP da aba inválida.")?;
-            let servers = root
-                .entry("mcpServers")
-                .or_insert_with(|| json!({}))
-                .as_object_mut()
-                .ok_or("Servidores MCP da aba inválidos.")?;
-            // Claude define CLAUDE_CODE_SESSION_ID ao abrir seu servidor MCP.
-            servers.insert(
-                "ai-memory".into(),
-                json!({"command":binary,"args":["mcp-bridge"]}),
-            );
-            std::fs::write(&config_path, config.to_string())
-                .map_err(|_| "Não foi possível gravar o MCP da aba.".to_string())?;
-            let config_arg = crate::util::external_path(&config_path)
+    std::fs::create_dir_all(dir)
+        .map_err(|_| "Não foi possível preparar o MCP da aba.".to_string())?;
+    let config_path = dir.join(format!("{name}.json"));
+    let mut config = read_owned_config(&config_path)?;
+    let root = config
+        .as_object_mut()
+        .ok_or("Config MCP da aba inválida.")?;
+    let servers = root
+        .entry("mcpServers")
+        .or_insert_with(|| json!({}))
+        .as_object_mut()
+        .ok_or("Servidores MCP da aba inválidos.")?;
+    // Claude define CLAUDE_CODE_SESSION_ID ao abrir seu servidor MCP.
+    servers.insert(
+        "ai-memory".into(),
+        json!({"command":binary,"args":["mcp-bridge"]}),
+    );
+    std::fs::write(&config_path, config.to_string())
+        .map_err(|_| "Não foi possível gravar o MCP da aba.".to_string())?;
+    let config_arg = crate::util::external_path(&config_path)
+        .to_string_lossy()
+        .into_owned();
+    if !argv.iter().any(|a| a == &config_arg) {
+        plan.args.extend(["--mcp-config".into(), config_arg]);
+    }
+    // Não substitui --settings que a pessoa colocou no comando.
+    if !argv
+        .iter()
+        .any(|a| a == "--settings" || a.starts_with("--settings="))
+        && !should_skip_hooks(settings)
+    {
+        let file = dir.join(format!(
+            "{name}.ai-memory-{}.settings.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        plan.settings_file = Some(file.clone());
+        std::fs::write(&file, hooks(program).to_string())
+            .map_err(|_| "Não foi possível gravar hooks da aba.".to_string())?;
+        plan.args.extend([
+            "--settings".into(),
+            crate::util::external_path(&file)
                 .to_string_lossy()
-                .into_owned();
-            if !argv.iter().any(|a| a == &config_arg) {
-                plan.args.extend(["--mcp-config".into(), config_arg]);
-            }
-            // Não substitui --settings que a pessoa colocou no comando.
-            if !argv
-                .iter()
-                .any(|a| a == "--settings" || a.starts_with("--settings="))
-                && !should_skip_hooks(settings)
-            {
-                let file = dir.join(format!(
-                    "{name}.ai-memory-{}.settings.json",
-                    uuid::Uuid::new_v4().simple()
-                ));
-                plan.settings_file = Some(file.clone());
-                std::fs::write(&file, hooks(program).to_string())
-                    .map_err(|_| "Não foi possível gravar hooks da aba.".to_string())?;
-                plan.args.extend([
-                    "--settings".into(),
-                    crate::util::external_path(&file)
-                        .to_string_lossy()
-                        .into_owned(),
-                ]);
-            }
-        }
-        "opencode" => {
-            let mut config: Value = match env.get("OPENCODE_CONFIG_CONTENT") {
-                Some(raw) => serde_json::from_str(raw)
-                    .map_err(|_| "Config OpenCode da aba inválida.".to_string())?,
-                None => json!({}),
-            };
-            let root = config.as_object_mut().ok_or("Config OpenCode inválida.")?;
-            let servers = root
-                .entry("mcp")
-                .or_insert_with(|| json!({}))
-                .as_object_mut()
-                .ok_or("Servidores OpenCode inválidos.")?;
-            servers.insert("ai-memory".into(), json!({"type":"local","command":[binary,"mcp-bridge","--no-session-id"],"enabled":true}));
-            plan.env
-                .insert("OPENCODE_CONFIG_CONTENT".into(), config.to_string());
-        }
-        "codex" => {
-            // Literais TOML mantêm barras do Windows; apóstrofo usa string JSON/TOML.
-            let toml_binary = if binary.contains('\'') {
-                serde_json::to_string(&binary).map_err(|_| "Caminho de binário inválido.")?
-            } else {
-                format!("'{binary}'")
-            };
-            plan.args.extend([
-                "-c".into(),
-                format!("mcp_servers.ai-memory.command={toml_binary}"),
-                "-c".into(),
-                "mcp_servers.ai-memory.args=['mcp-bridge','--no-session-id']".into(),
-            ]);
-        }
-        _ => {}
+                .into_owned(),
+        ]);
     }
     Ok(plan)
 }

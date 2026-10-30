@@ -473,34 +473,24 @@ while :; do :; done
     }
 
     #[test]
-    fn opencode_mescla_config_inline_e_codex_so_recebe_mcp_sem_hooks() {
+    fn bridges_estaticos_nao_recebem_mcp_automatico_sem_escopo_imposto() {
         let fake = Fake::new("ai-memory 3.3.0", "exit 99");
         let env = std::collections::HashMap::from([(
             "OPENCODE_CONFIG_CONTENT".into(),
-            r#"{"mcp":{"ags":{"type":"local","command":["ags"]}},"permission":{"bash":"ask"}}"#
-                .into(),
+            r#"{"mcp":{"ags":{"command":["ags"]}},"permission":{"bash":"ask"}}"#.into(),
         )]);
+        let before = env.clone();
         let dir = fake.root.join("mcp");
-        let plan =
-            crate::ai_memory::tabs::prepare(&fake.program, &dir, "abc", "opencode", &[], &env, &[])
-                .unwrap();
-        let config: serde_json::Value =
-            serde_json::from_str(&plan.env["OPENCODE_CONFIG_CONTENT"]).unwrap();
-        assert_eq!(config["mcp"]["ags"]["command"], serde_json::json!(["ags"]));
-        assert_eq!(config["mcp"]["ai-memory"]["command"][2], "--no-session-id");
-        assert_eq!(config["permission"]["bash"], "ask");
-        assert!(plan.settings_file.is_none());
-        let plan =
-            crate::ai_memory::tabs::prepare(&fake.program, &dir, "abc", "codex", &[], &env, &[])
-                .unwrap();
-        assert_eq!(plan.args[0], "-c");
-        assert!(plan.args[1].starts_with("mcp_servers.ai-memory.command="));
-        assert_eq!(
-            plan.args[3],
-            "mcp_servers.ai-memory.args=['mcp-bridge','--no-session-id']"
-        );
-        assert!(plan.settings_file.is_none());
-        assert!(!dir.exists());
+        for agent in ["opencode", "codex"] {
+            let plan =
+                crate::ai_memory::tabs::prepare(&fake.program, &dir, "abc", agent, &[], &env, &[])
+                    .unwrap();
+            assert!(plan.args.is_empty());
+            assert!(plan.env.is_empty());
+            assert!(plan.settings_file.is_none());
+            assert!(!dir.exists());
+        }
+        assert_eq!(env, before);
     }
 
     #[test]
@@ -545,6 +535,8 @@ while :; do :; done
             Some("claude")
         );
         assert_eq!(crate::ai_memory::tabs::agent_from_program("agy"), None);
+        assert_eq!(crate::ai_memory::tabs::agent_from_program("codex"), None);
+        assert_eq!(crate::ai_memory::tabs::agent_from_program("opencode"), None);
     }
 
     #[test]

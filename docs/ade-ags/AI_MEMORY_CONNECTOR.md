@@ -98,14 +98,14 @@ O protocolo interno envia `initialize`, aguarda a resposta, envia a notificaçã
 
 O ajuste **Memória do ai-memory nas abas**, na seção de agentes, usa `ai_memory_tabs_enabled`. Ausência da chave significa ligado; `false` desliga a injeção. Erro ao ler o ajuste falha fechado. Só `terminal::pty_create` consulta a chave: mudar o interruptor não reconfigura nem reinicia PTYs vivos. A variável `AI_MEMORY_RUN_AUTOWIRE=false` é imposta depois do ambiente do perfil em **todo** novo PTY, inclusive com o interruptor desligado, para impedir configuração global automática.
 
-A descoberta usa o PATH do app e aceita apenas `--version` ≥3.3.0, sem consultar o servidor. O resultado é cacheado pelo caminho, tamanho e mtime do binário; uma troca do executável invalida o cache. Nomes de executável reconhecidos: `claude`, `codex`, `opencode` e sufixos `.exe`/`.cmd`. Shells, wrappers com outro nome e Antigravity não recebem integração automática. Antigravity ficou fora por não haver mecanismo por aba verificado sem escrita global.
+A descoberta usa o PATH do app e aceita apenas `--version` ≥3.3.0, sem consultar o servidor. O resultado é cacheado pelo caminho, tamanho e mtime do binário; uma troca do executável invalida o cache. A injeção automática reconhece somente `claude` e seus sufixos `.exe`/`.cmd`. Codex/OpenCode ficam sem MCP automático até existir escopo imposto por aba. Shells, wrappers com outro nome e Antigravity não recebem integração automática. Antigravity ficou fora por não haver mecanismo por aba verificado sem escrita global.
 
 | Agente | Injeção no nascimento do PTY |
 |---|---|
 | Claude | Soma `mcpServers.ai-memory` ao `tab-<id>.json` do ADE, preservando `ags`; comando absoluto do binário e `args: ["mcp-bridge"]`. Claude fornece `CLAUDE_CODE_SESSION_ID` ao iniciar esse MCP. Se não existir o config do ADE, cria somente o registro adicional e acrescenta `--mcp-config`. |
 | Claude (captura) | `--settings <ADE-data>/mcp/tab-<id>.ai-memory-<nonce>.settings.json`. JSON `{"hooks":{"SessionStart":[{"matcher":"","hooks":[{"type":"command","command":"'<binário>' hook --event session-start --agent claude-code"}]}], ...}}`. Windows usa exec form: `command` é o binário, `args` é o vetor nativo. Sem token ou URL no arquivo. |
-| OpenCode | Mescla `mcp.ai-memory` ao JSON de `OPENCODE_CONFIG_CONTENT`, preservando `ags`, permissões e demais campos. Registro local com `command: ["<binário>","mcp-bridge","--no-session-id"]`. Não registra hooks/plugin. |
-| Codex | Acrescenta `-c mcp_servers.ai-memory.command='<binário>'` e `-c "mcp_servers.ai-memory.args=['mcp-bridge','--no-session-id']"` como argumentos separados. Sem hooks ou escrita de configuração do Codex por esta integração. |
+| OpenCode | MCP automático do ai-memory desativado: o bridge estático não fixa o escopo da pasta. O MCP `ags`, permissões e conteúdo configurado pela pessoa permanecem intactos. |
+| Codex | MCP automático do ai-memory desativado pelo mesmo limite de escopo. Sem hooks ou novos `-c mcp_servers.ai-memory.*`; configurações globais da pessoa não são removidas. |
 
 Os hooks nativos foram conferidos na tag v3.3.0: `cli.rs::HookArgs`, `commands/render_shared.rs::CLAUDE_CODE_EVENTS` e `HookCommandPlatform::for_bash_runner`. macOS/Linux usam `PosixNative` por padrão e Windows usa `WindowsNative`. Existe o subcomando `hook`, portanto **não é necessário instalar os scripts `.sh`** para esta injeção. Eventos: SessionStart/session-start, UserPromptSubmit/user-prompt-submit, PreToolUse/pre-tool-use, PostToolUse/post-tool-use, PreCompact/pre-compact, Stop/stop, SessionEnd/session-end, SubagentStart/subagent-start e SubagentStop/subagent-stop. SessionEnd recebe timeout de 15s, como o instalador nativo. Não se habilita captura de resposta do assistente por flags adicionais.
 
@@ -115,6 +115,12 @@ O arquivo de hooks tem nonce por instância, para o encerramento de uma instânc
 
 Sem prelaunch, os argumentos são anexados diretamente ao `CommandBuilder`, sem remontar/parsing de strings. Com prelaunch POSIX, recebem citação de shell. Com prelaunch Windows, valores que exigiriam escape inseguro (`"`, `%`, `!`, `^`, quebras de linha) fazem a integração ser omitida e a aba abrir normalmente; não se tenta reinterpretar esses caracteres. Windows e captura real não foram executados nesta entrega. Provas usam fakes e montagem de arquivos em diretório temporário, sem acessar a instalação/base real.
 
-Comandos Claude/Codex que já contêm o terminador literal `--` não recebem flags adicionais, pois elas virariam texto do prompt. Configurações e wrappers especiais continuam sendo decisão da pessoa, sem reescrita silenciosa do comando.
+Comandos Claude que já contêm o terminador literal `--` não recebem flags adicionais, pois elas virariam texto do prompt. Configurações e wrappers especiais continuam sendo decisão da pessoa, sem reescrita silenciosa do comando.
 
 O opt-out não desliga hooks/MCP que a pessoa já instalou globalmente por conta própria; apenas impede acréscimos do ADE. Verificação desta fase: 15 testes `ai_memory::`, 23 testes `terminal::test::`, 12 testes `tabMcp.test.ts`, TypeScript, Babel e lint de testes aprovados. Clippy não adicionou avisos em relação à base. Não houve teste de captura com agente real, HMR, instalação ou execução contra a base real do ai-memory.
+
+### Mitigação dos bridges estáticos
+
+A 3.3.0 não impõe workspace/projeto em `mcp-bridge --no-session-id`. A query de URL não seleciona escopo e o relay repassa `tools/call` sem completar argumentos. Por isso foi retirada a injeção automática de MCP do ai-memory em Codex/OpenCode. O Claude continua session-aware, o painel usa chamadas de nome fixo com par explícito e `AI_MEMORY_RUN_AUTOWIRE=false` continua em todo novo PTY. Um adapter por aba depende de decisão posterior; instruções no prompt não substituem imposição de escopo. Abas vivas e configurações globais preexistentes não são alteradas.
+
+Prova da mitigação: teste de regressão inicialmente falhou porque OpenCode ainda recebia `OPENCODE_CONFIG_CONTENT` adicional; após retirar os bridges estáticos, `cargo test --lib ai_memory::` passou com 31 testes na base integrada. TypeScript, Babel e lint de testes passaram; Clippy voltou aos 138 avisos herdados, sem aviso novo no conector.
