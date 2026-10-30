@@ -1195,6 +1195,23 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY(entry_id, revision)
     );")?;
+    // Registro da cópia única das memórias para a wiki do ai-memory (`ai_memory::migracao`). Aditiva e
+    // sem subir user_version. Só essa tabela é escrita pela migração; as de memória ficam intocadas.
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS ai_memory_migration (
+        entry_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        ade_workspace_id TEXT NOT NULL,
+        content_hash TEXT NOT NULL,
+        body_sha256 TEXT NOT NULL,
+        aim_workspace TEXT,
+        aim_project TEXT,
+        wiki_path TEXT,
+        status TEXT NOT NULL CHECK(status IN ('written','skipped_secret','conflict','divergent','failed')),
+        reason TEXT,
+        migrated_at INTEGER NOT NULL,
+        PRIMARY KEY(entry_id, revision)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_memory_migration_ws ON ai_memory_migration(ade_workspace_id, status);")?;
     // De que repositório é cada memória (ver `memory::repo_scope`). Sem subir user_version, como as
     // outras aditivas daqui. O preenchimento roda uma vez, quando a coluna nasce; uma falha nele não
     // impede abrir a base (as memórias ficam sem chave e valem em todos os repositórios, como antes).
