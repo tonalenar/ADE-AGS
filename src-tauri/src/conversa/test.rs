@@ -139,3 +139,225 @@ fn a_resposta_sai_no_formato_do_protocolo() {
     assert_eq!(answer_of("command", "deny", &json!([])), json!({ "decision": "decline" }));
     assert_eq!(answer_of("question", "SQLite", &json!([{ "id": "q1" }])), json!({ "answers": { "q1": { "answers": ["SQLite"] } } }));
 }
+
+// ── Claude Code por protocolo (`claude_map`) e roteamento (`api`) ─────────────
+
+mod claude {
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::{json, Value};
+
+    use crate::canal::timeline::{ItemKind, ToolKind, ToolStatus};
+    use crate::conversa::api::{self, Engine, NewThread};
+    use crate::conversa::claude_map::{access_of_mode, answer_of, ask_of, launch_args, permission_mode, Mapper, Out, Pending, Start, TurnResult};
+    use crate::conversa::store::ThreadRow;
+
+    fn row(access: &str) -> ThreadRow {
+        ThreadRow {
+            id: "t".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/p".into(), title: String::new(),
+            model: Some("haiku".into()), effort: Some("low".into()), access: access.into(), account_id: None,
+            state: "active".into(), created_at: 1, updated_at: 1,
+        }
+    }
+
+    fn items(outs: Vec<Out>) -> Vec<crate::canal::timeline::Item> {
+        outs.into_iter().filter_map(|o| if let Out::Item(i) = o { Some(i) } else { None }).collect()
+    }
+
+    // Linhas como as do `claude -p --output-format stream-json --include-partial-messages` 2.1.312
+    // (encurtadas de uma sessão real).
+    fn assistant(message_id: &str, block: Value) -> Value {
+        json!({ "type": "assistant", "message": { "id": message_id, "role": "assistant", "content": [block] },
+            "parent_tool_use_id": null, "uuid": "u-1", "timestamp": "2026-10-30T00:56:27.889Z" })
+    }
+
+    #[test]
+    fn o_acesso_vira_o_modo_de_permissao_do_claude_e_volta() {
+        let pairs = [("ask", "default"), ("edits", "acceptEdits"), ("safe", "auto"), ("full", "bypassPermissions"), ("plan", "plan")];
+        for (access, mode) in pairs {
+            assert_eq!(permission_mode(access), mode);
+            assert_eq!(access_of_mode(mode), Some(access));
+        }
+        assert_eq!(permission_mode("lixo"), "default");
+        assert_eq!(access_of_mode("manual"), Some("ask"));
+        assert_eq!(access_of_mode("dontAsk"), None);
+    }
+
+    #[test]
+    fn os_argumentos_abrem_ou_retomam_a_sessao_com_o_modo_modelo_e_esforco() {
+        let new = launch_args(&row("plan"), Start::New("s-1"));
+        let joined = new.join(" ");
+        assert!(joined.starts_with("-p --input-format stream-json --output-format stream-json --verbose"));
+        assert!(joined.contains("--permission-prompt-tool stdio --permission-mode plan --session-id s-1 --model haiku --effort low"));
+        let resumed = launch_args(&ThreadRow { model: None, effort: None, ..row("safe") }, Start::Resume("s-1")).join(" ");
+        assert!(resumed.ends_with("--permission-mode auto --resume s-1"));
+    }
+
+    #[test]
+    fn a_ferramenta_abre_e_fecha_com_o_resultado() {
+        let mut m = Mapper::default();
+        let tool = items(m.feed(&assistant("msg_1", json!({ "type": "tool_use", "id": "toolu_1", "name": "Write",
+            "input": { "file_path": "/p/ok.txt", "content": "OK" } })), 5));
+        assert_eq!(tool.len(), 1);
+        assert_eq!((tool[0].tool, tool[0].status, tool[0].path.as_deref(), tool[0].added), (Some(ToolKind::Write), Some(ToolStatus::Running), Some("/p/ok.txt"), Some(1)));
+        assert!(tool[0].at.is_some_and(|at| at > 5));
+        let done = items(m.feed(&json!({ "type": "user", "parent_tool_use_id": null, "message": { "role": "user", "content": [
+            { "tool_use_id": "toolu_1", "type": "tool_result", "content": "File created successfully at: /p/ok.txt" }
+        ] }, "tool_result_meta": [{ "id": "toolu_1", "permission_decision": { "decision": "accept", "source": "user_temporary" } }] }), 6));
+        assert_eq!((done[0].id.as_str(), done[0].status), ("toolu_1", Some(ToolStatus::Done)));
+        assert_eq!(done[0].output.as_deref(), Some("File created successfully at: /p/ok.txt"));
+    }
+
+    #[test]
+    fn a_ferramenta_negada_aparece_como_negada() {
+        let mut m = Mapper::default();
+        m.feed(&assistant("msg_1", json!({ "type": "tool_use", "id": "toolu_2", "name": "Bash", "input": { "command": "rm -rf build" } })), 1);
+        m.deny("toolu_2");
+        let done = items(m.feed(&json!({ "type": "user", "message": { "content": [
+            { "tool_use_id": "toolu_2", "type": "tool_result", "content": "negado", "is_error": true }
+        ] } }), 2));
+        assert_eq!(done[0].status, Some(ToolStatus::Denied));
+    }
+
+    #[test]
+    fn o_texto_em_pedacos_tem_o_mesmo_id_do_item_final() {
+        let mut m = Mapper::default();
+        // Bloco 0 é o raciocínio (não aparece); o texto é o bloco 1, nos pedaços e na linha final.
+        assert!(items(m.feed(&assistant("msg_9", json!({ "type": "thinking", "thinking": "" })), 1)).is_empty());
+        let delta = m.feed(&json!({ "type": "stream_event", "parent_tool_use_id": null, "api_message_id": "msg_9",
+            "event": { "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": "O" } } }), 2);
+        let Some(Out::Delta { item_id, delta }) = delta.into_iter().next() else { panic!("sem delta") };
+        let text = items(m.feed(&assistant("msg_9", json!({ "type": "text", "text": "OK" })), 3));
+        assert_eq!((item_id.as_str(), delta.as_str()), ("msg_9#1", "O"));
+        assert_eq!((text[0].kind, text[0].id.as_str(), text[0].text.as_deref()), (ItemKind::Assistant, "msg_9#1", Some("OK")));
+        // Os outros eventos parciais (o JSON da ferramenta chegando) não viram nada.
+        assert!(m.feed(&json!({ "type": "stream_event", "api_message_id": "msg_9",
+            "event": { "type": "content_block_delta", "index": 2, "delta": { "type": "input_json_delta", "partial_json": "{" } } }), 4).is_empty());
+    }
+
+    #[test]
+    fn o_fim_do_turno_diz_se_foi_interrompido_ou_falhou() {
+        let mut m = Mapper::default();
+        m.feed(&json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": "[Request interrupted by user]" }] } }), 1);
+        let out = m.feed(&json!({ "type": "result", "subtype": "error_during_execution", "is_error": true, "duration_ms": 1261,
+            "terminal_reason": "aborted_streaming", "errors": ["[ede_diagnostic] result_type=user"] }), 2);
+        assert_eq!(out, vec![Out::Done(TurnResult { interrupted: true, error: None, duration_ms: Some(1261) })]);
+        let ok = m.feed(&json!({ "type": "result", "subtype": "success", "is_error": false, "duration_ms": 7181, "result": "OK", "terminal_reason": "completed" }), 3);
+        assert_eq!(ok, vec![Out::Done(TurnResult { interrupted: false, error: None, duration_ms: Some(7181) })]);
+        let failed = m.feed(&json!({ "type": "result", "subtype": "success", "is_error": true, "result": "Credit balance is too low" }), 4);
+        assert_eq!(failed, vec![Out::Done(TurnResult { interrupted: false, error: Some("Credit balance is too low".into()), duration_ms: None })]);
+    }
+
+    #[test]
+    fn o_inicio_e_o_status_dizem_a_sessao_e_o_modo() {
+        let mut m = Mapper::default();
+        assert_eq!(m.feed(&json!({ "type": "system", "subtype": "init", "session_id": "s-1", "permissionMode": "default" }), 1),
+            vec![Out::Session("s-1".into()), Out::Mode("default".into())]);
+        assert_eq!(m.feed(&json!({ "type": "system", "subtype": "status", "status": null, "permissionMode": "plan" }), 1), vec![Out::Mode("plan".into())]);
+        assert!(m.feed(&json!({ "type": "system", "subtype": "thinking_tokens" }), 1).is_empty());
+    }
+
+    #[test]
+    fn o_que_o_subagente_faz_nao_entra_na_timeline() {
+        let mut m = Mapper::default();
+        let mut line = assistant("msg_2", json!({ "type": "text", "text": "dentro do Task" }));
+        line["parent_tool_use_id"] = json!("toolu_task");
+        assert!(m.feed(&line, 1).is_empty());
+    }
+
+    #[test]
+    fn a_saida_do_plano_vira_o_plano_na_timeline() {
+        let mut m = Mapper::default();
+        let plan = items(m.feed(&assistant("msg_3", json!({ "type": "tool_use", "id": "toolu_p", "name": "ExitPlanMode",
+            "input": { "plan": "# Plano\n1. Ler\n2. Editar" } })), 1));
+        assert_eq!((plan[0].tool, plan[0].label.as_deref()), (Some(ToolKind::Todo), Some("# Plano")));
+        assert_eq!(plan[0].output.as_deref(), Some("# Plano\n1. Ler\n2. Editar"));
+    }
+
+    fn can_use_tool(tool: &str, input: Value) -> Value {
+        json!({ "subtype": "can_use_tool", "tool_name": tool, "display_name": tool, "input": input, "tool_use_id": "toolu_x",
+            "description": "ok.txt", "permission_suggestions": [{ "type": "setMode", "mode": "acceptEdits", "destination": "session" }] })
+    }
+
+    #[test]
+    fn os_pedidos_de_permissao_viram_o_que_mostrar() {
+        let write = ask_of(&can_use_tool("Write", json!({ "file_path": "/p/ok.txt", "content": "OK" }))).unwrap();
+        assert_eq!((write.kind, write.title.as_str(), write.item_id.as_deref()), ("fileChange", "/p/ok.txt", Some("toolu_x")));
+        assert_eq!(write.options, json!({ "tool": "Write" }));
+        let bash = ask_of(&can_use_tool("Bash", json!({ "command": "cargo test\n--lib", "description": "Roda os testes" }))).unwrap();
+        assert_eq!((bash.kind, bash.title.as_str(), bash.detail.as_str()), ("command", "cargo test", "Roda os testes"));
+        let fetch = ask_of(&can_use_tool("WebFetch", json!({ "url": "https://exemplo.dev" }))).unwrap();
+        assert_eq!((fetch.kind, fetch.title.as_str(), fetch.detail.as_str()), ("command", "WebFetch: https://exemplo.dev", "ok.txt"));
+        let plan = ask_of(&can_use_tool("ExitPlanMode", json!({ "plan": "1. Ler" }))).unwrap();
+        assert_eq!((plan.kind, plan.title.as_str(), plan.detail.as_str()), ("command", "", "1. Ler"));
+        assert_eq!(plan.options, json!({ "tool": "ExitPlanMode" }));
+        let q = ask_of(&can_use_tool("AskUserQuestion", json!({ "questions": [
+            { "question": "Qual banco?", "header": "Banco", "multiSelect": false, "options": [{ "label": "SQLite", "description": "" }, { "label": "Postgres", "description": "" }] }
+        ] }))).unwrap();
+        assert_eq!((q.kind, q.title.as_str()), ("question", "Qual banco?"));
+        assert_eq!(q.options, json!([{ "id": "Qual banco?", "question": "Qual banco?", "options": ["SQLite", "Postgres"] }]));
+        assert!(ask_of(&json!({ "subtype": "hook_callback" })).is_none());
+    }
+
+    #[test]
+    fn a_resposta_sai_no_formato_do_can_use_tool() {
+        let write = Pending::of(&can_use_tool("Write", json!({ "file_path": "/p/ok.txt" })));
+        assert_eq!(answer_of(&write, "allow"), (json!({ "behavior": "allow", "updatedInput": { "file_path": "/p/ok.txt" } }), None));
+        let (deny, _) = answer_of(&write, "deny");
+        assert_eq!(deny["behavior"], "deny");
+        assert!(deny.get("interrupt").is_none());
+        assert_eq!(answer_of(&write, "cancel").0["interrupt"], true);
+        // Na sessão: as sugestões do Claude, sempre só na sessão; aceitar edições muda o acesso.
+        let (session, access) = answer_of(&write, "allowSession");
+        assert_eq!(session["updatedPermissions"], json!([{ "type": "setMode", "mode": "acceptEdits", "destination": "session" }]));
+        assert_eq!(access, Some("edits"));
+        let fetch = Pending { tool: "WebFetch".into(), input: json!({ "url": "u" }),
+            suggestions: vec![json!({ "type": "addRules", "rules": [{ "toolName": "WebFetch" }], "behavior": "allow", "destination": "localSettings" })] };
+        assert_eq!(answer_of(&fetch, "allowSession").0["updatedPermissions"][0]["destination"], "session");
+        let bare = Pending { tool: "Bash".into(), input: json!({}), suggestions: Vec::new() };
+        assert_eq!(answer_of(&bare, "allowSession").0["updatedPermissions"],
+            json!([{ "type": "addRules", "rules": [{ "toolName": "Bash" }], "behavior": "allow", "destination": "session" }]));
+    }
+
+    #[test]
+    fn a_pergunta_e_a_saida_do_plano_respondem_com_o_que_o_claude_espera() {
+        let q = Pending { tool: "AskUserQuestion".into(), input: json!({ "questions": [{ "question": "Qual banco?" }] }), suggestions: Vec::new() };
+        let (answer, _) = answer_of(&q, "SQLite");
+        assert_eq!(answer["updatedInput"]["answers"], json!({ "Qual banco?": "SQLite" }));
+        assert_eq!(answer["updatedInput"]["questions"][0]["question"], "Qual banco?");
+        let plan = Pending { tool: "ExitPlanMode".into(), input: json!({ "plan": "1." }), suggestions: Vec::new() };
+        let (approve, access) = answer_of(&plan, "allow");
+        assert_eq!((approve["updatedPermissions"][0]["mode"].as_str(), access), (Some("default"), Some("ask")));
+        assert_eq!(answer_of(&plan, "allowSession").1, Some("edits"));
+        let (keep, access) = answer_of(&plan, "deny");
+        assert_eq!((keep["behavior"].as_str(), access), (Some("deny"), None));
+    }
+
+    #[test]
+    fn o_roteamento_aceita_o_claude_e_o_plano_so_nele() {
+        assert_eq!(Engine::of("claude-code"), Some(Engine::Claude));
+        assert_eq!(Engine::of("codex"), Some(Engine::Codex));
+        assert_eq!(Engine::of("gemini-cli"), None);
+        assert!(api::structured_agent("claude-code") && api::structured_agent("codex") && !api::structured_agent("gemini-cli"));
+        assert!(Engine::Claude.accepts("plan") && !Engine::Codex.accepts("plan"));
+        assert!(Engine::Codex.accepts("edits") && !Engine::Claude.accepts("lixo"));
+    }
+
+    #[test]
+    fn criar_e_trocar_respeitam_o_que_cada_agente_aceita() {
+        let db = Arc::new(Mutex::new(crate::database::test_db()));
+        let input = |agent: &str, access: &str| NewThread {
+            agent_id: agent.into(), cwd: "/p".into(), title: "T".into(), model: None, effort: None, access: access.into(), account_id: None,
+        };
+        let claude = api::create(&db, input("claude-code", "plan")).unwrap();
+        assert_eq!((claude.agent_id.as_str(), claude.access.as_str()), ("claude-code", "plan"));
+        assert!(api::create(&db, input("codex", "plan")).is_err());
+        assert!(api::create(&db, input("gemini-cli", "ask")).is_err());
+        let codex = api::create(&db, input("codex", "ask")).unwrap();
+        assert!(api::retune(&db, &codex.id, None, None, "plan".into()).is_err());
+        // Sem processo aberto, trocar só grava.
+        let row = api::retune(&db, &claude.id, Some("haiku".into()), None, "edits".into()).unwrap();
+        assert_eq!((row.model.as_deref(), row.access.as_str()), (Some("haiku"), "edits"));
+        assert_eq!(api::status(&claude.id), api::ThreadStatus { alive: false, working: false });
+    }
+}

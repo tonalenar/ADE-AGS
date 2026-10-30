@@ -326,7 +326,7 @@ fn is_markup(text: &str) -> bool {
 }
 
 /// O texto de um `tool_result`: string, ou blocos `{type: text}`.
-fn result_text(content: Option<&Value>) -> Option<String> {
+pub(crate) fn result_text(content: Option<&Value>) -> Option<String> {
     match content? {
         Value::String(s) => Some(s.clone()),
         Value::Array(blocks) => {
