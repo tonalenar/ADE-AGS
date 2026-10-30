@@ -68,7 +68,7 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 
 ## Conversa por protocolo (caminho B): Codex pelo `app-server`
 
-Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, sem TUI. Vale para as conversas novas e pode ser desligado em Configurações → Modo chat → "Codex sem terminal". Desligado, o Codex roda na TUI como os outros agentes. As conversas que já existem não mudam.
+Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, sem TUI. Vale para as conversas novas e pode ser desligado em Configurações → Modo chat → "Codex e Claude Code sem terminal" (a mesma opção liga o Claude Code por protocolo, abaixo). Desligado, o Codex roda na TUI como os outros agentes. As conversas que já existem não mudam.
 
 - **Backend (`src-tauri/src/conversa/`):**
   - `store.rs`: as tabelas `chat_thread`, `chat_run`, `chat_item` e `chat_request`. A migração é só aditiva, sem subir `user_version`.
@@ -86,7 +86,35 @@ Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, s
 
   Trocar o acesso fecha o processo; a próxima mensagem retoma a thread com o sandbox novo. Modelo e esforço valem no próximo turno.
 - **Front (`src/features/chat/structured/`):** o store ao vivo, os cartões (chave `thread:<id>`) e a `StructuredConversationView`. A tela usa a mesma `TimelineView`, o mesmo composer e os mesmos menus da conversa por TUI. Aprovações e perguntas se respondem nos botões do composer; parar interrompe o turno.
-- **Ainda não:** Claude Code, ACP (Gemini, Kimi) e OpenCode por protocolo; reverter turno; anexos de imagem.
+
+### Claude Code por protocolo
+
+Com o Claude Code, a conversa nova fala com o agente por `claude -p` em stream-json, sem TUI. A opção é a mesma do Codex ("Codex e Claude Code sem terminal").
+
+- **Protocolo (Claude Code 2.1.312, conferido no `--help`, no binário e em 2 turnos reais mínimos):** um processo por conversa, com `-p --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio --permission-mode <modo>`, e `--model`/`--effort` quando escolhidos. É o mesmo protocolo que o Agent SDK usa: JSON por linha nos dois sentidos.
+  - **Sessão:** a primeira abre com `--session-id <uuid>` escolhido pelo app; depois de fechar (reabrir o app, trocar o acesso), a próxima mensagem retoma com `--resume <uuid>`. Um `--resume` de sessão que sumiu fecha o processo antes de responder ao `initialize`: aí abre uma sessão nova, e a timeline guardada continua.
+  - **Mensagens:** o app manda `{type: "user", message}`; o Claude devolve `assistant` (um bloco por linha, com o mesmo `message.id`), `user` (os `tool_result`), `stream_event` (os pedaços do texto, com `api_message_id` e `index`) e `result` (o fim do turno). O texto em pedaços e o item final têm o mesmo id (`<message.id>#<index>`).
+  - **Aprovações:** com `--permission-prompt-tool stdio`, o Claude manda o `control_request` `can_use_tool` e espera `{behavior: "allow" | "deny"}`. "Permitir na sessão" devolve as sugestões do próprio Claude (`permission_suggestions`), sempre com `destination: "session"`: nada vai para os settings do projeto. `AskUserQuestion` chega pelo mesmo pedido e responde com `updatedInput.answers`.
+  - **Parar:** o `control_request` `interrupt`. O turno acaba com `result` (`terminal_reason: "aborted_*"`) e vira fim de turno interrompido.
+  - **Por que não a tool MCP da frota** (`--permission-prompt-tool mcp__ags__approve_tool_use`): ela passa pelo `ags mcp` e pelo broker, que servem tarefas desatendidas. Na conversa há alguém olhando, e o stdio já leva o pedido ao processo que mostra a tela, sem MCP, sem broker e sem tocar `ipc/`.
+- **Acesso** (`--permission-mode`):
+
+  | No chat | Modo do Claude |
+  |---|---|
+  | Supervisionado | `default` (pede aprovação de tudo que não é leitura) |
+  | Aceitar edições | `acceptEdits` |
+  | Auto | `auto`, o mesmo nível seguro das missões (`withAutonomy`) |
+  | Acesso total | `bypassPermissions` |
+  | Plano | `plan` |
+
+  - O **Plano** fica guardado no próprio `access` da conversa (`plan`, só no Claude), sem coluna nova. Ele liga e desliga no botão Plano/Construir do composer; desligar volta a Supervisionado, nunca a um modo com mais permissão.
+  - Sair do Plano é o pedido `ExitPlanMode`, com o plano no detalhe: "Aprovar o plano" segue em Supervisionado, "Aprovar e aceitar edições" segue em `acceptEdits`, "Continuar planejando" nega e o agente ajusta o plano.
+  - Quando o modo muda do lado do Claude (saiu do Plano, aceitou edições na sessão), o `access` da conversa acompanha e a tela recebe o evento `thread` com o `access` novo.
+  - Trocar modelo, esforço ou acesso fecha o processo (no fim do turno, se há um); a próxima mensagem retoma a sessão com as flags novas.
+- **Backend:** `conversa/claude.rs` (o processo, com o mesmo evento `cc-chat-thread` do Codex) e `conversa/claude_map.rs` (puro: linhas em itens, `can_use_tool` em pedido, respostas, flags). O `api.rs` escolhe o motor pelo agente da conversa (`Engine::Codex` / `Engine::Claude`). As ferramentas viram itens pelo mesmo `canal::timeline::claude_tool` da timeline lida do transcript; o `ExitPlanMode` vira o plano.
+- **Conta:** `accounts::env_for_account` (o `CLAUDE_CONFIG_DIR` da conta), como no Codex.
+
+- **Ainda não:** ACP (Gemini, Kimi) e OpenCode por protocolo; reverter turno; anexos de imagem; subagentes (`Task`) aparecem só como a ferramenta, sem o que fazem dentro.
 
 ## Como não derruba terminais
 
@@ -107,7 +135,7 @@ Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, s
 | `src/app/uiStore.ts` | `chatMode` (flag), `shellMode` (`chat` / `workspace`), `chatShellOn`, `useChatShell` |
 | `src/features/chat/` | `ChatShell`, `ChatSidebar`, `NewConversation`, `ConversationView`, `ChatComposer`, `AgentModelPicker`, `AccessMenu`, `ShellModeSwitch`, `ChatEntryButton`, `ChatModeSetting` |
 | `src/features/chat/ChatPage.tsx`, `ChatPageSidebar.tsx`, `chatSpaces.ts` | telas cheias no chat, sidebar das Configurações e dos Espaços |
-| `src-tauri/src/conversa/`, `src/features/chat/structured/` | conversa por protocolo (Codex pelo `app-server`) |
+| `src-tauri/src/conversa/`, `src/features/chat/structured/` | conversa por protocolo (Codex pelo `app-server`, Claude Code pelo `claude -p` em stream-json) |
 | `src/features/chat/DesignPane.tsx`, `DevicesPane.tsx` | abas Design e Dispositivos do painel direito |
 | `src/features/chat/chatModel.ts` | lógica pura: título da conversa, comando, projetos e cartões |
 | `src/features/tabs/layout/layoutStore.ts` | `CHAT_GROUP`, `chatPlacements`, `placementsFrom({ chat })` |
