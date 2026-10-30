@@ -85,9 +85,11 @@ export function NewConversation({ projects, folder, onFolder }: {
         ? (await chatNewWorktree(project.cwd, conversationTitle(prompt) ?? project.name)).cwd
         : project.cwd;
       if (prefs.structured && STRUCTURED_AGENTS.has(agent.id)) {
+        // No Claude o Plano é um modo de permissão: a conversa nasce nele e sai pelo pedido do agente.
         await startThread({
           agentId: agent.id, cwd, title: conversationTitle(prompt) ?? project.name,
-          model: mine ? prefs.model : null, effort: mine ? prefs.effort : null, access, accountId: mine ? prefs.accountId : null,
+          model: mine ? prefs.model : null, effort: mine ? prefs.effort : null, access: plan ? "plan" : access,
+          accountId: mine ? prefs.accountId : null,
         }, prompt);
         update({ cwd: project.cwd, agentId: agent.id });
         return true;

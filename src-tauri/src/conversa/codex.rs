@@ -15,16 +15,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
 use crate::database::DbConnection;
 
+use super::events::emit;
 use super::{codex_map, store};
 
-/// O evento da janela.
-pub const EVENT: &str = "cc-chat-thread";
 /// Quanto esperar a resposta de um pedido (abrir thread, começar turno). O turno em si não tem
 /// prazo: ele acaba por aviso (`turn/completed`).
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -131,16 +130,6 @@ pub fn close(thread_id: &str) {
     }
 }
 
-fn emit(app: &AppHandle, thread_id: &str, kind: &str, mut payload: Value) {
-    payload["threadId"] = json!(thread_id);
-    payload["type"] = json!(kind);
-    // O que muda o "está esperando o quê" vai também ao barramento: é o que acorda `ags chat wait`.
-    if matches!(kind, "phase" | "request" | "requestResolved" | "closed") {
-        let data = json!({ "threadId": thread_id, "type": kind, "phase": payload.get("phase") });
-        crate::bus::publish(Some(app), crate::bus::Publish::new(crate::ipc::commands::conversas::BUS_TOPIC).data(data));
-    }
-    let _ = app.emit(EVENT, payload);
-}
 
 /// A sessão de uma conversa: a viva, ou uma nova (sobe o processo, `initialize` e abre ou retoma a
 /// thread do Codex com o modelo e o acesso da conversa).

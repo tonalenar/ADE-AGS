@@ -190,11 +190,12 @@ OBSERVAR TABS (modo push — evita o polling)
   watch list                                  Tabs observadas e o limite vigente
   watch wait [--timeout 300] [--max 20]       Espera até alguma ter novidades
 
-CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo; hoje o Codex)
+CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex e Claude Code)
   chat list [--all]                           Conversas ativas (--all: também as concluídas)
   chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
-           [--agent codex] [--model ...] [--effort ...] [--title ...] [--account <id>]
-           [--access ask|safe|full]           · ask (padrão): a pessoa aprova o que o agente roda
+           [--agent codex|claude-code] [--model ...] [--effort ...] [--title ...] [--account <id>]
+           [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
+                                              plan: só no Claude Code (planeja antes de editar)
   chat send <id> \"...\"                        Manda outra mensagem (no meio de um turno, entra nele)
   chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
   chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente

@@ -4,17 +4,60 @@
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::AppHandle;
 
 use crate::canal::timeline::Item;
 use crate::database::DbConnection;
 
 use super::store::{self, RequestRow, ThreadRow, Tuning};
-use super::{codex, codex_map};
+use super::{claude, codex, codex_map};
+
+/// Quem fala com o agente de uma conversa por protocolo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Engine {
+    /// `codex app-server` (`codex.rs`).
+    Codex,
+    /// `claude -p` em stream-json (`claude.rs`).
+    Claude,
+}
+
+impl Engine {
+    pub fn of(agent_id: &str) -> Option<Engine> {
+        match agent_id {
+            "codex" => Some(Engine::Codex),
+            "claude-code" => Some(Engine::Claude),
+            _ => None,
+        }
+    }
+
+    /// Os acessos que o agente aceita. O Plano é um modo de permissão só do Claude.
+    pub fn accepts(self, access: &str) -> bool {
+        matches!(access, "ask" | "edits" | "safe" | "full") || (self == Engine::Claude && access == "plan")
+    }
+}
 
 /// Os agentes que falam por protocolo no chat.
 pub fn structured_agent(agent_id: &str) -> bool {
-    agent_id == "codex"
+    Engine::of(agent_id).is_some()
+}
+
+fn engine_for(agent_id: &str) -> Result<Engine, String> {
+    Engine::of(agent_id).ok_or_else(|| format!("{agent_id} não conversa por protocolo"))
+}
+
+fn engine_of(row: &ThreadRow) -> Result<Engine, String> {
+    engine_for(&row.agent_id)
+}
+
+/// O turno em andamento de uma conversa, em qualquer um dos agentes. `None` = sem processo aberto.
+fn live_turn(thread_id: &str) -> Option<Option<String>> {
+    codex::get(thread_id).map(|s| s.turn()).or_else(|| claude::get(thread_id).map(|s| s.turn()))
+}
+
+/// Fecha o processo do agente da conversa, qualquer que seja.
+fn close(thread_id: &str) {
+    codex::close(thread_id);
+    claude::close(thread_id);
 }
 
 fn db_err(e: impl ToString) -> String {
@@ -47,8 +90,9 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
     if !structured_agent(&input.agent_id) {
         return Err(format!("{} ainda não conversa por protocolo", input.agent_id));
     }
-    if !matches!(input.access.as_str(), "ask" | "edits" | "safe" | "full") {
-        return Err(format!("Acesso inválido: {} (ask, safe ou full)", input.access));
+    let engine = engine_for(&input.agent_id)?;
+    if !engine.accepts(&input.access) {
+        return Err(access_error(engine, &input.access));
     }
     let id = uuid::Uuid::new_v4().to_string();
     let conn = db.lock().map_err(db_err)?;
@@ -57,13 +101,25 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
         .map_err(db_err)
 }
 
+fn access_error(engine: Engine, access: &str) -> String {
+    match engine {
+        Engine::Claude => format!("Acesso inválido: {access} (ask, edits, safe, full ou plan)"),
+        Engine::Codex => format!("Acesso inválido: {access} (ask, edits, safe ou full)"),
+    }
+}
+
 /// Avisa a tela que a lista mudou (uma conversa criada fora dela, pela CLI).
 pub fn announce(app: &AppHandle, row: &ThreadRow) {
-    let _ = app.emit(codex::EVENT, json!({ "threadId": row.id, "type": "created", "thread": row }));
+    super::events::emit(app, &row.id, "created", json!({ "thread": row }));
 }
 
 /// Manda uma mensagem: começa um turno, ou entra no turno em andamento (`turn/steer`).
 pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> Result<(), String> {
+    let row = thread(db, thread_id)?;
+    if engine_of(&row)? == Engine::Claude {
+        let session = claude::session(app, db, thread_id).await?;
+        return claude::send_user(app, db, &session, text);
+    }
     let session = codex::session(app, db, thread_id).await?;
     let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
     let input = json!([{ "type": "text", "text": text, "text_elements": [] }]);
@@ -119,14 +175,17 @@ pub struct ThreadStatus {
 }
 
 pub fn status(thread_id: &str) -> ThreadStatus {
-    match codex::get(thread_id) {
-        Some(s) => ThreadStatus { alive: true, working: s.turn().is_some() },
+    match live_turn(thread_id) {
+        Some(turn) => ThreadStatus { alive: true, working: turn.is_some() },
         None => ThreadStatus { alive: false, working: false },
     }
 }
 
 /// Para o turno em andamento.
 pub async fn interrupt(thread_id: &str) -> Result<(), String> {
+    if let Some(session) = claude::get(thread_id) {
+        return claude::interrupt(&session).await;
+    }
     let Some(session) = codex::get(thread_id) else { return Ok(()) };
     let (Some(remote), Some(turn)) = (session.remote(), session.turn()) else { return Ok(()) };
     session.request("turn/interrupt", json!({ "threadId": remote, "turnId": turn })).await.map(|_| ())
@@ -142,32 +201,49 @@ pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str
     if row.state != "pending" {
         return Ok(false);
     }
-    let session = codex::get(&row.thread_id).ok_or("O agente desta conversa já fechou")?;
     let rpc_id: Value = serde_json::from_str(&row.rpc_id).map_err(db_err)?;
-    session.respond(rpc_id, codex_map::answer_of(&row.kind, choice, &row.options))?;
+    if let Some(session) = claude::get(&row.thread_id) {
+        claude::answer(app, db, &session, &rpc_id, row.item_id.as_deref(), choice)?;
+    } else {
+        let session = codex::get(&row.thread_id).ok_or("O agente desta conversa já fechou")?;
+        session.respond(rpc_id, codex_map::answer_of(&row.kind, choice, &row.options))?;
+    }
     let answered = {
         let conn = db.lock().map_err(db_err)?;
         store::answer_request(&conn, request_id, choice, crate::util::now_ts_ms()).map_err(db_err)?
     };
-    let _ = app.emit(codex::EVENT, json!({ "threadId": row.thread_id, "type": "requestResolved", "id": request_id }));
+    super::events::emit(app, &row.thread_id, "requestResolved", json!({ "id": request_id }));
     Ok(answered)
 }
 
-/// Troca modelo, esforço ou acesso. Modelo e esforço valem no próximo turno; o acesso muda o
-/// sandbox, que é da sessão: com o agente parado, a sessão fecha e reabre (retomando a thread) na
-/// próxima mensagem.
+/// Troca modelo, esforço ou acesso (no Claude, o Plano também é um acesso).
+/// - Codex: modelo e esforço valem no próximo turno; o acesso muda o sandbox, que é da sessão: com
+///   o agente parado, a sessão fecha e reabre (retomando a thread) na próxima mensagem.
+/// - Claude: tudo é flag do processo, então qualquer troca fecha a sessão (no fim do turno, se há
+///   um) e a próxima mensagem a retoma (`--resume`) com as flags novas.
 pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort: Option<String>, access: String) -> Result<ThreadRow, String> {
     let conn = db.lock().map_err(db_err)?;
     let before = store::thread(&conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
-    let working = codex::get(thread_id).is_some_and(|s| s.turn().is_some());
+    let engine = engine_of(&before)?;
+    if !engine.accepts(&access) {
+        return Err(access_error(engine, &access));
+    }
+    let working = live_turn(thread_id).is_some_and(|turn| turn.is_some());
     if working && before.access != access {
         return Err("Para trocar o acesso, espere o agente terminar o turno.".into());
     }
+    let changed = before.model != model || before.effort != effort || before.access != access;
     store::set_tuning(&conn, thread_id, &Tuning { model, effort, access: access.clone() }, crate::util::now_ts_ms()).map_err(db_err)?;
     let row = store::thread(&conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
     drop(conn);
-    if before.access != access {
-        codex::close(thread_id);
+    match engine {
+        Engine::Codex if before.access != access => codex::close(thread_id),
+        Engine::Claude if changed => {
+            if let Some(session) = claude::get(thread_id) {
+                session.retire();
+            }
+        }
+        _ => {}
     }
     Ok(row)
 }
@@ -184,7 +260,7 @@ pub fn settle(db: &DbConnection, thread_id: &str, settled: bool) -> Result<(), S
         store::set_state(&conn, thread_id, if settled { "settled" } else { "active" }, crate::util::now_ts_ms()).map_err(db_err)?;
     }
     if settled {
-        codex::close(thread_id);
+        close(thread_id);
     }
     Ok(())
 }

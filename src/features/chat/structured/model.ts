@@ -2,15 +2,17 @@ import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import type { ConversationCard } from "../chatModel";
 import type { TimelineItem } from "../timeline/types";
-import type { RequestRow, ThreadRow } from "./ipc";
+import type { ChatAccess } from "../chatModel";
+import type { QuestionOption, RequestRow, ThreadAccess, ThreadRow } from "./ipc";
 
 /**
- * As conversas por protocolo (o Codex pelo `app-server`, ver `src-tauri/src/conversa/`) no mesmo
- * formato que as outras: um cartão da sidebar e uma timeline. Puro.
+ * As conversas por protocolo (o Codex pelo `app-server` e o Claude Code pelo `claude -p` em
+ * stream-json, ver `src-tauri/src/conversa/`) no mesmo formato que as outras: um cartão da sidebar
+ * e uma timeline. Puro.
  */
 
 /** Os agentes que conversam por protocolo (espelho de `conversa::structured_agent`). */
-export const STRUCTURED_AGENTS = new Set(["codex"]);
+export const STRUCTURED_AGENTS = new Set(["codex", "claude-code"]);
 
 /** O prefixo que separa um cartão de conversa por protocolo de um de aba (o `tabId` do cartão). */
 export const THREAD_PREFIX = "thread:";
@@ -65,7 +67,8 @@ export type ThreadEvent =
   | { type: "phase"; threadId: string; phase: "working" | "idle" }
   | { type: "request"; threadId: string; request: RequestRow }
   | { type: "requestResolved"; threadId: string; id: string }
-  | { type: "thread"; threadId: string; title: string }
+  /** O título mudou, ou o acesso (o Claude saiu do Plano, aceitou edições na sessão). */
+  | { type: "thread"; threadId: string; title?: string; access?: ThreadAccess }
   | { type: "error"; threadId: string; message: string }
   | { type: "closed"; threadId: string };
 
@@ -95,4 +98,31 @@ export function applyThreadEvent(live: ThreadLive, event: ThreadEvent): ThreadLi
     default:
       return live;
   }
+}
+
+/** A conversa depois de um evento `thread`: só o que veio muda. Pura. */
+export function applyThreadMeta(row: ThreadRow, event: { title?: string; access?: ThreadAccess }): ThreadRow {
+  return { ...row, ...(event.title ? { title: event.title } : {}), ...(event.access ? { access: event.access } : {}) };
+}
+
+/** A pergunta de um pedido (a primeira), ou `null` se o pedido não é pergunta. Pura. */
+export function questionOf(request: RequestRow | null): QuestionOption | null {
+  if (request?.kind !== "question" || !Array.isArray(request.options)) return null;
+  return request.options[0] ?? null;
+}
+
+/** O pedido do Claude para sair do Plano (a ferramenta `ExitPlanMode`). Pura. */
+export function isPlanExit(request: RequestRow | null): boolean {
+  const options = request?.options;
+  return !!options && !Array.isArray(options) && options.tool === "ExitPlanMode";
+}
+
+/** O Plano ligado ou desligado. Desligar volta a Supervisionado: nunca dá mais permissão do que antes do Plano. Pura. */
+export function togglePlan(access: ThreadAccess): ThreadAccess {
+  return access === "plan" ? "ask" : "plan";
+}
+
+/** O que o menu de acesso mostra: no Plano, o modo em que o agente segue depois (Supervisionado). Pura. */
+export function menuAccess(access: ThreadAccess): ChatAccess {
+  return access === "plan" ? "ask" : access;
 }

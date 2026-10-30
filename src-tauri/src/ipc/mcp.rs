@@ -1418,21 +1418,21 @@ fn chat_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": "chat_list",
-            "description": "List the ADE AGS chat-mode conversations (agents running without a terminal, by protocol): id, title, agent, folder, whether the agent is working and how many requests wait for the person.",
+            "description": "List the ADE AGS chat-mode conversations (Codex or Claude Code running without a terminal, by protocol): id, title, agent, folder, whether the agent is working and how many requests wait for the person.",
             "inputSchema": { "type": "object", "properties": {
                 "all": { "type": "boolean", "description": "Also list settled conversations." }
             }, "required": [] },
         }),
         json!({
             "name": "chat_new",
-            "description": "Open a new chat-mode conversation with another agent (today: codex) and send the first message. It starts supervised (`access: ask`): commands it wants to run wait for the person's approval in the app. Returns the conversation; then call chat_wait.",
+            "description": "Open a new chat-mode conversation with another agent (codex or claude-code) and send the first message. It starts supervised (`access: ask`): commands it wants to run wait for the person's approval in the app. Returns the conversation; then call chat_wait.",
             "inputSchema": { "type": "object", "properties": {
                 "text": { "type": "string", "description": "The first message." },
                 "cwd": { "type": "string", "description": "Folder the agent works in (default: yours)." },
-                "agent": { "type": "string", "description": "Agent id (default: codex)." },
+                "agent": { "type": "string", "enum": ["codex", "claude-code"], "description": "Agent id (default: codex)." },
                 "model": { "type": "string", "description": "Optional model." },
                 "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…)." },
-                "access": { "type": "string", "enum": ["ask", "safe", "full"], "description": "ask (default): the person approves; safe: writes in the folder, asks when needed; full: no approvals." },
+                "access": { "type": "string", "enum": ["ask", "edits", "safe", "full", "plan"], "description": "ask (default): the person approves; edits: file edits pass, the rest asks; safe: writes in the folder, asks when needed; full: no approvals; plan (claude-code only): plans first, the person approves the plan." },
                 "title": { "type": "string", "description": "Optional title (default: the first line of the message)." }
             }, "required": ["text"] },
         }),

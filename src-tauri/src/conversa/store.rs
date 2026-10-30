@@ -194,7 +194,8 @@ pub struct RequestRow {
     pub item_id: Option<String>,
     pub title: String,
     pub detail: String,
-    /// As opções de uma pergunta (JSON `[{id, question, options: [...]}]`).
+    /// As opções de uma pergunta (JSON `[{id, question, options: [...]}]`). Numa aprovação do
+    /// Claude, a ferramenta (`{tool}`); numa do Codex, `[]`.
     pub options: serde_json::Value,
     pub state: String,
     pub created_at: i64,

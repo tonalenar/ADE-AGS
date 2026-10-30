@@ -5,18 +5,21 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { AccessMenu } from "../AccessMenu";
 import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
-import { accessModesFor, type ConversationCard } from "../chatModel";
+import { BotIcon } from "../chatIcons";
+import { accessModesFor, planSupported, type ConversationCard } from "../chatModel";
 import { ChatComposer } from "../ChatComposer";
 import { ContextStrip } from "../NewConversation";
 import { TimelineView, type ApprovalNote } from "../timeline/ConversationTimeline";
 import type { RequestRow, ThreadRow } from "./ipc";
-import { EMPTY_LIVE } from "./model";
+import { EMPTY_LIVE, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
 import { answerRequest, hydrateThread, interruptThread, retuneThread, sendToThread, useStructured } from "./store";
 
 /**
- * Uma conversa por protocolo (o Codex pelo `app-server`): a mesma timeline e o mesmo composer das
- * outras, mas sem terminal. Aprovações e perguntas chegam como pedidos do agente e se respondem
- * aqui; parar interrompe o turno; modelo, esforço e acesso valem a partir do próximo turno.
+ * Uma conversa por protocolo (o Codex pelo `app-server`, o Claude Code pelo `claude -p`): a mesma
+ * timeline e o mesmo composer das outras, mas sem terminal. Aprovações e perguntas chegam como
+ * pedidos do agente e se respondem aqui; parar interrompe o turno; modelo, esforço e acesso valem a
+ * partir do próximo turno. No Claude, o Plano liga e desliga aqui, e sair dele é um pedido do agente
+ * (aprovar o plano).
  */
 export function StructuredConversationView({ card, thread }: { card: ConversationCard; thread: ThreadRow }) {
   const { t } = useTranslation();
@@ -29,10 +32,13 @@ export function StructuredConversationView({ card, thread }: { card: Conversatio
   const request: RequestRow | null = live.requests[0] ?? null;
   const working = live.phase === "working";
   const locked = working || !!request;
-  const question = request?.kind === "question" ? request.options?.[0] ?? null : null;
+  const question = questionOf(request);
+  const planExit = isPlanExit(request);
+  const plan = thread.access === "plan";
   const note: ApprovalNote | null = request
     ? {
       title: request.kind === "question" ? request.title
+        : planExit ? t("chat.structured.planReady")
         : request.title || t(request.kind === "command" ? "chat.structured.command" : "chat.structured.fileChange"),
       detail: request.detail || null,
     }
@@ -41,7 +47,13 @@ export function StructuredConversationView({ card, thread }: { card: Conversatio
 
   const controls = request ? (
     <div className="flex items-center gap-1.5 flex-wrap justify-end">
-      {question ? question.options.map((o) => <ApprovalButton key={o} onClick={() => answer(o)}>{o}</ApprovalButton>) : (
+      {question ? question.options.map((o) => <ApprovalButton key={o} onClick={() => answer(o)}>{o}</ApprovalButton>) : planExit ? (
+        <>
+          <ApprovalButton onClick={() => answer("deny")}>{t("chat.structured.planKeep")}</ApprovalButton>
+          <ApprovalButton onClick={() => answer("allowSession")}>{t("chat.structured.planEdits")}</ApprovalButton>
+          <ApprovalButton primary onClick={() => answer("allow")}>{t("chat.structured.planApprove")}</ApprovalButton>
+        </>
+      ) : (
         <>
           <ApprovalButton onClick={() => answer("deny")}>{t("chat.approval.deny")}</ApprovalButton>
           <ApprovalButton onClick={() => answer("allowSession")}>{t("chat.approval.session")}</ApprovalButton>
@@ -56,6 +68,14 @@ export function StructuredConversationView({ card, thread }: { card: Conversatio
         onChange={(v) => retuneThread(thread.id, v.model, thread.effort, thread.access)} />
       <EffortMenu agentId={thread.agentId} model={thread.model} account={null} value={thread.effort} disabled={locked}
         onChange={(effort) => retuneThread(thread.id, thread.model, effort, thread.access)} />
+      {planSupported(thread.agentId) && (
+        <button type="button" disabled={locked} aria-pressed={plan} onClick={() => retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access))}
+          title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
+          className="flex items-center gap-1.5 h-7 px-2 rounded-lg text-[14px] font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50 disabled:hover:bg-transparent">
+          <BotIcon className="w-4 h-4 text-gray-500 dark:text-white/45" />
+          {plan ? t("chat.plan.plan") : t("chat.plan.build")}
+        </button>
+      )}
     </div>
   );
 
@@ -71,7 +91,7 @@ export function StructuredConversationView({ card, thread }: { card: Conversatio
           onStop={working && !request ? () => interruptThread(thread.id) : null}
           controls={controls} />
         <ContextStrip branch={card.branch} worktree={card.isWorktree}>
-          <AccessMenu value={thread.access} available={accessModesFor(thread.agentId)}
+          <AccessMenu value={menuAccess(thread.access)} available={accessModesFor(thread.agentId)}
             onChange={locked ? undefined : (next) => retuneThread(thread.id, thread.model, thread.effort, next)} />
         </ContextStrip>
       </div>

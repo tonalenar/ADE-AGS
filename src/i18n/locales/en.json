@@ -3746,6 +3746,10 @@
   "chat.structured.command": "The agent wants to run a command",
   "chat.structured.fileChange": "The agent wants to edit files",
   "chat.structured.answer": "Answer the agent's question",
-  "chat.settings.structured": "Codex without a terminal (app-server)",
-  "chat.settings.structuredHint": "New Codex conversations talk to it directly: approvals and questions arrive in the chat, and stopping interrupts the turn. Off, Codex runs in its TUI, like the other agents."
+  "chat.settings.structured": "Codex and Claude Code without a terminal",
+  "chat.settings.structuredHint": "New conversations with Codex (app-server) and Claude Code (stream-json) talk to them directly: approvals, questions and leaving Plan mode arrive in the chat, and stopping interrupts the turn. Off, they run in their TUI, like the other agents.",
+  "chat.structured.planReady": "The plan is ready. Go ahead with it?",
+  "chat.structured.planKeep": "Keep planning",
+  "chat.structured.planEdits": "Approve and accept edits",
+  "chat.structured.planApprove": "Approve the plan"
 }
