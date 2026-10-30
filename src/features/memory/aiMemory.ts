@@ -49,7 +49,8 @@ export interface AiMemoryHandoff {
   from_agent: string;
   /** null quando o handoff não tem destinatário certo. */
   to_agent: string | null;
-  cwd: string;
+  /** null quando o handoff não registrou a pasta (o CLI 3.3.0 manda `cwd: null`). */
+  cwd: string | null;
   created_at_ms: number;
 }
 
