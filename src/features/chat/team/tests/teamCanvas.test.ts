@@ -6,7 +6,7 @@ import type { TeamMember, TeamView } from "../ipc";
 import { canvasPlan, leadBoardKey, runCanvasPlan, type CanvasApi, type CanvasInput } from "../teamCanvas";
 
 function member(ref: string, role: string): TeamMember {
-  return { teamId: "t1", member: ref, agentId: "codex", label: ref, role, model: null, policy: "ask", branch: null, worktree: null, origin: "existing", position: 0, createdAt: 1, updatedAt: 1 };
+  return { teamId: "t1", member: ref, agentId: "codex", label: ref, role, model: null, policy: "ask", branch: null, worktree: null, origin: "existing", position: 0, createdAt: 1, updatedAt: 1, subagent: false };
 }
 
 function team(orchestrator: string, refs: [string, string][]): TeamView {
@@ -33,7 +33,11 @@ function fakeApi(boards: Record<string, Board>): CanvasApi & { boards: () => Rec
       boards[to] = { ...tb, nodes };
       boards[from] = { ...f, nodes: rest };
     },
-    setRole: (k, id, role) => { const b = get(k); boards[k] = { ...b, roles: { ...b.roles, [id]: role ?? "" } }; },
+    setRole: (k, id, role, subagent) => {
+      const b = get(k);
+      const others = b.subagents.filter((x) => x !== id);
+      boards[k] = { ...b, roles: { ...b.roles, [id]: role ?? "" }, subagents: subagent ? [...others, id] : others };
+    },
   };
 }
 
@@ -51,9 +55,9 @@ describe("o time no canvas", () => {
       { kind: "crown", key: "main|/repo", id: "lead" },
       { kind: "move", from: "main|/wt", to: "main|/repo", ids: ["ui"] },
       { kind: "connect", key: "main|/repo", a: "lead", b: "ui" },
-      { kind: "role", key: "main|/repo", id: "ui", label: "FRONTEND" },
+      { kind: "role", key: "main|/repo", id: "ui", label: "FRONTEND", subagent: false },
       { kind: "connect", key: "main|/repo", a: "lead", b: "thread:x" },
-      { kind: "role", key: "main|/repo", id: "thread:x", label: "QA" },
+      { kind: "role", key: "main|/repo", id: "thread:x", label: "QA", subagent: false },
     ]);
     const api = fakeApi(boards);
     expect(runCanvasPlan(ops, api).sort()).toEqual(["main|/repo", "main|/wt"]);
@@ -103,5 +107,30 @@ describe("o time no canvas", () => {
     runCanvasPlan(canvasPlan(input(t, boards, { lead: "main|/repo", a: "main|/repo" }, { dissolve: true })), api);
     expect(boards["main|/repo"]!.edges).toEqual([]);
     expect(boards["main|/repo"]!.orchestrators).toEqual([]);
+  });
+
+  it("espelha o subagente do time no canvas, liga e desliga", () => {
+    const boards: Record<string, Board> = { "main|/repo": withNodes(["lead", "ui"]) };
+    const tabs = { lead: "main|/repo", ui: "main|/repo" };
+    const t = team("lead", [["ui", "frontend"]]);
+    t.members[0]!.subagent = true;
+    const on = canvasPlan(input(t, boards, tabs)).filter((op) => op.kind === "role");
+    expect(on).toEqual([{ kind: "role", key: "main|/repo", id: "ui", label: "FRONTEND", subagent: true }]);
+    runCanvasPlan(on, fakeApi(boards));
+    expect(boards["main|/repo"]!.subagents).toEqual(["ui"]);
+    expect(canvasPlan(input(t, boards, tabs)).filter((op) => op.kind === "role")).toEqual([]);
+    t.members[0]!.subagent = false;
+    const off = canvasPlan(input(t, boards, tabs)).filter((op) => op.kind === "role");
+    expect(off).toEqual([{ kind: "role", key: "main|/repo", id: "ui", label: "FRONTEND", subagent: false }]);
+    runCanvasPlan(off, fakeApi(boards));
+    expect(boards["main|/repo"]!.subagents).toEqual([]);
+  });
+
+  it("a conversa por protocolo não ganha a marca no canvas", () => {
+    const boards: Record<string, Board> = { "main|/repo": withNodes(["lead"]) };
+    const t = team("lead", [["thread:x", "qa"]]);
+    t.members[0]!.subagent = true;
+    const roles = canvasPlan(input(t, boards, { lead: "main|/repo" })).filter((op) => op.kind === "role");
+    expect(roles).toEqual([{ kind: "role", key: "main|/repo", id: "thread:x", label: "QA", subagent: false }]);
   });
 });

@@ -26,7 +26,7 @@ import { useTeamStore } from "../teamStore";
 
 const TEAM: TeamView = {
   id: "t1", orchestrator: "tab-lead", agentId: "claude-code", label: "Claude Code", cwd: "/repo", title: "", createdAt: 1, updatedAt: 1, headcount: 1,
-  members: [{ teamId: "t1", member: "thread:x", agentId: "codex", label: "Codex", role: "backend", model: null, policy: "edits", branch: null, worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1 }],
+  members: [{ teamId: "t1", member: "thread:x", agentId: "codex", label: "Codex", role: "backend", model: null, policy: "edits", branch: null, worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1, subagent: false }],
 };
 const FEED: TeamFeedItem[] = [
   { id: 1, kind: "delegation", member: "thread:x", memberName: "Codex", task: "Fazer o backend", state: "delivered", at: 1, handoff: null },

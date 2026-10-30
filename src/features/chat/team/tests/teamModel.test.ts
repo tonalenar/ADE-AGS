@@ -10,7 +10,7 @@ import {
 function member(ref: string, agentId: string, role: string, extra: Partial<TeamMember> = {}): TeamMember {
   return {
     teamId: "t1", member: ref, agentId, label: agentId, role, model: null, policy: defaultPolicy(role), branch: null, worktree: null,
-    origin: "existing", position: 0, createdAt: 1, updatedAt: 1, ...extra,
+    origin: "existing", position: 0, createdAt: 1, updatedAt: 1, subagent: false, ...extra,
   };
 }
 

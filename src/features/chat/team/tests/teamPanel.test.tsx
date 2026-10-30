@@ -27,7 +27,7 @@ import { useTeamStore } from "../teamStore";
 
 const TEAM: TeamView = {
   id: "t1", orchestrator: "tab-lead", agentId: "claude-code", label: "Claude Code", cwd: "/repo", title: "", createdAt: 1, updatedAt: 1, headcount: 2,
-  members: [{ teamId: "t1", member: "thread:x", agentId: "codex", label: "Codex", role: "frontend", model: "gpt-6.1-sol", policy: "edits", branch: "team/ui", worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1 }],
+  members: [{ teamId: "t1", member: "thread:x", agentId: "codex", label: "Codex", role: "frontend", model: "gpt-6.1-sol", policy: "edits", branch: "team/ui", worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1, subagent: false }],
 };
 
 const card = (tabId: string, agentId: string, title: string): ConversationCard => ({
@@ -67,6 +67,17 @@ describe("o painel Time", () => {
     expect(items[1]!.textContent).toContain("chat.team.roles.frontend");
     expect(items[1]!.textContent).toContain("chat.team.policy.edits");
     expect(items[1]!.textContent).toContain("team/ui");
+    expect(host.textContent).not.toContain("role.subagentTag");
+  });
+
+  it("marca com a etiqueta o integrante que é subagente", async () => {
+    const sub = { ...TEAM, members: [{ ...TEAM.members[0]!, subagent: true }] };
+    useTeamStore.setState({ teams: [sub] });
+    backend.teams = [sub];
+    await render(<TeamPanel conversation={card("tab-lead", "claude-code", "Claude Code")} cards={[card("tab-lead", "claude-code", "Claude Code")]} />);
+    const items = host.querySelectorAll("li");
+    expect(items[1]!.textContent).toContain("role.subagentTag");
+    expect(items[0]!.textContent).not.toContain("role.subagentTag");
   });
 
   it("+ Ligar agente abre o formulário com agente, papel e permissões", async () => {

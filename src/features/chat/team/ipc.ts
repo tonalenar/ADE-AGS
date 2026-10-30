@@ -23,6 +23,8 @@ export interface TeamMember {
   position: number;
   createdAt: number;
   updatedAt: number;
+  /** Marcado como subagente (o mesmo interruptor do canvas): só executa o que o orquestrador envia. */
+  subagent: boolean;
 }
 
 /** Espelho de `chat_team::api::TeamView`. */
@@ -77,6 +79,8 @@ export interface LinkInput {
   branch?: string | null;
   worktree?: string | null;
   origin?: "new" | "existing";
+  /** `undefined` = não disse: nasce como não subagente (e, se já estava no time, fica como está). */
+  subagent?: boolean;
 }
 
 export interface Linked {
@@ -95,7 +99,7 @@ export const chatTeamLink = (input: LinkInput) => invoke<Linked>("chat_team_link
 
 export const chatTeamUnlink = (teamId: string, member: string) => invoke<boolean>("chat_team_unlink", { teamId, member });
 
-export const chatTeamUpdate = (input: { teamId: string; member: string; role?: string; policy?: TeamPolicy; label?: string }) =>
+export const chatTeamUpdate = (input: { teamId: string; member: string; role?: string; policy?: TeamPolicy; label?: string; subagent?: boolean }) =>
   invoke<TeamMember>("chat_team_update", { input });
 
 export const chatTeamDissolve = (teamId: string) => invoke<boolean>("chat_team_dissolve", { teamId });

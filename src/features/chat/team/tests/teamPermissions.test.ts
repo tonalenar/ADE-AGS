@@ -9,7 +9,7 @@ import { decidePermission, teamPolicyOf, teamRequester, teamVerdict, teamVerdict
 
 const TEAM: TeamView = {
   id: "t1", orchestrator: "lead", agentId: "claude-code", label: "Claude Code", cwd: "/r", title: "", createdAt: 1, updatedAt: 1, headcount: 2,
-  members: [{ teamId: "t1", member: "thread:k", agentId: "kimi", label: "Kimi", role: "qa", model: null, policy: "read", branch: null, worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1 }],
+  members: [{ teamId: "t1", member: "thread:k", agentId: "kimi", label: "Kimi", role: "qa", model: null, policy: "read", branch: null, worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1, subagent: false }],
 };
 
 describe("a política do time na caixa de Permissões", () => {

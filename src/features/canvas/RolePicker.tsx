@@ -1,7 +1,7 @@
-import { useId } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useCanvasRoles, type AgentRoleChoice } from "./agentRole";
+import { SubagentSwitch } from "./SubagentSwitch";
 
 /**
  * O que este terminal vai ser: "Sem especificação" (o orquestrador decide quando a corda o liga a ele)
@@ -12,7 +12,6 @@ import { useCanvasRoles, type AgentRoleChoice } from "./agentRole";
 export function RolePicker({ value, onChange }: { value: AgentRoleChoice; onChange: (next: AgentRoleChoice) => void }) {
   const { t } = useTranslation();
   const roles = useCanvasRoles();
-  const switchId = useId();
   const chip = (selected: boolean) =>
     `min-w-0 truncate rounded-lg px-3 h-8 text-left text-[12.5px] transition-colors motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/40 ${
       selected
@@ -33,17 +32,7 @@ export function RolePicker({ value, onChange }: { value: AgentRoleChoice; onChan
           </button>
         ))}
       </div>
-      <div className="flex items-center justify-between gap-3 rounded-[10px] bg-white px-3.5 py-2.5 shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-black/20 dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55)]">
-        <span className="min-w-0">
-          <span id={switchId} className="block text-[13px] leading-[17px] text-gray-900 dark:text-[#f5f5f7]">{t("role.subagent")}</span>
-          <span className="block text-[11px] leading-[14px] text-gray-500 dark:text-white/60">{t("role.subagentHint")}</span>
-        </span>
-        <button type="button" role="switch" aria-checked={value.subagent} aria-labelledby={switchId}
-          onClick={() => onChange({ ...value, subagent: !value.subagent })}
-          className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors motion-reduce:transition-none focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-500/30 ${value.subagent ? "bg-[#34c759] dark:bg-[#30d158]" : "bg-gray-300 dark:bg-surface-overlay"}`}>
-          <span aria-hidden="true" className={`absolute left-[2px] top-[2px] h-[18px] w-[18px] rounded-full bg-white shadow-[0_2px_4px_rgba(0,0,0,0.35)] transition-transform motion-reduce:transition-none ${value.subagent ? "translate-x-4" : ""}`} />
-        </button>
-      </div>
+      <SubagentSwitch value={value.subagent} onChange={(subagent) => onChange({ ...value, subagent })} />
     </div>
   );
 }

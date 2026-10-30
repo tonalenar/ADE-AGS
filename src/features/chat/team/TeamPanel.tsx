@@ -150,6 +150,11 @@ function MemberCard({ row, teamId }: { row: RosterRow; teamId: string }) {
         <span className="text-[11px] font-semibold px-1.5 py-px rounded-[5px] bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-white/60">
           {roleLabel(row.role)}
         </span>
+        {row.subagent && (
+          <span className="text-[11px] font-semibold px-1.5 py-px rounded-[5px] bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-white/60">
+            {t("role.subagentTag")}
+          </span>
+        )}
       </div>
       <div className="flex items-center gap-2 text-chat-caption text-gray-500 dark:text-white/45">
         <StateDot state={row.state} />

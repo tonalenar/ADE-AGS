@@ -151,6 +151,8 @@ export interface RosterRow {
   policy: TeamPolicy | null;
   branch: string | null;
   isThread: boolean;
+  /** Marcado como subagente (só os integrantes; o orquestrador não é). */
+  subagent: boolean;
 }
 
 export interface RosterContext {
@@ -176,6 +178,7 @@ export function rosterRows(team: TeamView, feed: TeamFeedItem[], ctx: RosterCont
     policy: m.policy,
     branch: m.branch ?? ctx.branchOf(m.member),
     isThread: isThreadRef(m.member),
+    subagent: m.subagent,
   }));
   const lead: RosterRow = {
     ref: team.orchestrator,
@@ -187,6 +190,7 @@ export function rosterRows(team: TeamView, feed: TeamFeedItem[], ctx: RosterCont
     policy: ctx.orchestratorPolicy,
     branch: ctx.branchOf(team.orchestrator),
     isThread: isThreadRef(team.orchestrator),
+    subagent: false,
   };
   return [lead, ...members];
 }

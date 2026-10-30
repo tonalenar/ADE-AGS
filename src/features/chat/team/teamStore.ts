@@ -161,9 +161,9 @@ async function finishLink(teamId: string, ref: string, briefing: string): Promis
 }
 
 /** Liga ao time uma conversa que já existe (escolhida no formulário ou arrastada da sidebar). */
-export async function linkExisting(teamId: string, conv: ConversationRef, role: string, policy: TeamPolicy | null): Promise<void> {
+export async function linkExisting(teamId: string, conv: ConversationRef, role: string, policy: TeamPolicy | null, subagent?: boolean): Promise<void> {
   const linked = await chatTeamLink({
-    teamId, member: conv.key, agentId: conv.agentId, label: conv.agentLabel, role, policy: policy ?? defaultPolicy(role), origin: "existing",
+    teamId, member: conv.key, agentId: conv.agentId, label: conv.agentLabel, role, policy: policy ?? defaultPolicy(role), origin: "existing", subagent,
   });
   await finishLink(teamId, conv.key, linked.briefing);
 }
@@ -182,6 +182,8 @@ export interface NewMemberInput {
   effort?: string | null;
   /** Por protocolo, sem TUI (Codex e Claude Code), como as conversas novas do chat. */
   structured: boolean;
+  /** Já nasce como subagente (o interruptor do canvas). */
+  subagent?: boolean;
 }
 
 /**
@@ -212,7 +214,7 @@ export async function linkNew(input: NewMemberInput): Promise<string> {
   }
   const linked = await chatTeamLink({
     teamId: input.teamId, member: ref, agentId: agent.id, label, role: input.role, model: input.model, policy: input.policy,
-    branch: place?.branch ?? null, worktree: place?.root ?? null, origin: "new",
+    branch: place?.branch ?? null, worktree: place?.root ?? null, origin: "new", subagent: input.subagent,
   });
   await finishLink(input.teamId, ref, linked.briefing);
   return ref;
@@ -226,7 +228,7 @@ export async function unlinkMember(teamId: string, ref: string): Promise<void> {
   if (team) await syncTeamCanvas(team, { removed: [ref] });
 }
 
-export async function updateMember(teamId: string, ref: string, patch: { role?: string; policy?: TeamPolicy }): Promise<void> {
+export async function updateMember(teamId: string, ref: string, patch: { role?: string; policy?: TeamPolicy; subagent?: boolean }): Promise<void> {
   await chatTeamUpdate({ teamId, member: ref, ...patch });
   const teams = await reloadTeams();
   const team = teams.find((t) => t.id === teamId);

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { SubagentSwitch } from "@/features/canvas/SubagentSwitch";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 
@@ -49,6 +50,7 @@ export function LinkAgentForm({ team, cards }: { team: TeamView; cards: Conversa
   const [role, setRole] = useState<string>("reviewer");
   const [policy, setPolicy] = useState<TeamPolicy>("ask");
   const [touchedPolicy, setTouchedPolicy] = useState(false);
+  const [subagent, setSubagent] = useState(false);
   const [worktree, setWorktree] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -69,10 +71,10 @@ export function LinkAgentForm({ team, cards }: { team: TeamView; cards: Conversa
     setError("");
     try {
       if (pick.kind === "existing") {
-        await linkExisting(team.id, conversationRefOf(pick.card), role, policy);
+        await linkExisting(team.id, conversationRefOf(pick.card), role, policy, subagent);
       } else {
         await linkNew({
-          teamId: team.id, agent: pick.agent, role, policy, cwd: team.cwd, worktree, model: tune.model, effort: tune.effort, structured: loadChatPrefs().structured,
+          teamId: team.id, agent: pick.agent, role, policy, cwd: team.cwd, worktree, model: tune.model, effort: tune.effort, structured: loadChatPrefs().structured, subagent,
         });
       }
       setAdding(team.id, false);
@@ -137,6 +139,7 @@ export function LinkAgentForm({ team, cards }: { team: TeamView; cards: Conversa
         // O esforço some nos agentes que não têm (o `EffortMenu` devolve nada).
         <EffortRow agent={pick.agent} model={tune.model} value={tune.effort} onChange={(effort) => setTune((cur) => ({ ...cur, effort }))} />
       )}
+      <SubagentSwitch value={subagent} onChange={setSubagent} />
       {pick?.kind === "new" && (
         <label className="flex items-center gap-2 text-chat-caption text-gray-600 dark:text-white/60">
           <input type="checkbox" checked={worktree} onChange={(e) => setWorktree(e.target.checked)} className="accent-accent-600" />
