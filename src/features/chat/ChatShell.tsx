@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
 import { WindowLights } from "@/app/WindowLights";
@@ -11,6 +12,9 @@ import { newConversation, reopenFolder } from "./chatActions";
 import { DetailsIcon, PanelBottomIcon, PanelRightIcon, SidebarIcon } from "./chatIcons";
 import { chatProjects, conversationCards, readAccess, type ChatProject, type ConversationCard } from "./chatModel";
 import { ChatSidebar, IconButton, ProjectBadge, type FolderDiff } from "./ChatSidebar";
+import { ChatPage } from "./ChatPage";
+import { SettingsSidebar, SpacesSidebar } from "./ChatPageSidebar";
+import { isSettingsRoute } from "./chatSpaces";
 import { CHAT_SHELL_ATTR, ConversationView, hasTimeline, useTerminalOpen } from "./ConversationView";
 import { parseUnifiedDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
@@ -26,9 +30,16 @@ import { usePopover } from "./usePopover";
  * ou a de conversa nova, e o painel direito. Fica por cima do workspace, que continua montado por
  * baixo (terminais, canvas, navegadores): trocar de modo não derruba nada. As conversas são as abas
  * de agente da janela.
+ *
+ * Uma rota de tela cheia (`page`: Configurações, Missões…) abre no lugar da conversa, com a sidebar
+ * das seções ou dos Espaços; o painel direito some enquanto ela está aberta.
  */
-export function ChatShell({ groups }: { groups: RepoGroup[] }) {
+export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?: React.ReactNode }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const tabCount = useTabsStore((s) => s.tabs.length);
+  const closePage = useCallback(() => navigate(tabCount > 0 ? "/workspace" : "/"), [navigate, tabCount]);
   const cards = useMemo(() => conversationCards(groups), [groups]);
   const projects = useMemo(() => chatProjects(groups), [groups]);
   const closed = useMemo(() => {
@@ -58,13 +69,20 @@ export function ChatShell({ groups }: { groups: RepoGroup[] }) {
   return (
     <div {...{ [CHAT_SHELL_ATTR]: "" }}
       className="absolute inset-0 flex bg-white dark:bg-surface-deep text-gray-900 dark:text-white">
-      {sidebarOpen && (
+      {sidebarOpen && page && (isSettingsRoute(pathname)
+        ? <SettingsSidebar onBack={closePage} />
+        : <SpacesSidebar activeCount={cards.length} onBack={closePage} />)}
+      {sidebarOpen && !page && (
         <ChatSidebar cards={cards} closed={closed} diffs={diffs} selectedId={active?.tabId ?? null}
           onCollapse={() => setSidebarOpen(false)} onAddProject={() => { void addProject(); }}
           onReopen={(cwd) => { void reopenFolder(cwd); }} />
       )}
 
-      {!(panelOpen && maximized) && (
+      {page && (
+        <ChatPage onClose={closePage} sidebarOpen={sidebarOpen} onExpandSidebar={() => setSidebarOpen(true)}>{page}</ChatPage>
+      )}
+
+      {!page && !(panelOpen && maximized) && (
         <main className="relative flex-1 min-w-[360px] flex flex-col">
           <header data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-3 pl-5 pr-3 text-[14px] select-none">
             {!sidebarOpen && (
@@ -92,7 +110,7 @@ export function ChatShell({ groups }: { groups: RepoGroup[] }) {
         </main>
       )}
 
-      <RightPanel tabId={active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""} />
+      {!page && <RightPanel tabId={active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""} />}
     </div>
   );
 }

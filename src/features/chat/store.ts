@@ -28,7 +28,7 @@ interface ChatState {
   browser: { viewId: string; rect: Rect } | null;
 }
 
-export type RightPanelTab = "diff" | "files" | "browser";
+export type RightPanelTab = "diff" | "files" | "browser" | "design" | "devices";
 
 export const useChatStore = create<ChatState>(() => ({ slot: null, composing: false, terminalOpen: {}, panel: null, panelMaximized: false, browser: null }));
 

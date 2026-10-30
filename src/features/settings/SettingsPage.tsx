@@ -7,7 +7,7 @@ import { AlertaToast } from "@/shared/ui/alerts";
 import { useTranslation } from "react-i18next";
 
 import i18n, { setLanguage } from "@/i18n/index";
-import { useUiStore, type SettingsSectionId } from "@/app/uiStore";
+import { useChatShell, useUiStore, type SettingsSectionId } from "@/app/uiStore";
 import { ContasSection } from "@/features/accounts/ContasSection";
 import { useAgentsStore } from "@/features/agents/store";
 import type { CustomAgent } from "@/features/agents/types";
@@ -67,15 +67,17 @@ const GLYPH: Record<SettingsSectionId, { tone: string; icon: React.ReactNode }> 
   accounts: { tone: "bg-green-500", icon: <><circle cx="8" cy="5.6" r="2.4" /><path d="M3 13.2c.7-2.2 2.5-3.4 5-3.4s4.3 1.2 5 3.4" /></> },
   agents: { tone: "bg-orange-500", icon: <><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1.6" /><path d="M6.4 1.8v2.4M9.6 1.8v2.4M6.4 11.8v2.4M9.6 11.8v2.4M1.8 6.4h2.4M1.8 9.6h2.4M11.8 6.4h2.4M11.8 9.6h2.4" /></> },
   memory: { tone: "bg-purple-500", icon: <><path d="M8 2.2 13.6 5 8 7.8 2.4 5 8 2.2Z" /><path d="m2.4 8 5.6 2.8L13.6 8M2.4 11l5.6 2.8L13.6 11" /></> },
+  chat: { tone: "bg-accent-500", icon: <path d="M14 8a5.6 5.6 0 0 1-8.1 5l-3.6.8.7-3.3A5.6 5.6 0 1 1 14 8Z" /> },
   terminal: { tone: "bg-sky-400", icon: <><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2.2" /><path d="M4.6 6.4 6.6 8l-2 1.6M8.8 10.2h2.6" /></> },
   shortcuts: { tone: "bg-red-500", icon: <><rect x="1.4" y="4" width="13.2" height="8" rx="2" /><path d="M4 6.8h.01M6.8 6.8h.01M9.6 6.8h.01M12 6.8h.01M4.4 9.4h7.2" /></> },
   decisions: { tone: "bg-teal-600", icon: <><circle cx="8" cy="3.2" r="1.5" /><circle cx="4.2" cy="12.2" r="1.5" /><circle cx="11.8" cy="12.2" r="1.5" /><path d="M8 4.7v2.4M8 7.1 4.2 10.7M8 7.1l3.8 3.6" /></> },
   advanced: { tone: "bg-gray-600", icon: <><path d="M2 4.6h12M2 11.4h12" /><circle cx="5.6" cy="4.6" r="1.5" /><circle cx="10.4" cy="11.4" r="1.5" /></> },
 };
 
-/** Os dois grupos da barra lateral (a linha entre eles é a da prancheta). */
-const NAV: SettingsSectionId[][] = [
-  ["general", "appearance", "accounts", "agents"],
+/** Os dois grupos da barra lateral (a linha entre eles é a da prancheta). No modo chat, a barra
+ *  lateral do chat mostra os mesmos grupos (ver `ChatSidebar`). */
+export const SETTINGS_NAV: SettingsSectionId[][] = [
+  ["general", "appearance", "chat", "accounts", "agents"],
   ["memory", "terminal", "shortcuts", "decisions", "advanced"],
 ];
 
@@ -126,6 +128,8 @@ type AdvancedTab = "cli" | "graphify";
 export function SettingsPage() {
   const { t } = useTranslation();
   const section = useUiStore((s) => s.settingsSection);
+  // No modo chat o menu das seções é a barra lateral do chat (prancheta 5): aqui só o conteúdo.
+  const chat = useChatShell();
   const setSection = useUiStore((s) => s.setSettingsSection);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const activeCwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? s.tabs[0]?.cwd ?? "");
@@ -162,6 +166,7 @@ export function SettingsPage() {
   const labels: Record<SettingsSectionId, string> = {
     general: t("settings.general"),
     appearance: t("settings.appearance"),
+    chat: t("chat.settings.title"),
     accounts: t("settings.accounts"),
     agents: t("settings.agents"),
     memory: t("settings.memory"),
@@ -193,17 +198,18 @@ export function SettingsPage() {
   const terms = useMemo<Record<SettingsSectionId, string>>(() => ({
     general: [labels.general, ...generalTabs.map((x) => x.label), t("settings.language")].join(" "),
     appearance: [labels.appearance, t("settings.theme")].join(" "),
+    chat: [labels.chat, t("chat.settings.toggle"), t("chat.settings.worktree"), t("chat.settings.plan")].join(" "),
     accounts: [labels.accounts].join(" "),
     agents: [labels.agents, ...agentsTabs.map((x) => x.label)].join(" "),
     memory: labels.memory,
     terminal: labels.terminal,
     shortcuts: labels.shortcuts,
     decisions: [labels.decisions, t("settings.decisions.provider"), "laya", "jev"].join(" "),
-    advanced: [labels.advanced, ...advancedTabs.map((x) => x.label), t("chat.settings.title")].join(" "),
+    advanced: [labels.advanced, ...advancedTabs.map((x) => x.label)].join(" "),
   }), [t]); // eslint-disable-line react-hooks/exhaustive-deps
   const q = filter.trim().toLocaleLowerCase();
   const matches = (id: SettingsSectionId) => !q || terms[id].toLocaleLowerCase().includes(q);
-  const firstMatch = NAV.flat().find(matches);
+  const firstMatch = SETTINGS_NAV.flat().find(matches);
 
   const handleChangeSkillsDir = async () => {
     const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
@@ -222,7 +228,7 @@ export function SettingsPage() {
   return (
     <div className="@container flex h-full min-h-0 w-full bg-gray-50 dark:bg-surface-deep">
       {/* ══ a barra lateral ═══════════════════════════════════════════════ */}
-      <nav aria-label={t("settings.title")} className="flex w-[208px] shrink-0 flex-col min-h-0
+      {!chat && <nav aria-label={t("settings.title")} className="flex w-[208px] shrink-0 flex-col min-h-0
         border-r border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-gray-100/60 dark:bg-surface">
         <label className="mx-3 mt-3 mb-2 flex h-8 shrink-0 items-center gap-2 rounded-[9px] pl-2.5 pr-2
           bg-black/[0.05] dark:bg-surface-raised text-gray-400 dark:text-white/30
@@ -235,11 +241,11 @@ export function SettingsPage() {
         </label>
         <div className="cc-scroll flex min-h-0 flex-1 flex-col gap-0.5 px-2 pb-3">
           {!firstMatch && <p className="px-2 py-3 text-[12px] text-gray-400 dark:text-white/35">{t("settings.searchEmpty")}</p>}
-          {NAV.map((group, gi) => {
+          {SETTINGS_NAV.map((group, gi) => {
             const visible = group.filter(matches);
             if (visible.length === 0) return null;
             return (
-              <div key={gi} className={`flex flex-col gap-0.5 ${gi > 0 && NAV.slice(0, gi).some((g) => g.some(matches)) ? "mt-1 border-t border-black/[0.08] pt-2 dark:border-[rgba(84,84,88,0.55)]" : ""}`}>
+              <div key={gi} className={`flex flex-col gap-0.5 ${gi > 0 && SETTINGS_NAV.slice(0, gi).some((g) => g.some(matches)) ? "mt-1 border-t border-black/[0.08] pt-2 dark:border-[rgba(84,84,88,0.55)]" : ""}`}>
                 {visible.map((id) => (
                   <Button variant="custom" key={id} onClick={() => setSection(id)} aria-current={section === id ? "page" : undefined}
                     className={`cc-t flex h-8 w-full items-center gap-2.5 rounded-md px-1.5 text-left text-[13px] leading-[18px]
@@ -254,7 +260,7 @@ export function SettingsPage() {
             );
           })}
         </div>
-      </nav>
+      </nav>}
 
       {/* ══ a seção aberta ════════════════════════════════════════════════ */}
       <main className="cc-scroll min-w-0 flex-1 px-8 py-6">
@@ -413,13 +419,13 @@ export function SettingsPage() {
               : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>
           )}
 
+          {section === "chat" && <ChatModeSetting />}
           {section === "terminal" && <TerminalSection />}
           {section === "shortcuts" && <ShortcutsSection />}
           {section === "decisions" && <DecisionsSection />}
 
           {section === "advanced" && (
             <>
-              <ChatModeSetting />
               <SubTabs items={advancedTabs} value={advancedTab} onChange={setAdvancedTab} />
               {advancedTab === "cli" && <CliInstallSection />}
               {advancedTab === "graphify" && <GraphifySection />}
@@ -429,7 +435,7 @@ export function SettingsPage() {
       </main>
 
       {/* ══ o painel de memória ═══════════════════════════════════════════ */}
-      {workspaceId && (
+      {!chat && workspaceId && (
         <MemoryRail workspaceId={workspaceId} workspaceName={workspaceName}
           onOpenMemory={section === "memory" ? undefined : () => setSection("memory")} />
       )}

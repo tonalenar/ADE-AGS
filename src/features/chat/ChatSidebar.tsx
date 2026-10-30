@@ -272,7 +272,7 @@ export function IconButton({ label, onClick, children, className = "", active = 
   );
 }
 
-function FooterButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+export function FooterButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} title={label}
       className="w-8 h-8 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">

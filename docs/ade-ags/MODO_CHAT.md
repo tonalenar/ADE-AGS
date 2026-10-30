@@ -56,6 +56,16 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
   - "Concluídas", com as pastas fechadas para reabrir;
   - rodapé com Configurações, Pull requests (Forge) e Uso (Contas).
 
+## Telas no visual novo
+
+- **Telas cheias dentro da casca:** com o chat ligado, Configurações, Missões, Frota, Squads, Skills, Marketplace, Forge e Histórico abrem no lugar da conversa (`ChatPage`), não por cima (`RouteModal`). As rotas não mudam. Escape ou "Voltar ao chat" voltam à conversa.
+- **Configurações (prancheta 5):** a sidebar do chat vira o menu das seções (`SettingsSidebar`), em três grupos com busca. A página esconde o menu próprio e a coluna de memória.
+- **Seção "Modo chat":** saiu de Avançado e virou seção própria (`chat`), com o liga/desliga e dois padrões das conversas novas: worktree por conversa e começar no Plano (os mesmos valores que o composer lembra).
+- **Espaços (prancheta 6):** nas outras telas a sidebar lista Conversas e os Espaços (`chatSpaces.ts`). Memória abre a seção das Configurações.
+- **Painel direito:** duas abas novas, carregadas sob demanda (puxam o canvas):
+  - **Design:** o mesmo `DesignPanel` do canvas, com os designs da pasta da conversa;
+  - **Dispositivos:** o simulador iOS (`SimulatorScreen`, a tela nativa) e o Android (quadros do `adb`, toque e deslizar), como os nós do canvas.
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:
@@ -74,6 +84,8 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 |---|---|
 | `src/app/uiStore.ts` | `chatMode` (flag), `shellMode` (`chat` / `workspace`), `chatShellOn`, `useChatShell` |
 | `src/features/chat/` | `ChatShell`, `ChatSidebar`, `NewConversation`, `ConversationView`, `ChatComposer`, `AgentModelPicker`, `AccessMenu`, `ShellModeSwitch`, `ChatEntryButton`, `ChatModeSetting` |
+| `src/features/chat/ChatPage.tsx`, `ChatPageSidebar.tsx`, `chatSpaces.ts` | telas cheias no chat, sidebar das Configurações e dos Espaços |
+| `src/features/chat/DesignPane.tsx`, `DevicesPane.tsx` | abas Design e Dispositivos do painel direito |
 | `src/features/chat/chatModel.ts` | lógica pura: título da conversa, comando, projetos e cartões |
 | `src/features/tabs/layout/layoutStore.ts` | `CHAT_GROUP`, `chatPlacements`, `placementsFrom({ chat })` |
 | `src/app/shortcuts.ts` | `toggleChat` (Ctrl+Shift+L) |

@@ -311,7 +311,8 @@ export function AppShell() {
               scrollea por dentro (encabezado fijo arriba, atajos fijos abajo, la lista en
               el medio). Un scroll acá afuera además reservaría su carril a la derecha de
               TODAS las páginas, incluidas las que no lo necesitan. */}
-          {chat && <ChatShell groups={groups} />}
+          {/* No chat as telas cheias (Configurações, Missões…) abrem dentro da casca, no lugar da conversa. */}
+          {chat && <ChatShell groups={groups} page={fullPage ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} />}
 
           {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
@@ -319,7 +320,7 @@ export function AppShell() {
             </div>
           )}
 
-          {fullPage && (
+          {fullPage && !chat && (
             <RouteModal onClose={() => navigate(tabs.length > 0 ? "/workspace" : "/")}>
               <Outlet context={{ groups } satisfies ShellOutletContext} />
             </RouteModal>

@@ -59,3 +59,4 @@ export function StopIcon({ className = "w-2.5 h-2.5" }: IconProps) {
 }
 export const ClockIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
 export const FolderGitIcon = (p: IconProps) => <Svg {...p}><path d="M20 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z" /><circle cx="12" cy="13" r="2" /><path d="M14 13h4M6 13h4" /></Svg>;
+export const ChevronLeftIcon = (p: IconProps) => <Svg {...p}><path d="m15 18-6-6 6-6" /></Svg>;

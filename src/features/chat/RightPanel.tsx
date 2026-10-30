@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 
@@ -11,6 +11,10 @@ import { parseUnifiedDiff, type FileDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
 import { CHAT_SHELL_ATTR } from "./ConversationView";
 import { setChatBrowser, setRightPanel, togglePanelMaximized, useChatStore, type RightPanelTab } from "./store";
+
+// Design e Dispositivos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
+const DesignPane = lazy(() => import("./DesignPane").then((m) => ({ default: m.DesignPane })));
+const DevicesPane = lazy(() => import("./DevicesPane").then((m) => ({ default: m.DevicesPane })));
 
 /** A largura do painel (a padrão do T3 Code). */
 export const RIGHT_PANEL_W = 540;
@@ -28,6 +32,8 @@ export function RightPanel({ tabId, cwd, project }: { tabId: string | null; cwd:
     { id: "diff", label: t("chat.panel.diff") },
     { id: "files", label: t("chat.panel.files") },
     { id: "browser", label: t("chat.panel.browser") },
+    { id: "design", label: t("chat.panel.design") },
+    { id: "devices", label: t("chat.panel.devices") },
   ];
   return (
     <aside aria-label={t("chat.panel.label")}
@@ -51,6 +57,11 @@ export function RightPanel({ tabId, cwd, project }: { tabId: string | null; cwd:
         {panel === "diff" && <DiffView tabId={tabId} cwd={cwd} />}
         {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}
         {panel === "browser" && cwd && <BrowserSurface cwd={cwd} />}
+        {(panel === "design" || panel === "devices") && (
+          <Suspense fallback={<p className="p-4 text-[13px] text-gray-400 dark:text-white/40">{t("chat.panel.loading")}</p>}>
+            {panel === "design" ? <DesignPane cwd={cwd} /> : <DevicesPane />}
+          </Suspense>
+        )}
       </div>
     </aside>
   );
