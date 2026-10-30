@@ -42,3 +42,41 @@ export function formatCreatedAt(ms: number, locale: string, timeZone?: string): 
   if (!Number.isFinite(ms)) return "";
   return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short", timeZone }).format(new Date(ms));
 }
+
+/** Um handoff pendente como o `ai-memory handoffs --json` devolve (só estes campos, sem resumo). */
+export interface AiMemoryHandoff {
+  id: string;
+  from_agent: string;
+  /** null quando o handoff não tem destinatário certo. */
+  to_agent: string | null;
+  cwd: string;
+  created_at_ms: number;
+}
+
+export interface AiMemoryHandoffGroup {
+  /** null agrupa os handoffs sem destinatário. */
+  toAgent: string | null;
+  /** Do mais antigo para o mais novo. */
+  handoffs: AiMemoryHandoff[];
+}
+
+/** Agrupa por `to_agent`: os nomeados em ordem alfabética e, por último, os sem destinatário. Não altera a entrada. */
+export function groupPendingHandoffs(list: readonly AiMemoryHandoff[]): AiMemoryHandoffGroup[] {
+  const byAgent = new Map<string | null, AiMemoryHandoff[]>();
+  for (const handoff of list) {
+    const key = handoff.to_agent || null;
+    const bucket = byAgent.get(key) ?? [];
+    bucket.push(handoff);
+    byAgent.set(key, bucket);
+  }
+
+  const groups = [...byAgent].map(([toAgent, handoffs]) => ({
+    toAgent,
+    handoffs: [...handoffs].sort((a, b) => a.created_at_ms - b.created_at_ms || a.id.localeCompare(b.id)),
+  }));
+  return groups.sort((a, b) => {
+    if (a.toAgent === null) return 1;
+    if (b.toAgent === null) return -1;
+    return a.toAgent.localeCompare(b.toAgent);
+  });
+}
