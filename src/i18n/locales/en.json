@@ -3742,5 +3742,10 @@
   "chat.devices.ios": "iOS",
   "chat.devices.android": "Android",
   "chat.devices.noIos": "No Xcode simulators",
-  "chat.design.empty": "No artboards in this folder yet. Ask the agent for a design: the artboards show up here to comment on and approve."
+  "chat.design.empty": "No artboards in this folder yet. Ask the agent for a design: the artboards show up here to comment on and approve.",
+  "chat.structured.command": "The agent wants to run a command",
+  "chat.structured.fileChange": "The agent wants to edit files",
+  "chat.structured.answer": "Answer the agent's question",
+  "chat.settings.structured": "Codex without a terminal (app-server)",
+  "chat.settings.structuredHint": "New Codex conversations talk to it directly: approvals and questions arrive in the chat, and stopping interrupts the turn. Off, Codex runs in its TUI, like the other agents."
 }

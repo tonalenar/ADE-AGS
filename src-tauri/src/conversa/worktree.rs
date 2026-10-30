@@ -1,5 +1,4 @@
-//! O que o modo chat pede ao backend e não cabe em outro módulo. Hoje: o worktree de uma conversa
-//! nova ("Novo worktree" na faixa do composer), feito pelo mesmo `runs::worktrees` da frota.
+//! O worktree de uma conversa nova ("Novo worktree" na faixa do composer), feito pelo mesmo `runs::worktrees` da frota.
 
 use std::path::Path;
 

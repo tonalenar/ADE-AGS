@@ -33,11 +33,40 @@ export function ConversationTimeline({ tabId, agentLabel, approval, onOpenTermin
   approval: PermissionPrompt | null;
   onOpenTerminal: () => void;
 }) {
-  const { t } = useTranslation();
   const { timeline, loaded, phase } = useConversationTimeline(tabId);
   const items = useMemo(() => timeline?.items ?? [], [timeline]);
+  return (
+    <TimelineView items={items} loaded={loaded} missing={loaded && !timeline} truncated={!!timeline?.truncated}
+      working={phase === "working" || approval !== null} approval={approval} agentLabel={agentLabel} onOpenTerminal={onOpenTerminal} />
+  );
+}
+
+/** O pedido que espera a pessoa, como a timeline o mostra. */
+export interface ApprovalNote {
+  title: string;
+  detail?: string | null;
+}
+
+/**
+ * O desenho da timeline, alimentado por itens: os do transcript (`ConversationTimeline`) ou os que o
+ * agente manda pelo protocolo (`StructuredConversationView`).
+ */
+export function TimelineView({ items, loaded, missing = false, truncated = false, working, approval, draft = null, agentLabel, onOpenTerminal }: {
+  items: TimelineItem[];
+  loaded: boolean;
+  /** Ainda não há de onde ler (o transcript não existe): oferece o terminal. */
+  missing?: boolean;
+  truncated?: boolean;
+  working: boolean;
+  approval: ApprovalNote | null;
+  /** O texto do agente que ainda está chegando (protocolo). */
+  draft?: string | null;
+  agentLabel: string;
+  /** Sem terminal (protocolo), as perguntas se respondem no composer. */
+  onOpenTerminal?: () => void;
+}) {
+  const { t } = useTranslation();
   const turns = useMemo(() => timelineTurns(items), [items]);
-  const working = phase === "working" || approval !== null;
   const startedAt = useMemo(() => openTurnStart(items), [items]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -45,7 +74,7 @@ export function ConversationTimeline({ tabId, agentLabel, approval, onOpenTermin
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [turns.length, working, items]);
+  }, [turns.length, working, items, draft]);
 
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 cc-scroll"
@@ -54,11 +83,11 @@ export function ConversationTimeline({ tabId, agentLabel, approval, onOpenTermin
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
       }}>
       <div className="max-w-[736px] mx-auto px-4 sm:px-6 pt-4 pb-6 flex flex-col gap-4 text-[14px] leading-relaxed text-gray-900 dark:text-white">
-        {timeline?.truncated && (
+        {truncated && (
           <p className="text-center text-[12px] text-gray-400 dark:text-white/35">{t("chat.timeline.truncated")}</p>
         )}
         {!loaded && <p className="py-10 text-center text-[13px] text-gray-400 dark:text-white/40">{t("chat.timeline.loading")}</p>}
-        {loaded && !timeline && (
+        {missing && onOpenTerminal && (
           <div className="py-10 flex flex-col items-center gap-3 text-center text-[13px] text-gray-400 dark:text-white/40">
             <p>{t("chat.timeline.waiting", { agent: agentLabel })}</p>
             <button type="button" onClick={onOpenTerminal}
@@ -67,7 +96,7 @@ export function ConversationTimeline({ tabId, agentLabel, approval, onOpenTermin
             </button>
           </div>
         )}
-        {loaded && timeline && turns.length === 0 && !working && (
+        {loaded && !missing && turns.length === 0 && !working && (
           <p className="py-10 text-center text-[13px] text-gray-400 dark:text-white/40">{t("chat.timeline.empty", { agent: agentLabel })}</p>
         )}
         {turns.map((turn, i) => <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} />)}
@@ -83,13 +112,14 @@ export function ConversationTimeline({ tabId, agentLabel, approval, onOpenTermin
             )}
           </div>
         )}
+        {working && draft && <div className="px-1 text-[14px] break-words"><Markdown content={draft} /></div>}
         {working && <WorkingLine since={startedAt} waiting={approval !== null} />}
       </div>
     </div>
   );
 }
 
-function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolean; onOpenTerminal: () => void }) {
+function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolean; onOpenTerminal?: () => void }) {
   const { t } = useTranslation();
   // Os turnos antigos começam recolhidos; o último (ou o em aberto), aberto.
   const [open, setOpen] = useState(latest || turn.end === null);
@@ -120,7 +150,7 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
   );
 }
 
-function BodyRowView({ row, onOpenTerminal }: { row: BodyRow; onOpenTerminal: () => void }) {
+function BodyRowView({ row, onOpenTerminal }: { row: BodyRow; onOpenTerminal?: () => void }) {
   const { t } = useTranslation();
   switch (row.type) {
     case "assistant":
@@ -145,10 +175,12 @@ function BodyRowView({ row, onOpenTerminal }: { row: BodyRow; onOpenTerminal: ()
               ))}
             </ul>
           )}
-          <button type="button" onClick={onOpenTerminal}
-            className="self-start h-7 px-3 rounded-md bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-[12.5px] font-medium">
-            {t("chat.timeline.answerInTerminal")}
-          </button>
+          {onOpenTerminal && (
+            <button type="button" onClick={onOpenTerminal}
+              className="self-start h-7 px-3 rounded-md bg-gray-900 dark:bg-white text-white dark:text-gray-900 text-[12.5px] font-medium">
+              {t("chat.timeline.answerInTerminal")}
+            </button>
+          )}
         </div>
       );
   }

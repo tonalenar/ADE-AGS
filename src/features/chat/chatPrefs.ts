@@ -16,11 +16,13 @@ export interface ChatPrefs {
   plan: boolean;
   /** Abrir a conversa num worktree novo em vez do checkout atual. */
   worktree: boolean;
+  /** Os agentes que falam por protocolo (o Codex) conversam sem TUI. Desligado = sempre pela TUI. */
+  structured: boolean;
 }
 
 const KEY = "cc-chat-prefs";
 
-export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, worktree: false };
+export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, worktree: false, structured: true };
 
 const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : null);
 
@@ -37,6 +39,7 @@ export function parseChatPrefs(raw: unknown): ChatPrefs {
     access: o.access === "ask" || o.access === "edits" || o.access === "full" ? o.access : "safe",
     plan: o.plan === true,
     worktree: o.worktree === true,
+    structured: o.structured !== false,
   };
 }
 

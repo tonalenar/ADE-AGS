@@ -1295,6 +1295,9 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     // Pontos de restauração das abas (`tab_checkpoints`): fichas das fotos em refs escondidas. Só
     // aditiva, sem subir user_version.
     crate::tab_checkpoints::migrate(conn)?;
+    // As conversas do modo chat que falam com o agente por protocolo (`conversa`): só aditiva, sem
+    // subir user_version.
+    crate::conversa::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

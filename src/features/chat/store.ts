@@ -26,11 +26,13 @@ interface ChatState {
   panelMaximized: boolean;
   /** O navegador da aba Navegador e onde desenhá-lo (como o terminal: por slot, sem remontar). */
   browser: { viewId: string; rect: Rect } | null;
+  /** A conversa por protocolo aberta (ver `structured/`); `null` = a da aba ativa. */
+  thread: string | null;
 }
 
 export type RightPanelTab = "diff" | "files" | "browser" | "design" | "devices";
 
-export const useChatStore = create<ChatState>(() => ({ slot: null, composing: false, terminalOpen: {}, panel: null, panelMaximized: false, browser: null }));
+export const useChatStore = create<ChatState>(() => ({ slot: null, composing: false, terminalOpen: {}, panel: null, panelMaximized: false, browser: null, thread: null }));
 
 const sameRect = (a: Rect | null, b: Rect | null) =>
   a === b || (!!a && !!b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);

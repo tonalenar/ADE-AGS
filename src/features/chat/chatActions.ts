@@ -8,7 +8,7 @@ import type { AgentInfo } from "@/features/tabs/types";
 import { pasteIntoTab, sendWhenReady } from "@/features/terminal/terminalRegistry";
 
 import { chatCommand, conversationTitle, retuneConversation, type LaunchChoice } from "./chatModel";
-import { setComposing } from "./store";
+import { setComposing, useChatStore } from "./store";
 
 export interface StartConversation extends LaunchChoice {
   cwd: string;
@@ -38,6 +38,7 @@ export async function startConversation(input: StartConversation): Promise<strin
   registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, tabs.workspaceId, []));
   if (input.prompt.trim()) sendWhenReady(tabId, input.prompt.trim());
   // A conversa nova é a ativa: a tela dela substitui a de conversa nova.
+  useChatStore.setState({ thread: null });
   useViewTabsStore.getState().showTerminal();
   setComposing(false);
   return tabId;
@@ -45,6 +46,7 @@ export async function startConversation(input: StartConversation): Promise<strin
 
 /** Mostra uma conversa da sidebar. */
 export function openConversation(tabId: string): void {
+  useChatStore.setState({ thread: null });
   useTabsStore.getState().activateTab(tabId);
   useViewTabsStore.getState().showTerminal();
   setComposing(false);

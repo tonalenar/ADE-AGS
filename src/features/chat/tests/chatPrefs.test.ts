@@ -11,7 +11,7 @@ describe("parseChatPrefs", () => {
 
   it("guarda só o que serve", () => {
     expect(parseChatPrefs({ cwd: "/p", agentId: "codex", model: 3, effort: "", accountId: "a1", access: "ask", extra: true }))
-      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, worktree: false });
+      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, worktree: false, structured: true });
   });
 
   it("permissão desconhecida cai no nível das missões (safe)", () => {
@@ -25,5 +25,13 @@ describe("isPageRoute", () => {
     expect(isPageRoute("/workspace")).toBe(false);
     expect(isPageRoute("/settings")).toBe(true);
     expect(isPageRoute("/missions")).toBe(true);
+  });
+});
+
+describe("parseChatPrefs: conversa por protocolo", () => {
+  it("vem ligada e só desliga com false explícito", () => {
+    expect(parseChatPrefs({}).structured).toBe(true);
+    expect(parseChatPrefs({ structured: "não" }).structured).toBe(true);
+    expect(parseChatPrefs({ structured: false }).structured).toBe(false);
   });
 });

@@ -23,6 +23,9 @@ import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
 import { ShellModeSwitch } from "./ShellModeSwitch";
 import { setTerminalOpen, toggleRightPanel, useChatStore } from "./store";
+import { threadCards, threadIdOf, threadKey } from "./structured/model";
+import { startStructured, useStructured } from "./structured/store";
+import { StructuredConversationView } from "./structured/StructuredConversationView";
 import { usePopover } from "./usePopover";
 
 /**
@@ -40,7 +43,13 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const { pathname } = useLocation();
   const tabCount = useTabsStore((s) => s.tabs.length);
   const closePage = useCallback(() => navigate(tabCount > 0 ? "/workspace" : "/"), [navigate, tabCount]);
-  const cards = useMemo(() => conversationCards(groups), [groups]);
+  const threads = useStructured((s) => s.threads);
+  const selectedThread = useChatStore((s) => s.thread);
+  const detected = useTabsStore((s) => s.detectedAgents);
+  const cards = useMemo(() => {
+    const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? id;
+    return [...threadCards(threads, groups, labelOf, selectedThread), ...conversationCards(groups)].sort((a, b) => b.openedAt - a.openedAt);
+  }, [groups, threads, detected, selectedThread]);
   const projects = useMemo(() => chatProjects(groups), [groups]);
   const closed = useMemo(() => {
     const open = new Set(cards.map((c) => c.cwd));
@@ -52,10 +61,13 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const maximized = useChatStore((s) => s.panelMaximized);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [folder, setFolder] = useState<string | null>(null);
-  const active = composing ? null : cards.find((c) => c.tabId === activeTabId) ?? null;
+  const threadCard = selectedThread ? cards.find((c) => threadIdOf(c.tabId) === selectedThread) ?? null : null;
+  const active = composing ? null : threadCard ?? cards.find((c) => c.tabId === activeTabId) ?? null;
+  const activeThread = active ? threads.find((th) => th.id === threadIdOf(active.tabId)) ?? null : null;
   const diffs = useFolderDiffs(cards);
 
   useEffect(() => startChatLive(), []);
+  useEffect(() => startStructured(), []);
 
   const addProject = async () => {
     const picked = await pickProjectFolder(t("home.dialogTitle"));
@@ -99,18 +111,19 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             <ShellModeSwitch />
             <div className="flex items-center gap-1">
               <DetailsButton card={active} />
-              {active && hasTimeline(active.agentId) ? <TerminalToggle card={active} /> : (
+              {active && !activeThread && hasTimeline(active.agentId) ? <TerminalToggle card={active} /> : (
                 <IconButton label={t("chat.terminal.toggle")} onClick={() => undefined} className="opacity-40 pointer-events-none"><PanelBottomIcon className="w-4 h-4" /></IconButton>
               )}
               <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
             </div>
           </header>
 
-          {active ? <ConversationView key={active.tabId} card={active} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
+          {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} />
+            : active ? <ConversationView key={active.tabId} card={active} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
         </main>
       )}
 
-      {!page && <RightPanel tabId={active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""} />}
+      {!page && <RightPanel tabId={activeThread ? null : active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""} />}
     </div>
   );
 }
@@ -196,9 +209,16 @@ function useFolderDiffs(cards: ConversationCard[]): Record<string, FolderDiff> {
       if (prev) window.clearTimeout(prev);
       timers.current.set(cwd, window.setTimeout(() => load(cwd), DIFF_DEBOUNCE_MS));
     });
+    // A conversa por protocolo não tem transcript: o diff relê quando o turno dela acaba.
+    const offThread = listen<{ threadId: string; type: string; phase?: string }>("cc-chat-thread", (e) => {
+      if (e.payload.type !== "phase" || e.payload.phase !== "idle") return;
+      const cwd = tabCwd.current.get(threadKey(e.payload.threadId));
+      if (cwd) load(cwd);
+    });
     const pending = timers.current;
     return () => {
       off.then((fn) => fn()).catch(() => undefined);
+      offThread.then((fn) => fn()).catch(() => undefined);
       pending.forEach((id) => window.clearTimeout(id));
       pending.clear();
     };

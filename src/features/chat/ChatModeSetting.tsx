@@ -32,6 +32,8 @@ export function ChatModeSetting() {
           checked={prefs.worktree} onChange={(worktree) => update({ worktree })} />
         <SettingsToggleRow label={t("chat.settings.plan")} description={t("chat.settings.planHint")}
           checked={prefs.plan} onChange={(plan) => update({ plan })} />
+        <SettingsToggleRow label={t("chat.settings.structured")} description={t("chat.settings.structuredHint")}
+          checked={prefs.structured} onChange={(structured) => update({ structured })} />
       </SettingsGroup>
     </SettingsSection>
   );

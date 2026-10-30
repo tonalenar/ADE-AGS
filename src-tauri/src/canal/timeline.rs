@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::event::{clip, first_line, parse_ts_ms};
@@ -23,7 +23,7 @@ pub const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ItemKind {
     User,
@@ -33,7 +33,7 @@ pub enum ItemKind {
 }
 
 /// Que tipo de ferramenta, para o ícone e o verbo da linha ("Leu", "Editou", "Rodou").
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolKind {
     Read,
@@ -48,7 +48,7 @@ pub enum ToolKind {
     Other,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ToolStatus {
     Running,
@@ -57,7 +57,7 @@ pub enum ToolStatus {
     Denied,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Question {
     pub text: String,
@@ -65,7 +65,7 @@ pub struct Question {
 }
 
 /// Um item da timeline. Os campos que não valem para o tipo ficam de fora do JSON.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Item {
     pub kind: ItemKind,
@@ -106,7 +106,7 @@ pub struct Item {
 }
 
 impl Item {
-    fn new(kind: ItemKind, id: String, at: Option<i64>) -> Item {
+    pub(crate) fn new(kind: ItemKind, id: String, at: Option<i64>) -> Item {
         Item {
             kind, id, at, text: None, name: None, tool: None, label: None, path: None, added: None, removed: None,
             status: None, output: None, question: None, interrupted: None, duration_ms: None,

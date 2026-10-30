@@ -66,6 +66,28 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
   - **Design:** o mesmo `DesignPanel` do canvas, com os designs da pasta da conversa;
   - **Dispositivos:** o simulador iOS (`SimulatorScreen`, a tela nativa) e o Android (quadros do `adb`, toque e deslizar), como os nós do canvas.
 
+## Conversa por protocolo (caminho B): Codex pelo `app-server`
+
+Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, sem TUI. Vale para as conversas novas e pode ser desligado em Configurações → Modo chat → "Codex sem terminal". Desligado, o Codex roda na TUI como os outros agentes. As conversas que já existem não mudam.
+
+- **Backend (`src-tauri/src/conversa/`):**
+  - `store.rs`: as tabelas `chat_thread`, `chat_run`, `chat_item` e `chat_request`. A migração é só aditiva, sem subir `user_version`.
+  - `codex.rs`: um processo `codex app-server` por conversa, com JSON por linha no stdio. Ele sobe na primeira mensagem e retoma a thread do Codex (`thread/resume`) depois de reabrir o app.
+  - `codex_map.rs` (puro): os itens do Codex viram o mesmo `canal::timeline::Item` da timeline lida do transcript; o acesso vira política de aprovação e sandbox.
+  - `commands.rs`: `chat_threads`, `chat_thread_create`, `chat_thread_send` (começa um turno ou entra no que está em andamento com `turn/steer`), `chat_thread_items`, `chat_thread_requests`, `chat_thread_status`, `chat_thread_interrupt`, `chat_request_answer`, `chat_thread_retune`, `chat_thread_rename` e `chat_thread_settle`.
+  - Evento `cc-chat-thread`, com os tipos `item`, `delta`, `phase`, `request`, `requestResolved`, `thread`, `error` e `closed`.
+- **Acesso:**
+
+  | No chat | `approvalPolicy` | Sandbox |
+  |---|---|---|
+  | Supervisionado | `untrusted` | `workspace-write` |
+  | Auto | `on-request` | `workspace-write` |
+  | Acesso total | `never` | `danger-full-access` |
+
+  Trocar o acesso fecha o processo; a próxima mensagem retoma a thread com o sandbox novo. Modelo e esforço valem no próximo turno.
+- **Front (`src/features/chat/structured/`):** o store ao vivo, os cartões (chave `thread:<id>`) e a `StructuredConversationView`. A tela usa a mesma `TimelineView`, o mesmo composer e os mesmos menus da conversa por TUI. Aprovações e perguntas se respondem nos botões do composer; parar interrompe o turno.
+- **Ainda não:** Claude Code, ACP (Gemini, Kimi) e OpenCode por protocolo; reverter turno; anexos de imagem.
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:
@@ -85,6 +107,7 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 | `src/app/uiStore.ts` | `chatMode` (flag), `shellMode` (`chat` / `workspace`), `chatShellOn`, `useChatShell` |
 | `src/features/chat/` | `ChatShell`, `ChatSidebar`, `NewConversation`, `ConversationView`, `ChatComposer`, `AgentModelPicker`, `AccessMenu`, `ShellModeSwitch`, `ChatEntryButton`, `ChatModeSetting` |
 | `src/features/chat/ChatPage.tsx`, `ChatPageSidebar.tsx`, `chatSpaces.ts` | telas cheias no chat, sidebar das Configurações e dos Espaços |
+| `src-tauri/src/conversa/`, `src/features/chat/structured/` | conversa por protocolo (Codex pelo `app-server`) |
 | `src/features/chat/DesignPane.tsx`, `DevicesPane.tsx` | abas Design e Dispositivos do painel direito |
 | `src/features/chat/chatModel.ts` | lógica pura: título da conversa, comando, projetos e cartões |
 | `src/features/tabs/layout/layoutStore.ts` | `CHAT_GROUP`, `chatPlacements`, `placementsFrom({ chat })` |

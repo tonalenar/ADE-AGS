@@ -11,7 +11,16 @@ import { CheckIcon, ChevronRightIcon, ClockIcon, FilterIcon, FolderPlusIcon, New
 import { projectTone, type ChatProject, type ConversationCard } from "./chatModel";
 import { useChatLive } from "./liveStore";
 import { reopenSettled, settleConversation, snoozeConversation, unsnoozeConversation, useShelf } from "./shelf";
+import { folderName, threadIdOf } from "./structured/model";
+import { openThread, settleThread, useStructured } from "./structured/store";
 import { usePopover } from "./usePopover";
+
+/** Abre o cartão: a conversa por protocolo, ou a aba do agente. */
+function openCard(key: string): void {
+  const threadId = threadIdOf(key);
+  if (threadId) openThread(threadId);
+  else openConversation(key);
+}
 
 /** A largura da sidebar (a padrão do T3 Code). */
 export const CHAT_SIDEBAR_W = 256;
@@ -46,6 +55,8 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
   const [snoozedOpen, setSnoozedOpen] = useState(false);
   const snoozedIds = useShelf((s) => s.snoozed);
   const settled = useShelf((s) => s.settled);
+  const threads = useStructured((s) => s.threads);
+  const settledThreads = useMemo(() => threads.filter((th) => th.state === "settled"), [threads]);
   const folders = useMemo(() => [...new Set(cards.map((c) => c.project))], [cards]);
   const matches = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -53,7 +64,7 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
   }, [cards, query, folder]);
   const shown = matches.filter((c) => !snoozedIds.includes(c.tabId));
   const snoozed = matches.filter((c) => snoozedIds.includes(c.tabId));
-  const doneCount = settled.length + closed.length;
+  const doneCount = settled.length + settledThreads.length + closed.length;
 
   return (
     <aside aria-label={t("chat.sidebar.label")} style={{ width: CHAT_SIDEBAR_W }}
@@ -95,7 +106,7 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
             <div className="max-h-40 cc-scroll flex flex-col">
               {snoozed.map((c) => (
                 <SlimRow key={c.tabId} name={c.project} title={c.title} agentId={c.agentId}
-                  onOpen={() => { unsnoozeConversation(c.tabId); openConversation(c.tabId); }} />
+                  onOpen={() => { unsnoozeConversation(c.tabId); openCard(c.tabId); }} />
               ))}
             </div>
           )}
@@ -110,6 +121,10 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
               {settled.map((e) => (
                 <SlimRow key={e.id} name={e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? e.cwd} title={e.title} agentId={e.agentId}
                   onOpen={() => reopenSettled(e.id)} />
+              ))}
+              {settledThreads.map((th) => (
+                <SlimRow key={th.id} name={folderName(th.cwd)} title={th.title} agentId={th.agentId}
+                  onOpen={() => { settleThread(th.id, false); openThread(th.id); }} />
               ))}
               {closed.map((p) => (
                 <button key={p.cwd} type="button" onClick={() => onReopen(p.cwd)} title={t("chat.sidebar.reopen", { name: p.name })}
@@ -146,9 +161,16 @@ export function ProjectBadge({ name, size = "md", muted = false }: { name: strin
 function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDiff | undefined; selected: boolean }) {
   const { t } = useTranslation();
   const Icon = agentIcon(card.agentId);
-  const phase = useChatLive((s) => s.phase[card.tabId]);
-  const question = useChatLive((s) => s.question[card.tabId]);
-  const awaiting = useChatLive((s) => card.tabId in s.awaiting);
+  const threadId = threadIdOf(card.tabId);
+  const tabPhase = useChatLive((s) => s.phase[card.tabId]);
+  const tabQuestion = useChatLive((s) => s.question[card.tabId]);
+  const tabAwaiting = useChatLive((s) => card.tabId in s.awaiting);
+  // Conversa por protocolo: o estado vem dos eventos do agente, não do canal da aba.
+  const threadPhase = useStructured((s) => (threadId ? s.live[threadId]?.phase : undefined));
+  const threadAsk = useStructured((s) => (threadId ? s.live[threadId]?.requests[0]?.kind ?? null : null));
+  const phase = threadId ? threadPhase : tabPhase;
+  const question = threadId ? threadAsk === "question" : tabQuestion;
+  const awaiting = threadId ? !!threadAsk && threadAsk !== "question" : tabAwaiting;
   const status = awaiting
     ? { label: t("chat.status.approval"), tone: "text-amber-700 dark:text-amber-400", dash: "3 3" }
     : question
@@ -157,8 +179,8 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
         ? { label: t("chat.status.working"), tone: "text-accent-700 dark:text-accent-400", dash: "5 3" }
         : null;
   return (
-    <div role="button" tabIndex={0} onClick={() => openConversation(card.tabId)} aria-current={selected ? "page" : undefined} title={card.cwd}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openConversation(card.tabId); } }}
+    <div role="button" tabIndex={0} onClick={() => openCard(card.tabId)} aria-current={selected ? "page" : undefined} title={card.cwd}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCard(card.tabId); } }}
       className={`group w-full h-[78px] shrink-0 flex flex-col justify-between px-2 py-2.5 rounded-md text-left cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent-500/70
         ${selected
           ? "bg-white dark:bg-white/[0.11] ring-1 ring-inset ring-gray-200 dark:ring-transparent"
@@ -174,7 +196,7 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
         )}
         <span className="hidden group-hover:inline-flex shrink-0 items-center gap-0.5 -my-1">
           <CardAction label={t("chat.sidebar.snooze")} onClick={() => snoozeConversation(card.tabId)}><ClockIcon className="w-3.5 h-3.5" /></CardAction>
-          <CardAction label={t("chat.sidebar.settle")} onClick={() => { void settleConversation(card.tabId); }}><CheckIcon className="w-3.5 h-3.5" /></CardAction>
+          <CardAction label={t("chat.sidebar.settle")} onClick={() => { if (threadId) settleThread(threadId, true); else void settleConversation(card.tabId); }}><CheckIcon className="w-3.5 h-3.5" /></CardAction>
         </span>
       </span>
       <span className="truncate text-[14px] font-medium text-gray-900 dark:text-white">{card.title}</span>

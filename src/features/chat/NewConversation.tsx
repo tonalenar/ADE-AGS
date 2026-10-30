@@ -14,6 +14,8 @@ import { startConversation } from "./chatActions";
 import { BotIcon, BranchIcon, CheckIcon, ChevronDownIcon, FolderGitIcon, FolderIcon } from "./chatIcons";
 import { accessModesFor, conversationTitle, planSupported, type ChatProject } from "./chatModel";
 import { chatNewWorktree } from "./ipc";
+import { STRUCTURED_AGENTS } from "./structured/model";
+import { startThread } from "./structured/store";
 import { loadChatPrefs, saveChatPrefs, type ChatPrefs } from "./chatPrefs";
 import { ChatComposer } from "./ChatComposer";
 import { usePopover } from "./usePopover";
@@ -82,6 +84,14 @@ export function NewConversation({ projects, folder, onFolder }: {
       const cwd = prefs.worktree
         ? (await chatNewWorktree(project.cwd, conversationTitle(prompt) ?? project.name)).cwd
         : project.cwd;
+      if (prefs.structured && STRUCTURED_AGENTS.has(agent.id)) {
+        await startThread({
+          agentId: agent.id, cwd, title: conversationTitle(prompt) ?? project.name,
+          model: mine ? prefs.model : null, effort: mine ? prefs.effort : null, access, accountId: mine ? prefs.accountId : null,
+        }, prompt);
+        update({ cwd: project.cwd, agentId: agent.id });
+        return true;
+      }
       await startConversation({
         cwd,
         agent,
