@@ -4223,5 +4223,7 @@
   "chat.team.feed.deliveries_other": "{{count}} deliveries",
   "chat.team.feed.busy_one": "{{count}} in progress",
   "chat.team.feed.busy_other": "{{count}} in progress",
-  "chat.team.node.title": "State and permission in the team"
+  "chat.team.node.title": "State and permission in the team",
+  "chat.team.dock.team": "Open the team panel",
+  "chat.team.dock.permissions": "The team's permission requests"
 }

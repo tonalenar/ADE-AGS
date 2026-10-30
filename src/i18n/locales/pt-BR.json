@@ -4223,5 +4223,7 @@
   "chat.team.feed.deliveries_other": "{{count}} entregas",
   "chat.team.feed.busy_one": "{{count}} em andamento",
   "chat.team.feed.busy_other": "{{count}} em andamento",
-  "chat.team.node.title": "Estado e permissão no time"
+  "chat.team.node.title": "Estado e permissão no time",
+  "chat.team.dock.team": "Abrir o painel do time",
+  "chat.team.dock.permissions": "Pedidos de permissão do time"
 }

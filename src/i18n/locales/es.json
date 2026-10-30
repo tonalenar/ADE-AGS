@@ -4223,5 +4223,7 @@
   "chat.team.feed.deliveries_other": "{{count}} entregas",
   "chat.team.feed.busy_one": "{{count}} en curso",
   "chat.team.feed.busy_other": "{{count}} en curso",
-  "chat.team.node.title": "Estado y permiso en el equipo"
+  "chat.team.node.title": "Estado y permiso en el equipo",
+  "chat.team.dock.team": "Abrir el panel del equipo",
+  "chat.team.dock.permissions": "Solicitudes de permiso del equipo"
 }
