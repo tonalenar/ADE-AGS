@@ -1,6 +1,6 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use rusqlite::{params, Connection};
@@ -30,6 +30,7 @@ read-page)
   printf '{"path":"%s","workspace":"WS-FAKE","project":"projeto-fake","title":null,"body":"%s","frontmatter":null,"expired":false}\n' "$P" "$(sed -e 's/"/\\"/g' "$F" | awk 'NR>1{printf "\\n"} {printf "%s",$0}')"
   exit 0 ;;
 write-page)
+  echo "$PWD" >> "$ROOT/cwd.log"
   cat > "$ROOT/stdin.tmp"
   cat "$ROOT/stdin.tmp" >> "$ROOT/stdin.log"
   n=$(grep -c '^write-page' "$ROOT/argv.log")
@@ -73,19 +74,60 @@ impl Env {
     }
 
     fn mission(&self, id: &str, workspace: &str) {
-        let cwd = self.folder.display().to_string();
+        self.mission_at(id, workspace, &self.folder, 1);
+    }
+
+    fn mission_at(&self, id: &str, workspace: &str, cwd: &Path, created_at: i64) {
+        let cwd = cwd.display().to_string();
         self.with(|c| {
             c.execute(
                 "INSERT INTO missions (id, workspace_id, title, objective, cwd, created_at, updated_at)
-                 VALUES (?1, ?2, 'Missão', 'objetivo', ?3, 1, 1)",
-                params![id, workspace, cwd],
+                 VALUES (?1, ?2, 'Missão', 'objetivo', ?3, ?4, ?4)",
+                params![id, workspace, cwd, created_at],
             )
             .unwrap();
         });
     }
 
+    /// Pasta com `.git/config` de origin `git@github.com:acme/<name>.git`: o repo_key sai daí.
+    fn repo(&self, name: &str) -> PathBuf {
+        let dir = self.root.join(name);
+        fs::create_dir_all(dir.join(".git")).unwrap();
+        fs::write(
+            dir.join(".git/config"),
+            format!("[remote \"origin\"]\n\turl = git@github.com:acme/{name}.git\n"),
+        )
+        .unwrap();
+        dir
+    }
+
+    fn plain(&self, name: &str) -> PathBuf {
+        let dir = self.root.join(name);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
     fn run(&self) -> Result<MigrationSummary, String> {
-        migrate(&self.db, WS, Some(self.program.clone()))
+        migrate(&self.db, WS, Some(self.program.clone()), None)
+    }
+
+    fn run_in(&self, cwd: &Path) -> Result<MigrationSummary, String> {
+        migrate(&self.db, WS, Some(self.program.clone()), Some(&cwd.display().to_string()))
+    }
+
+    /// Pastas (basename) em que o fake escreveu, na ordem das chamadas.
+    fn write_folders(&self) -> Vec<String> {
+        fs::read_to_string(self.root.join("cwd.log"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| Path::new(l).file_name().unwrap().to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn set_repo(&self, entry: &str, key: Option<&str>) {
+        self.with(|c| {
+            c.execute("UPDATE memory_entries SET repo_key = ?2 WHERE id = ?1", params![entry, key]).unwrap();
+        });
     }
 
     fn page(&self, path: &str) -> PathBuf {
@@ -380,7 +422,7 @@ fn workspace_sem_pasta_pula_com_motivo_e_nao_chama_o_processo() {
     env.with(|c| {
         entry(c, "x1", "workspace", None, "x", "note", "active", Some(1), &[(1, "approved", "create", "sem pasta")]);
     });
-    let summary = migrate(&env.db, "ws-vazio", Some(env.program.clone())).unwrap();
+    let summary = migrate(&env.db, "ws-vazio", Some(env.program.clone()), None).unwrap();
 
     assert!(summary.reason.as_deref().unwrap_or("").contains("sem pasta"), "{summary:?}");
     assert_eq!(summary.written + summary.failed + summary.conflict, 0);
@@ -392,7 +434,7 @@ fn sem_binario_e_erro_antes_de_tocar_no_registro() {
     let env = Env::new();
     approved(&env, "e1", "decision", "sem binário");
 
-    assert!(migrate(&env.db, WS, None).is_err());
+    assert!(migrate(&env.db, WS, None, None).is_err());
     assert!(env.registry().is_empty());
 }
 
@@ -436,16 +478,123 @@ fn tabela_aditiva_existe_e_user_version_nao_sobe() {
     assert_eq!(versao, 45);
 }
 
+fn pasta(cwd: &str, key: Option<&str>) -> Folder {
+    Folder { cwd: cwd.into(), repo_key: key.map(String::from) }
+}
+
 #[test]
-fn pasta_da_missao_com_o_mesmo_repositorio_e_a_mais_recente_sem_repositorio() {
-    let folders = vec![
-        Folder { cwd: "/repo-b".into(), repo_key: Some("github.com/b".into()) },
-        Folder { cwd: "/repo-a".into(), repo_key: Some("github.com/a".into()) },
-    ];
-    assert_eq!(folder_for(&folders, Some("github.com/a")), Some("/repo-a"));
-    assert_eq!(folder_for(&folders, Some("github.com/c")), None);
-    assert_eq!(folder_for(&folders, None), Some("/repo-b"));
-    assert_eq!(folder_for(&[], None), None);
+fn escolhe_a_pasta_na_ordem_da_aba_da_missao_e_da_recente() {
+    let missoes = vec![pasta("/missao-b", Some("acme/b")), pasta("/missao-a", Some("acme/a"))];
+    let aba_a = pasta("/aba-a", Some("acme/a"));
+    let aba_z = pasta("/aba-z", Some("acme/z"));
+    let aba_sem_repo = pasta("/aba-simples", None);
+
+    // 1. memória com repo_key igual ao da aba: vence a aba, mesmo com missão do mesmo repo.
+    assert_eq!(folder_for(&missoes, Some(&aba_a), Some("acme/a")), Some("/aba-a"));
+    // 2. repo_key de outro repositório que não o da aba: vai para a missão desse repositório.
+    assert_eq!(folder_for(&missoes, Some(&aba_z), Some("acme/a")), Some("/missao-a"));
+    assert_eq!(folder_for(&missoes, None, Some("acme/b")), Some("/missao-b"));
+    // 3. sem repo_key: a aba, se veio; senão a missão mais recente (a primeira da lista).
+    assert_eq!(folder_for(&missoes, Some(&aba_sem_repo), None), Some("/aba-simples"));
+    assert_eq!(folder_for(&missoes, None, None), Some("/missao-b"));
+    // 4. nenhum caminho: sem pasta.
+    assert_eq!(folder_for(&missoes, Some(&aba_z), Some("acme/c")), None);
+    assert_eq!(folder_for(&[], None, Some("acme/c")), None);
+    assert_eq!(folder_for(&[], None, None), None);
+}
+
+/// Cada ramo da escolha de pasta, com o binário fake: o `cwd.log` mostra onde cada escrita rodou.
+#[test]
+fn ramo_1_a_pasta_da_aba_com_o_mesmo_repositorio_vence_a_missao() {
+    let env = Env::new();
+    let aba = env.repo("aba-acme");
+    let outra = env.repo("missao-outra");
+    env.mission_at("m-outra", WS, &outra, 5);
+    env.with(|c| entry(c, "e-r1", "workspace", None, "r1", "note", "active", Some(1), &[(1, "approved", "create", "ramo 1")]));
+    let chave = crate::memory::repo_scope::repo_key(&aba).unwrap();
+    env.set_repo("e-r1", Some(&chave));
+    // A missão tem outro repositório: só a aba casa com a memória.
+    assert_ne!(crate::memory::repo_scope::repo_key(&outra), Some(chave.clone()));
+
+    let summary = env.run_in(&aba).unwrap();
+
+    assert_eq!(summary.written, 1, "{summary:?}");
+    assert_eq!(env.write_folders(), vec!["aba-acme"]);
+}
+
+#[test]
+fn ramo_2_sem_a_aba_no_repositorio_a_missao_com_o_mesmo_repositorio_e_usada() {
+    let env = Env::new();
+    let aba = env.repo("aba-outra-coisa");
+    let missao = env.repo("missao-acme");
+    env.mission_at("m-acme", WS, &missao, 5);
+    env.with(|c| entry(c, "e-r2", "workspace", None, "r2", "note", "active", Some(1), &[(1, "approved", "create", "ramo 2")]));
+    let chave = crate::memory::repo_scope::repo_key(&missao).unwrap();
+    env.set_repo("e-r2", Some(&chave));
+
+    let summary = env.run_in(&aba).unwrap();
+
+    assert_eq!(summary.written, 1, "{summary:?}");
+    assert_eq!(env.write_folders(), vec!["missao-acme"]);
+}
+
+#[test]
+fn ramo_3_sem_repo_key_vai_para_a_aba_quando_ela_veio() {
+    let env = Env::new();
+    let aba = env.plain("aba-simples");
+    let recente = env.repo("missao-recente");
+    env.mission_at("m-recente", WS, &recente, 9);
+    env.with(|c| entry(c, "e-r3a", "workspace", None, "r3a", "note", "active", Some(1), &[(1, "approved", "create", "ramo 3a")]));
+
+    let summary = env.run_in(&aba).unwrap();
+
+    assert_eq!(summary.written, 1, "{summary:?}");
+    assert_eq!(env.write_folders(), vec!["aba-simples"]);
+}
+
+#[test]
+fn ramo_3_sem_repo_key_e_sem_aba_vai_para_a_missao_mais_recente() {
+    let env = Env::new();
+    let antiga = env.repo("missao-antiga");
+    let recente = env.repo("missao-recente");
+    env.mission_at("m-antiga", WS, &antiga, 1);
+    env.mission_at("m-recente", WS, &recente, 9);
+    env.with(|c| entry(c, "e-r3b", "workspace", None, "r3b", "note", "active", Some(1), &[(1, "approved", "create", "ramo 3b")]));
+
+    let summary = env.run().unwrap();
+
+    assert_eq!(summary.written, 1, "{summary:?}");
+    assert_eq!(env.write_folders(), vec!["missao-recente"]);
+}
+
+#[test]
+fn ramo_4_sem_nenhuma_pasta_compativel_pula_com_motivo_e_nao_escreve() {
+    let env = Env::new();
+    let aba = env.repo("aba-z");
+    let missao = env.repo("missao-b");
+    env.mission_at("m-b", WS, &missao, 5);
+    env.with(|c| entry(c, "e-r4", "workspace", None, "r4", "note", "active", Some(1), &[(1, "approved", "create", "ramo 4")]));
+    env.set_repo("e-r4", Some("github.com/acme/sem-pasta"));
+
+    let summary = env.run_in(&aba).unwrap();
+
+    assert_eq!(summary.failed, 1, "{summary:?}");
+    assert_eq!(summary.written, 0);
+    assert!(env.write_folders().is_empty(), "sem pasta não pode chamar o processo");
+    let registro = env.registry();
+    assert!(
+        registro.iter().any(|(id, status, reason)| id == "e-r4" && status == "failed" && reason.as_deref().unwrap_or("").contains("sem pasta")),
+        "{registro:?}"
+    );
+}
+
+#[test]
+fn a_pasta_da_aba_precisa_ser_um_diretorio_absoluto() {
+    let env = Env::new();
+    approved(&env, "e-cwd", "note", "x");
+    assert!(migrate(&env.db, WS, Some(env.program.clone()), Some("relativo/caminho")).is_err());
+    assert!(migrate(&env.db, WS, Some(env.program.clone()), Some("/nao/existe/mesmo")).is_err());
+    assert!(env.registry().is_empty());
 }
 
 #[test]

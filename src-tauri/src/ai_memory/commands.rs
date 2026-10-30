@@ -73,11 +73,14 @@ pub async fn ai_memory_sessions(
 #[tauri::command]
 pub async fn ai_memory_migrate(
     workspace_id: String,
+    cwd: Option<String>,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<MigrationSummary, String> {
     let db = db.inner().clone();
-    blocking(move || migracao::migrate(&db, &workspace_id, path_env::find_program("ai-memory")))
-        .await
+    blocking(move || {
+        migracao::migrate(&db, &workspace_id, path_env::find_program("ai-memory"), cwd.as_deref())
+    })
+    .await
 }
 
 /// Registro da cópia do workspace, sem o corpo das memórias.

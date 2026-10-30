@@ -88,17 +88,31 @@ enum Outcome {
 
 /// Copia as memórias aprovadas e atuais do workspace para a wiki do ai-memory.
 ///
-/// `program` é o binário resolvido (`None` = ausente). Erros de entrada ou do processo que param a
-/// cópia voltam em `stopped`; o que já foi gravado fica no registro.
+/// `program` é o binário resolvido (`None` = ausente). `cwd` é a pasta da aba ativa, se o painel
+/// tiver uma. Erros de entrada ou do processo que param a cópia voltam em `stopped`; o que já foi
+/// gravado fica no registro.
 pub fn migrate(
     db: &DbConnection,
     workspace_id: &str,
     program: Option<PathBuf>,
+    cwd: Option<&str>,
 ) -> Result<MigrationSummary, String> {
+    let cwd_folder = match cwd {
+        Some(path) => {
+            if !Path::new(path).is_absolute() || !Path::new(path).is_dir() {
+                return Err("A pasta da aba deve ser um diretório absoluto existente.".into());
+            }
+            Some(Folder { cwd: path.to_string(), repo_key: repo_scope::repo_key(Path::new(path)) })
+        }
+        None => None,
+    };
     let (candidates, folders, mut recorded) = load(db, workspace_id)?;
     let mut summary = MigrationSummary::default();
 
-    let Some(first) = folders.iter().find(|f| Path::new(&f.cwd).is_dir()) else {
+    let first = cwd_folder
+        .as_ref()
+        .or_else(|| folders.iter().find(|f| Path::new(&f.cwd).is_dir()));
+    let Some(first) = first else {
         summary.reason = Some("workspace sem pasta: nenhuma missão com pasta existente".into());
         return Ok(summary);
     };
@@ -106,7 +120,7 @@ pub fn migrate(
     Client::at(Some(program.clone()), PathBuf::from(&first.cwd))?.ensure_supported()?;
 
     for candidate in &candidates {
-        let outcome = match folder_for(&folders, candidate.repo_key.as_deref()) {
+        let outcome = match folder_for(&folders, cwd_folder.as_ref(), candidate.repo_key.as_deref()) {
             None => Outcome::Failed("sem pasta para o repositório desta memória".into()),
             Some(cwd) => match Client::at(Some(program.clone()), PathBuf::from(cwd)) {
                 Err(_) => Outcome::Failed("a pasta da missão não existe mais".into()),
@@ -238,16 +252,23 @@ fn candidates(conn: &Connection, workspace_id: &str) -> Result<Vec<Candidate>, S
     rows.collect::<Result<Vec<_>, _>>().map_err(|e| e.to_string())
 }
 
-/// Pasta que a CLI vai usar para resolver o projeto: a da missão com o mesmo repositório da memória;
-/// sem repositório, a missão mais recente do workspace.
-fn folder_for<'a>(folders: &'a [Folder], repo_key: Option<&str>) -> Option<&'a str> {
-    match repo_key {
-        Some(key) => folders
-            .iter()
-            .find(|f| f.repo_key.as_deref() == Some(key))
-            .map(|f| f.cwd.as_str()),
-        None => folders.first().map(|f| f.cwd.as_str()),
-    }
+/// Pasta que a CLI vai usar para resolver o projeto da memória, nesta ordem:
+/// 1. a pasta da aba, se o repositório dela for o da memória;
+/// 2. a pasta de uma missão com o mesmo repositório;
+/// 3. sem repositório na memória: a pasta da aba, senão a missão mais recente;
+/// 4. nenhuma: `None` (a memória é contada como falha, com motivo).
+fn folder_for<'a>(
+    folders: &'a [Folder],
+    cwd: Option<&'a Folder>,
+    repo_key: Option<&str>,
+) -> Option<&'a str> {
+    let chosen = match repo_key {
+        Some(key) => cwd
+            .filter(|f| f.repo_key.as_deref() == Some(key))
+            .or_else(|| folders.iter().find(|f| f.repo_key.as_deref() == Some(key))),
+        None => cwd.or_else(|| folders.first()),
+    };
+    chosen.map(|f| f.cwd.as_str())
 }
 
 /// Decide o que fazer com uma memória. `Err` para a cópia (falha do processo); `Ok` é o resultado
