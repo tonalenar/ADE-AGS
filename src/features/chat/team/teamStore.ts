@@ -6,7 +6,7 @@ import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } fro
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useTabsStore } from "@/features/tabs/store";
-import type { AgentInfo } from "@/features/tabs/types";
+import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 
 import { chatCommand } from "../chatModel";
@@ -19,7 +19,8 @@ import {
   type TeamFeedItem, type TeamPolicy, type TeamView,
 } from "./ipc";
 import { canvasPlan, runCanvasPlan } from "./teamCanvas";
-import { conversationAccess, defaultPolicy, type ComposerTarget } from "./teamModel";
+import { projectCanvas, reversePlan, roleIdOfLabel, type CanvasProjection, type ReverseOp } from "./teamMirror";
+import { conversationAccess, defaultPolicy, TEAM_ROLES, type ComposerTarget } from "./teamModel";
 
 /**
  * Os times do modo chat na janela: a lista (do banco), o fio de cada um (delegações e entregas, da fila
@@ -73,6 +74,7 @@ export function startTeams(): void {
     };
     useTabsStore.subscribe(whenReady);
     useCanvasStore.subscribe(whenReady);
+    startCanvasMirror();
     // Mudou pela tela, pela CLI ou pelo MCP: relê e põe o canvas em dia (idempotente).
     listen<{ teamId: string }>("cc-chat-team", (e) => {
       reloadTeams()
@@ -113,16 +115,112 @@ export function syncTeamCanvas(team: TeamView, opts: { removed?: string[]; disso
     roleLabel: (role) => i18n.t(`chat.team.roles.${role}`, { defaultValue: role }),
     ...opts,
   });
-  if (ops.length === 0) return Promise.resolve();
-  const touched = runCanvasPlan(ops, {
-    boards: () => useCanvasStore.getState().boards,
-    connect: canvasActions.connect,
-    disconnectPair: canvasActions.disconnectPair,
-    toggleOrchestrator: canvasActions.toggleOrchestrator,
-    moveTerminals: canvasActions.moveTerminals,
-    setRole: canvasActions.setRole,
-  });
+  if (opts.dissolve) delete baselines[team.id];
+  if (ops.length === 0) {
+    // Nada a mudar: a linha de base só nasce aqui (uma mudança da pessoa ainda por espelhar não é engolida).
+    if (!(team.id in baselines)) adoptBaseline(team);
+    return Promise.resolve();
+  }
+  // O canvas muda por obra do time: o observador não pode tomar isso por ação da pessoa.
+  syncing = true;
+  let touched: string[];
+  try {
+    touched = runCanvasPlan(ops, {
+      boards: () => useCanvasStore.getState().boards,
+      connect: canvasActions.connect,
+      disconnectPair: canvasActions.disconnectPair,
+      toggleOrchestrator: canvasActions.toggleOrchestrator,
+      moveTerminals: canvasActions.moveTerminals,
+      setRole: canvasActions.setRole,
+    });
+  } finally {
+    syncing = false;
+  }
+  if (!opts.dissolve) adoptBaseline(team);
   return Promise.all(touched.map((key) => flushSave(key).catch(() => undefined))).then(() => undefined);
+}
+
+// ── O espelho canvas -> chat ─────────────────────────────────────────
+
+/**
+ * O canvas como o time e a pessoa concordaram por último, por time (`teamMirror.ts`). Só o que muda
+ * depois disso, no canvas, é obra da pessoa e vira comando do time. Fica na memória: ao abrir o app, o
+ * que já estava no canvas vale como acordado.
+ */
+const baselines: Record<string, CanvasProjection> = {};
+/** O time está escrevendo no canvas agora (chat -> canvas): o observador não reage. */
+let syncing = false;
+let mirroring = false;
+let mirrorAgain = false;
+let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
+
+function isAgentTab(ref: string): boolean {
+  return useTabsStore.getState().tabs.some((t) => t.id === ref && t.agentId !== SHELL_AGENT_ID);
+}
+
+const roleName = (role: string) => i18n.t(`chat.team.roles.${role}`, { defaultValue: role });
+
+function adoptBaseline(team: TeamView): void {
+  const projection = projectCanvas(team, useCanvasStore.getState().boards, isAgentTab);
+  if (projection) baselines[team.id] = projection;
+  else delete baselines[team.id];
+}
+
+/** O que a pessoa mudou no canvas, como comandos do time (puro: `reversePlan`). */
+function mirrorOps(): ReverseOp[] {
+  const { teams } = useTeamStore.getState();
+  return reversePlan({
+    teams,
+    boards: useCanvasStore.getState().boards,
+    baselines,
+    isAgentTab,
+    roleIdOf: (label) => roleIdOfLabel(label, TEAM_ROLES, roleName),
+  });
+}
+
+async function applyReverse(op: ReverseOp): Promise<void> {
+  switch (op.kind) {
+    case "link": {
+      const tab = useTabsStore.getState().tabs.find((t) => t.id === op.ref);
+      if (!tab) return;
+      await linkExisting(op.teamId, { key: tab.id, agentId: tab.agentId, agentLabel: tab.agentLabel, title: tab.title, cwd: tab.cwd }, op.role, null, op.subagent);
+      return;
+    }
+    case "unlink":
+      await unlinkMember(op.teamId, op.ref);
+      return;
+    case "update":
+      await updateMember(op.teamId, op.ref, { role: op.role, subagent: op.subagent });
+      return;
+  }
+}
+
+async function runMirror(): Promise<void> {
+  if (!useTabsStore.getState().hydrated || !useCanvasStore.getState().loaded) return;
+  if (mirroring) { mirrorAgain = true; return; }
+  mirroring = true;
+  try {
+    do {
+      mirrorAgain = false;
+      const ops = mirrorOps();
+      // A linha de base passa a ser o canvas de agora ANTES de executar: o que os comandos devolvem ao
+      // canvas (chat -> canvas) é adotado de novo em `syncTeamCanvas`.
+      for (const team of useTeamStore.getState().teams) adoptBaseline(team);
+      for (const op of ops) await applyReverse(op).catch((e) => console.warn("[time] espelho canvas -> chat:", e));
+    } while (mirrorAgain);
+  } finally {
+    mirroring = false;
+  }
+}
+
+/** Observa o canvas: uma mudança que não veio do time vira, em instantes, comando do time (uma vez por janela). */
+function startCanvasMirror(): void {
+  useCanvasStore.subscribe((state, prev) => {
+    if (syncing || state.boards === prev.boards) return;
+    if (mirrorTimer) clearTimeout(mirrorTimer);
+    // Arrastar um nó muda o canvas a cada quadro: o plano só roda quando a pessoa parar.
+    mirrorTimer = setTimeout(() => { mirrorTimer = null; void runMirror(); }, 300);
+  });
 }
 
 // ── Ações da tela ────────────────────────────────────────────────────
