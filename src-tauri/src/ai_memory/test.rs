@@ -540,6 +540,88 @@ while :; do :; done
     }
 
     #[test]
+    fn falha_passageira_da_versao_nao_fica_em_cache() {
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let marker = fake.root.join("ja-falhou");
+        let script = format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then\n  if [ -e '{m}' ]; then echo 'ai-memory 3.3.0'; exit 0; fi\n  : > '{m}'; exit 1\nfi\nexit 99\n",
+            m = marker.display()
+        );
+        fs::write(&fake.program, script).unwrap();
+        assert!(!crate::ai_memory::tabs::supported_program(&fake.program, &fake.cwd));
+        assert!(
+            crate::ai_memory::tabs::supported_program(&fake.program, &fake.cwd),
+            "o erro passageiro não pode desligar o ai-memory até reiniciar o app"
+        );
+    }
+
+    #[test]
+    fn leituras_seguidas_checam_a_versao_uma_vez() {
+        let fake = Fake::new("ai-memory 3.3.0", "cat \"$(dirname \"$0\")/result.json\"");
+        let client = fake.client();
+        fake.fixture("handoffs-empty.json");
+        client.read::<Vec<Handoff>>(Read::Handoffs).unwrap();
+        fake.fixture("recent-empty.json");
+        client.read::<Vec<RecentPage>>(Read::Recent).unwrap();
+        fake.fixture("projects.json");
+        client.read::<Vec<Project>>(Read::Projects).unwrap();
+        let argv = fs::read_to_string(fake.root.join("argv")).unwrap();
+        assert_eq!(argv.matches("--version\n").count(), 1, "{argv}");
+    }
+
+    #[test]
+    fn hooks_do_usuario_so_em_parte_ganham_so_os_eventos_que_faltam() {
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let settings = fake.root.join("settings.json");
+        fs::write(&settings, r#"{"hooks":{"Stop":[{"hooks":[{"command":"ai-memory hook --event stop --agent claude-code"}]}]}}"#).unwrap();
+        assert!(!crate::ai_memory::tabs::configured_hooks(std::slice::from_ref(&settings)));
+        let plan = crate::ai_memory::tabs::prepare(
+            &fake.program,
+            &fake.root.join("mcp"),
+            "abc",
+            "claude",
+            &[],
+            &Default::default(),
+            std::slice::from_ref(&settings),
+        )
+        .unwrap();
+        let file = plan.settings_file.clone().expect("falta SessionStart: o arquivo da aba completa os hooks");
+        let hooks: serde_json::Value = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        let events = hooks["hooks"].as_object().unwrap();
+        assert!(events.contains_key("SessionStart"));
+        assert!(!events.contains_key("Stop"), "o Stop do usuário não pode ser duplicado");
+        assert_eq!(events.len(), 8);
+    }
+
+    #[test]
+    fn config_do_usuario_invalida_continua_sem_hooks_da_aba() {
+        let fake = Fake::new("ai-memory 3.3.0", "exit 99");
+        let settings = fake.root.join("settings.json");
+        fs::write(&settings, "invalid").unwrap();
+        let plan = crate::ai_memory::tabs::prepare(
+            &fake.program,
+            &fake.root.join("mcp"),
+            "abc",
+            "claude",
+            &[],
+            &Default::default(),
+            &[settings],
+        )
+        .unwrap();
+        assert!(plan.settings_file.is_none());
+    }
+
+    #[test]
+    fn pagina_ausente_e_reconhecida_sem_depender_de_maiusculas_ou_do_prefixo() {
+        use crate::ai_memory::client::is_missing_page;
+        assert!(is_missing_page("Error: GET /admin/read-page: server returned 404 Not Found: {}"));
+        assert!(is_missing_page("error: http status 404 not found"));
+        assert!(!is_missing_page("connection refused"));
+        assert!(!is_missing_page("500 Internal Server Error"));
+        assert!(!is_missing_page(""));
+    }
+
+    #[test]
     fn barrido_preserva_settings_de_aba_viva_e_remove_os_orfaos() {
         let fake = Fake::new("unused", "exit 99");
         let alive = fake.root.join("tab-alive.ai-memory-123.settings.json");

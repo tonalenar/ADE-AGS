@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::io;
 use std::path::{Component, Path, PathBuf};
-use std::time::Duration;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, SystemTime};
 
 use serde::de::DeserializeOwned;
 
@@ -10,6 +12,18 @@ use crate::util::{external_path, path_env, spawn};
 const TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_OUTPUT: usize = 2 * 1024 * 1024;
 const INSTALL: &str = "Instale manualmente o ai-memory 3.3.0 ou superior pela release oficial: https://github.com/akitaonrails/ai-memory/releases. Confira o checksum publicado e disponibilize o binário no PATH. O ADE não instala nem inicia serviços.";
+
+/// Versões já confirmadas, por identidade do executável (mtime e tamanho). Só o sucesso entra: uma falha
+/// passageira (prazo estourado, serviço subindo) não pode desligar a integração até reiniciar o app.
+type Verified = HashMap<PathBuf, (Option<SystemTime>, u64, String)>;
+static VERIFIED: OnceLock<Mutex<Verified>> = OnceLock::new();
+
+/// O erro de uma leitura diz que a página não existe. O texto vem do servidor, então a comparação
+/// ignora caixa e prefixo; qualquer outro erro continua sendo erro (uma queda nunca vira "ausente").
+pub(super) fn is_missing_page(stderr: &str) -> bool {
+    let stderr = stderr.to_ascii_lowercase();
+    stderr.contains("404") && stderr.contains("not found")
+}
 
 pub(super) struct Client {
     program: Option<PathBuf>,
@@ -158,6 +172,28 @@ impl Client {
     }
 
     fn version(&self) -> Result<String, Failure> {
+        let identity = self.program.as_deref().and_then(|program| {
+            let meta = std::fs::metadata(program).ok()?;
+            Some((program.to_path_buf(), meta.modified().ok(), meta.len()))
+        });
+        let cache = VERIFIED.get_or_init(|| Mutex::new(HashMap::new()));
+        if let Some((program, modified, len)) = &identity
+            && let Ok(known) = cache.lock()
+            && let Some((m, l, version)) = known.get(program)
+            && (m, l) == (modified, len)
+        {
+            return Ok(version.clone());
+        }
+        let version = self.run_version()?;
+        if let Some((program, modified, len)) = identity
+            && let Ok(mut known) = cache.lock()
+        {
+            known.insert(program, (modified, len, version.clone()));
+        }
+        Ok(version)
+    }
+
+    fn run_version(&self) -> Result<String, Failure> {
         let output = self.execute(&["--version".into()]).map_err(Failure::Io)?;
         if !output.status.success() {
             return Err(Failure::Unavailable);
@@ -258,7 +294,7 @@ impl Client {
         })?;
         if !output.status.success() {
             // Só o código do erro importa. O stderr pode trazer credenciais: não é reenviado.
-            if String::from_utf8_lossy(&output.stderr).contains("404 Not Found") {
+            if is_missing_page(&String::from_utf8_lossy(&output.stderr)) {
                 return Ok(None);
             }
             return Err(

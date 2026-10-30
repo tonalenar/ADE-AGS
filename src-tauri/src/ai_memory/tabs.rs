@@ -1,10 +1,8 @@
 //! Injeção somente no nascimento do PTY; nunca modifica uma aba viva.
 use serde_json::{Value, json};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
-    time::SystemTime,
 };
 
 pub(crate) const TABS_SETTING: &str = "ai_memory_tabs_enabled";
@@ -23,40 +21,50 @@ impl Drop for TabInjection {
     }
 }
 
-// O cache só guarda identidade do executável e a compatibilidade, nunca dados externos.
-type VersionCache = HashMap<PathBuf, (Option<SystemTime>, u64, bool)>;
-static VERSIONS: OnceLock<Mutex<VersionCache>> = OnceLock::new();
-
 pub(crate) fn supported_binary(cwd: &Path) -> Option<PathBuf> {
     let program = crate::util::path_env::find_program("ai-memory")?;
     supported_program(&program, cwd).then_some(program)
 }
 
+/// A versão confirmada fica em cache dentro do `Client`; uma falha não é guardada.
 pub(super) fn supported_program(program: &Path, cwd: &Path) -> bool {
-    let Some(result) = supported_program_result(program, cwd) else {
-        return false;
-    };
-    result
+    super::client::Client::at(Some(program.to_path_buf()), cwd.to_path_buf())
+        .and_then(|client| client.ensure_supported())
+        .is_ok()
 }
 
-fn supported_program_result(program: &Path, cwd: &Path) -> Option<bool> {
-    let program = program.to_path_buf();
-    let meta = std::fs::metadata(&program).ok()?;
-    let identity = (meta.modified().ok(), meta.len());
-    let cache = VERSIONS.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Some((modified, len, ok)) = cache.lock().ok()?.get(&program).copied()
-        && (modified, len) == identity
-    {
-        return Some(ok);
+/// O que o `pty_create` precisa saber depois de preparar a injeção de uma nova aba.
+pub(crate) struct NewTab {
+    pub plan: TabInjection,
+    /// Binário aceito (versão mínima); `None` quando ausente ou antigo.
+    pub binary: Option<PathBuf>,
+    /// O usuário já tem o `SessionStart` do ai-memory nos próprios settings.
+    pub hooks_configured: bool,
+}
+
+/// Prepara hooks e MCP de uma nova aba. Faz subprocesso (`--version`) e I/O de arquivo: quem chama de
+/// um contexto assíncrono deve usar `spawn_blocking`.
+pub(crate) fn prepare_new_tab(
+    tab: &str,
+    agent: &str,
+    dir: &Path,
+    home: &Path,
+    cwd: &Path,
+    argv: &[String],
+    extras: &HashMap<String, String>,
+) -> NewTab {
+    let mut out = NewTab { plan: TabInjection::default(), binary: None, hooks_configured: false };
+    let Some(binary) = supported_binary(cwd) else {
+        return out;
+    };
+    let settings = user_settings(home, extras);
+    out.hooks_configured = configured_hooks(&settings);
+    out.binary = Some(binary.clone());
+    match prepare(&binary, dir, tab, agent, argv, extras, &settings) {
+        Ok(plan) => out.plan = plan,
+        Err(_) => eprintln!("[ade-ags] integração ai-memory indisponível nesta nova aba"),
     }
-    let ok = super::client::Client::at(Some(program.clone()), cwd.to_path_buf())
-        .and_then(|c| c.ensure_supported())
-        .is_ok();
-    cache
-        .lock()
-        .ok()?
-        .insert(program.clone(), (identity.0, identity.1, ok));
-    Some(ok)
+    out
 }
 
 pub(crate) fn agent_from_program(program: &str) -> Option<&'static str> {
@@ -84,18 +92,50 @@ fn carries_hooks(value: &Value) -> bool {
     }
 }
 
-/// Config inválida ou ilegível faz a captura falhar fechada, sem duplicar hooks.
-fn should_skip_hooks(paths: &[PathBuf]) -> bool {
-    paths.iter().any(|path| match std::fs::read(path) {
-        Err(e) => e.kind() != std::io::ErrorKind::NotFound,
-        Ok(bytes) if bytes.len() <= 2 * 1024 * 1024 => serde_json::from_slice::<Value>(&bytes)
-            .map(|v| v.get("hooks").is_some_and(carries_hooks))
-            .unwrap_or(true),
-        Ok(_) => true,
-    })
+/// O que os `settings.json` do usuário já dizem sobre o ai-memory.
+struct UserHooks {
+    /// Eventos (`SessionStart`, `Stop`…) com um hook do ai-memory.
+    events: HashSet<String>,
+    /// Algum arquivo existe mas não dá para ler como JSON: a captura falha fechada, sem duplicar hooks.
+    unreadable: bool,
 }
 
-fn hooks(program: &Path) -> Value {
+impl UserHooks {
+    fn read(paths: &[PathBuf]) -> Self {
+        let mut found = Self { events: HashSet::new(), unreadable: false };
+        for path in paths {
+            let bytes = match std::fs::read(path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Ok(bytes) if bytes.len() <= 2 * 1024 * 1024 => bytes,
+                _ => {
+                    found.unreadable = true;
+                    continue;
+                }
+            };
+            let Ok(value) = serde_json::from_slice::<Value>(&bytes) else {
+                found.unreadable = true;
+                continue;
+            };
+            if let Some(events) = value.get("hooks").and_then(Value::as_object) {
+                found.events.extend(
+                    events
+                        .iter()
+                        .filter(|(_, hooks)| carries_hooks(hooks))
+                        .map(|(name, _)| name.clone()),
+                );
+            }
+        }
+        found
+    }
+
+    /// Com o `SessionStart` do ai-memory, a pessoa rodou o `setup` dele: a configuração é dela inteira.
+    fn complete(&self) -> bool {
+        self.events.contains("SessionStart")
+    }
+}
+
+/// Hooks da aba, sem os eventos que o usuário já configurou com o ai-memory.
+fn hooks(program: &Path, skip: &HashSet<String>) -> Value {
     let mut events = serde_json::Map::new();
     for (name, event) in [
         ("SessionStart", "session-start"),
@@ -108,6 +148,9 @@ fn hooks(program: &Path) -> Value {
         ("SubagentStart", "subagent-start"),
         ("SubagentStop", "subagent-stop"),
     ] {
+        if skip.contains(name) {
+            continue;
+        }
         let path = crate::util::external_path(program)
             .to_string_lossy()
             .into_owned();
@@ -184,17 +227,21 @@ pub(crate) fn prepare(
         plan.args.extend(["--mcp-config".into(), config_arg]);
     }
     // Não substitui --settings que a pessoa colocou no comando.
+    let user = UserHooks::read(settings);
+    let tab_hooks = hooks(program, &user.events);
     if !argv
         .iter()
         .any(|a| a == "--settings" || a.starts_with("--settings="))
-        && !should_skip_hooks(settings)
+        && !user.unreadable
+        && !user.complete()
+        && !tab_hooks["hooks"].as_object().is_none_or(|h| h.is_empty())
     {
         let file = dir.join(format!(
             "{name}.ai-memory-{}.settings.json",
             uuid::Uuid::new_v4().simple()
         ));
         plan.settings_file = Some(file.clone());
-        std::fs::write(&file, hooks(program).to_string())
+        std::fs::write(&file, tab_hooks.to_string())
             .map_err(|_| "Não foi possível gravar hooks da aba.".to_string())?;
         plan.args.extend([
             "--settings".into(),
@@ -261,14 +308,7 @@ pub(crate) fn remove_owned_server(dir: &Path, tab_id: &str) {
     }
 }
 
-/// Só um hook reconhecido em JSON válido permite dispensar nosso arquivo.
+/// Só um `SessionStart` do ai-memory em JSON válido dispensa nosso arquivo (e vale para a continuidade).
 pub(crate) fn configured_hooks(paths: &[PathBuf]) -> bool {
-    paths.iter().any(|path| {
-        std::fs::read(path)
-            .ok()
-            .filter(|b| b.len() <= 2 * 1024 * 1024)
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok())
-            .and_then(|value| value.get("hooks")?.get("SessionStart").map(carries_hooks))
-            .unwrap_or(false)
-    })
+    UserHooks::read(paths).complete()
 }
