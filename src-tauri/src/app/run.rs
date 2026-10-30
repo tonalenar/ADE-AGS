@@ -90,6 +90,13 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::ai_memory::ai_memory_probe,
+            crate::ai_memory::ai_memory_status,
+            crate::ai_memory::ai_memory_handoffs,
+            crate::ai_memory::ai_memory_recent,
+            crate::ai_memory::ai_memory_search,
+            crate::ai_memory::ai_memory_read_page,
+            crate::ai_memory::ai_memory_projects,
             crate::desktop_apps::gemini_desktop_status,
             crate::desktop_apps::gemini_desktop_attach,
             crate::desktop_apps::gemini_desktop_layout,
