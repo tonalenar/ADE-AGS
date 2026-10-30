@@ -3792,5 +3792,11 @@
   "chat.settings.widthHint": "Normal is 736 px, like T3.",
   "chat.settings.widthNormal": "Normal",
   "chat.settings.widthWide": "Wide",
-  "chat.settings.widthFull": "Full"
+  "chat.settings.widthFull": "Full",
+  "chat.accounts.of": "{{agent}} accounts",
+  "chat.accounts.main": "main account",
+  "chat.accounts.window": "Current window",
+  "chat.accounts.week": "This week",
+  "chat.accounts.pools": "Account pools",
+  "chat.accounts.more": "Limits, keys and git accounts"
 }

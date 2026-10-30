@@ -3792,5 +3792,11 @@
   "chat.settings.widthHint": "Normal é 736 px, como no T3.",
   "chat.settings.widthNormal": "Normal",
   "chat.settings.widthWide": "Larga",
-  "chat.settings.widthFull": "Inteira"
+  "chat.settings.widthFull": "Inteira",
+  "chat.accounts.of": "Contas de {{agent}}",
+  "chat.accounts.main": "conta principal",
+  "chat.accounts.window": "Janela atual",
+  "chat.accounts.week": "Esta semana",
+  "chat.accounts.pools": "Pools de contas",
+  "chat.accounts.more": "Limites, chaves e contas do git"
 }
