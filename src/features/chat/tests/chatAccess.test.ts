@@ -49,7 +49,7 @@ describe("anexo vira @caminho", () => {
 });
 
 describe("store ao vivo", () => {
-  const empty = { phase: {}, question: {}, awaiting: {} };
+  const empty = { phase: {}, question: {}, awaiting: {}, turn: {} };
   it("fase, pergunta e aprovação por aba", () => {
     const snapshot = { tabId: "a", agentId: "codex", mode: "veto" as const, phase: "working" as const, stale: false, tools: [], question: null, endsWithQuestion: false };
     let s = applyLiveState(empty, snapshot);
@@ -57,7 +57,17 @@ describe("store ao vivo", () => {
     s = applyApproval(s, { tabId: "a", waiting: true, tool: "rm -rf build" });
     expect(s.awaiting).toEqual({ a: "rm -rf build" });
     s = applyApproval(applyLiveState(s, { tabId: "a", removed: true }), { tabId: "a", waiting: false, tool: "" });
-    expect(s).toEqual({ phase: {}, question: {}, awaiting: {} });
+    expect(s).toEqual({ phase: {}, question: {}, awaiting: {}, turn: {} });
+  });
+
+  it("guarda o começo do turno e as ferramentas pendentes, para a linha viva da sidebar", () => {
+    const snapshot = {
+      tabId: "a", agentId: "claude-code", mode: "veto" as const, phase: "working" as const, stale: false,
+      tools: [{ id: "t1", name: "Bash", summary: "bun run test", sinceMs: 5 }], question: null, endsWithQuestion: false,
+      turnStartedAt: 1_000, turnEndedAt: null,
+    };
+    const s = applyLiveState(empty, snapshot);
+    expect(s.turn.a).toEqual({ startedAt: 1_000, endedAt: null, tools: [{ name: "Bash", summary: "bun run test" }] });
   });
 });
 

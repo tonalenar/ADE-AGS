@@ -3,13 +3,13 @@ import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
-import { WindowLights } from "@/app/WindowLights";
+import { WindowControls, WindowLights } from "@/app/WindowLights";
 import { readTuning } from "@/features/canvas/tabTuning";
 import { useTabsStore } from "@/features/tabs/store";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { newConversation, reopenFolder } from "./chatActions";
-import { DetailsIcon, PanelBottomIcon, PanelRightIcon, SidebarIcon } from "./chatIcons";
+import { DetailsIcon, PanelBottomIcon, PanelRightIcon, SidebarIcon, UsersIcon } from "./chatIcons";
 import { chatProjects, conversationCards, readAccess, type ChatProject, type ConversationCard } from "./chatModel";
 import { ChatSidebar, IconButton, ProjectBadge, type FolderDiff } from "./ChatSidebar";
 import { ChatPage } from "./ChatPage";
@@ -19,10 +19,19 @@ import { CHAT_SHELL_ATTR, ConversationView, hasTimeline, useTerminalOpen } from 
 import { parseUnifiedDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
 import { startChatLive } from "./liveStore";
+import { useLiveSummary } from "./liveSummary";
+import { HeaderLive } from "./LiveActivity";
+import { PermissionsInbox } from "./permissions/PermissionsInbox";
+import { TeamHeaderBadge } from "./team/TeamThreadFeed";
+import { useOpenTeamPanel } from "./team/TeamSidebar";
+import { PermissionsManager } from "./permissions/PermissionsManager";
+import { setInboxOpen, usePermissions } from "./permissions/permissionsStore";
+import { startQueueRunner } from "./queueRunner";
 import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
 import { ShellModeSwitch } from "./ShellModeSwitch";
-import { setTerminalOpen, toggleRightPanel, useChatStore } from "./store";
+import { addSurface, forgetLastPanel, openTeamPanelFocused, setRightPanel, setTerminalOpen, toggleRightPanel, useChatStore } from "./store";
+import { matchTeamShortcut, TEAM_SHORTCUT } from "./panelMenu";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
 import { startStructured, useStructured } from "./structured/store";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
@@ -58,6 +67,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const composing = useChatStore((s) => s.composing);
   const panelOpen = useChatStore((s) => s.panel !== null);
+  const panelTab = useChatStore((s) => s.panel);
   const maximized = useChatStore((s) => s.panelMaximized);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [folder, setFolder] = useState<string | null>(null);
@@ -68,6 +78,27 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
 
   useEffect(() => startChatLive(), []);
   useEffect(() => startStructured(), []);
+  useEffect(() => startQueueRunner(), []);
+  // O atalho do Time (⌥⌘T no macOS, Ctrl+Shift+O nos outros) abre o painel Time e foca nele. Na fase de
+  // captura, antes do terminal: o acorde não chega à TUI. A casca só existe com o modo chat ligado.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!matchTeamShortcut(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      openTeamPanelFocused();
+    };
+    window.addEventListener("keydown", onKey, { capture: true });
+    return () => window.removeEventListener("keydown", onKey, { capture: true });
+  }, []);
+  // Uma conversa nova esquece a aba lembrada do painel: a próxima abertura mostra o estado vazio.
+  useEffect(() => { if (composing) forgetLastPanel(); }, [composing]);
+  // A caixa de permissões e o painel direito dividem o lado direito: abrir um fecha o outro.
+  const inboxOpen = usePermissions((s) => s.inboxOpen);
+  useEffect(() => { if (inboxOpen) setRightPanel(null); }, [inboxOpen]);
+  useEffect(() => { if (panelOpen) setInboxOpen(false); }, [panelOpen]);
+  // Com o time ativo, o painel Time abre no lado direito (prancheta 15).
+  useOpenTeamPanel(active?.tabId ?? null, openTeamSurface);
 
   const addProject = async () => {
     const picked = await pickProjectFolder(t("home.dialogTitle"));
@@ -80,7 +111,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
 
   return (
     <div {...{ [CHAT_SHELL_ATTR]: "" }}
-      className="absolute inset-0 flex bg-white dark:bg-surface-deep text-gray-900 dark:text-white">
+      className="cc-chat-type absolute inset-0 flex bg-white dark:bg-surface-deep text-gray-900 dark:text-white">
       {sidebarOpen && page && (isSettingsRoute(pathname)
         ? <SettingsSidebar onBack={closePage} />
         : <SpacesSidebar activeCount={cards.length} onBack={closePage} />)}
@@ -95,8 +126,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
       )}
 
       {!page && !(panelOpen && maximized) && (
-        <main className="relative flex-1 min-w-[360px] flex flex-col">
-          <header data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-3 pl-5 pr-3 text-[14px] select-none">
+        <main className="relative flex-1 min-w-[440px] flex flex-col">
+          <header data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-3 pl-5 pr-3 text-chat-ui select-none">
             {!sidebarOpen && (
               <>
                 <WindowLights />
@@ -107,25 +138,39 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
               {project && <span className="flex items-center gap-2 text-gray-500 dark:text-white/50 truncate"><ProjectBadge name={project} size="sm" />{project}</span>}
               {project && <span aria-hidden="true" className="text-gray-300 dark:text-white/25">/</span>}
               <span className="font-medium truncate">{active ? active.title : t("chat.new.title")}</span>
+              <TeamHeaderBadge conversation={active} />
             </span>
+            {active && <ActiveLive cardKey={active.tabId} />}
             <ShellModeSwitch />
             <div className="flex items-center gap-1">
               <DetailsButton card={active} />
               {active && !activeThread && hasTimeline(active.agentId) ? <TerminalToggle card={active} /> : (
                 <IconButton label={t("chat.terminal.toggle")} onClick={() => undefined} className="opacity-40 pointer-events-none"><PanelBottomIcon className="w-4 h-4" /></IconButton>
               )}
+              <IconButton label={`${t("chat.team.headerButton")} (${TEAM_SHORTCUT})`} onClick={() => openTeamPanelFocused()} active={panelTab === "team"}><UsersIcon className="w-4 h-4" /></IconButton>
               <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
             </div>
+            {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
+            {!panelOpen && <WindowControls className="-mr-3" />}
           </header>
 
-          {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} />
-            : active ? <ConversationView key={active.tabId} card={active} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
+          {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} cards={cards} />
+            : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
         </main>
       )}
 
-      {!page && <RightPanel tabId={activeThread ? null : active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""} />}
+      {!page && <RightPanel tabId={activeThread ? null : active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""}
+        conversation={active} cards={cards} />}
+      {!page && inboxOpen && <PermissionsInbox />}
+      <PermissionsManager />
     </div>
   );
+}
+
+/** "Trabalhando · 52 s" no cabeçalho da conversa aberta (prancheta 13). */
+function ActiveLive({ cardKey }: { cardKey: string }) {
+  const live = useLiveSummary(cardKey);
+  return <HeaderLive live={live} />;
 }
 
 /** Abre e fecha a gaveta do terminal da conversa (onde a TUI do agente continua rodando). */
@@ -163,7 +208,7 @@ function DetailsButton({ card }: { card: ConversationCard | null }) {
       <IconButton label={t("chat.details.title")} onClick={() => setOpen(!open)} active={open}><DetailsIcon className="w-4 h-4" /></IconButton>
       {open && (
         <div role="dialog" aria-label={t("chat.details.title")}
-          className="absolute right-0 top-full mt-1.5 z-50 w-[280px] p-3 rounded-lg text-[12.5px] bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
+          className="absolute right-0 top-full mt-1.5 z-50 w-[280px] p-3 rounded-lg text-chat-note bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           <dl className="m-0 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1.5">
             {rows.map(([k, v]) => (
@@ -225,4 +270,9 @@ function useFolderDiffs(cards: ConversationCard[]): Record<string, FolderDiff> {
   }, [cwds]);
 
   return diffs;
+}
+
+/** Abre a aba Time do painel direito (estável: o hook do time a chama uma vez por conversa). */
+function openTeamSurface(): void {
+  addSurface("team");
 }

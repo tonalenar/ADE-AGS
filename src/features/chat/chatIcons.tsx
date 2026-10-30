@@ -62,3 +62,33 @@ export const FolderGitIcon = (p: IconProps) => <Svg {...p}><path d="M20 20H4a2 2
 export const ChevronLeftIcon = (p: IconProps) => <Svg {...p}><path d="m15 18-6-6 6-6" /></Svg>;
 export const PhoneIcon = (p: IconProps) => <Svg {...p}><rect x="7" y="2.5" width="10" height="19" rx="2.5" /><path d="M11 18.5h2" /></Svg>;
 export const XIcon = (p: IconProps) => <Svg {...p}><path d="M18 6 6 18M6 6l12 12" /></Svg>;
+
+// Os controles dos aparelhos do painel (pranchetas 9 e 10).
+export const HomeIcon = (p: IconProps) => <Svg {...p}><path d="M3 11 12 4l9 7v9H5v-9" /></Svg>;
+export const RotateIcon = (p: IconProps) => <Svg {...p}><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></Svg>;
+export const CameraIcon = (p: IconProps) => <Svg {...p}><path d="M4 8h3l2-3h6l2 3h3v11H4Z" /><circle cx="12" cy="13" r="3.5" /></Svg>;
+export const ContrastIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="8" /><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" /></Svg>;
+export const PinIcon = (p: IconProps) => <Svg {...p}><path d="M12 22s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12Z" /><circle cx="12" cy="10" r="2.5" /></Svg>;
+export const FaceIdIcon = (p: IconProps) => <Svg {...p}><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M9 9v1M15 9v1M12 9v4h-1M9 16c1.5 1 4.5 1 6 0" /></Svg>;
+export const KeyboardIcon = (p: IconProps) => <Svg {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Svg>;
+export const BackTriangleIcon = (p: IconProps) => <Svg {...p}><path d="M17 5v14L6 12Z" /></Svg>;
+export const CircleIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="7" /></Svg>;
+export const SquareIcon = (p: IconProps) => <Svg {...p}><rect x="5" y="5" width="14" height="14" rx="2" /></Svg>;
+export const VolumeIcon = (p: IconProps) => <Svg {...p}><path d="M4 9h4l5-4v14l-5-4H4Z" /><path d="M17 9a4 4 0 0 1 0 6" /></Svg>;
+export const LogIcon = (p: IconProps) => <Svg {...p}><path d="M4 6h16M4 10h10M4 14h16M4 18h8" /></Svg>;
+export function MoreVerticalIcon({ className = "w-4 h-4" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+      <circle cx="12" cy="5" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="12" cy="19" r="1.6" />
+    </svg>
+  );
+}
+/** O cadeado do cartão de permissão (prancheta 14). */
+export const PadlockIcon = (p: IconProps) => <Svg {...p}><rect x="4" y="10" width="16" height="11" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></Svg>;
+/** O triângulo de aviso do "N agentes esperando você". */
+export const WarnIcon = (p: IconProps) => <Svg {...p}><path d="M12 3 2 21h20Z" /><path d="M12 10v4M12 17h.01" /></Svg>;
+
+export const UsersIcon = (p: IconProps) => <Svg {...p}><circle cx="9" cy="8" r="3.2" /><path d="M3 20c.6-3.3 3-5 6-5s5.4 1.7 6 5" /><path d="M16 4.6a3.2 3.2 0 0 1 0 6.3M18 15.4c1.6.6 2.7 2.1 3 4.6" /></Svg>;
+export const DiffIcon = (p: IconProps) => <Svg {...p}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6M9 13h6M9 17h6M12 10v0" /></Svg>;
+export const FilesIcon = (p: IconProps) => <Svg {...p}><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V6Z" /><path d="M15 2v4h4M4 7v13a2 2 0 0 0 2 2h9" /></Svg>;
+export const DesignIcon = (p: IconProps) => <Svg {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.5-1.9-.3-1 .4-2.1 1.5-2.1H17a4 4 0 0 0 4-4c0-5-4-10-9-10Z" /><path d="M7.5 11h.01M11 7.5h.01M15.5 9h.01" /></Svg>;

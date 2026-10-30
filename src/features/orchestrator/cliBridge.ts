@@ -14,9 +14,11 @@ import i18n from "@/i18n";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { getAutonomy } from "@/features/missions/autonomy";
-import { useUiStore } from "@/app/uiStore";
+import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
 import { openThread, reloadThreads } from "@/features/chat/structured/store";
+import { openDesignInPanel } from "@/features/chat/store";
+import { designRoute, parseDesignOpen } from "@/features/design/openRoute";
 import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
@@ -410,6 +412,38 @@ async function handleChatOpen(args: Record<string, unknown>): Promise<unknown> {
   return { opened: thread };
 }
 
+/**
+ * `ags design open <id> [--artboard] [--page]`: no modo chat abre a aba Design do painel direito com
+ * aquele design (fechando a tela cheia que estiver por cima); nas abas e no canvas, a tela cheia
+ * `/design/:id`.
+ */
+function handleDesignOpen(args: Record<string, unknown>): unknown {
+  const req = parseDesignOpen(args);
+  const path = window.location.hash.replace(/^#/, "") || "/";
+  if (chatShellOn(useUiStore.getState())) {
+    if (isPageRoute(path)) window.location.hash = useTabsStore.getState().tabs.length > 0 ? "#/workspace" : "#/";
+    openDesignInPanel(req);
+    return { opened: req.designId, where: "panel" };
+  }
+  window.location.hash = `#${designRoute({ ...req, seq: Date.now() })}`;
+  return { opened: req.designId, where: "page" };
+}
+
+/**
+ * `ags team link|unlink|role|create`: o backend já mudou o time; aqui ele vira canvas (coroa, cordas,
+ * papéis) e é gravado na hora, para o próximo `ags peer tell` do orquestrador já passar.
+ */
+async function handleTeamSync(args: Record<string, unknown>): Promise<unknown> {
+  const teamId = str(args, "teamId");
+  if (!teamId) throw new Error("Falta o time");
+  const removed = str(args, "removed");
+  const { reloadTeams, syncTeamCanvas } = await import("@/features/chat/team/teamStore");
+  const team = (await reloadTeams()).find((t) => t.id === teamId);
+  if (!team) throw new Error("Esse time não existe mais");
+  await syncTeamCanvas(team, { removed: removed ? [removed] : [] });
+  return { ok: true };
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
@@ -426,6 +460,8 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.portal": return handlePortal(args);
     case "user.notify": return handleNotify(args);
     case "chat.open": return handleChatOpen(args);
+    case "design.open": return handleDesignOpen(args);
+    case "team.sync": return handleTeamSync(args);
     default: throw new Error(`O frontend não sabe atender '${command}'`);
   }
 }

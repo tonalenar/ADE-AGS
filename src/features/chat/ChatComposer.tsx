@@ -1,8 +1,9 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./chatIcons";
+import { useChatStore } from "./store";
 
 /** Até quantas linhas a caixa cresce antes de rolar. */
 const MAX_ROWS = 10;
@@ -16,19 +17,41 @@ export function mentionFor(cwd: string | null, path: string): string {
   return `@${/\s/.test(rel) ? `"${rel}"` : rel}`;
 }
 
+/** Junta um trecho ao texto, com um espaço entre os dois e outro no fim. Pura. */
+export function appendMention(prev: string, mention: string): string {
+  return prev && !/\s$/.test(prev) ? `${prev} ${mention} ` : `${prev}${mention} `;
+}
+
+/** O que o `addon` do composer recebe: o texto, o cursor e como trocar os dois. */
+export interface ComposerAddonContext {
+  text: string;
+  caret: number;
+  apply: (text: string, caret: number) => void;
+}
+
 /**
  * A caixa do composer da prancheta (a do T3 Code): cartão de vidro com cantos de 16 px, o texto em
  * cima e, embaixo, anexar à esquerda, os controles e o botão redondo de 32 px à direita. Enter
- * envia; Shift+Enter quebra a linha. Com o agente trabalhando e a caixa vazia, o botão vira Parar.
+ * envia na hora; Shift+Enter quebra a linha; ⌘⏎ (Ctrl+Enter fora do macOS) põe na fila quando há
+ * `onQueue` (prancheta 13), e a fila aparece embaixo ("Fila: 1 mensagem"). Com o agente
+ * trabalhando e a caixa vazia, o botão vira Parar.
  */
-export function ChatComposer({ placeholder, controls, onSubmit, onStop, cwd = null, disabled = false, autoFocus = false }: {
+export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onStop, onQueue, queued = 0, cwd = null, disabled = false, autoFocus = false }: {
   placeholder: string;
+  /** Logo depois do anexar, à esquerda (o segmentado "Time | Só o orquestrador", prancheta 15). */
+  leading?: React.ReactNode;
+  /** Acima da caixa, com o texto e o cursor (o menu do @agente do time). `apply` troca os dois. */
+  addon?: (ctx: ComposerAddonContext) => React.ReactNode;
   /** Entre o espaço vazio e o botão de enviar. */
   controls?: React.ReactNode;
   /** `false` (ou erro) = não foi: o texto continua na caixa. */
   onSubmit: (text: string) => boolean | void | Promise<boolean | void>;
   /** O agente está trabalhando: o botão vira Parar (com a caixa vazia). */
   onStop?: (() => void) | null;
+  /** ⌘⏎: põe a mensagem na fila da conversa (sai quando o turno acabar). */
+  onQueue?: ((text: string) => void) | null;
+  /** Quantas mensagens esperam na fila. */
+  queued?: number;
   /** A pasta da conversa, para o anexo virar um caminho relativo. */
   cwd?: string | null;
   disabled?: boolean;
@@ -37,9 +60,31 @@ export function ChatComposer({ placeholder, controls, onSubmit, onStop, cwd = nu
   const { t } = useTranslation();
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [caret, setCaret] = useState(0);
   const ref = useRef<HTMLTextAreaElement>(null);
+  // O cursor pedido por `apply` (o @ trocado pelo apelido): aplicado depois de o texto mudar.
+  const pendingCaret = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const at = pendingCaret.current;
+    if (at === null || !ref.current) return;
+    pendingCaret.current = null;
+    ref.current.focus();
+    ref.current.setSelectionRange(at, at);
+    setCaret(at);
+  }, [text]);
+  const apply = (next: string, at: number) => { pendingCaret.current = at; setText(next); };
   const canSend = text.trim().length > 0 && !disabled && !busy;
   const stopping = !!onStop && text.trim().length === 0;
+
+  // O que o painel manda para a conversa (a captura de um aparelho) entra no fim do texto.
+  const insert = useChatStore((s) => s.composerInsert);
+  const seen = useRef(insert?.seq ?? 0);
+  useEffect(() => {
+    if (!insert || insert.seq === seen.current) return;
+    seen.current = insert.seq;
+    setText((prev) => appendMention(prev, insert.text));
+    ref.current?.focus();
+  }, [insert]);
 
   // Cresce com o texto até `MAX_ROWS` linhas.
   useLayoutEffect(() => {
@@ -49,6 +94,12 @@ export function ChatComposer({ placeholder, controls, onSubmit, onStop, cwd = nu
     const line = parseFloat(getComputedStyle(el).lineHeight) || 22;
     el.style.height = `${Math.min(el.scrollHeight, line * MAX_ROWS)}px`;
   }, [text]);
+
+  const queue = () => {
+    if (!onQueue || text.trim().length === 0 || disabled) return;
+    onQueue(text);
+    setText("");
+  };
 
   const submit = async () => {
     if (!canSend) return;
@@ -67,7 +118,7 @@ export function ChatComposer({ placeholder, controls, onSubmit, onStop, cwd = nu
     const files = typeof picked === "string" ? [picked] : picked ?? [];
     if (files.length === 0) return;
     const mentions = files.map((f) => mentionFor(cwd, f)).join(" ");
-    setText((prev) => (prev && !/\s$/.test(prev) ? `${prev} ${mentions} ` : `${prev}${mentions} `));
+    setText((prev) => appendMention(prev, mentions));
     ref.current?.focus();
   };
 
@@ -78,18 +129,21 @@ export function ChatComposer({ placeholder, controls, onSubmit, onStop, cwd = nu
         bg-white/80 dark:bg-surface-raised/80 backdrop-blur-md backdrop-saturate-[1.14]
         shadow-[0_1px_2px_rgba(0,0,0,0.05)] dark:shadow-none"
     >
+      {addon?.({ text, caret, apply })}
       <label className="block px-4 pt-4 pb-2">
         <span className="sr-only">{t("chat.composer.label")}</span>
         <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); }}
+          onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault();
-              void submit();
+              if ((e.metaKey || e.ctrlKey) && onQueue) queue();
+              else void submit();
             }
           }}
           placeholder={placeholder}
-          className="block w-full resize-none bg-transparent outline-none text-[15px] leading-[1.5]
+          className="block w-full resize-none bg-transparent outline-none text-chat-prose
             text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
       </label>
       <div className="flex items-center gap-0.5 px-2 pb-2">
@@ -97,6 +151,10 @@ export function ChatComposer({ placeholder, controls, onSubmit, onStop, cwd = nu
           className="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
           <PaperclipIcon className="w-4 h-4" />
         </button>
+        {leading}
+        {queued > 0 && (
+          <span role="status" className="pl-2 text-chat-caption text-gray-500 dark:text-white/45">{t("chat.composer.queued", { count: queued })}</span>
+        )}
         <span className="flex-1" />
         {controls}
         {stopping ? (

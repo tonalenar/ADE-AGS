@@ -57,9 +57,11 @@ export function NewConversation({ projects, folder, onFolder }: {
   const project: ChatProject | null = projects.find((p) => p.cwd === cwd) ?? (cwd ? { cwd, name: baseName(cwd), branch: null } : null);
   const agent = agents.find((a) => a.id === prefs.agentId) ?? agents.find((a) => a.id === PREFERRED_AGENT) ?? agents[0] ?? null;
   const mine = !!agent && prefs.agentId === agent.id;
-  const modes = agent ? accessModesFor(agent.id) : ["ask" as const];
+  // Por protocolo (sem TUI) o agente tem os acessos e o Plano do motor dele; na TUI, os flags dela.
+  const viaProtocol = !!agent && prefs.structured && STRUCTURED_AGENTS.has(agent.id);
+  const modes = agent ? accessModesFor(agent.id, viaProtocol) : ["ask" as const];
   const access = modes.includes(prefs.access) ? prefs.access : modes.includes("safe") ? "safe" : "ask";
-  const plan = !!agent && planSupported(agent.id) && prefs.plan;
+  const plan = !!agent && planSupported(agent.id, viaProtocol) && prefs.plan;
 
   const choose = (path: string) => {
     onFolder(path);
@@ -84,7 +86,7 @@ export function NewConversation({ projects, folder, onFolder }: {
       const cwd = prefs.worktree
         ? (await chatNewWorktree(project.cwd, conversationTitle(prompt) ?? project.name)).cwd
         : project.cwd;
-      if (prefs.structured && STRUCTURED_AGENTS.has(agent.id)) {
+      if (viaProtocol) {
         // No Claude o Plano é um modo de permissão: a conversa nasce nele e sai pelo pedido do agente.
         await startThread({
           agentId: agent.id, cwd, title: conversationTitle(prompt) ?? project.name,
@@ -122,7 +124,7 @@ export function NewConversation({ projects, folder, onFolder }: {
           </>
         ) : t("chat.new.pickFolderHeadline")}
       </h1>
-      <p className="mt-2 mb-[18px] text-[14px]">
+      <p className="mt-2 mb-[18px] text-chat-ui">
         <button type="button" onClick={() => { void (project ? withoutProject() : browse()); }}
           className="text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/80">
           {project ? t("chat.new.withoutProject") : t("chat.new.pickFolder")}
@@ -139,10 +141,10 @@ export function NewConversation({ projects, folder, onFolder }: {
                 onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account })} />
               <EffortMenu agentId={agent?.id ?? null} model={mine ? prefs.model : null} account={mine ? prefs.accountId : null}
                 value={mine ? prefs.effort : null} onChange={(effort) => agent && update({ agentId: agent.id, effort, model: mine ? prefs.model : null, accountId: mine ? prefs.accountId : null })} />
-              {agent && planSupported(agent.id) && (
+              {agent && planSupported(agent.id, viaProtocol) && (
                 <button type="button" onClick={() => update({ plan: !prefs.plan })} aria-pressed={plan}
                   title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
-                  className="flex items-center gap-1.5 h-7 px-2 rounded-lg text-[14px] font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07]">
+                  className="flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07]">
                   <BotIcon className="w-4 h-4 text-gray-500 dark:text-white/45" />
                   {plan ? t("chat.plan.plan") : t("chat.plan.build")}
                 </button>
@@ -153,7 +155,7 @@ export function NewConversation({ projects, folder, onFolder }: {
           workspace={<WorkspaceMenu worktree={prefs.worktree} onChange={(worktree) => update({ worktree })} />}>
           <AccessMenu value={access} available={modes} onChange={(next) => update({ access: next })} />
         </ContextStrip>
-        {error && <p role="alert" className="mt-3 px-2 text-[12.5px] text-red-600 dark:text-red-400">{error}</p>}
+        {error && <p role="alert" className="mt-3 px-2 text-chat-note text-red-600 dark:text-red-400">{error}</p>}
       </div>
     </section>
   );
@@ -170,7 +172,7 @@ export function ContextStrip({ branch, workspace, worktree = false, children }: 
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-wrap items-center gap-0.5 px-2 pt-2 text-[12px] text-gray-500 dark:text-white/45">
+    <div className="flex flex-wrap items-center gap-0.5 px-2 pt-2 text-chat-caption text-gray-500 dark:text-white/45">
       {workspace ?? (
         <span className="flex items-center gap-1.5 h-6 px-1.5">
           {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
@@ -202,7 +204,7 @@ function ProjectPicker({ project, projects, onPick, onBrowse }: {
       {open && (
         <div role="listbox" aria-label={t("chat.new.projects")}
           className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-72 max-h-80 cc-scroll p-1 rounded-lg text-left
-            text-[13.5px] font-normal tracking-normal bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
+            text-chat-ui font-normal tracking-normal bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           {projects.map((p) => (
             <button key={p.cwd} type="button" role="option" aria-selected={p.cwd === project.cwd} title={p.cwd}
@@ -243,15 +245,15 @@ function WorkspaceMenu({ worktree, onChange }: { worktree: boolean; onChange: (w
         <div role="menu" aria-label={t("chat.workspace.title")}
           className="absolute left-0 top-full mt-1.5 z-50 w-72 p-1.5 rounded-lg bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
-          <div className="px-2 pt-1 pb-1.5 text-[12px] font-medium text-gray-500 dark:text-white/45">{t("chat.workspace.title")}</div>
+          <div className="px-2 pt-1 pb-1.5 text-chat-caption font-medium text-gray-500 dark:text-white/45">{t("chat.workspace.title")}</div>
           {options.map((o) => (
             <button key={String(o.value)} type="button" role="menuitemradio" aria-checked={o.value === worktree}
               onClick={() => { onChange(o.value); setOpen(false); }}
               className="w-full flex items-start gap-2 px-2 py-1.5 rounded-md text-left hover:bg-gray-100 dark:hover:bg-white/[0.07]">
               <o.icon className="w-4 h-4 mt-0.5 shrink-0 text-gray-500 dark:text-white/45" />
               <span className="flex-1 min-w-0">
-                <span className="block text-[13.5px] font-medium text-gray-900 dark:text-white">{o.label}</span>
-                <span className="block text-[12px] text-gray-500 dark:text-white/45">{o.hint}</span>
+                <span className="block text-chat-ui font-medium text-gray-900 dark:text-white">{o.label}</span>
+                <span className="block text-chat-caption text-gray-500 dark:text-white/45">{o.hint}</span>
               </span>
               {o.value === worktree && <CheckIcon className="w-3.5 h-3.5 mt-0.5 text-gray-900 dark:text-white" />}
             </button>

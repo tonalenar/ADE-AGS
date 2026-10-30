@@ -1,6 +1,6 @@
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
@@ -16,7 +16,6 @@ import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
 import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
-import { MemoryRail } from "@/features/settings/MemoryRail";
 import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
 import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
@@ -30,10 +29,10 @@ import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
 import { DevicesSection } from "@/features/settings/DevicesSection";
 import { WorktreesSection } from "@/features/settings/WorktreesSection";
-import { SettingsLookContext, useSettingsLook } from "@/features/settings/settingsLook";
-import { SETTINGS_NAV } from "@/features/settings/settingsNav";
 import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
+import { SettingsSidebar } from "@/features/chat/ChatPageSidebar";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
+import { PermissionsSection } from "@/features/chat/permissions/PermissionsSection";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
@@ -64,62 +63,19 @@ function AgentCapabilities({ agent }: { agent: CustomAgent }) {
   );
 }
 
-/** Cada item da barra lateral tem o seu quadradinho de cor com um glifo, como os Ajustes do macOS. */
-const GLYPH: Record<SettingsSectionId, { tone: string; icon: React.ReactNode }> = {
-  general: { tone: "bg-gray-500", icon: <><circle cx="8" cy="8" r="2.2" /><circle cx="8" cy="8" r="5.6" strokeDasharray="2.4 1.8" /></> },
-  appearance: { tone: "bg-accent-500", icon: <><circle cx="8" cy="8" r="5.6" /><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor" /></> },
-  accounts: { tone: "bg-green-500", icon: <><circle cx="8" cy="5.6" r="2.4" /><path d="M3 13.2c.7-2.2 2.5-3.4 5-3.4s4.3 1.2 5 3.4" /></> },
-  agents: { tone: "bg-orange-500", icon: <><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1.6" /><path d="M6.4 1.8v2.4M9.6 1.8v2.4M6.4 11.8v2.4M9.6 11.8v2.4M1.8 6.4h2.4M1.8 9.6h2.4M11.8 6.4h2.4M11.8 9.6h2.4" /></> },
-  memory: { tone: "bg-purple-500", icon: <><path d="M8 2.2 13.6 5 8 7.8 2.4 5 8 2.2Z" /><path d="m2.4 8 5.6 2.8L13.6 8M2.4 11l5.6 2.8L13.6 11" /></> },
-  chat: { tone: "bg-accent-500", icon: <path d="M14 8a5.6 5.6 0 0 1-8.1 5l-3.6.8.7-3.3A5.6 5.6 0 1 1 14 8Z" /> },
-  terminal: { tone: "bg-sky-400", icon: <><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2.2" /><path d="M4.6 6.4 6.6 8l-2 1.6M8.8 10.2h2.6" /></> },
-  shortcuts: { tone: "bg-red-500", icon: <><rect x="1.4" y="4" width="13.2" height="8" rx="2" /><path d="M4 6.8h.01M6.8 6.8h.01M9.6 6.8h.01M12 6.8h.01M4.4 9.4h7.2" /></> },
-  decisions: { tone: "bg-teal-600", icon: <><circle cx="8" cy="3.2" r="1.5" /><circle cx="4.2" cy="12.2" r="1.5" /><circle cx="11.8" cy="12.2" r="1.5" /><path d="M8 4.7v2.4M8 7.1 4.2 10.7M8 7.1l3.8 3.6" /></> },
-  devices: { tone: "bg-indigo-500", icon: <><rect x="4.4" y="1.6" width="7.2" height="12.8" rx="1.8" /><path d="M7.2 12.2h1.6" /></> },
-  worktrees: { tone: "bg-orange-500", icon: <><circle cx="4.4" cy="3.6" r="1.5" /><circle cx="4.4" cy="12.4" r="1.5" /><circle cx="11.6" cy="5.4" r="1.5" /><path d="M4.4 5.1v5.8M11.6 6.9c0 2.7-4 2-7.2 4" /></> },
-  advanced: { tone: "bg-gray-600", icon: <><path d="M2 4.6h12M2 11.4h12" /><circle cx="5.6" cy="4.6" r="1.5" /><circle cx="10.4" cy="11.4" r="1.5" /></> },
-};
-
-
-function Glyph({ id }: { id: SettingsSectionId }) {
-  const glyph = GLYPH[id];
-  return (
-    <span className={`flex size-[22px] shrink-0 items-center justify-center rounded-md text-white ${glyph.tone}`}>
-      <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none"
-        stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-        {glyph.icon}
-      </svg>
-    </span>
-  );
-}
-
 /** Abas dentro de uma seção que reúne várias coisas (Agentes, Avançado, Geral): um segmentado. */
 function SubTabs<T extends string>({ items, value, onChange }: {
   items: { id: T; label: string }[];
   value: T;
   onChange: (id: T) => void;
 }) {
-  if (useSettingsLook() === "chat") {
-    return (
-      <div role="tablist" className="self-start inline-flex max-w-full flex-wrap gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
-        {items.map((it) => (
-          <button key={it.id} type="button" role="tab" aria-selected={value === it.id} onClick={() => onChange(it.id)}
-            className={`h-6 px-2.5 rounded-md text-[12px] font-medium ${value === it.id
-              ? "bg-white dark:bg-white/[0.12] text-gray-900 dark:text-white shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
-              : "text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white"}`}>
-            {it.label}
-          </button>
-        ))}
-      </div>
-    );
-  }
   return (
-    <div role="tablist" className="mb-4 inline-flex max-w-full flex-wrap gap-0.5 rounded-[9px] bg-black/[0.05] p-0.5 dark:bg-surface-raised">
+    <div role="tablist" className="self-start inline-flex max-w-full flex-wrap gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
       {items.map((it) => (
         <button key={it.id} type="button" role="tab" aria-selected={value === it.id} onClick={() => onChange(it.id)}
-          className={`h-[26px] rounded-[7px] px-3 text-[12.5px] font-medium transition-colors ${value === it.id
-            ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-white dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
-            : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
+          className={`h-6 px-2.5 rounded-md text-[12px] font-medium ${value === it.id
+            ? "bg-white dark:bg-white/[0.12] text-gray-900 dark:text-white shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+            : "text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white"}`}>
           {it.label}
         </button>
       ))}
@@ -132,8 +88,8 @@ type AgentsTab = "tuis" | "orchestrator" | "routing" | "prelaunch" | "skillsDir"
 type AdvancedTab = "cli" | "graphify";
 
 /**
- * A tela de Configurações, TUDO numa tela só (prancheta 5): a barra lateral com a busca, a seção
- * aberta no meio e o painel de memória à direita.
+ * A tela de Configurações (prancheta 5), a mesma nas abas, no canvas e no chat: a barra das seções
+ * com a busca e a seção aberta no meio, com título e subtítulo.
  *
  * Contas, que era um modal à parte, é a seção "Contas". As seções que juntam várias coisas
  * (Agentes, Avançado, Geral) as separam em abas, para o meio mostrar UMA coisa por vez em vez de
@@ -142,11 +98,9 @@ type AdvancedTab = "cli" | "graphify";
 export function SettingsPage() {
   const { t } = useTranslation();
   const section = useUiStore((s) => s.settingsSection);
-  // No modo chat o menu das seções é a barra lateral do chat (prancheta 5): aqui só o conteúdo.
+  // No chat a barra das seções é a da casca (`ChatShell`); fora dele a página a desenha.
   const chat = useChatShell();
-  const setSection = useUiStore((s) => s.setSettingsSection);
   const workspaceId = useTabsStore((s) => s.workspaceId);
-  const activeCwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? s.tabs[0]?.cwd ?? "");
   const customAgents = useAgentsStore((s) => s.customAgents);
   const loadCustomAgents = useAgentsStore((s) => s.loadCustomAgents);
   const saveCustomAgent = useAgentsStore((s) => s.saveCustomAgent);
@@ -189,6 +143,7 @@ export function SettingsPage() {
     decisions: t("settings.decisions"),
     devices: t("settings.devices"),
     worktrees: t("settings.worktrees"),
+    permissions: t("settings.permissions"),
     advanced: t("settings.advanced"),
   };
   const generalTabs = [
@@ -209,26 +164,6 @@ export function SettingsPage() {
     { id: "graphify" as const, label: t("settings.graphify") },
   ];
 
-  // Busca da barra lateral: acha a seção pelo nome dela ou pelo de qualquer aba que ela tenha.
-  const [filter, setFilter] = useState("");
-  const terms = useMemo<Record<SettingsSectionId, string>>(() => ({
-    general: [labels.general, ...generalTabs.map((x) => x.label), t("settings.language")].join(" "),
-    appearance: [labels.appearance, t("settings.theme")].join(" "),
-    chat: [labels.chat, t("chat.settings.toggle"), t("chat.settings.worktree"), t("chat.settings.plan")].join(" "),
-    accounts: [labels.accounts].join(" "),
-    agents: [labels.agents, ...agentsTabs.map((x) => x.label)].join(" "),
-    memory: labels.memory,
-    terminal: labels.terminal,
-    shortcuts: labels.shortcuts,
-    decisions: [labels.decisions, t("settings.decisions.provider"), "laya", "jev"].join(" "),
-    devices: [labels.devices, "ios", "android", "simulador", "simulator"].join(" "),
-    worktrees: [labels.worktrees, "git", "branch"].join(" "),
-    advanced: [labels.advanced, ...advancedTabs.map((x) => x.label)].join(" "),
-  }), [t]); // eslint-disable-line react-hooks/exhaustive-deps
-  const q = filter.trim().toLocaleLowerCase();
-  const matches = (id: SettingsSectionId) => !q || terms[id].toLocaleLowerCase().includes(q);
-  const firstMatch = SETTINGS_NAV.flat().find(matches);
-
   const handleChangeSkillsDir = async () => {
     const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
     if (typeof selected === "string" && selected) {
@@ -241,56 +176,19 @@ export function SettingsPage() {
     persistLocale(localStorage, lang);
   };
 
-  const workspaceName = activeCwd.split(/[\\/]/).filter(Boolean).pop() ?? t("settings.workspace");
-
   return (
-    <SettingsLookContext.Provider value={chat ? "chat" : "classic"}>
-    <div className={`@container flex h-full min-h-0 w-full ${chat ? "" : "bg-gray-50 dark:bg-surface-deep"}`}>
-      {/* ══ a barra lateral ═══════════════════════════════════════════════ */}
-      {!chat && <nav aria-label={t("settings.title")} className="flex w-[208px] shrink-0 flex-col min-h-0
-        border-r border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-gray-100/60 dark:bg-surface">
-        <label className="mx-3 mt-3 mb-2 flex h-8 shrink-0 items-center gap-2 rounded-[9px] pl-2.5 pr-2
-          bg-black/[0.05] dark:bg-surface-raised text-gray-400 dark:text-white/30
-          focus-within:ring-[3px] focus-within:ring-accent-500/25">
-          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" className="h-3.5 w-3.5 shrink-0" aria-hidden><circle cx="8" cy="8" r="5.5" /><path d="M12.2 12.2 16 16" /></svg>
-          <input value={filter} onChange={(e) => setFilter(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && firstMatch) setSection(firstMatch); if (e.key === "Escape" && filter) { e.stopPropagation(); setFilter(""); } }}
-            placeholder={t("settings.search")} aria-label={t("settings.search")}
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/30 outline-none" />
-        </label>
-        <div className="cc-scroll flex min-h-0 flex-1 flex-col gap-0.5 px-2 pb-3">
-          {!firstMatch && <p className="px-2 py-3 text-[12px] text-gray-400 dark:text-white/35">{t("settings.searchEmpty")}</p>}
-          {SETTINGS_NAV.map((group, gi) => {
-            const visible = group.filter(matches);
-            if (visible.length === 0) return null;
-            return (
-              <div key={gi} className={`flex flex-col gap-0.5 ${gi > 0 && SETTINGS_NAV.slice(0, gi).some((g) => g.some(matches)) ? "mt-1 border-t border-black/[0.08] pt-2 dark:border-[rgba(84,84,88,0.55)]" : ""}`}>
-                {visible.map((id) => (
-                  <Button variant="custom" key={id} onClick={() => setSection(id)} aria-current={section === id ? "page" : undefined}
-                    className={`cc-t flex h-8 w-full items-center gap-2.5 rounded-md px-1.5 text-left text-[13px] leading-[18px]
-                      ${section === id
-                        ? "bg-accent-500 text-white font-medium"
-                        : "text-gray-800 dark:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-white/[0.06]"}`}>
-                    <Glyph id={id} />
-                    <span title={labels[id]} className="truncate">{labels[id]}</span>
-                  </Button>
-                ))}
-              </div>
-            );
-          })}
-        </div>
-      </nav>}
+    <div className="@container flex h-full min-h-0 w-full bg-white dark:bg-surface-deep">
+      {/* A barra das seções: no chat é a da casca; nas abas e no canvas, a mesma, aqui. */}
+      {!chat && <SettingsSidebar />}
 
       {/* ══ a seção aberta ════════════════════════════════════════════════ */}
-      <main className={chat ? "cc-scroll min-w-0 flex-1 px-6 sm:px-12 pt-4 pb-12" : "cc-scroll min-w-0 flex-1 px-8 py-6"}>
-        <div className={chat ? `${section === "decisions" ? "max-w-[1040px]" : "max-w-[736px]"} mx-auto flex flex-col gap-7` : "max-w-[760px]"}>
-          {/* No chat (prancheta 5) a página tem título e subtítulo; os cartões vêm abaixo. */}
-          {chat && (
-            <div>
-              <h1 className="m-0 text-[24px] font-semibold tracking-[-0.02em] text-gray-900 dark:text-white">{labels[section]}</h1>
-              <p className="mt-1.5 mb-0 text-[14px] text-gray-500 dark:text-white/50">{t(`settings.page.${section}`)}</p>
-            </div>
-          )}
+      <main className="cc-scroll min-w-0 flex-1 px-6 sm:px-12 pt-4 pb-12">
+        <div className={`${section === "decisions" ? "max-w-[1040px]" : "max-w-[736px]"} mx-auto flex flex-col gap-7`}>
+          {/* A página tem título e subtítulo (prancheta 5); os cartões vêm abaixo. */}
+          <div>
+            <h1 className="m-0 text-[24px] font-semibold tracking-[-0.02em] text-gray-900 dark:text-white">{labels[section]}</h1>
+            <p className="mt-1.5 mb-0 text-[14px] text-gray-500 dark:text-white/50">{t(`settings.page.${section}`)}</p>
+          </div>
           {section === "general" && (
             <>
               <SubTabs items={generalTabs} value={generalTab} onChange={setGeneralTab} />
@@ -425,7 +323,7 @@ export function SettingsPage() {
                   }
                 >
                   <SettingsGroup>
-                    <div className="flex items-center gap-2 min-h-10 px-3 py-2">
+                    <div className="flex items-center gap-2 px-4 py-3.5">
                       <FolderIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/35" />
                       <span title={skillsDir || "…"} className="flex-1 min-w-0 truncate font-mono text-[11.5px] tabular-nums
                         text-gray-700 dark:text-gray-300">
@@ -448,6 +346,7 @@ export function SettingsPage() {
           {section === "chat" && <ChatModeSetting />}
           {section === "devices" && <DevicesSection />}
           {section === "worktrees" && <WorktreesSection />}
+          {section === "permissions" && <PermissionsSection />}
           {section === "terminal" && <TerminalSection />}
           {section === "shortcuts" && <ShortcutsSection />}
           {section === "decisions" && <DecisionsSection />}
@@ -461,13 +360,6 @@ export function SettingsPage() {
           )}
         </div>
       </main>
-
-      {/* ══ o painel de memória ═══════════════════════════════════════════ */}
-      {!chat && workspaceId && (
-        <MemoryRail workspaceId={workspaceId} workspaceName={workspaceName}
-          onOpenMemory={section === "memory" ? undefined : () => setSection("memory")} />
-      )}
     </div>
-    </SettingsLookContext.Provider>
   );
 }

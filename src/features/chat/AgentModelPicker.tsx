@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { poolValue, usePools } from "@/features/accounts/pools";
 import { DEFAULT_EFFORTS } from "@/features/canvas/tabTuning";
-import { getRoster } from "@/features/runs/ipc";
+import { getRoster, refreshRosterModels } from "@/features/runs/ipc";
 import type { Roster, RosterModel } from "@/features/runs/types";
 import { modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
 import type { AgentInfo } from "@/features/tabs/types";
@@ -15,6 +15,9 @@ import { usePopover } from "./usePopover";
 
 /** Os agentes cujo esforço vira flag (ver `withModel`). Nos outros o menu de esforço some. */
 const EFFORT_AGENTS = new Set(["claude-code", "codex", "antigravity"]);
+
+/** O agente tem esforço que vira flag? (o controle some nos outros) */
+export const hasEffort = (agentId: string | null): boolean => !!agentId && EFFORT_AGENTS.has(agentId);
 
 export interface AgentModelValue {
   agentId: string | null;
@@ -82,7 +85,7 @@ interface Row {
  * O seletor da prancheta 3 (o do T3 Code): popover de 360×346 com o trilho de agentes (e os
  * favoritos) à esquerda e a lista de modelos com busca à direita; a conta no rodapé (do ADE).
  */
-export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, disabled = false }: {
+export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, disabled = false, placement = "above" }: {
   agents: AgentInfo[];
   value: AgentModelValue;
   onChange: (next: AgentModelValue) => void;
@@ -90,10 +93,14 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   /** Numa conversa aberta a conta não muda (a sessão mora na pasta da conta). */
   showAccount?: boolean;
   disabled?: boolean;
+  /** Para onde o popover abre: em cima (o composer, no pé da tela) ou embaixo (uma linha das Configurações). */
+  placement?: "above" | "below";
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
-  const roster = useRoster(true);
+  const loaded = useRoster(true);
+  const [fresh, setFresh] = useState<Roster | null>(null);
+  const roster = fresh ?? loaded;
   const [tab, setTab] = useState<string | "fav">(value.agentId ?? agents[0]?.id ?? "fav");
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>(loadFavorites);
@@ -102,6 +109,16 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const pools = usePools(tabAgent?.id ?? null);
   const current = catalogOf(roster, agent?.id ?? null, value.account);
   const modelLabel = value.model ? current.find((m) => m.id === value.model)?.label || value.model : t("chat.model.default");
+
+  // Os provedores do OpenCode mudam fora do app (`opencode auth login`): ao abrir, sonda de novo.
+  useEffect(() => {
+    if (!open || tabAgent?.id !== "opencode") return;
+    let alive = true;
+    refreshRosterModels("opencode", value.agentId === "opencode" && value.account && !value.account.startsWith("pool:") ? value.account : null)
+      .then((next) => { if (alive) { rosterRequest = Promise.resolve(next); setFresh(next); } })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [open, tabAgent?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
 
   useEffect(() => { if (open && agent) setTab(agent.id); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
 
@@ -125,13 +142,13 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
     saveFavorites(next);
   };
 
-  if (!agent) return <span className="px-2 text-[13px] text-gray-400 dark:text-white/40">{t("chat.agent.none")}</span>;
+  if (!agent) return <span className="px-2 text-chat-note text-gray-400 dark:text-white/40">{t("chat.agent.none")}</span>;
   const Icon = agentIcon(agent.id, agent.command);
 
   return (
     <div ref={ref} className="relative">
       <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => !disabled && setOpen(!open)} title={shortcutHint} disabled={disabled}
-        className={`flex items-center gap-1.5 h-7 px-2 rounded-lg text-[14px] font-medium text-gray-900/85 dark:text-white/85
+        className={`flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85
           hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
         <Icon className="w-4 h-4 shrink-0" />
         <span className="truncate max-w-52">{modelLabel}</span>
@@ -139,9 +156,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
 
       {open && (
         <div role="dialog" aria-label={t("chat.picker.title")}
-          className="absolute right-0 bottom-full mb-2 z-50 flex w-[360px] h-[346px] overflow-hidden rounded-lg
+          className={`absolute right-0 ${placement === "below" ? "top-full mt-2" : "bottom-full mb-2"} z-50 flex w-[360px] h-[346px] overflow-hidden rounded-lg
             bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
-            shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
+            shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]`}>
           <div role="tablist" aria-label={t("chat.picker.agents")}
             className="w-11 shrink-0 flex flex-col items-center gap-1 p-1 cc-scroll bg-gray-50/60 dark:bg-white/[0.01]">
             <RailButton label={t("chat.picker.favorites")} on={tab === "fav"} onClick={() => setTab("fav")}>
@@ -163,15 +180,20 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               <SearchIcon className="w-3.5 h-3.5" />
               <span className="sr-only">{t("chat.picker.search")}</span>
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("chat.picker.search")} autoFocus
-                className="flex-1 min-w-0 bg-transparent outline-none text-[14px] text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
+                className="flex-1 min-w-0 bg-transparent outline-none text-chat-ui text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
             </label>
             <div role="listbox" aria-label={t("chat.picker.models")} className="flex-1 min-h-0 cc-scroll p-1">
-              {rows.map((r) => {
+              {rows.map((r, i) => {
+                const group = r.agent.id === "opencode" && r.model?.includes("/") ? r.model.split("/")[0] : null;
+                const prevGroup = i > 0 && rows[i - 1].agent.id === "opencode" ? rows[i - 1].model?.split("/")[0] : undefined;
+                const showGroup = !!group && (i === 0 || prevGroup !== group || !rows[i - 1].model?.includes("/"));
                 const RIcon = agentIcon(r.agent.id, r.agent.command);
                 const selected = r.agent.id === agent.id && r.model === value.model;
                 const fav = !!r.model && favorites.includes(favKey(r.agent.id, r.model));
                 return (
-                  <div key={`${r.agent.id}:${r.model ?? ""}`}
+                  <Fragment key={`${r.agent.id}:${r.model ?? ""}`}>
+                  {showGroup && <div className="px-2 pt-2 pb-1 text-chat-caption font-medium uppercase tracking-wide text-gray-500 dark:text-white/45">{group}</div>}
+                  <div
                     className={`flex items-center gap-1.5 px-2 py-1.5 rounded ${selected ? "bg-gray-200/60 dark:bg-white/10" : "hover:bg-gray-200/40 dark:hover:bg-white/[0.06]"}`}>
                     <button type="button" role="option" aria-selected={selected}
                       onClick={() => {
@@ -179,8 +201,8 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                         setOpen(false);
                       }}
                       className="flex-1 min-w-0 flex flex-col items-start text-left">
-                      <span className="w-full truncate text-[14px] text-gray-900 dark:text-white">{r.label}</span>
-                      <span className="flex items-center gap-1 text-[12px] text-gray-500 dark:text-white/45">
+                      <span className="w-full truncate text-chat-ui text-gray-900 dark:text-white">{r.label}</span>
+                      <span className="flex items-center gap-1 text-chat-caption text-gray-500 dark:text-white/45">
                         <RIcon className="w-3 h-3" />{r.agent.label}
                       </span>
                     </button>
@@ -193,19 +215,25 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                     )}
                     {selected && <CheckIcon className="w-3.5 h-3.5 shrink-0 text-gray-900 dark:text-white" />}
                   </div>
+                  </Fragment>
                 );
               })}
               {tab === "fav" && rows.length === 0 && (
-                <p className="my-6 text-center text-[13px] text-gray-500 dark:text-white/45">{t("chat.picker.noFavorites")}</p>
+                <p className="my-6 text-center text-chat-note text-gray-500 dark:text-white/45">{t("chat.picker.noFavorites")}</p>
               )}
-              {!roster && tab !== "fav" && <p className="px-2 py-3 text-[12.5px] text-gray-400 dark:text-white/40">{t("chat.picker.loading")}</p>}
+              {roster && tab === "opencode" && !query.trim() && catalogOf(roster, "opencode", value.agentId === "opencode" ? value.account : null).length === 0 && (
+                <p className="px-2 py-3 text-chat-note text-gray-500 dark:text-white/45">
+                  {t("chat.picker.opencodeNone")} <code className="font-mono">opencode auth login</code>
+                </p>
+              )}
+              {!roster && tab !== "fav" && <p className="px-2 py-3 text-chat-note text-gray-400 dark:text-white/40">{t("chat.picker.loading")}</p>}
             </div>
-            {showAccount && <div className="flex items-center gap-2 h-9 shrink-0 px-3 border-t border-gray-200 dark:border-white/[0.08] text-[12px] text-gray-500 dark:text-white/45">
+            {showAccount && <div className="flex items-center gap-2 h-9 shrink-0 px-3 border-t border-gray-200 dark:border-white/[0.08] text-chat-caption text-gray-500 dark:text-white/45">
               <span className="flex-1">{t("chat.picker.account")}</span>
               {tabAgent && (
                 <PopupSelect value={tabAgent.id === value.agentId ? value.account ?? "" : ""} aria-label={t("chat.picker.account")}
                   onChange={(e) => onChange({ agentId: tabAgent.id, model: tabAgent.id === value.agentId ? value.model : null, effort: tabAgent.id === value.agentId ? value.effort : null, account: e.target.value || null })}
-                  className="max-w-44 text-[12px]">
+                  className="max-w-44 text-chat-caption">
                   <option value="">{t("accounts.system")}</option>
                   {(roster?.agents.find((a) => a.agentId === tabAgent.id)?.accounts ?? []).filter((a) => a.accountId !== null).map((a) => (
                     <option key={a.accountId!} value={a.accountId!}>{a.label ?? a.name}</option>
@@ -235,13 +263,15 @@ function RailButton({ label, on, onClick, children }: { label: string; on: boole
  * O esforço, num menu à parte (a palavra cinza ao lado do modelo, como no T3). Só aparece nos
  * agentes em que o esforço vira flag.
  */
-export function EffortMenu({ agentId, model, account, value, onChange, disabled = false }: {
+export function EffortMenu({ agentId, model, account, value, onChange, disabled = false, placement = "above" }: {
   agentId: string | null;
   model: string | null;
   account: string | null;
   value: string | null;
   onChange: (effort: string | null) => void;
   disabled?: boolean;
+  /** Para onde o menu abre: em cima (o composer) ou embaixo (um formulário perto do topo). */
+  placement?: "above" | "below";
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
@@ -253,24 +283,24 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
   return (
     <div ref={ref} className="relative -ml-1.5">
       <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => !disabled && setOpen(!open)} disabled={disabled}
-        className={`h-7 px-1.5 rounded-lg text-[14px] font-medium text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
+        className={`h-7 px-1.5 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
         {value ? label(value) : t("chat.effort.default")}
       </button>
       {open && (
         <div role="menu" aria-label={t("chat.picker.effort")}
-          className="absolute right-0 bottom-full mb-2 z-50 w-[220px] p-1 rounded-lg bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
-            shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
-          <div className="px-2 pt-1.5 pb-1 text-[12px] font-medium text-gray-500 dark:text-white/45">{t("chat.picker.effort")}</div>
+          className={`absolute right-0 ${placement === "below" ? "top-full mt-2" : "bottom-full mb-2"} z-50 w-[220px] p-1 rounded-lg bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
+            shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]`}>
+          <div className="px-2 pt-1.5 pb-1 text-chat-caption font-medium text-gray-500 dark:text-white/45">{t("chat.picker.effort")}</div>
           {[null, ...efforts].map((e) => (
             <button key={e ?? "default"} type="button" role="menuitemradio" aria-checked={value === e}
               onClick={() => { onChange(e); setOpen(false); }}
-              className="w-full flex items-center gap-2 min-h-7 px-2 rounded text-left text-[14px] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.07]">
+              className="w-full flex items-center gap-2 min-h-7 px-2 rounded text-left text-chat-ui text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.07]">
               <span className="flex-1">{e ? label(e) : t("chat.effort.default")}</span>
               {value === e && <CheckIcon className="w-3.5 h-3.5" />}
             </button>
           ))}
           {agentId === "codex" && (
-            <div className="flex items-center gap-2 min-h-7 px-2 mt-1 pt-1 border-t border-gray-200 dark:border-white/10 text-[13px] text-gray-500 dark:text-white/45">
+            <div className="flex items-center gap-2 min-h-7 px-2 mt-1 pt-1 border-t border-gray-200 dark:border-white/10 text-chat-note text-gray-500 dark:text-white/45">
               <ZapIcon className="w-3.5 h-3.5" /><span className="flex-1">{t("chat.picker.fast")}</span><span>{t("chat.picker.fastOff")}</span>
             </div>
           )}

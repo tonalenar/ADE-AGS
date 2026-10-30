@@ -9,6 +9,7 @@ import { AgentModelPicker } from "./AgentModelPicker";
 import { setChatWidth, useChatLook } from "./chatLook";
 import { accessModesFor, planSupported } from "./chatModel";
 import { loadChatPrefs, saveChatPrefs, type ChatPrefs, type ChatWidth } from "./chatPrefs";
+import { STRUCTURED_AGENTS } from "./structured/model";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
@@ -35,7 +36,8 @@ export function ChatModeSetting() {
     saveChatPrefs(next);
   };
   const agentId = prefs.agentId ?? agents[0]?.id ?? null;
-  const modes = agentId ? accessModesFor(agentId) : ["ask" as const];
+  const viaProtocol = !!agentId && prefs.structured && STRUCTURED_AGENTS.has(agentId);
+  const modes = agentId ? accessModesFor(agentId, viaProtocol) : ["ask" as const];
   const access = modes.includes(prefs.access) ? prefs.access : modes[0] ?? "ask";
 
   return (
@@ -60,20 +62,20 @@ export function ChatModeSetting() {
         <SettingsGroup>
           <SettingsRow label={t("chat.settings.defaultAgent")} hint={t("chat.settings.defaultAgentHint")}>
             <span className="rounded-lg border border-gray-200 dark:border-white/10">
-              <AgentModelPicker agents={agents}
+              <AgentModelPicker agents={agents} placement="below"
                 value={{ agentId, model: prefs.model, effort: prefs.effort, account: prefs.accountId }}
                 onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account })} />
             </span>
           </SettingsRow>
           <SettingsRow label={t("chat.settings.defaultAccess")} hint={t("chat.settings.defaultAccessHint")}>
             <span className="rounded-lg border border-gray-200 dark:border-white/10 px-1">
-              <AccessMenu value={access} available={modes} onChange={(next) => update({ access: next })} />
+              <AccessMenu placement="below" value={access} available={modes} onChange={(next) => update({ access: next })} />
             </span>
           </SettingsRow>
           <SettingsToggleRow label={t("chat.settings.worktree")} description={t("chat.settings.worktreeHint")}
             checked={prefs.worktree} onChange={(worktree) => update({ worktree })} />
           <SettingsToggleRow label={t("chat.settings.plan")} description={t("chat.settings.planHint")}
-            checked={prefs.plan} disabled={!!agentId && !planSupported(agentId)} onChange={(plan) => update({ plan })} />
+            checked={prefs.plan} disabled={!!agentId && !planSupported(agentId, viaProtocol)} onChange={(plan) => update({ plan })} />
           <SettingsToggleRow label={t("chat.settings.structured")} description={t("chat.settings.structuredHint")}
             checked={prefs.structured} onChange={(structured) => update({ structured })} />
         </SettingsGroup>

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { RequestRow, ThreadRow } from "@/features/chat/structured/ipc";
 import {
-  applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isPlanExit, menuAccess, questionOf, STRUCTURED_AGENTS, threadCards, threadIdOf, threadKey,
+  applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isPlanExit, menuAccess, questionOf, STRUCTURED_AGENTS, threadCards, threadIdOf, threadKey,
   togglePlan,
 } from "@/features/chat/structured/model";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
@@ -16,12 +16,27 @@ describe("conversa por protocolo: eventos", () => {
   it("o texto chega aos pedaços e some quando o item completo chega", () => {
     let live = applyThreadEvent(EMPTY_LIVE, { type: "delta", threadId: "t1", itemId: "m1", delta: "Ol" });
     live = applyThreadEvent(live, { type: "delta", threadId: "t1", itemId: "m1", delta: "á" });
-    expect(live.draft).toEqual({ itemId: "m1", text: "Olá" });
+    expect(live.drafts).toEqual([{ itemId: "m1", kind: "assistant", text: "Olá" }]);
     live = applyThreadEvent(live, { type: "item", threadId: "t1", item: { kind: "assistant", id: "m1", text: "Olá" } });
-    expect(live.draft).toBeNull();
+    expect(live.drafts).toEqual([]);
     expect(live.items).toHaveLength(1);
   });
 
+  it("os pedaços de um quadro entram de uma vez, por item, e o raciocínio fica separado da resposta", () => {
+    const live = applyDeltas(EMPTY_LIVE, [
+      { itemId: "r", delta: "Lendo ", kind: "reasoning" },
+      { itemId: "m", delta: "Pron" },
+      { itemId: "r", delta: "o arquivo", kind: "reasoning" },
+      { itemId: "m", delta: "to." },
+    ]);
+    expect(live.drafts).toEqual([
+      { itemId: "r", kind: "reasoning", text: "Lendo o arquivo" },
+      { itemId: "m", kind: "assistant", text: "Pronto." },
+    ]);
+    // Um pedaço atrasado de um item que já chegou inteiro não reabre o rascunho.
+    const done = { ...EMPTY_LIVE, items: [{ kind: "assistant" as const, id: "m", text: "Pronto." }] };
+    expect(applyDeltas(done, [{ itemId: "m", delta: "x" }])).toBe(done);
+  });
   it("um item que já existe é trocado no lugar (a ferramenta que terminou)", () => {
     let live = applyThreadEvent(EMPTY_LIVE, { type: "item", threadId: "t1", item: { kind: "tool", id: "c", status: "running" } });
     live = applyThreadEvent(live, { type: "item", threadId: "t1", item: { kind: "assistant", id: "a", text: "x" } });
@@ -41,8 +56,8 @@ describe("conversa por protocolo: eventos", () => {
   it("começar um turno apaga o erro anterior; terminar apaga o rascunho", () => {
     const working = applyThreadEvent({ ...EMPTY_LIVE, error: "falhou" }, { type: "phase", threadId: "t1", phase: "working" });
     expect(working.error).toBeNull();
-    const idle = applyThreadEvent({ ...working, draft: { itemId: "m", text: "meio" } }, { type: "phase", threadId: "t1", phase: "idle" });
-    expect(idle.draft).toBeNull();
+    const idle = applyThreadEvent({ ...working, drafts: [{ itemId: "m", kind: "assistant", text: "meio" }] }, { type: "phase", threadId: "t1", phase: "idle" });
+    expect(idle.drafts).toEqual([]);
   });
 });
 

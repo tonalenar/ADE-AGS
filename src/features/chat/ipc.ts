@@ -20,3 +20,9 @@ export const scmWorkingDiff = (cwd: string) => invoke<WorkingDiff | null>("scm_w
 
 /** Um worktree novo para uma conversa (`conversa.rs`): onde o agente roda e a branch criada. */
 export const chatNewWorktree = (cwd: string, title: string) => invoke<{ cwd: string; branch: string }>("chat_new_worktree", { cwd, title });
+
+/**
+ * O aviso do sistema de um pedido de permissão (`conversa/commands.rs`, `chat_permission_notify`):
+ * o mesmo das missões, só com o app sem foco e com os avisos ligados. Devolve se apareceu.
+ */
+export const chatPermissionNotify = (title: string, body: string) => invoke<boolean>("chat_permission_notify", { title, body });

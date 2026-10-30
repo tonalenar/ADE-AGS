@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** As seções da tela de Configurações (a barra lateral da prancheta 5). */
-export type SettingsSectionId = "general" | "appearance" | "chat" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "decisions" | "devices" | "worktrees" | "advanced";
+export type SettingsSectionId = "general" | "appearance" | "chat" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "decisions" | "devices" | "worktrees" | "permissions" | "advanced";
 
 /** O que a gaveta da direita mostra (abre pelos botões do canto de cima, ver `PanelButtons`). */
 export type ExplorerView = "files" | "search" | "scm";

@@ -5,7 +5,6 @@ import { useTranslation } from "react-i18next";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { useSettingsLook } from "@/features/settings/settingsLook";
 import { POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
 import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
@@ -37,12 +36,9 @@ function ModeBadge({ point }: { point: string }) {
   return <span className={`shrink-0 text-[11px] font-medium px-1.5 py-px rounded-[5px] ${MODE_TONE[mode]}`}>{t(`settings.decisions.mode.${mode}`)}</span>;
 }
 
-/** No chat, os títulos dos blocos são os nomes pequenos acima dos cartões. */
+/** Os títulos dos blocos: os nomes pequenos acima dos cartões. */
 function Heading({ children }: { children: React.ReactNode }) {
-  const chat = useSettingsLook() === "chat";
-  return chat
-    ? <h2 className="m-0 mx-1 text-[13px] font-medium text-gray-500 dark:text-white/50">{children}</h2>
-    : <h3 className="px-1 pt-1 text-[12px] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-white/40">{children}</h3>;
+  return <h2 className="m-0 mx-1 text-[13px] font-medium text-gray-500 dark:text-white/50">{children}</h2>;
 }
 
 const FIELD = "h-8 rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] text-gray-900 outline-none transition-shadow placeholder:text-gray-400 focus:border-accent-500 focus:ring-[3px] focus:ring-accent-500/25 dark:border-white/15 dark:bg-surface-raised dark:text-gray-100 dark:placeholder:text-white/30";
@@ -209,7 +205,6 @@ export function DecisionsSection() {
   );
   const providerLabel = (id: DecisionProviderId) => t(`settings.decisions.provider.${id === "laya_local" ? "layaLocal" : id === "laya_studio" ? "layaStudio" : id}`);
   const active = settings.enabled && settings.provider !== "none";
-  const chat = useSettingsLook() === "chat";
   const secondaryOn = settings.secondaryProvider !== "none";
   const sameAsPrimary = secondaryOn && settings.secondaryProvider === settings.provider
     && settings.secondaryBaseUrl.trim() === settings.baseUrl.trim()
@@ -308,7 +303,7 @@ export function DecisionsSection() {
   const pill = <StatusPill on={active} label={t(active ? "settings.decisions.status.on" : "settings.decisions.status.off")} />;
   const body = (
     <>
-      {chat && <div className="flex items-center gap-2"><span className="flex-1"><Heading>{t("settings.decisions.provider")}</Heading></span>{pill}</div>}
+      <div className="flex items-center gap-2"><span className="flex-1"><Heading>{t("settings.decisions.provider")}</Heading></span>{pill}</div>
       <SettingsGroup>
         <SettingsToggleRow
           checked={settings.enabled}
@@ -575,13 +570,6 @@ export function DecisionsSection() {
     </>
   );
 
-  if (!chat) {
-    return (
-      <SettingsSection title={t("settings.decisions")} description={t("settings.decisions.desc")} action={pill}>
-        {body}
-      </SettingsSection>
-    );
-  }
   // Prancheta 7: o provedor e os pontos à esquerda; o resumo do modo sombra e onde o Jev age, à direita.
   const summary = shadowSummary(report?.points ?? []);
   return (

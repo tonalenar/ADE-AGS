@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -7,12 +7,18 @@ import { useUiStore } from "@/app/uiStore";
 import { agentIcon } from "@/features/agents/agentIcons";
 
 import { newConversation, openConversation } from "./chatActions";
-import { CheckIcon, ChevronRightIcon, ClockIcon, FilterIcon, FolderPlusIcon, NewChatIcon, PullRequestIcon, SearchIcon, SettingsIcon, SidebarIcon, UsageIcon } from "./chatIcons";
+import { CheckIcon, ChevronRightIcon, ClockIcon, FilterIcon, FolderPlusIcon, NewChatIcon, PullRequestIcon, SearchIcon, SettingsIcon, SidebarIcon, UsageIcon, WarnIcon } from "./chatIcons";
 import { projectTone, type ChatProject, type ConversationCard } from "./chatModel";
+import { useLiveSummary } from "./liveSummary";
+import { SidebarLiveRow } from "./LiveActivity";
 import { useChatLive } from "./liveStore";
+import { INBOX_SHORTCUT } from "./permissions/PermissionCard";
+import { waitingAgents } from "./permissions/permissionModel";
+import { toggleInbox, usePendingAsks } from "./permissions/permissionsStore";
 import { reopenSettled, settleConversation, snoozeConversation, unsnoozeConversation, useShelf } from "./shelf";
 import { folderName, threadIdOf } from "./structured/model";
 import { openThread, settleThread, useStructured } from "./structured/store";
+import { TeamBadge, TeamMembers, conversationDragProps, useTeamGrouping } from "./team/TeamSidebar";
 import { usePopover } from "./usePopover";
 
 /** Abre o cartão: a conversa por protocolo, ou a aba do agente. */
@@ -62,7 +68,16 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
     const q = query.trim().toLowerCase();
     return cards.filter((c) => (!folder || c.project === folder) && (!q || `${c.title} ${c.project} ${c.agentLabel}`.toLowerCase().includes(q)));
   }, [cards, query, folder]);
-  const shown = matches.filter((c) => !snoozedIds.includes(c.tabId));
+  // O time fica sob a conversa do orquestrador: os integrantes saem da lista e aparecem indentados (prancheta 15).
+  const grouping = useTeamGrouping(cards);
+  const shown = matches.filter((c) => !snoozedIds.includes(c.tabId) && !grouping.nested.has(c.tabId));
+  const asks = usePendingAsks();
+  const waiting = waitingAgents(asks);
+  const asksBy = useMemo(() => {
+    const by: Record<string, number> = {};
+    for (const a of asks) if (a.conversation) by[a.conversation] = (by[a.conversation] ?? 0) + 1;
+    return by;
+  }, [asks]);
   const snoozed = matches.filter((c) => snoozedIds.includes(c.tabId));
   const doneCount = settled.length + settledThreads.length + closed.length;
 
@@ -72,13 +87,24 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
       <div data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-2 pl-5 select-none">
         <WindowLights />
         <IconButton label={t("chat.sidebar.collapse")} onClick={onCollapse} className="ml-3.5"><SidebarIcon className="w-4 h-4" /></IconButton>
-        <span data-tauri-drag-region className="text-[14px] font-semibold text-gray-900 dark:text-white">
+        <span data-tauri-drag-region className="text-chat-heading font-semibold text-gray-900 dark:text-white">
           ADE <span className="font-medium text-gray-500 dark:text-white/50">AGS</span>
         </span>
       </div>
 
+      {waiting > 0 && (
+        <button type="button" onClick={toggleInbox} aria-keyshortcuts={INBOX_SHORTCUT}
+          className="mx-2 mt-1 mb-1.5 shrink-0 flex items-center gap-2 h-[34px] px-2.5 rounded-lg text-chat-note font-medium
+            bg-amber-50 dark:bg-amber-400/[0.08] ring-1 ring-inset ring-amber-300 dark:ring-amber-400/35 text-amber-800 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-400/[0.14]">
+          <WarnIcon className="w-4 h-4 shrink-0" />
+          <span className="truncate">{t("chat.inbox.waiting", { count: waiting })}</span>
+          <span className="flex-1" />
+          <kbd className="ml-1.5 px-1 rounded border border-amber-300 dark:border-amber-400/35 font-sans text-[11px] font-normal">{INBOX_SHORTCUT}</kbd>
+        </button>
+      )}
+
       <div className="flex items-center gap-0.5 px-2 pt-1 pb-2">
-        <label className="flex-1 min-w-0 flex items-center gap-2 h-8 px-2 rounded-md text-[14px] font-medium
+        <label className="flex-1 min-w-0 flex items-center gap-2 h-8 px-2 rounded-md text-chat-ui font-medium
           text-gray-500 dark:text-white/45 hover:bg-white dark:hover:bg-white/[0.05] focus-within:ring-1 focus-within:ring-accent-500/70">
           <SearchIcon className="w-4 h-4 shrink-0" />
           <span className="sr-only">{t("chat.sidebar.search")}</span>
@@ -92,10 +118,15 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
 
       <nav aria-label={t("chat.sidebar.active")} className="flex-1 min-h-0 cc-scroll px-2 flex flex-col gap-0.5">
         {cards.length === 0 && (
-          <p className="px-2 py-6 text-center text-[13px] text-gray-400 dark:text-white/40">{t("chat.sidebar.empty")}</p>
+          <p className="px-2 py-6 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.sidebar.empty")}</p>
         )}
         {shown.map((card) => (
-          <Card key={card.tabId} card={card} diff={diffs[card.cwd]} selected={card.tabId === selectedId} />
+          <Fragment key={card.tabId}>
+            <Card card={card} diff={diffs[card.cwd]} selected={card.tabId === selectedId} asks={asksBy[card.tabId] ?? 0} />
+            {grouping.groups[card.tabId] && (
+              <TeamMembers orchestrator={card.tabId} members={grouping.groups[card.tabId]!} cards={cards} selectedId={selectedId} />
+            )}
+          </Fragment>
         ))}
       </nav>
 
@@ -128,7 +159,7 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
               ))}
               {closed.map((p) => (
                 <button key={p.cwd} type="button" onClick={() => onReopen(p.cwd)} title={t("chat.sidebar.reopen", { name: p.name })}
-                  className="h-9 shrink-0 flex items-center gap-2.5 px-2.5 rounded-md text-left text-[13px] text-gray-600 dark:text-white/60 hover:bg-white dark:hover:bg-white/[0.05]">
+                  className="h-9 shrink-0 flex items-center gap-2.5 px-2.5 rounded-md text-left text-chat-note text-gray-600 dark:text-white/60 hover:bg-white dark:hover:bg-white/[0.05]">
                   <ProjectBadge name={p.name} size="sm" muted />
                   <span className="flex-1 truncate">{p.name}</span>
                 </button>
@@ -158,8 +189,9 @@ export function ProjectBadge({ name, size = "md", muted = false }: { name: strin
   );
 }
 
-function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDiff | undefined; selected: boolean }) {
+function Card({ card, diff, selected, asks }: { card: ConversationCard; diff: FolderDiff | undefined; selected: boolean; asks: number }) {
   const { t } = useTranslation();
+  const live = useLiveSummary(card.tabId);
   const Icon = agentIcon(card.agentId);
   const threadId = threadIdOf(card.tabId);
   const tabPhase = useChatLive((s) => s.phase[card.tabId]);
@@ -171,24 +203,29 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
   const phase = threadId ? threadPhase : tabPhase;
   const question = threadId ? threadAsk === "question" : tabQuestion;
   const awaiting = threadId ? !!threadAsk && threadAsk !== "question" : tabAwaiting;
-  const status = awaiting
+  // Pedido de permissão: "● 1 pedido" (prancheta 14). Trabalhando: a linha viva embaixo (prancheta 13).
+  const status = asks === 0 && awaiting
     ? { label: t("chat.status.approval"), tone: "text-amber-700 dark:text-amber-400", dash: "3 3" }
     : question
       ? { label: t("chat.status.question"), tone: "text-amber-700 dark:text-amber-400", dash: "3 3" }
-      : phase === "working"
-        ? { label: t("chat.status.working"), tone: "text-accent-700 dark:text-accent-400", dash: "5 3" }
-        : null;
+      : null;
+  const working = asks === 0 && !question && (phase === "working" || live.working);
   return (
     <div role="button" tabIndex={0} onClick={() => openCard(card.tabId)} aria-current={selected ? "page" : undefined} title={card.cwd}
+      {...conversationDragProps(card.tabId)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openCard(card.tabId); } }}
       className={`group w-full h-[78px] shrink-0 flex flex-col justify-between px-2 py-2.5 rounded-md text-left cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-accent-500/70
         ${selected
           ? "bg-white dark:bg-white/[0.11] ring-1 ring-inset ring-gray-200 dark:ring-transparent"
           : "hover:bg-white dark:hover:bg-white/[0.08]"}`}>
-      <span className="flex items-center gap-1.5 text-[12px] text-gray-600 dark:text-white/55">
+      <span className="flex items-center gap-1.5 text-chat-caption text-gray-600 dark:text-white/55">
         <ProjectBadge name={card.project} />
         <span className="flex-1 min-w-0 truncate">{card.project}</span>
-        {status && (
+        <TeamBadge convKey={card.tabId} />
+        {asks > 0 && (
+          <span className="shrink-0 group-hover:hidden text-[11px] font-semibold text-amber-800 dark:text-amber-400">● {t("chat.status.asks", { count: asks })}</span>
+        )}
+        {asks === 0 && status && (
           <span className={`shrink-0 inline-flex items-center gap-1 group-hover:hidden ${status.tone}`}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeDasharray={status.dash} className="w-3.5 h-3.5" aria-hidden="true"><circle cx="12" cy="12" r="9" /></svg>
             {status.label}
@@ -199,8 +236,9 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
           <CardAction label={t("chat.sidebar.settle")} onClick={() => { if (threadId) settleThread(threadId, true); else void settleConversation(card.tabId); }}><CheckIcon className="w-3.5 h-3.5" /></CardAction>
         </span>
       </span>
-      <span className="truncate text-[14px] font-medium text-gray-900 dark:text-white">{card.title}</span>
-      <span className="flex items-center gap-2 text-[12px] text-gray-500 dark:text-white/45">
+      <span className="truncate text-chat-ui font-medium text-gray-900 dark:text-white">{card.title}</span>
+      {working ? <SidebarLiveRow live={live} /> : (
+      <span className="flex items-center gap-2 text-chat-caption text-gray-500 dark:text-white/45">
         <span className="truncate max-w-[110px] font-mono text-[11px]">{card.branch ?? card.agentLabel}</span>
         {diff && diff.added + diff.removed > 0 && (
           <span className="font-mono text-[11px]">
@@ -211,6 +249,7 @@ function Card({ card, diff, selected }: { card: ConversationCard; diff: FolderDi
         <span className="flex-1" />
         <Icon className="w-3.5 h-3.5 shrink-0" />
       </span>
+      )}
     </div>
   );
 }
@@ -229,7 +268,7 @@ function CardAction({ label, onClick, children }: { label: string; onClick: () =
 function SectionHeader({ label, count, open, onToggle }: { label: string; count: number; open: boolean; onToggle: () => void }) {
   return (
     <button type="button" aria-expanded={open} onClick={onToggle}
-      className="w-full flex items-center h-8 px-2 rounded-md text-[13px] font-medium text-gray-500 dark:text-white/45 hover:bg-white dark:hover:bg-white/[0.05]">
+      className="w-full flex items-center h-8 px-2 rounded-md text-chat-note font-medium text-gray-500 dark:text-white/45 hover:bg-white dark:hover:bg-white/[0.05]">
       <span className="flex-1 text-left">{label}</span>
       <span className="tabular-nums mr-1.5">{count}</span>
       <ChevronRightIcon className={`w-3 h-3 transition-transform ${open ? "rotate-90" : ""}`} />
@@ -242,7 +281,7 @@ function SlimRow({ name, title, agentId, onOpen }: { name: string; title: string
   const Icon = agentIcon(agentId);
   return (
     <button type="button" onClick={onOpen} title={title}
-      className="group h-9 shrink-0 flex items-center gap-2.5 px-2.5 rounded-md text-left text-[13px] text-gray-600 dark:text-white/60 hover:bg-white dark:hover:bg-white/[0.05]">
+      className="group h-9 shrink-0 flex items-center gap-2.5 px-2.5 rounded-md text-left text-chat-note text-gray-600 dark:text-white/60 hover:bg-white dark:hover:bg-white/[0.05]">
       <span className="opacity-40 grayscale group-hover:opacity-100 group-hover:grayscale-0"><ProjectBadge name={name} size="sm" /></span>
       <span className="flex-1 truncate">{title}</span>
       <Icon className="w-3.5 h-3.5 shrink-0 opacity-60" />
@@ -258,7 +297,7 @@ function FolderFilter({ folders, value, onChange }: { folders: string[]; value: 
       <IconButton label={t("chat.sidebar.filter")} onClick={() => setOpen(!open)} active={value !== null}><FilterIcon className="w-4 h-4" /></IconButton>
       {open && (
         <div role="menu" aria-label={t("chat.sidebar.filter")}
-          className="absolute left-0 top-full mt-1 z-50 w-56 max-h-72 cc-scroll p-1 rounded-lg text-[13px]
+          className="absolute left-0 top-full mt-1 z-50 w-56 max-h-72 cc-scroll p-1 rounded-lg text-chat-note
             bg-white/95 dark:bg-surface-raised/95 backdrop-blur-xl shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           <MenuItem on={value === null} onClick={() => { onChange(null); setOpen(false); }}>{t("chat.sidebar.allFolders")}</MenuItem>
           {folders.map((f) => (

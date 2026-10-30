@@ -1,23 +1,34 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+import { DESKTOP_OS } from "@/app/platform";
 import { readTuning } from "@/features/canvas/tabTuning";
-import { answerTerminalPrompt, useTerminalPrompts } from "@/features/canvas/useTerminalPrompts";
-import type { PermissionPrompt } from "@/features/canvas/terminalPrompts";
 import { useTabsStore } from "@/features/tabs/store";
 import { sendKeysToTab } from "@/features/terminal/terminalRegistry";
 
 import { AccessMenu } from "./AccessMenu";
+import { turnLive } from "./activityModel";
 import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
 import { retuneConversationTab, sendToConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
 import { accessModesFor, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { ChatComposer } from "./ChatComposer";
 import { useChatWidthClass } from "./chatLook";
+import { ActivityLine } from "./LiveActivity";
 import { useChatLive } from "./liveStore";
 import { ContextStrip } from "./NewConversation";
+import { PermissionCard } from "./permissions/PermissionCard";
+import { usePendingAsks } from "./permissions/permissionsStore";
+import { queueOrSend } from "./queueRunner";
 import { setChatSlot, setTerminalOpen, useChatStore } from "./store";
-import { ConversationTimeline } from "./timeline/ConversationTimeline";
+import { TeamMentionMenu, useTeamComposer } from "./team/TeamComposer";
+import { TeamThreadFeed } from "./team/TeamThreadFeed";
+import { TimelineView } from "./timeline/ConversationTimeline";
+import { addPending, usePending } from "./timeline/pending";
+import { useConversationTimeline } from "./timeline/useConversationTimeline";
+
+/** A tecla da fila como a pessoa a digita (⌘⏎ no macOS). */
+export const QUEUE_KEY = DESKTOP_OS === "macos" ? "⌘⏎" : "Ctrl+⏎";
 
 /** O contêiner contra o qual o retângulo é medido: a casca do chat cobre a mesma área que as abas. */
 export const CHAT_SHELL_ATTR = "data-chat-shell";
@@ -55,7 +66,7 @@ function rectIn(el: HTMLElement | null) {
  * `TerminalPanel` desenha a TUI ali por cima, sem remontar. Gaveta fechada = nenhum espaço = a TUI
  * continua viva, escondida.
  */
-export function ConversationView({ card }: { card: ConversationCard }) {
+export function ConversationView({ card, cards = [] }: { card: ConversationCard; cards?: ConversationCard[] }) {
   const { t } = useTranslation();
   const timeline = hasTimeline(card.agentId);
   const terminalOpen = useTerminalOpen(card);
@@ -66,11 +77,22 @@ export function ConversationView({ card }: { card: ConversationCard }) {
   const tuning = useMemo(() => readTuning(card.agentId, command), [card.agentId, command]);
   const access = useMemo(() => readAccess(card.agentId, command), [card.agentId, command]);
   const working = useChatLive((s) => s.phase[card.tabId] === "working");
+  const turnStart = useChatLive((s) => s.turn[card.tabId]?.startedAt ?? null);
   const width = useChatWidthClass();
-  const prompts = useTerminalPrompts(useMemo(() => [{ id: card.tabId, name: card.title }], [card.tabId, card.title]), true);
-  const approval: PermissionPrompt | null = prompts[0]?.prompt ?? null;
+  // O pedido da TUI vem do store único das permissões (o `PermissionsManager` lê a tela).
+  const asks = usePendingAsks();
+  const approval = useMemo(() => asks.find((a) => a.conversation === card.tabId) ?? null, [asks, card.tabId]);
+  const queued = useChatStore((s) => s.queues[card.tabId]?.length ?? 0);
+  const { timeline: read, loaded, phase } = useConversationTimeline(card.tabId);
+  const items = useMemo(() => read?.items ?? [], [read]);
+  const live = useMemo(() => turnLive(items, !!approval), [items, approval]);
+  // O que a pessoa acabou de enviar aparece já, até o transcript devolver a mensagem.
+  const pending = usePending(card.tabId, items);
+  const busy = working || phase === "working";
+  // Orquestrador de um time: "Time | Só o orquestrador", o @agente e o resumo do time (prancheta 15).
+  const team = useTeamComposer(card, cards);
   // Trocar reinicia o agente (retomando a sessão): nunca no meio de um turno.
-  const locked = working || !!approval;
+  const locked = busy || !!approval;
   const retune = (patch: Partial<{ model: string | null; effort: string | null; access: ChatAccess; plan: boolean }>) =>
     retuneConversationTab(card.tabId, {
       model: patch.model !== undefined ? patch.model : tuning.model,
@@ -93,22 +115,7 @@ export function ConversationView({ card }: { card: ConversationCard }) {
   // Sem esta tela na frente, nenhum terminal: a de conversa nova não tem onde mostrar um.
   useEffect(() => () => setChatSlot(null), []);
 
-  const answer = (id: "allow" | "allowSession" | "deny") => {
-    const choice = approval?.choices.find((c) => c.id === id);
-    if (choice) answerTerminalPrompt(card.tabId, choice);
-  };
-
-  const controls = approval ? (
-    <div className="flex items-center gap-1.5">
-      {approval.choices.some((c) => c.id === "deny") && (
-        <ApprovalButton onClick={() => answer("deny")}>{t("chat.approval.deny")}</ApprovalButton>
-      )}
-      {approval.choices.some((c) => c.id === "allowSession") && (
-        <ApprovalButton onClick={() => answer("allowSession")}>{t("chat.approval.session")}</ApprovalButton>
-      )}
-      <ApprovalButton primary onClick={() => answer("allow")}>{t("chat.approval.allow")}</ApprovalButton>
-    </div>
-  ) : (
+  const controls = (
     <div title={locked ? t("chat.composer.lockedWhileWorking") : t("chat.composer.retuneHint")} className="flex items-center gap-0.5">
       <AgentModelPicker agents={[agentInfo]} showAccount={false} disabled={locked}
         value={{ agentId: card.agentId, model: tuning.model, effort: tuning.effort, account: null }}
@@ -118,7 +125,7 @@ export function ConversationView({ card }: { card: ConversationCard }) {
       {planSupported(card.agentId) && (
         <button type="button" disabled={locked} onClick={() => retune({ plan: !access.plan })} aria-pressed={access.plan}
           title={access.plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
-          className="flex items-center gap-1.5 h-7 px-2 rounded-lg text-[14px] font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">
+          className="flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">
           <BotIcon className="w-4 h-4 text-gray-500 dark:text-white/45" />
           {access.plan ? t("chat.plan.plan") : t("chat.plan.build")}
         </button>
@@ -128,10 +135,19 @@ export function ConversationView({ card }: { card: ConversationCard }) {
 
   const composer = (
     <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}>
+      {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
       <ChatComposer cwd={card.cwd}
-        placeholder={approval ? t("chat.composer.redirect") : t("chat.composer.reply")}
-        onSubmit={(text) => { sendToConversation(card.tabId, text); }}
-        onStop={working && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
+        placeholder={approval ? t("chat.composer.redirect") : busy ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
+        onSubmit={(text) => {
+          const out = team ? team.prepare(text) : text;
+          if (out === null) return;
+          if (timeline && out.trim()) addPending(card.tabId, out.trim(), items);
+          sendToConversation(card.tabId, out);
+        }}
+        onQueue={(text) => { const out = team ? team.prepare(text) : text; if (out !== null) queueOrSend(card.tabId, out); }} queued={queued}
+        onStop={busy && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
+        leading={team?.controls}
+        addon={team ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}
         controls={controls} />
       <ContextStrip branch={card.branch} worktree={card.isWorktree}>
         <AccessMenu value={access.plan ? "ask" : access.access} available={accessModesFor(card.agentId)}
@@ -147,12 +163,14 @@ export function ConversationView({ card }: { card: ConversationCard }) {
           <div ref={slotRef} data-chat-terminal={card.tabId}
             className="relative h-full mx-auto max-w-[1040px] rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-100 dark:bg-surface">
             {card.starting && (
-              <p className="absolute inset-0 flex items-center justify-center text-[13px] text-gray-400 dark:text-white/40">
+              <p className="absolute inset-0 flex items-center justify-center text-chat-note text-gray-400 dark:text-white/40">
                 {t("chat.conversation.starting", { agent: card.agentLabel })}
               </p>
             )}
           </div>
         </div>
+        {/* Sem timeline, o pedido fica logo acima do composer (o terminal mostra o mesmo diálogo). */}
+        {approval && <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}><PermissionCard ask={approval} terminal /></div>}
         {composer}
       </div>
     );
@@ -160,8 +178,11 @@ export function ConversationView({ card }: { card: ConversationCard }) {
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <ConversationTimeline tabId={card.tabId} agentLabel={card.agentLabel} approval={approval}
-        onOpenTerminal={() => setTerminalOpen(card.tabId, true)} />
+      <TimelineView items={items} loaded={loaded} missing={loaded && !read} truncated={!!read?.truncated}
+        working={busy || approval !== null} approval={null} live
+        approvalCard={approval ? <PermissionCard ask={approval} terminal /> : null}
+        agentLabel={card.agentLabel} agentId={card.agentId} pending={pending} onOpenTerminal={() => setTerminalOpen(card.tabId, true)}
+        after={<TeamThreadFeed conversation={card} cards={cards} />} />
       {composer}
       {terminalOpen && (
         <section aria-label={t("chat.terminal.label")} style={{ height: DRAWER_H }}
@@ -170,15 +191,5 @@ export function ConversationView({ card }: { card: ConversationCard }) {
         </section>
       )}
     </div>
-  );
-}
-
-function ApprovalButton({ primary = false, onClick, children }: { primary?: boolean; onClick: () => void; children: React.ReactNode }) {
-  return (
-    <button type="button" onClick={onClick}
-      className={`h-6 px-2 rounded-md text-[12px] font-medium
-        ${primary ? "bg-accent-600 text-white hover:bg-accent-700" : "border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.04] text-gray-800 dark:text-white/80 hover:bg-gray-50 dark:hover:bg-white/[0.08]"}`}>
-      {children}
-    </button>
   );
 }

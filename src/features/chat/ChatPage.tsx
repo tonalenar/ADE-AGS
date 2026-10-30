@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { popupOwnsEscape } from "@/app/RouteModal";
 import { useUiStore } from "@/app/uiStore";
-import { WindowLights } from "@/app/WindowLights";
+import { WindowControls, WindowLights } from "@/app/WindowLights";
 import { hasOpenDialog } from "@/shared/ui/openDialog";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
 
@@ -48,7 +48,7 @@ export function ChatPage({ onClose, sidebarOpen, onExpandSidebar, children }: {
 
   return (
     <main ref={frameRef} tabIndex={-1} className="relative flex-1 min-w-[360px] flex flex-col outline-none cc-fade">
-      <header data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-3 pl-5 pr-3 text-[14px] select-none">
+      <header data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-3 pl-5 pr-3 text-chat-ui select-none">
         {!sidebarOpen && (
           <>
             <WindowLights />
@@ -60,6 +60,7 @@ export function ChatPage({ onClose, sidebarOpen, onExpandSidebar, children }: {
           {settings && title && <span aria-hidden="true" className="text-gray-300 dark:text-white/25">/</span>}
           {title && <span className="font-medium truncate">{title}</span>}
         </span>
+        <WindowControls className="-mr-3" />
       </header>
       {/* As telas são de altura completa e rolam por dentro (como no `RouteModal`). */}
       <div className="flex-1 min-h-0 overflow-hidden">{children}</div>

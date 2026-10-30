@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { startShell } from "@/app/uiStore";
-import { CHAT_SETTINGS_GROUPS, settingsLabelKey } from "@/features/chat/chatSettingsNav";
+import { CHAT_SETTINGS_GROUPS, SETTINGS_SEARCH, settingsLabelKey, settingsMatch } from "@/features/chat/chatSettingsNav";
 import { parseChatPrefs } from "@/features/chat/chatPrefs";
-import { SETTINGS_NAV } from "@/features/settings/settingsNav";
 
 describe("modo inicial", () => {
   it("sem escolha, abre onde estava", () => {
@@ -31,14 +30,22 @@ describe("largura da conversa", () => {
   });
 });
 
-describe("menu das Configurações no chat", () => {
+describe("barra das Configurações (a mesma em todos os modos)", () => {
   it("tem todas as seções da página, cada uma uma vez", () => {
     const chat = CHAT_SETTINGS_GROUPS.flatMap((g) => g.items);
     expect(new Set(chat).size).toBe(chat.length);
-    expect([...chat].sort()).toEqual(SETTINGS_NAV.flat().sort());
+    expect([...chat].sort()).toEqual(Object.keys(SETTINGS_SEARCH).sort());
   });
 
   it("o nome vem das chaves da página", () => {
     expect(settingsLabelKey("chat")).toBe("settings.chat");
+  });
+
+  it("a busca acha pelo nome, pelas abas de dentro e pelas palavras soltas", () => {
+    const t = (k: string) => ({ "settings.general": "Geral", "settings.language": "Idioma", "settings.devices": "Dispositivos" }[k] ?? k);
+    expect(settingsMatch("general", "", t)).toBe(true);
+    expect(settingsMatch("general", "idioma", t)).toBe(true);
+    expect(settingsMatch("devices", "ios", t)).toBe(true);
+    expect(settingsMatch("devices", "idioma", t)).toBe(false);
   });
 });

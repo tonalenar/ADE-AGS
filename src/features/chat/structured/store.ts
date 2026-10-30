@@ -6,7 +6,8 @@ import {
   chatRequestAnswer, chatThreadCreate, chatThreadInterrupt, chatThreadItems, chatThreadRequests, chatThreadRetune, chatThreadSend,
   chatThreadSettle, chatThreads, chatThreadStatus, type ThreadAccess, type ThreadRow,
 } from "./ipc";
-import { applyThreadEvent, applyThreadMeta, EMPTY_LIVE, type ThreadEvent, type ThreadLive } from "./model";
+import { createFrameBatcher } from "../timeline/streaming";
+import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, type ThreadEvent, type ThreadLive } from "./model";
 
 /**
  * As conversas por protocolo, ao vivo: a lista (do banco) e, por conversa aberta, a timeline, os
@@ -36,6 +37,32 @@ export function reloadThreads(): Promise<void> {
   return chatThreads().then((threads) => useStructured.setState({ threads })).catch(() => undefined);
 }
 
+type DeltaEvent = Extract<ThreadEvent, { type: "delta" }>;
+
+/** Agenda no próximo quadro (fora da janela, num tique curto). */
+function nextFrame(run: () => void): () => void {
+  if (typeof requestAnimationFrame === "function") {
+    const id = requestAnimationFrame(run);
+    return () => cancelAnimationFrame(id);
+  }
+  const id = setTimeout(run, 16);
+  return () => clearTimeout(id);
+}
+
+/**
+ * Os pedaços do texto chegam a cada token: juntá-los por quadro faz uma atualização do store (e um
+ * redesenho) por quadro, não por token.
+ */
+const deltas = createFrameBatcher<DeltaEvent>(nextFrame, (batch) => {
+  const byThread = new Map<string, DeltaEvent[]>();
+  for (const d of batch) byThread.set(d.threadId, [...(byThread.get(d.threadId) ?? []), d]);
+  useStructured.setState((s) => {
+    const live = { ...s.live };
+    for (const [id, list] of byThread) live[id] = applyDeltas(live[id] ?? EMPTY_LIVE, list);
+    return { live };
+  });
+});
+
 let started = false;
 
 /** Liga a escuta (uma vez por janela) e lê a lista. */
@@ -45,6 +72,12 @@ export function startStructured(): void {
   void reloadThreads();
   void listen<ThreadEvent | { type: "created"; threadId: string; thread: ThreadRow }>("cc-chat-thread", (e) => {
     const event = e.payload;
+    if (event.type === "delta") {
+      deltas.push(event);
+      return;
+    }
+    // O que vem depois dos pedaços (o item completo, o fim do turno) os vê aplicados, na ordem.
+    deltas.flushNow();
     // Criada fora da tela (pela CLI `ags chat new`).
     if (event.type === "created") {
       upsertThread(event.thread);
@@ -103,9 +136,12 @@ export async function startThread(input: NewThread, text: string): Promise<strin
 }
 
 /** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
-export function sendToThread(id: string, text: string): void {
+export function sendToThread(id: string, text: string, onError?: () => void): void {
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
-  chatThreadSend(id, text).catch((e) => patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) })));
+  chatThreadSend(id, text).catch((e) => {
+    onError?.();
+    patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
+  });
 }
 
 export function interruptThread(id: string): void {

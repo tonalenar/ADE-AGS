@@ -1,18 +1,19 @@
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
-import type { ConversationCard } from "../chatModel";
+import { PROTOCOL_AGENTS, type ChatAccess, type ConversationCard } from "../chatModel";
+import { appendDeltas, type DeltaInput, type Draft, type DraftKind } from "../timeline/streaming";
 import type { TimelineItem } from "../timeline/types";
-import type { ChatAccess } from "../chatModel";
 import type { QuestionOption, RequestRow, ThreadAccess, ThreadRow } from "./ipc";
 
 /**
- * As conversas por protocolo (o Codex pelo `app-server` e o Claude Code pelo `claude -p` em
- * stream-json, ver `src-tauri/src/conversa/`) no mesmo formato que as outras: um cartão da sidebar
- * e uma timeline. Puro.
+ * As conversas por protocolo (o Codex pelo `app-server`, o Claude Code pelo `claude -p` em
+ * stream-json, o OpenCode pelo `opencode acp` e o Antigravity pelo `agy --print`, ver
+ * `src-tauri/src/conversa/`) no mesmo formato que as outras: um cartão da sidebar e uma timeline.
+ * Puro.
  */
 
-/** Os agentes que conversam por protocolo (espelho de `conversa::structured_agent`). */
-export const STRUCTURED_AGENTS = new Set(["codex", "claude-code"]);
+/** Os agentes que conversam por protocolo (espelho de `conversa::structured_agent`; a tabela é `PROTOCOL_AGENTS`). */
+export const STRUCTURED_AGENTS = new Set(Object.keys(PROTOCOL_AGENTS));
 
 /** O prefixo que separa um cartão de conversa por protocolo de um de aba (o `tabId` do cartão). */
 export const THREAD_PREFIX = "thread:";
@@ -53,17 +54,18 @@ export interface ThreadLive {
   items: TimelineItem[];
   requests: RequestRow[];
   phase: "working" | "idle";
-  /** O texto do agente chegando, antes do item completo. */
-  draft: { itemId: string; text: string } | null;
+  /** O texto (e o raciocínio) do agente chegando, por item, antes do item completo. */
+  drafts: Draft[];
   error: string | null;
 }
 
-export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", draft: null, error: null };
+export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", drafts: [], error: null };
 
 /** Um evento `cc-chat-thread` (ver `conversa::codex`). */
 export type ThreadEvent =
   | { type: "item"; threadId: string; item: TimelineItem }
-  | { type: "delta"; threadId: string; itemId: string; delta: string }
+  /** Um pedaço do texto chegando (só na janela; o banco guarda o item completo). */
+  | { type: "delta"; threadId: string; itemId: string; delta: string; kind?: DraftKind }
   | { type: "phase"; threadId: string; phase: "working" | "idle" }
   | { type: "request"; threadId: string; request: RequestRow }
   | { type: "requestResolved"; threadId: string; id: string }
@@ -78,15 +80,13 @@ export function applyThreadEvent(live: ThreadLive, event: ThreadEvent): ThreadLi
     case "item": {
       const at = live.items.findIndex((i) => i.id === event.item.id);
       const items = at >= 0 ? live.items.map((i, k) => (k === at ? event.item : i)) : [...live.items, event.item];
-      const draft = live.draft?.itemId === event.item.id ? null : live.draft;
-      return { ...live, items, draft };
+      const drafts = live.drafts.some((d) => d.itemId === event.item.id) ? live.drafts.filter((d) => d.itemId !== event.item.id) : live.drafts;
+      return { ...live, items, drafts };
     }
-    case "delta": {
-      const text = live.draft?.itemId === event.itemId ? live.draft.text + event.delta : event.delta;
-      return { ...live, draft: { itemId: event.itemId, text } };
-    }
+    case "delta":
+      return applyDeltas(live, [event]);
     case "phase":
-      return { ...live, phase: event.phase, draft: event.phase === "idle" ? null : live.draft, error: event.phase === "working" ? null : live.error };
+      return { ...live, phase: event.phase, drafts: event.phase === "idle" ? [] : live.drafts, error: event.phase === "working" ? null : live.error };
     case "request":
       return { ...live, requests: [...live.requests.filter((r) => r.id !== event.request.id), event.request] };
     case "requestResolved":
@@ -94,10 +94,19 @@ export function applyThreadEvent(live: ThreadLive, event: ThreadEvent): ThreadLi
     case "error":
       return { ...live, error: event.message };
     case "closed":
-      return { ...live, phase: "idle", draft: null, requests: [] };
+      return { ...live, phase: "idle", drafts: [], requests: [] };
     default:
       return live;
   }
+}
+
+/** Os pedaços de um quadro de uma vez (o store junta os `delta` por `requestAnimationFrame`). Pura. */
+export function applyDeltas(live: ThreadLive, deltas: DeltaInput[]): ThreadLive {
+  // Um pedaço de um item que já chegou inteiro (atrasado na fila) não reabre o rascunho.
+  const known = new Set(live.items.map((i) => i.id));
+  const fresh = deltas.filter((d) => !known.has(d.itemId));
+  if (fresh.length === 0) return live;
+  return { ...live, drafts: appendDeltas(live.drafts, fresh) };
 }
 
 /** A conversa depois de um evento `thread`: só o que veio muda. Pura. */

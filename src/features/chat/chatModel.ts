@@ -42,14 +42,38 @@ const ACCESS_FLAGS: Record<Exclude<ChatAccess, "ask" | "safe">, Record<string, s
 /** O modo Plano (só planeja, não edita). Só o Claude Code tem flag de lançamento para isso. */
 const PLAN_FLAG: Record<string, string> = { "claude-code": "--permission-mode plan" };
 
-/** Os modos que este agente aceita. Supervisionado sempre (é não passar nada). Pura. */
-export function accessModesFor(agentId: string): ChatAccess[] {
+/**
+ * Os agentes que conversam por protocolo, sem TUI (espelho de `conversa::api::Engine`), e o que o
+ * protocolo de cada um suporta. Os acessos e o Plano de um agente por protocolo são os do motor,
+ * não os flags da TUI:
+ * - Codex (`app-server`): a política de aprovação e o sandbox; sem Plano;
+ * - Claude Code (`claude -p`): `--permission-mode`, com o Plano;
+ * - OpenCode (`opencode acp`): a política de permissões no ambiente do processo e o agente `plan`;
+ * - Antigravity (`agy --print`): `--mode accept-edits|auto|plan` e `--dangerously-skip-permissions`;
+ *   no `-p` ele não pergunta, então Supervisionado é só leitura na prática.
+ */
+export const PROTOCOL_AGENTS: Record<string, { access: ChatAccess[]; plan: boolean }> = {
+  codex: { access: ["ask", "safe", "full"], plan: false },
+  "claude-code": { access: ["ask", "edits", "safe", "full"], plan: true },
+  opencode: { access: ["ask", "edits", "safe", "full"], plan: true },
+  antigravity: { access: ["ask", "edits", "safe", "full"], plan: true },
+};
+
+/**
+ * Os modos que este agente aceita. Supervisionado sempre (é não passar nada). Com `protocol`
+ * (a conversa vai por protocolo), os do motor do agente. Pura.
+ */
+export function accessModesFor(agentId: string, protocol = false): ChatAccess[] {
+  const engine = protocol ? PROTOCOL_AGENTS[agentId] : undefined;
+  if (engine) return ACCESS_MODES.filter((mode) => engine.access.includes(mode));
   return ACCESS_MODES.filter((mode) =>
     mode === "ask" || (mode === "safe" ? withAutonomy(agentId, "x", "safe") !== "x" : !!ACCESS_FLAGS[mode][agentId]));
 }
 
-export function planSupported(agentId: string): boolean {
-  return agentId in PLAN_FLAG;
+/** O agente tem o modo Plano? Por protocolo, é o do motor; na TUI, o flag de lançamento. Pura. */
+export function planSupported(agentId: string, protocol = false): boolean {
+  const engine = protocol ? PROTOCOL_AGENTS[agentId] : undefined;
+  return engine ? engine.plan : agentId in PLAN_FLAG;
 }
 
 export interface LaunchChoice {

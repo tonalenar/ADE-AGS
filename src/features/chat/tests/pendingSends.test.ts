@@ -1,0 +1,39 @@
+import { describe, expect, it } from "vitest";
+
+import { pendingSend, unreconciled, PENDING_TTL_MS } from "../timeline/pending";
+import type { TimelineItem } from "../timeline/types";
+
+const user = (id: string, text: string): TimelineItem => ({ kind: "user", id, text });
+
+describe("unreconciled", () => {
+  it("mantém o envio até a mensagem real chegar, sem duplicar", () => {
+    const p = pendingSend("p1", "rode os testes", [], 1000);
+    expect(unreconciled([p], [], 1500)).toEqual([p]);
+    expect(unreconciled([p], [user("u1", "rode os testes")], 1500)).toEqual([]);
+  });
+
+  it("ignora espaços e quebras ao comparar", () => {
+    const p = pendingSend("p1", "oi  \n tudo bem", [], 1000);
+    expect(unreconciled([p], [user("u1", "oi tudo bem")], 1500)).toEqual([]);
+  });
+
+  it("uma mensagem igual de antes não conta como o eco", () => {
+    const before = [user("u0", "ok")];
+    const p = pendingSend("p1", "ok", before, 1000);
+    expect(unreconciled([p], before, 1500)).toEqual([p]);
+    expect(unreconciled([p], [...before, user("u1", "ok")], 1500)).toEqual([]);
+  });
+
+  it("dois envios iguais esperam cada um o seu eco", () => {
+    const a = pendingSend("a", "sim", [], 1000);
+    const b = pendingSend("b", "sim", [], 1001);
+    expect(unreconciled([a, b], [user("u1", "sim")], 1500)).toEqual([b]);
+    expect(unreconciled([a, b], [user("u1", "sim"), user("u2", "sim")], 1500)).toEqual([]);
+  });
+
+  it("o envio sem eco some depois do prazo, sem relógio de verdade", () => {
+    const p = pendingSend("p1", "/compact", [], 1000);
+    expect(unreconciled([p], [], 1000 + PENDING_TTL_MS)).toEqual([p]);
+    expect(unreconciled([p], [], 1001 + PENDING_TTL_MS)).toEqual([]);
+  });
+});

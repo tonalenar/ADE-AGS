@@ -20,6 +20,7 @@ import { ExplorerDrawer } from "@/features/sidePanel/ExplorerDrawer";
 import { PanelButtons } from "@/features/sidePanel/PanelButtons";
 import { SessionPanel } from "@/features/sidePanel/SessionPanel";
 import { RouteModal } from "@/app/RouteModal";
+import { WindowControls } from "@/app/WindowLights";
 import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
 import { EditorArea } from "@/features/tabs/EditorArea";
 import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
@@ -53,7 +54,7 @@ import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
 /** Las rutas cuyas terminales siguen visibles (y vivas) por debajo de la pantalla. */
-const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge", "/settings"];
+const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge", "/settings", "/design"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -289,7 +290,7 @@ export function AppShell() {
       <div className={chat ? "hidden" : "flex shrink-0"}>
         <SideHead width={sideWidth} />
         <TabBar showLights={workspacesCollapsed && !railExpanded}
-          trailing={<PanelButtons changes={activeRepo?.changedCount ?? 0} />} />
+          trailing={<><PanelButtons changes={activeRepo?.changedCount ?? 0} /><WindowControls className="-my-1.5 -mr-1.5" /></>} />
       </div>
 
       <div className="relative flex flex-1 min-h-0">

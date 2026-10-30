@@ -24,6 +24,7 @@ export const router = createHashRouter([
       { path: "squads", lazy: () => import("@/features/squads/SquadsPage").then((m) => ({ Component: m.SquadsPage })) },
       { path: "forge", lazy: () => import("@/features/forge/ForgePage").then((m) => ({ Component: m.ForgePage })) },
       { path: "marketplace", lazy: () => import("@/features/marketplace/MarketplacePage").then((m) => ({ Component: m.MarketplacePage })) },
+      { path: "design/:id", lazy: () => import("@/features/design/DesignPage").then((m) => ({ Component: m.DesignPage })) },
       { path: "marketplace/registries", lazy: () => import("@/features/marketplace/RegistriesPage").then((m) => ({ Component: m.RegistriesPage })) },
     ],
   },
