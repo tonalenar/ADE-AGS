@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseSnippet } from "../aiMemory";
+import { formatCreatedAt, parseSnippet } from "../aiMemory";
 
 describe("parseSnippet (snippet do ai-memory search --json)", () => {
   it("destaca o <mark> do fixture real e mantém o resto como texto", () => {
@@ -46,5 +46,19 @@ describe("parseSnippet (snippet do ai-memory search --json)", () => {
 
   it("snippet vazio não gera segmentos", () => {
     expect(parseSnippet("")).toEqual([]);
+  });
+});
+
+describe("formatCreatedAt (created_at_ms do handoff)", () => {
+  // created_at_ms do fixture handoffs-populated.stdout: 2026-10-30T18:28:56.570Z.
+  const ms = 1793384936570;
+
+  it("formata em UTC com o fuso informado, sem depender do fuso da máquina", () => {
+    expect(formatCreatedAt(ms, "pt-BR", "UTC")).toBe("30/10/2026, 18:28");
+    expect(formatCreatedAt(ms, "pt-BR", "America/Sao_Paulo")).toBe("30/10/2026, 15:28");
+  });
+
+  it("devolve vazio para um instante inválido, em vez de estourar", () => {
+    expect(formatCreatedAt(Number.NaN, "pt-BR", "UTC")).toBe("");
   });
 });

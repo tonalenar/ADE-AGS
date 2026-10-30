@@ -36,3 +36,9 @@ export function parseSnippet(snippet: string): AiMemorySnippetSegment[] {
   push(snippet.slice(last), highlight);
   return out;
 }
+
+/** Data e hora de `created_at_ms` no fuso dado (o padrão é o da máquina). Vazio se o instante for inválido. */
+export function formatCreatedAt(ms: number, locale: string, timeZone?: string): string {
+  if (!Number.isFinite(ms)) return "";
+  return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short", timeZone }).format(new Date(ms));
+}
