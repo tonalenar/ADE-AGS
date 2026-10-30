@@ -27,14 +27,14 @@ describe("painel direito: as superfícies (prancheta 8)", () => {
 describe("painel direito: abrir sem superfície", () => {
   beforeEach(() => useChatStore.setState({ panel: null, lastPanel: null, panelFocus: 0, surfaces: [] }));
 
-  it("a primeira abertura mostra o estado vazio; uma superfície aberta o faz sumir", () => {
+  it("a primeira abertura mostra o Resumo (a superfície padrão); uma superfície aberta a troca", () => {
     toggleRightPanel();
-    expect(useChatStore.getState().panel).toBe("empty");
+    expect(useChatStore.getState().panel).toBe("summary");
     addSurface("browser");
     expect(useChatStore.getState().panel).toBe("browser");
   });
 
-  it("fechar e reabrir volta na aba que estava à vista; fechar o vazio não inventa uma", () => {
+  it("fechar e reabrir volta na aba que estava à vista; fechar sem aba lembrada não inventa uma", () => {
     addSurface("files");
     toggleRightPanel();
     expect(useChatStore.getState().panel).toBeNull();
@@ -45,9 +45,10 @@ describe("painel direito: abrir sem superfície", () => {
     expect(useChatStore.getState().lastPanel).toBe("files");
     forgetLastPanel();
     toggleRightPanel();
-    expect(useChatStore.getState().panel).toBe("empty");
+    expect(useChatStore.getState().panel).toBe("summary");
     toggleRightPanel();
-    expect(useChatStore.getState().lastPanel).toBeNull();
+    // Fechar o Resumo o lembra (reabrir volta nele, que já é o padrão).
+    expect(useChatStore.getState().lastPanel).toBe("summary");
   });
 
   it("o atalho do Time abre a aba e pede o foco", () => {

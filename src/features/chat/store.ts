@@ -52,12 +52,12 @@ interface ChatState {
 /** Um pedido de abrir um design no painel: o design e, se vier, a prancheta e a página. */
 export interface DesignOpenRequest { designId: string; artboardId?: string | null; pageId?: string | null; seq: number }
 
-/** O que se abre no painel direito pelo "+" (o Diff está sempre lá; "empty" não é aba). */
-export type Surface = Exclude<RightPanelTab, "diff" | "empty">;
+/** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
+export type Surface = Exclude<RightPanelTab, "summary" | "diff" | "empty">;
 export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android"];
 
-/** `team`: o painel Time do time de agentes (pranchetas 15 e 16, `team/TeamPanel.tsx`). `empty`: o estado vazio do T3. */
-export type RightPanelTab = "diff" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
+/** `summary`: o Resumo, a superfície padrão com os cartões (`summary/SummaryPane.tsx`). `team`: o painel Time do time de agentes (pranchetas 15 e 16, `team/TeamPanel.tsx`). `empty`: o estado vazio do T3. */
+export type RightPanelTab = "summary" | "diff" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
@@ -155,7 +155,7 @@ export function setRightPanel(panel: RightPanelTab | null): void {
   });
 }
 
-/** Esquece a aba lembrada: a próxima abertura do painel (conversa nova) mostra o estado vazio. */
+/** Esquece a aba lembrada: a próxima abertura do painel (conversa nova) mostra o Resumo. */
 export function forgetLastPanel(): void {
   if (useChatStore.getState().lastPanel !== null) useChatStore.setState({ lastPanel: null });
 }
@@ -187,10 +187,10 @@ export function hostLabel(url: string | null | undefined): string | null {
   }
 }
 
-/** Abre ou fecha o painel: aberto sem nada antes, mostra o estado vazio; com uma aba já aberta, volta nela. */
+/** Abre ou fecha o painel: aberto sem nada antes, mostra o Resumo; com uma aba já aberta, volta nela. */
 export function toggleRightPanel(): void {
   const s = useChatStore.getState();
-  setRightPanel(s.panel ? null : s.lastPanel ?? "empty");
+  setRightPanel(s.panel ? null : s.lastPanel ?? "summary");
 }
 
 export function togglePanelMaximized(): void {

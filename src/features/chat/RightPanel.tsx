@@ -1,20 +1,19 @@
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { listen } from "@tauri-apps/api/event";
 
 import { FilesView } from "@/features/explorer/FilesView";
 import { WindowControls } from "@/app/WindowLights";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
 
-import { ChevronDownIcon, DesignIcon, DiffIcon, FilesIcon, GlobeIcon, MaximizeIcon, PanelBottomIcon, PanelRightIcon, PhoneIcon, PlusIcon, PullRequestIcon, TerminalIcon, UsersIcon, XIcon } from "./chatIcons";
+import { ChevronDownIcon, DesignIcon, DetailsIcon, DiffIcon, FilesIcon, GlobeIcon, MaximizeIcon, PanelBottomIcon, PanelRightIcon, PhoneIcon, PlusIcon, PullRequestIcon, TerminalIcon, UsersIcon, XIcon } from "./chatIcons";
 import { devicesShare } from "./devicesIpc";
 import { sharedDevices } from "./devicesModel";
-import { parseUnifiedDiff, type FileDiff } from "./diffModel";
-import { scmWorkingDiff } from "./ipc";
+import { useWorkingDiff } from "./useWorkingDiff";
 import { CHAT_SHELL_ATTR, hasTimeline, useTerminalOpen } from "./ConversationView";
 import { entryForKey, isAvailable, keyLabel, PANEL_ENTRIES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import type { ConversationCard } from "./chatModel";
+import { SummaryPane } from "./summary/SummaryPane";
 import { TeamPanel } from "./team/TeamPanel";
 import { addSurface, clampPanelWidth, hostLabel, PANEL_W, removeSurface, setChatBrowser, setPanelWidth, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleRightPanel, useChatStore, type Surface } from "./store";
 import { usePopover } from "./usePopover";
@@ -52,7 +51,8 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   // O terminal é a gaveta da conversa (só as que têm timeline); o PR ainda não tem aba no painel (esmaecido).
   const available: PanelAvailability = { terminal: !!tabId && !!conversation && hasTimeline(conversation.agentId), pr: false };
   const choose = (id: PanelChoice) => {
-    if (id === "diff") setRightPanel("diff");
+    if (id === "summary") setRightPanel("summary");
+    else if (id === "diff") setRightPanel("diff");
     else if (id === "terminal") { if (tabId) setTerminalOpen(tabId, true); }
     else if (id !== "pr") addSurface(id);
   };
@@ -72,6 +72,11 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
       {!maximized && <ResizeHandle />}
       <div role="tablist" data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-1 pl-2 pr-3">
         {/* No estado vazio não há aba nenhuma, só o "+" (como no T3). */}
+        {!empty && (
+          <button type="button" role="tab" aria-selected={panel === "summary"} onClick={() => setRightPanel("summary")} className={tabCls(panel === "summary")}>
+            {t("chat.panel.summaryTab")}
+          </button>
+        )}
         {!empty && (
           <button type="button" role="tab" aria-selected={panel === "diff"} onClick={() => setRightPanel("diff")} className={tabCls(panel === "diff")}>
             {t("chat.panel.diff")}
@@ -103,6 +108,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
       </div>
       <div ref={contentRef} tabIndex={-1} className="flex-1 min-h-0 flex flex-col border-t border-gray-200 dark:border-white/[0.08] outline-none">
         {empty && <SurfaceLauncher available={available} onChoose={choose} />}
+        {panel === "summary" && <SummaryPane conversation={conversation} cwd={cwd} tabId={tabId} />}
         {panel === "diff" && <DiffView tabId={tabId} cwd={cwd} />}
         {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}
         {panel === "team" && <TeamPanel conversation={conversation} cards={cards} />}
@@ -173,34 +179,9 @@ function useShareDevices() {
   useEffect(() => () => { devicesShare([], false).catch(() => undefined); }, []);
 }
 
-/** Quanto esperar depois do último aviso de "a conversa cresceu" para reler o diff. */
-const DIFF_DEBOUNCE_MS = 1500;
-
 function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) {
   const { t } = useTranslation();
-  const [state, setState] = useState<{ files: FileDiff[]; truncated: boolean; loaded: boolean; repo: boolean }>({ files: [], truncated: false, loaded: false, repo: true });
-  const timer = useRef<number | null>(null);
-
-  const load = useCallback(() => {
-    if (!cwd) return;
-    scmWorkingDiff(cwd)
-      .then((diff) => setState({ files: diff ? parseUnifiedDiff(diff.text) : [], truncated: diff?.truncated ?? false, loaded: true, repo: diff !== null }))
-      .catch(() => setState((s) => ({ ...s, loaded: true })));
-  }, [cwd]);
-
-  useEffect(() => {
-    load();
-    if (!tabId) return;
-    const off = listen<{ tabId: string }>("cc-conversation-grew", (e) => {
-      if (e.payload.tabId !== tabId) return;
-      if (timer.current) window.clearTimeout(timer.current);
-      timer.current = window.setTimeout(load, DIFF_DEBOUNCE_MS);
-    });
-    return () => {
-      off.then((fn) => fn()).catch(() => undefined);
-      if (timer.current) window.clearTimeout(timer.current);
-    };
-  }, [load, tabId]);
+  const { state, load } = useWorkingDiff(cwd, tabId);
 
   const total = useMemo(() => state.files.reduce((n, f) => ({ added: n.added + f.added, removed: n.removed + f.removed }), { added: 0, removed: 0 }), [state.files]);
 
@@ -245,7 +226,7 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
 
 /** Os ícones das linhas do menu "Abrir uma superfície". */
 const ENTRY_ICON: Record<PanelChoice, (p: { className?: string }) => React.ReactElement> = {
-  browser: GlobeIcon, terminal: TerminalIcon, files: FilesIcon, diff: DiffIcon, design: DesignIcon,
+  summary: DetailsIcon, browser: GlobeIcon, terminal: TerminalIcon, files: FilesIcon, diff: DiffIcon, design: DesignIcon,
   ios: PhoneIcon, android: PhoneIcon, team: UsersIcon, pr: PullRequestIcon,
 };
 
