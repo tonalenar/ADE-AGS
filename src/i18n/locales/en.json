@@ -3610,5 +3610,16 @@
   "aiMemory.migration.left.skipped_secret": "Left out because they look like secrets ({{count}})",
   "aiMemory.migration.left.conflict": "Left out: a page already existed at the same path ({{count}})",
   "aiMemory.migration.left.divergent": "Left out: the page changed after the copy ({{count}})",
-  "aiMemory.migration.left.failed": "Failed ({{count}})"
+  "aiMemory.migration.left.failed": "Failed ({{count}})",
+  "continuity.title": "Continue with another agent",
+  "continuity.confirm": "Continue with {{agent}}",
+  "continuity.originStays": "The source tab stays open. A new tab will be created in the same folder after your confirmation.",
+  "continuity.untrusted": "Handoff: untrusted data, displayed read-only.",
+  "continuity.loading": "Loading pending handoffs…",
+  "continuity.disabled": "Tab memory is disabled. The agent will open normally.",
+  "continuity.empty": "No pending handoff for Claude in this folder. The agent will open normally.",
+  "continuity.previewNote": "Version 3.3.0 only exposes these metadata in the preview; ai-memory will deliver the content to the new agent.",
+  "continuity.claimNote": "On continuation, SessionStart may automatically accept a handoff. The server guarantees a single claim; another agent may accept it before this tab opens.",
+  "continuity.claudeMissing": "Claude is not available in this installation.",
+  "continuity.unsupported": "Continuity unavailable: this agent’s bridge cannot yet guarantee folder scope."
 }

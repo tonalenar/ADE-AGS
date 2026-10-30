@@ -3610,5 +3610,16 @@
   "aiMemory.migration.left.skipped_secret": "Fuera por parecer secretos ({{count}})",
   "aiMemory.migration.left.conflict": "Fuera: ya había una página con la misma ruta ({{count}})",
   "aiMemory.migration.left.divergent": "Fuera: la página cambió después de la copia ({{count}})",
-  "aiMemory.migration.left.failed": "Fallaron ({{count}})"
+  "aiMemory.migration.left.failed": "Fallaron ({{count}})",
+  "continuity.title": "Continuar con otro agente",
+  "continuity.confirm": "Continuar con {{agent}}",
+  "continuity.originStays": "La pestaña de origen permanece abierta. Se creará una nueva pestaña en la misma carpeta después de tu confirmación.",
+  "continuity.untrusted": "Handoff: datos no confiables, mostrados solo para lectura.",
+  "continuity.loading": "Cargando handoffs pendientes…",
+  "continuity.disabled": "La memoria en pestañas está desactivada. El agente abrirá normalmente.",
+  "continuity.empty": "No hay handoff pendiente para Claude en esta carpeta. El agente abrirá normalmente.",
+  "continuity.previewNote": "La versión 3.3.0 solo ofrece estos metadatos en la vista previa; ai-memory entregará el contenido al nuevo agente.",
+  "continuity.claimNote": "Al continuar, SessionStart podrá aceptar automáticamente un handoff. El servidor garantiza una sola aceptación; otro agente podría aceptarlo antes de abrir esta pestaña.",
+  "continuity.claudeMissing": "Claude no está disponible en esta instalación.",
+  "continuity.unsupported": "Continuidad no disponible: el bridge de este agente aún no garantiza el alcance de la carpeta."
 }

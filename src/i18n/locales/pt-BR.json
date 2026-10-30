@@ -3610,5 +3610,16 @@
   "aiMemory.migration.left.skipped_secret": "De fora por parecer segredo ({{count}})",
   "aiMemory.migration.left.conflict": "De fora: já havia página com o mesmo caminho ({{count}})",
   "aiMemory.migration.left.divergent": "De fora: a página mudou depois da cópia ({{count}})",
-  "aiMemory.migration.left.failed": "Falharam ({{count}})"
+  "aiMemory.migration.left.failed": "Falharam ({{count}})",
+  "continuity.title": "Continuar com outro agente",
+  "continuity.confirm": "Continuar com {{agent}}",
+  "continuity.originStays": "A aba de origem permanece aberta. Uma nova aba será criada na mesma pasta após sua confirmação.",
+  "continuity.untrusted": "Handoff: dados não confiáveis, exibidos apenas para leitura.",
+  "continuity.loading": "Carregando handoffs pendentes…",
+  "continuity.disabled": "A memória nas abas está desligada. O agente abrirá normalmente.",
+  "continuity.empty": "Nenhum handoff pendente para Claude nesta pasta. O agente abrirá normalmente.",
+  "continuity.previewNote": "A versão 3.3.0 oferece somente estes metadados no preview; o conteúdo será entregue pelo ai-memory ao novo agente.",
+  "continuity.claimNote": "Ao continuar, o SessionStart poderá aceitar automaticamente um handoff. O servidor garante aceite único; outro agente pode aceitá-lo antes desta abertura.",
+  "continuity.claudeMissing": "Claude não está disponível nesta instalação.",
+  "continuity.unsupported": "Continuidade indisponível: o bridge deste agente ainda não garante o escopo da pasta."
 }

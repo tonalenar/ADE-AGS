@@ -124,3 +124,23 @@ O opt-out não desliga hooks/MCP que a pessoa já instalou globalmente por conta
 A 3.3.0 não impõe workspace/projeto em `mcp-bridge --no-session-id`. A query de URL não seleciona escopo e o relay repassa `tools/call` sem completar argumentos. Por isso foi retirada a injeção automática de MCP do ai-memory em Codex/OpenCode. O Claude continua session-aware, o painel usa chamadas de nome fixo com par explícito e `AI_MEMORY_RUN_AUTOWIRE=false` continua em todo novo PTY. Um adapter por aba depende de decisão posterior; instruções no prompt não substituem imposição de escopo. Abas vivas e configurações globais preexistentes não são alteradas.
 
 Prova da mitigação: teste de regressão inicialmente falhou porque OpenCode ainda recebia `OPENCODE_CONFIG_CONTENT` adicional; após retirar os bridges estáticos, `cargo test --lib ai_memory::` passou com 31 testes na base integrada. TypeScript, Babel e lint de testes passaram; Clippy voltou aos 138 avisos herdados, sem aviso novo no conector.
+
+## Continuidade explícita em nova aba
+
+O menu compartilhado das abas oferece **Continuar com outro agente**. Ele abre um diálogo de leitura antes de criar qualquer aba ou PTY. A origem permanece aberta. O diálogo consulta apenas `ai_memory_handoffs(cwd)` (`handoffs --json`); não aceita, cancela nem expira handoffs. Exibe origem, identificador e pasta como texto não confiável. A CLI 3.3.0 não devolve resumo nem corpo nesse endpoint, portanto o preview informa essa limitação. Codex e OpenCode aparecem desabilitados, com o motivo de escopo; somente Claude é destino nesta fase.
+
+Após o clique em **Continuar com Claude**, o frontend cria uma nova aba na mesma pasta. Havendo candidatos para Claude (destinatário Claude ou aberto, cwd igual/ancestral por fronteira de caminho, ou cwd ausente), registra uma intenção efêmera, consumida uma única vez na criação do PTY. Não é persistida nem reaplicada em reinício ou reattach. Sem candidatos, ou com o ajuste de memória desligado, abre o agente normalmente, sem `run`. Falha na leitura impede confirmar; não transforma indisponibilidade do servidor em ausência de handoffs.
+
+A intenção chega no argumento opcional `aiMemoryContinuity?: boolean` de `pty_create`. O backend exige binário compatível e hooks disponíveis, preserva o executável nativo e monta argv sem shell (exceto o prelaunch já existente):
+
+```text
+<ai-memory absoluto> run --no-autowire --no-exit-prompt --require-server --executable <claude absoluto> claude <args nativos> <settings/MCP da aba>
+```
+
+Na fonte v3.3.0, `commands/run.rs` condiciona o autowire a `!no_autowire`; esse modo não cria hooks/MCP adicionais. Por isso os argumentos nativos do ADE continuam depois do harness, uma única vez. `--require-server` impede degradação offline que pareceria continuidade bem-sucedida. O backend recusa o wrapper se não puder preparar seus hooks nem reconhecer um SessionStart do ai-memory no settings válido do perfil. Nenhum `--yolo`, `--fresh`, troca de modelo ou id de sessão é acrescentado. O prelaunch segue a mesma validação de citação existente; erro nesse caminho bloqueia somente a nova abertura.
+
+O ADE nunca chama `accept`. Depois da confirmação, o SessionStart gerenciado pode aceitar automaticamente, de acordo com `claim_on_session_start` já configurado no servidor. O CAS do ai-memory garante claim-once. Não se altera essa opção global. Há corrida entre preview e abertura; a lista não reserva um id nem garante qual handoff será entregue. A CLI também não expõe `from_session_id`, necessário para diferenciar manuais (projeto inteiro) de automáticos (cwd); o filtro do preview é conservador e a escolha final permanece no servidor. A confirmação explicita a aceitação automática e a possibilidade de outro agente chegar antes.
+
+Os arquivos temporários e sua limpeza seguem o mecanismo por aba acima. Não se muda key, pai ou montagem de Terminal e não se escreve nas configurações globais dos agentes. Os testes usam mocks de IPC e montagem de argv/settings em pasta temporária; não abrem agente real nem consultam a base instalada. UI visual e execução real de continuidade não verificadas.
+
+Prova desta fase: `ags test affected` aprovado (86 testes Rust e 131 frontend relacionados, TypeScript e Babel); verificação adicional das abas/MCP com 168 testes aprovados; módulo `ai_memory::` com 39 testes; diálogo/lógica/catálogos com 11 testes. `cargo clippy --all-targets` concluiu: biblioteca com os mesmos 138 avisos herdados, nenhum aviso novo nas alterações; os targets de teste ainda contêm avisos herdados. Lint de testes: 40 violações antigas no baseline, nenhuma nova. Não houve HMR, instalação, agente real nem acesso à base instalada do ai-memory.
