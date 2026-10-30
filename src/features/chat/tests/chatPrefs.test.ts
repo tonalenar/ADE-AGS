@@ -11,7 +11,7 @@ describe("parseChatPrefs", () => {
 
   it("guarda só o que serve", () => {
     expect(parseChatPrefs({ cwd: "/p", agentId: "codex", model: 3, effort: "", accountId: "a1", access: "ask", extra: true }))
-      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, worktree: false, structured: true });
+      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, worktree: false, structured: true, width: "normal" });
   });
 
   it("permissão desconhecida cai no nível das missões (safe)", () => {

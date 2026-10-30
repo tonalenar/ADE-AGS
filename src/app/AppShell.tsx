@@ -9,7 +9,7 @@ import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
 import { CompareHost } from "@/features/compare/CompareHost";
-import { initCanvasSync } from "@/features/canvas/store";
+import { boardKeyOfTab, initCanvasSync, setWorkMode } from "@/features/canvas/store";
 import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
 import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckpointsCapture";
@@ -160,6 +160,18 @@ export function AppShell() {
     // Las TUIs custom viven en SQLite (el backend también las consulta), así que hay que
     // traerlas explícitamente en cada ventana en vez de que se rehidraten solas.
     useAgentsStore.getState().loadCustomAgents().catch(console.error);
+  }, []);
+
+  // O modo inicial Abas ou Canvas (Configurações → Modo chat) vale para a pasta ativa, depois que as
+  // abas voltam do disco.
+  useEffect(() => {
+    void waitForHydration().then(() => {
+      const mode = useUiStore.getState().startMode;
+      if (mode !== "tabs" && mode !== "canvas") return;
+      const { tabs: list, activeTabId: active } = useTabsStore.getState();
+      const tab = list.find((x) => x.id === active);
+      if (tab) setWorkMode(boardKeyOfTab(tab), mode);
+    });
   }, []);
 
   // Puente de la CLI `ags`: esta ventana queda disponible para atender los comandos

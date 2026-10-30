@@ -18,11 +18,15 @@ export interface ChatPrefs {
   worktree: boolean;
   /** Os agentes que falam por protocolo (o Codex) conversam sem TUI. Desligado = sempre pela TUI. */
   structured: boolean;
+  /** A largura da conversa: 736 px como no T3, larga ou a área inteira. */
+  width: ChatWidth;
 }
+
+export type ChatWidth = "normal" | "wide" | "full";
 
 const KEY = "cc-chat-prefs";
 
-export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, worktree: false, structured: true };
+export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, worktree: false, structured: true, width: "normal" };
 
 const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : null);
 
@@ -40,6 +44,7 @@ export function parseChatPrefs(raw: unknown): ChatPrefs {
     plan: o.plan === true,
     worktree: o.worktree === true,
     structured: o.structured !== false,
+    width: o.width === "wide" || o.width === "full" ? o.width : "normal",
   };
 }
 

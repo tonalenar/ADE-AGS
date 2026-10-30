@@ -8,6 +8,7 @@ import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
 import { BotIcon } from "../chatIcons";
 import { accessModesFor, planSupported, type ConversationCard } from "../chatModel";
 import { ChatComposer } from "../ChatComposer";
+import { useChatWidthClass } from "../chatLook";
 import { ContextStrip } from "../NewConversation";
 import { TimelineView, type ApprovalNote } from "../timeline/ConversationTimeline";
 import type { RequestRow, ThreadRow } from "./ipc";
@@ -27,6 +28,7 @@ export function StructuredConversationView({ card, thread }: { card: Conversatio
   const agentInfo = useTabsStore((s) => s.detectedAgents.find((a) => a.id === thread.agentId))
     ?? { id: thread.agentId, label: card.agentLabel, command: "", available: true };
   const hydrated = useStructured((s) => !!s.hydrated[thread.id]);
+  const width = useChatWidthClass();
   useEffect(() => hydrateThread(thread.id), [thread.id]);
 
   const request: RequestRow | null = live.requests[0] ?? null;
@@ -83,7 +85,7 @@ export function StructuredConversationView({ card, thread }: { card: Conversatio
     <div className="flex-1 min-h-0 flex flex-col">
       <TimelineView items={live.items} loaded={hydrated} working={working || !!request}
         approval={note} draft={live.draft?.text ?? null} agentLabel={card.agentLabel} />
-      <div className="w-full max-w-[736px] mx-auto px-4 sm:px-12 pb-3">
+      <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}>
         {live.error && <p role="alert" className="mb-2 px-1 text-[12.5px] text-red-600 dark:text-red-400 break-words">{live.error}</p>}
         <ChatComposer cwd={thread.cwd}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : t("chat.composer.reply")}

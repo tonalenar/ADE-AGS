@@ -3,26 +3,12 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { WindowLights } from "@/app/WindowLights";
-import { useUiStore, type SettingsSectionId } from "@/app/uiStore";
+import { useUiStore } from "@/app/uiStore";
 
 import { ChatBubbleIcon, ChevronLeftIcon, PullRequestIcon, SearchIcon, SettingsIcon, UsageIcon } from "./chatIcons";
 import { CHAT_SIDEBAR_W, FooterButton } from "./ChatSidebar";
+import { CHAT_SETTINGS_GROUPS, NEW_SETTINGS, settingsLabelKey } from "./chatSettingsNav";
 import { CHAT_SPACES, spaceForPath, type ChatSpace } from "./chatSpaces";
-
-/**
- * Os grupos das Configurações no chat (prancheta 5). As mesmas seções da página, em três grupos com
- * título em vez dos dois separados por linha.
- */
-export const CHAT_SETTINGS_GROUPS: { titleKey: string; items: SettingsSectionId[] }[] = [
-  { titleKey: "chat.settingsNav.app", items: ["general", "appearance", "chat", "shortcuts"] },
-  { titleKey: "chat.settingsNav.agents", items: ["agents", "accounts", "memory", "decisions"] },
-  { titleKey: "chat.settingsNav.tools", items: ["terminal", "advanced"] },
-];
-
-/** O nome de uma seção (as chaves da página; "Modo chat" é a da seção nova). */
-export function settingsLabelKey(id: SettingsSectionId): string {
-  return id === "chat" ? "chat.settings.title" : `settings.${id}`;
-}
 
 const rowCls = (current: boolean) => `w-full flex items-center gap-2 h-8 px-2 rounded-md text-[14px] text-left
   ${current ? "bg-white dark:bg-white/[0.07] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] font-medium text-gray-900 dark:text-white"
@@ -72,7 +58,10 @@ export function SettingsSidebar({ onBack }: { onBack: () => void }) {
             <div className="px-2 pt-3 pb-1 text-[12px] font-medium text-gray-400 dark:text-white/35">{t(g.titleKey)}</div>
             {g.items.map((id) => (
               <button key={id} type="button" onClick={() => setSection(id)} aria-current={section === id ? "page" : undefined} className={rowCls(section === id)}>
-                {t(settingsLabelKey(id))}
+                <span className="truncate">{t(settingsLabelKey(id))}</span>
+                {NEW_SETTINGS.has(id) && (
+                  <span className="ml-auto text-[10px] font-semibold uppercase tracking-[0.04em] text-accent-600 dark:text-accent-400">{t("chat.settingsNav.new")}</span>
+                )}
               </button>
             ))}
           </div>

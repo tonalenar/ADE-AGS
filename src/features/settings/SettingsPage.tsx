@@ -28,6 +28,10 @@ import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
+import { DevicesSection } from "@/features/settings/DevicesSection";
+import { WorktreesSection } from "@/features/settings/WorktreesSection";
+import { SettingsLookContext, useSettingsLook } from "@/features/settings/settingsLook";
+import { SETTINGS_NAV } from "@/features/settings/settingsNav";
 import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
@@ -71,15 +75,11 @@ const GLYPH: Record<SettingsSectionId, { tone: string; icon: React.ReactNode }> 
   terminal: { tone: "bg-sky-400", icon: <><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2.2" /><path d="M4.6 6.4 6.6 8l-2 1.6M8.8 10.2h2.6" /></> },
   shortcuts: { tone: "bg-red-500", icon: <><rect x="1.4" y="4" width="13.2" height="8" rx="2" /><path d="M4 6.8h.01M6.8 6.8h.01M9.6 6.8h.01M12 6.8h.01M4.4 9.4h7.2" /></> },
   decisions: { tone: "bg-teal-600", icon: <><circle cx="8" cy="3.2" r="1.5" /><circle cx="4.2" cy="12.2" r="1.5" /><circle cx="11.8" cy="12.2" r="1.5" /><path d="M8 4.7v2.4M8 7.1 4.2 10.7M8 7.1l3.8 3.6" /></> },
+  devices: { tone: "bg-indigo-500", icon: <><rect x="4.4" y="1.6" width="7.2" height="12.8" rx="1.8" /><path d="M7.2 12.2h1.6" /></> },
+  worktrees: { tone: "bg-orange-500", icon: <><circle cx="4.4" cy="3.6" r="1.5" /><circle cx="4.4" cy="12.4" r="1.5" /><circle cx="11.6" cy="5.4" r="1.5" /><path d="M4.4 5.1v5.8M11.6 6.9c0 2.7-4 2-7.2 4" /></> },
   advanced: { tone: "bg-gray-600", icon: <><path d="M2 4.6h12M2 11.4h12" /><circle cx="5.6" cy="4.6" r="1.5" /><circle cx="10.4" cy="11.4" r="1.5" /></> },
 };
 
-/** Os dois grupos da barra lateral (a linha entre eles é a da prancheta). No modo chat, a barra
- *  lateral do chat mostra os mesmos grupos (ver `ChatSidebar`). */
-export const SETTINGS_NAV: SettingsSectionId[][] = [
-  ["general", "appearance", "chat", "accounts", "agents"],
-  ["memory", "terminal", "shortcuts", "decisions", "advanced"],
-];
 
 function Glyph({ id }: { id: SettingsSectionId }) {
   const glyph = GLYPH[id];
@@ -99,6 +99,20 @@ function SubTabs<T extends string>({ items, value, onChange }: {
   value: T;
   onChange: (id: T) => void;
 }) {
+  if (useSettingsLook() === "chat") {
+    return (
+      <div role="tablist" className="self-start inline-flex max-w-full flex-wrap gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
+        {items.map((it) => (
+          <button key={it.id} type="button" role="tab" aria-selected={value === it.id} onClick={() => onChange(it.id)}
+            className={`h-6 px-2.5 rounded-md text-[12px] font-medium ${value === it.id
+              ? "bg-white dark:bg-white/[0.12] text-gray-900 dark:text-white shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+              : "text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white"}`}>
+            {it.label}
+          </button>
+        ))}
+      </div>
+    );
+  }
   return (
     <div role="tablist" className="mb-4 inline-flex max-w-full flex-wrap gap-0.5 rounded-[9px] bg-black/[0.05] p-0.5 dark:bg-surface-raised">
       {items.map((it) => (
@@ -166,13 +180,15 @@ export function SettingsPage() {
   const labels: Record<SettingsSectionId, string> = {
     general: t("settings.general"),
     appearance: t("settings.appearance"),
-    chat: t("chat.settings.title"),
+    chat: t("settings.chat"),
     accounts: t("settings.accounts"),
     agents: t("settings.agents"),
     memory: t("settings.memory"),
     terminal: t("settings.terminal"),
     shortcuts: t("settings.shortcuts"),
     decisions: t("settings.decisions"),
+    devices: t("settings.devices"),
+    worktrees: t("settings.worktrees"),
     advanced: t("settings.advanced"),
   };
   const generalTabs = [
@@ -205,6 +221,8 @@ export function SettingsPage() {
     terminal: labels.terminal,
     shortcuts: labels.shortcuts,
     decisions: [labels.decisions, t("settings.decisions.provider"), "laya", "jev"].join(" "),
+    devices: [labels.devices, "ios", "android", "simulador", "simulator"].join(" "),
+    worktrees: [labels.worktrees, "git", "branch"].join(" "),
     advanced: [labels.advanced, ...advancedTabs.map((x) => x.label)].join(" "),
   }), [t]); // eslint-disable-line react-hooks/exhaustive-deps
   const q = filter.trim().toLocaleLowerCase();
@@ -226,7 +244,8 @@ export function SettingsPage() {
   const workspaceName = activeCwd.split(/[\\/]/).filter(Boolean).pop() ?? t("settings.workspace");
 
   return (
-    <div className="@container flex h-full min-h-0 w-full bg-gray-50 dark:bg-surface-deep">
+    <SettingsLookContext.Provider value={chat ? "chat" : "classic"}>
+    <div className={`@container flex h-full min-h-0 w-full ${chat ? "" : "bg-gray-50 dark:bg-surface-deep"}`}>
       {/* ══ a barra lateral ═══════════════════════════════════════════════ */}
       {!chat && <nav aria-label={t("settings.title")} className="flex w-[208px] shrink-0 flex-col min-h-0
         border-r border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-gray-100/60 dark:bg-surface">
@@ -263,8 +282,15 @@ export function SettingsPage() {
       </nav>}
 
       {/* ══ a seção aberta ════════════════════════════════════════════════ */}
-      <main className="cc-scroll min-w-0 flex-1 px-8 py-6">
-        <div className="max-w-[760px]">
+      <main className={chat ? "cc-scroll min-w-0 flex-1 px-6 sm:px-12 pt-4 pb-12" : "cc-scroll min-w-0 flex-1 px-8 py-6"}>
+        <div className={chat ? "max-w-[736px] mx-auto flex flex-col gap-7" : "max-w-[760px]"}>
+          {/* No chat (prancheta 5) a página tem título e subtítulo; os cartões vêm abaixo. */}
+          {chat && (
+            <div>
+              <h1 className="m-0 text-[24px] font-semibold tracking-[-0.02em] text-gray-900 dark:text-white">{labels[section]}</h1>
+              <p className="mt-1.5 mb-0 text-[14px] text-gray-500 dark:text-white/50">{t(`settings.page.${section}`)}</p>
+            </div>
+          )}
           {section === "general" && (
             <>
               <SubTabs items={generalTabs} value={generalTab} onChange={setGeneralTab} />
@@ -420,6 +446,8 @@ export function SettingsPage() {
           )}
 
           {section === "chat" && <ChatModeSetting />}
+          {section === "devices" && <DevicesSection />}
+          {section === "worktrees" && <WorktreesSection />}
           {section === "terminal" && <TerminalSection />}
           {section === "shortcuts" && <ShortcutsSection />}
           {section === "decisions" && <DecisionsSection />}
@@ -440,5 +468,6 @@ export function SettingsPage() {
           onOpenMemory={section === "memory" ? undefined : () => setSection("memory")} />
       )}
     </div>
+    </SettingsLookContext.Provider>
   );
 }

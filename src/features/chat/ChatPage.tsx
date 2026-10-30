@@ -9,7 +9,7 @@ import { hasOpenDialog } from "@/shared/ui/openDialog";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
 
 import { SidebarIcon } from "./chatIcons";
-import { settingsLabelKey } from "./ChatPageSidebar";
+import { settingsLabelKey } from "./chatSettingsNav";
 import { IconButton } from "./ChatSidebar";
 import { isSettingsRoute, spaceForPath } from "./chatSpaces";
 

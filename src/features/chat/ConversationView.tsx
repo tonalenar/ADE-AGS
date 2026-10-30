@@ -13,6 +13,7 @@ import { retuneConversationTab, sendToConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
 import { accessModesFor, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { ChatComposer } from "./ChatComposer";
+import { useChatWidthClass } from "./chatLook";
 import { useChatLive } from "./liveStore";
 import { ContextStrip } from "./NewConversation";
 import { setChatSlot, setTerminalOpen, useChatStore } from "./store";
@@ -65,6 +66,7 @@ export function ConversationView({ card }: { card: ConversationCard }) {
   const tuning = useMemo(() => readTuning(card.agentId, command), [card.agentId, command]);
   const access = useMemo(() => readAccess(card.agentId, command), [card.agentId, command]);
   const working = useChatLive((s) => s.phase[card.tabId] === "working");
+  const width = useChatWidthClass();
   const prompts = useTerminalPrompts(useMemo(() => [{ id: card.tabId, name: card.title }], [card.tabId, card.title]), true);
   const approval: PermissionPrompt | null = prompts[0]?.prompt ?? null;
   // Trocar reinicia o agente (retomando a sessão): nunca no meio de um turno.
@@ -125,7 +127,7 @@ export function ConversationView({ card }: { card: ConversationCard }) {
   );
 
   const composer = (
-    <div className="w-full max-w-[736px] mx-auto px-4 sm:px-12 pb-3">
+    <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}>
       <ChatComposer cwd={card.cwd}
         placeholder={approval ? t("chat.composer.redirect") : t("chat.composer.reply")}
         onSubmit={(text) => { sendToConversation(card.tabId, text); }}

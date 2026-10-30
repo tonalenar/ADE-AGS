@@ -8,6 +8,7 @@ import {
 } from "../chatIcons";
 import type { PermissionPrompt } from "@/features/canvas/terminalPrompts";
 
+import { useChatWidthClass } from "../chatLook";
 import { setRightPanel } from "../store";
 import { fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
@@ -67,6 +68,7 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
 }) {
   const { t } = useTranslation();
   const turns = useMemo(() => timelineTurns(items), [items]);
+  const width = useChatWidthClass();
   const startedAt = useMemo(() => openTurnStart(items), [items]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -82,7 +84,7 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
       }}>
-      <div className="max-w-[736px] mx-auto px-4 sm:px-6 pt-4 pb-6 flex flex-col gap-4 text-[14px] leading-relaxed text-gray-900 dark:text-white">
+      <div className={`${width} mx-auto px-4 sm:px-6 pt-4 pb-6 flex flex-col gap-4 text-[14px] leading-relaxed text-gray-900 dark:text-white`}>
         {truncated && (
           <p className="text-center text-[12px] text-gray-400 dark:text-white/35">{t("chat.timeline.truncated")}</p>
         )}
