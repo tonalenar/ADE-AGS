@@ -244,16 +244,39 @@ pub(crate) fn find_peer<'a>(peers: &'a [OpenTab], to: &str) -> Result<&'a OpenTa
 }
 
 /// O alvo de um `tell`/`ask`, ou a recusa de política (destino que não existe, ambíguo, si mesmo)
-/// com a frase que oferece saída. Pura.
-pub(crate) fn target_or_refusal<'a>(peers: &'a [OpenTab], me: Option<&OpenTab>, from: &str, to: &str) -> Result<&'a OpenTab, (&'static str, String)> {
+/// com a frase que oferece saída. `alias` = (rótulo do time, id do orquestrador) de quem envia: o briefing
+/// manda o integrante chamar o orquestrador pelo rótulo, que pode diferir do título da aba. Pura.
+pub(crate) fn target_or_refusal<'a>(peers: &'a [OpenTab], me: Option<&OpenTab>, from: &str, to: &str, alias: Option<(&str, &str)>) -> Result<&'a OpenTab, (&'static str, String)> {
     use crate::peer_queue::store::REFUSAL_WAY_OUT;
     let is_me = to == from || me.is_some_and(|m| m.id == to || m.name.eq_ignore_ascii_case(to.trim()));
-    match find_peer(peers, to) {
+    match find_peer_or_alias(peers, to, alias) {
         Ok(found) if found.id != from => Ok(found),
         Ok(_) => Err(("self", format!("Você tentou mandar a mensagem para si mesmo. {REFUSAL_WAY_OUT}"))),
         Err(_) if is_me => Err(("self", format!("Você tentou mandar a mensagem para si mesmo. {REFUSAL_WAY_OUT}"))),
         Err((reason, message)) => Err((reason, format!("Não enviei: {message} {REFUSAL_WAY_OUT}"))),
     }
+}
+
+/// `find_peer`, e, se o nome não existe entre os conectados, o rótulo do time como apelido do orquestrador
+/// (quando ele está ao alcance). Um nome que já aponta para uma aba, ou é ambíguo, nunca é desviado. Pura.
+fn find_peer_or_alias<'a>(peers: &'a [OpenTab], to: &str, alias: Option<(&str, &str)>) -> Result<&'a OpenTab, (&'static str, String)> {
+    match find_peer(peers, to) {
+        Err(("unknown_target", message)) => match alias {
+            Some((label, orchestrator)) if !label.trim().is_empty() && label.trim().eq_ignore_ascii_case(to.trim()) => {
+                peers.iter().find(|p| p.id == orchestrator).ok_or(("unknown_target", message))
+            }
+            _ => Err(("unknown_target", message)),
+        },
+        other => other,
+    }
+}
+
+/// (rótulo do time, id do orquestrador) do time de `from`, para `target_or_refusal`. `None` fora de time.
+pub(crate) fn team_alias(app: &AppHandle, from: &str) -> Option<(String, String)> {
+    let db = super::shared::db(app).ok()?;
+    let conn = db.lock().ok()?;
+    let team = crate::chat_team::store::team_of(&conn, from).ok().flatten()?;
+    Some((team.label, team.orchestrator))
 }
 
 /// A resposta de uma recusa de política: `Ok` (exit 0 na CLI) com `refused`, o motivo e a frase. Pura.
@@ -828,7 +851,8 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let from_name = me.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| from.clone());
     let typed = free.as_deref().unwrap_or("");
     // Recusas de política: uma frase com saída, `Ok` e exit 0; a linha fica gravada com o motivo.
-    let target = match target_or_refusal(&list, me.as_ref(), &from, &to) {
+    let alias = team_alias(app, &from);
+    let target = match target_or_refusal(&list, me.as_ref(), &from, &to, alias.as_ref().map(|(l, o)| (l.as_str(), o.as_str()))) {
         Ok(target) => target,
         Err((reason, message)) => return policy_refusal(app, "tell", &from, &from_name, (&to, &to), typed, None, reason, &message),
     };
@@ -1538,7 +1562,8 @@ pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let envelope = envelope_arg(args);
     let free = free_text(args, &envelope)?;
     let typed = free.as_deref().unwrap_or("");
-    let target = match target_or_refusal(&list, me.as_ref(), &from, &to) {
+    let alias = team_alias(app, &from);
+    let target = match target_or_refusal(&list, me.as_ref(), &from, &to, alias.as_ref().map(|(l, o)| (l.as_str(), o.as_str()))) {
         Ok(target) => target.clone(),
         Err((reason, message)) => return policy_refusal(app, "ask", &from, &from_name, (&to, &to), typed, None, reason, &message),
     };
@@ -1565,8 +1590,9 @@ fn ask_batch(
     let (from_id, from_name) = from;
     let asks = parse_batch(batch)?;
     let mut targets: Vec<(OpenTab, String)> = Vec::new();
+    let alias = team_alias(app, from_id);
     for (name, text) in asks {
-        let target = match target_or_refusal(list, None, from_id, &name) {
+        let target = match target_or_refusal(list, None, from_id, &name, alias.as_ref().map(|(l, o)| (l.as_str(), o.as_str()))) {
             Ok(target) => target.clone(),
             // Um nome errado recusa o lote inteiro, antes de perguntar a qualquer um.
             Err((reason, message)) => return policy_refusal(app, "ask", from_id, from_name, (&name, &name), &text, None, reason, &message),
@@ -1992,18 +2018,40 @@ mod contrato_tests {
     fn destino_errado_ambiguo_ou_si_mesmo_viram_recusa_com_saida() {
         let me = tab("eu", "Backend");
         let peers = vec![tab("t1", "QA"), tab("t2", "Dup"), tab("t3", "Dup")];
-        assert_eq!(target_or_refusal(&peers, Some(&me), "eu", "qa").unwrap().id, "t1");
-        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "Fantasma").unwrap_err();
+        assert_eq!(target_or_refusal(&peers, Some(&me), "eu", "qa", None).unwrap().id, "t1");
+        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "Fantasma", None).unwrap_err();
         assert!(reason == "unknown_target" && message.contains("Conectados: QA") && message.contains("pergunte à pessoa"), "{message}");
-        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "dup").unwrap_err();
+        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "dup", None).unwrap_err();
         assert!(reason == "ambiguous_target" && message.contains("t2") && message.contains("t3"), "{message}");
         for to in ["eu", "backend"] {
-            let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", to).unwrap_err();
+            let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", to, None).unwrap_err();
             assert!(reason == "self" && message.contains("si mesmo"), "{message}");
         }
         // Mesmo se a própria aba aparecesse entre os pares.
         let with_me = vec![tab("eu", "Backend")];
-        assert_eq!(target_or_refusal(&with_me, None, "eu", "eu").unwrap_err().0, "self");
+        assert_eq!(target_or_refusal(&with_me, None, "eu", "eu", None).unwrap_err().0, "self");
+    }
+
+    #[test]
+    fn o_rotulo_do_time_chama_o_orquestrador_cuja_aba_tem_outro_titulo() {
+        // O briefing manda o integrante usar o rótulo gravado no time ("Claude Code"), mas a aba do
+        // orquestrador se chama "Claude Code — pasta": sem o apelido, o primeiro `tell` voltava `unknown_target`.
+        let me = tab("m1", "Backend");
+        let peers = vec![tab("orq", "Claude Code — pasta"), tab("t2", "QA")];
+        let alias = Some(("Claude Code", "orq"));
+        assert_eq!(target_or_refusal(&peers, Some(&me), "m1", "claude code", alias).unwrap().id, "orq", "o rótulo vale, sem diferenciar maiúsculas");
+        assert_eq!(target_or_refusal(&peers, Some(&me), "m1", "Claude Code — pasta", alias).unwrap().id, "orq", "o título da aba continua valendo");
+        assert_eq!(target_or_refusal(&peers, Some(&me), "m1", "orq", alias).unwrap().id, "orq", "e o id também");
+        let (reason, _) = target_or_refusal(&peers, Some(&me), "m1", "claude code", None).unwrap_err();
+        assert_eq!(reason, "unknown_target", "sem time, o rótulo não é apelido de ninguém");
+        let (reason, _) = target_or_refusal(&peers, Some(&me), "m1", "Outro nome", alias).unwrap_err();
+        assert_eq!(reason, "unknown_target", "o apelido é só o rótulo do time");
+        // O orquestrador fora do alcance do canvas não vira alvo por apelido.
+        let sem_orq = vec![tab("t2", "QA")];
+        assert_eq!(target_or_refusal(&sem_orq, Some(&me), "m1", "Claude Code", alias).unwrap_err().0, "unknown_target");
+        // Um nome exato de outra aba vence o apelido: nunca desviar a mensagem para o lugar errado.
+        let dois = vec![tab("orq", "Claude Code — pasta"), tab("t3", "Claude Code")];
+        assert_eq!(target_or_refusal(&dois, Some(&me), "m1", "Claude Code", alias).unwrap().id, "t3");
     }
 
     #[test]

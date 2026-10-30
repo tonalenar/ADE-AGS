@@ -65,6 +65,7 @@
   1. grava uma marca na linha atual da tela e cola a pergunta;
   2. o turno acaba quando há saída seguida de 5 s de silêncio;
   3. devolve até 200 linhas a partir da marca, juntas em `reply` dentro do envelope de conteúdo não confiável, com status `finished` ou `timed_out`.
+- Integrante de time chama o orquestrador pelo título da aba, pelo id **ou pelo rótulo do time** (apelido, só quando nenhuma aba tem esse nome exato): o briefing usa o rótulo gravado, que pode diferir do título atual da aba.
 - `--batch '{"A":"…","B":"…"}'` pergunta a vários em paralelo, com um erro isolado por agente.
 - `peer check`: tela atual, `askStatus` e a resposta parcial.
 
