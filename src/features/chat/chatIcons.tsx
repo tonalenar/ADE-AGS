@@ -19,6 +19,7 @@ export const SidebarIcon = (p: IconProps) => <Svg {...p}><rect x="3" y="3" width
 export const PaperclipIcon = (p: IconProps) => <Svg {...p}><path d="m21 11-8.5 8.5a5 5 0 0 1-7-7L14 4a3.3 3.3 0 0 1 4.7 4.7L10.2 17a1.7 1.7 0 0 1-2.4-2.4L15.5 7" /></Svg>;
 export const ArrowUpIcon = (p: IconProps) => <Svg {...p}><path d="M12 19V5M5 12l7-7 7 7" /></Svg>;
 export const FolderIcon = (p: IconProps) => <Svg {...p}><path d="M20 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z" /></Svg>;
+export const ComputerIcon = (p: IconProps) => <Svg {...p}><rect x="4" y="5" width="16" height="11" rx="2" /><path d="M2 20h20" /></Svg>;
 export const BranchIcon = (p: IconProps) => <Svg {...p}><circle cx="6" cy="6" r="2.5" /><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="8" r="2.5" /><path d="M6 8.5v7M18 10.5c0 4-6 3-10 6" /></Svg>;
 export const ShieldIcon = (p: IconProps) => <Svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /></Svg>;
 export const LockIcon = (p: IconProps) => <Svg {...p}><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></Svg>;
