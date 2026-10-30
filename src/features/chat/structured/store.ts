@@ -44,8 +44,13 @@ export function startStructured(): void {
   if (started) return;
   started = true;
   void reloadThreads();
-  void listen<ThreadEvent>("cc-chat-thread", (e) => {
+  void listen<ThreadEvent | { type: "created"; threadId: string; thread: ThreadRow }>("cc-chat-thread", (e) => {
     const event = e.payload;
+    // Criada fora da tela (pela CLI `ags chat new`).
+    if (event.type === "created") {
+      upsertThread(event.thread);
+      return;
+    }
     if (event.type === "thread") {
       useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? { ...t, title: event.title } : t)) }));
       return;

@@ -4,9 +4,11 @@
 //! - `store`: as tabelas (`chat_thread`, `chat_run`, `chat_item`, `chat_request`), só aditivas;
 //! - `codex_map`: o item do Codex virando o `canal::timeline::Item` da timeline (puro);
 //! - `codex`: o processo `app-server` de cada conversa (JSON por linha no stdio);
+//! - `api`: o núcleo (criar, mandar, parar, responder, trocar), usado pela tela, pela CLI e pelo MCP;
 //! - `commands`: os comandos Tauri;
 //! - `worktree`: o worktree de uma conversa nova.
 
+pub mod api;
 pub mod codex;
 pub mod codex_map;
 pub mod commands;
