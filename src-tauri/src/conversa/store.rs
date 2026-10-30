@@ -248,3 +248,45 @@ pub fn expire_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<V
     conn.execute("UPDATE chat_request SET state = 'expired' WHERE thread_id = ?1 AND state = 'pending'", params![thread_id])?;
     Ok(ids)
 }
+
+/// O que o `sweep_orphans` marcou.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Sweep {
+    pub runs: usize,
+    pub requests: usize,
+}
+
+/// No arranque do app: nenhum agente de uma conversa sobrevive ao app, então todo turno `inProgress` e todo
+/// pedido `pending` que sobrou de um crash é órfão. O turno vira `interrupted`; o que ficou aberto na ponta da
+/// timeline ganha um `turnEnd` com o motivo (para a tela não mostrar um turno aberto para sempre); o pedido
+/// vira `expired` (clicar nele daria "o agente já fechou"). Nunca apaga linha. Idempotente.
+pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
+    let runs: Vec<(String, String)> = {
+        let mut stmt = conn.prepare("SELECT thread_id, id FROM chat_run WHERE status = 'inProgress'")?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?
+    };
+    for (thread_id, run_id) in &runs {
+        conn.execute(
+            "UPDATE chat_run SET status = 'interrupted', completed_at = COALESCE(completed_at, ?3) WHERE thread_id = ?1 AND id = ?2",
+            params![thread_id, run_id, now],
+        )?;
+        // Só o turno que ficou na ponta da timeline fecha com o `turnEnd`: um fim jogado no meio fecharia o turno errado.
+        let last: Option<i64> = conn.query_row("SELECT MAX(seq) FROM chat_item WHERE thread_id = ?1 AND run_id = ?2", params![thread_id, run_id], |r| r.get(0))?;
+        let Some(last) = last else { continue };
+        let others: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM chat_item WHERE thread_id = ?1 AND seq > ?2 AND COALESCE(run_id, '') != ?3",
+            params![thread_id, last, run_id],
+            |r| r.get(0),
+        )?;
+        let end_id = format!("end:{run_id}");
+        let has_end: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM chat_item WHERE thread_id = ?1 AND id = ?2)", params![thread_id, end_id], |r| r.get(0))?;
+        if others == 0 && !has_end {
+            let mut end = Item::new(crate::canal::timeline::ItemKind::TurnEnd, end_id, Some(now));
+            end.interrupted = Some(false);
+            end.text = Some("O app foi fechado antes de o turno terminar.".into());
+            upsert_item(conn, thread_id, Some(run_id), &end)?;
+        }
+    }
+    let requests = conn.execute("UPDATE chat_request SET state = 'expired' WHERE state = 'pending'", [])?;
+    Ok(Sweep { runs: runs.len(), requests })
+}

@@ -455,6 +455,10 @@ mod claude {
     }
 }
 
+fn user_item(id: &str) -> crate::canal::timeline::Item {
+    crate::canal::timeline::Item::new(ItemKind::User, id.to_string(), None)
+}
+
 fn pending_request(conn: &rusqlite::Connection, id: &str, thread_id: &str) {
     let row = RequestRow {
         id: id.into(), thread_id: thread_id.into(), rpc_id: "7".into(), kind: "command".into(), item_id: None,
@@ -490,4 +494,37 @@ fn o_fim_do_turno_que_caiu_grava_o_erro_no_item_e_expira_os_pedidos() {
     let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("o turnEnd é gravado");
     assert_eq!((end.id.as_str(), end.interrupted, end.text.as_deref()), ("end:r1", Some(false), Some("O processo do Codex fechou no meio do turno")));
     assert!(store::pending_requests(&conn, "t1").unwrap().is_empty());
+}
+
+#[test]
+fn no_arranque_o_turno_e_os_pedidos_orfaos_expiram_sem_apagar_nada() {
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    thread(&conn, "t2");
+    // t1: um turno concluído e um que o app deixou aberto (a queda do app mata o agente).
+    store::upsert_run(&conn, "t1", "r1", "completed", Some(1), Some(2), Some(1)).unwrap();
+    store::upsert_run(&conn, "t1", "r2", "inProgress", Some(3), None, None).unwrap();
+    store::upsert_item(&conn, "t1", Some("r2"), &user_item("u2")).unwrap();
+    pending_request(&conn, "q1", "t1");
+    // t2: o turno aberto NÃO é o último da timeline (um mais novo já escreveu): não ganha turnEnd.
+    store::upsert_run(&conn, "t2", "r3", "inProgress", Some(3), None, None).unwrap();
+    store::upsert_item(&conn, "t2", Some("r3"), &user_item("u3")).unwrap();
+    store::upsert_item(&conn, "t2", Some("r4"), &user_item("u4")).unwrap();
+
+    let sweep = store::sweep_orphans(&conn, 100).unwrap();
+    assert_eq!((sweep.runs, sweep.requests), (2, 1));
+    assert_eq!(store::run_status(&conn, "t1", "r1").unwrap().as_deref(), Some("completed"), "o que acabou fica como estava");
+    assert_eq!(store::run_status(&conn, "t1", "r2").unwrap().as_deref(), Some("interrupted"));
+    assert!(store::pending_requests(&conn, "t1").unwrap().is_empty());
+    let expired: String = conn.query_row("SELECT state FROM chat_request WHERE id = 'q1'", [], |r| r.get(0)).unwrap();
+    assert_eq!(expired, "expired", "o pedido continua na tabela, só expirado");
+    // O turno que ficou aberto na ponta ganha o turnEnd durável; o do meio, não.
+    let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("turnEnd do app que fechou");
+    assert_eq!((end.id.as_str(), end.interrupted), ("end:r2", Some(false)));
+    assert!(end.text.as_deref().is_some_and(|t| t.contains("app foi fechado")), "{:?}", end.text);
+    assert!(store::items(&conn, "t2").unwrap().iter().all(|i| i.kind != ItemKind::TurnEnd));
+    assert_eq!(store::items(&conn, "t2").unwrap().len(), 2, "nenhuma linha apagada");
+    // Rodar de novo não acha mais nada.
+    let again = store::sweep_orphans(&conn, 200).unwrap();
+    assert_eq!((again.runs, again.requests), (0, 0));
 }

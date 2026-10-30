@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::database::DbConnection;
 
 use super::events::emit;
-use super::{codex_map, store};
+use super::{codex_map, store, turn};
 
 /// Quanto esperar a resposta de um pedido (abrir thread, começar turno). O turno em si não tem
 /// prazo: ele acaba por aviso (`turn/completed`).
@@ -265,7 +265,8 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
 }
 
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
-    session.alive.store(false, Ordering::SeqCst);
+    // `kill` (fechar a conversa, trocar o acesso) já baixou `alive`: o fim por conta própria é queda.
+    let killed = !session.alive.swap(false, Ordering::SeqCst);
     let waiting: Vec<Reply> = session.pending.lock().map(|mut p| p.drain().map(|(_, r)| r).collect()).unwrap_or_default();
     for reply in waiting {
         let _ = reply.send(Err("O processo do Codex fechou".into()));
@@ -278,6 +279,16 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
         && map.get(&session.thread_id).is_some_and(|s| Arc::ptr_eq(s, session))
     {
         map.remove(&session.thread_id);
+    }
+    // O turno que o processo deixou aberto fecha aqui, como no Claude e no OpenCode: sem o `turnEnd` o
+    // `chat_run` ficava `inProgress` e a tela, sem saber por que o agente parou.
+    if let Some(turn_id) = session.turn() {
+        session.set_turn(None);
+        let (result, message) = turn::dropped(killed, None, "Codex");
+        turn::finish(app, db, &session.thread_id, &turn_id, &result);
+        if let Some(message) = message {
+            emit(app, &session.thread_id, "error", json!({ "message": message }));
+        }
     }
     emit(app, &session.thread_id, "phase", json!({ "phase": "idle" }));
     emit(app, &session.thread_id, "closed", json!({}));
