@@ -3586,6 +3586,13 @@
   "aiMemory.handoffsAnyone": "Para cualquier agente",
   "aiMemory.handoffFrom": "De {{agent}}, el {{when}}",
   "aiMemory.sessions": "Sesiones recientes",
-  "aiMemory.sessionsCount": "{{count}} sesiones registradas.",
-  "aiMemory.sessionsSoon": "La lista de sesiones aún no está disponible."
+  "aiMemory.sessionsSoon": "La lista de sesiones aún no está disponible.",
+  "aiMemory.project": "Proyecto de ai-memory",
+  "aiMemory.pickProject": "Elige el proyecto",
+  "aiMemory.noProjects": "ai-memory aún no tiene proyectos.",
+  "aiMemory.sessionsEmpty": "No hay sesiones recientes en este proyecto.",
+  "aiMemory.sessionLine": "{{agent}}, última actividad el {{when}}",
+  "aiMemory.sessionCurrent": "actual",
+  "aiMemory.sessionHandedOff": "dejó un handoff",
+  "aiMemory.sessionEnded": "terminada"
 }

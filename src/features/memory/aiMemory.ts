@@ -141,3 +141,44 @@ export interface AiMemoryPage {
   frontmatter: unknown;
   expired: boolean;
 }
+
+export interface AiMemoryProject {
+  workspace_id: string | null;
+  workspace_name: string;
+  project_id: string | null;
+  project_name: string;
+  page_count: number;
+  last_updated: string | null;
+}
+
+export interface AiMemorySession {
+  session_id: string;
+  agent_kind: string;
+  cwd: string | null;
+  last_activity_at: string;
+  /** false não prova interrupção: a sessão pode estar viva em outra aba. */
+  ended: boolean;
+  handed_off: boolean;
+  current: boolean;
+}
+
+/** Nome da pasta (último trecho do caminho, com `/` ou `\`). */
+function folderName(cwd: string): string {
+  const parts = cwd.split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] ?? "";
+}
+
+/**
+ * Projeto do ai-memory pré-selecionado para a pasta da aba: o de nome igual ao da pasta (sem
+ * diferenciar maiúsculas); havendo mais de um, o atualizado por último. null se nenhum bater.
+ */
+export function guessProject(projects: readonly AiMemoryProject[], cwd: string): AiMemoryProject | null {
+  const name = folderName(cwd).toLowerCase();
+  if (!name) return null;
+  const matches = projects.filter((p) => p.project_name.toLowerCase() === name);
+  if (matches.length === 0) return null;
+  return [...matches].sort((a, b) => (b.last_updated ?? "").localeCompare(a.last_updated ?? ""))[0];
+}
+
+/** Chave estável de um projeto para a escolha no painel. */
+export const projectKey = (p: AiMemoryProject) => `${p.workspace_name}/${p.project_name}`;

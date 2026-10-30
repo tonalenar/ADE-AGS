@@ -2,9 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
-import { formatCreatedAt, groupPendingHandoffs, parseSnippet } from "./aiMemory";
-import type { AiMemoryHandoff, AiMemoryPage, AiMemoryProbe, AiMemoryRecentPage } from "./aiMemory";
-import { aiMemoryHandoffs, aiMemoryProbe, aiMemoryReadPage, aiMemoryRecent } from "./aiMemoryIpc";
+import { PopupSelect } from "@/shared/ui/PopupSelect";
+
+import { formatCreatedAt, groupPendingHandoffs, guessProject, parseSnippet, projectKey } from "./aiMemory";
+import type { AiMemoryHandoff, AiMemoryPage, AiMemoryProbe, AiMemoryProject, AiMemoryRecentPage, AiMemorySession } from "./aiMemory";
+import { aiMemoryHandoffs, aiMemoryProbe, aiMemoryProjects, aiMemoryReadPage, aiMemoryRecent, aiMemorySessions } from "./aiMemoryIpc";
 
 interface Loaded {
   probe: AiMemoryProbe;
@@ -20,6 +22,65 @@ function Snippet({ text }: { text: string }) {
         ? <mark key={i} className="rounded-sm bg-accent-500/20 px-0.5 text-inherit">{seg.text}</mark>
         : <span key={i}>{seg.text}</span>)}
     </span>
+  );
+}
+
+/**
+ * Últimas sessões de um projeto do ai-memory. O caminho das sessões não conhece a pasta da aba, por
+ * isso o projeto é escolhido explicitamente: começa pelo de nome igual ao da pasta e pode ser trocado.
+ */
+function Sessions({ cwd }: { cwd: string }) {
+  const { t } = useTranslation();
+  const [projects, setProjects] = useState<AiMemoryProject[] | null>(null);
+  const [selected, setSelected] = useState<string>("");
+  const [sessions, setSessions] = useState<AiMemorySession[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    aiMemoryProjects(cwd).then((r) => {
+      if (!alive) return;
+      setProjects(r.data);
+      const guess = guessProject(r.data, cwd);
+      setSelected(guess ? projectKey(guess) : "");
+    }).catch((e) => { if (alive) setError(String(e)); });
+    return () => { alive = false; };
+  }, [cwd]);
+
+  useEffect(() => {
+    const project = projects?.find((p) => projectKey(p) === selected);
+    setSessions(null);
+    if (!project) return;
+    let alive = true;
+    aiMemorySessions(project.workspace_name, project.project_name)
+      .then((r) => { if (alive) setSessions(r.data); })
+      .catch((e) => { if (alive) setError(String(e)); });
+    return () => { alive = false; };
+  }, [projects, selected]);
+
+  if (error) return <p className="text-red-500" role="alert">{t("aiMemory.error", { error })}</p>;
+  if (!projects) return <p className="text-gray-500" role="status">{t("aiMemory.loading")}</p>;
+  if (projects.length === 0) return <p className="text-gray-500">{t("aiMemory.noProjects")}</p>;
+  return (
+    <div className="grid gap-1">
+      <PopupSelect aria-label={t("aiMemory.project")} value={selected} placeholder={t("aiMemory.pickProject")}
+        onChange={(event) => setSelected(event.target.value)} className="min-w-44">
+        {projects.map((p) => <option key={projectKey(p)} value={projectKey(p)}>{projectKey(p)}</option>)}
+      </PopupSelect>
+      {selected && sessions?.length === 0 && <p className="text-gray-500">{t("aiMemory.sessionsEmpty")}</p>}
+      {sessions && sessions.length > 0 && (
+        <ul className="grid gap-0.5">
+          {sessions.map((s) => (
+            <li key={s.session_id}>
+              {t("aiMemory.sessionLine", { agent: s.agent_kind, when: s.last_activity_at })}
+              {s.current && <span className="ml-1 text-gray-500">· {t("aiMemory.sessionCurrent")}</span>}
+              {s.handed_off && <span className="ml-1 text-gray-500">· {t("aiMemory.sessionHandedOff")}</span>}
+              {s.ended && <span className="ml-1 text-gray-500">· {t("aiMemory.sessionEnded")}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -128,9 +189,9 @@ export function AiMemoryPanel({ cwd }: { cwd: string }) {
 
           <div>
             <h4 className="mb-1 font-semibold">{t("aiMemory.sessions")}</h4>
-            <p className="text-gray-500">
-              {probe.sessions_supported ? t("aiMemory.sessionsCount", { count: probe.status?.counts.sessions ?? 0 }) : t("aiMemory.sessionsSoon")}
-            </p>
+            {probe.sessions_supported
+              ? <Sessions cwd={cwd} />
+              : <p className="text-gray-500">{t("aiMemory.sessionsSoon")}</p>}
           </div>
         </div>
       )}

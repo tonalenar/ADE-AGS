@@ -22,6 +22,8 @@ import { AiMemoryPanel } from "../AiMemoryPanel";
 import handoffsFixture from "../../../../src-tauri/src/ai_memory/fixtures/handoffs-populated.json";
 import readPageFixture from "../../../../src-tauri/src/ai_memory/fixtures/read-page-populated.json";
 import recentFixture from "../../../../src-tauri/src/ai_memory/fixtures/recent-populated.json";
+import projectsFixture from "../../../../src-tauri/src/ai_memory/fixtures/projects.json";
+import briefingFixture from "../../../../src-tauri/src/ai_memory/fixtures/sessions-briefing-populated.json";
 
 const CWD = "/workspace";
 const envelope = <T,>(data: T) => ({ source: "ai-memory", trust: "UNTRUSTED", data });
@@ -106,25 +108,42 @@ describe("AiMemoryPanel", () => {
     expect(host.textContent).toContain('aiMemory.handoffsTo {"agent":"codex"}');
     expect(host.textContent).toContain("aiMemory.handoffsAnyone");
     expect(host.textContent).toContain("aiMemory.sessionsSoon");
-    expect(host.textContent).not.toContain("aiMemory.sessionsCount");
     expect(commands()).toEqual(["ai_memory_probe", "ai_memory_recent", "ai_memory_handoffs"]);
     expect(invoke).toHaveBeenCalledWith("ai_memory_recent", { cwd: CWD });
   });
 
-  it("com sessões suportadas mostra a contagem em vez do aviso", async () => {
+  it("com sessões suportadas pré-seleciona o projeto da pasta e lista as sessões dele", async () => {
+    // A pasta da aba se chama "probe", como o projeto da fixture.
+    const cwd = "/fixture/probe";
     route({
-      ai_memory_probe: () => envelope({
-        ...probeOk(true),
-        status: { version: "3.3.0", counts: { pages_latest: 1, pages_all: 1, sessions: 4, observations: 0 }, client: null, providers: null, capture_mode: null },
-      }),
+      ai_memory_probe: () => envelope(probeOk(true)),
       ai_memory_recent: () => envelope([]),
       ai_memory_handoffs: () => envelope([]),
+      ai_memory_projects: () => envelope(projectsFixture),
+      ai_memory_sessions: () => envelope(briefingFixture.recent_sessions),
+    });
+
+    await act(async () => { root.render(<AiMemoryPanel cwd={cwd} />); });
+    await act(async () => {});
+
+    expect(invoke).toHaveBeenCalledWith("ai_memory_projects", { cwd });
+    expect(invoke).toHaveBeenCalledWith("ai_memory_sessions", { workspace: "ade-test", project: "probe" });
+    expect(host.textContent).toContain('aiMemory.sessionLine {"agent":"codex","when":"2024-01-01T00:00:00Z"}');
+    expect(host.textContent).not.toContain("aiMemory.sessionsSoon");
+  });
+
+  it("sem projeto com o nome da pasta não consulta sessões até a escolha", async () => {
+    route({
+      ai_memory_probe: () => envelope(probeOk(true)),
+      ai_memory_recent: () => envelope([]),
+      ai_memory_handoffs: () => envelope([]),
+      ai_memory_projects: () => envelope(projectsFixture),
     });
 
     await render();
+    await act(async () => {});
 
-    expect(host.textContent).toContain('aiMemory.sessionsCount {"count":4}');
-    expect(host.textContent).not.toContain("aiMemory.sessionsSoon");
+    expect(commands()).not.toContain("ai_memory_sessions");
   });
 
   it("snippet com <mark> destaca o termo sem criar HTML extra", async () => {

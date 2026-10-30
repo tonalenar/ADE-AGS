@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatCreatedAt, groupPendingHandoffs, parseSnippet, type AiMemoryHandoff } from "../aiMemory";
+import { formatCreatedAt, groupPendingHandoffs, guessProject, parseSnippet, type AiMemoryHandoff } from "../aiMemory";
 
 describe("parseSnippet (snippet do ai-memory search --json)", () => {
   it("destaca o <mark> do fixture real e mantém o resto como texto", () => {
@@ -109,5 +109,29 @@ describe("groupPendingHandoffs (handoffs --json do ai-memory)", () => {
     expect(groups).toHaveLength(1);
     expect(groups[0].toAgent).toBeNull();
     expect(groups[0].handoffs).toHaveLength(1);
+  });
+});
+
+describe("guessProject", () => {
+  const project = (workspace_name: string, project_name: string, last_updated: string | null) =>
+    ({ workspace_id: null, workspace_name, project_id: null, project_name, page_count: 0, last_updated });
+
+  it("escolhe o projeto com o nome da pasta, sem diferenciar maiúsculas", () => {
+    const list = [project("w", "outro", null), project("w", "ADE-AGS", null)];
+    expect(guessProject(list, "/Users/x/Projects/ade-ags")?.project_name).toBe("ADE-AGS");
+  });
+
+  it("aceita caminho do Windows e barra no fim", () => {
+    expect(guessProject([project("w", "app", null)], "C:\\code\\app\\")?.project_name).toBe("app");
+  });
+
+  it("com dois do mesmo nome, fica com o atualizado por último", () => {
+    const list = [project("a", "app", "2026-01-01T00:00:00Z"), project("b", "app", "2026-02-01T00:00:00Z")];
+    expect(guessProject(list, "/x/app")?.workspace_name).toBe("b");
+  });
+
+  it("devolve null quando nenhum bate ou a pasta é vazia", () => {
+    expect(guessProject([project("w", "app", null)], "/x/outra")).toBeNull();
+    expect(guessProject([project("w", "app", null)], "")).toBeNull();
   });
 });
