@@ -6,7 +6,7 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 
 - **Conversas por TUI:** cada uma é uma aba de agente, lida do transcript numa timeline; o terminal fica numa gaveta, sem remontar.
 - **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
-- **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat.
+- **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
 
 ## CLIs fora do PATH e instalação pela ADE
