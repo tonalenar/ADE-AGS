@@ -30,6 +30,7 @@ import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
+import { AiMemoryTabsSetting } from "@/features/settings/AiMemoryTabsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
@@ -300,6 +301,7 @@ export function SettingsPage() {
                 <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
                   <SettingsGroup>
                     <AgentAutoUpdateSetting />
+                    <AiMemoryTabsSetting />
                   </SettingsGroup>
                   <DetectedAgents />
 

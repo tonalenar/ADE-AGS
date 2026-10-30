@@ -1,4 +1,6 @@
 {
+  "settings.aiMemoryTabs.label": "Memória do ai-memory nas abas",
+  "settings.aiMemoryTabs.desc": "Em novas abas, conecta o MCP do ai-memory ao Claude, OpenCode e Codex e habilita captura por hooks no Claude, se a versão 3.3.0 ou superior estiver instalada. Não altera configurações globais dos agentes nem reinicia abas abertas.",
   "models.reference": "Catálogo do provedor — acesso da conta não verificado",
   "accounts.antigravity.installRequired": "Verificando a instalação. Se o botão continuar desativado, instale a CLI agy e reabra o aplicativo.",
   "accounts.antigravity.description": "O login OAuth 2.0 é realizado pela CLI oficial do Antigravity. Ela abre o navegador quando não há uma sessão salva; se você já está conectado, reutiliza sua conta. Complete a autenticação no navegador pessoalmente.",
