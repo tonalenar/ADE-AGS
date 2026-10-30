@@ -42,15 +42,7 @@ impl Read {
                 vec!["search", "--json", "--limit", "50", "--", query]
             }
             Self::Page(path) => {
-                if path.is_empty()
-                    || path.len() > 1024
-                    || path.contains(['\\', '\0', ':'])
-                    || Path::new(path)
-                        .components()
-                        .any(|c| !matches!(c, Component::Normal(_)))
-                {
-                    return Err("Informe um caminho relativo de página, sem travessia.".into());
-                }
+                check_page_path(path)?;
                 return Ok(vec![
                     "read-page".into(),
                     "--json".into(),
@@ -59,6 +51,68 @@ impl Read {
             }
         };
         Ok(args.into_iter().map(String::from).collect())
+    }
+}
+
+/// Caminho relativo de página, sem travessia: vale para leitura e para escrita.
+fn check_page_path(path: &str) -> Result<(), String> {
+    if path.is_empty()
+        || path.len() > 1024
+        || path.contains(['\\', '\0', ':'])
+        || Path::new(path)
+            .components()
+            .any(|c| !matches!(c, Component::Normal(_)))
+    {
+        return Err("Informe um caminho relativo de página, sem travessia.".into());
+    }
+    Ok(())
+}
+
+/// Única escrita do conector: a cópia da F4. Lista fechada, como `Read`. Não passa `--workspace` nem
+/// `--project`: a CLI resolve o projeto pela pasta da aba (`AI_MEMORY_HOST_CWD`).
+pub(super) struct PageWrite<'a> {
+    pub path: &'a str,
+    pub title: &'a str,
+    pub kind: &'a str,
+    pub tags: &'a [String],
+    pub pinned: bool,
+}
+
+impl PageWrite<'_> {
+    /// Valida sem executar nada: a cópia recusa a entrada antes de chamar o processo.
+    pub(super) fn check(&self) -> Result<(), String> {
+        self.args().map(|_| ())
+    }
+
+    fn args(&self) -> Result<Vec<String>, String> {
+        let plain = |text: &str, max: usize| {
+            !text.is_empty() && text.len() <= max && !text.chars().any(char::is_control)
+        };
+        check_page_path(self.path)?;
+        if !matches!(self.kind, "fact" | "rule" | "decision" | "gotcha") {
+            return Err("Tipo de página desconhecido para a escrita.".into());
+        }
+        if !plain(self.title, 128) {
+            return Err("Informe um título de 1 a 128 bytes, sem controle.".into());
+        }
+        if self.tags.iter().any(|tag| !plain(tag, 96) || tag.contains(char::is_whitespace)) {
+            return Err("Tag inválida para a escrita.".into());
+        }
+        // `--body -`: o corpo vai pela entrada padrão, nunca pela linha de comando.
+        let mut args = vec![
+            "write-page".to_string(),
+            format!("--path={}", self.path),
+            format!("--title={}", self.title),
+            format!("--kind={}", self.kind),
+            "--tier=semantic".to_string(),
+            "--body".to_string(),
+            "-".to_string(),
+        ];
+        args.extend(self.tags.iter().map(|tag| format!("--tag={tag}")));
+        if self.pinned {
+            args.push("--pinned".into());
+        }
+        Ok(args)
     }
 }
 
@@ -193,6 +247,46 @@ impl Client {
     pub fn read<T: DeserializeOwned>(&self, read: Read) -> Result<Untrusted<T>, String> {
         self.version().map_err(|failure| failure.message())?;
         self.json(read).map(Untrusted::new)
+    }
+
+    /// Lê uma página. `None` quando ela não existe (404). Qualquer outra falha é erro: uma queda do
+    /// servidor nunca pode parecer página ausente, senão a cópia sobrescreveria algo.
+    pub(super) fn find_page(&self, path: &str) -> Result<Option<Page>, String> {
+        let args = Read::Page(path.into()).args()?;
+        let output = self.execute(&args).map_err(|_| {
+            "Não foi possível consultar o ai-memory (limite de 10 segundos).".to_string()
+        })?;
+        if !output.status.success() {
+            // Só o código do erro importa. O stderr pode trazer credenciais: não é reenviado.
+            if String::from_utf8_lossy(&output.stderr).contains("404 Not Found") {
+                return Ok(None);
+            }
+            return Err(
+                "O ai-memory não respondeu à leitura; confira se o servidor está em execução."
+                    .into(),
+            );
+        }
+        if output.stdout.len() > MAX_OUTPUT {
+            return Err("A resposta do ai-memory excedeu 2 MiB.".into());
+        }
+        serde_json::from_slice(&output.stdout)
+            .map(Some)
+            .map_err(|_| "O ai-memory retornou JSON incompatível.".into())
+    }
+
+    /// Escreve uma página com o corpo na entrada padrão. Qualquer falha do processo é erro.
+    pub(super) fn write_page(&self, write: &PageWrite<'_>, body: Vec<u8>) -> Result<(), String> {
+        let args = write.args()?;
+        let mut command = self
+            .command(&args)
+            .map_err(|_| "Não foi possível iniciar o ai-memory.".to_string())?;
+        let output = spawn::output_with_input(&mut command, Some(body), self.timeout).map_err(
+            |_| "Não foi possível escrever no ai-memory (limite de 10 segundos).".to_string(),
+        )?;
+        if output.status.success() {
+            return Ok(());
+        }
+        Err("O ai-memory recusou a escrita; confira se o servidor está em execução.".into())
     }
 
     pub fn probe(&self) -> Result<Untrusted<Probe>, String> {
