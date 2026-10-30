@@ -4,7 +4,7 @@
 //! (`thread/resume`) quando a conversa já existia.
 //!
 //! O que chega vira linhas no banco (`store`) e o evento `cc-chat-thread` para a janela:
-//! `item` (um item novo ou atualizado da timeline), `delta` (o texto do agente chegando), `phase`
+//! `item` (um item novo ou atualizado da timeline), `delta` (o texto e o resumo do raciocínio chegando, só na janela), `phase`
 //! (`working`/`idle`), `request` e `requestResolved` (aprovações e perguntas), `thread` (o título
 //! mudou), `error` e `closed`. O lock do banco só é pego para gravar, nunca durante o I/O.
 
@@ -40,6 +40,8 @@ pub struct Session {
     alive: AtomicBool,
     remote: Mutex<Option<String>>,
     turn: Mutex<Option<String>>,
+    /// A base para os tokens do turno (`codex_map::TurnTokens`).
+    tokens: Mutex<codex_map::TurnTokens>,
     child: Mutex<Option<tokio::process::Child>>,
 }
 
@@ -206,6 +208,8 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     if let Some(env) = env {
         cmd.envs(env);
     }
+    // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
+    cmd.envs(crate::chat_team::env::thread_env(&row.id));
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Codex: {e}"))?;
@@ -222,6 +226,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         alive: AtomicBool::new(true),
         remote: Mutex::new(None),
         turn: Mutex::new(None),
+        tokens: Mutex::new(codex_map::TurnTokens::default()),
         child: Mutex::new(Some(child)),
     });
 
@@ -375,10 +380,18 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
             let item = params.get("item").unwrap_or(&Value::Null);
             save_items(app, db, thread_id, turn_id, codex_map::items_of(item, at));
         }
-        "item/agentMessage/delta" => {
-            let item_id = params.get("itemId").and_then(Value::as_str).unwrap_or("");
-            let delta = params.get("delta").and_then(Value::as_str).unwrap_or("");
-            emit(app, thread_id, "delta", json!({ "itemId": item_id, "delta": delta }));
+        "turn/plan/updated" => {
+            save_items(app, db, thread_id, turn_id, codex_map::plan_item(params, Some(crate::util::now_ts_ms())).into_iter().collect());
+        }
+        "thread/tokenUsage/updated" => {
+            let item = session.tokens.lock().ok().and_then(|mut t| codex_map::usage_item(&mut t, params, Some(crate::util::now_ts_ms())));
+            save_items(app, db, thread_id, turn_id, item.into_iter().collect());
+        }
+        // O texto chegando vai só à janela: o banco grava o item completo (`item/completed`).
+        "item/agentMessage/delta" | "item/reasoning/summaryTextDelta" | "item/reasoning/summaryPartAdded" => {
+            if let Some((item_id, delta, kind)) = codex_map::delta_of(method, params) {
+                emit(app, thread_id, "delta", json!({ "itemId": item_id, "delta": delta, "kind": kind.as_str() }));
+            }
         }
         "serverRequest/resolved" => {
             // Resolvido do lado do Codex (o turno foi interrompido, por exemplo): o pendente some.

@@ -21,6 +21,7 @@ pub fn simulator_devices() -> Result<Vec<Device>, String> {
 #[tauri::command(async)]
 pub fn simulator_boot(app: AppHandle, udid: String, light: Option<bool>) -> Result<(), String> {
     ops::boot(&udid, light.unwrap_or(true))?;
+    ops::forget_orientation(&udid);
     lifecycle::booted(&app, &udid);
     Ok(())
 }
@@ -54,6 +55,7 @@ pub fn simulator_priority(udid: String, light: bool) -> Result<usize, String> {
 #[tauri::command(async)]
 pub fn simulator_shutdown(udid: String) -> Result<(), String> {
     lifecycle::forget(&udid);
+    ops::forget_orientation(&udid);
     ops::shutdown(&udid)
 }
 
@@ -65,6 +67,71 @@ pub fn simulator_button(udid: String, name: String) -> Result<(), String> {
 #[tauri::command(async)]
 pub fn simulator_open_url(udid: String, url: String) -> Result<(), String> {
     ops::open_url(&udid, &url)
+}
+
+// ── Controles do painel direito do modo chat ──
+
+/// Digita o texto no aparelho (teclado americano, só ASCII).
+#[tauri::command(async)]
+pub fn simulator_type(udid: String, text: String) -> Result<(), String> {
+    ops::type_text(&udid, &text)
+}
+
+/// Com `mode` (`light`/`dark`), troca a aparência do iOS; devolve sempre a atual (`light`/`dark`).
+#[tauri::command(async)]
+pub fn simulator_appearance(udid: String, mode: Option<String>) -> Result<String, String> {
+    ops::appearance(&udid, mode.as_deref())
+}
+
+/// Fixa a localização em `lat`/`lon`; sem os dois, volta a não ter localização simulada.
+#[tauri::command(async)]
+pub fn simulator_location(udid: String, lat: Option<f64>, lon: Option<f64>) -> Result<(), String> {
+    match (lat, lon) {
+        (Some(lat), Some(lon)) => ops::location(&udid, Some((lat, lon))),
+        (None, None) => ops::location(&udid, None),
+        _ => Err("Mande latitude e longitude juntas (ou nenhuma, para limpar).".into()),
+    }
+}
+
+/// Face ID: `enroll`, `unenroll`, `match`, `nomatch` ou `state`. Devolve se está cadastrado.
+#[tauri::command(async)]
+pub fn simulator_biometric(udid: String, action: String) -> Result<bool, String> {
+    ops::biometric(&udid, &action)
+}
+
+/// O bundle id do app do usuário rodando no aparelho (`null` = nenhum).
+#[tauri::command(async)]
+pub fn simulator_foreground_app(udid: String) -> Result<Option<String>, String> {
+    ops::foreground_app(&udid)
+}
+
+/// Fecha e abre de novo o app `bundle`.
+#[tauri::command(async)]
+pub fn simulator_relaunch(udid: String, bundle: String) -> Result<(), String> {
+    ops::relaunch(&udid, &bundle)
+}
+
+/// Gira o aparelho um quarto de volta (`left`/`right`); devolve a orientação nova (`portrait`,
+/// `landscapeLeft`, `portraitUpsideDown`, `landscapeRight`).
+#[tauri::command(async)]
+pub fn simulator_rotate(app: AppHandle, udid: String, direction: String) -> Result<String, String> {
+    let orientation = ops::rotate(&udid, &direction)?;
+    // As telas abertas desse aparelho se põem em pé na orientação nova (as views são da thread da interface).
+    #[cfg(target_os = "macos")]
+    {
+        let target = udid.clone();
+        let _ = app.run_on_main_thread(move || super::native::view::reorient(&target));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    Ok(orientation)
+}
+
+/// A última orientação que a ADE mandou ao aparelho (`portrait`, `landscapeLeft`…): a tela que abre
+/// depois de um giro já desenha a moldura deitada.
+#[tauri::command]
+pub fn simulator_orientation(udid: String) -> String {
+    crate::simulator::model::orientation_name(ops::orientation(&udid)).to_string()
 }
 
 /// A foto da tela (PNG temporário): o caminho, para anexar na conversa com os agentes.
@@ -82,12 +149,13 @@ pub async fn simulator_attach<R: Runtime>(webview: Webview<R>, id: String, udid:
     lifecycle::seen(&udid, place.visible.is_some());
     #[cfg(target_os = "macos")]
     {
-        let (screen, hid) = tokio::task::spawn_blocking(move || super::native::connect(&udid)).await.map_err(|e| e.to_string())??;
+        let target = udid.clone();
+        let (screen, hid) = tokio::task::spawn_blocking(move || super::native::connect(&target)).await.map_err(|e| e.to_string())??;
         let (tx, rx) = tokio::sync::oneshot::channel();
         webview
             .with_webview(move |platform| {
                 // SAFETY: `with_webview` roda na thread da interface e `inner()` é o WKWebView da janela.
-                let result = unsafe { super::native::view::attach(platform.inner(), &id, screen, hid, &place) };
+                let result = unsafe { super::native::view::attach(platform.inner(), &id, &udid, screen, hid, &place) };
                 let _ = tx.send(result);
             })
             .map_err(|e| e.to_string())?;

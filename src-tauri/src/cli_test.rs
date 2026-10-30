@@ -470,6 +470,14 @@ fn design_nested_commands_keep_ids_and_html_flags() {
         (vec!["design","approve","all","d1"],"design.approve.all","designId","d1"),
         (vec!["design","delete","d1"],"design.delete","designId","d1"),
         (vec!["design","archive","d1"],"design.archive","designId","d1"),
+        (vec!["design","view","d1"],"design.view","designId","d1"),
+        (vec!["design","open","d1","--artboard","b1"],"design.open","designId","d1"),
+        (vec!["design","artboard","duplicate","b1","--x","0"],"design.artboard.duplicate","artboardId","b1"),
+        (vec!["design","artboard","delete","b1"],"design.artboard.delete","artboardId","b1"),
+        (vec!["design","artboard","resize","b1","--width","390","--radius","12"],"design.artboard.resize","artboardId","b1"),
+        (vec!["design","page","rename","p1","Fluxo"],"design.page.rename","pageId","p1"),
+        (vec!["design","page","delete","p1"],"design.page.delete","pageId","p1"),
+        (vec!["design","note","add","p1","lembrar","--x","10","--y","-20"],"design.note.add","pageId","p1"),
     ] {
         let args=words.iter().map(|v|v.to_string()).collect::<Vec<_>>();
         let (command,rest)=design_command(&args).unwrap();
@@ -495,6 +503,14 @@ fn design_cli_defaults_use_callers_cwd_and_agent_author() {
     assert_eq!(a["designId"],"d1");assert_eq!(a["page"],"Page 1");assert!(a.get("pageId").is_none());
     let a=design_defaults("design.artboard.add",parse("design.artboard.add",&["p1","Home"]).unwrap(),cwd);
     assert_eq!(a["pageId"],"p1");assert!(a.get("designId").is_none());
+    // `design open --page/--artboard` levam ids; `design view` sem id fica sem designId.
+    let a=design_defaults("design.open",parse("design.open",&["d1","--page","p1","--artboard","b1"]).unwrap(),cwd);
+    assert_eq!((a["designId"].clone(),a["pageId"].clone(),a["artboardId"].clone()),(json!("d1"),json!("p1"),json!("b1")));
+    assert!(a.get("page").is_none() && a.get("artboard").is_none());
+    let a=design_defaults("design.view",parse("design.view",&[]).unwrap(),cwd);
+    assert!(a.get("designId").is_none());
+    let a=parse("design.note.add",&["p1","lembrar","--x","10","--y","-20"]).unwrap();
+    assert_eq!((a["text"].clone(),a["x"].clone(),a["y"].clone()),(json!("lembrar"),json!("10"),json!("-20")));
 }
 
 #[test]

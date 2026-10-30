@@ -84,6 +84,13 @@ pub fn record_vigia(conn: &Connection, boards: &Boards, lead: (&str, &str), text
     record_inner(conn, boards, "tell", (lead.0, "Vigia"), lead, text, at_ms, true)
 }
 
+/// O chat da equipe de uma aba (ou de uma conversa por protocolo, `thread:<id>`): o do time do modo
+/// chat, se ela está num (`t:<id>`, ver `crate::chat_team`); senão o da missão ou da conversa de projeto
+/// do canvas. O time vem primeiro porque uma conversa por protocolo não é nó de nenhum canvas.
+pub fn scope_of(conn: &Connection, boards: &Boards, tab: &str) -> Option<String> {
+    crate::chat_team::api::scope_of(conn, tab).or_else(|| team_scope_of_tab(boards, tab))
+}
+
 /// Em que chat a mensagem entra. Na mesma missão ou conversa, nela; uma missão só fala dentro dela. Numa conversa
 /// (`c:`), o que um agente diz a outro de outra conversa (ou sem conversa) entra no chat de quem fala, ou no de
 /// quem recebe se quem fala não tem time: antes era descartada calada, e o chat ficava vazio com o orquestrador
@@ -107,7 +114,7 @@ fn record_inner(
         return Ok(false);
     }
     // O chat da equipe vale para uma missão e também para uma conversa de projeto (`c:<id>`).
-    let Some(mission) = shared_scope(team_scope_of_tab(boards, from.0), team_scope_of_tab(boards, to.0)) else {
+    let Some(mission) = shared_scope(scope_of(conn, boards, from.0), scope_of(conn, boards, to.0)) else {
         return Ok(false);
     };
     migrate(conn).map_err(|e| e.to_string())?;
@@ -135,7 +142,7 @@ pub fn record_handoff(
     payload: &str,
     at_ms: i64,
 ) -> Result<Option<i64>, String> {
-    let Some(mission) = team_scope_of_tab(boards, from.0) else { return Ok(None) };
+    let Some(mission) = scope_of(conn, boards, from.0) else { return Ok(None) };
     if !record_inner(conn, boards, "handoff", from, to, readable, at_ms, false)? {
         return Ok(None);
     }

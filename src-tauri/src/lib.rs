@@ -7,6 +7,7 @@ mod agents;
 mod canal;
 mod canvas;
 mod chat;
+mod chat_team;
 mod compare;
 mod conversa;
 mod app;

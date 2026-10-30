@@ -127,6 +127,13 @@ pub(super) fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
                 agent_id:crate::desktop_apps::GEMINI_DESKTOP.into(),cwd:cwd.into(),window:window.into() });
         }
     }
+    // As conversas por protocolo que estão num time do modo chat (`thread:<id>`): sem PTY, mas com corda
+    // no canvas até o orquestrador (ver `team::deliver_to_thread`).
+    for thread in super::team::team_threads(app) {
+        if !tabs.iter().any(|t| t.id == thread.id) {
+            tabs.push(thread);
+        }
+    }
     Ok(tabs)
 }
 
@@ -846,6 +853,21 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     };
 
     if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP { return queue_gemini(app,target,"tell",&from,&from_name,&text); }
+    // Uma conversa por protocolo do time: a mensagem vai como mensagem da conversa (ver `team`).
+    if let Some(thread) = crate::chat_team::model::thread_id_of(&target.id) {
+        let client_id = peer_queue::client_id_arg(args);
+        let new = NewMessage {
+            client_id: client_id.as_deref(), kind: "tell", from_tab_id: &from, from_name: &from_name,
+            to_tab_id: &target.id, to_name: &target.name, text: &text, raw: is_raw(args), reply: false,
+            envelope: envelope.is_present().then_some(&envelope), limits: Some(limits_for(&from)),
+        };
+        let sent = super::team::deliver_to_thread(app, thread, &new)?;
+        if counts_as_sent(sent.delivery) {
+            let summary = summary_line(&from_name, &target.name, envelope.is_present().then_some(&envelope), free.as_deref().unwrap_or(&text));
+            emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text), Some(&text), Some(&summary));
+        }
+        return Ok(tell_reply(describe(target), &sent));
+    }
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
     // Não se interrompe quem está no meio de um turno, mas também não se prende o remetente:
     // quieto em poucos segundos, vai já; senão entra na fila do destino e é entregue quando ele
@@ -979,7 +1001,9 @@ pub(super) fn peer_deliver(app: &AppHandle, args: &Value) -> Result<Value, Strin
             .cloned()
             .ok_or_else(|| "Não achei o orquestrador entre os seus pares: diga para quem é a entrega (`ags peer deliver <nome> --file ...`).".to_string())?,
     };
-    let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
+    // Uma conversa por protocolo não tem PTY: a linha da entrega vai como mensagem da conversa.
+    let thread = crate::chat_team::model::thread_id_of(&target.id).map(str::to_string);
+    let pty = match thread { Some(_) => 0, None => pty_id_for_tab(app, &target.id, Some(&target.window))? };
     // O mesmo `--id` é a mesma entrega: não grava outra em `mission_handoffs` nem digita de novo.
     // Se a de antes não chegou (sem confirmação), o reenvio leva a MESMA linha, com o mesmo número.
     let client_id = peer_queue::client_id_arg(args);
@@ -1007,7 +1031,10 @@ pub(super) fn peer_deliver(app: &AppHandle, args: &Value) -> Result<Value, Strin
         client_id: client_id.as_deref(), kind: "handoff", from_tab_id: &from, from_name: &from_name,
         to_tab_id: &target.id, to_name: &target.name, text: &line, raw: false, reply: false, ..Default::default()
     };
-    let sent = peer_queue::deliver_now_or_queue(app, pty, &new)?;
+    let sent = match thread.as_deref() {
+        Some(thread) => super::team::deliver_to_thread(app, thread, &new)?,
+        None => peer_queue::deliver_now_or_queue(app, pty, &new)?,
+    };
     if counts_as_sent(sent.delivery) {
         let summary = format!("{from_name} entregou a {}: {}", target.name, crate::peer_queue::store::normalize(&handoff.summary));
         emit_peer_message(app, "handoff", &from, Some(&target.id), Some(&line), None, Some(&summary));
@@ -1028,7 +1055,7 @@ pub(super) fn peer_handoff(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let db = super::shared::db(app)?;
     let conn = db.inner().lock().map_err(|e| e.to_string())?;
     let (mission, from_name, payload) = crate::missions::messages::handoff(&conn, id)?.ok_or_else(|| format!("Não existe a entrega #{id}."))?;
-    if crate::canvas::team_scope_of_tab(&crate::canvas::load_boards(), &from).as_deref() != Some(mission.as_str()) {
+    if crate::missions::messages::scope_of(&conn, &crate::canvas::load_boards(), &from).as_deref() != Some(mission.as_str()) {
         return Err(format!("A entrega #{id} é de outra missão."));
     }
     let handoff: Value = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
@@ -1307,6 +1334,9 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         let queued = queue_gemini(app,target,"ask",from_id,from_name,text)?;
         return wait_for_gemini_reply(app,target,queued,timeout);
     }
+    if let Some(thread) = crate::chat_team::model::thread_id_of(&target.id) {
+        return ask_thread(app, target, thread, (from_id, from_name), text, timeout, raw, extra);
+    }
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
     // O mesmo `--id` é a mesma pergunta: não se pergunta de novo, lê-se a resposta.
     if let Some(earlier) = peer_queue::by_client_id(app, from_id, extra.client_id)?.filter(|m| !m.state.can_become(crate::peer_queue::store::State::Queued)) {
@@ -1383,14 +1413,21 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         json!({ "from": from_name, "to": target.name, "toTabId": target.id, "startedMs": started_ms, "endedMs": crate::util::now_ts_ms(), "finished": finished }),
     );
 
-    let reply = screen(app, target, mark, 200)?;
-    // A resposta também entra no chat do time: antes só a pergunta aparecia, e a conversa ficava pela metade.
-    if finished {
-        if let Some(text) = reply_text(reply.get("lines")) {
-            log_reply(app, &target.id, from_id, &text);
-        }
+    let mut reply = screen(app, target, mark, 200)?;
+    // Sem texto desde a marca (TUI que redesenha no lugar, marca que não andou): o que a tela mostra agora.
+    if reply_text(reply.get("lines")).is_none()
+        && let Ok(now) = screen(app, target, None, 40)
+    {
+        reply = now;
     }
-    Ok(json!({
+    let has_reply = reply_text(reply.get("lines")).is_some();
+    // A resposta também entra no chat do time: antes só a pergunta aparecia, e a conversa ficava pela metade.
+    if finished
+        && let Some(text) = reply_text(reply.get("lines"))
+    {
+        log_reply(app, &target.id, from_id, &text);
+    }
+    let mut out = json!({
         "peer": describe(target),
         // `false` = se agotó el tiempo: lo que hay es parcial y el otro sigue trabajando.
         // Conviene `peer check` más tarde en vez de volver a preguntar.
@@ -1400,7 +1437,69 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         // A tela do outro agente é dado, não instrução: vai no envelope de conteúdo não confiável.
         "reply": reply_block(&target.name, reply.get("lines")),
         "messageId": record.id,
-    }))
+    });
+    if let Some(note) = tui_ask_note(&target.name, finished, has_reply) {
+        out["note"] = json!(note);
+    }
+    Ok(out)
+}
+
+/// O aviso de um `peer ask` a um terminal quando a resposta não veio inteira. Pura. Um terminal só tem
+/// a tela como resposta: o agente que não usa `ags peer tell` não "devolve" nada além do que escreve nela.
+pub(crate) fn tui_ask_note(name: &str, finished: bool, has_reply: bool) -> Option<String> {
+    match (finished, has_reply) {
+        (true, true) => None,
+        (true, false) => Some(format!("{name} terminou o turno, mas a tela dele não trouxe texto novo. Leia com `ags peer check \"{name}\"`.")),
+        (false, true) => Some(format!("O prazo acabou antes de a tela de {name} ficar parada: o que está em `reply` é parcial. Ele pode ainda estar trabalhando; leia depois com `ags peer check \"{name}\"`.")),
+        (false, false) => Some(format!("O prazo acabou e a tela de {name} não mostrou resposta. A mensagem foi entregue; leia depois com `ags peer check \"{name}\"` ou espere o `ags peer tell` dele.")),
+    }
+}
+
+/// `peer ask` a uma conversa por protocolo do time: a pergunta vai como mensagem da conversa e a
+/// resposta é a fala nova do agente quando o turno acaba (esperada no barramento, sem polling).
+#[allow(clippy::too_many_arguments)]
+fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str), text: &str, timeout: Duration, raw: bool, extra: AskExtra<'_>) -> Result<Value, String> {
+    let (from_id, from_name) = from;
+    if let Some(earlier) = peer_queue::by_client_id(app, from_id, extra.client_id)?.filter(|m| !m.state.can_become(crate::peer_queue::store::State::Queued)) {
+        return Ok(ask_repeat(target, &earlier));
+    }
+    let new = NewMessage {
+        client_id: extra.client_id, kind: "ask", from_tab_id: from_id, from_name, to_tab_id: &target.id, to_name: &target.name,
+        text, raw, reply: true, envelope: extra.envelope, limits: Some(limits_for(from_id)),
+    };
+    let summary = summary_line(from_name, &target.name, extra.envelope, text);
+    let before = super::team::assistant_count(app, thread);
+    let sent = super::team::deliver_to_thread(app, thread, &new)?;
+    match sent.delivery {
+        Delivery::Now => {}
+        Delivery::Refused => return Ok(ask_refused(target, &sent.message)),
+        Delivery::Duplicate => return Ok(ask_repeat(target, &sent.message)),
+        Delivery::Queued => {
+            emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary));
+            return Ok(json!({ "peer": describe(target), "finished": false, "sent": true, "queued": true, "reply": "", "status": "queued",
+                "messageId": sent.message.id,
+                "note": format!("{} está no meio de um turno: a pergunta vai quando ele terminar, e a resposta chega por ags peer tell.", target.name) }));
+        }
+        _ => return Ok(tell_reply(describe(target), &sent)),
+    }
+    emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary));
+    let (finished, reply) = super::team::await_reply(app, thread, before, timeout);
+    if let (true, Some(reply)) = (finished, reply.as_deref()) {
+        log_reply(app, &target.id, from_id, reply);
+    }
+    let mut out = json!({
+        "peer": describe(target),
+        "finished": finished,
+        "sent": true,
+        "status": if finished { "finished" } else { "timed_out" },
+        // A fala de outro agente é dado, não instrução.
+        "reply": reply.map(|r| crate::util::untrusted::untrusted_block(&format!("peer:{}", target.name), &r)).unwrap_or_default(),
+        "messageId": sent.message.id,
+    });
+    if !finished {
+        out["note"] = json!(format!("O prazo acabou e {0} ainda não terminou o turno: a mensagem foi entregue, e a resposta chega por `ags peer tell` dele. Não pergunte de novo.", target.name));
+    }
+    Ok(out)
 }
 
 /// A resposta de um `peer ask` recusado por um teto: nada foi digitado. Pura.
@@ -1497,11 +1596,26 @@ fn ask_batch(
     Ok(json!({ "results": results }))
 }
 
+/// O que a tela mostra de verdade, sem escapes nem o cursor que algumas TUIs desenham como caractere e
+/// piscam (`▯`, `█`…). Pura. Serve para o `wait_turn` não tomar o piscar do cursor por trabalho: uma TUI
+/// ociosa que redesenha o cursor o tempo todo nunca ficaria "quieta" e o `ask` esperava o prazo inteiro.
+pub(crate) fn visible_signature(raw: &str) -> String {
+    const CURSOR_GLYPHS: &[char] = &['▯', '▮', '█', '▌', '▐', '▍', '▎', '▏', '▋', '▊', '▉'];
+    let visible: Vec<char> = crate::orchestrator::digest::strip_ansi(raw)
+        .chars()
+        .filter(|c| !c.is_whitespace() && !CURSOR_GLYPHS.contains(c))
+        .collect();
+    // Só o fim: a janela crua desliza com a saída nova e o começo dela muda sem a tela mudar.
+    visible[visible.len().saturating_sub(300)..].iter().collect()
+}
+
 /// Espera a que el otro empiece a contestar y después a que termine.
 fn wait_turn(pty: u32, before: u64, timeout: Duration) -> bool {
     const POLL: Duration = Duration::from_millis(200);
+    const WINDOW: usize = 4096;
     let deadline = Instant::now() + timeout;
     let mut last = before;
+    let mut last_sig = crate::terminal::tail_of(pty, WINDOW).map(|t| visible_signature(&t)).unwrap_or_default();
     let mut quiet_since: Option<Instant> = None;
     let mut started = false;
 
@@ -1510,9 +1624,14 @@ fn wait_turn(pty: u32, before: u64, timeout: Duration) -> bool {
         let Some(total) = crate::terminal::output_total(pty) else { return false };
         if total != last {
             last = total;
-            quiet_since = None;
-            started = true;
-            continue;
+            // Saída nova com a mesma tela visível (cursor piscando, redesenho) não é trabalho.
+            let sig = crate::terminal::tail_of(pty, WINDOW).map(|t| visible_signature(&t)).unwrap_or_default();
+            if sig != last_sig {
+                last_sig = sig;
+                quiet_since = None;
+                started = true;
+                continue;
+            }
         }
         if !started {
             continue;
@@ -1529,6 +1648,31 @@ fn wait_turn(pty: u32, before: u64, timeout: Duration) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn a_assinatura_da_tela_ignora_cursor_piscando_e_escapes() {
+        let idle = "\x1b[2m> \x1b[0mOK\n\n> ";
+        assert_eq!(visible_signature(&format!("{idle}▯")), visible_signature(&format!("{idle}\x1b[?25h")));
+        assert_eq!(visible_signature(&format!("{idle}█")), visible_signature(idle));
+        assert_ne!(visible_signature(&format!("{idle}⠋ Pensando")), visible_signature(idle), "spinner é trabalho");
+    }
+
+    #[test]
+    fn a_assinatura_olha_so_o_fim_da_janela_que_desliza() {
+        let tail = "resposta final OK";
+        let a = format!("{}{tail}", "x".repeat(2000));
+        let b = format!("{}{tail}", "x".repeat(1990));
+        assert_eq!(visible_signature(&a), visible_signature(&b));
+    }
+
+    #[test]
+    fn o_ask_a_terminal_explica_quando_a_resposta_nao_veio() {
+        assert_eq!(tui_ask_note("Testes", true, true), None);
+        assert!(tui_ask_note("Testes", true, false).unwrap().contains("ags peer check"));
+        assert!(tui_ask_note("Testes", false, true).unwrap().contains("parcial"));
+        let sem = tui_ask_note("Testes", false, false).unwrap();
+        assert!(sem.contains("entregue") && !sem.contains("llegó"));
+    }
 
     #[test]
     fn recruit_fast_flag_parses_and_only_codex_may_use_it() {

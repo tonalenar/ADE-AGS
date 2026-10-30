@@ -7,6 +7,7 @@ mod device;
 mod dtu;
 pub mod hid;
 mod kit;
+mod purple;
 pub mod screen;
 mod slim;
 pub mod view;
@@ -15,6 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::simulator::model::{self, Device};
+
+pub use purple::orient;
 
 /// Quanto esperar a tela aparecer depois do boot (o launchd sobe antes da porta de IO dela).
 const SCREEN_WAIT: Duration = Duration::from_secs(60);
@@ -79,7 +82,11 @@ pub fn connect(udid: &str) -> Result<(screen::Screen, Arc<hid::Hid>), String> {
 /// Um toque em (x, y) pontos do iOS: desce e sobe.
 pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
     let (screen, hid) = connect(udid)?;
-    let ratio = model::point_ratio(x, y, screen.points())?;
+    // Os pontos são os da tela como se vê (os do `shot`, que já sai em pé): em paisagem, voltam para a
+    // superfície em retrato, que é a do HID.
+    let orientation = crate::simulator::ops::orientation(udid);
+    let ratio = model::point_ratio(x, y, model::oriented_size(screen.points(), orientation))?;
+    let ratio = model::native_ratio(ratio, orientation);
     hid.touch(ratio, hid::Phase::Down)?;
     std::thread::sleep(Duration::from_millis(60));
     hid.touch(ratio, hid::Phase::Up)
@@ -88,9 +95,12 @@ pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
 /// Desliza de um ponto a outro em `ms` milissegundos (pontos do iOS).
 pub fn swipe(udid: &str, from: (f64, f64), to: (f64, f64), ms: u64) -> Result<(), String> {
     let (screen, hid) = connect(udid)?;
-    let size = screen.points();
-    let a = model::point_ratio(from.0, from.1, size)?;
-    let b = model::point_ratio(to.0, to.1, size)?;
+    // Como em `tap`: pontos da tela em pé → proporção na superfície em retrato (a conta é linear, então os
+    // passos intermediários também caem certos).
+    let orientation = crate::simulator::ops::orientation(udid);
+    let size = model::oriented_size(screen.points(), orientation);
+    let a = model::native_ratio(model::point_ratio(from.0, from.1, size)?, orientation);
+    let b = model::native_ratio(model::point_ratio(to.0, to.1, size)?, orientation);
     // Passos de ~16 ms: o Indigo descarta arrasto acima de 60 por segundo.
     let steps = (ms / 16).clamp(4, 120) as u32;
     let points = model::swipe_points(a, b, steps);

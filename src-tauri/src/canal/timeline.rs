@@ -30,6 +30,28 @@ pub enum ItemKind {
     Assistant,
     Tool,
     TurnEnd,
+    /// O trecho de raciocínio que o agente expõe (o `thinking` do Claude, o resumo do Codex).
+    Reasoning,
+    /// Os tokens de uma chamada ao modelo (Claude: uma mensagem; Codex: um `token_count`), para a
+    /// conta do turno. A tela não desenha: só soma.
+    Usage,
+}
+
+/// O estado de um passo do plano do agente (TodoWrite do Claude, `update_plan` do Codex).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum StepStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
+/// Um passo do plano.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlanStep {
+    pub text: String,
+    pub status: StepStatus,
 }
 
 /// Que tipo de ferramenta, para o ícone e o verbo da linha ("Leu", "Editou", "Rodou").
@@ -103,19 +125,66 @@ pub struct Item {
     pub interrupted: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub duration_ms: Option<i64>,
+    /// O plano publicado (ferramenta `todo`), na ordem.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan: Option<Vec<PlanStep>>,
+    /// Os tokens de um item `usage`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u64>,
 }
 
 impl Item {
     pub(crate) fn new(kind: ItemKind, id: String, at: Option<i64>) -> Item {
         Item {
             kind, id, at, text: None, name: None, tool: None, label: None, path: None, added: None, removed: None,
-            status: None, output: None, question: None, interrupted: None, duration_ms: None,
+            status: None, output: None, question: None, interrupted: None, duration_ms: None, plan: None, tokens: None,
         }
     }
 
     fn message(kind: ItemKind, id: String, at: Option<i64>, text: &str) -> Item {
         Item { text: Some(clip(text, TEXT_MAX)), ..Item::new(kind, id, at) }
     }
+
+    /// Um trecho de raciocínio, cortado em [`REASONING_MAX`]. `None` para texto vazio.
+    pub fn reasoning(id: String, at: Option<i64>, text: &str) -> Option<Item> {
+        (!text.trim().is_empty()).then(|| Item { text: Some(clip(text, REASONING_MAX)), ..Item::new(ItemKind::Reasoning, id, at) })
+    }
+
+    /// Os tokens de uma chamada ao modelo.
+    pub fn usage(id: String, at: Option<i64>, tokens: u64) -> Item {
+        Item { tokens: Some(tokens), ..Item::new(ItemKind::Usage, id, at) }
+    }
+}
+
+/// O tamanho máximo de um trecho de raciocínio (a tela mostra só o fim dele).
+const REASONING_MAX: usize = 2_000;
+
+/// Os passos de um plano: os `todos` do TodoWrite (`content`, `status`) ou o `plan` do Codex
+/// (`step`, `status` em `in_progress` ou `inProgress`). `None` sem lista. Pura.
+pub fn plan_steps(raw: Option<&Value>) -> Option<Vec<PlanStep>> {
+    let list = raw?.as_array()?;
+    let steps = list
+        .iter()
+        .filter_map(|s| {
+            let text = s.get("content").or_else(|| s.get("step")).or_else(|| s.get("text")).and_then(Value::as_str)?;
+            let status = match s.get("status").and_then(Value::as_str).unwrap_or("") {
+                "completed" | "done" => StepStatus::Completed,
+                "in_progress" | "inProgress" => StepStatus::InProgress,
+                _ => StepStatus::Pending,
+            };
+            Some(PlanStep { text: clip(text, 300), status })
+        })
+        .collect();
+    Some(steps)
+}
+
+/// Os tokens de um `usage` do Claude: entrada, cache (escrito e lido) e saída. `None` sem `usage`
+/// ou com tudo zero. Pura.
+pub fn claude_tokens(usage: Option<&Value>) -> Option<u64> {
+    let usage = usage?;
+    let n = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let total = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens") + n("output_tokens");
+    (total > 0).then_some(total)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -134,6 +203,10 @@ pub struct Builder {
     /// Codex: quando o turno começou, para a duração no fim.
     turn_started: Option<i64>,
     seq: usize,
+    /// Claude: o item `usage` de cada mensagem (as linhas de uma mesma mensagem repetem o `usage`).
+    usage_of: HashMap<String, usize>,
+    /// Codex: o último total visto, para não contar duas vezes um `token_count` repetido.
+    codex_total: Option<u64>,
 }
 
 impl Builder {
@@ -246,9 +319,29 @@ impl Builder {
     }
 
     fn claude_assistant(&mut self, line: &Value, at: Option<i64>, uuid: Option<&str>) {
+        if let (Some(message_id), Some(tokens)) = (
+            line.pointer("/message/id").and_then(Value::as_str).filter(|id| !id.is_empty()),
+            claude_tokens(line.pointer("/message/usage")),
+        ) {
+            match self.usage_of.get(message_id) {
+                // A última linha da mensagem traz a saída completa.
+                Some(&index) => self.items[index].tokens = Some(tokens),
+                None => {
+                    self.usage_of.insert(message_id.to_string(), self.items.len());
+                    self.items.push(Item::usage(format!("usage:{message_id}"), at, tokens));
+                }
+            }
+        }
         let Some(blocks) = line.pointer("/message/content").and_then(Value::as_array) else { return };
         for block in blocks {
             match block.get("type").and_then(Value::as_str) {
+                Some("thinking") => {
+                    let text = block.get("thinking").and_then(Value::as_str).unwrap_or("");
+                    if !text.trim().is_empty() {
+                        let id = self.next_id(uuid);
+                        self.items.extend(Item::reasoning(id, at, text));
+                    }
+                }
                 Some("text") => {
                     if let Some(text) = block.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
                         let id = self.next_id(uuid);
@@ -284,6 +377,26 @@ impl Builder {
                     if let Some(text) = payload.get("message").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
                         let id = self.next_id(None);
                         self.items.push(Item::message(ItemKind::Assistant, id, at, text));
+                    }
+                }
+                "agent_reasoning" => {
+                    let text = payload.get("text").and_then(Value::as_str).unwrap_or("");
+                    if !text.trim().is_empty() {
+                        let id = self.next_id(None);
+                        self.items.extend(Item::reasoning(id, at, text));
+                    }
+                }
+                "token_count" => {
+                    let info = payload.get("info").filter(|i| !i.is_null());
+                    let last = info.and_then(|i| i.pointer("/last_token_usage/total_tokens")).and_then(Value::as_u64);
+                    let total = info.and_then(|i| i.pointer("/total_token_usage/total_tokens")).and_then(Value::as_u64);
+                    // O mesmo total de novo é o mesmo aviso repetido (o Codex reescreve o contador).
+                    if let Some(last) = last.filter(|n| *n > 0)
+                        && (total.is_none() || total != self.codex_total)
+                    {
+                        self.codex_total = total;
+                        let id = self.next_id(None);
+                        self.items.push(Item::usage(id, at, last));
                     }
                 }
                 "task_complete" | "turn_aborted" => {
@@ -376,7 +489,7 @@ pub fn claude_tool(id: &str, name: &str, input: &Value, at: Option<i64>) -> Item
         "Task" | "Agent" => Item { label: field("description").map(|d| first_line(d, 160)), ..tool_item(id, name, ToolKind::Task, at) },
         "TodoWrite" => {
             let n = input.get("todos").and_then(Value::as_array).map(Vec::len).unwrap_or(0);
-            Item { label: Some(n.to_string()), ..tool_item(id, name, ToolKind::Todo, at) }
+            Item { label: Some(n.to_string()), plan: plan_steps(input.get("todos")), ..tool_item(id, name, ToolKind::Todo, at) }
         }
         "AskUserQuestion" => Item { question: question_of(input), ..tool_item(id, name, ToolKind::Question, at) },
         _ => Item { label: Some(first_line(name, 120)), ..tool_item(id, name, ToolKind::Other, at) },
@@ -416,8 +529,9 @@ pub fn codex_tool(id: &str, name: &str, payload: &Value, at: Option<i64>) -> Ite
         return item;
     }
     if name == "update_plan" {
-        let n = args.as_ref().and_then(|a| a.get("plan")).and_then(Value::as_array).map(Vec::len).unwrap_or(0);
-        return Item { label: Some(n.to_string()), ..tool_item(id, name, ToolKind::Todo, at) };
+        let plan = args.as_ref().and_then(|a| a.get("plan"));
+        let n = plan.and_then(Value::as_array).map(Vec::len).unwrap_or(0);
+        return Item { label: Some(n.to_string()), plan: plan_steps(plan), ..tool_item(id, name, ToolKind::Todo, at) };
     }
     if name == "request_user_input" {
         return Item { question: args.as_ref().and_then(question_of), ..tool_item(id, name, ToolKind::Question, at) };

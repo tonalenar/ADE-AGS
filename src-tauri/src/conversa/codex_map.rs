@@ -8,7 +8,7 @@
 use serde_json::{json, Value};
 
 use crate::canal::event::{clip, first_line};
-use crate::canal::timeline::{count_lines, Item, ItemKind, ToolKind, ToolStatus};
+use crate::canal::timeline::{count_lines, plan_steps, Item, ItemKind, ToolKind, ToolStatus};
 
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;
@@ -48,8 +48,9 @@ fn diff_stats(diff: &str) -> (u32, u32) {
 }
 
 /// Os itens da timeline de um `ThreadItem`. Uma edição vira um item por arquivo (o cartão de
-/// arquivos alterados e a linha de cada edição são por arquivo). O que a timeline não mostra
-/// (raciocínio, compactação, revisão) não vira nada.
+/// arquivos alterados e a linha de cada edição são por arquivo). O raciocínio vira o item
+/// `reasoning` (o resumo, ou o texto quando não há resumo); o que a timeline não mostra
+/// (compactação, revisão) não vira nada.
 pub fn items_of(item: &Value, at: Option<i64>) -> Vec<Item> {
     let Some(id) = str_of(item, "id").map(str::to_string) else { return Vec::new() };
     match str_of(item, "type").unwrap_or("") {
@@ -114,6 +115,14 @@ pub fn items_of(item: &Value, at: Option<i64>) -> Vec<Item> {
             it.status = Some(ToolStatus::Done);
             vec![it]
         }
+        "reasoning" => {
+            let join = |key: &str| -> String {
+                item.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join("\n\n")
+            };
+            let summary = join("summary");
+            let text = if summary.trim().is_empty() { join("content") } else { summary };
+            Item::reasoning(id, at, &text).into_iter().collect()
+        }
         "plan" => {
             let text = str_of(item, "text").unwrap_or("");
             if text.trim().is_empty() {
@@ -127,6 +136,93 @@ pub fn items_of(item: &Value, at: Option<i64>) -> Vec<Item> {
         }
         _ => Vec::new(),
     }
+}
+
+/// De que é um pedaço de texto que chega antes do item completo (evento `delta` da janela).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DeltaKind {
+    /// A resposta do agente.
+    Assistant,
+    /// O raciocínio que o agente expõe (o resumo do Codex, o `thinking` do Claude).
+    Reasoning,
+}
+
+impl DeltaKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Assistant => "assistant",
+            Self::Reasoning => "reasoning",
+        }
+    }
+}
+
+/// Um pedaço de texto do Codex chegando: o id do item que vai fechar o texto, o pedaço e de que
+/// é. Vem de `item/agentMessage/delta` (a resposta) e de `item/reasoning/summaryTextDelta` (o
+/// resumo do raciocínio). Uma parte nova do resumo (`item/reasoning/summaryPartAdded` com índice
+/// maior que 0) vira a linha em branco que o item final põe entre as partes (`items_of`). O
+/// `item/reasoning/textDelta` (o raciocínio cru) fica de fora: o item final só usa o cru quando
+/// não há resumo, e misturar os dois daria um rascunho diferente do item. Pura.
+pub fn delta_of(method: &str, params: &Value) -> Option<(String, String, DeltaKind)> {
+    let item_id = str_of(params, "itemId").filter(|id| !id.is_empty())?.to_string();
+    match method {
+        "item/agentMessage/delta" => {
+            let delta = str_of(params, "delta").filter(|d| !d.is_empty())?;
+            Some((item_id, delta.to_string(), DeltaKind::Assistant))
+        }
+        "item/reasoning/summaryTextDelta" => {
+            let delta = str_of(params, "delta").filter(|d| !d.is_empty())?;
+            Some((item_id, delta.to_string(), DeltaKind::Reasoning))
+        }
+        "item/reasoning/summaryPartAdded" if params.get("summaryIndex").and_then(Value::as_u64).is_some_and(|i| i > 0) => {
+            Some((item_id, "\n\n".to_string(), DeltaKind::Reasoning))
+        }
+        _ => None,
+    }
+}
+
+/// O plano do turno (`turn/plan/updated`): um item `todo` por turno, com o mesmo id a cada
+/// atualização (a timeline troca no lugar). `None` sem turno.
+pub fn plan_item(params: &Value, at: Option<i64>) -> Option<Item> {
+    let turn = str_of(params, "turnId").filter(|t| !t.is_empty())?;
+    let plan = plan_steps(params.get("plan")).unwrap_or_default();
+    let mut it = tool(format!("plan:{turn}"), at, ToolKind::Todo, "update_plan");
+    it.label = Some(plan.len().to_string());
+    it.output = str_of(params, "explanation").filter(|e| !e.trim().is_empty()).map(|e| clip(e, OUTPUT_MAX));
+    it.status = Some(ToolStatus::Done);
+    it.plan = Some(plan);
+    Some(it)
+}
+
+/// Os tokens do turno em andamento a partir dos avisos `thread/tokenUsage/updated`, que trazem o
+/// total da sessão e o da última chamada. A base é o total antes da primeira chamada do turno
+/// (`total - last` no primeiro aviso dele); o turno é o total menos a base.
+#[derive(Debug, Default)]
+pub struct TurnTokens {
+    base: Option<(String, u64)>,
+}
+
+impl TurnTokens {
+    /// Os tokens do turno `turn` depois deste aviso. Pura no estado.
+    pub fn update(&mut self, turn: &str, total: u64, last: u64) -> u64 {
+        let base = match &self.base {
+            Some((t, base)) if t == turn => *base,
+            _ => {
+                let base = total.saturating_sub(last);
+                self.base = Some((turn.to_string(), base));
+                base
+            }
+        };
+        total.saturating_sub(base)
+    }
+}
+
+/// O item `usage` do turno (um por turno, trocado no lugar) a partir de um `thread/tokenUsage/updated`.
+pub fn usage_item(tokens: &mut TurnTokens, params: &Value, at: Option<i64>) -> Option<Item> {
+    let turn = str_of(params, "turnId").filter(|t| !t.is_empty())?;
+    let total = params.pointer("/tokenUsage/total/totalTokens").and_then(Value::as_u64)?;
+    let last = params.pointer("/tokenUsage/last/totalTokens").and_then(Value::as_u64).unwrap_or(0);
+    let n = tokens.update(turn, total, last);
+    (n > 0).then(|| Item::usage(format!("usage:{turn}"), at, n))
 }
 
 /// O fim de um turno (`Turn` com status final). `None` enquanto está em andamento.

@@ -74,3 +74,14 @@ pub fn chat_thread_rename(db: State<'_, DbConnection>, thread_id: String, title:
 pub fn chat_thread_settle(db: State<'_, DbConnection>, thread_id: String, settled: bool) -> Result<(), String> {
     api::settle(&db, &thread_id, settled)
 }
+
+/// O aviso do sistema de um pedido de permissão de um agente do chat (a caixa "Permissões"). O
+/// mesmo mecanismo das missões (`notifier::show_custom`): só com o app sem foco e com os avisos
+/// ligados (`notifications.enabled`). O texto vem da janela, já no idioma da pessoa. Devolve se o
+/// aviso apareceu.
+#[tauri::command]
+pub fn chat_permission_notify(app: AppHandle, title: String, body: String) -> Result<bool, String> {
+    let title: String = title.chars().take(120).collect();
+    let body: String = body.chars().take(300).collect();
+    Ok(crate::notifier::show_custom(&app, &title, &body))
+}

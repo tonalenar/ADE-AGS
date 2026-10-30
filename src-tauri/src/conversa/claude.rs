@@ -218,6 +218,8 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     if let Some(env) = env {
         cmd.envs(env);
     }
+    // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
+    cmd.envs(crate::chat_team::env::thread_env(&row.id));
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Claude: {e}"))?;
@@ -393,11 +395,12 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
     match out {
         Out::Item(item) => {
             let turn = begin_turn(app, db, session);
-            save_items(app, db, thread_id, Some(&turn), vec![item]);
+            save_items(app, db, thread_id, Some(&turn), vec![*item]);
         }
-        Out::Delta { item_id, delta } => {
+        // O texto chegando vai só à janela: o banco grava o item completo (a linha `assistant`).
+        Out::Delta { item_id, delta, kind } => {
             begin_turn(app, db, session);
-            emit(app, thread_id, "delta", json!({ "itemId": item_id, "delta": delta }));
+            emit(app, thread_id, "delta", json!({ "itemId": item_id, "delta": delta, "kind": kind.as_str() }));
         }
         Out::Mode(mode) => {
             if session.alive()

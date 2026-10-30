@@ -10,7 +10,7 @@ use crate::canal::timeline::Item;
 use crate::database::DbConnection;
 
 use super::store::{self, RequestRow, ThreadRow, Tuning};
-use super::{claude, codex, codex_map};
+use super::{agy, claude, codex, codex_map, opencode};
 
 /// Quem fala com o agente de uma conversa por protocolo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +19,10 @@ pub enum Engine {
     Codex,
     /// `claude -p` em stream-json (`claude.rs`).
     Claude,
+    /// `opencode acp`, o Agent Client Protocol por stdio (`opencode.rs`).
+    OpenCode,
+    /// `agy --print --output-format stream-json`, um processo por turno (`agy.rs`).
+    Antigravity,
 }
 
 impl Engine {
@@ -26,13 +30,16 @@ impl Engine {
         match agent_id {
             "codex" => Some(Engine::Codex),
             "claude-code" => Some(Engine::Claude),
+            "opencode" => Some(Engine::OpenCode),
+            "antigravity" => Some(Engine::Antigravity),
             _ => None,
         }
     }
 
-    /// Os acessos que o agente aceita. O Plano é um modo de permissão só do Claude.
+    /// Os acessos que o agente aceita. O Plano é um modo do Claude (permissão), do OpenCode (o agente
+    /// `plan`) e do Antigravity (`--mode plan`); o Codex não tem.
     pub fn accepts(self, access: &str) -> bool {
-        matches!(access, "ask" | "edits" | "safe" | "full") || (self == Engine::Claude && access == "plan")
+        matches!(access, "ask" | "edits" | "safe" | "full") || (self != Engine::Codex && access == "plan")
     }
 }
 
@@ -51,13 +58,19 @@ fn engine_of(row: &ThreadRow) -> Result<Engine, String> {
 
 /// O turno em andamento de uma conversa, em qualquer um dos agentes. `None` = sem processo aberto.
 fn live_turn(thread_id: &str) -> Option<Option<String>> {
-    codex::get(thread_id).map(|s| s.turn()).or_else(|| claude::get(thread_id).map(|s| s.turn()))
+    codex::get(thread_id)
+        .map(|s| s.turn())
+        .or_else(|| claude::get(thread_id).map(|s| s.turn()))
+        .or_else(|| opencode::get(thread_id).map(|s| s.turn()))
+        .or_else(|| agy::get(thread_id).map(|s| s.turn()))
 }
 
 /// Fecha o processo do agente da conversa, qualquer que seja.
 fn close(thread_id: &str) {
     codex::close(thread_id);
     claude::close(thread_id);
+    opencode::close(thread_id);
+    agy::close(thread_id);
 }
 
 fn db_err(e: impl ToString) -> String {
@@ -103,7 +116,7 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
 
 fn access_error(engine: Engine, access: &str) -> String {
     match engine {
-        Engine::Claude => format!("Acesso inválido: {access} (ask, edits, safe, full ou plan)"),
+        Engine::Claude | Engine::OpenCode | Engine::Antigravity => format!("Acesso inválido: {access} (ask, edits, safe, full ou plan)"),
         Engine::Codex => format!("Acesso inválido: {access} (ask, edits, safe ou full)"),
     }
 }
@@ -116,9 +129,17 @@ pub fn announce(app: &AppHandle, row: &ThreadRow) {
 /// Manda uma mensagem: começa um turno, ou entra no turno em andamento (`turn/steer`).
 pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> Result<(), String> {
     let row = thread(db, thread_id)?;
-    if engine_of(&row)? == Engine::Claude {
-        let session = claude::session(app, db, thread_id).await?;
-        return claude::send_user(app, db, &session, text);
+    match engine_of(&row)? {
+        Engine::Claude => {
+            let session = claude::session(app, db, thread_id).await?;
+            return claude::send_user(app, db, &session, text);
+        }
+        Engine::OpenCode => {
+            let session = opencode::session(app, db, thread_id).await?;
+            return opencode::send_user(app, db, &session, text);
+        }
+        Engine::Antigravity => return agy::send(app, db, thread_id, text),
+        Engine::Codex => {}
     }
     let session = codex::session(app, db, thread_id).await?;
     let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
@@ -186,6 +207,13 @@ pub async fn interrupt(thread_id: &str) -> Result<(), String> {
     if let Some(session) = claude::get(thread_id) {
         return claude::interrupt(&session).await;
     }
+    if let Some(session) = opencode::get(thread_id) {
+        return opencode::interrupt(&session).await;
+    }
+    if agy::get(thread_id).is_some() {
+        agy::interrupt(thread_id);
+        return Ok(());
+    }
     let Some(session) = codex::get(thread_id) else { return Ok(()) };
     let (Some(remote), Some(turn)) = (session.remote(), session.turn()) else { return Ok(()) };
     session.request("turn/interrupt", json!({ "threadId": remote, "turnId": turn })).await.map(|_| ())
@@ -204,6 +232,8 @@ pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str
     let rpc_id: Value = serde_json::from_str(&row.rpc_id).map_err(db_err)?;
     if let Some(session) = claude::get(&row.thread_id) {
         claude::answer(app, db, &session, &rpc_id, row.item_id.as_deref(), choice)?;
+    } else if let Some(session) = opencode::get(&row.thread_id) {
+        opencode::answer(&session, &rpc_id, row.item_id.as_deref(), &row.options, choice)?;
     } else {
         let session = codex::get(&row.thread_id).ok_or("O agente desta conversa já fechou")?;
         session.respond(rpc_id, codex_map::answer_of(&row.kind, choice, &row.options))?;
@@ -219,6 +249,10 @@ pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str
 /// Troca modelo, esforço ou acesso (no Claude, o Plano também é um acesso).
 /// - Codex: modelo e esforço valem no próximo turno; o acesso muda o sandbox, que é da sessão: com
 ///   o agente parado, a sessão fecha e reabre (retomando a thread) na próxima mensagem.
+/// - OpenCode: o acesso vira política de permissões no ambiente do processo, e modelo e esforço
+///   são opções da sessão: qualquer troca fecha a sessão (no fim do turno) e a próxima mensagem a
+///   retoma (`session/resume`).
+/// - Antigravity: cada turno é um processo; a troca vale no turno seguinte.
 /// - Claude: tudo é flag do processo, então qualquer troca fecha a sessão (no fim do turno, se há
 ///   um) e a próxima mensagem a retoma (`--resume`) com as flags novas.
 pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort: Option<String>, access: String) -> Result<ThreadRow, String> {
@@ -243,6 +277,13 @@ pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort:
                 session.retire();
             }
         }
+        // O OpenCode lê as permissões do ambiente e o resto na abertura: qualquer troca reabre.
+        Engine::OpenCode if changed => {
+            if let Some(session) = opencode::get(thread_id) {
+                session.retire();
+            }
+        }
+        // O Antigravity não tem processo entre os turnos: o turno seguinte lê a conversa do banco.
         _ => {}
     }
     Ok(row)

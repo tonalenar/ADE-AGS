@@ -96,7 +96,8 @@ pub(super) fn chat_show(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let last = arg_u64_checked(args, "last")?.unwrap_or(SHOW_DEFAULT) as usize;
     let db = db(app)?;
     let row = api::thread(&db, &thread)?;
-    let items = api::items(&db, &thread)?;
+    // Os tokens de cada chamada são só para a conta do turno na tela: não entram na conversa.
+    let items: Vec<_> = api::items(&db, &thread)?.into_iter().filter(|i| i.kind != ItemKind::Usage).collect();
     let from = items.len().saturating_sub(last);
     Ok(json!({
         "thread": row,

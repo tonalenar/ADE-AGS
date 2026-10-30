@@ -94,6 +94,19 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer disconnect <a> <b>                     Desconecta os dois
   peer role <nome> <papel> [--subagent]       Define o papel de um agente da equipe (os sem papel esperam por isso)
 
+TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por protocolo); as cordas do canvas autorizam
+  team list                                   O seu time: orquestrador, integrantes, papel, política, branch e estado
+  team create [--title \"...\"]                 Faz do seu canvas um time (só quem a pessoa coroou); quem já está
+                                              ligado a você entra junto, supervisionado
+  Só o orquestrador do time:
+  team link <nome> [--role <papel>]           Liga ao time uma conversa da sua pasta (aba ou conversa por protocolo):
+               [--policy read|ask]            · cria a corda, manda o papel; papéis: frontend (UI), backend, qa (testes),
+               [--branch team/ui]               reviewer, researcher, devops, generalist. Política: no máximo ask —
+                                                só a pessoa aumenta (painel Time)
+  team unlink <nome>                          Tira do time (a corda sai; a conversa continua aberta)
+  team role <nome> <papel> [--policy read]    Troca o papel (e só baixa a política)
+  Delegue com peer tell/ask/deliver, como numa missão: as conversas por protocolo recebem como mensagem
+
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
   fix list <escopo>                           Entregas e quantas rodadas cada uma usou
   fix decide <escopo> <trabalho> <ação>       accept | extra | abort
@@ -120,6 +133,8 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   device open <dispositivo> <url>             Abre a URL no Safari do aparelho (localhost funciona)
   device button <dispositivo> home|lock|side|siri   Aperta um botão físico
   device say <dispositivo> \"mensagem\"         Responde na conversa do simulador (a pessoa e os outros agentes veem)
+  Aparelhos do painel do modo chat (id chat:<udid|serial>) também aparecem em `devices`, para qualquer aba;
+  sem a chave \"Permitir que agentes controlem dispositivos\" da pessoa, só shot e tree
 
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
   portals                                     Os portais que você controla, cada um com seu estado: pronto, carregando, sem runtime,
@@ -174,8 +189,19 @@ NOTAS DO CANVAS — as conectadas a este terminal (orquestrador: as da equipe)
   design artboard add <designId> <title> --page <name> --file <html>
   design update <artboardId> --file <html> [--expected-version <n>]
   design comment <artboardId> <text> [--author user|agent] [--selector <css>]
+                 [--anchor <sel>] [--point-x 0..1 --point-y 0..1] [--parent-id <commentId>]
   design approve|reject <artboardId> | approve all <designId>
   design revert <artboardId> --version <n>
+  design view [<designId>]                    O que a pessoa está vendo na tela de Design
+                                              (sem id: o design aberto mais recente)
+  design open <designId> [--artboard <id>] [--page <id>]
+                                              Abre a tela de Design (no chat: painel direito)
+  design artboard duplicate <artboardId> [--x <n> --y <n>]
+  design artboard delete <artboardId>
+  design artboard resize <artboardId> [--width <n> --height <n> --x <n> --y <n> --radius <n>]
+                                              Moldura só: não cria versão nem tira a aprovação
+  design page rename <pageId> <name> | page delete <pageId>   (a última página fica)
+  design note add <pageId> \"texto\" --x <n> --y <n> [--w <n> --h <n> --color <cor>]
   notes                                       As notas que você alcança
   note create [\"texto\"] [--name <n>]          Cria uma nota ao seu lado, já conectada
               [--stack <nota>]                · em vez de ao lado: dentro da pilha dessa nota (dividem o lugar)
@@ -190,13 +216,14 @@ OBSERVAR TABS (modo push — evita o polling)
   watch list                                  Tabs observadas e o limite vigente
   watch wait [--timeout 300] [--max 20]       Espera até alguma ter novidades
 
-CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex e Claude Code)
+CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code, OpenCode e Antigravity)
   chat list [--all]                           Conversas ativas (--all: também as concluídas)
   chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
-           [--agent codex|claude-code] [--model ...] [--effort ...] [--title ...] [--account <id>]
+           [--agent codex|claude-code|opencode|antigravity] [--model ...] [--effort ...] [--title ...] [--account <id>]
            [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
-                                              plan: só no Claude Code (planeja antes de editar)
-  chat send <id> \"...\"                        Manda outra mensagem (no meio de um turno, entra nele)
+                                              plan: todos menos o Codex (planeja antes de editar);
+                                              antigravity: sem aprovação (o que pediria é negado)
+  chat send <id> \"...\"                        Manda outra mensagem (Codex e Claude Code: entra no turno; OpenCode e Antigravity: fica na fila)
   chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
   chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente
   chat stop <id>                              Interrompe o turno em andamento
@@ -707,7 +734,7 @@ impl CliError {
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 /// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 13] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
+    const GROUPS: [&str; 14] = ["peer.", "team.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }
@@ -777,6 +804,16 @@ fn design_defaults(command: &str, mut args: Value, cwd: &std::path::Path) -> Val
     if matches!(command, "design.comment" | "design.comment.add") && args.get("author").is_none() {
         args["author"] = json!("agent");
     }
+    // `design open --page <id> --artboard <id>`: aqui `--page` é um id, não um nome.
+    if command == "design.open" {
+        if let Some(map) = args.as_object_mut() {
+            for (flag, key) in [("page", "pageId"), ("artboard", "artboardId")] {
+                if let Some(v) = map.remove(flag) {
+                    map.entry(key).or_insert(v);
+                }
+            }
+        }
+    }
     if command == "design.artboard.add" && args.get("page").is_some() && args.get("designId").is_none() {
         if let Some(id) = args.as_object_mut().and_then(|a| a.remove("pageId")) {
             args["designId"] = id;
@@ -787,7 +824,7 @@ fn design_defaults(command: &str, mut args: Value, cwd: &std::path::Path) -> Val
 
 fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
     let action = args.get(1).ok_or("Missing design action")?;
-    let nested = matches!(action.as_str(), "page" | "artboard")
+    let nested = matches!(action.as_str(), "page" | "artboard" | "note")
         || (action == "comment" && args.get(2).is_some_and(|v| matches!(v.as_str(), "add" | "resolve")))
         || (action == "approve" && args.get(2).is_some_and(|v| v == "all"));
     if nested {
@@ -843,6 +880,11 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "design.update" | "design.artboard.update" | "design.revert" | "design.artboard.revert" | "design.approve" | "design.artboard.approve" | "design.reject" | "design.artboard.reject" => &["artboardId"],
         "design.comment" | "design.comment.add" => &["artboardId", "text"],
         "design.comment.resolve" => &["commentId"],
+        "design.view" | "design.open" => &["designId"],
+        "design.artboard.duplicate" | "design.artboard.delete" | "design.artboard.resize" => &["artboardId"],
+        "design.page.rename" => &["pageId", "name"],
+        "design.page.delete" => &["pageId"],
+        "design.note.add" => &["pageId", "text"],
         "skill.install" => &["skill"],
         "skill.show" | "skill.edit" => &["skill"],
         // `ags skill new mi-skill` en vez de `--name mi-skill`.
@@ -867,6 +909,11 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
         "peer.role" => &["to", "role"],
+        // `ags team link Codex --role ui`, `ags team role Codex qa`.
+        "team.link" | "team.unlink" => &["to"],
+        "team.role" => &["to", "role"],
+        "team.create" => &["title"],
+        "team.list" => &[],
         "ci.watch" => &["pr"],
         // `ags peer deliver --file entrega.json` (ao orquestrador) ou `ags peer deliver QA --file ...`.
         "peer.deliver" => &["to", "text"],

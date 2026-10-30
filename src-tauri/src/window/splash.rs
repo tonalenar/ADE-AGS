@@ -54,6 +54,10 @@ pub fn splash_config(main: Option<&tauri::utils::config::WindowConfig>) -> Optio
     config.resizable = false;
     config.maximizable = false;
     config.decorations = false;
+    // No macOS a principal vem com a barra `Overlay` e o título escondido (tauri.macos.conf.json); a janelinha
+    // não tem moldura nem semáforos.
+    config.title_bar_style = tauri::TitleBarStyle::Visible;
+    config.hidden_title = false;
     config.transparent = true;
     config.shadow = false;
     config.center = true;

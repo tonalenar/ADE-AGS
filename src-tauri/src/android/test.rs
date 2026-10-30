@@ -100,3 +100,32 @@ fn fechar_um_app_rejeita_o_mesmo_pacote_que_abrir() {
     assert!(close("x", "").is_err());
     assert!(check_package("com.android.chrome").is_ok());
 }
+
+#[test]
+fn a_info_diz_modelo_api_e_se_e_emulador() {
+    let pixel = info_from("emulator-5554", "sdk_gphone64_arm64\n", "35\n", "\n");
+    assert_eq!(pixel, AndroidInfo { model: "sdk_gphone64_arm64".into(), api: Some(35), emulator: true });
+    let phone = info_from("R58M123ABC", "SM-S918B", "34", "");
+    assert!(!phone.emulator);
+    assert!(info_from("127.0.0.1:5555", "x", "", "1").emulator, "ro.kernel.qemu=1 também é emulador");
+    assert_eq!(info_from("X", "x", "abc", "").api, None);
+}
+
+#[test]
+fn girar_alterna_entre_retrato_e_paisagem() {
+    assert_eq!(parse_rotation("0\n"), 0);
+    assert_eq!(parse_rotation("1"), 1);
+    assert_eq!(parse_rotation("null"), 0);
+    assert_eq!(parse_rotation("7"), 0);
+    assert_eq!(toggled_rotation(0), 1);
+    assert_eq!(toggled_rotation(1), 0);
+    assert_eq!(toggled_rotation(3), 0);
+}
+
+#[test]
+fn o_logcat_pede_200_linhas_por_padrao_e_no_maximo_2000() {
+    assert_eq!(logcat_lines(None), 200);
+    assert_eq!(logcat_lines(Some(50)), 50);
+    assert_eq!(logcat_lines(Some(9999)), 2000);
+    assert_eq!(logcat_lines(Some(0)), 1);
+}

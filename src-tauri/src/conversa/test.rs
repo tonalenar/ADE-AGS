@@ -2,7 +2,7 @@ use serde_json::json;
 
 use crate::canal::timeline::{ItemKind, ToolKind, ToolStatus};
 
-use super::codex_map::{access_policy, answer_of, ask_of, items_of, turn_end};
+use super::codex_map::{access_policy, answer_of, ask_of, delta_of, items_of, plan_item, turn_end, usage_item, DeltaKind, TurnTokens};
 use super::store::{self, RequestRow, Tuning};
 
 fn thread(conn: &rusqlite::Connection, id: &str) {
@@ -140,7 +140,68 @@ fn a_resposta_sai_no_formato_do_protocolo() {
     assert_eq!(answer_of("question", "SQLite", &json!([{ "id": "q1" }])), json!({ "answers": { "q1": { "answers": ["SQLite"] } } }));
 }
 
+#[test]
+fn o_raciocinio_do_codex_vira_item_com_o_resumo_ou_o_texto() {
+    let r = items_of(&json!({ "type": "reasoning", "id": "r1", "summary": ["Lendo o código", "Planejando"], "content": ["cru"] }), Some(3));
+    assert_eq!((r[0].kind, r[0].text.as_deref()), (ItemKind::Reasoning, Some("Lendo o código\n\nPlanejando")));
+    let c = items_of(&json!({ "type": "reasoning", "id": "r2", "summary": [], "content": ["só o texto"] }), None);
+    assert_eq!(c[0].text.as_deref(), Some("só o texto"));
+}
+
+#[test]
+fn o_plano_do_turno_vira_um_item_trocado_no_lugar() {
+    let params = json!({ "threadId": "x", "turnId": "turn_1", "explanation": "por partes",
+        "plan": [{ "step": "Ler", "status": "completed" }, { "step": "Testar", "status": "inProgress" }, { "step": "Entregar", "status": "pending" }] });
+    let it = plan_item(&params, Some(9)).unwrap();
+    assert_eq!((it.id.as_str(), it.tool, it.label.as_deref(), it.output.as_deref()), ("plan:turn_1", Some(ToolKind::Todo), Some("3"), Some("por partes")));
+    let plan = it.plan.unwrap();
+    assert_eq!(plan[1].status, crate::canal::timeline::StepStatus::InProgress);
+    assert!(plan_item(&json!({ "plan": [] }), None).is_none(), "sem turno, nada");
+}
+
+#[test]
+fn os_tokens_do_turno_contam_desde_a_primeira_chamada_dele() {
+    let mut tokens = TurnTokens::default();
+    // Primeiro aviso do turno: a base é o total antes desta chamada.
+    assert_eq!(tokens.update("t1", 5_000, 1_200), 1_200);
+    assert_eq!(tokens.update("t1", 7_000, 2_000), 3_200);
+    // Turno novo: recomeça.
+    assert_eq!(tokens.update("t2", 7_500, 500), 500);
+    let params = |turn: &str, total: u64, last: u64| json!({ "turnId": turn, "tokenUsage": { "total": { "totalTokens": total }, "last": { "totalTokens": last } } });
+    let mut fresh = TurnTokens::default();
+    let it = usage_item(&mut fresh, &params("t9", 900, 900), Some(1)).unwrap();
+    assert_eq!((it.kind, it.id.as_str(), it.tokens), (ItemKind::Usage, "usage:t9", Some(900)));
+    assert!(usage_item(&mut fresh, &json!({ "turnId": "t9" }), None).is_none(), "sem total, nada");
+}
+
 // ── Claude Code por protocolo (`claude_map`) e roteamento (`api`) ─────────────
+
+#[test]
+fn os_pedacos_do_codex_dizem_o_item_e_se_sao_resposta_ou_raciocinio() {
+    // Os parâmetros como nos bindings do app-server (`AgentMessageDeltaNotification`,
+    // `ReasoningSummaryTextDeltaNotification`, `ReasoningSummaryPartAddedNotification`).
+    let p = |extra: serde_json::Value| {
+        let mut base = json!({ "threadId": "th", "turnId": "tu", "itemId": "it" });
+        base.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+        base
+    };
+    assert_eq!(delta_of("item/agentMessage/delta", &p(json!({ "delta": "Ol" }))), Some(("it".into(), "Ol".into(), DeltaKind::Assistant)));
+    assert_eq!(
+        delta_of("item/reasoning/summaryTextDelta", &p(json!({ "delta": "Lendo", "summaryIndex": 0 }))),
+        Some(("it".into(), "Lendo".into(), DeltaKind::Reasoning))
+    );
+    // A segunda parte do resumo começa com a linha em branco que o item final põe entre as partes.
+    assert_eq!(delta_of("item/reasoning/summaryPartAdded", &p(json!({ "summaryIndex": 0 }))), None);
+    assert_eq!(
+        delta_of("item/reasoning/summaryPartAdded", &p(json!({ "summaryIndex": 1 }))),
+        Some(("it".into(), "\n\n".into(), DeltaKind::Reasoning))
+    );
+    // O raciocínio cru, pedaço vazio ou sem item: nada.
+    assert_eq!(delta_of("item/reasoning/textDelta", &p(json!({ "delta": "x", "contentIndex": 0 }))), None);
+    assert_eq!(delta_of("item/agentMessage/delta", &p(json!({ "delta": "" }))), None);
+    assert_eq!(delta_of("item/agentMessage/delta", &json!({ "delta": "x" })), None);
+    assert_eq!((DeltaKind::Assistant.as_str(), DeltaKind::Reasoning.as_str()), ("assistant", "reasoning"));
+}
 
 mod claude {
     use std::sync::{Arc, Mutex};
@@ -149,6 +210,7 @@ mod claude {
 
     use crate::canal::timeline::{ItemKind, ToolKind, ToolStatus};
     use crate::conversa::api::{self, Engine, NewThread};
+    use crate::conversa::codex_map::DeltaKind;
     use crate::conversa::claude_map::{access_of_mode, answer_of, ask_of, launch_args, permission_mode, Mapper, Out, Pending, Start, TurnResult};
     use crate::conversa::store::ThreadRow;
 
@@ -161,7 +223,7 @@ mod claude {
     }
 
     fn items(outs: Vec<Out>) -> Vec<crate::canal::timeline::Item> {
-        outs.into_iter().filter_map(|o| if let Out::Item(i) = o { Some(i) } else { None }).collect()
+        outs.into_iter().filter_map(|o| if let Out::Item(i) = o { Some(*i) } else { None }).collect()
     }
 
     // Linhas como as do `claude -p --output-format stream-json --include-partial-messages` 2.1.312
@@ -169,6 +231,22 @@ mod claude {
     fn assistant(message_id: &str, block: Value) -> Value {
         json!({ "type": "assistant", "message": { "id": message_id, "role": "assistant", "content": [block] },
             "parent_tool_use_id": null, "uuid": "u-1", "timestamp": "2026-10-30T00:56:27.889Z" })
+    }
+
+    #[test]
+    fn o_pensamento_vira_raciocinio_e_o_usage_vira_os_tokens_da_mensagem() {
+        let mut m = Mapper::default();
+        let line = json!({ "type": "assistant", "message": { "id": "msg_7", "role": "assistant",
+            "usage": { "input_tokens": 4, "cache_read_input_tokens": 90, "output_tokens": 6 },
+            "content": [{ "type": "thinking", "thinking": "conferir o snap" }] }, "parent_tool_use_id": null });
+        let out = items(m.feed(&line, 1));
+        assert_eq!(out.iter().map(|i| i.kind).collect::<Vec<_>>(), [ItemKind::Usage, ItemKind::Reasoning]);
+        assert_eq!((out[0].id.as_str(), out[0].tokens), ("usage:msg_7", Some(100)));
+        assert_eq!((out[1].id.as_str(), out[1].text.as_deref()), ("msg_7#0", Some("conferir o snap")));
+        // O TodoWrite traz o plano.
+        let todo = items(m.feed(&assistant("msg_8", json!({ "type": "tool_use", "id": "td", "name": "TodoWrite",
+            "input": { "todos": [{ "content": "Ler", "status": "completed" }, { "content": "Testar", "status": "in_progress" }] } })), 2));
+        assert_eq!(todo[0].plan.as_ref().map(Vec::len), Some(2));
     }
 
     #[test]
@@ -226,13 +304,28 @@ mod claude {
         assert!(items(m.feed(&assistant("msg_9", json!({ "type": "thinking", "thinking": "" })), 1)).is_empty());
         let delta = m.feed(&json!({ "type": "stream_event", "parent_tool_use_id": null, "api_message_id": "msg_9",
             "event": { "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": "O" } } }), 2);
-        let Some(Out::Delta { item_id, delta }) = delta.into_iter().next() else { panic!("sem delta") };
+        let Some(Out::Delta { item_id, delta, kind }) = delta.into_iter().next() else { panic!("sem delta") };
         let text = items(m.feed(&assistant("msg_9", json!({ "type": "text", "text": "OK" })), 3));
-        assert_eq!((item_id.as_str(), delta.as_str()), ("msg_9#1", "O"));
+        assert_eq!((item_id.as_str(), delta.as_str(), kind), ("msg_9#1", "O", DeltaKind::Assistant));
         assert_eq!((text[0].kind, text[0].id.as_str(), text[0].text.as_deref()), (ItemKind::Assistant, "msg_9#1", Some("OK")));
         // Os outros eventos parciais (o JSON da ferramenta chegando) não viram nada.
         assert!(m.feed(&json!({ "type": "stream_event", "api_message_id": "msg_9",
             "event": { "type": "content_block_delta", "index": 2, "delta": { "type": "input_json_delta", "partial_json": "{" } } }), 4).is_empty());
+    }
+
+    #[test]
+    fn o_raciocinio_em_pedacos_tem_o_mesmo_id_do_item_de_raciocinio() {
+        let mut m = Mapper::default();
+        let out = m.feed(&json!({ "type": "stream_event", "parent_tool_use_id": null, "api_message_id": "msg_7",
+            "event": { "type": "content_block_delta", "index": 0, "delta": { "type": "thinking_delta", "thinking": "Vou ler" } } }), 1);
+        assert_eq!(out, vec![Out::Delta { item_id: "msg_7#0".into(), delta: "Vou ler".into(), kind: DeltaKind::Reasoning }]);
+        let final_item = items(m.feed(&assistant("msg_7", json!({ "type": "thinking", "thinking": "Vou ler o arquivo" })), 2));
+        assert_eq!((final_item[0].kind, final_item[0].id.as_str()), (ItemKind::Reasoning, "msg_7#0"));
+        // A assinatura do raciocínio e o pedaço vazio não viram nada.
+        assert!(m.feed(&json!({ "type": "stream_event", "api_message_id": "msg_7",
+            "event": { "type": "content_block_delta", "index": 0, "delta": { "type": "signature_delta", "signature": "abc" } } }), 3).is_empty());
+        assert!(m.feed(&json!({ "type": "stream_event", "api_message_id": "msg_7",
+            "event": { "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": "" } } }), 4).is_empty());
     }
 
     #[test]

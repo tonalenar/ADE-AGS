@@ -8,9 +8,15 @@
 //!
 //! Todo va por `adb` (ver `crate::android`). El permiso se decide acá; lo que se ve en el
 //! nodo lo dibuja el frontend.
+//!
+//! Além do canvas, o painel direito do modo chat mostra aparelhos fora dele e os compartilha com os agentes
+//! (`devices_share`): qualquer aba os alcança, com id `chat:<udid|serial>`. Sem a chave "Permitir que agentes
+//! controlem dispositivos" da pessoa, o agente só vê (`shot` e `tree`).
 
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
@@ -30,17 +36,112 @@ const BOOT_WAIT: Duration = Duration::from_secs(120);
 struct Reachable {
     id: String,
     portal: Portal,
+    /// `Some(control)` = veio do painel do chat (com a chave da pessoa); `None` = portal do canvas.
+    chat: Option<bool>,
+}
+
+// ── Aparelhos compartilhados pelo painel do modo chat ──
+
+/// O prefixo do id de um aparelho do painel do chat (não há nó do canvas com ele).
+pub(crate) const CHAT_PREFIX: &str = "chat:";
+
+/// Um aparelho aberto no painel direito do modo chat, como o frontend manda.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedDevice {
+    /// `ios` ou `android`.
+    pub kind: String,
+    pub name: String,
+    #[serde(default)]
+    pub udid: Option<String>,
+    #[serde(default)]
+    pub serial: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ChatShare {
+    devices: Vec<SharedDevice>,
+    control: bool,
+}
+
+/// Só em memória: o painel manda de novo a cada mudança, e com o app fechado não há o que compartilhar.
+fn chat_share() -> &'static Mutex<ChatShare> {
+    static S: OnceLock<Mutex<ChatShare>> = OnceLock::new();
+    S.get_or_init(Default::default)
+}
+
+/// Confere a lista do painel: tipo conhecido, nome, e o UDID (iOS) ou o serial (Android).
+fn check_shared(devices: &[SharedDevice]) -> Result<(), String> {
+    for d in devices {
+        let key = match d.kind.as_str() {
+            "ios" => d.udid.as_deref(),
+            "android" => d.serial.as_deref(),
+            other => return Err(format!("Tipo de aparelho desconhecido: \"{other}\" (ios ou android).")),
+        };
+        if key.is_none_or(|k| k.trim().is_empty()) {
+            return Err(format!("O aparelho \"{}\" veio sem {}.", d.name, if d.kind == "ios" { "udid" } else { "serial" }));
+        }
+    }
+    Ok(())
+}
+
+/// O painel do chat abriu/fechou um aparelho ou a pessoa mudou a chave: substitui o que estava compartilhado.
+#[tauri::command]
+pub fn devices_share(devices: Vec<SharedDevice>, control: bool) -> Result<(), String> {
+    check_shared(&devices)?;
+    let mut share = chat_share().lock().map_err(|_| "O compartilhamento de aparelhos travou.".to_string())?;
+    *share = ChatShare { devices, control };
+    Ok(())
+}
+
+/// Os aparelhos do painel como dispositivos alcançáveis. Um que já é portal do canvas ligado ao agente fica
+/// de fora: pelo canvas ele já o controla, e o mesmo nome duas vezes só confundiria a resolução.
+fn chat_reachable(devices: &[SharedDevice], control: bool, canvas: &[Reachable]) -> Vec<Reachable> {
+    devices
+        .iter()
+        .filter_map(|d| {
+            let key = if d.kind == "ios" { d.udid.clone()? } else { d.serial.clone()? };
+            let on_canvas = canvas.iter().any(|c| c.portal.kind.as_deref() == Some(d.kind.as_str())
+                && (if d.kind == "ios" { c.portal.udid.as_deref() } else { c.portal.serial.as_deref() }) == Some(key.as_str()));
+            (!on_canvas).then(|| Reachable {
+                id: format!("{CHAT_PREFIX}{key}"),
+                portal: Portal {
+                    name: d.name.clone(),
+                    kind: Some(d.kind.clone()),
+                    udid: d.udid.clone().filter(|_| d.kind == "ios"),
+                    serial: d.serial.clone().filter(|_| d.kind == "android"),
+                    ..Default::default()
+                },
+                chat: Some(control),
+            })
+        })
+        .collect()
+}
+
+/// Sem a chave do painel, um aparelho do chat só deixa olhar.
+fn chat_allows(action: &str, control: bool) -> Result<(), String> {
+    if control || matches!(action, "shot" | "tree") {
+        return Ok(());
+    }
+    Err(format!(
+        "A pessoa não liberou o controle deste aparelho no painel do chat (a chave \"Permitir que agentes controlem dispositivos\" está desligada): `{action}` não é permitido. Você pode olhar com `ags device shot` e `ags device tree`."
+    ))
 }
 
 fn reachable(from: &str) -> Vec<Reachable> {
     let boards = canvas::load_boards();
-    canvas::portals_for(&boards, from)
+    let mut list: Vec<Reachable> = canvas::portals_for(&boards, from)
         .into_iter()
         .filter_map(|(key, id)| {
             let portal = boards.get(&key)?.portals.get(&id)?.clone();
-            matches!(portal.kind.as_deref(), Some("android") | Some("ios")).then_some(Reachable { id, portal })
+            matches!(portal.kind.as_deref(), Some("android") | Some("ios")).then_some(Reachable { id, portal, chat: None })
         })
-        .collect()
+        .collect();
+    if let Ok(share) = chat_share().lock() {
+        let extra = chat_reachable(&share.devices, share.control, &list);
+        list.extend(extra);
+    }
+    list
 }
 
 /// Resuelve un dispositivo por id o nombre (sin mayúsculas), entre los que el agente alcanza.
@@ -68,10 +169,17 @@ fn resolve<'a>(list: &'a [Reachable], wanted: &str) -> Result<&'a Reachable, Str
 }
 
 fn describe(d: &Reachable) -> Value {
-    if d.portal.kind.as_deref() == Some("ios") {
-        return json!({ "id": d.id, "name": d.portal.name, "kind": "ios", "udid": d.portal.udid });
+    let mut out = if d.portal.kind.as_deref() == Some("ios") {
+        json!({ "id": d.id, "name": d.portal.name, "kind": "ios", "udid": d.portal.udid })
+    } else {
+        json!({ "id": d.id, "name": d.portal.name, "kind": "android", "serial": d.portal.serial, "avd": d.portal.avd })
+    };
+    // De onde vem: o painel do chat diz se a pessoa liberou o controle (sem ela, só shot/tree).
+    if let Some(control) = d.chat {
+        out["source"] = json!("chat");
+        out["control"] = json!(control);
     }
-    json!({ "id": d.id, "name": d.portal.name, "kind": "android", "serial": d.portal.serial, "avd": d.portal.avd })
+    out
 }
 
 /// Un número que puede llegar como número (flag) o como texto.
@@ -174,6 +282,9 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
     let from = caller(args)?;
     let mine = reachable(&from);
     let target = resolve(&mine, &arg_str(args, "name")?)?;
+    if let Some(control) = target.chat {
+        chat_allows(action, control)?;
+    }
 
     if target.portal.kind.as_deref() == Some("ios") {
         return super::simulators::action(_app, &from, &target.id, &target.portal, args, action, shots_dir()?);
@@ -281,7 +392,54 @@ mod test {
     use super::*;
 
     fn dev(id: &str, name: &str) -> Reachable {
-        Reachable { id: id.into(), portal: Portal { name: name.into(), kind: Some("android".into()), ..Default::default() } }
+        Reachable { id: id.into(), portal: Portal { name: name.into(), kind: Some("android".into()), ..Default::default() }, chat: None }
+    }
+
+    fn shared(kind: &str, name: &str, key: &str) -> SharedDevice {
+        let ios = kind == "ios";
+        SharedDevice { kind: kind.into(), name: name.into(), udid: ios.then(|| key.into()), serial: (!ios).then(|| key.into()) }
+    }
+
+    #[test]
+    fn um_aparelho_do_painel_do_chat_resolve_por_id_e_por_nome() {
+        let list = chat_reachable(&[shared("ios", "iPhone 17", "AAA-1"), shared("android", "Pixel 9", "emulator-5554")], false, &[]);
+        let ios = resolve(&list, "chat:AAA-1").unwrap();
+        assert_eq!((ios.portal.kind.as_deref(), ios.portal.udid.as_deref(), ios.chat), (Some("ios"), Some("AAA-1"), Some(false)));
+        let android = resolve(&list, "pixel 9").unwrap();
+        assert_eq!((android.id.as_str(), android.portal.serial.as_deref()), ("chat:emulator-5554", Some("emulator-5554")));
+        assert_eq!(android.portal.udid, None);
+        let shown = describe(android);
+        assert_eq!((shown["source"].as_str(), shown["control"].as_bool()), (Some("chat"), Some(false)));
+        assert!(describe(&dev("portal-1", "x")).get("source").is_none(), "o do canvas não diz source");
+    }
+
+    #[test]
+    fn o_que_ja_e_portal_do_canvas_nao_aparece_de_novo_pelo_chat() {
+        let mut canvas = dev("portal-1", "Pixel");
+        canvas.portal.serial = Some("emulator-5554".into());
+        let list = chat_reachable(&[shared("android", "Pixel", "emulator-5554"), shared("android", "Outro", "R58")], true, &[canvas]);
+        assert_eq!(list.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["chat:R58"]);
+    }
+
+    #[test]
+    fn sem_a_chave_da_pessoa_o_agente_so_ve() {
+        assert!(chat_allows("shot", false).is_ok());
+        assert!(chat_allows("tree", false).is_ok());
+        for action in ["tap", "swipe", "type", "key", "launch", "close", "start", "open", "button", "say"] {
+            let err = chat_allows(action, false).unwrap_err();
+            assert!(err.contains("painel do chat") && err.contains("shot"), "{action}: {err}");
+            assert!(chat_allows(action, true).is_ok(), "{action} com controle");
+        }
+    }
+
+    #[test]
+    fn o_painel_so_compartilha_aparelho_com_identificador() {
+        assert!(check_shared(&[shared("ios", "iPhone", "AAA")]).is_ok());
+        assert!(check_shared(&[SharedDevice { kind: "ios".into(), name: "iPhone".into(), udid: None, serial: Some("x".into()) }]).is_err());
+        assert!(check_shared(&[shared("android", "Pixel", " ")]).is_err());
+        assert!(check_shared(&[shared("watch", "Relógio", "x")]).is_err());
+        let parsed: Vec<SharedDevice> = serde_json::from_value(json!([{ "kind": "android", "name": "Pixel", "serial": "emulator-5554" }])).unwrap();
+        assert_eq!(parsed[0], shared("android", "Pixel", "emulator-5554"));
     }
 
     #[test]

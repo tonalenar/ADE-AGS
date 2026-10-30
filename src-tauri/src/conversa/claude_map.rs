@@ -6,8 +6,8 @@
 //! mensagem nos dois sentidos.
 //! - Saída: `system` (`init` e `status`, com `permissionMode`), `assistant` (UM bloco por linha:
 //!   `thinking`, `text` ou `tool_use`, com o mesmo `message.id`), `user` (os `tool_result`, e o
-//!   `[Request interrupted by user]`), `stream_event` (os pedaços do texto, com `api_message_id` e
-//!   `index` do bloco) e `result` (o fim do turno).
+//!   `[Request interrupted by user]`), `stream_event` (os pedaços do texto e do raciocínio, com
+//!   `api_message_id` e `index` do bloco) e `result` (o fim do turno).
 //! - Controle: `control_request` / `control_response` com `request_id`, nos dois sentidos. O
 //!   cliente manda `initialize`, `interrupt` e `set_permission_mode`; o Claude manda `can_use_tool`
 //!   (com `--permission-prompt-tool stdio`) e espera `{behavior: allow | deny}`.
@@ -17,9 +17,9 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 
 use crate::canal::event::{clip, first_line, parse_ts_ms};
-use crate::canal::timeline::{claude_tool, result_text, Item, ItemKind, ToolKind, ToolStatus};
+use crate::canal::timeline::{claude_tokens, claude_tool, result_text, Item, ItemKind, ToolKind, ToolStatus};
 
-use super::codex_map::Ask;
+use super::codex_map::{Ask, DeltaKind};
 use super::store::ThreadRow;
 
 const TEXT_MAX: usize = 20_000;
@@ -100,10 +100,11 @@ pub fn user_message(text: &str) -> Value {
 /// O que uma linha da saída significa para a conversa.
 #[derive(Debug, PartialEq)]
 pub enum Out {
-    /// Um item novo ou atualizado da timeline.
-    Item(Item),
-    /// Um pedaço do texto do agente chegando (`item_id` é o do item que vai fechar o texto).
-    Delta { item_id: String, delta: String },
+    /// Um item novo ou atualizado da timeline (numa caixa: o item é bem maior que as outras variantes).
+    Item(Box<Item>),
+    /// Um pedaço do texto (ou do raciocínio) do agente chegando (`item_id` é o do item que vai
+    /// fechar o texto).
+    Delta { item_id: String, delta: String, kind: DeltaKind },
     /// O modo de permissão que o Claude diz estar usando.
     Mode(String),
     /// O id da sessão do Claude (para retomar).
@@ -179,15 +180,24 @@ impl Mapper {
         let message_id = line.pointer("/message/id").and_then(Value::as_str).or_else(|| str_of(line, "uuid")).unwrap_or("").to_string();
         let blocks = line.pointer("/message/content").and_then(Value::as_array).cloned().unwrap_or_default();
         let mut out = Vec::new();
+        // Os tokens da mensagem: cada linha repete o `usage`, e o item (mesmo id) fica com o último.
+        if let Some(tokens) = claude_tokens(line.pointer("/message/usage")).filter(|_| !message_id.is_empty()) {
+            out.push(Out::Item(Box::new(Item::usage(format!("usage:{message_id}"), at, tokens))));
+        }
         for block in &blocks {
             let seen = self.blocks.entry(message_id.clone()).or_insert(0);
             let index = *seen;
             *seen += 1;
             match str_of(block, "type") {
+                Some("thinking") => {
+                    if let Some(item) = Item::reasoning(block_id(&message_id, index), at, str_of(block, "thinking").unwrap_or("")) {
+                        out.push(Out::Item(Box::new(item)));
+                    }
+                }
                 Some("text") => {
                     let text = str_of(block, "text").unwrap_or("");
                     if !text.trim().is_empty() {
-                        out.push(Out::Item(Item { text: Some(clip(text, TEXT_MAX)), ..Item::new(ItemKind::Assistant, block_id(&message_id, index), at) }));
+                        out.push(Out::Item(Box::new(Item { text: Some(clip(text, TEXT_MAX)), ..Item::new(ItemKind::Assistant, block_id(&message_id, index), at) })));
                     }
                 }
                 Some("tool_use") => {
@@ -196,7 +206,7 @@ impl Mapper {
                     let input = block.get("input").cloned().unwrap_or(Value::Null);
                     let item = tool_item(id, name, &input, at);
                     self.tools.insert(id.to_string(), item.clone());
-                    out.push(Out::Item(item));
+                    out.push(Out::Item(Box::new(item)));
                 }
                 _ => {}
             }
@@ -229,7 +239,7 @@ impl Mapper {
                             item.output = Some(clip(&output, OUTPUT_MAX));
                         }
                     }
-                    out.push(Out::Item(item));
+                    out.push(Out::Item(Box::new(item)));
                 }
                 _ => {}
             }
@@ -243,15 +253,25 @@ fn block_id(message_id: &str, index: usize) -> String {
     format!("{message_id}#{index}")
 }
 
+/// Um `stream_event` com um pedaço de texto (`text_delta`) ou de raciocínio (`thinking_delta`):
+/// o id é o do bloco (`api_message_id` + `index`), o mesmo do item final. O resto dos eventos
+/// parciais (o JSON da ferramenta, as assinaturas) não vira nada.
 fn delta_of(line: &Value) -> Option<Out> {
     let event = line.get("event")?;
-    if str_of(event, "type") != Some("content_block_delta") || event.pointer("/delta/type").and_then(Value::as_str) != Some("text_delta") {
+    if str_of(event, "type") != Some("content_block_delta") {
+        return None;
+    }
+    let (kind, delta) = match event.pointer("/delta/type").and_then(Value::as_str)? {
+        "text_delta" => (DeltaKind::Assistant, event.pointer("/delta/text").and_then(Value::as_str)?),
+        "thinking_delta" => (DeltaKind::Reasoning, event.pointer("/delta/thinking").and_then(Value::as_str)?),
+        _ => return None,
+    };
+    if delta.is_empty() {
         return None;
     }
     let message_id = str_of(line, "api_message_id")?;
     let index = event.get("index").and_then(Value::as_u64)? as usize;
-    let delta = event.pointer("/delta/text").and_then(Value::as_str)?;
-    Some(Out::Delta { item_id: block_id(message_id, index), delta: delta.to_string() })
+    Some(Out::Delta { item_id: block_id(message_id, index), delta: delta.to_string(), kind })
 }
 
 fn error_of(result: &Value) -> String {

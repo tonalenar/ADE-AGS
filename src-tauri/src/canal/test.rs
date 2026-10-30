@@ -484,7 +484,7 @@ fn segredo_nao_vai_para_a_pendencia() {
 mod timeline_tests {
     use serde_json::json;
 
-    use super::super::timeline::{self, count_lines, patch_stats, ItemKind, ToolKind, ToolStatus};
+    use super::super::timeline::{self, claude_tokens, count_lines, patch_stats, plan_steps, ItemKind, PlanStep, StepStatus, ToolKind, ToolStatus};
 
     fn build(agent: &str, lines: &[serde_json::Value]) -> timeline::Timeline {
         let raw: Vec<Vec<u8>> = lines.iter().map(|l| serde_json::to_vec(l).unwrap()).collect();
@@ -568,6 +568,75 @@ mod timeline_tests {
         assert_eq!((edit.tool, edit.added, edit.removed, edit.path.as_deref()), (Some(ToolKind::Edit), Some(3), Some(1), Some("src/a.ts")));
         assert_eq!(edit.label.as_deref(), Some("src/a.ts, src/b.ts"));
         assert_eq!(t.items[4].duration_ms, Some(5000));
+    }
+
+    #[test]
+    fn claude_raciocinio_tokens_por_mensagem_e_plano_do_todowrite() {
+        let usage = |out: u64| json!({"input_tokens": 10, "cache_creation_input_tokens": 5, "cache_read_input_tokens": 100, "output_tokens": out});
+        let t = build("claude-code", &[
+            json!({"type": "user", "uuid": "u1", "message": {"content": "faz o plano"}}),
+            // Duas linhas da mesma mensagem (um bloco cada): o `usage` se repete e o item fica com o último.
+            json!({"type": "assistant", "uuid": "a1", "message": {"id": "msg_1", "usage": usage(2), "content": [
+                {"type": "thinking", "thinking": "conferir o snap de 8 px"}
+            ]}}),
+            json!({"type": "assistant", "uuid": "a2", "message": {"id": "msg_1", "usage": usage(40), "content": [
+                {"type": "tool_use", "id": "td", "name": "TodoWrite", "input": {"todos": [
+                    {"content": "Achar a causa", "status": "completed", "activeForm": "Achando"},
+                    {"content": "Corrigir", "status": "in_progress"},
+                    {"content": "Conferir", "status": "pending"}
+                ]}}
+            ]}}),
+            json!({"type": "assistant", "uuid": "a3", "message": {"id": "msg_2", "usage": usage(7), "content": [{"type": "text", "text": "Feito."}]}}),
+        ]);
+        let kinds: Vec<ItemKind> = t.items.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [ItemKind::User, ItemKind::Usage, ItemKind::Reasoning, ItemKind::Tool, ItemKind::Usage, ItemKind::Assistant]);
+        assert_eq!(t.items[1].tokens, Some(155), "a mensagem conta uma vez, com a saída da última linha");
+        assert_eq!(t.items[4].tokens, Some(122));
+        assert_eq!(t.items[2].text.as_deref(), Some("conferir o snap de 8 px"));
+        let plan = t.items[3].plan.as_ref().unwrap();
+        assert_eq!(plan.iter().map(|s| s.status).collect::<Vec<_>>(), [StepStatus::Completed, StepStatus::InProgress, StepStatus::Pending]);
+        assert_eq!(plan[0].text, "Achar a causa");
+    }
+
+    #[test]
+    fn codex_raciocinio_tokens_sem_repetir_o_contador_e_plano() {
+        let count = |last: u64, total: u64| json!({"type": "event_msg", "payload": {"type": "token_count", "info": {
+            "last_token_usage": {"total_tokens": last}, "total_token_usage": {"total_tokens": total}}}});
+        let t = build("codex", &[
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "planeja"}}),
+            json!({"type": "event_msg", "payload": {"type": "agent_reasoning", "text": "**Lendo** o código"}}),
+            count(1000, 5000),
+            count(1000, 5000),
+            json!({"type": "response_item", "payload": {"type": "function_call", "name": "update_plan", "call_id": "p1",
+                "arguments": "{\"plan\":[{\"step\":\"Ler\",\"status\":\"completed\"},{\"step\":\"Testar\",\"status\":\"in_progress\"}]}"}}),
+            count(300, 5300),
+        ]);
+        let kinds: Vec<ItemKind> = t.items.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [ItemKind::User, ItemKind::Reasoning, ItemKind::Usage, ItemKind::Tool, ItemKind::Usage]);
+        assert_eq!((t.items[2].tokens, t.items[4].tokens), (Some(1000), Some(300)), "o mesmo total repetido não conta de novo");
+        assert_eq!(t.items[3].plan.as_ref().map(Vec::len), Some(2));
+        assert_eq!(t.items[3].plan.as_ref().unwrap()[1].status, StepStatus::InProgress);
+    }
+
+    #[test]
+    fn passos_do_plano_e_tokens_do_claude_toleram_lixo() {
+        assert_eq!(plan_steps(None), None);
+        assert_eq!(plan_steps(Some(&json!("x"))), None);
+        assert_eq!(plan_steps(Some(&json!([{"step": "a", "status": "inProgress"}, {"sem": "texto"}]))),
+            Some(vec![PlanStep { text: "a".into(), status: StepStatus::InProgress }]));
+        assert_eq!(claude_tokens(None), None);
+        assert_eq!(claude_tokens(Some(&json!({"input_tokens": 0}))), None);
+        assert_eq!(claude_tokens(Some(&json!({"output_tokens": 3, "input_tokens": 2}))), Some(5));
+    }
+
+    #[test]
+    fn os_campos_novos_ficam_fora_do_json_quando_vazios() {
+        let t = build("claude-code", &[json!({"type": "user", "message": {"content": "oi"}})]);
+        let raw = serde_json::to_string(&t.items[0]).unwrap();
+        assert!(!raw.contains("plan") && !raw.contains("tokens"));
+        // Um corpo antigo (sem os campos novos) continua legível.
+        let old: timeline::Item = serde_json::from_str(r#"{"kind":"user","id":"x","text":"oi"}"#).unwrap();
+        assert_eq!((old.plan, old.tokens), (None, None));
     }
 
     #[test]

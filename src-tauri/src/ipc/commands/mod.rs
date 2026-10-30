@@ -14,7 +14,7 @@ pub mod routine;
 mod role;
 mod portals;
 mod replay;
-mod devices;
+pub mod devices;
 pub mod simulators;
 pub mod pool;
 mod browser;
@@ -26,6 +26,8 @@ mod shared;
 mod runs;
 mod skills;
 mod tabs;
+// O time de agentes do modo chat (`ags team …`) e a entrega às conversas por protocolo.
+mod team;
 mod watch;
 mod windows;
 mod workspaces;
