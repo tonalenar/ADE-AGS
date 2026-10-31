@@ -162,7 +162,7 @@ describe("a mensagem enviada mostra as miniaturas acima do texto", () => {
   it("só anexos: sem balão de texto vazio", async () => {
     await act(async () => { root.render(<PersonBubble text={attachmentBlock(atts)} />); });
     expect(host.querySelector("ul[aria-label='chat.attach.label']")).not.toBeNull();
-    expect(host.querySelector(".rounded-3xl")).toBeNull();
+    expect(host.querySelector(".rounded-2xl")).toBeNull();
   });
 
   it("mensagem sem anexos fica como sempre", async () => {

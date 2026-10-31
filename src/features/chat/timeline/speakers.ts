@@ -1,8 +1,9 @@
 /**
- * Quem fala na conversa e quando a linha do remetente (logo pequeno + nome) aparece acima do texto, já
- * que as falas não ficam mais em balões. Na conversa de um agente só nunca aparece; num time, aparece
- * quando fala OUTRO agente (o `ags peer` chega como mensagem com envelope) e quando o agente da conversa
- * volta a falar depois de outro. A mensagem da pessoa zera a sequência. Pura.
+ * Quem fala na conversa e quando a linha do remetente (logo pequeno + nome) aparece acima do texto: só
+ * a pessoa fala em balão, as falas dos agentes ficam soltas e são identificadas por esta linha. Aparece
+ * na primeira fala de um agente depois da pessoa e sempre que a voz muda (o agente da conversa, outro
+ * agente pelo `ags peer`, de volta ao da conversa). Falas seguidas da mesma voz (com ferramentas no meio)
+ * não repetem a linha. A mensagem da pessoa zera a sequência e nunca leva cabeçalho. Pura.
  */
 import { parsePeerEnvelope } from "./peerEnvelope";
 import type { TimelineItem } from "./types";
@@ -22,9 +23,7 @@ export function speakerHeaders(items: TimelineItem[]): Set<string> {
       speaker = peer ? `peer:${peer.sender}` : PERSON;
     }
     if (speaker === null) continue;
-    const other = speaker !== SELF && speaker !== PERSON;
-    const backFromOther = speaker === SELF && previous !== null && previous !== SELF && previous !== PERSON;
-    if (speaker !== previous && (other || backFromOther)) shown.add(item.id);
+    if (speaker !== PERSON && speaker !== previous) shown.add(item.id);
     previous = speaker;
   }
   return shown;

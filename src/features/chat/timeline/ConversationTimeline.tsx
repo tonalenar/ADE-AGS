@@ -44,6 +44,9 @@ interface RevealOf {
   headers: ReadonlySet<string>;
 }
 
+/** Responder a pergunta em aberto pelo cartão dela (só nas conversas por protocolo, com uma pergunta esperando). */
+const AnswerContext = createContext<((choice: string) => void) | null>(null);
+
 const RevealContext = createContext<RevealOf>({ animate: () => false, live: () => false, entering: () => false, agent: { id: "", label: "" }, headers: new Set() });
 
 /** O pedido que espera a pessoa, como a timeline o mostra. */
@@ -59,7 +62,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, after = null }: {
+export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, after = null }: {
   /** O espaço no fim da lista para o composer que flutua por cima (`ChatFrame`); 0 = o fim de sempre. */
   bottomInset?: number;
   items: TimelineItem[];
@@ -82,6 +85,8 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   pending?: PendingSend[];
   /** Sem terminal (protocolo), as perguntas se respondem no composer. */
   onOpenTerminal?: () => void;
+  /** Há uma pergunta do agente em aberto: as opções do cartão dela viram botões que respondem por aqui. */
+  onAnswer?: (choice: string) => void;
   /** Reenvia uma mensagem que saiu da fila do agente sem ser enviada (o aviso «não enviada»). Sem ele, sem o botão. */
   onResend?: (text: string) => void;
   /** Depois dos turnos, no fim do fio: as delegações e entregas do time (`team/TeamThreadFeed`). */
@@ -144,6 +149,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
       }}>
       <RevealContext.Provider value={reveal}>
+      <AnswerContext.Provider value={onAnswer ?? null}>
       <div ref={contentRef} style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
         className={`${width} mx-auto px-4 sm:px-6 pt-4 ${bottomInset > 0 ? "" : "pb-6"} flex flex-col gap-4 text-chat-prose text-gray-900 dark:text-white`}>
         {truncated && (
@@ -182,6 +188,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         {working && !live && <WorkingLine since={startedAt} waiting={approval !== null} />}
         {after}
       </div>
+      </AnswerContext.Provider>
       </RevealContext.Provider>
     </div>
   );
@@ -234,7 +241,7 @@ function UserMessage({ item }: { item: TimelineItem }) {
   const [entering] = useState(() => !!peer && reveal.entering(item.id));
   if (!peer) return <PersonBubble text={text} />;
   return (
-    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} header={reveal.headers.has(item.id)} entering={entering}>
+    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering}>
       <Markdown content={peer.body} tone="chat" />
     </AgentBubble>
   );
@@ -259,6 +266,7 @@ function AgentText({ item }: { item: TimelineItem }) {
 /** `active`: a última linha do turno em aberto (o agente ainda está trabalhando nela). */
 function BodyRowView({ row, onOpenTerminal, active = false }: { row: BodyRow; onOpenTerminal?: () => void; active?: boolean }) {
   const { t } = useTranslation();
+  const answer = useContext(AnswerContext);
   switch (row.type) {
     case "assistant":
       return <AgentText item={row.item} />;
@@ -279,7 +287,17 @@ function BodyRowView({ row, onOpenTerminal, active = false }: { row: BodyRow; on
           {(row.item.question?.options.length ?? 0) > 0 && (
             <ul className="m-0 p-0 list-none flex flex-wrap gap-1.5">
               {row.item.question!.options.map((o) => (
-                <li key={o} className="px-2 py-0.5 rounded-md bg-white dark:bg-white/[0.06] border border-gray-200 dark:border-white/10 text-chat-note">{o}</li>
+                <li key={o}>
+                  {/* A pergunta em aberto (a última linha do turno em andamento) responde ao clique; as já respondidas ficam só como registro. */}
+                  {active && answer ? (
+                    <button type="button" onClick={() => answer(o)}
+                      className="px-2.5 py-1 rounded-md bg-white dark:bg-white/[0.06] border border-gray-200 dark:border-white/10 text-chat-note text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.12] focus-visible:ring-2 focus-visible:ring-accent-500/50">
+                      {o}
+                    </button>
+                  ) : (
+                    <span className="block px-2.5 py-1 rounded-md bg-white dark:bg-white/[0.06] border border-gray-200 dark:border-white/10 text-chat-note text-gray-500 dark:text-white/55">{o}</span>
+                  )}
+                </li>
               ))}
             </ul>
           )}
