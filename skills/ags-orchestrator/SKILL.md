@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.39.0
+version: 1.40.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -410,6 +410,12 @@ ags peer check Backend --lines 40           # what is on its screen right now
   twice, so retrying after a timeout or a restart is safe (the key outlives the 7-day cleanup for
   30 days). Without `--id`, the same text (whitespace aside) and envelope to the same agent within
   10 minutes is refused as a duplicate.
+- `ags peer receipt <messageId | --id key>` tells you where a message of yours stands: `outcome`
+  `pending` (queued, being delivered, or waiting out a retry), `delivered` or `failed` (with
+  `attempts` and the `reason`). Use it instead of re-sending. Delivery to a team **conversation**
+  (`thread:<id>`) is asynchronous: your `tell` returns the number, the app sends it when the
+  conversation is free, retries what provably did not leave (up to 5 times), and a final failure
+  comes back to you as a message, even if you are yourself a conversation.
 - `ags peer queue` lists what you sent that is still waiting; `ags peer queue cancel <id>`
   withdraws one of yours. The user can also edit, reorder, cancel or send queued messages now
   from the "N na fila" badge on the terminal.
@@ -934,6 +940,12 @@ link to each member), so the canvas is still what authorizes messages: `ags peer
 team, and `peer tell/ask/deliver` work as usual. A protocol conversation has no terminal: a
 message to it arrives as a chat message (after its current turn ends), and it answers with
 `ags peer tell` like anyone else. Its id is `thread:<id>`.
+
+An `ask` to a conversation waits for **that message's** turn: `replies` holds every reply the
+agent wrote in it (`reply` is the last), `status: "failed"` with `failure` means the question never
+arrived, and `stopped` gives the reason when the turn ended with no reply (error, interrupted,
+process gone). Repeating the same `ask` while it still waits **joins the same wait** (`joined: true`):
+the member is not asked twice, and a timeout alone does not close it.
 
 ```bash
 ags team list                                   # orchestrator + members: role, policy, model, branch, working

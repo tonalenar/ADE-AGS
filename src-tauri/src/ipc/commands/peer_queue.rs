@@ -646,6 +646,47 @@ pub fn peer_queue_send_now(app: AppHandle, id: i64) -> Result<PeerMessage, Strin
     Ok(msg)
 }
 
+// ── `ags peer receipt` ───────────────────────────────────────────────
+
+/// Pura: o recibo de uma mensagem para quem a mandou. `outcome` resume o estado: `pending` (na fila ou sendo
+/// entregue), `delivered` ou `failed` (não chegou: expirada, sem confirmação, cancelada ou recusada; o motivo
+/// vai em `reason`/`note`). Repetir o `--id` devolve este mesmo recibo, sem enviar de novo.
+pub(crate) fn receipt(msg: &PeerMessage, now_ms: i64) -> Value {
+    let outcome = match msg.state {
+        State::Queued | State::Delivering => "pending",
+        State::Delivered => "delivered",
+        State::Unconfirmed | State::Cancelled | State::Expired | State::Refused => "failed",
+    };
+    json!({
+        "messageId": msg.id, "clientId": msg.client_id, "kind": msg.kind, "state": msg.state, "stateLabel": msg.state.label(),
+        "outcome": outcome, "to": if msg.to_name.is_empty() { &msg.to_tab_id } else { &msg.to_name }, "toTabId": msg.to_tab_id,
+        "attempts": msg.attempts, "reason": msg.reason, "note": msg.note, "mode": msg.delivery_mode,
+        "ageS": ((now_ms - msg.created_at).max(0)) / 1000, "deliveredAt": msg.delivered_at,
+        // Um retry com backoff: quando volta a tentar (ms até lá; `null` = já).
+        "retryInMs": msg.available_at.map(|at| (at - now_ms).max(0)),
+        "answered": msg.settled_at.is_some(),
+    })
+}
+
+/// `ags peer receipt <número | --id chave>`: o estado de uma mensagem SUA (a entrega a uma conversa é
+/// assíncrona: o `tell` devolve o número, e aqui se vê se chegou, quantas tentativas, e por que falhou).
+pub(super) fn peer_receipt(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let raw = client_id_arg(args).ok_or("Uso: ags peer receipt <número da mensagem> (ou o --id que você deu a ela)")?;
+    let raw = raw.trim().trim_start_matches('#').to_string();
+    let found = match raw.parse::<i64>() {
+        Ok(id) => with_db(app, |conn| store::get(conn, id))?.filter(|m| m.from_tab_id == from),
+        Err(_) => None,
+    };
+    let found = match found {
+        Some(m) => Some(m),
+        None => with_db(app, |conn| store::by_client_id(conn, &from, Some(&raw)))?,
+    };
+    let msg = found.ok_or_else(|| format!("Não achei uma mensagem sua com o número ou o id '{raw}'."))?;
+    let at = with_db(app, store::db_now)?;
+    Ok(receipt(&msg, at))
+}
+
 // ── `ags peer queue` ─────────────────────────────────────────────────
 
 /// Pura: uma linha da fila para a CLI (sem o texto inteiro).
@@ -811,6 +852,27 @@ oi
         assert!(!concerns(&json!({ "threadId": "t2" }), "t1", "thread:t1"));
         assert!(!concerns(&json!({ "toTabId": "tab-9" }), "t1", "thread:t1"));
         assert!(!concerns(&json!({ "toTabId": null }), "t1", "thread:t1"));
+    }
+
+    #[test]
+    fn o_recibo_diz_se_esta_pendente_entregue_ou_falhou_e_quando_tenta_de_novo() {
+        let mut m = msg(false, false);
+        m.attempts = 2;
+        m.available_at = Some(1_400);
+        let pending = receipt(&m, 1_000);
+        assert_eq!((pending["outcome"].as_str(), pending["retryInMs"].as_i64(), pending["attempts"].as_i64()), (Some("pending"), Some(400), Some(2)));
+        m.state = State::Delivered;
+        assert_eq!(receipt(&m, 2_000)["outcome"], "delivered");
+        for state in [State::Unconfirmed, State::Cancelled, State::Expired, State::Refused] {
+            m.state = state;
+            assert_eq!(receipt(&m, 2_000)["outcome"], "failed", "{state:?}");
+        }
+        m.state = State::Expired;
+        m.reason = Some("delivery_failed".into());
+        m.note = Some("A conversa de destino foi concluída ou apagada.".into());
+        let failed = receipt(&m, 2_000);
+        assert_eq!((failed["reason"].as_str(), failed["to"].as_str()), (Some("delivery_failed"), Some("QA")));
+        assert_eq!(failed["retryInMs"].as_i64(), Some(0), "o backoff já venceu");
     }
 
     #[test]

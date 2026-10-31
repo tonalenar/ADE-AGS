@@ -22,6 +22,10 @@ Criada por `peer_queue::store::migrate` (aditiva, sem subir `user_version`).
 | `depth`, `parent_id`, `answer_of` | profundidade do repasse, a mensagem em tratamento de quem enviou e, se esta a responde, qual |
 | `reason` | motivo de uma recusa (`depth`, `fanout`, `duplicate`, `unknown_target`, `ambiguous_target`, `self`, `no_task`) |
 | `dedupe_key` | chave de idempotência derivada no servidor (ver abaixo) |
+| `available_at` | só conversas `thread:`: a mensagem não vai antes disto (backoff do retry); `NULL` = já |
+| `lease_until` | só conversas: até quando a posse do consumidor vale enquanto está `delivering` |
+| `delivery_mode` | só conversas: `queue_after_active` ou `steer_active` |
+| `settled_at` | `ask` a uma conversa: a espera acabou com resposta ou motivo (o prazo não encerra) |
 
 Tabela `peer_message_keys` (tombstone): `(from_tab_id, client_id)` de cada registro com `--id` que saiu na
 limpeza de 7 dias, guardada por 30 dias (`KEEP_KEYS_MS`). Sem ela, apagar a linha devolvia a chave e o
@@ -29,6 +33,42 @@ mesmo `--id` rodava de novo.
 
 Uma tabela antiga (o CHECK do estado sem `refused`) é reconstruída uma vez pela migração, copiando todas
 as linhas; as colunas novas entram com `ALTER TABLE ADD COLUMN`.
+
+## Conversas por protocolo (`thread:<id>`)
+
+A mensagem para uma conversa do time (`conversa/`, sem PTY) usa a MESMA tabela e o mesmo ciclo dos terminais,
+com um consumidor por destino no lugar do entregador do PTY (etapa 2 do harness do modo chat).
+
+- **Entrada**: `team::deliver_to_thread` = `admit(Queued)` + o consumidor decide a vez agora. `Delivery::Now`
+  = já entrou na conversa; `Queued` = espera (conversa ocupada ou envio que falhou e tenta de novo). Acabaram a
+  `std::thread` por mensagem, o `wait_idle` e o `begin_direct` (que gravava `delivering` sem enviar nada).
+- **Consumidor** (`peer_queue::thread_outbox::drain`, ligado em `ipc/commands/peer_queue.rs::run_thread_worker`):
+  puro sobre `&DbConnection` + uma `ThreadPort` (a conversa); processa o que está pronto num `now` e devolve
+  `Next::{Empty, Busy(até), At(t)}`. O laço dorme no barramento (`chat.changed` da conversa, `peer.queue` do destino)
+  ou até o prazo; sem polling. O lock do banco nunca é segurado durante o envio.
+- **Ordem**: `position, id`. A cabeça com backoff segura as seguintes.
+- **Modos**: `queue_after_active` (padrão: só com a conversa livre; ocupada devolve `Busy`, que não gasta
+  tentativa) e `steer_active` (o «enviar agora» e o prazo de 15 min entram no turno em andamento; no Codex um
+  `turn/steer` recusado porque o turno acabou cai para `turn/start`). O Antigravity não tem processo entre
+  turnos: o envio dele entra na fila interna.
+- **Trava** (`conversa::api::send_gate`): um `tokio::sync::Mutex` por conversa segura a checagem do turno + o
+  `turn/start`/`turn/steer`, para todo chamador (tela, `ags chat`, fila de mensagens): fecha o check-then-act.
+- **Erro de envio** (`conversa::envio::SendError`): `Busy` (volta à fila sem gastar tentativa), `NotSent` (nada
+  chegou ao agente: volta com backoff `100·2^n ms` até 30 s, no máximo 5 tentativas; na última vira `expired`
+  com `reason = delivery_failed` e o aviso ao remetente) e `Unknown` (o pedido saiu e a resposta se perdeu:
+  `unconfirmed`, **sem retry**, e o aviso). No Codex só o pedido que saiu e perdeu a resposta é `Unknown`
+  (`RequestFailure`); Claude, OpenCode e Antigravity só falham antes de escrever.
+- **Marcador `#id`**: o cabeçalho que a conversa recebe é `[Mensagem #<id> de X via ADE AGS]`. Ele permite
+  achar, na timeline, a mensagem entregue: (1) na **recuperação** (`thread_outbox::recover`, no arranque e
+  quando `lease_until` vence): achou → `delivered`; não achou e o motor grava a mensagem do usuário no envio
+  (Claude, OpenCode, Antigravity) → volta à fila uma vez; não achou no Codex (que a grava quando o servidor
+  avisa) ou a timeline não abre → `unconfirmed` e aviso; (2) na **âncora do `ask`** (`chat_team::model::reply_window`).
+- **Arranque**: `store::resume` deixa o `delivering` de uma conversa para a recuperação (não o marca às cegas).
+  O conjunto de vivos inclui as conversas ativas (`live_ids`): o aviso de falha alcança quem pediu de dentro de uma.
+- **Barramento**: cada mudança de estado publica `peer.message {id, state, reason, from, to, kind, attempts}`.
+- **`ask`**: um em andamento por remetente+destino (`Admission::Joined`); `replies` com todas as falas do turno; `status: failed`.
+- **Dedupe do `tell`**: não vale se o destino mandou algo ao remetente depois da mensagem anterior.
+- **Recibo**: `ags peer receipt <número | --id chave>` / MCP `peer_receipt` (`ipc/commands/peer_queue.rs::receipt`).
 
 ## Estados
 
@@ -148,8 +188,9 @@ gravados com ele. Quem escreve no mesmo banco (o app e qualquer processo da CLI)
 
 ## Sem lease (decisão)
 
-A auditoria (item 13) sugere um lease renovado pela atividade do PTY. Não foi feito: **só o app
-entrega**. A CLI e as tools MCP só pedem (pelo IPC); nenhum outro processo toma mensagens da fila. A
+A auditoria (item 13) sugere um lease renovado pela atividade do PTY. Não foi feito para os terminais:
+**só o app entrega**. (Para as conversas `thread:` há `lease_until`, mas só para recuperar um consumidor que
+morreu com a mensagem em `delivering`, não para disputa entre entregadores.) A CLI e as tools MCP só pedem (pelo IPC); nenhum outro processo toma mensagens da fila. A
 exclusão já é garantida por `store::claim` (`queued → delivering` numa só escrita), pelo
 `delivery_lock` por destino e por um entregador por destino; no arranque, o que estava `delivering`
 vira `unconfirmed` e nunca é digitado de novo. Um lease só faria sentido com dois entregadores
@@ -157,8 +198,8 @@ disputando a mesma fila (por exemplo, um daemon headless entregando junto com o 
 
 ## Arranque do app
 
-`start_resume` (em `app/run.rs`, fora do modo headless): `delivering` vira `unconfirmed` (não se sabe
-se chegou, então não se digita de novo); `queued` de aba que não existe mais, ou com mais de 1 h, vira
+`start_resume` (em `app/run.rs`, fora do modo headless): `delivering` de um terminal vira `unconfirmed` (não se
+sabe se chegou, então não se digita de novo; o de uma conversa vai para a recuperação por marcador); `queued` de aba que não existe mais, ou com mais de 1 h, vira
 `expired`; o resto volta a andar, com o aviso de atraso. Cada uma que terminou `unconfirmed`/`expired` ali gera o aviso
 ao remetente (se ele ainda está aberto).
 
@@ -169,7 +210,7 @@ ao remetente (se ele ainda está aberto).
   agora e cancelar (com confirmação). Atualiza pelo evento `cc-peer-queue`.
 - Comandos Tauri: `peer_queue_counts`, `peer_queue_list`, `peer_queue_edit`, `peer_queue_move`,
   `peer_queue_cancel`, `peer_queue_send_now`.
-- `ags peer queue [list]` (o que você mandou e espera), `ags peer queue refused` (as suas recusas) e
+- `ags peer receipt <número | --id chave>` (o estado de uma mensagem sua), `ags peer queue [list]` (o que você mandou e espera), `ags peer queue refused` (as suas recusas) e
   `ags peer queue cancel <id>` (só as suas).
 
 ## Vigia e detector de parados (o lado da janela)
