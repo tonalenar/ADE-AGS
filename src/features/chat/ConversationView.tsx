@@ -13,7 +13,8 @@ import { retuneConversationTab, sendToConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
 import { accessModesFor, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { ChatComposer } from "./ChatComposer";
-import { useChatWidthClass } from "./chatLook";
+import { ChatFrame } from "./ChatFrame";
+import { ComposerColumn } from "./ComposerColumn";
 import { ActivityLine } from "./LiveActivity";
 import { useChatLive } from "./liveStore";
 import { ContextStrip } from "./NewConversation";
@@ -78,7 +79,6 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const access = useMemo(() => readAccess(card.agentId, command), [card.agentId, command]);
   const working = useChatLive((s) => s.phase[card.tabId] === "working");
   const turnStart = useChatLive((s) => s.turn[card.tabId]?.startedAt ?? null);
-  const width = useChatWidthClass();
   // O pedido da TUI vem do store único das permissões (o `PermissionsManager` lê a tela).
   const asks = usePendingAsks();
   const approval = useMemo(() => asks.find((a) => a.conversation === card.tabId) ?? null, [asks, card.tabId]);
@@ -116,7 +116,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   useEffect(() => () => setChatSlot(null), []);
 
   const controls = (
-    <div title={locked ? t("chat.composer.lockedWhileWorking") : t("chat.composer.retuneHint")} className="flex items-center gap-0.5">
+    <div title={locked ? t("chat.composer.lockedWhileWorking") : t("chat.composer.retuneHint")} className="flex min-w-0 flex-wrap items-center justify-end gap-x-0.5 gap-y-1">
       <AgentModelPicker agents={[agentInfo]} showAccount={false} disabled={locked}
         value={{ agentId: card.agentId, model: tuning.model, effort: tuning.effort, account: null }}
         onChange={(v) => retune({ model: v.model })} />
@@ -134,7 +134,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   );
 
   const composer = (
-    <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}>
+    <ComposerColumn>
       {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
       <ChatComposer cwd={card.cwd}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
@@ -153,7 +153,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
         <AccessMenu value={access.plan ? "ask" : access.access} available={accessModesFor(card.agentId)}
           onChange={locked ? undefined : (next) => retune({ access: next, plan: false })} />
       </ContextStrip>
-    </div>
+    </ComposerColumn>
   );
 
   if (!timeline) {
@@ -170,7 +170,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           </div>
         </div>
         {/* Sem timeline, o pedido fica logo acima do composer (o terminal mostra o mesmo diálogo). */}
-        {approval && <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}><PermissionCard ask={approval} terminal /></div>}
+        {approval && <ComposerColumn><PermissionCard ask={approval} terminal /></ComposerColumn>}
         {composer}
       </div>
     );
@@ -178,12 +178,13 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <TimelineView items={items} loaded={loaded} missing={loaded && !read} truncated={!!read?.truncated}
+    <ChatFrame composer={composer} list={(bottomInset) => (
+      <TimelineView bottomInset={bottomInset} items={items} loaded={loaded} missing={loaded && !read} truncated={!!read?.truncated}
         working={busy || approval !== null} approval={null} live
         approvalCard={approval ? <PermissionCard ask={approval} terminal /> : null}
         agentLabel={card.agentLabel} agentId={card.agentId} pending={pending} onOpenTerminal={() => setTerminalOpen(card.tabId, true)}
         after={<TeamThreadFeed conversation={card} cards={cards} />} />
-      {composer}
+    )} />
       {terminalOpen && (
         <section aria-label={t("chat.terminal.label")} style={{ height: DRAWER_H }}
           className="shrink-0 border-t border-gray-200 dark:border-white/[0.08] bg-white dark:bg-black">

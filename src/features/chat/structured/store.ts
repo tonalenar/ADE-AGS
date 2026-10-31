@@ -127,11 +127,17 @@ export interface NewThread {
 
 /** Cria a conversa, mostra e manda a primeira mensagem. */
 export async function startThread(input: NewThread, text: string): Promise<string> {
+  const id = await createThread(input);
+  openThread(id);
+  sendToThread(id, text);
+  return id;
+}
+
+/** Cria a conversa por protocolo sem abri-la nem mandar nada (o time é montado antes de a tela trocar). */
+export async function createThread(input: NewThread): Promise<string> {
   const row = await chatThreadCreate(input);
   upsertThread(row);
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [row.id]: true } }));
-  openThread(row.id);
-  sendToThread(row.id, text);
   return row.id;
 }
 

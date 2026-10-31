@@ -25,7 +25,7 @@ export function TeamTargetSwitch({ orchestrator }: { orchestrator: string }) {
     <div role="group" aria-label={t("chat.team.target.label")} className="flex shrink-0 gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
       {options.map(([id, label]) => (
         <button key={id} type="button" aria-pressed={target === id} onClick={() => setComposerTarget(orchestrator, id)}
-          className={`h-6 px-2.5 rounded-md whitespace-nowrap text-chat-caption font-medium
+          className={`h-7 px-2.5 rounded-md whitespace-nowrap text-chat-caption font-medium
             ${target === id ? "bg-white dark:bg-surface-raised text-gray-900 dark:text-white shadow-[0_1px_2px_rgba(0,0,0,0.08)]" : "text-gray-500 dark:text-white/45"}`}>
           {label}
         </button>

@@ -29,12 +29,12 @@ export function AccessMenu({ value, available, onChange, placement = "above" }: 
     </span>
   );
   if (!onChange) {
-    return <span title={t(`chat.access.${value}Hint`)} className="h-6 px-1.5 flex items-center text-chat-caption text-gray-500 dark:text-white/45">{trigger}</span>;
+    return <span title={t(`chat.access.${value}Hint`)} className="h-7 px-1.5 flex items-center whitespace-nowrap text-chat-caption text-gray-500 dark:text-white/45">{trigger}</span>;
   }
   return (
     <div ref={ref} className="relative">
       <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}
-        className={`h-6 px-1.5 rounded-md text-chat-caption text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/[0.07] hover:text-gray-800 dark:hover:text-white/80
+        className={`h-7 px-1.5 rounded-md whitespace-nowrap text-chat-caption text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/[0.07] hover:text-gray-800 dark:hover:text-white/80
           ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
         {trigger}
       </button>

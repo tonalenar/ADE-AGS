@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { entryForKey, matchTeamShortcut, PANEL_ENTRIES, type Chord } from "@/features/chat/panelMenu";
+import { entryForKey, matchTeamShortcut, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type Chord } from "@/features/chat/panelMenu";
 
 const ALL = { terminal: true, pr: false };
 const key = (k: string, mods: object = {}) => ({ key: k, ...mods });
@@ -36,5 +36,16 @@ describe("o atalho do painel Time", () => {
     expect(matchTeamShortcut(chord({ key: "O", ctrlKey: true, shiftKey: true }), "windows")).toBe(true);
     expect(matchTeamShortcut(chord({ key: "o", ctrlKey: true, shiftKey: true, altKey: true }), "windows")).toBe(false);
     expect(matchTeamShortcut(chord({ key: "o", ctrlKey: true }), "linux")).toBe(false);
+  });
+});
+
+describe("a fileira de ícones do painel", () => {
+  it("tem Resumo, Terminal, Diff, Navegador, Aparelho e Arquivos; o resto vai para o ⋯", () => {
+    expect(ROW_CHOICES).toEqual(["summary", "terminal", "diff", "browser", "ios", "files"]);
+    expect(MORE_ENTRIES.map((e) => e.id)).toEqual(["design", "android", "team", "pr"]);
+  });
+  it("nada some: fileira e ⋯ juntos são todas as linhas do menu, sem repetir", () => {
+    const all = [...ROW_CHOICES, ...MORE_ENTRIES.map((e) => e.id)].sort();
+    expect(all).toEqual(PANEL_ENTRIES.map((e) => e.id).sort());
   });
 });

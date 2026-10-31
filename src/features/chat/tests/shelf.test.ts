@@ -10,8 +10,8 @@ const entry = (id: string): SettledConversation => ({
 
 describe("Adiadas e Concluídas", () => {
   it("lixo vira vazio e entradas sem o essencial saem", () => {
-    expect(parseShelf("x")).toEqual({ snoozed: [], settled: [] });
-    expect(parseShelf({ snoozed: ["a", 3], settled: [{ id: "x" }, entry("1")] })).toEqual({ snoozed: ["a"], settled: [entry("1")] });
+    expect(parseShelf("x")).toEqual({ snoozed: [], settled: [], pinned: [], unread: [], collapsed: [] });
+    expect(parseShelf({ snoozed: ["a", 3], settled: [{ id: "x" }, entry("1")] })).toEqual({ snoozed: ["a"], settled: [entry("1")], pinned: [], unread: [], collapsed: [] });
   });
 
   it("concluir põe no topo, sem repetir, com teto", () => {

@@ -1,9 +1,9 @@
 /**
  * Mensagem grande recolhida, como no Claude Code: o balão fecha em ~9 linhas da prosa do chat
- * (24 px cada) e o fim some num degradê, com "Mostrar mais" dentro do balão.
+ * (21,5 px cada) e o fim some num degradê, com "Mostrar mais" dentro do balão.
  */
 export const COLLAPSED_LINES = 9;
-export const LINE_PX = 24;
+export const LINE_PX = 21.5;
 /** A altura do balão recolhido. */
 export const COLLAPSED_PX = COLLAPSED_LINES * LINE_PX;
 

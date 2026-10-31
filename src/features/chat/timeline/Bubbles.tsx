@@ -6,17 +6,6 @@ import { agentIcon } from "@/features/agents/agentIcons";
 import { COLLAPSED_PX, overflowsLimit } from "./bubbleModel";
 import { prefersReducedMotion } from "./useRevealedText";
 
-/** O logo do agente ao lado do balão (o mesmo `agentIcon` de todo o app). */
-export function AgentAvatar({ agentId, command, label }: { agentId: string; command?: string; label: string }) {
-  const Icon = agentIcon(agentId, command);
-  return (
-    <span title={label} role="img" aria-label={label}
-      className="shrink-0 w-7 h-7 mt-0.5 rounded-full flex items-center justify-center bg-gray-100 dark:bg-white/[0.08]">
-      <Icon className="w-4 h-4" />
-    </span>
-  );
-}
-
 /**
  * O conteúdo de um balão com o limite de altura: passando dele, recolhe com o fim apagado por uma
  * máscara (`cc-bubble-fade`, vale em qualquer cor de fundo, clara ou escura) e o botão "Mostrar mais"
@@ -69,24 +58,34 @@ export function PersonBubble({ text, sending = false }: { text: string; sending?
   );
 }
 
-/** A fala de um agente: o logo ao lado e o balão, sempre inteiro (só as mensagens da pessoa recolhem em "Mostrar mais"). `sender` mostra o nome (quem fala por `ags peer`). */
-export function AgentBubble({ agentId, command, label, sender, entering = false, caret = false, children }: {
+/**
+ * A fala de um agente, SEM balão: texto corrido direto no fundo da página, como no Claude Code. `header`
+ * põe acima do texto uma linha discreta com o logo pequeno e o nome de quem fala (só num time, quando o
+ * remetente muda; ver `speakers.ts`). `sender` é o nome de quem fala por `ags peer`.
+ */
+export function AgentBubble({ agentId, command, label, sender, header = false, entering = false, caret = false, children }: {
   agentId: string;
   command?: string;
   label: string;
   sender?: string;
+  /** Mostra o logo e o nome acima do texto. */
+  header?: boolean;
   entering?: boolean;
   caret?: boolean;
   children: React.ReactNode;
 }) {
+  const Icon = agentIcon(agentId, command);
+  const name = sender ?? label;
   return (
-    <div className={`flex items-start gap-2.5 ${entering ? "cc-msg-in" : ""}`}>
-      <AgentAvatar agentId={agentId} command={command} label={sender ?? label} />
-      <div className="min-w-0 max-w-[88%] flex flex-col gap-1">
-        {sender && <span className="px-1 text-chat-caption font-medium text-gray-500 dark:text-white/45">{sender}</span>}
-        <div className={`rounded-3xl px-4 py-3 bg-gray-100 dark:bg-white/[0.05] break-words`} aria-busy={caret || undefined}>
-          <div className={caret ? "cc-stream-caret" : undefined}>{children}</div>
+    <div className={`min-w-0 flex flex-col gap-1.5 ${entering ? "cc-msg-in" : ""}`}>
+      {header && (
+        <div className="flex items-center gap-1.5 text-chat-caption font-medium text-gray-500 dark:text-white/50">
+          <span role="img" aria-label={name} title={name} className="shrink-0 w-4 h-4 flex items-center justify-center"><Icon className="w-4 h-4" /></span>
+          <span className="truncate">{name}</span>
         </div>
+      )}
+      <div className="min-w-0 break-words" aria-busy={caret || undefined}>
+        <div className={caret ? "cc-stream-caret" : undefined}>{children}</div>
       </div>
     </div>
   );

@@ -5,8 +5,9 @@ import { openConversation } from "../chatActions";
 import type { ConversationCard } from "../chatModel";
 import { threadIdOf } from "../structured/model";
 import { openThread } from "../structured/store";
+import { DraftTeamPanel } from "./DraftTeamPanel";
 import { LinkAgentForm, conversationRefOf } from "./LinkAgentForm";
-import { AgentMono, StateDot, useRoleLabel } from "./TeamParts";
+import { AgentMono, PanelHeader, StateDot, useRoleLabel } from "./TeamParts";
 import { CONVERSATION_DRAG_MIME, defaultPolicy, placeOf, rosterRows, takenRefs, type RosterRow } from "./teamModel";
 import { dissolveTeam, linkExisting, loadFeed, makeOrchestrator, setAdding, startTeams, unlinkMember, useTeamStore } from "./teamStore";
 import { useTeamLive } from "./useTeamLive";
@@ -45,9 +46,8 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
     [team, feed, live],
   );
 
-  if (!conversation) {
-    return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.team.empty.noConversation")}</p>;
-  }
+  // Sem conversa aberta é a tela "Nova conversa": o time se monta em rascunho e nasce com a primeira mensagem.
+  if (!conversation) return <DraftTeamPanel cards={cards} />;
 
   if (!team) {
     return (
@@ -110,23 +110,6 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
   );
 }
 
-function PanelHeader({ summary, onAdd, adding = false }: { summary: string | null; onAdd?: () => void; adding?: boolean }) {
-  const { t } = useTranslation();
-  return (
-    <div className="h-[52px] shrink-0 flex items-center gap-2 px-3.5 border-b border-gray-200 dark:border-white/[0.08]">
-      <b className="text-chat-heading font-semibold text-gray-900 dark:text-white">{t("chat.team.title")}</b>
-      {summary && <span className="text-chat-caption text-gray-500 dark:text-white/45">{summary}</span>}
-      <span className="flex-1" />
-      {onAdd && (
-        <button type="button" onClick={onAdd} aria-expanded={adding}
-          className="h-7 px-2.5 rounded-[7px] border border-gray-200 dark:border-white/[0.08] text-chat-note text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.06]">
-          {t("chat.team.link")}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function Footer() {
   return (
     <div className="mt-auto px-3.5 py-2.5 border-t border-gray-200 dark:border-white/[0.08] text-chat-caption leading-normal text-gray-500 dark:text-white/45">
@@ -156,17 +139,17 @@ function MemberCard({ row, teamId }: { row: RosterRow; teamId: string }) {
           </span>
         )}
       </div>
-      <div className="flex items-center gap-2 text-chat-caption text-gray-500 dark:text-white/45">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-chat-caption text-gray-500 dark:text-white/45">
         <StateDot state={row.state} />
-        {row.policy && <span>· {t(`chat.team.policy.${row.policy}`)}</span>}
+        {row.policy && <span className="whitespace-nowrap">· {t(`chat.team.policy.${row.policy}`)}</span>}
         <span className="flex-1" />
         {!lead && (
           <button type="button" onClick={() => { void unlinkMember(teamId, row.ref); }}
-            className="hidden group-hover:inline text-[11px] text-gray-500 dark:text-white/45 hover:text-red-700 dark:hover:text-red-400">
+            className="hidden group-hover:inline whitespace-nowrap text-[11px] text-gray-500 dark:text-white/45 hover:text-red-700 dark:hover:text-red-400">
             {t("chat.team.unlink")}
           </button>
         )}
-        <span className="font-mono truncate max-w-[45%]">{row.branch ?? (row.isThread ? t("chat.team.thread") : t("chat.team.tab"))}</span>
+        <span className="font-mono truncate min-w-0 max-w-full">{row.branch ?? (row.isThread ? t("chat.team.thread") : t("chat.team.tab"))}</span>
       </div>
     </li>
   );

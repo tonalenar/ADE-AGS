@@ -1,6 +1,7 @@
+// @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { addSurface, forgetLastPanel, hostLabel, openTeamPanelFocused, removeSurface, setRightPanel, toggleRightPanel, useChatStore } from "@/features/chat/store";
+import { addSurface, forgetLastPanel, hostLabel, openTeamPanelFocused, parsePanel, removeSurface, setRightPanel, toggleRightPanel, useChatStore } from "@/features/chat/store";
 
 describe("painel direito: as superfícies (prancheta 8)", () => {
   beforeEach(() => useChatStore.setState({ panel: null, surfaces: ["browser"] }));
@@ -75,5 +76,23 @@ describe("largura do painel direito (arrastando a borda)", () => {
     expect(clampPanelWidth(1300, 1400)).toBe(1400 - PANEL_W.conversationMin);
     expect(clampPanelWidth(900, 800)).toBe(PANEL_W.min);
     expect(clampPanelWidth(Number.NaN, 1400)).toBe(PANEL_W.initial);
+  });
+});
+
+describe("o painel lembrado", () => {
+  it("abre no Resumo sem nada guardado ou com lixo; 'none' é o painel que a pessoa fechou", () => {
+    expect(parsePanel(null)).toBe("summary");
+    expect(parsePanel("lixo")).toBe("summary");
+    expect(parsePanel("empty")).toBe("summary");
+    expect(parsePanel("none")).toBeNull();
+    expect(parsePanel("diff")).toBe("diff");
+  });
+  it("a escolha (inclusive fechar) é gravada", () => {
+    setRightPanel("diff");
+    expect(localStorage.getItem("ags.chat.panel")).toBe("diff");
+    setRightPanel(null);
+    expect(localStorage.getItem("ags.chat.panel")).toBe("none");
+    setRightPanel("summary");
+    expect(localStorage.getItem("ags.chat.panel")).toBe("summary");
   });
 });

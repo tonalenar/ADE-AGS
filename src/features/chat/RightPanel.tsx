@@ -2,21 +2,21 @@ import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { useTranslation } from "react-i18next";
 
 import { FilesView } from "@/features/explorer/FilesView";
+import { DESKTOP_OS } from "@/app/platform";
 import { WindowControls } from "@/app/WindowLights";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
+import { comparablePath } from "@/features/tabs/viewTabs";
 
-import { ChevronDownIcon, DesignIcon, DetailsIcon, DiffIcon, FilesIcon, GlobeIcon, MaximizeIcon, PanelBottomIcon, PanelRightIcon, PhoneIcon, PlusIcon, PullRequestIcon, TerminalIcon, UsersIcon, XIcon } from "./chatIcons";
+import { ChevronDownIcon, MaximizeIcon, PanelRightIcon } from "./chatIcons";
+import { choosePanel, ENTRY_ICON, onEntryKey, PanelToolbar } from "./PanelToolbar";
 import { devicesShare } from "./devicesIpc";
 import { sharedDevices } from "./devicesModel";
 import { useWorkingDiff } from "./useWorkingDiff";
-import { CHAT_SHELL_ATTR, hasTimeline, useTerminalOpen } from "./ConversationView";
-import { entryForKey, isAvailable, keyLabel, PANEL_ENTRIES, type PanelAvailability, type PanelChoice } from "./panelMenu";
+import { CHAT_SHELL_ATTR, hasTimeline } from "./ConversationView";
+import { isAvailable, keyLabel, PANEL_ENTRIES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import type { ConversationCard } from "./chatModel";
-import { SummaryPane } from "./summary/SummaryPane";
 import { TeamPanel } from "./team/TeamPanel";
-import { addSurface, clampPanelWidth, hostLabel, PANEL_W, removeSurface, setChatBrowser, setPanelWidth, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleRightPanel, useChatStore, type Surface } from "./store";
-import { usePopover } from "./usePopover";
+import { clampPanelWidth, PANEL_W, setChatBrowser, setPanelWidth, togglePanelMaximized, toggleRightPanel, useChatStore } from "./store";
 
 // Design e os aparelhos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
 const DesignPane = lazy(() => import("./DesignPane").then((m) => ({ default: m.DesignPane })));
@@ -36,79 +36,45 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   const { t } = useTranslation();
   const panel = useChatStore((s) => s.panel);
   const maximized = useChatStore((s) => s.panelMaximized);
-  const surfaces = useChatStore((s) => s.surfaces);
-  // As abas levam o nome do que mostram (prancheta 8): o endereço do navegador, o aparelho ligado.
-  const browserUrl = useViewTabsStore((s) =>
-    cwd ? s.views.find((v): v is Extract<ViewTab, { kind: "browser" }> => v.kind === "browser" && !v.owner && comparablePath(v.cwd) === comparablePath(cwd))?.url ?? null : null);
-  const deviceNames = useChatStore((s) => s.deviceNames);
   const panelWidth = useChatStore((s) => s.panelWidth);
   const panelFocus = useChatStore((s) => s.panelFocus);
   const contentRef = useRef<HTMLDivElement>(null);
   useShareDevices();
   // O atalho do Time (e quem mais pedir) leva o foco para dentro do painel.
   useEffect(() => { if (panelFocus > 0) contentRef.current?.focus(); }, [panelFocus]);
-  if (!panel) return null;
+  const terminalOn = useChatStore((s) => (tabId ? s.terminalOpen[tabId] ?? false : false));
+  // O Resumo não é coluna: flutua ao lado da conversa (`ChatShell`). Aqui só moram as outras superfícies.
+  if (!panel || panel === "summary") return null;
   // O terminal é a gaveta da conversa (só as que têm timeline); o PR ainda não tem aba no painel (esmaecido).
   const available: PanelAvailability = { terminal: !!tabId && !!conversation && hasTimeline(conversation.agentId), pr: false };
-  const choose = (id: PanelChoice) => {
-    if (id === "summary") setRightPanel("summary");
-    else if (id === "diff") setRightPanel("diff");
-    else if (id === "terminal") { if (tabId) setTerminalOpen(tabId, true); }
-    else if (id !== "pr") addSurface(id);
-  };
+  const choose = (id: PanelChoice) => choosePanel(id, tabId, terminalOn);
   const empty = panel === "empty";
-  const label = (surface: Surface) =>
-    surface === "browser" ? hostLabel(browserUrl) ?? t("chat.panel.browser")
-    : surface === "ios" || surface === "android" ? deviceNames[surface] ?? t(`chat.panel.${surface}`)
-    : t(`chat.panel.${surface}`);
-  const icon = (surface: Surface) => (surface === "browser" ? <GlobeIcon className="w-3 h-3 shrink-0" /> : null);
   const headBtn = "w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10";
-  const tabCls = (on: boolean) => `h-6 max-w-40 px-2 rounded-md text-chat-caption inline-flex items-center gap-1.5
-    ${on ? "bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white font-medium" : "text-gray-500 dark:text-white/45 hover:bg-gray-100/60 dark:hover:bg-white/[0.06]"}`;
+  // Windows e Linux: os botões da janela moram no canto direito; o conteúdo cede a altura deles. No macOS não há nada a ceder.
+  const winControls = DESKTOP_OS === "windows" || DESKTOP_OS === "linux";
   return (
     <aside aria-label={t("chat.panel.label")}
       style={maximized ? undefined : { width: panelWidth }}
       className={`${maximized ? "flex-1" : "shrink"} relative min-w-[360px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
       {!maximized && <ResizeHandle />}
-      <div role="tablist" data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-1 pl-2 pr-3">
-        {/* No estado vazio não há aba nenhuma, só o "+" (como no T3). */}
-        {!empty && (
-          <button type="button" role="tab" aria-selected={panel === "summary"} onClick={() => setRightPanel("summary")} className={tabCls(panel === "summary")}>
-            {t("chat.panel.summaryTab")}
+      {/* Sem faixa de cabeçalho: a fileira de ícones e o recolher moram no cabeçalho principal e cada superfície
+          começa no topo da coluna. Fica só uma região de arrasto fina (não cobre os botões da superfície). */}
+      <div data-tauri-drag-region aria-hidden="true" className="absolute inset-x-0 top-0 h-2 z-10" />
+      {winControls && <div className="absolute top-0 right-0 z-20"><WindowControls /></div>}
+      {/* Maximizado, o cabeçalho principal some: a fileira, o restaurar e o recolher vêm para uma barra flutuante discreta. */}
+      {maximized && (
+        <div className={`absolute right-3 z-20 flex items-center gap-1 rounded-lg bg-white/95 dark:bg-surface-deep/95 p-0.5 shadow-[0_0_0_1px_rgba(24,24,27,0.08),0_8px_24px_-12px_rgba(0,0,0,0.4)] ${winControls ? "top-9" : "top-2"}`}>
+          <PanelToolbar tabId={tabId} terminalAvailable={available.terminal} />
+          <button type="button" onClick={togglePanelMaximized} aria-pressed aria-label={t("chat.panel.maximize")} title={t("chat.panel.maximize")} className={`${headBtn} bg-gray-100 dark:bg-white/10`}>
+            <MaximizeIcon className="w-[15px] h-[15px]" />
           </button>
-        )}
-        {!empty && (
-          <button type="button" role="tab" aria-selected={panel === "diff"} onClick={() => setRightPanel("diff")} className={tabCls(panel === "diff")}>
-            {t("chat.panel.diff")}
+          <button type="button" onClick={toggleRightPanel} aria-label={t("chat.panel.toggle")} title={t("chat.panel.toggle")} className={headBtn}>
+            <PanelRightIcon className="w-[15px] h-[15px]" />
           </button>
-        )}
-        {!empty && surfaces.map((surface) => (
-          <span key={surface} className="group relative inline-flex">
-            <button type="button" role="tab" aria-selected={panel === surface} onClick={() => setRightPanel(surface)} className={tabCls(panel === surface)}>
-              {icon(surface)}<span className="truncate">{label(surface)}</span>
-            </button>
-            <button type="button" onClick={() => removeSurface(surface)} aria-label={t("chat.panel.close", { name: label(surface) })}
-              className="hidden group-hover:flex absolute -right-1 -top-1 w-3.5 h-3.5 items-center justify-center rounded-full bg-gray-300 dark:bg-white/25 text-gray-700 dark:text-white">
-              <XIcon className="w-2.5 h-2.5" />
-            </button>
-          </span>
-        ))}
-        <AddSurface available={available} onChoose={choose} />
-        <span data-tauri-drag-region className="flex-1 self-stretch" />
-        <button type="button" onClick={togglePanelMaximized} aria-pressed={maximized} aria-label={t("chat.panel.maximize")} title={t("chat.panel.maximize")}
-          className={headBtn}>
-          <MaximizeIcon className="w-[15px] h-[15px]" />
-        </button>
-        <PanelTerminalToggle conversation={available.terminal ? conversation : null} />
-        <button type="button" onClick={toggleRightPanel} aria-pressed aria-label={t("chat.panel.toggle")} title={t("chat.panel.toggle")}
-          className={`${headBtn} bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white`}>
-          <PanelRightIcon className="w-[15px] h-[15px]" />
-        </button>
-        <WindowControls className="-mr-3" />
-      </div>
-      <div ref={contentRef} tabIndex={-1} className="flex-1 min-h-0 flex flex-col border-t border-gray-200 dark:border-white/[0.08] outline-none">
+        </div>
+      )}
+      <div ref={contentRef} tabIndex={-1} className={`flex-1 min-h-0 flex flex-col outline-none ${winControls ? "pt-8" : ""}`}>
         {empty && <SurfaceLauncher available={available} onChoose={choose} />}
-        {panel === "summary" && <SummaryPane conversation={conversation} cwd={cwd} tabId={tabId} />}
         {panel === "diff" && <DiffView tabId={tabId} cwd={cwd} />}
         {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}
         {panel === "team" && <TeamPanel conversation={conversation} cards={cards} />}
@@ -224,12 +190,6 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
   );
 }
 
-/** Os ícones das linhas do menu "Abrir uma superfície". */
-const ENTRY_ICON: Record<PanelChoice, (p: { className?: string }) => React.ReactElement> = {
-  summary: DetailsIcon, browser: GlobeIcon, terminal: TerminalIcon, files: FilesIcon, diff: DiffIcon, design: DesignIcon,
-  ios: PhoneIcon, android: PhoneIcon, team: UsersIcon, pr: PullRequestIcon,
-};
-
 /**
  * As linhas do menu: ícone, nome e a tecla de atalho numa caixinha à direita; esmaecida a que não se
  * aplica. A tecla vale com o foco na lista (o estado vazio e o menu do "+").
@@ -261,15 +221,6 @@ function EntryList({ available, onChoose, active = null }: { available: PanelAva
   );
 }
 
-/** Uma tecla do menu abre a linha dela (as esmaecidas e as com modificador não). */
-function onEntryKey(e: React.KeyboardEvent, available: PanelAvailability, onChoose: (id: PanelChoice) => void): void {
-  const entry = entryForKey(e, available);
-  if (!entry) return;
-  e.preventDefault();
-  e.stopPropagation();
-  onChoose(entry.id);
-}
-
 /**
  * O estado vazio do painel (como o T3 Code): "Abrir uma superfície" e a lista com os atalhos. Pega o
  * foco ao aparecer, para as teclas valerem de cara. Some assim que uma superfície se abre.
@@ -286,49 +237,6 @@ function SurfaceLauncher({ available, onChoose }: { available: PanelAvailability
         <EntryList available={available} onChoose={onChoose} />
       </div>
     </div>
-  );
-}
-
-/** O "+" do painel: o mesmo menu do estado vazio (Navegador, Terminal, Arquivos, Diff, Design, aparelhos, Time e PR). */
-function AddSurface({ available, onChoose }: { available: PanelAvailability; onChoose: (id: PanelChoice) => void }) {
-  const { t } = useTranslation();
-  const { open, setOpen, ref } = usePopover();
-  const pick = (id: PanelChoice) => { onChoose(id); setOpen(false); };
-  return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen(!open)} aria-label={t("chat.panel.add")} title={t("chat.panel.add")} aria-expanded={open}
-        className="w-6 h-6 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10">
-        <PlusIcon className="w-3.5 h-3.5" />
-      </button>
-      {open && (
-        <div onKeyDown={(e) => onEntryKey(e, available, pick)} ref={(el) => el?.focus()} tabIndex={-1}
-          className="absolute left-0 top-full mt-1 z-50 w-[260px] p-1 rounded-lg bg-white dark:bg-surface-raised outline-none
-          shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
-          <EntryList available={available} onChoose={pick} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** O botão do terminal no canto do painel (como no T3): abre e fecha a gaveta da conversa. Esmaecido sem gaveta. */
-function PanelTerminalToggle({ conversation }: { conversation: ConversationCard | null }) {
-  const { t } = useTranslation();
-  const cls = "w-7 h-7 flex items-center justify-center rounded-md";
-  if (!conversation) {
-    return <button type="button" disabled aria-label={t("chat.terminal.toggle")} title={t("chat.terminal.toggle")} className={`${cls} text-gray-500 dark:text-white/45 opacity-40`}><PanelBottomIcon className="w-[15px] h-[15px]" /></button>;
-  }
-  return <TerminalToggleOn conversation={conversation} className={cls} />;
-}
-
-function TerminalToggleOn({ conversation, className }: { conversation: ConversationCard; className: string }) {
-  const { t } = useTranslation();
-  const open = useTerminalOpen(conversation);
-  return (
-    <button type="button" onClick={() => setTerminalOpen(conversation.tabId, !open)} aria-pressed={open} aria-label={t("chat.terminal.toggle")} title={t("chat.terminal.toggle")}
-      className={`${className} ${open ? "bg-gray-100 dark:bg-white/10 text-gray-900 dark:text-white" : "text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10"}`}>
-      <PanelBottomIcon className="w-[15px] h-[15px]" />
-    </button>
   );
 }
 

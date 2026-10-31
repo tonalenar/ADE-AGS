@@ -146,12 +146,12 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const Icon = agentIcon(agent.id, agent.command);
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative min-w-0 max-w-full">
       <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => !disabled && setOpen(!open)} title={shortcutHint} disabled={disabled}
-        className={`flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85
+        className={`flex max-w-full items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85
           hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
         <Icon className="w-4 h-4 shrink-0" />
-        <span className="truncate max-w-52">{modelLabel}</span>
+        <span className="min-w-0 truncate max-w-52">{modelLabel}</span>
       </button>
 
       {open && (

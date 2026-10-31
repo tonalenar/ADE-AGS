@@ -33,6 +33,15 @@ export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "pr", key: "p" },
 ];
 
+/**
+ * A fileira de ícones da barra do painel (como o painel do Claude Code): Resumo, Terminal, Diff,
+ * Navegador, Aparelho (o simulador iOS) e Arquivos. O resto (Design, Android, Time, PR) fica no `⋯`.
+ */
+export const ROW_CHOICES: PanelChoice[] = ["summary", "terminal", "diff", "browser", "ios", "files"];
+
+/** As linhas que sobram para o menu `⋯`, na ordem de `PANEL_ENTRIES`. */
+export const MORE_ENTRIES: PanelEntry[] = PANEL_ENTRIES.filter((e) => !ROW_CHOICES.includes(e.id));
+
 /** O que está disponível agora: o terminal precisa de uma conversa com gaveta; o PR ainda não tem aba no painel. */
 export interface PanelAvailability {
   terminal: boolean;

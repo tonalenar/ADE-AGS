@@ -15,7 +15,7 @@ import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints
 import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckpointsCapture";
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
-import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
+import { AppSessionsSidebar } from "@/features/chat/sidebar/AppSessionsSidebar";
 import { ExplorerDrawer } from "@/features/sidePanel/ExplorerDrawer";
 import { PanelButtons } from "@/features/sidePanel/PanelButtons";
 import { SessionPanel } from "@/features/sidePanel/SessionPanel";
@@ -299,7 +299,7 @@ export function AppShell() {
             archivos es el panel secundario y va del otro lado. */}
         <div className={chat ? "hidden" : "contents"}>
           <ActivityRail agentCount={tabs.length} width={RAIL_W} />
-          {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
+          {!workspacesCollapsed && <AppSessionsSidebar groups={groups} width={PANEL_W} />}
         </div>
 
         <div className="relative flex-1 min-w-0 overflow-hidden">

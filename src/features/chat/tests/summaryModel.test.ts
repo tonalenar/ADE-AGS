@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ForgeItem } from "@/features/forge/types";
 
 import {
-  connectorsOf, contextOf, diffTotals, environmentOf, homeRelative, outputsFromItems, pickOutputs, pullTone, pullsOfBranch,
+  connectorsOf, contextOf, diffTotals, environmentOf, homeRelative, filesFromHandoffs, outputsFromItems, pickOutputs, pullTone,
   SUMMARY_KEY,
 } from "../summary/summaryModel";
 import { PANEL_ENTRIES } from "../panelMenu";
@@ -42,16 +42,24 @@ describe("as saídas da conversa", () => {
   });
 });
 
+describe("os arquivos que o time entregou", () => {
+  it("um por caminho, o mais recente primeiro, com quem entregou", () => {
+    const out = filesFromHandoffs([
+      { from: "Codex", files: ["src/a.ts", "docs/P.md"] },
+      { from: "Kimi", files: ["src/a.ts", "src/b.ts"] },
+    ]);
+    expect(out.map((o) => [o.path, o.by])).toEqual([["src/a.ts", "Kimi"], ["src/b.ts", "Kimi"], ["docs/P.md", "Codex"]]);
+    expect(out.find((o) => o.path === "docs/P.md")!.kind).toBe("doc");
+  });
+  it("sem entregas, nada", () => {
+    expect(filesFromHandoffs([])).toEqual([]);
+  });
+});
+
 describe("as alterações", () => {
   it("somam as linhas do diff do worktree", () => {
     expect(diffTotals([{ added: 3, removed: 1 }, { added: 5, removed: 0 }])).toEqual({ files: 2, added: 8, removed: 1 });
     expect(diffTotals([])).toEqual({ files: 0, added: 0, removed: 0 });
-  });
-
-  it("os PRs da branch: só os dela, o número maior primeiro", () => {
-    const list = [pull(1), pull(3), pull(2, { sourceBranch: "outra" }), pull(4, { sourceBranch: null })];
-    expect(pullsOfBranch(list, "feat/a").map((p) => p.number)).toEqual([3, 1]);
-    expect(pullsOfBranch(list, null)).toEqual([]);
   });
 
   it("o tom do PR pelo estado", () => {

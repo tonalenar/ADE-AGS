@@ -1,28 +1,32 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-
-import { forgePulls } from "@/features/forge/ipc";
-import { useRepoTarget } from "@/features/forge/useRepoTarget";
-import { hasBrowserMcp } from "@/features/browser/tabMcp";
-import { ScmPanel } from "@/features/scm/ScmPanel";
-import { homeDir } from "@/shared/ipc/window";
-import { AppDialog } from "@/shared/ui/AppDialog";
-import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { Button } from "neogestify-ui-components";
 
-import { formatTokens } from "../activityModel";
+import { hasBrowserMcp } from "@/features/browser/tabMcp";
+import { ScmPanel } from "@/features/scm/ScmPanel";
+import { ConnectorsSection, ContextSection } from "@/features/sidePanel/AgentSections";
+import { folderLabel, shortTokens } from "@/features/sidePanel/panelModel";
+import { Row, Section } from "@/features/sidePanel/Section";
+import { PR_STATE, usePulls } from "@/features/sidePanel/SessionPanel";
+import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
+import { homeDir } from "@/shared/ipc/window";
+import { AppDialog } from "@/shared/ui/AppDialog";
+
 import type { ConversationCard } from "../chatModel";
-import { BranchIcon, ChevronDownIcon, ChevronRightIcon, ComputerIcon, DiffIcon, FilePlusIcon, FolderIcon, MoreVerticalIcon, PenIcon, PullRequestIcon } from "../chatIcons";
+import { BranchIcon, ComputerIcon, DiffIcon, FilePlusIcon, MoreHorizontalIcon, PenIcon, PullRequestIcon } from "../chatIcons";
 import { addSurface } from "../store";
 import { threadIdOf } from "../structured/model";
 import { useStructured } from "../structured/store";
+import { chatTeamHandoff } from "../team/ipc";
+import { deliveries, teamLedBy } from "../team/teamModel";
+import { startTeams, useTeamStore } from "../team/teamStore";
 import { useConversationTimeline } from "../timeline/useConversationTimeline";
 import type { TimelineItem } from "../timeline/types";
-import { useTeamLive } from "../team/useTeamLive";
 import { useWorkingDiff } from "../useWorkingDiff";
-import { connectorsOf, contextOf, diffTotals, environmentOf, outputsFromItems, pickOutputs, pullTone, pullsOfBranch, type PullTone } from "./summaryModel";
-import type { ForgeItem } from "@/features/forge/types";
+import { connectorsOf, contextOf, diffTotals, filesFromHandoffs, outputsFromItems, pickOutputs, type OutputFile } from "./summaryModel";
 
 const EMPTY_ITEMS: TimelineItem[] = [];
 
@@ -35,60 +39,23 @@ function useConversationItems(conversation: ConversationCard | null): TimelineIt
   return (thread ? structured : tui.timeline?.items) ?? EMPTY_ITEMS;
 }
 
-const TONE: Record<PullTone, string> = {
-  open: "bg-emerald-500",
-  draft: "bg-gray-400 dark:bg-white/35",
-  merged: "bg-violet-500",
-  closed: "bg-red-500",
-};
-
-/** Um cartão arredondado; recolhível quando `onToggle` vem. */
-function Card({ title, right, open = true, onToggle, children }: {
-  title: string; right?: React.ReactNode; open?: boolean; onToggle?: () => void; children?: React.ReactNode;
-}) {
-  const head = (
-    <>
-      <span className="text-chat-ui font-medium text-gray-900 dark:text-white">{title}</span>
-      {onToggle && (open ? <ChevronDownIcon className="w-3 h-3 text-gray-500 dark:text-white/45" /> : <ChevronRightIcon className="w-3 h-3 text-gray-500 dark:text-white/45" />)}
-      <span className="flex-1" />
-      {right}
-    </>
-  );
-  return (
-    <section className="rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-raised">
-      {onToggle ? (
-        <button type="button" onClick={onToggle} aria-expanded={open} className="w-full flex items-center gap-2 min-h-11 px-4 text-left">{head}</button>
-      ) : (
-        <div className="flex items-center gap-2 min-h-11 px-4">{head}</div>
-      )}
-      {open && children && <div className="px-4 pb-3 flex flex-col gap-1">{children}</div>}
-    </section>
-  );
-}
-
-function Row({ icon, children, right, title }: { icon: React.ReactNode; children: React.ReactNode; right?: React.ReactNode; title?: string }) {
-  return (
-    <div className="flex items-center gap-2.5 min-h-8 text-chat-note text-gray-800 dark:text-white/85" title={title}>
-      <span className="shrink-0 text-gray-500 dark:text-white/45">{icon}</span>
-      <span className="min-w-0 flex-1 truncate">{children}</span>
-      {right}
-    </div>
-  );
-}
-
 /**
- * O Resumo do painel direito (a superfície padrão), em cartões como o painel de resumo do Claude desktop:
- * Ambiente, Contexto, Conectores, Saídas e Alterações. Só lê o que o ADE já sabe; o que não tem fonte
- * aparece como "não medido" (o contexto em %, a saúde dos conectores, os checks dos PRs).
+ * O Resumo do painel direito, no formato do painel do Claude Code: cartões arredondados empilhados, cada
+ * um com título e seta que abre e recolhe (o estado é lembrado, o mesmo das Abas): Ambiente, Contexto,
+ * Conectores, Saídas e Alterações. Os dados são os que o ADE já tem (git, forge, transcript, config dos
+ * MCPs); o que não tem fonte fica de fora ou como "não medido", nunca inventado.
  */
 export function SummaryPane({ conversation, cwd, tabId }: { conversation: ConversationCard | null; cwd: string | null; tabId: string | null }) {
   const { t } = useTranslation();
+  // A aba da conversa (TUI): tem sessão e config, e os cartões de Contexto e Conectores leem o disco. A
+  // conversa por protocolo não tem aba: esses dois cartões usam o que o app recebe dos eventos.
+  const tab = useTabsStore((s) => s.tabs.find((x) => x.id === conversation?.tabId) ?? null);
   if (!conversation || !cwd) return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.summary.none")}</p>;
   return (
-    <div className="flex-1 min-h-0 cc-scroll p-3.5 flex flex-col gap-3">
+    <div className="flex-1 min-h-0 cc-scroll p-3 flex flex-col gap-3">
       <EnvironmentCard conversation={conversation} cwd={cwd} />
-      <ContextCard conversation={conversation} />
-      <ConnectorsCard conversation={conversation} />
+      {tab ? <ContextSection tab={tab} flat /> : <ThreadContextCard conversation={conversation} />}
+      {tab ? <ConnectorsSection tab={tab} flat /> : <ThreadConnectorsCard conversation={conversation} />}
       <OutputsCard conversation={conversation} cwd={cwd} />
       <ChangesCard conversation={conversation} cwd={cwd} tabId={tabId} />
     </div>
@@ -98,81 +65,111 @@ export function SummaryPane({ conversation, cwd, tabId }: { conversation: Conver
 function EnvironmentCard({ conversation, cwd }: { conversation: ConversationCard; cwd: string }) {
   const { t } = useTranslation();
   const [home, setHome] = useState<string | null>(null);
-  useEffect(() => { homeDir().then(setHome).catch(() => undefined); }, []);
-  const live = useTeamLive();
-  const env = useMemo(() => environmentOf({ cwd, branch: conversation.branch, isWorktree: conversation.isWorktree }, home), [cwd, conversation.branch, conversation.isWorktree, home]);
-  const model = live.modelOf(conversation.tabId);
+  useEffect(() => { homeDir().then(setHome).catch(() => setHome(null)); }, []);
+  const cwds = useMemo(() => [cwd], [cwd]);
+  const repo = useRepoInfo(cwds).get(cwd) ?? null;
+  const folder = folderLabel(cwd, home);
+  const branch = repo?.branch ?? conversation.branch?.trim() ?? null;
+  const worktree = repo?.isWorktree ?? conversation.isWorktree;
   return (
-    <Card title={t("chat.summary.environment")}>
-      <Row icon={<ComputerIcon className="w-4 h-4" />}>{env.place === "worktree" ? t("chat.summary.worktree") : t("chat.summary.computer")}</Row>
-      <Row icon={<FolderIcon className="w-4 h-4" />} title={cwd}>
-        {env.folder}<span className="text-gray-500 dark:text-white/45"> · {env.parent}</span>
+    <Section id="env" title={t("sidePanel.env.title")} flat>
+      <Row icon={<ComputerIcon className="w-4 h-4" />}>{worktree ? t("chat.summary.worktree") : t("chat.summary.computer")}</Row>
+      <Row icon={<FolderGlyph />} title={cwd}>
+        {folder.name} <span className="text-gray-400 dark:text-white/35">· {folder.parent}</span>
       </Row>
-      {env.branch && <Row icon={<BranchIcon className="w-4 h-4" />}>{env.branch}</Row>}
-      <Row icon={<span className="w-4 text-center text-[11px] font-semibold">AI</span>}>
-        {conversation.agentLabel}{model && <span className="text-gray-500 dark:text-white/45"> · {model}</span>}
+      {branch && <Row icon={<BranchIcon className="w-4 h-4" />}>{branch}</Row>}
+      <Row icon={<span className="w-4 text-center text-[10px] font-semibold">AI</span>}>
+        {conversation.agentLabel}
       </Row>
-    </Card>
+    </Section>
   );
 }
 
-function ContextCard({ conversation }: { conversation: ConversationCard }) {
+function FolderGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4" aria-hidden="true">
+      <path d="M20 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2Z" />
+    </svg>
+  );
+}
+
+/** Conversa por protocolo: sem aba, o contexto é o que o agente informa (tokens); nunca uma porcentagem inventada. */
+function ThreadContextCard({ conversation }: { conversation: ConversationCard }) {
   const { t, i18n } = useTranslation();
-  const [open, setOpen] = useState(false);
   const items = useConversationItems(conversation);
   const tokens = useMemo(() => items.reduce((n, i) => (i.kind === "usage" && typeof i.tokens === "number" ? n + i.tokens : n), 0), [items]);
   const ctx = contextOf(tokens > 0 ? tokens : null);
   return (
-    <Card title={t("chat.summary.context")} open={open} onToggle={() => setOpen(!open)}
-      right={<span className="text-chat-note text-gray-500 dark:text-white/45">{ctx.measured ? t("chat.summary.contextTokens", { tokens: formatTokens(ctx.tokens ?? 0, i18n.language) }) : t("chat.summary.notMeasured")}</span>}>
-      <p className="m-0 text-chat-caption leading-relaxed text-gray-500 dark:text-white/45">{t("chat.summary.contextHint")}</p>
-    </Card>
+    <Section id="context" title={t("sidePanel.context.title")} defaultOpen={false} flat
+      aside={<span className="text-[11px] text-gray-500 dark:text-white/45 tabular-nums">{ctx.measured ? t("chat.summary.contextTokens", { tokens: shortTokens(ctx.tokens ?? 0, i18n.language) }) : t("chat.summary.notMeasured")}</span>}>
+      <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.contextHint")}</span></Row>
+    </Section>
   );
 }
 
-function ConnectorsCard({ conversation }: { conversation: ConversationCard }) {
+function ThreadConnectorsCard({ conversation }: { conversation: ConversationCard }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
   const list = connectorsOf(hasBrowserMcp(conversation.agentId));
   const on = list.filter((c) => c.on).length;
   return (
-    <Card title={t("chat.summary.connectors")} open={open} onToggle={() => setOpen(!open)}
-      right={<span className="text-chat-note text-gray-500 dark:text-white/45">{on > 0 ? t("chat.summary.connectorsOn", { count: on }) : t("chat.summary.connectorsNone")}</span>}>
+    <Section id="connectors" title={t("sidePanel.connectors.title")} defaultOpen={false} flat
+      aside={<span className="text-[11px] text-gray-500 dark:text-white/45 tabular-nums">{on > 0 ? t("chat.summary.connectorsOn", { count: on }) : t("chat.summary.connectorsNone")}</span>}>
       {list.map((c) => (
-        <Row key={c.id} icon={<span aria-hidden="true" className={`block w-2 h-2 rounded-full ${c.on ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/25"}`} />}
-          right={<span className="text-chat-caption text-gray-500 dark:text-white/45">{c.on ? t("chat.summary.connectorOn") : t("chat.summary.connectorOff")}</span>}>
+        <Row key={c.id} icon={<span aria-hidden="true" className={`block w-1.5 h-1.5 rounded-full ${c.on ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/25"}`} />}
+          trailing={<span className="shrink-0 text-[10.5px] text-gray-400 dark:text-white/35">{c.on ? t("chat.summary.connectorOn") : t("chat.summary.connectorOff")}</span>}>
           {t(`chat.summary.connector.${c.id}`)}
         </Row>
       ))}
-      <p className="m-0 mt-1 text-chat-caption leading-relaxed text-gray-500 dark:text-white/45">{t("chat.summary.connectorsHint")}</p>
-    </Card>
+      <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.connectorsHint")}</span></Row>
+    </Section>
   );
+}
+
+/** Os arquivos que o time entregou (Handoff v1), para o orquestrador: só informam, são da pasta de cada integrante. */
+function useTeamFiles(conversation: ConversationCard): OutputFile[] {
+  useEffect(() => startTeams(), []);
+  const team = useTeamStore((s) => teamLedBy(s.teams, conversation.tabId));
+  const feed = useTeamStore((s) => (team ? s.feeds[team.id] : undefined));
+  const [handoffs, setHandoffs] = useState<{ from: string; files: string[] }[]>([]);
+  useEffect(() => {
+    if (!team || !feed) { setHandoffs([]); return; }
+    let alive = true;
+    const latest = deliveries(feed).filter((d) => d.handoff !== null).slice(-6);
+    void Promise.all(latest.map((d) => chatTeamHandoff(team.id, d.handoff!)
+      .then((h) => ({ from: d.memberName, files: (h.handoff.changed_files ?? []).map((f) => f.path) }))
+      .catch(() => null)))
+      .then((list) => { if (alive) setHandoffs(list.filter((x): x is { from: string; files: string[] } => x !== null)); });
+    return () => { alive = false; };
+  }, [team?.id, feed]); // eslint-disable-line react-hooks/exhaustive-deps
+  return useMemo(() => filesFromHandoffs(handoffs), [handoffs]);
 }
 
 function OutputsCard({ conversation, cwd }: { conversation: ConversationCard; cwd: string }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const items = useConversationItems(conversation);
-  const outputs = useMemo(() => outputsFromItems(items), [items]);
+  const own = useMemo(() => outputsFromItems(items), [items]);
+  const delivered = useTeamFiles(conversation);
+  const outputs = useMemo(() => [...own, ...delivered.filter((d) => !own.some((o) => o.path === d.path))], [own, delivered]);
   const { shown, hidden } = pickOutputs(outputs, expanded);
   // Abre o arquivo no painel de Arquivos (o mesmo editor das Abas).
   const open = (path: string) => { addSurface("files"); useViewTabsStore.getState().openFile(cwd, path); };
   return (
-    <Card title={t("chat.summary.outputs")}>
-      {outputs.length === 0 && <p className="m-0 py-1 text-chat-caption text-gray-500 dark:text-white/45">{t("chat.summary.outputsEmpty")}</p>}
+    <Section id="outputs" title={t("chat.summary.outputs")} flat>
+      {outputs.length === 0 && <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.outputsEmpty")}</span></Row>}
       {shown.map((file) => (
-        <button key={file.path} type="button" onClick={() => open(file.path)} title={file.path}
-          className="flex items-center gap-2.5 min-h-8 rounded-md text-left text-chat-note text-gray-800 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.06]">
-          <span className="shrink-0 text-gray-500 dark:text-white/45">{file.created ? <FilePlusIcon className="w-4 h-4" /> : <PenIcon className="w-4 h-4" />}</span>
-          <span className="min-w-0 flex-1 truncate">{file.name}</span>
-        </button>
+        <Row key={file.path} title={file.path} onClick={file.by ? undefined : () => open(file.path)}
+          icon={file.created ? <FilePlusIcon className="w-4 h-4" /> : <PenIcon className="w-4 h-4" />}
+          trailing={file.by ? <span className="shrink-0 text-[11.5px] text-gray-400 dark:text-white/35">{file.by}</span> : undefined}>
+          {file.name}
+        </Row>
       ))}
-      {(hidden > 0 || expanded) && outputs.length > 4 && (
-        <button type="button" onClick={() => setExpanded(!expanded)} className="self-start mt-1 text-chat-note text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white">
+      {(hidden > 0 || (expanded && outputs.length > 4)) && (
+        <button type="button" onClick={() => setExpanded(!expanded)} className="self-start mt-1 px-1.5 text-[12.5px] text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white">
           {expanded ? t("chat.summary.showLess") : t("chat.summary.showMore")}
         </button>
       )}
-    </Card>
+    </Section>
   );
 }
 
@@ -180,64 +177,60 @@ function ChangesCard({ conversation, cwd, tabId }: { conversation: ConversationC
   const { t } = useTranslation();
   const { state } = useWorkingDiff(cwd, tabId);
   const total = useMemo(() => diffTotals(state.files), [state.files]);
+  const cwds = useMemo(() => [cwd], [cwd]);
+  const repo = useRepoInfo(cwds).get(cwd) ?? null;
+  const branch = repo?.branch ?? conversation.branch?.trim() ?? null;
+  const { pulls, stats } = usePulls(repo?.root ? cwd : null, branch);
+  const repoName = folderLabel(repo?.root ?? cwd, null).name;
   const [committing, setCommitting] = useState(false);
   return (
-    <Card title={t("chat.summary.changes")}>
+    <Section id="changes" title={t("chat.summary.changes")} flat>
       {state.loaded && !state.repo ? (
-        <p className="m-0 py-1 text-chat-caption text-gray-500 dark:text-white/45">{t("chat.panel.noRepo")}</p>
+        <Row><span className="text-gray-500 dark:text-white/45">{t("chat.panel.noRepo")}</span></Row>
       ) : (
         <div className="flex items-center gap-2.5 min-h-9">
-          <span className="shrink-0 text-gray-500 dark:text-white/45"><DiffIcon className="w-4 h-4" /></span>
-          <span className="font-mono text-chat-note">
+          <span className="shrink-0 text-gray-400 dark:text-white/40"><DiffIcon className="w-4 h-4" /></span>
+          <span className="font-mono text-[12.5px]">
             <span className="text-emerald-700 dark:text-emerald-400">+{total.added}</span>{" "}<span className="text-red-700 dark:text-red-400">−{total.removed}</span>
           </span>
           <span className="flex-1" />
           {/* Só abre o fluxo de commit do ADE (a mensagem se edita lá); nunca commita sozinho. */}
           <button type="button" disabled={total.files === 0} onClick={() => setCommitting(true)}
-            className="h-8 px-3 rounded-lg bg-gray-100 dark:bg-white/[0.07] text-chat-note text-gray-900 dark:text-white disabled:opacity-40 hover:bg-gray-200 dark:hover:bg-white/10">
+            className="min-w-0 truncate h-8 px-3 rounded-lg bg-gray-100 dark:bg-white/[0.07] text-[12.5px] text-gray-900 dark:text-white disabled:opacity-40 hover:bg-gray-200 dark:hover:bg-white/10">
             {t("chat.summary.commit")}
           </button>
         </div>
       )}
-      <PullsList cwd={cwd} branch={conversation.branch?.trim() || null} />
+      {pulls && pulls.length > 0 && (
+        <ul className="m-0 mt-1 p-0 list-none flex flex-col">
+          {pulls.map((pull) => (
+            <li key={pull.number} className="flex items-start gap-2.5 py-1.5">
+              <span className={`mt-0.5 shrink-0 ${PR_STATE[pull.state] ?? ""}`}><PullRequestIcon className="w-4 h-4" /></span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[12.5px] text-gray-900 dark:text-white" title={pull.title}>{pull.title}</span>
+                <span className="block truncate text-[12px] text-gray-500 dark:text-white/45 tabular-nums">
+                  {repoName} #{pull.number}
+                  {stats[pull.number] && (
+                    <>{" "}<span className="text-emerald-600 dark:text-emerald-400">+{stats[pull.number]!.add}</span>{" "}<span className="text-rose-600 dark:text-rose-400">−{stats[pull.number]!.del}</span></>
+                  )}
+                </span>
+              </span>
+              <button type="button" onClick={() => { openUrl(pull.webUrl).catch(console.error); }} aria-label={t("chat.summary.pullOpen")} title={t("chat.summary.pullOpen")}
+                className="shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10">
+                <MoreHorizontalIcon className="w-4 h-4" />
+              </button>
+              <span aria-label={t(`chat.summary.pull.${pull.state === "open" && pull.draft ? "draft" : pull.state}`)} title={t(`chat.summary.pull.${pull.state === "open" && pull.draft ? "draft" : pull.state}`)}
+                className={`mt-2 shrink-0 w-1.5 h-1.5 rounded-full ${pull.state === "open" ? (pull.draft ? "bg-gray-400" : "bg-emerald-500") : pull.state === "merged" ? "bg-violet-500" : "bg-red-500"}`} />
+            </li>
+          ))}
+        </ul>
+      )}
       {committing && (
         <AppDialog title={t("chat.summary.commit")} size="md" onClose={() => setCommitting(false)} closeOnEsc
           footer={<Button variant="outline" onClick={() => setCommitting(false)}>{t("btn.close")}</Button>}>
           <div className="h-[60vh] min-h-0 flex flex-col"><ScmPanel cwd={cwd} /></div>
         </AppDialog>
       )}
-    </Card>
-  );
-}
-
-/** Os PRs abertos desta branch, pela integração de GitHub/GitLab do ADE. Sem remoto ou conta, o cartão fica sem lista. */
-function PullsList({ cwd, branch }: { cwd: string; branch: string | null }) {
-  const { t } = useTranslation();
-  const { target } = useRepoTarget(cwd);
-  const [pulls, setPulls] = useState<ForgeItem[]>([]);
-  useEffect(() => {
-    if (!target || !branch) { setPulls([]); return; }
-    let alive = true;
-    forgePulls(cwd, "open").then((list) => { if (alive) setPulls(pullsOfBranch(list, branch)); }).catch(() => { if (alive) setPulls([]); });
-    return () => { alive = false; };
-  }, [cwd, branch, target]);
-  if (!target || pulls.length === 0) return null;
-  return (
-    <ul className="m-0 mt-1 p-0 list-none flex flex-col">
-      {pulls.map((pull) => (
-        <li key={pull.number} className="flex items-start gap-2.5 py-1.5">
-          <span className="mt-0.5 shrink-0 text-gray-500 dark:text-white/45"><PullRequestIcon className="w-4 h-4" /></span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-chat-note text-gray-900 dark:text-white" title={pull.title}>{pull.title}</span>
-            <span className="block truncate text-chat-caption text-gray-500 dark:text-white/45">{target.path.split("/").pop()} #{pull.number}</span>
-          </span>
-          <span aria-label={t(`chat.summary.pull.${pullTone(pull)}`)} title={t(`chat.summary.pull.${pullTone(pull)}`)} className={`mt-1.5 shrink-0 w-2 h-2 rounded-full ${TONE[pullTone(pull)]}`} />
-          <button type="button" onClick={() => { openUrl(pull.webUrl).catch(console.error); }} aria-label={t("chat.summary.pullOpen")} title={t("chat.summary.pullOpen")}
-            className="shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10">
-            <MoreVerticalIcon className="w-4 h-4" />
-          </button>
-        </li>
-      ))}
-    </ul>
+    </Section>
   );
 }

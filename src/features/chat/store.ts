@@ -18,6 +18,8 @@ interface ChatState {
   slot: Rect | null;
   /** A tela de conversa nova está aberta (a hero com o composer), em vez da conversa ativa. */
   composing: boolean;
+  /** A pasta que o "+" de um projeto da barra pede para a tela "Nova conversa" (a casca a lê uma vez e limpa). */
+  composeFolder: string | null;
   /** A gaveta do terminal aberta, por conversa (aba). Ausente = o padrão da conversa. */
   terminalOpen: Record<string, boolean>;
   /** O painel direito e a aba dele; `null` = fechado; `"empty"` = aberto sem nada aberto ("Abrir uma superfície"). */
@@ -62,6 +64,26 @@ export type RightPanelTab = "summary" | "diff" | "files" | "browser" | "design" 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
 
+const PANEL_KEY = "ags.chat.panel";
+const PANELS: readonly string[] = ["summary", "diff", "files", "browser", "design", "ios", "android", "team"];
+
+/**
+ * O painel lembrado: a superfície que estava à vista, ou `"none"` (a pessoa o fechou). Sem nada
+ * guardado, ou com lixo, abre no Resumo (o padrão). Pura.
+ */
+export function parsePanel(raw: string | null): RightPanelTab | null {
+  if (raw === "none") return null;
+  return raw && PANELS.includes(raw) ? (raw as RightPanelTab) : "summary";
+}
+
+function readPanel(): RightPanelTab | null {
+  try {
+    return parsePanel(localStorage.getItem(PANEL_KEY));
+  } catch {
+    return "summary";
+  }
+}
+
 const CONTROL_KEY = "ags.chat.deviceControl";
 const WIDTH_KEY = "ags.chat.panelWidth";
 
@@ -92,7 +114,7 @@ function readControl(): boolean {
 }
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, terminalOpen: {}, panel: null, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, thread: null, surfaces: [],
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: readPanel(), lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, thread: null, surfaces: [],
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, designOpen: null, panelWidth: readWidth(),
   queues: {},
 }));
@@ -134,6 +156,11 @@ const sameRect = (a: Rect | null, b: Rect | null) =>
 export function setChatSlot(slot: Rect | null): void {
   if (sameRect(useChatStore.getState().slot, slot)) return;
   useChatStore.setState({ slot });
+}
+
+/** Abre a tela "Nova conversa" já com essa pasta escolhida (o "+" do cabeçalho de um projeto). */
+export function composeIn(cwd: string): void {
+  useChatStore.setState({ composing: true, composeFolder: cwd });
 }
 
 export function setComposing(composing: boolean): void {
@@ -245,3 +272,13 @@ export function openDesignInPanel(req: Omit<DesignOpenRequest, "seq">): void {
     panel: "design",
   }));
 }
+
+// A escolha do painel (inclusive fechá-lo) persiste entre as aberturas.
+useChatStore.subscribe((state, prev) => {
+  if (state.panel === prev.panel || state.panel === "empty") return;
+  try {
+    localStorage.setItem(PANEL_KEY, state.panel ?? "none");
+  } catch {
+    /* sem lembrar, vale só nesta abertura */
+  }
+});

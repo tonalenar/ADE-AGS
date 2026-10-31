@@ -125,12 +125,12 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   return (
     <form
       onSubmit={(e) => { e.preventDefault(); void submit(); }}
-      className="w-full rounded-2xl border border-black/[0.08] dark:border-white/[0.05]
-        bg-white/80 dark:bg-surface-raised/80 backdrop-blur-md backdrop-saturate-[1.14]
-        shadow-[0_1px_2px_rgba(0,0,0,0.05)] dark:shadow-none"
+      className="w-full rounded-[20px] border border-black/[0.10] dark:border-white/[0.10]
+        bg-white dark:bg-surface-raised
+        shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-none"
     >
       {addon?.({ text, caret, apply })}
-      <label className="block px-4 pt-4 pb-2">
+      <label className="block px-5 pt-4 pb-2">
         <span className="sr-only">{t("chat.composer.label")}</span>
         <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus}
           onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); }}
@@ -146,17 +146,24 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
           className="block w-full resize-none bg-transparent outline-none text-chat-prose
             text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
       </label>
-      <div className="flex items-center gap-0.5 px-2 pb-2">
+      {/*
+        A linha de baixo QUEBRA quando falta espaço (a coluna fica estreita com o painel direito aberto): o
+        grupo da esquerda (anexar, "Time | Só o orquestrador", fila) e o da direita (controles e enviar)
+        viram duas linhas, nunca estouram o cartão. O enviar é sempre o último do grupo da direita, no canto.
+      */}
+      <div data-composer-row className="flex flex-wrap items-center justify-between gap-x-1 gap-y-1 px-3 pb-2.5">
+        <div data-composer-left className="flex min-w-0 max-w-full items-center gap-0.5">
         <button type="button" onClick={() => { void attach(); }} aria-label={t("chat.composer.attach")} title={t("chat.composer.attach")}
-          className="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
+          className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
           <PaperclipIcon className="w-4 h-4" />
         </button>
         {leading}
         {queued > 0 && (
-          <span role="status" className="pl-2 text-chat-caption text-gray-500 dark:text-white/45">{t("chat.composer.queued", { count: queued })}</span>
+          <span role="status" className="pl-2 text-chat-caption whitespace-nowrap text-gray-500 dark:text-white/45">{t("chat.composer.queued", { count: queued })}</span>
         )}
-        <span className="flex-1" />
-        {controls}
+        </div>
+        <div data-composer-right className="ml-auto flex min-w-0 max-w-full items-center gap-0.5">
+        <div data-composer-controls className="flex min-w-0 flex-wrap items-center justify-end gap-x-0.5 gap-y-1">{controls}</div>
         {stopping ? (
           <button type="button" onClick={() => onStop?.()} aria-label={t("chat.composer.stop")} title={t("chat.composer.stop")}
             className="ml-1 w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-red-600/90 text-white hover:bg-red-600">
@@ -169,6 +176,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
             <ArrowUpIcon className="w-3.5 h-3.5" />
           </button>
         )}
+        </div>
       </div>
     </form>
   );

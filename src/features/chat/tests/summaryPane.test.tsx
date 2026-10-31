@@ -8,10 +8,12 @@ const mocks = vi.hoisted(() => ({
   diff: { files: [] as { added: number; removed: number; path: string }[], truncated: false, loaded: true, repo: true },
   target: null as unknown,
   pulls: [] as unknown[],
+  pullsError: false,
+  filesError: false,
   commits: 0,
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve(null) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openUrl: () => Promise.resolve() }));
 vi.mock("react-i18next", () => ({
@@ -19,8 +21,10 @@ vi.mock("react-i18next", () => ({
   Trans: ({ i18nKey }: { i18nKey: string }) => i18nKey,
 }));
 vi.mock("@/shared/ipc/window", () => ({ homeDir: () => Promise.resolve("/Users/ton") }));
-vi.mock("@/features/forge/useRepoTarget", () => ({ useRepoTarget: () => ({ target: mocks.target, error: null, reload: () => undefined }) }));
-vi.mock("@/features/forge/ipc", () => ({ forgePulls: () => Promise.resolve(mocks.pulls) }));
+vi.mock("@/features/workspaces/useRepoInfo", () => ({
+  useRepoInfo: () => new Map([["/Users/ton/Projects/ADE-AGS", { root: mocks.target ? "/Users/ton/Projects/ADE-AGS" : null, branch: "feat/a", isWorktree: false, changes: {}, changedCount: 0 }]]),
+}));
+vi.mock("@/features/forge/ipc", () => ({ forgePulls: () => (mocks.pullsError ? Promise.reject(new Error("404 Not Found")) : Promise.resolve(mocks.pulls)), forgePullFiles: () => (mocks.filesError ? Promise.reject(new Error("404 Not Found")) : Promise.resolve([{ additions: 5, deletions: 1 }])) }));
 vi.mock("@/features/scm/ScmPanel", () => ({ ScmPanel: () => <div data-testid="scm" /> }));
 vi.mock("@/features/scm/ipc", () => ({ scmCommit: () => { mocks.commits += 1; return Promise.resolve(); } }));
 vi.mock("../timeline/useConversationTimeline", () => ({ useConversationTimeline: () => ({ timeline: { items: mocks.items, truncated: false }, loaded: true, phase: null }) }));
@@ -44,7 +48,7 @@ let root: Root;
 let host: HTMLDivElement;
 const render = () => act(async () => { root.render(<SummaryPane conversation={card} cwd={card.cwd} tabId="tab-1" />); });
 const clickText = async (text: string) => {
-  const el = [...host.querySelectorAll("button")].find((b) => b.textContent?.includes(text));
+  const el = [...host.querySelectorAll("button, [role=button]")].find((b) => b.textContent?.includes(text));
   if (!el) throw new Error(`sem botão ${text}`);
   await act(async () => { (el as HTMLButtonElement).click(); });
 };
@@ -55,6 +59,8 @@ beforeEach(() => {
   mocks.diff = { files: [], truncated: false, loaded: true, repo: true };
   mocks.target = null;
   mocks.pulls = [];
+  mocks.pullsError = false;
+  mocks.filesError = false;
   mocks.commits = 0;
   useChatStore.setState({ panel: "summary", surfaces: [] });
   host = document.createElement("div");
@@ -70,7 +76,6 @@ describe("o Resumo do painel", () => {
     expect(host.textContent).toContain("ADE-AGS");
     expect(host.textContent).toContain("~/Projects");
     expect(host.textContent).toContain("feat/a");
-    expect(host.textContent).toContain("Opus 5.5 · alto");
   });
 
   it("o contexto sem tokens é 'não medido' e com tokens mostra os tokens, nunca uma porcentagem", async () => {
@@ -124,7 +129,25 @@ describe("o Resumo do painel", () => {
     mocks.target = { path: "tonalenar/ADE-AGS" };
     await render();
     expect(host.textContent).toContain("PR 259");
-    expect(host.textContent).toContain("#259");
+    expect(host.textContent).toContain("ADE-AGS #259");
+    expect(host.textContent).toContain("+5");
     expect(host.textContent).not.toContain("PR 7");
+  });
+
+  it("o forge devolvendo 404 (origin sem GitHub, conta fora) NUNCA derruba a tela: o Resumo renderiza sem a lista de PRs", async () => {
+    mocks.target = { path: "x" };
+    mocks.pullsError = true;
+    await render();
+    expect(host.textContent).toContain("chat.summary.changes");
+    expect(host.textContent).not.toContain("PR 259");
+  });
+
+  it("se só a leitura do +/− do PR falha (404), o PR aparece mesmo assim", async () => {
+    mocks.target = { path: "x" };
+    mocks.pulls = [pull(259, "feat/a")];
+    mocks.filesError = true;
+    await render();
+    expect(host.textContent).toContain("PR 259");
+    expect(host.textContent).not.toContain("+5");
   });
 });

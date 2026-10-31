@@ -9,7 +9,8 @@ import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
 import { BotIcon } from "../chatIcons";
 import { accessModesFor, planSupported, type ConversationCard } from "../chatModel";
 import { ChatComposer } from "../ChatComposer";
-import { useChatWidthClass } from "../chatLook";
+import { ChatFrame } from "../ChatFrame";
+import { ComposerColumn } from "../ComposerColumn";
 import { QUEUE_KEY } from "../ConversationView";
 import { ActivityLine } from "../LiveActivity";
 import { ContextStrip } from "../NewConversation";
@@ -41,7 +42,6 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   const agentInfo = useTabsStore((s) => s.detectedAgents.find((a) => a.id === thread.agentId))
     ?? { id: thread.agentId, label: card.agentLabel, command: "", available: true };
   const hydrated = useStructured((s) => !!s.hydrated[thread.id]);
-  const width = useChatWidthClass();
   useEffect(() => hydrateThread(thread.id), [thread.id]);
 
   const request: RequestRow | null = live.requests[0] ?? null;
@@ -88,7 +88,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       )}
     </div>
   ) : (
-    <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex items-center gap-0.5">
+    <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex min-w-0 flex-wrap items-center justify-end gap-x-0.5 gap-y-1">
       <AgentModelPicker agents={[agentInfo]} showAccount={false} disabled={locked}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
         onChange={(v) => retuneThread(thread.id, v.model, thread.effort, thread.access)} />
@@ -105,13 +105,8 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
     </div>
   );
 
-  return (
-    <div className="flex-1 min-h-0 flex flex-col">
-      <TimelineView items={items} loaded={hydrated} working={working || !!request} live
-        approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
-        streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending}
-        after={<TeamThreadFeed conversation={card} cards={cards} />} />
-      <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}>
+  const composer = (
+      <ComposerColumn>
         {live.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error}</p>}
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd}
@@ -133,7 +128,17 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           <AccessMenu value={menuAccess(thread.access)} available={accessModesFor(thread.agentId, true)}
             onChange={locked ? undefined : (next) => retuneThread(thread.id, thread.model, thread.effort, next)} />
         </ContextStrip>
-      </div>
+      </ComposerColumn>
+  );
+
+  return (
+    <div className="flex-1 min-h-0 flex flex-col">
+      <ChatFrame composer={composer} list={(bottomInset) => (
+        <TimelineView bottomInset={bottomInset} items={items} loaded={hydrated} working={working || !!request} live
+          approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
+          streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending}
+          after={<TeamThreadFeed conversation={card} cards={cards} />} />
+      )} />
     </div>
   );
 }

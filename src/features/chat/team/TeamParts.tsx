@@ -23,11 +23,29 @@ export function AgentMono({ agentId, label, size = 22 }: { agentId: string; labe
 /** "● trabalhando", na cor do estado. */
 export function StateDot({ state, className = "" }: { state: MemberState; className?: string }) {
   const { t } = useTranslation();
-  return <span className={`${stateTone(state)} ${className}`}>● {t(`chat.team.state.${state}`)}</span>;
+  return <span className={`whitespace-nowrap ${stateTone(state)} ${className}`}>● {t(`chat.team.state.${state}`)}</span>;
 }
 
 /** O nome do papel, pelos catálogos (o id fica como está se não houver tradução). */
 export function useRoleLabel(): (role: string) => string {
   const { t } = useTranslation();
   return (role: string) => t(`chat.team.roles.${role}`, { defaultValue: role });
+}
+
+/** O cabeçalho do painel Time: o título, o resumo ("4 agentes · 1 orquestrador") e o "+ Ligar agente". */
+export function PanelHeader({ summary, onAdd, adding = false }: { summary: string | null; onAdd?: () => void; adding?: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="h-[52px] shrink-0 flex items-center gap-2 px-3.5 border-b border-gray-200 dark:border-white/[0.08]">
+      <b className="text-chat-heading font-semibold text-gray-900 dark:text-white">{t("chat.team.title")}</b>
+      {summary && <span className="text-chat-caption text-gray-500 dark:text-white/45">{summary}</span>}
+      <span className="flex-1" />
+      {onAdd && (
+        <button type="button" onClick={onAdd} aria-expanded={adding}
+          className="h-7 px-2.5 rounded-[7px] border border-gray-200 dark:border-white/[0.08] text-chat-note text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.06]">
+          {t("chat.team.link")}
+        </button>
+      )}
+    </div>
+  );
 }

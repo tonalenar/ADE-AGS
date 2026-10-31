@@ -2,6 +2,7 @@ import { createHashRouter } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
 import { HomePage } from "@/features/workspaces/HomePage";
 import { RouteError } from "@/app/RouteError";
+import { NotFound } from "@/app/NotFound";
 
 // Las páginas que no son la primera pantalla se cargan al entrar a ellas: antes iban todas
 // en el chunk principal, que había que bajar y parsear entero antes de pintar nada.
@@ -26,6 +27,8 @@ export const router = createHashRouter([
       { path: "marketplace", lazy: () => import("@/features/marketplace/MarketplacePage").then((m) => ({ Component: m.MarketplacePage })) },
       { path: "design/:id", lazy: () => import("@/features/design/DesignPage").then((m) => ({ Component: m.DesignPage })) },
       { path: "marketplace/registries", lazy: () => import("@/features/marketplace/RegistriesPage").then((m) => ({ Component: m.RegistriesPage })) },
+      // Um caminho desconhecido mostra "Não encontrado" dentro da casca, nunca o erro de tela cheia.
+      { path: "*", element: <NotFound /> },
     ],
   },
 ]);

@@ -30,7 +30,7 @@ export function TeamThreadFeed({ conversation, cards }: { conversation: Conversa
   // O que ainda pede atenção aparece já na linha recolhida; o resto fica dentro.
   const busy = delegations.filter((d) => d.state === "working" || d.state === "approval" || d.state === "question").length;
   return (
-    <section aria-label={t("chat.team.feed.label")} className="flex flex-col px-1 text-chat-prose">
+    <section aria-label={t("chat.team.feed.label")} className="flex flex-col text-chat-prose">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
         className="flex items-center gap-2.5 min-h-[26px] text-left text-chat-ui text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75">
         <UsersIcon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
@@ -60,16 +60,20 @@ function DelegationRow({ card, teamId }: { card: DelegationCard; teamId: string 
   const member = useTeamStore((s) => placeOf(s.teams, card.member)?.member ?? null);
   const name = member?.label ? member.label.split(" · ")[0]! : card.memberName;
   return (
-    <div data-team={teamId} className="flex items-center gap-2 min-h-[26px] text-chat-note">
-      <AgentMono agentId={member?.agentId ?? ""} label={name} size={16} />
-      <span className="shrink-0 font-medium text-gray-900 dark:text-white">{name}</span>
-      <span className="shrink-0 text-gray-500 dark:text-white/45">· {roleLabel(member?.role ?? "generalist")}</span>
-      <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-white/60" title={card.task}>{card.task}</span>
-      <StateDot state={card.state} className="shrink-0 text-chat-caption" />
-      <button type="button" onClick={() => openMember(card.member)}
-        className="shrink-0 h-6 px-2 rounded-md text-chat-caption text-gray-700 dark:text-white/70 hover:bg-gray-100 dark:hover:bg-white/[0.06]">
-        {t("chat.team.open")}
-      </button>
+    // Duas linhas: quem e o estado em cima, a tarefa embaixo (numa coluna estreita a tarefa sumia espremida entre os dois).
+    <div data-team={teamId} className="flex flex-col min-h-[26px] py-0.5 text-chat-note">
+      <div className="flex min-w-0 items-center gap-2">
+        <AgentMono agentId={member?.agentId ?? ""} label={name} size={16} />
+        <span className="min-w-0 truncate font-medium text-gray-900 dark:text-white">{name}</span>
+        <span className="shrink-0 whitespace-nowrap text-gray-500 dark:text-white/45">· {roleLabel(member?.role ?? "generalist")}</span>
+        <span className="flex-1" />
+        <StateDot state={card.state} className="shrink-0 whitespace-nowrap text-chat-caption" />
+        <button type="button" onClick={() => openMember(card.member)}
+          className="shrink-0 h-7 px-2 rounded-md text-chat-caption text-gray-700 dark:text-white/70 hover:bg-gray-100 dark:hover:bg-white/[0.06]">
+          {t("chat.team.open")}
+        </button>
+      </div>
+      <span className="ml-6 min-w-0 truncate text-gray-600 dark:text-white/60" title={card.task}>{card.task}</span>
     </div>
   );
 }

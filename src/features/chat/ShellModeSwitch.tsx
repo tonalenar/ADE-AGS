@@ -2,8 +2,12 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { useChatShell, useUiStore } from "@/app/uiStore";
-import { setWorkMode, useActiveBoardKey, useWorkMode, type WorkMode } from "@/features/canvas/store";
+import { boardKey as folderBoardKey, setWorkMode, useActiveBoardKey, useWorkMode, type WorkMode } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
+
+import { canvasKeyFor } from "./shellModeModel";
+import { useChatStore } from "./store";
+import { useStructured } from "./structured/store";
 
 type Choice = "chat" | WorkMode;
 
@@ -18,7 +22,11 @@ export function ShellModeSwitch({ className = "" }: { className?: string }) {
   const setShellMode = useUiStore((s) => s.setShellMode);
   const chat = useChatShell();
   const workMode = useWorkMode();
-  const boardKey = useActiveBoardKey();
+  const activeKey = useActiveBoardKey();
+  // Com uma conversa por protocolo na tela não há aba ativa: o canvas é o da pasta dela.
+  const selectedThread = useChatStore((s) => s.thread);
+  const threadCwd = useStructured((s) => (selectedThread ? s.threads.find((th) => th.id === selectedThread)?.cwd ?? null : null));
+  const boardKey = canvasKeyFor(activeKey, threadCwd, folderBoardKey);
   const hasTabs = useTabsStore((s) => s.tabs.length > 0);
   if (!enabled) return null;
 
@@ -46,7 +54,7 @@ export function ShellModeSwitch({ className = "" }: { className?: string }) {
       data-tauri-drag-region="false"
       className={`flex items-center gap-0.5 p-0.5 h-7 shrink-0 rounded-lg bg-black/5 dark:bg-white/[0.07] ${className}`}>
       {options.map((option) => (
-        <button key={option.value} type="button" aria-pressed={current === option.value}
+        <button key={option.value} type="button" aria-pressed={current === option.value} data-tauri-drag-region="false"
           onClick={() => pick(option.value)}
           className={`cc-t h-6 px-2.5 rounded-md text-[11.5px] font-medium
             ${current === option.value

@@ -3,8 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import type { ConversationCard } from "../chatModel";
 import { openMember } from "./TeamPanel";
-import { AgentMono, StateDot, useRoleLabel } from "./TeamParts";
-import { CONVERSATION_DRAG_MIME, memberState, sidebarGrouping, teamLedBy, type SidebarGrouping } from "./teamModel";
+import { AgentMono, useRoleLabel } from "./TeamParts";
+import { CONVERSATION_DRAG_MIME, memberState, sidebarGrouping, stateTone, teamLedBy, type SidebarGrouping } from "./teamModel";
 import { startTeams, useTeamStore } from "./teamStore";
 import { useTeamLive } from "./useTeamLive";
 
@@ -54,11 +54,11 @@ export function TeamMembers({ orchestrator, members, cards, selectedId }: {
           <button key={ref} type="button" onClick={() => openMember(ref)} aria-current={selectedId === ref ? "page" : undefined}
             {...conversationDragProps(ref)}
             title={card?.title ?? member.label}
-            className={`ml-3.5 flex items-center gap-2 px-2 py-1.5 border-l border-gray-200 dark:border-white/[0.08] text-left text-chat-note
-              text-gray-600 dark:text-white/60 hover:bg-white dark:hover:bg-white/[0.05] ${selectedId === ref ? "bg-white dark:bg-white/[0.08]" : ""}`}>
+            className={`ml-[18px] flex w-[calc(100%-18px)] items-center gap-2 h-8 pl-3 pr-2 rounded-lg border-l border-gray-300 dark:border-white/15 text-left text-[13px]
+              text-gray-700 dark:text-white/70 hover:bg-gray-200/50 dark:hover:bg-white/[0.06] ${selectedId === ref ? "bg-gray-200/70 dark:bg-white/[0.10]" : ""}`}>
             <AgentMono agentId={member.agentId} label={card?.agentLabel ?? member.label} size={14} />
-            <span className="flex-1 min-w-0 truncate">{roleLabel(member.role)}</span>
-            <StateDot state={state} className="shrink-0 text-[11px]" />
+            <span className="flex-1 min-w-0 truncate">{card?.title ?? roleLabel(member.role)}</span>
+            <span aria-label={state} title={state} className={`shrink-0 text-[11px] ${stateTone(state)}`}>●</span>
           </button>
         );
       })}

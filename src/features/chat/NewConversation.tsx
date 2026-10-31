@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { homeDir } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -11,17 +11,27 @@ import { baseName } from "@/features/workspaces/workspaceTree";
 import { AccessMenu } from "./AccessMenu";
 import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
 import { startConversation } from "./chatActions";
+import { setComposing } from "./store";
 import { BotIcon, BranchIcon, CheckIcon, ChevronDownIcon, FolderGitIcon, FolderIcon } from "./chatIcons";
 import { accessModesFor, conversationTitle, planSupported, type ChatProject } from "./chatModel";
 import { chatNewWorktree } from "./ipc";
+import { clearDraft, setDraftLead, useTeamDraft } from "./team/draftStore";
+import { TeamTargetSwitch } from "./team/TeamComposer";
+import { launchDraftTeam } from "./team/teamLaunch";
+import { mentionSlug } from "./team/teamModel";
+import { setComposerTarget, useTeamStore } from "./team/teamStore";
 import { STRUCTURED_AGENTS } from "./structured/model";
 import { startThread } from "./structured/store";
 import { loadChatPrefs, saveChatPrefs, type ChatPrefs } from "./chatPrefs";
 import { ChatComposer } from "./ChatComposer";
+import { useColumnGutter } from "./ComposerColumn";
 import { usePopover } from "./usePopover";
 
 /** O agente que o composer sugere quando não há escolha lembrada. */
 const PREFERRED_AGENT = "claude-code";
+
+/** A chave do "para quem" do rascunho (o time ainda não tem orquestrador: ver `TeamTargetSwitch`). */
+const DRAFT_KEY = "draft";
 
 /** A pasta escolhida pelo "Adicionar projeto" da sidebar chega por aqui. */
 export function pickProjectFolder(title: string): Promise<string | null> {
@@ -63,6 +73,15 @@ export function NewConversation({ projects, folder, onFolder }: {
   const access = modes.includes(prefs.access) ? prefs.access : modes.includes("safe") ? "safe" : "ask";
   const plan = !!agent && planSupported(agent.id, viaProtocol) && prefs.plan;
 
+  // O time montado antes da conversa (painel Time): vive só enquanto esta tela existe.
+  const draftMembers = useTeamDraft((s) => s.members);
+  const draftTarget = useTeamStore((s) => s.targets[DRAFT_KEY] ?? "team");
+  const leadCwd = project?.cwd ?? null;
+  useEffect(() => { setDraftLead(agent && leadCwd ? { agentId: agent.id, label: agent.label, cwd: leadCwd } : null); }, [agent, leadCwd]);
+  useEffect(() => () => { clearDraft(); setDraftLead(null); setComposerTarget(DRAFT_KEY, "team"); }, []);
+  const withTeam = draftMembers.length > 0;
+  const firstMember = draftMembers[0];
+
   const choose = (path: string) => {
     onFolder(path);
     update({ cwd: path });
@@ -86,6 +105,22 @@ export function NewConversation({ projects, folder, onFolder }: {
       const cwd = prefs.worktree
         ? (await chatNewWorktree(project.cwd, conversationTitle(prompt) ?? project.name)).cwd
         : project.cwd;
+      if (withTeam) {
+        // Com integrantes no rascunho: conversa, time e integrantes nascem juntos, ou nada fica (ver `launchTeam`).
+        setComposing(true); // a tela não troca no meio da criação, nem na primeira conversa de todas
+        const result = await launchDraftTeam({
+          agent, cwd, title: conversationTitle(prompt) ?? project.name, model: mine ? prefs.model : null, effort: mine ? prefs.effort : null,
+          access, plan, accountId: mine ? prefs.accountId : null, account: mine ? prefs.accountId ?? undefined : undefined, viaProtocol,
+        }, draftMembers, prompt, draftTarget);
+        if (!result.ok) {
+          const left = result.leftovers.length > 0 ? ` ${t("chat.team.draft.leftovers", { items: result.leftovers.join("; ") })}` : "";
+          setError(`${t("chat.team.draft.failed", { error: result.error })}${left}`);
+          return false;
+        }
+        clearDraft();
+        update({ cwd: project.cwd, agentId: agent.id });
+        return true;
+      }
       if (viaProtocol) {
         // No Claude o Plano é um modo de permissão: a conversa nasce nele e sai pelo pedido do agente.
         await startThread({
@@ -114,8 +149,9 @@ export function NewConversation({ projects, folder, onFolder }: {
     }
   };
 
+  const column = useColumnGutter<HTMLElement>();
   return (
-    <section className="flex-1 min-h-0 flex flex-col items-center justify-center px-6 sm:px-12 pb-20">
+    <section ref={column.ref} style={column.style} className="flex-1 min-h-0 flex flex-col items-center justify-center pb-20">
       <h1 className="m-0 text-center text-[26px] sm:text-[30px] leading-tight font-normal tracking-tight text-gray-900 dark:text-white">
         {project ? (
           <>
@@ -132,10 +168,13 @@ export function NewConversation({ projects, folder, onFolder }: {
       </p>
 
       <div className="w-full max-w-[736px]">
-        <ChatComposer autoFocus cwd={project?.cwd ?? null} placeholder={t("chat.composer.placeholder")} disabled={!project || !agent}
+        <ChatComposer autoFocus cwd={project?.cwd ?? null} placeholder={!withTeam ? t("chat.composer.placeholder")
+            : draftTarget === "lead" ? t("chat.team.placeholderLead")
+            : t("chat.team.placeholder", { agent: firstMember ? mentionSlug(firstMember.kind === "new" ? firstMember.agent.id : firstMember.conv.agentId) : "codex" })} disabled={!project || !agent}
           onSubmit={submit}
           controls={
             <>
+              {withTeam && <TeamTargetSwitch orchestrator={DRAFT_KEY} />}
               <AgentModelPicker agents={agents}
                 value={{ agentId: agent?.id ?? null, model: mine ? prefs.model : null, effort: mine ? prefs.effort : null, account: mine ? prefs.accountId : null }}
                 onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account })} />
@@ -172,14 +211,14 @@ export function ContextStrip({ branch, workspace, worktree = false, children }: 
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-wrap items-center gap-0.5 px-2 pt-2 text-chat-caption text-gray-500 dark:text-white/45">
+    <div className="flex flex-wrap items-center gap-0.5 px-3 pt-1.5 text-chat-note text-gray-500 dark:text-white/45">
       {workspace ?? (
-        <span className="flex items-center gap-1.5 h-6 px-1.5">
+        <span className="flex items-center gap-1.5 h-7 px-1.5 whitespace-nowrap">
           {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
           {worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")}
         </span>
       )}
-      {branch && <span className="flex items-center gap-1.5 h-6 px-1.5 font-mono text-[11.5px]"><BranchIcon className="w-3.5 h-3.5" />{branch}</span>}
+      {branch && <span className="flex min-w-0 max-w-full items-center gap-1.5 h-7 px-1.5 font-mono text-[11.5px]" title={branch}><BranchIcon className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{branch}</span></span>}
       <span className="flex-1" />
       {children}
     </div>

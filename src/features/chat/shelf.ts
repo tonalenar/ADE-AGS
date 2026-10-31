@@ -5,6 +5,7 @@ import { requestCloseItem } from "@/features/tabs/tabActions";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 
 import { openConversation } from "./chatActions";
+import { toggleIn } from "./sidebar/sessionsModel";
 
 /**
  * As seções "Adiadas" e "Concluídas" da sidebar (o snooze e o settle do T3 Code).
@@ -34,7 +35,15 @@ export const SETTLED_MAX = 30;
 interface ShelfState {
   snoozed: string[];
   settled: SettledConversation[];
+  /** As conversas fixadas na barra (no alto, na ordem em que foram fixadas). */
+  pinned: string[];
+  /** As marcadas como não lidas. */
+  unread: string[];
+  /** As seções da barra recolhidas (`pinned` ou `project:<nome>`). */
+  collapsed: string[];
 }
+
+const EMPTY: ShelfState = { snoozed: [], settled: [], pinned: [], unread: [], collapsed: [] };
 
 const KEY = "cc-chat-shelf";
 
@@ -42,9 +51,10 @@ const str = (v: unknown) => (typeof v === "string" ? v : null);
 
 /** Lê o que veio e devolve só o que serve. Pura. */
 export function parseShelf(raw: unknown): ShelfState {
-  if (!raw || typeof raw !== "object") return { snoozed: [], settled: [] };
+  if (!raw || typeof raw !== "object") return { ...EMPTY };
   const o = raw as Record<string, unknown>;
-  const snoozed = Array.isArray(o.snoozed) ? o.snoozed.filter((x): x is string => typeof x === "string") : [];
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const snoozed = strings(o.snoozed);
   const settled = Array.isArray(o.settled)
     ? o.settled.flatMap((x): SettledConversation[] => {
       if (!x || typeof x !== "object") return [];
@@ -60,7 +70,7 @@ export function parseShelf(raw: unknown): ShelfState {
       }];
     })
     : [];
-  return { snoozed, settled: settled.slice(0, SETTLED_MAX) };
+  return { snoozed, settled: settled.slice(0, SETTLED_MAX), pinned: strings(o.pinned), unread: strings(o.unread), collapsed: strings(o.collapsed) };
 }
 
 /** Acrescenta uma concluída no topo, sem repetir e com teto. Pura. */
@@ -73,7 +83,7 @@ function load(): ShelfState {
     const raw = localStorage.getItem(KEY);
     return parseShelf(raw ? JSON.parse(raw) : null);
   } catch {
-    return { snoozed: [], settled: [] };
+    return { ...EMPTY };
   }
 }
 
@@ -86,6 +96,26 @@ useShelf.subscribe((state) => {
     /* sem lembrar, as seções só valem nesta abertura */
   }
 });
+
+/** Fixa ou desafixa uma conversa. */
+export function togglePinned(id: string): void {
+  useShelf.setState((s) => ({ ...s, pinned: toggleIn(s.pinned, id) }));
+}
+
+/** Marca como não lida (`true`) ou lida (`false`). */
+export function setUnread(id: string, unread: boolean): void {
+  useShelf.setState((s) => (s.unread.includes(id) === unread ? s : { ...s, unread: unread ? [...s.unread, id] : s.unread.filter((x) => x !== id) }));
+}
+
+/** Troca a lista de seções recolhidas de uma vez (expandir/recolher todos). */
+export function setCollapsed(ids: string[]): void {
+  useShelf.setState((s) => ({ ...s, collapsed: ids }));
+}
+
+/** Recolhe ou abre uma seção da barra. */
+export function toggleSection(id: string): void {
+  useShelf.setState((s) => ({ ...s, collapsed: toggleIn(s.collapsed, id) }));
+}
 
 export function snoozeConversation(tabId: string): void {
   useShelf.setState((s) => (s.snoozed.includes(tabId) ? s : { ...s, snoozed: [...s.snoozed, tabId] }));

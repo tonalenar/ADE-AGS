@@ -127,8 +127,8 @@
      Cada `--text-chat-*` gera a classe `text-chat-*` com tamanho e altura de linha. */
   --font-chat: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --font-chat-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --text-chat-prose: 16px;          /* a resposta do agente e as mensagens da pessoa */
-  --text-chat-prose--line-height: 24px;
+  --text-chat-prose: 15px;          /* a resposta do agente e as mensagens da pessoa (medido no Claude Code, ver `chatLook.ts`) */
+  --text-chat-prose--line-height: 21.5px;
   --text-chat-ui: 14px;             /* o corpo da interface */
   --text-chat-ui--line-height: 20px;
   --text-chat-heading: 15px;        /* título de bloco */

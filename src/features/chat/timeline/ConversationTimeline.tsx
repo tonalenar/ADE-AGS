@@ -12,10 +12,12 @@ import { PlanCard } from "../LiveActivity";
 import { setRightPanel } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
 import { parsePeerEnvelope, senderAgent } from "./peerEnvelope";
+import { speakerHeaders } from "./speakers";
 import type { PendingSend } from "./pending";
 import { displayUserText } from "./userMessage";
 import { isFresh } from "./streaming";
 import { commandTitle } from "./toolTitle";
+import { activityOf, joinParts, summarizeTools } from "./workSummary";
 import { fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
@@ -36,9 +38,11 @@ interface RevealOf {
   entering: (id: string) => boolean;
   /** Quem fala nas falas do agente da conversa. */
   agent: { id: string; label: string };
+  /** As falas que levam o logo e o nome de quem fala acima do texto (`speakers.ts`). */
+  headers: ReadonlySet<string>;
 }
 
-const RevealContext = createContext<RevealOf>({ animate: () => false, live: () => false, entering: () => false, agent: { id: "", label: "" } });
+const RevealContext = createContext<RevealOf>({ animate: () => false, live: () => false, entering: () => false, agent: { id: "", label: "" }, headers: new Set() });
 
 /** O pedido que espera a pessoa, como a timeline o mostra. */
 export interface ApprovalNote {
@@ -53,7 +57,9 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, after = null }: {
+export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, after = null }: {
+  /** O espaço no fim da lista para o composer que flutua por cima (`ChatFrame`); 0 = o fim de sempre. */
+  bottomInset?: number;
   items: TimelineItem[];
   loaded: boolean;
   /** Ainda não há de onde ler (o transcript não existe): oferece o terminal. */
@@ -88,6 +94,7 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
   if (baseline.current === null && loaded) baseline.current = new Set(items.filter((i) => !streaming?.has(i.id)).map((i) => i.id));
   // Cada mensagem entra animada uma única vez (remontar ao mudar de lugar no turno não repete).
   const entered = useRef<Set<string>>(new Set());
+  const headers = useMemo(() => speakerHeaders(items), [items]);
   const reveal = useMemo<RevealOf>(() => ({
     animate: (item) => !!streaming?.has(item.id) || (baseline.current !== null && isFresh(item, baseline.current, mountedAt)),
     live: (id) => working && !!streaming?.has(id),
@@ -97,7 +104,8 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
       return true;
     },
     agent: { id: agentId, label: agentLabel },
-  }), [streaming, mountedAt, working, agentId, agentLabel]);
+    headers,
+  }), [streaming, mountedAt, working, agentId, agentLabel, headers]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -132,7 +140,8 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
       }}>
       <RevealContext.Provider value={reveal}>
-      <div ref={contentRef} className={`${width} mx-auto px-4 sm:px-6 pt-4 pb-6 flex flex-col gap-4 text-chat-prose text-gray-900 dark:text-white`}>
+      <div ref={contentRef} style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
+        className={`${width} mx-auto px-4 sm:px-6 pt-4 ${bottomInset > 0 ? "" : "pb-6"} flex flex-col gap-4 text-chat-prose text-gray-900 dark:text-white`}>
         {truncated && (
           <p className="text-center text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.truncated")}</p>
         )}
@@ -153,7 +162,7 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
-          <div className="flex flex-col gap-1.5 px-1">
+          <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-2.5 min-h-[26px] text-chat-ui font-medium text-amber-700 dark:text-amber-400">
               <ShieldIcon className="w-4 h-4" />{t("chat.timeline.approval")}
             </div>
@@ -183,7 +192,7 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
       {turn.end === null && turn.plan && <PlanCard plan={turn.plan} />}
       {turn.end && (
         <button type="button" onClick={() => foldable && setOpen(!open)} aria-expanded={foldable ? open : undefined}
-          className={`flex items-center gap-1.5 px-1 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
+          className={`flex items-center gap-1.5 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
             ${foldable ? "hover:text-gray-800 dark:hover:text-white/75" : "cursor-default"}`}>
           {turn.end.interrupted
             ? t("chat.timeline.interrupted")
@@ -193,9 +202,11 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
           {foldable && <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />}
         </button>
       )}
-      {(open || turn.end === null) && turn.body.map((row) => <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} />)}
+      {(open || turn.end === null) && turn.body.map((row, i) => (
+        <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && i === turn.body.length - 1} />
+      ))}
       {turn.final && <AgentText item={turn.final} />}
-      {turn.end && turn.end.files.length > 0 && <div className="px-1"><ChangedFilesCard files={turn.end.files} /></div>}
+      {turn.end && turn.end.files.length > 0 && <div><ChangedFilesCard files={turn.end.files} /></div>}
     </>
   );
 }
@@ -212,7 +223,7 @@ function UserMessage({ item }: { item: TimelineItem }) {
   const [entering] = useState(() => !!peer && reveal.entering(item.id));
   if (!peer) return <PersonBubble text={text} />;
   return (
-    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} entering={entering}>
+    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} header={reveal.headers.has(item.id)} entering={entering}>
       <Markdown content={peer.body} tone="chat" />
     </AgentBubble>
   );
@@ -228,23 +239,23 @@ function AgentText({ item }: { item: TimelineItem }) {
   const caret = revealing || reveal.live(item.id);
   const [entering] = useState(() => reveal.entering(item.id));
   return (
-    <AgentBubble agentId={reveal.agent.id} label={reveal.agent.label} entering={entering} caret={caret}>
+    <AgentBubble agentId={reveal.agent.id} label={reveal.agent.label} header={reveal.headers.has(item.id)} entering={entering} caret={caret}>
       <Markdown content={text} tone="chat" />
     </AgentBubble>
   );
 }
 
-function BodyRowView({ row, onOpenTerminal }: { row: BodyRow; onOpenTerminal?: () => void }) {
+/** `active`: a última linha do turno em aberto (o agente ainda está trabalhando nela). */
+function BodyRowView({ row, onOpenTerminal, active = false }: { row: BodyRow; onOpenTerminal?: () => void; active?: boolean }) {
   const { t } = useTranslation();
   switch (row.type) {
     case "assistant":
       return <AgentText item={row.item} />;
     case "work":
-      return (
-        <div className="flex flex-col px-1">
-          {row.tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}
-        </div>
-      );
+      // Uma ferramenta só aparece como é; duas ou mais viram uma linha-resumo recolhida.
+      return row.tools.length === 1
+        ? <div className="flex flex-col"><ToolRow tool={row.tools[0]!} /></div>
+        : <WorkGroup tools={row.tools} active={active} />;
     case "infra":
       return <InfraRow tools={row.tools} />;
     case "question":
@@ -277,12 +288,42 @@ const VERB: Record<ToolKind, string> = {
   web: "chat.tool.web", task: "chat.tool.task", question: "chat.tool.question", todo: "chat.tool.todo", other: "chat.tool.other",
 };
 
+/**
+ * Ferramentas em sequência numa linha só, recolhida ("Leu 1 arquivo, rodou 13 comandos · 1 falhou"),
+ * como o Claude Code. O chevron abre a lista (cada uma como sempre, uma linha). Com o turno rodando,
+ * a linha mostra também, discreta, a atividade atual e o ponto pulsante. Quem abriu o grupo o mantém
+ * aberto: o estado é do componente e a chave da linha não muda quando chegam itens novos.
+ */
+function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const summary = useMemo(() => summarizeTools(tools), [tools]);
+  const title = joinParts(summary.parts.map((p) => t(`chat.work.${p.kind}`, { count: p.count })));
+  const activity = active ? activityOf(summary.last) : "";
+  const Icon = TOOL_ICON[summary.parts[0]?.kind ?? "other"];
+  return (
+    <div className="flex flex-col">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} title={activity || title}
+        className="flex min-w-0 items-center gap-2.5 min-h-[26px] text-left text-chat-ui text-gray-600 dark:text-white/60 hover:text-gray-900 dark:hover:text-white/85">
+        <Icon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+        <span className="shrink-0 whitespace-nowrap">{title}</span>
+        {summary.failed > 0 && <span className="shrink-0 whitespace-nowrap text-chat-caption text-red-600 dark:text-red-400">· {t("chat.work.failed", { count: summary.failed })}</span>}
+        {activity && <span className="min-w-0 flex-1 truncate font-mono text-chat-code text-gray-400 dark:text-white/35">{activity}</span>}
+        {!activity && <span className="flex-1" />}
+        {active && <span aria-hidden="true" className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-500 animate-pulse" />}
+        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />
+      </button>
+      {open && <div className="ml-[26px] flex flex-col">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
+    </div>
+  );
+}
+
 /** Os comandos `ags …` do time numa linha só, recolhida: bastidor, a conversa não os mostra um a um. */
 function InfraRow({ tools }: { tools: TimelineItem[] }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
-    <div className="flex flex-col px-1">
+    <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
         className="flex items-center gap-2.5 min-h-[26px] text-left text-chat-ui text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75">
         <TerminalIcon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
@@ -387,7 +428,7 @@ function WorkingLine({ since, waiting }: { since: number | null; waiting: boolea
     return () => window.clearInterval(id);
   }, []);
   return (
-    <div className="flex items-center gap-2 px-1 text-chat-ui text-gray-500 dark:text-white/45">
+    <div className="flex items-center gap-2 text-chat-ui text-gray-500 dark:text-white/45">
       <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />
       {waiting ? t("chat.timeline.waitingApproval") : since !== null ? t("chat.timeline.workingFor", { duration: formatDuration(now - since) }) : t("chat.timeline.working")}
     </div>

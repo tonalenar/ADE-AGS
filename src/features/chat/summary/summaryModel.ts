@@ -13,6 +13,8 @@ export const SUMMARY_KEY = "r";
 // ── Saídas ───────────────────────────────────────────────────────────
 
 export interface OutputFile {
+  /** Quem entregou (o integrante do time), quando o arquivo vem de uma entrega. */
+  by?: string;
   path: string;
   name: string;
   /** `doc` (texto, markdown) ou `code`. */
@@ -46,6 +48,23 @@ export function outputsFromItems(items: TimelineItem[]): OutputFile[] {
     .map(([path, v]) => ({ path, name: baseName(path), kind: DOC.test(path) ? "doc" : "code", created: v.created }));
 }
 
+/**
+ * Os arquivos que o time entregou (o `changed_files` do Handoff v1 de cada entrega): um por caminho, o
+ * mais recente primeiro, com quem entregou. São da pasta de cada integrante, então só informam. Pura.
+ */
+export function filesFromHandoffs(handoffs: { from: string; files: string[] }[]): OutputFile[] {
+  const seen = new Set<string>();
+  const out: OutputFile[] = [];
+  for (const h of [...handoffs].reverse()) {
+    for (const path of h.files) {
+      if (seen.has(path)) continue;
+      seen.add(path);
+      out.push({ path, name: baseName(path), kind: DOC.test(path) ? "doc" : "code", created: false, by: h.from });
+    }
+  }
+  return out;
+}
+
 /** O que a lista mostra e quantas ficam escondidas atrás do "Mostrar mais". Pura. */
 export function pickOutputs(list: OutputFile[], expanded: boolean): { shown: OutputFile[]; hidden: number } {
   if (expanded || list.length <= OUTPUTS_SHOWN) return { shown: list, hidden: 0 };
@@ -60,12 +79,6 @@ export function diffTotals(files: { added: number; removed: number }[]): { files
     (n, f) => ({ files: n.files + 1, added: n.added + f.added, removed: n.removed + f.removed }),
     { files: 0, added: 0, removed: 0 },
   );
-}
-
-/** Os PRs abertos DESTA branch, o número maior primeiro. Sem branch, nenhum. Pura. */
-export function pullsOfBranch(pulls: ForgeItem[], branch: string | null): ForgeItem[] {
-  if (!branch) return [];
-  return pulls.filter((p) => p.sourceBranch === branch).sort((a, b) => b.number - a.number);
 }
 
 export type PullTone = "open" | "draft" | "merged" | "closed";

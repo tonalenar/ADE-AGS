@@ -13,7 +13,7 @@ import { chatCommand } from "../chatModel";
 import { useChatStore } from "../store";
 import { chatThreadCreate } from "../structured/ipc";
 import { STRUCTURED_AGENTS, threadIdOf, threadKey } from "../structured/model";
-import { reloadThreads, sendToThread } from "../structured/store";
+import { reloadThreads, sendToThread, settleThread } from "../structured/store";
 import {
   chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
   type TeamFeedItem, type TeamPolicy, type TeamView,
@@ -287,38 +287,64 @@ export interface NewMemberInput {
   subagent?: boolean;
 }
 
+/** Uma conversa aberta para um integrante novo, ainda sem ligar ao time. */
+export interface SpawnedMember {
+  ref: string;
+  label: string;
+  /** O worktree `team/<papel>` criado (fica no disco: nada o apaga). */
+  place: { cwd: string; branch: string; root: string } | null;
+  /** Fecha a conversa (a aba fecha; a por protocolo é concluída). */
+  close: () => void;
+}
+
 /**
- * Abre uma conversa nova para o time e a liga: no worktree `team/<papel>` (se pedido), com o acesso que
- * a política deixa, e com o briefing do papel como primeira mensagem. A conversa aberta na tela continua
- * a do orquestrador.
+ * Abre a conversa do integrante novo: no worktree `team/<papel>` (se pedido) e com o acesso que a
+ * política deixa. A conversa aberta na tela continua a do orquestrador.
  */
-export async function linkNew(input: NewMemberInput): Promise<string> {
+export async function spawnMember(input: NewMemberInput): Promise<SpawnedMember> {
   const { agent } = input;
   const place = input.worktree ? await chatTeamWorktree(input.cwd, input.role) : null;
   const cwd = place?.cwd ?? input.cwd;
   const roleLabel = i18n.t(`chat.team.roles.${input.role}`, { defaultValue: input.role });
   const label = `${agent.label} · ${roleLabel}`;
   const { access, plan } = conversationAccess(input.policy, agent.id);
-  let ref: string;
   if (input.structured && STRUCTURED_AGENTS.has(agent.id)) {
     const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: null });
     await reloadThreads();
-    ref = threadKey(row.id);
-  } else {
-    const tabs = useTabsStore.getState();
-    const before = tabs.activeTabId;
-    const command = chatCommand(agent.id, agent.command, { model: input.model, effort: input.effort ?? null, access, plan });
-    ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true });
-    registerPendingSkillSetup(ref, attachSkillsToTab(ref, tabs.workspaceId, []));
-    // A tela segue na conversa do orquestrador (a aba nova não rouba a vez).
-    if (before && !useChatStore.getState().thread) useTabsStore.getState().activateTab(before);
+    return { ref: threadKey(row.id), label, place, close: () => settleThread(row.id, true) };
   }
+  const tabs = useTabsStore.getState();
+  const before = tabs.activeTabId;
+  const command = chatCommand(agent.id, agent.command, { model: input.model, effort: input.effort ?? null, access, plan });
+  const ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true });
+  registerPendingSkillSetup(ref, attachSkillsToTab(ref, tabs.workspaceId, []));
+  // A tela segue na conversa do orquestrador (a aba nova não rouba a vez).
+  if (before && !useChatStore.getState().thread) useTabsStore.getState().activateTab(before);
+  return { ref, label, place, close: () => useTabsStore.getState().closeTab(ref) };
+}
+
+/**
+ * Abre uma conversa nova para o time e a liga, com o briefing do papel como primeira mensagem. Se ligar
+ * falhar, a conversa que acabou de abrir fecha (não sobra uma aba solta).
+ */
+export async function linkNew(input: NewMemberInput): Promise<string> {
+  const spawned = await spawnMember(input);
+  try {
+    await linkSpawned(input, spawned);
+  } catch (e) {
+    spawned.close();
+    throw e;
+  }
+  return spawned.ref;
+}
+
+/** Liga ao time a conversa que `spawnMember` abriu e entrega o briefing. */
+export async function linkSpawned(input: NewMemberInput, spawned: SpawnedMember): Promise<void> {
   const linked = await chatTeamLink({
-    teamId: input.teamId, member: ref, agentId: agent.id, label, role: input.role, model: input.model, policy: input.policy,
-    branch: place?.branch ?? null, worktree: place?.root ?? null, origin: "new", subagent: input.subagent,
+    teamId: input.teamId, member: spawned.ref, agentId: input.agent.id, label: spawned.label, role: input.role, model: input.model, policy: input.policy,
+    branch: spawned.place?.branch ?? null, worktree: spawned.place?.root ?? null, origin: "new", subagent: input.subagent,
   });
-  await finishLink(input.teamId, ref, linked.briefing);
-  return ref;
+  await finishLink(input.teamId, spawned.ref, linked.briefing);
 }
 
 /** Tira do time: a corda com o orquestrador sai; a conversa continua aberta. */

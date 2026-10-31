@@ -35,13 +35,13 @@ function useContext(tab: Tab) {
 const tone = (pct: number) => (pct >= 85 ? "bg-rose-500" : pct >= 60 ? "bg-amber-500" : "bg-accent-500");
 
 /** Quanto da janela de contexto a conversa do agente já ocupa, como o "Contexto 11%" do Claude Code. */
-export function ContextSection({ tab }: { tab: Tab }) {
+export function ContextSection({ tab, flat = false }: { tab: Tab; flat?: boolean }) {
   const { t, i18n } = useTranslation();
   const usage = useContext(tab);
   const pct = usage ? Math.min(100, Math.max(0, usage.percent)) : null;
 
   return (
-    <Section id="context" title={t("sidePanel.context.title")} defaultOpen={false}
+    <Section id="context" title={t("sidePanel.context.title")} defaultOpen={false} flat={flat}
       aside={pct !== null && (
         <span className="flex items-center gap-1.5 text-[11px] text-gray-500 dark:text-white/45 tabular-nums">
           {Math.round(pct)}%
@@ -65,7 +65,7 @@ export function ContextSection({ tab }: { tab: Tab }) {
 }
 
 /** Os MCPs configurados para o agente nesta pasta (configuração, não estado ao vivo). */
-export function ConnectorsSection({ tab }: { tab: Tab }) {
+export function ConnectorsSection({ tab, flat = false }: { tab: Tab; flat?: boolean }) {
   const { t } = useTranslation();
   const [list, setList] = useState<Connector[] | null>(null);
   useEffect(() => {
@@ -79,7 +79,7 @@ export function ConnectorsSection({ tab }: { tab: Tab }) {
   }, [tab.agentId, tab.cwd, tab.accountId, tab.id]);
 
   return (
-    <Section id="connectors" title={t("sidePanel.connectors.title")} defaultOpen={false}
+    <Section id="connectors" title={t("sidePanel.connectors.title")} defaultOpen={false} flat={flat}
       aside={list && list.length > 0
         ? <span className="text-[11px] text-gray-500 dark:text-white/45 tabular-nums">{list.length}</span>
         : undefined}>

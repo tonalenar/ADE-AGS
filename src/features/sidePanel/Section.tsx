@@ -5,6 +5,9 @@ import { Button } from "neogestify-ui-components";
 export const CARD = `rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-50/95 dark:bg-surface-sunken/95
   backdrop-blur-md shadow-lg shadow-black/10 dark:shadow-black/40`;
 
+/** O cartão do painel do chat: arredondado e liso (sem sombra), como o painel do Claude Code. */
+export const FLAT_CARD = "rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-raised";
+
 const OPEN_KEY = "cc-side-panel-sections";
 
 function loadOpen(): Record<string, boolean> {
@@ -16,13 +19,15 @@ function loadOpen(): Record<string, boolean> {
 }
 
 /** Uma seção que abre e fecha pelo título, como no painel do Claude Code. Lembra o estado. */
-export function Section({ id, title, aside, children, defaultOpen = true }: {
+export function Section({ id, title, aside, children, defaultOpen = true, flat = false }: {
   id: string;
   title: string;
   /** O resumo à direita do título (uma porcentagem, uma contagem). */
   aside?: ReactNode;
   children?: ReactNode;
   defaultOpen?: boolean;
+  /** O cartão liso do painel do chat (`FLAT_CARD`), em vez do cartão flutuante das Abas. */
+  flat?: boolean;
 }) {
   const [open, setOpen] = useState(() => loadOpen()[id] ?? defaultOpen);
   const toggle = () => {
@@ -35,9 +40,9 @@ export function Section({ id, title, aside, children, defaultOpen = true }: {
     }
   };
   return (
-    <section className={CARD}>
+    <section className={flat ? FLAT_CARD : CARD}>
       <Button variant="custom" onClick={toggle} aria-expanded={open}
-        className="cc-t flex items-center gap-1.5 w-full h-9 px-3 text-left">
+        className={`cc-t flex items-center gap-1.5 w-full px-3 text-left ${flat ? "h-11" : "h-9"}`}>
         <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">{title}</span>
         <span className={`text-[9px] text-gray-400 dark:text-white/35 transition-transform ${open ? "" : "-rotate-90"}`}>▼</span>
         <span className="flex-1" />

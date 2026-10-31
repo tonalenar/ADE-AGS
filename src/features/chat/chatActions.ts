@@ -8,7 +8,7 @@ import type { AgentInfo } from "@/features/tabs/types";
 import { pasteIntoTab, sendWhenReady } from "@/features/terminal/terminalRegistry";
 
 import { chatCommand, conversationTitle, retuneConversation, type LaunchChoice } from "./chatModel";
-import { setComposing, useChatStore } from "./store";
+import { composeIn, setComposing, useChatStore } from "./store";
 
 export interface StartConversation extends LaunchChoice {
   cwd: string;
@@ -16,6 +16,10 @@ export interface StartConversation extends LaunchChoice {
   prompt: string;
   /** O valor do seletor de conta: um id, um pool ou `undefined` (a conta principal). */
   account: string | undefined;
+  /** O título da conversa (senão sai da primeira linha do prompt). */
+  title?: string;
+  /** Cria a aba sem trocar a tela: a de conversa nova continua à vista (o time ainda está sendo montado). */
+  background?: boolean;
 }
 
 /**
@@ -26,7 +30,7 @@ export interface StartConversation extends LaunchChoice {
 export async function startConversation(input: StartConversation): Promise<string> {
   const accountId = await resolveAccountChoice(input.agent.id, input.account);
   const command = chatCommand(input.agent.id, input.agent.command, input);
-  const title = conversationTitle(input.prompt) ?? undefined;
+  const title = input.title ?? conversationTitle(input.prompt) ?? undefined;
   const tabs = useTabsStore.getState();
   const tabId = tabs.addTab({
     cwd: input.cwd,
@@ -37,6 +41,7 @@ export async function startConversation(input: StartConversation): Promise<strin
   });
   registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, tabs.workspaceId, []));
   if (input.prompt.trim()) sendWhenReady(tabId, input.prompt.trim());
+  if (input.background) return tabId;
   // A conversa nova é a ativa: a tela dela substitui a de conversa nova.
   useChatStore.setState({ thread: null });
   useViewTabsStore.getState().showTerminal();
@@ -55,6 +60,11 @@ export function openConversation(tabId: string): void {
 /** Abre a tela de conversa nova (a hero com o composer). */
 export function newConversation(): void {
   setComposing(true);
+}
+
+/** Abre a tela de conversa nova já no projeto `cwd` (o "+" do cabeçalho do grupo na barra). */
+export function newConversationIn(cwd: string): void {
+  composeIn(cwd);
 }
 
 /**
