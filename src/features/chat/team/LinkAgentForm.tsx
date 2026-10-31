@@ -237,7 +237,7 @@ function Menu({ label, ariaLabel, children }: { label: string; ariaLabel: string
       </button>
       {open && (
         <div role="menu" aria-label={ariaLabel}
-          className="absolute right-0 top-full mt-1 z-50 w-64 max-h-72 cc-scroll p-1 rounded-lg text-chat-note
+          className="absolute right-0 top-full mt-1 z-50 w-64 max-h-72 cc-scroll-hidden p-1 rounded-lg text-chat-note
             bg-white/95 dark:bg-surface-raised/95 backdrop-blur-xl shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           {children(() => setOpen(false))}
         </div>

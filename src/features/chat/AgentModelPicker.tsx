@@ -182,7 +182,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
             bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]`}>
           <div role="tablist" aria-label={t("chat.picker.agents")}
-            className="w-11 shrink-0 flex flex-col items-center gap-1 p-1 cc-scroll bg-gray-50/60 dark:bg-white/[0.01]">
+            className="w-11 shrink-0 flex flex-col items-center gap-1 p-1 cc-scroll-hidden bg-gray-50/60 dark:bg-white/[0.01]">
             <RailButton label={t("chat.picker.favorites")} on={tab === "fav"} onClick={() => setTab("fav")}>
               <StarIcon filled className="w-5 h-5 text-amber-500" />
             </RailButton>
@@ -204,7 +204,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("chat.picker.search")} autoFocus
                 className="flex-1 min-w-0 bg-transparent outline-none text-chat-ui text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
             </label>
-            <div role="listbox" aria-label={t("chat.picker.models")} className="flex-1 min-h-0 cc-scroll p-1">
+            <div role="listbox" aria-label={t("chat.picker.models")} className="flex-1 min-h-0 cc-scroll-hidden p-1">
               {rows.map((r, i) => {
                 const group = r.agent.id === "opencode" && r.model?.includes("/") ? r.model.split("/")[0] : null;
                 const prevGroup = i > 0 && rows[i - 1].agent.id === "opencode" ? rows[i - 1].model?.split("/")[0] : undefined;

@@ -59,7 +59,7 @@ export function DraftTeamPanel({ cards }: { cards: ConversationCard[] }) {
             submitLabel={t("chat.team.draft.add")} onSubmit={add} onCancel={() => setDraftForm({ adding: false })} />
         </div>
       )}
-      <ul aria-label={t("chat.team.title")} className="list-none m-0 p-2.5 flex flex-col gap-2 cc-scroll min-h-0 flex-1">
+      <ul aria-label={t("chat.team.title")} className="list-none m-0 p-2.5 flex flex-col gap-2 cc-scroll-hidden min-h-0 flex-1">
         <li className="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-raised px-3 py-2.5 flex items-center gap-2">
           <AgentMono agentId={lead.agentId} label={lead.label} />
           <div className="flex-1 min-w-0">

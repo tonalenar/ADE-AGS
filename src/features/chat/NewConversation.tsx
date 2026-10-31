@@ -10,6 +10,8 @@ import { baseName } from "@/features/workspaces/workspaceTree";
 
 import { AccessMenu } from "./AccessMenu";
 import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
+import type { Attachment } from "./attachments/attachModel";
+import { threadMessage, tuiMessage } from "./attachments/send";
 import { startConversation } from "./chatActions";
 import { setComposing } from "./store";
 import { BotIcon, BranchIcon, CheckIcon, ChevronDownIcon, FolderGitIcon, FolderIcon } from "./chatIcons";
@@ -96,7 +98,7 @@ export function NewConversation({ projects, folder, onFolder }: {
   };
 
   /** `false` = não abriu: o texto fica na caixa. */
-  const submit = async (prompt: string): Promise<boolean> => {
+  const submit = async (prompt: string, attachments: Attachment[] = []): Promise<boolean> => {
     setError("");
     if (!project) { setError(t("chat.new.noFolder")); return false; }
     if (!agent) { setError(t("chat.agent.none")); return false; }
@@ -111,7 +113,7 @@ export function NewConversation({ projects, folder, onFolder }: {
         const result = await launchDraftTeam({
           agent, cwd, title: conversationTitle(prompt) ?? project.name, model: mine ? prefs.model : null, effort: mine ? prefs.effort : null,
           access, plan, accountId: mine ? prefs.accountId : null, account: mine ? prefs.accountId ?? undefined : undefined, viaProtocol,
-        }, draftMembers, prompt, draftTarget);
+        }, draftMembers, prompt, draftTarget, attachments);
         if (!result.ok) {
           const left = result.leftovers.length > 0 ? ` ${t("chat.team.draft.leftovers", { items: result.leftovers.join("; ") })}` : "";
           setError(`${t("chat.team.draft.failed", { error: result.error })}${left}`);
@@ -123,18 +125,20 @@ export function NewConversation({ projects, folder, onFolder }: {
       }
       if (viaProtocol) {
         // No Claude o Plano é um modo de permissão: a conversa nasce nele e sai pelo pedido do agente.
+        const sent = threadMessage(prompt, attachments);
         await startThread({
           agentId: agent.id, cwd, title: conversationTitle(prompt) ?? project.name,
           model: mine ? prefs.model : null, effort: mine ? prefs.effort : null, access: plan ? "plan" : access,
           accountId: mine ? prefs.accountId : null,
-        }, prompt);
+        }, sent.text, sent.images);
         update({ cwd: project.cwd, agentId: agent.id });
         return true;
       }
       await startConversation({
         cwd,
         agent,
-        prompt,
+        prompt: tuiMessage(agent.id, prompt, attachments),
+        title: conversationTitle(prompt) ?? project.name,
         model: mine ? prefs.model : null,
         effort: mine ? prefs.effort : null,
         account: mine ? prefs.accountId ?? undefined : undefined,
@@ -242,7 +246,7 @@ function ProjectPicker({ project, projects, onPick, onBrowse }: {
       </button>
       {open && (
         <div role="listbox" aria-label={t("chat.new.projects")}
-          className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-72 max-h-80 cc-scroll p-1 rounded-lg text-left
+          className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 w-72 max-h-80 cc-scroll-hidden p-1 rounded-lg text-left
             text-chat-ui font-normal tracking-normal bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           {projects.map((p) => (

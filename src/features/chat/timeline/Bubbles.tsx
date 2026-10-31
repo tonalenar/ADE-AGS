@@ -1,8 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 
+import { splitAttachmentBlock } from "../attachments/attachModel";
+import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { COLLAPSED_PX, overflowsLimit } from "./bubbleModel";
 import { prefersReducedMotion } from "./useRevealedText";
 
@@ -48,11 +50,16 @@ export function Collapsible({ children, innerClass = "" }: { children: React.Rea
 /** A mensagem da pessoa: balão à direita. `sending` = ainda não voltou do agente. */
 export function PersonBubble({ text, sending = false }: { text: string; sending?: boolean }) {
   const { t } = useTranslation();
+  // Os anexos (bloco `[Anexos]` do fim do texto) viram miniaturas ACIMA do texto, como no Claude Code.
+  const { text: body, attachments } = useMemo(() => splitAttachmentBlock(text), [text]);
   return (
-    <div className="flex flex-col items-end gap-0.5" aria-busy={sending || undefined}>
+    <div className="flex flex-col items-end gap-1" aria-busy={sending || undefined}>
+      {attachments.length > 0 && <AttachmentStrip items={attachments} className="justify-end max-w-[80%]" />}
+      {body && (
       <div className={`max-w-[80%] rounded-3xl px-4 py-3 bg-gray-200/60 dark:bg-white/[0.08] break-words ${sending ? "opacity-70" : ""}`}>
-        <Collapsible><div className="whitespace-pre-wrap">{text}</div></Collapsible>
+        <Collapsible><div className="whitespace-pre-wrap">{body}</div></Collapsible>
       </div>
+      )}
       {sending && <span className="px-2 text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.sending")}</span>}
     </div>
   );

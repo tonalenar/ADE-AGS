@@ -134,7 +134,14 @@ pub fn announce(app: &AppHandle, row: &ThreadRow) {
 /// Manda uma mensagem: começa um turno, ou entra no turno em andamento (`turn/steer`). É o envio da pessoa
 /// (tela, `ags chat`): entra no turno, como sempre foi. A fila de mensagens entre agentes usa [`send_mode`].
 pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> Result<(), String> {
-    send_mode(app, db, thread_id, text, SendMode::SteerActive).await.map_err(String::from)
+    send_with(app, db, thread_id, text, &[]).await
+}
+
+/// Como [`send`], com as imagens anexadas (caminhos). Só o Claude as recebe em linha; nos outros
+/// motores o caminho já está no texto (ver `attach`). Uma imagem que não cabe nos limites segue só
+/// pelo texto: nunca derruba a mensagem.
+pub async fn send_with(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), String> {
+    send_mode(app, db, thread_id, text, SendMode::SteerActive, images).await.map_err(String::from)
 }
 
 /// Uma trava por conversa: a checagem do turno e o envio (`turn/start`/`turn/steer`) acontecem juntos, sem
@@ -170,7 +177,7 @@ pub(super) fn codex_error(failure: RequestFailure) -> SendError {
 /// Manda uma mensagem à conversa no modo dado, com a classe do erro (ver [`SendError`]). Qualquer falha antes
 /// de a mensagem chegar ao agente (a sessão não abre, o processo já fechou, o canal de escrita fechou) é
 /// `NotSent`; um pedido que saiu e perdeu a resposta é `Unknown`.
-pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode) -> Result<(), SendError> {
+pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
     let gate = send_gate(thread_id);
     let _held = gate.lock().await;
     let row = thread(db, thread_id).map_err(SendError::NotSent)?;
@@ -188,7 +195,8 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
     match engine {
         Engine::Claude => {
             let session = claude::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
-            return claude::send_user(app, db, &session, text).map_err(SendError::NotSent);
+            let (blocks, _skipped) = super::attach::image_blocks(images);
+            return claude::send_user(app, db, &session, text, blocks).map_err(SendError::NotSent);
         }
         Engine::OpenCode => {
             let session = opencode::session(app, db, thread_id).await.map_err(SendError::NotSent)?;

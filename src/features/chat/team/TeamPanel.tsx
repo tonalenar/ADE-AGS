@@ -94,7 +94,7 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
       {adding[team.id] && <LinkAgentForm key={team.id} team={team} cards={cards} />}
       {dropping && <p className="mx-3.5 mt-2.5 mb-0 text-chat-caption text-accent-700 dark:text-accent-400">{t("chat.team.drop")}</p>}
       {error && <p role="alert" className="mx-3.5 mt-2.5 mb-0 text-chat-caption text-red-700 dark:text-red-400">{error}</p>}
-      <ul aria-label={t("chat.team.title")} className="list-none m-0 p-2.5 flex flex-col gap-2 cc-scroll min-h-0 flex-1">
+      <ul aria-label={t("chat.team.title")} className="list-none m-0 p-2.5 flex flex-col gap-2 cc-scroll-hidden min-h-0 flex-1">
         {rows.map((row) => <MemberCard key={row.ref} row={row} teamId={team.id} />)}
       </ul>
       <label title={t("chat.team.autoDecide.hint")} className="mx-3.5 mb-1 flex items-center gap-2 text-chat-caption text-gray-600 dark:text-white/55 cursor-pointer">

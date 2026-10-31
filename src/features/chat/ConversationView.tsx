@@ -12,6 +12,7 @@ import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
 import { retuneConversationTab, sendToConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
 import { accessModesFor, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
+import { messageFor } from "./attachments/send";
 import { ChatComposer } from "./ChatComposer";
 import { ChatFrame } from "./ChatFrame";
 import { ComposerColumn } from "./ComposerColumn";
@@ -139,17 +140,19 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
       <ChatComposer cwd={card.cwd}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
-        onSubmit={(text) => {
-          const prepared = team ? team.prepare(text, { key: card.tabId, items }) : { text, onSent: () => undefined };
+        onSubmit={(text, attachments) => {
+          const prepared = team && text.trim() ? team.prepare(text, { key: card.tabId, items }, attachments) : { text, onSent: () => undefined };
           if (prepared === null) return;
-          if (timeline && prepared.text.trim()) addPending(card.tabId, prepared.text.trim(), items);
-          sendToConversation(card.tabId, prepared.text);
+          // Os anexos vão como `@caminho` no fim do texto (a TUI os lê pelo caminho).
+          const sent = messageFor(card.tabId, prepared.text, attachments).text;
+          if (timeline && sent.trim()) addPending(card.tabId, sent.trim(), items);
+          sendToConversation(card.tabId, sent);
           // Numa aba não há resposta do backend a esperar: o resumo do time conta como entregue ao enviar.
           prepared.onSent();
         }}
-        onQueue={(text) => {
-          const prepared = team ? team.prepare(text, { key: card.tabId, items }) : { text, onSent: () => undefined };
-          if (prepared !== null) { queueOrSend(card.tabId, prepared.text); prepared.onSent(); }
+        onQueue={(text, attachments) => {
+          const prepared = team ? team.prepare(text, { key: card.tabId, items }, attachments) : { text, onSent: () => undefined };
+          if (prepared !== null) { queueOrSend(card.tabId, messageFor(card.tabId, prepared.text, attachments).text); prepared.onSent(); }
         }} queued={queued}
         onStop={busy && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
         leading={team?.controls}

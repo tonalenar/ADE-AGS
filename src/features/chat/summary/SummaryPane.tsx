@@ -53,7 +53,7 @@ export function SummaryPane({ conversation, cwd, tabId }: { conversation: Conver
   const tab = useTabsStore((s) => s.tabs.find((x) => x.id === conversation?.tabId) ?? null);
   if (!conversation || !cwd) return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.summary.none")}</p>;
   return (
-    <div className="flex-1 min-h-0 cc-scroll p-3 flex flex-col gap-3">
+    <div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">
       <EnvironmentCard conversation={conversation} cwd={cwd} />
       {tab ? <ContextSection tab={tab} flat /> : <ThreadContextCard conversation={conversation} />}
       <LimitsCard conversation={conversation} />

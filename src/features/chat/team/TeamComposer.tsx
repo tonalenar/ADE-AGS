@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
+import type { Attachment } from "../attachments/attachModel";
+import { messageFor } from "../attachments/send";
 import type { ConversationCard } from "../chatModel";
 import type { TeamPolicy, TeamView } from "./ipc";
 import { AgentMono, useRoleLabel } from "./TeamParts";
@@ -56,7 +58,7 @@ export interface TeamComposer {
    * mudou, ou o aviso de "Só o orquestrador") e o `onSent`, que quem envia chama DEPOIS de o envio funcionar:
    * só então o resumo conta como entregue.
    */
-  prepare: (text: string, where: { key: string; items: TimelineItem[] }) => PreparedSend | null;
+  prepare: (text: string, where: { key: string; items: TimelineItem[] }, attachments?: Attachment[]) => PreparedSend | null;
 }
 
 export interface PreparedSend {
@@ -80,7 +82,7 @@ export function useTeamComposer(conversation: ConversationCard | null, cards: Co
 
   const orchestrator = conversation?.tabId ?? "";
   const error = useTeamStore((s) => s.sendErrors[orchestrator] ?? null);
-  const prepare = useCallback((text: string, where: { key: string; items: TimelineItem[] }): PreparedSend | null => {
+  const prepare = useCallback((text: string, where: { key: string; items: TimelineItem[] }, attachments: Attachment[] = []): PreparedSend | null => {
     if (!team) return { text, onSent: () => undefined };
     setSendError(orchestrator, null);
     const signature = rosterSignature(team);
@@ -88,7 +90,9 @@ export function useTeamComposer(conversation: ConversationCard | null, cards: Co
     const notice = target === "team" && told !== signature ? rosterNotice(team, live.nameOf, roleLabel, policyLabel) : null;
     const routed = routeMessage(text, target, team, options, notice);
     if (routed.direct) {
-      sendDirect(orchestrator, routed.to, routed.text, where);
+      // Um anexo vai ao integrante pelo mesmo caminho da mensagem (o caminho no texto nunca se perde).
+      const sent = messageFor(routed.to, routed.text, attachments);
+      sendDirect(orchestrator, routed.to, sent.text, where, sent.images);
       return null;
     }
     // O resumo do time só conta como entregue depois de o envio funcionar.

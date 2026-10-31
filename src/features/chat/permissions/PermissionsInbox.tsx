@@ -117,7 +117,7 @@ export function PermissionsInbox() {
         ))}
       </div>
 
-      <ul className="m-0 px-2.5 py-1 list-none flex flex-col gap-2 overflow-auto cc-scroll">
+      <ul className="m-0 px-2.5 py-1 list-none flex flex-col gap-2 overflow-auto cc-scroll-hidden">
         {shown.length === 0 && (
           <li className="px-2 py-8 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.inbox.empty")}</li>
         )}

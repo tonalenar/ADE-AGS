@@ -471,7 +471,7 @@ impl ThreadPort for RealPort<'_> {
     }
 
     fn send(&self, thread: &str, text: &str, mode: SendMode) -> Result<(), SendError> {
-        tauri::async_runtime::block_on(crate::conversa::api::send_mode(self.app, &self.db, thread, text, mode))
+        tauri::async_runtime::block_on(crate::conversa::api::send_mode(self.app, &self.db, thread, text, mode, &[]))
     }
 
     fn items(&self, thread: &str) -> Option<Vec<crate::canal::timeline::Item>> {

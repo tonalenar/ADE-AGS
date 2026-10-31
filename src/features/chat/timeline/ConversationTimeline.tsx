@@ -138,7 +138,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   }, []);
 
   return (
-    <div ref={scrollRef} className="flex-1 min-h-0 cc-scroll"
+    <div ref={scrollRef} className="flex-1 min-h-0 cc-scroll-hidden"
       onScroll={(e) => {
         const el = e.currentTarget;
         stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
@@ -384,13 +384,13 @@ function ToolRow({ tool }: { tool: TimelineItem }) {
         {canOpen && <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
       </button>
       {open && command && longCommand && (
-        <pre className="m-0 ml-[26px] mt-1 max-h-48 overflow-auto rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
+        <pre className="m-0 ml-[26px] mt-1 max-h-48 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-800 dark:text-white/80">
           {command.full}
         </pre>
       )}
       {open && tool.output && (
-        <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
+        <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-white/70">
           {tool.output}
         </pre>

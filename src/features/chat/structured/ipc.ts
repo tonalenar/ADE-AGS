@@ -56,7 +56,9 @@ export const chatThreadCreate = (input: {
   agentId: string; cwd: string; title: string; model: string | null; effort: string | null; access: ThreadAccess; accountId: string | null;
 }) => invoke<ThreadRow>("chat_thread_create", input);
 
-export const chatThreadSend = (threadId: string, text: string) => invoke<void>("chat_thread_send", { threadId, text });
+/** `images`: caminhos de imagens para o motor que as recebe em linha (o Claude); o caminho já está no texto. */
+export const chatThreadSend = (threadId: string, text: string, images?: string[]) =>
+  invoke<void>("chat_thread_send", { threadId, text, images: images && images.length > 0 ? images : null });
 export const chatThreadItems = (threadId: string) => invoke<TimelineItem[]>("chat_thread_items", { threadId });
 export const chatThreadRequests = (threadId: string) => invoke<RequestRow[]>("chat_thread_requests", { threadId });
 export const chatThreadStatus = (threadId: string) => invoke<ThreadStatus>("chat_thread_status", { threadId });

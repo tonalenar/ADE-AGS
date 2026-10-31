@@ -242,7 +242,7 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
 
       {extraTop}
 
-      <nav ref={navRef} aria-label={t("chat.sidebar.active")} onKeyDown={onNavKey} className="flex-1 min-h-0 cc-scroll px-2 pt-3 flex flex-col gap-3">
+      <nav ref={navRef} aria-label={t("chat.sidebar.active")} onKeyDown={onNavKey} className="flex-1 min-h-0 cc-scroll-hidden px-2 pt-3 flex flex-col gap-3">
         {cards.length === 0 && (
           <p className="px-2 py-6 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.sidebar.empty")}</p>
         )}
@@ -276,7 +276,7 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
         <div className="px-2 pt-1">
           <SectionHeader label={t("chat.sidebar.snoozed")} count={snoozed.length} open={snoozedOpen} onToggle={() => setSnoozedOpen(!snoozedOpen)} />
           {snoozedOpen && (
-            <div className="max-h-40 cc-scroll flex flex-col">
+            <div className="max-h-40 cc-scroll-hidden flex flex-col">
               {snoozed.map((c) => (
                 <SlimRow key={c.tabId} name={c.project} title={c.title} agentId={c.agentId}
                   onOpen={() => { unsnoozeConversation(c.tabId); openCard(c.tabId); onOpened?.(); }} />
@@ -290,7 +290,7 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
         <div className="px-2 pt-1">
           <SectionHeader label={t("chat.sidebar.closed")} count={doneCount} open={closedOpen} onToggle={() => setClosedOpen(!closedOpen)} />
           {closedOpen && (
-            <div className="max-h-48 cc-scroll flex flex-col">
+            <div className="max-h-48 cc-scroll-hidden flex flex-col">
               {settled.map((e) => (
                 <SlimRow key={e.id} name={e.cwd.split(/[\\/]/).filter(Boolean).pop() ?? e.cwd} title={e.title} agentId={e.agentId}
                   onOpen={() => { reopenSettled(e.id); onOpened?.(); }} />
@@ -509,7 +509,7 @@ function FolderFilter({ folders, value, onChange }: { folders: string[]; value: 
       <IconButton label={t("chat.sidebar.filter")} onClick={() => setOpen(!open)} active={value !== null}><FilterIcon className="w-4 h-4" /></IconButton>
       {open && (
         <div role="menu" aria-label={t("chat.sidebar.filter")}
-          className="absolute left-0 top-full mt-1 z-50 w-56 max-h-72 cc-scroll p-1 rounded-lg text-chat-note
+          className="absolute left-0 top-full mt-1 z-50 w-56 max-h-72 cc-scroll-hidden p-1 rounded-lg text-chat-note
             bg-white/95 dark:bg-surface-raised/95 backdrop-blur-xl shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           <MenuItem on={value === null} onClick={() => { onChange(null); setOpen(false); }}>{t("chat.sidebar.allFolders")}</MenuItem>
           {folders.map((f) => (

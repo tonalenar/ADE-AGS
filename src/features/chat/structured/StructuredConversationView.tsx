@@ -8,6 +8,7 @@ import { turnLive } from "../activityModel";
 import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
 import { BotIcon } from "../chatIcons";
 import { accessModesFor, planSupported, type ConversationCard } from "../chatModel";
+import { messageFor } from "../attachments/send";
 import { ChatComposer } from "../ChatComposer";
 import { ChatFrame } from "../ChatFrame";
 import { ComposerColumn } from "../ComposerColumn";
@@ -117,18 +118,20 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
-          onSubmit={(text) => {
+          onSubmit={(text, attachments) => {
             if (question) { answer(text); return; }
-            const prepared = team ? team.prepare(text, { key, items }) : { text, onSent: () => undefined };
+            const prepared = team && text.trim() ? team.prepare(text, { key, items }, attachments) : { text, onSent: () => undefined };
             if (prepared === null) return;
+            // O caminho de cada anexo vai no texto (bloco `[Anexos]`) e as imagens também em linha, onde o motor aceita.
+            const sent = messageFor(key, prepared.text, attachments);
             // A mensagem aparece na hora; se o backend recusar, sai do fio e o erro aparece no aviso.
-            const mark = prepared.text.trim() ? addPending(key, prepared.text.trim(), items) : null;
-            sendToThread(thread.id, prepared.text, mark ? () => dropPending(key, mark) : undefined, prepared.onSent);
+            const mark = sent.text.trim() ? addPending(key, sent.text.trim(), items) : null;
+            sendToThread(thread.id, sent.text, mark ? () => dropPending(key, mark) : undefined, prepared.onSent, sent.images);
           }}
-          onQueue={question ? null : (text) => {
-            const prepared = team ? team.prepare(text, { key, items }) : { text, onSent: () => undefined };
+          onQueue={question ? null : (text, attachments) => {
+            const prepared = team ? team.prepare(text, { key, items }, attachments) : { text, onSent: () => undefined };
             // A fila do composer não avisa quando a mensagem sai: o resumo do time conta como entregue ao enfileirar.
-            if (prepared !== null) { queueOrSend(key, prepared.text); prepared.onSent(); }
+            if (prepared !== null) { queueOrSend(key, messageFor(key, prepared.text, attachments).text); prepared.onSent(); }
           }} queued={queued}
           leading={question ? null : team?.controls}
           addon={team && !question ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}

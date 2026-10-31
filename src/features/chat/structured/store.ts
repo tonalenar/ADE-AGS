@@ -126,10 +126,10 @@ export interface NewThread {
 }
 
 /** Cria a conversa, mostra e manda a primeira mensagem. */
-export async function startThread(input: NewThread, text: string): Promise<string> {
+export async function startThread(input: NewThread, text: string, images?: string[]): Promise<string> {
   const id = await createThread(input);
   openThread(id);
-  sendToThread(id, text);
+  sendToThread(id, text, undefined, undefined, images);
   return id;
 }
 
@@ -142,10 +142,10 @@ export async function createThread(input: NewThread): Promise<string> {
 }
 
 /** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
-export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void): void {
+export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[]): void {
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
   // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
-  chatThreadSend(id, text).then(() => onSent?.(), (e) => {
+  chatThreadSend(id, text, images).then(() => onSent?.(), (e) => {
     onError?.(String(e));
     patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
   });

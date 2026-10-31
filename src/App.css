@@ -332,6 +332,43 @@ html.dark {
   background: transparent;
 }
 
+/* A rolagem do modo chat (conversa, Resumo, Time, listas e menus) sem barra visível: a rueda, o
+   trackpad, o teclado e o foco rolam como sempre. Fica fora de editores e terminais, que mantêm as suas. */
+.cc-scroll-hidden {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.cc-scroll-hidden::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Só esconde a barra, sem mexer no overflow (blocos de código e saídas de ferramenta rolam nos dois eixos). */
+.cc-no-bar {
+  scrollbar-width: none;
+}
+
+.cc-no-bar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* O Markdown das mensagens (código e tabelas) rola na horizontal sem barra dentro do modo chat. */
+.cc-chat-type .overflow-x-auto {
+  scrollbar-width: none;
+}
+
+.cc-chat-type .overflow-x-auto::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* Scroll horizontal sin barra visible — la barra de tabs (estilo Chrome) desborda al
    costado, pero una barra dibujada ahí abajo se comería parte de los 40px de alto y se
    leería como un artefacto. El scroll con rueda/trackpad/drag sigue funcionando. */

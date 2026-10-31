@@ -255,10 +255,10 @@ export async function makeOrchestrator(conv: ConversationRef): Promise<TeamView>
  * Manda o texto à conversa: a aba (quando a TUI estiver pronta) ou a conversa por protocolo. `onSent`: o backend
  * aceitou (numa aba não há resposta a esperar: vale ao entregar à fila do terminal). `onError`: ele recusou.
  */
-export function sendToMember(ref: string, text: string, done?: { onSent?: () => void; onError?: (message: string) => void }): void {
+export function sendToMember(ref: string, text: string, done?: { onSent?: () => void; onError?: (message: string) => void }, images?: string[]): void {
   const thread = threadIdOf(ref);
   if (thread) {
-    sendToThread(thread, text, done?.onError, done?.onSent);
+    sendToThread(thread, text, done?.onError, done?.onSent, images);
     return;
   }
   sendWhenReady(ref, text);
@@ -291,14 +291,14 @@ export function setSendError(orchestrator: string, message: string | null): void
  * na conversa que a pessoa está olhando (`pending.key`) até o backend responder; se ele recusar, o erro aparece
  * ali (`sendErrors`), não só na conversa do integrante, que a pessoa nem vê.
  */
-export function sendDirect(orchestrator: string, member: string, text: string, pending: { key: string; items: TimelineItem[] }): void {
+export function sendDirect(orchestrator: string, member: string, text: string, pending: { key: string; items: TimelineItem[] }, images?: string[]): void {
   setSendError(orchestrator, null);
   const mark = text.trim() ? addPending(pending.key, text.trim(), pending.items) : null;
   const drop = () => { if (mark) dropPending(pending.key, mark); };
   sendToMember(member, text, {
     onSent: drop,
     onError: (message) => { drop(); setSendError(orchestrator, message); },
-  });
+  }, images);
 }
 
 async function finishLink(teamId: string, ref: string, briefing: string): Promise<void> {

@@ -10,6 +10,7 @@
 //! - `opencode_map` e `opencode`: o mesmo para o OpenCode (Agent Client Protocol, JSON-RPC no stdio);
 //! - `agy_map` e `agy`: o mesmo para o Antigravity (`agy --print --output-format stream-json`);
 //! - `turn`: abrir e fechar o turno no banco, comum aos motores mais novos;
+//! - `attach`: os anexos das mensagens (conferir caminhos, miniaturas e imagens em linha do Claude);
 //! - `api`: o núcleo (criar, mandar, parar, responder, trocar), usado pela tela, pela CLI e pelo MCP;
 //! - `commands`: os comandos Tauri;
 //! - `worktree`: o worktree de uma conversa nova.
@@ -18,6 +19,7 @@ pub mod agy;
 pub mod agy_map;
 pub mod answer;
 pub mod api;
+pub mod attach;
 pub mod claude;
 pub mod claude_map;
 pub mod codex;
@@ -34,12 +36,15 @@ pub mod store;
 pub mod turn;
 pub mod worktree;
 #[cfg(test)]
+mod attach_test;
+#[cfg(test)]
 mod test;
 #[cfg(test)]
 mod test_memoria;
 #[cfg(test)]
 mod test_motores;
 
+pub use attach::*;
 pub use commands::*;
 pub use store::migrate;
 pub use worktree::*;

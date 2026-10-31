@@ -94,7 +94,14 @@ pub fn launch_args(row: &ThreadRow, start: Start<'_>) -> Vec<String> {
 
 /// A mensagem do usuário no formato do `--input-format stream-json`.
 pub fn user_message(text: &str) -> Value {
-    json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] }, "parent_tool_use_id": null, "session_id": "" })
+    user_message_with(text, Vec::new())
+}
+
+/// Com imagens em linha: os blocos `image` (base64) vêm antes do texto, como o Claude Code os monta.
+pub fn user_message_with(text: &str, images: Vec<Value>) -> Value {
+    let mut content = images;
+    content.push(json!({ "type": "text", "text": text }));
+    json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "session_id": "" })
 }
 
 /// O que uma linha da saída significa para a conversa.

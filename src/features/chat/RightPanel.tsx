@@ -157,7 +157,7 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <div className="flex-1 min-h-0 cc-scroll text-chat-caption">
+      <div className="flex-1 min-h-0 cc-scroll-hidden text-chat-caption">
         {state.files.map((file) => (
           <section key={file.path}>
             <div className="sticky top-0 flex items-center gap-2 h-9 px-3 border-b border-gray-200 dark:border-white/[0.08] bg-gray-50 dark:bg-white/[0.03] backdrop-blur">
