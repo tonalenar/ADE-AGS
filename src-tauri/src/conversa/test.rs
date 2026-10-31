@@ -1364,4 +1364,58 @@ mod ponta_a_ponta {
             assert_eq!((*sent.borrow(), state(&db, &row.id).as_str()), (1, "answered"));
         }
     }
+    /// O time montado na tela de rascunho ("Nova conversa com time"): o orquestrador e os integrantes nascem como
+    /// conversas por protocolo (`thread:<id>`), o time é criado e o integrante ligado ANTES da primeira mensagem.
+    /// O backend decide pelas mesmas tabelas de sempre, sem saber que veio de um rascunho.
+    fn draft_world(lead_is_t1: bool, member_policy: Policy, rules: &[(Kind, &str)]) -> DbConnection {
+        let db = world(rules);
+        {
+            let conn = db.lock().unwrap();
+            if lead_is_t1 {
+                // O pedido é do próprio orquestrador: não há linha de integrante, só a regra da pessoa decide.
+                conn.execute("DELETE FROM chat_team_member WHERE member = 'thread:t1'", []).unwrap();
+                conn.execute("UPDATE chat_team SET orchestrator = 'thread:t1'", []).unwrap();
+            } else {
+                conn.execute("UPDATE chat_team SET orchestrator = 'thread:lead'", []).unwrap();
+                conn.execute("UPDATE chat_team_member SET policy = ?1, origin = 'spawned' WHERE member = 'thread:t1'", [member_policy.as_str()]).unwrap();
+            }
+        }
+        db
+    }
+
+    #[test]
+    fn time_de_rascunho_por_protocolo_integrante_e_decidido_pela_politica_dele() {
+        for engine in ENGINES {
+            let db = draft_world(false, Policy::Full, &[]);
+            let (answered, sent) = arrival(&db, engine, command_request(engine, "q1", "cargo build"));
+            assert!(answered && sent.len() == 1, "{engine:?}: acesso total libera o comando sem a pessoa");
+            let by: String = db.lock().unwrap().query_row("SELECT decided_by FROM chat_request WHERE id = 'q1'", [], |r| r.get(0)).unwrap();
+            assert_eq!(by, "policy", "{engine:?}");
+            let (answered, _) = arrival(&db, engine, command_request(engine, "q2", "git push origin main"));
+            assert!(!answered, "{engine:?}: risco alto nunca é automático, nem com acesso total");
+
+            let db = draft_world(false, Policy::Read, &[]);
+            let (answered, sent) = arrival(&db, engine, edit_request(engine, "q3", "src/a.ts"));
+            assert!(answered && sent.len() == 1, "{engine:?}: leitura nega a edição sozinha");
+            let (verdict, by): (String, String) = db
+                .lock()
+                .unwrap()
+                .query_row("SELECT COALESCE(answer, ''), decided_by FROM chat_request WHERE id = 'q3'", [], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap();
+            assert_eq!((verdict.as_str(), by.as_str()), ("deny", "policy"), "{engine:?}");
+        }
+    }
+
+    #[test]
+    fn time_de_rascunho_o_orquestrador_por_protocolo_so_tem_as_regras_da_pessoa() {
+        for engine in ENGINES {
+            let db = draft_world(true, Policy::Ask, &[]);
+            let (answered, _) = arrival(&db, engine, command_request(engine, "q1", "cargo build"));
+            assert!(!answered, "{engine:?}: o orquestrador não tem política: sem regra, a pessoa decide");
+            assert_eq!(state(&db, "q1"), "pending");
+            let db = draft_world(true, Policy::Ask, &[(Kind::Command, "cargo build *")]);
+            let (answered, _) = arrival(&db, engine, command_request(engine, "q1", "cargo build"));
+            assert!(answered, "{engine:?}: a regra «Sempre permitir» vale para o orquestrador");
+        }
+    }
 }
