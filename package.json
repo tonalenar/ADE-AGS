@@ -10,6 +10,7 @@
     "test": "vitest run",
     "check:babel": "node scripts/babel-parse-check.mjs src",
     "check:test-lint": "node scripts/test-lint.mjs",
+    "check:i18n": "node scripts/i18n-lint.mjs",
     "test:watch": "vitest",
     "tauri": "tauri",
     "app:build": "bun scripts/build.mjs",

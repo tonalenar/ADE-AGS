@@ -1,0 +1,8 @@
+{
+  "_leia": "Dívida antiga do i18n. Só deve diminuir; nunca absorva achados novos. Atualize com node scripts/i18n-lint.mjs --update-baseline.",
+  "violacoes": {
+    "[\"duplicates\",{\"lang\":\"pt-BR\",\"key\":\"settings.accounts.limits.budgetHelper\"},2]": 1,
+    "[\"duplicates\",{\"lang\":\"en\",\"key\":\"settings.accounts.limits.budgetHelper\"},2]": 1,
+    "[\"duplicates\",{\"lang\":\"es\",\"key\":\"settings.accounts.limits.budgetHelper\"},2]": 1
+  }
+}
