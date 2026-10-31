@@ -239,6 +239,11 @@ pub struct Named<'a> {
     pub subagent: bool,
 }
 
+/// As regras de mensagem de quem trabalha num time. Um `ask` já devolve o fim do turno a quem perguntou: copiá-lo
+/// por `peer tell`, ou avisar «estou pronto» sem ninguém pedir, só gasta token do orquestrador. A MESMA frase vai no
+/// canvas (`agentRole.ts::MESSAGE_RULES`); um teste do front confere que as duas são iguais.
+pub const MESSAGE_RULES: &str = "Se a tarefa chegou como `ask`, a resposta final do seu turno VOLTA SOZINHA a quem perguntou: não repita o mesmo conteúdo por `ags peer tell`. NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido («estou pronto», «recebi», «vou ler»): só fale com o orquestrador para entregar o resultado, pedir algo que o bloqueia ou responder a uma pergunta. O resumo da entrega vai uma vez só.";
+
 /// O que o integrante recebe ao entrar no time: quem é o orquestrador, o papel, a política e a regra
 /// de esperar a tarefa. `instructions` são as do papel no catálogo (vazio = sem). Pura.
 pub fn member_briefing(orchestrator: &str, me: &Named<'_>, instructions: &str) -> String {
@@ -255,10 +260,11 @@ pub fn member_briefing(orchestrator: &str, me: &Named<'_>, instructions: &str) -
     }
     if me.subagent {
         // A mesma frase do canvas (`agentRole.ts::roleBriefing`).
-        out.push_str(" Você é um subagente: execute as tarefas que o orquestrador enviar e responda com `ags peer tell`.");
+        out.push_str(" Você é um subagente: execute as tarefas que o orquestrador enviar.");
     }
     out.push_str(&format!(
-        " Não explore nem edite antes de receber a tarefa de {orchestrator}. Responda e avise com `ags peer tell \"{orchestrator}\" \"...\"`; \
+        " Não explore nem edite antes de receber a tarefa de {orchestrator}. {MESSAGE_RULES} \
+         Para pedir algo que o bloqueia ou responder a uma pergunta, use `ags peer tell \"{orchestrator}\" \"...\"`; \
          a entrega final vai UMA vez com `ags peer deliver --file entrega.json` (Handoff v1)."
     ));
     out

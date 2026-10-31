@@ -1409,7 +1409,7 @@ fn peer_schemas() -> Vec<Value> {
                 "role": { "type": "string", "description": "frontend (UI), backend, qa (tests), reviewer, researcher, devops or generalist." },
                 "policy": { "type": "string", "enum": ["read", "ask"], "description": "read: read-only; ask (default): the person approves edits and commands." },
                 "branch": { "type": "string", "description": "Optional branch the member works on (e.g. team/ui)." },
-                "subagent": { "type": "boolean", "description": "Mark the member as a subagent: support that only executes what you send and answers with `ags peer tell`." }
+                "subagent": { "type": "boolean", "description": "Mark the member as a subagent: support that only executes what you send and delivers the result once (an `ask` reply comes back by itself; no ready/ack/progress messages)." }
             }, "required": ["to"] },
         }),
         json!({

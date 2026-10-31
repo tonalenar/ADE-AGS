@@ -4,6 +4,7 @@ import i18n from "i18next";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
+import { MESSAGE_RULES } from "@/features/canvas/agentRole";
 import { BROWSER_HINT } from "@/features/canvas/portalNotice";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
@@ -341,13 +342,14 @@ export function memberBriefing(
       ? `SEU PAPEL: ${member.roleLabel}${member.roleDescription ? ` — ${member.roleDescription}` : ""}`
       : `SEU PAPEL: ainda não definido. O orquestrador "${LEAD_NAME}" vai decidir e avisar; até lá, aguarde.`,
     member.roleInstructions,
-    ...(member.subagent ? ["Você é um SUBAGENTE do orquestrador: execute o que ele enviar e responda a ele."] : []),
+    ...(member.subagent ? ["Você é um SUBAGENTE do orquestrador: execute o que ele enviar."] : []),
     "",
     ...(workspace ? [`SEU WORKTREE: ${workspace.cwd}; branch: ${workspace.branch}. Trabalhe somente nele.`, workspace.environment, ""] : []),
     ...(findings.trim() ? [findings.trim(), ""] : []),
     ...(memoryEnvelope(memory, mission.id) ? [memoryEnvelope(memory, mission.id), ""] : []),
     "Ao receber a tarefa, leia o quadro da missão (`ags swarm read`): regras, contratos e decisões que valem para todos ficam lá, numerados. Publique ali (`ags swarm note --file <arquivo>`) o que outro integrante precisa saber, em vez de repetir em cada mensagem.",
     "Não explore nem edite antes de receber a tarefa do Orquestrador. Aguarde a delegação; use somente seu worktree e preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
+    MESSAGE_RULES,
     ...singleBranchRule("member", undefined, workspace?.branch),
     "",
     ...(mission.id ? [

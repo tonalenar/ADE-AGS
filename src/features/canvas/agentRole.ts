@@ -56,6 +56,17 @@ export function choiceFromLabel(roles: CanvasRole[], label: string | undefined, 
 }
 
 /**
+ * As regras de mensagem de quem trabalha num time. Um `ask` já devolve o fim do turno a quem perguntou: copiá-lo
+ * por `peer tell`, ou avisar «estou pronto» sem ninguém pedir, só gasta token do orquestrador. A MESMA frase vai no
+ * backend (`chat_team/model.rs::MESSAGE_RULES`); `agentRole.test.ts` confere que as duas são iguais.
+ */
+export const MESSAGE_RULES =
+  "Se a tarefa chegou como `ask`, a resposta final do seu turno VOLTA SOZINHA a quem perguntou: não repita o mesmo conteúdo por `ags peer tell`. "
+  + "NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido («estou pronto», «recebi», «vou ler»): "
+  + "só fale com o orquestrador para entregar o resultado, pedir algo que o bloqueia ou responder a uma pergunta. "
+  + "O resumo da entrega vai uma vez só.";
+
+/**
  * O que o agente lê ao receber a função, ou `null` se não há nada a dizer (sem função e não é subagente).
  * Segue o texto do `ags peer recruit --role` ("Seu papel neste time: …").
  */
@@ -65,8 +76,10 @@ export function roleBriefing(roles: CanvasRole[], choice: AgentRoleChoice): stri
   if (role) parts.push(`Seu papel neste time: ${role.label} — ${role.instructions}`);
   if (choice.subagent) {
     parts.push(role
-      ? "Você é um subagente: execute as tarefas que o orquestrador enviar e responda com `ags peer tell`."
+      ? "Você é um subagente: execute as tarefas que o orquestrador enviar."
       : "Você é um subagente deste time. O orquestrador vai definir o seu papel e enviar as tarefas: aguarde.");
   }
-  return parts.length > 0 ? `[ADE AGS] ${parts.join("\n")}` : null;
+  if (parts.length === 0) return null;
+  parts.push(MESSAGE_RULES);
+  return `[ADE AGS] ${parts.join("\n")}`;
 }

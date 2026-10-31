@@ -309,11 +309,38 @@ fn a_migracao_acrescenta_a_coluna_a_uma_tabela_antiga_sem_perder_linhas() {
     assert_eq!(old.role, "qa");
 }
 
+/// Um `ask` já devolve o fim do turno a quem perguntou; um integrante que também o manda por `peer tell`, ou que
+/// avisa «estou pronto» sem ninguém pedir, só gasta token do orquestrador (medido num teste real).
+fn assert_regras_de_mensagem(text: &str) {
+    assert!(text.contains("chegou como `ask`"), "{text}");
+    assert!(text.contains("VOLTA SOZINHA a quem perguntou"), "{text}");
+    assert!(text.contains("não repita o mesmo conteúdo por `ags peer tell`"), "{text}");
+    assert!(text.contains("NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido"), "{text}");
+    assert!(text.contains("«estou pronto», «recebi», «vou ler»"), "{text}");
+    assert!(text.contains("entregar o resultado") && text.contains("pedir algo que o bloqueia") && text.contains("responder a uma pergunta"), "{text}");
+    assert!(text.contains("O resumo da entrega vai uma vez só"), "{text}");
+    assert!(!text.contains("Responda e avise com"), "o texto antigo mandava avisar por tell: {text}");
+}
+
+#[test]
+fn o_briefing_de_todo_integrante_proibe_copiar_o_ask_e_avisar_prontidao() {
+    for subagent in [false, true] {
+        let me = model::Named { name: "Codex", agent: "codex", role: "QA", policy: Policy::Ask, branch: Some("team/tests"), subagent };
+        let text = model::member_briefing("Claude Code", &me, "Rode os testes.");
+        assert_regras_de_mensagem(&text);
+        // O que já havia continua: papel, política, branch, espera da tarefa e entrega estruturada.
+        for keep in ["como QA", "supervisionado", "team/tests", "Rode os testes.", "Não explore nem edite antes de receber a tarefa de Claude Code", "ags peer deliver --file entrega.json"] {
+            assert!(text.contains(keep), "perdeu `{keep}`: {text}");
+        }
+    }
+}
+
 #[test]
 fn o_briefing_do_subagente_usa_a_frase_do_canvas_e_o_resumo_o_marca() {
     let me = model::Named { name: "Codex", agent: "codex", role: "QA", policy: Policy::Ask, branch: None, subagent: true };
     let text = model::member_briefing("Claude Code", &me, "");
-    assert!(text.contains("Você é um subagente: execute as tarefas que o orquestrador enviar e responda com `ags peer tell`."));
+    assert!(text.contains("Você é um subagente: execute as tarefas que o orquestrador enviar."));
+    assert!(!text.contains("e responda com `ags peer tell`"), "responder por tell contradiz o ask: {text}");
     let plain = model::Named { subagent: false, ..me.clone() };
     assert!(!model::member_briefing("Claude Code", &plain, "").contains("subagente"));
     assert!(model::roster_notice(&[me]).contains("QA; supervisionado; subagente"));
