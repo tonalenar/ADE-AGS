@@ -34,8 +34,8 @@ import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
-import { SummaryPane } from "./summary/SummaryPane";
-import { chatInset, SUMMARY_W } from "./summary/summaryLayout";
+import { SummaryDock, SummaryPane } from "./summary/SummaryPane";
+import { chatInset } from "./summary/summaryLayout";
 import { addSurface, forgetLastPanel, type RightPanelTab, openTeamPanelFocused, setRightPanel, toggleRightPanel, useChatStore } from "./store";
 import { matchTeamShortcut } from "./panelMenu";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
@@ -186,9 +186,9 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
           </div>
           <DropOverlay />
           {inset > 0 && (
-            <div className="absolute top-[52px] bottom-0 right-3 z-10" style={{ width: SUMMARY_W }}>
+            <SummaryDock>
               <SummaryPane conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
-            </div>
+            </SummaryDock>
           )}
         </main>
       )}

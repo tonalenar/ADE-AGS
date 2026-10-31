@@ -27,9 +27,23 @@ import { useConversationTimeline } from "../timeline/useConversationTimeline";
 import type { TimelineItem } from "../timeline/types";
 import { useWorkingDiff } from "../useWorkingDiff";
 import { LimitsCard } from "./LimitsCard";
+import { SUMMARY_W } from "./summaryLayout";
 import { connectorsOf, contextOf, diffTotals, filesFromHandoffs, memoryConnectorOf, outputsFromItems, pickOutputs, type OutputFile } from "./summaryModel";
 
 const EMPTY_ITEMS: TimelineItem[] = [];
+
+/**
+ * O espaço do Resumo solto ao lado da conversa (320 px, do cabeçalho ao pé). É uma coluna flex de altura
+ * FIXA pelas bordas (`top`/`bottom`): sem isso o `flex-1` do Resumo não vale, ele cresce com o conteúdo, passa
+ * da altura e a roda não rola (a barra é escondida, mas a rolagem tem de existir).
+ */
+export function SummaryDock({ children }: { children: React.ReactNode }) {
+  return (
+    <div data-summary-dock className="absolute top-[52px] bottom-0 right-3 z-10 flex flex-col min-h-0" style={{ width: SUMMARY_W }}>
+      {children}
+    </div>
+  );
+}
 
 /** Os itens da conversa: da timeline da aba (TUI) ou dos eventos da conversa por protocolo. */
 function useConversationItems(conversation: ConversationCard | null): TimelineItem[] {
