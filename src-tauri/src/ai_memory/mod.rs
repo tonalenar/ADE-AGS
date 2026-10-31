@@ -4,6 +4,7 @@ mod commands;
 pub(crate) mod continuation;
 mod migracao;
 mod sessions;
+pub mod scoped_bridge;
 mod types;
 pub(crate) mod tabs;
 
