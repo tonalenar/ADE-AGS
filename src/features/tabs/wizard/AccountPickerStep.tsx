@@ -47,8 +47,14 @@ export function useAgentAccounts(agentId: string | null, preload = false): Agent
   // contrario: una pantalla que YA está abierta y necesita las cuentas cargadas antes de
   // saber de qué TUI van a ser.
   useEffect(() => {
-    if ((preload || agentId !== null) && !loaded) load().catch(console.error);
+    if (!preload && agentId !== null && !loaded) load().catch(console.error);
   }, [preload, agentId, loaded, load]);
+  // Uma pantalla abierta (`preload`) vuelve a leer el disco cada vez que se abre: una cuenta creada
+  // fuera de esta ventana (la CLI, otra ventana, el login en la TUI) no avisa, y con la lista
+  // guardada de la primera vez nunca aparecería.
+  useEffect(() => {
+    if (preload) load().catch(console.error);
+  }, [preload, load]);
 
   return useMemo(
     () => (agentId === null ? [] : accounts.filter((a) => a.agentId === agentId)),

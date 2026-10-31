@@ -75,6 +75,9 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer queue [list]                           O que você mandou e ainda espera na fila (id, destino, idade)
   peer queue refused                          As suas últimas recusas (motivo e a frase)
   peer queue cancel <id>                      Cancela uma mensagem sua que ainda não foi entregue
+  peer receipt <número | --id chave>          O estado de uma mensagem sua: pendente, entregue ou falhou (tentativas, motivo).
+                                              A entrega a uma conversa do time é assíncrona: o `tell` devolve o número e o
+                                              recibo diz se chegou. `ags events wait --topic peer.message` acorda na mudança
   peer pending [--all]                        Aprovações e perguntas dos integrantes que esperam resposta
   peer answer <id> <resposta> [--enter]       Responde uma pendência (só orquestradores): num diálogo, o número
                                               da opção, y, n ou esc; numa pergunta de fim de turno, o texto
@@ -93,6 +96,19 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer connect <a> <b>                        Conecta dois agentes da equipe
   peer disconnect <a> <b>                     Desconecta os dois
   peer role <nome> <papel> [--subagent]       Define o papel de um agente da equipe (os sem papel esperam por isso)
+
+TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por protocolo); as cordas do canvas autorizam
+  team list                                   O seu time: orquestrador, integrantes, papel, política, branch e estado
+  team create [--title \"...\"]                 Faz do seu canvas um time (só quem a pessoa coroou); quem já está
+                                              ligado a você entra junto, supervisionado
+  Só o orquestrador do time:
+  team link <nome> [--role <papel>]           Liga ao time uma conversa da sua pasta (aba ou conversa por protocolo):
+               [--policy read|ask]            · cria a corda, manda o papel; papéis: frontend (UI), backend, qa (testes),
+               [--branch team/ui]               reviewer, researcher, devops, generalist. Política: no máximo ask —
+               [--subagent]                     só a pessoa aumenta (painel Time). --subagent marca apoio que só executa o que você enviar
+  team unlink <nome>                          Tira do time (a corda sai; a conversa continua aberta)
+  team role <nome> <papel> [--policy read]    Troca o papel (e só baixa a política); [--subagent [false]] liga ou desliga a marca
+  Delegue com peer tell/ask/deliver, como numa missão: as conversas por protocolo recebem como mensagem
 
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
   fix list <escopo>                           Entregas e quantas rodadas cada uma usou
@@ -120,6 +136,8 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   device open <dispositivo> <url>             Abre a URL no Safari do aparelho (localhost funciona)
   device button <dispositivo> home|lock|side|siri   Aperta um botão físico
   device say <dispositivo> \"mensagem\"         Responde na conversa do simulador (a pessoa e os outros agentes veem)
+  Aparelhos do painel do modo chat (id chat:<udid|serial>) também aparecem em `devices`, para qualquer aba;
+  sem a chave \"Permitir que agentes controlem dispositivos\" da pessoa, só shot e tree
 
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
   portals                                     Os portais que você controla, cada um com seu estado: pronto, carregando, sem runtime,
@@ -139,6 +157,10 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
                                               Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
+
+SIMULADOR IOS — nó conectado ao seu terminal; Jev e reserva visual habilitados
+  sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
+                                              Foto + HID; confirmação de ações sensíveis na UI; --fill só no campo já focado
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
@@ -174,8 +196,19 @@ NOTAS DO CANVAS — as conectadas a este terminal (orquestrador: as da equipe)
   design artboard add <designId> <title> --page <name> --file <html>
   design update <artboardId> --file <html> [--expected-version <n>]
   design comment <artboardId> <text> [--author user|agent] [--selector <css>]
+                 [--anchor <sel>] [--point-x 0..1 --point-y 0..1] [--parent-id <commentId>]
   design approve|reject <artboardId> | approve all <designId>
   design revert <artboardId> --version <n>
+  design view [<designId>]                    O que a pessoa está vendo na tela de Design
+                                              (sem id: o design aberto mais recente)
+  design open <designId> [--artboard <id>] [--page <id>]
+                                              Abre a tela de Design (no chat: painel direito)
+  design artboard duplicate <artboardId> [--x <n> --y <n>]
+  design artboard delete <artboardId>
+  design artboard resize <artboardId> [--width <n> --height <n> --x <n> --y <n> --radius <n>]
+                                              Moldura só: não cria versão nem tira a aprovação
+  design page rename <pageId> <name> | page delete <pageId>   (a última página fica)
+  design note add <pageId> \"texto\" --x <n> --y <n> [--w <n> --h <n> --color <cor>]
   notes                                       As notas que você alcança
   note create [\"texto\"] [--name <n>]          Cria uma nota ao seu lado, já conectada
               [--stack <nota>]                · em vez de ao lado: dentro da pilha dessa nota (dividem o lugar)
@@ -189,6 +222,22 @@ OBSERVAR TABS (modo push — evita o polling)
   watch remove <id>                           Para de observá-la
   watch list                                  Tabs observadas e o limite vigente
   watch wait [--timeout 300] [--max 20]       Espera até alguma ter novidades
+
+CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code, OpenCode e Antigravity)
+  chat list [--all]                           Conversas ativas (--all: também as concluídas)
+  chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
+           [--agent codex|claude-code|opencode|antigravity] [--model ...] [--effort ...] [--title ...] [--account <id>]
+           [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
+                                              plan: todos menos o Codex (planeja antes de editar);
+                                              antigravity: sem aprovação (o que pediria é negado)
+  chat send <id> \"...\"                        Manda outra mensagem (Codex e Claude Code: entra no turno; OpenCode e Antigravity: fica na fila)
+  chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
+  chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente
+  chat stop <id>                              Interrompe o turno em andamento
+  chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela) e quem respondeu
+                                              as últimas (`decided`: a pessoa, a política do time ou uma regra dela)
+  chat open <id>                              Mostra a conversa na tela do modo chat
+  chat settle <id> [--reopen]                 Conclui (o agente fecha; reabrir retoma a mesma thread)
 
 EVENTOS (o barramento da frota e das missões)
   events since [--after <seq>] [filtros]      O que aconteceu depois desse número
@@ -291,6 +340,7 @@ AGENTES, CONTAS E SKILLS
 
 SERVIDOR MCP (não é você quem digita: o app o inicia)
   mcp --cwd <pasta> [--tab <id>]              A ponte de uma tab interativa
+  ai-memory-bridge --cwd <pasta> --workspace <W> --project <P>  MCP com escopo fixo
   mcp --task <id-da-tarefa>                   A de uma tarefa da frota
 
   Diferente do resto, isto NÃO devolve uma linha JSON: fica preso no stdin
@@ -348,6 +398,40 @@ pub(crate) fn main() -> ExitCode {
     // `ags mcp` se atiende antes que nada: no devuelve una línea JSON como el resto,
     // sino que se queda con stdin y stdout hablando JSON-RPC con el agente que lo lanzó.
     // Mezclarlo con el parseo de flags normal le ensuciaría el canal.
+    if args[0] == "ai-memory-bridge" {
+        let mut values = std::collections::HashMap::new();
+        for pair in args[1..].chunks(2) {
+            if pair.len() != 2
+                || !["--cwd", "--workspace", "--project"].contains(&pair[0].as_str())
+                || values.insert(pair[0].as_str(), pair[1].as_str()).is_some()
+            {
+                eprintln!("Argumentos inválidos do intermediário MCP.");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+        let (Some(cwd), Some(workspace), Some(project)) = (
+            values.get("--cwd"),
+            values.get("--workspace"),
+            values.get("--project"),
+        ) else {
+            eprintln!("Informe pasta, workspace e projeto.");
+            return ExitCode::from(EXIT_USAGE);
+        };
+        let result = tokio::runtime::Runtime::new().and_then(|rt| {
+            rt.block_on(ade_ags_lib::ai_memory::scoped_bridge::serve(
+                std::path::Path::new(cwd),
+                workspace,
+                project,
+            ))
+        });
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => {
+                eprintln!("Intermediário MCP encerrado com erro.");
+                ExitCode::from(EXIT_COMMAND_FAILED)
+            }
+        };
+    }
     if args[0] == "mcp" {
         return run_mcp(&args[1..]);
     }
@@ -435,6 +519,23 @@ pub(crate) fn main() -> ExitCode {
             Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
         };
         design_defaults(&command, parsed, &cwd)
+    } else { parsed };
+    // `ags chat new` abre a conversa na pasta da shell, não na do app.
+    let parsed = if command == "chat.new" {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                eprintln!("Não foi possível ler a pasta atual: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        match run_defaults(parsed, &cwd) {
+            Ok(args) => args,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
     } else { parsed };
     let parsed = if command.starts_with("run.") {
         let cwd = match std::env::current_dir() {
@@ -676,7 +777,7 @@ impl CliError {
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 /// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 13] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
+    const GROUPS: [&str; 15] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }
@@ -690,7 +791,7 @@ fn with_caller(command: &str, mut parsed: Value) -> Value {
 }
 
 fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: Option<String>) {
-    if command.starts_with("memory.") || command.starts_with("swarm.") {
+    if command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");
@@ -746,6 +847,16 @@ fn design_defaults(command: &str, mut args: Value, cwd: &std::path::Path) -> Val
     if matches!(command, "design.comment" | "design.comment.add") && args.get("author").is_none() {
         args["author"] = json!("agent");
     }
+    // `design open --page <id> --artboard <id>`: aqui `--page` é um id, não um nome.
+    if command == "design.open" {
+        if let Some(map) = args.as_object_mut() {
+            for (flag, key) in [("page", "pageId"), ("artboard", "artboardId")] {
+                if let Some(v) = map.remove(flag) {
+                    map.entry(key).or_insert(v);
+                }
+            }
+        }
+    }
     if command == "design.artboard.add" && args.get("page").is_some() && args.get("designId").is_none() {
         if let Some(id) = args.as_object_mut().and_then(|a| a.remove("pageId")) {
             args["designId"] = id;
@@ -756,7 +867,7 @@ fn design_defaults(command: &str, mut args: Value, cwd: &std::path::Path) -> Val
 
 fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
     let action = args.get(1).ok_or("Missing design action")?;
-    let nested = matches!(action.as_str(), "page" | "artboard")
+    let nested = matches!(action.as_str(), "page" | "artboard" | "note")
         || (action == "comment" && args.get(2).is_some_and(|v| matches!(v.as_str(), "add" | "resolve")))
         || (action == "approve" && args.get(2).is_some_and(|v| v == "all"));
     if nested {
@@ -812,6 +923,11 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "design.update" | "design.artboard.update" | "design.revert" | "design.artboard.revert" | "design.approve" | "design.artboard.approve" | "design.reject" | "design.artboard.reject" => &["artboardId"],
         "design.comment" | "design.comment.add" => &["artboardId", "text"],
         "design.comment.resolve" => &["commentId"],
+        "design.view" | "design.open" => &["designId"],
+        "design.artboard.duplicate" | "design.artboard.delete" | "design.artboard.resize" => &["artboardId"],
+        "design.page.rename" => &["pageId", "name"],
+        "design.page.delete" => &["pageId"],
+        "design.note.add" => &["pageId", "text"],
         "skill.install" => &["skill"],
         "skill.show" | "skill.edit" => &["skill"],
         // `ags skill new mi-skill` en vez de `--name mi-skill`.
@@ -836,12 +952,19 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
         "peer.role" => &["to", "role"],
+        // `ags team link Codex --role ui`, `ags team role Codex qa`.
+        "team.link" | "team.unlink" => &["to"],
+        "team.role" => &["to", "role"],
+        "team.create" => &["title"],
+        "team.list" => &[],
         "ci.watch" => &["pr"],
         // `ags peer deliver --file entrega.json` (ao orquestrador) ou `ags peer deliver QA --file ...`.
         "peer.deliver" => &["to", "text"],
         "peer.handoff" => &["id"],
         // `ags peer queue`, `ags peer queue cancel 12`.
         "peer.queue" => &["action", "id"],
+        // `ags peer receipt 12`.
+        "peer.receipt" => &["id"],
         // `ags peer answer 12 1`: a pendência e a resposta.
         "peer.answer" => &["id", "text"],
         // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.
@@ -849,6 +972,10 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.
         "floor.create" => &["name"],
         "say.send" => &["text"],
+        // `ags chat new "..."`, `ags chat send <id> "..."`, `ags chat wait <id>`.
+        "chat.new" => &["text"],
+        "chat.send" => &["thread", "text"],
+        "chat.show" | "chat.wait" | "chat.stop" | "chat.pending" | "chat.open" | "chat.settle" => &["thread"],
         "recall.get" => &["thread"],
         "memory.search" => &["query"],
         "memory.open" => &["path"],
@@ -871,7 +998,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "portal.create" => &["name", "url"],
         "portal.open" => &["url"],
         "portal.close" => &["name"],
-        "portal.act" => &["name", "goal"],
+        "portal.act" | "sim.act" => &["name", "goal"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],
         "portal.click" | "portal.hover" => &["name", "target"],
@@ -1090,7 +1217,7 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" | "maxParallel" => {
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" | "maxParallel" | "last" => {
             raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
         }
         _ => Value::String(raw.to_string()),
@@ -1146,11 +1273,18 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(requested + 90)
         }
         "peer.tell" => Duration::from_secs(90),
+        // `chat wait` bloqueia até o turno acabar (tope 1 h); abrir a conversa sobe o agente e começa o turno.
+        "chat.wait" => {
+            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(1, 3600);
+            Duration::from_secs(requested + 15)
+        }
+        "chat.new" | "chat.send" | "chat.stop" => Duration::from_secs(150),
         "fix.list" | "fix.decide" => Duration::from_secs(60),
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
         // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).
         "device.start" => Duration::from_secs(150),
+        "sim.act" => Duration::from_secs(args.get("timeout").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(115).clamp(10, 1800) + 75),
         c if c.starts_with("device.") => Duration::from_secs(60),
         // `routine run` espera a que el agente de destino se calle (hasta 60 s).
         "routine.run" => Duration::from_secs(120),

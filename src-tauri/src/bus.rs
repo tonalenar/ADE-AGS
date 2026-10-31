@@ -166,7 +166,7 @@ fn page_after(ring: &VecDeque<BusEvent>, after: u64, filter: &Filter, limit: usi
         .take(limit)
         .cloned()
         .collect();
-    Page { events, last_seq: SEQ.load(Ordering::SeqCst), truncated: after > 0 && oldest > after + 1 }
+    Page { events, last_seq: SEQ.load(Ordering::SeqCst), truncated: after > 0 && oldest > after.saturating_add(1) }
 }
 
 /// Lo que pasó después de `after`, hasta `limit` eventos.
@@ -205,6 +205,16 @@ mod tests {
 
     fn pub_(topic: &'static str, run: &str) -> u64 {
         publish::<tauri::Wry>(None, Publish::new(topic).run(run))
+    }
+
+    /// `since(u64::MAX, ..)` é como quem espera pega o `seq` de agora sem ler eventos
+    /// (`ags chat wait`, `peer ask` a conversa do time): somar 1 estourava no debug e a thread do
+    /// comando morria, e a CLI via só "sem resposta".
+    #[test]
+    fn pedir_desde_o_maior_seq_nao_estoura() {
+        let page = since(u64::MAX, &Filter::default(), 1);
+        assert!(page.events.is_empty());
+        assert!(!page.truncated);
     }
 
     #[test]

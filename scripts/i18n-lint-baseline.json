@@ -1,0 +1,4 @@
+{
+  "_leia": "Dívida antiga do i18n. Só deve diminuir; nunca absorva achados novos. Atualize com node scripts/i18n-lint.mjs --update-baseline.",
+  "violacoes": {}
+}

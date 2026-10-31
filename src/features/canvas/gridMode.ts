@@ -1,7 +1,10 @@
 import { useMemo } from "react";
 
 import { boardKeyOfTab, conversationOfKey, missionOfKey, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
+import { useTeamIndex } from "@/features/chat/team/teamIndex";
+import { teamGridIds } from "@/features/chat/team/teamModel";
 import { useTabsStore } from "@/features/tabs/store";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
@@ -17,9 +20,11 @@ export function gridColumns(count: number): number {
  * Los panes de la grade de una misión o conversa de proyecto, o `null` si no corresponde (opción apagada, no es una
  * misión, hay menos de dos terminales, o la vista no es de abas). Pura.
  */
-export function gridTabs(opts: { on: boolean; mission: string | null; mode: string; tabIds: string[] }): string[] | null {
-  if (!opts.on || !opts.mission || opts.mode !== "tabs" || opts.tabIds.length < 2) return null;
-  return opts.tabIds;
+export function gridTabs(opts: { on: boolean; mission: string | null; team?: string[] | null; mode: string; tabIds: string[] }): string[] | null {
+  if (!opts.on || opts.mode !== "tabs") return null;
+  // Missão (ou conversa de projeto): os terminais do canvas dela. Senão, o time do chat da aba ativa.
+  if (opts.mission) return opts.tabIds.length >= 2 ? opts.tabIds : null;
+  return opts.team && opts.team.length >= 2 ? opts.team : null;
 }
 
 /** Un hueco medido de la grade (relativo al área del editor). */
@@ -65,8 +70,15 @@ export function useMissionGrid(): string[] | null {
     [key, tabs, boards],
   );
   const joined = ids.join("|");
+  // O time do chat da aba ativa (só agentes abertos): a grade dele no lugar da de missão.
+  const teams = useTeamIndex((s) => s.teams);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const agentTabs = useTabsStore((s) => s.tabs.filter((t) => t.agentId !== SHELL_AGENT_ID).map((t) => t.id).join("|"));
+  const teamJoined = useMemo(() => teamGridIds(teams, activeTabId, agentTabs ? agentTabs.split("|") : [])?.join("|") ?? "", [teams, activeTabId, agentTabs]);
   return useMemo(
-    () => (viewActive ? null : gridTabs({ on, mission: missionOfKey(key) ?? conversationOfKey(key), mode, tabIds: joined ? joined.split("|") : [] })),
-    [on, key, mode, joined, viewActive],
+    () => (viewActive ? null : gridTabs({
+      on, mission: missionOfKey(key) ?? conversationOfKey(key), team: teamJoined ? teamJoined.split("|") : null, mode, tabIds: joined ? joined.split("|") : [],
+    })),
+    [on, key, mode, joined, viewActive, teamJoined],
   );
 }

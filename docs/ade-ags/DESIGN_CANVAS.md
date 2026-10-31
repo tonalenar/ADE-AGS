@@ -73,6 +73,19 @@ As pranchetas de um design agora podem ser dispostas diretamente no canvas princ
 - Evento Tauri `design-changed`: emite `{designId, isNew, deleted, archived, title, workspace, missionId}`.
 - CLI: `ags design create|list|get|delete|archive|page add|artboard add|update|comment|approve|reject`.
 
+## Tela de Design (backend)
+
+A mesma tela (`DesignStudio`) abre na rota `/design/:id` e na aba Design do painel direito do chat. O backend acrescenta, sem apagar nada e sem subir `user_version` (`design::migrate`, idempotente):
+
+- **Colunas novas:** `design_comment.anchor` (≤1024), `point_x`/`point_y` (0–1, relativos ao elemento ou à prancheta), `parent_id` (resposta num fio da mesma prancheta), `created_at` (ms); `design_artboard.radius` (cantos da moldura, padrão 0) e `hidden` (ainda sem uso).
+- **Tabelas novas:** `design_note` (notas da página) e `design_shape` (desenho no canvas: `rect|oval|line|arrow|pencil|pen|text`, com `data` JSON opaco ≤256 KB). As duas caem junto com a página.
+- **Versões:** só título e HTML criam versão nova (e tiram a aprovação). Mover, redimensionar e arredondar os cantos não. A volta para uma versão mantém posição e cantos.
+- **Páginas:** renomear, apagar (a última página nunca se apaga) e reordenar (`pageIds` com exatamente as páginas do design). Sem `order`, a página nova vai para o fim.
+- **Comandos IPC novos:** `design_artboard_duplicate|artboard_delete|page_rename|page_delete|page_reorder|note_add|note_update|note_delete|shape_add|shape_update|shape_delete|view_set|view_get`. As ops que criam algo devolvem o design e o id novo (`pageId`, `artboardId`, `noteId`, `shapeId`, `commentId`).
+- **View state:** `design_view_set {designId, state}` guarda em memória, por design, o que a pessoa vê (modo, página, pranchetas visíveis e selecionadas, elementos escolhidos, zoom), normalizado e com teto. `ags design view [<designId>]` (e a tool `design_view`) lê; sem id, o design aberto mais recentemente. Não emite `design-changed`.
+- **Abrir:** `ags design open <designId> [--artboard <id>] [--page <id>]` confere o design no banco e pede ao front, pela ponte, a op `design.open` com `{designId, title, pageId, artboardId}` (a página vem da prancheta, se só ela foi dada).
+- **CLI e MCP:** `ags design view|open`, `design artboard duplicate|delete|resize`, `design page rename|delete`, `design note add`; tools `design_*` só nas abas (como as `chat_*`), e os papéis de leitura só veem `design_list|get|view`. Aprovar e rejeitar não têm tool.
+
 ## Segurança: o HTML nunca é confiável
 
 Cada prancheta renderiza em `iframe` com `sandbox="allow-scripts"` (sem `allow-same-origin`) e `srcdoc` com CSP `default-src 'none'`, estilos inline e imagens `data:`, `form-action 'none'` e `base-uri 'none'`. Sem rede e sem acesso ao app; o iframe só fala com o painel por `postMessage` (seleção de elemento). No backend o HTML tem limite de tamanho e nunca é executado. No prompt de construção o HTML é escapado e truncado.

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Input } from "neogestify-ui-components";
@@ -30,7 +30,9 @@ export function HomePage() {
   const workspaces = useWorkspacesStore((s) => s.workspaces);
   const loadWorkspaces = useWorkspacesStore((s) => s.loadWorkspaces);
   const focusIfOpen = useWorkspacesStore((s) => s.focusIfOpen);
-  const [selectedCwd, setSelectedCwd] = useState("");
+  // O "+" de um projeto na barra das Abas e do Canvas chega aqui com a pasta já escolhida.
+  const [params] = useSearchParams();
+  const [selectedCwd, setSelectedCwd] = useState(() => params.get("cwd") ?? "");
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
   /** `undefined` = la cuenta del sistema (ver AccountPickerStep). */

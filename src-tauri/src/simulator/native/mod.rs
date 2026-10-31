@@ -7,6 +7,7 @@ mod device;
 mod dtu;
 pub mod hid;
 mod kit;
+mod purple;
 pub mod screen;
 mod slim;
 pub mod view;
@@ -15,6 +16,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::simulator::model::{self, Device};
+
+pub use purple::orient;
 
 /// Quanto esperar a tela aparecer depois do boot (o launchd sobe antes da porta de IO dela).
 const SCREEN_WAIT: Duration = Duration::from_secs(60);
@@ -26,7 +29,8 @@ pub fn devices() -> Result<Vec<Device>, String> {
 }
 
 /// Liga e espera a tela existir. No modo leve, com o aparelho desligado, sobe sem os serviços pesados do iOS
-/// (`simulator::slim`: o arquivo original volta logo que a tela existe) e com prioridade baixa ([`set_priority`]).
+/// (`simulator::slim`: o arquivo original volta logo que a tela existe). A prioridade fica normal enquanto à
+/// vista e só baixa quando a tela sai de vista (`lifecycle`).
 pub fn boot(udid: &str, light: bool) -> Result<(), String> {
     let dev = device::find(udid)?;
     let slimmed = light && device::state(&dev) == model::STATE_SHUTDOWN && match slim::apply(udid) {
@@ -45,15 +49,8 @@ pub fn boot(udid: &str, light: bool) -> Result<(), String> {
         }
         slim::restore(udid);
     }
-    ready?;
-    if light {
-        set_priority(udid, LIGHT_NICE)?;
-    }
-    Ok(())
+    ready
 }
-
-/// A prioridade do iOS no modo leve: abaixo de tudo o que a pessoa usa, sem parar o aparelho.
-pub const LIGHT_NICE: i32 = 10;
 
 pub fn shutdown(udid: &str) -> Result<(), String> {
     let dev = device::find(udid)?;
@@ -79,7 +76,11 @@ pub fn connect(udid: &str) -> Result<(screen::Screen, Arc<hid::Hid>), String> {
 /// Um toque em (x, y) pontos do iOS: desce e sobe.
 pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
     let (screen, hid) = connect(udid)?;
-    let ratio = model::point_ratio(x, y, screen.points())?;
+    // Os pontos são os da tela como se vê (os do `shot`, que já sai em pé): em paisagem, voltam para a
+    // superfície em retrato, que é a do HID.
+    let orientation = crate::simulator::ops::orientation(udid);
+    let ratio = model::point_ratio(x, y, model::oriented_size(screen.points(), orientation))?;
+    let ratio = model::native_ratio(ratio, orientation);
     hid.touch(ratio, hid::Phase::Down)?;
     std::thread::sleep(Duration::from_millis(60));
     hid.touch(ratio, hid::Phase::Up)
@@ -88,9 +89,12 @@ pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
 /// Desliza de um ponto a outro em `ms` milissegundos (pontos do iOS).
 pub fn swipe(udid: &str, from: (f64, f64), to: (f64, f64), ms: u64) -> Result<(), String> {
     let (screen, hid) = connect(udid)?;
-    let size = screen.points();
-    let a = model::point_ratio(from.0, from.1, size)?;
-    let b = model::point_ratio(to.0, to.1, size)?;
+    // Como em `tap`: pontos da tela em pé → proporção na superfície em retrato (a conta é linear, então os
+    // passos intermediários também caem certos).
+    let orientation = crate::simulator::ops::orientation(udid);
+    let size = model::oriented_size(screen.points(), orientation);
+    let a = model::native_ratio(model::point_ratio(from.0, from.1, size)?, orientation);
+    let b = model::native_ratio(model::point_ratio(to.0, to.1, size)?, orientation);
     // Passos de ~16 ms: o Indigo descarta arrasto acima de 60 por segundo.
     let steps = (ms / 16).clamp(4, 120) as u32;
     let points = model::swipe_points(a, b, steps);
@@ -153,15 +157,19 @@ fn launchd_started(udid: &str, wait: Duration) {
     }
 }
 
-/// Põe o iOS do aparelho na prioridade `nice` (0 = normal, 10 = baixa): com o iOS ocupado (papel de parede
-/// animado, indexação depois do boot) a ADE e o resto do Mac continuam com a CPU primeiro. Os processos que o
-/// iOS abrir depois herdam a do `launchd_sim`. Devolve quantos processos mudaram.
+/// Põe o iOS do aparelho na prioridade de segundo plano (`nice > 0`, `PRIO_DARWIN_BG`: núcleos de eficiência e I/O
+/// baixo) ou de volta à normal (`0`). Ao contrário de `PRIO_PROCESS` (`nice = 10`), que sem root no macOS falha com
+/// `EACCES` ao tentar voltar a `0` e deixava o aparelho preso em prioridade baixa para sempre, `PRIO_DARWIN_PROCESS`
+/// é reversível pelo próprio usuário (o mesmo mecanismo de `taskpolicy -b/-B`). Devolve quantos processos mudaram.
 pub fn set_priority(udid: &str, nice: i32) -> Result<usize, String> {
+    const PRIO_DARWIN_PROCESS: i32 = 4;
+    const PRIO_DARWIN_BG: i32 = 0x1000;
+    let prio = if nice > 0 { PRIO_DARWIN_BG } else { 0 };
     let pids = ios_processes(udid)?;
     let mut changed = 0;
     for pid in &pids {
         // SAFETY: setpriority só lê os argumentos; processos do mesmo usuário.
-        if unsafe { libc::setpriority(libc::PRIO_PROCESS, *pid, nice) } == 0 {
+        if unsafe { libc::setpriority(PRIO_DARWIN_PROCESS, *pid, prio) } == 0 {
             changed += 1;
         }
     }

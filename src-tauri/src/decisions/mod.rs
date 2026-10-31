@@ -31,3 +31,8 @@ pub(crate) use points::{memory_state_hash, POINT_MEMORY};
 
 #[cfg(test)]
 mod test;
+
+/// Mesma barreira de segredos usada no protocolo do piloto.
+pub(crate) fn computer_secret(text: &str) -> bool {
+    points::memory_secret("", text, None)
+}

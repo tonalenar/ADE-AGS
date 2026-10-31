@@ -1,5 +1,22 @@
 # Roadmap ADE AGS
 
+## Modo chat (estilo T3 Code), experimental
+
+Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações → Modo chat. `Chat | Abas | Canvas` e Ctrl+Shift+L alternam. Detalhes em [MODO_CHAT.md](./MODO_CHAT.md).
+
+- **Conversas por TUI:** cada uma é uma aba de agente, lida do transcript numa timeline; o terminal fica numa gaveta, sem remontar.
+- **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
+- **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
+- **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
+
+## Conector opcional de leitura do ai-memory
+
+Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões recentes usam bridge MCP temporário com workspace/projeto explícitos e apenas `memory_briefing`. Novas abas do Claude podem somar MCP session-aware e hooks nativos; Codex/OpenCode usam intermediário MCP com workspace/projeto fixos, somente quando a pasta identifica um único projeto, com ajuste `ai_memory_tabs_enabled` e sem escrita nas configurações globais dos agentes. A ação explícita “Continuar com outro agente” apresenta preview não consumidor e, após confirmação, abre uma nova aba Claude via `ai-memory run`, preservando a origem; sem handoff abre normalmente. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
+
+## Computer use em múltiplas superfícies — iOS
+
+Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. macOS genérico e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
+
 ## CLIs fora do PATH e instalação pela ADE
 
 No macOS a lista e o terminal acham o Claude do aplicativo e o `cursor-agent` sem estarem no PATH. O Cursor entra na fábrica sem sessão, conta isolada nem MCP. A tela de Agentes instala Codex, Gemini e Kimi com o comando npm/bun já fixo; Claude, OpenCode, Hermes, Cursor e Antigravity só mostram o comando, sem executá-lo. Detalhe em [AGENT_UPDATES.md](./AGENT_UPDATES.md).
@@ -17,6 +34,13 @@ Achados por agente, desenho e limites em [CANAL_ESTRUTURADO.md](./CANAL_ESTRUTUR
 Toda mensagem entre agentes tem id e registro no SQLite (`peer_messages`), a entrega sobrevive ao
 reinício, `--id` torna o reenvio idempotente e o selo "N na fila" deixa o usuário editar, reordenar,
 cancelar ou enviar já. Detalhes em [FILA_DE_MENSAGENS.md](./FILA_DE_MENSAGENS.md).
+
+**Etapa 2 do harness do modo chat — entrega confiável a conversas do time.** A mensagem para uma conversa
+por protocolo (`thread:`) entra na mesma fila, com um consumidor por destino (ordem, retry só do que não saiu,
+recuperação por marcador `#id` no reinício), trava de envio por conversa, aviso de falha também para quem
+pediu de dentro de uma conversa, `ask` ancorado na mensagem (`replies`, `status: failed`, repetição junta-se à
+mesma espera) e `ags peer receipt`. Fica para a etapa 3: retomada com aviso, bolha só quando o turno começa,
+permissão no backend, `restart_active`, painel da fila para conversas.
 
 ## Etapa 20 — ponto 1: notificações com identidade ADE AGS
 

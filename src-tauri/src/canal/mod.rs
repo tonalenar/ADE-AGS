@@ -15,6 +15,7 @@ pub mod event;
 pub mod pending;
 pub mod state;
 pub mod tail;
+pub mod timeline;
 #[cfg(test)]
 mod test;
 

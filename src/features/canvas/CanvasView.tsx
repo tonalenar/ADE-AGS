@@ -50,6 +50,7 @@ import { ChatPanel } from "./ChatPanel";
 import { agentAccent, agentTile, nodeFrame } from "@/features/agents/agentTile";
 import { activeTabIds } from "@/features/terminal/activity";
 import { PeerQueueBadge } from "@/features/peerQueue/PeerQueueBadge";
+import { TeamNodeBadge } from "@/features/chat/team/TeamNodeBadge";
 import { CORD_MAGNET, CordConnectionLine, CordEdge, CordPort, cordColor, flashNode } from "./cords";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { DesignPanel } from "./design/DesignPanel";
@@ -915,6 +916,7 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60" title={tab.title}>
               <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(tab.agentId) }} />
               <span className="shrink-0">{tab.agentLabel}</span>
+              <TeamNodeBadge tabId={tab.id} />
               {tab.title.includes(" — ") && (
                 <span title={tab.title.split(" — ").slice(1).join(" — ")} className="min-w-0 truncate font-mono text-[10.5px] text-gray-400 dark:text-white/30">{tab.title.split(" — ").slice(1).join(" — ")}</span>
               )}

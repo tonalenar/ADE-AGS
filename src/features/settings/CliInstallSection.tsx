@@ -46,7 +46,7 @@ export function CliInstallSection() {
       {status && (
         <div className="flex flex-col gap-3">
           <SettingsGroup>
-            <div className="flex items-center gap-2 min-h-10 px-3 py-2">
+            <div className="flex items-center gap-2 px-4 py-3.5">
               {status.installed ? (
                 <>
                   <CheckCircleIcon className="w-4 h-4 shrink-0 text-emerald-500" />
@@ -61,7 +61,7 @@ export function CliInstallSection() {
               )}
             </div>
 
-            <div className="flex flex-col gap-1.5 px-3 py-2.5">
+            <div className="flex flex-col gap-1.5 px-4 py-3.5">
               <span className="text-[11px] leading-[14px] uppercase tracking-[0.06em] font-semibold text-gray-500 dark:text-white/45">
                 {t("settings.cli.location")}
               </span>

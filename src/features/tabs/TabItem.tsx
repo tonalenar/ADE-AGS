@@ -4,6 +4,7 @@ import { Button } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
+import { TeamTabMarks } from "@/features/chat/team/TeamTabMarks";
 import { PeerQueueBadge } from "@/features/peerQueue/PeerQueueBadge";
 import type { AgentPaint } from "@/features/browser/agentPaint";
 import type { Tab } from "@/features/tabs/types";
@@ -119,6 +120,9 @@ export function TabItem({
 
       {/* Mensagens de outros agentes esperando este terminal terminar o turno (some sem fila). */}
       {!isEditing && <PeerQueueBadge tabId={tab.id} name={tab.title} variant="tab" />}
+
+      {/* O papel no time do chat (ou "orquestrador"): a mesma marca do chat e do canvas. */}
+      {!isEditing && <TeamTabMarks tabId={tab.id} compact />}
 
       {/* Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado. */}
       <span

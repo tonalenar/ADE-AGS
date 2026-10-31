@@ -413,6 +413,16 @@ describe("memória nos briefings", () => {
     expect(text).toContain("caminhos relativos");
     expect(text).toContain("Atualizações intermediárias só");
   });
+  it("o integrante não copia a resposta de um ask por tell nem avisa prontidão sem ser pedido", () => {
+    for (const subagent of [false, true]) {
+      const text = memberBriefing(mission, { ...member, subagent });
+      expect(text).toContain("VOLTA SOZINHA a quem perguntou");
+      expect(text).toContain("NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido");
+      expect(text).toContain("Se for bloqueado por uma pergunta ou permissão que só a pessoa decide, diga isso numa frase ao orquestrador (uma vez) e espere.");
+      expect(text).toContain("O resumo da entrega vai uma vez só");
+      expect(text).not.toContain("execute o que ele enviar e responda a ele");
+    }
+  });
 });
 
 describe("sugestão de memória ao terminar", () => {

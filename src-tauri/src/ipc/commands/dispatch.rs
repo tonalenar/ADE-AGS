@@ -52,15 +52,34 @@ fn design_command(app: &AppHandle, command: &str, args: &Value) -> Result<Value,
         "design.comment" | "design.comment.add" => "comment_add",
         "design.comment.resolve" => "comment_resolve",
         "design.approve.all" => "approve_all",
+        "design.page.rename" => "page_rename",
+        "design.page.delete" => "page_delete",
+        "design.artboard.duplicate" => "artboard_duplicate",
+        "design.artboard.delete" => "artboard_delete",
+        "design.artboard.resize" => "artboard_update",
+        "design.note.add" => "note_add",
         other => &other[7..],
     };
     let mut args = args.clone();
+    // `resize` mexe só na moldura: nunca no HTML nem no título (não cria versão).
+    if command == "design.artboard.resize"
+        && let Some(map) = args.as_object_mut()
+    {
+        map.retain(|k, _| matches!(k.as_str(), "artboardId" | "width" | "height" | "x" | "y" | "radius" | "expectedVersion"));
+    }
     if args.get("html").is_none() {
         if let Some(content) = args.get("content").cloned() {
             args["html"] = content;
         }
     }
     crate::design::dispatch(app, op, &args)
+}
+
+/// `ags design open`: confere o design (e a página/prancheta) no banco e pede ao front para
+/// abrir a tela de Design. O lock do banco é solto antes de falar com o front.
+fn design_open(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let target = crate::design::dispatch(app, "open_target", args)?;
+    bridge_call(app, "design.open", &target)
 }
 
 pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
@@ -100,6 +119,14 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "design.comment.add" => design_command(app, command, args),
         "design.comment.resolve" => design_command(app, command, args),
         "design.approve.all" => design_command(app, command, args),
+        "design.view" => design_command(app, command, args),
+        "design.page.rename" => design_command(app, command, args),
+        "design.page.delete" => design_command(app, command, args),
+        "design.artboard.duplicate" => design_command(app, command, args),
+        "design.artboard.delete" => design_command(app, command, args),
+        "design.artboard.resize" => design_command(app, command, args),
+        "design.note.add" => design_command(app, command, args),
+        "design.open" => design_open(app, args),
         "tab.list" => tab_list(app),
         "tab.output" => tab_output(app, args),
         "tab.send" => tab_send(app, args),
@@ -118,8 +145,15 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.connect" => peer_connect(app, args),
         "peer.disconnect" => peer_disconnect(app, args),
         "peer.role" => peer_role(app, args),
+        "team.list" => super::team::team_list(app, args),
+        "team.create" => super::team::team_create(app, args),
+        "team.link" => super::team::team_link(app, args),
+        "team.unlink" => super::team::team_unlink(app, args),
+        "team.role" => super::team::team_role(app, args),
         // A fila persistente das mensagens que você mandou (ver `peer_queue`).
         "peer.queue" => super::peer_queue::peer_queue(app, args),
+        // O recibo de uma mensagem sua: pendente, entregue ou falha, com tentativas e motivo.
+        "peer.receipt" => super::peer_queue::peer_receipt(app, args),
         // Aprovações e perguntas dos integrantes, vistas pelo canal estruturado (ver `canal`).
         "peer.pending" => super::canal::peer_pending(app, args),
         "peer.answer" => super::canal::peer_answer(app, args),
@@ -139,6 +173,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "pool.delete" => pool_delete(app, args),
         "device.list" => device_list(app, args),
         "device.create" => device_create(app, args),
+        "sim.act" => super::sim_act::act(app, args),
         "device.start" => device_action(app, args, "start"),
         "device.tap" => device_action(app, args, "tap"),
         "device.swipe" => device_action(app, args, "swipe"),
@@ -190,6 +225,16 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "routine.run" => routine_run(app, args),
         "routine.delete" => routine_delete(app, args),
         // Chat con el usuario (ver `chat`).
+        // As conversas por protocolo do modo chat (ver `conversas`).
+        "chat.list" => super::conversas::chat_list(app, args),
+        "chat.new" => super::conversas::chat_new(app, args),
+        "chat.send" => super::conversas::chat_send(app, args),
+        "chat.show" => super::conversas::chat_show(app, args),
+        "chat.wait" => super::conversas::chat_wait(app, args),
+        "chat.stop" => super::conversas::chat_stop(app, args),
+        "chat.pending" => super::conversas::chat_pending(app, args),
+        "chat.open" => super::conversas::chat_open(app, args),
+        "chat.settle" => super::conversas::chat_settle(app, args),
         "say.send" => chat_say(app, args),
         "recall.get" => chat_recall(app, args),
         "agent.list" => agent_list(app),

@@ -27,6 +27,11 @@ use super::quota::{self, Quota};
 const PROBE_TTL: Duration = Duration::from_secs(10 * 60);
 const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
+/// O OpenCode 2.x recusa `--verbose` em `models` (`Unrecognized flag`, exit 1) e já lista só os modelos
+/// dos provedores conectados (login, variável de ambiente, config) mais os gratuitos do `opencode/`.
+/// A lista simples (`provedor/modelo`, um por linha) vale também para o 1.x: perde só preço e contexto.
+const OPENCODE_MODELS_ARGS: &[&str] = &["models"];
+
 #[derive(Serialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Roster {
@@ -156,6 +161,8 @@ pub fn parse_opencode_models(text: &str) -> Vec<OpencodeModel> {
             && !line.starts_with(char::is_whitespace)
             && !line.starts_with('{')
             && !line.starts_with('}')
+            // Um id não tem espaço: uma linha de aviso ("Warning: a/b") não é um modelo.
+            && !line.trim_end().contains(char::is_whitespace)
             && line.contains('/');
         if is_header {
             flush(&mut current, &mut models);
@@ -385,7 +392,7 @@ fn discover_catalog(
         ModelSource::CodexAppServer => super::model_discovery::discover_codex(def.command, env),
         ModelSource::ClaudeCode => super::model_discovery::discover_claude(def.command, env),
         ModelSource::OpencodeModels => {
-            let Some(output) = run_with_env(def.command, &["models", "--verbose"], env) else {
+            let Some(output) = run_with_env(def.command, OPENCODE_MODELS_ARGS, env) else {
                 return ModelCatalog::unavailable();
             };
             let listed = parse_opencode_models(&output);

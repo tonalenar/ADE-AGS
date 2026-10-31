@@ -194,6 +194,21 @@ Ficam em `watcher.ts`, com tick de 5 s. Os dois ignoram telas com diálogo de ap
   - cola no lead "[Aviso automático do ADE AGS] O integrante "X" … espera sua resposta há …" e grava o span `orchestrator_stall`.
 - Esses detectores reconhecem o lead pelo **título "Orquestrador"**, enquanto o Vigia usa `board.orchestrators`.
 
+## No chat (times de conversas por protocolo)
+O Vigia acima só enxerga terminais e missões do canvas. No modo chat, o orquestrador de um time fica ciente dos integrantes (conversas por protocolo) pelo **vigia do chat**: determinístico, sem LLM, sem cota.
+
+- **Onde**: `chat_team/watch.rs` (puro: estado + "agora" injetado → avisos e próximo prazo), `chat_team/watch_db.rs` (lê o banco e põe o aviso na fila) e `ipc/commands/chat_watch.rs` (o laço). O laço dorme no barramento `chat.changed` (fase, pedido, pedido resolvido, conversa fechada, interruptor) e, com um prazo correndo, até ele. Sem polling.
+- **O que avisa o orquestrador**, UM aviso por chave (`vigia-chat-*` no `client_id` da fila), marcado `[Vigia do chat]`:
+  - **bloqueio**: pedido (`chat_request`: comando, edição, pergunta) pendente há ≥ 20 s; turno que terminou com pergunta/pedido de autorização à pessoa sem resposta; turno que falhou (com o erro);
+  - **destravou**: a pessoa respondeu (ou o pedido expirou) o pedido de que ele foi avisado;
+  - **sem progresso**: turno em andamento sem item novo há ≥ 15 min (só com o interruptor `watch_stall`; não vale enquanto há pedido pendente, que já é o aviso do bloqueio).
+- **Interruptores** (painel Time, só a pessoa): `chat_team.watch` (bloqueios e «destravou», ligado por padrão) e `chat_team.watch_stall` (desligado por padrão, como o Vigia nasce desligado). Colunas aditivas; nada é apagado.
+- **Entrega**: `peer_messages` do orquestrador para ele mesmo (`kind: notice`, `raw`), pela fila durável e o `thread_outbox`. Não passa por `peer tell` de agente; de si para si, então a falha do aviso nunca acorda o integrante. A chave já usada nunca volta à fila (nem `unconfirmed` reenvia). Teto de 8 avisos por 10 min por time; o excesso espera a janela andar. Turnos que acabaram há mais de 30 min não geram aviso (o app que abre horas depois não despeja o passado).
+- **Regras**: só avisa; nunca escreve na conversa do integrante, nunca interrompe um turno e nunca responde um pedido. A decisão de um pedido é **da pessoa**: o aviso diz isso, e o texto do integrante dentro dele (título, erro, opções) vai numa linha só, cortado e marcado como dado, não ordem.
+- **A falha da mensagem do próprio orquestrador** (`unconfirmed`/`expired`) já volta a ele pelo aviso de falha da fila (`failure_notice`); o vigia do chat não a repete.
+- **Detecção de «terminou perguntando»**: o último parágrafo da última fala do agente termina em `?`, ou pede autorização/resposta («preciso de autorização», «aguardo sua…»). Heurística conservadora; calibre em `asks_the_person`.
+- **Testes**: `chat_team/watch_test.rs` (puro, banco em memória, sem relógio). Prova real com agentes só com OK do usuário.
+
 ## Testes
 - Front (`src/features/missions/tests/`): `vigia.test.ts`, `vigiaWatchdog.test.ts` (regras, cooldown, limite, `missionStartMs`, `refreshWatch`), `vigiaDelivery.test.ts` (integração com mocks), `vigiaPoke.test.ts`, `vigiaLoop.test.ts`, `vigiaClosing.test.ts`, `vigiaSwitch.test.ts`; irmãos em `stalled.test.ts`, `stallWorking.test.ts`, `leadStall.test.ts`, `stallAlerts.test.tsx`; feed em `canvas/tests/teamFeedModel.test.ts`.
 - Rust: os testes de `vigia.rs` (`user_notice`, `parse_actions`, `tail_lines`), `messages.rs`, `delivery.rs` e `decisions/test.rs`.

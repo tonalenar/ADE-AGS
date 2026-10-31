@@ -8,7 +8,8 @@ React 19 + TypeScript + Vite 7 + Tailwind 4 + Zustand 5, com xterm e @xyflow. O 
 - **Desmontar `<Terminal>` mata o PTY.** O cleanup de `src/features/terminal/Terminal.tsx` chama `ptyKill`.
   - Nunca mude a `key`, o pai React nem o ponto de montagem de terminais e navegadores.
   - Os dois são desenhados sempre no mesmo lugar (`TerminalPanel`, `ViewTabsHost`) e posicionados por cima do layout (`EditorArea.tsx`, `CanvasView.tsx` com `liveRects`). Mantenha assim.
-- **Toda string de UI entra nos três catálogos** (`src/i18n/locales/{pt-BR,en,es}.json`), com os mesmos placeholders. Os testes quebram se faltar.
+- **Toda string de UI entra nos três catálogos** (`src/i18n/locales/{pt-BR,en,es}.json`), com os mesmos placeholders. Rode `bun run check:i18n`: verifica duplicatas, chaves ausentes, placeholders, pares plurais e usos literais sem chave. Chamadas dinâmicas são contadas e ignoradas.
+  - O baseline `scripts/i18n-lint-baseline.json` guarda a dívida antiga; o comando falha só com achados novos. Para reduzir a dívida após corrigir: `bun run check:i18n -- --update-baseline`. Nunca atualize o baseline para absorver uma violação nova.
 - **Cores só por token** do `@theme` em `src/App.css`; **nunca um hex** em componente.
 - Chame o backend pelo `ipc.ts` da feature, não com `invoke` solto em componente.
 - Não importe `@xterm/xterm` nem `@xyflow/react` estaticamente em `main.tsx`, `EditorArea`, `TerminalPanel` ou `CanvasView`. Eles entram por `LazyTerminal`/`lazy()`, e `src/app/tests/staticEntryGraph.test.ts` protege isso.
@@ -101,3 +102,7 @@ React 19 + TypeScript + Vite 7 + Tailwind 4 + Zustand 5, com xterm e @xyflow. O 
 ## Pontos frágeis
 - `tabs/store.ts`, `layout/layoutStore.ts`, `canvas/store.ts`, `terminal/terminalRegistry.ts`, `missions/terminals.ts` e `tabs/persistence.ts` guardam estado de módulo. Um HMR desses módulos com o app em uso pode derrubar terminais: veja as regras de ouro no `AGENTS.md`.
 - `vigia.ts` mantém `watches` e `closingNudges` só em memória: um reinício repete avisos.
+- Botões da janela, nativos de cada sistema (`app/WindowLights.tsx`):
+  - `WindowLights` vai no cabeçalho da esquerda e só reserva o lugar. No macOS os semáforos são os do AppKit, posicionados pelo `window_controls_place`.
+  - `WindowControls` vai no fim do cabeçalho da direita e desenha os botões do Windows e do Linux.
+  - Cabeçalho novo no topo da janela leva os dois. Nunca desenhe bolinhas próprias.

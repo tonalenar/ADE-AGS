@@ -19,6 +19,8 @@ import { groupOf, isAgentKey, keyId, type SplitSide } from "@/features/tabs/layo
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { ContinueAgentDialog } from "./ContinueAgentDialog";
+import { requestContinuity } from "./continuity";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
 import { MEMORY_SUGGEST_HINT, memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
 import { BROWSER_HINT } from "@/features/canvas/portalNotice";
@@ -48,6 +50,7 @@ interface TabActionsState {
   wizardFor: WizardFor | null;
   /** A aba com o diálogo de pontos de restauração aberto. */
   checkpointsFor: string | null;
+  continuityFor: Tab | null;
 }
 
 const useTabActions = create<TabActionsState>(() => ({
@@ -57,6 +60,7 @@ const useTabActions = create<TabActionsState>(() => ({
   wizardOpen: false,
   wizardFor: null,
   checkpointsFor: null,
+  continuityFor: null,
 }));
 
 interface WizardFor {
@@ -144,8 +148,9 @@ export function splitWithItem(key: string, side: SplitSide): void {
 export function TabDialogs() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { menu, closingDirty, skillTarget, wizardOpen, wizardFor, checkpointsFor } = useTabActions();
+  const { menu, closingDirty, skillTarget, wizardOpen, wizardFor, checkpointsFor, continuityFor } = useTabActions();
   const tabs = useTabsStore((s) => s.tabs);
+  const detectedAgents = useTabsStore((s) => s.detectedAgents);
   const checkpointsTab = checkpointsFor ? tabs.find((x) => x.id === checkpointsFor) : undefined;
   const activeTab = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId));
   const workspaceId = useTabsStore((s) => s.workspaceId);
@@ -202,6 +207,11 @@ export function TabDialogs() {
         onSelect: () => { duplicateTab(tab).catch(console.error); navigate("/workspace"); },
       },
       ...(tab.agentId === SHELL_AGENT_ID ? [] : [{
+        key: "continueOther",
+        label: t("continuity.title"),
+        icon: <CopyIcon className="w-4 h-4" />,
+        onSelect: () => close({ continuityFor: tab }),
+      }, {
         key: "duplicateOther",
         label: t("tabs.duplicateOther"),
         icon: <CopyIcon className="w-4 h-4" />,
@@ -247,6 +257,23 @@ export function TabDialogs() {
       {skillTarget && <SkillPalette target={skillTarget} onClose={() => close({ skillTarget: null })} />}
 
       {checkpointsTab && <CheckpointsDialog tab={checkpointsTab} onClose={() => close({ checkpointsFor: null })} />}
+
+      {continuityFor && <ContinueAgentDialog
+        source={continuityFor}
+        claude={detectedAgents.find((a) => a.id === "claude-code")}
+        onClose={() => close({ continuityFor: null })}
+        onContinue={async (agent, withRun) => {
+          const source = useTabActions.getState().continuityFor;
+          if (!source) return;
+          const skillIds = await tabSkillIds(source.id).catch(() => []);
+          const id = useTabsStore.getState().addTab({ cwd: source.cwd, agent,
+            accountId: source.agentId === agent.id ? source.accountId : undefined, prelaunch: source.prelaunch });
+          if (withRun) requestContinuity(id);
+          registerPendingSkillSetup(id, attachSkillsToTab(id, workspaceId, skillIds));
+          joinActiveConversation(id, source.cwd, null);
+          navigate("/workspace");
+        }}
+      />}
 
       <NewAgentDialog
         isOpen={(wizardOpen && activeTab !== undefined) || wizardFor !== null}

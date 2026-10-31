@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Terminal } from "@/features/terminal/LazyTerminal";
 import { useTabsStore } from "@/features/tabs/store";
-import { CANVAS_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
+import { CANVAS_GROUP, CHAT_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { useWorkMode } from "@/features/canvas/store";
+import { useChatShell } from "@/app/uiStore";
+import { isPageRoute } from "@/features/chat/chatRoutes";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable, newSessionId, resumeFailed } from "@/features/sessions/agentResume";
 
@@ -24,10 +26,15 @@ export function TerminalPanel() {
   // En el canvas el panel es transparente y no atrapa el puntero: abajo está el canvas, y
   // solo las terminales vivas (encima de sus nodos) reciben clicks.
   const canvas = useWorkMode() === "canvas";
+  // No chat é igual: por baixo está a tela da conversa, e só o terminal dela recebe cliques.
+  const chat = useChatShell();
+  const overlay = canvas || chat;
   // El panel sigue montado (para no matar los PTYs) pero oculto fuera de /workspace, así
   // que "ser la tab activa" no alcanza para enfocar: en Skills o Settings el foco tiene que
-  // quedarse en esa página, no robárselo una terminal invisible.
-  const onWorkspace = useLocation().pathname.startsWith("/workspace");
+  // quedarse en esa página, no robárselo una terminal invisible. O chat não é uma rota: a
+  // conversa aberta está na tela qualquer que seja o caminho por baixo.
+  const pathname = useLocation().pathname;
+  const onWorkspace = pathname.startsWith("/workspace") || (chat && !isPageRoute(pathname));
   // Con la pantalla dividida se ven varias, pero el teclado va a una sola: la del grupo
   // enfocado. Si ahí hay un archivo o un navegador, a ninguna terminal.
   const { visible, focusedItem } = usePlacements();
@@ -38,7 +45,7 @@ export function TerminalPanel() {
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
     // así que h-full es la única forma de darle altura real al panel.
-    <div className={`relative h-full w-full overflow-hidden ${canvas ? "pointer-events-none" : "bg-gray-100 dark:bg-surface"}`}>
+    <div className={`relative h-full w-full overflow-hidden ${overlay ? "pointer-events-none" : "bg-gray-100 dark:bg-surface"}`}>
       {tabs.map((tab) => {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
@@ -71,6 +78,8 @@ export function TerminalPanel() {
               // sem isto ela saía em ângulo reto por cima dos cantos de baixo. Só os de baixo: o topo
               // fica debaixo do cabeçalho do nó.
               ...(placement?.groupId === CANVAS_GROUP ? { borderRadius: "0 0 14px 14px", overflow: "hidden" } : {}),
+              // No chat o terminal é o cartão da conversa: cantos como os do composer.
+              ...(placement?.groupId === CHAT_GROUP ? { borderRadius: 12, overflow: "hidden" } : {}),
               // Sin "visible" explícito: así hereda el visibility del contenedor de
               // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
               visibility: shown ? undefined : "hidden",
@@ -130,7 +139,7 @@ export function TerminalPanel() {
         );
       })}
 
-      {tabs.length === 0 && !canvas && (
+      {tabs.length === 0 && !overlay && (
         <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-400 dark:text-white/20">
           <span className="text-5xl select-none">⌥</span>
           <p className="text-sm">{t("terminal.empty")}</p>

@@ -138,6 +138,9 @@ export function emptyBoard(): Board {
   return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
+/** O prefixo do id de uma conversa por protocolo no canvas (o mesmo de `chat/structured/model.ts`). */
+export const THREAD_REF_PREFIX = "thread:";
+
 /**
  * Pone el canvas al día con las tabs abiertas: cada tab nueva recibe un lugar libre, y las
  * que se cerraron se van con sus conexiones (una conexión con alguien que ya no existe
@@ -153,12 +156,15 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   // Una conexión puede llegar a un agente de OTRO piso (otro canvas de la misma ventana):
   // vale mientras ese agente siga abierto, aunque no tenga nodo acá.
   const anywhere = new Set(allTabIds);
-  const alive = (id: string) => open.has(id) || anywhere.has(id) || id in board.notes || id in board.portals;
+  // Uma conversa por protocolo do modo chat (`thread:<id>`) não é aba nem nó: a corda dela com o
+  // orquestrador do time (e a coroa, se ela orquestra) vale enquanto o time a tiver (ver `chat/team`).
+  const outside = (id: string) => id.startsWith(THREAD_REF_PREFIX);
+  const alive = (id: string) => open.has(id) || anywhere.has(id) || id in board.notes || id in board.portals || outside(id);
   // Uma tab ainda aberta NUNCA perde a ligação por uma reconciliação parcial (ex.: a janela ainda
   // não sabe que ela é deste canvas). Antes a aresta sumia e o integrante saía de `ags peers` com a
   // aba viva: o orquestrador deixava de conseguir falar com ele.
   const edges = board.edges.filter((e) => (alive(e.a) && alive(e.b)) || (anywhere.has(e.a) && anywhere.has(e.b)));
-  const participant = (id: string) => open.has(id) || board.portals[id]?.kind === "gemini";
+  const participant = (id: string) => open.has(id) || board.portals[id]?.kind === "gemini" || outside(id);
   const orchestrators = board.orchestrators.filter(participant);
   // El papel de una tab cerrada se va con ella.
   const roleIds = Object.keys(board.roles);

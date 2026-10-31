@@ -93,12 +93,17 @@ function stripUnsafeHead(html: string): string {
   return html.replace(/<meta\b[^>]*http-equiv[^>]*>/gi, "").replace(/<base\b[^>]*>/gi, "");
 }
 
-export interface SrcdocOptions { picker?: boolean; chooser?: boolean }
+export interface SrcdocOptions {
+  picker?: boolean;
+  chooser?: boolean;
+  /** Um script próprio no fim do body (o da tela de Design, ver `features/design/frameBridge.ts`). */
+  script?: string;
+}
 
 /** Monta o `srcdoc` do iframe: CSP primeiro, depois o HTML do agente, e o seletor se for modo EDIT. */
 export function buildSrcdoc(html: string, opts: SrcdocOptions = {}): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${DESIGN_CSP}">`;
-  const picker = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.chooser ? `<script>${CHOOSER_SCRIPT}</script>` : "";
+  const picker = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.chooser ? `<script>${CHOOSER_SCRIPT}</script>` : opts.script ? `<script>${opts.script}</script>` : "";
   return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}${SCROLLBAR_CSS}</style></head><body>${stripUnsafeHead(html)}${picker}</body></html>`;
 }
 
