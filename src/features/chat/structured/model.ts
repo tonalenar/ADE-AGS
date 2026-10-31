@@ -110,8 +110,8 @@ export function applyDeltas(live: ThreadLive, deltas: DeltaInput[]): ThreadLive 
 }
 
 /** A conversa depois de um evento `thread`: só o que veio muda. Pura. */
-export function applyThreadMeta(row: ThreadRow, event: { title?: string; access?: ThreadAccess }): ThreadRow {
-  return { ...row, ...(event.title ? { title: event.title } : {}), ...(event.access ? { access: event.access } : {}) };
+export function applyThreadMeta(row: ThreadRow, event: { title?: string; access?: ThreadAccess; memory?: string }): ThreadRow {
+  return { ...row, ...(event.title ? { title: event.title } : {}), ...(event.access ? { access: event.access } : {}), ...(event.memory ? { memory: event.memory } : {}) };
 }
 
 /** A pergunta de um pedido (a primeira), ou `null` se o pedido não é pergunta. Pura. */

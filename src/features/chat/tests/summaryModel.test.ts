@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ForgeItem } from "@/features/forge/types";
 
 import {
-  connectorsOf, contextOf, diffTotals, environmentOf, homeRelative, filesFromHandoffs, outputsFromItems, pickOutputs, pullTone,
+  connectorsOf, contextOf, memoryConnectorOf, diffTotals, environmentOf, homeRelative, filesFromHandoffs, outputsFromItems, pickOutputs, pullTone,
   SUMMARY_KEY,
 } from "../summary/summaryModel";
 import { PANEL_ENTRIES } from "../panelMenu";
@@ -97,6 +97,14 @@ describe("o contexto e os conectores (sem inventar)", () => {
   it("os conectores: o app (ags, navegador) só vale onde o agente recebe o MCP; o resto não é lido", () => {
     expect(connectorsOf(true)).toEqual([{ id: "ags", on: true }, { id: "browser", on: true }]);
     expect(connectorsOf(false)).toEqual([{ id: "ags", on: false }, { id: "browser", on: false }]);
+  });
+
+  it("o ai-memory da conversa por protocolo é só o que o backend gravou ao abrir o processo", () => {
+    expect(memoryConnectorOf(null)).toEqual({ on: false, reason: null, pending: true });
+    expect(memoryConnectorOf(undefined)).toEqual({ on: false, reason: null, pending: true });
+    expect(memoryConnectorOf("on")).toEqual({ on: true, reason: null, pending: false });
+    expect(memoryConnectorOf("off:unavailable")).toEqual({ on: false, reason: "unavailable", pending: false });
+    expect(memoryConnectorOf("off:unsupported")).toEqual({ on: false, reason: "unsupported", pending: false });
   });
 });
 

@@ -35,6 +35,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 
 import type { ConversationCard } from "../chatModel";
 import { useChatStore } from "../store";
+import { useStructured } from "../structured/store";
 import { SummaryPane } from "../summary/SummaryPane";
 
 const card: ConversationCard = {
@@ -76,6 +77,20 @@ describe("o Resumo do painel", () => {
     expect(host.textContent).toContain("ADE-AGS");
     expect(host.textContent).toContain("~/Projects");
     expect(host.textContent).toContain("feat/a");
+  });
+
+  it("o conector ai-memory da conversa por protocolo mostra o que o backend gravou", async () => {
+    const thread = { ...card, tabId: "thread:t1" };
+    const row = (memory: string | null) => ({ id: "t1", agentId: "claude-code", cwd: card.cwd, title: "T", model: null, effort: null, access: "ask", accountId: null, memory, state: "active", createdAt: 1, updatedAt: 1 });
+    const draw = async (memory: string | null) => {
+      useStructured.setState({ threads: [row(memory)] as never });
+      await act(async () => { root.render(<SummaryPane conversation={thread} cwd={card.cwd} tabId="thread:t1" />); });
+      if (!host.querySelector("[data-testid=ai-memory-connector]")) await clickText("sidePanel.connectors.title");
+      return host.querySelector("[data-testid=ai-memory-connector]")?.textContent;
+    };
+    expect(await draw("on")).toBe("chat.summary.memory.on");
+    expect(await draw("off:unavailable")).toContain("chat.summary.memory.off");
+    expect(await draw(null)).toBe("chat.summary.memory.pending");
   });
 
   it("o contexto sem tokens é 'não medido' e com tokens mostra os tokens, nunca uma porcentagem", async () => {

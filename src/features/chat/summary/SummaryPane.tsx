@@ -27,7 +27,7 @@ import { useConversationTimeline } from "../timeline/useConversationTimeline";
 import type { TimelineItem } from "../timeline/types";
 import { useWorkingDiff } from "../useWorkingDiff";
 import { LimitsCard } from "./LimitsCard";
-import { connectorsOf, contextOf, diffTotals, filesFromHandoffs, outputsFromItems, pickOutputs, type OutputFile } from "./summaryModel";
+import { connectorsOf, contextOf, diffTotals, filesFromHandoffs, memoryConnectorOf, outputsFromItems, pickOutputs, type OutputFile } from "./summaryModel";
 
 const EMPTY_ITEMS: TimelineItem[] = [];
 
@@ -112,7 +112,13 @@ function ThreadContextCard({ conversation }: { conversation: ConversationCard })
 function ThreadConnectorsCard({ conversation }: { conversation: ConversationCard }) {
   const { t } = useTranslation();
   const list = connectorsOf(hasBrowserMcp(conversation.agentId));
-  const on = list.filter((c) => c.on).length;
+  // O que o backend gravou ao abrir o processo da conversa; a tela não adivinha.
+  const thread = threadIdOf(conversation.tabId);
+  const memory = memoryConnectorOf(useStructured((s) => (thread ? s.threads.find((x) => x.id === thread)?.memory : null)));
+  const on = list.filter((c) => c.on).length + (memory.on ? 1 : 0);
+  const memoryText = memory.on ? t("chat.summary.memory.on")
+    : memory.pending ? t("chat.summary.memory.pending")
+    : t("chat.summary.memory.off", { reason: t(`chat.summary.memory.reason.${memory.reason}`, { defaultValue: memory.reason }) });
   return (
     <Section id="connectors" title={t("sidePanel.connectors.title")} defaultOpen={false} flat
       aside={<span className="text-[11px] text-gray-500 dark:text-white/45 tabular-nums">{on > 0 ? t("chat.summary.connectorsOn", { count: on }) : t("chat.summary.connectorsNone")}</span>}>
@@ -122,6 +128,9 @@ function ThreadConnectorsCard({ conversation }: { conversation: ConversationCard
           {t(`chat.summary.connector.${c.id}`)}
         </Row>
       ))}
+      <Row icon={<span aria-hidden="true" className={`block w-1.5 h-1.5 rounded-full ${memory.on ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/25"}`} />}>
+        <span data-testid="ai-memory-connector">{memoryText}</span>
+      </Row>
       <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.connectorsHint")}</span></Row>
     </Section>
   );

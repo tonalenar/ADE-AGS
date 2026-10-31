@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { SettingsToggleRow } from "@/features/settings/SettingsSection";
 
-/** Aplica-se apenas ao nascimento de novas abas; não reinicia terminais. */
+/** Aplica-se apenas ao nascimento de novas abas e de processos de conversa; não reinicia terminais. */
 export function AiMemoryTabsSetting() {
   const { t } = useTranslation();
   const [enabled, setEnabled] = useState(true);

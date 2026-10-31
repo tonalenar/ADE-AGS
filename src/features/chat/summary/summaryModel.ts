@@ -139,6 +139,21 @@ export interface Connector {
   on: boolean;
 }
 
+export interface MemoryConnector {
+  on: boolean;
+  /** `null` = ligado; senão o código gravado na conversa (`disabled`, `unavailable`, `failed`, `nothing`, `unsupported`). */
+  reason: string | null;
+  /** O processo da conversa ainda não abriu: nada foi gravado. */
+  pending: boolean;
+}
+
+/** O ai-memory da conversa por protocolo, lido do que o backend gravou ao abrir o processo (`on` / `off:<código>`). Pura. */
+export function memoryConnectorOf(state: string | null | undefined): MemoryConnector {
+  if (!state) return { on: false, reason: null, pending: true };
+  if (state === "on") return { on: true, reason: null, pending: false };
+  return { on: false, reason: state.startsWith("off:") ? state.slice(4) : state, pending: false };
+}
+
 /** Os conectores do app para a aba. A saúde da conexão não é lida: só se a aba os recebe. Pura. */
 export function connectorsOf(hasMcp: boolean): Connector[] {
   return [{ id: "ags", on: hasMcp }, { id: "browser", on: hasMcp }];

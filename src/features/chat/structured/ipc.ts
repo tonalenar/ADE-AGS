@@ -19,6 +19,8 @@ export interface ThreadRow {
   effort: string | null;
   access: ThreadAccess;
   accountId: string | null;
+  /** O ai-memory na abertura do processo: `on` ou `off:<código>`; `null` = o processo ainda não abriu. */
+  memory?: string | null;
   state: "active" | "settled";
   createdAt: number;
   updatedAt: number;

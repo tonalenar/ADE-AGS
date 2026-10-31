@@ -91,6 +91,7 @@ describe("conversa por protocolo: Claude Code e o Plano", () => {
     const base = row({ agentId: "claude-code", access: "plan" });
     expect(applyThreadMeta(base, { access: "edits" })).toMatchObject({ access: "edits", title: "Arrumar login" });
     expect(applyThreadMeta(base, { title: "Novo" })).toMatchObject({ access: "plan", title: "Novo" });
+    expect(applyThreadMeta(base, { memory: "on" })).toMatchObject({ memory: "on", title: "Arrumar login" });
   });
 
   it("a saída do Plano se reconhece pela ferramenta; a aprovação comum e a do Codex não", () => {

@@ -1,6 +1,6 @@
 {
   "settings.aiMemoryTabs.label": "Memória do ai-memory nas abas",
-  "settings.aiMemoryTabs.desc": "Em novas abas, conecta o ai-memory ao Claude e habilita a captura da sessão, se a versão 3.3.0 ou superior estiver instalada. Não altera configurações globais dos agentes nem reinicia abas abertas.",
+  "settings.aiMemoryTabs.desc": "Em novas abas e nas conversas do Claude no modo chat, conecta o ai-memory ao Claude e habilita a captura da sessão, se a versão 3.3.0 ou superior estiver instalada. Não altera configurações globais dos agentes nem reinicia abas abertas.",
   "models.reference": "Catálogo do provedor — acesso da conta não verificado",
   "accounts.antigravity.installRequired": "Verificando a instalação. Se o botão continuar desativado, instale a CLI agy e reabra o aplicativo.",
   "accounts.antigravity.description": "O login OAuth 2.0 é realizado pela CLI oficial do Antigravity. Ela abre o navegador quando não há uma sessão salva; se você já está conectado, reutiliza sua conta. Complete a autenticação no navegador pessoalmente.",
@@ -4415,5 +4415,13 @@
   "continuity.previewNote": "A versão 3.3.0 oferece somente estes metadados no preview; o conteúdo será entregue pelo ai-memory ao novo agente.",
   "continuity.claimNote": "Ao continuar, o SessionStart poderá aceitar automaticamente um handoff. O servidor garante aceite único; outro agente pode aceitá-lo antes desta abertura.",
   "continuity.claudeMissing": "Claude não está disponível nesta instalação.",
-  "continuity.unsupported": "Continuidade indisponível: o bridge deste agente ainda não garante o escopo da pasta."
+  "continuity.unsupported": "Continuidade indisponível: o bridge deste agente ainda não garante o escopo da pasta.",
+  "chat.summary.memory.on": "ai-memory ligado",
+  "chat.summary.memory.pending": "ai-memory: o processo da conversa ainda não abriu",
+  "chat.summary.memory.off": "ai-memory fora: {{reason}}",
+  "chat.summary.memory.reason.disabled": "desligado em Configurações → Memória",
+  "chat.summary.memory.reason.unavailable": "não instalado ou abaixo da versão 3.3.0",
+  "chat.summary.memory.reason.failed": "não deu para preparar os hooks e o MCP",
+  "chat.summary.memory.reason.nothing": "nada a injetar nesta abertura",
+  "chat.summary.memory.reason.unsupported": "este agente por protocolo ainda não recebe a memória"
 }
