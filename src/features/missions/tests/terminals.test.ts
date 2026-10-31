@@ -418,6 +418,7 @@ describe("memória nos briefings", () => {
       const text = memberBriefing(mission, { ...member, subagent });
       expect(text).toContain("VOLTA SOZINHA a quem perguntou");
       expect(text).toContain("NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido");
+      expect(text).toContain("Se for bloqueado por uma pergunta ou permissão que só a pessoa decide, diga isso numa frase ao orquestrador (uma vez) e espere.");
       expect(text).toContain("O resumo da entrega vai uma vez só");
       expect(text).not.toContain("execute o que ele enviar e responda a ele");
     }

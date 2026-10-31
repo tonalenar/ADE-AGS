@@ -64,6 +64,7 @@ export const MESSAGE_RULES =
   "Se a tarefa chegou como `ask`, a resposta final do seu turno VOLTA SOZINHA a quem perguntou: não repita o mesmo conteúdo por `ags peer tell`. "
   + "NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido («estou pronto», «recebi», «vou ler»): "
   + "só fale com o orquestrador para entregar o resultado, pedir algo que o bloqueia ou responder a uma pergunta. "
+  + "Se for bloqueado por uma pergunta ou permissão que só a pessoa decide, diga isso numa frase ao orquestrador (uma vez) e espere. "
   + "O resumo da entrega vai uma vez só.";
 
 /**
