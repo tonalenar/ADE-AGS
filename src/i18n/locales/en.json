@@ -449,7 +449,7 @@
   "settings.accounts.limits.maxConcurrentHelper": "Empty = no limit. Tasks beyond it wait their turn; with an automatic account they move to another account with room.",
   "settings.accounts.limits.budget": "24 h budget (US$)",
   "settings.accounts.limits.budgetHelper": "Based on the cost the CLI reports (Claude Code, OpenCode). Once reached, the account leaves routing until the spend leaves the 24 h window. Codex does not report cost.",
-  "settings.accounts.limits.budgetHelper": "The daily budget must be a number greater than or equal to zero.",
+  "settings.accounts.limits.budgetInvalid": "The daily budget must be a number greater than or equal to zero.",
   "settings.accounts.limits.save": "Save",
   "settings.accounts.limits.loading": "Reading this account's limits…",
   "settings.accounts.limits.loadError": "Could not read this account's limits ({{error}}). Saving is disabled so the current limits are not erased.",

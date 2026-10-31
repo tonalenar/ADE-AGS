@@ -449,7 +449,7 @@
   "settings.accounts.limits.maxConcurrentHelper": "Vazio = sem limite. As tarefas além disso esperam a vez; com conta automática, vão para outra conta com lugar.",
   "settings.accounts.limits.budget": "Orçamento em 24 h (US$)",
   "settings.accounts.limits.budgetHelper": "Pelo custo que a CLI informa (Claude Code, OpenCode). Ao atingir, a conta sai do roteamento até o gasto sair da janela de 24 h. O Codex não informa custo.",
-  "settings.accounts.limits.budgetHelper": "O orçamento diário precisa ser um número maior ou igual a zero.",
+  "settings.accounts.limits.budgetInvalid": "O orçamento diário precisa ser um número maior ou igual a zero.",
   "settings.accounts.limits.save": "Salvar",
   "settings.accounts.limits.loading": "Lendo os limites desta conta…",
   "settings.accounts.limits.loadError": "Não foi possível ler os limites desta conta ({{error}}). Salvar fica desativado para não apagar os limites atuais.",
