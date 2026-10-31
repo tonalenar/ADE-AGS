@@ -211,6 +211,18 @@ Com o Antigravity, a conversa nova roda `agy --print <mensagem> --output-format 
 - **Item `notice`** (`ItemKind::Notice`; `label` = código): linha própria no fio, fora dos turnos. A mensagem da pessoa no meio de um turno (steer, fila) fecha o turno anterior como «superado» (`TurnEnd.superseded`), e o fim de verdade vai para o turno que tem a resposta.
 - **@menção do orquestrador**: a mensagem aparece como pendente na conversa que a pessoa olha, o erro de envio aparece ali, e, numa conversa por protocolo, o resumo do time só conta como entregue depois de o backend aceitar o envio (na fila do composer e numa aba, não há resposta a esperar: conta ao enfileirar/entregar).
 
+## Permissão decidida no backend (etapa 3, parte B)
+
+A política do integrante e as regras «Sempre permitir» da pessoa são aplicadas pelo BACKEND (`conversa/permission.rs`, `chat_team/permission.rs`), não mais pelo React: a decisão vale com a casca do chat fechada, com a conversa em segundo plano e depois de recarregar a janela.
+
+- **Na chegada** (`on_arrival`, nos três motores): o motor monta o pedido INTEIRO (`Subject`: o comando completo, não o título, que guarda só a primeira linha), grava-o em `chat_request.subject` e decide: política do integrante (`model::decide`, que pode negar) e depois as regras. `Allow`/`Deny` respondem ao agente na hora; o resto fica `pending` e vai à tela.
+- **Nunca automático**: risco alto (push, `rm -r`, `sudo`, `--force`, `curl | sh`…), perguntas do agente e a saída do Plano. Falha de leitura (time, regra) = a pessoa decide. Um pedido sem `subject` (de antes desta versão) nunca é decidido sozinho. Regra com escopo de papel ou de time (`role`, `team_id`, preparados) ainda não decide nada.
+- **Só a pessoa cria regras**: tabela `chat_permission_rule` (`origin` só `person`), comandos Tauri chamados pela tela; nenhum comando de CLI/MCP escreve regra (teste de contrato em `chat_team/test.rs`). As regras antigas dos settings (`chat.permissions.rules`) foram COPIADAS uma vez, sem apagar o setting.
+- **Interruptor por time** (`chat_team.auto_decide`, padrão ligado; «Não decidir sozinho» no painel do time): desligado, tudo vai à pessoa.
+- **Varredura** (`chat_requests_sweep`): reaplica a decisão aos pendentes de todas as conversas ativas ao montar a janela, ao criar/mudar uma regra e ao religar o time. No arranque do app não há pendentes (o agente morre com o app e `sweep_orphans` os expira).
+- **Auditoria**: `chat_request.decided_by` (`person`, `policy`, `rule:<id>`) e `decided_why`; o aviso `requestResolved` leva `by`/`why` e `ags chat pending` lista os últimos (`decided`).
+- **Mesmo veredito nos dois lados**: as fixtures `src/features/chat/permissions/fixtures/permission-cases.json` (geradas do TypeScript) são lidas pelo vitest e pelo `cargo test`. TUI e frota seguem decididas na janela (`decidedByBackend`).
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:

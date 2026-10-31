@@ -230,7 +230,8 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
   chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
   chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente
   chat stop <id>                              Interrompe o turno em andamento
-  chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela)
+  chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela) e quem respondeu
+                                              as últimas (`decided`: a pessoa, a política do time ou uma regra dela)
   chat open <id>                              Mostra a conversa na tela do modo chat
   chat settle <id> [--reopen]                 Conclui (o agente fecha; reabrir retoma a mesma thread)
 
