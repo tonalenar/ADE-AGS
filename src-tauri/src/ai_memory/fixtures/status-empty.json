@@ -1,0 +1,108 @@
+{
+  "version": "3.3.0",
+  "data_dir": "/fixture/ai-memory-data",
+  "bind": "127.0.0.1:49374",
+  "db_path": "/fixture/ai-memory-data/db/memory.sqlite",
+  "counts": {
+    "pages_latest": 0,
+    "pages_all": 0,
+    "sessions": 0,
+    "observations": 0
+  },
+  "derived": {
+    "pages_rows": 0,
+    "pages_fts_rows": 0,
+    "observations_rows": 0,
+    "observations_fts_rows": 0,
+    "latest_pages_missing_embeddings": 0,
+    "latest_pages_unembeddable": 0,
+    "typed_links_from_latest_pages": [],
+    "embed_failures_unresolved": 0,
+    "embed_failures_recovered": 0,
+    "embedding_rows": 0,
+    "embedding_triples": [],
+    "links_from_latest_pages": 0,
+    "unresolved_links_from_latest_pages": 0,
+    "stale_links_from_latest_pages": 0
+  },
+  "storage": {
+    "page_size": 4096,
+    "page_count": 217,
+    "freelist_count": 2,
+    "database_bytes": 888832,
+    "reclaimable_bytes": 8192,
+    "data_dir_free_bytes": 313075744768
+  },
+  "providers": {
+    "llm": {
+      "status": "disabled",
+      "provider": null,
+      "model": null,
+      "dim": null,
+      "last_call_at": null,
+      "last_success_at": null,
+      "last_error_at": null,
+      "last_error_status": null,
+      "last_error_message": null,
+      "retry_hint": null
+    },
+    "llm_candidates": [],
+    "llm_workloads": [],
+    "embedding": {
+      "status": "disabled",
+      "provider": null,
+      "model": null,
+      "dim": null,
+      "last_call_at": null,
+      "last_success_at": null,
+      "last_error_at": null,
+      "last_error_status": null,
+      "last_error_message": null,
+      "retry_hint": null
+    }
+  },
+  "spool": {
+    "pending": 0,
+    "oldest_age_ms": null,
+    "retries_total": 0,
+    "capacity": 10000
+  },
+  "recovery": {
+    "journal_pending": 0,
+    "degraded_runs": 0,
+    "finish_failed_runs": 0,
+    "journal_error": null
+  },
+  "capture_mode": "denylist",
+  "ingest": {
+    "accepted": 0,
+    "dropped_unauthorized": 0,
+    "stored": 0,
+    "replayed": 0,
+    "resumed": 0,
+    "ignored_end": 0,
+    "dropped_collision": 0,
+    "dropped_invalid": 0,
+    "failed": 0,
+    "dropped_by_policy": 0,
+    "shed_saturated": 0,
+    "shed_rate_limited": 0,
+    "last_persisted_ms": null
+  },
+  "client": {
+    "version": "3.3.0",
+    "server_url": "http://127.0.0.1:49374",
+    "auth": false
+  },
+  "auth_posture": {
+    "posture": "none_loopback",
+    "fix": "ai-memory auth enable"
+  },
+  "consolidation": {
+    "pending": 0,
+    "running": 0,
+    "completed": 0,
+    "failed": 0,
+    "failed_sessions": []
+  }
+}

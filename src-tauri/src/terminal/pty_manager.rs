@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -27,6 +27,7 @@ struct PtySession {
     session_token: Option<String>,
     /// Perfil do Codex com o token, fora do argv. Some só quando o arquivo existe.
     codex_profile: Option<std::path::PathBuf>,
+    ai_memory_settings: Option<std::path::PathBuf>,
 }
 
 /// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
@@ -599,6 +600,9 @@ fn restrict_to_user(_path: &std::path::Path) -> Result<(), String> {
 }
 
 fn forget_session(session: &PtySession) {
+    if let Some(path) = &session.ai_memory_settings {
+        let _ = std::fs::remove_file(path);
+    }
     if let Some(token) = &session.session_token {
         super::release_token(token);
     }
@@ -629,6 +633,8 @@ pub(crate) fn open_pty(size: PtySize) -> Result<portable_pty::PtyPair, String> {
 /// y no vuelven a redibujar bien tras un `SIGWINCH` post-arranque — quedaban con
 /// contenido cortado/desbordado hasta el primer redibujado manual. Con el tamaño correcto
 /// desde el primer byte, ese problema no llega a existir.
+// O contrato IPC mantém campos planos e o AppHandle é fornecido pelo Tauri.
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn pty_create(
     command: String,
@@ -642,6 +648,8 @@ pub async fn pty_create(
     // `prelaunch`: comandos a ejecutar antes del agente, ya resueltos y en orden (ver el
     // módulo `prelaunch`). Vacío = se lanza igual que siempre, sin ningún intermediario.
     prelaunch: Option<Vec<String>>,
+    // Só nasce após confirmação explícita no preview; nunca se aplica a PTY vivo.
+    ai_memory_continuity: Option<bool>,
     app: AppHandle,
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
@@ -666,7 +674,68 @@ pub async fn pty_create(
         _ => None,
     };
     let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile.as_ref().and(codex_profile_name.as_deref()));
-    let mut cmd = build_launch(&command, &steps)?;
+    let mut memory = crate::ai_memory::tabs::TabInjection::default();
+    let mut continuity_binary = None;
+    let mut continuity_hooks = false;
+    let enabled = app
+        .try_state::<crate::database::DbConnection>()
+        .map(|db| crate::database::get_setting(&db, crate::ai_memory::tabs::TABS_SETTING))
+        .and_then(Result::ok)
+        .map(|value| crate::ai_memory::tabs::enabled(value.as_deref()))
+        .unwrap_or(false);
+    let argv = split_command(&command);
+    let mcp_dir = crate::util::datadir::ags_home().map(|h| h.join("mcp"));
+    if let (Some(tab), Some(dir)) = (tab_id.as_deref(), mcp_dir.as_deref()) {
+        crate::ai_memory::tabs::remove_owned_server(dir, tab);
+    }
+    if enabled
+        && let (Some(tab), Some(agent), Some(dir), Some(home)) = (
+            tab_id.clone(),
+            argv.first()
+                .and_then(|p| crate::ai_memory::tabs::agent_from_program(p)),
+            mcp_dir.clone(),
+            dirs::home_dir(),
+        )
+    {
+        // `--version` do ai-memory e a escrita dos arquivos da aba bloqueiam. O guard de atualização
+        // acima não atravessa um `.await`, então usa-se `block_in_place`: o runtime move as outras
+        // tarefas desta thread enquanto o processo roda.
+        let (extras, cwd_path) = (env.clone().unwrap_or_default(), std::path::PathBuf::from(&cwd));
+        let prepared = tokio::task::block_in_place(|| {
+            crate::ai_memory::tabs::prepare_new_tab(&tab, agent, &dir, &home, &cwd_path, &argv, &extras)
+        });
+        continuity_hooks = prepared.hooks_configured;
+        continuity_binary = prepared.binary;
+        memory = prepared.plan;
+    }
+    let mut cmd = if ai_memory_continuity.unwrap_or(false) {
+        if !enabled || tab_id.is_none() || (memory.settings_file.is_none() && !continuity_hooks) {
+            return Err("Não foi possível preparar hooks seguros para a continuidade; a aba de origem permanece aberta.".into());
+        }
+        let binary = continuity_binary.ok_or("ai-memory 3.3.0 ou superior é necessário para continuar.")?;
+        let native_program = argv.first().ok_or("Comando do agente ausente.")?;
+        let executable = crate::util::path_env::find_program(native_program)
+            .unwrap_or_else(|| std::path::PathBuf::from(native_program));
+        let wrapped = crate::ai_memory::continuation::argv(&binary, &executable, &argv, &memory.args)?;
+        // Mesmo caminho dos outros lançamentos: resolução do programa, regras do Windows e pré-comandos.
+        build_launch(&crate::ai_memory::tabs::shell_args(&wrapped)?, &steps)?
+    } else if steps.is_empty() {
+        let mut cmd = build_launch(&command, &steps)?;
+        cmd.args(&memory.args);
+        cmd
+    } else {
+        match crate::ai_memory::tabs::shell_args(&memory.args) {
+            Ok(args) => build_launch(&format!("{command} {args}"), &steps)?,
+            Err(_) => {
+                memory = Default::default();
+                if let (Some(tab), Some(dir)) = (tab_id.as_deref(), mcp_dir.as_deref()) {
+                    crate::ai_memory::tabs::remove_owned_server(dir, tab);
+                }
+                eprintln!("[ade-ags] ai-memory omitido: argumentos incompatíveis com o prelaunch");
+                build_launch(&command, &steps)?
+            }
+        }
+    };
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
@@ -697,6 +766,11 @@ pub async fn pty_create(
         }
         cmd.env(k, v);
     }
+    for (k, v) in &memory.env {
+        cmd.env(k, v);
+    }
+    // Nunca permite que autowire reescreva configurações globais, nem com opt-out.
+    crate::ai_memory::tabs::protect_pty_env(&mut cmd);
     if let Some(tab) = &tab_id {
         cmd.env("ADE_TAB_ID", tab);
     }
@@ -762,6 +836,7 @@ pub async fn pty_create(
             cwd: cwd.clone(),
             session_token: session_token.clone(),
             codex_profile,
+            ai_memory_settings: memory.settings_file.take(),
         });
         (old, removed)
     };

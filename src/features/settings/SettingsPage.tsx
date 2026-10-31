@@ -18,6 +18,7 @@ import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
 import { MemoryRail } from "@/features/settings/MemoryRail";
 import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
+import { AiMemoryPanel } from "@/features/memory/AiMemoryPanel";
 import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
@@ -29,6 +30,7 @@ import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
+import { AiMemoryTabsSetting } from "@/features/settings/AiMemoryTabsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
@@ -299,6 +301,7 @@ export function SettingsPage() {
                 <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
                   <SettingsGroup>
                     <AgentAutoUpdateSetting />
+                    <AiMemoryTabsSetting />
                   </SettingsGroup>
                   <DetectedAgents />
 
@@ -407,9 +410,12 @@ export function SettingsPage() {
           )}
 
           {section === "memory" && (
-            workspaceId
-              ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
-              : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>
+            <>
+              <AiMemoryPanel cwd={activeCwd} workspaceId={workspaceId} />
+              {workspaceId
+                ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
+                : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>}
+            </>
           )}
 
           {section === "terminal" && <TerminalSection />}
