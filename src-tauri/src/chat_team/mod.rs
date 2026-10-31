@@ -14,6 +14,7 @@ pub mod api;
 pub mod commands;
 pub mod env;
 pub mod model;
+pub mod permission;
 pub mod store;
 #[cfg(test)]
 mod test;
