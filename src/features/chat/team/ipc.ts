@@ -40,6 +40,8 @@ export interface TeamView {
   updatedAt: number;
   /** O backend decide sozinho o que a política e as regras da pessoa cobrem. Ausente = ligado. */
   autoDecide?: boolean;
+  /** O acesso total libera ferramentas de fora do shell (MCP, `Task`…). Ausente = desligado. */
+  allowTools?: boolean;
   members: TeamMember[];
   /** Os integrantes mais o orquestrador. */
   headcount: number;

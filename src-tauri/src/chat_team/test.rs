@@ -460,6 +460,10 @@ mod regras {
         assert!(store::set_auto_decide(&conn, &t, false).unwrap());
         assert!(!store::team(&conn, &t).unwrap().unwrap().auto_decide);
         assert!(!store::set_auto_decide(&conn, "nao-existe", false).unwrap());
+        // A flag das ferramentas de fora do shell nasce desligada.
+        assert!(!store::team(&conn, &t).unwrap().unwrap().allow_tools);
+        assert!(store::set_allow_tools(&conn, &t, true).unwrap());
+        assert!(store::team(&conn, &t).unwrap().unwrap().allow_tools);
         assert!(store::set_auto_decide(&conn, &t, true).unwrap());
         assert!(store::team_joined_by(&conn, "x").unwrap().is_none());
     }
@@ -475,7 +479,7 @@ fn nenhum_comando_de_cli_nem_de_mcp_escreve_regra_de_permissao() {
         ("ipc/commands/team.rs", include_str!("../ipc/commands/team.rs")),
         ("ipc/commands/peers.rs", include_str!("../ipc/commands/peers.rs")),
     ] {
-        for forbidden in ["add_rule(", "update_rule(", "remove_rule(", "set_auto_decide(", "chat_permission_rule", "chat_team_auto_decide"] {
+        for forbidden in ["add_rule(", "update_rule(", "remove_rule(", "set_auto_decide(", "set_allow_tools(", "chat_permission_rule", "chat_team_auto_decide", "chat_team_allow_tools"] {
             assert!(!source.contains(forbidden), "{name} não pode mexer em regras de permissão ({forbidden})");
         }
     }

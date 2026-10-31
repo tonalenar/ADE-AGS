@@ -351,6 +351,7 @@ pub fn run() {
             crate::chat_team::chat_permission_rule_update,
             crate::chat_team::chat_permission_rule_remove,
             crate::chat_team::chat_team_auto_decide,
+            crate::chat_team::chat_team_allow_tools,
             crate::conversa::chat_permission_notify,
             crate::scm::scm_init,
             crate::scm::scm_stage,

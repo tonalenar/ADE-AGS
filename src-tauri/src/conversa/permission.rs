@@ -29,6 +29,8 @@ pub struct Draft {
     pub kind: Kind,
     pub detail: String,
     pub files: Vec<String>,
+    /// O nome de uma ferramenta de fora do shell (`mcp__x__run`, `Task`…): o `detail` é só um rótulo.
+    pub foreign: Option<String>,
 }
 
 /// Pura: o pedido do `app-server` do Codex. O comando vem INTEIRO de `params.command` (o título guarda só a
@@ -38,11 +40,11 @@ pub fn draft_codex(method: &str, params: &Value, ask: &Ask) -> Option<Draft> {
     match method {
         "item/commandExecution/requestApproval" => {
             let command = params.get("command").and_then(Value::as_str).unwrap_or(&ask.title);
-            Some(Draft { kind: Kind::Command, detail: command.to_string(), files: Vec::new() })
+            Some(Draft { kind: Kind::Command, detail: command.to_string(), files: Vec::new(), foreign: None })
         }
         "item/fileChange/requestApproval" => {
             let files: Vec<String> = Some(ask.title.clone()).filter(|t| !t.is_empty()).into_iter().collect();
-            Some(Draft { kind: Kind::Edit, detail: files.join(", "), files })
+            Some(Draft { kind: Kind::Edit, detail: files.join(", "), files, foreign: None })
         }
         _ => None,
     }
@@ -58,28 +60,33 @@ pub fn draft_claude(request: &Value, ask: &Ask) -> Option<Draft> {
         "AskUserQuestion" | "ExitPlanMode" => None,
         "Bash" | "PowerShell" => {
             let command = input.get("command").and_then(Value::as_str).unwrap_or(&ask.title);
-            Some(Draft { kind: Kind::Command, detail: command.to_string(), files: Vec::new() })
+            Some(Draft { kind: Kind::Command, detail: command.to_string(), files: Vec::new(), foreign: None })
         }
         "Edit" | "MultiEdit" | "Write" | "NotebookEdit" => {
             let files = vec![ask.title.clone()];
-            Some(Draft { kind: Kind::Edit, detail: ask.title.clone(), files })
+            Some(Draft { kind: Kind::Edit, detail: ask.title.clone(), files, foreign: None })
         }
         "WebFetch" | "WebSearch" | "web_search" => {
             let what = ask.title.strip_prefix(&format!("{tool}: ")).unwrap_or(&ask.title);
-            Some(Draft { kind: Kind::Network, detail: what.to_string(), files: Vec::new() })
+            Some(Draft { kind: Kind::Network, detail: what.to_string(), files: Vec::new(), foreign: None })
         }
-        _ => Some(Draft { kind: Kind::Command, detail: ask.title.clone(), files: Vec::new() }),
+        _ => Some(Draft { kind: Kind::Command, detail: ask.title.clone(), files: Vec::new(), foreign: Some(tool.to_string()) }),
     }
 }
 
 /// Pura: o pedido `session/request_permission` do OpenCode. `execute`: o comando inteiro de `rawInput.command`.
 pub fn draft_opencode(params: &Value, ask: &Ask) -> Option<Draft> {
     match ask.kind {
-        "fileChange" => Some(Draft { kind: Kind::Edit, detail: ask.title.clone(), files: vec![ask.title.clone()] }),
+        "fileChange" => Some(Draft { kind: Kind::Edit, detail: ask.title.clone(), files: vec![ask.title.clone()], foreign: None }),
         "command" => {
             let call = params.get("toolCall").unwrap_or(&Value::Null);
-            let full = call.pointer("/rawInput/command").and_then(Value::as_str).filter(|_| call.get("kind").and_then(Value::as_str) == Some("execute"));
-            Some(Draft { kind: Kind::Command, detail: full.unwrap_or(&ask.title).to_string(), files: Vec::new() })
+            // Só `execute` é um comando de shell; as outras ferramentas do OpenCode (`fetch`, `search`, `other`…) têm só o rótulo.
+            let kind = call.get("kind").and_then(Value::as_str).unwrap_or("other");
+            if kind != "execute" {
+                return Some(Draft { kind: Kind::Command, detail: ask.title.clone(), files: Vec::new(), foreign: Some(format!("opencode:{kind}")) });
+            }
+            let full = call.pointer("/rawInput/command").and_then(Value::as_str);
+            Some(Draft { kind: Kind::Command, detail: full.unwrap_or(&ask.title).to_string(), files: Vec::new(), foreign: None })
         }
         _ => None,
     }
@@ -118,16 +125,16 @@ pub fn symlink_escapes(files: &[String], cwd: &str) -> bool {
 pub fn plan(conn: &Connection, thread_id: &str, subject: &Subject) -> Decision {
     let ask = |why: &str| Decision { verdict: Verdict::Ask, by: "person".into(), why: why.into() };
     let me = format!("thread:{thread_id}");
-    let (policy, auto_decide): (Option<Policy>, bool) = match team_store::team_of(conn, &me) {
-        Ok(None) => (None, true),
+    let (policy, auto_decide, allow_tools): (Option<Policy>, bool, bool) = match team_store::team_of(conn, &me) {
+        Ok(None) => (None, true, false),
         Ok(Some(team)) => match team_store::member(conn, &me) {
-            Ok(member) => (member.map(|m| m.policy), team.auto_decide),
+            Ok(member) => (member.map(|m| m.policy), team.auto_decide, team.allow_tools),
             Err(_) => return ask("Não consegui ler o integrante no time."),
         },
         Err(_) => return ask("Não consegui ler o time."),
     };
     match team_store::rules(conn) {
-        Ok(rules) => permission::decide(policy, auto_decide, &rules, subject),
+        Ok(rules) => permission::decide(policy, auto_decide, allow_tools, &rules, subject),
         Err(_) => ask("Não consegui ler as regras de permissão."),
     }
 }
@@ -156,6 +163,7 @@ pub fn on_arrival(app: &AppHandle, db: &DbConnection, row: &RequestRow, draft: O
             }
         }
         let mut subject = Subject::new(draft.kind, draft.detail, draft.files, Some(thread.cwd.clone()), &thread.agent_id);
+        subject.foreign = draft.foreign;
         if subject.kind == Kind::Edit {
             subject.escapes = symlink_escapes(&subject.files, &thread.cwd);
         }

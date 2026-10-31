@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => un
 
 import { usePendingSends } from "../../timeline/pending";
 import { sendToThread } from "../../structured/store";
-import { sendDirect, setAutoDecide, setSendError, useTeamStore } from "../teamStore";
+import { sendDirect, setAllowTools, setAutoDecide, setSendError, useTeamStore } from "../teamStore";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const pendingOf = (key: string) => (usePendingSends.getState().byKey[key] ?? []).map((p) => p.text);
@@ -87,5 +87,15 @@ describe("setAutoDecide (o interruptor «não decidir sozinho»)", () => {
     expect(backend.calls[backend.calls.length - 1]).toEqual(["chat_team_auto_decide", { teamId: "t1", enabled: false }]);
     setAutoDecide("t1", true);
     expect(useTeamStore.getState().teams[0]!.autoDecide).toBe(true);
+  });
+});
+
+describe("setAllowTools (ferramentas de fora do shell)", () => {
+  it("nasce desligado, mostra já e pede ao backend", () => {
+    useTeamStore.setState({ teams: [{ id: "t1", orchestrator: "tab", agentId: "claude-code", label: "L", cwd: "/", title: "", createdAt: 1, updatedAt: 1, headcount: 1, members: [] }] });
+    expect(useTeamStore.getState().teams[0]!.allowTools).toBeUndefined();
+    setAllowTools("t1", true);
+    expect(useTeamStore.getState().teams[0]!.allowTools).toBe(true);
+    expect(backend.calls[backend.calls.length - 1]).toEqual(["chat_team_allow_tools", { teamId: "t1", enabled: true }]);
   });
 });

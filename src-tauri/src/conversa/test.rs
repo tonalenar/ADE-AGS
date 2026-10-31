@@ -837,7 +837,7 @@ mod permissao {
     /// Uma conversa `t1` no time `team1` (orquestrador `tab-lead`), com a política dada.
     fn member_with(conn: &Connection, policy: Policy) {
         store::insert_thread(conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
-        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true };
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
         team_store::insert_team(conn, &row).unwrap();
         let new = NewMember { member: "thread:t1".into(), agent_id: "codex".into(), label: "Codex".into(), role: "backend".into(), origin: "existing".into(), ..Default::default() };
         team_store::insert_member(conn, "team1", &new, policy, 1).unwrap();
@@ -881,6 +881,9 @@ mod permissao {
         let other = json!({ "subtype": "can_use_tool", "tool_name": "mcp__x__run", "tool_use_id": "t", "input": {} });
         let draft = draft_claude(&other, &crate::conversa::claude_map::ask_of(&other).unwrap()).unwrap();
         assert!(draft.kind == Kind::Command && draft.detail.starts_with("mcp__x__run"), "ferramenta de fora do shell: o nome fica no começo");
+        assert_eq!(draft.foreign.as_deref(), Some("mcp__x__run"), "e vem marcada: regra de shell nenhuma a casa");
+        let task = json!({ "subtype": "can_use_tool", "tool_name": "Task", "tool_use_id": "t", "input": { "description": "x" } });
+        assert_eq!(draft_claude(&task, &crate::conversa::claude_map::ask_of(&task).unwrap()).unwrap().foreign.as_deref(), Some("Task"));
         let plan_exit = json!({ "subtype": "can_use_tool", "tool_name": "ExitPlanMode", "tool_use_id": "t", "input": { "plan": "p" } });
         assert_eq!(draft_claude(&plan_exit, &crate::conversa::claude_map::ask_of(&plan_exit).unwrap()), None);
         let question = json!({ "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "tool_use_id": "t", "input": { "questions": [] } });
@@ -895,7 +898,33 @@ mod permissao {
         });
         let ask = crate::conversa::opencode_map::ask_of(&params).unwrap();
         let draft = draft_opencode(&params, &ask).unwrap();
-        assert_eq!(draft, Draft { kind: Kind::Command, detail: "ls\nrm -rf ~".into(), files: vec![] });
+        assert_eq!(draft, Draft { kind: Kind::Command, detail: "ls\nrm -rf ~".into(), files: vec![], foreign: None });
+    }
+
+    #[test]
+    fn so_o_execute_do_opencode_e_comando_de_shell() {
+        let params = json!({
+            "options": [{ "optionId": "o1", "kind": "allow_once", "name": "Allow" }],
+            "toolCall": { "toolCallId": "c", "kind": "fetch", "title": "webfetch https://x" },
+        });
+        let ask = crate::conversa::opencode_map::ask_of(&params).unwrap();
+        let draft = draft_opencode(&params, &ask).unwrap();
+        assert_eq!(draft.foreign.as_deref(), Some("opencode:fetch"));
+    }
+
+    #[test]
+    fn a_flag_do_time_decide_se_o_acesso_total_libera_a_ferramenta_de_fora_do_shell() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        let mut tool = cmd("mcp__x__run: algo");
+        tool.foreign = Some("mcp__x__run".into());
+        let d = plan(&conn, "t1", &tool);
+        assert_eq!(d.verdict, Verdict::Ask, "desligada por padrão");
+        assert!(d.why.contains("mcp__x__run"));
+        team_store::set_allow_tools(&conn, "team1", true).unwrap();
+        assert_eq!(plan(&conn, "t1", &tool).verdict, Verdict::Allow);
+        // A flag do time não libera risco alto de shell.
+        assert_eq!(plan(&conn, "t1", &cmd("git push")).verdict, Verdict::Ask);
     }
 
     // ── quem decide ──
@@ -947,7 +976,7 @@ mod permissao {
     fn o_orquestrador_nao_tem_politica_so_regras() {
         let conn = db();
         store::insert_thread(&conn, "lead", "claude-code", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
-        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true };
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
         team_store::insert_team(&conn, &row).unwrap();
         assert_eq!(plan(&conn, "lead", &cmd("bun add zod")).verdict, Verdict::Ask, "sem política de integrante nem regra, a pessoa decide");
     }

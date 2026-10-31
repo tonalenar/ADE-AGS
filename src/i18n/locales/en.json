@@ -4265,5 +4265,7 @@
   "chat.timeline.notice.optionIgnored": "An option was not applied by the agent.",
   "chat.timeline.notice.resend": "Resend",
   "chat.team.autoDecide.off": "Don't decide on its own",
-  "chat.team.autoDecide.hint": "Unchecked, each member's policy and your \"Always allow\" rules answer what they cover (high risk always waits for you). Checked, every permission waits for you."
+  "chat.team.autoDecide.hint": "Unchecked, each member's policy and your \"Always allow\" rules answer what they cover (high risk always waits for you). Checked, every permission waits for you.",
+  "chat.team.allowTools.on": "Full access allows non-shell tools",
+  "chat.team.allowTools.hint": "Tools such as MCP tools and Task are not shell commands: no \"Always allow\" rule matches them. Checked, a member's full access allows them without asking. Unchecked (default), they wait for you."
 }

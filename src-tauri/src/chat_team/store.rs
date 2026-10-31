@@ -53,6 +53,11 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_auto {
         conn.execute("ALTER TABLE chat_team ADD COLUMN auto_decide INTEGER NOT NULL DEFAULT 1", [])?;
     }
+    // O acesso total libera ferramentas de fora do shell (MCP, Task…)? Desligado por padrão: só a pessoa liga.
+    let has_tools = conn.prepare("SELECT 1 FROM pragma_table_info('chat_team') WHERE name = 'allow_tools'")?.exists([])?;
+    if !has_tools {
+        conn.execute("ALTER TABLE chat_team ADD COLUMN allow_tools INTEGER NOT NULL DEFAULT 0", [])?;
+    }
     // As regras «Sempre permitir», criadas SÓ pela pessoa (tela). `role` e `team_id` estão preparados e ainda
     // não se avaliam (`permission::auto_allow_rule`).
     conn.execute_batch(
@@ -210,6 +215,12 @@ pub fn count_rule_use(conn: &Connection, id: &str, now: i64) -> Result<(), Strin
     Ok(())
 }
 
+/// Liga ou desliga o «acesso total libera ferramentas de fora do shell» do time. SÓ a pessoa, pela tela.
+pub fn set_allow_tools(conn: &Connection, team_id: &str, enabled: bool) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    Ok(conn.execute("UPDATE chat_team SET allow_tools = ?1 WHERE id = ?2", params![enabled as i64, team_id]).map_err(err)? > 0)
+}
+
 /// Liga ou desliga o «decidir sozinho» do time. `false` se o time não existe.
 pub fn set_auto_decide(conn: &Connection, team_id: &str, enabled: bool) -> Result<bool, String> {
     migrate(conn).map_err(err)?;
@@ -230,6 +241,8 @@ pub struct TeamRow {
     pub updated_at: i64,
     /// O backend decide sozinho o que a política e as regras da pessoa cobrem. Desligado (`false`), tudo vai à pessoa.
     pub auto_decide: bool,
+    /// O acesso total libera ferramentas de fora do shell (desligado por padrão).
+    pub allow_tools: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -282,7 +295,7 @@ pub struct MemberPatch {
     pub subagent: Option<bool>,
 }
 
-const TEAM_COLUMNS: &str = "id, orchestrator, agent_id, label, cwd, title, created_at, updated_at, auto_decide";
+const TEAM_COLUMNS: &str = "id, orchestrator, agent_id, label, cwd, title, created_at, updated_at, auto_decide, allow_tools";
 const MEMBER_COLUMNS: &str = "team_id, member, agent_id, label, role, model, policy, branch, worktree, origin, position, created_at, updated_at, subagent";
 
 fn team_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamRow> {
@@ -296,6 +309,7 @@ fn team_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamRow> {
         created_at: r.get(6)?,
         updated_at: r.get(7)?,
         auto_decide: r.get::<_, i64>(8)? != 0,
+        allow_tools: r.get::<_, i64>(9)? != 0,
     })
 }
 
@@ -327,8 +341,8 @@ fn err(e: rusqlite::Error) -> String {
 pub fn insert_team(conn: &Connection, row: &TeamRow) -> Result<(), String> {
     migrate(conn).map_err(err)?;
     conn.execute(
-        &format!("INSERT INTO chat_team ({TEAM_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"),
-        params![row.id, row.orchestrator, row.agent_id, row.label, row.cwd, row.title, row.created_at, row.updated_at, row.auto_decide as i64],
+        &format!("INSERT INTO chat_team ({TEAM_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
+        params![row.id, row.orchestrator, row.agent_id, row.label, row.cwd, row.title, row.created_at, row.updated_at, row.auto_decide as i64, row.allow_tools as i64],
     )
     .map_err(err)?;
     Ok(())
@@ -350,7 +364,7 @@ pub fn team_led_by(conn: &Connection, orchestrator: &str) -> Result<Option<TeamR
 pub fn team_joined_by(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
     migrate(conn).map_err(err)?;
     conn.query_row(
-        "SELECT t.id, t.orchestrator, t.agent_id, t.label, t.cwd, t.title, t.created_at, t.updated_at, t.auto_decide
+        "SELECT t.id, t.orchestrator, t.agent_id, t.label, t.cwd, t.title, t.created_at, t.updated_at, t.auto_decide, t.allow_tools
          FROM chat_team t JOIN chat_team_member m ON m.team_id = t.id WHERE m.member = ?1",
         [member],
         team_row,

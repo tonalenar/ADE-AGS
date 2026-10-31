@@ -103,6 +103,7 @@ pub fn create(conn: &Connection, input: NewTeam, now: i64) -> Result<(TeamView, 
         created_at: now,
         updated_at: now,
         auto_decide: true,
+        allow_tools: false,
     };
     store::insert_team(conn, &row)?;
     Ok((view(conn, row)?, true))

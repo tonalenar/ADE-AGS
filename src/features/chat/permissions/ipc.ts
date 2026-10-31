@@ -24,3 +24,4 @@ export const chatPermissionRuleAdd = (input: { kind: AskKind; pattern: string; a
 export const chatPermissionRuleUpdate = (id: string, patch: { pattern?: string; agentId?: string; anyAgent?: boolean }) => invoke<boolean>("chat_permission_rule_update", { id, patch });
 export const chatPermissionRuleRemove = (id: string) => invoke<boolean>("chat_permission_rule_remove", { id });
 export const chatTeamAutoDecide = (teamId: string, enabled: boolean) => invoke<boolean>("chat_team_auto_decide", { teamId, enabled });
+export const chatTeamAllowTools = (teamId: string, enabled: boolean) => invoke<boolean>("chat_team_allow_tools", { teamId, enabled });

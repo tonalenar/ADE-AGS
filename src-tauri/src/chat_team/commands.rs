@@ -312,3 +312,14 @@ pub fn chat_team_auto_decide(app: AppHandle, db: State<'_, DbConnection>, team_i
 
 /// O evento que a tela escuta para reler as regras.
 pub const RULES_EVENT: &str = "cc-chat-permission-rules";
+
+/// «Acesso total libera ferramentas de fora do shell» do time (MCP, `Task`…). Desligado por padrão; só a pessoa liga.
+#[tauri::command]
+pub fn chat_team_allow_tools(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
+    let changed = super::store::set_allow_tools(&*lock(&db)?, &team_id, enabled)?;
+    announce(&app, &team_id);
+    if enabled {
+        crate::conversa::permission::sweep(&app, &db);
+    }
+    Ok(changed)
+}

@@ -4265,5 +4265,7 @@
   "chat.timeline.notice.optionIgnored": "El agente no aplicó una opción.",
   "chat.timeline.notice.resend": "Reenviar",
   "chat.team.autoDecide.off": "No decidir por su cuenta",
-  "chat.team.autoDecide.hint": "Sin marcar, la política de cada integrante y sus reglas «Permitir siempre» responden lo que cubren (el riesgo alto siempre espera por usted). Marcado, todo permiso espera por usted."
+  "chat.team.autoDecide.hint": "Sin marcar, la política de cada integrante y sus reglas «Permitir siempre» responden lo que cubren (el riesgo alto siempre espera por usted). Marcado, todo permiso espera por usted.",
+  "chat.team.allowTools.on": "El acceso total permite herramientas fuera del shell",
+  "chat.team.allowTools.hint": "Herramientas como las de MCP y Task no son comandos de shell: ninguna regla «Permitir siempre» las cubre. Marcado, el acceso total de un integrante las permite sin preguntar. Sin marcar (predeterminado), esperan por usted."
 }

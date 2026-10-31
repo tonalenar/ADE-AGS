@@ -20,7 +20,7 @@ import {
   chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
   type TeamFeedItem, type TeamPolicy, type TeamView,
 } from "./ipc";
-import { chatTeamAutoDecide } from "../permissions/ipc";
+import { chatTeamAllowTools, chatTeamAutoDecide } from "../permissions/ipc";
 import { canvasPlan, runCanvasPlan } from "./teamCanvas";
 import { useTeamIndex } from "./teamIndex";
 import { projectCanvas, reversePlan, roleIdOfLabel, type CanvasProjection, type ReverseOp } from "./teamMirror";
@@ -269,6 +269,12 @@ export function sendToMember(ref: string, text: string, done?: { onSent?: () => 
 export function setAutoDecide(teamId: string, enabled: boolean): void {
   useTeamStore.setState((s) => ({ teams: s.teams.map((t) => (t.id === teamId ? { ...t, autoDecide: enabled } : t)) }));
   chatTeamAutoDecide(teamId, enabled).catch(() => void reloadTeams());
+}
+
+/** «Acesso total libera ferramentas de fora do shell» (MCP, `Task`…): desligado por padrão; só a pessoa liga. */
+export function setAllowTools(teamId: string, enabled: boolean): void {
+  useTeamStore.setState((s) => ({ teams: s.teams.map((t) => (t.id === teamId ? { ...t, allowTools: enabled } : t)) }));
+  chatTeamAllowTools(teamId, enabled).catch(() => void reloadTeams());
 }
 
 export function setSendError(orchestrator: string, message: string | null): void {
