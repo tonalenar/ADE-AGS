@@ -28,7 +28,7 @@ use crate::database::DbConnection;
 
 use super::claude_map::{self, Mapper, Out, Pending, Start};
 use super::events::emit;
-use super::{resume, store, turn};
+use super::{permission, resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido de controle (abrir, parar). O turno não tem prazo.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -472,6 +472,8 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, reques
         return;
     };
     begin_turn(app, db, session);
+    // O pedido inteiro (o título só guarda a primeira linha do comando): é sobre ele que o backend decide.
+    let draft = permission::draft_claude(request, &ask);
     let row = store::RequestRow {
         id: uuid::Uuid::new_v4().to_string(),
         thread_id: session.thread_id.clone(),
@@ -492,6 +494,10 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, reques
     }
     if let Ok(mut asks) = session.asks.lock() {
         asks.insert(request_id.to_string(), Pending::of(request));
+    }
+    // A política do integrante e as regras da pessoa respondem o que cobrem; o resto fica pendente e vai à tela.
+    if permission::on_arrival(app, db, &row, draft) {
+        return;
     }
     emit(app, &session.thread_id, "request", json!({ "request": row }));
 }

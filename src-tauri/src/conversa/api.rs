@@ -286,6 +286,12 @@ pub async fn interrupt(thread_id: &str) -> Result<(), String> {
 /// Responde a um pedido do agente: `allow`, `allowSession` ou `deny` numa aprovação; o texto da
 /// resposta numa pergunta. `false` se o pedido já não estava pendente.
 pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str) -> Result<bool, String> {
+    answer_as(app, db, request_id, choice, "person", None)
+}
+
+/// Como `answer`, dizendo quem responde (`person`, `policy`, `rule:<id>`) e por quê: fica gravado e vai no aviso
+/// `requestResolved`. A resposta da pessoa é a de sempre; as do backend vêm de `conversa::permission`.
+pub fn answer_as(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str, by: &str, why: Option<&str>) -> Result<bool, String> {
     let row = {
         let conn = db.lock().map_err(db_err)?;
         store::request(&conn, request_id).map_err(db_err)?.ok_or("Pedido não encontrado")?
@@ -304,9 +310,9 @@ pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str
     }
     let answered = {
         let conn = db.lock().map_err(db_err)?;
-        store::answer_request(&conn, request_id, choice, crate::util::now_ts_ms()).map_err(db_err)?
+        store::answer_request_by(&conn, request_id, choice, crate::util::now_ts_ms(), by, why).map_err(db_err)?
     };
-    super::events::emit(app, &row.thread_id, "requestResolved", json!({ "id": request_id }));
+    super::events::emit(app, &row.thread_id, "requestResolved", json!({ "id": request_id, "by": by, "why": why }));
     Ok(answered)
 }
 

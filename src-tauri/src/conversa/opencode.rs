@@ -27,7 +27,7 @@ use crate::database::DbConnection;
 use super::claude_map::TurnResult;
 use super::events::emit;
 use super::opencode_map::{self as map, Mapper, Out};
-use super::{resume, store, turn};
+use super::{permission, resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido de abertura (`initialize`, `session/new`…). O turno não tem prazo.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -517,6 +517,8 @@ fn on_permission(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, rpc
         session.refuse(&rpc_id);
         return;
     };
+    // O pedido inteiro (o título só guarda a primeira linha do comando): é sobre ele que o backend decide.
+    let draft = permission::draft_opencode(params, &ask);
     let row = store::RequestRow {
         id: uuid::Uuid::new_v4().to_string(),
         thread_id: session.thread_id.clone(),
@@ -536,6 +538,10 @@ fn on_permission(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, rpc
     }
     if let Ok(mut asks) = session.asks.lock() {
         asks.push(rpc_id);
+    }
+    // A política do integrante e as regras da pessoa respondem o que cobrem; o resto fica pendente e vai à tela.
+    if permission::on_arrival(app, db, &row, draft) {
+        return;
     }
     emit(app, &session.thread_id, "request", json!({ "request": row }));
 }

@@ -464,3 +464,19 @@ mod regras {
         assert!(store::team_joined_by(&conn, "x").unwrap().is_none());
     }
 }
+
+#[test]
+fn nenhum_comando_de_cli_nem_de_mcp_escreve_regra_de_permissao() {
+    // Só a pessoa, pela tela (comandos Tauri), cria, muda ou apaga regras e liga o «decidir sozinho».
+    for (name, source) in [
+        ("ipc/commands/dispatch.rs", include_str!("../ipc/commands/dispatch.rs")),
+        ("ipc/mcp.rs", include_str!("../ipc/mcp.rs")),
+        ("bin/cli.rs", include_str!("../bin/cli.rs")),
+        ("ipc/commands/team.rs", include_str!("../ipc/commands/team.rs")),
+        ("ipc/commands/peers.rs", include_str!("../ipc/commands/peers.rs")),
+    ] {
+        for forbidden in ["add_rule(", "update_rule(", "remove_rule(", "set_auto_decide(", "chat_permission_rule", "chat_team_auto_decide"] {
+            assert!(!source.contains(forbidden), "{name} não pode mexer em regras de permissão ({forbidden})");
+        }
+    }
+}

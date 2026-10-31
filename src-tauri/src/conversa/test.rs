@@ -815,3 +815,197 @@ mod stderr {
         assert_eq!(message, result.error);
     }
 }
+
+// ── Etapa 3 (B): a permissão decidida no backend ────────────────────────
+
+mod permissao {
+    use rusqlite::Connection;
+    use serde_json::{json, Value};
+
+    use super::super::codex_map::{ask_of, Ask};
+    use super::super::permission::{draft_claude, draft_codex, draft_opencode, plan, plan_stored, Draft};
+    use super::super::store::{self, RequestRow, Tuning};
+    use crate::chat_team::model::{Policy, Verdict};
+    use crate::chat_team::permission::{Kind, Subject};
+    use crate::chat_team::store as team_store;
+    use crate::chat_team::store::NewMember;
+
+    fn db() -> Connection {
+        crate::database::test_db()
+    }
+
+    /// Uma conversa `t1` no time `team1` (orquestrador `tab-lead`), com a política dada.
+    fn member_with(conn: &Connection, policy: Policy) {
+        store::insert_thread(conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true };
+        team_store::insert_team(conn, &row).unwrap();
+        let new = NewMember { member: "thread:t1".into(), agent_id: "codex".into(), label: "Codex".into(), role: "backend".into(), origin: "existing".into(), ..Default::default() };
+        team_store::insert_member(conn, "team1", &new, policy, 1).unwrap();
+    }
+
+    fn cmd(detail: &str) -> Subject {
+        Subject::new(Kind::Command, detail.into(), vec![], Some("/p".into()), "codex")
+    }
+
+    fn request(id: &str, kind: &str) -> RequestRow {
+        RequestRow { id: id.into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: kind.into(), item_id: None, title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1 }
+    }
+
+    // ── o pedido inteiro, não o título truncado ──
+
+    fn codex_ask(command: &str) -> (Value, Ask) {
+        let params = json!({ "itemId": "i1", "command": command, "reason": "r" });
+        let ask = ask_of("item/commandExecution/requestApproval", &params).unwrap();
+        (params, ask)
+    }
+
+    #[test]
+    fn o_codex_decide_sobre_o_comando_inteiro_e_nao_sobre_a_primeira_linha() {
+        let (params, ask) = codex_ask("ls -la\nrm -rf ~");
+        assert_eq!(ask.title, "ls -la", "o título guarda só a primeira linha");
+        let draft = draft_codex("item/commandExecution/requestApproval", &params, &ask).unwrap();
+        assert_eq!((draft.kind, draft.detail.as_str()), (Kind::Command, "ls -la\nrm -rf ~"));
+    }
+
+    #[test]
+    fn o_claude_usa_o_comando_do_input_a_edicao_o_arquivo_a_rede_o_endereco_e_a_pergunta_fica_com_a_pessoa() {
+        let bash = json!({ "subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "t", "input": { "command": "ls\nnode steal.js" } });
+        let draft = draft_claude(&bash, &crate::conversa::claude_map::ask_of(&bash).unwrap()).unwrap();
+        assert_eq!(draft.detail, "ls\nnode steal.js");
+        let edit = json!({ "subtype": "can_use_tool", "tool_name": "Edit", "tool_use_id": "t", "input": { "file_path": "src/a.ts" } });
+        let draft = draft_claude(&edit, &crate::conversa::claude_map::ask_of(&edit).unwrap()).unwrap();
+        assert_eq!((draft.kind, draft.files), (Kind::Edit, vec!["src/a.ts".to_string()]));
+        let web = json!({ "subtype": "can_use_tool", "tool_name": "WebFetch", "tool_use_id": "t", "input": { "url": "https://docs.rs/x" } });
+        let draft = draft_claude(&web, &crate::conversa::claude_map::ask_of(&web).unwrap()).unwrap();
+        assert_eq!(draft.kind, Kind::Network);
+        let other = json!({ "subtype": "can_use_tool", "tool_name": "mcp__x__run", "tool_use_id": "t", "input": {} });
+        let draft = draft_claude(&other, &crate::conversa::claude_map::ask_of(&other).unwrap()).unwrap();
+        assert!(draft.kind == Kind::Command && draft.detail.starts_with("mcp__x__run"), "ferramenta de fora do shell: o nome fica no começo");
+        let plan_exit = json!({ "subtype": "can_use_tool", "tool_name": "ExitPlanMode", "tool_use_id": "t", "input": { "plan": "p" } });
+        assert_eq!(draft_claude(&plan_exit, &crate::conversa::claude_map::ask_of(&plan_exit).unwrap()), None);
+        let question = json!({ "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "tool_use_id": "t", "input": { "questions": [] } });
+        assert_eq!(draft_claude(&question, &crate::conversa::claude_map::ask_of(&question).unwrap()), None);
+    }
+
+    #[test]
+    fn o_opencode_usa_o_comando_do_raw_input() {
+        let params = json!({
+            "options": [{ "optionId": "o1", "kind": "allow_once", "name": "Allow" }],
+            "toolCall": { "toolCallId": "c", "kind": "execute", "title": "bash", "rawInput": { "command": "ls\nrm -rf ~" } },
+        });
+        let ask = crate::conversa::opencode_map::ask_of(&params).unwrap();
+        let draft = draft_opencode(&params, &ask).unwrap();
+        assert_eq!(draft, Draft { kind: Kind::Command, detail: "ls\nrm -rf ~".into(), files: vec![] });
+    }
+
+    // ── quem decide ──
+
+    #[test]
+    fn o_integrante_com_acesso_total_e_liberado_pela_politica_e_o_so_leitura_e_negado() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        let d = plan(&conn, "t1", &cmd("bun add zod"));
+        assert_eq!((d.verdict, d.by.as_str()), (Verdict::Allow, "policy"));
+        assert_eq!(plan(&conn, "t1", &cmd("git push origin main")).verdict, Verdict::Ask, "risco alto vai à pessoa");
+        team_store::patch_member(&conn, "thread:t1", &team_store::MemberPatch { policy: Some(Policy::Read), ..Default::default() }, 2).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("bun add zod")).verdict, Verdict::Deny);
+    }
+
+    #[test]
+    fn a_regra_da_pessoa_libera_o_que_a_politica_pergunta() {
+        let conn = db();
+        member_with(&conn, Policy::Ask);
+        assert_eq!(plan(&conn, "t1", &cmd("cargo build")).verdict, Verdict::Ask);
+        let rule = team_store::add_rule(&conn, Kind::Command, "cargo build *", None, 5).unwrap();
+        let d = plan(&conn, "t1", &cmd("cargo build --release"));
+        assert_eq!((d.verdict, d.by), (Verdict::Allow, format!("rule:{}", rule.id)));
+        assert_eq!(plan(&conn, "t1", &cmd("cargo build\nrm -rf ~")).verdict, Verdict::Ask, "o comando inteiro, não a primeira linha");
+    }
+
+    #[test]
+    fn o_interruptor_do_time_manda_tudo_para_a_pessoa() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        team_store::add_rule(&conn, Kind::Command, "*", None, 5).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls")).verdict, Verdict::Allow);
+        team_store::set_auto_decide(&conn, "team1", false).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls")).verdict, Verdict::Ask);
+    }
+
+    #[test]
+    fn fora_de_time_so_as_regras_valem_e_sem_regra_pergunta() {
+        let conn = db();
+        store::insert_thread(&conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls")).verdict, Verdict::Ask);
+        team_store::add_rule(&conn, Kind::Command, "ls *", Some("codex"), 5).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls -la")).verdict, Verdict::Allow);
+        let other = Subject::new(Kind::Command, "ls -la".into(), vec![], None, "claude-code");
+        assert_eq!(plan(&conn, "t1", &other).verdict, Verdict::Ask, "a regra é do Codex");
+    }
+
+    #[test]
+    fn o_orquestrador_nao_tem_politica_so_regras() {
+        let conn = db();
+        store::insert_thread(&conn, "lead", "claude-code", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true };
+        team_store::insert_team(&conn, &row).unwrap();
+        assert_eq!(plan(&conn, "lead", &cmd("bun add zod")).verdict, Verdict::Ask, "sem política de integrante nem regra, a pessoa decide");
+    }
+
+    // ── a varredura ──
+
+    #[test]
+    fn a_varredura_decide_pelo_pedido_guardado_e_nunca_o_sem_subject_nem_a_pergunta() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        // Um pedido guardado com o subject inteiro: a política libera.
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        store::set_subject(&conn, "q1", &serde_json::to_string(&cmd("bun add zod")).unwrap()).unwrap();
+        // O mesmo pedido, de antes desta versão (sem subject): nunca é decidido sozinho.
+        store::insert_request(&conn, &request("q2", "command")).unwrap();
+        // Uma pergunta é sempre da pessoa, mesmo com subject.
+        store::insert_request(&conn, &request("q3", "question")).unwrap();
+        store::set_subject(&conn, "q3", &serde_json::to_string(&cmd("ls")).unwrap()).unwrap();
+        // De risco alto.
+        store::insert_request(&conn, &request("q4", "command")).unwrap();
+        store::set_subject(&conn, "q4", &serde_json::to_string(&cmd("git push")).unwrap()).unwrap();
+        let rows = store::pending_all(&conn).unwrap();
+        let decided: Vec<(&str, Verdict)> = rows.iter().filter_map(|r| plan_stored(&conn, r).map(|d| (r.id.as_str(), d.verdict))).collect();
+        assert_eq!(decided, [("q1", Verdict::Allow)]);
+    }
+
+    #[test]
+    fn so_as_conversas_ativas_entram_na_varredura() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        assert_eq!(store::pending_all(&conn).unwrap().len(), 1);
+        store::set_state(&conn, "t1", "settled", 5).unwrap();
+        assert!(store::pending_all(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_resposta_grava_quem_decidiu_e_a_da_pessoa_diz_person() {
+        let conn = db();
+        member_with(&conn, Policy::Ask);
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        store::insert_request(&conn, &request("q2", "command")).unwrap();
+        assert!(store::answer_request_by(&conn, "q1", "allow", 5, "rule:r9", Some("Liberado pela regra")).unwrap());
+        assert!(store::answer_request(&conn, "q2", "deny", 6).unwrap());
+        assert!(!store::answer_request_by(&conn, "q1", "deny", 7, "policy", None).unwrap(), "responder duas vezes não muda quem decidiu");
+        let decisions = store::recent_decisions(&conn, "t1", 10).unwrap();
+        assert_eq!(decisions[0], ("q2".into(), "deny".into(), Some("person".into()), None));
+        assert_eq!(decisions[1], ("q1".into(), "allow".into(), Some("rule:r9".into()), Some("Liberado pela regra".into())));
+    }
+
+    #[test]
+    fn a_migracao_das_colunas_da_decisao_roda_duas_vezes_e_guarda_o_que_havia() {
+        let conn = db();
+        store::migrate(&conn).unwrap();
+        store::migrate(&conn).unwrap();
+        member_with(&conn, Policy::Ask);
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        store::migrate(&conn).unwrap();
+        assert_eq!(store::pending_all(&conn).unwrap().len(), 1, "migrar de novo não apaga nada");
+    }
+}

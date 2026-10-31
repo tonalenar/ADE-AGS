@@ -26,6 +26,7 @@ pub mod events;
 pub mod commands;
 pub mod opencode;
 pub mod opencode_map;
+pub mod permission;
 pub mod resume;
 pub mod store;
 pub mod turn;

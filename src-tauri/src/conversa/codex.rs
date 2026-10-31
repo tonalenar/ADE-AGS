@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::database::DbConnection;
 
 use super::events::emit;
-use super::{codex_map, resume, store, turn};
+use super::{codex_map, permission, resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido (abrir thread, começar turno). O turno em si não tem
 /// prazo: ele acaba por aviso (`turn/completed`).
@@ -420,6 +420,8 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Session, method: &st
         session.refuse(rpc_id);
         return;
     };
+    // O pedido inteiro (o título só guarda a primeira linha do comando): é sobre ele que o backend decide.
+    let draft = permission::draft_codex(method, params, &ask);
     let row = store::RequestRow {
         id: uuid::Uuid::new_v4().to_string(),
         thread_id: session.thread_id.clone(),
@@ -434,6 +436,11 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Session, method: &st
     };
     let saved = db.lock().ok().map(|conn| store::insert_request(&conn, &row).is_ok()).unwrap_or(false);
     if saved {
+        // A política do integrante e as regras da pessoa respondem o que cobrem, com a janela fechada ou não;
+        // o resto fica pendente e vai à tela.
+        if permission::on_arrival(app, db, &row, draft) {
+            return;
+        }
         emit(app, &session.thread_id, "request", json!({ "request": row }));
     } else {
         session.refuse(rpc_id);
