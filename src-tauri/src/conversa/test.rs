@@ -217,7 +217,7 @@ mod claude {
     fn row(access: &str) -> ThreadRow {
         ThreadRow {
             id: "t".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/p".into(), title: String::new(),
-            model: Some("haiku".into()), effort: Some("low".into()), access: access.into(), account_id: None,
+            model: Some("haiku".into()), effort: Some("low".into()), access: access.into(), account_id: None, memory: None,
             state: "active".into(), created_at: 1, updated_at: 1,
         }
     }

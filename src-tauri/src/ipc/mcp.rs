@@ -1940,8 +1940,20 @@ pub(crate) fn sweep_configs_in(dir: &std::path::Path, conn: &rusqlite::Connectio
         // nadie. Los de una tarea llevan su id pelado, que es como los escribe el supervisor.
         let keep = match stem.strip_prefix("tab-") {
             Some(tab_id) => {
-                let tab_id = tab_id.split(".ai-memory-").next().unwrap_or(tab_id);
-                !tab_id.is_empty() && alive("tabs", tab_id)
+                let (tab_id, hooks_file) = match tab_id.split_once(".ai-memory-") {
+                    Some((id, _)) => (id, true),
+                    None => (tab_id, false),
+                };
+                match tab_id.strip_prefix("thread-") {
+                    // Conversa por protocolo (`conversa::memoria::config_id`): o MCP vale enquanto a conversa existir; o
+                    // arquivo dos hooks, só enquanto o processo dela viver (no arranque, nenhum).
+                    Some(thread) => {
+                        !thread.is_empty()
+                            && alive("chat_thread", thread)
+                            && (!hooks_file || crate::conversa::claude::get(thread).is_some())
+                    }
+                    None => !tab_id.is_empty() && alive("tabs", tab_id),
+                }
             }
             None => alive("tasks", stem),
         };

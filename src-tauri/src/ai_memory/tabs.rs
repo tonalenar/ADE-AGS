@@ -33,13 +33,15 @@ pub(super) fn supported_program(program: &Path, cwd: &Path) -> bool {
         .is_ok()
 }
 
-/// O que o `pty_create` precisa saber depois de preparar a injeção de uma nova aba.
+/// O que quem abre o agente (`pty_create`, a conversa por protocolo) precisa saber depois de preparar a injeção.
 pub(crate) struct NewTab {
     pub plan: TabInjection,
     /// Binário aceito (versão mínima); `None` quando ausente ou antigo.
     pub binary: Option<PathBuf>,
     /// O usuário já tem o `SessionStart` do ai-memory nos próprios settings.
     pub hooks_configured: bool,
+    /// O binário existe mas não deu para gravar os arquivos da injeção (a abertura segue sem memória).
+    pub failed: bool,
 }
 
 /// Prepara hooks e MCP de uma nova aba. Faz subprocesso (`--version`) e I/O de arquivo: quem chama de
@@ -53,8 +55,21 @@ pub(crate) fn prepare_new_tab(
     argv: &[String],
     extras: &HashMap<String, String>,
 ) -> NewTab {
-    let mut out = NewTab { plan: TabInjection::default(), binary: None, hooks_configured: false };
-    let Some(binary) = supported_binary(cwd) else {
+    prepare_new_tab_with(supported_binary(cwd), tab, agent, dir, home, argv, extras)
+}
+
+/// O miolo de [`prepare_new_tab`], com o binário já resolvido (`None` = ausente ou antigo): só grava arquivos.
+pub(crate) fn prepare_new_tab_with(
+    binary: Option<PathBuf>,
+    tab: &str,
+    agent: &str,
+    dir: &Path,
+    home: &Path,
+    argv: &[String],
+    extras: &HashMap<String, String>,
+) -> NewTab {
+    let mut out = NewTab { plan: TabInjection::default(), binary: None, hooks_configured: false, failed: false };
+    let Some(binary) = binary else {
         return out;
     };
     let settings = user_settings(home, extras);
@@ -62,7 +77,10 @@ pub(crate) fn prepare_new_tab(
     out.binary = Some(binary.clone());
     match prepare(&binary, dir, tab, agent, argv, extras, &settings) {
         Ok(plan) => out.plan = plan,
-        Err(_) => eprintln!("[ade-ags] integração ai-memory indisponível nesta nova aba"),
+        Err(_) => {
+            out.failed = true;
+            eprintln!("[ade-ags] integração ai-memory indisponível nesta nova aba");
+        }
     }
     out
 }
@@ -294,8 +312,11 @@ pub(crate) fn enabled(value: Option<&str>) -> bool {
     value != Some("false")
 }
 
+/// Nunca deixa o `ai-memory run` reescrever configurações globais do agente, nem com a injeção desligada.
+pub(crate) const PROTECT_ENV: (&str, &str) = ("AI_MEMORY_RUN_AUTOWIRE", "false");
+
 pub(crate) fn protect_pty_env(command: &mut portable_pty::CommandBuilder) {
-    command.env("AI_MEMORY_RUN_AUTOWIRE", "false");
+    command.env(PROTECT_ENV.0, PROTECT_ENV.1);
 }
 
 pub(crate) fn remove_owned_server(dir: &Path, tab_id: &str) {

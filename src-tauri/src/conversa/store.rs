@@ -72,6 +72,11 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             conn.execute_batch(&format!("ALTER TABLE chat_request ADD COLUMN {column} {ddl};"))?;
         }
     }
+    // O ai-memory na abertura do processo (`on` ou `off:<código>`): aditiva, nula até o primeiro processo abrir.
+    let has = conn.prepare("SELECT 1 FROM pragma_table_info('chat_thread') WHERE name = 'memory'")?.exists([])?;
+    if !has {
+        conn.execute_batch("ALTER TABLE chat_thread ADD COLUMN memory TEXT;")?;
+    }
     Ok(())
 }
 
@@ -88,6 +93,8 @@ pub struct ThreadRow {
     pub effort: Option<String>,
     pub access: String,
     pub account_id: Option<String>,
+    /// O ai-memory na abertura do processo: `on`, ou `off:<código>`; `None` = o processo ainda não abriu.
+    pub memory: Option<String>,
     pub state: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -101,13 +108,13 @@ pub struct Tuning {
     pub access: String,
 }
 
-const THREAD_COLS: &str = "id, agent_id, remote_id, cwd, title, model, effort, access, account_id, state, created_at, updated_at";
+const THREAD_COLS: &str = "id, agent_id, remote_id, cwd, title, model, effort, access, account_id, state, created_at, updated_at, memory";
 
 fn thread_of(r: &rusqlite::Row) -> rusqlite::Result<ThreadRow> {
     Ok(ThreadRow {
         id: r.get(0)?, agent_id: r.get(1)?, remote_id: r.get(2)?, cwd: r.get(3)?, title: r.get(4)?,
         model: r.get(5)?, effort: r.get(6)?, access: r.get(7)?, account_id: r.get(8)?, state: r.get(9)?,
-        created_at: r.get(10)?, updated_at: r.get(11)?,
+        created_at: r.get(10)?, updated_at: r.get(11)?, memory: r.get(12)?,
     })
 }
 
@@ -141,6 +148,11 @@ pub fn set_tuning(conn: &Connection, id: &str, tuning: &Tuning, now: i64) -> rus
         params![id, tuning.model, tuning.effort, tuning.access, now],
     )
     .map(|_| ())
+}
+
+/// O ai-memory na abertura do processo da conversa (`on` ou `off:<código>`), para a tela mostrar o que de fato aconteceu.
+pub fn set_memory(conn: &Connection, id: &str, memory: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_thread SET memory = ?2 WHERE id = ?1", params![id, memory]).map(|_| ())
 }
 
 pub fn set_title(conn: &Connection, id: &str, title: &str) -> rusqlite::Result<()> {

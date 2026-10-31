@@ -28,7 +28,8 @@ use crate::database::DbConnection;
 
 use super::claude_map::{self, Mapper, Out, Pending, Start};
 use super::events::emit;
-use super::{permission, resume, store, turn};
+use super::{memoria, permission, resume, store, turn};
+use crate::ai_memory::tabs::TabInjection;
 
 /// Quanto esperar a resposta de um pedido de controle (abrir, parar). O turno não tem prazo.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -55,6 +56,8 @@ pub struct Session {
     asks: Mutex<HashMap<String, Pending>>,
     stderr: Mutex<VecDeque<String>>,
     child: Mutex<Option<tokio::process::Child>>,
+    /// Os hooks temporários do ai-memory: o arquivo vive tanto quanto o processo e some quando a sessão é solta.
+    _memory: TabInjection,
 }
 
 impl Session {
@@ -225,7 +228,11 @@ async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: O
 fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>) -> Result<Arc<Session>, String> {
     let name = crate::agents::agent_command("claude-code").unwrap_or("claude");
     let program = crate::util::find_program(name).ok_or("Não achei o Claude Code (claude) no PATH")?;
-    let args = claude_map::launch_args(row, start);
+    let mut args = claude_map::launch_args(row, start);
+    // O ai-memory entra por processo, como nas abas: hooks e MCP só no nascimento (a troca de modelo ou de acesso, e a
+    // retomada, abrem outro processo e passam por aqui de novo). Falhar aqui nunca impede a conversa de abrir.
+    let memory = memoria::for_thread(db, row, &program, &args, env.as_ref());
+    args.extend(memory.args.iter().cloned());
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(crate::util::external_path(std::path::Path::new(&row.cwd)))
@@ -235,11 +242,13 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     if let Some(env) = env {
         cmd.envs(env);
     }
+    cmd.envs(memory.env.iter().map(|(k, v)| (k, v)));
     // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Claude: {e}"))?;
+    record_memory(app, db, row, &memory);
     let stdin = child.stdin.take().ok_or("sem stdin")?;
     let stdout = child.stdout.take().ok_or("sem stdout")?;
     let stderr = child.stderr.take();
@@ -258,6 +267,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         asks: Mutex::new(HashMap::new()),
         stderr: Mutex::new(VecDeque::new()),
         child: Mutex::new(Some(child)),
+        _memory: memory.guard,
     });
 
     tauri::async_runtime::spawn(write_loop(rx, stdin));
@@ -277,6 +287,21 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     }
     tauri::async_runtime::spawn(read_loop(app.clone(), db.clone(), session.clone(), stdout));
     Ok(session)
+}
+
+/// Grava na conversa o que aconteceu com o ai-memory nesta abertura (a tela mostra o que está gravado, não adivinha) e,
+/// quando algo falhou, deixa um aviso no fio, uma vez por mudança de estado.
+fn record_memory(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, memory: &memoria::Memory) {
+    if row.memory.as_deref() == Some(memory.state.as_str()) {
+        return;
+    }
+    if let Ok(conn) = db.lock() {
+        let _ = store::set_memory(&conn, &row.id, &memory.state);
+    }
+    emit(app, &row.id, "thread", json!({ "memory": memory.state }));
+    if let Some(text) = &memory.notice {
+        turn::save_notice(app, db, &row.id, "memoryOff", text);
+    }
 }
 
 async fn write_loop(mut rx: mpsc::UnboundedReceiver<String>, mut stdin: tokio::process::ChildStdin) {

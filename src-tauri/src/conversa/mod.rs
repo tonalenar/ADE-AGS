@@ -24,6 +24,7 @@ pub mod codex;
 pub mod codex_map;
 pub mod envio;
 pub mod events;
+pub mod memoria;
 pub mod commands;
 pub mod opencode;
 pub mod opencode_map;
@@ -34,6 +35,8 @@ pub mod turn;
 pub mod worktree;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_memoria;
 #[cfg(test)]
 mod test_motores;
 
