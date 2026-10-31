@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
@@ -103,14 +103,30 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
-  useLayoutEffect(() => {
+  // A altura segue o texto: a cada mudança do texto e também quando a largura da caixa muda (o painel
+  // direito abre, a janela redimensiona, o composer sai de um espaço sem largura): o texto quebra de outro
+  // jeito e a altura de antes ficaria curta ou sobrando.
+  const fit = useCallback(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
     // Escrevendo no fim, o cursor acompanha o texto que desce.
     if (scroller.current && el.selectionStart === el.value.length) scroller.current.scrollTop = scroller.current.scrollHeight;
-  }, [text, attachments.list.length]);
+  }, []);
+  useLayoutEffect(fit, [fit, text, attachments.list.length]);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let width = el.offsetWidth;
+    const observer = new ResizeObserver(() => {
+      if (el.offsetWidth === width) return;
+      width = el.offsetWidth;
+      fit();
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [fit]);
 
   const queue = () => {
     if (!onQueue || !canSubmit(text, attachments.list.length, disabled, false)) return;
