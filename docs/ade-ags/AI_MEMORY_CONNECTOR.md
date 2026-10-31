@@ -190,3 +190,33 @@ a última execução específica do intermediário aprovou os 6 testes, incluind
 fake sem encaminhá-las ao filho. Clippy all-targets concluiu sem avisos nos arquivos novos
 (138 avisos herdados da lib); lint mantém 40 violações antigas, nenhuma nova. Catálogos/diálogo:
 8 testes aprovados. Nenhum cliente real foi executado; Windows não foi validado.
+
+### Prioridade do marcador nos worktrees
+
+Antes de guessProject, a resolução estática procura `.ai-memory.toml` a partir do cwd da nova aba.
+Dentro de `$HOME`, consulta até o próprio home; fora dele, até a raiz do checkout mais próxima
+(`.git` arquivo ou diretório). Fora de home e sem checkout, consulta somente cwd. Sem home definido,
+consulta até a raiz do filesystem. Caminhos existentes são canonicalizados para respeitar fronteiras
+com symlinks. Arquivos maiores que 2 MiB, ilegíveis, TOML inválido ou pares com tipos/valores inválidos
+são ignorados; marcadores somente `[capture]` são transparentes. O marcador mais próximo com settings
+reconhecidos governa a busca: um marcador parcial não herda a metade ausente de um ancestral.
+
+Um par explícito válido workspace/project vence o basename e é aceito mesmo sem existir em
+`list-projects`: o marcador é a declaração do repositório para clientes estáticos, e
+`memory_write_page` v3.3.0 cria projetos nomeados na primeira escrita autorizada. O ADE não cria projeto
+na resolução. As tools de leitura podem responder “não encontrado” até existir conteúdo. Projetos
+reservados continuam recusados. Sem par utilizável, permanece o fallback de correspondência única
+por basename em `list-projects --json`; sem match ou com ambiguidade, não injeta.
+
+Fonte: `docs/marker-file.md` (“Where to put it”, “Static MCP clients”, “What the marker file does NOT do”)
+e `crates/ai-memory-mcp/src/server.rs::WritePageArgs`, tag v3.3.0. TOML usa o `toml_edit` já resolvido no
+lockfile, agora declarado diretamente; nenhuma versão transitiva foi atualizada. A resolução não
+lê arquivos de instalação, tokens ou config do ai-memory: somente o marcador do repositório.
+
+Prova do ajuste: 57 testes `ai_memory::` aprovados, incluindo 5 testes de marcador em temporários.
+O caso de marcador inválido na fronteira foi observado falhando antes da correção do iterador e
+passou depois; nunca se sobe acima do home/checkout, mesmo quando o arquivo da fronteira é inválido.
+Clippy all-targets sem avisos nas alterações, com os 138 avisos herdados da lib; lint de testes sem
+violação nova. `ags test affected --dry-run` selecionou a suíte Rust inteira por causa do manifesto;
+não a repetimos nesta mudança sem schema/IPC, conforme a política de testes: executamos o módulo e
+compilamos todos os targets com Clippy. Sem binário/base real do ai-memory nos testes.

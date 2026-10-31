@@ -56,6 +56,8 @@ tokio-tungstenite = "0.24"
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Utils
+# Parser já presente no lockfile; valida marcadores oficiais do ai-memory.
+toml_edit = { version = "=0.25.15", default-features = false, features = ["parse"] }
 # Horas locales para las rotinas (ya llegaba como dependencia transitiva).
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 uuid = { version = "1", features = ["v4"] }

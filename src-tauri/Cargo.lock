@@ -50,6 +50,7 @@ dependencies = [
  "tauri-winrt-notification",
  "tokio",
  "tokio-tungstenite",
+ "toml_edit 0.25.15+spec-1.1.0",
  "trash",
  "unicode-normalization",
  "url",

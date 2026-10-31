@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.34.0
+version: 1.35.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -1015,8 +1015,11 @@ yourself; it is started by the user.
 
 The app may start `ags ai-memory-bridge --cwd <folder> --workspace <W> --project <P>`
 for new Codex/OpenCode tabs. It speaks JSON-RPC stdio, never the regular CLI envelope.
-The app resolves a unique project matching the folder through `list-projects --json`;
-ambiguity or failure means no memory MCP injection. Workspace/project are fixed by the app.
+The app first reads an explicit workspace/project pair from the nearest allowed `.ai-memory.toml`
+(home/checkout boundaries apply; invalid and capture-only markers are skipped). A declared pair
+does not require a pre-existing project: the app does not create it during resolution. Otherwise,
+it resolves a unique project matching the folder through `list-projects --json`; ambiguity or
+failure means no memory MCP injection. Workspace/project remain fixed for the connection.
 Divergent scopes, global/profile/multi-project requests, unknown tools and methods are rejected.
 Only memory_query, memory_recent, memory_status, memory_read_page, memory_write_page and
 memory_patch_page are exposed. This does not change settings or live tabs.

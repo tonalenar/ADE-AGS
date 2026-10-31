@@ -319,34 +319,29 @@ pub(crate) fn configured_hooks(paths: &[PathBuf]) -> bool {
     UserHooks::read(paths).complete()
 }
 
-/// Só um nome de pasta com correspondência única permite guessProject. Ambiguidade falha fechada.
+/// Prefere o par explícito do marcador; sem ele, guessProject exige correspondência única.
 fn static_plan(
     binary: &Path,
     cwd: &Path,
     agent: &str,
     extras: &HashMap<String, String>,
 ) -> Option<TabInjection> {
-    let projects = super::client::Client::at(Some(binary.to_path_buf()), cwd.to_path_buf())
-        .ok()?
-        .read::<Vec<super::types::Project>>(super::client::Read::Projects)
-        .ok()?
-        .data;
-    let project = unique_project(&projects, cwd)?;
+    let (workspace, project) = match super::marker::scope(cwd, dirs::home_dir().as_deref()) {
+        Some(scope) => scope,
+        None => {
+            let projects = super::client::Client::at(Some(binary.to_path_buf()), cwd.to_path_buf())
+                .ok()?.read::<Vec<super::types::Project>>(super::client::Read::Projects).ok()?.data;
+            let project = unique_project(&projects, cwd)?;
+            (project.workspace_name.clone(), project.project_name.clone())
+        }
+    };
     let ags = std::env::current_exe()
         .ok()?
         .with_file_name(if cfg!(windows) { "ags.exe" } else { "ags" });
     if !ags.is_file() {
         return None;
     }
-    scoped_plan(
-        &ags,
-        cwd,
-        agent,
-        extras,
-        &project.workspace_name,
-        &project.project_name,
-    )
-    .ok()
+    scoped_plan(&ags, cwd, agent, extras, &workspace, &project).ok()
 }
 pub(super) fn scoped_plan(
     ags: &Path,

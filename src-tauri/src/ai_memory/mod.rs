@@ -1,5 +1,6 @@
 //! Conector externo e integração efêmera de novas abas; não importa memória.
 mod client;
+mod marker;
 mod commands;
 pub(crate) mod continuation;
 mod migracao;
