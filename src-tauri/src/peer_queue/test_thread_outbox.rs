@@ -133,7 +133,8 @@ fn a_fila_da_conversa_sai_em_ordem_uma_de_cada_vez() {
     let ids: Vec<i64> = ["um", "dois", "tres"].iter().enumerate().map(|(i, t)| enqueue(&db, t, 1_000 + i as i64).id).collect();
     port.working(true);
     let busy = run(&db, &port, 2_000);
-    assert_eq!(busy.next, Next::Busy);
+    assert!(matches!(busy.next, Next::Busy(_)));
+    assert!(!busy.touched, "só olhou e dormiu: nada mudou no banco");
     assert!(port.texts().is_empty(), "com a conversa trabalhando, nada é enviado");
     port.working(false);
     // Um envio aceito abre um turno: a seguinte espera o turno acabar. Ordem fixa por `position, id`.
@@ -169,7 +170,7 @@ fn o_enviar_agora_e_o_prazo_vencido_entram_no_turno_em_andamento() {
 
     let old = enqueue(&db, "velha", 10_000);
     port.working(true);
-    assert_eq!(run(&db, &port, 10_000 + STEER_AFTER_MS - 1).next, Next::Busy, "ainda dentro dos 15 min");
+    assert_eq!(run(&db, &port, 10_000 + STEER_AFTER_MS - 1).next, Next::Busy(10_000 + STEER_AFTER_MS), "ainda dentro dos 15 min; volta quando vencer");
     run(&db, &port, 10_000 + STEER_AFTER_MS);
     assert_eq!(get_msg(&db, old.id).delivery_mode.as_deref(), Some("steer_active"), "passou de 15 min: entra mesmo assim");
 }
@@ -223,7 +224,7 @@ fn a_conversa_ocupada_devolve_a_mensagem_sem_gastar_tentativa() {
     let r = run(&db, &port, 2_000);
     let row = get_msg(&db, msg.id);
     assert_eq!((row.state, row.attempts, row.available_at), (State::Queued, 0, None));
-    assert_eq!(r.next, Next::Busy);
+    assert!(matches!(r.next, Next::Busy(_)));
     assert!(r.failed.is_empty());
 }
 

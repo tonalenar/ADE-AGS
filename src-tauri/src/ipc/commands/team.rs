@@ -23,10 +23,6 @@ use crate::database::DbConnection;
 use crate::ipc::protocol::{arg_str, arg_str_opt};
 use crate::peer_queue::store::NewMessage;
 
-/// Quanto uma mensagem para uma conversa ocupada espera o turno acabar (o mesmo teto da fila dos
-/// terminais, `peer_queue`): depois vai mesmo assim.
-const THREAD_QUEUE_MAX_WAIT: Duration = Duration::from_secs(15 * 60);
-
 /// O agente "shell" das abas: não é um agente de código, não entra num time.
 const SHELL_AGENT: &str = "bash";
 
@@ -78,51 +74,30 @@ pub(super) fn team_threads(app: &AppHandle) -> Vec<OpenTab> {
         .collect()
 }
 
-/// Espera, no barramento e sem polling, a conversa terminar o turno (ou o prazo).
-fn wait_idle(thread_id: &str, max: Duration) {
-    let deadline = Instant::now() + max;
-    let filter = crate::bus::Filter { topics: vec![super::conversas::BUS_TOPIC.into()], ..Default::default() };
-    let mut after = crate::bus::since(u64::MAX, &filter, 1).last_seq;
-    while crate::conversa::api::status(thread_id).working && Instant::now() < deadline {
-        let page = crate::bus::wait(after, &filter, 50, deadline.saturating_duration_since(Instant::now()));
-        after = page.last_seq;
+/// Entrega a uma conversa por protocolo. A mensagem entra na fila de `peer_messages` (dedupe, tetos, a tela
+/// da fila, `--id`) como qualquer outra e o consumidor da conversa (`peer_queue::thread_outbox`, um por
+/// destino) a envia, na ordem e quando a conversa estiver livre. Aqui o `tell` só espera o consumidor
+/// decidir a vez dele: `Now` = já entrou na conversa; `Queued` = espera (conversa ocupada, ou o envio falhou
+/// e tenta de novo com backoff; se esgotar, o aviso de falha volta pela fila do remetente).
+pub(super) fn deliver_to_thread(app: &AppHandle, thread_id: &str, new: &NewMessage<'_>) -> Result<Sent, String> {
+    let sent = peer_queue::enqueue(app, new)?;
+    if sent.delivery != Delivery::Queued {
+        return Ok(sent);
+    }
+    let to = sent.message.to_tab_id.clone();
+    peer_queue::pump_thread(app, &to)?;
+    let message = fresh(app, sent.message.id).unwrap_or(sent.message);
+    use crate::peer_queue::store::State;
+    match message.state {
+        State::Delivered => Ok(Sent { delivery: Delivery::Now, message, repeat: false }),
+        State::Unconfirmed | State::Expired => Err(message.note.clone().unwrap_or_else(|| format!("A mensagem não chegou à conversa {thread_id}."))),
+        _ => Ok(Sent { delivery: Delivery::Queued, message, repeat: false }),
     }
 }
 
 fn fresh(app: &AppHandle, id: i64) -> Option<crate::peer_queue::store::PeerMessage> {
     let db = db(app).ok()?;
     with_conn(&db, |conn| crate::peer_queue::store::get(conn, id)).ok().flatten()
-}
-
-fn send_now(app: &AppHandle, thread_id: &str, text: &str) -> Result<(), String> {
-    let db = db(app)?;
-    tauri::async_runtime::block_on(crate::conversa::api::send(app, &db, thread_id, text))
-}
-
-/// Entrega a uma conversa por protocolo. A mensagem entra na mesma fila (`peer_messages`: dedupe,
-/// tetos, a tela da fila) e vai como mensagem da conversa, com o mesmo cabeçalho do terminal. Com o
-/// agente no meio de um turno, espera o turno acabar (até [`THREAD_QUEUE_MAX_WAIT`]) para não desviar
-/// o trabalho dele, como a fila dos terminais.
-pub(super) fn deliver_to_thread(app: &AppHandle, thread_id: &str, new: &NewMessage<'_>) -> Result<Sent, String> {
-    let msg = match peer_queue::begin_direct(app, new)? {
-        Ok(msg) => msg,
-        Err(sent) => return Ok(sent),
-    };
-    if !crate::conversa::api::status(thread_id).working {
-        let result = send_now(app, thread_id, &peer_queue::compose(&msg, &msg.text, Duration::ZERO));
-        peer_queue::end_direct(app, &msg, result.as_ref().err().map(String::as_str));
-        result?;
-        let message = fresh(app, msg.id).unwrap_or(msg);
-        return Ok(Sent { delivery: Delivery::Now, message, repeat: false });
-    }
-    let (app2, thread, queued) = (app.clone(), thread_id.to_string(), msg.clone());
-    std::thread::spawn(move || {
-        let started = Instant::now();
-        wait_idle(&thread, THREAD_QUEUE_MAX_WAIT);
-        let result = send_now(&app2, &thread, &peer_queue::compose(&queued, &queued.text, started.elapsed()));
-        peer_queue::end_direct(&app2, &queued, result.as_ref().err().map(String::as_str));
-    });
-    Ok(Sent { delivery: Delivery::Queued, message: msg, repeat: false })
 }
 
 /// Quantas falas do agente a conversa já tem (para o `peer ask` achar a resposta NOVA).

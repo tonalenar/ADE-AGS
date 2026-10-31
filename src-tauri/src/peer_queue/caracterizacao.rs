@@ -1,14 +1,13 @@
 //! Testes de CARACTERIZAÇÃO da entrega a conversas por protocolo (`thread:<id>`), antes da etapa 2
 //! (ver `.plans/conversa-harness/ETAPA2.md`).
 //!
-//! Cada falha tem dois testes sobre o mesmo cenário:
-//! - `hoje_…` passa e prova o comportamento atual (o "antes");
-//! - `etapa2_…` diz o que deve valer depois e está `#[ignore]` até a fila durável existir (o "depois").
-//!   Rode a mão: `cargo test --lib peer_queue::caracterizacao -- --ignored` (hoje todos falham).
+//! Cada falha tinha dois testes sobre o mesmo cenário: `hoje_…` (passava e provava o "antes") e `etapa2_…`
+//! (`#[ignore]` até a parte correspondente existir). A cada parte entregue, o `etapa2_…` perde o `#[ignore]`
+//! e o `hoje_…` sai (o comportamento que ele provava não existe mais); os que restam são as partes por vir.
 //!
 //! Só o que o `store` alcança entra aqui: `AppHandle` não se simula nos testes. A entrada de hoje de
 //! `team::deliver_to_thread` é `begin_direct`, ou seja, `admit(.., Delivering)`; o helper
-//! [`como_o_deliver_to_thread_grava_hoje`] a repete, e na etapa 2 passa a chamar o ponto de entrada novo.
+//! [`como_o_deliver_to_thread_grava`] a repete, e na etapa 2 passa a chamar o ponto de entrada novo.
 
 use std::collections::HashSet;
 
@@ -29,10 +28,10 @@ fn novo(a: Admission) -> PeerMessage {
     }
 }
 
-/// O que `deliver_to_thread` grava hoje ao receber uma mensagem para uma conversa: `begin_direct`,
-/// que admite já como `delivering`, esteja a conversa livre ou no meio de um turno.
-fn como_o_deliver_to_thread_grava_hoje(conn: &rusqlite::Connection, new: &NewMessage<'_>, now: i64) -> Admission {
-    admit(conn, new, State::Delivering, now).unwrap()
+/// O que `deliver_to_thread` grava ao receber uma mensagem para uma conversa: entra na fila (`queued`) e o
+/// consumidor da conversa a leva (etapa 2; antes era `begin_direct`, que admitia já como `delivering`).
+fn como_o_deliver_to_thread_grava(conn: &rusqlite::Connection, new: &NewMessage<'_>, now: i64) -> Admission {
+    admit(conn, new, State::Queued, now).unwrap()
 }
 
 fn entregue(conn: &rusqlite::Connection, new: &NewMessage<'_>, now: i64) -> PeerMessage {
@@ -42,53 +41,27 @@ fn entregue(conn: &rusqlite::Connection, new: &NewMessage<'_>, now: i64) -> Peer
     get(conn, m.id).unwrap().unwrap()
 }
 
-// ── Item 8: sem fila por destino ─────────────────────────────────────
+// ── Item 8: a espera é uma fila por destino ──────────────────────────
 
 #[test]
-fn hoje_a_espera_pelo_turno_da_conversa_nao_e_uma_fila() {
+fn a_espera_pelo_turno_da_conversa_e_uma_fila_em_ordem() {
     let conn = db();
     let ids: Vec<PeerMessage> = ["um", "dois", "tres"]
         .iter()
         .enumerate()
-        .map(|(i, text)| novo(como_o_deliver_to_thread_grava_hoje(&conn, &msg("tell", "thread:lead", "thread:t1", text), 1_000 + i as i64)))
-        .collect();
-    assert!(ids.iter().all(|m| m.state == State::Delivering), "todas nascem delivering, mesmo sem ninguém digitando");
-    assert!(head(&conn, "thread:t1").unwrap().is_none(), "nenhum consumidor da fila as enxerga");
-    assert!(ids.iter().all(|m| m.position == 1), "a posição só conta as queued: a ordem fica a cargo de qual thread acordar primeiro");
-}
-
-#[test]
-#[ignore = "etapa 2: falha até a fila durável existir"]
-fn etapa2_a_espera_pelo_turno_da_conversa_e_uma_fila_em_ordem() {
-    let conn = db();
-    let ids: Vec<PeerMessage> = ["um", "dois", "tres"]
-        .iter()
-        .enumerate()
-        .map(|(i, text)| novo(como_o_deliver_to_thread_grava_hoje(&conn, &msg("tell", "thread:lead", "thread:t1", text), 1_000 + i as i64)))
+        .map(|(i, text)| novo(como_o_deliver_to_thread_grava(&conn, &msg("tell", "thread:lead", "thread:t1", text), 1_000 + i as i64)))
         .collect();
     assert_eq!(head(&conn, "thread:t1").unwrap().map(|m| m.id), Some(ids[0].id), "o consumidor único começa pela mais antiga");
     let positions: Vec<i64> = ids.iter().map(|m| m.position).collect();
     assert!(positions.windows(2).all(|w| w[0] < w[1]), "posições estritamente crescentes: {positions:?}");
 }
 
-// ── Item 2: a falha não chega ao remetente; o reinício confunde espera com digitação ─────────
+// ── Item 2: o reinício não confunde mais espera com digitação ────────
 
 #[test]
-fn hoje_o_reinicio_marca_sem_confirmacao_a_mensagem_que_nunca_foi_enviada_a_conversa() {
+fn o_reinicio_devolve_a_fila_a_mensagem_que_ainda_esperava_o_turno() {
     let conn = db();
-    let waiting = novo(como_o_deliver_to_thread_grava_hoje(&conn, &msg("ask", "thread:lead", "thread:t1", "rode os testes"), 1_000));
-    let live: HashSet<String> = ["thread:lead", "thread:t1"].map(String::from).into();
-    resume(&conn, &live, 2_000).unwrap();
-    let after = get(&conn, waiting.id).unwrap().unwrap();
-    assert_eq!(after.state, State::Unconfirmed);
-    assert!(after.note.as_deref().is_some_and(|n| n.contains("digitada")), "o motivo fala em digitação, que não houve: {:?}", after.note);
-}
-
-#[test]
-#[ignore = "etapa 2: falha até a fila durável existir"]
-fn etapa2_o_reinicio_devolve_a_fila_a_mensagem_que_ainda_esperava_o_turno() {
-    let conn = db();
-    let waiting = novo(como_o_deliver_to_thread_grava_hoje(&conn, &msg("ask", "thread:lead", "thread:t1", "rode os testes"), 1_000));
+    let waiting = novo(como_o_deliver_to_thread_grava(&conn, &msg("ask", "thread:lead", "thread:t1", "rode os testes"), 1_000));
     let live: HashSet<String> = ["thread:lead", "thread:t1"].map(String::from).into();
     let targets = resume(&conn, &live, 2_000).unwrap();
     assert_eq!(get(&conn, waiting.id).unwrap().unwrap().state, State::Queued, "ainda não foi enviada: volta a esperar, não vira unconfirmed");
@@ -101,8 +74,8 @@ fn etapa2_o_reinicio_devolve_a_fila_a_mensagem_que_ainda_esperava_o_turno() {
 fn hoje_o_ask_repetido_enquanto_o_integrante_trabalha_vira_outra_espera() {
     let conn = db();
     let ask = msg("ask", "thread:lead", "thread:t1", "o build passa?");
-    let first = novo(como_o_deliver_to_thread_grava_hoje(&conn, &ask, 1_000));
-    let second = como_o_deliver_to_thread_grava_hoje(&conn, &ask, 2_000);
+    let first = novo(como_o_deliver_to_thread_grava(&conn, &ask, 1_000));
+    let second = como_o_deliver_to_thread_grava(&conn, &ask, 2_000);
     assert!(matches!(&second, Admission::New(m) if m.id != first.id), "reply: true pula o dedupe: {second:?}");
 }
 
@@ -111,8 +84,8 @@ fn hoje_o_ask_repetido_enquanto_o_integrante_trabalha_vira_outra_espera() {
 fn etapa2_o_ask_repetido_devolve_a_mesma_espera() {
     let conn = db();
     let ask = msg("ask", "thread:lead", "thread:t1", "o build passa?");
-    let first = novo(como_o_deliver_to_thread_grava_hoje(&conn, &ask, 1_000));
-    let second = como_o_deliver_to_thread_grava_hoje(&conn, &ask, 2_000);
+    let first = novo(como_o_deliver_to_thread_grava(&conn, &ask, 1_000));
+    let second = como_o_deliver_to_thread_grava(&conn, &ask, 2_000);
     assert!(
         matches!(&second, Admission::Duplicate(m) | Admission::Repeat(m) if m.id == first.id),
         "um ask em andamento por remetente+destino: repetir devolve a mesma espera, {second:?}"

@@ -70,8 +70,9 @@ pub trait ThreadPort {
 pub enum Next {
     /// Nada na fila.
     Empty,
-    /// A conversa está num turno: volta quando ela ficar livre (ou o "enviar agora" chegar).
-    Busy,
+    /// A conversa está num turno: volta quando ela ficar livre, o "enviar agora" chegar, ou em `.0` (ms do
+    /// relógio do banco), quando a cabeça passa a poder entrar no turno (ver [`STEER_AFTER_MS`]).
+    Busy(i64),
     /// A cabeça espera o backoff: volta neste instante (ms do relógio do banco).
     At(i64),
 }
@@ -80,6 +81,9 @@ pub enum Next {
 #[derive(Debug)]
 pub struct Drained {
     pub next: Next,
+    /// Algo mudou no banco (uma mensagem foi tomada, devolvida, entregue ou expirada): vale avisar a tela e
+    /// quem espera. Sem isto, o consumidor que só olhou e dormiu se acordaria com o próprio aviso.
+    pub touched: bool,
     pub delivered: Vec<PeerMessage>,
     /// As que terminaram sem chegar (`expired`/`unconfirmed`): o remetente precisa saber.
     pub failed: Vec<PeerMessage>,
@@ -107,7 +111,7 @@ fn step(conn: &Connection, to: &str, target: Target, now: i64) -> Result<Step, S
     }
     let may_steer = head.force_now || now - head.created_at >= STEER_AFTER_MS;
     if target.working && !may_steer {
-        return Ok(Step::Done(Next::Busy));
+        return Ok(Step::Done(Next::Busy(head.created_at + STEER_AFTER_MS)));
     }
     let mode = if target.working { SendMode::SteerActive } else { SendMode::QueueAfterActive };
     match store::claim_for_thread(conn, head.id, mode.as_str(), now, LEASE_MS)? {
@@ -127,7 +131,7 @@ fn settle(conn: &Connection, msg: &PeerMessage, result: Result<(), SendError>, n
         }
         Err(SendError::Busy) => {
             store::release(conn, msg.id, None, None, true, now)?;
-            return Ok(Some(Next::Busy));
+            return Ok(Some(Next::Busy(msg.created_at + STEER_AFTER_MS)));
         }
         Err(SendError::NotSent(error)) if msg.attempts >= MAX_ATTEMPTS => {
             store::fail_delivery(conn, msg.id, &error, now)?;
@@ -154,7 +158,7 @@ pub fn drain(
     now: i64,
 ) -> Result<Drained, String> {
     let thread = model::thread_id_of(to).ok_or_else(|| format!("{to} não é uma conversa por protocolo"))?;
-    let mut out = Drained { next: Next::Empty, delivered: Vec::new(), failed: Vec::new() };
+    let mut out = Drained { next: Next::Empty, touched: false, delivered: Vec::new(), failed: Vec::new() };
     loop {
         let target = port.target(thread);
         // O passo é lido e a guarda do lock solta antes de agir: o envio nunca roda com o banco preso.
@@ -165,10 +169,12 @@ pub fn drain(
                 return Ok(out);
             }
             Step::Expired(list) => {
+                out.touched |= !list.is_empty();
                 out.failed.extend(list);
                 return Ok(out);
             }
             Step::Send(msg, mode) => {
+                out.touched = true;
                 let waited = Duration::from_millis((now - msg.created_at).max(0) as u64);
                 let result = port.send(thread, &compose(&msg, waited), mode);
                 if let Some(next) = settle(&*lock(db)?, &msg, result, now, &mut out)? {

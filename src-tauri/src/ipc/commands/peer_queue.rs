@@ -29,7 +29,11 @@ use tauri::{AppHandle, Emitter};
 use super::peers::{caller, delivery_lock, outgoing, outgoing_peer, spill_to_inbox, stale_note, submit_confirmed};
 use super::tabs::{pty_id_for_tab, tab_list, wait_until_quiet};
 use crate::ipc::protocol::arg_str_opt;
+use crate::chat_team::model::THREAD_PREFIX;
+use crate::conversa::envio::{SendError, SendMode};
+use crate::database::DbConnection;
 use crate::peer_queue::store::{self, Admission, NewMessage, PeerMessage, State};
+use crate::peer_queue::thread_outbox::{self, Next, Target, ThreadPort};
 
 /// Quanto o comando de quem envia espera o destino ficar quieto. Passou disso, a mensagem vai
 /// para a fila e o remetente segue trabalhando (antes ele ficava preso até 60 s pelo trabalho
@@ -81,7 +85,7 @@ fn notify_failures(app: &AppHandle, failed: &[PeerMessage]) {
     }
     // Sem a lista das abas não se sabe se o remetente existe: melhor não avisar ninguém.
     let Ok(listed) = tab_list(app) else { return };
-    let live = live_ids(&listed);
+    let live = live_ids(&listed, &active_threads(app));
     for msg in failed {
         if !live.contains(&msg.from_tab_id) {
             continue;
@@ -93,18 +97,35 @@ fn notify_failures(app: &AppHandle, failed: &[PeerMessage]) {
     }
 }
 
-fn live_ids(listed: &Value) -> HashSet<String> {
-    listed
+/// Pura: quem existe agora: as abas de terminal (`tab_list`) e as conversas por protocolo ativas
+/// (`thread:<id>`, que `tab_list` não lista). Sem as conversas, o arranque expirava tudo o que esperava
+/// uma e o aviso de falha nunca alcançava quem pediu de dentro de uma.
+fn live_ids(listed: &Value, threads: &[String]) -> HashSet<String> {
+    let tabs = listed
         .get("tabs")
         .and_then(Value::as_array)
-        .map(|rows| rows.iter().filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_string)).collect())
+        .map(|rows| rows.iter().filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_string)).collect::<HashSet<_>>())
+        .unwrap_or_default();
+    tabs.into_iter().chain(threads.iter().cloned()).collect()
+}
+
+/// As conversas por protocolo ativas, como ids de destino (`thread:<id>`).
+fn active_threads(app: &AppHandle) -> Vec<String> {
+    let Ok(db) = super::shared::db(app) else { return Vec::new() };
+    crate::conversa::api::threads(db.inner())
+        .map(|rows| rows.into_iter().filter(|t| t.state == "active").map(|t| format!("{THREAD_PREFIX}{}", t.id)).collect())
         .unwrap_or_default()
 }
 
 /// Avisa a interface que a fila de um destino mudou (o selo e a lista se atualizam).
 fn changed(app: &AppHandle, to: Option<&str>) {
     let _ = app.emit("cc-peer-queue", json!({ "toTabId": to }));
+    // O entregador de uma conversa (`thread:`) dorme no barramento: o aviso o acorda sem polling.
+    crate::bus::publish(Some(app), crate::bus::Publish::new(PEER_TOPIC).data(json!({ "toTabId": to })));
 }
+
+/// O tópico do barramento em que cada mudança da fila de mensagens é anunciada.
+pub const PEER_TOPIC: &str = "peer.queue";
 
 /// O `--id` do chamador, se veio (texto ou número).
 pub(super) fn client_id_arg(args: &Value) -> Option<String> {
@@ -119,6 +140,10 @@ pub(super) fn client_id_arg(args: &Value) -> Option<String> {
 /// caminho, se ele foi para a caixa de entrada). Uma mensagem que esperou ganha o aviso de que pode
 /// estar velha; `--raw` não, porque é um comando da TUI (`/compact`) e o aviso o quebraria.
 pub(crate) fn compose(msg: &PeerMessage, body: &str, waited: Duration) -> String {
+    retry_marked(msg, framed_text(msg, body, waited))
+}
+
+fn framed_text(msg: &PeerMessage, body: &str, waited: Duration) -> String {
     // O corpo de uma mensagem de par (`tell`/`ask`) vai no envelope de conteúdo não confiável; o que o
     // próprio app escreve (papel, linha da entrega, aviso) vai como sempre.
     let text = if matches!(msg.kind.as_str(), "tell" | "ask") {
@@ -126,11 +151,22 @@ pub(crate) fn compose(msg: &PeerMessage, body: &str, waited: Duration) -> String
     } else {
         outgoing(&msg.from_name, body, msg.reply, msg.raw)
     };
-    let text = match stale_note(waited).filter(|_| !msg.raw) {
+    match stale_note(waited).filter(|_| !msg.raw) {
         Some(note) => format!("{text}\n{note}"),
         None => text,
-    };
-    retry_marked(msg, text)
+    }
+}
+
+/// Pura: o que uma CONVERSA por protocolo recebe. Como o texto do terminal, mas o cabeçalho leva o número
+/// da mensagem (`[Mensagem #12 de X via ADE AGS]`): é o marcador que permite achar na timeline, depois de
+/// um reinício, se ela chegou (ver `store::recover`) e ancorar a resposta de um `ask`. `--raw` não leva
+/// cabeçalho nem marcador. Sem aviso de reenvio: o retry da conversa só repete o que provadamente não saiu.
+pub(crate) fn compose_thread(msg: &PeerMessage, waited: Duration) -> String {
+    let text = framed_text(msg, &msg.text, waited);
+    match text.strip_prefix("[Mensagem de ") {
+        Some(rest) => format!("[Mensagem #{} de {rest}", msg.id),
+        None => text,
+    }
 }
 
 /// Pura: com `attempts > 1` a mensagem já foi tentada (digitada sem confirmação, ou reenviada com o
@@ -353,6 +389,9 @@ fn wait_turn(app: &AppHandle, to: &str, pty: u32) -> Turn {
 
 /// O laço do entregador de um destino: uma mensagem por vez, na ordem da fila, até ela esvaziar.
 fn run_worker(app: &AppHandle, to: &str) {
+    if to.starts_with(THREAD_PREFIX) {
+        return run_thread_worker(app, to);
+    }
     loop {
         let lock = delivery_lock(to);
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -392,6 +431,95 @@ fn run_worker(app: &AppHandle, to: &str) {
     }
 }
 
+// ── O entregador de uma conversa por protocolo (`thread:`) ─────────────
+
+/// A conversa de verdade, vista pelo consumidor da fila (`peer_queue::thread_outbox`).
+struct RealPort<'a> {
+    app: &'a AppHandle,
+    db: DbConnection,
+}
+
+impl ThreadPort for RealPort<'_> {
+    fn target(&self, thread: &str) -> Target {
+        let open = crate::conversa::api::thread(&self.db, thread).is_ok_and(|row| row.state == "active");
+        let status = crate::conversa::api::status(thread);
+        Target { open, alive: status.alive, working: status.working }
+    }
+
+    fn send(&self, thread: &str, text: &str, mode: SendMode) -> Result<(), SendError> {
+        tauri::async_runtime::block_on(crate::conversa::api::send_mode(self.app, &self.db, thread, text, mode))
+    }
+
+    fn items(&self, thread: &str) -> Option<Vec<crate::canal::timeline::Item>> {
+        crate::conversa::api::items(&self.db, thread).ok()
+    }
+}
+
+/// Um turno do consumidor de `to`: envia o que está pronto (uma conversa de cada vez, na ordem) e avisa quem
+/// pediu das que não chegaram. Bloqueia no `delivery_lock` do destino se outro `pump` estiver rodando, então
+/// quem chama de fora (o `tell`) sai daqui com o resultado da mensagem dele já decidido.
+pub(super) fn pump_thread(app: &AppHandle, to: &str) -> Result<Next, String> {
+    let db = super::shared::db(app)?.inner().clone();
+    let lock = delivery_lock(to);
+    let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
+    let now = with_db(app, store::db_now)?;
+    let drained = thread_outbox::drain(&db, &RealPort { app, db: db.clone() }, &compose_thread, to, now)?;
+    if drained.touched {
+        changed(app, Some(to));
+    }
+    notify_failures(app, &drained.failed);
+    Ok(drained.next)
+}
+
+/// Quanto dormir até `at` (ms do relógio do banco). O prazo é decidido pelo banco; o `Instant` só dorme.
+fn until(app: &AppHandle, at: i64) -> Duration {
+    let now = with_db(app, store::db_now).unwrap_or(at);
+    Duration::from_millis((at - now).max(1) as u64)
+}
+
+/// Pura: o aviso do barramento (da conversa, ou da fila) é desta conversa/fila?
+fn concerns(data: &Value, thread: &str, to: &str) -> bool {
+    data.get("threadId").and_then(Value::as_str) == Some(thread) || data.get("toTabId").and_then(Value::as_str) == Some(to)
+}
+
+/// O laço do entregador de uma conversa: processa a fila, dorme no barramento (a conversa ficou livre, a fila
+/// mudou) ou até o prazo (backoff, "entra no turno" dos 15 min) e repete. Sai quando a fila esvazia.
+fn run_thread_worker(app: &AppHandle, to: &str) {
+    let thread = to.strip_prefix(THREAD_PREFIX).unwrap_or(to).to_string();
+    let filter = crate::bus::Filter { topics: vec![super::conversas::BUS_TOPIC.into(), PEER_TOPIC.into()], ..Default::default() };
+    loop {
+        // O ponto de partida do que se espera vem ANTES do `pump`: um aviso durante ele não se perde.
+        let mut after = crate::bus::since(u64::MAX, &filter, 1).last_seq;
+        let timeout = match pump_thread(app, to) {
+            Ok(Next::Empty) => {
+                if retire_if_empty(app, to) {
+                    changed(app, Some(to));
+                    return;
+                }
+                continue;
+            }
+            Ok(Next::Busy(at)) | Ok(Next::At(at)) => until(app, at),
+            Err(_) => {
+                workers().lock().unwrap_or_else(|e| e.into_inner()).remove(to);
+                return;
+            }
+        };
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            let page = crate::bus::wait(after, &filter, 50, left);
+            after = page.last_seq;
+            // Só acorda quem importa: a mudança desta conversa ou desta fila (o barramento é de todas).
+            if page.events.iter().any(|e| concerns(&e.data, &thread, to)) {
+                break;
+            }
+        }
+    }
+}
+
 /// No arranque do app: o que estava sendo digitado vira `unconfirmed` (não se digita de novo), o
 /// que esperava uma aba que não existe mais (ou há mais de 1 h) vira `expired`, e o resto volta a
 /// andar, com o aviso de atraso na entrega.
@@ -400,7 +528,7 @@ pub fn start_resume(app: AppHandle) {
         crate::database::wait_until_db_ready();
         // Sem a lista das abas não se sabe quem existe: melhor não expirar nada.
         let Ok(listed) = tab_list(&app) else { return };
-        let live = live_ids(&listed);
+        let live = live_ids(&listed, &active_threads(&app));
         // `resume` também enfileira o aviso ao remetente de cada uma que terminou aqui.
         let Ok(targets) = with_db_now(&app, |conn, now| store::resume(conn, &live, now)) else { return };
         for to in &targets {
@@ -568,32 +696,66 @@ oi
         assert_eq!(line["clientId"], "r1");
     }
 
-    // ── Caracterização da etapa 2 (item 2): o aviso de falha não alcança remetente `thread:` ──
-    // Os dois testes usam o conjunto de abas vivas que `start_resume` monta hoje (`live_ids` sobre
-    // `tab_list`, que só lista abas de terminal) e o `resume` do store, como no arranque do app.
+    // ── Etapa 2 (item 2): o aviso de falha alcança o remetente `thread:` ──
+    // Usa o conjunto de vivos que `start_resume` monta (`live_ids`: abas de `tab_list` + conversas ativas)
+    // e o `resume` do store, como no arranque do app.
 
-    fn arranque_com_remetente_conversa() -> (Connection, PeerMessage) {
+    fn arranque_com_remetente_conversa(active: &[&str]) -> (Connection, PeerMessage) {
         let conn = crate::database::test_db();
         let new = NewMessage { kind: "ask", from_tab_id: "thread:lead", from_name: "Líder", to_tab_id: "thread:t1", to_name: "QA", text: "rode os testes", reply: true, ..Default::default() };
+        // A mensagem estava sendo enviada à conversa quando o app fechou.
         let Admission::New(sent) = store::admit(&conn, &new, State::Delivering, 1_000).unwrap() else { panic!("esperava nova") };
         let listed = json!({ "tabs": [{ "id": "tab-shell" }, { "id": "tab-codex" }] });
-        store::resume(&conn, &live_ids(&listed), 2_000).unwrap();
+        let threads: Vec<String> = active.iter().map(|t| t.to_string()).collect();
+        store::resume(&conn, &live_ids(&listed, &threads), 2_000).unwrap();
         (conn, sent)
     }
 
     #[test]
-    fn hoje_o_remetente_conversa_nao_recebe_o_aviso_de_que_a_mensagem_falhou() {
-        let (conn, sent) = arranque_com_remetente_conversa();
+    fn o_remetente_conversa_recebe_o_aviso_de_que_a_mensagem_falhou() {
+        let (conn, sent) = arranque_com_remetente_conversa(&["thread:lead", "thread:t1"]);
         assert_eq!(store::get(&conn, sent.id).unwrap().unwrap().state, State::Unconfirmed, "a mensagem falhou");
-        assert!(store::queued_for(&conn, "thread:lead").unwrap().is_empty(), "e ninguém avisou quem pediu");
+        let notices = store::queued_for(&conn, "thread:lead").unwrap();
+        assert!(notices.iter().any(|m| m.kind == "notice" && m.text.contains("não há confirmação")), "sem aviso a {sent:?}: {notices:?}");
     }
 
     #[test]
-    #[ignore = "etapa 2: falha até a fila durável existir"]
-    fn etapa2_o_remetente_conversa_recebe_o_aviso_de_que_a_mensagem_falhou() {
-        let (conn, sent) = arranque_com_remetente_conversa();
-        let notices = store::queued_for(&conn, "thread:lead").unwrap();
-        assert!(notices.iter().any(|m| m.kind == "notice" && (m.text.contains("não chegou") || m.text.contains("não há confirmação"))),"sem aviso a {sent:?}");
+    fn sem_a_conversa_do_remetente_viva_nao_ha_para_quem_avisar() {
+        let (conn, _) = arranque_com_remetente_conversa(&["thread:t1"]);
+        assert!(store::queued_for(&conn, "thread:lead").unwrap().is_empty(), "conversa concluída ou apagada: ninguém a avisar");
+    }
+
+    #[test]
+    fn os_vivos_juntam_as_abas_e_as_conversas_ativas() {
+        let live = live_ids(&json!({ "tabs": [{ "id": "a" }, { "id": "b" }] }), &["thread:t1".to_string()]);
+        assert_eq!(live, ["a", "b", "thread:t1"].map(String::from).into_iter().collect::<HashSet<_>>());
+        assert!(live_ids(&json!({}), &[]).is_empty());
+    }
+
+    #[test]
+    fn a_conversa_recebe_o_numero_da_mensagem_no_cabecalho_e_o_terminal_nao() {
+        let mut m = msg(false, false);
+        m.attempts = 3;
+        let thread = compose_thread(&m, Duration::ZERO);
+        assert!(thread.starts_with("[Mensagem #7 de Líder via ADE AGS] "), "{thread}");
+        assert!(thread.contains("rode os testes"), "{thread}");
+        assert!(!thread.contains(store::RETRY_MARK), "o retry da conversa só repete o que não saiu: sem aviso de reenvio");
+        assert!(compose(&m, "oi", Duration::ZERO).starts_with(&format!("{} [Mensagem de Líder", store::RETRY_MARK)), "o terminal segue como antes");
+        // `--raw` é um comando: sem cabeçalho, sem marcador.
+        let mut raw = msg(true, false);
+        raw.text = "/compact".into();
+        assert_eq!(compose_thread(&raw, Duration::ZERO), "/compact");
+        // O aviso de atraso também vai.
+        assert!(compose_thread(&m, Duration::from_secs(300)).contains("ficou na fila"));
+    }
+
+    #[test]
+    fn o_entregador_so_acorda_com_o_aviso_da_sua_conversa_ou_da_sua_fila() {
+        assert!(concerns(&json!({ "threadId": "t1", "type": "phase" }), "t1", "thread:t1"));
+        assert!(concerns(&json!({ "toTabId": "thread:t1" }), "t1", "thread:t1"));
+        assert!(!concerns(&json!({ "threadId": "t2" }), "t1", "thread:t1"));
+        assert!(!concerns(&json!({ "toTabId": "tab-9" }), "t1", "thread:t1"));
+        assert!(!concerns(&json!({ "toTabId": null }), "t1", "thread:t1"));
     }
 
     #[test]
