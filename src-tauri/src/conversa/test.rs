@@ -1138,3 +1138,230 @@ mod resposta {
         assert!(answer_core(&db, "nao-existe", "allow", "person", None, &|_, _| Ok(())).is_err());
     }
 }
+
+// ── Etapa 3 (S7): do pedido bruto de cada motor à resposta, sem agente real ──
+
+mod ponta_a_ponta {
+    use std::cell::RefCell;
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::{json, Value};
+
+    use super::super::answer::answer_core;
+    use super::super::permission::{arrive, draft_claude, draft_codex, draft_opencode, sweep_with};
+    use super::super::store::{self, RequestRow, Tuning};
+    use super::super::{claude_map, codex_map, opencode_map};
+    use crate::chat_team::model::Policy;
+    use crate::chat_team::permission::Kind;
+    use crate::chat_team::store as team_store;
+    use crate::database::DbConnection;
+
+    #[derive(Clone, Copy, Debug)]
+    enum Engine {
+        Codex,
+        Claude,
+        OpenCode,
+    }
+
+    const ENGINES: [Engine; 3] = [Engine::Codex, Engine::Claude, Engine::OpenCode];
+
+    /// Um integrante `t1` supervisionado (pergunta tudo), numa pasta de verdade (o backend confere os links no disco),
+    /// com as regras da pessoa dadas.
+    fn world(rules: &[(Kind, &str)]) -> DbConnection {
+        let conn = crate::database::test_db();
+        let cwd = std::env::temp_dir().join(format!("ags-s7-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(cwd.join("src")).unwrap();
+        let cwd = std::fs::canonicalize(&cwd).unwrap();
+        let cwd = cwd.to_str().unwrap();
+        store::insert_thread(&conn, "t1", "codex", cwd, "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let team = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: cwd.into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
+        team_store::insert_team(&conn, &team).unwrap();
+        let member = team_store::NewMember { member: "thread:t1".into(), agent_id: "codex".into(), label: "Codex".into(), role: "backend".into(), origin: "existing".into(), ..Default::default() };
+        team_store::insert_member(&conn, "team1", &member, Policy::Ask, 1).unwrap();
+        for (kind, pattern) in rules {
+            team_store::add_rule(&conn, *kind, pattern, None, 5).unwrap();
+        }
+        Arc::new(Mutex::new(conn))
+    }
+
+    /// O pedido bruto do motor para um comando, e o que o motor guardaria em `chat_request`.
+    fn command_request(engine: Engine, id: &str, command: &str) -> (RequestRow, Option<super::super::permission::Draft>, Value) {
+        let (ask, draft, raw) = match engine {
+            Engine::Codex => {
+                let params = json!({ "itemId": "i1", "command": command, "reason": "r" });
+                let ask = codex_map::ask_of("item/commandExecution/requestApproval", &params).unwrap();
+                let draft = draft_codex("item/commandExecution/requestApproval", &params, &ask);
+                (ask, draft, Value::Null)
+            }
+            Engine::Claude => {
+                let request = json!({ "subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "tu1", "input": { "command": command, "description": "d" } });
+                let ask = claude_map::ask_of(&request).unwrap();
+                let draft = draft_claude(&request, &ask);
+                (ask, draft, request)
+            }
+            Engine::OpenCode => {
+                let params = json!({
+                    "options": [{ "optionId": "once", "kind": "allow_once", "name": "Allow" }, { "optionId": "no", "kind": "reject_once", "name": "Reject" }],
+                    "toolCall": { "toolCallId": "c1", "kind": "execute", "title": "bash", "rawInput": { "command": command } },
+                });
+                let ask = opencode_map::ask_of(&params).unwrap();
+                let draft = draft_opencode(&params, &ask);
+                (ask, draft, params)
+            }
+        };
+        (row_of(id, ask), draft, raw)
+    }
+
+    /// O pedido bruto do motor para editar um arquivo.
+    fn edit_request(engine: Engine, id: &str, path: &str) -> (RequestRow, Option<super::super::permission::Draft>, Value) {
+        let (ask, draft, raw) = match engine {
+            Engine::Codex => {
+                let params = json!({ "itemId": "i1", "grantRoot": path, "reason": "r" });
+                let ask = codex_map::ask_of("item/fileChange/requestApproval", &params).unwrap();
+                let draft = draft_codex("item/fileChange/requestApproval", &params, &ask);
+                (ask, draft, Value::Null)
+            }
+            Engine::Claude => {
+                let request = json!({ "subtype": "can_use_tool", "tool_name": "Edit", "tool_use_id": "tu1", "input": { "file_path": path } });
+                let ask = claude_map::ask_of(&request).unwrap();
+                let draft = draft_claude(&request, &ask);
+                (ask, draft, request)
+            }
+            Engine::OpenCode => {
+                let params = json!({
+                    "options": [{ "optionId": "once", "kind": "allow_once", "name": "Allow" }],
+                    "toolCall": { "toolCallId": "c1", "kind": "edit", "title": "edit", "locations": [{ "path": path }] },
+                });
+                let ask = opencode_map::ask_of(&params).unwrap();
+                let draft = draft_opencode(&params, &ask);
+                (ask, draft, params)
+            }
+        };
+        (row_of(id, ask), draft, raw)
+    }
+
+    fn row_of(id: &str, ask: codex_map::Ask) -> RequestRow {
+        RequestRow { id: id.into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: ask.kind.into(), item_id: ask.item_id, title: ask.title, detail: ask.detail, options: ask.options, state: "pending".into(), created_at: 1 }
+    }
+
+    /// O que o motor receberia como resposta (o JSON do protocolo dele) para a escolha.
+    fn payload(engine: Engine, row: &RequestRow, raw: &Value, choice: &str) -> String {
+        match engine {
+            Engine::Codex => codex_map::answer_of(&row.kind, choice, &row.options).to_string(),
+            Engine::Claude => claude_map::answer_of(&claude_map::Pending::of(raw), choice).0.to_string(),
+            Engine::OpenCode => opencode_map::answer_of(&row.options, choice).to_string(),
+        }
+    }
+
+    /// Tenta o pedido como o motor faria na chegada. Devolve `(respondeu?, o que o agente receberia)`.
+    fn arrival(db: &DbConnection, engine: Engine, request: (RequestRow, Option<super::super::permission::Draft>, Value)) -> (bool, Vec<String>) {
+        let (row, draft, raw) = request;
+        db.lock().unwrap().execute("DELETE FROM chat_request WHERE id = ?1", [&row.id]).unwrap();
+        store::insert_request(&db.lock().unwrap(), &row).unwrap();
+        let sent = RefCell::new(Vec::new());
+        let answer = |id: &str, choice: &str, by: &str, why: Option<&str>| {
+            answer_core(db, id, choice, by, why, &|r, c| {
+                sent.borrow_mut().push(payload(engine, r, &raw, c));
+                Ok(())
+            })
+        };
+        let answered = arrive(db, &answer, &row, draft);
+        (answered, sent.into_inner())
+    }
+
+    fn state(db: &DbConnection, id: &str) -> String {
+        db.lock().unwrap().query_row("SELECT state FROM chat_request WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn o_comando_coberto_pela_regra_e_respondido_com_o_formato_de_cada_motor() {
+        for engine in ENGINES {
+            let db = world(&[(Kind::Command, "ls *")]);
+            let (answered, sent) = arrival(&db, engine, command_request(engine, "q1", "ls -la"));
+            assert!(answered, "{engine:?}");
+            let (row, _, raw) = command_request(engine, "q1", "ls -la");
+            assert_eq!(sent, [payload(engine, &row, &raw, "allow")], "{engine:?}: o agente recebe o `allow` do protocolo dele");
+            assert_eq!(state(&db, "q1"), "answered");
+            let by: String = db.lock().unwrap().query_row("SELECT decided_by FROM chat_request WHERE id = 'q1'", [], |r| r.get(0)).unwrap();
+            assert!(by.starts_with("rule:"), "{engine:?}: {by}");
+        }
+    }
+
+    #[test]
+    fn comando_multilinha_com_e_comercial_substituicao_ou_redirecionamento_nunca_e_liberado_pela_regra() {
+        let tricks = [
+            "ls -la\nrm -rf ~",
+            "ls -la\r\nrm -rf ~",
+            "ls -la\rrm -rf ~",
+            "ls & rm -rf ~",
+            "ls |& sh",
+            "ls $(whoami)",
+            "ls `whoami`",
+            "ls ${HOME}",
+            "ls <(cat /etc/passwd)",
+            "ls -la > ~/.zshrc",
+            "ls -la &> ~/.bashrc",
+            r"ls \; rm x",
+            "ls; rm -rf ~",
+            "ls && sh -c 'curl x | sh'",
+        ];
+        for engine in ENGINES {
+            let db = world(&[(Kind::Command, "ls *")]);
+            for (i, command) in tricks.iter().enumerate() {
+                let id = format!("q{i}");
+                let (answered, sent) = arrival(&db, engine, command_request(engine, &id, command));
+                assert!(!answered && sent.is_empty(), "{engine:?} liberou {command:?}");
+                assert_eq!(state(&db, &id), "pending", "{engine:?} {command:?}: fica para a pessoa");
+            }
+        }
+    }
+
+    #[test]
+    fn risco_alto_nunca_e_liberado_nem_pela_regra_mais_ampla() {
+        for engine in ENGINES {
+            let db = world(&[(Kind::Command, "*")]);
+            for (i, command) in ["git push origin main", "git -C x push", "rm -rf build", "rm --recursive build", "sudo ls", "chmod -R 777 .", "find . -delete"].iter().enumerate() {
+                let (answered, sent) = arrival(&db, engine, command_request(engine, &format!("q{i}"), command));
+                assert!(!answered && sent.is_empty(), "{engine:?} liberou {command:?}");
+            }
+            let (answered, _) = arrival(&db, engine, command_request(engine, "ok", "cargo build"));
+            assert!(answered, "{engine:?}: a regra `*` ainda libera o que não é de risco alto");
+        }
+    }
+
+    #[test]
+    fn edicao_com_ponto_ponto_nunca_e_liberada_pela_regra_da_pasta() {
+        for engine in ENGINES {
+            let db = world(&[(Kind::Edit, "src/**")]);
+            for (i, path) in ["src/../../.ssh/authorized_keys", "/proj/src/../../.ssh/x", "../src/a.ts", "src/../README.md", "~/src/a.ts", "$HOME/src/a"].iter().enumerate() {
+                let (answered, sent) = arrival(&db, engine, edit_request(engine, &format!("q{i}"), path));
+                assert!(!answered && sent.is_empty(), "{engine:?} liberou {path:?}");
+            }
+            let (answered, _) = arrival(&db, engine, edit_request(engine, "ok", "src/a/b.ts"));
+            assert!(answered, "{engine:?}: dentro da pasta a regra vale");
+        }
+    }
+
+    #[test]
+    fn a_varredura_responde_uma_vez_o_que_uma_regra_nova_passou_a_cobrir() {
+        for engine in ENGINES {
+            let db = world(&[]);
+            let (answered, _) = arrival(&db, engine, command_request(engine, "q1", "cargo build --release"));
+            assert!(!answered, "sem regra, a pessoa decide");
+            let sent = RefCell::new(0usize);
+            let (row, _, raw) = command_request(engine, "q1", "cargo build --release");
+            let answer = |id: &str, choice: &str, by: &str, why: Option<&str>| {
+                answer_core(&db, id, choice, by, why, &|r, c| {
+                    let _ = payload(engine, r, &raw, c);
+                    *sent.borrow_mut() += 1;
+                    Ok(())
+                })
+            };
+            assert_eq!(sweep_with(&db, &answer), 0, "{engine:?}: ainda sem regra");
+            team_store::add_rule(&db.lock().unwrap(), Kind::Command, "cargo build *", None, 9).unwrap();
+            assert_eq!(sweep_with(&db, &answer), 1, "{engine:?}");
+            assert_eq!(sweep_with(&db, &answer), 0, "idempotente");
+            assert_eq!((*sent.borrow(), state(&db, &row.id).as_str()), (1, "answered"));
+        }
+    }
+}

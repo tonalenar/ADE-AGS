@@ -139,12 +139,22 @@ pub fn plan(conn: &Connection, thread_id: &str, subject: &Subject) -> Decision {
     }
 }
 
+/// Quem responde ao agente: `(id do pedido, escolha, quem decidiu, por quê) -> respondeu?`. Em produção é
+/// `api::answer_as` (reserva o pedido e fala com o motor); nos testes, a mesma reserva com um motor de mentira que só
+/// registra o que seria respondido.
+pub type Answerer<'a> = &'a dyn Fn(&str, &str, &str, Option<&str>) -> Result<bool, String>;
+
 /// O pedido que o motor acabou de gravar (`pending`), ainda sem ter sido mostrado à tela: guarda o pedido inteiro,
 /// decide e, se a política ou uma regra da pessoa cobrem, RESPONDE ao agente. `true` = foi respondido (o motor não
 /// mostra o pedido à tela); `false` = fica para a pessoa. Quem chama já registrou o pedido na sessão do motor.
 pub fn on_arrival(app: &AppHandle, db: &DbConnection, row: &RequestRow, draft: Option<Draft>) -> bool {
+    arrive(db, &|id, choice, by, why| api::answer_as(app, db, id, choice, by, why), row, draft)
+}
+
+/// O miolo de [`on_arrival`], sem `AppHandle`.
+pub fn arrive(db: &DbConnection, answer: Answerer<'_>, row: &RequestRow, draft: Option<Draft>) -> bool {
     let Some(draft) = draft else { return false };
-    let prepared = {
+    let decision = {
         let Ok(conn) = db.lock() else { return false };
         let Ok(Some(thread)) = store::thread(&conn, &row.thread_id) else { return false };
         let mut draft = draft;
@@ -170,21 +180,20 @@ pub fn on_arrival(app: &AppHandle, db: &DbConnection, row: &RequestRow, draft: O
         if let Ok(json) = serde_json::to_string(&subject) {
             let _ = store::set_subject(&conn, &row.id, &json);
         }
-        (plan(&conn, &row.thread_id, &subject), subject)
+        plan(&conn, &row.thread_id, &subject)
     };
-    let (decision, _subject) = prepared;
-    respond(app, db, &row.id, &decision)
+    respond(db, answer, &row.id, &decision)
 }
 
 /// Responde ao agente o que a decisão manda (`Allow`/`Deny`) e grava quem decidiu. `false` = nada foi respondido.
-fn respond(app: &AppHandle, db: &DbConnection, request_id: &str, decision: &Decision) -> bool {
+fn respond(db: &DbConnection, answer: Answerer<'_>, request_id: &str, decision: &Decision) -> bool {
     let choice = match decision.verdict {
         Verdict::Allow => "allow",
         Verdict::Deny => "deny",
         Verdict::Ask => return false,
     };
-    // Se o agente já fechou, `answer_as` falha e o pedido segue pendente (a varredura de órfãos o expira).
-    let answered = api::answer_as(app, db, request_id, choice, &decision.by, Some(&decision.why)).unwrap_or(false);
+    // Se o agente já fechou, o envio falha e o pedido segue pendente (a varredura de órfãos o expira).
+    let answered = answer(request_id, choice, &decision.by, Some(&decision.why)).unwrap_or(false);
     if answered && let Some(rule_id) = decision.by.strip_prefix("rule:") && let Ok(conn) = db.lock() {
         let _ = team_store::count_rule_use(&conn, rule_id, crate::util::now_ts_ms());
     }
@@ -195,12 +204,17 @@ fn respond(app: &AppHandle, db: &DbConnection, request_id: &str, decision: &Deci
 /// (`subject`). Um pedido sem `subject` (de antes desta versão) nunca é decidido sozinho. Serve ao recarregar da
 /// janela, a uma regra nova da pessoa e ao interruptor do time. Idempotente. Devolve quantos respondeu.
 pub fn sweep(app: &AppHandle, db: &DbConnection) -> usize {
+    sweep_with(db, &|id, choice, by, why| api::answer_as(app, db, id, choice, by, why))
+}
+
+/// O miolo de [`sweep`], sem `AppHandle`.
+pub fn sweep_with(db: &DbConnection, answer: Answerer<'_>) -> usize {
     let todo: Vec<(String, Decision)> = {
         let Ok(conn) = db.lock() else { return 0 };
         let Ok(pending) = store::pending_all(&conn) else { return 0 };
         pending.iter().filter_map(|row| plan_stored(&conn, row).map(|d| (row.id.clone(), d))).collect()
     };
-    todo.iter().filter(|(id, decision)| respond(app, db, id, decision)).count()
+    todo.iter().filter(|(id, decision)| respond(db, answer, id, decision)).count()
 }
 
 /// A decisão de um pedido já gravado, pelo `subject` guardado. `None` = sem `subject`, ou a pessoa decide.
