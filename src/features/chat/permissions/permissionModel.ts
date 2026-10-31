@@ -97,28 +97,92 @@ export function isNetworkCommand(command: string): boolean {
   return NETWORK_RE.some((re) => re.test(command));
 }
 
-/** Arquivos sensíveis: nunca uma edição de baixo risco, e fora da pasta sobem para alto. */
-const SENSITIVE_RE = /(^|\/)(\.env(\.[\w.-]+)?|\.git\/|\.github\/workflows\/|\.ssh\/|id_(rsa|ed25519)|\.npmrc|\.netrc|\.aws\/|\.claude\/settings|Cargo\.lock$|bun\.lockb?$)/;
+/**
+ * Arquivos sensíveis: nunca uma edição de baixo risco, e fora da pasta sobem para alto. Chaves e credenciais,
+ * configuração de shell (que roda a cada terminal novo), hooks e workflows de CI, travas de dependência.
+ */
+const SENSITIVE_RE = /(^|\/)(\.env(\.[\w.-]+)?|\.git\/|\.github\/workflows\/|\.ssh\/|authorized_keys|id_(rsa|ed25519)|\.npmrc|\.netrc|\.aws\/|\.gnupg\/|\.kube\/|\.docker\/config\.json|\.config\/gh\/|\.(zshrc|zshenv|zprofile|bashrc|bash_profile|profile)$|\.claude\/settings|Cargo\.lock$|bun\.lockb?$)/;
 
 function norm(path: string): string {
   return path.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
-/** O arquivo está dentro da pasta? Caminhos relativos contam como de dentro. Pura. */
+/** Um caminho resolvido de forma LÉXICA (sem tocar o disco). */
+export interface ResolvedPath {
+  /** Provadamente dentro da pasta. Na dúvida, `false`. */
+  inside: boolean;
+  /** O caminho pôde ser entendido. `false` = tem variável (`$X`, `%X%`), crase ou controle: pode ser qualquer lugar. */
+  known: boolean;
+  /** Dentro da pasta: o caminho a partir dela, normalizado (`src/a.ts`). Vazio = a própria pasta. */
+  rel: string;
+  /** O caminho normalizado inteiro (para reconhecer arquivos sensíveis). */
+  full: string;
+}
+
+const UNKNOWN_PATH = /[$`\0\n\r]|%[^%\s]+%/;
+
+function segmentsOf(path: string): { segs: string[]; escapes: boolean } {
+  const segs: string[] = [];
+  let escapes = false;
+  for (const s of path.split("/")) {
+    if (s === "" || s === ".") continue;
+    if (s === "..") {
+      if (segs.length > 0) segs.pop();
+      else escapes = true;
+    } else segs.push(s);
+  }
+  return { segs, escapes };
+}
+
+interface Abs { drive: string; segs: string[] }
+
+function absoluteOf(path: string): Abs | null {
+  const p = path.replace(/\\/g, "/");
+  const drive = /^([A-Za-z]):(?:\/|$)/.exec(p);
+  if (drive) return { drive: drive[1]!.toLowerCase(), segs: segmentsOf(p.slice(2)).segs };
+  return p.startsWith("/") ? { drive: "", segs: segmentsOf(p).segs } : null;
+}
+
+/**
+ * Resolve `path` contra `cwd` por regras só de texto: `.` e `..` resolvidos, `//` e `\\` como `/`, letra do disco do
+ * Windows sem diferenciar maiúsculas. Um `..` que sobe acima da pasta é FORA; `~` (home), variáveis e o que não se
+ * entende também. Links simbólicos não se enxergam sem o disco: o backend os confere à parte. Pura.
+ */
+export function resolvePath(path: string, cwd: string | null): ResolvedPath {
+  const raw = path.trim();
+  if (!raw || UNKNOWN_PATH.test(raw)) return { inside: false, known: false, rel: "", full: raw };
+  const p = raw.replace(/\\/g, "/");
+  if (p.startsWith("~")) {
+    const { segs } = segmentsOf(p.slice(1));
+    return { inside: false, known: true, rel: "", full: `~/${segs.join("/")}` };
+  }
+  const abs = absoluteOf(p);
+  if (!abs) {
+    const { segs, escapes } = segmentsOf(p);
+    const rel = segs.join("/");
+    return { inside: !escapes, known: true, rel, full: escapes ? `../${rel}` : rel };
+  }
+  const full = `${abs.drive ? `${abs.drive}:` : ""}/${abs.segs.join("/")}`;
+  const base = cwd ? absoluteOf(cwd.trim()) : null;
+  if (!base || base.drive !== abs.drive || abs.segs.length < base.segs.length) return { inside: false, known: true, rel: "", full };
+  const same = (a: string, b: string) => (abs.drive ? a.toLowerCase() === b.toLowerCase() : a === b);
+  if (!base.segs.every((seg, i) => same(seg, abs.segs[i]!))) return { inside: false, known: true, rel: "", full };
+  return { inside: true, known: true, rel: abs.segs.slice(base.segs.length).join("/"), full };
+}
+
+/** O arquivo está dentro da pasta? Provado por texto; na dúvida, não. Pura. */
 export function insideFolder(file: string, cwd: string | null): boolean {
-  const f = norm(file);
-  if (!/^(\/|~|[A-Za-z]:\/)/.test(f)) return !f.startsWith("../");
-  if (!cwd) return false;
-  const base = norm(cwd);
-  return f === base || f.startsWith(`${base}/`);
+  return resolvePath(file, cwd).inside;
 }
 
 /** O risco de um pedido (baixo, médio ou alto). Alto nunca é permitido sozinho por uma regra. Pura. */
 export function riskOf(ask: Pick<PendingAsk, "kind" | "detail" | "files" | "cwd">): Risk {
   if (ask.kind === "edit") {
     const files = ask.files.length > 0 ? ask.files : [ask.detail].filter(Boolean);
-    const outside = files.some((f) => !insideFolder(f, ask.cwd));
-    const sensitive = files.some((f) => SENSITIVE_RE.test(norm(f)));
+    const resolved = files.map((f) => resolvePath(f, ask.cwd));
+    const outside = resolved.some((r) => !r.inside);
+    // O que não se entende (variável, crase) conta como sensível: pode ser qualquer lugar.
+    const sensitive = resolved.some((r) => !r.known || SENSITIVE_RE.test(r.full));
     if (sensitive && outside) return "high";
     return outside || sensitive || files.length === 0 ? "medium" : "low";
   }
@@ -149,12 +213,8 @@ export function touchesOf(command: string): string[] {
 const TWO_WORD = new Set(["git", "bun", "npm", "pnpm", "yarn", "cargo", "gh", "docker", "pip", "pip3", "uv", "go", "make", "ags", "bunx", "npx", "kubectl", "brew"]);
 
 function relative(path: string, cwd: string | null): string {
-  const f = norm(path);
-  if (cwd) {
-    const base = norm(cwd);
-    if (f.startsWith(`${base}/`)) return f.slice(base.length + 1);
-  }
-  return f;
+  const r = resolvePath(path, cwd);
+  return r.known && r.inside ? r.rel : norm(path);
 }
 
 /** A pasta comum de vários caminhos (`src/a/x.ts`, `src/a/b/y.ts` → `src/a`). */
@@ -264,8 +324,12 @@ export function ruleMatches(rule: PermissionRule, ask: Pick<PendingAsk, "kind" |
   }
   if (ask.kind === "edit") {
     const files = (ask.files.length > 0 ? ask.files : [ask.detail]).filter(Boolean);
+    // Um padrão com `..` não vale; e só casa o que está PROVADAMENTE dentro da pasta, pelo caminho normalizado
+    // (`src/../../.ssh/x` não é `src/**`).
+    if (rule.pattern.split(/[\\/]/).includes("..")) return false;
     const re = pathGlob(rule.pattern);
-    return files.length > 0 && files.every((f) => re.test(relative(f, ask.cwd)));
+    const resolved = files.map((f) => resolvePath(f, ask.cwd));
+    return resolved.length > 0 && resolved.every((r) => r.known && r.inside && r.rel !== "" && re.test(r.rel));
   }
   const host = hostOf(ask.detail);
   const target = host ? `${host}${new URL(ask.detail.trim()).pathname}` : ask.detail.trim();

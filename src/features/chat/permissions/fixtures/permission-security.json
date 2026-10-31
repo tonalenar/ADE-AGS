@@ -1,0 +1,800 @@
+{
+ "comment": "Casos de SEGURANÇA escritos à mão: o resultado esperado é a regra, não o que o código faz. Lidos pelo vitest e pelo cargo test. Nunca são regenerados.",
+ "inside": [
+  {
+   "file": "src/a.ts",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "src/../a.ts",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "src/../../x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "../x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "/proj/src/../../.ssh/authorized_keys",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "/proj/src/../x",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "/proj/../proj/x",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "/proj/./src//a.ts",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "/proj/src/..",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "src/..",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "..",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "/proj/..",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "/projx/a",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "~/x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "~",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "~root/x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "$HOME/x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "${HOME}/x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "%USERPROFILE%\\x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "src/$X/a",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "src\\a.ts",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "src\\..\\..\\x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "//server/share/x",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "/proj/",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "/proj",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "./a",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "a/./b/../c",
+   "cwd": "/proj",
+   "expected": true
+  },
+  {
+   "file": "/proj/a/../../../etc",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "src/`id`/a",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "/etc/hosts",
+   "cwd": "/proj",
+   "expected": false
+  },
+  {
+   "file": "C:\\proj\\src\\a.ts",
+   "cwd": "C:\\proj",
+   "expected": true
+  },
+  {
+   "file": "C:\\proj\\src\\..\\..\\Users\\x",
+   "cwd": "C:\\proj",
+   "expected": false
+  },
+  {
+   "file": "c:\\PROJ\\a",
+   "cwd": "C:\\proj",
+   "expected": true
+  },
+  {
+   "file": "D:\\proj\\a",
+   "cwd": "C:\\proj",
+   "expected": false
+  },
+  {
+   "file": "C:/proj/../x",
+   "cwd": "C:\\proj",
+   "expected": false
+  },
+  {
+   "file": "src\\..\\..\\x",
+   "cwd": "C:\\proj",
+   "expected": false
+  },
+  {
+   "file": "C:\\proj\\..\\proj\\a",
+   "cwd": "C:\\proj",
+   "expected": true
+  },
+  {
+   "file": "src/a.ts",
+   "cwd": null,
+   "expected": true
+  },
+  {
+   "file": "../a",
+   "cwd": null,
+   "expected": false
+  },
+  {
+   "file": "/proj/a",
+   "cwd": null,
+   "expected": false
+  }
+ ],
+ "risk": [
+  {
+   "kind": "edit",
+   "detail": "/proj/src/../../.ssh/authorized_keys",
+   "files": [
+    "/proj/src/../../.ssh/authorized_keys"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "src/../../.ssh/x",
+   "files": [
+    "src/../../.ssh/x"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "../../.ssh/config",
+   "files": [
+    "../../.ssh/config"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "src/../a.ts",
+   "files": [
+    "src/../a.ts"
+   ],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "edit",
+   "detail": "/proj/src/a.ts",
+   "files": [
+    "/proj/src/a.ts"
+   ],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "edit",
+   "detail": "/proj/.env",
+   "files": [
+    "/proj/.env"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": "/proj/src/../.env",
+   "files": [
+    "/proj/src/../.env"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": "/proj/src/../../etc/hosts",
+   "files": [
+    "/proj/src/../../etc/hosts"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": "~/.ssh/config",
+   "files": [
+    "~/.ssh/config"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "~/.zshrc",
+   "files": [
+    "~/.zshrc"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "~/.bashrc",
+   "files": [
+    "~/.bashrc"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "~/notes.txt",
+   "files": [
+    "~/notes.txt"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": "$HOME/.profile",
+   "files": [
+    "$HOME/.profile"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "%USERPROFILE%\\a",
+   "files": [
+    "%USERPROFILE%\\a"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "C:\\proj\\a.ts",
+   "files": [
+    "C:\\proj\\a.ts"
+   ],
+   "cwd": "C:\\proj",
+   "expected": "low"
+  },
+  {
+   "kind": "edit",
+   "detail": "C:\\proj\\..\\Users\\me\\.ssh\\id_rsa",
+   "files": [
+    "C:\\proj\\..\\Users\\me\\.ssh\\id_rsa"
+   ],
+   "cwd": "C:\\proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": ".git/hooks/pre-commit",
+   "files": [
+    ".git/hooks/pre-commit"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": ".github/workflows/ci.yml",
+   "files": [
+    ".github/workflows/ci.yml"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": "/proj/src/.git/config",
+   "files": [
+    "/proj/src/.git/config"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": "/Users/me/.aws/credentials",
+   "files": [
+    "/Users/me/.aws/credentials"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "/home/me/.ssh/authorized_keys",
+   "files": [
+    "/home/me/.ssh/authorized_keys"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "/home/me/.gnupg/secring.gpg",
+   "files": [
+    "/home/me/.gnupg/secring.gpg"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "/home/me/.kube/config",
+   "files": [
+    "/home/me/.kube/config"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "src/a.ts",
+   "files": [
+    "src/a.ts",
+    "src/../../.ssh/x"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "edit",
+   "detail": "src/a.ts",
+   "files": [
+    "src/a.ts",
+    "../notes"
+   ],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "edit",
+   "detail": "src\\..\\..\\.ssh\\x",
+   "files": [
+    "src\\..\\..\\.ssh\\x"
+   ],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "network",
+   "detail": "https://docs.rs",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  }
+ ],
+ "match": [
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "/proj/src/a.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "/proj/src/../../.ssh/x"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "src/../../.ssh/x"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "src/a/../b.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "src/../README.md"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "../src/a.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "/proj/src/a.ts",
+     "/proj/src/../../x"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "~/src/a.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "$HOME/src/a"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "src/./a.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "src//a.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "src\\a.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "README.md",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "docs/../README.md"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "../x"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "x"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/../**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "a"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "../x"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "a/b/c"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/**",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "/proj/src/.."
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "edit",
+    "pattern": "src/*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "edit",
+    "detail": "",
+    "files": [
+     "src/a/../../src/b.ts"
+    ],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  }
+ ]
+}

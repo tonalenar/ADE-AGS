@@ -85,6 +85,34 @@ pub fn draft_opencode(params: &Value, ask: &Ask) -> Option<Draft> {
     }
 }
 
+/// Algum arquivo, seguindo os links simbólicos NO DISCO, cai fora da pasta? O texto do caminho não mostra um link
+/// (`proj/link/x` pode ser `/etc/x`): resolve o trecho que existe e confere contra a pasta de verdade. Só olha
+/// o que o texto já prova estar dentro; sem como provar (a pasta não existe, erro ao ler), conta como fora.
+pub fn symlink_escapes(files: &[String], cwd: &str) -> bool {
+    let Ok(base) = std::fs::canonicalize(cwd) else { return true };
+    files.iter().any(|file| {
+        let resolved = permission::resolve_path(file, Some(cwd));
+        if !resolved.known || !resolved.inside {
+            return false;
+        }
+        let mut path = std::path::Path::new(cwd).join(&resolved.rel);
+        let mut rest: Vec<std::ffi::OsString> = Vec::new();
+        // O trecho que existe é resolvido (com os links); o que ainda não existe vai por cima, como está.
+        while !path.exists() {
+            match (path.file_name().map(|n| n.to_os_string()), path.parent().map(|p| p.to_path_buf())) {
+                (Some(name), Some(parent)) => {
+                    rest.push(name);
+                    path = parent;
+                }
+                _ => return true,
+            }
+        }
+        let Ok(mut real) = std::fs::canonicalize(&path) else { return true };
+        real.extend(rest.iter().rev());
+        !real.starts_with(&base)
+    })
+}
+
 /// O que o backend decide de um pedido, lendo o time, as regras e o interruptor. Qualquer erro de leitura é
 /// `Ask`: falha fechada, a pessoa decide.
 pub fn plan(conn: &Connection, thread_id: &str, subject: &Subject) -> Decision {
@@ -127,7 +155,10 @@ pub fn on_arrival(app: &AppHandle, db: &DbConnection, row: &RequestRow, draft: O
                 draft.files = edited;
             }
         }
-        let subject = Subject::new(draft.kind, draft.detail, draft.files, Some(thread.cwd.clone()), &thread.agent_id);
+        let mut subject = Subject::new(draft.kind, draft.detail, draft.files, Some(thread.cwd.clone()), &thread.agent_id);
+        if subject.kind == Kind::Edit {
+            subject.escapes = symlink_escapes(&subject.files, &thread.cwd);
+        }
         if let Ok(json) = serde_json::to_string(&subject) {
             let _ = store::set_subject(&conn, &row.id, &json);
         }
@@ -172,4 +203,26 @@ pub fn plan_stored(conn: &Connection, row: &RequestRow) -> Option<Decision> {
     let subject: Subject = serde_json::from_str(&store::subject_of(conn, &row.id).ok()??).ok()?;
     let decision = plan(conn, &row.thread_id, &subject);
     (decision.verdict != Verdict::Ask).then_some(decision)
+}
+
+#[cfg(all(test, unix))]
+mod test_links {
+    use super::symlink_escapes;
+
+    #[test]
+    fn o_link_simbolico_para_fora_da_pasta_conta_como_fora() {
+        let root = std::env::temp_dir().join(format!("ags-links-{}", uuid::Uuid::new_v4()));
+        let (proj, outside) = (root.join("proj"), root.join("outside"));
+        std::fs::create_dir_all(proj.join("src")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, proj.join("link")).unwrap();
+        let cwd = proj.to_str().unwrap();
+        let files = |f: &[&str]| f.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(symlink_escapes(&files(&["link/x.txt"]), cwd), "o link aponta para fora");
+        assert!(symlink_escapes(&files(&["src/a.rs", "link/novo/dir/x"]), cwd), "um arquivo que sai basta");
+        assert!(!symlink_escapes(&files(&["src/a.rs", "novo/dir/x.rs"]), cwd), "caminho que ainda não existe, sem link");
+        assert!(!symlink_escapes(&files(&[&format!("{cwd}/src/a.rs")]), cwd));
+        assert!(symlink_escapes(&files(&["a"]), "/nao/existe/mesmo"), "sem como provar a pasta: fora");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }

@@ -56,13 +56,16 @@ pub struct Subject {
     /// O comando acessa a rede (instalar, baixar, `git push`…).
     #[serde(default)]
     pub network: bool,
+    /// Algum arquivo, seguindo links simbólicos no disco, cai FORA da pasta (o backend confere; o texto não mostra).
+    #[serde(default)]
+    pub escapes: bool,
 }
 
 impl Subject {
     /// Monta o pedido, calculando `network` pelo comando. Pura.
     pub fn new(kind: Kind, detail: String, files: Vec<String>, cwd: Option<String>, agent_id: &str) -> Subject {
         let network = kind == Kind::Network || (kind == Kind::Command && is_network_command(&detail));
-        Subject { kind, detail, files, cwd, agent_id: agent_id.to_string(), network }
+        Subject { kind, detail, files, cwd, agent_id: agent_id.to_string(), network, escapes: false }
     }
 }
 
@@ -158,7 +161,10 @@ fn operators() -> &'static Regex {
 fn sensitive_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
-        re(r"(^|/)(\.env(\.[\w.-]+)?|\.git/|\.github/workflows/|\.ssh/|id_(rsa|ed25519)|\.npmrc|\.netrc|\.aws/|\.claude/settings|Cargo\.lock$|bun\.lockb?$)", false)
+        re(
+            r"(^|/)(\.env(\.[\w.-]+)?|\.git/|\.github/workflows/|\.ssh/|authorized_keys|id_(rsa|ed25519)|\.npmrc|\.netrc|\.aws/|\.gnupg/|\.kube/|\.docker/config\.json|\.config/gh/|\.(zshrc|zshenv|zprofile|bashrc|bash_profile|profile)$|\.claude/settings|Cargo\.lock$|bun\.lockb?$)",
+            false,
+        )
     })
 }
 
@@ -181,19 +187,90 @@ fn norm(path: &str) -> String {
     path.replace('\\', "/").trim_end_matches('/').to_string()
 }
 
-/// O arquivo está dentro da pasta? Caminhos relativos contam como de dentro. Pura.
-pub fn inside_folder(file: &str, cwd: Option<&str>) -> bool {
-    let f = norm(file);
-    let absolute = f.starts_with('/') || f.starts_with('~') || {
-        let b = f.as_bytes();
-        b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/'
-    };
-    if !absolute {
-        return !f.starts_with("../");
+/// Um caminho resolvido de forma LÉXICA (sem tocar o disco).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ResolvedPath {
+    /// Provadamente dentro da pasta. Na dúvida, `false`.
+    pub inside: bool,
+    /// O caminho pôde ser entendido. `false` = tem variável (`$X`, `%X%`), crase ou controle: pode ser qualquer lugar.
+    pub known: bool,
+    /// Dentro da pasta: o caminho a partir dela, normalizado. Vazio = a própria pasta.
+    pub rel: String,
+    /// O caminho normalizado inteiro (para reconhecer arquivos sensíveis).
+    pub full: String,
+}
+
+fn unknown_path_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| re(r"[$`\x00\n\r]|%[^%\s]+%", false))
+}
+
+fn segments_of(path: &str) -> (Vec<String>, bool) {
+    let mut segs: Vec<String> = Vec::new();
+    let mut escapes = false;
+    for s in path.split('/') {
+        match s {
+            "" | "." => {}
+            ".." => {
+                if segs.pop().is_none() {
+                    escapes = true;
+                }
+            }
+            other => segs.push(other.to_string()),
+        }
     }
-    let Some(cwd) = cwd else { return false };
-    let base = norm(cwd);
-    f == base || f.starts_with(&format!("{base}/"))
+    (segs, escapes)
+}
+
+struct Abs {
+    drive: String,
+    segs: Vec<String>,
+}
+
+fn absolute_of(path: &str) -> Option<Abs> {
+    let p = path.replace('\\', "/");
+    let bytes = p.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes.len() == 2 || bytes[2] == b'/') {
+        return Some(Abs { drive: (bytes[0] as char).to_ascii_lowercase().to_string(), segs: segments_of(&p[2..]).0 });
+    }
+    p.starts_with('/').then(|| Abs { drive: String::new(), segs: segments_of(&p).0 })
+}
+
+/// Resolve `path` contra `cwd` por regras só de texto: `.` e `..` resolvidos, `//` e `\\` como `/`, letra do disco do
+/// Windows sem diferenciar maiúsculas. Um `..` que sobe acima da pasta é FORA; `~` (home), variáveis e o que não se
+/// entende também. Links simbólicos não se enxergam sem o disco: o backend os confere à parte (`Subject::escapes`). Pura.
+pub fn resolve_path(path: &str, cwd: Option<&str>) -> ResolvedPath {
+    let raw = path.trim();
+    if raw.is_empty() || unknown_path_re().is_match(raw) {
+        return ResolvedPath { inside: false, known: false, rel: String::new(), full: raw.to_string() };
+    }
+    let p = raw.replace('\\', "/");
+    if let Some(rest) = p.strip_prefix('~') {
+        let (segs, _) = segments_of(rest);
+        return ResolvedPath { inside: false, known: true, rel: String::new(), full: format!("~/{}", segs.join("/")) };
+    }
+    let Some(abs) = absolute_of(&p) else {
+        let (segs, escapes) = segments_of(&p);
+        let rel = segs.join("/");
+        let full = if escapes { format!("../{rel}") } else { rel.clone() };
+        return ResolvedPath { inside: !escapes, known: true, rel, full };
+    };
+    let full = format!("{}/{}", if abs.drive.is_empty() { String::new() } else { format!("{}:", abs.drive) }, abs.segs.join("/"));
+    let outside = |full: String| ResolvedPath { inside: false, known: true, rel: String::new(), full };
+    let Some(base) = cwd.and_then(|c| absolute_of(c.trim())) else { return outside(full) };
+    if base.drive != abs.drive || abs.segs.len() < base.segs.len() {
+        return outside(full);
+    }
+    let same = |a: &str, b: &str| if abs.drive.is_empty() { a == b } else { a.eq_ignore_ascii_case(b) };
+    if !base.segs.iter().zip(&abs.segs).all(|(a, b)| same(a, b)) {
+        return outside(full);
+    }
+    ResolvedPath { inside: true, known: true, rel: abs.segs[base.segs.len()..].join("/"), full }
+}
+
+/// O arquivo está dentro da pasta? Provado por texto; na dúvida, não. Pura.
+pub fn inside_folder(file: &str, cwd: Option<&str>) -> bool {
+    resolve_path(file, cwd).inside
 }
 
 /// O risco de um pedido. Alto nunca é permitido sozinho. Pura.
@@ -205,8 +282,11 @@ pub fn risk_of(subject: &Subject) -> Risk {
             } else {
                 subject.files.iter().map(String::as_str).collect()
             };
-            let outside = files.iter().any(|f| !inside_folder(f, subject.cwd.as_deref()));
-            let sensitive = files.iter().any(|f| sensitive_re().is_match(&norm(f)));
+            let resolved: Vec<ResolvedPath> = files.iter().map(|f| resolve_path(f, subject.cwd.as_deref())).collect();
+            // Provado fora por links simbólicos (o backend confere no disco) conta como fora.
+            let outside = subject.escapes || resolved.iter().any(|r| !r.inside);
+            // O que não se entende (variável, crase) conta como sensível: pode ser qualquer lugar.
+            let sensitive = resolved.iter().any(|r| !r.known || sensitive_re().is_match(&r.full));
             if sensitive && outside {
                 Risk::High
             } else if outside || sensitive || files.is_empty() {
@@ -235,17 +315,6 @@ pub fn risk_of(subject: &Subject) -> Risk {
             }
         }
     }
-}
-
-fn relative(path: &str, cwd: Option<&str>) -> String {
-    let f = norm(path);
-    if let Some(cwd) = cwd {
-        let base = norm(cwd);
-        if let Some(rest) = f.strip_prefix(&format!("{base}/")) {
-            return rest.to_string();
-        }
-    }
-    f
 }
 
 fn escape(text: &str) -> String {
@@ -304,8 +373,14 @@ pub fn rule_matches(rule: &Rule, subject: &Subject) -> bool {
         Kind::Edit => {
             let files: Vec<&str> = if subject.files.is_empty() { vec![subject.detail.as_str()] } else { subject.files.iter().map(String::as_str).collect() };
             let files: Vec<&str> = files.into_iter().filter(|f| !f.is_empty()).collect();
+            // Um padrão com `..` não vale; e só casa o que está PROVADAMENTE dentro da pasta, pelo caminho
+            // normalizado (`src/../../.ssh/x` não é `src/**`).
+            if subject.escapes || rule.pattern.split(['/', '\\']).any(|seg| seg == "..") {
+                return false;
+            }
             let Some(glob) = path_glob(&rule.pattern) else { return false };
-            !files.is_empty() && files.iter().all(|f| glob.is_match(&relative(f, subject.cwd.as_deref())))
+            let resolved: Vec<ResolvedPath> = files.iter().map(|f| resolve_path(f, subject.cwd.as_deref())).collect();
+            !resolved.is_empty() && resolved.iter().all(|r| r.known && r.inside && !r.rel.is_empty() && glob.is_match(&r.rel))
         }
         Kind::Network => {
             let target = match host_and_path(&subject.detail) {
@@ -454,6 +529,38 @@ mod test {
         for c in f["inside"].as_array().unwrap() {
             assert_eq!(inside_folder(c["file"].as_str().unwrap(), c["cwd"].as_str()), c["expected"].as_bool().unwrap(), "{c}");
         }
+    }
+
+    fn security() -> Value {
+        serde_json::from_str(include_str!("../../../src/features/chat/permissions/fixtures/permission-security.json")).expect("fixtures de segurança válidas")
+    }
+
+    fn rule_of(r: &Value) -> Rule {
+        Rule { id: "r".into(), kind: kind(&r["kind"]), pattern: r["pattern"].as_str().unwrap().into(), agent_id: r["agentId"].as_str().map(str::to_string), role: None, team_id: None, created_at: 0 }
+    }
+
+    #[test]
+    fn os_casos_de_seguranca_escritos_a_mao_valem_nos_dois_lados() {
+        let f = security();
+        for c in f["inside"].as_array().unwrap() {
+            assert_eq!(inside_folder(c["file"].as_str().unwrap(), c["cwd"].as_str()), c["expected"].as_bool().unwrap(), "{c}");
+        }
+        for c in f["risk"].as_array().unwrap() {
+            assert_eq!(risk_name(risk_of(&subject(c))), c["expected"].as_str().unwrap(), "{c}");
+        }
+        for c in f["match"].as_array().unwrap() {
+            assert_eq!(rule_matches(&rule_of(&c["rule"]), &subject(&c["ask"])), c["expected"].as_bool().unwrap(), "{c}");
+        }
+    }
+
+    #[test]
+    fn o_link_simbolico_provado_fora_nunca_casa_regra_nem_e_baixo() {
+        let mut edit = Subject::new(Kind::Edit, "".into(), vec!["src/a.ts".into()], Some("/p".into()), "codex");
+        let rule = Rule { id: "r".into(), kind: Kind::Edit, pattern: "src/**".into(), agent_id: None, role: None, team_id: None, created_at: 0 };
+        assert!(rule_matches(&rule, &edit) && risk_of(&edit) == Risk::Low);
+        edit.escapes = true;
+        assert!(!rule_matches(&rule, &edit) && risk_of(&edit) == Risk::Medium);
+        assert_eq!(decide(None, true, &[rule], &edit).verdict, Verdict::Ask);
     }
 
     // ── a decisão ──
