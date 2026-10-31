@@ -49,10 +49,10 @@ const WAIT_SLICE: Duration = Duration::from_secs(3);
 /// Quanto o entregador espera o terminal do destino existir (no arranque, o PTY nasce depois).
 const PTY_WAIT: Duration = Duration::from_secs(120);
 
-/// O que aconteceu com uma mensagem: entregue já, na fila, repetida, sem confirmação, cancelada ou
-/// recusada por um teto (aí `Sent::message` é a linha da recusa, com o motivo e a frase).
+/// O que aconteceu com uma mensagem: entregue já, na fila, repetida, sem confirmação, cancelada, junta a
+/// um `ask` idêntico que ainda espera (`Joined`) ou recusada por um teto (aí `Sent::message` é a linha da recusa, com o motivo e a frase).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed, Cancelled, Refused }
+pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed, Cancelled, Refused, Joined }
 
 /// O resultado de mandar uma mensagem: o que aconteceu e o registro dela.
 #[derive(Clone, Debug)]
@@ -185,6 +185,7 @@ fn admit(app: &AppHandle, new: &NewMessage<'_>, initial: State) -> Result<Result
         Admission::New(message) => Ok(message),
         Admission::Repeat(message) => Err(Sent { delivery: Delivery::Duplicate, message, repeat: true }),
         Admission::Duplicate(message) => Err(Sent { delivery: Delivery::Duplicate, message, repeat: false }),
+        Admission::Joined(message) => Err(Sent { delivery: Delivery::Joined, message, repeat: false }),
         Admission::Refused(refusal) => Err(Sent { delivery: Delivery::Refused, message: refusal.record, repeat: false }),
     })
 }
@@ -293,6 +294,11 @@ pub(super) fn end_direct(app: &AppHandle, msg: &PeerMessage, error: Option<&str>
     let _ = with_db_now(app, |conn, now| store::finish(conn, msg.id, error.is_none(), error, now));
     changed(app, Some(&msg.to_tab_id));
     announce_state(app, &fresh(app, msg.clone()));
+}
+
+/// A espera do `ask` acabou com resposta ou motivo: ele deixa de valer como «em andamento».
+pub(super) fn settle_ask(app: &AppHandle, id: i64) -> Result<bool, String> {
+    with_db_now(app, |conn, now| store::settle_ask(conn, id, now))
 }
 
 /// Uma mensagem já registrada com este id do chamador, se houver.

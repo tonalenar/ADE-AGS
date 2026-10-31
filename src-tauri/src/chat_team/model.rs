@@ -37,6 +37,39 @@ pub fn stopped_reason(items: &[crate::canal::timeline::Item], alive: bool) -> Op
     }
 }
 
+/// As falas do agente que respondem a UMA mensagem entregue à conversa, achada pelo marcador `#id` do cabeçalho.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct ReplyWindow {
+    /// Onde, na timeline, está a mensagem. `None` = ainda não aparece.
+    pub start: Option<usize>,
+    /// Todas as falas do agente depois dela, até o fim do turno (não só a última).
+    pub replies: Vec<String>,
+    /// O turno dela terminou (há um `turnEnd` depois da mensagem).
+    pub ended: bool,
+}
+
+/// Pura: a janela de resposta da mensagem `message_id`. A âncora é a mensagem, não uma contagem de falas
+/// tirada antes do envio: com outras mensagens na frente, a fala nova pode ser a resposta de outra.
+pub fn reply_window(items: &[crate::canal::timeline::Item], message_id: i64) -> ReplyWindow {
+    use crate::canal::timeline::ItemKind;
+    let marker = format!("[Mensagem #{message_id} de ");
+    let Some(start) = items.iter().position(|i| i.kind == ItemKind::User && i.text.as_deref().is_some_and(|t| t.starts_with(&marker))) else {
+        return ReplyWindow::default();
+    };
+    let mut window = ReplyWindow { start: Some(start), ..Default::default() };
+    for item in &items[start + 1..] {
+        match item.kind {
+            ItemKind::Assistant => window.replies.extend(item.text.as_deref().map(str::trim).filter(|t| !t.is_empty()).map(str::to_string)),
+            ItemKind::TurnEnd => {
+                window.ended = true;
+                break;
+            }
+            _ => {}
+        }
+    }
+    window
+}
+
 /// O que o integrante pode fazer sem perguntar. É a política do papel no time: vale para os pedidos
 /// que chegam à caixa de Permissões e para a conversa nova aberta pelo time. Não muda os flags de
 /// uma TUI que já estava aberta (lá a política só restringe, pela caixa).

@@ -352,3 +352,31 @@ fn o_ask_a_conversa_que_errou_cai_ou_foi_interrompida_sai_com_o_motivo() {
     let velho = vec![item(User, "u0"), item(Assistant, "a0"), turn_end("end:t0", false, Some("erro antigo")), ask()];
     assert_eq!(model::stopped_reason(&velho, true), None, "o erro antigo não é desta pergunta");
 }
+
+// ── Etapa 2: a janela de resposta de uma mensagem ──────────────────────
+
+#[test]
+fn a_janela_de_resposta_junta_todas_as_falas_ate_o_fim_do_turno_da_mensagem() {
+    use crate::canal::timeline::ItemKind::{Assistant, TurnEnd, User};
+    let say = |kind, id: &str, text: &str| crate::canal::timeline::Item { text: Some(text.into()), ..crate::canal::timeline::Item::new(kind, id.into(), None) };
+    let items = vec![
+        say(User, "u1", "[Mensagem #5 de Líder via ADE AGS] antes"),
+        say(Assistant, "a1", "resposta do #5"),
+        say(TurnEnd, "e1", ""),
+        say(User, "u2", "[Mensagem #12 de Líder via ADE AGS] agora"),
+        say(Assistant, "a2", "passo 1"),
+        say(Assistant, "a3", "   "),
+        say(Assistant, "a4", "passo 2"),
+    ];
+    let open = model::reply_window(&items, 12);
+    assert_eq!((open.start, open.ended), (Some(3), false));
+    assert_eq!(open.replies, ["passo 1", "passo 2"], "todas as falas, sem a vazia");
+    let mut done = items.clone();
+    done.push(say(TurnEnd, "e2", ""));
+    done.push(say(Assistant, "a5", "de outro turno"));
+    let closed = model::reply_window(&done, 12);
+    assert!(closed.ended);
+    assert_eq!(closed.replies.len(), 2, "o que vem depois do fim do turno não é resposta desta mensagem");
+    assert_eq!(model::reply_window(&items, 1).start, None, "#1 não é prefixo de #12");
+    assert_eq!(model::reply_window(&items, 99), model::ReplyWindow::default());
+}

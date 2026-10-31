@@ -271,6 +271,9 @@ pub enum Admission {
     /// Sem id, a mesma mensagem já foi (ou está indo) para o mesmo destino há pouco. A recusa
     /// também fica gravada (motivo `duplicate`).
     Duplicate(PeerMessage),
+    /// Um `ask` a uma conversa idêntico a outro do mesmo remetente que ainda espera a resposta: não é uma
+    /// recusa nem uma pergunta nova, é a MESMA espera. Nada é gravado; quem pergunta espera a mensagem devolvida.
+    Joined(PeerMessage),
     /// Um teto (profundidade ou fan-out) recusou a mensagem: nada vai ser digitado.
     Refused(Refusal),
 }
@@ -725,6 +728,16 @@ pub fn admit(conn: &Connection, new: &NewMessage<'_>, initial: State, now: i64) 
     immediate(conn, |conn| admit_inner(conn, new, client_id.as_deref(), initial, now))
 }
 
+/// SQL: o destino (`m.to_tab_id`) NÃO mandou nada ao remetente (`m.from_tab_id`) depois de `m`. Usa os
+/// parâmetros posicionais de quem o inclui: `NOT_ANSWERED` lê as colunas de `m`, sem parâmetros próprios.
+const NOT_ANSWERED: &str = "NOT EXISTS (SELECT 1 FROM peer_messages r WHERE r.from_tab_id = m.to_tab_id AND r.to_tab_id = m.from_tab_id
+        AND r.state != 'refused' AND r.created_at > m.created_at)";
+
+/// Um `ask` a uma conversa por protocolo (o que entra na fila de `thread:`).
+fn joins_ask(new: &NewMessage<'_>) -> bool {
+    new.kind == "ask" && new.reply && new.to_tab_id.starts_with(THREAD_PREFIX)
+}
+
 fn admit_inner(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>, initial: State, now: i64) -> Result<Admission, String> {
     prune(conn, now)?;
 
@@ -754,15 +767,31 @@ fn admit_inner(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>,
             }
             return Ok(Admission::Repeat(existing));
         }
+    } else if joins_ask(new) {
+        // Um `ask` a uma conversa que ainda espera resposta: repeti-lo não faz outra pergunta nem outra
+        // espera, devolve a mesma (a recusa por prazo, no `ask`, diz para não perguntar de novo).
+        let found = query(
+            conn,
+            &format!("AS m WHERE m.kind = 'ask' AND m.reply = 1 AND m.from_tab_id = ?1 AND m.to_tab_id = ?2 AND m.dedupe_key = ?3
+                AND m.settled_at IS NULL AND m.state IN ('queued', 'delivering', 'delivered') AND m.created_at >= ?4 AND {NOT_ANSWERED}
+             ORDER BY m.id DESC LIMIT 1"),
+            params![new.from_tab_id, new.to_tab_id, dedupe_key(new), now - DUPLICATE_WINDOW_MS],
+        )?;
+        if let Some(existing) = found.into_iter().next() {
+            return Ok(Admission::Joined(existing));
+        }
     } else if !new.reply {
         // Sem id, vale a chave derivada no servidor (sobrevive ao reinício): mesmo remetente (com
         // `--raw`, qualquer um), mesmo destino, mesmo texto normalizado e mesmo envelope, há menos de
-        // 10 min. A que não se confirmou ou foi cancelada não conta: o reenvio dela passa.
+        // 10 min. A que não se confirmou ou foi cancelada não conta: o reenvio dela passa. Também não
+        // conta se o destino falou com o remetente depois (um «Concluído» de uma rodada nova): a conversa
+        // andou e a repetição é uma mensagem nova (continua valendo o teto de fan-out).
         let found = query(
             conn,
-            "WHERE dedupe_key = ?1 AND reply = 0 AND state IN ('queued', 'delivering', 'delivered') AND created_at >= ?2
-             ORDER BY id DESC LIMIT 1",
-            params![dedupe_key(new), now - DUPLICATE_WINDOW_MS],
+            &format!("AS m WHERE m.dedupe_key = ?1 AND m.reply = 0 AND m.state IN ('queued', 'delivering', 'delivered') AND m.created_at >= ?2
+                AND (?3 = 1 OR {NOT_ANSWERED})
+             ORDER BY m.id DESC LIMIT 1"),
+            params![dedupe_key(new), now - DUPLICATE_WINDOW_MS, new.raw as i64],
         )?;
         if let Some(existing) = found.into_iter().next() {
             let name = if new.to_name.is_empty() { new.to_tab_id } else { new.to_name };
@@ -894,6 +923,15 @@ pub fn delivering_for_threads(conn: &Connection, to: Option<&str>, all: bool, no
            AND (?2 = 1 OR lease_until IS NULL OR lease_until < ?3) ORDER BY position, id",
         params![to, all as i64, now],
     )
+}
+
+/// A espera de um `ask` acabou com resposta, parada ou falha: ele deixa de valer como «em andamento». Um prazo
+/// vencido NÃO encerra: o mesmo `ask` repetido continua juntando-se à mesma espera.
+pub fn settle_ask(conn: &Connection, id: i64, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute("UPDATE peer_messages SET settled_at = ?1 WHERE id = ?2 AND settled_at IS NULL", params![now, id])
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
 }
 
 /// O envio provadamente não aconteceu: a mensagem volta ao início da fila. `available_at` = quando pode

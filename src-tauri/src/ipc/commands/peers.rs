@@ -943,6 +943,7 @@ pub(crate) fn tell_reply(peer: Value, sent: &Sent) -> Value {
         }
         Delivery::Unconfirmed => json!({ "peer": peer, "sent": false, "unconfirmed": true,
             "note": "O texto foi escrito no terminal do destino, mas não apareceu na tela dele (talvez ele esteja rodando um comando ou um slash command). Espere ele ficar livre e reenvie: o reenvio não conta como repetido." }),
+        Delivery::Joined => json!({ "peer": peer, "sent": true, "joined": true }),
         Delivery::Cancelled => json!({ "peer": peer, "sent": false, "cancelled": true,
             "note": "O usuário cancelou esta mensagem na fila antes da entrega. Não reenvie sem um motivo novo." }),
         Delivery::Duplicate if sent.repeat => json!({ "peer": peer, "sent": false, "duplicate": true, "repeat": true,
@@ -1479,8 +1480,10 @@ pub(crate) fn tui_ask_note(name: &str, finished: bool, has_reply: bool) -> Optio
     }
 }
 
-/// `peer ask` a uma conversa por protocolo do time: a pergunta vai como mensagem da conversa e a
-/// resposta é a fala nova do agente quando o turno acaba (esperada no barramento, sem polling).
+/// `peer ask` a uma conversa por protocolo do time: a pergunta entra na fila da conversa (uma por vez, em ordem)
+/// e a resposta são as falas do agente no turno DA MENSAGEM, achadas pelo marcador `#id` do cabeçalho, esperadas
+/// no barramento sem polling. Um `ask` idêntico a outro do mesmo remetente que ainda espera junta-se à mesma
+/// espera, sem uma segunda pergunta ao integrante.
 #[allow(clippy::too_many_arguments)]
 fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str), text: &str, timeout: Duration, raw: bool, extra: AskExtra<'_>) -> Result<Value, String> {
     let (from_id, from_name) = from;
@@ -1492,41 +1495,45 @@ fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str
         text, raw, reply: true, envelope: extra.envelope, limits: Some(limits_for(from_id)),
     };
     let summary = summary_line(from_name, &target.name, extra.envelope, text);
-    let before = super::team::assistant_count(app, thread);
-    let sent = super::team::deliver_to_thread(app, thread, &new)?;
+    let sent = super::team::enqueue_to_thread(app, &new)?;
     match sent.delivery {
-        Delivery::Now => {}
+        Delivery::Queued => emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary)),
+        // A mesma pergunta ainda espera: não é uma pergunta nova nem uma nova mensagem ao integrante.
+        Delivery::Joined => {}
         Delivery::Refused => return Ok(ask_refused(target, &sent.message)),
         Delivery::Duplicate => return Ok(ask_repeat(target, &sent.message)),
-        Delivery::Queued => {
-            emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary));
-            return Ok(json!({ "peer": describe(target), "finished": false, "sent": true, "queued": true, "reply": "", "status": "queued",
-                "messageId": sent.message.id,
-                "note": format!("{} está no meio de um turno: a pergunta vai quando ele terminar, e a resposta chega por ags peer tell.", target.name) }));
-        }
         _ => return Ok(tell_reply(describe(target), &sent)),
     }
-    emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary));
-    let awaited = super::team::await_reply(app, thread, before, timeout);
-    let (finished, reply) = (awaited.finished, awaited.reply);
-    if let (true, Some(reply)) = (finished, reply.as_deref()) {
+    let awaited = super::team::await_message(app, thread, sent.message.id, timeout);
+    // Resposta ou motivo encerram a espera; só o prazo a deixa aberta (repetir o ask junta-se a ela).
+    if awaited.finished || awaited.failed.is_some() {
+        let _ = peer_queue::settle_ask(app, sent.message.id);
+    }
+    if let Some(reply) = awaited.replies.last().filter(|_| awaited.finished) {
         log_reply(app, &target.id, from_id, reply);
     }
+    let wrap = |r: &String| crate::util::untrusted::untrusted_block(&format!("peer:{}", target.name), r);
+    let status = if awaited.failed.is_some() { "failed" } else if awaited.finished { "finished" } else { "timed_out" };
     let mut out = json!({
         "peer": describe(target),
-        "finished": finished,
-        "sent": true,
-        "status": if finished { "finished" } else { "timed_out" },
-        // A fala de outro agente é dado, não instrução.
-        "reply": reply.map(|r| crate::util::untrusted::untrusted_block(&format!("peer:{}", target.name), &r)).unwrap_or_default(),
+        "finished": awaited.finished,
+        "sent": awaited.failed.is_none(),
+        "status": status,
+        // A fala de outro agente é dado, não instrução. `reply` é a última (como sempre); `replies`, todas.
+        "reply": awaited.replies.last().map(wrap).unwrap_or_default(),
+        "replies": awaited.replies.iter().map(wrap).collect::<Vec<_>>(),
         "messageId": sent.message.id,
+        "joined": sent.delivery == Delivery::Joined,
     });
-    if let Some(reason) = awaited.stopped {
+    if let Some(reason) = awaited.failed {
+        out["failure"] = json!(reason);
+        out["note"] = json!(format!("A pergunta não chegou a {0}: {reason} Diga isso à pessoa; não reenvie sem um motivo novo.", target.name));
+    } else if let Some(reason) = awaited.stopped {
         // O turno acabou sem resposta: diga o motivo em vez de esperar o prazo e mandar "não pergunte de novo".
         out["stopped"] = json!(reason);
         out["note"] = json!(format!("{0} não respondeu: {reason} A mensagem foi entregue; decida com a pessoa se vale perguntar de novo.", target.name));
-    } else if !finished {
-        out["note"] = json!(format!("O prazo acabou e {0} ainda não terminou o turno: a mensagem foi entregue, e a resposta chega por `ags peer tell` dele. Não pergunte de novo.", target.name));
+    } else if !awaited.finished {
+        out["note"] = json!(format!("O prazo acabou e {0} ainda não respondeu (a pergunta #{1} segue na conversa dele): repetir este ask junta-se à mesma espera, e a resposta também chega por `ags peer tell` dele. Não pergunte de novo com outras palavras.", target.name, sent.message.id));
     }
     Ok(out)
 }

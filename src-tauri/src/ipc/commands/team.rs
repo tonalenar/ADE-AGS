@@ -80,19 +80,27 @@ pub(super) fn team_threads(app: &AppHandle) -> Vec<OpenTab> {
 /// decidir a vez dele: `Now` = já entrou na conversa; `Queued` = espera (conversa ocupada, ou o envio falhou
 /// e tenta de novo com backoff; se esgotar, o aviso de falha volta pela fila do remetente).
 pub(super) fn deliver_to_thread(app: &AppHandle, thread_id: &str, new: &NewMessage<'_>) -> Result<Sent, String> {
+    let sent = enqueue_to_thread(app, new)?;
+    use crate::peer_queue::store::State;
+    match (sent.delivery, sent.message.state) {
+        (Delivery::Queued, State::Delivered) => Ok(Sent { delivery: Delivery::Now, ..sent }),
+        (Delivery::Queued, State::Unconfirmed | State::Expired) => {
+            Err(sent.message.note.clone().unwrap_or_else(|| format!("A mensagem não chegou à conversa {thread_id}.")))
+        }
+        _ => Ok(sent),
+    }
+}
+
+/// Põe a mensagem na fila da conversa e deixa o consumidor decidir a vez dela agora. Devolve o registro como
+/// ficou (entregue, esperando ou falho), sem transformar a falha em erro: o `ask` a lê do estado da mensagem.
+pub(super) fn enqueue_to_thread(app: &AppHandle, new: &NewMessage<'_>) -> Result<Sent, String> {
     let sent = peer_queue::enqueue(app, new)?;
     if sent.delivery != Delivery::Queued {
         return Ok(sent);
     }
-    let to = sent.message.to_tab_id.clone();
-    peer_queue::pump_thread(app, &to)?;
+    peer_queue::pump_thread(app, &sent.message.to_tab_id.clone())?;
     let message = fresh(app, sent.message.id).unwrap_or(sent.message);
-    use crate::peer_queue::store::State;
-    match message.state {
-        State::Delivered => Ok(Sent { delivery: Delivery::Now, message, repeat: false }),
-        State::Unconfirmed | State::Expired => Err(message.note.clone().unwrap_or_else(|| format!("A mensagem não chegou à conversa {thread_id}."))),
-        _ => Ok(Sent { delivery: Delivery::Queued, message, repeat: false }),
-    }
+    Ok(Sent { delivery: Delivery::Queued, message, repeat: false })
 }
 
 fn fresh(app: &AppHandle, id: i64) -> Option<crate::peer_queue::store::PeerMessage> {
@@ -100,54 +108,90 @@ fn fresh(app: &AppHandle, id: i64) -> Option<crate::peer_queue::store::PeerMessa
     with_conn(&db, |conn| crate::peer_queue::store::get(conn, id)).ok().flatten()
 }
 
-/// Quantas falas do agente a conversa já tem (para o `peer ask` achar a resposta NOVA).
-pub(super) fn assistant_count(app: &AppHandle, thread_id: &str) -> usize {
-    let Ok(db) = db(app) else { return 0 };
-    crate::conversa::api::items(&db, thread_id)
-        .map(|items| items.iter().filter(|i| i.kind == crate::canal::timeline::ItemKind::Assistant).count())
-        .unwrap_or(0)
-}
-
 /// Como a espera de um `peer ask` a uma conversa acabou.
+#[derive(Debug, Default, PartialEq, Eq)]
 pub(super) struct Awaited {
-    /// O turno acabou (com resposta ou sem ela: veja `stopped`).
+    /// O turno da pergunta acabou (com resposta ou sem ela: veja `stopped`).
     pub finished: bool,
-    /// A última fala nova do agente.
-    pub reply: Option<String>,
+    /// TODAS as falas novas do agente, na ordem (a última é a resposta).
+    pub replies: Vec<String>,
     /// Por que o turno acabou sem fala nova (erro, interrompido, conversa fechada). Só quando é verdade.
     pub stopped: Option<String>,
+    /// A pergunta nem chegou à conversa (esgotou as tentativas, a conversa sumiu…): o motivo.
+    pub failed: Option<String>,
 }
 
-/// Espera o turno da conversa acabar, sem polling, e para no que vier primeiro: uma fala nova depois de
-/// `before` falas, o fim do turno sem fala (erro, interrompido, processo que caiu: `stopped`) ou o prazo.
-/// Acorda também com o `closed`, que vai ao mesmo tópico do barramento.
-pub(super) fn await_reply(app: &AppHandle, thread_id: &str, before: usize, timeout: Duration) -> Awaited {
+/// O que se pode dizer da espera de uma mensagem, dado o que está gravado.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Verdict {
+    /// Ainda não dá para dizer: espere.
+    Wait,
+    Replied(Vec<String>),
+    Stopped(String),
+    Failed(String),
+}
+
+/// Pura: julga a espera da mensagem `id` pelo estado dela na fila e pela timeline da conversa. A resposta é
+/// ancorada na mensagem (o marcador `#id`), não numa contagem de falas feita antes do envio.
+pub(super) fn judge(msg: &crate::peer_queue::store::PeerMessage, items: &[crate::canal::timeline::Item], alive: bool) -> Verdict {
+    use crate::peer_queue::store::State;
+    match msg.state {
+        State::Expired | State::Unconfirmed | State::Cancelled | State::Refused => {
+            return Verdict::Failed(msg.note.clone().unwrap_or_else(|| format!("A mensagem ficou {}.", msg.state.label())));
+        }
+        State::Queued | State::Delivering => return Verdict::Wait,
+        State::Delivered => {}
+    }
+    let window = model::reply_window(items, msg.id);
+    let Some(start) = window.start else {
+        // Entregue e a timeline ainda não a mostra (o Codex a grava quando o servidor avisa).
+        return if alive { Verdict::Wait } else { Verdict::Stopped("A conversa fechou antes de responder.".into()) };
+    };
+    let reason = || model::stopped_reason(&items[start..], alive).unwrap_or_else(|| "O turno terminou sem nenhuma resposta escrita.".into());
+    match (window.ended, window.replies.is_empty()) {
+        (true, false) => Verdict::Replied(window.replies),
+        (true, true) => Verdict::Stopped(reason()),
+        (false, _) if !alive => Verdict::Stopped(reason()),
+        (false, _) => Verdict::Wait,
+    }
+}
+
+/// Pura: o aviso do barramento muda a espera da mensagem `id` na conversa `thread`?
+fn concerns(data: &Value, thread: &str, id: i64) -> bool {
+    data.get("threadId").and_then(Value::as_str) == Some(thread) || data.get("id").and_then(Value::as_i64) == Some(id)
+}
+
+/// Espera, no barramento e sem polling, a resposta da mensagem `message_id` (o `ask`): para no que vier
+/// primeiro, a resposta, o fim do turno sem fala, a falha da entrega ou o prazo. Acorda com qualquer aviso da
+/// conversa (`chat.changed`: fase, `closed`…) ou da própria mensagem (`peer.message`).
+pub(super) fn await_message(app: &AppHandle, thread_id: &str, message_id: i64, timeout: Duration) -> Awaited {
     let deadline = Instant::now() + timeout;
-    let filter = crate::bus::Filter { topics: vec![super::conversas::BUS_TOPIC.into()], ..Default::default() };
+    let filter = crate::bus::Filter { topics: vec![super::conversas::BUS_TOPIC.into(), super::peer_queue::MESSAGE_TOPIC.into()], ..Default::default() };
+    // O ponto de partida vem ANTES da primeira leitura: um aviso entre ler e dormir não se perde.
     let mut after = crate::bus::since(u64::MAX, &filter, 1).last_seq;
-    let Ok(db) = db(app) else { return Awaited { finished: false, reply: None, stopped: None } };
+    let Ok(db) = db(app) else { return Awaited::default() };
     loop {
+        let msg = with_conn(&db, |conn| crate::peer_queue::store::get(conn, message_id)).ok().flatten();
         let items = crate::conversa::api::items(&db, thread_id).unwrap_or_default();
-        let replies: Vec<String> = items
-            .iter()
-            .filter(|i| i.kind == crate::canal::timeline::ItemKind::Assistant)
-            .skip(before)
-            .filter_map(|i| i.text.clone())
-            .collect();
-        let status = crate::conversa::api::status(thread_id);
-        if !status.working {
-            if !replies.is_empty() {
-                return Awaited { finished: true, reply: replies.last().cloned(), stopped: None };
+        let alive = crate::conversa::api::status(thread_id).alive;
+        let verdict = msg.as_ref().map_or(Verdict::Failed("A mensagem sumiu da fila.".into()), |m| judge(m, &items, alive));
+        match verdict {
+            Verdict::Replied(replies) => return Awaited { finished: true, replies, ..Default::default() },
+            Verdict::Stopped(reason) => return Awaited { finished: true, stopped: Some(reason), ..Default::default() },
+            Verdict::Failed(reason) => return Awaited { failed: Some(reason), ..Default::default() },
+            Verdict::Wait => {}
+        }
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Awaited::default();
             }
-            if let Some(reason) = model::stopped_reason(&items, status.alive) {
-                return Awaited { finished: true, reply: None, stopped: Some(reason) };
+            let page = crate::bus::wait(after, &filter, 50, left);
+            after = page.last_seq;
+            if page.events.iter().any(|e| concerns(&e.data, thread_id, message_id)) {
+                break;
             }
         }
-        if Instant::now() >= deadline {
-            return Awaited { finished: false, reply: replies.last().cloned(), stopped: None };
-        }
-        let page = crate::bus::wait(after, &filter, 50, deadline.saturating_duration_since(Instant::now()));
-        after = page.last_seq;
     }
 }
 
@@ -386,4 +430,73 @@ pub(super) fn team_role(app: &AppHandle, args: &Value) -> Result<Value, String> 
         brief(app, &me, &target, &crate::chat_team::briefing_for(&me.name, &member, &label, &instructions))
     };
     Ok(json!({ "member": member, "roleLabel": role_label(&member.role), "briefed": briefed, "canvasSynced": synced }))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::canal::timeline::{Item, ItemKind};
+    use crate::peer_queue::store::{PeerMessage, State};
+
+    fn msg(id: i64, state: State, note: Option<&str>) -> PeerMessage {
+        PeerMessage {
+            id, client_id: None, kind: "ask".into(), from_tab_id: "thread:lead".into(), from_name: "Líder".into(), to_tab_id: "thread:t1".into(),
+            to_name: "QA".into(), text: "?".into(), raw: false, reply: true, state, position: 1, force_now: false, attempts: 1, created_at: 1,
+            updated_at: 1, delivered_at: None, edited_at: None, note: note.map(str::to_string), depth: 0, parent_id: None, answer_of: None,
+            reason: None, available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
+        }
+    }
+
+    fn user(id: i64) -> Item {
+        Item { text: Some(format!("[Mensagem #{id} de Líder via ADE AGS] ?")), ..Item::new(ItemKind::User, format!("u{id}"), None) }
+    }
+    fn said(text: &str) -> Item {
+        Item { text: Some(text.into()), ..Item::new(ItemKind::Assistant, format!("a-{text}"), None) }
+    }
+    fn end(error: Option<&str>) -> Item {
+        Item { text: error.map(str::to_string), interrupted: Some(false), ..Item::new(ItemKind::TurnEnd, "end".into(), None) }
+    }
+
+    #[test]
+    fn a_pergunta_que_nao_chegou_sai_com_o_motivo_sem_esperar_o_prazo() {
+        let failed = msg(7, State::Expired, Some("A conversa de destino foi concluída ou apagada."));
+        assert_eq!(judge(&failed, &[], true), Verdict::Failed("A conversa de destino foi concluída ou apagada.".into()));
+        assert!(matches!(judge(&msg(7, State::Unconfirmed, None), &[], true), Verdict::Failed(m) if m.contains("sem confirmação")));
+        assert_eq!(judge(&msg(7, State::Queued, None), &[], true), Verdict::Wait, "ainda na fila: espera");
+        assert_eq!(judge(&msg(7, State::Delivering, None), &[], true), Verdict::Wait);
+    }
+
+    #[test]
+    fn devolve_todas_as_falas_do_turno_e_so_quando_ele_acaba() {
+        let delivered = msg(7, State::Delivered, None);
+        let open = [said("antes"), user(7), said("primeira"), said("segunda")];
+        assert_eq!(judge(&delivered, &open, true), Verdict::Wait, "o turno segue aberto");
+        let ended = [said("antes"), user(7), said("primeira"), said("segunda"), end(None)];
+        assert_eq!(judge(&delivered, &ended, true), Verdict::Replied(vec!["primeira".into(), "segunda".into()]));
+    }
+
+    #[test]
+    fn a_ancora_e_a_mensagem_nao_a_contagem_de_falas() {
+        // A fala de uma mensagem anterior (#6) e a de outra mensagem na frente não são a resposta de #7.
+        let items = [user(6), said("resposta de seis"), end(None), user(7), said("resposta de sete"), end(None), user(8), said("de oito"), end(None)];
+        assert_eq!(judge(&msg(7, State::Delivered, None), &items, true), Verdict::Replied(vec!["resposta de sete".into()]));
+        assert_eq!(judge(&msg(8, State::Delivered, None), &items, true), Verdict::Replied(vec!["de oito".into()]));
+    }
+
+    #[test]
+    fn sai_com_o_motivo_quando_o_turno_erra_acaba_mudo_ou_a_conversa_fecha() {
+        let delivered = msg(7, State::Delivered, None);
+        assert!(matches!(judge(&delivered, &[user(7), end(Some("falhou"))], true), Verdict::Stopped(m) if m.contains("falhou")));
+        assert!(matches!(judge(&delivered, &[user(7), end(None)], true), Verdict::Stopped(m) if m.contains("sem nenhuma resposta")));
+        assert!(matches!(judge(&delivered, &[user(7), said("parcial")], false), Verdict::Stopped(m) if m.contains("fechou")));
+        assert_eq!(judge(&delivered, &[], true), Verdict::Wait, "entregue, mas a timeline ainda não mostra");
+        assert!(matches!(judge(&delivered, &[], false), Verdict::Stopped(_)));
+    }
+
+    #[test]
+    fn so_acorda_com_o_aviso_da_conversa_ou_da_mensagem() {
+        assert!(concerns(&json!({ "threadId": "t1" }), "t1", 7));
+        assert!(concerns(&json!({ "id": 7, "state": "delivered" }), "t1", 7));
+        assert!(!concerns(&json!({ "threadId": "t2", "id": 8 }), "t1", 7));
+    }
 }

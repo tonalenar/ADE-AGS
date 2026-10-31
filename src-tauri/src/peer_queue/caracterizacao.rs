@@ -71,43 +71,63 @@ fn o_reinicio_devolve_a_fila_a_mensagem_que_ainda_esperava_o_turno() {
 // ── Item 10: ask repetido e "Concluído" legítimo ─────────────────────
 
 #[test]
-fn hoje_o_ask_repetido_enquanto_o_integrante_trabalha_vira_outra_espera() {
-    let conn = db();
-    let ask = msg("ask", "thread:lead", "thread:t1", "o build passa?");
-    let first = novo(como_o_deliver_to_thread_grava(&conn, &ask, 1_000));
-    let second = como_o_deliver_to_thread_grava(&conn, &ask, 2_000);
-    assert!(matches!(&second, Admission::New(m) if m.id != first.id), "reply: true pula o dedupe: {second:?}");
-}
-
-#[test]
-#[ignore = "etapa 2: falha até a fila durável existir"]
-fn etapa2_o_ask_repetido_devolve_a_mesma_espera() {
+fn o_ask_repetido_devolve_a_mesma_espera() {
     let conn = db();
     let ask = msg("ask", "thread:lead", "thread:t1", "o build passa?");
     let first = novo(como_o_deliver_to_thread_grava(&conn, &ask, 1_000));
     let second = como_o_deliver_to_thread_grava(&conn, &ask, 2_000);
     assert!(
-        matches!(&second, Admission::Duplicate(m) | Admission::Repeat(m) if m.id == first.id),
+        matches!(&second, Admission::Joined(m) if m.id == first.id),
         "um ask em andamento por remetente+destino: repetir devolve a mesma espera, {second:?}"
     );
+    // Nada de recusa gravada: juntar-se à espera não é uma recusa.
+    assert!(refusals_from(&conn, "thread:lead", 10).unwrap().is_empty());
 }
 
 #[test]
-fn hoje_o_concluido_legitimo_depois_de_novo_pedido_e_recusado_como_duplicado() {
-    let conn = db();
-    entregue(&conn, &msg("tell", "thread:t1", "thread:lead", "Concluído"), 1_000);
-    entregue(&conn, &msg("tell", "thread:lead", "thread:t1", "agora faça o item B"), 2_000);
-    let again = admit(&conn, &msg("tell", "thread:t1", "thread:lead", "Concluído"), State::Queued, 3_000).unwrap();
-    assert!(matches!(again, Admission::Duplicate(_)), "{again:?}");
-    assert_eq!(refusals_from(&conn, "thread:t1", 10).unwrap().len(), 1, "e ainda grava a recusa 'duplicate'");
-}
-
-#[test]
-#[ignore = "etapa 2: falha até a fila durável existir"]
-fn etapa2_o_concluido_depois_de_novo_pedido_passa() {
+fn o_concluido_depois_de_novo_pedido_passa() {
     let conn = db();
     entregue(&conn, &msg("tell", "thread:t1", "thread:lead", "Concluído"), 1_000);
     entregue(&conn, &msg("tell", "thread:lead", "thread:t1", "agora faça o item B"), 2_000);
     let again = admit(&conn, &msg("tell", "thread:t1", "thread:lead", "Concluído"), State::Queued, 3_000).unwrap();
     assert!(matches!(again, Admission::New(_)), "o destino falou com o remetente no meio: a conversa andou, não é repetição ({again:?})");
+}
+
+#[test]
+fn o_concluido_repetido_sem_o_destino_ter_falado_continua_recusado() {
+    let conn = db();
+    entregue(&conn, &msg("tell", "thread:t1", "thread:lead", "Concluído"), 1_000);
+    let again = admit(&conn, &msg("tell", "thread:t1", "thread:lead", "Concluído"), State::Queued, 3_000).unwrap();
+    assert!(matches!(again, Admission::Duplicate(_)), "{again:?}");
+    assert_eq!(refusals_from(&conn, "thread:t1", 10).unwrap().len(), 1, "a recusa 'duplicate' continua gravada");
+}
+
+#[test]
+fn o_ask_que_ja_teve_resposta_ou_foi_encerrado_nao_junta_a_proxima_pergunta() {
+    let conn = db();
+    let ask = msg("ask", "thread:lead", "thread:t1", "o build passa?");
+    let first = novo(admit(&conn, &ask, State::Queued, 1_000).unwrap());
+    assert!(settle_ask(&conn, first.id, 2_000).unwrap());
+    assert!(!settle_ask(&conn, first.id, 2_001).unwrap(), "encerrar duas vezes não muda nada");
+    assert!(matches!(admit(&conn, &ask, State::Queued, 3_000).unwrap(), Admission::New(m) if m.id != first.id), "encerrado: a pergunta de novo é nova");
+}
+
+#[test]
+fn o_ask_cuja_resposta_veio_por_tell_tambem_deixa_de_estar_em_andamento() {
+    let conn = db();
+    let ask = msg("ask", "thread:lead", "thread:t1", "o build passa?");
+    novo(admit(&conn, &ask, State::Queued, 1_000).unwrap());
+    entregue(&conn, &msg("tell", "thread:t1", "thread:lead", "passa sim"), 2_000);
+    assert!(matches!(admit(&conn, &ask, State::Queued, 3_000).unwrap(), Admission::New(_)), "o integrante já respondeu: é outra pergunta");
+}
+
+#[test]
+fn texto_diferente_ou_outro_destino_nao_se_juntam_e_o_ask_a_terminal_segue_como_antes() {
+    let conn = db();
+    novo(admit(&conn, &msg("ask", "thread:lead", "thread:t1", "o build passa?"), State::Queued, 1_000).unwrap());
+    assert!(matches!(admit(&conn, &msg("ask", "thread:lead", "thread:t1", "e o lint?"), State::Queued, 2_000).unwrap(), Admission::New(_)));
+    assert!(matches!(admit(&conn, &msg("ask", "thread:lead", "thread:t2", "o build passa?"), State::Queued, 2_000).unwrap(), Admission::New(_)));
+    // Para um terminal, o `ask` direto (reply) continua pulando o dedupe, como antes.
+    novo(admit(&conn, &msg("ask", "lead-tab", "tab-1", "pronto?"), State::Delivering, 1_000).unwrap());
+    assert!(matches!(admit(&conn, &msg("ask", "lead-tab", "tab-1", "pronto?"), State::Delivering, 2_000).unwrap(), Admission::New(_)));
 }
