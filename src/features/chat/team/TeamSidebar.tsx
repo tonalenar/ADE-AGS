@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 import type { ConversationCard } from "../chatModel";
@@ -75,19 +75,4 @@ export function conversationDragProps(key: string): { draggable: true; onDragSta
       e.dataTransfer.effectAllowed = "link";
     },
   };
-}
-
-/**
- * Com o time ativo, o painel Time abre no lado direito (prancheta 15): ao abrir uma conversa que
- * orquestra um time ou é integrante de um, uma vez por conversa. Fechar depois é da pessoa.
- */
-export function useOpenTeamPanel(convKey: string | null, open: (convKey: string) => void): void {
-  const teams = useTeamStore((s) => s.teams);
-  const inTeam = !!convKey && teams.some((t) => t.orchestrator === convKey || t.members.some((m) => m.member === convKey));
-  const shown = useRef<string | null>(null);
-  useEffect(() => {
-    if (!convKey || !inTeam || shown.current === convKey) return;
-    shown.current = convKey;
-    open(convKey);
-  }, [convKey, inTeam, open]);
 }

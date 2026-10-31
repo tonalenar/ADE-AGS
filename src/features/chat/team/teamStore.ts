@@ -10,7 +10,7 @@ import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 
 import { chatCommand } from "../chatModel";
-import { useChatStore } from "../store";
+import { addSurface, useChatStore } from "../store";
 import { chatThreadCreate } from "../structured/ipc";
 import { STRUCTURED_AGENTS, threadIdOf, threadKey } from "../structured/model";
 import { addPending, dropPending } from "../timeline/pending";
@@ -247,6 +247,8 @@ export interface ConversationRef {
 export async function makeOrchestrator(conv: ConversationRef): Promise<TeamView> {
   const team = await chatTeamCreate({ orchestrator: conv.key, agentId: conv.agentId, label: conv.agentLabel, cwd: conv.cwd, title: conv.title });
   upsertTeam(team);
+  // Criar o time é pedido da pessoa: o painel Time abre, uma vez, para ela montar o elenco.
+  addSurface("team");
   await syncTeamCanvas(team);
   return team;
 }

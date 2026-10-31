@@ -26,7 +26,6 @@ import { useLiveSummary } from "./liveSummary";
 import { HeaderLive } from "./LiveActivity";
 import { PermissionsInbox } from "./permissions/PermissionsInbox";
 import { TeamHeaderBadge } from "./team/TeamThreadFeed";
-import { useOpenTeamPanel } from "./team/TeamSidebar";
 import { PermissionsManager } from "./permissions/PermissionsManager";
 import { setInboxOpen, usePermissions } from "./permissions/permissionsStore";
 import { startQueueRunner } from "./queueRunner";
@@ -35,8 +34,9 @@ import { RightPanel } from "./RightPanel";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
 import { SummaryDock, SummaryPane } from "./summary/SummaryPane";
+import { useTeamDraft } from "./team/draftStore";
 import { chatInset } from "./summary/summaryLayout";
-import { addSurface, forgetLastPanel, type RightPanelTab, openTeamPanelFocused, setRightPanel, toggleRightPanel, useChatStore } from "./store";
+import { forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
 import { matchTeamShortcut } from "./panelMenu";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
 import { startStructured, useStructured } from "./structured/store";
@@ -124,8 +124,14 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
     }
   }, [inboxOpen]);
   useEffect(() => { if (panelOpen) setInboxOpen(false); }, [panelOpen]);
-  // Com o time ativo, o painel Time abre no lado direito (prancheta 15).
-  useOpenTeamPanel(active?.tabId ?? null, openTeamSurface);
+  // O painel Time só abre quando a pessoa o pede (botão, atalho ou ao criar o time): trocar de conversa, de
+  // integrante ou entrar numa conversa do time não mexe na aba do painel. Uma conversa nova só tira o Time que sobrou.
+  const newScreen = !active;
+  useEffect(() => {
+    if (!newScreen) return;
+    const next = panelForNewConversation(useChatStore.getState().panel, useTeamDraft.getState().members.length === 0);
+    if (next !== useChatStore.getState().panel) setRightPanel(next);
+  }, [newScreen]);
 
   const addProject = async () => {
     const picked = await pickProjectFolder(t("home.dialogTitle"));
@@ -255,7 +261,3 @@ export function useFolderDiffs(cards: ConversationCard[]): Record<string, Folder
   return diffs;
 }
 
-/** Abre a aba Time do painel direito (estável: o hook do time a chama uma vez por conversa). */
-function openTeamSurface(): void {
-  addSurface("team");
-}

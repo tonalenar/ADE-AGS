@@ -73,7 +73,17 @@ const PANELS: readonly string[] = ["summary", "diff", "files", "browser", "desig
  */
 export function parsePanel(raw: string | null): RightPanelTab | null {
   if (raw === "none") return null;
+  // O Time só abre quando a pessoa o pede naquela hora: nunca volta sozinho ao reabrir o app.
+  if (raw === "team") return "summary";
   return raw && PANELS.includes(raw) ? (raw as RightPanelTab) : "summary";
+}
+
+/**
+ * O painel ao entrar numa conversa nova: o Time (que sobrou da conversa anterior) sai de cena, a menos que a
+ * pessoa já tenha montado um time em rascunho; qualquer outra aba, ou o painel fechado, fica como ela deixou. Pura.
+ */
+export function panelForNewConversation(panel: RightPanelTab | null, draftEmpty: boolean): RightPanelTab | null {
+  return panel === "team" && draftEmpty ? "summary" : panel;
 }
 
 function readPanel(): RightPanelTab | null {
