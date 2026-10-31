@@ -362,12 +362,26 @@ pub(crate) fn outgoing_peer(from_name: &str, text: &str, expects_reply: bool, ra
 
 /// El encabezado con el que llega un mensaje: quién lo manda y cómo contestar.
 pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String {
-    let how = if expects_reply {
+    format!("[Mensagem de {from_name} via ADE AGS] {text}\n({})", how_to_reply(from_name, expects_reply))
+}
+
+/// A frase final de uma mensagem a um TERMINAL: a resposta de um `ask` lê-se na tela; a cópia por `tell` é a reserva de quem demora.
+pub(crate) fn how_to_reply(from_name: &str, expects_reply: bool) -> String {
+    if expects_reply {
         format!("Responda normalmente: quem perguntou lê a resposta na sua tela. Se demorar, mande-a também com: ags peer tell \"{from_name}\" \"<resposta>\"")
     } else {
         format!("Para responder, use: ags peer tell \"{from_name}\" \"<mensagem>\"")
-    };
-    format!("[Mensagem de {from_name} via ADE AGS] {text}\n({how})")
+    }
+}
+
+/// A mesma frase para uma CONVERSA por protocolo: o fim do turno de um `ask` volta sozinho a quem perguntou, e
+/// copiá-lo por `tell` (ou confirmar o recebimento) só gasta token de quem espera.
+pub(crate) fn how_to_reply_thread(from_name: &str, expects_reply: bool) -> String {
+    if expects_reply {
+        "A resposta final do seu turno volta sozinha a quem perguntou: não a repita por `ags peer tell`".to_string()
+    } else {
+        format!("Não responda só para confirmar o recebimento. Com o resultado, um bloqueio ou uma pergunta, use: ags peer tell \"{from_name}\" \"<mensagem>\"")
+    }
 }
 
 /// O fim da saída do PTY, sem escapes, para conferir se uma mensagem apareceu na tela.
@@ -522,6 +536,17 @@ pub(super) fn peer_connect(app: &AppHandle, args: &Value) -> Result<Value, Strin
 /// `ags peer role <nome> <papel> [--subagent]`: o orquestrador define (ou troca) o papel de um agente da
 /// equipe, em geral um que o usuário abriu "sem especificação". O canvas passa a mostrar o papel e o
 /// agente recebe a instrução do papel.
+/// Pura: o que o integrante lê ao receber o papel (e, se subagente, de quem recebe tarefas).
+fn role_text(role: &crate::canvas::roles::Role, orchestrator: &str, subagent: bool) -> String {
+    let rules = crate::chat_team::model::MESSAGE_RULES;
+    let briefing = crate::canvas::roles::briefing(role);
+    if subagent {
+        format!("{briefing}\nVocê é um subagente de {orchestrator}: execute as tarefas que ele enviar. {rules}")
+    } else {
+        format!("{briefing}\n{rules}")
+    }
+}
+
 pub(super) fn peer_role(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let me = orchestrator(app, args)?;
     let candidates = operable(app, &me)?;
@@ -535,12 +560,7 @@ pub(super) fn peer_role(app: &AppHandle, args: &Value) -> Result<Value, String> 
     };
     canvas_change(app, &me, "canvas.role", json!({ "cwd": target.cwd, "tabId": target.id, "role": role.label, "subagent": subagent }))?;
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
-    let text = if subagent {
-        format!("{}
-Você é um subagente de {}: execute as tarefas que ele enviar e responda com ags peer tell.", crate::canvas::roles::briefing(&role), me.name)
-    } else {
-        crate::canvas::roles::briefing(&role)
-    };
+    let text = role_text(&role, &me.name, subagent);
     let new = NewMessage {
         client_id: None, kind: "role", from_tab_id: &me.id, from_name: &me.name,
         to_tab_id: &target.id, to_name: &target.name, text: &text, raw: false, reply: false, ..Default::default()
@@ -1871,6 +1891,19 @@ mod test {
         assert!(!is_raw(&json!({ "raw": false })));
         assert!(!is_raw(&json!({ "raw": "no" })));
         assert!(!is_raw(&json!({})));
+    }
+
+    #[test]
+    fn o_papel_dado_pelo_orquestrador_traz_as_regras_de_mensagem_e_nao_manda_responder_por_tell() {
+        let role = crate::canvas::roles::Role { id: "qa".into(), label: "QA".into(), instructions: "Rode os testes.".into(), builtin: false };
+        for subagent in [false, true] {
+            let text = role_text(&role, "Líder", subagent);
+            assert!(text.starts_with("Seu papel neste time: QA — Rode os testes."), "{text}");
+            assert!(text.contains("VOLTA SOZINHA a quem perguntou"), "{text}");
+            assert!(text.contains("NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido"), "{text}");
+            assert!(!text.contains("responda com ags peer tell"), "{text}");
+            assert_eq!(text.contains("Você é um subagente de Líder"), subagent, "{text}");
+        }
     }
 
     #[test]

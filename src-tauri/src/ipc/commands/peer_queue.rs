@@ -26,7 +26,7 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-use super::peers::{caller, delivery_lock, outgoing, outgoing_peer, spill_to_inbox, stale_note, submit_confirmed};
+use super::peers::{caller, delivery_lock, how_to_reply, how_to_reply_thread, outgoing, outgoing_peer, spill_to_inbox, stale_note, submit_confirmed};
 use super::tabs::{pty_id_for_tab, tab_list, wait_until_quiet};
 use crate::ipc::protocol::arg_str_opt;
 use crate::chat_team::model::THREAD_PREFIX;
@@ -169,7 +169,14 @@ pub(crate) fn compose_thread(msg: &PeerMessage, waited: Duration) -> String {
     if msg.raw {
         return format!("[Mensagem #{} de {}] {}", msg.id, msg.from_name, msg.text);
     }
-    let text = framed_text(msg, &msg.text, waited);
+    let mut text = framed_text(msg, &msg.text, waited);
+    // O rodapé "como responder" do terminal manda copiar o `ask` por `tell`; numa conversa a resposta volta sozinha.
+    if matches!(msg.kind.as_str(), "tell" | "ask") {
+        let terminal = how_to_reply(&msg.from_name, msg.reply);
+        if let Some(at) = text.rfind(&terminal) {
+            text.replace_range(at..at + terminal.len(), &how_to_reply_thread(&msg.from_name, msg.reply));
+        }
+    }
     match text.strip_prefix("[Mensagem de ") {
         Some(rest) => format!("[Mensagem #{} de {rest}", msg.id),
         None => text,
@@ -843,6 +850,19 @@ oi
         assert_eq!(compose_thread(&raw, Duration::ZERO), "[Mensagem #7 de Líder] aviso do app");
         // O aviso de atraso também vai.
         assert!(compose_thread(&m, Duration::from_secs(300)).contains("ficou na fila"));
+    }
+
+    #[test]
+    fn o_ask_a_uma_conversa_diz_que_a_resposta_volta_sozinha_e_nao_manda_copia_por_tell() {
+        let ask = compose_thread(&msg(false, true), Duration::ZERO);
+        assert!(ask.contains("volta sozinha a quem perguntou"), "{ask}");
+        assert!(ask.contains("não a repita por `ags peer tell`"), "{ask}");
+        assert!(!ask.contains("Se demorar, mande-a também"), "o rodapé do terminal mandava a cópia por tell: {ask}");
+        let tell = compose_thread(&msg(false, false), Duration::ZERO);
+        assert!(tell.contains("Não responda só para confirmar"), "{tell}");
+        assert!(tell.contains("ags peer tell \"Líder\""), "o caminho para o resultado ou o bloqueio segue: {tell}");
+        // O terminal não muda: a resposta lê-se na tela e a cópia é a reserva de quem demora.
+        assert!(compose(&msg(false, true), "oi", Duration::ZERO).contains("Se demorar, mande-a também com: ags peer tell"));
     }
 
     #[test]
