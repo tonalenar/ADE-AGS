@@ -443,7 +443,7 @@ mod test {
             id, client_id: None, kind: "ask".into(), from_tab_id: "thread:lead".into(), from_name: "Líder".into(), to_tab_id: "thread:t1".into(),
             to_name: "QA".into(), text: "?".into(), raw: false, reply: true, state, position: 1, force_now: false, attempts: 1, created_at: 1,
             updated_at: 1, delivered_at: None, edited_at: None, note: note.map(str::to_string), depth: 0, parent_id: None, answer_of: None,
-            reason: None, available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
+            reason: None, available_at: None, lease_until: None, delivery_mode: None, settled_at: None, sending_at: None,
         }
     }
 

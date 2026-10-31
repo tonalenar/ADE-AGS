@@ -58,11 +58,17 @@ com um consumidor por destino no lugar do entregador do PTY (etapa 2 do harness 
   com `reason = delivery_failed` e o aviso ao remetente) e `Unknown` (o pedido saiu e a resposta se perdeu:
   `unconfirmed`, **sem retry**, e o aviso). No Codex só o pedido que saiu e perdeu a resposta é `Unknown`
   (`RequestFailure`); Claude, OpenCode e Antigravity só falham antes de escrever.
-- **Marcador `#id`**: o cabeçalho que a conversa recebe é `[Mensagem #<id> de X via ADE AGS]`. Ele permite
-  achar, na timeline, a mensagem entregue: (1) na **recuperação** (`thread_outbox::recover`, no arranque e
-  quando `lease_until` vence): achou → `delivered`; não achou e o motor grava a mensagem do usuário no envio
-  (Claude, OpenCode, Antigravity) → volta à fila uma vez; não achou no Codex (que a grava quando o servidor
-  avisa) ou a timeline não abre → `unconfirmed` e aviso; (2) na **âncora do `ask`** (`chat_team::model::reply_window`).
+- **Marcador `#id`**: o cabeçalho que a conversa recebe é `[Mensagem #<id> de X via ADE AGS]`. TODA mensagem a uma conversa
+  o leva: o `--raw` de um agente a uma conversa é **recusado** (`raw_to_thread`; uma conversa por protocolo não é um terminal,
+  e `/compact` não vale para ela) e o `--raw` que o app mesmo manda (o aviso de falha) leva um cabeçalho mínimo
+  `[Mensagem #<id> de X]`. O marcador serve à **recuperação** (`thread_outbox::recover`) e à **âncora do `ask`**
+  (`chat_team::model::reply_window`).
+- **Recuperação só repete o que PROVA que não saiu**. O consumidor grava `sending_at` no banco ANTES de `session.send`
+  (`store::mark_sending`). Uma mensagem `delivering` que o app perdeu de vista (reinício, posse `lease_until` vencida):
+  o marcador está na timeline → `delivered`; **sem `sending_at`** (o envio nem começou) → volta à fila, em qualquer motor;
+  **com `sending_at` e sem marcador** (ou timeline ilegível) → `unconfirmed` e aviso a quem pediu. Mesmo nos motores que
+  gravam o item no envio há uma janela entre escrever no agente e gravar o item, então «sem marcador» não prova nada.
+  Na dúvida, nunca se repete a ordem.
 - **Arranque**: `store::resume` deixa o `delivering` de uma conversa para a recuperação (não o marca às cegas).
   O conjunto de vivos inclui as conversas ativas (`live_ids`): o aviso de falha alcança quem pediu de dentro de uma.
 - **Barramento**: cada mudança de estado publica `peer.message {id, state, reason, from, to, kind, attempts}`.

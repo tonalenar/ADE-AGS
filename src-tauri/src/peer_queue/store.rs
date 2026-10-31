@@ -177,6 +177,10 @@ pub struct PeerMessage {
     pub delivery_mode: Option<String>,
     /// `ask`: a espera pela resposta acabou (resposta, motivo ou prazo).
     pub settled_at: Option<i64>,
+    /// Só conversas: o instante em que o envio à conversa COMEÇOU (gravado ANTES de `session.send`). Sem ele, uma
+    /// mensagem `delivering` que o app perdeu de vista provadamente não saiu e pode voltar à fila; com ele e sem o
+    /// marcador na timeline, não dá para saber (o motor pode ter escrito e caído antes de gravar o item).
+    pub sending_at: Option<i64>,
 }
 
 /// Os campos do envelope tipado (`--task`, `--constraints`, `--expecting`).
@@ -352,6 +356,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("lease_until", "INTEGER"),
         ("delivery_mode", "TEXT"),
         ("settled_at", "INTEGER"),
+        ("sending_at", "INTEGER"),
     ] {
         if !has_column(conn, "peer_messages", column)? {
             conn.execute_batch(&format!("ALTER TABLE peer_messages ADD COLUMN {column} {ddl};"))?;
@@ -385,7 +390,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 
 const COLUMNS: &str = "id, client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply, state, \
     position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note, depth, parent_id, answer_of, reason, \
-    available_at, lease_until, delivery_mode, settled_at";
+    available_at, lease_until, delivery_mode, settled_at, sending_at";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
     let state: String = r.get(10)?;
@@ -418,6 +423,7 @@ fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
         lease_until: r.get(24)?,
         delivery_mode: r.get(25)?,
         settled_at: r.get(26)?,
+        sending_at: r.get(27)?,
     })
 }
 
@@ -693,6 +699,7 @@ fn from_tombstone(conn: &Connection, from: &str, cid: &str) -> Result<Option<Pee
                 lease_until: None,
                 delivery_mode: None,
                 settled_at: None,
+                sending_at: None,
             })
         },
     )
@@ -903,7 +910,7 @@ pub const DELIVERY_FAILED: &str = "delivery_failed";
 pub fn claim_for_thread(conn: &Connection, id: i64, mode: &str, now: i64, lease_ms: i64) -> Result<Option<PeerMessage>, String> {
     let changed = conn
         .execute(
-            "UPDATE peer_messages SET state = 'delivering', attempts = attempts + 1, updated_at = ?1, available_at = NULL,
+            "UPDATE peer_messages SET state = 'delivering', attempts = attempts + 1, updated_at = ?1, available_at = NULL, sending_at = NULL,
                 lease_until = ?2, delivery_mode = ?3 WHERE id = ?4 AND state = 'queued'",
             params![now, now + lease_ms, mode, id],
         )
@@ -934,12 +941,20 @@ pub fn settle_ask(conn: &Connection, id: i64, now: i64) -> Result<bool, String> 
     Ok(changed == 1)
 }
 
+/// Grava que o envio à conversa vai COMEÇAR (antes de `session.send`): é a prova, no banco, de que antes disto nada saiu.
+pub fn mark_sending(conn: &Connection, id: i64, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute("UPDATE peer_messages SET sending_at = ?1 WHERE id = ?2 AND state = 'delivering'", params![now, id])
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
 /// O envio provadamente não aconteceu: a mensagem volta ao início da fila. `available_at` = quando pode
 /// ir de novo (backoff; `None` = já). `refund`: a tentativa não conta (a conversa só estava ocupada).
 pub fn release(conn: &Connection, id: i64, note: Option<&str>, available_at: Option<i64>, refund: bool, now: i64) -> Result<bool, String> {
     let changed = conn
         .execute(
-            "UPDATE peer_messages SET state = 'queued', note = ?1, available_at = ?2, lease_until = NULL, updated_at = ?3,
+            "UPDATE peer_messages SET state = 'queued', note = ?1, available_at = ?2, lease_until = NULL, sending_at = NULL, updated_at = ?3,
                 attempts = attempts - ?4 WHERE id = ?5 AND state = 'delivering'",
             params![note, available_at, now, refund as i64, id],
         )

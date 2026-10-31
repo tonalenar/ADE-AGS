@@ -484,3 +484,12 @@ fn nenhum_comando_de_cli_nem_de_mcp_escreve_regra_de_permissao() {
         }
     }
 }
+
+#[test]
+fn a_janela_de_resposta_acha_tambem_o_cabecalho_minimo_do_raw_interno() {
+    use crate::canal::timeline::{Item, ItemKind};
+    let item = |kind, id: &str, text: &str| Item { text: Some(text.into()), ..Item::new(kind, id.into(), None) };
+    let items = vec![item(ItemKind::User, "u", "[Mensagem #9 de ADE AGS] aviso do app"), item(ItemKind::Assistant, "a", "ok"), item(ItemKind::TurnEnd, "e", "")];
+    let window = model::reply_window(&items, 9);
+    assert_eq!((window.start, window.ended, window.replies), (Some(0), true, vec!["ok".to_string()]));
+}

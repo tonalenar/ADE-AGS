@@ -842,6 +842,12 @@ fn policy_refusal(app: &AppHandle, kind: &str, from: &str, from_name: &str, to: 
     Ok(refused_reply(peer, reason, message, Some(&record)))
 }
 
+/// `--raw` é para mandar a uma TUI um comando dela (`/compact`) sem cabeçalho. Uma conversa por protocolo não é um terminal e
+/// toda mensagem a ela precisa do marcador `#id` (a recuperação e a resposta do `ask` dependem dele): a recusa diz o caminho.
+pub(crate) fn raw_to_thread_refusal(name: &str) -> (&'static str, String) {
+    ("raw_to_thread", format!("Não enviei: {name} é uma conversa por protocolo, não um terminal; `--raw` (comando de TUI como /compact) não vale para ela. Mande o texto sem `--raw`. {}", crate::peer_queue::store::REFUSAL_WAY_OUT))
+}
+
 pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let to = arg_str(args, "to")?;
@@ -879,6 +885,10 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP { return queue_gemini(app,target,"tell",&from,&from_name,&text); }
     // Uma conversa por protocolo do time: a mensagem vai como mensagem da conversa (ver `team`).
     if let Some(thread) = crate::chat_team::model::thread_id_of(&target.id) {
+        if is_raw(args) {
+            let (reason, message) = raw_to_thread_refusal(&target.name);
+            return policy_refusal(app, "tell", &from, &from_name, (&target.id, &target.name), typed, Some(describe(target)), reason, &message);
+        }
         let client_id = peer_queue::client_id_arg(args);
         let new = NewMessage {
             client_id: client_id.as_deref(), kind: "tell", from_tab_id: &from, from_name: &from_name,
@@ -1494,6 +1504,11 @@ fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str
         client_id: extra.client_id, kind: "ask", from_tab_id: from_id, from_name, to_tab_id: &target.id, to_name: &target.name,
         text, raw, reply: true, envelope: extra.envelope, limits: Some(limits_for(from_id)),
     };
+    if raw {
+        let (reason, message) = raw_to_thread_refusal(&target.name);
+        let record = peer_queue::refuse(app, &new, reason, &message)?;
+        return Ok(ask_refused(target, &record));
+    }
     let summary = summary_line(from_name, &target.name, extra.envelope, text);
     let sent = super::team::enqueue_to_thread(app, &new)?;
     match sent.delivery {
@@ -1842,6 +1857,13 @@ mod test {
     }
 
     #[test]
+    fn o_raw_a_uma_conversa_por_protocolo_e_recusado_com_o_caminho() {
+        let (reason, message) = raw_to_thread_refusal("Codex · UI");
+        assert_eq!(reason, "raw_to_thread");
+        assert!(message.contains("conversa por protocolo") && message.contains("sem `--raw`") && message.contains("Codex · UI"), "{message}");
+    }
+
+    #[test]
     fn raw_llega_como_flag_suelto_texto_o_bool() {
         assert!(is_raw(&json!({ "raw": true })));
         assert!(is_raw(&json!({ "raw": "" })));
@@ -1906,7 +1928,7 @@ mod queue_reply_tests {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "oi".into(), raw: false, reply: false, state, position: 1,
             force_now: false, attempts: 0, created_at: 0, updated_at: 0, delivered_at: None, edited_at: None, note: None,
             depth: 0, parent_id: None, answer_of: None, reason: None,
-            available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None, sending_at: None,
         };
         Sent { delivery, message, repeat }
     }
@@ -2001,7 +2023,7 @@ mod contrato_tests {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "oi".into(), raw: false, reply: false, state, position: 0,
             force_now: false, attempts: 0, created_at: 0, updated_at: 0, delivered_at: None, edited_at: None,
             note: note.map(str::to_string), depth: 3, parent_id: None, answer_of: None, reason: reason.map(str::to_string),
-            available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None, sending_at: None,
         }
     }
 

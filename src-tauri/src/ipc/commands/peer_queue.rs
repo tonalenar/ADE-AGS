@@ -161,9 +161,14 @@ fn framed_text(msg: &PeerMessage, body: &str, waited: Duration) -> String {
 
 /// Pura: o que uma CONVERSA por protocolo recebe. Como o texto do terminal, mas o cabeçalho leva o número
 /// da mensagem (`[Mensagem #12 de X via ADE AGS]`): é o marcador que permite achar na timeline, depois de
-/// um reinício, se ela chegou (ver `store::recover`) e ancorar a resposta de um `ask`. `--raw` não leva
-/// cabeçalho nem marcador. Sem aviso de reenvio: o retry da conversa só repete o que provadamente não saiu.
+/// um reinício, se ela chegou (`thread_outbox::recover`) e ancorar a resposta de um `ask`. TODA mensagem a uma conversa
+/// leva o marcador. Um `--raw` (só o app o manda a uma conversa: o de um agente é recusado) leva um cabeçalho mínimo,
+/// `[Mensagem #12 de X] texto`, que não quebra nada numa conversa por protocolo (ela não é um terminal). Sem aviso de
+/// reenvio: o retry da conversa só repete o que provadamente não saiu.
 pub(crate) fn compose_thread(msg: &PeerMessage, waited: Duration) -> String {
+    if msg.raw {
+        return format!("[Mensagem #{} de {}] {}", msg.id, msg.from_name, msg.text);
+    }
     let text = framed_text(msg, &msg.text, waited);
     match text.strip_prefix("[Mensagem de ") {
         Some(rest) => format!("[Mensagem #{} de {rest}", msg.id),
@@ -465,12 +470,6 @@ impl ThreadPort for RealPort<'_> {
     fn items(&self, thread: &str) -> Option<Vec<crate::canal::timeline::Item>> {
         crate::conversa::api::items(&self.db, thread).ok()
     }
-
-    fn records_user_on_send(&self, thread: &str) -> bool {
-        // Claude, OpenCode e Antigravity gravam a mensagem na timeline ao enviar; o Codex só quando o
-        // servidor avisa (`userMessage`).
-        crate::conversa::api::thread(&self.db, thread).is_ok_and(|row| row.agent_id != "codex")
-    }
 }
 
 /// Publica no barramento o estado de uma mensagem (`ags events wait --topic peer.message`): quem espera uma
@@ -746,7 +745,7 @@ mod test {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "\n  rode os testes\nsegunda linha".into(), raw, reply,
             state: State::Queued, position: 1, force_now: false, attempts: 0, created_at: 1_000, updated_at: 1_000,
             delivered_at: None, edited_at: None, note: None, depth: 0, parent_id: None, answer_of: None, reason: None,
-            available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None, sending_at: None,
         }
     }
 
@@ -837,10 +836,11 @@ oi
         assert!(thread.contains("rode os testes"), "{thread}");
         assert!(!thread.contains(store::RETRY_MARK), "o retry da conversa só repete o que não saiu: sem aviso de reenvio");
         assert!(compose(&m, "oi", Duration::ZERO).starts_with(&format!("{} [Mensagem de Líder", store::RETRY_MARK)), "o terminal segue como antes");
-        // `--raw` é um comando: sem cabeçalho, sem marcador.
+        // Um `--raw` que o app mesmo manda (o aviso de falha) também leva o marcador, num cabeçalho mínimo: sem ele a
+        // recuperação não prova se chegou. (O `--raw` de um agente a uma conversa é recusado antes.)
         let mut raw = msg(true, false);
-        raw.text = "/compact".into();
-        assert_eq!(compose_thread(&raw, Duration::ZERO), "/compact");
+        raw.text = "aviso do app".into();
+        assert_eq!(compose_thread(&raw, Duration::ZERO), "[Mensagem #7 de Líder] aviso do app");
         // O aviso de atraso também vai.
         assert!(compose_thread(&m, Duration::from_secs(300)).contains("ficou na fila"));
     }

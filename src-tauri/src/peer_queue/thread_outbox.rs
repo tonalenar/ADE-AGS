@@ -63,9 +63,6 @@ pub trait ThreadPort {
     /// A timeline da conversa, para achar uma mensagem enviada (recuperação por marcador). `None` = não
     /// dá para ler.
     fn items(&self, thread: &str) -> Option<Vec<Item>>;
-    /// O motor grava a mensagem do usuário na timeline NO ENVIO (Claude, OpenCode, Antigravity)? O Codex a
-    /// grava quando o servidor avisa (`userMessage`), então um marcador ausente não prova que não chegou.
-    fn records_user_on_send(&self, thread: &str) -> bool;
 }
 
 /// Quando o consumidor deve voltar.
@@ -179,6 +176,9 @@ pub fn drain(
             Step::Send(msg, mode) => {
                 out.touched = true;
                 let waited = Duration::from_millis((now - msg.created_at).max(0) as u64);
+                // O registro de «enviando» vai ao banco ANTES de a conversa receber a mensagem: é a única prova de que,
+                // sem ele, nada saiu (ver `recover`).
+                store::mark_sending(&*lock(db)?, msg.id, now)?;
                 let result = port.send(thread, &compose(&msg, waited), mode);
                 if let Some(next) = settle(&*lock(db)?, &msg, result, now, &mut out)? {
                     out.next = next;
@@ -208,11 +208,13 @@ pub fn has_marker(items: &[Item], id: i64) -> bool {
 }
 
 /// Resolve o que ficou `delivering` para uma conversa sem consumidor que o segure (o app reiniciou, `all`; ou a
-/// posse venceu, `lease_until`), SEM digitar de novo: acha o marcador `#id` na timeline.
-/// - achou → `delivered` (a queda foi depois do envio);
-/// - não achou e o motor grava a mensagem no envio → volta à fila, uma vez (nunca foi enviada);
-/// - não achou e o motor não grava no envio (Codex), ou a timeline não abre → `unconfirmed` (o remetente é
-///   avisado): repetir poderia duplicar a ordem.
+/// posse venceu, `lease_until`), SEM digitar de novo e SÓ repetindo o que se PROVA que não saiu:
+/// - o marcador `#id` está na timeline → `delivered` (a queda foi depois do envio);
+/// - não há marcador e o banco NÃO tem o registro de «enviando» (`sending_at`, gravado antes do envio) → nada saiu:
+///   volta à fila, uma vez, em qualquer motor;
+/// - o envio chegou a começar (`sending_at`) e não há marcador (ou a timeline não abre) → `unconfirmed` e o remetente
+///   é avisado. Mesmo nos motores que gravam o item no envio, há uma janela entre escrever no agente e gravar o
+///   item: repetir a ordem poderia duplicá-la.
 pub fn recover(db: &DbConnection, port: &dyn ThreadPort, to: Option<&str>, all: bool, now: i64) -> Result<Recovered, String> {
     let stuck = store::delivering_for_threads(&*lock(db)?, to, all, now)?;
     let mut out = Recovered::default();
@@ -224,8 +226,8 @@ pub fn recover(db: &DbConnection, port: &dyn ThreadPort, to: Option<&str>, all: 
             if store::finish(&conn, msg.id, true, None, now)? {
                 out.delivered.extend(store::get(&conn, msg.id)?);
             }
-        } else if items.is_some() && port.records_user_on_send(thread) {
-            let note = "O app fechou antes de a mensagem ser enviada à conversa; ela volta à fila.";
+        } else if msg.sending_at.is_none() {
+            let note = "O app fechou antes de o envio à conversa começar; a mensagem volta à fila.";
             if store::release(&conn, msg.id, Some(note), None, false, now)? {
                 out.requeued.extend(store::get(&conn, msg.id)?);
             }

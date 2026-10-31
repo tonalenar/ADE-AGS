@@ -22,7 +22,8 @@ struct Fake {
     db: DbConnection,
     db_was_free_during_send: Mutex<Vec<bool>>,
     timeline: Mutex<Option<Vec<Item>>>,
-    records_on_send: Mutex<bool>,
+    /// O `sending_at` da linha que está sendo enviada, lido DENTRO do envio (o banco precisa já ter o registro).
+    sending_seen: Mutex<Vec<Option<i64>>>,
 }
 
 impl Fake {
@@ -34,7 +35,7 @@ impl Fake {
             db: db.clone(),
             db_was_free_during_send: Mutex::default(),
             timeline: Mutex::new(Some(Vec::new())),
-            records_on_send: Mutex::new(true),
+            sending_seen: Mutex::default(),
         }
     }
     fn working(&self, working: bool) {
@@ -54,6 +55,10 @@ impl ThreadPort for Fake {
     }
     fn send(&self, _thread: &str, text: &str, mode: SendMode) -> Result<(), SendError> {
         self.db_was_free_during_send.lock().unwrap().push(self.db.try_lock().is_ok());
+        if let Ok(conn) = self.db.try_lock() {
+            let at = conn.query_row("SELECT sending_at FROM peer_messages WHERE state = 'delivering' ORDER BY id LIMIT 1", [], |r| r.get(0)).ok().flatten();
+            self.sending_seen.lock().unwrap().push(at);
+        }
         let scripted = self.script.lock().unwrap().pop_front();
         let result = scripted.unwrap_or(Ok(()));
         if result.is_ok() {
@@ -64,9 +69,6 @@ impl ThreadPort for Fake {
     }
     fn items(&self, _thread: &str) -> Option<Vec<Item>> {
         self.timeline.lock().unwrap().clone()
-    }
-    fn records_user_on_send(&self, _thread: &str) -> bool {
-        *self.records_on_send.lock().unwrap()
     }
 }
 
@@ -329,19 +331,53 @@ fn o_reinicio_sem_o_marcador_devolve_a_fila_e_envia_uma_vez() {
 }
 
 #[test]
-fn o_motor_que_nao_grava_no_envio_ou_a_timeline_ilegivel_nao_permitem_repetir() {
-    for (records, timeline) in [(false, Some(Vec::new())), (true, None)] {
+fn o_registro_de_enviando_esta_no_banco_antes_de_a_conversa_receber_a_mensagem() {
+    let db = db();
+    let port = Fake::new(&db);
+    let msg = enqueue(&db, "tarefa", 1_000);
+    run(&db, &port, 2_000);
+    assert_eq!(*port.sending_seen.lock().unwrap(), [Some(2_000)], "durante o envio a linha já diz que o envio começou");
+    assert_eq!(get_msg(&db, msg.id).state, State::Delivered);
+}
+
+#[test]
+fn a_queda_antes_do_envio_comecar_e_provadamente_nao_enviada_e_volta_a_fila_em_qualquer_motor() {
+    // Só é «provado» o que o banco diz: a posse foi tomada, mas o envio nem começou. Vale mesmo sem ler a timeline.
+    let db = db();
+    let port = Fake::new(&db);
+    *port.timeline.lock().unwrap() = None;
+    let msg = sending(&db, "tarefa", 1_000);
+    assert_eq!(get_msg(&db, msg.id).sending_at, None);
+    let r = recover(&db, &port, None, true, 5_000).unwrap();
+    assert_eq!((r.requeued.len(), r.failed.len()), (1, 0));
+    assert_eq!(get_msg(&db, msg.id).state, State::Queued);
+}
+
+#[test]
+fn a_queda_depois_de_o_envio_comecar_sem_o_marcador_nunca_repete_a_ordem() {
+    // O envio começou e o marcador não está na timeline: o motor pode ter escrito e caído antes de gravar o item.
+    for timeline in [Some(Vec::new()), None] {
         let db = db();
         let port = Fake::new(&db);
-        *port.records_on_send.lock().unwrap() = records;
         *port.timeline.lock().unwrap() = timeline;
         let msg = sending(&db, "tarefa", 1_000);
+        mark_sending(&db.lock().unwrap(), msg.id, 1_500).unwrap();
         let r = recover(&db, &port, None, true, 5_000).unwrap();
-        assert_eq!(r.failed.len(), 1, "records={records}");
+        assert_eq!((r.requeued.len(), r.failed.len()), (0, 1));
         let row = get_msg(&db, msg.id);
         assert_eq!(row.state, State::Unconfirmed);
         assert!(row.note.as_deref().unwrap().contains("não dá para saber"));
     }
+}
+
+#[test]
+fn o_marcador_na_timeline_vence_o_registro_de_enviando() {
+    let db = db();
+    let port = Fake::new(&db);
+    let msg = sending(&db, "tarefa", 1_000);
+    mark_sending(&db.lock().unwrap(), msg.id, 1_500).unwrap();
+    *port.timeline.lock().unwrap() = Some(vec![user(&format!("[Mensagem #{} de Líder] tarefa", msg.id))]);
+    assert_eq!(recover(&db, &port, None, true, 5_000).unwrap().delivered.len(), 1, "o cabeçalho mínimo (--raw interno) também é achado");
 }
 
 #[test]
