@@ -262,6 +262,27 @@ miniaturas ao reabrir a conversa, em qualquer motor, sem campo novo no banco. Um
 depois disso a miniatura mostra "indisponível" (o caminho continua na mensagem). Mensagens de time (`@menção`,
 "Time | Só o orquestrador") levam os anexos pelo mesmo caminho.
 
+## Fala do agente × mensagem da pessoa (acabamento)
+
+- **Balão só do usuário.** A mensagem da pessoa tem balão (`rounded-2xl`, `px-4 py-2.5`, fundo cinza translúcido,
+  à direita, até 85% da coluna, "Mostrar mais" ao passar de ~8 linhas). A fala do agente fica SEM balão: texto
+  corrido, com o logo e o nome acima na primeira fala depois da pessoa e sempre que a voz muda (`speakers.ts`);
+  falas seguidas da mesma voz (com ferramentas no meio) não repetem a linha. **Aproximação**: sem o Claude desktop
+  à mão, raio, padding e largura seguem o desenho já usado; ajustar em `timeline/Bubbles.tsx` se a comparação lado a
+  lado pedir.
+- **Mensagem entre agentes.** O envelope cru (`[Mensagem #68 de X via ADE AGS]`, a frase de aviso, a tag
+  `untrusted_data`, a dica de resposta) só existe no que vai ao agente e no banco; a tela mostra o logo e o nome de
+  quem mandou (sem balão) e o conteúdo. O pedido tipado (`X pediu sua ajuda nisto. Tarefa: … Contexto: …`) vira a
+  tarefa e, em negrito, só os campos preenchidos (valores-padrão somem). O número da mensagem (`#68`, do
+  `ags peer receipt`) fica só na dica (tooltip). Ver `timeline/peerEnvelope.ts`.
+- **Perguntas.** O cartão «O agente fez uma pergunta» de uma conversa por protocolo responde ao clique enquanto a
+  pergunta espera (as opções são botões); respondida, vira registro. Listas em texto do agente nunca viram botão.
+  Em abas com TUI o cartão continua levando ao terminal.
+- **Rolagem.** O Resumo solto fica num dock de altura fixa em coluna flex (`SummaryDock`); sem isso o miolo crescia
+  com o conteúdo e a roda não rolava.
+- **Composer.** A altura segue o texto e também a largura da caixa (`ResizeObserver`): abrir o painel direito
+  refaz a altura sem digitar.
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:
