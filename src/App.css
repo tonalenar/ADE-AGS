@@ -25,6 +25,41 @@
   .ai-chat-card *, .ai-chat-card *::before, .ai-chat-card *::after { transition: none; }
 }
 
+/* ── Modo chat: tipografia e texto chegando ─────────────────────────────────
+   `cc-chat-type` vai na raiz da casca do chat (`ChatShell`): troca a família (inclusive a do
+   `font-sans`/`font-mono` de quem está dentro) e os pesos para os do Claude — 400, 500, 580
+   (semibold) e 600 (bold). As Abas e o Canvas ficam fora dela e não mudam. */
+.cc-chat-type {
+  --font-sans: var(--font-chat);
+  --font-mono: var(--font-chat-mono);
+  --font-weight-semibold: 580;
+  --font-weight-bold: 600;
+  font-family: var(--font-chat);
+  font-size: var(--text-chat-ui);
+  line-height: var(--text-chat-ui--line-height);
+}
+
+/* O cursor no fim da fala enquanto o texto chega (`AgentText`): depois do último bloco do markdown. */
+@keyframes cc-caret-blink {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 0.15; }
+}
+.cc-stream-caret > :last-child > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 0.45em;
+  height: 1em;
+  margin-left: 0.15em;
+  vertical-align: -0.12em;
+  border-radius: 2px;
+  background: currentColor;
+  opacity: 0.6;
+  animation: cc-caret-blink 1.1s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-stream-caret > :last-child > :last-child::after { animation: none; }
+}
+
 /* ── Identidade ADE AGS ────────────────────────────────────────────────────
    A paleta inteira vive aqui. Os componentes usam as classes de sempre (`gray-*`,
    `accent-*`, `surface*`) e nunca um hex: trocar a identidade é trocar este bloco.
@@ -86,6 +121,26 @@
   --radius-2xl: 1.25rem;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", "Inter", "Segoe UI Variable Text", "Segoe UI", "Adwaita Sans", "Cantarell", system-ui, sans-serif;
   --font-mono: "SF Mono", ui-monospace, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
+
+  /* Tipografia do modo chat: a escala do app do Claude. A fonte de lá (Anthropic Sans) é
+     proprietária e não vem junto; fica a mesma pilha de reserva que o app do Claude usa.
+     Cada `--text-chat-*` gera a classe `text-chat-*` com tamanho e altura de linha. */
+  --font-chat: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --font-chat-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --text-chat-prose: 15px;          /* a resposta do agente e as mensagens da pessoa (medido no Claude Code, ver `chatLook.ts`) */
+  --text-chat-prose--line-height: 21.5px;
+  --text-chat-ui: 14px;             /* o corpo da interface */
+  --text-chat-ui--line-height: 20px;
+  --text-chat-heading: 15px;        /* título de bloco */
+  --text-chat-heading--line-height: 20px;
+  --text-chat-title: 22px;
+  --text-chat-title--line-height: 28px;
+  --text-chat-code: 13px;
+  --text-chat-code--line-height: 19px;
+  --text-chat-note: 13px;
+  --text-chat-note--line-height: 17px;
+  --text-chat-caption: 12px;
+  --text-chat-caption--line-height: 16px;
 
   /* O brilho do mascote e do status "rodando": a única cor quente da marca. */
   --color-glow: oklch(0.82 0.12 75);
@@ -275,6 +330,43 @@ html.dark {
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* A rolagem do modo chat (conversa, Resumo, Time, listas e menus) sem barra visível: a rueda, o
+   trackpad, o teclado e o foco rolam como sempre. Fica fora de editores e terminais, que mantêm as suas. */
+.cc-scroll-hidden {
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.cc-scroll-hidden::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Só esconde a barra, sem mexer no overflow (blocos de código e saídas de ferramenta rolam nos dois eixos). */
+.cc-no-bar {
+  scrollbar-width: none;
+}
+
+.cc-no-bar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* O Markdown das mensagens (código e tabelas) rola na horizontal sem barra dentro do modo chat. */
+.cc-chat-type .overflow-x-auto {
+  scrollbar-width: none;
+}
+
+.cc-chat-type .overflow-x-auto::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 /* Scroll horizontal sin barra visible — la barra de tabs (estilo Chrome) desborda al
@@ -816,4 +908,40 @@ button[class*="hover:bg-[var(--nui-danger-hover"]:not(:disabled):hover { backgro
 .ade-device-bar-in { animation: ade-device-bar-in 0.28s ease-out both; }
 @media (prefers-reduced-motion: reduce) {
   .ade-device-in, .ade-window-in, .ade-device-bar-in { animation: none; }
+}
+
+/* Os três pontos do "agente trabalhando" (prancheta 13): 5 px, pulso de 1,2 s, um atrás do outro. */
+@keyframes cc-dot-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+.cc-dot {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 9999px;
+  background: currentColor;
+  animation: cc-dot-pulse 1.2s infinite;
+}
+.cc-dot:nth-child(2) { animation-delay: 0.2s; }
+.cc-dot:nth-child(3) { animation-delay: 0.4s; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-dot { animation: none; opacity: 0.8; }
+}
+
+/* ── Modo chat: balões das mensagens ────────────────────────────────────────
+   `cc-bubble-fade`: o balão recolhido apaga o fim do texto com uma máscara (as últimas ~2 linhas),
+   que funciona sobre qualquer fundo, claro ou escuro, sem cor fixa. `cc-msg-in`: a mensagem que
+   chega entra com um fade/slide curto (180 ms). */
+.cc-bubble-fade {
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - 3rem), transparent);
+}
+@keyframes cc-msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.cc-msg-in { animation: cc-msg-in 180ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .cc-msg-in { animation: none; }
 }

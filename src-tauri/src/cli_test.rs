@@ -470,6 +470,14 @@ fn design_nested_commands_keep_ids_and_html_flags() {
         (vec!["design","approve","all","d1"],"design.approve.all","designId","d1"),
         (vec!["design","delete","d1"],"design.delete","designId","d1"),
         (vec!["design","archive","d1"],"design.archive","designId","d1"),
+        (vec!["design","view","d1"],"design.view","designId","d1"),
+        (vec!["design","open","d1","--artboard","b1"],"design.open","designId","d1"),
+        (vec!["design","artboard","duplicate","b1","--x","0"],"design.artboard.duplicate","artboardId","b1"),
+        (vec!["design","artboard","delete","b1"],"design.artboard.delete","artboardId","b1"),
+        (vec!["design","artboard","resize","b1","--width","390","--radius","12"],"design.artboard.resize","artboardId","b1"),
+        (vec!["design","page","rename","p1","Fluxo"],"design.page.rename","pageId","p1"),
+        (vec!["design","page","delete","p1"],"design.page.delete","pageId","p1"),
+        (vec!["design","note","add","p1","lembrar","--x","10","--y","-20"],"design.note.add","pageId","p1"),
     ] {
         let args=words.iter().map(|v|v.to_string()).collect::<Vec<_>>();
         let (command,rest)=design_command(&args).unwrap();
@@ -495,6 +503,14 @@ fn design_cli_defaults_use_callers_cwd_and_agent_author() {
     assert_eq!(a["designId"],"d1");assert_eq!(a["page"],"Page 1");assert!(a.get("pageId").is_none());
     let a=design_defaults("design.artboard.add",parse("design.artboard.add",&["p1","Home"]).unwrap(),cwd);
     assert_eq!(a["pageId"],"p1");assert!(a.get("designId").is_none());
+    // `design open --page/--artboard` levam ids; `design view` sem id fica sem designId.
+    let a=design_defaults("design.open",parse("design.open",&["d1","--page","p1","--artboard","b1"]).unwrap(),cwd);
+    assert_eq!((a["designId"].clone(),a["pageId"].clone(),a["artboardId"].clone()),(json!("d1"),json!("p1"),json!("b1")));
+    assert!(a.get("page").is_none() && a.get("artboard").is_none());
+    let a=design_defaults("design.view",parse("design.view",&[]).unwrap(),cwd);
+    assert!(a.get("designId").is_none());
+    let a=parse("design.note.add",&["p1","lembrar","--x","10","--y","-20"]).unwrap();
+    assert_eq!((a["text"].clone(),a["x"].clone(),a["y"].clone()),(json!("lembrar"),json!("10"),json!("-20")));
 }
 
 #[test]
@@ -652,4 +668,21 @@ fn portal_close_leva_o_nome_do_portal_e_vem_na_ajuda() {
     for estado in ["pronto", "carregando", "sem runtime", "oculto", "verificação anti-robô"] {
         assert!(USAGE.contains(estado), "{estado}");
     }
+}
+
+#[test]
+fn sim_act_preserva_contrato_de_posicionais_fills_expectativas_e_timeout() {
+    let args=parse("sim.act", &["iPhone","abrir ajustes","--fill","screen=a=b","--expect","text:Ajustes","--expect","text:Geral","--steps","4","--timeout","90"]).unwrap();
+    assert_eq!(args["name"],"iPhone");assert_eq!(args["goal"],"abrir ajustes");assert_eq!(args["fill"],json!(["screen=a=b"]));
+    assert_eq!(args["expect"],json!(["text:Ajustes","text:Geral"]));
+    assert_eq!(read_timeout_for("sim.act",&args).as_secs(),165);
+    assert_eq!(read_timeout_for("sim.act",&json!({"timeout":"1800"})).as_secs(),1875);
+    let mut args=args;caller_from("sim.act",&mut args,Some("sim-agent".into()),None);assert_eq!(args["from"],"sim-agent");
+}
+
+#[test]
+fn sim_act_ignora_identidade_e_sessao_injetadas_em_flags(){
+    let mut args=json!({"from":"outro","session":"forjada","taskId":"task-alheia","mission":"missao"});
+    caller_from("sim.act",&mut args,Some("tab-real".into()),Some("sessao-real".into()));
+    assert_eq!(args["from"],"tab-real");assert_eq!(args["session"],"sessao-real");assert!(args.get("taskId").is_none());assert!(args.get("mission").is_none());
 }

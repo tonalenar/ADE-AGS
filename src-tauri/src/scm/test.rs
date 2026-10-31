@@ -658,3 +658,11 @@ fn el_pull_integra_como_git_segun_la_config() {
     std::fs::remove_dir_all(origin).ok();
     std::fs::remove_dir_all(local).ok();
 }
+
+#[test]
+fn o_diff_de_trabalho_e_cortado_sem_partir_caractere() {
+    use super::commands::clip_diff;
+    assert_eq!(clip_diff("abc".into(), 10), ("abc".into(), false));
+    // "é" ocupa 2 bytes: cortar em 2 cairia no meio dele.
+    assert_eq!(clip_diff("aé".into(), 2), ("a".into(), true));
+}

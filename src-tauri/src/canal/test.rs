@@ -478,3 +478,192 @@ fn segredo_nao_vai_para_a_pendencia() {
     let item = &pending::sync(&conn, &Owner { tab_id: "m", ..Owner::default() }, &[s], 0).unwrap()[0];
     assert!(item.detail.starts_with("(oculto"), "{}", item.detail);
 }
+
+// ── Timeline do modo chat ─────────────────────────────────────────────
+
+mod timeline_tests {
+    use serde_json::json;
+
+    use super::super::timeline::{self, claude_tokens, count_lines, patch_stats, plan_steps, ItemKind, PlanStep, StepStatus, ToolKind, ToolStatus};
+
+    fn build(agent: &str, lines: &[serde_json::Value]) -> timeline::Timeline {
+        let raw: Vec<Vec<u8>> = lines.iter().map(|l| serde_json::to_vec(l).unwrap()).collect();
+        timeline::build(agent, raw.iter().map(Vec::as_slice), false)
+    }
+
+    #[test]
+    fn claude_vira_mensagens_ferramentas_e_fim_de_turno() {
+        let t = build("claude-code", &[
+            json!({"type": "user", "uuid": "u1", "timestamp": "2026-10-29T10:00:00.000Z", "message": {"content": "corrige o login"}}),
+            json!({"type": "assistant", "uuid": "a1", "message": {"content": [
+                {"type": "text", "text": "Vou olhar."},
+                {"type": "tool_use", "id": "t1", "name": "Read", "input": {"file_path": "src/login.ts"}},
+                {"type": "tool_use", "id": "t2", "name": "Edit", "input": {"file_path": "src/login.ts", "old_string": "a\nb", "new_string": "a\nb\nc"}},
+                {"type": "tool_use", "id": "t3", "name": "Bash", "input": {"command": "bun run test\n--watch"}}
+            ]}}),
+            json!({"type": "user", "uuid": "u2", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "t1", "content": "conteúdo"},
+                {"type": "tool_result", "tool_use_id": "t2", "content": [{"type": "text", "text": "ok"}]}
+            ]}}),
+            json!({"type": "user", "uuid": "u3", "message": {"content": [{"type": "tool_result", "tool_use_id": "t3", "content": "falhou", "is_error": true}]}}),
+            json!({"type": "system", "subtype": "turn_duration", "uuid": "s1", "durationMs": 4200}),
+        ]);
+        let kinds: Vec<ItemKind> = t.items.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [ItemKind::User, ItemKind::Assistant, ItemKind::Tool, ItemKind::Tool, ItemKind::Tool, ItemKind::TurnEnd]);
+        assert_eq!(t.items[0].text.as_deref(), Some("corrige o login"));
+        assert!(t.items[0].at.is_some());
+        let edit = &t.items[3];
+        assert_eq!((edit.tool, edit.path.as_deref(), edit.added, edit.removed), (Some(ToolKind::Edit), Some("src/login.ts"), Some(3), Some(2)));
+        assert_eq!(edit.status, Some(ToolStatus::Done));
+        let bash = &t.items[4];
+        assert_eq!((bash.tool, bash.label.as_deref(), bash.status), (Some(ToolKind::Command), Some("bun run test"), Some(ToolStatus::Error)));
+        assert_eq!(bash.output.as_deref(), Some("falhou"));
+        assert_eq!(t.items[5].duration_ms, Some(4200));
+    }
+
+    #[test]
+    fn claude_ignora_subagente_meta_e_saida_de_comando_local() {
+        let t = build("claude-code", &[
+            json!({"type": "user", "isSidechain": true, "message": {"content": "de outro agente"}}),
+            json!({"type": "user", "isMeta": true, "message": {"content": "lembrete"}}),
+            json!({"type": "user", "message": {"content": "<local-command-stdout>x</local-command-stdout>"}}),
+            json!({"type": "user", "message": {"content": "[Request interrupted by user]"}}),
+        ]);
+        assert_eq!(t.items.len(), 1);
+        assert_eq!((t.items[0].kind, t.items[0].interrupted), (ItemKind::TurnEnd, Some(true)));
+    }
+
+    #[test]
+    fn claude_ferramenta_recusada_e_pergunta_com_opcoes() {
+        let t = build("claude-code", &[
+            json!({"type": "assistant", "message": {"content": [
+                {"type": "tool_use", "id": "q1", "name": "AskUserQuestion", "input": {"questions": [{"question": "Qual banco?", "options": [{"label": "SQLite"}, {"label": "Postgres"}]}]}},
+                {"type": "tool_use", "id": "b1", "name": "Bash", "input": {"command": "rm -rf build"}}
+            ]}}),
+            json!({"type": "user", "toolDenialKind": "user-rejected", "message": {"content": [{"type": "tool_result", "tool_use_id": "b1", "content": "negado"}]}}),
+        ]);
+        let q = t.items[0].question.as_ref().unwrap();
+        assert_eq!((q.text.as_str(), q.options.clone()), ("Qual banco?", vec!["SQLite".to_string(), "Postgres".to_string()]));
+        assert_eq!(t.items[0].status, Some(ToolStatus::Running));
+        assert_eq!(t.items[1].status, Some(ToolStatus::Denied));
+    }
+
+    #[test]
+    fn codex_vira_mensagens_comando_patch_e_duracao() {
+        let patch = "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-velho\n+novo\n+mais\n*** Add File: src/b.ts\n+x\n*** End Patch";
+        let t = build("codex", &[
+            json!({"type": "event_msg", "timestamp": "2026-10-29T10:00:00.000Z", "payload": {"type": "task_started"}}),
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "ajusta o build"}}),
+            json!({"type": "response_item", "payload": {"type": "function_call", "name": "shell", "call_id": "c1", "arguments": "{\"command\":[\"bash\",\"-lc\",\"cargo check\"]}"}}),
+            json!({"type": "response_item", "payload": {"type": "function_call_output", "call_id": "c1", "output": "{\"output\":\"erro\",\"metadata\":{\"exit_code\":1}}"}}),
+            json!({"type": "response_item", "payload": {"type": "custom_tool_call", "name": "apply_patch", "call_id": "c2", "input": patch}}),
+            json!({"type": "response_item", "payload": {"type": "custom_tool_call_output", "call_id": "c2", "output": "Done"}}),
+            json!({"type": "event_msg", "payload": {"type": "agent_message", "message": "Pronto."}}),
+            json!({"type": "event_msg", "timestamp": "2026-10-29T10:00:05.000Z", "payload": {"type": "task_complete"}}),
+        ]);
+        let kinds: Vec<ItemKind> = t.items.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [ItemKind::User, ItemKind::Tool, ItemKind::Tool, ItemKind::Assistant, ItemKind::TurnEnd]);
+        assert_eq!((t.items[1].label.as_deref(), t.items[1].status), (Some("bash -lc cargo check"), Some(ToolStatus::Error)));
+        let edit = &t.items[2];
+        assert_eq!((edit.tool, edit.added, edit.removed, edit.path.as_deref()), (Some(ToolKind::Edit), Some(3), Some(1), Some("src/a.ts")));
+        assert_eq!(edit.label.as_deref(), Some("src/a.ts, src/b.ts"));
+        assert_eq!(t.items[4].duration_ms, Some(5000));
+    }
+
+    #[test]
+    fn claude_raciocinio_tokens_por_mensagem_e_plano_do_todowrite() {
+        let usage = |out: u64| json!({"input_tokens": 10, "cache_creation_input_tokens": 5, "cache_read_input_tokens": 100, "output_tokens": out});
+        let t = build("claude-code", &[
+            json!({"type": "user", "uuid": "u1", "message": {"content": "faz o plano"}}),
+            // Duas linhas da mesma mensagem (um bloco cada): o `usage` se repete e o item fica com o último.
+            json!({"type": "assistant", "uuid": "a1", "message": {"id": "msg_1", "usage": usage(2), "content": [
+                {"type": "thinking", "thinking": "conferir o snap de 8 px"}
+            ]}}),
+            json!({"type": "assistant", "uuid": "a2", "message": {"id": "msg_1", "usage": usage(40), "content": [
+                {"type": "tool_use", "id": "td", "name": "TodoWrite", "input": {"todos": [
+                    {"content": "Achar a causa", "status": "completed", "activeForm": "Achando"},
+                    {"content": "Corrigir", "status": "in_progress"},
+                    {"content": "Conferir", "status": "pending"}
+                ]}}
+            ]}}),
+            json!({"type": "assistant", "uuid": "a3", "message": {"id": "msg_2", "usage": usage(7), "content": [{"type": "text", "text": "Feito."}]}}),
+        ]);
+        let kinds: Vec<ItemKind> = t.items.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [ItemKind::User, ItemKind::Usage, ItemKind::Reasoning, ItemKind::Tool, ItemKind::Usage, ItemKind::Assistant]);
+        assert_eq!(t.items[1].tokens, Some(155), "a mensagem conta uma vez, com a saída da última linha");
+        assert_eq!(t.items[4].tokens, Some(122));
+        assert_eq!(t.items[2].text.as_deref(), Some("conferir o snap de 8 px"));
+        let plan = t.items[3].plan.as_ref().unwrap();
+        assert_eq!(plan.iter().map(|s| s.status).collect::<Vec<_>>(), [StepStatus::Completed, StepStatus::InProgress, StepStatus::Pending]);
+        assert_eq!(plan[0].text, "Achar a causa");
+    }
+
+    #[test]
+    fn codex_raciocinio_tokens_sem_repetir_o_contador_e_plano() {
+        let count = |last: u64, total: u64| json!({"type": "event_msg", "payload": {"type": "token_count", "info": {
+            "last_token_usage": {"total_tokens": last}, "total_token_usage": {"total_tokens": total}}}});
+        let t = build("codex", &[
+            json!({"type": "event_msg", "payload": {"type": "user_message", "message": "planeja"}}),
+            json!({"type": "event_msg", "payload": {"type": "agent_reasoning", "text": "**Lendo** o código"}}),
+            count(1000, 5000),
+            count(1000, 5000),
+            json!({"type": "response_item", "payload": {"type": "function_call", "name": "update_plan", "call_id": "p1",
+                "arguments": "{\"plan\":[{\"step\":\"Ler\",\"status\":\"completed\"},{\"step\":\"Testar\",\"status\":\"in_progress\"}]}"}}),
+            count(300, 5300),
+        ]);
+        let kinds: Vec<ItemKind> = t.items.iter().map(|i| i.kind).collect();
+        assert_eq!(kinds, [ItemKind::User, ItemKind::Reasoning, ItemKind::Usage, ItemKind::Tool, ItemKind::Usage]);
+        assert_eq!((t.items[2].tokens, t.items[4].tokens), (Some(1000), Some(300)), "o mesmo total repetido não conta de novo");
+        assert_eq!(t.items[3].plan.as_ref().map(Vec::len), Some(2));
+        assert_eq!(t.items[3].plan.as_ref().unwrap()[1].status, StepStatus::InProgress);
+    }
+
+    #[test]
+    fn passos_do_plano_e_tokens_do_claude_toleram_lixo() {
+        assert_eq!(plan_steps(None), None);
+        assert_eq!(plan_steps(Some(&json!("x"))), None);
+        assert_eq!(plan_steps(Some(&json!([{"step": "a", "status": "inProgress"}, {"sem": "texto"}]))),
+            Some(vec![PlanStep { text: "a".into(), status: StepStatus::InProgress }]));
+        assert_eq!(claude_tokens(None), None);
+        assert_eq!(claude_tokens(Some(&json!({"input_tokens": 0}))), None);
+        assert_eq!(claude_tokens(Some(&json!({"output_tokens": 3, "input_tokens": 2}))), Some(5));
+    }
+
+    #[test]
+    fn os_campos_novos_ficam_fora_do_json_quando_vazios() {
+        let t = build("claude-code", &[json!({"type": "user", "message": {"content": "oi"}})]);
+        let raw = serde_json::to_string(&t.items[0]).unwrap();
+        assert!(!raw.contains("plan") && !raw.contains("tokens"));
+        // Um corpo antigo (sem os campos novos) continua legível.
+        let old: timeline::Item = serde_json::from_str(r#"{"kind":"user","id":"x","text":"oi"}"#).unwrap();
+        assert_eq!((old.plan, old.tokens), (None, None));
+    }
+
+    #[test]
+    fn contas_de_linhas_e_patch() {
+        assert_eq!(count_lines(""), 0);
+        assert_eq!(count_lines("um"), 1);
+        assert_eq!(count_lines("um\ndois\n"), 2);
+        let s = patch_stats("*** Begin Patch\n*** Delete File: x\n*** End Patch");
+        assert_eq!((s.files, s.added, s.removed), (vec!["x".to_string()], 0, 0));
+    }
+
+    #[test]
+    fn le_so_o_fim_de_um_arquivo_grande() {
+        let dir = std::env::temp_dir().join(format!("ade-timeline-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("t.jsonl");
+        let filler = format!("{}\n", "x".repeat(1024));
+        let mut body = String::new();
+        while (body.len() as u64) <= timeline::MAX_BYTES {
+            body.push_str(&filler);
+        }
+        body.push_str(&serde_json::to_string(&json!({"type": "user", "message": {"content": "no fim"}})).unwrap());
+        body.push('\n');
+        std::fs::write(&path, body).unwrap();
+        let t = timeline::read(&path, "claude-code").unwrap();
+        assert!(t.truncated);
+        assert_eq!(t.items.last().and_then(|i| i.text.as_deref()), Some("no fim"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

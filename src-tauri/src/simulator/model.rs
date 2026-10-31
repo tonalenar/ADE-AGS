@@ -278,3 +278,157 @@ pub fn process_tree(ps: &str, udid: &str) -> Vec<u32> {
     }
     tree
 }
+
+// ── Controles do painel do chat (aparência, local, Face ID, app em primeiro plano, rotação) ──
+
+/// A aparência pedida (`light`/`dark`), validada antes de ir para o `simctl ui`.
+pub fn appearance_mode(mode: &str) -> Result<&'static str, String> {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "light" | "claro" => Ok("light"),
+        "dark" | "escuro" => Ok("dark"),
+        other => Err(format!("Aparência desconhecida: \"{other}\". Use light ou dark.")),
+    }
+}
+
+/// O que `simctl ui <udid> appearance` imprime → `light`/`dark` (outra coisa, como `unsupported`, é erro).
+pub fn parse_appearance(out: &str) -> Result<String, String> {
+    match out.trim() {
+        "light" => Ok("light".into()),
+        "dark" => Ok("dark".into()),
+        other => Err(format!("O aparelho não informou a aparência (\"{other}\").")),
+    }
+}
+
+/// A localização simulada como o `simctl location … set` recebe (`lat,lon`), validando as faixas.
+pub fn location_arg(lat: f64, lon: f64) -> Result<String, String> {
+    if !lat.is_finite() || !(-90.0..=90.0).contains(&lat) {
+        return Err(format!("Latitude fora da faixa (-90 a 90): {lat}."));
+    }
+    if !lon.is_finite() || !(-180.0..=180.0).contains(&lon) {
+        return Err(format!("Longitude fora da faixa (-180 a 180): {lon}."));
+    }
+    Ok(format!("{lat},{lon}"))
+}
+
+/// O bundle id vai como argumento do `simctl`: só letras, dígitos, `.`, `-` e `_`, sem começar com `-`.
+pub fn check_bundle(bundle: &str) -> Result<(), String> {
+    let ok = !bundle.is_empty()
+        && bundle.len() <= 255
+        && !bundle.starts_with(['-', '.'])
+        && bundle.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'));
+    if ok { Ok(()) } else { Err(format!("Bundle id inválido: \"{bundle}\" (algo como com.empresa.app).")) }
+}
+
+/// As ações de Face ID: (valor a gravar em `enrollmentChanged` antes de avisar, notificação a postar).
+/// `state` só lê. Nomes conferidos no runtime do iOS 27 (`BiometricKit` e `BiometricKit_Sim`).
+pub fn biometric_steps(action: &str) -> Result<(Option<u8>, Option<&'static str>), String> {
+    const ENROLL: &str = "com.apple.BiometricKit.enrollmentChanged";
+    Ok(match action.trim().to_ascii_lowercase().as_str() {
+        "enroll" => (Some(1), Some(ENROLL)),
+        "unenroll" => (Some(0), Some(ENROLL)),
+        "match" => (None, Some("com.apple.BiometricKit_Sim.pearl.match")),
+        "nomatch" | "no-match" => (None, Some("com.apple.BiometricKit_Sim.pearl.nomatch")),
+        "state" => (None, None),
+        other => return Err(format!("Ação de Face ID desconhecida: \"{other}\". Use enroll, unenroll, match, nomatch ou state.")),
+    })
+}
+
+/// `notifyutil -g <nome>` imprime `<nome> <número>`: cadastrado = número diferente de zero.
+pub fn parse_notify_state(out: &str) -> Result<bool, String> {
+    let value = out.split_whitespace().last().ok_or("O notifyutil não respondeu.")?;
+    value.parse::<u64>().map(|n| n != 0).map_err(|_| format!("Resposta inesperada do notifyutil: \"{}\".", out.trim()))
+}
+
+/// O app do usuário que está rodando, pelas linhas `UIKitApplication:<bundle>[…]` do `launchctl list` de
+/// dentro do aparelho. Prefere o que não é da Apple (o app que a pessoa está testando); senão o primeiro.
+pub fn parse_foreground_app(launchctl: &str) -> Option<String> {
+    let bundles: Vec<&str> = launchctl
+        .lines()
+        .filter_map(|line| {
+            let label = line.split_whitespace().last()?;
+            let rest = label.strip_prefix("UIKitApplication:")?;
+            let bundle = rest.split('[').next()?.trim();
+            (!bundle.is_empty()).then_some(bundle)
+        })
+        .collect();
+    bundles.iter().find(|b| !b.starts_with("com.apple.")).or(bundles.first()).map(|b| b.to_string())
+}
+
+/// As orientações do `UIDeviceOrientation`: 1 retrato, 2 de cabeça para baixo, 3 paisagem à esquerda (girado
+/// para a esquerda, o botão Início à direita), 4 paisagem à direita.
+pub fn orientation_name(orientation: u32) -> &'static str {
+    match orientation {
+        2 => "portraitUpsideDown",
+        3 => "landscapeLeft",
+        4 => "landscapeRight",
+        _ => "portrait",
+    }
+}
+
+/// A orientação depois de girar o aparelho um quarto de volta para `direction` (`left` = anti-horário).
+pub fn next_orientation(current: u32, direction: &str) -> Result<u32, String> {
+    // Anti-horário: retrato → paisagem à esquerda → de cabeça para baixo → paisagem à direita → retrato.
+    const LEFT: [u32; 4] = [1, 3, 2, 4];
+    let i = LEFT.iter().position(|o| *o == current).unwrap_or(0);
+    match direction.trim().to_ascii_lowercase().as_str() {
+        "left" | "esquerda" => Ok(LEFT[(i + 1) % 4]),
+        "right" | "direita" => Ok(LEFT[(i + 3) % 4]),
+        other => Err(format!("Direção desconhecida: \"{other}\". Use left ou right.")),
+    }
+}
+
+/// Tamanho da mensagem Purple de orientação: o cabeçalho mach (24 bytes) + o `GSEventRecord` + o valor.
+pub const ORIENTATION_MESSAGE_SIZE: usize = 80;
+
+/// A mensagem mach que gira o iOS: um `GSEvent` de orientação (tipo 50, com a marca de "veio do host"
+/// 0x20000) para a `PurpleWorkspacePort` do aparelho; o `backboardd` a lê e muda a orientação. O formato foi
+/// medido contra o iOS 27 (o `backboardd` loga "Got an orientation event from a GSEvent: N"): o tipo logo
+/// depois do cabeçalho, o tamanho do dado (4) no byte 72 e a orientação no byte 76, 80 bytes no total.
+/// `port` vai no `msgh_remote_port`, com `MACH_MSG_TYPE_COPY_SEND` (19).
+pub fn orientation_message(port: u32, orientation: u32) -> [u8; ORIENTATION_MESSAGE_SIZE] {
+    let mut msg = [0u8; ORIENTATION_MESSAGE_SIZE];
+    let mut put = |at: usize, value: u32| msg[at..at + 4].copy_from_slice(&value.to_ne_bytes());
+    put(0, 19); // msgh_bits = MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, 0)
+    put(4, ORIENTATION_MESSAGE_SIZE as u32); // msgh_size
+    put(8, port); // msgh_remote_port
+    put(20, 0x7B); // msgh_id (o do GraphicsServices)
+    put(24, 50 | 0x20000); // GSEventRecord.type: orientação, do host
+    put(72, 4); // GSEventRecord.infoSize: o dado tem 4 bytes
+    put(76, orientation);
+    msg
+}
+
+/// A orientação é de paisagem (a tela aparece deitada).
+pub fn is_landscape(orientation: u32) -> bool {
+    matches!(orientation, 3 | 4)
+}
+
+/// A `IOSurface` do aparelho fica sempre em retrato (medido no iOS 27): ao girar, o iOS só desenha o conteúdo
+/// de lado. Quantos quartos de volta no sentido horário (como se vê na tela) ela leva para aparecer em pé.
+pub fn display_quarter_turns(orientation: u32) -> i32 {
+    match orientation {
+        3 => -1,
+        4 => 1,
+        2 => 2,
+        _ => 0,
+    }
+}
+
+/// O tamanho da tela como se vê (em pé) a partir do tamanho em retrato: em paisagem, largura e altura trocam.
+pub fn oriented_size(portrait: (f64, f64), orientation: u32) -> (f64, f64) {
+    if is_landscape(orientation) { (portrait.1, portrait.0) } else { portrait }
+}
+
+/// Um ponto da tela como se vê (proporção 0..1, em pé) → proporção na superfície em retrato, que é como o HID
+/// do simulador recebe o toque (medido: em paisagem, o toque no ponto em retrato do botão acerta o botão).
+pub fn native_ratio(seen: (f64, f64), orientation: u32) -> (f64, f64) {
+    let (u, v) = seen;
+    match orientation {
+        // A superfície aparece girada um quarto anti-horário: o topo dela fica à esquerda.
+        3 => (1.0 - v, u),
+        // Um quarto horário: o topo dela fica à direita.
+        4 => (v, 1.0 - u),
+        2 => (1.0 - u, 1.0 - v),
+        _ => (u, v),
+    }
+}

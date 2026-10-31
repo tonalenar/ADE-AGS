@@ -1,6 +1,13 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
+
+import { useTeamIndex } from "@/features/chat/team/teamIndex";
+import { teamGridIds } from "@/features/chat/team/teamModel";
+import { startTeams } from "@/features/chat/team/teamStore";
+import { useTabsStore } from "@/features/tabs/store";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
 import { conversationOfKey, missionOfKey, setMissionGrid, setWorkMode, useActiveBoardKey, useCanvasStore, useWorkMode, type WorkMode } from "./store";
 
@@ -11,9 +18,15 @@ export function ModeToggle() {
   const key = useActiveBoardKey();
   const mode = useWorkMode();
   const grid = useCanvasStore((s) => (key ? !!s.grids[key] : false));
+  // O time do chat da aba ativa também abre a grade (os terminais dele lado a lado).
+  useEffect(() => startTeams(), []);
+  const teams = useTeamIndex((s) => s.teams);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const agentTabs = useTabsStore((s) => s.tabs.filter((tab) => tab.agentId !== SHELL_AGENT_ID).map((tab) => tab.id).join("|"));
+  const teamGrid = (teamGridIds(teams, activeTabId, agentTabs ? agentTabs.split("|") : [])?.length ?? 0) >= 2;
   if (!key) return null;
   // La grade es de una misión y de la vista de abas: individual, no global.
-  const gridable = mode === "tabs" && (missionOfKey(key) !== null || conversationOfKey(key) !== null);
+  const gridable = mode === "tabs" && (missionOfKey(key) !== null || conversationOfKey(key) !== null || teamGrid);
 
   const option = (value: WorkMode, label: string) => (
     <Button variant="custom"

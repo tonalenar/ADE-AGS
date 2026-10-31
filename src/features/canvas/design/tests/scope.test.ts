@@ -5,7 +5,7 @@ import { AREA_GAP, designsForBoard, freeOrigin, layoutGroups, positionsToSave } 
 
 const design = (id: string, over: Partial<Design> = {}): Design => ({ id, workspace: "C:\proj", missionId: null, ownerTabId: null, title: id, status: "draft", ...over });
 const board = (id: string, x = 0, y = 0, pageId = "p1"): Artboard => ({ id, pageId, title: id, html: "", width: 400, height: 300, x, y, version: 1, status: "draft" });
-const detail = (d: Design, artboards: Artboard[]): DesignDetail => ({ design: d, pages: [{ id: "p1", designId: d.id, name: "Home", order: 0 }], artboards, comments: [], versions: {} });
+const detail = (d: Design, artboards: Artboard[]): DesignDetail => ({ design: d, pages: [{ id: "p1", designId: d.id, name: "Home", order: 0 }], artboards, comments: [], versions: {}, notes: [], shapes: [] });
 
 describe("designsForBoard", () => {
   const all = [design("a"), design("b", { missionId: "m1" }), design("c", { workspace: "C:\outra" })];

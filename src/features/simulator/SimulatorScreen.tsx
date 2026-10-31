@@ -9,6 +9,25 @@ import { simulatorAttach, simulatorDetach, simulatorPlace, type SimPlace } from 
  *  buraco na tela. */
 const IGNORE = ".react-flow__node, .react-flow__edge, .react-flow__pane, [data-terminal-tab], [data-term-scale]";
 
+function sameBox(a: Box | null | undefined, b: Box | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return Math.abs(a.x - b.x) < 0.05
+    && Math.abs(a.y - b.y) < 0.05
+    && Math.abs(a.width - b.width) < 0.05
+    && Math.abs(a.height - b.height) < 0.05;
+}
+
+function samePlace(a: SimPlace | null, b: SimPlace): boolean {
+  if (!a) return false;
+  if (Math.abs(a.radius - b.radius) >= 0.05) return false;
+  if (!sameBox(a.rect, b.rect) || !sameBox(a.visible, b.visible)) return false;
+  if (a.holes.length !== b.holes.length) return false;
+  for (let i = 0; i < a.holes.length; i++) {
+    if (!sameBox(a.holes[i], b.holes[i])) return false;
+  }
+  return true;
+}
+
 /**
  * O lugar da tela do aparelho. A tela é uma NSView nativa por cima do webview (ver `simulator::native::view`),
  * que mostra a `IOSurface` do simulador sem copiar quadros: este elemento só reserva o espaço e, a cada quadro,
@@ -37,17 +56,31 @@ export function SimulatorScreen({ screenId, udid, radius, onError }: {
     let sent: SimPlace | null = null;
     let clips: HTMLElement[] = clippingAncestors(el);
     let covers: Box[] = [];
+    let coveredRect: Box | null = null;
     let coveredAt = 0;
+    let domDirty = true;
     let frame = 0;
+
+    const markDirty = () => {
+      domDirty = true;
+    };
+    const observer = new MutationObserver(markDirty);
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden", "data-state"] });
+    window.addEventListener("resize", markDirty);
 
     const measure = (): SimPlace => {
       const rect = boxOf(el);
       const now = performance.now();
       const shown = document.visibilityState !== "hidden" && rect.width > 1 && rect.height > 1
         && el.checkVisibility({ visibilityProperty: true, opacityProperty: true });
-      if (shown && now - coveredAt > COVER_MS) {
+      const moved = !sameBox(rect, coveredRect);
+      if (shown && (domDirty || moved) && now - coveredAt > COVER_MS) {
         coveredAt = now;
-        clips = clippingAncestors(el);
+        coveredRect = rect;
+        if (domDirty) {
+          clips = clippingAncestors(el);
+          domDirty = false;
+        }
         covers = coversOf(el, rect, IGNORE);
       }
       const windowBox = { x: 0, y: 0, width: innerWidth, height: innerHeight };
@@ -58,7 +91,7 @@ export function SimulatorScreen({ screenId, udid, radius, onError }: {
     const tick = () => {
       if (attached) {
         const place = measure();
-        if (!sent || JSON.stringify(sent) !== JSON.stringify(place)) {
+        if (!samePlace(sent, place)) {
           sent = place;
           simulatorPlace(screenId, place).catch(() => undefined);
         }
@@ -77,6 +110,8 @@ export function SimulatorScreen({ screenId, udid, radius, onError }: {
 
     return () => {
       closed = true;
+      observer.disconnect();
+      window.removeEventListener("resize", markDirty);
       cancelAnimationFrame(frame);
       simulatorDetach(screenId).catch(() => undefined);
     };

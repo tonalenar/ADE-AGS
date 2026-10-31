@@ -1,0 +1,5 @@
+# Escopo do ai-memory para este repositório (docs/marker-file.md do ai-memory 3.3.0).
+# Fixa o projeto para todo worktree: sem isto, um worktree cujo remoto não é reconhecido
+# (ex.: ~/.ags/chat-worktrees/<id>) vira um projeto com o nome da pasta.
+workspace = "default"
+project = "ADE-AGS"

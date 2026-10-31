@@ -1,4 +1,5 @@
 pub(crate) mod close_guard;
+pub mod controls;
 mod manager;
 mod splash;
 mod startup;

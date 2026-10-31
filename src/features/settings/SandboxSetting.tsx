@@ -47,11 +47,11 @@ export function SandboxSetting() {
   };
 
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2.5">
+    <div className="flex flex-col gap-1.5 px-4 py-3.5">
       <div className="flex items-center justify-between gap-4">
-        <div className="flex flex-col gap-px min-w-0">
-          <span className="text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{t("settings.sandbox.label")}</span>
-          <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{t("settings.sandbox.desc")}</span>
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[14px] font-medium text-gray-900 dark:text-white">{t("settings.sandbox.label")}</span>
+          <span className="text-[13px] text-gray-500 dark:text-white/50">{t("settings.sandbox.desc")}</span>
         </div>
         {/* Pop-up estilo macOS: el valor y los chevrons apilados a la derecha. */}
         <span className="relative inline-flex shrink-0">
@@ -67,7 +67,7 @@ export function SandboxSetting() {
       </div>
       {status && (
         <span
-          className={`text-[11.5px] leading-4 ${status.fsIsolation ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}
+          className={`text-[12.5px] ${status.fsIsolation ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}
         >
           {status.fsIsolation
             ? t("settings.sandbox.active", { backend: status.backend })

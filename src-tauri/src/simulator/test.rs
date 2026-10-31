@@ -117,13 +117,13 @@ fn hiberna_so_fora_de_vista_depois_do_prazo() {
 }
 
 #[test]
-fn a_prioridade_e_baixa_no_boot_e_fora_de_vista_e_normal_quando_se_olha() {
+fn a_prioridade_e_baixa_fora_de_vista_e_normal_quando_se_olha() {
     use super::lifecycle::wanted_nice;
     use std::time::Duration;
     let settled = Duration::from_secs(600);
     assert_eq!(wanted_nice(true, true, settled), 0);
     assert_eq!(wanted_nice(true, false, settled), 10);
-    assert_eq!(wanted_nice(true, true, Duration::from_secs(30)), 10, "no pico do boot, baixa mesmo à vista");
+    assert_eq!(wanted_nice(true, true, Duration::from_secs(30)), 0, "à vista a prioridade é sempre normal para não engasgar");
     assert_eq!(wanted_nice(false, false, settled), 0, "sem modo leve, sempre normal");
 }
 
@@ -145,4 +145,103 @@ fn o_modo_leve_desliga_cada_servico_uma_vez_e_o_caminho_e_seguro() {
     assert!(original.ends_with("disabled.ade-original.plist"));
     assert!(slim::paths("../../etc").is_none());
     assert!(slim::paths("B3DECAAB-8989-4EF2-B77D-C045E026E19/").is_none());
+}
+
+#[test]
+fn o_app_em_primeiro_plano_sai_do_launchctl_e_prefere_o_que_nao_e_da_apple() {
+    let out = "PID\tStatus\tLabel\n70010\t0\tUIKitApplication:com.apple.mobilesafari[2368][rb-legacy]\n-\t0\tcom.apple.backboardd\n71000\t0\tUIKitApplication:br.com.autovale.app[a1b2][rb-legacy]\n69297\t0\tUIKitApplication:com.apple.Spotlight[231e][rb-legacy]\n";
+    assert_eq!(parse_foreground_app(out).as_deref(), Some("br.com.autovale.app"));
+    let only_apple = "70010\t0\tUIKitApplication:com.apple.mobilesafari[2368][rb-legacy]\n69297\t0\tUIKitApplication:com.apple.Spotlight[231e][rb-legacy]\n";
+    assert_eq!(parse_foreground_app(only_apple).as_deref(), Some("com.apple.mobilesafari"));
+    assert_eq!(parse_foreground_app("PID\tStatus\tLabel\n-\t0\tcom.apple.backboardd\n"), None);
+    assert_eq!(parse_foreground_app(""), None);
+}
+
+#[test]
+fn o_cadastro_do_face_id_sai_do_notifyutil() {
+    assert!(parse_notify_state("com.apple.BiometricKit.enrollmentChanged 1\n").unwrap());
+    assert!(!parse_notify_state("com.apple.BiometricKit.enrollmentChanged 0").unwrap());
+    assert!(parse_notify_state("").is_err());
+    assert!(parse_notify_state("com.apple.BiometricKit.enrollmentChanged x").is_err());
+    assert_eq!(biometric_steps("enroll").unwrap(), (Some(1), Some("com.apple.BiometricKit.enrollmentChanged")));
+    assert_eq!(biometric_steps("unenroll").unwrap().0, Some(0));
+    assert_eq!(biometric_steps("match").unwrap(), (None, Some("com.apple.BiometricKit_Sim.pearl.match")));
+    assert_eq!(biometric_steps("nomatch").unwrap(), (None, Some("com.apple.BiometricKit_Sim.pearl.nomatch")));
+    assert_eq!(biometric_steps("state").unwrap(), (None, None));
+    assert!(biometric_steps("touch").is_err());
+}
+
+#[test]
+fn a_localizacao_respeita_as_faixas() {
+    assert_eq!(location_arg(-23.55, -46.63).unwrap(), "-23.55,-46.63");
+    assert_eq!(location_arg(90.0, 180.0).unwrap(), "90,180");
+    assert!(location_arg(90.1, 0.0).is_err());
+    assert!(location_arg(0.0, -180.5).is_err());
+    assert!(location_arg(f64::NAN, 0.0).is_err());
+}
+
+#[test]
+fn o_bundle_id_so_aceita_caracteres_seguros() {
+    assert!(check_bundle("com.apple.mobilesafari").is_ok());
+    assert!(check_bundle("br.com.auto-vale.app_2").is_ok());
+    for bad in ["", "-x", ".x", "com.x;rm", "com x", "com/x", "çom.x"] {
+        assert!(check_bundle(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_aparencia_so_e_light_ou_dark() {
+    assert_eq!(appearance_mode("Dark").unwrap(), "dark");
+    assert_eq!(appearance_mode("light").unwrap(), "light");
+    assert!(appearance_mode("sepia").is_err());
+    assert_eq!(parse_appearance("dark\n").unwrap(), "dark");
+    assert!(parse_appearance("unsupported").is_err());
+}
+
+#[test]
+fn girar_anda_um_quarto_de_volta_e_a_mensagem_tem_o_formato_medido() {
+    assert_eq!(next_orientation(1, "left").unwrap(), 3);
+    assert_eq!(next_orientation(3, "left").unwrap(), 2);
+    assert_eq!(next_orientation(1, "right").unwrap(), 4);
+    assert_eq!(next_orientation(4, "left").unwrap(), 1);
+    assert!(next_orientation(1, "up").is_err());
+    assert_eq!(orientation_name(3), "landscapeLeft");
+    let msg = orientation_message(0x1234, 4);
+    let word = |at: usize| u32::from_ne_bytes(msg[at..at + 4].try_into().unwrap());
+    assert_eq!(msg.len(), 80);
+    assert_eq!((word(0), word(4), word(8), word(20)), (19, 80, 0x1234, 0x7B));
+    assert_eq!((word(24), word(72), word(76)), (50 | 0x20000, 4, 4));
+}
+
+/// Prova de verdade num aparelho ligado (não roda no CI): `CC_E2E_SIM_UDID=<udid> cargo test --lib -- --ignored
+/// gira_um_aparelho_de_verdade`, com um app que gira aberto (o Safari); a captura fica em paisagem.
+#[test]
+#[ignore = "precisa de um simulador iOS ligado (CC_E2E_SIM_UDID)"]
+fn gira_um_aparelho_de_verdade() {
+    let udid = std::env::var("CC_E2E_SIM_UDID").expect("CC_E2E_SIM_UDID");
+    assert_eq!(super::ops::rotate(&udid, "left").unwrap(), "landscapeLeft");
+    assert_eq!(super::ops::rotate(&udid, "right").unwrap(), "portrait");
+}
+
+#[test]
+fn em_paisagem_o_toque_volta_para_a_superficie_em_retrato() {
+    // O "+" do Safari, medido: na superfície em retrato (0.913, 0.853); na tela em pé, girada para a esquerda (3),
+    // aparece em (0.853, 0.087).
+    let (x, y) = native_ratio((0.853, 0.087), 3);
+    assert!((x - 0.913).abs() < 1e-9 && (y - 0.853).abs() < 1e-9);
+    assert_eq!(native_ratio((0.25, 0.1), 1), (0.25, 0.1));
+    assert_eq!(native_ratio((0.25, 0.1), 4), (0.1, 0.75));
+    assert_eq!(native_ratio((0.25, 0.1), 2), (0.75, 0.9));
+    // Os quatro cantos da tela em pé caem nos quatro cantos da superfície.
+    for o in 1..=4 {
+        let mut corners: Vec<(f64, f64)> = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)].iter().map(|c| native_ratio(*c, o)).collect();
+        corners.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert_eq!(corners, vec![(0.0, 0.0), (0.0, 1.0), (1.0, 0.0), (1.0, 1.0)], "orientação {o}");
+    }
+    assert_eq!(display_quarter_turns(3), -1);
+    assert_eq!(display_quarter_turns(4), 1);
+    assert_eq!(display_quarter_turns(2), 2);
+    assert_eq!(display_quarter_turns(1), 0);
+    assert_eq!(oriented_size((390.0, 844.0), 4), (844.0, 390.0));
+    assert_eq!(oriented_size((390.0, 844.0), 2), (390.0, 844.0));
 }

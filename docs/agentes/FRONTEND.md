@@ -102,3 +102,7 @@ React 19 + TypeScript + Vite 7 + Tailwind 4 + Zustand 5, com xterm e @xyflow. O 
 ## Pontos frágeis
 - `tabs/store.ts`, `layout/layoutStore.ts`, `canvas/store.ts`, `terminal/terminalRegistry.ts`, `missions/terminals.ts` e `tabs/persistence.ts` guardam estado de módulo. Um HMR desses módulos com o app em uso pode derrubar terminais: veja as regras de ouro no `AGENTS.md`.
 - `vigia.ts` mantém `watches` e `closingNudges` só em memória: um reinício repete avisos.
+- Botões da janela, nativos de cada sistema (`app/WindowLights.tsx`):
+  - `WindowLights` vai no cabeçalho da esquerda e só reserva o lugar. No macOS os semáforos são os do AppKit, posicionados pelo `window_controls_place`.
+  - `WindowControls` vai no fim do cabeçalho da direita e desenha os botões do Windows e do Linux.
+  - Cabeçalho novo no topo da janela leva os dois. Nunca desenhe bolinhas próprias.

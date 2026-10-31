@@ -265,7 +265,11 @@ pub(super) fn handle_connection(
         }
         Ok(req) => {
             command = req.command.clone();
-            super::transport::with_client_pid(client_pid, || commands::dispatch(app, &req.command, &req.args))
+            // Um pânico no comando não pode fechar a conexão calada: a CLI só veria "sem resposta".
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                super::transport::with_client_pid(client_pid, || commands::dispatch(app, &req.command, &req.args))
+            }))
+            .unwrap_or_else(|_| Response::err(format!("Erro interno do app ao executar `{}`: o comando falhou no meio. Tente de novo; se repetir, veja o log do app.", req.command)))
         }
     };
 

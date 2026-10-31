@@ -26,6 +26,9 @@ export interface StructuredSnapshot {
   tools: { id: string; name: string; summary: string; sinceMs: number }[];
   question: { id: string; text: string; options: string[]; sinceMs: number } | null;
   endsWithQuestion: boolean;
+  /** Quando o turno atual começou e quando o último acabou (ms; o `TabState` do canal). */
+  turnStartedAt?: number | null;
+  turnEndedAt?: number | null;
 }
 
 /** O evento do backend: um estado novo, ou a aba que deixou de ter canal. */

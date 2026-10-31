@@ -70,20 +70,46 @@ function LoadedImage({ src, alt, load }: { src: string; alt: string; load: Image
  * Los enlaces abren en el navegador del sistema. Navegar DENTRO del webview reemplazaría
  * la app entera por una página web, sin forma de volver.
  */
-export function Markdown({ content, loadImage }: { content: string; loadImage?: ImageLoader }) {
+/**
+ * Os tamanhos de cada tom. `compact` é o de sempre (skills, PRs, notas); `chat` é o da conversa do
+ * modo chat, com a escala do Claude (tokens `text-chat-*` do `App.css`).
+ */
+export type MarkdownTone = "compact" | "chat";
+
+const TONE: Record<MarkdownTone, { root: string; h1: string; h2: string; h3: string; code: string; table: string }> = {
+  compact: {
+    root: "text-[12.5px] leading-relaxed text-gray-700 dark:text-gray-300",
+    h1: "text-base font-bold",
+    h2: "text-sm font-bold",
+    h3: "text-[13px] font-semibold",
+    code: "text-[11.5px]",
+    table: "text-[11.5px]",
+  },
+  chat: {
+    root: "text-chat-prose text-gray-800 dark:text-gray-200",
+    h1: "text-chat-title font-semibold",
+    h2: "text-chat-prose font-semibold",
+    h3: "text-chat-prose font-medium",
+    code: "text-chat-code",
+    table: "text-chat-ui",
+  },
+};
+
+export function Markdown({ content, loadImage, tone = "compact" }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone }) {
+  const size = TONE[tone];
   // El frontmatter no es prosa: sin sacarlo, los `---` se renderizan como una línea
   // horizontal y los campos como un párrafo suelto arriba de todo. Los datos que trae ya
   // se muestran aparte, en la cabecera.
   const body = useMemo(() => htmlImagesToMarkdown(stripFrontmatter(content)), [content]);
 
   return (
-    <div className="flex flex-col gap-3 text-[12.5px] leading-relaxed text-gray-700 dark:text-gray-300">
+    <div className={`flex flex-col gap-3 ${size.root}`}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
-          h1: (p) => <h1 className="text-base font-bold text-gray-900 dark:text-white mt-2" {...p} />,
-          h2: (p) => <h2 className="text-sm font-bold text-gray-900 dark:text-white mt-3" {...p} />,
-          h3: (p) => <h3 className="text-[13px] font-semibold text-gray-800 dark:text-gray-100 mt-2" {...p} />,
+          h1: (p) => <h1 className={`${size.h1} text-gray-900 dark:text-white mt-2`} {...p} />,
+          h2: (p) => <h2 className={`${size.h2} text-gray-900 dark:text-white mt-3`} {...p} />,
+          h3: (p) => <h3 className={`${size.h3} text-gray-800 dark:text-gray-100 mt-2`} {...p} />,
           p: (p) => <p className="my-1.5" {...p} />,
           ul: (p) => <ul className="list-disc pl-5 my-1.5 flex flex-col gap-1" {...p} />,
           ol: (p) => <ol className="list-decimal pl-5 my-1.5 flex flex-col gap-1" {...p} />,
@@ -100,11 +126,11 @@ export function Markdown({ content, loadImage }: { content: string; loadImage?: 
             // de bloque; el de bloque llega con una clase `language-*` y envuelto en <pre>.
             const isBlock = /language-/.test(className ?? "");
             return isBlock ? (
-              <code className="font-mono text-[11.5px] block" {...rest}>{children}</code>
+              <code className={`font-mono ${size.code} block`} {...rest}>{children}</code>
             ) : (
               <code
-                className="font-mono text-[11.5px] px-1 py-0.5 rounded
-                  bg-gray-100 dark:bg-white/8 text-gray-800 dark:text-gray-200"
+                className={`font-mono ${size.code} px-1 py-0.5 rounded
+                  bg-gray-100 dark:bg-white/8 text-gray-800 dark:text-gray-200`}
                 {...rest}
               >
                 {children}
@@ -121,7 +147,7 @@ export function Markdown({ content, loadImage }: { content: string; loadImage?: 
           ),
           table: (p) => (
             <div className="my-2 overflow-x-auto">
-              <table className="text-[11.5px] border-collapse" {...p} />
+              <table className={`${size.table} border-collapse`} {...p} />
             </div>
           ),
           th: (p) => (
