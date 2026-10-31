@@ -114,6 +114,7 @@ Para **usar** o app pela CLI (abrir abas, peers, portais, memória), siga a skil
 | Rodar isolado | `pwsh scripts/dev-local.ps1 -Run` |
 | Typecheck + Babel | `bunx tsc --noEmit` · `bun run check:babel` |
 | Lint dos testes | `bun run check:test-lint` |
+| Lint de i18n | `bun run check:i18n` |
 | Testes | `ags test affected` · `bun run test` · `cd src-tauri && cargo test --lib --bin ags` |
 | Esperar CI | `gh pr checks <n> --repo tonalenar/ADE-AGS --watch` |
 | Abrir PR | `gh pr create --repo tonalenar/ADE-AGS --base dev` |
