@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::database::DbConnection;
 
 use super::events::emit;
-use super::{codex_map, store, turn};
+use super::{codex_map, resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido (abrir thread, começar turno). O turno em si não tem
 /// prazo: ele acaba por aviso (`turn/completed`).
@@ -173,13 +173,16 @@ pub fn close(thread_id: &str) {
 
 
 /// A sessão de uma conversa: a viva, ou uma nova (sobe o processo, `initialize` e abre ou retoma a
-/// thread do Codex com o modelo e o acesso da conversa).
+/// thread do Codex com o modelo e o acesso da conversa). A thread guardada é retomada; só se ela sumiu (ou o
+/// erro transitório persistiu) abre outra, e então a timeline recebe o aviso de que o agente recomeçou sem o
+/// histórico (ver `resume`). O id da thread anterior só é trocado depois de a nova abrir.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
-    static START: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    let _guard = START.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+    // Uma trava por conversa: um Codex lento a abrir não segura o início das outras.
+    let gate = resume::start_gate("codex", thread_id);
+    let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
@@ -188,16 +191,26 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
-    let session = spawn(app, db, &row, env)?;
 
-    let opened = open_thread(&session, &row).await;
-    let remote = match opened {
-        Ok(remote) => remote,
-        Err(e) => {
-            session.kill();
-            return Err(e);
-        }
+    let fresh = || {
+        let (env, row) = (env.clone(), &row);
+        async move { open_fresh(app, db, row, env).await }
     };
+    let opened = match row.remote_id.clone() {
+        Some(remote) => {
+            resume::open_resuming(
+                || {
+                    let (env, row, remote) = (env.clone(), &row, remote.clone());
+                    async move { open_resumed(app, db, row, env, &remote).await }
+                },
+                fresh,
+                tokio::time::sleep,
+            )
+            .await?
+        }
+        None => resume::Opened { session: fresh().await?, lost: None },
+    };
+    let (session, remote) = opened.session;
     if let Ok(conn) = db.lock() {
         let _ = store::set_remote_id(&conn, thread_id, &remote);
     }
@@ -207,33 +220,81 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     if let Ok(mut map) = sessions().lock() {
         map.insert(thread_id.to_string(), session.clone());
     }
+    if let Some(reason) = opened.lost {
+        turn::save_notice(app, db, thread_id, "resumeLost", &resume::lost_notice(&reason));
+    }
     Ok(session)
 }
 
-async fn open_thread(session: &Session, row: &store::ThreadRow) -> Result<String, String> {
-    session
-        .request("initialize", json!({ "clientInfo": { "name": "ade-ags", "title": "ADE AGS", "version": env!("CARGO_PKG_VERSION") }, "capabilities": null }))
-        .await?;
-    session.notify("initialized")?;
+/// Um processo novo com o `initialize` feito. Fecha o processo se o `initialize` falha.
+async fn started(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<Arc<Session>, String> {
+    let session = spawn(app, db, row, env)?;
+    let init = async {
+        session
+            .request("initialize", json!({ "clientInfo": { "name": "ade-ags", "title": "ADE AGS", "version": env!("CARGO_PKG_VERSION") }, "capabilities": null }))
+            .await?;
+        session.notify("initialized")
+    };
+    if let Err(e) = init.await {
+        session.kill();
+        return Err(e);
+    }
+    Ok(session)
+}
+
+/// Um processo novo que retoma a thread `remote`. Um processo que não sobe é `Fatal` (abrir outra thread não
+/// resolveria); o Codex dizendo que a thread não existe é `Gone`; o resto, pela classe do erro.
+async fn open_resumed(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, remote: &str) -> Result<(Arc<Session>, String), resume::ResumeFailure> {
+    let session = started(app, db, row, env).await.map_err(|e| resume::classify(&e))?;
+    let (approval, sandbox) = codex_map::access_policy(&row.access);
+    let mut params = json!({ "cwd": row.cwd, "approvalPolicy": approval, "sandbox": sandbox, "threadId": remote, "excludeTurns": true });
+    if let Some(model) = &row.model {
+        params["model"] = json!(model);
+    }
+    match session.request_typed("thread/resume", params).await {
+        Ok(result) => match thread_id_of(&result) {
+            Ok(id) => Ok((session, id)),
+            Err(e) => {
+                session.kill();
+                Err(resume::ResumeFailure::Transient(e))
+            }
+        },
+        Err(failure) => {
+            session.kill();
+            Err(resume_failure(failure))
+        }
+    }
+}
+
+/// Pura: o erro de `thread/resume` como classe. O Codex respondendo com erro = a thread não existe (ou não
+/// abre): `Gone`. O pedido que não saiu, ou o processo que caiu com ele pendente: `Transient`. O prazo: `Timeout`.
+fn resume_failure(failure: RequestFailure) -> resume::ResumeFailure {
+    match failure {
+        RequestFailure::Rejected(m) => resume::ResumeFailure::Gone(m),
+        RequestFailure::NotSent(m) => resume::ResumeFailure::Transient(m),
+        RequestFailure::Lost(m) => resume::classify(&m),
+    }
+}
+
+/// Um processo novo com uma thread nova.
+async fn open_fresh(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<(Arc<Session>, String), String> {
+    let session = started(app, db, row, env).await?;
     let (approval, sandbox) = codex_map::access_policy(&row.access);
     let mut params = json!({ "cwd": row.cwd, "approvalPolicy": approval, "sandbox": sandbox });
     if let Some(model) = &row.model {
         params["model"] = json!(model);
     }
-    let result = match &row.remote_id {
-        Some(remote) => {
-            let mut resume = params.clone();
-            resume["threadId"] = json!(remote);
-            resume["excludeTurns"] = json!(true);
-            // A thread pode ter sumido (apagada no Codex, outra conta): começa outra, a timeline
-            // guardada continua aqui.
-            match session.request("thread/resume", resume).await {
-                Ok(r) => r,
-                Err(_) => session.request("thread/start", params).await?,
-            }
+    let result = session.request("thread/start", params).await.inspect_err(|_| session.kill())?;
+    match thread_id_of(&result) {
+        Ok(id) => Ok((session, id)),
+        Err(e) => {
+            session.kill();
+            Err(e)
         }
-        None => session.request("thread/start", params).await?,
-    };
+    }
+}
+
+fn thread_id_of(result: &Value) -> Result<String, String> {
     result.pointer("/thread/id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "O Codex não devolveu a thread".to_string())
 }
 

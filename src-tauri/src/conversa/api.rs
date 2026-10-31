@@ -161,7 +161,9 @@ pub(super) fn steer_falls_back_to_start(steered: &str, current: Option<&str>) ->
 pub(super) fn codex_error(failure: RequestFailure) -> SendError {
     match failure {
         RequestFailure::NotSent(m) | RequestFailure::Rejected(m) => SendError::NotSent(m),
-        RequestFailure::Lost(m) => SendError::Unknown(m),
+        // O pedido saiu e a resposta se perdeu (o prazo do `turn/start`, o processo que caiu): o turno pode estar
+        // aberto. Quem reenviar pode duplicar a ordem, então a mensagem diz para conferir antes.
+        RequestFailure::Lost(m) => SendError::Unknown(format!("{m}. A mensagem pode ter chegado ao agente: confira a conversa antes de reenviar.")),
     }
 }
 

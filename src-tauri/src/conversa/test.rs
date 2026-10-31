@@ -557,7 +557,7 @@ mod envio {
     fn so_o_pedido_que_saiu_e_perdeu_a_resposta_e_desconhecido() {
         assert_eq!(codex_error(RequestFailure::NotSent("fechou".into())), SendError::NotSent("fechou".into()));
         assert_eq!(codex_error(RequestFailure::Rejected("turno velho".into())), SendError::NotSent("turno velho".into()));
-        assert_eq!(codex_error(RequestFailure::Lost("sem resposta".into())), SendError::Unknown("sem resposta".into()));
+        assert!(matches!(codex_error(RequestFailure::Lost("sem resposta".into())), SendError::Unknown(m) if m.starts_with("sem resposta") && m.contains("confira a conversa antes de reenviar")));
     }
 
     #[test]
@@ -601,5 +601,217 @@ mod envio {
             task.await.unwrap();
         }
         assert_eq!(highest.load(Ordering::SeqCst), 1);
+    }
+}
+
+// ── Etapa 3 (A1): retomar a sessão sem esquecer em silêncio ─────────────
+
+mod retomada {
+    use std::cell::RefCell;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use super::super::resume::{classify, lost_notice, open_resuming, start_gate, Opened, ResumeFailure, RETRY_PAUSES};
+
+    /// Roda `open_resuming` com as tentativas roteirizadas: o que cada `resume` devolve, em ordem, e o registro
+    /// de quantas vezes abriu sessão nova e de quais pausas pediu (sem relógio).
+    fn run(script: Vec<Result<&'static str, ResumeFailure>>) -> (Result<Opened<&'static str>, String>, usize, Vec<Duration>) {
+        let script = RefCell::new(script.into_iter());
+        let fresh_calls = RefCell::new(0usize);
+        let pauses = RefCell::new(Vec::new());
+        let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(open_resuming(
+            || async { script.borrow_mut().next().expect("tentativa a mais") },
+            || async { *fresh_calls.borrow_mut() += 1; Ok("nova") },
+            |wait| { pauses.borrow_mut().push(wait); async {} },
+        ));
+        (out, *fresh_calls.borrow(), pauses.into_inner())
+    }
+
+    #[test]
+    fn a_retomada_que_funciona_nao_abre_sessao_nova_nem_avisa() {
+        let (out, fresh, pauses) = run(vec![Ok("retomada")]);
+        assert_eq!(out, Ok(Opened { session: "retomada", lost: None }));
+        assert_eq!((fresh, pauses.len()), (0, 0));
+    }
+
+    #[test]
+    fn a_sessao_que_nao_existe_mais_abre_outra_e_diz_o_motivo() {
+        let (out, fresh, pauses) = run(vec![Err(ResumeFailure::Gone("No conversation found".into()))]);
+        assert_eq!(out, Ok(Opened { session: "nova", lost: Some("No conversation found".into()) }));
+        assert_eq!((fresh, pauses.len()), (1, 0), "sem retentativa: ela não existe");
+    }
+
+    #[test]
+    fn o_erro_transitorio_tenta_de_novo_com_pausa_curta_e_nao_esquece_se_voltar() {
+        let (out, fresh, pauses) = run(vec![Err(ResumeFailure::Transient("fechou".into())), Ok("retomada")]);
+        assert_eq!(out, Ok(Opened { session: "retomada", lost: None }));
+        assert_eq!((fresh, pauses), (0, vec![RETRY_PAUSES[0]]));
+    }
+
+    #[test]
+    fn o_erro_transitorio_que_persiste_abre_outra_mas_avisa() {
+        let (out, fresh, pauses) = run(vec![Err(ResumeFailure::Transient("a".into())), Err(ResumeFailure::Transient("b".into())), Err(ResumeFailure::Transient("c".into()))]);
+        assert_eq!(out, Ok(Opened { session: "nova", lost: Some("c".into()) }));
+        assert_eq!((fresh, pauses), (1, RETRY_PAUSES.to_vec()), "duas retentativas e depois a nova, com o último motivo");
+    }
+
+    #[test]
+    fn o_prazo_nao_abre_sessao_nova_e_o_erro_de_abrir_o_processo_tambem_nao() {
+        let (out, fresh, _) = run(vec![Err(ResumeFailure::Timeout("O Claude não respondeu a initialize".into()))]);
+        assert!(out.unwrap_err().contains("Ela foi mantida"));
+        assert_eq!(fresh, 0, "a sessão pode existir: o id dela não é trocado");
+        let (out, fresh, _) = run(vec![Err(ResumeFailure::Fatal("Não achei o Claude".into()))]);
+        assert_eq!((out, fresh), (Err("Não achei o Claude".to_string()), 0));
+    }
+
+    #[test]
+    fn os_textos_dos_motores_viram_a_classe_certa() {
+        assert!(matches!(classify("Não achei o Claude Code (claude) no PATH"), ResumeFailure::Fatal(_)));
+        assert!(matches!(classify("Não consegui abrir o Codex: boom"), ResumeFailure::Fatal(_)));
+        assert!(matches!(classify("O Codex não respondeu a thread/resume"), ResumeFailure::Timeout(_)));
+        assert!(matches!(classify("O Claude não respondeu a initialize"), ResumeFailure::Timeout(_)));
+        assert!(matches!(classify("No conversation found with session ID: abc"), ResumeFailure::Gone(_)));
+        assert!(matches!(classify("thread not found: thr_9"), ResumeFailure::Gone(_)));
+        assert!(matches!(classify("O processo do Claude fechou"), ResumeFailure::Transient(_)));
+        assert!(matches!(classify("erro do OpenCode"), ResumeFailure::Transient(_)));
+    }
+
+    #[test]
+    fn o_aviso_da_timeline_diz_que_o_agente_recomecou_sem_historico() {
+        assert!(lost_notice("").contains("recomeçou sem o histórico"));
+        assert!(lost_notice("thread not found").ends_with("Motivo: thread not found"));
+    }
+
+    #[test]
+    fn a_trava_de_abertura_e_por_conversa_e_por_motor() {
+        assert!(Arc::ptr_eq(&start_gate("claude", "a"), &start_gate("claude", "a")));
+        assert!(!Arc::ptr_eq(&start_gate("claude", "a"), &start_gate("claude", "b")), "um agente lento não trava as outras conversas");
+        assert!(!Arc::ptr_eq(&start_gate("claude", "a"), &start_gate("codex", "a")));
+    }
+}
+
+// ── Etapa 3 (A1): opções do OpenCode que não se engolem, e o item de aviso ──
+
+mod opcoes {
+    use serde_json::json;
+
+    use super::super::opencode::{plan_option, OptionPlan};
+    use super::super::turn::notice_item;
+    use crate::canal::timeline::ItemKind;
+
+    fn config() -> serde_json::Value {
+        json!({ "configOptions": [
+            { "id": "effort", "currentValue": "default", "options": [{ "value": "low" }, { "value": "default" }] },
+            { "id": "mode", "currentValue": "build", "options": [{ "value": "build" }, { "value": "plan" }] },
+        ] })
+    }
+
+    #[test]
+    fn a_opcao_igual_nao_se_pede_a_ausente_se_marca_e_a_desconhecida_se_tenta() {
+        assert_eq!(plan_option(&config(), "mode", "build"), OptionPlan::Same);
+        assert_eq!(plan_option(&config(), "mode", "plan"), OptionPlan::Set);
+        assert_eq!(plan_option(&config(), "effort", "ultra"), OptionPlan::Unavailable, "o modelo não tem esse esforço: aviso, nunca silêncio");
+        assert_eq!(plan_option(&json!({}), "mode", "build"), OptionPlan::Set, "o OpenCode que não lista a opção: tenta mesmo assim");
+    }
+
+    #[test]
+    fn o_aviso_e_um_item_proprio_com_o_codigo_no_label_e_id_unico() {
+        let a = notice_item("resumeLost", "A sessão anterior não pôde ser retomada", 5);
+        let b = notice_item("resumeLost", "A sessão anterior não pôde ser retomada", 5);
+        assert_eq!((a.kind, a.label.as_deref(), a.at), (ItemKind::Notice, Some("resumeLost"), Some(5)));
+        assert_ne!(a.id, b.id, "dois avisos iguais não colapsam");
+        assert_eq!(serde_json::to_value(&a).unwrap()["kind"], "notice");
+    }
+}
+
+// ── Etapa 3 (A2): a fila que não some mensagem ──────────────────────────
+
+mod fila {
+    use std::sync::{Arc, Barrier};
+
+    use super::super::turn::{dropped_items, Admitted, Lane};
+    use crate::canal::timeline::ItemKind;
+
+    #[test]
+    fn a_conversa_livre_comeca_o_turno_e_a_ocupada_enfileira_em_ordem() {
+        let lane = Lane::default();
+        let Admitted::Start(first) = lane.admit("um") else { panic!("livre: começa") };
+        assert_eq!(lane.turn().as_deref(), Some(first.as_str()), "o turno já fica reservado");
+        assert_eq!((lane.admit("dois"), lane.admit("tres")), (Admitted::Queued, Admitted::Queued));
+        assert_eq!(lane.queued(), 2);
+        assert_eq!(lane.take_turn().as_deref(), Some(first.as_str()));
+        let (turn, text) = lane.advance().unwrap();
+        assert_eq!(text, "dois", "FIFO");
+        assert_eq!(lane.turn().as_deref(), Some(turn.as_str()));
+        assert_eq!(lane.drain(), ["tres"]);
+        lane.take_turn();
+        assert!(lane.advance().is_none());
+        assert!(matches!(lane.admit("quatro"), Admitted::Start(_)), "fila vazia e sem turno: a próxima começa");
+    }
+
+    /// A corrida que encalhava a mensagem: ela chega no instante em que o turno acaba. Com a decisão sob uma
+    /// trava só, ou ela é vista pelo `advance` (estava na fila) ou acha o turno livre e começa. Nunca fica na
+    /// fila com o turno livre.
+    #[test]
+    fn a_mensagem_que_chega_quando_o_turno_acaba_nunca_fica_encalhada() {
+        for _ in 0..500 {
+            let lane = Arc::new(Lane::default());
+            assert!(matches!(lane.admit("em andamento"), Admitted::Start(_)));
+            let barrier = Arc::new(Barrier::new(2));
+            let ender = {
+                let (lane, barrier) = (lane.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    lane.take_turn();
+                    lane.advance()
+                })
+            };
+            barrier.wait();
+            let admitted = lane.admit("no instante");
+            let advanced = ender.join().unwrap();
+            let started = matches!(admitted, Admitted::Start(_));
+            let popped = advanced.is_some();
+            assert!(started ^ popped, "exatamente um dos dois a leva: {admitted:?} / {advanced:?}");
+            assert!(lane.queued() == 0, "nada encalhado na fila");
+        }
+    }
+
+    #[test]
+    fn cada_mensagem_descartada_vira_um_aviso_nao_enviada_com_o_texto_dela() {
+        let items = dropped_items(vec!["rode os testes".into(), "rode os testes".into(), "e o lint?".into()], 9);
+        assert_eq!(items.len(), 3, "duas iguais são duas mensagens: nenhuma some");
+        assert!(items.iter().all(|i| i.kind == ItemKind::Notice && i.label.as_deref() == Some("queueDropped") && i.at == Some(9)));
+        assert_eq!(items.iter().map(|i| i.text.as_deref().unwrap()).collect::<Vec<_>>(), ["rode os testes", "rode os testes", "e o lint?"]);
+        let ids: std::collections::HashSet<_> = items.iter().map(|i| i.id.clone()).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(dropped_items(Vec::new(), 9).is_empty());
+    }
+}
+
+// ── Etapa 3 (A4): o aviso no stderr não é o erro ────────────────────────
+
+mod stderr {
+    use super::super::turn::{dropped, stderr_reason};
+
+    fn lines(v: &[&str]) -> Vec<String> {
+        v.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn o_aviso_depois_do_erro_nao_vira_o_motivo_da_queda() {
+        let tail = lines(&["Error: sessão corrompida", "", "warning: update available", "  INFO  shutting down"]);
+        assert_eq!(stderr_reason(tail.iter()).as_deref(), Some("Error: sessão corrompida"));
+        // Antes (a última linha qualquer) o motivo mostrado era o aviso inofensivo.
+        let before = tail.iter().rev().find(|l| !l.trim().is_empty()).cloned();
+        assert_eq!(before.as_deref(), Some("  INFO  shutting down"));
+    }
+
+    #[test]
+    fn so_aviso_no_stderr_cai_na_frase_generica() {
+        let tail = lines(&["[WARN] node deprecation", "debug: closing"]);
+        assert_eq!(stderr_reason(tail.iter()), None);
+        let (result, message) = dropped(false, None, "Claude");
+        assert_eq!(result.error.as_deref(), Some("O processo do Claude fechou no meio do turno"));
+        assert_eq!(message, result.error);
     }
 }

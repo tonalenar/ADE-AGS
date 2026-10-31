@@ -73,12 +73,127 @@ pub fn dropped(killed: bool, stderr_tail: Option<&str>, agent: &str) -> (TurnRes
     (TurnResult { error: Some(reason.clone()), ..Default::default() }, Some(reason))
 }
 
+/// Pura: a linha do stderr que explica um processo que fechou no meio do turno: a última que NÃO é aviso
+/// (`warning:`, `info`, `debug`, `deprecated`…). Antes era a última linha qualquer, e um aviso inofensivo
+/// impresso antes de o processo cair virava «o erro» na tela.
+pub fn stderr_reason<'a>(lines: impl DoubleEndedIterator<Item = &'a String>) -> Option<String> {
+    lines.rev().map(|l| l.trim()).find(|l| !l.is_empty() && !is_noise(l)).map(str::to_string)
+}
+
+fn is_noise(line: &str) -> bool {
+    let start = line.trim_start_matches(|c: char| !c.is_alphanumeric()).to_lowercase();
+    ["warn", "info", "debug", "notice", "deprecat"].iter().any(|p| start.starts_with(p))
+}
+
 /// A mensagem da pessoa na timeline, gravada ao mandar.
 pub fn save_user(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, text: &str) {
     use crate::canal::event::clip;
     use crate::canal::timeline::ItemKind;
     let item = Item { text: Some(clip(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
     save_items(app, db, thread_id, Some(turn), vec![item]);
+}
+
+/// Um aviso do app no fio da conversa (ver `ItemKind::Notice`): a retomada que recomeçou sem histórico, a
+/// mensagem da fila que foi descartada, uma opção que o agente não aplicou. Persistente: sobrevive ao reinício.
+pub fn save_notice(app: &AppHandle, db: &DbConnection, thread_id: &str, code: &str, text: &str) {
+    save_items(app, db, thread_id, None, vec![notice_item(code, text, crate::util::now_ts_ms())]);
+}
+
+/// Pura: o item de um aviso. O id é único por aviso (duas mensagens descartadas iguais não colapsam).
+pub fn notice_item(code: &str, text: &str, now: i64) -> Item {
+    use crate::canal::event::clip;
+    use crate::canal::timeline::ItemKind;
+    Item {
+        label: Some(code.to_string()),
+        text: Some(clip(text, 20_000)),
+        ..Item::new(ItemKind::Notice, format!("n:{code}:{}", uuid::Uuid::new_v4()), Some(now))
+    }
+}
+
+/// O turno em andamento de uma conversa e a fila do que chegou durante ele, numa só trava. Decidir «começa
+/// agora ou entra na fila» e «qual é o próximo» são decisões sobre o MESMO estado: com duas travas, a mensagem que
+/// chegava no instante em que o turno acabava era lida como «há turno», o fim do turno esvaziava a fila e ela
+/// ficava encalhada, sem nunca ser enviada.
+#[derive(Default)]
+pub struct Lane {
+    state: std::sync::Mutex<LaneState>,
+}
+
+#[derive(Default)]
+struct LaneState {
+    turn: Option<String>,
+    queue: std::collections::VecDeque<String>,
+}
+
+/// O que a [`Lane`] decidiu para uma mensagem.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Admitted {
+    /// Havia turno: entrou na fila.
+    Queued,
+    /// Não havia: este é o turno dela, já reservado.
+    Start(String),
+}
+
+impl Lane {
+    fn state(&self) -> std::sync::MutexGuard<'_, LaneState> {
+        self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn turn(&self) -> Option<String> {
+        self.state().turn.clone()
+    }
+
+    /// Tira o turno em andamento: quem o tira é quem o fecha.
+    pub fn take_turn(&self) -> Option<String> {
+        self.state().turn.take()
+    }
+
+    /// Começa um turno para `text` se a conversa está livre (reservando-o), senão põe `text` na fila.
+    pub fn admit(&self, text: &str) -> Admitted {
+        let mut state = self.state();
+        if state.turn.is_some() {
+            state.queue.push_back(text.to_string());
+            return Admitted::Queued;
+        }
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        state.turn = Some(turn_id.clone());
+        Admitted::Start(turn_id)
+    }
+
+    /// A próxima da fila, com o turno dela já reservado. `None` = fila vazia (o turno segue livre).
+    pub fn advance(&self) -> Option<(String, String)> {
+        let mut state = self.state();
+        let text = state.queue.pop_front()?;
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        state.turn = Some(turn_id.clone());
+        Some((turn_id, text))
+    }
+
+    /// Esvazia a fila e devolve o que esperava.
+    pub fn drain(&self) -> Vec<String> {
+        self.state().queue.drain(..).collect()
+    }
+
+    #[cfg(test)]
+    pub fn queued(&self) -> usize {
+        self.state().queue.len()
+    }
+}
+
+/// Pura: um aviso `queueDropped` por mensagem da fila que não chegou a ser enviada (a conversa foi
+/// interrompida ou fechada antes de a vez dela). O texto do item é a mensagem, para a tela mostrá-la como
+/// «não enviada» e oferecer reenviar.
+pub fn dropped_items(texts: Vec<String>, now: i64) -> Vec<Item> {
+    texts.iter().map(|text| notice_item("queueDropped", text, now)).collect()
+}
+
+/// Marca, na timeline, cada mensagem da fila descartada: antes elas sumiam, e a pessoa ficava com uma bolha
+/// que ninguém respondeu.
+pub fn discard_queue(app: &AppHandle, db: &DbConnection, thread_id: &str, texts: Vec<String>) {
+    if texts.is_empty() {
+        return;
+    }
+    save_items(app, db, thread_id, None, dropped_items(texts, crate::util::now_ts_ms()));
 }
 
 /// Grava o novo acesso da conversa (o agente mudou de modo sozinho) e avisa a janela.

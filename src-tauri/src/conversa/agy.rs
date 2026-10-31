@@ -32,7 +32,11 @@ const STDERR_TAIL: usize = 20;
 pub struct Session {
     thread_id: String,
     turn: Mutex<Option<String>>,
+    /// Mensagens que chegaram com o turno em andamento. Só entram no fio quando o turno delas começa; se a fila é
+    /// descartada, cada uma vira um aviso «não enviada».
     queue: Mutex<VecDeque<String>>,
+    app: AppHandle,
+    db: DbConnection,
     /// A conversa no `agy` (`--conversation`).
     conversation: Mutex<Option<String>>,
     /// A pessoa parou o turno (ou fechou a conversa): o processo foi morto de propósito.
@@ -64,12 +68,16 @@ impl Session {
         }
     }
 
-    /// Mata o processo do turno e esvazia a fila.
+    /// Esvazia a fila e marca cada mensagem como «não enviada» na timeline.
+    fn discard_queue(&self) {
+        let dropped: Vec<String> = self.queue.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default();
+        turn::discard_queue(&self.app, &self.db, &self.thread_id, dropped);
+    }
+
+    /// Mata o processo do turno e descarta a fila (visivelmente).
     pub fn kill(&self) {
         self.killed.store(true, Ordering::SeqCst);
-        if let Ok(mut queue) = self.queue.lock() {
-            queue.clear();
-        }
+        self.discard_queue();
         self.kill_child();
     }
 }
@@ -107,19 +115,20 @@ pub fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> 
     let session = {
         let mut map = sessions().lock().map_err(|e| e.to_string())?;
         if let Some(running) = map.get(thread_id).filter(|s| s.alive() && !s.killed.load(Ordering::SeqCst)).cloned() {
-            let at = running.turn().unwrap_or_else(|| turn_id.clone());
             // Entra na fila sob o mesmo lock do fim do laço: não se perde entre o último `pop` e a saída.
             if let Ok(mut queue) = running.queue.lock() {
                 queue.push_back(text.to_string());
             }
             drop(map);
-            turn::save_user(app, db, thread_id, &at, text);
+            // Só entra no fio quando o turno dela começar (`next_turn`).
             return Ok(());
         }
         let session = Arc::new(Session {
             thread_id: thread_id.to_string(),
             turn: Mutex::new(Some(turn_id.clone())),
             queue: Mutex::new(VecDeque::new()),
+            app: app.clone(),
+            db: db.clone(),
             conversation: Mutex::new(row.remote_id.clone()),
             killed: AtomicBool::new(false),
             alive: AtomicBool::new(true),
@@ -164,6 +173,8 @@ fn next_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) -> Opti
             let turn_id = uuid::Uuid::new_v4().to_string();
             session.set_turn(Some(turn_id.clone()));
             turn::begin(app, db, thread_id, &turn_id);
+            // A mensagem que esperava a vez entra no fio agora, que é quando o turno dela começa.
+            turn::save_user(app, db, thread_id, &turn_id, &text);
             Some((turn_id, text))
         }
         None => {

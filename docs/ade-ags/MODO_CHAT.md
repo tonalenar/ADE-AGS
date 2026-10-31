@@ -96,7 +96,7 @@ Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, s
 - **Front (`src/features/chat/structured/`):** o store ao vivo, os cartões (chave `thread:<id>`) e a `StructuredConversationView`. A tela usa a mesma `TimelineView`, o mesmo composer e os mesmos menus da conversa por TUI. Aprovações e perguntas se respondem nos botões do composer; parar interrompe o turno.
 - **CLI e MCP (etapa 5):** `ags chat list|new|send|wait|show|stop|pending|open|settle` (Codex e Claude Code) e as tools `chat_*` nas abas (handlers em `src-tauri/src/ipc/commands/conversas.rs`, sobre o mesmo `conversa::api` da tela).
   - Uma conversa aberta por agente começa **supervisionada** (`access: ask`).
-  - `chat wait` dorme no barramento (`chat.changed`), sem polling, até o turno acabar ou o agente pedir algo à pessoa.
+  - `chat wait` dorme no barramento (`chat.changed`), sem polling, até o turno acabar ou o agente pedir algo à pessoa. `reply` é a última fala DEPOIS da última mensagem da pessoa; terminou sem fala nova (erro, interrompido, processo caído), `reply` vem `null` e `stopped` traz o motivo (lido do `turnEnd`).
   - Responder às aprovações e perguntas do agente da conversa **não** tem comando: é da pessoa, na tela.
   - `chat open` liga a casca do chat e mostra a conversa (pela ponte do front, `cliBridge.ts`).
   - Papéis só de leitura (QA) recebem só `chat_list`, `chat_show`, `chat_wait` e `chat_pending`; tarefas da frota não recebem as tools do chat.
@@ -201,6 +201,15 @@ Com o Antigravity, a conversa nova roda `agy --print <mensagem> --output-format 
 - **Tela (`src/features/chat/team/`):** o painel Time (`TeamPanel`, a aba "Time" do painel direito) com o formulário de ligar e o arrastar da sidebar; os cartões de delegação e as entregas no fio do orquestrador (`TeamThreadFeed`); o segmentado "Time | Só o orquestrador" e o @agente (`TeamComposer`); o grupo do time na sidebar (`TeamSidebar`); o selo "Orquestrador · X" (`TeamHeaderBadge`).
 - **Onde aparece:** a aba "Time" do painel direito abre sozinha ao abrir uma conversa que está num time (uma vez por conversa); a sidebar agrupa os integrantes sob o orquestrador com o selo "TIME · N"; o cabeçalho mostra "Orquestrador · X"; o composer do orquestrador tem "Time | Só o orquestrador" à esquerda e o menu do @agente; o fio termina com os cartões das delegações e o resumo das entregas.
 - **Permissões:** `team/teamPermissions.ts` diz de quem é o pedido (papel, política, time) e o que a política decide sozinha. O `PermissionsManager` aplica a política antes das regras "Sempre permitir": só leitura nega (e diz ao agente por quê), o que a política deixa passa sozinho, o resto vai às regras e à pessoa; risco alto nunca é automático. O cartão e a caixa mostram o papel e a política (`TeamRoleTag`).
+
+## Retomada, fila e avisos na timeline (etapa 3 do harness)
+
+- **Retomar uma sessão que falha não esquece em silêncio** (`conversa/resume.rs`): o erro de `--resume`/`thread/resume`/`session/resume` é `Gone` (a sessão não existe: abre outra), `Transient` (2 retentativas com pausa curta; se persistir, abre outra), `Timeout` (NÃO abre outra: a sessão pode existir; falha e a pessoa tenta de novo) ou `Fatal` (o processo não sobe, ou modelo/modo não aplicam: falha). Ao abrir outra, a timeline recebe um item `notice` (`resumeLost`) e a tela diz que o agente recomeçou sem o histórico; o id da sessão anterior só é trocado depois de a nova abrir.
+- **OpenCode falha fechado** em modelo, esforço e MODO: um erro ao aplicar recusa a abertura (as permissões nunca divergem do que a tela mostra). O esforço que o modelo não oferece fica no padrão, mas vira um `notice` (`optionIgnored`). Um OpenCode que nem lista a opção `mode` não tem o que mostrar errado (as permissões valem pelo ambiente do processo).
+- **A fila do agy e do OpenCode** (`turn::Lane`: turno + fila sob UMA trava) só grava o item `User` quando o turno da mensagem começa; a tela a mostra como pendente até lá (sem o prazo de 2 min enquanto o agente trabalha). Se interromper ou fechar descarta a fila, cada mensagem vira um `notice` `queueDropped` («não enviada», com o texto e «Reenviar»).
+- **Uma trava de abertura por conversa** (`resume::start_gate`), não uma por motor: um agente lento no `initialize` não segura as outras conversas.
+- **Item `notice`** (`ItemKind::Notice`; `label` = código): linha própria no fio, fora dos turnos. A mensagem da pessoa no meio de um turno (steer, fila) fecha o turno anterior como «superado» (`TurnEnd.superseded`), e o fim de verdade vai para o turno que tem a resposta.
+- **@menção do orquestrador**: a mensagem aparece como pendente na conversa que a pessoa olha, o erro de envio aparece ali, e, numa conversa por protocolo, o resumo do time só conta como entregue depois de o backend aceitar o envio (na fila do composer e numa aba, não há resposta a esperar: conta ao enfileirar/entregar).
 
 ## Como não derruba terminais
 

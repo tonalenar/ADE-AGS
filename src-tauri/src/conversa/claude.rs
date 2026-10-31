@@ -28,7 +28,7 @@ use crate::database::DbConnection;
 
 use super::claude_map::{self, Mapper, Out, Pending, Start};
 use super::events::emit;
-use super::{store, turn};
+use super::{resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido de controle (abrir, parar). O turno não tem prazo.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -152,14 +152,17 @@ pub fn close(thread_id: &str) {
 }
 
 
-/// A sessão de uma conversa: a viva, ou uma nova (sobe o processo e faz o `initialize`). Uma
-/// sessão que não dá para retomar (apagada, outra conta) vira uma nova; a timeline guardada fica.
+/// A sessão de uma conversa: a viva, ou uma nova (sobe o processo e faz o `initialize`). A sessão guardada é
+/// retomada (`--resume`); só se ela sumiu (ou o erro transitório persistiu) abre outra, e então a timeline recebe o
+/// aviso de que o agente recomeçou sem o histórico (ver `resume`). O id da sessão anterior só é trocado depois de
+/// a nova abrir.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
-    static START: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    let _guard = START.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+    // Uma trava por conversa: um Claude lento a abrir não segura o início das outras.
+    let gate = resume::start_gate("claude", thread_id);
+    let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
@@ -169,20 +172,29 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     };
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
 
-    let mut opened = None;
-    if let Some(remote) = row.remote_id.as_deref() {
-        match open(app, db, &row, env.clone(), Start::Resume(remote)).await {
-            Ok(s) => opened = Some((s, remote.to_string())),
-            Err(e) => eprintln!("[claude] não retomou a sessão {remote}: {e}"),
-        }
-    }
-    let (session, remote) = match opened {
-        Some(found) => found,
-        None => {
-            let fresh = uuid::Uuid::new_v4().to_string();
-            (open(app, db, &row, env, Start::New(&fresh)).await?, fresh)
+    let fresh = || {
+        let env = env.clone();
+        let row = &row;
+        async move {
+            let id = uuid::Uuid::new_v4().to_string();
+            open(app, db, row, env, Start::New(&id)).await.map(|s| (s, id))
         }
     };
+    let opened = match row.remote_id.clone() {
+        Some(remote) => {
+            resume::open_resuming(
+                || {
+                    let (env, remote, row) = (env.clone(), remote.clone(), &row);
+                    async move { open(app, db, row, env, Start::Resume(&remote)).await.map(|s| (s, remote)).map_err(|e| resume::classify(&e)) }
+                },
+                fresh,
+                tokio::time::sleep,
+            )
+            .await?
+        }
+        None => resume::Opened { session: fresh().await?, lost: None },
+    };
+    let (session, remote) = opened.session;
     if let Ok(conn) = db.lock() {
         let _ = store::set_remote_id(&conn, thread_id, &remote);
     }
@@ -192,6 +204,9 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     if let Ok(mut map) = sessions().lock() {
         map.insert(thread_id.to_string(), session.clone());
     }
+    if let Some(reason) = opened.lost {
+        turn::save_notice(app, db, thread_id, "resumeLost", &resume::lost_notice(&reason));
+    }
     Ok(session)
 }
 
@@ -199,8 +214,10 @@ async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: O
     let session = spawn(app, db, row, env, start)?;
     // O `--resume` de uma sessão que não existe fecha o processo antes de responder.
     if let Err(e) = session.control("initialize", json!({})).await {
+        // O que o processo escreveu antes de fechar diz se a sessão sumiu ("No conversation found…").
+        let tail = session.stderr.lock().ok().map(|t| t.iter().rev().take(2).rev().cloned().collect::<Vec<_>>().join(" | ")).unwrap_or_default();
         session.kill();
-        return Err(e);
+        return Err(if tail.trim().is_empty() { e } else { format!("{e}: {}", tail.trim()) });
     }
     Ok(session)
 }
@@ -303,7 +320,7 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     }
     if let Some(turn) = session.turn() {
         session.set_turn(None);
-        let tail = session.stderr.lock().ok().and_then(|t| t.iter().rev().find(|l| !l.trim().is_empty()).cloned());
+        let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
         let (result, message) = turn::dropped(killed, tail.as_deref(), "Claude");
         finish_turn(app, db, thread_id, &turn, &result);
         if let Some(message) = message {
