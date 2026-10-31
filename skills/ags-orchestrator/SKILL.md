@@ -1195,3 +1195,16 @@ it can only `memory_propose/update/delete` with a `reason` that cites sources, a
 and not while there are more than 32 pending. It never writes to disk: the ADE computes the Markdown diff
 and the user approves the dream group, which then makes the commit. Do not plan or assign dreamer work
 yourself; it is started by the user.
+
+## ai-memory MCP with a fixed project
+
+The app may start `ags ai-memory-bridge --cwd <folder> --workspace <W> --project <P>`
+for new Codex/OpenCode tabs. It speaks JSON-RPC stdio, never the regular CLI envelope.
+The app first reads an explicit workspace/project pair from the nearest allowed `.ai-memory.toml`
+(home/checkout boundaries apply; invalid and capture-only markers are skipped). A declared pair
+does not require a pre-existing project: the app does not create it during resolution. Otherwise,
+it resolves a unique project matching the folder through `list-projects --json`; ambiguity or
+failure means no memory MCP injection. Workspace/project remain fixed for the connection.
+Divergent scopes, global/profile/multi-project requests, unknown tools and methods are rejected.
+Only memory_query, memory_recent, memory_status, memory_read_page, memory_write_page and
+memory_patch_page are exposed. This does not change settings or live tabs.

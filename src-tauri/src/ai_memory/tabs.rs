@@ -72,6 +72,10 @@ pub(crate) fn prepare_new_tab_with(
     let Some(binary) = binary else {
         return out;
     };
+    if agent != "claude" {
+        out.plan = static_plan(&binary, cwd, agent, extras).unwrap_or_default();
+        return out;
+    }
     let settings = user_settings(home, extras);
     out.hooks_configured = configured_hooks(&settings);
     out.binary = Some(binary.clone());
@@ -93,6 +97,8 @@ pub(crate) fn agent_from_program(program: &str) -> Option<&'static str> {
         .unwrap_or(&file);
     match stem {
         "claude" => Some("claude"),
+        "codex" => Some("codex"),
+        "opencode" => Some("opencode"),
         _ => None,
     }
 }
@@ -332,4 +338,103 @@ pub(crate) fn remove_owned_server(dir: &Path, tab_id: &str) {
 /// Só um `SessionStart` do ai-memory em JSON válido dispensa nosso arquivo (e vale para a continuidade).
 pub(crate) fn configured_hooks(paths: &[PathBuf]) -> bool {
     UserHooks::read(paths).complete()
+}
+
+/// Prefere o par explícito do marcador; sem ele, guessProject exige correspondência única.
+fn static_plan(
+    binary: &Path,
+    cwd: &Path,
+    agent: &str,
+    extras: &HashMap<String, String>,
+) -> Option<TabInjection> {
+    let (workspace, project) = match super::marker::scope(cwd, dirs::home_dir().as_deref()) {
+        Some(scope) => scope,
+        None => {
+            let projects = super::client::Client::at(Some(binary.to_path_buf()), cwd.to_path_buf())
+                .ok()?.read::<Vec<super::types::Project>>(super::client::Read::Projects).ok()?.data;
+            let project = unique_project(&projects, cwd)?;
+            (project.workspace_name.clone(), project.project_name.clone())
+        }
+    };
+    let ags = std::env::current_exe()
+        .ok()?
+        .with_file_name(if cfg!(windows) { "ags.exe" } else { "ags" });
+    if !ags.is_file() {
+        return None;
+    }
+    scoped_plan(&ags, cwd, agent, extras, &workspace, &project).ok()
+}
+pub(super) fn scoped_plan(
+    ags: &Path,
+    cwd: &Path,
+    agent: &str,
+    extras: &HashMap<String, String>,
+    workspace: &str,
+    project: &str,
+) -> Result<TabInjection, String> {
+    super::sessions::validate_scope(workspace, project)?;
+    let exe = crate::util::external_path(ags)
+        .to_string_lossy()
+        .into_owned();
+    let args = vec![
+        "ai-memory-bridge".to_string(),
+        "--cwd".into(),
+        crate::util::external_path(cwd)
+            .to_string_lossy()
+            .into_owned(),
+        "--workspace".into(),
+        workspace.into(),
+        "--project".into(),
+        project.into(),
+    ];
+    let mut plan = TabInjection::default();
+    match agent {
+        "codex" => {
+            plan.args = vec![
+                "-c".into(),
+                format!("mcp_servers.ai-memory.command={}", json!(exe)),
+                "-c".into(),
+                format!("mcp_servers.ai-memory.args={}", json!(args)),
+            ];
+        }
+        "opencode" => {
+            let mut config: Value = extras
+                .get("OPENCODE_CONFIG_CONTENT")
+                .map(|s| serde_json::from_str(s))
+                .transpose()
+                .map_err(|_| "Config OpenCode inválida.")?
+                .unwrap_or_else(|| json!({}));
+            let root = config.as_object_mut().ok_or("Config OpenCode inválida.")?;
+            let mcp = root
+                .entry("mcp")
+                .or_insert_with(|| json!({}))
+                .as_object_mut()
+                .ok_or("Config MCP inválida.")?;
+            let mut command = vec![exe];
+            command.extend(args);
+            mcp.insert(
+                "ai-memory".into(),
+                json!({"type":"local","command":command,"enabled":true}),
+            );
+            plan.env
+                .insert("OPENCODE_CONFIG_CONTENT".into(), config.to_string());
+        }
+        _ => return Err("Cliente sem adaptador de escopo.".into()),
+    }
+    Ok(plan)
+}
+
+pub(super) fn unique_project<'a>(
+    projects: &'a [super::types::Project],
+    cwd: &Path,
+) -> Option<&'a super::types::Project> {
+    let folder = cwd.file_name()?.to_str()?;
+    let mut matches = projects
+        .iter()
+        .filter(|p| p.project_name.eq_ignore_ascii_case(folder));
+    let project = matches.next()?;
+    if matches.next().is_some() || super::scoped_bridge::reserved_project(&project.project_name) {
+        return None;
+    }
+    Some(project)
 }

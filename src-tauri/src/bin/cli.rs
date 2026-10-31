@@ -340,6 +340,7 @@ AGENTES, CONTAS E SKILLS
 
 SERVIDOR MCP (não é você quem digita: o app o inicia)
   mcp --cwd <pasta> [--tab <id>]              A ponte de uma tab interativa
+  ai-memory-bridge --cwd <pasta> --workspace <W> --project <P>  MCP com escopo fixo
   mcp --task <id-da-tarefa>                   A de uma tarefa da frota
 
   Diferente do resto, isto NÃO devolve uma linha JSON: fica preso no stdin
@@ -397,6 +398,40 @@ pub(crate) fn main() -> ExitCode {
     // `ags mcp` se atiende antes que nada: no devuelve una línea JSON como el resto,
     // sino que se queda con stdin y stdout hablando JSON-RPC con el agente que lo lanzó.
     // Mezclarlo con el parseo de flags normal le ensuciaría el canal.
+    if args[0] == "ai-memory-bridge" {
+        let mut values = std::collections::HashMap::new();
+        for pair in args[1..].chunks(2) {
+            if pair.len() != 2
+                || !["--cwd", "--workspace", "--project"].contains(&pair[0].as_str())
+                || values.insert(pair[0].as_str(), pair[1].as_str()).is_some()
+            {
+                eprintln!("Argumentos inválidos do intermediário MCP.");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
+        let (Some(cwd), Some(workspace), Some(project)) = (
+            values.get("--cwd"),
+            values.get("--workspace"),
+            values.get("--project"),
+        ) else {
+            eprintln!("Informe pasta, workspace e projeto.");
+            return ExitCode::from(EXIT_USAGE);
+        };
+        let result = tokio::runtime::Runtime::new().and_then(|rt| {
+            rt.block_on(ade_ags_lib::ai_memory::scoped_bridge::serve(
+                std::path::Path::new(cwd),
+                workspace,
+                project,
+            ))
+        });
+        return match result {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => {
+                eprintln!("Intermediário MCP encerrado com erro.");
+                ExitCode::from(EXIT_COMMAND_FAILED)
+            }
+        };
+    }
     if args[0] == "mcp" {
         return run_mcp(&args[1..]);
     }

@@ -535,8 +535,8 @@ while :; do :; done
             Some("claude")
         );
         assert_eq!(crate::ai_memory::tabs::agent_from_program("agy"), None);
-        assert_eq!(crate::ai_memory::tabs::agent_from_program("codex"), None);
-        assert_eq!(crate::ai_memory::tabs::agent_from_program("opencode"), None);
+        assert_eq!(crate::ai_memory::tabs::agent_from_program("codex"), Some("codex"));
+        assert_eq!(crate::ai_memory::tabs::agent_from_program("opencode"), Some("opencode"));
     }
 
     #[test]

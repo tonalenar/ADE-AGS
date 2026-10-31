@@ -6,6 +6,7 @@
 Decisão completa em [`docs/decisoes/AI_MEMORY.md`](../decisoes/AI_MEMORY.md).
 - A memória de longo prazo dos agentes é a do **ai-memory** (≥ 3.3.0). O que ele captura vale **sem aprovação item a item**.
 - O ADE lê o ai-memory **só pelo binário**, por subprocesso com `--json` e timeout (`util::spawn`). **Nunca lê o token** nem os arquivos dele.
+- O projeto no ai-memory é fixado pelo `.ai-memory.toml` da raiz (`default/ADE-AGS`), para todo worktree cair no mesmo projeto. Sem ele, um worktree com remoto não reconhecido vira um projeto com o nome da pasta.
 - Toda aba roda com `AI_MEMORY_RUN_AUTOWIRE=false`; o `run` leva `--no-autowire`. Hooks e MCP entram **por aba**, nunca nas configs globais dos agentes sem OK.
 - O apagamento automático fica desligado (`forget_sweep_interval_secs = 0`): **ao vencer o decaimento, o ADE só avisa**.
 - Embeddings (~87 MB) e reranker pelo Jev só com OK do usuário.
