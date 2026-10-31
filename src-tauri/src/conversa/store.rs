@@ -63,7 +63,16 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             answered_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_chat_request_state ON chat_request(thread_id, state);",
-    )
+    )?;
+    // A permissão decidida no backend: o pedido INTEIRO (`chat_team::permission::Subject`, em JSON: o título só
+    // guarda a primeira linha do comando) e quem respondeu e por quê (`person`, `policy`, `rule:<id>`).
+    for (column, ddl) in [("subject", "TEXT"), ("decided_by", "TEXT"), ("decided_why", "TEXT")] {
+        let has = conn.prepare("SELECT 1 FROM pragma_table_info('chat_request') WHERE name = ?1")?.exists([column])?;
+        if !has {
+            conn.execute_batch(&format!("ALTER TABLE chat_request ADD COLUMN {column} {ddl};"))?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -230,13 +239,46 @@ pub fn pending_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<
     stmt.query_map(params![thread_id], request_of)?.collect()
 }
 
-/// Marca respondido. `false` se já não estava pendente (respondido em outro lugar, ou expirou).
+/// Marca respondido pela pessoa. `false` se já não estava pendente (respondido em outro lugar, ou expirou).
 pub fn answer_request(conn: &Connection, id: &str, answer: &str, now: i64) -> rusqlite::Result<bool> {
+    answer_request_by(conn, id, answer, now, "person", None)
+}
+
+/// Como `answer_request`, dizendo quem respondeu (`person`, `policy`, `rule:<id>`) e por quê (auditoria).
+pub fn answer_request_by(conn: &Connection, id: &str, answer: &str, now: i64, by: &str, why: Option<&str>) -> rusqlite::Result<bool> {
     conn.execute(
-        "UPDATE chat_request SET state = 'answered', answer = ?2, answered_at = ?3 WHERE id = ?1 AND state = 'pending'",
-        params![id, answer, now],
+        "UPDATE chat_request SET state = 'answered', answer = ?2, answered_at = ?3, decided_by = ?4, decided_why = ?5
+          WHERE id = ?1 AND state = 'pending'",
+        params![id, answer, now, by, why],
     )
     .map(|n| n > 0)
+}
+
+/// Guarda o pedido inteiro (JSON de `permission::Subject`) para decidir sobre ele, na chegada ou depois.
+pub fn set_subject(conn: &Connection, id: &str, subject: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_request SET subject = ?2 WHERE id = ?1", params![id, subject]).map(|_| ())
+}
+
+pub fn subject_of(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    Ok(conn.query_row("SELECT subject FROM chat_request WHERE id = ?1", params![id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten())
+}
+
+/// As últimas decisões de uma conversa (quem respondeu e por quê), da mais nova para a mais velha.
+pub fn recent_decisions(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<(String, String, Option<String>, Option<String>)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, COALESCE(answer, ''), decided_by, decided_why FROM chat_request
+          WHERE thread_id = ?1 AND state = 'answered' ORDER BY answered_at DESC, id LIMIT ?2",
+    )?;
+    stmt.query_map(params![thread_id, limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
+}
+
+/// Os pedidos pendentes de TODAS as conversas ativas (a varredura os decide; ver `conversa::permission`).
+pub fn pending_all(conn: &Connection) -> rusqlite::Result<Vec<RequestRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {REQUEST_COLS} FROM chat_request WHERE state = 'pending'
+           AND thread_id IN (SELECT id FROM chat_thread WHERE state = 'active') ORDER BY created_at"
+    ))?;
+    stmt.query_map([], request_of)?.collect()
 }
 
 /// Os pendentes de uma conversa expiram (o turno acabou, ou o processo do agente fechou). Devolve os ids.

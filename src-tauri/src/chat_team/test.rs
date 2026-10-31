@@ -380,3 +380,87 @@ fn a_janela_de_resposta_junta_todas_as_falas_ate_o_fim_do_turno_da_mensagem() {
     assert_eq!(model::reply_window(&items, 1).start, None, "#1 não é prefixo de #12");
     assert_eq!(model::reply_window(&items, 99), model::ReplyWindow::default());
 }
+
+// ── Etapa 3 (B2): regras de permissão e o interruptor do time ───────────
+
+mod regras {
+    use super::*;
+    use crate::chat_team::permission::Kind;
+
+    fn legacy(conn: &rusqlite::Connection, json: &str) {
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('chat.permissions.rules', ?1)", [json]).unwrap();
+    }
+
+    #[test]
+    fn as_regras_dos_settings_sao_copiadas_uma_vez_sem_apagar_o_setting() {
+        let conn = db();
+        legacy(&conn, r#"[
+            {"id":"r1","kind":"command","pattern":"bun add *","agentId":"codex","createdAt":5},
+            {"id":"r2","kind":"edit","pattern":"src/**","agentId":null,"createdAt":6},
+            {"id":"","kind":"command","pattern":"x"},
+            {"id":"r3","kind":"outro","pattern":"x"},
+            {"id":"r4","kind":"command","pattern":"   "},
+            "lixo"
+        ]"#);
+        let rules = store::rules(&conn).unwrap();
+        assert_eq!(rules.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["r1", "r2"], "o lixo fica de fora");
+        assert_eq!((rules[0].kind, rules[0].agent_id.as_deref(), rules[0].created_at), (Kind::Command, Some("codex"), 5));
+        assert!(rules.iter().all(|r| r.role.is_none() && r.team_id.is_none()), "o escopo de papel/time nasce desligado");
+        let kept: String = conn.query_row("SELECT value FROM settings WHERE key = 'chat.permissions.rules'", [], |r| r.get(0)).unwrap();
+        assert!(kept.contains("bun add"), "o setting não é apagado: dá para voltar atrás");
+
+        // Rodar de novo não duplica, e apagar tudo não ressuscita as antigas.
+        store::migrate(&conn).unwrap();
+        assert_eq!(store::rules(&conn).unwrap().len(), 2);
+        assert!(store::remove_rule(&conn, "r1").unwrap() && store::remove_rule(&conn, "r2").unwrap());
+        store::migrate(&conn).unwrap();
+        assert!(store::rules(&conn).unwrap().is_empty(), "a importação é de uma vez só");
+    }
+
+    #[test]
+    fn sem_settings_nada_e_importado_e_a_migracao_continua_aditiva() {
+        let conn = db();
+        assert!(store::rules(&conn).unwrap().is_empty());
+        team(&conn, "tab-1");
+        store::migrate(&conn).unwrap();
+        assert_eq!(store::teams(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_pessoa_cria_muda_e_apaga_regras_sem_repetir_a_mesma() {
+        let conn = db();
+        let a = store::add_rule(&conn, Kind::Command, "  ls *  ", Some("codex"), 10).unwrap();
+        assert_eq!((a.pattern.as_str(), a.agent_id.as_deref(), a.role.as_deref()), ("ls *", Some("codex"), None));
+        let again = store::add_rule(&conn, Kind::Command, "ls *", Some("codex"), 20).unwrap();
+        assert_eq!(again.id, a.id, "a mesma regra não se repete");
+        assert_ne!(store::add_rule(&conn, Kind::Command, "ls *", None, 20).unwrap().id, a.id, "outro agente é outra regra");
+        assert!(store::add_rule(&conn, Kind::Command, "   ", None, 1).is_err());
+        assert!(store::update_rule(&conn, &a.id, Some("ls -la *"), Some(None)).unwrap());
+        let changed = store::rules(&conn).unwrap().into_iter().find(|r| r.id == a.id).unwrap();
+        assert_eq!((changed.pattern.as_str(), changed.agent_id), ("ls -la *", None));
+        store::count_rule_use(&conn, &a.id, 99).unwrap();
+        let uses: (i64, i64) = conn.query_row("SELECT uses, last_used_at FROM chat_permission_rule WHERE id = ?1", [&a.id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(uses, (1, 99));
+        assert!(store::remove_rule(&conn, &a.id).unwrap() && !store::remove_rule(&conn, &a.id).unwrap());
+    }
+
+    #[test]
+    fn so_a_pessoa_e_a_origem_possivel_de_uma_regra() {
+        let conn = db();
+        store::migrate(&conn).unwrap();
+        let rejected = conn.execute("INSERT INTO chat_permission_rule (id, kind, pattern, origin, created_at) VALUES ('x', 'command', '*', 'agent', 1)", []);
+        assert!(rejected.is_err(), "o banco nem aceita uma regra de origem diferente de 'person'");
+    }
+
+    #[test]
+    fn o_time_decide_sozinho_por_padrao_e_o_interruptor_liga_e_desliga() {
+        let conn = db();
+        let t = team(&conn, "tab-lead");
+        assert!(store::team(&conn, &t).unwrap().unwrap().auto_decide);
+        assert!(store::set_auto_decide(&conn, &t, false).unwrap());
+        assert!(!store::team(&conn, &t).unwrap().unwrap().auto_decide);
+        assert!(!store::set_auto_decide(&conn, "nao-existe", false).unwrap());
+        assert!(store::set_auto_decide(&conn, &t, true).unwrap());
+        assert!(store::team_joined_by(&conn, "x").unwrap().is_none());
+    }
+}

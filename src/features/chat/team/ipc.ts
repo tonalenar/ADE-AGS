@@ -38,6 +38,8 @@ export interface TeamView {
   title: string;
   createdAt: number;
   updatedAt: number;
+  /** O backend decide sozinho o que a política e as regras da pessoa cobrem. Ausente = ligado. */
+  autoDecide?: boolean;
   members: TeamMember[];
   /** Os integrantes mais o orquestrador. */
   headcount: number;

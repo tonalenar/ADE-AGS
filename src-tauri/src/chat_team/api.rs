@@ -102,6 +102,7 @@ pub fn create(conn: &Connection, input: NewTeam, now: i64) -> Result<(TeamView, 
         title: model::clean_title(&input.title),
         created_at: now,
         updated_at: now,
+        auto_decide: true,
     };
     store::insert_team(conn, &row)?;
     Ok((view(conn, row)?, true))
