@@ -107,7 +107,7 @@ function LimitsDialog({ account, onClose, onSaved }: {
     const parsed = parseLimitsForm(load, concurrent, budget);
     if (!parsed.ok) {
       if (parsed.problem === "maxConcurrent") setError(t("settings.accounts.limits.maxConcurrentHelper"));
-      if (parsed.problem === "budget") setError(t("settings.accounts.limits.budgetHelper"));
+      if (parsed.problem === "budget") setError(t("settings.accounts.limits.budgetInvalid"));
       return;
     }
     const next = parsed.limits;
