@@ -13,6 +13,8 @@ import { chatCommand } from "../chatModel";
 import { useChatStore } from "../store";
 import { chatThreadCreate } from "../structured/ipc";
 import { STRUCTURED_AGENTS, threadIdOf, threadKey } from "../structured/model";
+import { addPending, dropPending } from "../timeline/pending";
+import type { TimelineItem } from "../timeline/types";
 import { reloadThreads, sendToThread } from "../structured/store";
 import {
   chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
@@ -37,11 +39,13 @@ interface TeamState {
   targets: Record<string, ComposerTarget>;
   /** A composição do time que o orquestrador já recebeu (`rosterSignature`), por time. */
   told: Record<string, string>;
+  /** O erro do último envio direto (@menção) de cada orquestrador: aparece na conversa que a pessoa está olhando. */
+  sendErrors: Record<string, string>;
   /** O formulário "Ligar ao time" aberto, por time. */
   adding: Record<string, boolean>;
 }
 
-export const useTeamStore = create<TeamState>(() => ({ teams: [], loaded: false, feeds: {}, targets: {}, told: {}, adding: {} }));
+export const useTeamStore = create<TeamState>(() => ({ teams: [], loaded: false, feeds: {}, targets: {}, told: {}, sendErrors: {}, adding: {} }));
 // A grade das Abas lê a lista daqui, sem depender deste módulo (ver `teamIndex.ts`).
 useTeamStore.subscribe((state, prev) => { if (state.teams !== prev.teams) useTeamIndex.setState({ teams: state.teams }); });
 
@@ -246,11 +250,42 @@ export async function makeOrchestrator(conv: ConversationRef): Promise<TeamView>
   return team;
 }
 
-/** Manda o texto à conversa: a aba (quando a TUI estiver pronta) ou a conversa por protocolo. */
-export function sendToMember(ref: string, text: string): void {
+/**
+ * Manda o texto à conversa: a aba (quando a TUI estiver pronta) ou a conversa por protocolo. `onSent`: o backend
+ * aceitou (numa aba não há resposta a esperar: vale ao entregar à fila do terminal). `onError`: ele recusou.
+ */
+export function sendToMember(ref: string, text: string, done?: { onSent?: () => void; onError?: (message: string) => void }): void {
   const thread = threadIdOf(ref);
-  if (thread) sendToThread(thread, text);
-  else sendWhenReady(ref, text);
+  if (thread) {
+    sendToThread(thread, text, done?.onError, done?.onSent);
+    return;
+  }
+  sendWhenReady(ref, text);
+  done?.onSent?.();
+}
+
+export function setSendError(orchestrator: string, message: string | null): void {
+  useTeamStore.setState((s) => {
+    const sendErrors = { ...s.sendErrors };
+    if (message) sendErrors[orchestrator] = message;
+    else delete sendErrors[orchestrator];
+    return { sendErrors };
+  });
+}
+
+/**
+ * O @agente do composer do orquestrador: manda o texto direto a um integrante. A mensagem aparece como pendente
+ * na conversa que a pessoa está olhando (`pending.key`) até o backend responder; se ele recusar, o erro aparece
+ * ali (`sendErrors`), não só na conversa do integrante, que a pessoa nem vê.
+ */
+export function sendDirect(orchestrator: string, member: string, text: string, pending: { key: string; items: TimelineItem[] }): void {
+  setSendError(orchestrator, null);
+  const mark = text.trim() ? addPending(pending.key, text.trim(), pending.items) : null;
+  const drop = () => { if (mark) dropPending(pending.key, mark); };
+  sendToMember(member, text, {
+    onSent: drop,
+    onError: (message) => { drop(); setSendError(orchestrator, message); },
+  });
 }
 
 async function finishLink(teamId: string, ref: string, briefing: string): Promise<void> {
