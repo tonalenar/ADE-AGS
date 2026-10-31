@@ -4258,5 +4258,10 @@
   "chat.summary.pullOpen": "Open the pull request in the browser",
   "chat.timeline.interruptedByYou": "Interrupted by you",
   "chat.timeline.notDone": "Not finished",
-  "chat.timeline.stopped": "The agent stopped: {{reason}}"
+  "chat.timeline.stopped": "The agent stopped: {{reason}}",
+  "chat.timeline.continued": "Continued in the next message",
+  "chat.timeline.notice.resumeLost": "The previous session could not be resumed; the agent started over without its history.",
+  "chat.timeline.notice.queueDropped": "Message not sent: the conversation was interrupted or closed before its turn.",
+  "chat.timeline.notice.optionIgnored": "An option was not applied by the agent.",
+  "chat.timeline.notice.resend": "Resend"
 }

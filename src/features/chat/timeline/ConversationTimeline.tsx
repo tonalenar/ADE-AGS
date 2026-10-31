@@ -16,6 +16,7 @@ import type { PendingSend } from "./pending";
 import { displayUserText } from "./userMessage";
 import { isFresh } from "./streaming";
 import { commandTitle } from "./toolTitle";
+import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
 import { endOutcome, fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
@@ -54,7 +55,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, after = null }: {
+export function TimelineView({ items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, after = null }: {
   items: TimelineItem[];
   loaded: boolean;
   /** Ainda não há de onde ler (o transcript não existe): oferece o terminal. */
@@ -75,6 +76,8 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
   pending?: PendingSend[];
   /** Sem terminal (protocolo), as perguntas se respondem no composer. */
   onOpenTerminal?: () => void;
+  /** Reenvia uma mensagem que saiu da fila do agente sem ser enviada (o aviso «não enviada»). Sem ele, sem o botão. */
+  onResend?: (text: string) => void;
   /** Depois dos turnos, no fim do fio: as delegações e entregas do time (`team/TeamThreadFeed`). */
   after?: React.ReactNode;
 }) {
@@ -150,7 +153,9 @@ export function TimelineView({ items, loaded, missing = false, truncated = false
         {loaded && !missing && turns.length === 0 && !working && (
           <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.empty", { agent: agentLabel })}</p>
         )}
-        {turns.map((turn, i) => <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} />)}
+        {turns.map((turn, i) => turn.notice
+          ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} />
+          : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} />)}
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
@@ -186,7 +191,9 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
         <button type="button" onClick={() => foldable && setOpen(!open)} aria-expanded={foldable ? open : undefined}
           className={`flex items-center gap-1.5 px-1 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
             ${foldable ? "hover:text-gray-800 dark:hover:text-white/75" : "cursor-default"}`}>
-          {endOutcome(turn.end) === "error"
+          {turn.end.superseded
+            ? t("chat.timeline.continued")
+            : endOutcome(turn.end) === "error"
             ? t("chat.timeline.notDone")
             : endOutcome(turn.end) === "interrupted"
             ? t("chat.timeline.interruptedByYou")

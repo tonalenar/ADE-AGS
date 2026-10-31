@@ -4258,5 +4258,10 @@
   "chat.summary.pullOpen": "Abrir o pull request no navegador",
   "chat.timeline.interruptedByYou": "Interrompido por você",
   "chat.timeline.notDone": "Não concluído",
-  "chat.timeline.stopped": "O agente parou: {{reason}}"
+  "chat.timeline.stopped": "O agente parou: {{reason}}",
+  "chat.timeline.continued": "Seguiu na mensagem seguinte",
+  "chat.timeline.notice.resumeLost": "A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele.",
+  "chat.timeline.notice.queueDropped": "Mensagem não enviada: a conversa foi interrompida ou fechada antes da vez dela.",
+  "chat.timeline.notice.optionIgnored": "Uma opção não foi aplicada pelo agente.",
+  "chat.timeline.notice.resend": "Reenviar"
 }

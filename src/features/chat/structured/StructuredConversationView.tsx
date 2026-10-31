@@ -54,7 +54,8 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   // O texto chegando entra na timeline como item (o mesmo id do item final), e o raciocínio
   // chegando alimenta a linha viva.
   const items = useMemo(() => withDrafts(live.items, live.drafts), [live.items, live.drafts]);
-  const pending = usePending(key, items);
+  // Com o agente trabalhando, a mensagem na fila dele só entra no fio quando o turno dela começa: o envio otimista espera.
+  const pending = usePending(key, items, working);
   const streaming = useMemo(() => new Set(live.drafts.map((d) => d.itemId)), [live.drafts]);
   const turn = useMemo(() => turnLive(items, !!request), [items, request]);
   const locked = working || !!request;
@@ -69,6 +70,11 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       detail: request.detail || null,
     }
     : null;
+  // «Reenviar» uma mensagem que saiu da fila do agente sem ser enviada.
+  const resend = (text: string) => {
+    const mark = addPending(key, text, items);
+    sendToThread(thread.id, text, () => dropPending(key, mark));
+  };
   const answer = (choice: string) => { if (request) answerRequest(thread.id, request.id, choice); };
 
   const controls = request && !ask ? (
@@ -109,7 +115,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
     <div className="flex-1 min-h-0 flex flex-col">
       <TimelineView items={items} loaded={hydrated} working={working || !!request} live
         approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
-        streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending}
+        streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} onResend={resend}
         after={<TeamThreadFeed conversation={card} cards={cards} />} />
       <div className={`w-full ${width} mx-auto px-4 sm:px-12 pb-3`}>
         {live.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error}</p>}

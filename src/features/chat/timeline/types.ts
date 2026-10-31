@@ -1,7 +1,10 @@
 /** Espelho de `src-tauri/src/canal/timeline.rs`. */
 
-/** `reasoning`: o trecho de raciocínio que o agente expõe. `usage`: os tokens de uma chamada (só para a conta do turno). */
-export type TimelineItemKind = "user" | "assistant" | "tool" | "turnEnd" | "reasoning" | "usage";
+/**
+ * `reasoning`: o trecho de raciocínio que o agente expõe. `usage`: os tokens de uma chamada (só para a conta do turno).
+ * `notice`: um aviso do próprio app no fio (`label` = o código: `resumeLost`, `queueDropped`, `optionIgnored`).
+ */
+export type TimelineItemKind = "user" | "assistant" | "tool" | "turnEnd" | "reasoning" | "usage" | "notice";
 export type ToolKind = "read" | "edit" | "write" | "command" | "search" | "web" | "task" | "question" | "todo" | "other";
 export type ToolStatus = "running" | "done" | "error" | "denied";
 export type StepStatus = "pending" | "inProgress" | "completed";

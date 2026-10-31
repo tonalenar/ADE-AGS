@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changedFiles, endOutcome, fileName, formatDuration, openTurnStart, timelineTurns } from "@/features/chat/timeline/timelineModel";
+import { changedFiles, endOutcome, fileName, formatDuration, noticeDetail, openTurnStart, timelineTurns } from "@/features/chat/timeline/timelineModel";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
 const user = (id: string, at?: number): TimelineItem => ({ kind: "user", id, at, text: `msg ${id}` });
@@ -81,5 +81,55 @@ describe("utilitários", () => {
   it("fileName e changedFiles ignoram erro", () => {
     expect(fileName("/a/b/c.ts")).toBe("c.ts");
     expect(changedFiles([tool("x", { tool: "edit", path: "p", added: 1, removed: 1, status: "error" })])).toEqual([]);
+  });
+});
+
+describe("timelineTurns: mensagem no meio do turno (steer, fila)", () => {
+  it("fecha o turno anterior ao chegar uma nova mensagem, e o fim vai para o turno da mensagem nova", () => {
+    const turns = timelineTurns([
+      user("u1", 1000), tool("t1"), say("a1"),
+      user("u2", 2000), tool("t2"), say("a2"),
+      end("e1", { at: 5000, durationMs: 4000 }),
+    ]);
+    expect(turns).toHaveLength(2);
+    // O primeiro não fica "em aberto" para sempre: fecha ao ser superado, com o que já tinha.
+    expect(turns[0]!.end).toEqual({ durationMs: null, interrupted: false, error: null, files: [], superseded: true });
+    expect(turns[0]!.final?.id).toBe("a1");
+    // O fim de verdade é do turno que tem a resposta.
+    expect(turns[1]!.end).toMatchObject({ durationMs: 4000, interrupted: false });
+    expect(turns[1]!.end?.superseded).toBeUndefined();
+    expect(turns[1]!.final?.id).toBe("a2");
+  });
+
+  it("o arquivo editado no turno superado continua contado nele", () => {
+    const [first] = timelineTurns([user("u1"), tool("t1", { tool: "edit", path: "src/a.ts", added: 2, removed: 1 }), user("u2")]);
+    expect(first!.end?.files).toEqual([{ path: "src/a.ts", added: 2, removed: 1 }]);
+  });
+
+  it("uma injeção do ADE (sem bolha) no meio do turno não abre outro turno", () => {
+    const injection: TimelineItem = { kind: "user", id: "inj", text: "[ADE AGS] Você entrou no time." };
+    const turns = timelineTurns([user("u1", 1000), tool("t1"), injection, say("a1"), end("e1")]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]!.end).not.toBeNull();
+    expect(turns[0]!.end?.superseded).toBeUndefined();
+  });
+
+  it("o aviso do app é uma linha própria e não abre nem fecha o turno em andamento", () => {
+    const notice: TimelineItem = { kind: "notice", id: "n1", label: "resumeLost", text: "A sessão anterior não pôde ser retomada" };
+    const turns = timelineTurns([user("u1", 1000), notice, say("a1"), end("e1")]);
+    expect(turns.map((t) => t.notice?.id ?? t.user?.id)).toEqual(["u1", "n1"]);
+    expect(turns[0]!.body.map((r) => r.type)).toEqual([]);
+    expect(turns[0]!.final?.id).toBe("a1");
+    expect(turns[0]!.end).not.toBeNull();
+  });
+});
+
+describe("noticeDetail", () => {
+  it("mostra o motivo da sessão que não voltou, a mensagem que não foi enviada e a opção ignorada", () => {
+    expect(noticeDetail({ kind: "notice", id: "n", label: "resumeLost", text: "A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele. Motivo: thread not found" })).toBe("thread not found");
+    expect(noticeDetail({ kind: "notice", id: "n", label: "resumeLost", text: "A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele." })).toBeNull();
+    expect(noticeDetail({ kind: "notice", id: "n", label: "queueDropped", text: "e o lint?" })).toBe("e o lint?");
+    expect(noticeDetail({ kind: "notice", id: "n", label: "optionIgnored", text: "O esforço \"ultra\" não existe" })).toBe("O esforço \"ultra\" não existe");
+    expect(noticeDetail({ kind: "notice", id: "n", label: "algoNovo", text: "texto" })).toBe("texto");
   });
 });
