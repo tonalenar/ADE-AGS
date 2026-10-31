@@ -297,3 +297,7 @@ O plano completo, com as fases F2 a F7, fica fora do repositório. Resumo:
 | F3 | Aprovações e perguntas dentro do chat; modos Aceitar edições e Acesso total; Plano |
 | F4–F6 | Claude e ACP; painel direito (diff, arquivos, navegador, dispositivos) e drawer de terminal; telas no visual novo |
 | F7 | `ags chat`, MCP e skill |
+
+## Vigia do chat (o orquestrador ciente dos integrantes)
+
+Um time de conversas por protocolo não tem terminal para o Vigia das missões olhar. O **vigia do chat** (`chat_team/watch*.rs`, `ipc/commands/chat_watch.rs`) lê o que o backend já tem (pedidos `chat_request`, turnos `chat_run`, a timeline) e avisa o orquestrador, pela fila durável, quando um integrante: espera a **pessoa** há ≥ 20 s (comando, edição, pergunta), terminou o turno perguntando algo a ela, ou teve o turno falho; e quando a pessoa destrava. «Sem progresso» (15 min sem item novo) é um segundo interruptor, desligado por padrão. Os dois ficam no painel Time (`chat_team.watch`, `chat_team.watch_stall`). Sem LLM e sem cota; só avisa, e a decisão é sempre da pessoa. Detalhes: [`docs/agentes/VIGIA.md`](../agentes/VIGIA.md#no-chat-times-de-conversas-por-protocolo).
