@@ -522,6 +522,7 @@ mod test {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "\n  rode os testes\nsegunda linha".into(), raw, reply,
             state: State::Queued, position: 1, force_now: false, attempts: 0, created_at: 1_000, updated_at: 1_000,
             delivered_at: None, edited_at: None, note: None, depth: 0, parent_id: None, answer_of: None, reason: None,
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
         }
     }
 
@@ -565,6 +566,34 @@ oi
         assert_eq!(line["to"], "QA");
         assert_eq!(line["state"], "queued");
         assert_eq!(line["clientId"], "r1");
+    }
+
+    // ── Caracterização da etapa 2 (item 2): o aviso de falha não alcança remetente `thread:` ──
+    // Os dois testes usam o conjunto de abas vivas que `start_resume` monta hoje (`live_ids` sobre
+    // `tab_list`, que só lista abas de terminal) e o `resume` do store, como no arranque do app.
+
+    fn arranque_com_remetente_conversa() -> (Connection, PeerMessage) {
+        let conn = crate::database::test_db();
+        let new = NewMessage { kind: "ask", from_tab_id: "thread:lead", from_name: "Líder", to_tab_id: "thread:t1", to_name: "QA", text: "rode os testes", reply: true, ..Default::default() };
+        let Admission::New(sent) = store::admit(&conn, &new, State::Delivering, 1_000).unwrap() else { panic!("esperava nova") };
+        let listed = json!({ "tabs": [{ "id": "tab-shell" }, { "id": "tab-codex" }] });
+        store::resume(&conn, &live_ids(&listed), 2_000).unwrap();
+        (conn, sent)
+    }
+
+    #[test]
+    fn hoje_o_remetente_conversa_nao_recebe_o_aviso_de_que_a_mensagem_falhou() {
+        let (conn, sent) = arranque_com_remetente_conversa();
+        assert_eq!(store::get(&conn, sent.id).unwrap().unwrap().state, State::Unconfirmed, "a mensagem falhou");
+        assert!(store::queued_for(&conn, "thread:lead").unwrap().is_empty(), "e ninguém avisou quem pediu");
+    }
+
+    #[test]
+    #[ignore = "etapa 2: falha até a fila durável existir"]
+    fn etapa2_o_remetente_conversa_recebe_o_aviso_de_que_a_mensagem_falhou() {
+        let (conn, sent) = arranque_com_remetente_conversa();
+        let notices = store::queued_for(&conn, "thread:lead").unwrap();
+        assert!(notices.iter().any(|m| m.kind == "notice" && (m.text.contains("não chegou") || m.text.contains("não há confirmação"))),"sem aviso a {sent:?}");
     }
 
     #[test]

@@ -21,6 +21,7 @@ pub mod claude;
 pub mod claude_map;
 pub mod codex;
 pub mod codex_map;
+pub mod envio;
 pub mod events;
 pub mod commands;
 pub mod opencode;

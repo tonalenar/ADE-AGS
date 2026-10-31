@@ -1899,6 +1899,7 @@ mod queue_reply_tests {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "oi".into(), raw: false, reply: false, state, position: 1,
             force_now: false, attempts: 0, created_at: 0, updated_at: 0, delivered_at: None, edited_at: None, note: None,
             depth: 0, parent_id: None, answer_of: None, reason: None,
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
         };
         Sent { delivery, message, repeat }
     }
@@ -1993,6 +1994,7 @@ mod contrato_tests {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "oi".into(), raw: false, reply: false, state, position: 0,
             force_now: false, attempts: 0, created_at: 0, updated_at: 0, delivered_at: None, edited_at: None,
             note: note.map(str::to_string), depth: 3, parent_id: None, answer_of: None, reason: reason.map(str::to_string),
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None,
         }
     }
 

@@ -164,8 +164,17 @@ pub struct PeerMessage {
     pub parent_id: Option<i64>,
     /// Esta é a resposta (ao remetente) da mensagem `answer_of`: não é um pedido novo.
     pub answer_of: Option<i64>,
-    /// O motivo de uma recusa (`depth`, `fanout`, `duplicate`, `unknown_target`…).
+    /// O motivo de uma recusa (`depth`, `fanout`, `duplicate`, `unknown_target`…) ou de uma falha de
+    /// entrega (`delivery_failed`).
     pub reason: Option<String>,
+    /// Só o consumidor de uma conversa (`thread:`): a mensagem não vai antes disto (backoff do retry).
+    pub available_at: Option<i64>,
+    /// Só o consumidor de uma conversa: até quando a posse dele vale enquanto a mensagem está `delivering`.
+    pub lease_until: Option<i64>,
+    /// `queue_after_active` ou `steer_active`: como a mensagem foi (ou vai ser) entregue a uma conversa.
+    pub delivery_mode: Option<String>,
+    /// `ask`: a espera pela resposta acabou (resposta, motivo ou prazo).
+    pub settled_at: Option<i64>,
 }
 
 /// Os campos do envelope tipado (`--task`, `--constraints`, `--expecting`).
@@ -333,6 +342,11 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("answer_of", "INTEGER"),
         ("reason", "TEXT"),
         ("dedupe_key", "TEXT"),
+        // Etapa 2 (entrega a conversas `thread:`): só o consumidor delas usa.
+        ("available_at", "INTEGER"),
+        ("lease_until", "INTEGER"),
+        ("delivery_mode", "TEXT"),
+        ("settled_at", "INTEGER"),
     ] {
         if !has_column(conn, "peer_messages", column)? {
             conn.execute_batch(&format!("ALTER TABLE peer_messages ADD COLUMN {column} {ddl};"))?;
@@ -347,6 +361,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             ON peer_messages(from_tab_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_peer_messages_dedupe
             ON peer_messages(dedupe_key, created_at) WHERE dedupe_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_peer_messages_ready
+            ON peer_messages(to_tab_id, state, available_at, position);
         CREATE TABLE IF NOT EXISTS peer_message_keys (
             from_tab_id TEXT NOT NULL,
             client_id TEXT NOT NULL,
@@ -363,7 +379,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 const COLUMNS: &str = "id, client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply, state, \
-    position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note, depth, parent_id, answer_of, reason";
+    position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note, depth, parent_id, answer_of, reason, \
+    available_at, lease_until, delivery_mode, settled_at";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
     let state: String = r.get(10)?;
@@ -392,6 +409,10 @@ fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
         parent_id: r.get(20)?,
         answer_of: r.get(21)?,
         reason: r.get(22)?,
+        available_at: r.get(23)?,
+        lease_until: r.get(24)?,
+        delivery_mode: r.get(25)?,
+        settled_at: r.get(26)?,
     })
 }
 
@@ -663,6 +684,10 @@ fn from_tombstone(conn: &Connection, from: &str, cid: &str) -> Result<Option<Pee
                 parent_id: None,
                 answer_of: None,
                 reason: None,
+                available_at: None,
+                lease_until: None,
+                delivery_mode: None,
+                settled_at: None,
             })
         },
     )
@@ -827,11 +852,70 @@ pub fn finish(conn: &Connection, id: i64, confirmed: bool, note: Option<&str>, n
     let state = if confirmed { State::Delivered } else { State::Unconfirmed };
     let changed = conn
         .execute(
-            "UPDATE peer_messages SET state = ?1, delivered_at = ?2, note = ?3, updated_at = ?4 WHERE id = ?5 AND state = 'delivering'",
+            "UPDATE peer_messages SET state = ?1, delivered_at = ?2, note = ?3, updated_at = ?4, lease_until = NULL WHERE id = ?5 AND state = 'delivering'",
             params![state.as_str(), confirmed.then_some(now), note, now, id],
         )
         .map_err(|e| e.to_string())?;
     Ok(changed == 1)
+}
+
+// ── Entrega a uma conversa por protocolo (`thread:`) ───────────────────
+// O consumidor da conversa (`thread_outbox`) é o único que usa estas funções. A mensagem de um
+// terminal segue `claim`/`finish`; aqui a diferença é poder VOLTAR à fila (`release`) quando o envio
+// provadamente não aconteceu, e terminar como falha de entrega (`fail_delivery`).
+
+/// O motivo gravado numa mensagem que esgotou as tentativas ou não tem mais para onde ir.
+pub const DELIVERY_FAILED: &str = "delivery_failed";
+
+/// Toma a mensagem para enviar a uma conversa: `queued` → `delivering` numa só escrita, com a posse
+/// (`lease_until`) e o modo de entrega. `None` se ela saiu da fila nesse meio tempo.
+pub fn claim_for_thread(conn: &Connection, id: i64, mode: &str, now: i64, lease_ms: i64) -> Result<Option<PeerMessage>, String> {
+    let changed = conn
+        .execute(
+            "UPDATE peer_messages SET state = 'delivering', attempts = attempts + 1, updated_at = ?1, available_at = NULL,
+                lease_until = ?2, delivery_mode = ?3 WHERE id = ?4 AND state = 'queued'",
+            params![now, now + lease_ms, mode, id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    get(conn, id)
+}
+
+/// O envio provadamente não aconteceu: a mensagem volta ao início da fila. `available_at` = quando pode
+/// ir de novo (backoff; `None` = já). `refund`: a tentativa não conta (a conversa só estava ocupada).
+pub fn release(conn: &Connection, id: i64, note: Option<&str>, available_at: Option<i64>, refund: bool, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE peer_messages SET state = 'queued', note = ?1, available_at = ?2, lease_until = NULL, updated_at = ?3,
+                attempts = attempts - ?4 WHERE id = ?5 AND state = 'delivering'",
+            params![note, available_at, now, refund as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
+/// A entrega a uma conversa falhou de vez (tentativas esgotadas): `expired` com o motivo `delivery_failed`.
+pub fn fail_delivery(conn: &Connection, id: i64, note: &str, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE peer_messages SET state = 'expired', reason = ?1, note = ?2, lease_until = NULL, updated_at = ?3
+              WHERE id = ?4 AND state = 'delivering'",
+            params![DELIVERY_FAILED, note, now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
+/// Tudo o que esperava uma conversa que não existe mais (concluída, apagada) vira `expired` com o motivo
+/// `delivery_failed`. Devolve as que expiraram (para o aviso ao remetente).
+pub fn expire_undeliverable(conn: &Connection, to: &str, note: &str, now: i64) -> Result<Vec<PeerMessage>, String> {
+    let expired = expire_queued_for(conn, to, note, now)?;
+    for msg in &expired {
+        conn.execute("UPDATE peer_messages SET reason = ?1 WHERE id = ?2", params![DELIVERY_FAILED, msg.id]).map_err(|e| e.to_string())?;
+    }
+    expired.iter().filter_map(|m| get(conn, m.id).transpose()).collect()
 }
 
 /// O erro de quem tentou mexer numa mensagem que não está mais na fila.
