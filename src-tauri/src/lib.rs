@@ -11,6 +11,7 @@ mod chat;
 mod chat_team;
 mod compare;
 mod conversa;
+pub mod computer_use;
 mod app;
 mod bus;
 mod database;
