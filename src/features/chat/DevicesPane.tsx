@@ -53,14 +53,24 @@ function useBoxSize() {
   return { ref, size };
 }
 
+/**
+ * Onde o painelzinho de um botão da coluna se encosta: os botões de cima abrem para baixo (`top-0`), mas o
+ * «mais» fica no pé da coluna e, abrindo para baixo, o menu (Desligar, Abrir URL…) saía da janela e não dava para
+ * clicar. Esse (`anchor = "bottom"`) abre para cima. A altura se limita à janela e rola por dentro.
+ */
+export function popPlacementCls(anchor: "top" | "bottom", wide: boolean): string {
+  return `right-full ${anchor === "bottom" ? "bottom-0" : "top-0"} mr-2 max-h-[calc(100vh-96px)] overflow-y-auto cc-scroll-hidden ${wide ? "w-[440px]" : "w-[260px]"}`;
+}
+
 /** Um botão da coluna de controles; com `pop`, abre o painelzinho dele à esquerda. */
-function NavButton({ label, onClick, disabled, children, pop, wide = false }: {
+function NavButton({ label, onClick, disabled, children, pop, wide = false, anchor = "top" }: {
   label: string;
   onClick?: () => void;
   disabled?: boolean;
   children: React.ReactNode;
   pop?: (close: () => void) => React.ReactNode;
   wide?: boolean;
+  anchor?: "top" | "bottom";
 }) {
   const { open, setOpen, ref } = usePopover();
   return (
@@ -70,7 +80,7 @@ function NavButton({ label, onClick, disabled, children, pop, wide = false }: {
         {children}
       </button>
       {pop && open && (
-        <div role="dialog" aria-label={label} className={`${popCls} right-full top-0 mr-2 ${wide ? "w-[440px]" : "w-[260px]"}`}>
+        <div role="dialog" aria-label={label} className={`${popCls} ${popPlacementCls(anchor, wide)}`}>
           {pop(() => setOpen(false))}
         </div>
       )}
@@ -245,7 +255,7 @@ export function IosPane() {
             <KeyboardIcon className="w-[17px] h-[17px]" />
           </NavButton>
           <span className="flex-1" />
-          <NavButton label={t("chat.devices.more")} disabled={!current} pop={(close) => current && (
+          <NavButton anchor="bottom" label={t("chat.devices.more")} disabled={!current} pop={(close) => current && (
             <IosMore device={current} booted={booted} onBoot={() => { close(); void boot(); }} onDone={close} onError={fail} />
           )}>
             <MoreVerticalIcon className="w-[17px] h-[17px]" />
@@ -553,7 +563,7 @@ export function AndroidPane() {
             <LogIcon className="w-[17px] h-[17px]" />
           </NavButton>
           <span className="flex-1" />
-          <NavButton label={t("chat.devices.more")} pop={(close) => (
+          <NavButton anchor="bottom" label={t("chat.devices.more")} pop={(close) => (
             <div className="flex flex-col">
               {chosen && <button type="button" onClick={() => { press("power"); close(); }} className={itemCls}>{t("chat.devices.power")}</button>}
               {avds.length > 0 && <PopTitle>{t("canvas.device.emulator")}</PopTitle>}
