@@ -96,7 +96,7 @@ O protocolo interno envia `initialize`, aguarda a resposta, envia a notificaçã
 
 ## Integração nas abas novas
 
-O ajuste **Memória do ai-memory nas abas**, na seção de agentes, usa `ai_memory_tabs_enabled`. Ausência da chave significa ligado; `false` desliga a injeção. Erro ao ler o ajuste falha fechado. Só `terminal::pty_create` consulta a chave: mudar o interruptor não reconfigura nem reinicia PTYs vivos. A variável `AI_MEMORY_RUN_AUTOWIRE=false` é imposta depois do ambiente do perfil em **todo** novo PTY, inclusive com o interruptor desligado, para impedir configuração global automática.
+O ajuste **Memória do ai-memory nas abas**, na seção de agentes, usa `ai_memory_tabs_enabled`. Ausência da chave significa ligado; `false` desliga a injeção. Erro ao ler o ajuste falha fechado. Só `terminal::pty_create` e, para as conversas por protocolo do Claude, `conversa::memoria` consultam a chave (ver «Conversas por protocolo do modo chat»): mudar o interruptor não reconfigura nem reinicia PTYs nem processos vivos. A variável `AI_MEMORY_RUN_AUTOWIRE=false` é imposta depois do ambiente do perfil em **todo** novo PTY, inclusive com o interruptor desligado, para impedir configuração global automática.
 
 A descoberta usa o PATH do app e aceita apenas `--version` ≥3.3.0, sem consultar o servidor. Só o sucesso é cacheado, pelo caminho, tamanho e mtime do binário (uma troca do executável invalida o cache); uma falha passageira não desliga a integração até reiniciar o app. O mesmo cache serve às leituras do painel, que checam a versão uma vez só. A injeção automática reconhece somente `claude` e seus sufixos `.exe`/`.cmd`. Codex/OpenCode ficam sem MCP automático até existir escopo imposto por aba. Shells, wrappers com outro nome e Antigravity não recebem integração automática. Antigravity ficou fora por não haver mecanismo por aba verificado sem escrita global.
 
@@ -144,3 +144,22 @@ O ADE nunca chama `accept`. Depois da confirmação, o SessionStart gerenciado p
 Os arquivos temporários e sua limpeza seguem o mecanismo por aba acima. Não se muda key, pai ou montagem de Terminal e não se escreve nas configurações globais dos agentes. Os testes usam mocks de IPC e montagem de argv/settings em pasta temporária; não abrem agente real nem consultam a base instalada. UI visual e execução real de continuidade não verificadas.
 
 Prova desta fase: `ags test affected` aprovado (86 testes Rust e 131 frontend relacionados, TypeScript e Babel); verificação adicional das abas/MCP com 168 testes aprovados; módulo `ai_memory::` com 39 testes; diálogo/lógica/catálogos com 11 testes. `cargo clippy --all-targets` concluiu: biblioteca com os mesmos 138 avisos herdados, nenhum aviso novo nas alterações; os targets de teste ainda contêm avisos herdados. Lint de testes: 40 violações antigas no baseline, nenhuma nova. Não houve HMR, instalação, agente real nem acesso à base instalada do ai-memory.
+
+## Conversas por protocolo do modo chat
+
+As conversas do modo chat que falam com o agente por protocolo (sem TUI) não passam por `pty_create`; abrem o processo em `conversa/*.rs`. A injeção por processo, a mesma das abas, existe só para o **Claude Code** (`claude -p` em stream-json), em `conversa::memoria`, chamada por `conversa::claude::spawn`:
+
+- **O que entra:** `--settings <ADE-data>/mcp/tab-thread-<id>.ai-memory-<nonce>.settings.json` (hooks) e `--mcp-config <ADE-data>/mcp/tab-thread-<id>.json` (`mcpServers.ai-memory`, `mcp-bridge`). O nome vem de `thread-<id>` passado por `tab_config_name`, que só deixa letras, números, `-` e `_`. O ambiente do filho leva `AI_MEMORY_RUN_AUTOWIRE=false` sempre, também com o ajuste desligado ou o binário ausente.
+- **Quando:** a cada abertura do processo. A primeira mensagem, a retomada (`--resume`) e a troca de modelo, esforço ou acesso (que fecham e reabrem o processo) preparam de novo; o servidor `ai-memory` que ficou no arquivo é retirado antes, então o ajuste desligado não deixa rastro. Nada muda num processo vivo.
+- **O que respeita:** o ajuste `ai_memory_tabs_enabled` (padrão ligado), a versão mínima 3.3.0 (cache só de sucesso), um `--settings` já presente no comando (não é substituído) e o `SessionStart` do ai-memory que a pessoa já tenha nos próprios settings (os hooks dela não são duplicados; o MCP continua).
+- **Limpeza:** o arquivo de hooks pertence ao `Session` do processo e some quando ele é solto; a varredura de configs do arranque (`sweep_configs_in`) remove o que sobrar de uma queda, e só poupa o `tab-thread-<id>.json` de uma conversa que ainda existe em `chat_thread`.
+- **Falha:** nunca impede a conversa de abrir. Sem binário aceito, ou com o ajuste desligado, abre sem memória e sem aviso. Se o binário existe mas os arquivos não puderam ser gravados, abre sem memória e deixa um aviso (`memoryOff`) na timeline.
+- **O que a tela mostra:** a coluna aditiva `chat_thread.memory` guarda `on` ou `off:<código>` (`disabled`, `unavailable`, `failed`, `nothing`, `unsupported`); o cartão **Conectores** do Resumo lê esse campo («ai-memory ligado» / «ai-memory fora: motivo»). Vazio = o processo ainda não abriu.
+
+**Fora, e por quê:**
+
+- **Codex, OpenCode e Antigravity por protocolo** não recebem nada e ficam gravados como `off:unsupported`. MCP: a 3.3.0 não impõe workspace/projeto no `mcp-bridge --no-session-id`, então o escopo cairia no projeto padrão do servidor (a mesma razão que retirou o MCP dessas TUIs). Hooks: nenhum dos três tem um flag de hooks por processo provado aqui; o `claude` aceita `--settings`, e o resto exigiria escrever em configuração global do agente, o que a integração proíbe. Não há suporte inventado: quando houver flag por processo verificado, entra em `conversa::memoria` com o teste correspondente.
+- **Agentes de um time** abertos por protocolo seguem a mesma regra do próprio agente (só o Claude).
+- **Windows e agente real** não foram exercitados nesta fase; os testes usam arquivos temporários e um binário só como caminho.
+
+Prova: `conversa/test_memoria.rs` (hooks e MCP, ambiente, remoção do arquivo, reabertura sem duplicar, `--settings` explícito, hooks do usuário, ajuste desligado, binário ausente, falha de gravação, varredura) e um teste `#[ignore]` com o roteiro de ponta a ponta.
