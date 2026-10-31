@@ -528,3 +528,78 @@ fn no_arranque_o_turno_e_os_pedidos_orfaos_expiram_sem_apagar_nada() {
     let again = store::sweep_orphans(&conn, 200).unwrap();
     assert_eq!((again.runs, again.requests), (0, 0));
 }
+
+// ── Etapa 2: o envio a uma conversa (trava, modo, classe do erro) ────────
+
+mod envio {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use super::super::api::{admits, codex_error, send_gate, steer_falls_back_to_start};
+    use super::super::codex::{failure_of, RequestFailure};
+    use super::super::envio::{SendError, SendMode};
+
+    #[test]
+    fn o_modo_fila_so_entra_com_a_conversa_livre_e_o_steer_sempre() {
+        assert!(admits(SendMode::QueueAfterActive, false));
+        assert!(!admits(SendMode::QueueAfterActive, true));
+        assert!(admits(SendMode::SteerActive, true) && admits(SendMode::SteerActive, false));
+    }
+
+    #[test]
+    fn o_steer_recusado_so_vira_turn_start_se_o_turno_ja_nao_e_o_mesmo() {
+        assert!(steer_falls_back_to_start("t1", None), "o turno acabou entre a checagem e o pedido");
+        assert!(steer_falls_back_to_start("t1", Some("t2")), "outro turno já começou");
+        assert!(!steer_falls_back_to_start("t1", Some("t1")), "o turno segue: a recusa é de outro motivo");
+    }
+
+    #[test]
+    fn so_o_pedido_que_saiu_e_perdeu_a_resposta_e_desconhecido() {
+        assert_eq!(codex_error(RequestFailure::NotSent("fechou".into())), SendError::NotSent("fechou".into()));
+        assert_eq!(codex_error(RequestFailure::Rejected("turno velho".into())), SendError::NotSent("turno velho".into()));
+        assert_eq!(codex_error(RequestFailure::Lost("sem resposta".into())), SendError::Unknown("sem resposta".into()));
+    }
+
+    #[test]
+    fn a_mensagem_de_processo_fechado_e_perda_e_o_erro_do_servidor_e_recusa() {
+        assert_eq!(failure_of(Err("O processo do Codex fechou".into())), Err(RequestFailure::Lost("O processo do Codex fechou".into())));
+        assert_eq!(failure_of(Err("expectedTurnId não confere".into())), Err(RequestFailure::Rejected("expectedTurnId não confere".into())));
+        assert!(failure_of(Ok(serde_json::json!({ "ok": true }))).is_ok());
+    }
+
+    #[test]
+    fn o_erro_de_envio_vira_texto_para_quem_so_conhece_string() {
+        assert_eq!(String::from(SendError::NotSent("x".into())), "x");
+        assert!(String::from(SendError::Busy).contains("turno"));
+    }
+
+    #[test]
+    fn a_trava_e_uma_por_conversa() {
+        assert!(Arc::ptr_eq(&send_gate("gate-a"), &send_gate("gate-a")));
+        assert!(!Arc::ptr_eq(&send_gate("gate-a"), &send_gate("gate-b")));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn dois_envios_a_mesma_conversa_nunca_entram_juntos() {
+        let inside = Arc::new(AtomicUsize::new(0));
+        let highest = Arc::new(AtomicUsize::new(0));
+        let tasks: Vec<_> = (0..16)
+            .map(|_| {
+                let (inside, highest) = (inside.clone(), highest.clone());
+                tokio::spawn(async move {
+                    let gate = send_gate("gate-corrida");
+                    let _held = gate.lock().await;
+                    let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                    highest.fetch_max(now, Ordering::SeqCst);
+                    // Cede a vez no meio do "envio": sem a trava, outro entraria aqui.
+                    tokio::task::yield_now().await;
+                    inside.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for task in tasks {
+            task.await.unwrap();
+        }
+        assert_eq!(highest.load(Ordering::SeqCst), 1);
+    }
+}

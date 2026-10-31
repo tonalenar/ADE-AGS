@@ -32,6 +32,35 @@ const STDERR_LINES: usize = 40;
 
 type Reply = oneshot::Sender<Result<Value, String>>;
 
+/// A mensagem que o laço de leitura devolve aos pedidos pendentes quando o processo cai (`closed`).
+const CLOSED: &str = "O processo do Codex fechou";
+
+/// Como um pedido ao Codex falhou, pela única pergunta que a fila de mensagens faz: o servidor pode ter
+/// agido nele?
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RequestFailure {
+    /// Nem saiu (processo já fechado, canal de escrita fechado).
+    NotSent(String),
+    /// O Codex respondeu com erro: ele não executou o pedido.
+    Rejected(String),
+    /// O pedido saiu e a resposta se perdeu (processo caiu, prazo): pode ter sido executado.
+    Lost(String),
+}
+
+impl RequestFailure {
+    pub fn message(&self) -> &str {
+        match self {
+            RequestFailure::NotSent(m) | RequestFailure::Rejected(m) | RequestFailure::Lost(m) => m,
+        }
+    }
+}
+
+/// Pura: a resposta de um pedido que chegou ao laço de leitura. O erro com a mensagem de `closed` é o
+/// processo que caiu com o pedido pendente (perdido), não uma recusa do servidor.
+pub(super) fn failure_of(reply: Result<Value, String>) -> Result<Value, RequestFailure> {
+    reply.map_err(|m| if m == CLOSED { RequestFailure::Lost(m) } else { RequestFailure::Rejected(m) })
+}
+
 pub struct Session {
     thread_id: String,
     tx: mpsc::UnboundedSender<String>,
@@ -67,27 +96,37 @@ impl Session {
     }
 
     fn send(&self, msg: &Value) -> Result<(), String> {
-        self.tx.send(msg.to_string()).map_err(|_| "O processo do Codex fechou".to_string())
+        self.tx.send(msg.to_string()).map_err(|_| CLOSED.to_string())
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.request_typed(method, params).await.map_err(|f| f.message().to_string())
+    }
+
+    /// Como `request`, dizendo na falha se o pedido chegou a sair (ver [`RequestFailure`]).
+    pub async fn request_typed(&self, method: &str, params: Value) -> Result<Value, RequestFailure> {
         if !self.alive() {
-            return Err("O processo do Codex fechou".into());
+            return Err(RequestFailure::NotSent(CLOSED.into()));
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         if let Ok(mut pending) = self.pending.lock() {
             pending.insert(id, tx);
         }
-        self.send(&json!({ "id": id, "method": method, "params": params }))?;
+        if let Err(error) = self.send(&json!({ "id": id, "method": method, "params": params })) {
+            if let Ok(mut pending) = self.pending.lock() {
+                pending.remove(&id);
+            }
+            return Err(RequestFailure::NotSent(error));
+        }
         match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err("O processo do Codex fechou".into()),
+            Ok(Ok(result)) => failure_of(result),
+            Ok(Err(_)) => Err(RequestFailure::Lost(CLOSED.into())),
             Err(_) => {
                 if let Ok(mut pending) = self.pending.lock() {
                     pending.remove(&id);
                 }
-                Err(format!("O Codex não respondeu a {method}"))
+                Err(RequestFailure::Lost(format!("O Codex não respondeu a {method}")))
             }
         }
     }
@@ -269,7 +308,7 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     let killed = !session.alive.swap(false, Ordering::SeqCst);
     let waiting: Vec<Reply> = session.pending.lock().map(|mut p| p.drain().map(|(_, r)| r).collect()).unwrap_or_default();
     for reply in waiting {
-        let _ = reply.send(Err("O processo do Codex fechou".into()));
+        let _ = reply.send(Err(CLOSED.into()));
     }
     let expired = db.lock().ok().and_then(|conn| store::expire_requests(&conn, &session.thread_id).ok()).unwrap_or_default();
     for id in expired {
