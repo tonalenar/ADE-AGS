@@ -9,6 +9,10 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
 
+## Conector opcional de leitura do ai-memory
+
+Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões recentes usam bridge MCP temporário com workspace/projeto explícitos e apenas `memory_briefing`. Novas abas do Claude podem somar MCP session-aware e hooks nativos; Codex/OpenCode ficam sem MCP automático por falta de escopo imposto, com ajuste `ai_memory_tabs_enabled` e sem escrita nas configurações globais dos agentes. A ação explícita “Continuar com outro agente” apresenta preview não consumidor e, após confirmação, abre uma nova aba Claude via `ai-memory run`, preservando a origem; sem handoff abre normalmente. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
+
 ## CLIs fora do PATH e instalação pela ADE
 
 No macOS a lista e o terminal acham o Claude do aplicativo e o `cursor-agent` sem estarem no PATH. O Cursor entra na fábrica sem sessão, conta isolada nem MCP. A tela de Agentes instala Codex, Gemini e Kimi com o comando npm/bun já fixo; Claude, OpenCode, Hermes, Cursor e Antigravity só mostram o comando, sem executá-lo. Detalhe em [AGENT_UPDATES.md](./AGENT_UPDATES.md).

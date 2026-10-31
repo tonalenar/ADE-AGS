@@ -1,0 +1,16 @@
+{
+  "path": "notes/probe.md",
+  "workspace": "ade-test",
+  "project": "probe",
+  "title": "Probe",
+  "body": "A fixtureunique local test page.",
+  "frontmatter": {
+    "title": "Probe",
+    "tier": "semantic",
+    "type": "Note",
+    "generated": {
+      "by": "process:ai-memory/3.3.0",
+      "at": "2024-01-01T00:00:00Z"
+    }
+  }
+}

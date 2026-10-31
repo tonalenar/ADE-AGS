@@ -1939,7 +1939,10 @@ pub(crate) fn sweep_configs_in(dir: &std::path::Path, conn: &rusqlite::Connectio
         // La carpeta la escribe solo la app: un archivo sin tab ni tarea viva no lo apunta
         // nadie. Los de una tarea llevan su id pelado, que es como los escribe el supervisor.
         let keep = match stem.strip_prefix("tab-") {
-            Some(tab_id) => !tab_id.is_empty() && alive("tabs", tab_id),
+            Some(tab_id) => {
+                let tab_id = tab_id.split(".ai-memory-").next().unwrap_or(tab_id);
+                !tab_id.is_empty() && alive("tabs", tab_id)
+            }
             None => alive("tasks", stem),
         };
         if !keep && std::fs::remove_file(entry.path()).is_ok() {

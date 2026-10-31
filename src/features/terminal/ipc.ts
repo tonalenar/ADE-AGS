@@ -10,6 +10,8 @@ export interface PtyCreateArgs {
   env: Record<string, string> | null;
   /** Comandos ya resueltos a ejecutar antes del agente. */
   prelaunch: string[];
+  /** Somente para uma nova aba, após confirmação do preview. */
+  aiMemoryContinuity?: boolean;
 }
 
 /** Lanza el proceso y devuelve el id del PTY. El tamaño se fija acá, al nacer. */

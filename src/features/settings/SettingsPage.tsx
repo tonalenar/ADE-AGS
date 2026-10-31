@@ -17,6 +17,7 @@ import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
 import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
+import { AiMemoryPanel } from "@/features/memory/AiMemoryPanel";
 import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
@@ -33,6 +34,7 @@ import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
 import { SettingsSidebar } from "@/features/chat/ChatPageSidebar";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { PermissionsSection } from "@/features/chat/permissions/PermissionsSection";
+import { AiMemoryTabsSetting } from "@/features/settings/AiMemoryTabsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
@@ -101,6 +103,7 @@ export function SettingsPage() {
   // No chat a barra das seções é a da casca (`ChatShell`); fora dele a página a desenha.
   const chat = useChatShell();
   const workspaceId = useTabsStore((s) => s.workspaceId);
+  const activeCwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? s.tabs[0]?.cwd ?? "");
   const customAgents = useAgentsStore((s) => s.customAgents);
   const loadCustomAgents = useAgentsStore((s) => s.loadCustomAgents);
   const saveCustomAgent = useAgentsStore((s) => s.saveCustomAgent);
@@ -230,6 +233,7 @@ export function SettingsPage() {
                 <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
                   <SettingsGroup>
                     <AgentAutoUpdateSetting />
+                    <AiMemoryTabsSetting />
                   </SettingsGroup>
                   <DetectedAgents />
 
@@ -338,9 +342,12 @@ export function SettingsPage() {
           )}
 
           {section === "memory" && (
-            workspaceId
-              ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
-              : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>
+            <>
+              <AiMemoryPanel cwd={activeCwd} workspaceId={workspaceId} />
+              {workspaceId
+                ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
+                : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>}
+            </>
           )}
 
           {section === "chat" && <ChatModeSetting />}
