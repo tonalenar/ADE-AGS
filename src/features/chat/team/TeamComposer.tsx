@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
+import type { Attachment } from "../attachments/attachModel";
+import { messageFor } from "../attachments/send";
 import type { ConversationCard } from "../chatModel";
 import type { TeamPolicy, TeamView } from "./ipc";
 import { AgentMono, useRoleLabel } from "./TeamParts";
@@ -52,7 +54,7 @@ export interface TeamComposer {
    * orquestrador pelo caminho de sempre da conversa (com o resumo do time quando ele mudou, ou o aviso
    * de "Só o orquestrador").
    */
-  prepare: (text: string) => string | null;
+  prepare: (text: string, attachments?: Attachment[]) => string | null;
 }
 
 /**
@@ -69,14 +71,16 @@ export function useTeamComposer(conversation: ConversationCard | null, cards: Co
   const live = useTeamLive(cards);
   const options = useMentionOptions(team, cards);
 
-  const prepare = useCallback((text: string): string | null => {
+  const prepare = useCallback((text: string, attachments: Attachment[] = []): string | null => {
     if (!team) return text;
     const signature = rosterSignature(team);
     const policyLabel = (p: TeamPolicy) => t(`chat.team.policy.${p}`);
     const notice = target === "team" && told !== signature ? rosterNotice(team, live.nameOf, roleLabel, policyLabel) : null;
     const routed = routeMessage(text, target, team, options, notice);
     if (routed.direct) {
-      sendToMember(routed.to, routed.text);
+      // Um anexo vai ao integrante pelo mesmo caminho da mensagem (o caminho no texto nunca se perde).
+      const sent = messageFor(routed.to, routed.text, attachments);
+      sendToMember(routed.to, sent.text, sent.images);
       return null;
     }
     if (notice) markTold(team.id, signature);

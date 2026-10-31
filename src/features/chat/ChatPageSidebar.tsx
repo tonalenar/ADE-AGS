@@ -79,7 +79,7 @@ export function SettingsSidebar({ onBack }: { onBack?: () => void }) {
             className="flex-1 min-w-0 bg-transparent outline-none text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-white/45" />
         </label>
       </div>
-      <nav aria-label={t("settings.title")} className="flex-1 min-h-0 cc-scroll px-2 flex flex-col gap-px">
+      <nav aria-label={t("settings.title")} className="flex-1 min-h-0 cc-scroll-hidden px-2 flex flex-col gap-px">
         {groups.length === 0 && <p className="px-2 py-3 text-[12px] text-gray-400 dark:text-white/35">{t("settings.searchEmpty")}</p>}
         {groups.map((g) => (
           <div key={g.titleKey} className="flex flex-col gap-px">

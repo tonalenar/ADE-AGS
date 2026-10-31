@@ -26,6 +26,7 @@ import { startTeams, useTeamStore } from "../team/teamStore";
 import { useConversationTimeline } from "../timeline/useConversationTimeline";
 import type { TimelineItem } from "../timeline/types";
 import { useWorkingDiff } from "../useWorkingDiff";
+import { LimitsCard } from "./LimitsCard";
 import { connectorsOf, contextOf, diffTotals, filesFromHandoffs, outputsFromItems, pickOutputs, type OutputFile } from "./summaryModel";
 
 const EMPTY_ITEMS: TimelineItem[] = [];
@@ -42,7 +43,7 @@ function useConversationItems(conversation: ConversationCard | null): TimelineIt
 /**
  * O Resumo do painel direito, no formato do painel do Claude Code: cartões arredondados empilhados, cada
  * um com título e seta que abre e recolhe (o estado é lembrado, o mesmo das Abas): Ambiente, Contexto,
- * Conectores, Saídas e Alterações. Os dados são os que o ADE já tem (git, forge, transcript, config dos
+ * Limites de uso, Conectores, Saídas e Alterações. Os dados são os que o ADE já tem (git, forge, transcript, config dos
  * MCPs); o que não tem fonte fica de fora ou como "não medido", nunca inventado.
  */
 export function SummaryPane({ conversation, cwd, tabId }: { conversation: ConversationCard | null; cwd: string | null; tabId: string | null }) {
@@ -52,9 +53,10 @@ export function SummaryPane({ conversation, cwd, tabId }: { conversation: Conver
   const tab = useTabsStore((s) => s.tabs.find((x) => x.id === conversation?.tabId) ?? null);
   if (!conversation || !cwd) return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.summary.none")}</p>;
   return (
-    <div className="flex-1 min-h-0 cc-scroll p-3 flex flex-col gap-3">
+    <div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">
       <EnvironmentCard conversation={conversation} cwd={cwd} />
       {tab ? <ContextSection tab={tab} flat /> : <ThreadContextCard conversation={conversation} />}
+      <LimitsCard conversation={conversation} />
       {tab ? <ConnectorsSection tab={tab} flat /> : <ThreadConnectorsCard conversation={conversation} />}
       <OutputsCard conversation={conversation} cwd={cwd} />
       <ChangesCard conversation={conversation} cwd={cwd} tabId={tabId} />

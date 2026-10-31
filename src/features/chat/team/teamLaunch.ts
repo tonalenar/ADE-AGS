@@ -3,6 +3,8 @@ import i18n from "i18next";
 import { useTabsStore } from "@/features/tabs/store";
 import type { AgentInfo } from "@/features/tabs/types";
 
+import type { Attachment } from "../attachments/attachModel";
+import { messageFor } from "../attachments/send";
 import { openConversation, startConversation } from "../chatActions";
 import type { ChatAccess } from "../chatModel";
 import { loadChatPrefs } from "../chatPrefs";
@@ -39,7 +41,7 @@ const nameOfRef = (ref: string): string | null => {
 };
 
 /** O `TeamPort` de verdade: aba ou conversa por protocolo, os comandos do time e o envio. */
-export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarget): TeamPort {
+export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarget, attachments: Attachment[] = []): TeamPort {
   const conv = (ref: string) => ({ key: ref, agentId: spec.agent.id, agentLabel: spec.agent.label, title: spec.title, cwd: spec.cwd });
   const close = async (ref: string) => {
     const thread = threadIdOf(ref);
@@ -98,7 +100,9 @@ export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarg
     const notice = target === "team" ? rosterNotice(team, nameOfRef, roleName, policyName) : null;
     const options = team.members.map((m) => ({ ref: m.member, name: nameOfRef(m.member) ?? (m.label || m.agentId), agentId: m.agentId, role: m.role }));
     const routed = routeMessage(prompt, target, team, options, notice);
-    sendToMember(routed.to, routed.text);
+    // O anexo vai junto, para quem recebe a mensagem (o caminho no texto, em qualquer motor).
+    const sent = messageFor(routed.to, routed.text, attachments);
+    sendToMember(routed.to, sent.text, sent.images);
     if (!routed.direct && notice) markTold(team.id, rosterSignature(team));
     // A caixa de "para quem" da conversa já nasce como a pessoa deixou na tela de rascunho.
     setComposerTarget(lead.ref, target);
@@ -111,6 +115,6 @@ export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarg
 }
 
 /** Cria a conversa com o time montado. `ok: false` = nada ficou (menos o que `leftovers` diz); o texto segue na caixa. */
-export function launchDraftTeam(spec: LeadSpec, members: DraftMember[], prompt: string, target: ComposerTarget): Promise<LaunchResult> {
-  return launchTeam(appTeamPort(spec, prompt, target), members);
+export function launchDraftTeam(spec: LeadSpec, members: DraftMember[], prompt: string, target: ComposerTarget, attachments: Attachment[] = []): Promise<LaunchResult> {
+  return launchTeam(appTeamPort(spec, prompt, target, attachments), members);
 }

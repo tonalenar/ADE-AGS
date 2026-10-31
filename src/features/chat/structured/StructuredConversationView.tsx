@@ -8,6 +8,7 @@ import { turnLive } from "../activityModel";
 import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
 import { BotIcon } from "../chatIcons";
 import { accessModesFor, planSupported, type ConversationCard } from "../chatModel";
+import { messageFor } from "../attachments/send";
 import { ChatComposer } from "../ChatComposer";
 import { ChatFrame } from "../ChatFrame";
 import { ComposerColumn } from "../ComposerColumn";
@@ -111,15 +112,17 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
-          onSubmit={(text) => {
+          onSubmit={(text, attachments) => {
             if (question) { answer(text); return; }
-            const out = team ? team.prepare(text) : text;
+            const out = team && text.trim() ? team.prepare(text, attachments) : text;
             if (out === null) return;
+            // O caminho de cada anexo vai no texto (bloco `[Anexos]`) e as imagens também em linha, onde o motor aceita.
+            const sent = messageFor(key, out, attachments);
             // A mensagem aparece na hora; se o backend recusar, sai do fio e o erro aparece no aviso.
-            const mark = out.trim() ? addPending(key, out.trim(), items) : null;
-            sendToThread(thread.id, out, mark ? () => dropPending(key, mark) : undefined);
+            const mark = sent.text.trim() ? addPending(key, sent.text.trim(), items) : null;
+            sendToThread(thread.id, sent.text, mark ? () => dropPending(key, mark) : undefined, sent.images);
           }}
-          onQueue={question ? null : (text) => { const out = team ? team.prepare(text) : text; if (out !== null) queueOrSend(key, out); }} queued={queued}
+          onQueue={question ? null : (text, attachments) => { const out = team ? team.prepare(text, attachments) : text; if (out !== null) queueOrSend(key, messageFor(key, out, attachments).text); }} queued={queued}
           leading={question ? null : team?.controls}
           addon={team && !question ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}
           onStop={working && !request ? () => interruptThread(thread.id) : null}

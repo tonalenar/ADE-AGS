@@ -500,8 +500,8 @@ fn resolve_rpc(app: &AppHandle, db: &DbConnection, session: &Session, request_id
 
 /// Manda a mensagem da pessoa. Sem turno em andamento, começa um; com turno, o Claude a recebe
 /// no meio dele (ou logo depois, na fila).
-pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str) -> Result<(), String> {
-    session.send(&claude_map::user_message(text))?;
+pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, images: Vec<Value>) -> Result<(), String> {
+    session.send(&claude_map::user_message_with(text, images))?;
     let turn = begin_turn(app, db, session);
     let item = Item { text: Some(clip(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
     save_items(app, db, &session.thread_id, Some(&turn), vec![item]);

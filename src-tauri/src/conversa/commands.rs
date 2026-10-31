@@ -30,9 +30,9 @@ pub fn chat_thread_create(
 }
 
 #[tauri::command]
-pub async fn chat_thread_send(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, text: String) -> Result<(), String> {
+pub async fn chat_thread_send(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, text: String, images: Option<Vec<String>>) -> Result<(), String> {
     let db = db.inner().clone();
-    api::send(&app, &db, &thread_id, &text).await
+    api::send_with(&app, &db, &thread_id, &text, &images.unwrap_or_default()).await
 }
 
 #[tauri::command]

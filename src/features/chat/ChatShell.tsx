@@ -7,6 +7,9 @@ import { WindowControls, WindowLights } from "@/app/WindowLights";
 import { useTabsStore } from "@/features/tabs/store";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
+import { AttachCwdContext } from "./attachments/AttachmentStrip";
+import { DropOverlay } from "./attachments/DropOverlay";
+import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
 import { chatProjects, conversationCards, type ChatProject, type ConversationCard } from "./chatModel";
@@ -73,6 +76,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const maximized = useChatStore((s) => s.panelMaximized);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { ref: mainRef, width: mainWidth } = useElementWidth<HTMLElement>();
+  // Arquivos do Finder soltos na coluna do chat viram anexos do composer à vista (só os caminhos).
+  useChatFileDrop(mainRef);
   const inset = chatInset(panelTab, mainWidth);
   const [folder, setFolder] = useState<string | null>(null);
   // O "+" de um projeto na barra pede a tela de conversa nova já nessa pasta: a casca lê o pedido uma vez.
@@ -174,9 +179,12 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
 
           {/* A conversa cede o lado direito ao Resumo (solto, sem coluna); sem lugar, o Resumo some. */}
           <div className="flex-1 min-h-0 flex flex-col" style={{ paddingRight: inset }}>
-            {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} cards={cards} />
-              : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
+            <AttachCwdContext.Provider value={active?.cwd ?? null}>
+              {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} cards={cards} />
+                : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
+            </AttachCwdContext.Provider>
           </div>
+          <DropOverlay />
           {inset > 0 && (
             <div className="absolute top-[52px] bottom-0 right-3 z-10" style={{ width: SUMMARY_W }}>
               <SummaryPane conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />

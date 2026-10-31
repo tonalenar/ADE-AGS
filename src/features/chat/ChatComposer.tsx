@@ -2,11 +2,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 
+import { canSubmit, composerMaxHeight, type Attachment } from "./attachments/attachModel";
+import { AttachmentStrip } from "./attachments/AttachmentStrip";
+import { registerDropSink } from "./attachments/dropRegistry";
+import { useAttachments } from "./attachments/useAttachments";
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./chatIcons";
 import { useChatStore } from "./store";
-
-/** Até quantas linhas a caixa cresce antes de rolar. */
-const MAX_ROWS = 10;
 
 /** O caminho do arquivo relativo à pasta da conversa (com `/`), ou o absoluto se for de fora. Pura. */
 export function mentionFor(cwd: string | null, path: string): string {
@@ -35,6 +36,10 @@ export interface ComposerAddonContext {
  * envia na hora; Shift+Enter quebra a linha; ⌘⏎ (Ctrl+Enter fora do macOS) põe na fila quando há
  * `onQueue` (prancheta 13), e a fila aparece embaixo ("Fila: 1 mensagem"). Com o agente
  * trabalhando e a caixa vazia, o botão vira Parar.
+ *
+ * Anexos como no Claude Code: Cmd/Ctrl+V cola a imagem do clipboard, soltar arquivos na coluna do chat e
+ * o clipe os põem numa fileira de miniaturas acima do texto; o bloco (miniaturas + texto) cresce até 40%
+ * da janela e depois rola por dentro, sem barra, com o enviar sempre à vista. Enviar só com anexos vale.
  */
 export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onStop, onQueue, queued = 0, cwd = null, disabled = false, autoFocus = false }: {
   placeholder: string;
@@ -44,12 +49,12 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   addon?: (ctx: ComposerAddonContext) => React.ReactNode;
   /** Entre o espaço vazio e o botão de enviar. */
   controls?: React.ReactNode;
-  /** `false` (ou erro) = não foi: o texto continua na caixa. */
-  onSubmit: (text: string) => boolean | void | Promise<boolean | void>;
+  /** `false` (ou erro) = não foi: o texto e os anexos continuam na caixa. */
+  onSubmit: (text: string, attachments: Attachment[]) => boolean | void | Promise<boolean | void>;
   /** O agente está trabalhando: o botão vira Parar (com a caixa vazia). */
   onStop?: (() => void) | null;
   /** ⌘⏎: põe a mensagem na fila da conversa (sai quando o turno acabar). */
-  onQueue?: ((text: string) => void) | null;
+  onQueue?: ((text: string, attachments: Attachment[]) => void) | null;
   /** Quantas mensagens esperam na fila. */
   queued?: number;
   /** A pasta da conversa, para o anexo virar um caminho relativo. */
@@ -73,8 +78,11 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     setCaret(at);
   }, [text]);
   const apply = (next: string, at: number) => { pendingCaret.current = at; setText(next); };
-  const canSend = text.trim().length > 0 && !disabled && !busy;
-  const stopping = !!onStop && text.trim().length === 0;
+  const attachments = useAttachments();
+  const canSend = canSubmit(text, attachments.list.length, disabled, busy);
+  const stopping = !!onStop && text.trim().length === 0 && attachments.list.length === 0;
+  // O que se solta na janela chega aqui (o ouvinte nativo está no ChatShell).
+  useEffect(() => registerDropSink({ addPaths: (paths) => { void attachments.addPaths(paths); } }), [attachments.addPaths]); // eslint-disable-line react-hooks/exhaustive-deps -- `addPaths` é estável
 
   // O que o painel manda para a conversa (a captura de um aparelho) entra no fim do texto.
   const insert = useChatStore((s) => s.composerInsert);
@@ -86,26 +94,39 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     ref.current?.focus();
   }, [insert]);
 
-  // Cresce com o texto até `MAX_ROWS` linhas.
+  // O bloco cresce com o texto e com as miniaturas até 40% da janela; a caixa tem a altura do texto todo
+  // e quem rola é o miolo (`scroller`), de modo que o enviar não sai da tela.
+  const scroller = useRef<HTMLDivElement>(null);
+  const [maxHeight, setMaxHeight] = useState(() => composerMaxHeight(window.innerHeight));
+  useEffect(() => {
+    const onResize = () => setMaxHeight(composerMaxHeight(window.innerHeight));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
     el.style.height = "auto";
-    const line = parseFloat(getComputedStyle(el).lineHeight) || 22;
-    el.style.height = `${Math.min(el.scrollHeight, line * MAX_ROWS)}px`;
-  }, [text]);
+    el.style.height = `${el.scrollHeight}px`;
+    // Escrevendo no fim, o cursor acompanha o texto que desce.
+    if (scroller.current && el.selectionStart === el.value.length) scroller.current.scrollTop = scroller.current.scrollHeight;
+  }, [text, attachments.list.length]);
 
   const queue = () => {
-    if (!onQueue || text.trim().length === 0 || disabled) return;
-    onQueue(text);
+    if (!onQueue || !canSubmit(text, attachments.list.length, disabled, false)) return;
+    onQueue(text, attachments.list);
     setText("");
+    attachments.clear();
   };
 
   const submit = async () => {
     if (!canSend) return;
     setBusy(true);
     try {
-      if ((await onSubmit(text)) !== false) setText("");
+      if ((await onSubmit(text, attachments.list)) !== false) {
+        setText("");
+        attachments.clear();
+      }
     } catch {
       /* quem envia mostra o erro; o texto fica para tentar de novo */
     } finally {
@@ -117,8 +138,8 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     const picked = await openDialog({ multiple: true, directory: false, defaultPath: cwd ?? undefined, title: t("chat.composer.attach") });
     const files = typeof picked === "string" ? [picked] : picked ?? [];
     if (files.length === 0) return;
-    const mentions = files.map((f) => mentionFor(cwd, f)).join(" ");
-    setText((prev) => appendMention(prev, mentions));
+    // A mesma regra de soltar: viram miniaturas, com os mesmos limites.
+    await attachments.addPaths(files);
     ref.current?.focus();
   };
 
@@ -130,9 +151,17 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-none"
     >
       {addon?.({ text, caret, apply })}
-      <label className="block px-5 pt-4 pb-2">
+      <div ref={scroller} style={{ maxHeight }} className="cc-scroll-hidden">
+        <AttachmentStrip items={attachments.list} onRemove={attachments.remove} cwd={cwd} className="px-4 pt-3.5" />
+        {attachments.notices.length > 0 && (
+          <ul role="status" className="list-none m-0 px-5 pt-2 flex flex-col gap-0.5 text-chat-caption text-amber-700 dark:text-amber-400">
+            {attachments.notices.map((n) => <li key={n}>{n}</li>)}
+          </ul>
+        )}
+      <label className={`block px-5 pb-2 ${attachments.list.length > 0 ? "pt-3" : "pt-4"}`}>
         <span className="sr-only">{t("chat.composer.label")}</span>
         <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus}
+          onPaste={attachments.onPaste}
           onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
           onKeyDown={(e) => {
@@ -146,6 +175,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
           className="block w-full resize-none bg-transparent outline-none text-chat-prose
             text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
       </label>
+      </div>
       {/*
         A linha de baixo QUEBRA quando falta espaço (a coluna fica estreita com o painel direito aberto): o
         grupo da esquerda (anexar, "Time | Só o orquestrador", fila) e o da direita (controles e enviar)

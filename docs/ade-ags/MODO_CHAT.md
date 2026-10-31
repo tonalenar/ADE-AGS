@@ -202,6 +202,40 @@ Com o Antigravity, a conversa nova roda `agy --print <mensagem> --output-format 
 - **Onde aparece:** a aba "Time" do painel direito abre sozinha ao abrir uma conversa que está num time (uma vez por conversa); a sidebar agrupa os integrantes sob o orquestrador com o selo "TIME · N"; o cabeçalho mostra "Orquestrador · X"; o composer do orquestrador tem "Time | Só o orquestrador" à esquerda e o menu do @agente; o fio termina com os cartões das delegações e o resumo das entregas.
 - **Permissões:** `team/teamPermissions.ts` diz de quem é o pedido (papel, política, time) e o que a política decide sozinha. O `PermissionsManager` aplica a política antes das regras "Sempre permitir": só leitura nega (e diz ao agente por quê), o que a política deixa passa sozinho, o resto vai às regras e à pessoa; risco alto nunca é automático. O cartão e a caixa mostram o papel e a política (`TeamRoleTag`).
 
+## Anexos: colar, arrastar, miniaturas
+
+O composer do chat (conversa aberta, "Nova conversa" e mensagens de time) aceita anexos como o Claude Code:
+Cmd/Ctrl+V cola a imagem do clipboard e arquivos copiados (lista `text/uri-list`); arquivos e pastas do Finder
+soltos na coluna do chat inteira (realce "Solte para anexar"); o clipe usa a mesma regra. Eles aparecem como
+miniaturas acima do texto (imagem = cartão com prévia; arquivo/pasta = chip com nome e tamanho; "×" com mouse
+ou foco) e, na mensagem enviada, acima do balão; clicar numa imagem a amplia (visualizador com Esc, clique fora e
+setas). Enviar só com anexos vale; o mesmo caminho duas vezes vira um só. O bloco do composer cresce com o texto e
+as miniaturas até 40% da janela e rola por dentro, sem barra, com o enviar sempre à vista.
+
+**Segurança.** A tela manda só CAMINHOS que a pessoa colou, soltou ou escolheu. O backend (`conversa/attach.rs`)
+só faz `stat` neles (`chat_attachment_inspect`) e só lê imagens (`png/jpg/webp/gif`) para a prévia
+(`chat_attachment_read`, até 20 MB) ou para o Claude (até 5 MB cada, 8 por mensagem). Pasta = só o caminho
+(nada é listado). Imagem colada vai para `~/.ags/tmp/pasted` (`save_pasted_image`, 700/600, limpa em 24 h).
+
+**Limites.** 10 anexos por mensagem; imagem até 20 MB; outros arquivos até 100 MB (o agente os lê pelo caminho);
+soma de 200 MB. O que passa do limite fica de fora COM aviso; erro de leitura vira aviso; o texto digitado nunca se perde.
+
+**Como cada motor recebe** (decisão; o caminho no texto é o fallback de TODOS e nunca é omitido):
+
+| Motor | Caminho no texto | Imagem em linha |
+|---|---|---|
+| Claude Code (stream-json) | bloco `[Anexos]` | sim: blocos `image` base64 antes do texto (≤ 5 MB, ≤ 8) |
+| Codex (`app-server`) | bloco `[Anexos]` | não: o item `localImage` do `turn/start` não foi verificado neste app |
+| OpenCode (ACP) | bloco `[Anexos]` | não: `promptCapabilities.image` ainda não é lida |
+| Antigravity (`agy -p`) | bloco `[Anexos]` | não |
+| Abas com TUI | `@caminho` no fim do texto | não (a TUI lê pelo caminho, como ao soltar no terminal) |
+
+O bloco é `[Anexos]` + uma linha `- imagem|arquivo|pasta | nome | bytes | caminho` por anexo, no fim do texto.
+Como ele fica na mensagem guardada pelo motor, a bolha o lê de volta (`splitAttachmentBlock`) e mostra as
+miniaturas ao reabrir a conversa, em qualquer motor, sem campo novo no banco. Uma imagem colada é limpa em 24 h:
+depois disso a miniatura mostra "indisponível" (o caminho continua na mensagem). Mensagens de time (`@menção`,
+"Time | Só o orquestrador") levam os anexos pelo mesmo caminho.
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:

@@ -128,11 +128,19 @@ pub fn announce(app: &AppHandle, row: &ThreadRow) {
 
 /// Manda uma mensagem: começa um turno, ou entra no turno em andamento (`turn/steer`).
 pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> Result<(), String> {
+    send_with(app, db, thread_id, text, &[]).await
+}
+
+/// Como [`send`], com as imagens anexadas (caminhos). Só o Claude as recebe em linha; nos outros
+/// motores o caminho já está no texto (ver `attach`). Uma imagem que não cabe nos limites segue só
+/// pelo texto: nunca derruba a mensagem.
+pub async fn send_with(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), String> {
     let row = thread(db, thread_id)?;
     match engine_of(&row)? {
         Engine::Claude => {
             let session = claude::session(app, db, thread_id).await?;
-            return claude::send_user(app, db, &session, text);
+            let (blocks, _skipped) = super::attach::image_blocks(images);
+            return claude::send_user(app, db, &session, text, blocks);
         }
         Engine::OpenCode => {
             let session = opencode::session(app, db, thread_id).await?;

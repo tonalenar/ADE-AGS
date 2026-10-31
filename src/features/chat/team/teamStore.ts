@@ -247,9 +247,9 @@ export async function makeOrchestrator(conv: ConversationRef): Promise<TeamView>
 }
 
 /** Manda o texto à conversa: a aba (quando a TUI estiver pronta) ou a conversa por protocolo. */
-export function sendToMember(ref: string, text: string): void {
+export function sendToMember(ref: string, text: string, images: string[] = []): void {
   const thread = threadIdOf(ref);
-  if (thread) sendToThread(thread, text);
+  if (thread) sendToThread(thread, text, undefined, images);
   else sendWhenReady(ref, text);
 }
 

@@ -326,6 +326,8 @@ pub fn run() {
             crate::conversa::chat_threads,
             crate::conversa::chat_thread_create,
             crate::conversa::chat_thread_send,
+            crate::conversa::chat_attachment_inspect,
+            crate::conversa::chat_attachment_read,
             crate::conversa::chat_thread_items,
             crate::conversa::chat_thread_requests,
             crate::conversa::chat_thread_status,

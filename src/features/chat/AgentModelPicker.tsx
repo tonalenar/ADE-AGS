@@ -27,7 +27,11 @@ export interface AgentModelValue {
   account: string | null;
 }
 
-/** O roster é caro de montar (sonda as TUIs): um pedido por sessão do app basta para o seletor. */
+/**
+ * O primeiro roster da sessão (a sonda das TUIs é a parte cara, e o backend a guarda): só evita pedir de
+ * novo a cada montagem. NÃO vale como lista de contas: elas nascem e morrem fora da tela (CLI, outra
+ * janela, o login na TUI), então o seletor pede de novo toda vez que abre (`useRoster`).
+ */
 let rosterRequest: Promise<Roster> | null = null;
 function loadRoster(): Promise<Roster> {
   rosterRequest ??= getRoster(false).catch((e) => {
@@ -37,13 +41,33 @@ function loadRoster(): Promise<Roster> {
   return rosterRequest;
 }
 
-function useRoster(enabled: boolean): Roster | null {
+/**
+ * O roster do seletor. `open` = o menu está aberto: aí ele é pedido de novo (o backend remonta as contas
+ * na hora e só reaproveita a sonda dos modelos, então é barato) e o resultado vira o novo guardado.
+ * `update` troca o roster quando outra fonte traz um mais novo (a sonda do OpenCode).
+ */
+function useRoster(enabled: boolean, open = false): { roster: Roster | null; update: (next: Roster) => void } {
   const [roster, setRoster] = useState<Roster | null>(null);
   useEffect(() => {
     if (!enabled || roster) return;
     loadRoster().then(setRoster).catch(() => undefined);
   }, [enabled, roster]);
-  return roster;
+  useEffect(() => {
+    if (!enabled || !open) return;
+    let alive = true;
+    getRoster(false)
+      .then((next) => {
+        rosterRequest = Promise.resolve(next);
+        if (alive) setRoster(next);
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [enabled, open]);
+  const update = (next: Roster) => {
+    rosterRequest = Promise.resolve(next);
+    setRoster(next);
+  };
+  return { roster, update };
 }
 
 function catalogOf(roster: Roster | null, agentId: string | null, account: string | null): RosterModel[] {
@@ -98,9 +122,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
-  const loaded = useRoster(true);
-  const [fresh, setFresh] = useState<Roster | null>(null);
-  const roster = fresh ?? loaded;
+  const { roster, update: updateRoster } = useRoster(true, open);
   const [tab, setTab] = useState<string | "fav">(value.agentId ?? agents[0]?.id ?? "fav");
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>(loadFavorites);
@@ -115,7 +137,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
     if (!open || tabAgent?.id !== "opencode") return;
     let alive = true;
     refreshRosterModels("opencode", value.agentId === "opencode" && value.account && !value.account.startsWith("pool:") ? value.account : null)
-      .then((next) => { if (alive) { rosterRequest = Promise.resolve(next); setFresh(next); } })
+      .then((next) => { if (alive) updateRoster(next); })
       .catch(() => undefined);
     return () => { alive = false; };
   }, [open, tabAgent?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
@@ -160,7 +182,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
             bg-white/[0.92] dark:bg-surface-raised/[0.92] backdrop-blur-xl
             shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]`}>
           <div role="tablist" aria-label={t("chat.picker.agents")}
-            className="w-11 shrink-0 flex flex-col items-center gap-1 p-1 cc-scroll bg-gray-50/60 dark:bg-white/[0.01]">
+            className="w-11 shrink-0 flex flex-col items-center gap-1 p-1 cc-scroll-hidden bg-gray-50/60 dark:bg-white/[0.01]">
             <RailButton label={t("chat.picker.favorites")} on={tab === "fav"} onClick={() => setTab("fav")}>
               <StarIcon filled className="w-5 h-5 text-amber-500" />
             </RailButton>
@@ -182,7 +204,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("chat.picker.search")} autoFocus
                 className="flex-1 min-w-0 bg-transparent outline-none text-chat-ui text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
             </label>
-            <div role="listbox" aria-label={t("chat.picker.models")} className="flex-1 min-h-0 cc-scroll p-1">
+            <div role="listbox" aria-label={t("chat.picker.models")} className="flex-1 min-h-0 cc-scroll-hidden p-1">
               {rows.map((r, i) => {
                 const group = r.agent.id === "opencode" && r.model?.includes("/") ? r.model.split("/")[0] : null;
                 const prevGroup = i > 0 && rows[i - 1].agent.id === "opencode" ? rows[i - 1].model?.split("/")[0] : undefined;
@@ -275,7 +297,7 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
-  const roster = useRoster(!!agentId && EFFORT_AGENTS.has(agentId));
+  const { roster } = useRoster(!!agentId && EFFORT_AGENTS.has(agentId), open);
   if (!agentId || !EFFORT_AGENTS.has(agentId)) return null;
   const levels = reasoningOptions(model, catalogOf(roster, agentId, account));
   const efforts = levels.length > 0 ? levels : DEFAULT_EFFORTS;

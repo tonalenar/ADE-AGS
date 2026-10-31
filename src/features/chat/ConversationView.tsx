@@ -12,6 +12,7 @@ import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
 import { retuneConversationTab, sendToConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
 import { accessModesFor, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
+import { messageFor } from "./attachments/send";
 import { ChatComposer } from "./ChatComposer";
 import { ChatFrame } from "./ChatFrame";
 import { ComposerColumn } from "./ComposerColumn";
@@ -138,13 +139,15 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
       <ChatComposer cwd={card.cwd}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
-        onSubmit={(text) => {
-          const out = team ? team.prepare(text) : text;
+        onSubmit={(text, attachments) => {
+          const out = team && text.trim() ? team.prepare(text, attachments) : text;
           if (out === null) return;
-          if (timeline && out.trim()) addPending(card.tabId, out.trim(), items);
-          sendToConversation(card.tabId, out);
+          // Os anexos vão como `@caminho` no fim do texto (a TUI os lê pelo caminho).
+          const sent = messageFor(card.tabId, out, attachments).text;
+          if (timeline && sent.trim()) addPending(card.tabId, sent.trim(), items);
+          sendToConversation(card.tabId, sent);
         }}
-        onQueue={(text) => { const out = team ? team.prepare(text) : text; if (out !== null) queueOrSend(card.tabId, out); }} queued={queued}
+        onQueue={(text, attachments) => { const out = team ? team.prepare(text, attachments) : text; if (out !== null) queueOrSend(card.tabId, messageFor(card.tabId, out, attachments).text); }} queued={queued}
         onStop={busy && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
         leading={team?.controls}
         addon={team ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}
