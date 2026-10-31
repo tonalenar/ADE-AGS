@@ -109,4 +109,25 @@ describe("PopupSelect", () => {
     act(() => { native.value = "a"; native.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(onPick).toHaveBeenCalledWith("a");
   });
+
+  it("junta as opções que vêm de uma fileira fixa, de um .map() filtrado e de outro .map() (como o seletor de conta)", () => {
+    const accounts = [{ id: null, name: "Sistema" }, { id: "t", name: "Ton" }, { id: "m", name: "Maria" }];
+    act(() => root.render(
+      <PopupSelect aria-label="Conta" value="">
+        <option value="">Conta principal</option>
+        {accounts.filter((a) => a.id !== null).map((a) => <option key={a.id!} value={a.id!}>{a.name}</option>)}
+        {[{ id: "p", name: "pool" }].map((p) => <option key={p.id} value={`pool:${p.name}`}>Pool {p.name}</option>)}
+      </PopupSelect>,
+    ));
+    click(button());
+    expect(menuOptions().map((o) => o.textContent)).toEqual(["✓Conta principal", "Ton", "Maria", "Pool pool"]);
+  });
+
+  it("a altura estimada do menu cabe todas as linhas (30px cada + o respiro), sem barra de rolagem à toa", () => {
+    act(() => root.render(<Controlled onPick={() => {}} />));
+    click(button());
+    const menu = listbox()!;
+    // 4 opções (+ 1 cabeçalho de grupo ficam dentro do teto de 320): 4 × 30 + 12
+    expect(parseInt(menu.style.maxHeight, 10)).toBeGreaterThanOrEqual(4 * 30 + 12);
+  });
 });

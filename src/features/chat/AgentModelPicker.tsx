@@ -27,7 +27,11 @@ export interface AgentModelValue {
   account: string | null;
 }
 
-/** O roster é caro de montar (sonda as TUIs): um pedido por sessão do app basta para o seletor. */
+/**
+ * O primeiro roster da sessão (a sonda das TUIs é a parte cara, e o backend a guarda): só evita pedir de
+ * novo a cada montagem. NÃO vale como lista de contas: elas nascem e morrem fora da tela (CLI, outra
+ * janela, o login na TUI), então o seletor pede de novo toda vez que abre (`useRoster`).
+ */
 let rosterRequest: Promise<Roster> | null = null;
 function loadRoster(): Promise<Roster> {
   rosterRequest ??= getRoster(false).catch((e) => {
@@ -37,13 +41,33 @@ function loadRoster(): Promise<Roster> {
   return rosterRequest;
 }
 
-function useRoster(enabled: boolean): Roster | null {
+/**
+ * O roster do seletor. `open` = o menu está aberto: aí ele é pedido de novo (o backend remonta as contas
+ * na hora e só reaproveita a sonda dos modelos, então é barato) e o resultado vira o novo guardado.
+ * `update` troca o roster quando outra fonte traz um mais novo (a sonda do OpenCode).
+ */
+function useRoster(enabled: boolean, open = false): { roster: Roster | null; update: (next: Roster) => void } {
   const [roster, setRoster] = useState<Roster | null>(null);
   useEffect(() => {
     if (!enabled || roster) return;
     loadRoster().then(setRoster).catch(() => undefined);
   }, [enabled, roster]);
-  return roster;
+  useEffect(() => {
+    if (!enabled || !open) return;
+    let alive = true;
+    getRoster(false)
+      .then((next) => {
+        rosterRequest = Promise.resolve(next);
+        if (alive) setRoster(next);
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [enabled, open]);
+  const update = (next: Roster) => {
+    rosterRequest = Promise.resolve(next);
+    setRoster(next);
+  };
+  return { roster, update };
 }
 
 function catalogOf(roster: Roster | null, agentId: string | null, account: string | null): RosterModel[] {
@@ -98,9 +122,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
-  const loaded = useRoster(true);
-  const [fresh, setFresh] = useState<Roster | null>(null);
-  const roster = fresh ?? loaded;
+  const { roster, update: updateRoster } = useRoster(true, open);
   const [tab, setTab] = useState<string | "fav">(value.agentId ?? agents[0]?.id ?? "fav");
   const [query, setQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>(loadFavorites);
@@ -115,7 +137,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
     if (!open || tabAgent?.id !== "opencode") return;
     let alive = true;
     refreshRosterModels("opencode", value.agentId === "opencode" && value.account && !value.account.startsWith("pool:") ? value.account : null)
-      .then((next) => { if (alive) { rosterRequest = Promise.resolve(next); setFresh(next); } })
+      .then((next) => { if (alive) updateRoster(next); })
       .catch(() => undefined);
     return () => { alive = false; };
   }, [open, tabAgent?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir ou trocar de aba
@@ -275,7 +297,7 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
-  const roster = useRoster(!!agentId && EFFORT_AGENTS.has(agentId));
+  const { roster } = useRoster(!!agentId && EFFORT_AGENTS.has(agentId), open);
   if (!agentId || !EFFORT_AGENTS.has(agentId)) return null;
   const levels = reasoningOptions(model, catalogOf(roster, agentId, account));
   const efforts = levels.length > 0 ? levels : DEFAULT_EFFORTS;

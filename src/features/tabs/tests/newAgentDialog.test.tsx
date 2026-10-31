@@ -89,7 +89,8 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "list_skills") return [];
+      // Abrir o diálogo relê as contas do disco (uma criada fora da janela tem de aparecer).
+      if (cmd === "list_skills" || cmd === "list_agent_accounts" || cmd === "system_accounts" || cmd === "account_capable_agents") return [];
       return undefined;
     });
     host = document.createElement("div");
@@ -275,7 +276,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
   describe("integração com TabDialogs: prompt + memória em um único envio (P2)", () => {
     it("TUI com prompt e memória: sendWhenReady é chamado UMA vez com memória antes do prompt", async () => {
       mocks.invoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "list_skills") {
+        if (cmd === "list_skills" || cmd === "list_agent_accounts" || cmd === "system_accounts" || cmd === "account_capable_agents") {
           return [];
         }
         if (cmd === "memory_index") {
@@ -340,7 +341,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
 
     it("ligar memória, voltar e escolher shell com prompt: memória nunca é enviada ao shell", async () => {
       mocks.invoke.mockImplementation(async (cmd: string) => {
-        if (cmd === "list_skills") {
+        if (cmd === "list_skills" || cmd === "list_agent_accounts" || cmd === "system_accounts" || cmd === "account_capable_agents") {
           return [];
         }
         if (cmd === "memory_index") {
