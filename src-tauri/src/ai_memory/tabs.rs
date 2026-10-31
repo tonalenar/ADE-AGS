@@ -55,7 +55,7 @@ pub(crate) fn prepare_new_tab(
     argv: &[String],
     extras: &HashMap<String, String>,
 ) -> NewTab {
-    prepare_new_tab_with(supported_binary(cwd), tab, agent, dir, home, argv, extras)
+    prepare_new_tab_with(supported_binary(cwd), tab, agent, dir, home, cwd, argv, extras)
 }
 
 /// O miolo de [`prepare_new_tab`], com o binário já resolvido (`None` = ausente ou antigo): só grava arquivos.
@@ -65,6 +65,7 @@ pub(crate) fn prepare_new_tab_with(
     agent: &str,
     dir: &Path,
     home: &Path,
+    cwd: &Path,
     argv: &[String],
     extras: &HashMap<String, String>,
 ) -> NewTab {

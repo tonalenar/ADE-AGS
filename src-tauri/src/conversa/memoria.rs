@@ -60,7 +60,8 @@ pub fn prepare(inputs: Inputs<'_>) -> Memory {
         memory.state = "off:unavailable".into();
         return memory;
     };
-    let tab = prepare_new_tab_with(Some(binary), &id, "claude", inputs.dir, inputs.home, inputs.argv, inputs.extras);
+    // A pasta (`cwd`) só decide o projeto do MCP de Codex e OpenCode; o Claude, o único daqui, vai por hooks.
+    let tab = prepare_new_tab_with(Some(binary), &id, "claude", inputs.dir, inputs.home, inputs.dir, inputs.argv, inputs.extras);
     if tab.failed {
         memory.state = "off:failed".into();
         memory.notice = Some("A memória do ai-memory ficou fora desta conversa: não consegui preparar os hooks e o MCP dela. A conversa segue normalmente.".into());
