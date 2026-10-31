@@ -263,13 +263,23 @@ pub fn subject_of(conn: &Connection, id: &str) -> rusqlite::Result<Option<String
     Ok(conn.query_row("SELECT subject FROM chat_request WHERE id = ?1", params![id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten())
 }
 
+/// Quem respondeu um pedido e por quê (auditoria).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Decision {
+    pub request_id: String,
+    pub answer: String,
+    /// `person`, `policy` ou `rule:<id>`.
+    pub by: Option<String>,
+    pub why: Option<String>,
+}
+
 /// As últimas decisões de uma conversa (quem respondeu e por quê), da mais nova para a mais velha.
-pub fn recent_decisions(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<(String, String, Option<String>, Option<String>)>> {
+pub fn recent_decisions(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<Decision>> {
     let mut stmt = conn.prepare(
         "SELECT id, COALESCE(answer, ''), decided_by, decided_why FROM chat_request
           WHERE thread_id = ?1 AND state = 'answered' ORDER BY answered_at DESC, id LIMIT ?2",
     )?;
-    stmt.query_map(params![thread_id, limit], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?.collect()
+    stmt.query_map(params![thread_id, limit], |r| Ok(Decision { request_id: r.get(0)?, answer: r.get(1)?, by: r.get(2)?, why: r.get(3)? }))?.collect()
 }
 
 /// Os pedidos pendentes de TODAS as conversas ativas (a varredura os decide; ver `conversa::permission`).

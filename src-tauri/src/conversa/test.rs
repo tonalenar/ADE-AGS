@@ -994,8 +994,8 @@ mod permissao {
         assert!(store::answer_request(&conn, "q2", "deny", 6).unwrap());
         assert!(!store::answer_request_by(&conn, "q1", "deny", 7, "policy", None).unwrap(), "responder duas vezes não muda quem decidiu");
         let decisions = store::recent_decisions(&conn, "t1", 10).unwrap();
-        assert_eq!(decisions[0], ("q2".into(), "deny".into(), Some("person".into()), None));
-        assert_eq!(decisions[1], ("q1".into(), "allow".into(), Some("rule:r9".into()), Some("Liberado pela regra".into())));
+        let seen: Vec<(&str, &str, Option<&str>, Option<&str>)> = decisions.iter().map(|d| (d.request_id.as_str(), d.answer.as_str(), d.by.as_deref(), d.why.as_deref())).collect();
+        assert_eq!(seen, [("q2", "deny", Some("person"), None), ("q1", "allow", Some("rule:r9"), Some("Liberado pela regra"))]);
     }
 
     #[test]
