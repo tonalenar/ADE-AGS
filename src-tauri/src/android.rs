@@ -454,5 +454,90 @@ pub fn android_text(serial: String, text: String) -> Result<(), String> {
     type_text(&serial, &text)
 }
 
+// ── Controles do painel direito do modo chat ───────────────────────
+
+/// O que o painel mostra de um aparelho: o modelo, o nível da API e se é emulador.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AndroidInfo {
+    pub model: String,
+    pub api: Option<u32>,
+    pub emulator: bool,
+}
+
+/// Monta o `AndroidInfo` a partir das propriedades lidas (`getprop`). Pura.
+pub fn info_from(serial: &str, model: &str, sdk: &str, qemu: &str) -> AndroidInfo {
+    AndroidInfo {
+        model: model.trim().to_string(),
+        api: sdk.trim().parse().ok(),
+        emulator: serial.starts_with("emulator-") || qemu.trim() == "1",
+    }
+}
+
+/// `settings get system user_rotation` → 0..3 (o que não for número conta como 0, o retrato).
+pub fn parse_rotation(out: &str) -> u32 {
+    out.trim().parse::<u32>().ok().filter(|r| *r <= 3).unwrap_or(0)
+}
+
+/// A rotação depois de girar: alterna entre retrato (0) e paisagem (1).
+pub fn toggled_rotation(current: u32) -> u32 {
+    if current == 0 { 1 } else { 0 }
+}
+
+/// Quantas linhas do logcat pedir: padrão 200, no máximo 2000, no mínimo 1.
+pub fn logcat_lines(lines: Option<u32>) -> u32 {
+    lines.unwrap_or(200).clamp(1, 2000)
+}
+
+pub fn info(serial: &str) -> Result<AndroidInfo, String> {
+    let prop = |name: &str| adb_text(Some(serial), &["shell", "getprop", name], FAST);
+    let model = prop("ro.product.model")?;
+    let sdk = prop("ro.build.version.sdk").unwrap_or_default();
+    let qemu = prop("ro.kernel.qemu").unwrap_or_default();
+    Ok(info_from(serial, &model, &sdk, &qemu))
+}
+
+/// Trava a rotação automática e alterna retrato/paisagem; devolve a rotação nova (0 ou 1).
+pub fn rotate(serial: &str) -> Result<u32, String> {
+    adb(Some(serial), &["shell", "settings", "put", "system", "accelerometer_rotation", "0"], FAST)?;
+    let current = parse_rotation(&adb_text(Some(serial), &["shell", "settings", "get", "system", "user_rotation"], FAST)?);
+    let next = toggled_rotation(current);
+    adb(Some(serial), &["shell", "settings", "put", "system", "user_rotation", &next.to_string()], FAST)?;
+    Ok(next)
+}
+
+/// As últimas `lines` linhas do logcat (sem ficar ouvindo: `-d`).
+pub fn logcat(serial: &str, lines: Option<u32>) -> Result<String, String> {
+    adb_text(Some(serial), &["logcat", "-d", "-t", &logcat_lines(lines).to_string()], SLOW)
+}
+
+#[tauri::command(async)]
+pub fn android_info(serial: String) -> Result<AndroidInfo, String> {
+    info(&serial)
+}
+
+#[tauri::command(async)]
+pub fn android_rotate(serial: String) -> Result<u32, String> {
+    rotate(&serial)
+}
+
+#[tauri::command(async)]
+pub fn android_logcat(serial: String, lines: Option<u32>) -> Result<String, String> {
+    logcat(&serial, lines)
+}
+
+/// A captura num PNG temporário (como `simulator::ops::screenshot`); devolve o caminho absoluto, para
+/// anexar na conversa com os agentes.
+#[tauri::command(async)]
+pub fn android_screenshot(serial: String) -> Result<String, String> {
+    let png = screenshot(&serial)?;
+    let dir = std::env::temp_dir().join("ade-android");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let stem: String = serial.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).take(24).collect();
+    let file = dir.join(format!("{stem}-{}.png", crate::util::now_ts_ms()));
+    std::fs::write(&file, &png).map_err(|e| e.to_string())?;
+    Ok(file.to_string_lossy().into_owned())
+}
+
 #[cfg(test)]
 mod test;

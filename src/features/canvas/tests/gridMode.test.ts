@@ -15,6 +15,15 @@ describe("gridMode", () => {
     expect(gridTabs({ ...base, mode: "canvas" })).toBeNull();
     expect(gridTabs({ ...base, tabIds: ["a"] })).toBeNull();
   });
+  it("o time do chat também abre a grade, com os terminais dele (e a missão continua valendo antes)", () => {
+    const base = { on: true, mission: null, team: ["lead", "a", "b"], mode: "tabs", tabIds: ["x", "y", "lead"] };
+    expect(gridTabs(base)).toEqual(["lead", "a", "b"]);
+    expect(gridTabs({ ...base, on: false })).toBeNull();
+    expect(gridTabs({ ...base, mode: "canvas" })).toBeNull();
+    expect(gridTabs({ ...base, team: ["lead"] })).toBeNull();
+    expect(gridTabs({ ...base, team: null })).toBeNull();
+    expect(gridTabs({ ...base, mission: "m" })).toEqual(["x", "y", "lead"]);
+  });
   it("lo persistido es por misión y descarta basura", () => {
     expect(parseGrids('{"k1":true,"k2":false,"k3":"x"}')).toEqual({ k1: true });
     expect(parseGrids("no json")).toEqual({});

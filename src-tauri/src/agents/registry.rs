@@ -146,7 +146,7 @@ pub enum ModelSource {
     CodexAppServer,
     /// Modelos declarados por el perfil Claude Code y aliases observables en su CLI.
     ClaudeCode,
-    /// Se le pregunta al binario con `opencode models --verbose`, que trae proveedor,
+    /// Se le pregunta al binario con `opencode models` (sin `--verbose`: el 2.x lo rechaza), que trae proveedor,
     /// precio, contexto y si el modelo puede usar herramientas.
     OpencodeModels,
     /// Official Gemini CLI model IDs, with account entitlement left unverified.

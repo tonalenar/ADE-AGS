@@ -15,8 +15,13 @@ use crate::ipc::protocol::{arg_str, arg_str_opt};
 use crate::peer_queue::store::NewMessage;
 use crate::simulator::{model, ops};
 
-/// O que o nó mostra na conversa: quem fez o quê.
+/// O que o nó mostra na conversa: quem fez o quê. Um aparelho do painel do modo chat (`chat:…`) não tem nó
+/// no canvas nem conversa própria: não se emite nada para ele (o painel mostra a tela ao vivo e o agente
+/// responde no próprio terminal), em vez de mandar um evento para um nó que não existe.
 fn activity(app: &AppHandle, node: &str, agent: &str, kind: &str, text: &str) {
+    if node.starts_with(super::devices::CHAT_PREFIX) {
+        return;
+    }
     let _ = app.emit("simulator-activity", json!({ "node": node, "agent": agent, "kind": kind, "text": text, "at": crate::util::now_ts_ms() }));
 }
 
@@ -28,11 +33,12 @@ fn udid_of(portal: &Portal) -> Result<String, String> {
     portal.udid.clone().filter(|u| !u.is_empty()).ok_or_else(|| "Esse simulador ainda não tem aparelho escolhido: a pessoa escolhe na barra dele.".into())
 }
 
-/// O tamanho da tela em pontos, para `swipe --dir`.
+/// O tamanho da tela em pontos, como se vê (em paisagem, deitada: é o que o `shot` mostra), para `swipe --dir`
+/// e para o agente saber as coordenadas.
 fn screen_points(udid: &str) -> Result<(f64, f64), String> {
     let list = ops::devices()?;
     let device = model::pick(&list, udid)?;
-    Ok((device.width, device.height))
+    Ok(model::oriented_size((device.width, device.height), ops::orientation(udid)))
 }
 
 fn num(args: &Value, key: &str) -> Result<Option<f64>, String> {
@@ -53,6 +59,9 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
     let who = json!({ "id": id, "name": portal.name, "kind": "ios", "udid": portal.udid });
     let agent = agent_name(app, from);
     if action == "say" {
+        if id.starts_with(super::devices::CHAT_PREFIX) {
+            return Err("`ags device say` é a conversa do nó do simulador no canvas; este aparelho está no painel do chat: responda pelo seu terminal.".into());
+        }
         let text = arg_str(args, "text")?;
         activity(app, id, &agent, "message", text.trim());
         return Ok(json!({ "device": who, "said": true, "note": "A pessoa vê na conversa do simulador." }));

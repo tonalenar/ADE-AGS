@@ -20,6 +20,8 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
 import { useWorkMode } from "@/features/canvas/store";
 import { GRID_SLOT, gridColumns, useMissionGrid } from "@/features/canvas/gridMode";
+import { TeamTabMarks } from "@/features/chat/team/TeamTabMarks";
+import { useChatShell } from "@/app/uiStore";
 
 // @xyflow/react pesa y solo hace falta en la vista canvas. Un import estático lo metía en
 // el arranque aunque `{canvas && …}` no lo montara. El tablero ya está en el store
@@ -48,7 +50,11 @@ export function EditorArea() {
   useChatUnreadWatcher();
   useMissionWatcher();
   const layout = useWorkspaceLayout();
-  const canvas = useWorkMode() === "canvas";
+  // Com a casca do chat na tela, esta área só empresta o TerminalPanel (o terminal da conversa
+  // aberta): nada de canvas, grade ou grupos por cima da tela da conversa.
+  const chat = useChatShell();
+  const boardCanvas = useWorkMode() === "canvas";
+  const canvas = boardCanvas && !chat;
   const grid = useMissionGrid();
   const containerRef = useRef<HTMLDivElement>(null);
   const groups = layout ? allGroups(layout.root) : [];
@@ -91,17 +97,23 @@ export function EditorArea() {
   return (
     <div ref={containerRef} data-editor-area className="absolute inset-0">
       {/* El canvas va ABAJO: TerminalPanel ubica cada terminal viva encima de su nodo. */}
-      {canvas && (
-        <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
-          <CanvasView />
-        </Suspense>
+      {/* No chat o canvas fica montado e só escondido: os portais dele são navegadores, e um
+          navegador desmontado perde a página. `visibility` sozinho não basta — o @xyflow marca
+          cada nó medido com `visibility: visible`, que vence o herdado —, então ele também sai da
+          tela, sem mudar de tamanho (como as terminais ocultas do `TerminalPanel`). */}
+      {boardCanvas && (
+        <div className="absolute inset-0" style={chat ? { visibility: "hidden", transform: "translateX(-300vw)" } : undefined}>
+          <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
+            <CanvasView />
+          </Suspense>
+        </div>
       )}
       {/* TerminalPanel siempre montado para preservar PTYs */}
       <TerminalPanel />
       {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
       <ViewTabsHost />
-      {!canvas && grid && <MissionGrid ids={grid} />}
-      {!canvas && !grid && (
+      {!chat && !canvas && grid && <MissionGrid ids={grid} />}
+      {!chat && !canvas && !grid && (
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
           {layout ? (
             <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
@@ -110,7 +122,7 @@ export function EditorArea() {
           )}
         </div>
       )}
-      {!canvas && !grid && <TabDragOverlay />}
+      {!chat && !canvas && !grid && <TabDragOverlay />}
     </div>
   );
 }
@@ -144,7 +156,8 @@ function MissionGrid({ ids }: { ids: string[] }) {
               title={t("canvas.grid.focus", { name: title })} aria-label={t("canvas.grid.focus", { name: title })}
               className={`pointer-events-auto cursor-pointer shrink-0 h-6 px-2 flex items-center truncate text-left text-[11px] font-medium
                 bg-gray-100 dark:bg-gray-900 ${active ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"}`}>
-              {title}
+              <span className="min-w-0 truncate">{title}</span>
+              <span className="ml-2"><TeamTabMarks tabId={id} /></span>
             </button>
             <div data-slot={GRID_SLOT + id} className="relative flex-1 min-h-0" />
           </div>

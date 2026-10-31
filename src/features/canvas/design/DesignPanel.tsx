@@ -16,6 +16,7 @@ import { ownerProblem } from "./ownerLabel";
 import { defaultDesignId, resolveOwner } from "./owner";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
+import { designRoute } from "@/features/design/openRoute";
 
 /**
  * O canvas de Design: as pranchetas que o agente desenhou, para ver, comentar, editar e
@@ -146,6 +147,10 @@ export function DesignPanel({ details, reload, initial, onClose }: {
             <Button variant="custom" className={`${btn} bg-accent-500/15 text-accent-600 dark:text-accent-300`} disabled={approvedCount === 0}
               onClick={build} title={t("canvas.design.buildHint")}>{t("canvas.design.build")}</Button>
           </>
+        )}
+        {detail && (
+          <Button variant="custom" className={btn} onClick={() => { window.location.hash = `#${designRoute({ designId: detail.design.id })}`; }}
+            title={t("design.studio.openFull")}>{t("design.studio.openFullShort")}</Button>
         )}
         {detail && (
           <Button variant="custom" className={btn} onClick={() => archive(detail.design.id)} title={t("canvas.design.archiveHint")}>{t("canvas.design.archive")}</Button>

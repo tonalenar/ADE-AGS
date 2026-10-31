@@ -36,6 +36,8 @@ pub(crate) mod store;
 pub(crate) mod supervisor;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod opencode_models_test;
 pub(crate) mod types;
 pub(crate) mod worktrees;
 

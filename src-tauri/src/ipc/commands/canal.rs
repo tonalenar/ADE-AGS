@@ -82,11 +82,13 @@ struct Watched {
     next_resolve: Instant,
     signature: String,
     dialog_seen_at: Option<i64>,
+    /// O último "esperando aprovação" avisado à janela (modo chat), para só avisar a mudança.
+    awaiting: bool,
 }
 
 impl Watched {
     fn new(row: TabRow) -> Watched {
-        Watched { row, tracker: None, next_resolve: Instant::now(), signature: String::new(), dialog_seen_at: None }
+        Watched { row, tracker: None, next_resolve: Instant::now(), signature: String::new(), dialog_seen_at: None, awaiting: false }
     }
 }
 
@@ -163,6 +165,7 @@ fn poll_tab(app: &AppHandle, db: &DbConnection, w: &mut Watched, mode: Mode) {
         w.tracker = Some(Tracker::new(&w.row.agent_id, session, path));
     }
     let Some(tracker) = w.tracker.as_mut() else { return };
+    let grew_before = tracker.grew_at;
     if tracker.feed(at).is_err() {
         // O arquivo sumiu (o Codex compacta os antigos): sem estado, quem decide é a tela.
         w.tracker = None;
@@ -172,6 +175,10 @@ fn poll_tab(app: &AppHandle, db: &DbConnection, w: &mut Watched, mode: Mode) {
         return;
     }
     let snapshot = tracker.snapshot(&w.row.id, at);
+    // A conversa ganhou linhas: o modo chat relê a timeline (ver `conversation_timeline`).
+    if tracker.grew_at != grew_before {
+        let _ = app.emit("cc-conversation-grew", json!({ "tabId": w.row.id }));
+    }
     let signature = format!("{}|{:?}|{}|{}", tracker.state.signature(), snapshot.phase, snapshot.stale, mode.as_str());
     let state = tracker.state.clone();
     canal::publish(snapshot.clone());
@@ -191,6 +198,13 @@ fn poll_tab(app: &AppHandle, db: &DbConnection, w: &mut Watched, mode: Mode) {
     });
     if dialog.is_none() {
         w.dialog_seen_at = None;
+    }
+    // O modo chat mostra Aprovar/Recusar no composer só com o diálogo de verdade na tela.
+    let awaiting = dialog == Some(true);
+    if awaiting != w.awaiting {
+        w.awaiting = awaiting;
+        let tool = state.tools.first().map(|t| t.summary.clone()).unwrap_or_default();
+        let _ = app.emit("cc-conversation-approval", json!({ "tabId": w.row.id, "waiting": awaiting, "tool": tool }));
     }
     let signals = pending::signals(&state, dialog, at);
     let owner = pending::Owner { tab_id: &w.row.id, tab_name: &w.row.title, agent_id: &w.row.agent_id, session_id: tracker.session_id.as_str() };
@@ -283,6 +297,20 @@ fn notify_due(app: &AppHandle, db: &DbConnection) {
 #[tauri::command]
 pub fn structured_state_all() -> Vec<canal::Snapshot> {
     canal::all()
+}
+
+/// A conversa de uma aba como timeline (modo chat), lida do transcript que o canal já acompanha.
+/// Pelo id da aba, nunca por caminho: o front não escolhe que arquivo se lê. `None` = sem canal
+/// (agente sem transcript, sessão ainda sem arquivo).
+#[tauri::command]
+pub async fn conversation_timeline(tab_id: String) -> Result<Option<canal::timeline::Timeline>, String> {
+    let Some(snapshot) = canal::snapshot(&tab_id) else { return Ok(None) };
+    let path = PathBuf::from(&snapshot.path);
+    tauri::async_runtime::spawn_blocking(move || canal::timeline::read(&path, &snapshot.agent_id))
+        .await
+        .map_err(|e| e.to_string())?
+        .map(Some)
+        .map_err(|e| e.to_string())
 }
 
 /// `ags tab state <id>`.

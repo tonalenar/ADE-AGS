@@ -26,10 +26,14 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-use super::peers::{caller, delivery_lock, outgoing, outgoing_peer, spill_to_inbox, stale_note, submit_confirmed};
+use super::peers::{caller, delivery_lock, how_to_reply, how_to_reply_thread, outgoing, outgoing_peer, spill_to_inbox, stale_note, submit_confirmed};
 use super::tabs::{pty_id_for_tab, tab_list, wait_until_quiet};
 use crate::ipc::protocol::arg_str_opt;
+use crate::chat_team::model::THREAD_PREFIX;
+use crate::conversa::envio::{SendError, SendMode};
+use crate::database::DbConnection;
 use crate::peer_queue::store::{self, Admission, NewMessage, PeerMessage, State};
+use crate::peer_queue::thread_outbox::{self, Next, Target, ThreadPort};
 
 /// Quanto o comando de quem envia espera o destino ficar quieto. Passou disso, a mensagem vai
 /// para a fila e o remetente segue trabalhando (antes ele ficava preso até 60 s pelo trabalho
@@ -45,10 +49,10 @@ const WAIT_SLICE: Duration = Duration::from_secs(3);
 /// Quanto o entregador espera o terminal do destino existir (no arranque, o PTY nasce depois).
 const PTY_WAIT: Duration = Duration::from_secs(120);
 
-/// O que aconteceu com uma mensagem: entregue já, na fila, repetida, sem confirmação, cancelada ou
-/// recusada por um teto (aí `Sent::message` é a linha da recusa, com o motivo e a frase).
+/// O que aconteceu com uma mensagem: entregue já, na fila, repetida, sem confirmação, cancelada, junta a
+/// um `ask` idêntico que ainda espera (`Joined`) ou recusada por um teto (aí `Sent::message` é a linha da recusa, com o motivo e a frase).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed, Cancelled, Refused }
+pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed, Cancelled, Refused, Joined }
 
 /// O resultado de mandar uma mensagem: o que aconteceu e o registro dela.
 #[derive(Clone, Debug)]
@@ -81,7 +85,7 @@ fn notify_failures(app: &AppHandle, failed: &[PeerMessage]) {
     }
     // Sem a lista das abas não se sabe se o remetente existe: melhor não avisar ninguém.
     let Ok(listed) = tab_list(app) else { return };
-    let live = live_ids(&listed);
+    let live = live_ids(&listed, &active_threads(app));
     for msg in failed {
         if !live.contains(&msg.from_tab_id) {
             continue;
@@ -93,18 +97,37 @@ fn notify_failures(app: &AppHandle, failed: &[PeerMessage]) {
     }
 }
 
-fn live_ids(listed: &Value) -> HashSet<String> {
-    listed
+/// Pura: quem existe agora: as abas de terminal (`tab_list`) e as conversas por protocolo ativas
+/// (`thread:<id>`, que `tab_list` não lista). Sem as conversas, o arranque expirava tudo o que esperava
+/// uma e o aviso de falha nunca alcançava quem pediu de dentro de uma.
+fn live_ids(listed: &Value, threads: &[String]) -> HashSet<String> {
+    let tabs = listed
         .get("tabs")
         .and_then(Value::as_array)
-        .map(|rows| rows.iter().filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_string)).collect())
+        .map(|rows| rows.iter().filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_string)).collect::<HashSet<_>>())
+        .unwrap_or_default();
+    tabs.into_iter().chain(threads.iter().cloned()).collect()
+}
+
+/// As conversas por protocolo ativas, como ids de destino (`thread:<id>`).
+fn active_threads(app: &AppHandle) -> Vec<String> {
+    let Ok(db) = super::shared::db(app) else { return Vec::new() };
+    crate::conversa::api::threads(db.inner())
+        .map(|rows| rows.into_iter().filter(|t| t.state == "active").map(|t| format!("{THREAD_PREFIX}{}", t.id)).collect())
         .unwrap_or_default()
 }
 
 /// Avisa a interface que a fila de um destino mudou (o selo e a lista se atualizam).
 fn changed(app: &AppHandle, to: Option<&str>) {
     let _ = app.emit("cc-peer-queue", json!({ "toTabId": to }));
+    // O entregador de uma conversa (`thread:`) dorme no barramento: o aviso o acorda sem polling.
+    crate::bus::publish(Some(app), crate::bus::Publish::new(PEER_TOPIC).data(json!({ "toTabId": to })));
 }
+
+/// O tópico do barramento em que cada mudança da fila de mensagens é anunciada.
+pub const PEER_TOPIC: &str = "peer.queue";
+/// O tópico em que cada mensagem que chega a um estado final (ou muda de estado) é anunciada, com o id.
+pub const MESSAGE_TOPIC: &str = "peer.message";
 
 /// O `--id` do chamador, se veio (texto ou número).
 pub(super) fn client_id_arg(args: &Value) -> Option<String> {
@@ -119,6 +142,10 @@ pub(super) fn client_id_arg(args: &Value) -> Option<String> {
 /// caminho, se ele foi para a caixa de entrada). Uma mensagem que esperou ganha o aviso de que pode
 /// estar velha; `--raw` não, porque é um comando da TUI (`/compact`) e o aviso o quebraria.
 pub(crate) fn compose(msg: &PeerMessage, body: &str, waited: Duration) -> String {
+    retry_marked(msg, framed_text(msg, body, waited))
+}
+
+fn framed_text(msg: &PeerMessage, body: &str, waited: Duration) -> String {
     // O corpo de uma mensagem de par (`tell`/`ask`) vai no envelope de conteúdo não confiável; o que o
     // próprio app escreve (papel, linha da entrega, aviso) vai como sempre.
     let text = if matches!(msg.kind.as_str(), "tell" | "ask") {
@@ -126,11 +153,34 @@ pub(crate) fn compose(msg: &PeerMessage, body: &str, waited: Duration) -> String
     } else {
         outgoing(&msg.from_name, body, msg.reply, msg.raw)
     };
-    let text = match stale_note(waited).filter(|_| !msg.raw) {
+    match stale_note(waited).filter(|_| !msg.raw) {
         Some(note) => format!("{text}\n{note}"),
         None => text,
-    };
-    retry_marked(msg, text)
+    }
+}
+
+/// Pura: o que uma CONVERSA por protocolo recebe. Como o texto do terminal, mas o cabeçalho leva o número
+/// da mensagem (`[Mensagem #12 de X via ADE AGS]`): é o marcador que permite achar na timeline, depois de
+/// um reinício, se ela chegou (`thread_outbox::recover`) e ancorar a resposta de um `ask`. TODA mensagem a uma conversa
+/// leva o marcador. Um `--raw` (só o app o manda a uma conversa: o de um agente é recusado) leva um cabeçalho mínimo,
+/// `[Mensagem #12 de X] texto`, que não quebra nada numa conversa por protocolo (ela não é um terminal). Sem aviso de
+/// reenvio: o retry da conversa só repete o que provadamente não saiu.
+pub(crate) fn compose_thread(msg: &PeerMessage, waited: Duration) -> String {
+    if msg.raw {
+        return format!("[Mensagem #{} de {}] {}", msg.id, msg.from_name, msg.text);
+    }
+    let mut text = framed_text(msg, &msg.text, waited);
+    // O rodapé "como responder" do terminal manda copiar o `ask` por `tell`; numa conversa a resposta volta sozinha.
+    if matches!(msg.kind.as_str(), "tell" | "ask") {
+        let terminal = how_to_reply(&msg.from_name, msg.reply);
+        if let Some(at) = text.rfind(&terminal) {
+            text.replace_range(at..at + terminal.len(), &how_to_reply_thread(&msg.from_name, msg.reply));
+        }
+    }
+    match text.strip_prefix("[Mensagem de ") {
+        Some(rest) => format!("[Mensagem #{} de {rest}", msg.id),
+        None => text,
+    }
 }
 
 /// Pura: com `attempts > 1` a mensagem já foi tentada (digitada sem confirmação, ou reenviada com o
@@ -147,6 +197,7 @@ fn admit(app: &AppHandle, new: &NewMessage<'_>, initial: State) -> Result<Result
         Admission::New(message) => Ok(message),
         Admission::Repeat(message) => Err(Sent { delivery: Delivery::Duplicate, message, repeat: true }),
         Admission::Duplicate(message) => Err(Sent { delivery: Delivery::Duplicate, message, repeat: false }),
+        Admission::Joined(message) => Err(Sent { delivery: Delivery::Joined, message, repeat: false }),
         Admission::Refused(refusal) => Err(Sent { delivery: Delivery::Refused, message: refusal.record, repeat: false }),
     })
 }
@@ -179,6 +230,9 @@ fn type_claimed(app: &AppHandle, pty: u32, msg: &PeerMessage, notify: bool) -> R
     };
     let closed = with_db_now(app, |conn, now| store::finish(conn, msg.id, matches!(result, Ok(true)), note.as_deref(), now));
     changed(app, Some(&msg.to_tab_id));
+    if let Ok(Some(done)) = with_db(app, |conn| store::get(conn, msg.id)) {
+        announce_state(app, &done);
+    }
     if notify && !matches!(result, Ok(true)) && matches!(closed, Ok(true))
         && let Ok(Some(done)) = with_db(app, |conn| store::get(conn, msg.id))
     {
@@ -251,6 +305,12 @@ pub(super) fn begin_direct(app: &AppHandle, new: &NewMessage<'_>) -> Result<Resu
 pub(super) fn end_direct(app: &AppHandle, msg: &PeerMessage, error: Option<&str>) {
     let _ = with_db_now(app, |conn, now| store::finish(conn, msg.id, error.is_none(), error, now));
     changed(app, Some(&msg.to_tab_id));
+    announce_state(app, &fresh(app, msg.clone()));
+}
+
+/// A espera do `ask` acabou com resposta ou motivo: ele deixa de valer como «em andamento».
+pub(super) fn settle_ask(app: &AppHandle, id: i64) -> Result<bool, String> {
+    with_db_now(app, |conn, now| store::settle_ask(conn, id, now))
 }
 
 /// Uma mensagem já registrada com este id do chamador, se houver.
@@ -353,6 +413,9 @@ fn wait_turn(app: &AppHandle, to: &str, pty: u32) -> Turn {
 
 /// O laço do entregador de um destino: uma mensagem por vez, na ordem da fila, até ela esvaziar.
 fn run_worker(app: &AppHandle, to: &str) {
+    if to.starts_with(THREAD_PREFIX) {
+        return run_thread_worker(app, to);
+    }
     loop {
         let lock = delivery_lock(to);
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
@@ -392,6 +455,120 @@ fn run_worker(app: &AppHandle, to: &str) {
     }
 }
 
+// ── O entregador de uma conversa por protocolo (`thread:`) ─────────────
+
+/// A conversa de verdade, vista pelo consumidor da fila (`peer_queue::thread_outbox`).
+struct RealPort<'a> {
+    app: &'a AppHandle,
+    db: DbConnection,
+}
+
+impl ThreadPort for RealPort<'_> {
+    fn target(&self, thread: &str) -> Target {
+        let open = crate::conversa::api::thread(&self.db, thread).is_ok_and(|row| row.state == "active");
+        let status = crate::conversa::api::status(thread);
+        Target { open, alive: status.alive, working: status.working }
+    }
+
+    fn send(&self, thread: &str, text: &str, mode: SendMode) -> Result<(), SendError> {
+        tauri::async_runtime::block_on(crate::conversa::api::send_mode(self.app, &self.db, thread, text, mode, &[]))
+    }
+
+    fn items(&self, thread: &str) -> Option<Vec<crate::canal::timeline::Item>> {
+        crate::conversa::api::items(&self.db, thread).ok()
+    }
+}
+
+/// Publica no barramento o estado de uma mensagem (`ags events wait --topic peer.message`): quem espera uma
+/// resposta ou o recibo acorda quando ela chega, falha ou expira, sem polling.
+pub(crate) fn announce_state(app: &AppHandle, msg: &PeerMessage) {
+    let data = json!({
+        "id": msg.id, "state": msg.state, "reason": msg.reason, "from": msg.from_tab_id, "to": msg.to_tab_id,
+        "kind": msg.kind, "attempts": msg.attempts,
+    });
+    crate::bus::publish(Some(app), crate::bus::Publish::new(MESSAGE_TOPIC).data(data));
+}
+
+/// Conta o que a recuperação resolveu: avisa quem pediu das que não chegaram e publica os estados.
+fn after_recovery(app: &AppHandle, recovered: &thread_outbox::Recovered) {
+    for msg in recovered.delivered.iter().chain(&recovered.requeued).chain(&recovered.failed) {
+        announce_state(app, msg);
+    }
+    notify_failures(app, &recovered.failed);
+}
+
+/// Um turno do consumidor de `to`: envia o que está pronto (uma conversa de cada vez, na ordem) e avisa quem
+/// pediu das que não chegaram. Bloqueia no `delivery_lock` do destino se outro `pump` estiver rodando, então
+/// quem chama de fora (o `tell`) sai daqui com o resultado da mensagem dele já decidido.
+pub(super) fn pump_thread(app: &AppHandle, to: &str) -> Result<Next, String> {
+    let db = super::shared::db(app)?.inner().clone();
+    let lock = delivery_lock(to);
+    let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
+    let now = with_db(app, store::db_now)?;
+    let port = RealPort { app, db: db.clone() };
+    // O que um consumidor que morreu deixou em `delivering` (posse vencida) é resolvido antes de seguir.
+    let recovered = thread_outbox::recover(&db, &port, Some(to), false, now)?;
+    after_recovery(app, &recovered);
+    let drained = thread_outbox::drain(&db, &port, &compose_thread, to, now)?;
+    if drained.touched || !recovered.requeued.is_empty() {
+        changed(app, Some(to));
+    }
+    for msg in drained.delivered.iter().chain(&drained.failed) {
+        announce_state(app, msg);
+    }
+    notify_failures(app, &drained.failed);
+    Ok(drained.next)
+}
+
+/// Quanto dormir até `at` (ms do relógio do banco). O prazo é decidido pelo banco; o `Instant` só dorme.
+fn until(app: &AppHandle, at: i64) -> Duration {
+    let now = with_db(app, store::db_now).unwrap_or(at);
+    Duration::from_millis((at - now).max(1) as u64)
+}
+
+/// Pura: o aviso do barramento (da conversa, ou da fila) é desta conversa/fila?
+fn concerns(data: &Value, thread: &str, to: &str) -> bool {
+    data.get("threadId").and_then(Value::as_str) == Some(thread) || data.get("toTabId").and_then(Value::as_str) == Some(to)
+}
+
+/// O laço do entregador de uma conversa: processa a fila, dorme no barramento (a conversa ficou livre, a fila
+/// mudou) ou até o prazo (backoff, "entra no turno" dos 15 min) e repete. Sai quando a fila esvazia.
+fn run_thread_worker(app: &AppHandle, to: &str) {
+    let thread = to.strip_prefix(THREAD_PREFIX).unwrap_or(to).to_string();
+    let filter = crate::bus::Filter { topics: vec![super::conversas::BUS_TOPIC.into(), PEER_TOPIC.into()], ..Default::default() };
+    loop {
+        // O ponto de partida do que se espera vem ANTES do `pump`: um aviso durante ele não se perde.
+        let mut after = crate::bus::since(u64::MAX, &filter, 1).last_seq;
+        let timeout = match pump_thread(app, to) {
+            Ok(Next::Empty) => {
+                if retire_if_empty(app, to) {
+                    changed(app, Some(to));
+                    return;
+                }
+                continue;
+            }
+            Ok(Next::Busy(at)) | Ok(Next::At(at)) => until(app, at),
+            Err(_) => {
+                workers().lock().unwrap_or_else(|e| e.into_inner()).remove(to);
+                return;
+            }
+        };
+        let deadline = Instant::now() + timeout;
+        loop {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            let page = crate::bus::wait(after, &filter, 50, left);
+            after = page.last_seq;
+            // Só acorda quem importa: a mudança desta conversa ou desta fila (o barramento é de todas).
+            if page.events.iter().any(|e| concerns(&e.data, &thread, to)) {
+                break;
+            }
+        }
+    }
+}
+
 /// No arranque do app: o que estava sendo digitado vira `unconfirmed` (não se digita de novo), o
 /// que esperava uma aba que não existe mais (ou há mais de 1 h) vira `expired`, e o resto volta a
 /// andar, com o aviso de atraso na entrega.
@@ -400,9 +577,21 @@ pub fn start_resume(app: AppHandle) {
         crate::database::wait_until_db_ready();
         // Sem a lista das abas não se sabe quem existe: melhor não expirar nada.
         let Ok(listed) = tab_list(&app) else { return };
-        let live = live_ids(&listed);
+        let live = live_ids(&listed, &active_threads(&app));
         // `resume` também enfileira o aviso ao remetente de cada uma que terminou aqui.
-        let Ok(targets) = with_db_now(&app, |conn, now| store::resume(conn, &live, now)) else { return };
+        let Ok(mut targets) = with_db_now(&app, |conn, now| store::resume(conn, &live, now)) else { return };
+        // As que estavam sendo enviadas a uma conversa: o marcador na timeline diz se chegaram.
+        if let (Ok(db), Ok(now)) = (super::shared::db(&app), with_db(&app, store::db_now)) {
+            let port = RealPort { app: &app, db: db.inner().clone() };
+            if let Ok(recovered) = thread_outbox::recover(db.inner(), &port, None, true, now) {
+                after_recovery(&app, &recovered);
+                for msg in &recovered.requeued {
+                    if !targets.contains(&msg.to_tab_id) {
+                        targets.push(msg.to_tab_id.clone());
+                    }
+                }
+            }
+        }
         for to in &targets {
             ensure_worker(&app, to);
         }
@@ -461,6 +650,47 @@ pub fn peer_queue_send_now(app: AppHandle, id: i64) -> Result<PeerMessage, Strin
     changed(&app, Some(&msg.to_tab_id));
     ensure_worker(&app, &msg.to_tab_id);
     Ok(msg)
+}
+
+// ── `ags peer receipt` ───────────────────────────────────────────────
+
+/// Pura: o recibo de uma mensagem para quem a mandou. `outcome` resume o estado: `pending` (na fila ou sendo
+/// entregue), `delivered` ou `failed` (não chegou: expirada, sem confirmação, cancelada ou recusada; o motivo
+/// vai em `reason`/`note`). Repetir o `--id` devolve este mesmo recibo, sem enviar de novo.
+pub(crate) fn receipt(msg: &PeerMessage, now_ms: i64) -> Value {
+    let outcome = match msg.state {
+        State::Queued | State::Delivering => "pending",
+        State::Delivered => "delivered",
+        State::Unconfirmed | State::Cancelled | State::Expired | State::Refused => "failed",
+    };
+    json!({
+        "messageId": msg.id, "clientId": msg.client_id, "kind": msg.kind, "state": msg.state, "stateLabel": msg.state.label(),
+        "outcome": outcome, "to": if msg.to_name.is_empty() { &msg.to_tab_id } else { &msg.to_name }, "toTabId": msg.to_tab_id,
+        "attempts": msg.attempts, "reason": msg.reason, "note": msg.note, "mode": msg.delivery_mode,
+        "ageS": ((now_ms - msg.created_at).max(0)) / 1000, "deliveredAt": msg.delivered_at,
+        // Um retry com backoff: quando volta a tentar (ms até lá; `null` = já).
+        "retryInMs": msg.available_at.map(|at| (at - now_ms).max(0)),
+        "answered": msg.settled_at.is_some(),
+    })
+}
+
+/// `ags peer receipt <número | --id chave>`: o estado de uma mensagem SUA (a entrega a uma conversa é
+/// assíncrona: o `tell` devolve o número, e aqui se vê se chegou, quantas tentativas, e por que falhou).
+pub(super) fn peer_receipt(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let raw = client_id_arg(args).ok_or("Uso: ags peer receipt <número da mensagem> (ou o --id que você deu a ela)")?;
+    let raw = raw.trim().trim_start_matches('#').to_string();
+    let found = match raw.parse::<i64>() {
+        Ok(id) => with_db(app, |conn| store::get(conn, id))?.filter(|m| m.from_tab_id == from),
+        Err(_) => None,
+    };
+    let found = match found {
+        Some(m) => Some(m),
+        None => with_db(app, |conn| store::by_client_id(conn, &from, Some(&raw)))?,
+    };
+    let msg = found.ok_or_else(|| format!("Não achei uma mensagem sua com o número ou o id '{raw}'."))?;
+    let at = with_db(app, store::db_now)?;
+    Ok(receipt(&msg, at))
 }
 
 // ── `ags peer queue` ─────────────────────────────────────────────────
@@ -522,6 +752,7 @@ mod test {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "\n  rode os testes\nsegunda linha".into(), raw, reply,
             state: State::Queued, position: 1, force_now: false, attempts: 0, created_at: 1_000, updated_at: 1_000,
             delivered_at: None, edited_at: None, note: None, depth: 0, parent_id: None, answer_of: None, reason: None,
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None, sending_at: None,
         }
     }
 
@@ -565,6 +796,103 @@ oi
         assert_eq!(line["to"], "QA");
         assert_eq!(line["state"], "queued");
         assert_eq!(line["clientId"], "r1");
+    }
+
+    // ── Etapa 2 (item 2): o aviso de falha alcança o remetente `thread:` ──
+    // Usa o conjunto de vivos que `start_resume` monta (`live_ids`: abas de `tab_list` + conversas ativas)
+    // e o `resume` do store, como no arranque do app.
+
+    fn arranque_com_remetente_conversa(active: &[&str]) -> (Connection, PeerMessage) {
+        let conn = crate::database::test_db();
+        let new = NewMessage { kind: "ask", from_tab_id: "thread:lead", from_name: "Líder", to_tab_id: "thread:t1", to_name: "QA", text: "rode os testes", reply: true, ..Default::default() };
+        // Esperava na fila da conversa `t1`, que foi apagada enquanto o app estava fechado.
+        let Admission::New(sent) = store::admit(&conn, &new, State::Queued, 1_000).unwrap() else { panic!("esperava nova") };
+        let listed = json!({ "tabs": [{ "id": "tab-shell" }, { "id": "tab-codex" }] });
+        let threads: Vec<String> = active.iter().map(|t| t.to_string()).collect();
+        store::resume(&conn, &live_ids(&listed, &threads), 2_000).unwrap();
+        (conn, sent)
+    }
+
+    #[test]
+    fn o_remetente_conversa_recebe_o_aviso_de_que_a_mensagem_falhou() {
+        let (conn, sent) = arranque_com_remetente_conversa(&["thread:lead"]);
+        assert_eq!(store::get(&conn, sent.id).unwrap().unwrap().state, State::Expired, "a mensagem não tem mais para onde ir");
+        let notices = store::queued_for(&conn, "thread:lead").unwrap();
+        assert!(notices.iter().any(|m| m.kind == "notice" && m.text.contains("não chegou")), "sem aviso a {sent:?}: {notices:?}");
+    }
+
+    #[test]
+    fn sem_a_conversa_do_remetente_viva_nao_ha_para_quem_avisar() {
+        let (conn, _) = arranque_com_remetente_conversa(&[]);
+        assert!(store::queued_for(&conn, "thread:lead").unwrap().is_empty(), "conversa concluída ou apagada: ninguém a avisar");
+    }
+
+    #[test]
+    fn os_vivos_juntam_as_abas_e_as_conversas_ativas() {
+        let live = live_ids(&json!({ "tabs": [{ "id": "a" }, { "id": "b" }] }), &["thread:t1".to_string()]);
+        assert_eq!(live, ["a", "b", "thread:t1"].map(String::from).into_iter().collect::<HashSet<_>>());
+        assert!(live_ids(&json!({}), &[]).is_empty());
+    }
+
+    #[test]
+    fn a_conversa_recebe_o_numero_da_mensagem_no_cabecalho_e_o_terminal_nao() {
+        let mut m = msg(false, false);
+        m.attempts = 3;
+        let thread = compose_thread(&m, Duration::ZERO);
+        assert!(thread.starts_with("[Mensagem #7 de Líder via ADE AGS] "), "{thread}");
+        assert!(thread.contains("rode os testes"), "{thread}");
+        assert!(!thread.contains(store::RETRY_MARK), "o retry da conversa só repete o que não saiu: sem aviso de reenvio");
+        assert!(compose(&m, "oi", Duration::ZERO).starts_with(&format!("{} [Mensagem de Líder", store::RETRY_MARK)), "o terminal segue como antes");
+        // Um `--raw` que o app mesmo manda (o aviso de falha) também leva o marcador, num cabeçalho mínimo: sem ele a
+        // recuperação não prova se chegou. (O `--raw` de um agente a uma conversa é recusado antes.)
+        let mut raw = msg(true, false);
+        raw.text = "aviso do app".into();
+        assert_eq!(compose_thread(&raw, Duration::ZERO), "[Mensagem #7 de Líder] aviso do app");
+        // O aviso de atraso também vai.
+        assert!(compose_thread(&m, Duration::from_secs(300)).contains("ficou na fila"));
+    }
+
+    #[test]
+    fn o_ask_a_uma_conversa_diz_que_a_resposta_volta_sozinha_e_nao_manda_copia_por_tell() {
+        let ask = compose_thread(&msg(false, true), Duration::ZERO);
+        assert!(ask.contains("volta sozinha a quem perguntou"), "{ask}");
+        assert!(ask.contains("não a repita por `ags peer tell`"), "{ask}");
+        assert!(!ask.contains("Se demorar, mande-a também"), "o rodapé do terminal mandava a cópia por tell: {ask}");
+        let tell = compose_thread(&msg(false, false), Duration::ZERO);
+        assert!(tell.contains("Não responda só para confirmar"), "{tell}");
+        assert!(tell.contains("ags peer tell \"Líder\""), "o caminho para o resultado ou o bloqueio segue: {tell}");
+        // O terminal não muda: a resposta lê-se na tela e a cópia é a reserva de quem demora.
+        assert!(compose(&msg(false, true), "oi", Duration::ZERO).contains("Se demorar, mande-a também com: ags peer tell"));
+    }
+
+    #[test]
+    fn o_entregador_so_acorda_com_o_aviso_da_sua_conversa_ou_da_sua_fila() {
+        assert!(concerns(&json!({ "threadId": "t1", "type": "phase" }), "t1", "thread:t1"));
+        assert!(concerns(&json!({ "toTabId": "thread:t1" }), "t1", "thread:t1"));
+        assert!(!concerns(&json!({ "threadId": "t2" }), "t1", "thread:t1"));
+        assert!(!concerns(&json!({ "toTabId": "tab-9" }), "t1", "thread:t1"));
+        assert!(!concerns(&json!({ "toTabId": null }), "t1", "thread:t1"));
+    }
+
+    #[test]
+    fn o_recibo_diz_se_esta_pendente_entregue_ou_falhou_e_quando_tenta_de_novo() {
+        let mut m = msg(false, false);
+        m.attempts = 2;
+        m.available_at = Some(1_400);
+        let pending = receipt(&m, 1_000);
+        assert_eq!((pending["outcome"].as_str(), pending["retryInMs"].as_i64(), pending["attempts"].as_i64()), (Some("pending"), Some(400), Some(2)));
+        m.state = State::Delivered;
+        assert_eq!(receipt(&m, 2_000)["outcome"], "delivered");
+        for state in [State::Unconfirmed, State::Cancelled, State::Expired, State::Refused] {
+            m.state = state;
+            assert_eq!(receipt(&m, 2_000)["outcome"], "failed", "{state:?}");
+        }
+        m.state = State::Expired;
+        m.reason = Some("delivery_failed".into());
+        m.note = Some("A conversa de destino foi concluída ou apagada.".into());
+        let failed = receipt(&m, 2_000);
+        assert_eq!((failed["reason"].as_str(), failed["to"].as_str()), (Some("delivery_failed"), Some("QA")));
+        assert_eq!(failed["retryInMs"].as_i64(), Some(0), "o backoff já venceu");
     }
 
     #[test]

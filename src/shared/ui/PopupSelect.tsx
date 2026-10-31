@@ -84,7 +84,9 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
     const r = buttonRef.current.getBoundingClientRect();
     const below = window.innerHeight - r.bottom - 12;
     const above = r.top - 12;
-    const want = Math.min(320, options.length * 28 + 12);
+    // Linhas de 30px, cabeçalhos de grupo de ~24px e o respiro de 12px do menu: errar para menos põe barra de rolagem à toa.
+    const groups = new Set(options.map((o) => o.group).filter(Boolean)).size;
+    const want = Math.min(320, options.length * 30 + groups * 24 + 12);
     const up = below < Math.min(want, 180) && above > below;
     setPos({
       left: Math.max(8, Math.min(r.left, window.innerWidth - Math.max(r.width, 180) - 8)),
@@ -210,6 +212,7 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
       {open && pos && createPortal(
         <div
           ref={menuRef}
+          data-popup-menu=""
           id={listId}
           role="listbox"
           tabIndex={-1}

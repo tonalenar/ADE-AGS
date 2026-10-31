@@ -156,3 +156,45 @@ export function urlAfterProviderChange(current: string, next: DecisionProviderId
   if (!current.trim() || knownUrl(current)) return PROVIDER_URL[next];
   return current;
 }
+
+/** Como cada ponto age (ver `docs/agentes/JEV.md`, tabela dos pontos): os selos da prancheta 7. */
+export type PointMode = "shadow" | "help" | "suggest" | "decide";
+
+export const POINT_MODE: Record<string, PointMode> = {
+  memory_approval: "shadow",
+  dream_triage: "shadow",
+  fleet_gate: "shadow",
+  mission_gate: "shadow",
+  delivery_gate: "help",
+  memory_relevance: "help",
+  turn_routing: "suggest",
+  browser_step: "decide",
+  browser_vision: "decide",
+};
+
+export interface ShadowSummary {
+  /** Concordância ponderada pelos casos comparados; `null` sem comparação. */
+  agreement: number | null;
+  /** O pior p50 e o pior p95 entre os pontos (ms). */
+  p50Ms: number | null;
+  p95Ms: number | null;
+  /** Erros ponderados pelo total de consultas; `null` sem consulta. */
+  errorRate: number | null;
+  /** Casos comparados, somados. */
+  sample: number;
+}
+
+/** O resumo do relatório do modo sombra (o cartão da direita no chat). Pura. */
+export function shadowSummary(points: { total: number; compared: number; agreementRate: number; p50Ms: number | null; p95Ms: number | null; errorRate: number }[]): ShadowSummary {
+  const sample = points.reduce((n, p) => n + p.compared, 0);
+  const total = points.reduce((n, p) => n + p.total, 0);
+  const worst = (pick: (p: (typeof points)[number]) => number | null) =>
+    points.reduce<number | null>((max, p) => { const v = pick(p); return v === null ? max : max === null ? v : Math.max(max, v); }, null);
+  return {
+    agreement: sample > 0 ? points.reduce((n, p) => n + p.agreementRate * p.compared, 0) / sample : null,
+    p50Ms: worst((p) => p.p50Ms),
+    p95Ms: worst((p) => p.p95Ms),
+    errorRate: total > 0 ? points.reduce((n, p) => n + p.errorRate * p.total, 0) / total : null,
+    sample,
+  };
+}

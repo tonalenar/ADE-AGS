@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import { SHORTCUTS } from "@/app/shortcuts";
+import { TEAM_SHORTCUT_KEYS } from "@/features/chat/panelMenu";
 import { SettingsSection } from "@/features/settings/SettingsSection";
 
 /** Cada tecla en su propia caja, como se dibuja una tecla. */
@@ -40,13 +41,20 @@ export function ShortcutsSection() {
         bg-gray-100/70 dark:bg-surface-raised/60
         divide-y divide-gray-200 dark:divide-white/[0.08]">
         {SHORTCUTS.map((s) => (
-          <li key={s.display} className="flex items-center justify-between gap-4 min-h-10 px-3 py-2">
+          <li key={s.display} className="flex items-center justify-between gap-4 px-4 py-3.5">
             <span title={t(s.labelKey)} className="text-[13px] text-gray-900 dark:text-gray-100 min-w-0 truncate">
               {t(s.labelKey)}
             </span>
             <Chord display={s.display} />
           </li>
         ))}
+        {/* O atalho do modo chat (painel Time) vive na casca do chat, não na tabela global: ver `chat/panelMenu.ts`. */}
+        <li className="flex items-center justify-between gap-4 px-4 py-3.5">
+          <span title={t("chat.team.shortcut")} className="text-[13px] text-gray-900 dark:text-gray-100 min-w-0 truncate">
+            {t("chat.team.shortcut")}
+          </span>
+          <Chord display={TEAM_SHORTCUT_KEYS} />
+        </li>
       </ul>
 
       {/* Lo que un atajo global le saca a la terminal se dice acá y no se descubre a los

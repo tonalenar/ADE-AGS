@@ -96,6 +96,11 @@ Cuidados:
 - As versões de `windows`/`windows-sys`/`webview2-com` precisam casar com as que o tauri/wry usa; senão o app quebra com `STATUS_ENTRYPOINT_NOT_FOUND`.
 - `main.rs:1` tem `windows_subsystem` marcado "DO NOT REMOVE".
 - Fechar uma janela nunca abre outra no lugar (`window/manager.rs`).
+- Moldura das janelas:
+  - **macOS:** nativa, com barra `Overlay` e sem título. Os semáforos vão aonde o front pede (`window/controls.rs`).
+  - **Windows e Linux:** sem moldura.
+  - Janela criada em código passa por `native_frame()`.
+  - A main tem a cópia inteira em `tauri.macos.conf.json`: mudou a janela no `tauri.conf.json`, mude lá também.
 
 ## Build e testes
 - `cd src-tauri && cargo test --lib --bin ags` é a mesma suíte do CI. Tempos: ~68 s completa; build frio ~205 s; incremental ~15 s.

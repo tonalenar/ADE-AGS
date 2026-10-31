@@ -82,10 +82,10 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
 
         let mut builder = tauri::WebviewWindowBuilder::new(app, &label, tauri::WebviewUrl::App("/".into()))
             .title(&label)
-            .decorations(false)
             .transparent(true)
             .maximized(true)
             .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
+        builder = builder.native_frame();
 
         if let Some((width, height)) = usable_size(w.width, w.height) {
             builder = builder.inner_size(width as f64, height as f64);
@@ -124,6 +124,26 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
     Ok(())
 }
 
+/// A moldura de cada sistema. No macOS, a nativa com a barra de título `Overlay` e sem título: o conteúdo vai
+/// até o topo e só os semáforos do AppKit aparecem, no lugar que o front pede (`controls::window_controls_place`).
+/// Nos outros, sem moldura: o front desenha os botões.
+trait NativeFrame {
+    fn native_frame(self) -> Self;
+}
+
+impl<'a, R: tauri::Runtime, M: tauri::Manager<R>> NativeFrame for tauri::WebviewWindowBuilder<'a, R, M> {
+    fn native_frame(self) -> Self {
+        #[cfg(target_os = "macos")]
+        {
+            self.decorations(true).title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            self.decorations(false)
+        }
+    }
+}
+
 /// Crea una ventana nativa en blanco (sin tabs) para un workspace específico. Usado
 /// cuando un workspace se queda sin ninguna ventana viva que mostrar: al cerrar la única
 /// ventana que le quedaba (ver `close_and_forget_window`), o al intentar "abrir" un
@@ -136,9 +156,9 @@ fn spawn_blank_window(app: &AppHandle, db: &DbConnection, workspace_id: &str) ->
         .title(&label)
         .inner_size(900.0, 650.0)
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-        .decorations(false)
         .transparent(true)
         .maximized(true)
+        .native_frame()
         .build()
         .map_err(|e| e.to_string())?;
     let _ = app.emit("cc-workspace-changed", ());
@@ -242,9 +262,9 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
         .title(&label)
         .inner_size(900.0, 650.0)
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-        .decorations(false)
         .transparent(true)
         .maximized(true)
+        .native_frame()
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -335,9 +355,9 @@ pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(),
         .title(&label)
         .inner_size(900.0, 650.0)
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
-        .decorations(false)
         .transparent(true)
         .maximized(true)
+        .native_frame()
         .build()
         .map_err(|e| e.to_string())?;
     // Las ventanas que ya estaban abiertas tienen que enterarse de que el workspace pasó a

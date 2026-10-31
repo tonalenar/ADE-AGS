@@ -36,10 +36,10 @@ export function FixRoundsSetting() {
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 min-h-10 px-3 py-2">
+    <div className="flex items-center justify-between gap-4 px-4 py-3.5">
       <div className="flex flex-col gap-px min-w-0">
-        <span className="text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{t("settings.fixRounds.label")}</span>
-        <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{t("settings.fixRounds.desc")}</span>
+        <span className="text-[14px] font-medium text-gray-900 dark:text-white">{t("settings.fixRounds.label")}</span>
+        <span className="text-[13px] text-gray-500 dark:text-white/50">{t("settings.fixRounds.desc")}</span>
       </div>
       <input
         type="number"

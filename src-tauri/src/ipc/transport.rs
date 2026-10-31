@@ -73,9 +73,9 @@ fn write_and_read(mut stream: impl Read + Write, payload: &str) -> Result<String
     let mut response = String::new();
     BufReader::new(stream)
         .read_line(&mut response)
-        .map_err(|e| ExchangeError::gone(format!("No llegó respuesta: {e}")))?;
+        .map_err(|e| ExchangeError::gone(format!("O app não respondeu ao comando: {e}")))?;
     if response.trim().is_empty() {
-        return Err(ExchangeError::gone("No llegó respuesta"));
+        return Err(ExchangeError::gone("O app fechou a conexão sem responder (o comando pode ter falhado dentro dele). Veja o log do app."));
     }
     Ok(response)
 }
@@ -123,7 +123,7 @@ fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Resu
     });
     match rx.recv_timeout(timeout) {
         Ok(result) => result,
-        Err(_) => Err(ExchangeError::gone("No llegó respuesta")),
+        Err(_) => Err(ExchangeError::gone("O app não respondeu dentro do prazo.")),
     }
 }
 

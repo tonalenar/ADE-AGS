@@ -11,7 +11,12 @@
 //! `ipc/commands/peer_queue.rs`.
 
 pub mod store;
+pub mod thread_outbox;
+#[cfg(test)]
+mod caracterizacao;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_thread_outbox;
 
 pub use store::migrate;

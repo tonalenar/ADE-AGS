@@ -2,12 +2,15 @@
 //!
 //! Cada módulo cubre un dominio; `app` es el que los ensambla y arranca Tauri.
 
+mod ai_memory;
 mod accounts;
 mod agents;
 mod canal;
 mod canvas;
 mod chat;
+mod chat_team;
 mod compare;
+mod conversa;
 mod app;
 mod bus;
 mod database;

@@ -17,10 +17,10 @@ import { ConnectorsSection, ContextSection } from "./AgentSections";
 import { CARD, Row, Section } from "./Section";
 import { backgroundTasks, branchPulls, folderLabel, formatElapsed } from "./panelModel";
 
-const PR_STATE: Record<string, string> = { open: "text-emerald-500", merged: "text-violet-500", closed: "text-gray-400" };
+export const PR_STATE: Record<string, string> = { open: "text-emerald-500", merged: "text-violet-500", closed: "text-gray-400" };
 
 /** Os PRs da branch com o +/− de cada um. Pede de novo quando a branch muda e a cada minuto. */
-function usePulls(cwd: string | null, branch: string | null) {
+export function usePulls(cwd: string | null, branch: string | null) {
   const [pulls, setPulls] = useState<ForgeItem[] | null>(null);
   const [stats, setStats] = useState<Record<number, { add: number; del: number }>>({});
   useEffect(() => {

@@ -42,6 +42,16 @@ struct CGRect {
     size: CGSize,
 }
 
+/// A matriz de transformação do Core Animation (`CATransform3D`).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CATransform3D([f64; 16]);
+
+#[link(name = "QuartzCore", kind = "framework")]
+unsafe extern "C" {
+    fn CATransform3DMakeRotation(angle: f64, x: f64, y: f64, z: f64) -> CATransform3D;
+}
+
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
     fn CGPathCreateWithRect(rect: CGRect, transform: *const c_void) -> *mut c_void;
@@ -60,6 +70,11 @@ const SHIFT: u32 = 0xe1;
 
 pub struct Ivars {
     hid: Arc<Hid>,
+    /// A subcamada que mostra a `IOSurface`. A superfície fica sempre em retrato; em paisagem (ou de cabeça para
+    /// baixo) esta camada gira dentro da camada da view, que guarda o fundo e a máscara.
+    content: Retained<AnyObject>,
+    /// A orientação do aparelho (`UIDeviceOrientation`) que a tela mostra agora.
+    orientation: Cell<u32>,
     /// Onde a tela recebe toque, em coordenadas da view (origem no topo). Vazio = nada à vista.
     region: RefCell<Vec<Rect>>,
     touching: Cell<bool>,
@@ -161,19 +176,28 @@ define_class!(
 
 impl ScreenView {
     fn create(mtm: MainThreadMarker, hid: Arc<Hid>) -> Retained<Self> {
-        let this = Self::alloc(mtm).set_ivars(Ivars { hid, region: RefCell::new(Vec::new()), touching: Cell::new(false), scrolling: Cell::new(None) });
+        let gravity = ns_string("resize");
+        // SAFETY: CALayer público; `layer` devolve +0 (autorelease) e a subcamada é retida nos ivars.
+        let content = unsafe {
+            let content = call!(class(c"CALayer").expect("QuartzCore"), sel!(layer); -> *mut AnyObject);
+            call!(content, sel!(setContentsGravity:), Retained::as_ptr(&gravity) as *mut AnyObject => *mut AnyObject; -> ());
+            retain(content).expect("CALayer")
+        };
+        let this = Self::alloc(mtm).set_ivars(Ivars {
+            hid, content, orientation: Cell::new(1), region: RefCell::new(Vec::new()), touching: Cell::new(false), scrolling: Cell::new(None),
+        });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
-        // Camada nossa (layer-hosting): o AppKit não redesenha por cima do que a superfície mostra.
+        // Camada nossa (layer-hosting): o AppKit não redesenha por cima do que a superfície mostra. Ela tem o fundo
+        // e a máscara; a superfície vai na subcamada `content`, que pode girar.
         // SAFETY: CALayer público.
         unsafe {
             let layer_class = class(c"CALayer").expect("QuartzCore");
             let layer = call!(layer_class, sel!(layer); -> *mut AnyObject);
-            let gravity = ns_string("resize");
-            call!(layer, sel!(setContentsGravity:), Retained::as_ptr(&gravity) as *mut AnyObject => *mut AnyObject; -> ());
             let black = call!(class(c"NSColor").expect("AppKit"), sel!(blackColor); -> *mut AnyObject);
             let cg = call!(black, sel!(CGColor); -> *mut c_void);
             call!(layer, sel!(setBackgroundColor:), cg => *mut c_void; -> ());
+            call!(layer, sel!(addSublayer:), Retained::as_ptr(&view.ivars().content) as *mut AnyObject => *mut AnyObject; -> ());
             call!(&*view as *const Self as *mut AnyObject, sel!(setLayer:), layer => *mut AnyObject; -> ());
         }
         view.setWantsLayer(true);
@@ -194,10 +218,36 @@ impl ScreenView {
         view
     }
 
+    /// Um toque em (x, y) da view: a proporção da tela como se vê, levada para a superfície em retrato (a do HID).
     fn touch_at(&self, x: f64, y: f64, phase: Phase) {
         let bounds = self.bounds();
         if let Some(ratio) = model::touch_ratio(x, y, bounds.size.width, bounds.size.height) {
-            let _ = self.ivars().hid.touch(ratio, phase);
+            let _ = self.ivars().hid.touch(model::native_ratio(ratio, self.ivars().orientation.get()), phase);
+        }
+    }
+
+    /// Põe a superfície em pé dentro da view para a orientação `orientation`: a subcamada fica com o tamanho da
+    /// superfície (em paisagem, a view deitada com largura e altura trocadas), no centro, girada em quartos de
+    /// volta. A máscara e a área de toque ficam na camada da view, então continuam no retângulo da view.
+    fn orient(&self, orientation: u32) {
+        self.ivars().orientation.set(orientation);
+        let bounds = self.bounds();
+        let (w, h) = (bounds.size.width, bounds.size.height);
+        let (cw, ch) = model::oriented_size((w, h), orientation);
+        let turns = f64::from(model::display_quarter_turns(orientation));
+        let content = Retained::as_ptr(&self.ivars().content) as *mut AnyObject;
+        // SAFETY: CALayer público, na thread da interface, sem animação.
+        unsafe {
+            // Com a geometria virada (a da view, origem no topo) um ângulo positivo gira no sentido horário; sem
+            // ela, no anti-horário. Medido: a camada da view vem virada (`contentsAreFlipped`).
+            let flipped = call!(self.layer(), sel!(contentsAreFlipped); -> bool);
+            let angle = turns * std::f64::consts::FRAC_PI_2 * if flipped { 1.0 } else { -1.0 };
+            transaction(|| {
+                call!(content, sel!(setTransform:), CATransform3DMakeRotation(0.0, 0.0, 0.0, 1.0) => CATransform3D; -> ());
+                call!(content, sel!(setBounds:), cg_rect(0.0, 0.0, cw, ch) => CGRect; -> ());
+                call!(content, sel!(setPosition:), CGPoint { x: w / 2.0, y: h / 2.0 } => CGPoint; -> ());
+                call!(content, sel!(setTransform:), CATransform3DMakeRotation(angle, 0.0, 0.0, 1.0) => CATransform3D; -> ());
+            });
         }
     }
 
@@ -248,10 +298,7 @@ impl ScreenView {
 
     fn touch(&self, event: &NSEvent, phase: Phase) {
         let point = self.convertPoint_fromView(event.locationInWindow(), None);
-        let bounds = self.bounds();
-        if let Some(ratio) = model::touch_ratio(point.x, point.y, bounds.size.width, bounds.size.height) {
-            let _ = self.ivars().hid.touch(ratio, phase);
-        }
+        self.touch_at(point.x, point.y, phase);
     }
 
     /// Teclas do Mac → teclado do iOS: as com nome pelo código da tecla, o resto pelo caractere.
@@ -439,6 +486,8 @@ impl Presenter {
 
 /// Uma tela aberta: a view, a tela do simulador e os registros de callback (vivos enquanto à vista).
 struct Entry {
+    /// O aparelho que a tela mostra (para a orientação dele).
+    udid: String,
     view: Retained<ScreenView>,
     screen: Screen,
     presenter: Arc<Presenter>,
@@ -584,6 +633,8 @@ fn apply(entry: &Entry, webview: &NSView, place: &Place) {
         return;
     };
     view.setFrame(frame_in_superview(webview, place.rect));
+    // A orientação é relida a cada lugar novo: depois de girar, o frontend deita a moldura e manda o retângulo.
+    view.orient(crate::simulator::ops::orientation(&entry.udid));
     view.set_region(visible, &place.holes, place.radius);
     view.setHidden(false);
     listen(entry);
@@ -593,7 +644,7 @@ fn apply(entry: &Entry, webview: &NSView, place: &Place) {
 ///
 /// # Safety
 /// Chame na thread da interface, com `webview` = o WKWebView da janela.
-pub unsafe fn attach(webview: *mut c_void, id: &str, screen: Screen, hid: Arc<Hid>, place: &Place) -> Result<(), String> {
+pub unsafe fn attach(webview: *mut c_void, id: &str, udid: &str, screen: Screen, hid: Arc<Hid>, place: &Place) -> Result<(), String> {
     let mtm = MainThreadMarker::new().ok_or("A tela do simulador só abre na thread da interface.")?;
     let webview = unsafe { webview.cast::<NSView>().as_ref() }.ok_or("O app não tem webview.")?;
     detach(id);
@@ -606,13 +657,13 @@ pub unsafe fn attach(webview: *mut c_void, id: &str, screen: Screen, hid: Arc<Hi
         call!(Retained::as_ptr(&superview) as *mut AnyObject, sel!(addSubview:positioned:relativeTo:),
             Retained::as_ptr(&view) as *mut AnyObject => *mut AnyObject, 1isize => isize, webview as *const NSView as *mut AnyObject => *mut AnyObject; -> ());
     }
-    // SAFETY: a camada e a tela estão vivas; `retain` as guarda para a fila de quadros.
-    let (layer, screen_obj) = unsafe { (retain(view.layer()), retain(screen.obj.ptr())) };
+    // SAFETY: a subcamada da superfície e a tela estão vivas; `retain` as guarda para a fila de quadros.
+    let (layer, screen_obj) = unsafe { (retain(Retained::as_ptr(&view.ivars().content) as *mut AnyObject), retain(screen.obj.ptr())) };
     let (Some(layer), Some(screen_obj)) = (layer, screen_obj) else { return Err("A tela do simulador não tem camada.".into()) };
     let presenter = Arc::new(Presenter {
         layer: Shared(layer), screen: Shared(screen_obj), surface: Mutex::new(None), seed: AtomicU32::new(0), pending: AtomicBool::new(false),
     });
-    let entry = Entry { view, screen, presenter, uuid: new_uuid(), listening: Cell::new(false) };
+    let entry = Entry { udid: udid.to_string(), view, screen, presenter, uuid: new_uuid(), listening: Cell::new(false) };
     apply(&entry, webview, place);
     SCREENS.with(|s| s.borrow_mut().insert(id.to_string(), entry));
     Ok(())
@@ -625,6 +676,17 @@ pub unsafe fn place(webview: *mut c_void, id: &str, place: &Place) {
     SCREENS.with(|s| {
         if let Some(entry) = s.borrow().get(id) {
             apply(entry, webview, place);
+        }
+    });
+}
+
+/// O aparelho `udid` girou: as telas abertas dele se põem na orientação nova já, sem esperar o próximo lugar.
+/// Chame na thread da interface.
+pub fn reorient(udid: &str) {
+    let orientation = crate::simulator::ops::orientation(udid);
+    SCREENS.with(|s| {
+        for entry in s.borrow().values().filter(|e| e.udid == udid) {
+            entry.view.orient(orientation);
         }
     });
 }
