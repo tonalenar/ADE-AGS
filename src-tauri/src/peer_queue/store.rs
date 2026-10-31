@@ -28,6 +28,8 @@ use std::collections::HashSet;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
+use crate::chat_team::model::THREAD_PREFIX;
+
 /// Dentro desta janela, a mesma mensagem (sem id do chamador) para o mesmo destino é repetida.
 pub const DUPLICATE_WINDOW_MS: i64 = 10 * 60 * 1000;
 /// No arranque, o que esperava há mais que isto não é mais entregue: vira `expired`.
@@ -883,6 +885,17 @@ pub fn claim_for_thread(conn: &Connection, id: i64, mode: &str, now: i64, lease_
     get(conn, id)
 }
 
+/// As mensagens `delivering` de uma conversa (`thread:`) cuja posse não vale mais: `all` (no arranque, quando
+/// nenhum consumidor está vivo) ou com o `lease_until` vencido. É o que a recuperação verifica.
+pub fn delivering_for_threads(conn: &Connection, to: Option<&str>, all: bool, now: i64) -> Result<Vec<PeerMessage>, String> {
+    query(
+        conn,
+        "WHERE state = 'delivering' AND to_tab_id LIKE 'thread:%' AND (?1 IS NULL OR to_tab_id = ?1)
+           AND (?2 = 1 OR lease_until IS NULL OR lease_until < ?3) ORDER BY position, id",
+        params![to, all as i64, now],
+    )
+}
+
 /// O envio provadamente não aconteceu: a mensagem volta ao início da fila. `available_at` = quando pode
 /// ir de novo (backoff; `None` = já). `refund`: a tentativa não conta (a conversa só estava ocupada).
 pub fn release(conn: &Connection, id: i64, note: Option<&str>, available_at: Option<i64>, refund: bool, now: i64) -> Result<bool, String> {
@@ -1136,6 +1149,14 @@ pub fn resume(conn: &Connection, live_tabs: &HashSet<String>, now: i64) -> Resul
     let mut targets: Vec<String> = Vec::new();
     let mut failed: Vec<i64> = Vec::new();
     for msg in pending {
+        // Uma mensagem sendo enviada a uma CONVERSA não vira `unconfirmed` às cegas: a recuperação
+        // (`thread_outbox::recover`) procura o marcador dela na timeline e decide se chegou.
+        if msg.state == State::Delivering && msg.to_tab_id.starts_with(THREAD_PREFIX) {
+            if !targets.contains(&msg.to_tab_id) {
+                targets.push(msg.to_tab_id.clone());
+            }
+            continue;
+        }
         let (sql, note) = match resume_decision(&msg, live_tabs, now) {
             Resume::Keep => {
                 if !targets.contains(&msg.to_tab_id) {

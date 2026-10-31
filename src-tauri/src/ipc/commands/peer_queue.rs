@@ -126,6 +126,8 @@ fn changed(app: &AppHandle, to: Option<&str>) {
 
 /// O tópico do barramento em que cada mudança da fila de mensagens é anunciada.
 pub const PEER_TOPIC: &str = "peer.queue";
+/// O tópico em que cada mensagem que chega a um estado final (ou muda de estado) é anunciada, com o id.
+pub const MESSAGE_TOPIC: &str = "peer.message";
 
 /// O `--id` do chamador, se veio (texto ou número).
 pub(super) fn client_id_arg(args: &Value) -> Option<String> {
@@ -215,6 +217,9 @@ fn type_claimed(app: &AppHandle, pty: u32, msg: &PeerMessage, notify: bool) -> R
     };
     let closed = with_db_now(app, |conn, now| store::finish(conn, msg.id, matches!(result, Ok(true)), note.as_deref(), now));
     changed(app, Some(&msg.to_tab_id));
+    if let Ok(Some(done)) = with_db(app, |conn| store::get(conn, msg.id)) {
+        announce_state(app, &done);
+    }
     if notify && !matches!(result, Ok(true)) && matches!(closed, Ok(true))
         && let Ok(Some(done)) = with_db(app, |conn| store::get(conn, msg.id))
     {
@@ -287,6 +292,7 @@ pub(super) fn begin_direct(app: &AppHandle, new: &NewMessage<'_>) -> Result<Resu
 pub(super) fn end_direct(app: &AppHandle, msg: &PeerMessage, error: Option<&str>) {
     let _ = with_db_now(app, |conn, now| store::finish(conn, msg.id, error.is_none(), error, now));
     changed(app, Some(&msg.to_tab_id));
+    announce_state(app, &fresh(app, msg.clone()));
 }
 
 /// Uma mensagem já registrada com este id do chamador, se houver.
@@ -453,6 +459,30 @@ impl ThreadPort for RealPort<'_> {
     fn items(&self, thread: &str) -> Option<Vec<crate::canal::timeline::Item>> {
         crate::conversa::api::items(&self.db, thread).ok()
     }
+
+    fn records_user_on_send(&self, thread: &str) -> bool {
+        // Claude, OpenCode e Antigravity gravam a mensagem na timeline ao enviar; o Codex só quando o
+        // servidor avisa (`userMessage`).
+        crate::conversa::api::thread(&self.db, thread).is_ok_and(|row| row.agent_id != "codex")
+    }
+}
+
+/// Publica no barramento o estado de uma mensagem (`ags events wait --topic peer.message`): quem espera uma
+/// resposta ou o recibo acorda quando ela chega, falha ou expira, sem polling.
+pub(crate) fn announce_state(app: &AppHandle, msg: &PeerMessage) {
+    let data = json!({
+        "id": msg.id, "state": msg.state, "reason": msg.reason, "from": msg.from_tab_id, "to": msg.to_tab_id,
+        "kind": msg.kind, "attempts": msg.attempts,
+    });
+    crate::bus::publish(Some(app), crate::bus::Publish::new(MESSAGE_TOPIC).data(data));
+}
+
+/// Conta o que a recuperação resolveu: avisa quem pediu das que não chegaram e publica os estados.
+fn after_recovery(app: &AppHandle, recovered: &thread_outbox::Recovered) {
+    for msg in recovered.delivered.iter().chain(&recovered.requeued).chain(&recovered.failed) {
+        announce_state(app, msg);
+    }
+    notify_failures(app, &recovered.failed);
 }
 
 /// Um turno do consumidor de `to`: envia o que está pronto (uma conversa de cada vez, na ordem) e avisa quem
@@ -463,9 +493,16 @@ pub(super) fn pump_thread(app: &AppHandle, to: &str) -> Result<Next, String> {
     let lock = delivery_lock(to);
     let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
     let now = with_db(app, store::db_now)?;
-    let drained = thread_outbox::drain(&db, &RealPort { app, db: db.clone() }, &compose_thread, to, now)?;
-    if drained.touched {
+    let port = RealPort { app, db: db.clone() };
+    // O que um consumidor que morreu deixou em `delivering` (posse vencida) é resolvido antes de seguir.
+    let recovered = thread_outbox::recover(&db, &port, Some(to), false, now)?;
+    after_recovery(app, &recovered);
+    let drained = thread_outbox::drain(&db, &port, &compose_thread, to, now)?;
+    if drained.touched || !recovered.requeued.is_empty() {
         changed(app, Some(to));
+    }
+    for msg in drained.delivered.iter().chain(&drained.failed) {
+        announce_state(app, msg);
     }
     notify_failures(app, &drained.failed);
     Ok(drained.next)
@@ -530,7 +567,19 @@ pub fn start_resume(app: AppHandle) {
         let Ok(listed) = tab_list(&app) else { return };
         let live = live_ids(&listed, &active_threads(&app));
         // `resume` também enfileira o aviso ao remetente de cada uma que terminou aqui.
-        let Ok(targets) = with_db_now(&app, |conn, now| store::resume(conn, &live, now)) else { return };
+        let Ok(mut targets) = with_db_now(&app, |conn, now| store::resume(conn, &live, now)) else { return };
+        // As que estavam sendo enviadas a uma conversa: o marcador na timeline diz se chegaram.
+        if let (Ok(db), Ok(now)) = (super::shared::db(&app), with_db(&app, store::db_now)) {
+            let port = RealPort { app: &app, db: db.inner().clone() };
+            if let Ok(recovered) = thread_outbox::recover(db.inner(), &port, None, true, now) {
+                after_recovery(&app, &recovered);
+                for msg in &recovered.requeued {
+                    if !targets.contains(&msg.to_tab_id) {
+                        targets.push(msg.to_tab_id.clone());
+                    }
+                }
+            }
+        }
         for to in &targets {
             ensure_worker(&app, to);
         }
@@ -703,8 +752,8 @@ oi
     fn arranque_com_remetente_conversa(active: &[&str]) -> (Connection, PeerMessage) {
         let conn = crate::database::test_db();
         let new = NewMessage { kind: "ask", from_tab_id: "thread:lead", from_name: "Líder", to_tab_id: "thread:t1", to_name: "QA", text: "rode os testes", reply: true, ..Default::default() };
-        // A mensagem estava sendo enviada à conversa quando o app fechou.
-        let Admission::New(sent) = store::admit(&conn, &new, State::Delivering, 1_000).unwrap() else { panic!("esperava nova") };
+        // Esperava na fila da conversa `t1`, que foi apagada enquanto o app estava fechado.
+        let Admission::New(sent) = store::admit(&conn, &new, State::Queued, 1_000).unwrap() else { panic!("esperava nova") };
         let listed = json!({ "tabs": [{ "id": "tab-shell" }, { "id": "tab-codex" }] });
         let threads: Vec<String> = active.iter().map(|t| t.to_string()).collect();
         store::resume(&conn, &live_ids(&listed, &threads), 2_000).unwrap();
@@ -713,15 +762,15 @@ oi
 
     #[test]
     fn o_remetente_conversa_recebe_o_aviso_de_que_a_mensagem_falhou() {
-        let (conn, sent) = arranque_com_remetente_conversa(&["thread:lead", "thread:t1"]);
-        assert_eq!(store::get(&conn, sent.id).unwrap().unwrap().state, State::Unconfirmed, "a mensagem falhou");
+        let (conn, sent) = arranque_com_remetente_conversa(&["thread:lead"]);
+        assert_eq!(store::get(&conn, sent.id).unwrap().unwrap().state, State::Expired, "a mensagem não tem mais para onde ir");
         let notices = store::queued_for(&conn, "thread:lead").unwrap();
-        assert!(notices.iter().any(|m| m.kind == "notice" && m.text.contains("não há confirmação")), "sem aviso a {sent:?}: {notices:?}");
+        assert!(notices.iter().any(|m| m.kind == "notice" && m.text.contains("não chegou")), "sem aviso a {sent:?}: {notices:?}");
     }
 
     #[test]
     fn sem_a_conversa_do_remetente_viva_nao_ha_para_quem_avisar() {
-        let (conn, _) = arranque_com_remetente_conversa(&["thread:t1"]);
+        let (conn, _) = arranque_com_remetente_conversa(&[]);
         assert!(store::queued_for(&conn, "thread:lead").unwrap().is_empty(), "conversa concluída ou apagada: ninguém a avisar");
     }
 

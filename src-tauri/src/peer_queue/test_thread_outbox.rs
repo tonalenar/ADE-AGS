@@ -21,6 +21,8 @@ struct Fake {
     sent: Mutex<Vec<(String, SendMode)>>,
     db: DbConnection,
     db_was_free_during_send: Mutex<Vec<bool>>,
+    timeline: Mutex<Option<Vec<Item>>>,
+    records_on_send: Mutex<bool>,
 }
 
 impl Fake {
@@ -31,6 +33,8 @@ impl Fake {
             sent: Mutex::default(),
             db: db.clone(),
             db_was_free_during_send: Mutex::default(),
+            timeline: Mutex::new(Some(Vec::new())),
+            records_on_send: Mutex::new(true),
         }
     }
     fn working(&self, working: bool) {
@@ -59,7 +63,10 @@ impl ThreadPort for Fake {
         result
     }
     fn items(&self, _thread: &str) -> Option<Vec<Item>> {
-        None
+        self.timeline.lock().unwrap().clone()
+    }
+    fn records_user_on_send(&self, _thread: &str) -> bool {
+        *self.records_on_send.lock().unwrap()
     }
 }
 
@@ -271,4 +278,94 @@ fn o_mesmo_id_do_chamador_nao_envia_duas_vezes() {
     port.working(false);
     run(&db, &port, 3_000);
     assert_eq!(port.texts().len(), 1);
+}
+
+// ── Recuperação por marcador (reinício e posse vencida) ──────────────
+
+fn user(text: &str) -> Item {
+    Item { text: Some(text.to_string()), ..Item::new(crate::canal::timeline::ItemKind::User, "u1".into(), None) }
+}
+
+/// Uma mensagem que estava sendo enviada quando o consumidor sumiu.
+fn sending(db: &DbConnection, text: &str, now: i64) -> PeerMessage {
+    let msg = enqueue(db, text, now);
+    claim_for_thread(&db.lock().unwrap(), msg.id, "queue_after_active", now, LEASE_MS).unwrap().unwrap()
+}
+
+#[test]
+fn o_marcador_acha_a_mensagem_na_timeline() {
+    let items = [user("[Mensagem #12 de Líder via ADE AGS] faça X"), user("[Mensagem #123 de Líder via ADE AGS] faça Y")];
+    assert!(has_marker(&items, 12) && has_marker(&items, 123));
+    assert!(!has_marker(&items, 1), "#1 não é prefixo de #12");
+    assert!(!has_marker(&[user("falei da [Mensagem #12 de alguém]")], 12), "só vale no começo do texto");
+}
+
+#[test]
+fn o_reinicio_com_o_marcador_na_timeline_marca_entregue_sem_enviar_de_novo() {
+    let db = db();
+    let port = Fake::new(&db);
+    let msg = sending(&db, "tarefa", 1_000);
+    *port.timeline.lock().unwrap() = Some(vec![user(&format!("[Mensagem #{} de Líder via ADE AGS] tarefa", msg.id))]);
+    let r = recover(&db, &port, None, true, 5_000).unwrap();
+    assert_eq!(r.delivered.len(), 1);
+    assert_eq!(get_msg(&db, msg.id).state, State::Delivered);
+    run(&db, &port, 6_000);
+    assert!(port.texts().is_empty(), "o que chegou não é enviado outra vez");
+}
+
+#[test]
+fn o_reinicio_sem_o_marcador_devolve_a_fila_e_envia_uma_vez() {
+    let db = db();
+    let port = Fake::new(&db);
+    let msg = sending(&db, "tarefa", 1_000);
+    let r = recover(&db, &port, None, true, 5_000).unwrap();
+    assert_eq!(r.requeued.len(), 1);
+    assert_eq!(get_msg(&db, msg.id).state, State::Queued);
+    run(&db, &port, 6_000);
+    port.working(false);
+    run(&db, &port, 7_000);
+    assert_eq!(port.texts().len(), 1, "enviada exatamente uma vez");
+    assert_eq!(get_msg(&db, msg.id).state, State::Delivered);
+}
+
+#[test]
+fn o_motor_que_nao_grava_no_envio_ou_a_timeline_ilegivel_nao_permitem_repetir() {
+    for (records, timeline) in [(false, Some(Vec::new())), (true, None)] {
+        let db = db();
+        let port = Fake::new(&db);
+        *port.records_on_send.lock().unwrap() = records;
+        *port.timeline.lock().unwrap() = timeline;
+        let msg = sending(&db, "tarefa", 1_000);
+        let r = recover(&db, &port, None, true, 5_000).unwrap();
+        assert_eq!(r.failed.len(), 1, "records={records}");
+        let row = get_msg(&db, msg.id);
+        assert_eq!(row.state, State::Unconfirmed);
+        assert!(row.note.as_deref().unwrap().contains("não dá para saber"));
+    }
+}
+
+#[test]
+fn a_posse_vigente_nao_e_tomada_e_a_vencida_sim() {
+    let db = db();
+    let port = Fake::new(&db);
+    let msg = sending(&db, "tarefa", 1_000);
+    let early = recover(&db, &port, Some(T1), false, 1_000 + LEASE_MS - 1).unwrap();
+    assert!(early.requeued.is_empty() && early.failed.is_empty() && early.delivered.is_empty());
+    assert_eq!(get_msg(&db, msg.id).state, State::Delivering, "o consumidor ainda a segura");
+    let late = recover(&db, &port, Some(T1), false, 1_000 + LEASE_MS + 1).unwrap();
+    assert_eq!(late.requeued.len(), 1);
+}
+
+#[test]
+fn o_arranque_deixa_a_mensagem_de_conversa_para_a_recuperacao_e_o_terminal_segue_como_antes() {
+    let conn = crate::database::test_db();
+    let live: std::collections::HashSet<String> = ["thread:t1", "thread:lead", "tab-1", "tab-0"].map(String::from).into();
+    let to_thread = NewMessage { kind: "tell", from_tab_id: "thread:lead", from_name: "L", to_tab_id: "thread:t1", to_name: "QA", text: "a", ..Default::default() };
+    let to_tab = NewMessage { kind: "tell", from_tab_id: "tab-0", from_name: "L", to_tab_id: "tab-1", to_name: "QA", text: "a", ..Default::default() };
+    let Admission::New(a) = admit(&conn, &to_thread, State::Delivering, 1_000).unwrap() else { panic!() };
+    let Admission::New(b) = admit(&conn, &to_tab, State::Delivering, 1_000).unwrap() else { panic!() };
+    let targets = resume(&conn, &live, 2_000).unwrap();
+    assert_eq!(get(&conn, a.id).unwrap().unwrap().state, State::Delivering, "a conversa: quem decide é a recuperação");
+    assert_eq!(get(&conn, b.id).unwrap().unwrap().state, State::Unconfirmed, "o terminal: como sempre");
+    assert!(targets.contains(&"thread:t1".to_string()), "e o consumidor da conversa é religado");
 }

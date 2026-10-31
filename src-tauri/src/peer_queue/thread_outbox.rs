@@ -63,6 +63,9 @@ pub trait ThreadPort {
     /// A timeline da conversa, para achar uma mensagem enviada (recuperação por marcador). `None` = não
     /// dá para ler.
     fn items(&self, thread: &str) -> Option<Vec<Item>>;
+    /// O motor grava a mensagem do usuário na timeline NO ENVIO (Claude, OpenCode, Antigravity)? O Codex a
+    /// grava quando o servidor avisa (`userMessage`), então um marcador ausente não prova que não chegou.
+    fn records_user_on_send(&self, thread: &str) -> bool;
 }
 
 /// Quando o consumidor deve voltar.
@@ -184,4 +187,54 @@ pub fn drain(
             }
         }
     }
+}
+
+/// O resultado de uma recuperação.
+#[derive(Debug, Default)]
+pub struct Recovered {
+    /// Chegaram (o marcador está na timeline): `delivered`.
+    pub delivered: Vec<PeerMessage>,
+    /// Não chegaram e voltaram à fila (uma vez só: o envio seguinte é o normal).
+    pub requeued: Vec<PeerMessage>,
+    /// Sem como saber: `unconfirmed`, e o remetente é avisado.
+    pub failed: Vec<PeerMessage>,
+}
+
+/// Pura: a timeline tem a mensagem de número `id`? O cabeçalho de `compose_thread` leva `#id` e o item
+/// `User` guarda o texto como foi enviado.
+pub fn has_marker(items: &[Item], id: i64) -> bool {
+    let marker = format!("[Mensagem #{id} de ");
+    items.iter().any(|i| i.kind == crate::canal::timeline::ItemKind::User && i.text.as_deref().is_some_and(|t| t.starts_with(&marker)))
+}
+
+/// Resolve o que ficou `delivering` para uma conversa sem consumidor que o segure (o app reiniciou, `all`; ou a
+/// posse venceu, `lease_until`), SEM digitar de novo: acha o marcador `#id` na timeline.
+/// - achou → `delivered` (a queda foi depois do envio);
+/// - não achou e o motor grava a mensagem no envio → volta à fila, uma vez (nunca foi enviada);
+/// - não achou e o motor não grava no envio (Codex), ou a timeline não abre → `unconfirmed` (o remetente é
+///   avisado): repetir poderia duplicar a ordem.
+pub fn recover(db: &DbConnection, port: &dyn ThreadPort, to: Option<&str>, all: bool, now: i64) -> Result<Recovered, String> {
+    let stuck = store::delivering_for_threads(&*lock(db)?, to, all, now)?;
+    let mut out = Recovered::default();
+    for msg in stuck {
+        let Some(thread) = model::thread_id_of(&msg.to_tab_id) else { continue };
+        let items = port.items(thread);
+        let conn = lock(db)?;
+        if items.as_deref().is_some_and(|items| has_marker(items, msg.id)) {
+            if store::finish(&conn, msg.id, true, None, now)? {
+                out.delivered.extend(store::get(&conn, msg.id)?);
+            }
+        } else if items.is_some() && port.records_user_on_send(thread) {
+            let note = "O app fechou antes de a mensagem ser enviada à conversa; ela volta à fila.";
+            if store::release(&conn, msg.id, Some(note), None, false, now)? {
+                out.requeued.extend(store::get(&conn, msg.id)?);
+            }
+        } else {
+            let note = "O app fechou enquanto a mensagem era enviada à conversa: não dá para saber se ela chegou.";
+            if store::finish(&conn, msg.id, false, Some(note), now)? {
+                out.failed.extend(store::get(&conn, msg.id)?);
+            }
+        }
+    }
+    Ok(out)
 }
