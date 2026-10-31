@@ -95,7 +95,7 @@ pub struct Drained {
 enum Step {
     Done(Next),
     Expired(Vec<PeerMessage>),
-    Send(PeerMessage, SendMode),
+    Send(Box<PeerMessage>, SendMode),
 }
 
 fn lock(db: &DbConnection) -> Result<MutexGuard<'_, Connection>, String> {
@@ -118,7 +118,7 @@ fn step(conn: &Connection, to: &str, target: Target, now: i64) -> Result<Step, S
     }
     let mode = if target.working { SendMode::SteerActive } else { SendMode::QueueAfterActive };
     match store::claim_for_thread(conn, head.id, mode.as_str(), now, LEASE_MS)? {
-        Some(claimed) => Ok(Step::Send(claimed, mode)),
+        Some(claimed) => Ok(Step::Send(Box::new(claimed), mode)),
         // Cancelada nesse meio tempo: lê a próxima.
         None => step(conn, to, target, now),
     }

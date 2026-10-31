@@ -369,3 +369,66 @@ fn o_arranque_deixa_a_mensagem_de_conversa_para_a_recuperacao_e_o_terminal_segue
     assert_eq!(get(&conn, b.id).unwrap().unwrap().state, State::Unconfirmed, "o terminal: como sempre");
     assert!(targets.contains(&"thread:t1".to_string()), "e o consumidor da conversa é religado");
 }
+
+// ── O app e a CLI escrevendo ao mesmo tempo (dois `Connection` no mesmo arquivo) ──
+
+fn open_shared(path: &std::path::Path) -> rusqlite::Connection {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    // Os mesmos pragmas do banco de produção (`database::connection`).
+    conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;").unwrap();
+    conn
+}
+
+#[test]
+fn dois_processos_no_mesmo_banco_nao_perdem_nem_duplicam_mensagens() {
+    let path = std::env::temp_dir().join(format!("ags-peer-queue-{}.db", uuid::Uuid::new_v4()));
+    migrate(&open_shared(&path)).unwrap();
+    const N: usize = 40;
+    let (tx, rx) = std::sync::mpsc::channel::<i64>();
+    let rx = Arc::new(Mutex::new(rx));
+    // A "CLI": admite as mensagens (BEGIN IMMEDIATE) por uma conexão própria.
+    let cli = {
+        let path = path.clone();
+        std::thread::spawn(move || {
+            let conn = open_shared(&path);
+            for i in 0..N {
+                let text = format!("pedido {i}");
+                let new = NewMessage { kind: "tell", from_tab_id: "thread:lead", from_name: "Líder", to_tab_id: T1, to_name: "QA", text: &text, ..Default::default() };
+                let Admission::New(m) = admit(&conn, &new, State::Queued, 1_000 + i as i64).expect("admitir não pode falhar com 'database is locked'") else { panic!("esperava nova") };
+                // Cada id vai duas vezes: os dois entregadores disputam a mesma mensagem.
+                tx.send(m.id).unwrap();
+                tx.send(m.id).unwrap();
+            }
+        })
+    };
+    // Dois entregadores, cada um com a sua conexão: a posse sai numa só escrita.
+    let claimers: Vec<_> = (0..2)
+        .map(|_| {
+            let (path, rx) = (path.clone(), rx.clone());
+            std::thread::spawn(move || {
+                let conn = open_shared(&path);
+                let mut won = Vec::new();
+                loop {
+                    let next = rx.lock().unwrap().recv();
+                    let Ok(id) = next else { break };
+                    if claim_for_thread(&conn, id, "queue_after_active", 2_000, LEASE_MS).expect("tomar não pode falhar com lock").is_some() {
+                        won.push(id);
+                    }
+                }
+                won
+            })
+        })
+        .collect();
+    cli.join().unwrap();
+    let mut all: Vec<i64> = claimers.into_iter().flat_map(|c| c.join().unwrap()).collect();
+    all.sort_unstable();
+    all.dedup();
+    assert_eq!(all.len(), N, "cada mensagem foi tomada, e por um entregador só");
+    let conn = open_shared(&path);
+    let delivering: i64 = conn.query_row("SELECT COUNT(*) FROM peer_messages WHERE state = 'delivering' AND attempts = 1", [], |r| r.get(0)).unwrap();
+    assert_eq!(delivering, N as i64, "nenhuma ficou com duas tentativas");
+    drop(conn);
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", path.display()));
+    }
+}
