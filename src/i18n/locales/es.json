@@ -4443,5 +4443,9 @@
   "chat.attach.lightbox.label": "Imagen {{index}} de {{count}}: {{name}}",
   "chat.attach.lightbox.close": "Cerrar",
   "chat.attach.lightbox.prev": "Imagen anterior",
-  "chat.attach.lightbox.next": "Imagen siguiente"
+  "chat.attach.lightbox.next": "Imagen siguiente",
+  "chat.team.watch.on": "Avisar al orquestador cuando un integrante se bloquee",
+  "chat.team.watch.hint": "Una petición que espera por ti más de 20 s, una pregunta sin respuesta o un turno fallido se convierte en UN aviso al orquestador (y otro cuando respondes). La decisión sigue siendo tuya: el orquestador no puede aprobar nada.",
+  "chat.team.watchStall.on": "Avisar también cuando un integrante no avance",
+  "chat.team.watchStall.hint": "Un integrante trabajando sin ningún elemento nuevo durante 15 min se convierte en UN aviso al orquestador. Solo avisa: no interrumpe ni escribe en la conversación del integrante. Desactivado por defecto."
 }

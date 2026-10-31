@@ -20,6 +20,7 @@ mod transport;
 mod test;
 
 pub use commands::routine::start_scheduler as start_routine_scheduler;
+pub use commands::chat_watch::start as start_chat_watch;
 pub use commands::peer_queue::start_resume as start_peer_queue;
 pub use commands::canal::start as start_canal;
 

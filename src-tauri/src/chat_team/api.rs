@@ -104,6 +104,8 @@ pub fn create(conn: &Connection, input: NewTeam, now: i64) -> Result<(TeamView, 
         updated_at: now,
         auto_decide: true,
         allow_tools: false,
+        watch: true,
+        watch_stall: false,
     };
     store::insert_team(conn, &row)?;
     Ok((view(conn, row)?, true))

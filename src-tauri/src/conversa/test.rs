@@ -837,7 +837,7 @@ mod permissao {
     /// Uma conversa `t1` no time `team1` (orquestrador `tab-lead`), com a política dada.
     fn member_with(conn: &Connection, policy: Policy) {
         store::insert_thread(conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
-        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false, watch: true, watch_stall: false };
         team_store::insert_team(conn, &row).unwrap();
         let new = NewMember { member: "thread:t1".into(), agent_id: "codex".into(), label: "Codex".into(), role: "backend".into(), origin: "existing".into(), ..Default::default() };
         team_store::insert_member(conn, "team1", &new, policy, 1).unwrap();
@@ -976,7 +976,7 @@ mod permissao {
     fn o_orquestrador_nao_tem_politica_so_regras() {
         let conn = db();
         store::insert_thread(&conn, "lead", "claude-code", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
-        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false, watch: true, watch_stall: false };
         team_store::insert_team(&conn, &row).unwrap();
         assert_eq!(plan(&conn, "lead", &cmd("bun add zod")).verdict, Verdict::Ask, "sem política de integrante nem regra, a pessoa decide");
     }
@@ -1174,7 +1174,7 @@ mod ponta_a_ponta {
         let cwd = std::fs::canonicalize(&cwd).unwrap();
         let cwd = cwd.to_str().unwrap();
         store::insert_thread(&conn, "t1", "codex", cwd, "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
-        let team = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: cwd.into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
+        let team = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: cwd.into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false, watch: true, watch_stall: false };
         team_store::insert_team(&conn, &team).unwrap();
         let member = team_store::NewMember { member: "thread:t1".into(), agent_id: "codex".into(), label: "Codex".into(), role: "backend".into(), origin: "existing".into(), ..Default::default() };
         team_store::insert_member(&conn, "team1", &member, Policy::Ask, 1).unwrap();

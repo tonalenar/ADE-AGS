@@ -58,6 +58,14 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_tools {
         conn.execute("ALTER TABLE chat_team ADD COLUMN allow_tools INTEGER NOT NULL DEFAULT 0", [])?;
     }
+    // O vigia do chat: `watch` avisa o orquestrador dos bloqueios dos integrantes (ligado por padrão) e `watch_stall`
+    // do «sem progresso» (desligado, como o Vigia das missões). Aditivas: nenhuma linha se perde.
+    for (column, default) in [("watch", 1), ("watch_stall", 0)] {
+        let has = conn.prepare("SELECT 1 FROM pragma_table_info('chat_team') WHERE name = ?1")?.exists([column])?;
+        if !has {
+            conn.execute(&format!("ALTER TABLE chat_team ADD COLUMN {column} INTEGER NOT NULL DEFAULT {default}"), [])?;
+        }
+    }
     // As regras «Sempre permitir», criadas SÓ pela pessoa (tela). `role` e `team_id` estão preparados e ainda
     // não se avaliam (`permission::auto_allow_rule`).
     conn.execute_batch(
@@ -221,6 +229,18 @@ pub fn set_allow_tools(conn: &Connection, team_id: &str, enabled: bool) -> Resul
     Ok(conn.execute("UPDATE chat_team SET allow_tools = ?1 WHERE id = ?2", params![enabled as i64, team_id]).map_err(err)? > 0)
 }
 
+/// Liga ou desliga os avisos de bloqueio do vigia do chat. SÓ a pessoa, pela tela.
+pub fn set_watch(conn: &Connection, team_id: &str, enabled: bool) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    Ok(conn.execute("UPDATE chat_team SET watch = ?1 WHERE id = ?2", params![enabled as i64, team_id]).map_err(err)? > 0)
+}
+
+/// Liga ou desliga o aviso de «sem progresso» do vigia do chat. SÓ a pessoa, pela tela.
+pub fn set_watch_stall(conn: &Connection, team_id: &str, enabled: bool) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    Ok(conn.execute("UPDATE chat_team SET watch_stall = ?1 WHERE id = ?2", params![enabled as i64, team_id]).map_err(err)? > 0)
+}
+
 /// Liga ou desliga o «decidir sozinho» do time. `false` se o time não existe.
 pub fn set_auto_decide(conn: &Connection, team_id: &str, enabled: bool) -> Result<bool, String> {
     migrate(conn).map_err(err)?;
@@ -243,6 +263,10 @@ pub struct TeamRow {
     pub auto_decide: bool,
     /// O acesso total libera ferramentas de fora do shell (desligado por padrão).
     pub allow_tools: bool,
+    /// O vigia do chat avisa o orquestrador dos bloqueios dos integrantes (padrão: ligado).
+    pub watch: bool,
+    /// ...e do «sem progresso» (padrão: desligado).
+    pub watch_stall: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -295,7 +319,7 @@ pub struct MemberPatch {
     pub subagent: Option<bool>,
 }
 
-const TEAM_COLUMNS: &str = "id, orchestrator, agent_id, label, cwd, title, created_at, updated_at, auto_decide, allow_tools";
+const TEAM_COLUMNS: &str = "id, orchestrator, agent_id, label, cwd, title, created_at, updated_at, auto_decide, allow_tools, watch, watch_stall";
 const MEMBER_COLUMNS: &str = "team_id, member, agent_id, label, role, model, policy, branch, worktree, origin, position, created_at, updated_at, subagent";
 
 fn team_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamRow> {
@@ -310,6 +334,8 @@ fn team_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamRow> {
         updated_at: r.get(7)?,
         auto_decide: r.get::<_, i64>(8)? != 0,
         allow_tools: r.get::<_, i64>(9)? != 0,
+        watch: r.get::<_, i64>(10)? != 0,
+        watch_stall: r.get::<_, i64>(11)? != 0,
     })
 }
 
@@ -341,8 +367,8 @@ fn err(e: rusqlite::Error) -> String {
 pub fn insert_team(conn: &Connection, row: &TeamRow) -> Result<(), String> {
     migrate(conn).map_err(err)?;
     conn.execute(
-        &format!("INSERT INTO chat_team ({TEAM_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)"),
-        params![row.id, row.orchestrator, row.agent_id, row.label, row.cwd, row.title, row.created_at, row.updated_at, row.auto_decide as i64, row.allow_tools as i64],
+        &format!("INSERT INTO chat_team ({TEAM_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+        params![row.id, row.orchestrator, row.agent_id, row.label, row.cwd, row.title, row.created_at, row.updated_at, row.auto_decide as i64, row.allow_tools as i64, row.watch as i64, row.watch_stall as i64],
     )
     .map_err(err)?;
     Ok(())
@@ -364,7 +390,7 @@ pub fn team_led_by(conn: &Connection, orchestrator: &str) -> Result<Option<TeamR
 pub fn team_joined_by(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
     migrate(conn).map_err(err)?;
     conn.query_row(
-        "SELECT t.id, t.orchestrator, t.agent_id, t.label, t.cwd, t.title, t.created_at, t.updated_at, t.auto_decide, t.allow_tools
+        "SELECT t.id, t.orchestrator, t.agent_id, t.label, t.cwd, t.title, t.created_at, t.updated_at, t.auto_decide, t.allow_tools, t.watch, t.watch_stall
          FROM chat_team t JOIN chat_team_member m ON m.team_id = t.id WHERE m.member = ?1",
         [member],
         team_row,

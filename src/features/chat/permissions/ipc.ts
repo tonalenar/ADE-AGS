@@ -25,3 +25,5 @@ export const chatPermissionRuleUpdate = (id: string, patch: { pattern?: string; 
 export const chatPermissionRuleRemove = (id: string) => invoke<boolean>("chat_permission_rule_remove", { id });
 export const chatTeamAutoDecide = (teamId: string, enabled: boolean) => invoke<boolean>("chat_team_auto_decide", { teamId, enabled });
 export const chatTeamAllowTools = (teamId: string, enabled: boolean) => invoke<boolean>("chat_team_allow_tools", { teamId, enabled });
+export const chatTeamWatch = (teamId: string, enabled: boolean) => invoke<boolean>("chat_team_watch", { teamId, enabled });
+export const chatTeamWatchStall = (teamId: string, enabled: boolean) => invoke<boolean>("chat_team_watch_stall", { teamId, enabled });

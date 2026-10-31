@@ -13,6 +13,7 @@ describe("o briefing do papel e do subagente", () => {
       expect(text, JSON.stringify(choice)).not.toContain("responda com `ags peer tell`");
       expect(text, JSON.stringify(choice)).toContain("VOLTA SOZINHA a quem perguntou");
       expect(text, JSON.stringify(choice)).toContain("NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido");
+      expect(text, JSON.stringify(choice)).toContain("Se for bloqueado por uma pergunta ou permissão que só a pessoa decide, diga isso numa frase ao orquestrador (uma vez) e espere.");
       expect(text, JSON.stringify(choice)).toContain("O resumo da entrega vai uma vez só");
     }
   });

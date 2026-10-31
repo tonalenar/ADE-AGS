@@ -242,7 +242,7 @@ pub struct Named<'a> {
 /// As regras de mensagem de quem trabalha num time. Um `ask` já devolve o fim do turno a quem perguntou: copiá-lo
 /// por `peer tell`, ou avisar «estou pronto» sem ninguém pedir, só gasta token do orquestrador. A MESMA frase vai no
 /// canvas (`agentRole.ts::MESSAGE_RULES`); um teste do front confere que as duas são iguais.
-pub const MESSAGE_RULES: &str = "Se a tarefa chegou como `ask`, a resposta final do seu turno VOLTA SOZINHA a quem perguntou: não repita o mesmo conteúdo por `ags peer tell`. NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido («estou pronto», «recebi», «vou ler»): só fale com o orquestrador para entregar o resultado, pedir algo que o bloqueia ou responder a uma pergunta. O resumo da entrega vai uma vez só.";
+pub const MESSAGE_RULES: &str = "Se a tarefa chegou como `ask`, a resposta final do seu turno VOLTA SOZINHA a quem perguntou: não repita o mesmo conteúdo por `ags peer tell`. NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido («estou pronto», «recebi», «vou ler»): só fale com o orquestrador para entregar o resultado, pedir algo que o bloqueia ou responder a uma pergunta. Se for bloqueado por uma pergunta ou permissão que só a pessoa decide, diga isso numa frase ao orquestrador (uma vez) e espere. O resumo da entrega vai uma vez só.";
 
 /// O que o integrante recebe ao entrar no time: quem é o orquestrador, o papel, a política e a regra
 /// de esperar a tarefa. `instructions` são as do papel no catálogo (vazio = sem). Pura.

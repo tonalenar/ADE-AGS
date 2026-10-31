@@ -323,3 +323,26 @@ pub fn chat_team_allow_tools(app: AppHandle, db: State<'_, DbConnection>, team_i
     }
     Ok(changed)
 }
+
+/// O vigia do chat do time (avisos de bloqueio ao orquestrador). Desligar não apaga nada. Só a pessoa, pela tela.
+#[tauri::command]
+pub fn chat_team_watch(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
+    let changed = super::store::set_watch(&*lock(&db)?, &team_id, enabled)?;
+    announce(&app, &team_id);
+    wake_watch(&app);
+    Ok(changed)
+}
+
+/// O aviso de «sem progresso» do vigia do chat. Só a pessoa, pela tela.
+#[tauri::command]
+pub fn chat_team_watch_stall(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
+    let changed = super::store::set_watch_stall(&*lock(&db)?, &team_id, enabled)?;
+    announce(&app, &team_id);
+    wake_watch(&app);
+    Ok(changed)
+}
+
+/// Acorda o vigia para ele reler os interruptores (o barramento das conversas é o que ele escuta).
+fn wake_watch(app: &AppHandle) {
+    crate::bus::publish(Some(app), crate::bus::Publish::new(crate::ipc::commands::conversas::BUS_TOPIC).data(serde_json::json!({ "type": "watch" })));
+}
