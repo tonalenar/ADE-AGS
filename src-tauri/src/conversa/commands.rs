@@ -60,6 +60,13 @@ pub fn chat_request_answer(app: AppHandle, db: State<'_, DbConnection>, request_
     api::answer(&app, &db, &request_id, &choice)
 }
 
+/// Reaplica a política do time e as regras da pessoa aos pedidos que esperam, de TODAS as conversas ativas (a janela
+/// chama ao montar, depois de um reload). Devolve quantos respondeu. Idempotente.
+#[tauri::command]
+pub fn chat_requests_sweep(app: AppHandle, db: State<'_, DbConnection>) -> usize {
+    super::permission::sweep(&app, &db)
+}
+
 #[tauri::command]
 pub fn chat_thread_retune(db: State<'_, DbConnection>, thread_id: String, model: Option<String>, effort: Option<String>, access: String) -> Result<ThreadRow, String> {
     api::retune(&db, &thread_id, model, effort, access)

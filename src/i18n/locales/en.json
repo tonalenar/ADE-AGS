@@ -4263,5 +4263,7 @@
   "chat.timeline.notice.resumeLost": "The previous session could not be resumed; the agent started over without its history.",
   "chat.timeline.notice.queueDropped": "Message not sent: the conversation was interrupted or closed before its turn.",
   "chat.timeline.notice.optionIgnored": "An option was not applied by the agent.",
-  "chat.timeline.notice.resend": "Resend"
+  "chat.timeline.notice.resend": "Resend",
+  "chat.team.autoDecide.off": "Don't decide on its own",
+  "chat.team.autoDecide.hint": "Unchecked, each member's policy and your \"Always allow\" rules answer what they cover (high risk always waits for you). Checked, every permission waits for you."
 }

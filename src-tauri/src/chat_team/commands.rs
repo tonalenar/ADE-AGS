@@ -265,6 +265,8 @@ pub struct RuleInput {
 pub fn chat_permission_rule_add(app: AppHandle, db: State<'_, DbConnection>, input: RuleInput) -> Result<super::permission::Rule, String> {
     let rule = super::store::add_rule(&*lock(&db)?, input.kind, &input.pattern, input.agent_id.as_deref(), crate::util::now_ts_ms())?;
     let _ = app.emit(RULES_EVENT, json!({}));
+    // Uma regra nova pode cobrir pedidos que já esperavam a pessoa.
+    crate::conversa::permission::sweep(&app, &db);
     Ok(rule)
 }
 
@@ -285,6 +287,7 @@ pub fn chat_permission_rule_update(app: AppHandle, db: State<'_, DbConnection>, 
     let agent = if patch.any_agent { Some(None) } else { patch.agent_id.as_deref().map(Some) };
     let changed = super::store::update_rule(&*lock(&db)?, &id, patch.pattern.as_deref(), agent)?;
     let _ = app.emit(RULES_EVENT, json!({}));
+    crate::conversa::permission::sweep(&app, &db);
     Ok(changed)
 }
 
@@ -300,6 +303,10 @@ pub fn chat_permission_rule_remove(app: AppHandle, db: State<'_, DbConnection>, 
 pub fn chat_team_auto_decide(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
     let changed = super::store::set_auto_decide(&*lock(&db)?, &team_id, enabled)?;
     announce(&app, &team_id);
+    // Ligado de novo, a política e as regras decidem o que já esperava.
+    if enabled {
+        crate::conversa::permission::sweep(&app, &db);
+    }
     Ok(changed)
 }
 

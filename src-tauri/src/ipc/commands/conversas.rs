@@ -164,10 +164,16 @@ pub(super) fn chat_pending(app: &AppHandle, args: &Value) -> Result<Value, Strin
         None => api::threads(&db)?.into_iter().filter(|t| t.state == "active").map(|t| t.id).collect(),
     };
     let mut pending = Vec::new();
+    let mut decided = Vec::new();
     for id in ids {
         pending.extend(api::requests(&db, &id)?);
+        // Quem respondeu os últimos pedidos (a pessoa, a política do time ou uma regra dela) e por quê.
+        let recent = db.lock().map_err(|e| e.to_string())?;
+        for (request, answer, by, why) in crate::conversa::store::recent_decisions(&recent, &id, 5).map_err(|e| e.to_string())? {
+            decided.push(json!({ "requestId": request, "threadId": id, "answer": answer, "decidedBy": by, "why": why }));
+        }
     }
-    Ok(json!({ "pending": pending }))
+    Ok(json!({ "pending": pending, "decided": decided }))
 }
 
 /// Mostra a conversa na tela (liga a casca do chat, se o modo estiver ligado).

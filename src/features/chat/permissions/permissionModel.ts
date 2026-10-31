@@ -280,6 +280,15 @@ export function autoAllowRule(rules: PermissionRule[], ask: PendingAsk): Permiss
   return rules.find((r) => ruleMatches(r, ask)) ?? null;
 }
 
+/**
+ * Quem decide sozinho um pedido: o pedido de uma conversa por protocolo é decidido pelo BACKEND (política do time e
+ * regras da pessoa, `conversa::permission`), com a janela aberta ou não; o React só mostra o que sobrou e deixa a
+ * pessoa decidir. Os diálogos das TUIs e as aprovações da frota continuam decididos aqui (não passam pelo backend). Pura.
+ */
+export function decidedByBackend(ask: Pick<PendingAsk, "ref">): boolean {
+  return ask.ref.source === "thread";
+}
+
 /** Os pedidos de um filtro da caixa: Comandos inclui os de rede (a rede é feita por comando ou ferramenta). Pura. */
 export function filterAsks(asks: PendingAsk[], filter: AskFilter): PendingAsk[] {
   if (filter === "all") return asks;

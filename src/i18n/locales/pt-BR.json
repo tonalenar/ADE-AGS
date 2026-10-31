@@ -4263,5 +4263,7 @@
   "chat.timeline.notice.resumeLost": "A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele.",
   "chat.timeline.notice.queueDropped": "Mensagem não enviada: a conversa foi interrompida ou fechada antes da vez dela.",
   "chat.timeline.notice.optionIgnored": "Uma opção não foi aplicada pelo agente.",
-  "chat.timeline.notice.resend": "Reenviar"
+  "chat.timeline.notice.resend": "Reenviar",
+  "chat.team.autoDecide.off": "Não decidir sozinho",
+  "chat.team.autoDecide.hint": "Desmarcado, a política de cada integrante e as suas regras «Sempre permitir» respondem o que cobrem (risco alto sempre espera por você). Marcado, toda permissão espera por você."
 }

@@ -8,7 +8,7 @@ import { openThread } from "../structured/store";
 import { LinkAgentForm, conversationRefOf } from "./LinkAgentForm";
 import { AgentMono, StateDot, useRoleLabel } from "./TeamParts";
 import { CONVERSATION_DRAG_MIME, defaultPolicy, placeOf, rosterRows, takenRefs, type RosterRow } from "./teamModel";
-import { dissolveTeam, linkExisting, loadFeed, makeOrchestrator, setAdding, startTeams, unlinkMember, useTeamStore } from "./teamStore";
+import { dissolveTeam, linkExisting, loadFeed, makeOrchestrator, setAdding, setAutoDecide, startTeams, unlinkMember, useTeamStore } from "./teamStore";
 import { useTeamLive } from "./useTeamLive";
 
 /** Abre a conversa de um integrante (a aba ou a conversa por protocolo). */
@@ -97,6 +97,10 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
       <ul aria-label={t("chat.team.title")} className="list-none m-0 p-2.5 flex flex-col gap-2 cc-scroll min-h-0 flex-1">
         {rows.map((row) => <MemberCard key={row.ref} row={row} teamId={team.id} />)}
       </ul>
+      <label title={t("chat.team.autoDecide.hint")} className="mx-3.5 mb-1 flex items-center gap-2 text-chat-caption text-gray-600 dark:text-white/55 cursor-pointer">
+        <input type="checkbox" checked={team.autoDecide === false} onChange={(e) => setAutoDecide(team.id, !e.target.checked)} />
+        {t("chat.team.autoDecide.off")}
+      </label>
       <div className="px-3.5 pb-1 flex items-center justify-end gap-2">
         {confirming && <span className="text-chat-caption text-gray-500 dark:text-white/45">{t("chat.team.dissolveConfirm")}</span>}
         <button type="button" onClick={() => { if (confirming) void dissolveTeam(team.id); setConfirming(!confirming); }}
