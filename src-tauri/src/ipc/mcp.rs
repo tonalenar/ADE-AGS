@@ -957,6 +957,8 @@ where
         git(context, tool, args, send)
     } else if let Some((_, command)) = PEER_TOOLS.iter().find(|(tool, _)| *tool == name) {
         peer(context, command, args, send)
+    } else if let Some(tool) = CHAT_TOOLS.iter().find(|t| t.name == name) {
+        chat(context, tool, args, send)
     } else if name == ASK_TOOL {
         ask(context, args, send)
     } else {
@@ -1207,6 +1209,10 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
     if matches!(context, McpContext::Cwd { tab: Some(_), .. }) {
         tools.extend(peer_schemas());
     }
+    if matches!(context, McpContext::Cwd { .. }) {
+        let read_only = allowed_powers.is_some_and(|powers| !powers.contains(&OrchestrationPower::Spawn));
+        tools.extend(chat_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
+    }
     tools.push(ask_schema());
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
     // TUI; ponerlo acá daría `ags_ags_browser_click`) y se prefija el resto
@@ -1262,6 +1268,7 @@ pub(crate) fn is_read_only(name: &str) -> bool {
         // Preguntar y pedir permiso no tocan nada: muestran una tarjeta.
         || name == ASK_TOOL
         || name == TOOL_NAME
+        || CHAT_TOOLS.iter().any(|t| t.name == name && t.read_only)
 }
 
 /// Las anotaciones del protocolo (`readOnlyHint`, `destructiveHint`, `openWorldHint`): lo
@@ -1381,6 +1388,104 @@ where
         args.insert("text".into(), json!(handoff.to_string()));
     }
     match send(command, Value::Object(args)) {
+        Ok(data) => content(data),
+        Err(e) => tool_error(&e),
+    }
+}
+
+/// As conversas do modo chat (ver `ipc/commands/conversas.rs`): abrir uma conversa com outro agente
+/// (hoje o Codex, sem terminal), mandar mensagens, esperar o turno e ler a resposta. Responder às
+/// aprovações do agente da conversa não está aqui: isso é da pessoa, na tela.
+struct ChatTool {
+    name: &'static str,
+    /// O comando do despachador (`chat.*`).
+    ipc: &'static str,
+    read_only: bool,
+}
+
+const CHAT_TOOLS: &[ChatTool] = &[
+    ChatTool { name: "chat_list", ipc: "chat.list", read_only: true },
+    ChatTool { name: "chat_new", ipc: "chat.new", read_only: false },
+    ChatTool { name: "chat_send", ipc: "chat.send", read_only: false },
+    ChatTool { name: "chat_wait", ipc: "chat.wait", read_only: true },
+    ChatTool { name: "chat_show", ipc: "chat.show", read_only: true },
+    ChatTool { name: "chat_stop", ipc: "chat.stop", read_only: false },
+    ChatTool { name: "chat_pending", ipc: "chat.pending", read_only: true },
+];
+
+fn chat_schemas() -> Vec<Value> {
+    let thread = json!({ "type": "string", "description": "The conversation id, as chat_list or chat_new returns it." });
+    vec![
+        json!({
+            "name": "chat_list",
+            "description": "List the ADE AGS chat-mode conversations (Codex or Claude Code running without a terminal, by protocol): id, title, agent, folder, whether the agent is working and how many requests wait for the person.",
+            "inputSchema": { "type": "object", "properties": {
+                "all": { "type": "boolean", "description": "Also list settled conversations." }
+            }, "required": [] },
+        }),
+        json!({
+            "name": "chat_new",
+            "description": "Open a new chat-mode conversation with another agent (codex or claude-code) and send the first message. It starts supervised (`access: ask`): commands it wants to run wait for the person's approval in the app. Returns the conversation; then call chat_wait.",
+            "inputSchema": { "type": "object", "properties": {
+                "text": { "type": "string", "description": "The first message." },
+                "cwd": { "type": "string", "description": "Folder the agent works in (default: yours)." },
+                "agent": { "type": "string", "enum": ["codex", "claude-code"], "description": "Agent id (default: codex)." },
+                "model": { "type": "string", "description": "Optional model." },
+                "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…)." },
+                "access": { "type": "string", "enum": ["ask", "edits", "safe", "full", "plan"], "description": "ask (default): the person approves; edits: file edits pass, the rest asks; safe: writes in the folder, asks when needed; full: no approvals; plan (claude-code only): plans first, the person approves the plan." },
+                "title": { "type": "string", "description": "Optional title (default: the first line of the message)." }
+            }, "required": ["text"] },
+        }),
+        json!({
+            "name": "chat_send",
+            "description": "Send another message to a chat-mode conversation. During a turn it joins that turn.",
+            "inputSchema": { "type": "object", "properties": {
+                "thread": thread.clone(),
+                "text": { "type": "string", "description": "The message." }
+            }, "required": ["thread", "text"] },
+        }),
+        json!({
+            "name": "chat_wait",
+            "description": "Wait (no polling) until the conversation's turn ends or its agent asks the person something. Returns `done`, `waitingForUser`, `timedOut`, the last `reply` and the pending requests.",
+            "inputSchema": { "type": "object", "properties": {
+                "thread": thread.clone(),
+                "timeout": { "type": "integer", "description": "Seconds (default 600, max 3600)." }
+            }, "required": ["thread"] },
+        }),
+        json!({
+            "name": "chat_show",
+            "description": "Read a conversation: its last timeline items, the last reply, status and pending requests.",
+            "inputSchema": { "type": "object", "properties": {
+                "thread": thread.clone(),
+                "last": { "type": "integer", "description": "How many items (default 20)." }
+            }, "required": ["thread"] },
+        }),
+        json!({
+            "name": "chat_stop",
+            "description": "Interrupt the conversation's running turn.",
+            "inputSchema": { "type": "object", "properties": { "thread": thread.clone() }, "required": ["thread"] },
+        }),
+        json!({
+            "name": "chat_pending",
+            "description": "Approvals and questions waiting for the person (of one conversation, or all). Only the person answers them, in the app.",
+            "inputSchema": { "type": "object", "properties": { "thread": thread }, "required": [] },
+        }),
+    ]
+}
+
+fn chat<F>(context: &McpContext, tool: &ChatTool, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let mut args = match arguments {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    // A conversa nova abre na pasta de quem pede, se não disser outra.
+    if let (McpContext::Cwd { cwd, .. }, "chat.new") = (context, tool.ipc) {
+        args.entry("cwd").or_insert_with(|| json!(cwd));
+    }
+    match send(tool.ipc, Value::Object(args)) {
         Ok(data) => content(data),
         Err(e) => tool_error(&e),
     }

@@ -13,6 +13,8 @@ import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
+import { useChatShell } from "@/app/uiStore";
+import { isPageRoute } from "@/features/chat/chatRoutes";
 
 /**
  * Donde se dibujan las tabs de archivo, diff y navegador: encima de las terminales.
@@ -39,14 +41,19 @@ export function ViewTabsHost() {
     useViewTabsStore.getState().showTerminal();
   }, [mode, boardKey, desktop, activeViewId]);
   const keepMountedIds = useViewTabsStore((s) => s.keepMountedIds);
-  const onWorkspace = useLocation().pathname.startsWith("/workspace");
+  const pathname = useLocation().pathname;
+  // O chat não é uma rota: com ele na tela, a vista que ele mostra (o navegador do painel) conta como na tela.
+  const chatOn = useChatShell();
+  const onWorkspace = pathname.startsWith("/workspace") || (chatOn && !isPageRoute(pathname));
   // Solo las del workspace activo tienen lugar: una de otro nunca se muestra.
   const { visible, focusedItem } = usePlacements();
   const lastRect = useRef(new Map<string, Rect | null>());
   const desktopNode = mode === "canvas" && portals ? Object.entries(portals).find(([, p]) => p.kind === "gemini") : undefined;
   const desktopRect = desktopNode && desktopRects[desktopNode[0]];
   const boardCwd = boardKey?.split("|").slice(1).join("|").split("#m:")[0];
-  const placementOf = (view: ViewTab) => view.kind === "desktop" && mode === "canvas"
+  // No chat só aparece o navegador do painel direito (nunca o Gemini Desktop do canvas).
+  const chat = chatOn;
+  const placementOf = (view: ViewTab) => view.kind === "desktop" && mode === "canvas" && !chat
     ? (desktopRect && !activeViewId && boardCwd === comparablePath(view.cwd) ? { groupId: "canvas", rect: desktopRect } : undefined)
     : visible.get(viewKey(view.id));
 

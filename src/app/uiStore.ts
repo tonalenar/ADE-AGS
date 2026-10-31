@@ -1,12 +1,41 @@
 import { create } from "zustand";
 
 /** As seções da tela de Configurações (a barra lateral da prancheta 5). */
-export type SettingsSectionId = "general" | "appearance" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "decisions" | "advanced";
+export type SettingsSectionId = "general" | "appearance" | "chat" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "decisions" | "devices" | "worktrees" | "advanced";
 
 /** O que a gaveta da direita mostra (abre pelos botões do canto de cima, ver `PanelButtons`). */
 export type ExplorerView = "files" | "search" | "scm";
 
+/**
+ * A casca da janela: o modo chat (conversas, estilo T3 Code) ou o workspace de sempre (abas ou
+ * canvas, por pasta — ver `WorkMode`). Só vale com o modo chat ligado em Configurações → Modo chat.
+ */
+export type ShellMode = "chat" | "workspace";
+
+/** Onde o app abre (Configurações → Modo chat → Modo inicial). `null` = onde estava ao fechar. */
+export type StartMode = "chat" | "tabs" | "canvas";
+
+/**
+ * A casca na abertura: a do modo inicial, se houver um (o chat só com o modo chat ligado), senão a
+ * lembrada. Abas e Canvas são o workspace; qual dos dois, o `AppShell` aplica à pasta ativa. Pura.
+ */
+export function startShell(chatMode: boolean, remembered: ShellMode, start: StartMode | null): ShellMode {
+  if (!chatMode) return "workspace";
+  if (start === "chat") return "chat";
+  if (start === "tabs" || start === "canvas") return "workspace";
+  return remembered;
+}
+
 interface UiState {
+  /** O modo chat ligado (experimental). Desligado, a casca é sempre o workspace. */
+  chatMode: boolean;
+  /** A casca escolhida por último. Lembrada entre aberturas, como os painéis. */
+  shellMode: ShellMode;
+  /** O modo em que o app abre; `null` = onde estava. */
+  startMode: StartMode | null;
+  setStartMode: (mode: StartMode | null) => void;
+  setChatMode: (on: boolean) => void;
+  setShellMode: (mode: ShellMode) => void;
   /** Panel izquierdo (workspaces) plegado: queda solo el riel de iconos. */
   workspacesCollapsed: boolean;
   /** O painel da sessão (Ambiente, Contexto, Conectores, Alterações, Tarefas) escondido. */
@@ -52,22 +81,29 @@ const KEY = "cc-ui-panels";
 
 /** Se recuerda entre arranques: que un panel que plegaste vuelva abierto cada vez es de
  *  las cosas que más molestan de una app de trabajo. */
-function load(): Pick<UiState, "workspacesCollapsed" | "sidePanelHidden" | "marketplaceReposCollapsed" | "railExpanded"> {
+type Persisted = Pick<UiState, "workspacesCollapsed" | "sidePanelHidden" | "marketplaceReposCollapsed" | "railExpanded" | "chatMode" | "shellMode" | "startMode">;
+
+function load(): Persisted {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<UiState>;
+      const chatMode = parsed.chatMode === true;
+      const startMode = parsed.startMode === "chat" || parsed.startMode === "tabs" || parsed.startMode === "canvas" ? parsed.startMode : null;
       return {
         workspacesCollapsed: Boolean(parsed.workspacesCollapsed),
         sidePanelHidden: Boolean(parsed.sidePanelHidden),
         marketplaceReposCollapsed: Boolean(parsed.marketplaceReposCollapsed),
         railExpanded: Boolean(parsed.railExpanded),
+        chatMode,
+        shellMode: startShell(chatMode, parsed.shellMode === "chat" ? "chat" : "workspace", startMode),
+        startMode,
       };
     }
   } catch {
     /* localStorage puede fallar o traer basura; los valores por defecto sirven igual */
   }
-  return { workspacesCollapsed: false, sidePanelHidden: false, marketplaceReposCollapsed: false, railExpanded: false };
+  return { workspacesCollapsed: false, sidePanelHidden: false, marketplaceReposCollapsed: false, railExpanded: false, chatMode: false, shellMode: "workspace", startMode: null };
 }
 
 function persist(state: UiState) {
@@ -77,6 +113,9 @@ function persist(state: UiState) {
       sidePanelHidden: state.sidePanelHidden,
       marketplaceReposCollapsed: state.marketplaceReposCollapsed,
       railExpanded: state.railExpanded,
+      chatMode: state.chatMode,
+      shellMode: state.shellMode,
+      startMode: state.startMode,
     }));
   } catch {
     /* no poder recordarlo no es motivo para no plegarlo */
@@ -91,6 +130,21 @@ export const useUiStore = create<UiState>((set, get) => ({
   accountsOpen: false,
   settingsSection: "general",
   paletteOpen: false,
+
+  setChatMode: (chatMode) => {
+    // Desligar devolve a casca de sempre: senão quem desliga ficaria preso numa tela que sumiu.
+    set(chatMode ? { chatMode } : { chatMode, shellMode: "workspace" });
+    persist(get());
+  },
+  setStartMode: (startMode) => {
+    set({ startMode });
+    persist(get());
+  },
+  setShellMode: (shellMode) => {
+    if (shellMode === "chat" && !get().chatMode) return;
+    set({ shellMode });
+    persist(get());
+  },
 
   toggleWorkspaces: () => {
     set({ workspacesCollapsed: !get().workspacesCollapsed });
@@ -116,3 +170,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
 }));
+
+/** A casca do chat está na tela: o modo ligado E escolhido. */
+export const chatShellOn = (s: Pick<UiState, "chatMode" | "shellMode">) => s.chatMode && s.shellMode === "chat";
+
+export const useChatShell = () => useUiStore(chatShellOn);

@@ -14,6 +14,9 @@ import i18n from "@/i18n";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { getAutonomy } from "@/features/missions/autonomy";
+import { useUiStore } from "@/app/uiStore";
+import { isPageRoute } from "@/features/chat/chatRoutes";
+import { openThread, reloadThreads } from "@/features/chat/structured/store";
 import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
@@ -393,6 +396,20 @@ async function handleNotify(args: Record<string, unknown>) {
   return { ok: true };
 }
 
+/** `ags chat open <id>`: liga a casca do chat e mostra a conversa (fecha a tela cheia que estiver por cima). */
+async function handleChatOpen(args: Record<string, unknown>): Promise<unknown> {
+  const thread = typeof args.thread === "string" ? args.thread : "";
+  if (!thread) throw new Error("Falta a conversa");
+  const ui = useUiStore.getState();
+  if (!ui.chatMode) throw new Error("O modo chat está desligado (Configurações → Modo chat).");
+  ui.setShellMode("chat");
+  await reloadThreads();
+  const path = window.location.hash.replace(/^#/, "") || "/";
+  if (isPageRoute(path)) window.location.hash = useTabsStore.getState().tabs.length > 0 ? "#/workspace" : "#/";
+  openThread(thread);
+  return { opened: thread };
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
@@ -408,6 +425,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.note": return handleNote(args);
     case "canvas.portal": return handlePortal(args);
     case "user.notify": return handleNotify(args);
+    case "chat.open": return handleChatOpen(args);
     default: throw new Error(`O frontend não sabe atender '${command}'`);
   }
 }

@@ -8,6 +8,7 @@ mod canal;
 mod canvas;
 mod chat;
 mod compare;
+mod conversa;
 mod app;
 mod bus;
 mod database;

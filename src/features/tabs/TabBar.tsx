@@ -13,6 +13,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { viewsOfWorkspace } from "@/features/tabs/viewTabs";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { ModeToggle } from "@/features/canvas/ModeToggle";
+import { ChatEntryButton } from "@/features/chat/ChatEntryButton";
 import { conversationOfKey, useActiveBoardKey, useWorkMode } from "@/features/canvas/store";
 import { MissionChips } from "@/features/missions/MissionChips";
 import { useActiveGroup, useMissionIndex } from "@/features/missions/groups";
@@ -181,6 +182,7 @@ export function TabBar({ showLights = false, trailing }: {
 
         {/* El resto de la franja es para arrastrar la ventana. */}
         <div className="flex-1 h-full" data-tauri-drag-region />
+        <ChatEntryButton />
         {activeTab && <ModeToggle />}
         {trailing}
       </div>

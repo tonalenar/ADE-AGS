@@ -43,7 +43,9 @@ export type ShortcutAction =
   /** `delta` en el ORDEN de la barra de tabs: +1 la siguiente, -1 la anterior. */
   | { kind: "cycleTab"; delta: 1 | -1 }
   /** O tamanho do texto dos terminais e do chat: +1 um passo maior, -1 menor, 0 de volta a 100 %. */
-  | { kind: "textZoom"; delta: 1 | -1 | 0 };
+  | { kind: "textZoom"; delta: 1 | -1 | 0 }
+  /** Alterna entre a casca do chat e o workspace (abas/canvas). Só com o modo chat ligado. */
+  | { kind: "toggleChat" };
 
 export interface Shortcut {
   /** `KeyboardEvent.key` en minúscula. */
@@ -95,6 +97,9 @@ export const SHORTCUTS: Shortcut[] = [
   { key: "+", action: { kind: "textZoom", delta: 1 }, display: "Ctrl++", labelKey: "shortcuts.zoomIn" },
   { key: "-", action: { kind: "textZoom", delta: -1 }, display: "Ctrl+-", labelKey: "shortcuts.zoomOut" },
   { key: "0", action: { kind: "textZoom", delta: 0 }, display: "Ctrl+0", labelKey: "shortcuts.zoomReset" },
+  // Chat ⇄ abas/canvas. Sem Alt (AltGr, ver `matchShortcut`); com o modo chat desligado o acorde
+  // segue para o terminal (ver `useGlobalShortcuts`).
+  { key: "l", shift: true, action: { kind: "toggleChat" }, display: "Ctrl+Shift+L", labelKey: "chat.mode.toggle" },
 ];
 
 /** Lo que hace falta de un `KeyboardEvent` — estructural para poder testear sin DOM. */
