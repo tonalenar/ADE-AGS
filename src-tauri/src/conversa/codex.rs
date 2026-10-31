@@ -313,6 +313,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Codex: {e}"))?;
+    super::memoria::record_unsupported(app, db, row);
     let stdin = child.stdin.take().ok_or("sem stdin")?;
     let stdout = child.stdout.take().ok_or("sem stdout")?;
     let stderr = child.stderr.take();

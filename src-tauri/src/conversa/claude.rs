@@ -248,7 +248,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Claude: {e}"))?;
-    record_memory(app, db, row, &memory);
+    memoria::record(app, db, row, &memory.state, memory.notice.as_deref());
     let stdin = child.stdin.take().ok_or("sem stdin")?;
     let stdout = child.stdout.take().ok_or("sem stdout")?;
     let stderr = child.stderr.take();
@@ -287,21 +287,6 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     }
     tauri::async_runtime::spawn(read_loop(app.clone(), db.clone(), session.clone(), stdout));
     Ok(session)
-}
-
-/// Grava na conversa o que aconteceu com o ai-memory nesta abertura (a tela mostra o que está gravado, não adivinha) e,
-/// quando algo falhou, deixa um aviso no fio, uma vez por mudança de estado.
-fn record_memory(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, memory: &memoria::Memory) {
-    if row.memory.as_deref() == Some(memory.state.as_str()) {
-        return;
-    }
-    if let Ok(conn) = db.lock() {
-        let _ = store::set_memory(&conn, &row.id, &memory.state);
-    }
-    emit(app, &row.id, "thread", json!({ "memory": memory.state }));
-    if let Some(text) = &memory.notice {
-        turn::save_notice(app, db, &row.id, "memoryOff", text);
-    }
 }
 
 async fn write_loop(mut rx: mpsc::UnboundedReceiver<String>, mut stdin: tokio::process::ChildStdin) {

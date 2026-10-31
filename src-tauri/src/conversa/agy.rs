@@ -233,6 +233,7 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Antigravity: {e}"))?;
+    super::memoria::record_unsupported(app, db, &row);
     let stdout = child.stdout.take().ok_or("sem stdout")?;
     let stderr = child.stderr.take();
     if let Ok(mut slot) = session.child.lock() {

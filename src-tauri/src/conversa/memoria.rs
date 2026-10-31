@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use super::store::ThreadRow;
 use crate::ai_memory::tabs::{enabled as tabs_enabled, prepare_new_tab_with, remove_owned_server, supported_binary, TabInjection, PROTECT_ENV, TABS_SETTING};
 use crate::database::{get_setting, DbConnection};
+use tauri::AppHandle;
 
 /// O que a abertura do `claude` leva da memória.
 pub struct Memory {
@@ -101,3 +102,25 @@ pub fn for_thread(db: &DbConnection, row: &ThreadRow, program: &Path, args: &[St
         prepare(Inputs { enabled, binary, thread_id: &row.id, dir: &dir, home: &home, argv: &argv, extras })
     })
 }
+
+/// Grava na conversa o que aconteceu com o ai-memory nesta abertura (a tela mostra o que está gravado, não adivinha) e,
+/// quando algo falhou, deixa um aviso no fio, uma vez por mudança de estado.
+pub fn record(app: &AppHandle, db: &DbConnection, row: &ThreadRow, state: &str, notice: Option<&str>) {
+    if row.memory.as_deref() == Some(state) {
+        return;
+    }
+    if let Ok(conn) = db.lock() {
+        let _ = super::store::set_memory(&conn, &row.id, state);
+    }
+    super::events::emit(app, &row.id, "thread", serde_json::json!({ "memory": state }));
+    if let Some(text) = notice {
+        super::turn::save_notice(app, db, &row.id, "memoryOff", text);
+    }
+}
+
+/// Os motores de protocolo que não recebem o ai-memory (Codex, OpenCode, Antigravity): fica dito na conversa.
+pub fn record_unsupported(app: &AppHandle, db: &DbConnection, row: &ThreadRow) {
+    record(app, db, row, UNSUPPORTED, None);
+}
+
+pub const UNSUPPORTED: &str = "off:unsupported";
