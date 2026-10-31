@@ -1117,3 +1117,15 @@ fn o_design_pelo_mcp_nasce_na_pasta_da_aba_e_o_comentario_e_do_agente() {
     assert_eq!(sent[0].0, "design.view");
     assert!(out[0]["result"]["content"][0]["text"].as_str().unwrap().contains("\"open\":false"));
 }
+
+#[test]
+fn sim_act_tem_rota_backend_e_scope_do_device_sem_fallback_para_udid_solto() {
+    let dispatch=include_str!("commands/dispatch.rs");
+    let handler=include_str!("commands/sim_act.rs");
+    let devices=include_str!("commands/devices.rs");
+    assert!(dispatch.contains("\"sim.act\" => super::sim_act::act(app, args)"));
+    assert!(handler.contains("super::devices::ios_target"));
+    assert!(devices.contains("pub(super) fn ios_target"));
+    assert!(handler.contains("crate::terminal::authorize"));
+    assert!(handler.contains("crate::ipc::current_client_pid"));
+}

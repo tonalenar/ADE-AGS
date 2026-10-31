@@ -669,3 +669,20 @@ fn portal_close_leva_o_nome_do_portal_e_vem_na_ajuda() {
         assert!(USAGE.contains(estado), "{estado}");
     }
 }
+
+#[test]
+fn sim_act_preserva_contrato_de_posicionais_fills_expectativas_e_timeout() {
+    let args=parse("sim.act", &["iPhone","abrir ajustes","--fill","screen=a=b","--expect","text:Ajustes","--expect","text:Geral","--steps","4","--timeout","90"]).unwrap();
+    assert_eq!(args["name"],"iPhone");assert_eq!(args["goal"],"abrir ajustes");assert_eq!(args["fill"],json!(["screen=a=b"]));
+    assert_eq!(args["expect"],json!(["text:Ajustes","text:Geral"]));
+    assert_eq!(read_timeout_for("sim.act",&args).as_secs(),165);
+    assert_eq!(read_timeout_for("sim.act",&json!({"timeout":"1800"})).as_secs(),1875);
+    let mut args=args;caller_from("sim.act",&mut args,Some("sim-agent".into()),None);assert_eq!(args["from"],"sim-agent");
+}
+
+#[test]
+fn sim_act_ignora_identidade_e_sessao_injetadas_em_flags(){
+    let mut args=json!({"from":"outro","session":"forjada","taskId":"task-alheia","mission":"missao"});
+    caller_from("sim.act",&mut args,Some("tab-real".into()),Some("sessao-real".into()));
+    assert_eq!(args["from"],"tab-real");assert_eq!(args["session"],"sessao-real");assert!(args.get("taskId").is_none());assert!(args.get("mission").is_none());
+}

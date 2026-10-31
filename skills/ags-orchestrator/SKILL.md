@@ -798,6 +798,28 @@ ags device say iPhone "Login fixed: the button no longer hides under the keyboar
 - The node has a **chat**: what the user writes there reaches every agent connected to it (with
   the current screen attached). Answer there with `ags device say`, not in your terminal only;
   the other connected agents and the user see it, together with the actions you took.
+- `ags sim act iPhone "Open General in Settings" --expect "text:iPhone Storage" --steps 8 --timeout 115`
+  runs the shared observe/decide/act/verify loop using simulator screenshots and existing HID.
+  Run it from an ADE terminal: it requires the app-issued PTY session and descendant process;
+  CLI flags cannot replace that identity.
+  Enable Jev, browser step and visual fallback in Decisions first. It uses only the configured
+  provider; no Chrome/CDP or WebView2 is involved. `--timeout` is seconds (10–1800); individual
+  native operations have their own bounded timeout and may finish after that deadline.
+- `ags sim act iPhone "Fill the already focused field" --fill "screen=hello" --expect "text:hello"`
+  inserts local text into the input you already focused. Only one nonempty printable US-ASCII `screen` fill is supported; controls, including Enter/Tab,
+  are rejected before acting.
+  Fill values and expectations are never included in the provider request. After typing, the
+  loop checks OCR locally and blocks further photo uploads. A persistent per-device marker
+  survives app restarts; a later act requires the person to clear the data and confirm that
+  the current photo contains none of the previous fills before uploads resume.
+- The simulator photo is part of the act request. Local Apple Vision OCR scans for secrets,
+  password labels and masked text before upload; failures block. This is best-effort detection,
+  not a complete accessibility tree. Sensitive/uncertain actions, unlabeled image targets and
+  typing require a one-action confirmation in the UI. A changed screenshot invalidates the
+  decision even after confirmation. Use `--expect text:...` (repeatable, local OCR) for verified
+  success; `url:`, `count:` and `absent:` are rejected before acting. No expectation means any
+  model-reported completion is explicitly unverified. Animated screens can exhaust the stale
+  revision guard; do not disable it. The log records photo submission metadata, never pixels.
 - `tree` and `tap --text` are not available on iOS yet: take a `shot` and tap by points.
 - **Light mode** (the default, ⚡ on the node's bar) boots iOS without Siri, widgets, Spotlight,
   iCloud sign-in, Mail/Calendar/Contacts sync, Health, Maps, News and iMessage. Push, purchases,

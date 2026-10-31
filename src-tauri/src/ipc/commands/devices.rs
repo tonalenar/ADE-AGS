@@ -489,3 +489,12 @@ mod test {
         assert_eq!(file_stem("../x"), "x");
     }
 }
+
+/// Resolve só nós iOS alcançáveis pelo chamador; não aceita UDID solto como autorização.
+pub(super) fn ios_target(from: &str, name: &str) -> Result<(String, String), String> {
+    let list = reachable(from);
+    let target = resolve(&list, name)?;
+    if target.portal.kind.as_deref() != Some("ios") { return Err("Use sim act somente em um nó iOS conectado ao seu terminal.".into()); }
+    let udid = target.portal.udid.clone().filter(|u| !u.is_empty()).ok_or("Escolha o aparelho no nó iOS antes de iniciar.")?;
+    Ok((target.id.clone(), udid))
+}

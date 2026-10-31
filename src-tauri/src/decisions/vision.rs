@@ -519,3 +519,6 @@ mod test {
         }
     }
 }
+
+#[path = "vision/computer.rs"]
+pub(crate) mod computer;

@@ -194,3 +194,9 @@ pub fn simulator_tell(app: AppHandle, key: String, node: String, name: String, t
     activity(&app, &node, "", "user", text);
     Ok(json!({ "sent": sent }))
 }
+
+/// Resumo do piloto na mesma conversa que já mostra toque/teclado, sem objetivo nem valores.
+pub(super) fn act_activity(app:&AppHandle,node:&str,from:&str,report:&crate::computer_use::Report){
+    let agent=agent_name(app,from);
+    activity(app,node,&agent,"action",&format!("act {:?}: {} tentativa(s). {}",report.status,report.actions.len(),report.reason));
+}

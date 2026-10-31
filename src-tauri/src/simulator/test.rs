@@ -117,13 +117,13 @@ fn hiberna_so_fora_de_vista_depois_do_prazo() {
 }
 
 #[test]
-fn a_prioridade_e_baixa_no_boot_e_fora_de_vista_e_normal_quando_se_olha() {
+fn a_prioridade_e_baixa_fora_de_vista_e_normal_quando_se_olha() {
     use super::lifecycle::wanted_nice;
     use std::time::Duration;
     let settled = Duration::from_secs(600);
     assert_eq!(wanted_nice(true, true, settled), 0);
     assert_eq!(wanted_nice(true, false, settled), 10);
-    assert_eq!(wanted_nice(true, true, Duration::from_secs(30)), 10, "no pico do boot, baixa mesmo à vista");
+    assert_eq!(wanted_nice(true, true, Duration::from_secs(30)), 0, "à vista a prioridade é sempre normal para não engasgar");
     assert_eq!(wanted_nice(false, false, settled), 0, "sem modo leve, sempre normal");
 }
 

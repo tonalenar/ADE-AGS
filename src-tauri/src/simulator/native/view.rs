@@ -13,7 +13,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use block2::RcBlock;
@@ -68,6 +68,15 @@ fn cg_rect(x: f64, y: f64, width: f64, height: f64) -> CGRect {
 /// Uso HID do Shift esquerdo.
 const SHIFT: u32 = 0xe1;
 
+#[derive(PartialEq)]
+struct AppliedRegion {
+    width: u64,
+    height: u64,
+    visible: Rect,
+    holes: Vec<Rect>,
+    radius: u64,
+}
+
 pub struct Ivars {
     hid: Arc<Hid>,
     /// A subcamada que mostra a `IOSurface`. A superfície fica sempre em retrato; em paisagem (ou de cabeça para
@@ -77,6 +86,7 @@ pub struct Ivars {
     orientation: Cell<u32>,
     /// Onde a tela recebe toque, em coordenadas da view (origem no topo). Vazio = nada à vista.
     region: RefCell<Vec<Rect>>,
+    applied: RefCell<Option<AppliedRegion>>,
     touching: Cell<bool>,
     /// O dedo de uma rolagem do trackpad (em coordenadas da view), enquanto ela dura.
     scrolling: Cell<Option<(f64, f64)>>,
@@ -184,7 +194,7 @@ impl ScreenView {
             retain(content).expect("CALayer")
         };
         let this = Self::alloc(mtm).set_ivars(Ivars {
-            hid, content, orientation: Cell::new(1), region: RefCell::new(Vec::new()), touching: Cell::new(false), scrolling: Cell::new(None),
+            hid, content, orientation: Cell::new(1), region: RefCell::new(Vec::new()), applied: RefCell::new(None), touching: Cell::new(false), scrolling: Cell::new(None),
         });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
@@ -194,6 +204,7 @@ impl ScreenView {
         unsafe {
             let layer_class = class(c"CALayer").expect("QuartzCore");
             let layer = call!(layer_class, sel!(layer); -> *mut AnyObject);
+            call!(layer, sel!(setOpaque:), true => bool; -> ());
             let black = call!(class(c"NSColor").expect("AppKit"), sel!(blackColor); -> *mut AnyObject);
             let cg = call!(black, sel!(CGColor); -> *mut c_void);
             call!(layer, sel!(setBackgroundColor:), cg => *mut c_void; -> ());
@@ -334,34 +345,64 @@ impl ScreenView {
     }
 
     /// O que da tela aparece: o retângulo arredondado da tela, cortado na parte à vista e sem os buracos (menus,
-    /// diálogos do app por cima). Vira a máscara da camada e a área de toque. O caminho sai das operações
-    /// booleanas do CoreGraphics. A camada de uma view virada (`isFlipped`) já vem com a geometria virada pelo
-    /// AppKit: as coordenadas são as da view, com a origem no topo, sem conversão.
+    /// diálogos do app por cima). Quando a tela inteira está à vista e sem buracos, usa o `cornerRadius` contínuo
+    /// direto na camada (sem `CAShapeLayer`, evitando composição intermediária fora da tela no `WindowServer`);
+    /// só cria máscara `CGPath` quando há recorte nas bordas ou buracos por cima.
     fn set_region(&self, visible: Rect, holes: &[Rect], radius: f64) {
         let bounds = self.bounds();
         let (w, h) = (bounds.size.width, bounds.size.height);
-        let flip = |r: &Rect| cg_rect(r.x, r.y, r.width, r.height);
         let radius = radius.clamp(0.0, w.min(h) / 2.0);
-        // SAFETY: CoreGraphics e CAShapeLayer públicos; cada caminho criado aqui é liberado aqui (a camada retém o seu).
+        let next = AppliedRegion {
+            width: w.to_bits(),
+            height: h.to_bits(),
+            visible,
+            holes: holes.to_vec(),
+            radius: radius.to_bits(),
+        };
+        if self.ivars().applied.borrow().as_ref() == Some(&next) {
+            return;
+        }
+        *self.ivars().applied.borrow_mut() = Some(next);
+
+        let full = holes.is_empty()
+            && visible.x.abs() <= 0.5
+            && visible.y.abs() <= 0.5
+            && (visible.width - w).abs() <= 0.5
+            && (visible.height - h).abs() <= 0.5;
+        let flip = |r: &Rect| cg_rect(r.x, r.y, r.width, r.height);
+        let layer = self.layer();
+        // SAFETY: CoreGraphics e CALayer/CAShapeLayer públicos; mudanças em transação sem animação implícita.
         unsafe {
-            let mut path = CGPathCreateWithRoundedRect(cg_rect(0.0, 0.0, w, h), radius, radius, std::ptr::null());
-            let clip = CGPathCreateWithRect(flip(&visible), std::ptr::null());
-            let cut = CGPathCreateCopyByIntersectingPath(path, clip, false);
-            CGPathRelease(clip);
-            CGPathRelease(path);
-            path = cut;
-            for hole in holes {
-                let hole_path = CGPathCreateWithRect(flip(hole), std::ptr::null());
-                let cut = CGPathCreateCopyBySubtractingPath(path, hole_path, false);
-                CGPathRelease(hole_path);
-                CGPathRelease(path);
-                path = cut;
-            }
-            let mask = call!(class(c"CAShapeLayer").expect("QuartzCore"), sel!(layer); -> *mut AnyObject);
-            call!(mask, sel!(setFrame:), cg_rect(0.0, 0.0, w, h) => CGRect; -> ());
-            call!(mask, sel!(setPath:), path => *mut c_void; -> ());
-            call!(self.layer(), sel!(setMask:), mask => *mut AnyObject; -> ());
-            CGPathRelease(path);
+            transaction(|| {
+                if full {
+                    call!(layer, sel!(setMask:), std::ptr::null_mut::<AnyObject>() => *mut AnyObject; -> ());
+                    let curve = ns_string("continuous");
+                    call!(layer, sel!(setCornerCurve:), Retained::as_ptr(&curve) as *mut AnyObject => *mut AnyObject; -> ());
+                    call!(layer, sel!(setCornerRadius:), radius => f64; -> ());
+                    call!(layer, sel!(setMasksToBounds:), radius > 0.0 => bool; -> ());
+                } else {
+                    call!(layer, sel!(setCornerRadius:), 0.0f64 => f64; -> ());
+                    call!(layer, sel!(setMasksToBounds:), false => bool; -> ());
+                    let mut path = CGPathCreateWithRoundedRect(cg_rect(0.0, 0.0, w, h), radius, radius, std::ptr::null());
+                    let clip = CGPathCreateWithRect(flip(&visible), std::ptr::null());
+                    let cut = CGPathCreateCopyByIntersectingPath(path, clip, false);
+                    CGPathRelease(clip);
+                    CGPathRelease(path);
+                    path = cut;
+                    for hole in holes {
+                        let hole_path = CGPathCreateWithRect(flip(hole), std::ptr::null());
+                        let cut = CGPathCreateCopyBySubtractingPath(path, hole_path, false);
+                        CGPathRelease(hole_path);
+                        CGPathRelease(path);
+                        path = cut;
+                    }
+                    let mask = call!(class(c"CAShapeLayer").expect("QuartzCore"), sel!(layer); -> *mut AnyObject);
+                    call!(mask, sel!(setFrame:), cg_rect(0.0, 0.0, w, h) => CGRect; -> ());
+                    call!(mask, sel!(setPath:), path => *mut c_void; -> ());
+                    call!(layer, sel!(setMask:), mask => *mut AnyObject; -> ());
+                    CGPathRelease(path);
+                }
+            });
         }
         // A área de toque (coordenadas da view): a parte visível sem os buracos. Os cantos arredondados ficam de
         // fora do toque só pela máscara; um clique ali ainda vira toque na borda da tela, como no Simulator.
@@ -378,9 +419,9 @@ fn frame_queue() -> &'static DispatchQueue {
     })
 }
 
-/// Depois de um aviso de quadro, quando conferir de novo se a superfície mudou: em ~13% dos avisos o seed da
-/// `IOSurface` só muda 1–16 ms depois (medição do serve-sim, da Expo).
-const RECHECK_MS: [u64; 6] = [1, 1, 2, 4, 8, 16];
+/// Depois de um aviso de quadro cujo seed da `IOSurface` ainda não avançou, quando conferir de novo (dentro da mesma
+/// metade de quadro de 8,3 ms a 120 Hz, sem invadir o quadro seguinte nem roubar o seed dele).
+const RECHECK_MS: [u64; 2] = [1, 2];
 
 /// O que a fila de quadros mexe: a camada da view e a superfície que ela mostra. Só a fila de quadros chama
 /// os métodos daqui; a camada é retida, então um aviso atrasado depois de fechar a tela não pega nada solto.
@@ -389,8 +430,8 @@ struct Presenter {
     screen: Shared,
     surface: Mutex<Option<Shared>>,
     seed: AtomicU32,
-    /// Já há uma reconferência marcada: avisos que chegam no meio ficam por conta dela.
-    pending: AtomicBool,
+    /// Geração do último aviso de quadro recebido; invalida reconferências anteriores sem bloquear novos quadros.
+    seq: AtomicU64,
 }
 
 /// Uma transação explícita do Core Animation: fora da thread da interface não há runloop para fechar a
@@ -444,14 +485,20 @@ impl Presenter {
         count_frame();
     }
 
-    /// Quadro novo: mostra se a superfície já mudou; senão reconfere logo depois.
+    /// Quadro novo: notifica a camada na hora (como o `SimDisplayRenderableView` do SimulatorKit) e, se o seed da
+    /// `IOSurface` ainda não tiver mudado no instante do aviso, agenda reconferência identificada por `seq`.
     fn frame(self: &Arc<Self>) {
-        if self.pending.load(Ordering::Relaxed) {
-            return;
-        }
-        if !self.advance() {
-            self.pending.store(true, Ordering::Relaxed);
-            self.recheck(0);
+        let seq = self.seq.fetch_add(1, Ordering::AcqRel) + 1;
+        let changed = match self.seed_now() {
+            Some(seed) if seed != self.seed.load(Ordering::Relaxed) => {
+                self.seed.store(seed, Ordering::Relaxed);
+                true
+            }
+            _ => false,
+        };
+        self.present();
+        if !changed {
+            self.recheck(seq, 0);
         }
     }
 
@@ -467,18 +514,18 @@ impl Presenter {
         }
     }
 
-    fn recheck(self: &Arc<Self>, attempt: usize) {
+    fn recheck(self: &Arc<Self>, seq: u64, attempt: usize) {
         let Some(ms) = RECHECK_MS.get(attempt) else {
-            self.pending.store(false, Ordering::Relaxed);
             return;
         };
         let this = self.clone();
         let when = DispatchTime::NOW.time((*ms * 1_000_000) as i64);
         let _ = frame_queue().after(when, move || {
-            if this.advance() {
-                this.pending.store(false, Ordering::Relaxed);
-            } else {
-                this.recheck(attempt + 1);
+            if this.seq.load(Ordering::Acquire) != seq {
+                return;
+            }
+            if !this.advance() {
+                this.recheck(seq, attempt + 1);
             }
         });
     }
@@ -661,7 +708,11 @@ pub unsafe fn attach(webview: *mut c_void, id: &str, udid: &str, screen: Screen,
     let (layer, screen_obj) = unsafe { (retain(Retained::as_ptr(&view.ivars().content) as *mut AnyObject), retain(screen.obj.ptr())) };
     let (Some(layer), Some(screen_obj)) = (layer, screen_obj) else { return Err("A tela do simulador não tem camada.".into()) };
     let presenter = Arc::new(Presenter {
-        layer: Shared(layer), screen: Shared(screen_obj), surface: Mutex::new(None), seed: AtomicU32::new(0), pending: AtomicBool::new(false),
+        layer: Shared(layer),
+        screen: Shared(screen_obj),
+        surface: Mutex::new(None),
+        seed: AtomicU32::new(0),
+        seq: AtomicU64::new(0),
     });
     let entry = Entry { udid: udid.to_string(), view, screen, presenter, uuid: new_uuid(), listening: Cell::new(false) };
     apply(&entry, webview, place);

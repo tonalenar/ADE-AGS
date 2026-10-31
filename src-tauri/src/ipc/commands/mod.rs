@@ -16,6 +16,7 @@ mod role;
 mod portals;
 mod replay;
 pub mod devices;
+mod sim_act;
 pub mod simulators;
 pub mod pool;
 mod browser;
