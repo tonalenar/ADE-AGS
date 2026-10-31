@@ -183,6 +183,7 @@ pub fn analyze_command(command: &str) -> ShellAnalysis {
 }
 
 /// As partes de um comando composto, sem as vazias. Pura.
+#[cfg(test)]
 pub fn command_parts(command: &str) -> Vec<String> {
     analyze_command(command).parts
 }
@@ -278,6 +279,7 @@ pub fn resolve_path(path: &str, cwd: Option<&str>) -> ResolvedPath {
 }
 
 /// O arquivo está dentro da pasta? Provado por texto; na dúvida, não. Pura.
+#[cfg(test)]
 pub fn inside_folder(file: &str, cwd: Option<&str>) -> bool {
     resolve_path(file, cwd).inside
 }

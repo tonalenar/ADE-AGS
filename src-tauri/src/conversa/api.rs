@@ -292,28 +292,30 @@ pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str
 /// Como `answer`, dizendo quem responde (`person`, `policy`, `rule:<id>`) e por quê: fica gravado e vai no aviso
 /// `requestResolved`. A resposta da pessoa é a de sempre; as do backend vêm de `conversa::permission`.
 pub fn answer_as(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str, by: &str, why: Option<&str>) -> Result<bool, String> {
-    let row = {
+    let thread_id = {
         let conn = db.lock().map_err(db_err)?;
-        store::request(&conn, request_id).map_err(db_err)?.ok_or("Pedido não encontrado")?
+        store::request(&conn, request_id).map_err(db_err)?.ok_or("Pedido não encontrado")?.thread_id
     };
-    if row.state != "pending" {
-        return Ok(false);
+    // A resposta ao agente só sai depois de o banco RESERVAR o pedido (ver `answer`): quem perde a corrida não envia nada.
+    let sender = |row: &store::RequestRow, choice: &str| send_answer(app, db, row, choice);
+    let answered = super::answer::answer_core(db, request_id, choice, by, why, &sender)?;
+    if answered {
+        super::events::emit(app, &thread_id, "requestResolved", json!({ "id": request_id, "by": by, "why": why }));
     }
+    Ok(answered)
+}
+
+/// Fala com o agente do motor da conversa. Só é chamada com o pedido já reservado.
+fn send_answer(app: &AppHandle, db: &DbConnection, row: &store::RequestRow, choice: &str) -> Result<(), String> {
     let rpc_id: Value = serde_json::from_str(&row.rpc_id).map_err(db_err)?;
     if let Some(session) = claude::get(&row.thread_id) {
-        claude::answer(app, db, &session, &rpc_id, row.item_id.as_deref(), choice)?;
+        claude::answer(app, db, &session, &rpc_id, row.item_id.as_deref(), choice)
     } else if let Some(session) = opencode::get(&row.thread_id) {
-        opencode::answer(&session, &rpc_id, row.item_id.as_deref(), &row.options, choice)?;
+        opencode::answer(&session, &rpc_id, row.item_id.as_deref(), &row.options, choice)
     } else {
         let session = codex::get(&row.thread_id).ok_or("O agente desta conversa já fechou")?;
-        session.respond(rpc_id, codex_map::answer_of(&row.kind, choice, &row.options))?;
+        session.respond(rpc_id, codex_map::answer_of(&row.kind, choice, &row.options))
     }
-    let answered = {
-        let conn = db.lock().map_err(db_err)?;
-        store::answer_request_by(&conn, request_id, choice, crate::util::now_ts_ms(), by, why).map_err(db_err)?
-    };
-    super::events::emit(app, &row.thread_id, "requestResolved", json!({ "id": request_id, "by": by, "why": why }));
-    Ok(answered)
 }
 
 /// Troca modelo, esforço ou acesso (no Claude, o Plano também é um acesso).

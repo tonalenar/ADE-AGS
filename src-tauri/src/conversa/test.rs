@@ -1009,3 +1009,103 @@ mod permissao {
         assert_eq!(store::pending_all(&conn).unwrap().len(), 1, "migrar de novo não apaga nada");
     }
 }
+
+// ── Etapa 3 (S4): uma só resposta ao agente ─────────────────────────────
+
+mod resposta {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier, Mutex};
+
+    use serde_json::json;
+
+    use super::super::answer::{answer_core, enter_person, CLAIM_LEASE_MS};
+    use super::super::store::{self, RequestRow, Tuning};
+    use crate::database::DbConnection;
+
+    fn db() -> DbConnection {
+        let conn = crate::database::test_db();
+        store::insert_thread(&conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = RequestRow { id: "q1".into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: "command".into(), item_id: None, title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1 };
+        store::insert_request(&conn, &row).unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn state(db: &DbConnection) -> String {
+        db.lock().unwrap().query_row("SELECT state FROM chat_request WHERE id = 'q1'", [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn a_reserva_e_atomica_e_a_velha_pode_ser_tomada() {
+        let conn = crate::database::test_db();
+        store::insert_thread(&conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = RequestRow { id: "q1".into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: "command".into(), item_id: None, title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1 };
+        store::insert_request(&conn, &row).unwrap();
+        assert!(store::reserve_request(&conn, "q1", 1_000, CLAIM_LEASE_MS).unwrap());
+        assert!(!store::reserve_request(&conn, "q1", 1_001, CLAIM_LEASE_MS).unwrap(), "quem perde a corrida não responde");
+        store::release_request(&conn, "q1").unwrap();
+        assert!(store::reserve_request(&conn, "q1", 1_002, CLAIM_LEASE_MS).unwrap(), "devolvida, volta a poder ser reservada");
+        assert!(!store::reserve_request(&conn, "q1", 1_002 + CLAIM_LEASE_MS - 1, CLAIM_LEASE_MS).unwrap());
+        assert!(store::reserve_request(&conn, "q1", 1_002 + CLAIM_LEASE_MS + 1, CLAIM_LEASE_MS).unwrap(), "a reserva esquecida (quem a fez morreu) vence");
+        assert!(store::answer_request(&conn, "q1", "allow", 5).unwrap());
+        assert!(!store::reserve_request(&conn, "q1", 9_999_999, CLAIM_LEASE_MS).unwrap(), "respondido não se reserva");
+    }
+
+    #[test]
+    fn duas_respostas_juntas_enviam_uma_so_ao_agente() {
+        for _ in 0..50 {
+            let db = db();
+            let sent = Arc::new(AtomicUsize::new(0));
+            let barrier = Arc::new(Barrier::new(2));
+            let handles: Vec<_> = [("person", "allow"), ("rule:r1", "deny")]
+                .into_iter()
+                .map(|(by, choice)| {
+                    let (db, sent, barrier) = (db.clone(), sent.clone(), barrier.clone());
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        answer_core(&db, "q1", choice, by, None, &|_, _| {
+                            sent.fetch_add(1, Ordering::SeqCst);
+                            Ok(())
+                        })
+                    })
+                })
+                .collect();
+            let wins = handles.into_iter().map(|h| h.join().unwrap().unwrap()).filter(|won| *won).count();
+            assert_eq!((wins, sent.load(Ordering::SeqCst)), (1, 1), "exatamente uma resposta chega ao agente");
+            assert_eq!(state(&db), "answered");
+        }
+    }
+
+    #[test]
+    fn se_o_envio_falha_o_pedido_volta_a_pendente_para_a_pessoa() {
+        let db = db();
+        let err = answer_core(&db, "q1", "allow", "policy", None, &|_, _| Err("O agente desta conversa já fechou".into())).unwrap_err();
+        assert!(err.contains("já fechou"));
+        assert_eq!(state(&db), "pending");
+        let sent = AtomicUsize::new(0);
+        assert!(answer_core(&db, "q1", "deny", "person", None, &|_, _| { sent.fetch_add(1, Ordering::SeqCst); Ok(()) }).unwrap(), "a pessoa ainda pode responder");
+        assert_eq!(sent.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_decisao_da_pessoa_vence_a_automatica_que_chega_junto() {
+        let db = db();
+        let sent = AtomicUsize::new(0);
+        let send = |_: &RequestRow, _: &str| { sent.fetch_add(1, Ordering::SeqCst); Ok(()) };
+        // A pessoa já está respondendo (entrou na fila da resposta): a automática não envia nada e deixa o pedido pendente.
+        let person = enter_person("q1");
+        assert!(!answer_core(&db, "q1", "allow", "rule:r1", Some("regra"), &send).unwrap());
+        assert_eq!((sent.load(Ordering::SeqCst), state(&db).as_str()), (0, "pending"));
+        drop(person);
+        // Sem a pessoa, a automática responde.
+        assert!(answer_core(&db, "q1", "allow", "rule:r1", Some("regra"), &send).unwrap());
+        assert_eq!(sent.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn o_pedido_respondido_ou_inexistente_nao_envia_nada() {
+        let db = db();
+        db.lock().unwrap().execute("UPDATE chat_request SET state = 'answered' WHERE id = 'q1'", []).unwrap();
+        assert!(!answer_core(&db, "q1", "allow", "person", None, &|_, _| panic!("não pode enviar")).unwrap());
+        assert!(answer_core(&db, "nao-existe", "allow", "person", None, &|_, _| Ok(())).is_err());
+    }
+}

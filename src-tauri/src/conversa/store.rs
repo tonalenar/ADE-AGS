@@ -66,7 +66,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     )?;
     // A permissão decidida no backend: o pedido INTEIRO (`chat_team::permission::Subject`, em JSON: o título só
     // guarda a primeira linha do comando) e quem respondeu e por quê (`person`, `policy`, `rule:<id>`).
-    for (column, ddl) in [("subject", "TEXT"), ("decided_by", "TEXT"), ("decided_why", "TEXT")] {
+    for (column, ddl) in [("subject", "TEXT"), ("decided_by", "TEXT"), ("decided_why", "TEXT"), ("claimed_at", "INTEGER")] {
         let has = conn.prepare("SELECT 1 FROM pragma_table_info('chat_request') WHERE name = ?1")?.exists([column])?;
         if !has {
             conn.execute_batch(&format!("ALTER TABLE chat_request ADD COLUMN {column} {ddl};"))?;
@@ -252,6 +252,21 @@ pub fn answer_request_by(conn: &Connection, id: &str, answer: &str, now: i64, by
         params![id, answer, now, by, why],
     )
     .map(|n| n > 0)
+}
+
+/// RESERVA o pedido para responder ao agente: só um quem chega primeiro, e só se ele ainda está `pending`. A reserva
+/// esquecida (mais velha que `lease_ms`) pode ser tomada. `false` = não era dele; quem perde não responde nada.
+pub fn reserve_request(conn: &Connection, id: &str, now: i64, lease_ms: i64) -> rusqlite::Result<bool> {
+    conn.execute(
+        "UPDATE chat_request SET claimed_at = ?2 WHERE id = ?1 AND state = 'pending' AND (claimed_at IS NULL OR claimed_at < ?3)",
+        params![id, now, now - lease_ms],
+    )
+    .map(|n| n == 1)
+}
+
+/// Devolve a reserva (o envio ao agente falhou): o pedido segue `pending` para a pessoa.
+pub fn release_request(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_request SET claimed_at = NULL WHERE id = ?1 AND state = 'pending'", params![id]).map(|_| ())
 }
 
 /// Guarda o pedido inteiro (JSON de `permission::Subject`) para decidir sobre ele, na chegada ou depois.
