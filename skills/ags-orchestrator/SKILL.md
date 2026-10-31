@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.40.0
+version: 1.41.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -911,6 +911,9 @@ ags chat open <id>                   # show it to the person in the chat screen
 - A conversation you open starts **supervised** (`--access ask`): every command or edit the
   agent wants waits for the person's approval in the app. `chat wait` returns with
   `waitingForUser: true` when that happens; tell the person, don't loop.
+- `chat wait`'s `reply` is the agent's last message **after your last send**. If the turn ended
+  with an error, was interrupted or the process died, `reply` is `null` and `stopped` says why;
+  it no longer returns the previous turn's answer as if it were the new one.
 - **Only the person answers approvals and questions** of a conversation; there is no command
   for it. `chat pending` shows what is waiting.
 - Ask for `--access edits`, `safe` or `full` only when the person asked for it. With every

@@ -47,6 +47,14 @@ pub fn last_reply(items: &[Item]) -> Option<String> {
     items.iter().rev().find(|i| i.kind == ItemKind::Assistant).and_then(|i| i.text.clone())
 }
 
+/// A última fala do agente DEPOIS da última mensagem da pessoa: a resposta do turno que `wait` acabou de esperar.
+/// Sem fala nova (o turno errou, foi interrompido ou o processo caiu), é `None`: antes o `wait` devolvia a fala
+/// do turno anterior como se fosse a resposta. Pura.
+pub fn reply_since_last_user(items: &[Item]) -> Option<String> {
+    let from = items.iter().rposition(|i| i.kind == ItemKind::User).map_or(0, |at| at + 1);
+    last_reply(&items[from..])
+}
+
 pub(super) fn chat_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let all = args.get("all").is_some_and(|v| v.as_bool().unwrap_or(true));
     let db = db(app)?;
@@ -125,11 +133,15 @@ pub(super) fn chat_wait(app: &AppHandle, args: &Value) -> Result<Value, String> 
         let timed_out = Instant::now() >= deadline;
         if !status.working || !pending.is_empty() || timed_out {
             let items = api::items(&db, &thread)?;
+            let reply = reply_since_last_user(&items);
+            // Terminou sem resposta nova: diga por quê (erro, interrompido, processo caído), lido do turnEnd gravado.
+            let stopped = if !status.working && reply.is_none() { crate::chat_team::model::stopped_reason(&items, status.alive) } else { None };
             return Ok(json!({
                 "done": !status.working,
                 "waitingForUser": !pending.is_empty(),
                 "timedOut": timed_out && status.working && pending.is_empty(),
-                "reply": last_reply(&items),
+                "reply": reply,
+                "stopped": stopped,
                 "pending": pending,
             }));
         }
@@ -170,4 +182,30 @@ pub(super) fn chat_settle(app: &AppHandle, args: &Value) -> Result<Value, String
     let reopen = args.get("reopen").is_some_and(|v| v.as_bool().unwrap_or(true));
     api::settle(&db(app)?, &thread, !reopen)?;
     Ok(json!({ "settled": !reopen }))
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn item(kind: ItemKind, id: &str, text: &str) -> Item {
+        Item { text: Some(text.into()), ..Item::new(kind, id.into(), None) }
+    }
+
+    #[test]
+    fn o_wait_so_devolve_a_fala_do_turno_que_esperou() {
+        let items = vec![
+            item(ItemKind::User, "u1", "faça A"),
+            item(ItemKind::Assistant, "a1", "A feito"),
+            item(ItemKind::TurnEnd, "e1", ""),
+            item(ItemKind::User, "u2", "faça B"),
+            item(ItemKind::TurnEnd, "e2", "o processo caiu"),
+        ];
+        assert_eq!(last_reply(&items).as_deref(), Some("A feito"), "o `show` segue destacando a última fala");
+        assert_eq!(reply_since_last_user(&items), None, "o turno de B errou: a fala de A não é a resposta dele");
+        let mut done = items.clone();
+        done.insert(4, item(ItemKind::Assistant, "a2", "B feito"));
+        assert_eq!(reply_since_last_user(&done).as_deref(), Some("B feito"));
+        assert_eq!(reply_since_last_user(&[item(ItemKind::Assistant, "a0", "só fala")]).as_deref(), Some("só fala"));
+    }
 }
