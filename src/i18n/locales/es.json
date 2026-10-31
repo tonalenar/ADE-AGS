@@ -1,6 +1,6 @@
 {
   "settings.aiMemoryTabs.label": "Memoria de ai-memory en pestañas",
-  "settings.aiMemoryTabs.desc": "En pestañas nuevas, conecta ai-memory a Claude y habilita la captura de la sesión si está instalada la versión 3.3.0 o superior. No modifica la configuración global de los agentes ni reinicia pestañas abiertas.",
+  "settings.aiMemoryTabs.desc": "En pestañas nuevas, conecta ai-memory a Claude y habilita la captura de la sesión si está instalada la versión 3.3.0 o superior. No modifica la configuración global de los agentes ni reinicia pestañas abiertas. Codex y OpenCode reciben MCP con proyecto fijo cuando la carpeta coincide con un único proyecto.",
   "models.reference": "Catálogo del proveedor — acceso de la cuenta no verificado",
   "accounts.antigravity.installRequired": "Comprobando la instalación. Si el botón sigue desactivado, instala la CLI agy y vuelve a abrir la aplicación.",
   "accounts.antigravity.description": "La CLI oficial de Antigravity realiza el acceso OAuth 2.0. Abre el navegador si no hay una sesión guardada; si ya estás conectado, reutiliza tu cuenta. Completa la autenticación en el navegador personalmente.",
@@ -3621,5 +3621,5 @@
   "continuity.previewNote": "La versión 3.3.0 solo ofrece estos metadatos en la vista previa; ai-memory entregará el contenido al nuevo agente.",
   "continuity.claimNote": "Al continuar, SessionStart podrá aceptar automáticamente un handoff. El servidor garantiza una sola aceptación; otro agente podría aceptarlo antes de abrir esta pestaña.",
   "continuity.claudeMissing": "Claude no está disponible en esta instalación.",
-  "continuity.unsupported": "Continuidad no disponible: el bridge de este agente aún no garantiza el alcance de la carpeta."
+  "continuity.unsupported": "La continuidad gestionada de handoff solo está disponible con destino Claude en esta versión."
 }

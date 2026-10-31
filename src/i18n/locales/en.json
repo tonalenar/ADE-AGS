@@ -1,6 +1,6 @@
 {
   "settings.aiMemoryTabs.label": "ai-memory in tabs",
-  "settings.aiMemoryTabs.desc": "For new tabs, connects ai-memory to Claude and enables session capture when version 3.3.0 or newer is installed. Does not change global agent settings or restart open tabs.",
+  "settings.aiMemoryTabs.desc": "For new tabs, connects ai-memory to Claude and enables session capture when version 3.3.0 or newer is installed. Does not change global agent settings or restart open tabs. Codex and OpenCode get MCP with a fixed project when the folder matches exactly one project.",
   "models.reference": "Provider catalogue — account access not verified",
   "accounts.antigravity.installRequired": "Checking installation. If the button stays disabled, install the agy CLI and reopen the app.",
   "accounts.antigravity.description": "OAuth 2.0 sign-in is handled by the official Antigravity CLI. It opens the browser when no saved session exists; if already connected, it reuses your account. Complete browser authentication yourself.",
@@ -3621,5 +3621,5 @@
   "continuity.previewNote": "Version 3.3.0 only exposes these metadata in the preview; ai-memory will deliver the content to the new agent.",
   "continuity.claimNote": "On continuation, SessionStart may automatically accept a handoff. The server guarantees a single claim; another agent may accept it before this tab opens.",
   "continuity.claudeMissing": "Claude is not available in this installation.",
-  "continuity.unsupported": "Continuity unavailable: this agent’s bridge cannot yet guarantee folder scope."
+  "continuity.unsupported": "Managed handoff continuity is available only with Claude as the destination in this version."
 }

@@ -144,3 +144,49 @@ O ADE nunca chama `accept`. Depois da confirmação, o SessionStart gerenciado p
 Os arquivos temporários e sua limpeza seguem o mecanismo por aba acima. Não se muda key, pai ou montagem de Terminal e não se escreve nas configurações globais dos agentes. Os testes usam mocks de IPC e montagem de argv/settings em pasta temporária; não abrem agente real nem consultam a base instalada. UI visual e execução real de continuidade não verificadas.
 
 Prova desta fase: `ags test affected` aprovado (86 testes Rust e 131 frontend relacionados, TypeScript e Babel); verificação adicional das abas/MCP com 168 testes aprovados; módulo `ai_memory::` com 39 testes; diálogo/lógica/catálogos com 11 testes. `cargo clippy --all-targets` concluiu: biblioteca com os mesmos 138 avisos herdados, nenhum aviso novo nas alterações; os targets de teste ainda contêm avisos herdados. Lint de testes: 40 violações antigas no baseline, nenhuma nova. Não houve HMR, instalação, agente real nem acesso à base instalada do ai-memory.
+
+## Intermediário MCP de projeto fixo (substitui a mitigação dos bridges estáticos)
+
+Novas abas Codex/OpenCode podem receber `ags ai-memory-bridge --cwd <pasta> --workspace <W> --project <P>`.
+O ADE consulta `list-projects --json` no cwd da aba e usa o equivalente conservador de guessProject:
+exatamente um projeto cujo nome corresponde ao último componente da pasta, sem diferenciar maiúsculas.
+Nenhum match, homônimos entre workspaces, erro de CLI, versão antiga ou ausência do CLI `ags` ao lado
+do app omitem a injeção. Isso é uma escolha por nome, não uma prova de associação por marker; o par
+selecionado fica fixo durante a vida do processo. Não usa o projeto padrão do servidor.
+
+O intermediário abre apenas `ai-memory mcp-bridge --no-session-id`, no cwd explícito, com
+`AI_MEMORY_HOST_CWD` explícito, `AI_MEMORY_RUN_AUTOWIRE=false` e embeddings desabilitados no filho.
+Nenhum token/config do ai-memory é lido pelo ADE. Codex recebe `-c mcp_servers.ai-memory.command/args`;
+OpenCode recebe `OPENCODE_CONFIG_CONTENT` mesclado, preservando `mcp.ags`. Claude mantém o caminho com sessão.
+Nenhuma aba viva ou configuração global é alterada.
+
+Lista fechada auditada na tag v3.3.0, commit `4d4d9ca389145bf16dcb56122626162833335ec8`,
+`crates/ai-memory-mcp/src/server.rs`: QueryArgs:650, RecentArgs:799, StatusArgs:815,
+ReadPageArgs:1716, PatchPageArgs:1761 e WritePageArgs:1936. Somente `memory_query`, `memory_recent`,
+`memory_status`, `memory_read_page`, `memory_write_page` e `memory_patch_page` são expostas.
+Todas recebem workspace/project fixos em cada tools/call. Valor ausente/null é preenchido;
+valor divergente é **recusado**, não sobrescrito. `global=true`, `scope` diferente de project/null,
+`scopes` não vazio e projetos reservados `_global`, `_profile` e `_profile.*` são recusados (também após trim e normalização de caixa). `scope:project` é normalizado
+para a forma padrão da CLI. Outras tools (incluindo operações por ID, mensagens, handoffs,
+consolidação e manutenção) são recusadas e ocultadas de tools/list. Não há heurística de nome/schema.
+Os metadados/conteúdo globais que o próprio ai-memory une implicitamente em suas leituras normais
+continuam sendo comportamento do servidor; o intermediário bloqueia a seleção explícita de outro escopo.
+
+Somente initialize, notifications/initialized, ping, tools/list e tools/call são encaminhados.
+Requests do servidor ao cliente não são repassados. JSON-RPC usa linhas limitadas a 2 MiB,
+preserva fragmentos entre seleções concorrentes de I/O e encerra/recolhe apenas o PID filho aberto,
+em EOF/erro de qualquer lado. Prazo máximo da conexão: 24 horas. Sem prompt do modelo como barreira
+para escopo. O comando é local, antes do despacho IPC normal; help e skill documentam a exceção stdio.
+
+Testes: bridge fake stdio, carimbo das seis tools, escopo divergente/global/perfil/múltiplos,
+filtragem da listagem, PID recolhido, fragmentos cancelados pelo select, resolução ambígua/ausente
+e preservação do MCP ags nas configurações. Sem agente real ou acesso à base real do ai-memory.
+
+Validação do intermediário: `ags test affected` aprovado (115 testes frontend, TypeScript/Babel,
+1887 testes da biblioteca e 46 do binário ags, além de 2 sondas isoladas de teste). A seleção Rust
+ampla foi decidida pelo runner afetado pela mudança na CLI; 16 testes herdados foram ignorados.
+Após o bloqueio adicional dos projetos reservados, `cargo test --lib ai_memory::` aprovou 52 testes;
+a última execução específica do intermediário aprovou os 6 testes, incluindo recusas pelo transporte
+fake sem encaminhá-las ao filho. Clippy all-targets concluiu sem avisos nos arquivos novos
+(138 avisos herdados da lib); lint mantém 40 violações antigas, nenhuma nova. Catálogos/diálogo:
+8 testes aprovados. Nenhum cliente real foi executado; Windows não foi validado.
