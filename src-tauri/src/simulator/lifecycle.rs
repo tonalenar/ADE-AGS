@@ -17,8 +17,6 @@ use tauri::{AppHandle, Emitter};
 
 use super::ops;
 
-/// O pico do boot: papéis de parede, widgets e Siri passam de 400% de CPU nos primeiros minutos.
-const BOOT_STORM: Duration = Duration::from_secs(150);
 /// De quanto em quanto tempo o monitor confere.
 const CHECK_EVERY: Duration = Duration::from_secs(20);
 const NICE_LOW: i32 = 10;
@@ -65,9 +63,10 @@ pub fn due(now: Instant, last_seen: Instant, visible: bool, after: Option<Durati
     }
 }
 
-/// A prioridade que o iOS deve ter agora: baixa no pico do boot ou fora de vista (no modo leve). Pura.
-pub fn wanted_nice(light: bool, visible: bool, since_boot: Duration) -> i32 {
-    if light && (!visible || since_boot < BOOT_STORM) { NICE_LOW } else { 0 }
+/// A prioridade que o iOS deve ter agora: baixa fora de vista (no modo leve) e normal enquanto à vista (o modo leve
+/// já desliga os 143 serviços de fundo em `slim.rs`; manter o aparelho em prioridade baixa à vista derrubava quadros).
+pub fn wanted_nice(light: bool, visible: bool, _since_boot: Duration) -> i32 {
+    if light && !visible { NICE_LOW } else { 0 }
 }
 
 pub fn set_settings(app: &AppHandle, new: Settings) {
@@ -101,7 +100,7 @@ pub fn booted(app: &AppHandle, udid: &str) {
     let now = Instant::now();
     let others: Vec<String> = match usage().lock() {
         Ok(mut map) => {
-            map.insert(udid.to_string(), Usage { booted_at: now, last_seen: now, visible: false, nice: NICE_LOW });
+            map.insert(udid.to_string(), Usage { booted_at: now, last_seen: now, visible: true, nice: 0 });
             map.keys().filter(|k| k.as_str() != udid).cloned().collect()
         }
         Err(_) => Vec::new(),
@@ -113,15 +112,27 @@ pub fn booted(app: &AppHandle, udid: &str) {
     }
 }
 
-/// A tela de `udid` está (ou deixou de estar) à vista.
+/// A tela de `udid` está (ou deixou de estar) à vista. Quando entra à vista com prioridade baixa, restaura a
+/// prioridade normal na hora (fora da thread da interface) sem esperar os 20 s do monitor.
 pub fn seen(udid: &str, visible: bool) {
+    let mut restore_now = false;
     if let Ok(mut map) = usage().lock() {
         if let Some(u) = map.get_mut(udid) {
             if visible || u.visible {
                 u.last_seen = Instant::now();
             }
             u.visible = visible;
+            if visible && u.nice != 0 {
+                u.nice = 0;
+                restore_now = true;
+            }
         }
+    }
+    if restore_now {
+        let udid = udid.to_string();
+        std::thread::spawn(move || {
+            let _ = ops::set_priority(&udid, 0);
+        });
     }
 }
 
@@ -158,7 +169,7 @@ fn start_monitor() {
                 continue;
             }
             let nice = wanted_nice(current.light, u.visible, now.saturating_duration_since(u.booted_at));
-            if nice != u.nice && ops::set_priority(&udid, nice).is_ok() {
+            if nice != u.nice && ops::set_priority(&udid, nice).is_ok_and(|n| n > 0) {
                 if let Ok(mut map) = usage().lock() {
                     if let Some(entry) = map.get_mut(&udid) {
                         entry.nice = nice;

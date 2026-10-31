@@ -29,7 +29,8 @@ pub fn devices() -> Result<Vec<Device>, String> {
 }
 
 /// Liga e espera a tela existir. No modo leve, com o aparelho desligado, sobe sem os serviços pesados do iOS
-/// (`simulator::slim`: o arquivo original volta logo que a tela existe) e com prioridade baixa ([`set_priority`]).
+/// (`simulator::slim`: o arquivo original volta logo que a tela existe). A prioridade fica normal enquanto à
+/// vista e só baixa quando a tela sai de vista (`lifecycle`).
 pub fn boot(udid: &str, light: bool) -> Result<(), String> {
     let dev = device::find(udid)?;
     let slimmed = light && device::state(&dev) == model::STATE_SHUTDOWN && match slim::apply(udid) {
@@ -48,15 +49,8 @@ pub fn boot(udid: &str, light: bool) -> Result<(), String> {
         }
         slim::restore(udid);
     }
-    ready?;
-    if light {
-        set_priority(udid, LIGHT_NICE)?;
-    }
-    Ok(())
+    ready
 }
-
-/// A prioridade do iOS no modo leve: abaixo de tudo o que a pessoa usa, sem parar o aparelho.
-pub const LIGHT_NICE: i32 = 10;
 
 pub fn shutdown(udid: &str) -> Result<(), String> {
     let dev = device::find(udid)?;
@@ -163,15 +157,19 @@ fn launchd_started(udid: &str, wait: Duration) {
     }
 }
 
-/// Põe o iOS do aparelho na prioridade `nice` (0 = normal, 10 = baixa): com o iOS ocupado (papel de parede
-/// animado, indexação depois do boot) a ADE e o resto do Mac continuam com a CPU primeiro. Os processos que o
-/// iOS abrir depois herdam a do `launchd_sim`. Devolve quantos processos mudaram.
+/// Põe o iOS do aparelho na prioridade de segundo plano (`nice > 0`, `PRIO_DARWIN_BG`: núcleos de eficiência e I/O
+/// baixo) ou de volta à normal (`0`). Ao contrário de `PRIO_PROCESS` (`nice = 10`), que sem root no macOS falha com
+/// `EACCES` ao tentar voltar a `0` e deixava o aparelho preso em prioridade baixa para sempre, `PRIO_DARWIN_PROCESS`
+/// é reversível pelo próprio usuário (o mesmo mecanismo de `taskpolicy -b/-B`). Devolve quantos processos mudaram.
 pub fn set_priority(udid: &str, nice: i32) -> Result<usize, String> {
+    const PRIO_DARWIN_PROCESS: i32 = 4;
+    const PRIO_DARWIN_BG: i32 = 0x1000;
+    let prio = if nice > 0 { PRIO_DARWIN_BG } else { 0 };
     let pids = ios_processes(udid)?;
     let mut changed = 0;
     for pid in &pids {
         // SAFETY: setpriority só lê os argumentos; processos do mesmo usuário.
-        if unsafe { libc::setpriority(libc::PRIO_PROCESS, *pid, nice) } == 0 {
+        if unsafe { libc::setpriority(PRIO_DARWIN_PROCESS, *pid, prio) } == 0 {
             changed += 1;
         }
     }
