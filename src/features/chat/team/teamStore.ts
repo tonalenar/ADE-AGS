@@ -20,7 +20,7 @@ import {
   chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
   type TeamFeedItem, type TeamPolicy, type TeamView,
 } from "./ipc";
-import { chatTeamAllowTools, chatTeamAutoDecide } from "../permissions/ipc";
+import { chatTeamAllowTools, chatTeamAutoDecide, chatTeamWatch, chatTeamWatchStall } from "../permissions/ipc";
 import { canvasPlan, runCanvasPlan } from "./teamCanvas";
 import { useTeamIndex } from "./teamIndex";
 import { projectCanvas, reversePlan, roleIdOfLabel, type CanvasProjection, type ReverseOp } from "./teamMirror";
@@ -275,6 +275,18 @@ export function setAutoDecide(teamId: string, enabled: boolean): void {
 export function setAllowTools(teamId: string, enabled: boolean): void {
   useTeamStore.setState((s) => ({ teams: s.teams.map((t) => (t.id === teamId ? { ...t, allowTools: enabled } : t)) }));
   chatTeamAllowTools(teamId, enabled).catch(() => void reloadTeams());
+}
+
+/** O vigia do chat avisa o orquestrador dos bloqueios dos integrantes (pedido que espera a pessoa, pergunta, turno que falhou). Ligado por padrão. */
+export function setWatch(teamId: string, enabled: boolean): void {
+  useTeamStore.setState((s) => ({ teams: s.teams.map((t) => (t.id === teamId ? { ...t, watch: enabled } : t)) }));
+  chatTeamWatch(teamId, enabled).catch(() => void reloadTeams());
+}
+
+/** ...e também de um integrante sem progresso há muito tempo. Desligado por padrão; só avisa, nunca interrompe. */
+export function setWatchStall(teamId: string, enabled: boolean): void {
+  useTeamStore.setState((s) => ({ teams: s.teams.map((t) => (t.id === teamId ? { ...t, watchStall: enabled } : t)) }));
+  chatTeamWatchStall(teamId, enabled).catch(() => void reloadTeams());
 }
 
 export function setSendError(orchestrator: string, message: string | null): void {

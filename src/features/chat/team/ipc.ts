@@ -42,6 +42,10 @@ export interface TeamView {
   autoDecide?: boolean;
   /** O acesso total libera ferramentas de fora do shell (MCP, `Task`…). Ausente = desligado. */
   allowTools?: boolean;
+  /** O vigia do chat avisa o orquestrador dos bloqueios dos integrantes. Ausente = ligado. */
+  watch?: boolean;
+  /** ...e de um integrante sem progresso. Ausente = desligado. */
+  watchStall?: boolean;
   members: TeamMember[];
   /** Os integrantes mais o orquestrador. */
   headcount: number;

@@ -118,7 +118,7 @@ fn active_threads(app: &AppHandle) -> Vec<String> {
 }
 
 /// Avisa a interface que a fila de um destino mudou (o selo e a lista se atualizam).
-fn changed(app: &AppHandle, to: Option<&str>) {
+pub(super) fn changed(app: &AppHandle, to: Option<&str>) {
     let _ = app.emit("cc-peer-queue", json!({ "toTabId": to }));
     // O entregador de uma conversa (`thread:`) dorme no barramento: o aviso o acorda sem polling.
     crate::bus::publish(Some(app), crate::bus::Publish::new(PEER_TOPIC).data(json!({ "toTabId": to })));

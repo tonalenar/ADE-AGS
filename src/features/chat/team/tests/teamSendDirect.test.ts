@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => un
 
 import { usePendingSends } from "../../timeline/pending";
 import { sendToThread } from "../../structured/store";
-import { sendDirect, setAllowTools, setAutoDecide, setSendError, useTeamStore } from "../teamStore";
+import { sendDirect, setAllowTools, setAutoDecide, setSendError, setWatch, setWatchStall, useTeamStore } from "../teamStore";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 const pendingOf = (key: string) => (usePendingSends.getState().byKey[key] ?? []).map((p) => p.text);
@@ -97,5 +97,19 @@ describe("setAllowTools (ferramentas de fora do shell)", () => {
     setAllowTools("t1", true);
     expect(useTeamStore.getState().teams[0]!.allowTools).toBe(true);
     expect(backend.calls[backend.calls.length - 1]).toEqual(["chat_team_allow_tools", { teamId: "t1", enabled: true }]);
+  });
+});
+
+describe("o vigia do chat (avisos ao orquestrador)", () => {
+  const team = { id: "t1", orchestrator: "tab", agentId: "claude-code", label: "L", cwd: "/", title: "", createdAt: 1, updatedAt: 1, headcount: 1, members: [] };
+  it("os bloqueios nascem ligados e «sem progresso» desligado; cada interruptor mostra já e pede ao backend", () => {
+    useTeamStore.setState({ teams: [team] });
+    expect(useTeamStore.getState().teams[0]!.watch).toBeUndefined();
+    setWatch("t1", false);
+    expect(useTeamStore.getState().teams[0]!.watch).toBe(false);
+    expect(backend.calls[backend.calls.length - 1]).toEqual(["chat_team_watch", { teamId: "t1", enabled: false }]);
+    setWatchStall("t1", true);
+    expect(useTeamStore.getState().teams[0]!.watchStall).toBe(true);
+    expect(backend.calls[backend.calls.length - 1]).toEqual(["chat_team_watch_stall", { teamId: "t1", enabled: true }]);
   });
 });

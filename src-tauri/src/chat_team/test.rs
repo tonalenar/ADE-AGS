@@ -304,6 +304,8 @@ fn a_migracao_acrescenta_a_coluna_a_uma_tabela_antiga_sem_perder_linhas() {
     .unwrap();
     store::migrate(&conn).unwrap();
     store::migrate(&conn).unwrap();
+    let team = store::team(&conn, "t1").unwrap().expect("o time antigo continua");
+    assert!(team.watch && !team.watch_stall, "o time antigo ganha o vigia com os padrões, sem perder a linha");
     let old = store::member(&conn, "tab-2").unwrap().expect("a linha antiga continua");
     assert!(!old.subagent, "linha antiga entra como não subagente");
     assert_eq!(old.role, "qa");
@@ -318,6 +320,7 @@ fn assert_regras_de_mensagem(text: &str) {
     assert!(text.contains("NÃO mande mensagens de prontidão, ciência ou progresso sem ser pedido"), "{text}");
     assert!(text.contains("«estou pronto», «recebi», «vou ler»"), "{text}");
     assert!(text.contains("entregar o resultado") && text.contains("pedir algo que o bloqueia") && text.contains("responder a uma pergunta"), "{text}");
+    assert!(text.contains("Se for bloqueado por uma pergunta ou permissão que só a pessoa decide, diga isso numa frase ao orquestrador (uma vez) e espere."), "{text}");
     assert!(text.contains("O resumo da entrega vai uma vez só"), "{text}");
     assert!(!text.contains("Responda e avise com"), "o texto antigo mandava avisar por tell: {text}");
 }
@@ -494,6 +497,21 @@ mod regras {
         assert!(store::set_auto_decide(&conn, &t, true).unwrap());
         assert!(store::team_joined_by(&conn, "x").unwrap().is_none());
     }
+
+    #[test]
+    fn o_vigia_do_chat_nasce_ligado_para_bloqueios_e_desligado_para_sem_progresso() {
+        let conn = db();
+        let t = team(&conn, "tab-lead");
+        let row = store::team(&conn, &t).unwrap().unwrap();
+        assert!(row.watch, "os avisos de bloqueio nascem ligados");
+        assert!(!row.watch_stall, "«sem progresso» nasce desligado, como o Vigia das missões");
+        assert!(store::set_watch(&conn, &t, false).unwrap());
+        assert!(store::set_watch_stall(&conn, &t, true).unwrap());
+        let row = store::team(&conn, &t).unwrap().unwrap();
+        assert!(!row.watch && row.watch_stall);
+        assert!(!store::set_watch(&conn, "nao-existe", true).unwrap());
+        assert!(!store::set_watch_stall(&conn, "nao-existe", true).unwrap());
+    }
 }
 
 #[test]
@@ -506,7 +524,7 @@ fn nenhum_comando_de_cli_nem_de_mcp_escreve_regra_de_permissao() {
         ("ipc/commands/team.rs", include_str!("../ipc/commands/team.rs")),
         ("ipc/commands/peers.rs", include_str!("../ipc/commands/peers.rs")),
     ] {
-        for forbidden in ["add_rule(", "update_rule(", "remove_rule(", "set_auto_decide(", "set_allow_tools(", "chat_permission_rule", "chat_team_auto_decide", "chat_team_allow_tools"] {
+        for forbidden in ["add_rule(", "update_rule(", "remove_rule(", "set_auto_decide(", "set_allow_tools(", "chat_permission_rule", "chat_team_auto_decide", "chat_team_allow_tools", "set_watch(", "set_watch_stall(", "chat_team_watch"] {
             assert!(!source.contains(forbidden), "{name} não pode mexer em regras de permissão ({forbidden})");
         }
     }

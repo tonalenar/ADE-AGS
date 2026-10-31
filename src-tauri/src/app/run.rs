@@ -41,6 +41,7 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         crate::ipc::start_routine_scheduler(app.clone());
         // A fila das mensagens entre agentes volta a andar de onde parou (ver `peer_queue`).
         crate::ipc::start_peer_queue(app.clone());
+        crate::ipc::start_chat_watch(app.clone());
         // O canal estruturado: o estado de cada aba de Claude Code/Codex lido do transcript (ver `canal`).
         crate::ipc::start_canal(app.clone());
         // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
@@ -364,6 +365,8 @@ pub fn run() {
             crate::chat_team::chat_permission_rule_remove,
             crate::chat_team::chat_team_auto_decide,
             crate::chat_team::chat_team_allow_tools,
+            crate::chat_team::chat_team_watch,
+            crate::chat_team::chat_team_watch_stall,
             crate::conversa::chat_permission_notify,
             crate::scm::scm_init,
             crate::scm::scm_stage,

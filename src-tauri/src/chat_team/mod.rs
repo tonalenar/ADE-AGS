@@ -5,6 +5,7 @@
 //! - `model`: o que é um integrante, as políticas, os papéis e os textos para os agentes (puro);
 //! - `store`: as tabelas `chat_team` e `chat_team_member`, só aditivas;
 //! - `api`: criar, ligar, desligar, mudar papel e política, o fio de delegações;
+//! - `watch`: o vigia do chat (puro): o que o orquestrador precisa saber dos integrantes;
 //! - `commands`: os comandos Tauri da tela.
 //!
 //! A autorização para os agentes se falarem continua sendo o canvas: ligar alguém ao time faz a tela
@@ -16,7 +17,11 @@ pub mod env;
 pub mod model;
 pub mod permission;
 pub mod store;
+pub mod watch;
+pub mod watch_db;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod watch_test;
 
 pub use commands::*;

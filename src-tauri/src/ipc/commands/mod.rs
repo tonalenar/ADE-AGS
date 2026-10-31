@@ -7,6 +7,7 @@ mod notes;
 mod notify;
 mod floor;
 pub mod chat;
+pub mod chat_watch;
 pub mod conversas;
 pub(crate) mod peers;
 pub mod peer_queue;

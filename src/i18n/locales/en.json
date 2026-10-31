@@ -4443,5 +4443,9 @@
   "chat.attach.lightbox.label": "Image {{index}} of {{count}}: {{name}}",
   "chat.attach.lightbox.close": "Close",
   "chat.attach.lightbox.prev": "Previous image",
-  "chat.attach.lightbox.next": "Next image"
+  "chat.attach.lightbox.next": "Next image",
+  "chat.team.watch.on": "Tell the orchestrator when a member gets stuck",
+  "chat.team.watch.hint": "A request waiting for you for over 20 s, an unanswered question or a failed turn becomes ONE notice to the orchestrator (and another when you answer). The decision stays yours: the orchestrator cannot approve anything.",
+  "chat.team.watchStall.on": "Also tell it when a member makes no progress",
+  "chat.team.watchStall.hint": "A member working with no new item for 15 min becomes ONE notice to the orchestrator. It only notifies: it never interrupts or writes in the member's conversation. Off by default."
 }
