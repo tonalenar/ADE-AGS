@@ -152,6 +152,12 @@ pub fn finish_db(conn: &DbConnection) -> SqlResult<()> {
 pub(crate) fn upgrade_schema(conn: &Connection, path: &std::path::Path) -> SqlResult<()> {
     backup_before_upgrade(conn, path)?;
     super::schema::migrate(conn)?;
+    // Turnos e pedidos de conversas que um crash do app deixou abertos: nenhum agente sobrevive a ele.
+    match crate::conversa::store::sweep_orphans(conn, crate::util::now_ts_ms()) {
+        Ok(sweep) if sweep.runs + sweep.requests > 0 => eprintln!("[conversa] {} turno(s) e {} pedido(s) órfãos marcados no arranque", sweep.runs, sweep.requests),
+        Ok(_) => {}
+        Err(error) => eprintln!("[conversa] não consegui marcar os órfãos no arranque: {error}"),
+    }
     super::seeds::seed_defaults(conn)?;
     super::queries::dedupe_session_history_once(conn)?;
 

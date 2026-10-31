@@ -22,13 +22,12 @@ use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::canal::event::clip;
 use crate::database::DbConnection;
 
 use super::claude_map::TurnResult;
 use super::events::emit;
 use super::opencode_map::{self as map, Mapper, Out};
-use super::{store, turn};
+use super::{permission, resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido de abertura (`initialize`, `session/new`…). O turno não tem prazo.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
@@ -45,16 +44,17 @@ pub struct Session {
     alive: AtomicBool,
     /// O id da sessão no OpenCode.
     remote: Mutex<Option<String>>,
-    /// O turno em andamento (o id é do app).
-    turn: Mutex<Option<String>>,
+    /// O turno em andamento (o id é do app) e a fila do que chegou durante ele. Só entram no fio (item `User`)
+    /// quando o turno delas começa; se a fila é descartada, cada uma vira um aviso «não enviada».
+    lane: turn::Lane,
     started: Mutex<Option<Instant>>,
     /// Fecha o processo quando o turno acabar (modelo, esforço ou acesso trocados no meio do turno).
     stale: AtomicBool,
     /// Durante o `session/load` o OpenCode reenvia o histórico todo: não vira nada.
     quiet: AtomicBool,
     mapper: Mutex<Mapper>,
-    /// Mensagens que chegaram com o turno em andamento.
-    queue: Mutex<VecDeque<String>>,
+    app: AppHandle,
+    db: DbConnection,
     /// Os `session/request_permission` esperando a pessoa (o id do JSON-RPC, como veio).
     asks: Mutex<Vec<Value>>,
     stderr: Mutex<VecDeque<String>>,
@@ -71,18 +71,17 @@ impl Session {
     }
 
     pub fn turn(&self) -> Option<String> {
-        self.turn.lock().ok().and_then(|t| t.clone())
+        self.lane.turn()
     }
 
-    fn set_turn(&self, turn: Option<String>) {
-        if let Ok(mut t) = self.turn.lock() {
-            *t = turn;
-        }
+    /// Esvazia a fila e marca cada mensagem como «não enviada» na timeline.
+    fn discard_queue(&self) {
+        turn::discard_queue(&self.app, &self.db, &self.thread_id, self.lane.drain());
     }
 
     /// Tira o turno em andamento: quem o tira é quem o fecha (o fim do prompt ou o processo que caiu).
     fn take_turn(&self) -> Option<String> {
-        self.turn.lock().ok().and_then(|mut t| t.take())
+        self.lane.take_turn()
     }
 
     fn send(&self, msg: &Value) -> Result<(), String> {
@@ -165,13 +164,18 @@ pub fn close(thread_id: &str) {
 }
 
 /// A sessão de uma conversa: a viva, ou uma nova (sobe o processo, `initialize`, abre ou retoma a
-/// sessão do OpenCode e aplica modelo, esforço e modo).
+/// sessão do OpenCode e aplica modelo, esforço e modo). A sessão guardada é retomada (`session/resume`, e
+/// `session/load` se ela recusa); só se ela sumiu (ou o erro transitório persistiu) abre outra, e então a
+/// timeline recebe o aviso de que o agente recomeçou sem o histórico (ver `resume`). O id anterior só é trocado
+/// depois de a nova abrir. Um erro ao aplicar o MODO falha a abertura: nunca se roda com um modo diferente do
+/// que a tela mostra.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
-    static START: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    let _guard = START.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+    // Uma trava por conversa: um OpenCode lento a abrir não segura o início das outras.
+    let gate = resume::start_gate("opencode", thread_id);
+    let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
@@ -180,14 +184,44 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
-    let session = spawn(app, db, &row, env)?;
-    let remote = match open_session(&session, &row).await {
-        Ok(remote) => remote,
-        Err(e) => {
-            session.kill();
-            return Err(e);
+
+    let fresh = || {
+        let (env, row) = (env.clone(), &row);
+        async move {
+            let session = spawn(app, db, row, env)?;
+            match open_session(&session, row, None).await {
+                Ok((remote, ignored)) => Ok((session, remote, ignored)),
+                Err(e) => {
+                    session.kill();
+                    Err(e.into_message())
+                }
+            }
         }
     };
+    let opened = match row.remote_id.clone() {
+        Some(remote) => {
+            resume::open_resuming(
+                || {
+                    let (env, row, remote) = (env.clone(), &row, remote.clone());
+                    async move {
+                        let session = spawn(app, db, row, env).map_err(|e| resume::classify(&e))?;
+                        match open_session(&session, row, Some(&remote)).await {
+                            Ok((remote, ignored)) => Ok((session, remote, ignored)),
+                            Err(failure) => {
+                                session.kill();
+                                Err(failure)
+                            }
+                        }
+                    }
+                },
+                fresh,
+                tokio::time::sleep,
+            )
+            .await?
+        }
+        None => resume::Opened { session: fresh().await?, lost: None },
+    };
+    let (session, remote, ignored) = opened.session;
     if let Ok(conn) = db.lock() {
         let _ = store::set_remote_id(&conn, thread_id, &remote);
     }
@@ -197,51 +231,77 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     if let Ok(mut map) = sessions().lock() {
         map.insert(thread_id.to_string(), session.clone());
     }
+    if let Some(reason) = opened.lost {
+        turn::save_notice(app, db, thread_id, "resumeLost", &resume::lost_notice(&reason));
+    }
+    for what in ignored {
+        turn::save_notice(app, db, thread_id, "optionIgnored", &what);
+    }
     Ok(session)
 }
 
-/// `initialize`, a sessão (nova, ou a retomada) e as opções da conversa. Devolve o id da sessão.
-async fn open_session(session: &Session, row: &store::ThreadRow) -> Result<String, String> {
-    session.request("initialize", map::initialize_params(), Some(REQUEST_TIMEOUT)).await?;
+/// `initialize`, a sessão (nova, ou a retomada) e as opções da conversa. Devolve o id da sessão e os avisos do
+/// que o OpenCode não aplicou. Com `resume`, qualquer recusa do OpenCode à sessão guardada é `Gone`; os erros ao
+/// aplicar modelo e modo são `Fatal` (a sessão existe: trocá-la por outra não os resolveria).
+async fn open_session(session: &Session, row: &store::ThreadRow, resume: Option<&str>) -> Result<(String, Vec<String>), resume::ResumeFailure> {
+    use resume::ResumeFailure as Failure;
+    session.request("initialize", map::initialize_params(), Some(REQUEST_TIMEOUT)).await.map_err(|e| resume::classify(&e))?;
     let cwd = row.cwd.as_str();
-    let mut opened: Option<(String, Value)> = None;
-    if let Some(remote) = row.remote_id.as_deref() {
-        // `session/resume` não reenvia o histórico; `session/load` sim (ignorado enquanto carrega).
-        if let Ok(result) = session.request("session/resume", map::resume_params(remote, cwd), Some(REQUEST_TIMEOUT)).await {
-            opened = Some((remote.to_string(), result));
-        } else {
-            session.quiet.store(true, Ordering::SeqCst);
-            let loaded = session.request("session/load", map::resume_params(remote, cwd), Some(REQUEST_TIMEOUT)).await;
-            session.quiet.store(false, Ordering::SeqCst);
-            if let Ok(result) = loaded {
-                opened = Some((remote.to_string(), result));
-            }
+    let (remote, mut config) = match resume {
+        Some(remote) => {
+            // `session/resume` não reenvia o histórico; `session/load` sim (ignorado enquanto carrega).
+            let resumed = session.request("session/resume", map::resume_params(remote, cwd), Some(REQUEST_TIMEOUT)).await;
+            let found = match resumed {
+                Ok(result) => result,
+                // Sem resposta a tempo ou com o processo caído, o `load` não adianta: a classe do erro decide.
+                Err(e) if !matches!(resume::classify(&e), Failure::Gone(_) | Failure::Transient(_)) || !session.alive() => return Err(resume::classify(&e)),
+                Err(first) => {
+                    session.quiet.store(true, Ordering::SeqCst);
+                    let loaded = session.request("session/load", map::resume_params(remote, cwd), Some(REQUEST_TIMEOUT)).await;
+                    session.quiet.store(false, Ordering::SeqCst);
+                    // O OpenCode respondendo com erro às duas = a sessão não existe mais.
+                    loaded.map_err(|second| if session.alive() { Failure::Gone(second) } else { resume::classify(&first) })?
+                }
+            };
+            (remote.to_string(), found)
         }
-    }
-    // A sessão pode ter sumido (apagada no OpenCode): abre outra, a timeline guardada continua aqui.
-    let (remote, mut config) = match opened {
-        Some(found) => found,
         None => {
-            let result = session.request("session/new", map::new_session_params(cwd), Some(REQUEST_TIMEOUT)).await?;
-            let id = result.get("sessionId").and_then(Value::as_str).ok_or("O OpenCode não devolveu a sessão")?.to_string();
+            let result = session.request("session/new", map::new_session_params(cwd), Some(REQUEST_TIMEOUT)).await.map_err(Failure::Fatal)?;
+            let id = result.get("sessionId").and_then(Value::as_str).ok_or_else(|| Failure::Fatal("O OpenCode não devolveu a sessão".into()))?.to_string();
             (id, result)
         }
     };
-    apply_options(session, &remote, row, &mut config).await?;
-    Ok(remote)
+    let ignored = apply_options(session, &remote, row, &mut config).await.map_err(Failure::Fatal)?;
+    Ok((remote, ignored))
 }
 
-/// Troca uma opção da sessão se ela é aceita e diferente da atual. `Ok(false)` = não precisou ou o
-/// OpenCode não tem a opção. A resposta traz as opções novas (o esforço muda com o modelo).
+/// O que fazer com uma opção da sessão (`model`, `effort`, `mode`), dada a configuração que o OpenCode mostra.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum OptionPlan {
+    /// Já está como se quer.
+    Same,
+    /// O valor não está entre os que o OpenCode oferece para esta opção.
+    Unavailable,
+    /// Pedir a troca (a opção existe e o valor é aceito, ou a configuração nem a lista).
+    Set,
+}
+
+/// Pura: o plano de uma opção.
+pub(super) fn plan_option(config: &Value, id: &str, want: &str) -> OptionPlan {
+    match map::config_option(config, id) {
+        Some((current, _)) if current.as_deref() == Some(want) => OptionPlan::Same,
+        Some((_, values)) if !values.iter().any(|v| v == want) => OptionPlan::Unavailable,
+        _ => OptionPlan::Set,
+    }
+}
+
+/// Troca uma opção da sessão se ela é aceita e diferente da atual. `Ok(false)` = não precisou. A resposta traz as
+/// opções novas (o esforço muda com o modelo). `Unavailable` é erro: quem aceita o valor ausente decide antes.
 async fn set_option(session: &Session, remote: &str, config: &mut Value, id: &str, want: &str) -> Result<bool, String> {
-    // Sem a opção na resposta, tenta mesmo assim.
-    if let Some((current, values)) = map::config_option(config, id) {
-        if current.as_deref() == Some(want) {
-            return Ok(false);
-        }
-        if !values.iter().any(|v| v == want) {
-            return Err(format!("{want} não está disponível no OpenCode ({id})"));
-        }
+    match plan_option(config, id, want) {
+        OptionPlan::Same => return Ok(false),
+        OptionPlan::Unavailable => return Err(format!("{want} não está disponível no OpenCode ({id})")),
+        OptionPlan::Set => {}
     }
     let result = session.request("session/set_config_option", map::set_option_params(remote, id, want), Some(REQUEST_TIMEOUT)).await?;
     if result.get("configOptions").is_some() {
@@ -250,16 +310,32 @@ async fn set_option(session: &Session, remote: &str, config: &mut Value, id: &st
     Ok(true)
 }
 
-async fn apply_options(session: &Session, remote: &str, row: &store::ThreadRow, config: &mut Value) -> Result<(), String> {
+/// Aplica modelo, esforço e modo. Falha fechada: um erro no modelo ou no MODO (as permissões) recusa a abertura,
+/// porque rodar com um modo diferente do mostrado é pior que não rodar. O esforço que o modelo não oferece fica
+/// no padrão do OpenCode, mas o aviso vai para a timeline (devolvido). Outro erro do esforço também falha.
+async fn apply_options(session: &Session, remote: &str, row: &store::ThreadRow, config: &mut Value) -> Result<Vec<String>, String> {
+    let mut ignored = Vec::new();
     if let Some(model) = row.model.as_deref().filter(|m| !m.is_empty()) {
         set_option(session, remote, config, "model", model).await?;
     }
-    // O esforço depende do modelo (por isso vem depois): um valor que o modelo não tem fica no padrão.
+    // O esforço depende do modelo (por isso vem depois).
     if let Some(effort) = row.effort.as_deref().filter(|e| !e.is_empty()) {
-        let _ = set_option(session, remote, config, "effort", effort).await;
+        if plan_option(config, "effort", effort) == OptionPlan::Unavailable {
+            ignored.push(format!("O esforço \"{effort}\" não existe para este modelo no OpenCode; ele usou o padrão."));
+        } else {
+            set_option(session, remote, config, "effort", effort).await.map_err(|e| format!("Não consegui aplicar o esforço {effort} no OpenCode: {e}"))?;
+        }
     }
-    let _ = set_option(session, remote, config, "mode", map::mode_of(&row.access)).await;
-    Ok(())
+    let mode = map::mode_of(&row.access);
+    let listed = map::config_option(config, "mode").is_some();
+    match set_option(session, remote, config, "mode", mode).await {
+        Ok(_) => {}
+        // Um OpenCode que nem lista a opção `mode` não tem modo a mostrar errado: as permissões valem pelo
+        // ambiente do processo (`map::launch_env`).
+        Err(_) if !listed => {}
+        Err(e) => return Err(format!("Não consegui aplicar o modo {mode} no OpenCode (as permissões não seriam as que a tela mostra): {e}")),
+    }
+    Ok(ignored)
 }
 
 fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<Arc<Session>, String> {
@@ -291,12 +367,13 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         next: AtomicU64::new(1),
         alive: AtomicBool::new(true),
         remote: Mutex::new(None),
-        turn: Mutex::new(None),
+        lane: turn::Lane::default(),
         started: Mutex::new(None),
         stale: AtomicBool::new(false),
         quiet: AtomicBool::new(false),
         mapper: Mutex::new(Mapper::new("")),
-        queue: Mutex::new(VecDeque::new()),
+        app: app.clone(),
+        db: db.clone(),
         asks: Mutex::new(Vec::new()),
         stderr: Mutex::new(VecDeque::new()),
         child: Mutex::new(Some(child)),
@@ -364,17 +441,14 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
     if let Some(turn_id) = session.take_turn() {
-        let result = TurnResult { interrupted: true, ..Default::default() };
+        let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
+        let (result, message) = turn::dropped(killed, tail.as_deref(), "OpenCode");
         turn::finish(app, db, thread_id, &turn_id, &result);
-        if !killed {
-            let tail = session.stderr.lock().ok().and_then(|t| t.iter().rev().find(|l| !l.trim().is_empty()).cloned());
-            let message = tail.map(|l| clip(&l, 600)).unwrap_or_else(|| "O processo do OpenCode fechou no meio do turno".into());
+        if let Some(message) = message {
             emit(app, thread_id, "error", json!({ "message": message }));
         }
     }
-    if let Ok(mut queue) = session.queue.lock() {
-        queue.clear();
-    }
+    session.discard_queue();
     emit(app, thread_id, "phase", json!({ "phase": "idle" }));
     emit(app, thread_id, "closed", json!({}));
 }
@@ -443,6 +517,8 @@ fn on_permission(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, rpc
         session.refuse(&rpc_id);
         return;
     };
+    // O pedido inteiro (o título só guarda a primeira linha do comando): é sobre ele que o backend decide.
+    let draft = permission::draft_opencode(params, &ask);
     let row = store::RequestRow {
         id: uuid::Uuid::new_v4().to_string(),
         thread_id: session.thread_id.clone(),
@@ -463,29 +539,32 @@ fn on_permission(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, rpc
     if let Ok(mut asks) = session.asks.lock() {
         asks.push(rpc_id);
     }
+    // A política do integrante e as regras da pessoa respondem o que cobrem; o resto fica pendente e vai à tela.
+    if permission::on_arrival(app, db, &row, draft) {
+        return;
+    }
     emit(app, &session.thread_id, "request", json!({ "request": row }));
 }
 
-/// Manda a mensagem da pessoa. Sem turno em andamento, começa um; com turno, fica na fila e
-/// começa quando ele acabar.
+/// Manda a mensagem da pessoa. Sem turno em andamento, começa um; com turno, fica na fila e começa quando ele
+/// acabar. A decisão é uma só, sob a trava da sessão; a mensagem da fila só entra no fio quando o turno dela começa.
 pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str) -> Result<(), String> {
     if !session.alive() {
         return Err("O processo do OpenCode fechou".into());
     }
-    if let Some(running) = session.turn() {
-        turn::save_user(app, db, &session.thread_id, &running, text);
-        if let Ok(mut queue) = session.queue.lock() {
-            queue.push_back(text.to_string());
-        }
-        return Ok(());
-    }
-    start_turn(app, db, session, text, true)
+    let turn_id = match session.lane.admit(text) {
+        turn::Admitted::Queued => return Ok(()),
+        turn::Admitted::Start(turn_id) => turn_id,
+    };
+    start_turn(app, db, session, text, turn_id, true)
 }
 
-fn start_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, save: bool) -> Result<(), String> {
-    let remote = session.remote().ok_or("A conversa ainda não abriu no OpenCode")?;
-    let turn_id = uuid::Uuid::new_v4().to_string();
-    session.set_turn(Some(turn_id.clone()));
+/// Abre o turno `turn_id` (já reservado) e manda o prompt. Se não dá para começar, o turno reservado é solto.
+fn start_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, turn_id: String, save: bool) -> Result<(), String> {
+    let Some(remote) = session.remote() else {
+        session.take_turn();
+        return Err("A conversa ainda não abriu no OpenCode".into());
+    };
     if let Ok(mut started) = session.started.lock() {
         *started = Some(Instant::now());
     }
@@ -536,9 +615,9 @@ fn end_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id:
         close(thread_id);
         return;
     }
-    let next = session.queue.lock().ok().and_then(|mut q| q.pop_front());
-    if let Some(next) = next
-        && let Err(e) = start_turn(app, db, session, &next, false)
+    // A mensagem da fila entra no fio agora, que é quando o turno dela começa (`save`).
+    if let Some((next_turn, next)) = session.lane.advance()
+        && let Err(e) = start_turn(app, db, session, &next, next_turn, true)
     {
         emit(app, thread_id, "error", json!({ "message": e }));
     }
@@ -555,9 +634,8 @@ pub async fn interrupt(session: &Session) -> Result<(), String> {
     for rpc_id in waiting {
         let _ = session.respond(&rpc_id, json!({ "outcome": { "outcome": "cancelled" } }));
     }
-    if let Ok(mut queue) = session.queue.lock() {
-        queue.clear();
-    }
+    // O que esperava a vez não vai mais: cada mensagem fica marcada como «não enviada» na timeline.
+    session.discard_queue();
     session.notify("session/cancel", json!({ "sessionId": remote }))
 }
 

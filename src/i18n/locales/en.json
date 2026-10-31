@@ -4348,5 +4348,17 @@
   "chat.summary.limits.budget": "Spent (24 h)",
   "chat.summary.limits.budgetOf": "US$ {{spent}} of US$ {{budget}}",
   "chat.summary.limits.teamShow": "Team accounts ({{count}})",
-  "chat.summary.limits.teamHide": "Hide team accounts"
+  "chat.summary.limits.teamHide": "Hide team accounts",
+  "chat.timeline.interruptedByYou": "Interrupted by you",
+  "chat.timeline.notDone": "Not finished",
+  "chat.timeline.stopped": "The agent stopped: {{reason}}",
+  "chat.timeline.continued": "Continued in the next message",
+  "chat.timeline.notice.resumeLost": "The previous session could not be resumed; the agent started over without its history.",
+  "chat.timeline.notice.queueDropped": "Message not sent: the conversation was interrupted or closed before its turn.",
+  "chat.timeline.notice.optionIgnored": "An option was not applied by the agent.",
+  "chat.timeline.notice.resend": "Resend",
+  "chat.team.autoDecide.off": "Don't decide on its own",
+  "chat.team.autoDecide.hint": "Unchecked, each member's policy and your \"Always allow\" rules answer what they cover (high risk always waits for you). Checked, every permission waits for you.",
+  "chat.team.allowTools.on": "Full access allows non-shell tools",
+  "chat.team.allowTools.hint": "Tools such as MCP tools and Task are not shell commands: no \"Always allow\" rule matches them. Checked, a member's full access allows them without asking. Unchecked (default), they wait for you."
 }

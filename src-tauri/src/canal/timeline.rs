@@ -35,6 +35,10 @@ pub enum ItemKind {
     /// Os tokens de uma chamada ao modelo (Claude: uma mensagem; Codex: um `token_count`), para a
     /// conta do turno. A tela não desenha: só soma.
     Usage,
+    /// Um aviso do próprio app no fio da conversa (não é fala de ninguém): `label` = o código
+    /// (`resumeLost`, `queueDropped`, `optionIgnored`) que a tela traduz; `text` = a frase em PT-BR (ou, em
+    /// `queueDropped`, a mensagem da pessoa que não foi enviada).
+    Notice,
 }
 
 /// O estado de um passo do plano do agente (TodoWrite do Claude, `update_plan` do Codex).

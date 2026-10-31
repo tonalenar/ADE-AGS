@@ -54,7 +54,8 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   // O texto chegando entra na timeline como item (o mesmo id do item final), e o raciocínio
   // chegando alimenta a linha viva.
   const items = useMemo(() => withDrafts(live.items, live.drafts), [live.items, live.drafts]);
-  const pending = usePending(key, items);
+  // Com o agente trabalhando, a mensagem na fila dele só entra no fio quando o turno dela começa: o envio otimista espera.
+  const pending = usePending(key, items, working);
   const streaming = useMemo(() => new Set(live.drafts.map((d) => d.itemId)), [live.drafts]);
   const turn = useMemo(() => turnLive(items, !!request), [items, request]);
   const locked = working || !!request;
@@ -69,6 +70,11 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       detail: request.detail || null,
     }
     : null;
+  // «Reenviar» uma mensagem que saiu da fila do agente sem ser enviada.
+  const resend = (text: string) => {
+    const mark = addPending(key, text, items);
+    sendToThread(thread.id, text, () => dropPending(key, mark));
+  };
   const answer = (choice: string) => { if (request) answerRequest(thread.id, request.id, choice); };
 
   const controls = request && !ask ? (
@@ -107,19 +113,23 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
 
   const composer = (
       <ComposerColumn>
-        {live.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error}</p>}
+        {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
           onSubmit={(text) => {
             if (question) { answer(text); return; }
-            const out = team ? team.prepare(text) : text;
-            if (out === null) return;
+            const prepared = team ? team.prepare(text, { key, items }) : { text, onSent: () => undefined };
+            if (prepared === null) return;
             // A mensagem aparece na hora; se o backend recusar, sai do fio e o erro aparece no aviso.
-            const mark = out.trim() ? addPending(key, out.trim(), items) : null;
-            sendToThread(thread.id, out, mark ? () => dropPending(key, mark) : undefined);
+            const mark = prepared.text.trim() ? addPending(key, prepared.text.trim(), items) : null;
+            sendToThread(thread.id, prepared.text, mark ? () => dropPending(key, mark) : undefined, prepared.onSent);
           }}
-          onQueue={question ? null : (text) => { const out = team ? team.prepare(text) : text; if (out !== null) queueOrSend(key, out); }} queued={queued}
+          onQueue={question ? null : (text) => {
+            const prepared = team ? team.prepare(text, { key, items }) : { text, onSent: () => undefined };
+            // A fila do composer não avisa quando a mensagem sai: o resumo do time conta como entregue ao enfileirar.
+            if (prepared !== null) { queueOrSend(key, prepared.text); prepared.onSent(); }
+          }} queued={queued}
           leading={question ? null : team?.controls}
           addon={team && !question ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}
           onStop={working && !request ? () => interruptThread(thread.id) : null}
@@ -136,7 +146,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       <ChatFrame composer={composer} list={(bottomInset) => (
         <TimelineView bottomInset={bottomInset} items={items} loaded={hydrated} working={working || !!request} live
           approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
-          streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending}
+          streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} onResend={resend}
           after={<TeamThreadFeed conversation={card} cards={cards} />} />
       )} />
     </div>

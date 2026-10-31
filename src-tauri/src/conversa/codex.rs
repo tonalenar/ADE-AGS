@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::database::DbConnection;
 
 use super::events::emit;
-use super::{codex_map, store};
+use super::{codex_map, permission, resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido (abrir thread, começar turno). O turno em si não tem
 /// prazo: ele acaba por aviso (`turn/completed`).
@@ -31,6 +31,35 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 const STDERR_LINES: usize = 40;
 
 type Reply = oneshot::Sender<Result<Value, String>>;
+
+/// A mensagem que o laço de leitura devolve aos pedidos pendentes quando o processo cai (`closed`).
+const CLOSED: &str = "O processo do Codex fechou";
+
+/// Como um pedido ao Codex falhou, pela única pergunta que a fila de mensagens faz: o servidor pode ter
+/// agido nele?
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RequestFailure {
+    /// Nem saiu (processo já fechado, canal de escrita fechado).
+    NotSent(String),
+    /// O Codex respondeu com erro: ele não executou o pedido.
+    Rejected(String),
+    /// O pedido saiu e a resposta se perdeu (processo caiu, prazo): pode ter sido executado.
+    Lost(String),
+}
+
+impl RequestFailure {
+    pub fn message(&self) -> &str {
+        match self {
+            RequestFailure::NotSent(m) | RequestFailure::Rejected(m) | RequestFailure::Lost(m) => m,
+        }
+    }
+}
+
+/// Pura: a resposta de um pedido que chegou ao laço de leitura. O erro com a mensagem de `closed` é o
+/// processo que caiu com o pedido pendente (perdido), não uma recusa do servidor.
+pub(super) fn failure_of(reply: Result<Value, String>) -> Result<Value, RequestFailure> {
+    reply.map_err(|m| if m == CLOSED { RequestFailure::Lost(m) } else { RequestFailure::Rejected(m) })
+}
 
 pub struct Session {
     thread_id: String,
@@ -67,27 +96,37 @@ impl Session {
     }
 
     fn send(&self, msg: &Value) -> Result<(), String> {
-        self.tx.send(msg.to_string()).map_err(|_| "O processo do Codex fechou".to_string())
+        self.tx.send(msg.to_string()).map_err(|_| CLOSED.to_string())
     }
 
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, String> {
+        self.request_typed(method, params).await.map_err(|f| f.message().to_string())
+    }
+
+    /// Como `request`, dizendo na falha se o pedido chegou a sair (ver [`RequestFailure`]).
+    pub async fn request_typed(&self, method: &str, params: Value) -> Result<Value, RequestFailure> {
         if !self.alive() {
-            return Err("O processo do Codex fechou".into());
+            return Err(RequestFailure::NotSent(CLOSED.into()));
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
         if let Ok(mut pending) = self.pending.lock() {
             pending.insert(id, tx);
         }
-        self.send(&json!({ "id": id, "method": method, "params": params }))?;
+        if let Err(error) = self.send(&json!({ "id": id, "method": method, "params": params })) {
+            if let Ok(mut pending) = self.pending.lock() {
+                pending.remove(&id);
+            }
+            return Err(RequestFailure::NotSent(error));
+        }
         match tokio::time::timeout(REQUEST_TIMEOUT, rx).await {
-            Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err("O processo do Codex fechou".into()),
+            Ok(Ok(result)) => failure_of(result),
+            Ok(Err(_)) => Err(RequestFailure::Lost(CLOSED.into())),
             Err(_) => {
                 if let Ok(mut pending) = self.pending.lock() {
                     pending.remove(&id);
                 }
-                Err(format!("O Codex não respondeu a {method}"))
+                Err(RequestFailure::Lost(format!("O Codex não respondeu a {method}")))
             }
         }
     }
@@ -134,13 +173,16 @@ pub fn close(thread_id: &str) {
 
 
 /// A sessão de uma conversa: a viva, ou uma nova (sobe o processo, `initialize` e abre ou retoma a
-/// thread do Codex com o modelo e o acesso da conversa).
+/// thread do Codex com o modelo e o acesso da conversa). A thread guardada é retomada; só se ela sumiu (ou o
+/// erro transitório persistiu) abre outra, e então a timeline recebe o aviso de que o agente recomeçou sem o
+/// histórico (ver `resume`). O id da thread anterior só é trocado depois de a nova abrir.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
-    static START: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
-    let _guard = START.get_or_init(|| tokio::sync::Mutex::new(())).lock().await;
+    // Uma trava por conversa: um Codex lento a abrir não segura o início das outras.
+    let gate = resume::start_gate("codex", thread_id);
+    let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
         return Ok(s);
     }
@@ -149,16 +191,26 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
-    let session = spawn(app, db, &row, env)?;
 
-    let opened = open_thread(&session, &row).await;
-    let remote = match opened {
-        Ok(remote) => remote,
-        Err(e) => {
-            session.kill();
-            return Err(e);
-        }
+    let fresh = || {
+        let (env, row) = (env.clone(), &row);
+        async move { open_fresh(app, db, row, env).await }
     };
+    let opened = match row.remote_id.clone() {
+        Some(remote) => {
+            resume::open_resuming(
+                || {
+                    let (env, row, remote) = (env.clone(), &row, remote.clone());
+                    async move { open_resumed(app, db, row, env, &remote).await }
+                },
+                fresh,
+                tokio::time::sleep,
+            )
+            .await?
+        }
+        None => resume::Opened { session: fresh().await?, lost: None },
+    };
+    let (session, remote) = opened.session;
     if let Ok(conn) = db.lock() {
         let _ = store::set_remote_id(&conn, thread_id, &remote);
     }
@@ -168,33 +220,81 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     if let Ok(mut map) = sessions().lock() {
         map.insert(thread_id.to_string(), session.clone());
     }
+    if let Some(reason) = opened.lost {
+        turn::save_notice(app, db, thread_id, "resumeLost", &resume::lost_notice(&reason));
+    }
     Ok(session)
 }
 
-async fn open_thread(session: &Session, row: &store::ThreadRow) -> Result<String, String> {
-    session
-        .request("initialize", json!({ "clientInfo": { "name": "ade-ags", "title": "ADE AGS", "version": env!("CARGO_PKG_VERSION") }, "capabilities": null }))
-        .await?;
-    session.notify("initialized")?;
+/// Um processo novo com o `initialize` feito. Fecha o processo se o `initialize` falha.
+async fn started(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<Arc<Session>, String> {
+    let session = spawn(app, db, row, env)?;
+    let init = async {
+        session
+            .request("initialize", json!({ "clientInfo": { "name": "ade-ags", "title": "ADE AGS", "version": env!("CARGO_PKG_VERSION") }, "capabilities": null }))
+            .await?;
+        session.notify("initialized")
+    };
+    if let Err(e) = init.await {
+        session.kill();
+        return Err(e);
+    }
+    Ok(session)
+}
+
+/// Um processo novo que retoma a thread `remote`. Um processo que não sobe é `Fatal` (abrir outra thread não
+/// resolveria); o Codex dizendo que a thread não existe é `Gone`; o resto, pela classe do erro.
+async fn open_resumed(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, remote: &str) -> Result<(Arc<Session>, String), resume::ResumeFailure> {
+    let session = started(app, db, row, env).await.map_err(|e| resume::classify(&e))?;
+    let (approval, sandbox) = codex_map::access_policy(&row.access);
+    let mut params = json!({ "cwd": row.cwd, "approvalPolicy": approval, "sandbox": sandbox, "threadId": remote, "excludeTurns": true });
+    if let Some(model) = &row.model {
+        params["model"] = json!(model);
+    }
+    match session.request_typed("thread/resume", params).await {
+        Ok(result) => match thread_id_of(&result) {
+            Ok(id) => Ok((session, id)),
+            Err(e) => {
+                session.kill();
+                Err(resume::ResumeFailure::Transient(e))
+            }
+        },
+        Err(failure) => {
+            session.kill();
+            Err(resume_failure(failure))
+        }
+    }
+}
+
+/// Pura: o erro de `thread/resume` como classe. O Codex respondendo com erro = a thread não existe (ou não
+/// abre): `Gone`. O pedido que não saiu, ou o processo que caiu com ele pendente: `Transient`. O prazo: `Timeout`.
+fn resume_failure(failure: RequestFailure) -> resume::ResumeFailure {
+    match failure {
+        RequestFailure::Rejected(m) => resume::ResumeFailure::Gone(m),
+        RequestFailure::NotSent(m) => resume::ResumeFailure::Transient(m),
+        RequestFailure::Lost(m) => resume::classify(&m),
+    }
+}
+
+/// Um processo novo com uma thread nova.
+async fn open_fresh(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<(Arc<Session>, String), String> {
+    let session = started(app, db, row, env).await?;
     let (approval, sandbox) = codex_map::access_policy(&row.access);
     let mut params = json!({ "cwd": row.cwd, "approvalPolicy": approval, "sandbox": sandbox });
     if let Some(model) = &row.model {
         params["model"] = json!(model);
     }
-    let result = match &row.remote_id {
-        Some(remote) => {
-            let mut resume = params.clone();
-            resume["threadId"] = json!(remote);
-            resume["excludeTurns"] = json!(true);
-            // A thread pode ter sumido (apagada no Codex, outra conta): começa outra, a timeline
-            // guardada continua aqui.
-            match session.request("thread/resume", resume).await {
-                Ok(r) => r,
-                Err(_) => session.request("thread/start", params).await?,
-            }
+    let result = session.request("thread/start", params).await.inspect_err(|_| session.kill())?;
+    match thread_id_of(&result) {
+        Ok(id) => Ok((session, id)),
+        Err(e) => {
+            session.kill();
+            Err(e)
         }
-        None => session.request("thread/start", params).await?,
-    };
+    }
+}
+
+fn thread_id_of(result: &Value) -> Result<String, String> {
     result.pointer("/thread/id").and_then(Value::as_str).map(str::to_string).ok_or_else(|| "O Codex não devolveu a thread".to_string())
 }
 
@@ -265,10 +365,11 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
 }
 
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
-    session.alive.store(false, Ordering::SeqCst);
+    // `kill` (fechar a conversa, trocar o acesso) já baixou `alive`: o fim por conta própria é queda.
+    let killed = !session.alive.swap(false, Ordering::SeqCst);
     let waiting: Vec<Reply> = session.pending.lock().map(|mut p| p.drain().map(|(_, r)| r).collect()).unwrap_or_default();
     for reply in waiting {
-        let _ = reply.send(Err("O processo do Codex fechou".into()));
+        let _ = reply.send(Err(CLOSED.into()));
     }
     let expired = db.lock().ok().and_then(|conn| store::expire_requests(&conn, &session.thread_id).ok()).unwrap_or_default();
     for id in expired {
@@ -278,6 +379,16 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
         && map.get(&session.thread_id).is_some_and(|s| Arc::ptr_eq(s, session))
     {
         map.remove(&session.thread_id);
+    }
+    // O turno que o processo deixou aberto fecha aqui, como no Claude e no OpenCode: sem o `turnEnd` o
+    // `chat_run` ficava `inProgress` e a tela, sem saber por que o agente parou.
+    if let Some(turn_id) = session.turn() {
+        session.set_turn(None);
+        let (result, message) = turn::dropped(killed, None, "Codex");
+        turn::finish(app, db, &session.thread_id, &turn_id, &result);
+        if let Some(message) = message {
+            emit(app, &session.thread_id, "error", json!({ "message": message }));
+        }
     }
     emit(app, &session.thread_id, "phase", json!({ "phase": "idle" }));
     emit(app, &session.thread_id, "closed", json!({}));
@@ -309,6 +420,8 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Session, method: &st
         session.refuse(rpc_id);
         return;
     };
+    // O pedido inteiro (o título só guarda a primeira linha do comando): é sobre ele que o backend decide.
+    let draft = permission::draft_codex(method, params, &ask);
     let row = store::RequestRow {
         id: uuid::Uuid::new_v4().to_string(),
         thread_id: session.thread_id.clone(),
@@ -323,6 +436,11 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Session, method: &st
     };
     let saved = db.lock().ok().map(|conn| store::insert_request(&conn, &row).is_ok()).unwrap_or(false);
     if saved {
+        // A política do integrante e as regras da pessoa respondem o que cobrem, com a janela fechada ou não;
+        // o resto fica pendente e vai à tela.
+        if permission::on_arrival(app, db, &row, draft) {
+            return;
+        }
         emit(app, &session.thread_id, "request", json!({ "request": row }));
     } else {
         session.refuse(rpc_id);

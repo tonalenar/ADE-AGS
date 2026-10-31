@@ -16,15 +16,19 @@
 
 pub mod agy;
 pub mod agy_map;
+pub mod answer;
 pub mod api;
 pub mod claude;
 pub mod claude_map;
 pub mod codex;
 pub mod codex_map;
+pub mod envio;
 pub mod events;
 pub mod commands;
 pub mod opencode;
 pub mod opencode_map;
+pub mod permission;
+pub mod resume;
 pub mod store;
 pub mod turn;
 pub mod worktree;

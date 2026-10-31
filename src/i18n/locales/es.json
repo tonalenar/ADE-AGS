@@ -4348,5 +4348,17 @@
   "chat.summary.limits.budget": "Gasto (24 h)",
   "chat.summary.limits.budgetOf": "US$ {{spent}} de US$ {{budget}}",
   "chat.summary.limits.teamShow": "Cuentas del equipo ({{count}})",
-  "chat.summary.limits.teamHide": "Ocultar cuentas del equipo"
+  "chat.summary.limits.teamHide": "Ocultar cuentas del equipo",
+  "chat.timeline.interruptedByYou": "Interrumpido por ti",
+  "chat.timeline.notDone": "No terminado",
+  "chat.timeline.stopped": "El agente se detuvo: {{reason}}",
+  "chat.timeline.continued": "Continuó en el mensaje siguiente",
+  "chat.timeline.notice.resumeLost": "No se pudo retomar la sesión anterior; el agente empezó de nuevo sin su historial.",
+  "chat.timeline.notice.queueDropped": "Mensaje no enviado: la conversación se interrumpió o se cerró antes de su turno.",
+  "chat.timeline.notice.optionIgnored": "El agente no aplicó una opción.",
+  "chat.timeline.notice.resend": "Reenviar",
+  "chat.team.autoDecide.off": "No decidir por su cuenta",
+  "chat.team.autoDecide.hint": "Sin marcar, la política de cada integrante y sus reglas «Permitir siempre» responden lo que cubren (el riesgo alto siempre espera por usted). Marcado, todo permiso espera por usted.",
+  "chat.team.allowTools.on": "El acceso total permite herramientas fuera del shell",
+  "chat.team.allowTools.hint": "Herramientas como las de MCP y Task no son comandos de shell: ninguna regla «Permitir siempre» las cubre. Marcado, el acceso total de un integrante las permite sin preguntar. Sin marcar (predeterminado), esperan por usted."
 }

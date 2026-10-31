@@ -242,3 +242,84 @@ pub async fn chat_team_worktree(cwd: String, role: String) -> Result<MemberWorkt
     .await
     .map_err(|e| e.to_string())?
 }
+
+// ── As regras «Sempre permitir» e o interruptor do time ─────────────────
+// SÓ a pessoa, pela tela, cria, muda ou apaga regras e liga/desliga o «decidir sozinho». Não há comando de CLI nem
+// de MCP para nada disto: um agente (ou o texto de uma mensagem de colega) nunca amplia a própria permissão.
+
+#[tauri::command]
+pub fn chat_permission_rules(db: State<'_, DbConnection>) -> Result<Vec<super::permission::Rule>, String> {
+    super::store::rules(&*lock(&db)?)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleInput {
+    pub kind: super::permission::Kind,
+    pub pattern: String,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+}
+
+#[tauri::command]
+pub fn chat_permission_rule_add(app: AppHandle, db: State<'_, DbConnection>, input: RuleInput) -> Result<super::permission::Rule, String> {
+    let rule = super::store::add_rule(&*lock(&db)?, input.kind, &input.pattern, input.agent_id.as_deref(), crate::util::now_ts_ms())?;
+    let _ = app.emit(RULES_EVENT, json!({}));
+    // Uma regra nova pode cobrir pedidos que já esperavam a pessoa.
+    crate::conversa::permission::sweep(&app, &db);
+    Ok(rule)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RulePatchInput {
+    #[serde(default)]
+    pub pattern: Option<String>,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    /// `true` = a regra passa a valer para qualquer agente.
+    #[serde(default)]
+    pub any_agent: bool,
+}
+
+#[tauri::command]
+pub fn chat_permission_rule_update(app: AppHandle, db: State<'_, DbConnection>, id: String, patch: RulePatchInput) -> Result<bool, String> {
+    let agent = if patch.any_agent { Some(None) } else { patch.agent_id.as_deref().map(Some) };
+    let changed = super::store::update_rule(&*lock(&db)?, &id, patch.pattern.as_deref(), agent)?;
+    let _ = app.emit(RULES_EVENT, json!({}));
+    crate::conversa::permission::sweep(&app, &db);
+    Ok(changed)
+}
+
+#[tauri::command]
+pub fn chat_permission_rule_remove(app: AppHandle, db: State<'_, DbConnection>, id: String) -> Result<bool, String> {
+    let removed = super::store::remove_rule(&*lock(&db)?, &id)?;
+    let _ = app.emit(RULES_EVENT, json!({}));
+    Ok(removed)
+}
+
+/// O interruptor «não decidir sozinho» de um time: desligado, o backend manda TUDO à pessoa.
+#[tauri::command]
+pub fn chat_team_auto_decide(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
+    let changed = super::store::set_auto_decide(&*lock(&db)?, &team_id, enabled)?;
+    announce(&app, &team_id);
+    // Ligado de novo, a política e as regras decidem o que já esperava.
+    if enabled {
+        crate::conversa::permission::sweep(&app, &db);
+    }
+    Ok(changed)
+}
+
+/// O evento que a tela escuta para reler as regras.
+pub const RULES_EVENT: &str = "cc-chat-permission-rules";
+
+/// «Acesso total libera ferramentas de fora do shell» do time (MCP, `Task`…). Desligado por padrão; só a pessoa liga.
+#[tauri::command]
+pub fn chat_team_allow_tools(app: AppHandle, db: State<'_, DbConnection>, team_id: String, enabled: bool) -> Result<bool, String> {
+    let changed = super::store::set_allow_tools(&*lock(&db)?, &team_id, enabled)?;
+    announce(&app, &team_id);
+    if enabled {
+        crate::conversa::permission::sweep(&app, &db);
+    }
+    Ok(changed)
+}

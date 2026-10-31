@@ -28,10 +28,16 @@ const MAX = 20;
 /** Compara pelo que a tela mostra (sem o resumo do time nem o prefixo "Só o orquestrador"). */
 const norm = (s: string) => (displayUserText(s) ?? s).trim().replace(/\s+/g, " ").slice(0, 200);
 
+/**
+ * Quantas mensagens iguais a timeline já tem: a da pessoa, ou o aviso «não enviada» (`queueDropped`) de uma que
+ * saiu da fila do agente sem ser enviada. Os dois são o desfecho de um envio.
+ */
 function userMatches(items: TimelineItem[], text: string): number {
   const key = norm(text);
   let n = 0;
-  for (const i of items) if (i.kind === "user" && norm(i.text ?? "") === key) n++;
+  for (const i of items) {
+    if ((i.kind === "user" || (i.kind === "notice" && i.label === "queueDropped")) && norm(i.text ?? "") === key) n++;
+  }
   return n;
 }
 
@@ -43,15 +49,16 @@ export function pendingSend(id: string, text: string, items: TimelineItem[], at:
 /**
  * Quais envios ainda esperam o eco. Um envio está resolvido quando a timeline tem mais mensagens
  * iguais do que tinha ao enviar (contando os envios iguais anteriores, que também esperam o seu).
- * Puro: `now` vem de fora.
+ * `working`: o agente está num turno, e uma mensagem na fila dele só entra no fio quando o turno dela começa
+ * (pode demorar mais que o prazo): enquanto ele trabalha, o prazo não vale. Puro: `now` vem de fora.
  */
-export function unreconciled(pending: PendingSend[], items: TimelineItem[], now: number): PendingSend[] {
+export function unreconciled(pending: PendingSend[], items: TimelineItem[], now: number, working = false): PendingSend[] {
   const seen = new Map<string, number>();
   return pending.filter((p) => {
     const key = norm(p.text);
     const index = seen.get(key) ?? 0;
     seen.set(key, index + 1);
-    if (now - p.at > PENDING_TTL_MS) return false;
+    if (!working && now - p.at > PENDING_TTL_MS) return false;
     return userMatches(items, p.text) < p.baseline + index + 1;
   });
 }
@@ -80,8 +87,8 @@ export function dropPending(key: string, id: string): void {
 const EMPTY: PendingSend[] = [];
 
 /** Os envios da conversa que ainda esperam o eco, na ordem. */
-export function usePending(key: string, items: TimelineItem[]): PendingSend[] {
+export function usePending(key: string, items: TimelineItem[], working = false): PendingSend[] {
   const all = usePendingSends((s) => s.byKey[key]) ?? EMPTY;
   // Sem relógio no render: o TTL só vale no próximo redesenho (a timeline muda a cada mensagem).
-  return unreconciled(all, items, Date.now());
+  return unreconciled(all, items, Date.now(), working);
 }

@@ -8,7 +8,8 @@ import {
   applyMention, mentionOptions, mentionQuery, mentionSlug, rosterNotice, rosterSignature, routeMessage, teamLedBy,
   type ComposerTarget, type MentionOption,
 } from "./teamModel";
-import { markTold, sendToMember, setComposerTarget, startTeams, useTeamStore } from "./teamStore";
+import type { TimelineItem } from "../timeline/types";
+import { markTold, sendDirect, setComposerTarget, setSendError, startTeams, useTeamStore } from "./teamStore";
 import { useTeamLive } from "./useTeamLive";
 
 /**
@@ -47,12 +48,20 @@ export interface TeamComposer {
   placeholder: string;
   /** O segmentado, para ir nos `controls` do composer. */
   controls: React.ReactNode;
+  /** O erro do último envio direto (@): a conversa que a pessoa está olhando o mostra. */
+  error: string | null;
   /**
-   * Prepara o envio: `null` = já foi direto a um integrante (pelo @); um texto = o que mandar ao
-   * orquestrador pelo caminho de sempre da conversa (com o resumo do time quando ele mudou, ou o aviso
-   * de "Só o orquestrador").
+   * Prepara o envio: `null` = já foi direto a um integrante (pelo @), com a bolha pendente na conversa de `where`;
+   * senão o texto a mandar ao orquestrador pelo caminho de sempre da conversa (com o resumo do time quando ele
+   * mudou, ou o aviso de "Só o orquestrador") e o `onSent`, que quem envia chama DEPOIS de o envio funcionar:
+   * só então o resumo conta como entregue.
    */
-  prepare: (text: string) => string | null;
+  prepare: (text: string, where: { key: string; items: TimelineItem[] }) => PreparedSend | null;
+}
+
+export interface PreparedSend {
+  text: string;
+  onSent: () => void;
 }
 
 /**
@@ -69,19 +78,22 @@ export function useTeamComposer(conversation: ConversationCard | null, cards: Co
   const live = useTeamLive(cards);
   const options = useMentionOptions(team, cards);
 
-  const prepare = useCallback((text: string): string | null => {
-    if (!team) return text;
+  const orchestrator = conversation?.tabId ?? "";
+  const error = useTeamStore((s) => s.sendErrors[orchestrator] ?? null);
+  const prepare = useCallback((text: string, where: { key: string; items: TimelineItem[] }): PreparedSend | null => {
+    if (!team) return { text, onSent: () => undefined };
+    setSendError(orchestrator, null);
     const signature = rosterSignature(team);
     const policyLabel = (p: TeamPolicy) => t(`chat.team.policy.${p}`);
     const notice = target === "team" && told !== signature ? rosterNotice(team, live.nameOf, roleLabel, policyLabel) : null;
     const routed = routeMessage(text, target, team, options, notice);
     if (routed.direct) {
-      sendToMember(routed.to, routed.text);
+      sendDirect(orchestrator, routed.to, routed.text, where);
       return null;
     }
-    if (notice) markTold(team.id, signature);
-    return routed.text;
-  }, [team, target, told, live, roleLabel, options, t]);
+    // O resumo do time só conta como entregue depois de o envio funcionar.
+    return { text: routed.text, onSent: () => { if (notice) markTold(team.id, signature); } };
+  }, [team, target, told, live, roleLabel, options, t, orchestrator]);
 
   if (!team || !conversation) return null;
   const first = options[0];
@@ -90,6 +102,7 @@ export function useTeamComposer(conversation: ConversationCard | null, cards: Co
       ? t("chat.team.placeholderLead")
       : t("chat.team.placeholder", { agent: first ? mentionSlug(first.agentId) : "codex" }),
     controls: <TeamTargetSwitch orchestrator={conversation.tabId} />,
+    error,
     prepare,
   };
 }

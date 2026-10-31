@@ -2,6 +2,9 @@
 //! e o MCP fazem, pelo mesmo caminho. Recebe o app e o banco; nunca segura o lock do banco durante
 //! o I/O com o agente.
 
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::AppHandle;
@@ -9,6 +12,8 @@ use tauri::AppHandle;
 use crate::canal::timeline::Item;
 use crate::database::DbConnection;
 
+use super::codex::RequestFailure;
+use super::envio::{SendError, SendMode};
 use super::store::{self, RequestRow, ThreadRow, Tuning};
 use super::{agy, claude, codex, codex_map, opencode};
 
@@ -126,32 +131,91 @@ pub fn announce(app: &AppHandle, row: &ThreadRow) {
     super::events::emit(app, &row.id, "created", json!({ "thread": row }));
 }
 
-/// Manda uma mensagem: começa um turno, ou entra no turno em andamento (`turn/steer`).
+/// Manda uma mensagem: começa um turno, ou entra no turno em andamento (`turn/steer`). É o envio da pessoa
+/// (tela, `ags chat`): entra no turno, como sempre foi. A fila de mensagens entre agentes usa [`send_mode`].
 pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> Result<(), String> {
-    let row = thread(db, thread_id)?;
-    match engine_of(&row)? {
+    send_mode(app, db, thread_id, text, SendMode::SteerActive).await.map_err(String::from)
+}
+
+/// Uma trava por conversa: a checagem do turno e o envio (`turn/start`/`turn/steer`) acontecem juntos, sem
+/// outro envio no meio. Vale para todo chamador (tela, CLI, fila de mensagens entre agentes). É
+/// `tokio::sync::Mutex` porque é segurada através de `.await`.
+pub(super) fn send_gate(thread_id: &str) -> Arc<tokio::sync::Mutex<()>> {
+    static GATES: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>> = OnceLock::new();
+    let mut map = GATES.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(thread_id.to_string()).or_default().clone()
+}
+
+/// Pura: o modo deixa a mensagem entrar agora? `queue_after_active` só com a conversa livre.
+pub(super) fn admits(mode: SendMode, working: bool) -> bool {
+    mode == SendMode::SteerActive || !working
+}
+
+/// Pura: o `turn/steer` foi recusado pelo Codex. Se o turno que se tentou guiar já não é o atual (acabou
+/// ou foi trocado no meio), a mensagem segue como `turn/start`; senão a recusa é de outro motivo.
+pub(super) fn steer_falls_back_to_start(steered: &str, current: Option<&str>) -> bool {
+    current != Some(steered)
+}
+
+/// Pura: o pedido ao Codex falhou: pode ter sido executado? Só o que SAIU e perdeu a resposta é `Unknown`.
+pub(super) fn codex_error(failure: RequestFailure) -> SendError {
+    match failure {
+        RequestFailure::NotSent(m) | RequestFailure::Rejected(m) => SendError::NotSent(m),
+        // O pedido saiu e a resposta se perdeu (o prazo do `turn/start`, o processo que caiu): o turno pode estar
+        // aberto. Quem reenviar pode duplicar a ordem, então a mensagem diz para conferir antes.
+        RequestFailure::Lost(m) => SendError::Unknown(format!("{m}. A mensagem pode ter chegado ao agente: confira a conversa antes de reenviar.")),
+    }
+}
+
+/// Manda uma mensagem à conversa no modo dado, com a classe do erro (ver [`SendError`]). Qualquer falha antes
+/// de a mensagem chegar ao agente (a sessão não abre, o processo já fechou, o canal de escrita fechou) é
+/// `NotSent`; um pedido que saiu e perdeu a resposta é `Unknown`.
+pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode) -> Result<(), SendError> {
+    let gate = send_gate(thread_id);
+    let _held = gate.lock().await;
+    let row = thread(db, thread_id).map_err(SendError::NotSent)?;
+    let engine = engine_of(&row).map_err(SendError::NotSent)?;
+    if !admits(mode, status(thread_id).working) {
+        return Err(SendError::Busy);
+    }
+    // Por motor, o que um `Err` quer dizer (revisado caso a caso; na dúvida seria `Unknown`):
+    // - Claude: `session` só sobe o processo e o `initialize`; `send_user` falha só se o canal de escrita
+    //   já fechou, e aí nada foi escrito;
+    // - OpenCode: `send_user` falha antes de qualquer pedido (processo fechado, conversa sem sessão); o
+    //   `session/prompt` roda em outra task e o erro dele vira erro do turno, não retorno daqui;
+    // - Antigravity: `send` só falha antes de criar o processo do turno;
+    // - Codex: ver o `RequestFailure` (saiu e perdeu a resposta = `Unknown`).
+    match engine {
         Engine::Claude => {
-            let session = claude::session(app, db, thread_id).await?;
-            return claude::send_user(app, db, &session, text);
+            let session = claude::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
+            return claude::send_user(app, db, &session, text).map_err(SendError::NotSent);
         }
         Engine::OpenCode => {
-            let session = opencode::session(app, db, thread_id).await?;
-            return opencode::send_user(app, db, &session, text);
+            let session = opencode::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
+            return opencode::send_user(app, db, &session, text).map_err(SendError::NotSent);
         }
-        Engine::Antigravity => return agy::send(app, db, thread_id, text),
+        Engine::Antigravity => return agy::send(app, db, thread_id, text).map_err(SendError::NotSent),
         Engine::Codex => {}
     }
-    let session = codex::session(app, db, thread_id).await?;
-    let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
+    let session = codex::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
+    let remote = session.remote().ok_or_else(|| SendError::NotSent("A conversa ainda não abriu no Codex".into()))?;
     let input = json!([{ "type": "text", "text": text, "text_elements": [] }]);
     if let Some(turn) = session.turn() {
-        session.request("turn/steer", json!({ "threadId": remote, "input": input, "expectedTurnId": turn })).await?;
-        return Ok(());
+        if !admits(mode, true) {
+            return Err(SendError::Busy);
+        }
+        let steered = session.request_typed("turn/steer", json!({ "threadId": remote, "input": input, "expectedTurnId": turn })).await;
+        match steered {
+            Ok(_) => return Ok(()),
+            // O turno acabou entre a checagem e o pedido: a mensagem abre um turno novo, em vez de se perder.
+            Err(RequestFailure::Rejected(_)) if steer_falls_back_to_start(&turn, session.turn().as_deref()) => {}
+            Err(failure) => return Err(codex_error(failure)),
+        }
     }
     let row = {
-        let conn = db.lock().map_err(db_err)?;
+        let conn = db.lock().map_err(|e| SendError::NotSent(db_err(e)))?;
         let _ = store::touch(&conn, thread_id, crate::util::now_ts_ms());
-        store::thread(&conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?
+        store::thread(&conn, thread_id).map_err(|e| SendError::NotSent(db_err(e)))?.ok_or_else(|| SendError::NotSent("Conversa não encontrada".into()))?
     };
     let (approval, _) = codex_map::access_policy(&row.access);
     let mut params = json!({ "threadId": remote, "input": input, "approvalPolicy": approval });
@@ -161,7 +225,7 @@ pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &st
     if let Some(effort) = &row.effort {
         params["effort"] = json!(effort);
     }
-    let started = session.request("turn/start", params).await?;
+    let started = session.request_typed("turn/start", params).await.map_err(codex_error)?;
     // O turno conta como aberto já na resposta (o aviso `turn/started` pode chegar depois): quem
     // perguntar o estado logo em seguida (`ags chat wait`) não o vê parado.
     // Se o turno já acabou (o aviso chegou antes desta resposta), não reabre.
@@ -222,28 +286,36 @@ pub async fn interrupt(thread_id: &str) -> Result<(), String> {
 /// Responde a um pedido do agente: `allow`, `allowSession` ou `deny` numa aprovação; o texto da
 /// resposta numa pergunta. `false` se o pedido já não estava pendente.
 pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str) -> Result<bool, String> {
-    let row = {
+    answer_as(app, db, request_id, choice, "person", None)
+}
+
+/// Como `answer`, dizendo quem responde (`person`, `policy`, `rule:<id>`) e por quê: fica gravado e vai no aviso
+/// `requestResolved`. A resposta da pessoa é a de sempre; as do backend vêm de `conversa::permission`.
+pub fn answer_as(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str, by: &str, why: Option<&str>) -> Result<bool, String> {
+    let thread_id = {
         let conn = db.lock().map_err(db_err)?;
-        store::request(&conn, request_id).map_err(db_err)?.ok_or("Pedido não encontrado")?
+        store::request(&conn, request_id).map_err(db_err)?.ok_or("Pedido não encontrado")?.thread_id
     };
-    if row.state != "pending" {
-        return Ok(false);
+    // A resposta ao agente só sai depois de o banco RESERVAR o pedido (ver `answer`): quem perde a corrida não envia nada.
+    let sender = |row: &store::RequestRow, choice: &str| send_answer(app, db, row, choice);
+    let answered = super::answer::answer_core(db, request_id, choice, by, why, &sender)?;
+    if answered {
+        super::events::emit(app, &thread_id, "requestResolved", json!({ "id": request_id, "by": by, "why": why }));
     }
+    Ok(answered)
+}
+
+/// Fala com o agente do motor da conversa. Só é chamada com o pedido já reservado.
+fn send_answer(app: &AppHandle, db: &DbConnection, row: &store::RequestRow, choice: &str) -> Result<(), String> {
     let rpc_id: Value = serde_json::from_str(&row.rpc_id).map_err(db_err)?;
     if let Some(session) = claude::get(&row.thread_id) {
-        claude::answer(app, db, &session, &rpc_id, row.item_id.as_deref(), choice)?;
+        claude::answer(app, db, &session, &rpc_id, row.item_id.as_deref(), choice)
     } else if let Some(session) = opencode::get(&row.thread_id) {
-        opencode::answer(&session, &rpc_id, row.item_id.as_deref(), &row.options, choice)?;
+        opencode::answer(&session, &rpc_id, row.item_id.as_deref(), &row.options, choice)
     } else {
         let session = codex::get(&row.thread_id).ok_or("O agente desta conversa já fechou")?;
-        session.respond(rpc_id, codex_map::answer_of(&row.kind, choice, &row.options))?;
+        session.respond(rpc_id, codex_map::answer_of(&row.kind, choice, &row.options))
     }
-    let answered = {
-        let conn = db.lock().map_err(db_err)?;
-        store::answer_request(&conn, request_id, choice, crate::util::now_ts_ms()).map_err(db_err)?
-    };
-    super::events::emit(app, &row.thread_id, "requestResolved", json!({ "id": request_id }));
-    Ok(answered)
 }
 
 /// Troca modelo, esforço ou acesso (no Claude, o Plano também é um acesso).

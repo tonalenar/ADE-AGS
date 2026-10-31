@@ -37,3 +37,19 @@ describe("unreconciled", () => {
     expect(unreconciled([p], [], 1001 + PENDING_TTL_MS)).toEqual([]);
   });
 });
+
+describe("unreconciled: mensagem na fila do agente", () => {
+  it("enquanto o agente trabalha, o envio sem eco não some pelo prazo (a mensagem espera a vez dela)", () => {
+    const p = pendingSend("p1", "e o lint?", [], 1000);
+    expect(unreconciled([p], [], 1001 + PENDING_TTL_MS, true)).toEqual([p]);
+    expect(unreconciled([p], [], 1001 + PENDING_TTL_MS, false)).toEqual([]);
+  });
+
+  it("a mensagem descartada da fila (aviso 'não enviada') é o desfecho dela: o envio otimista sai", () => {
+    const p = pendingSend("p1", "e o lint?", [], 1000);
+    const dropped: TimelineItem = { kind: "notice", id: "n1", label: "queueDropped", text: "e o lint?" };
+    expect(unreconciled([p], [dropped], 1500, true)).toEqual([]);
+    const other: TimelineItem = { kind: "notice", id: "n2", label: "resumeLost", text: "e o lint?" };
+    expect(unreconciled([p], [other], 1500, true)).toEqual([p]);
+  });
+});

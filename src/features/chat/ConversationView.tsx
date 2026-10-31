@@ -135,16 +135,22 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
 
   const composer = (
     <ComposerColumn>
+      {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
       {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
       <ChatComposer cwd={card.cwd}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
         onSubmit={(text) => {
-          const out = team ? team.prepare(text) : text;
-          if (out === null) return;
-          if (timeline && out.trim()) addPending(card.tabId, out.trim(), items);
-          sendToConversation(card.tabId, out);
+          const prepared = team ? team.prepare(text, { key: card.tabId, items }) : { text, onSent: () => undefined };
+          if (prepared === null) return;
+          if (timeline && prepared.text.trim()) addPending(card.tabId, prepared.text.trim(), items);
+          sendToConversation(card.tabId, prepared.text);
+          // Numa aba não há resposta do backend a esperar: o resumo do time conta como entregue ao enviar.
+          prepared.onSent();
         }}
-        onQueue={(text) => { const out = team ? team.prepare(text) : text; if (out !== null) queueOrSend(card.tabId, out); }} queued={queued}
+        onQueue={(text) => {
+          const prepared = team ? team.prepare(text, { key: card.tabId, items }) : { text, onSent: () => undefined };
+          if (prepared !== null) { queueOrSend(card.tabId, prepared.text); prepared.onSent(); }
+        }} queued={queued}
         onStop={busy && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
         leading={team?.controls}
         addon={team ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}

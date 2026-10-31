@@ -1340,6 +1340,7 @@ const PEER_TOOLS: &[(&str, &str)] = &[
     ("peer_tell", "peer.tell"),
     ("peer_deliver", "peer.deliver"),
     ("peer_handoff", "peer.handoff"),
+    ("peer_receipt", "peer.receipt"),
     // O time do modo chat (`ipc/commands/team.rs`): o remetente é a aba, como no `peer`.
     ("team_list", "team.list"),
     ("team_create", "team.create"),
@@ -1379,6 +1380,13 @@ fn peer_schemas() -> Vec<Value> {
             "description": "Read the full structured delivery `ENTREGA #<id>` of your mission.",
             "inputSchema": { "type": "object", "properties": {
                 "id": { "type": "string", "description": "The delivery number." }
+            }, "required": ["id"] },
+        }),
+        json!({
+            "name": "peer_receipt",
+            "description": "The state of a message you sent with peer_tell: pending (queued or being delivered), delivered, or failed (expired, unconfirmed, cancelled, refused), with attempts and the reason. Delivery to a team conversation is asynchronous and retried on its own; a final failure also reaches you as a message. Repeating peer_tell with the same `id` never sends again: read this instead.",
+            "inputSchema": { "type": "object", "properties": {
+                "id": { "type": "string", "description": "The message number peer_tell returned (`messageId`), or the request id you gave it." }
             }, "required": ["id"] },
         }),
         json!({

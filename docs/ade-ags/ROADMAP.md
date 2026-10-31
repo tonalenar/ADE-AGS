@@ -27,6 +27,13 @@ Toda mensagem entre agentes tem id e registro no SQLite (`peer_messages`), a ent
 reinício, `--id` torna o reenvio idempotente e o selo "N na fila" deixa o usuário editar, reordenar,
 cancelar ou enviar já. Detalhes em [FILA_DE_MENSAGENS.md](./FILA_DE_MENSAGENS.md).
 
+**Etapa 2 do harness do modo chat — entrega confiável a conversas do time.** A mensagem para uma conversa
+por protocolo (`thread:`) entra na mesma fila, com um consumidor por destino (ordem, retry só do que não saiu,
+recuperação por marcador `#id` no reinício), trava de envio por conversa, aviso de falha também para quem
+pediu de dentro de uma conversa, `ask` ancorado na mensagem (`replies`, `status: failed`, repetição junta-se à
+mesma espera) e `ags peer receipt`. Fica para a etapa 3: retomada com aviso, bolha só quando o turno começa,
+permissão no backend, `restart_active`, painel da fila para conversas.
+
 ## Etapa 20 — ponto 1: notificações com identidade ADE AGS
 
 AUMID explícito antes das janelas, atalho por usuário com o bot e reparo idempotente,

@@ -142,10 +142,11 @@ export async function createThread(input: NewThread): Promise<string> {
 }
 
 /** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
-export function sendToThread(id: string, text: string, onError?: () => void): void {
+export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void): void {
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
-  chatThreadSend(id, text).catch((e) => {
-    onError?.();
+  // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
+  chatThreadSend(id, text).then(() => onSent?.(), (e) => {
+    onError?.(String(e));
     patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
   });
 }

@@ -6,7 +6,6 @@ import type { TerminalPromptItem } from "@/features/canvas/teamFeedModel";
 import { useRunsStore } from "@/features/runs/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
-import { getSetting, setSetting } from "@/shared/ipc/settings";
 
 import { sendToConversation } from "../chatActions";
 import { chatPermissionNotify } from "../ipc";
@@ -16,13 +15,14 @@ import { answerRequest, sendToThread, useStructured } from "../structured/store"
 import { teamVerdictForAsk } from "../team/teamPermissions";
 import { useTeamStore } from "../team/teamStore";
 import { fleetAsk, threadAsks, tuiAsk } from "./askSources";
-import { parseRules, RULES_KEY, sortAsks, type AskFilter, type PendingAsk, type PermissionRule } from "./permissionModel";
+import { chatPermissionRuleAdd, chatPermissionRuleRemove, chatPermissionRuleUpdate, chatPermissionRules, ruleOf } from "./ipc";
+import { sortAsks, type AskFilter, type PendingAsk, type PermissionRule } from "./permissionModel";
 
 /**
  * O store único dos pedidos de permissão (prancheta 14): o que cada fonte tem pendente vira um
  * `PendingAsk` (ver `askSources.ts`), e responder pela caixa ou pelo cartão do fio usa o caminho que
  * cada fonte já tinha (responder ao protocolo, a tecla da TUI, a decisão da frota). As regras
- * "Sempre permitir" ficam nos settings (`chat.permissions.rules`), sem tabela nova.
+ * "Sempre permitir" ficam no banco (`chat_permission_rule`, lidas também pelo backend, que decide os pedidos das conversas por protocolo).
  */
 interface PermissionsState {
   rules: PermissionRule[];
@@ -66,30 +66,34 @@ export function setTuiPrompts(tui: TerminalPromptItem[]): void {
   });
 }
 
+/** Lê as regras do banco (a fonte da verdade, também do backend). */
 export async function loadRules(): Promise<void> {
-  const raw = await getSetting(RULES_KEY).catch(() => null);
-  usePermissions.setState({ rules: parseRules(raw), rulesLoaded: true });
+  const rows = await chatPermissionRules().catch(() => null);
+  usePermissions.setState({ rules: (rows ?? []).map(ruleOf), rulesLoaded: true });
 }
 
-function saveRules(rules: PermissionRule[]): void {
-  usePermissions.setState({ rules });
-  setSetting(RULES_KEY, JSON.stringify(rules)).catch(console.error);
-}
-
-/** Acrescenta uma regra (sem repetir a mesma). */
+/** Acrescenta uma regra (sem repetir a mesma): só a pessoa, pela tela. */
 export function addRule(rule: Omit<PermissionRule, "id" | "createdAt">): void {
   const { rules } = usePermissions.getState();
   if (rules.some((r) => r.kind === rule.kind && r.pattern === rule.pattern && r.agentId === rule.agentId)) return;
-  const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? crypto.randomUUID() : `r${Date.now()}`;
-  saveRules([...rules, { ...rule, id, createdAt: Date.now() }]);
+  chatPermissionRuleAdd({ kind: rule.kind, pattern: rule.pattern, agentId: rule.agentId }).then(() => loadRules(), console.error);
 }
 
 export function updateRule(id: string, patch: Partial<Omit<PermissionRule, "id">>): void {
-  saveRules(usePermissions.getState().rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  const body: { pattern?: string; agentId?: string; anyAgent?: boolean } = {};
+  if (patch.pattern !== undefined) body.pattern = patch.pattern;
+  if (patch.agentId !== undefined) {
+    if (patch.agentId === null) body.anyAgent = true;
+    else body.agentId = patch.agentId;
+  }
+  // Mostra já; o banco confirma (e corrige) na releitura.
+  usePermissions.setState((s) => ({ rules: s.rules.map((r) => (r.id === id ? { ...r, ...patch } : r)) }));
+  chatPermissionRuleUpdate(id, body).then(() => loadRules(), console.error);
 }
 
 export function removeRule(id: string): void {
-  saveRules(usePermissions.getState().rules.filter((r) => r.id !== id));
+  usePermissions.setState((s) => ({ rules: s.rules.filter((r) => r.id !== id) }));
+  chatPermissionRuleRemove(id).then(() => loadRules(), console.error);
 }
 
 export type AskDecision = "allow" | "allowSession" | "deny";

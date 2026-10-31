@@ -244,16 +244,39 @@ pub(crate) fn find_peer<'a>(peers: &'a [OpenTab], to: &str) -> Result<&'a OpenTa
 }
 
 /// O alvo de um `tell`/`ask`, ou a recusa de política (destino que não existe, ambíguo, si mesmo)
-/// com a frase que oferece saída. Pura.
-pub(crate) fn target_or_refusal<'a>(peers: &'a [OpenTab], me: Option<&OpenTab>, from: &str, to: &str) -> Result<&'a OpenTab, (&'static str, String)> {
+/// com a frase que oferece saída. `alias` = (rótulo do time, id do orquestrador) de quem envia: o briefing
+/// manda o integrante chamar o orquestrador pelo rótulo, que pode diferir do título da aba. Pura.
+pub(crate) fn target_or_refusal<'a>(peers: &'a [OpenTab], me: Option<&OpenTab>, from: &str, to: &str, alias: Option<(&str, &str)>) -> Result<&'a OpenTab, (&'static str, String)> {
     use crate::peer_queue::store::REFUSAL_WAY_OUT;
     let is_me = to == from || me.is_some_and(|m| m.id == to || m.name.eq_ignore_ascii_case(to.trim()));
-    match find_peer(peers, to) {
+    match find_peer_or_alias(peers, to, alias) {
         Ok(found) if found.id != from => Ok(found),
         Ok(_) => Err(("self", format!("Você tentou mandar a mensagem para si mesmo. {REFUSAL_WAY_OUT}"))),
         Err(_) if is_me => Err(("self", format!("Você tentou mandar a mensagem para si mesmo. {REFUSAL_WAY_OUT}"))),
         Err((reason, message)) => Err((reason, format!("Não enviei: {message} {REFUSAL_WAY_OUT}"))),
     }
+}
+
+/// `find_peer`, e, se o nome não existe entre os conectados, o rótulo do time como apelido do orquestrador
+/// (quando ele está ao alcance). Um nome que já aponta para uma aba, ou é ambíguo, nunca é desviado. Pura.
+fn find_peer_or_alias<'a>(peers: &'a [OpenTab], to: &str, alias: Option<(&str, &str)>) -> Result<&'a OpenTab, (&'static str, String)> {
+    match find_peer(peers, to) {
+        Err(("unknown_target", message)) => match alias {
+            Some((label, orchestrator)) if !label.trim().is_empty() && label.trim().eq_ignore_ascii_case(to.trim()) => {
+                peers.iter().find(|p| p.id == orchestrator).ok_or(("unknown_target", message))
+            }
+            _ => Err(("unknown_target", message)),
+        },
+        other => other,
+    }
+}
+
+/// (rótulo do time, id do orquestrador) do time de `from`, para `target_or_refusal`. `None` fora de time.
+pub(crate) fn team_alias(app: &AppHandle, from: &str) -> Option<(String, String)> {
+    let db = super::shared::db(app).ok()?;
+    let conn = db.lock().ok()?;
+    let team = crate::chat_team::store::team_of(&conn, from).ok().flatten()?;
+    Some((team.label, team.orchestrator))
 }
 
 /// A resposta de uma recusa de política: `Ok` (exit 0 na CLI) com `refused`, o motivo e a frase. Pura.
@@ -819,6 +842,12 @@ fn policy_refusal(app: &AppHandle, kind: &str, from: &str, from_name: &str, to: 
     Ok(refused_reply(peer, reason, message, Some(&record)))
 }
 
+/// `--raw` é para mandar a uma TUI um comando dela (`/compact`) sem cabeçalho. Uma conversa por protocolo não é um terminal e
+/// toda mensagem a ela precisa do marcador `#id` (a recuperação e a resposta do `ask` dependem dele): a recusa diz o caminho.
+pub(crate) fn raw_to_thread_refusal(name: &str) -> (&'static str, String) {
+    ("raw_to_thread", format!("Não enviei: {name} é uma conversa por protocolo, não um terminal; `--raw` (comando de TUI como /compact) não vale para ela. Mande o texto sem `--raw`. {}", crate::peer_queue::store::REFUSAL_WAY_OUT))
+}
+
 pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let to = arg_str(args, "to")?;
@@ -828,7 +857,8 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let from_name = me.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| from.clone());
     let typed = free.as_deref().unwrap_or("");
     // Recusas de política: uma frase com saída, `Ok` e exit 0; a linha fica gravada com o motivo.
-    let target = match target_or_refusal(&list, me.as_ref(), &from, &to) {
+    let alias = team_alias(app, &from);
+    let target = match target_or_refusal(&list, me.as_ref(), &from, &to, alias.as_ref().map(|(l, o)| (l.as_str(), o.as_str()))) {
         Ok(target) => target,
         Err((reason, message)) => return policy_refusal(app, "tell", &from, &from_name, (&to, &to), typed, None, reason, &message),
     };
@@ -855,6 +885,10 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     if target.agent_id == crate::desktop_apps::GEMINI_DESKTOP { return queue_gemini(app,target,"tell",&from,&from_name,&text); }
     // Uma conversa por protocolo do time: a mensagem vai como mensagem da conversa (ver `team`).
     if let Some(thread) = crate::chat_team::model::thread_id_of(&target.id) {
+        if is_raw(args) {
+            let (reason, message) = raw_to_thread_refusal(&target.name);
+            return policy_refusal(app, "tell", &from, &from_name, (&target.id, &target.name), typed, Some(describe(target)), reason, &message);
+        }
         let client_id = peer_queue::client_id_arg(args);
         let new = NewMessage {
             client_id: client_id.as_deref(), kind: "tell", from_tab_id: &from, from_name: &from_name,
@@ -919,6 +953,7 @@ pub(crate) fn tell_reply(peer: Value, sent: &Sent) -> Value {
         }
         Delivery::Unconfirmed => json!({ "peer": peer, "sent": false, "unconfirmed": true,
             "note": "O texto foi escrito no terminal do destino, mas não apareceu na tela dele (talvez ele esteja rodando um comando ou um slash command). Espere ele ficar livre e reenvie: o reenvio não conta como repetido." }),
+        Delivery::Joined => json!({ "peer": peer, "sent": true, "joined": true }),
         Delivery::Cancelled => json!({ "peer": peer, "sent": false, "cancelled": true,
             "note": "O usuário cancelou esta mensagem na fila antes da entrega. Não reenvie sem um motivo novo." }),
         Delivery::Duplicate if sent.repeat => json!({ "peer": peer, "sent": false, "duplicate": true, "repeat": true,
@@ -1455,8 +1490,10 @@ pub(crate) fn tui_ask_note(name: &str, finished: bool, has_reply: bool) -> Optio
     }
 }
 
-/// `peer ask` a uma conversa por protocolo do time: a pergunta vai como mensagem da conversa e a
-/// resposta é a fala nova do agente quando o turno acaba (esperada no barramento, sem polling).
+/// `peer ask` a uma conversa por protocolo do time: a pergunta entra na fila da conversa (uma por vez, em ordem)
+/// e a resposta são as falas do agente no turno DA MENSAGEM, achadas pelo marcador `#id` do cabeçalho, esperadas
+/// no barramento sem polling. Um `ask` idêntico a outro do mesmo remetente que ainda espera junta-se à mesma
+/// espera, sem uma segunda pergunta ao integrante.
 #[allow(clippy::too_many_arguments)]
 fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str), text: &str, timeout: Duration, raw: bool, extra: AskExtra<'_>) -> Result<Value, String> {
     let (from_id, from_name) = from;
@@ -1467,37 +1504,51 @@ fn ask_thread(app: &AppHandle, target: &OpenTab, thread: &str, from: (&str, &str
         client_id: extra.client_id, kind: "ask", from_tab_id: from_id, from_name, to_tab_id: &target.id, to_name: &target.name,
         text, raw, reply: true, envelope: extra.envelope, limits: Some(limits_for(from_id)),
     };
+    if raw {
+        let (reason, message) = raw_to_thread_refusal(&target.name);
+        let record = peer_queue::refuse(app, &new, reason, &message)?;
+        return Ok(ask_refused(target, &record));
+    }
     let summary = summary_line(from_name, &target.name, extra.envelope, text);
-    let before = super::team::assistant_count(app, thread);
-    let sent = super::team::deliver_to_thread(app, thread, &new)?;
+    let sent = super::team::enqueue_to_thread(app, &new)?;
     match sent.delivery {
-        Delivery::Now => {}
+        Delivery::Queued => emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary)),
+        // A mesma pergunta ainda espera: não é uma pergunta nova nem uma nova mensagem ao integrante.
+        Delivery::Joined => {}
         Delivery::Refused => return Ok(ask_refused(target, &sent.message)),
         Delivery::Duplicate => return Ok(ask_repeat(target, &sent.message)),
-        Delivery::Queued => {
-            emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary));
-            return Ok(json!({ "peer": describe(target), "finished": false, "sent": true, "queued": true, "reply": "", "status": "queued",
-                "messageId": sent.message.id,
-                "note": format!("{} está no meio de um turno: a pergunta vai quando ele terminar, e a resposta chega por ags peer tell.", target.name) }));
-        }
         _ => return Ok(tell_reply(describe(target), &sent)),
     }
-    emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text), Some(&summary));
-    let (finished, reply) = super::team::await_reply(app, thread, before, timeout);
-    if let (true, Some(reply)) = (finished, reply.as_deref()) {
+    let awaited = super::team::await_message(app, thread, sent.message.id, timeout);
+    // Resposta ou motivo encerram a espera; só o prazo a deixa aberta (repetir o ask junta-se a ela).
+    if awaited.finished || awaited.failed.is_some() {
+        let _ = peer_queue::settle_ask(app, sent.message.id);
+    }
+    if let Some(reply) = awaited.replies.last().filter(|_| awaited.finished) {
         log_reply(app, &target.id, from_id, reply);
     }
+    let wrap = |r: &String| crate::util::untrusted::untrusted_block(&format!("peer:{}", target.name), r);
+    let status = if awaited.failed.is_some() { "failed" } else if awaited.finished { "finished" } else { "timed_out" };
     let mut out = json!({
         "peer": describe(target),
-        "finished": finished,
-        "sent": true,
-        "status": if finished { "finished" } else { "timed_out" },
-        // A fala de outro agente é dado, não instrução.
-        "reply": reply.map(|r| crate::util::untrusted::untrusted_block(&format!("peer:{}", target.name), &r)).unwrap_or_default(),
+        "finished": awaited.finished,
+        "sent": awaited.failed.is_none(),
+        "status": status,
+        // A fala de outro agente é dado, não instrução. `reply` é a última (como sempre); `replies`, todas.
+        "reply": awaited.replies.last().map(wrap).unwrap_or_default(),
+        "replies": awaited.replies.iter().map(wrap).collect::<Vec<_>>(),
         "messageId": sent.message.id,
+        "joined": sent.delivery == Delivery::Joined,
     });
-    if !finished {
-        out["note"] = json!(format!("O prazo acabou e {0} ainda não terminou o turno: a mensagem foi entregue, e a resposta chega por `ags peer tell` dele. Não pergunte de novo.", target.name));
+    if let Some(reason) = awaited.failed {
+        out["failure"] = json!(reason);
+        out["note"] = json!(format!("A pergunta não chegou a {0}: {reason} Diga isso à pessoa; não reenvie sem um motivo novo.", target.name));
+    } else if let Some(reason) = awaited.stopped {
+        // O turno acabou sem resposta: diga o motivo em vez de esperar o prazo e mandar "não pergunte de novo".
+        out["stopped"] = json!(reason);
+        out["note"] = json!(format!("{0} não respondeu: {reason} A mensagem foi entregue; decida com a pessoa se vale perguntar de novo.", target.name));
+    } else if !awaited.finished {
+        out["note"] = json!(format!("O prazo acabou e {0} ainda não respondeu (a pergunta #{1} segue na conversa dele): repetir este ask junta-se à mesma espera, e a resposta também chega por `ags peer tell` dele. Não pergunte de novo com outras palavras.", target.name, sent.message.id));
     }
     Ok(out)
 }
@@ -1538,7 +1589,8 @@ pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let envelope = envelope_arg(args);
     let free = free_text(args, &envelope)?;
     let typed = free.as_deref().unwrap_or("");
-    let target = match target_or_refusal(&list, me.as_ref(), &from, &to) {
+    let alias = team_alias(app, &from);
+    let target = match target_or_refusal(&list, me.as_ref(), &from, &to, alias.as_ref().map(|(l, o)| (l.as_str(), o.as_str()))) {
         Ok(target) => target.clone(),
         Err((reason, message)) => return policy_refusal(app, "ask", &from, &from_name, (&to, &to), typed, None, reason, &message),
     };
@@ -1565,8 +1617,9 @@ fn ask_batch(
     let (from_id, from_name) = from;
     let asks = parse_batch(batch)?;
     let mut targets: Vec<(OpenTab, String)> = Vec::new();
+    let alias = team_alias(app, from_id);
     for (name, text) in asks {
-        let target = match target_or_refusal(list, None, from_id, &name) {
+        let target = match target_or_refusal(list, None, from_id, &name, alias.as_ref().map(|(l, o)| (l.as_str(), o.as_str()))) {
             Ok(target) => target.clone(),
             // Um nome errado recusa o lote inteiro, antes de perguntar a qualquer um.
             Err((reason, message)) => return policy_refusal(app, "ask", from_id, from_name, (&name, &name), &text, None, reason, &message),
@@ -1804,6 +1857,13 @@ mod test {
     }
 
     #[test]
+    fn o_raw_a_uma_conversa_por_protocolo_e_recusado_com_o_caminho() {
+        let (reason, message) = raw_to_thread_refusal("Codex · UI");
+        assert_eq!(reason, "raw_to_thread");
+        assert!(message.contains("conversa por protocolo") && message.contains("sem `--raw`") && message.contains("Codex · UI"), "{message}");
+    }
+
+    #[test]
     fn raw_llega_como_flag_suelto_texto_o_bool() {
         assert!(is_raw(&json!({ "raw": true })));
         assert!(is_raw(&json!({ "raw": "" })));
@@ -1868,6 +1928,7 @@ mod queue_reply_tests {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "oi".into(), raw: false, reply: false, state, position: 1,
             force_now: false, attempts: 0, created_at: 0, updated_at: 0, delivered_at: None, edited_at: None, note: None,
             depth: 0, parent_id: None, answer_of: None, reason: None,
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None, sending_at: None,
         };
         Sent { delivery, message, repeat }
     }
@@ -1962,6 +2023,7 @@ mod contrato_tests {
             to_tab_id: "b".into(), to_name: "QA".into(), text: "oi".into(), raw: false, reply: false, state, position: 0,
             force_now: false, attempts: 0, created_at: 0, updated_at: 0, delivered_at: None, edited_at: None,
             note: note.map(str::to_string), depth: 3, parent_id: None, answer_of: None, reason: reason.map(str::to_string),
+            available_at: None, lease_until: None, delivery_mode: None, settled_at: None, sending_at: None,
         }
     }
 
@@ -1992,18 +2054,40 @@ mod contrato_tests {
     fn destino_errado_ambiguo_ou_si_mesmo_viram_recusa_com_saida() {
         let me = tab("eu", "Backend");
         let peers = vec![tab("t1", "QA"), tab("t2", "Dup"), tab("t3", "Dup")];
-        assert_eq!(target_or_refusal(&peers, Some(&me), "eu", "qa").unwrap().id, "t1");
-        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "Fantasma").unwrap_err();
+        assert_eq!(target_or_refusal(&peers, Some(&me), "eu", "qa", None).unwrap().id, "t1");
+        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "Fantasma", None).unwrap_err();
         assert!(reason == "unknown_target" && message.contains("Conectados: QA") && message.contains("pergunte à pessoa"), "{message}");
-        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "dup").unwrap_err();
+        let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", "dup", None).unwrap_err();
         assert!(reason == "ambiguous_target" && message.contains("t2") && message.contains("t3"), "{message}");
         for to in ["eu", "backend"] {
-            let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", to).unwrap_err();
+            let (reason, message) = target_or_refusal(&peers, Some(&me), "eu", to, None).unwrap_err();
             assert!(reason == "self" && message.contains("si mesmo"), "{message}");
         }
         // Mesmo se a própria aba aparecesse entre os pares.
         let with_me = vec![tab("eu", "Backend")];
-        assert_eq!(target_or_refusal(&with_me, None, "eu", "eu").unwrap_err().0, "self");
+        assert_eq!(target_or_refusal(&with_me, None, "eu", "eu", None).unwrap_err().0, "self");
+    }
+
+    #[test]
+    fn o_rotulo_do_time_chama_o_orquestrador_cuja_aba_tem_outro_titulo() {
+        // O briefing manda o integrante usar o rótulo gravado no time ("Claude Code"), mas a aba do
+        // orquestrador se chama "Claude Code — pasta": sem o apelido, o primeiro `tell` voltava `unknown_target`.
+        let me = tab("m1", "Backend");
+        let peers = vec![tab("orq", "Claude Code — pasta"), tab("t2", "QA")];
+        let alias = Some(("Claude Code", "orq"));
+        assert_eq!(target_or_refusal(&peers, Some(&me), "m1", "claude code", alias).unwrap().id, "orq", "o rótulo vale, sem diferenciar maiúsculas");
+        assert_eq!(target_or_refusal(&peers, Some(&me), "m1", "Claude Code — pasta", alias).unwrap().id, "orq", "o título da aba continua valendo");
+        assert_eq!(target_or_refusal(&peers, Some(&me), "m1", "orq", alias).unwrap().id, "orq", "e o id também");
+        let (reason, _) = target_or_refusal(&peers, Some(&me), "m1", "claude code", None).unwrap_err();
+        assert_eq!(reason, "unknown_target", "sem time, o rótulo não é apelido de ninguém");
+        let (reason, _) = target_or_refusal(&peers, Some(&me), "m1", "Outro nome", alias).unwrap_err();
+        assert_eq!(reason, "unknown_target", "o apelido é só o rótulo do time");
+        // O orquestrador fora do alcance do canvas não vira alvo por apelido.
+        let sem_orq = vec![tab("t2", "QA")];
+        assert_eq!(target_or_refusal(&sem_orq, Some(&me), "m1", "Claude Code", alias).unwrap_err().0, "unknown_target");
+        // Um nome exato de outra aba vence o apelido: nunca desviar a mensagem para o lugar errado.
+        let dois = vec![tab("orq", "Claude Code — pasta"), tab("t3", "Claude Code")];
+        assert_eq!(target_or_refusal(&dois, Some(&me), "m1", "Claude Code", alias).unwrap().id, "t3");
     }
 
     #[test]

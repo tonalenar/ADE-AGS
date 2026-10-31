@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { fleetAsk, threadAsks, tuiAsk } from "@/features/chat/permissions/askSources";
 import {
-  askCounts, autoAllowRule, commandParts, filterAsks, freshAsks, insideFolder, parseRules, riskOf, ruleMatches, shortFolder, sortAsks, stepSelection,
+  askCounts, autoAllowRule, commandParts, decidedByBackend, filterAsks, freshAsks, insideFolder, parseRules, riskOf, ruleMatches, shortFolder, sortAsks, stepSelection,
   suggestPattern, touchesOf, waitingAgents, type PendingAsk, type PermissionRule,
 } from "@/features/chat/permissions/permissionModel";
 import type { RequestRow, ThreadRow } from "@/features/chat/structured/ipc";
@@ -22,7 +22,8 @@ const rule = (extra: Partial<PermissionRule>): PermissionRule => ({ id: "r", kin
 describe("risco", () => {
   it("leitura é baixo; instalar é médio; push, rm -r e sudo são altos", () => {
     expect(riskOf(ask({ detail: "git status && rg TODO src" }))).toBe("low");
-    expect(riskOf(ask({ detail: "bun run test" }))).toBe("low");
+    // Rodar o script de teste executa código do repositório (que o agente acabou de editar): não é «só leitura».
+    expect(riskOf(ask({ detail: "bun run test" }))).toBe("medium");
     expect(riskOf(ask({ detail: "bun add @codemirror/lang-html" }))).toBe("medium");
     expect(riskOf(ask({ detail: "git push origin feat/modo-chat" }))).toBe("high");
     expect(riskOf(ask({ detail: "rm -rf build" }))).toBe("high");
@@ -167,5 +168,13 @@ describe("as fontes viram o mesmo pedido", () => {
     const a = fleetAsk({ id: "ap", taskId: "tk", toolName: "Edit", input: { file_path: "/tmp/w/src/x.ts" }, askedAt: 1_700_000_000, suggestedRule: null },
       { id: "tk", title: "Tarefa", agentId: "claude-code", cwd: "/tmp/w", worktreePath: null } as never, () => "Claude Code");
     expect(a).toMatchObject({ kind: "edit", where: "Tarefa", cwd: "/tmp/w", risk: "low", atMs: 1_700_000_000_000, conversation: null });
+  });
+});
+
+describe("quem decide", () => {
+  it("o pedido de uma conversa por protocolo é do backend; o da TUI e o da frota seguem na janela", () => {
+    expect(decidedByBackend({ ref: { source: "thread", threadId: "t", requestId: "r" } })).toBe(true);
+    expect(decidedByBackend({ ref: { source: "tui", tabId: "a", signature: "s" } })).toBe(false);
+    expect(decidedByBackend({ ref: { source: "fleet", approvalId: "x" } })).toBe(false);
   });
 });

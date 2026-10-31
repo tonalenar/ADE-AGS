@@ -58,6 +58,8 @@ export const chatThreadSend = (threadId: string, text: string) => invoke<void>("
 export const chatThreadItems = (threadId: string) => invoke<TimelineItem[]>("chat_thread_items", { threadId });
 export const chatThreadRequests = (threadId: string) => invoke<RequestRow[]>("chat_thread_requests", { threadId });
 export const chatThreadStatus = (threadId: string) => invoke<ThreadStatus>("chat_thread_status", { threadId });
+/** Reaplica a política do time e as regras da pessoa aos pedidos que esperam (o backend decide; ver `conversa::permission`). */
+export const chatRequestsSweep = () => invoke<number>("chat_requests_sweep");
 export const chatThreadInterrupt = (threadId: string) => invoke<void>("chat_thread_interrupt", { threadId });
 export const chatRequestAnswer = (requestId: string, choice: string) => invoke<boolean>("chat_request_answer", { requestId, choice });
 export const chatThreadRetune = (threadId: string, model: string | null, effort: string | null, access: ThreadAccess) =>

@@ -7,7 +7,9 @@ import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
 import { ASK_TITLE } from "./PermissionCard";
-import { autoAllowRule, freshAsks } from "./permissionModel";
+import { chatRequestsSweep } from "../structured/ipc";
+import { hydrateThread, useStructured } from "../structured/store";
+import { autoAllowRule, decidedByBackend, freshAsks } from "./permissionModel";
 import { startTeams } from "../team/teamStore";
 import { answerAsk, loadRules, notifyAsk, setTuiPrompts, teamDecision, toggleInbox, usePendingAsks, usePermissions } from "./permissionsStore";
 
@@ -27,6 +29,16 @@ export function PermissionsManager() {
   // A política do time de cada integrante decide antes das regras (ver `teamDecision`).
   useEffect(() => startTeams(), []);
 
+  // Os pedidos das conversas por protocolo são decididos no backend. Aqui a janela só os MOSTRA: lê os pendentes de
+  // TODAS as conversas ativas (antes só a aberta era lida, e um pedido de um integrante em segundo plano nunca
+  // aparecia) e pede ao backend que reaplique a política e as regras ao que sobrou (depois de um reload).
+  const threads = useStructured((s) => s.threads);
+  const activeIds = useMemo(() => threads.filter((th) => th.state === "active").map((th) => th.id).join(","), [threads]);
+  useEffect(() => {
+    for (const id of activeIds ? activeIds.split(",") : []) hydrateThread(id);
+  }, [activeIds]);
+  useEffect(() => { chatRequestsSweep().catch(() => undefined); }, []);
+
   const asks = usePendingAsks();
   const rules = usePermissions((s) => s.rules);
   const loaded = usePermissions((s) => s.rulesLoaded);
@@ -37,6 +49,11 @@ export function PermissionsManager() {
     const fresh = freshAsks(seen.current, asks);
     seen.current = new Set(asks.map((a) => a.id));
     for (const ask of fresh) {
+      // O backend já decidiu o que a política e as regras cobrem; o que chegou aqui é da pessoa.
+      if (decidedByBackend(ask)) {
+        if (!document.hasFocus()) notifyAsk(t(ASK_TITLE[ask.kind], { agent: ask.agentLabel }), ask.detail || ask.where);
+        continue;
+      }
       // Integrante de um time: a política dele vem primeiro. Só leitura nega mesmo com regra; o que ela
       // deixa passa sem perguntar; o resto (e todo risco alto) segue para as regras e para a pessoa.
       const team = teamDecision(ask);

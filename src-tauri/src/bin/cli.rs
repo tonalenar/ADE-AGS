@@ -75,6 +75,9 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer queue [list]                           O que você mandou e ainda espera na fila (id, destino, idade)
   peer queue refused                          As suas últimas recusas (motivo e a frase)
   peer queue cancel <id>                      Cancela uma mensagem sua que ainda não foi entregue
+  peer receipt <número | --id chave>          O estado de uma mensagem sua: pendente, entregue ou falhou (tentativas, motivo).
+                                              A entrega a uma conversa do time é assíncrona: o `tell` devolve o número e o
+                                              recibo diz se chegou. `ags events wait --topic peer.message` acorda na mudança
   peer pending [--all]                        Aprovações e perguntas dos integrantes que esperam resposta
   peer answer <id> <resposta> [--enter]       Responde uma pendência (só orquestradores): num diálogo, o número
                                               da opção, y, n ou esc; numa pergunta de fim de turno, o texto
@@ -227,7 +230,8 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
   chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
   chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente
   chat stop <id>                              Interrompe o turno em andamento
-  chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela)
+  chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela) e quem respondeu
+                                              as últimas (`decided`: a pessoa, a política do time ou uma regra dela)
   chat open <id>                              Mostra a conversa na tela do modo chat
   chat settle <id> [--reopen]                 Conclui (o agente fecha; reabrir retoma a mesma thread)
 
@@ -920,6 +924,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.handoff" => &["id"],
         // `ags peer queue`, `ags peer queue cancel 12`.
         "peer.queue" => &["action", "id"],
+        // `ags peer receipt 12`.
+        "peer.receipt" => &["id"],
         // `ags peer answer 12 1`: a pendência e a resposta.
         "peer.answer" => &["id", "text"],
         // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.

@@ -318,3 +318,178 @@ fn o_briefing_do_subagente_usa_a_frase_do_canvas_e_o_resumo_o_marca() {
     assert!(!model::member_briefing("Claude Code", &plain, "").contains("subagente"));
     assert!(model::roster_notice(&[me]).contains("QA; supervisionado; subagente"));
 }
+
+fn item(kind: crate::canal::timeline::ItemKind, id: &str) -> crate::canal::timeline::Item {
+    crate::canal::timeline::Item::new(kind, id.to_string(), None)
+}
+
+fn turn_end(id: &str, interrupted: bool, error: Option<&str>) -> crate::canal::timeline::Item {
+    let mut end = item(crate::canal::timeline::ItemKind::TurnEnd, id);
+    end.interrupted = Some(interrupted);
+    end.text = error.map(str::to_string);
+    end
+}
+
+#[test]
+fn o_ask_a_conversa_que_errou_cai_ou_foi_interrompida_sai_com_o_motivo() {
+    use crate::canal::timeline::ItemKind::{Assistant, User};
+    let ask = || item(User, "u1");
+    // Turno que falhou: o erro do `turnEnd` é o motivo.
+    let falhou = vec![ask(), turn_end("end:t1", false, Some("API fora do ar"))];
+    let reason = model::stopped_reason(&falhou, true).unwrap();
+    assert!(reason.contains("API fora do ar") && reason.contains("erro"), "{reason}");
+    // Interrompido: diz que foi interrompido, sem culpar o agente.
+    let parado = vec![ask(), turn_end("end:t1", true, None)];
+    assert!(model::stopped_reason(&parado, true).unwrap().contains("interrompido"));
+    // Turno que fechou sem escrever nenhuma fala.
+    let mudo = vec![ask(), turn_end("end:t1", false, None)];
+    assert!(model::stopped_reason(&mudo, true).unwrap().contains("sem nenhuma resposta"));
+    // Processo morto sem `turnEnd`: a conversa fechou.
+    assert!(model::stopped_reason(&[ask()], false).unwrap().contains("fechou"));
+    // Ainda vivo e sem `turnEnd` da pergunta: não dá para dizer (o turno pode nem ter começado).
+    assert_eq!(model::stopped_reason(&[ask()], true), None);
+    // O `turnEnd` de um turno ANTERIOR à pergunta não conta.
+    let velho = vec![item(User, "u0"), item(Assistant, "a0"), turn_end("end:t0", false, Some("erro antigo")), ask()];
+    assert_eq!(model::stopped_reason(&velho, true), None, "o erro antigo não é desta pergunta");
+}
+
+// ── Etapa 2: a janela de resposta de uma mensagem ──────────────────────
+
+#[test]
+fn a_janela_de_resposta_junta_todas_as_falas_ate_o_fim_do_turno_da_mensagem() {
+    use crate::canal::timeline::ItemKind::{Assistant, TurnEnd, User};
+    let say = |kind, id: &str, text: &str| crate::canal::timeline::Item { text: Some(text.into()), ..crate::canal::timeline::Item::new(kind, id.into(), None) };
+    let items = vec![
+        say(User, "u1", "[Mensagem #5 de Líder via ADE AGS] antes"),
+        say(Assistant, "a1", "resposta do #5"),
+        say(TurnEnd, "e1", ""),
+        say(User, "u2", "[Mensagem #12 de Líder via ADE AGS] agora"),
+        say(Assistant, "a2", "passo 1"),
+        say(Assistant, "a3", "   "),
+        say(Assistant, "a4", "passo 2"),
+    ];
+    let open = model::reply_window(&items, 12);
+    assert_eq!((open.start, open.ended), (Some(3), false));
+    assert_eq!(open.replies, ["passo 1", "passo 2"], "todas as falas, sem a vazia");
+    let mut done = items.clone();
+    done.push(say(TurnEnd, "e2", ""));
+    done.push(say(Assistant, "a5", "de outro turno"));
+    let closed = model::reply_window(&done, 12);
+    assert!(closed.ended);
+    assert_eq!(closed.replies.len(), 2, "o que vem depois do fim do turno não é resposta desta mensagem");
+    assert_eq!(model::reply_window(&items, 1).start, None, "#1 não é prefixo de #12");
+    assert_eq!(model::reply_window(&items, 99), model::ReplyWindow::default());
+}
+
+// ── Etapa 3 (B2): regras de permissão e o interruptor do time ───────────
+
+mod regras {
+    use super::*;
+    use crate::chat_team::permission::Kind;
+
+    fn legacy(conn: &rusqlite::Connection, json: &str) {
+        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('chat.permissions.rules', ?1)", [json]).unwrap();
+    }
+
+    #[test]
+    fn as_regras_dos_settings_sao_copiadas_uma_vez_sem_apagar_o_setting() {
+        let conn = db();
+        legacy(&conn, r#"[
+            {"id":"r1","kind":"command","pattern":"bun add *","agentId":"codex","createdAt":5},
+            {"id":"r2","kind":"edit","pattern":"src/**","agentId":null,"createdAt":6},
+            {"id":"","kind":"command","pattern":"x"},
+            {"id":"r3","kind":"outro","pattern":"x"},
+            {"id":"r4","kind":"command","pattern":"   "},
+            "lixo"
+        ]"#);
+        let rules = store::rules(&conn).unwrap();
+        assert_eq!(rules.iter().map(|r| r.id.as_str()).collect::<Vec<_>>(), ["r1", "r2"], "o lixo fica de fora");
+        assert_eq!((rules[0].kind, rules[0].agent_id.as_deref(), rules[0].created_at), (Kind::Command, Some("codex"), 5));
+        assert!(rules.iter().all(|r| r.role.is_none() && r.team_id.is_none()), "o escopo de papel/time nasce desligado");
+        let kept: String = conn.query_row("SELECT value FROM settings WHERE key = 'chat.permissions.rules'", [], |r| r.get(0)).unwrap();
+        assert!(kept.contains("bun add"), "o setting não é apagado: dá para voltar atrás");
+
+        // Rodar de novo não duplica, e apagar tudo não ressuscita as antigas.
+        store::migrate(&conn).unwrap();
+        assert_eq!(store::rules(&conn).unwrap().len(), 2);
+        assert!(store::remove_rule(&conn, "r1").unwrap() && store::remove_rule(&conn, "r2").unwrap());
+        store::migrate(&conn).unwrap();
+        assert!(store::rules(&conn).unwrap().is_empty(), "a importação é de uma vez só");
+    }
+
+    #[test]
+    fn sem_settings_nada_e_importado_e_a_migracao_continua_aditiva() {
+        let conn = db();
+        assert!(store::rules(&conn).unwrap().is_empty());
+        team(&conn, "tab-1");
+        store::migrate(&conn).unwrap();
+        assert_eq!(store::teams(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_pessoa_cria_muda_e_apaga_regras_sem_repetir_a_mesma() {
+        let conn = db();
+        let a = store::add_rule(&conn, Kind::Command, "  ls *  ", Some("codex"), 10).unwrap();
+        assert_eq!((a.pattern.as_str(), a.agent_id.as_deref(), a.role.as_deref()), ("ls *", Some("codex"), None));
+        let again = store::add_rule(&conn, Kind::Command, "ls *", Some("codex"), 20).unwrap();
+        assert_eq!(again.id, a.id, "a mesma regra não se repete");
+        assert_ne!(store::add_rule(&conn, Kind::Command, "ls *", None, 20).unwrap().id, a.id, "outro agente é outra regra");
+        assert!(store::add_rule(&conn, Kind::Command, "   ", None, 1).is_err());
+        assert!(store::update_rule(&conn, &a.id, Some("ls -la *"), Some(None)).unwrap());
+        let changed = store::rules(&conn).unwrap().into_iter().find(|r| r.id == a.id).unwrap();
+        assert_eq!((changed.pattern.as_str(), changed.agent_id), ("ls -la *", None));
+        store::count_rule_use(&conn, &a.id, 99).unwrap();
+        let uses: (i64, i64) = conn.query_row("SELECT uses, last_used_at FROM chat_permission_rule WHERE id = ?1", [&a.id], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(uses, (1, 99));
+        assert!(store::remove_rule(&conn, &a.id).unwrap() && !store::remove_rule(&conn, &a.id).unwrap());
+    }
+
+    #[test]
+    fn so_a_pessoa_e_a_origem_possivel_de_uma_regra() {
+        let conn = db();
+        store::migrate(&conn).unwrap();
+        let rejected = conn.execute("INSERT INTO chat_permission_rule (id, kind, pattern, origin, created_at) VALUES ('x', 'command', '*', 'agent', 1)", []);
+        assert!(rejected.is_err(), "o banco nem aceita uma regra de origem diferente de 'person'");
+    }
+
+    #[test]
+    fn o_time_decide_sozinho_por_padrao_e_o_interruptor_liga_e_desliga() {
+        let conn = db();
+        let t = team(&conn, "tab-lead");
+        assert!(store::team(&conn, &t).unwrap().unwrap().auto_decide);
+        assert!(store::set_auto_decide(&conn, &t, false).unwrap());
+        assert!(!store::team(&conn, &t).unwrap().unwrap().auto_decide);
+        assert!(!store::set_auto_decide(&conn, "nao-existe", false).unwrap());
+        // A flag das ferramentas de fora do shell nasce desligada.
+        assert!(!store::team(&conn, &t).unwrap().unwrap().allow_tools);
+        assert!(store::set_allow_tools(&conn, &t, true).unwrap());
+        assert!(store::team(&conn, &t).unwrap().unwrap().allow_tools);
+        assert!(store::set_auto_decide(&conn, &t, true).unwrap());
+        assert!(store::team_joined_by(&conn, "x").unwrap().is_none());
+    }
+}
+
+#[test]
+fn nenhum_comando_de_cli_nem_de_mcp_escreve_regra_de_permissao() {
+    // Só a pessoa, pela tela (comandos Tauri), cria, muda ou apaga regras e liga o «decidir sozinho».
+    for (name, source) in [
+        ("ipc/commands/dispatch.rs", include_str!("../ipc/commands/dispatch.rs")),
+        ("ipc/mcp.rs", include_str!("../ipc/mcp.rs")),
+        ("bin/cli.rs", include_str!("../bin/cli.rs")),
+        ("ipc/commands/team.rs", include_str!("../ipc/commands/team.rs")),
+        ("ipc/commands/peers.rs", include_str!("../ipc/commands/peers.rs")),
+    ] {
+        for forbidden in ["add_rule(", "update_rule(", "remove_rule(", "set_auto_decide(", "set_allow_tools(", "chat_permission_rule", "chat_team_auto_decide", "chat_team_allow_tools"] {
+            assert!(!source.contains(forbidden), "{name} não pode mexer em regras de permissão ({forbidden})");
+        }
+    }
+}
+
+#[test]
+fn a_janela_de_resposta_acha_tambem_o_cabecalho_minimo_do_raw_interno() {
+    use crate::canal::timeline::{Item, ItemKind};
+    let item = |kind, id: &str, text: &str| Item { text: Some(text.into()), ..Item::new(kind, id.into(), None) };
+    let items = vec![item(ItemKind::User, "u", "[Mensagem #9 de ADE AGS] aviso do app"), item(ItemKind::Assistant, "a", "ok"), item(ItemKind::TurnEnd, "e", "")];
+    let window = model::reply_window(&items, 9);
+    assert_eq!((window.start, window.ended, window.replies), (Some(0), true, vec!["ok".to_string()]));
+}

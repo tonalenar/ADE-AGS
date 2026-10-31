@@ -63,7 +63,16 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             answered_at INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_chat_request_state ON chat_request(thread_id, state);",
-    )
+    )?;
+    // A permissão decidida no backend: o pedido INTEIRO (`chat_team::permission::Subject`, em JSON: o título só
+    // guarda a primeira linha do comando) e quem respondeu e por quê (`person`, `policy`, `rule:<id>`).
+    for (column, ddl) in [("subject", "TEXT"), ("decided_by", "TEXT"), ("decided_why", "TEXT"), ("claimed_at", "INTEGER")] {
+        let has = conn.prepare("SELECT 1 FROM pragma_table_info('chat_request') WHERE name = ?1")?.exists([column])?;
+        if !has {
+            conn.execute_batch(&format!("ALTER TABLE chat_request ADD COLUMN {column} {ddl};"))?;
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -230,13 +239,71 @@ pub fn pending_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<
     stmt.query_map(params![thread_id], request_of)?.collect()
 }
 
-/// Marca respondido. `false` se já não estava pendente (respondido em outro lugar, ou expirou).
+/// Marca respondido pela pessoa. `false` se já não estava pendente (respondido em outro lugar, ou expirou).
 pub fn answer_request(conn: &Connection, id: &str, answer: &str, now: i64) -> rusqlite::Result<bool> {
+    answer_request_by(conn, id, answer, now, "person", None)
+}
+
+/// Como `answer_request`, dizendo quem respondeu (`person`, `policy`, `rule:<id>`) e por quê (auditoria).
+pub fn answer_request_by(conn: &Connection, id: &str, answer: &str, now: i64, by: &str, why: Option<&str>) -> rusqlite::Result<bool> {
     conn.execute(
-        "UPDATE chat_request SET state = 'answered', answer = ?2, answered_at = ?3 WHERE id = ?1 AND state = 'pending'",
-        params![id, answer, now],
+        "UPDATE chat_request SET state = 'answered', answer = ?2, answered_at = ?3, decided_by = ?4, decided_why = ?5
+          WHERE id = ?1 AND state = 'pending'",
+        params![id, answer, now, by, why],
     )
     .map(|n| n > 0)
+}
+
+/// RESERVA o pedido para responder ao agente: só um quem chega primeiro, e só se ele ainda está `pending`. A reserva
+/// esquecida (mais velha que `lease_ms`) pode ser tomada. `false` = não era dele; quem perde não responde nada.
+pub fn reserve_request(conn: &Connection, id: &str, now: i64, lease_ms: i64) -> rusqlite::Result<bool> {
+    conn.execute(
+        "UPDATE chat_request SET claimed_at = ?2 WHERE id = ?1 AND state = 'pending' AND (claimed_at IS NULL OR claimed_at < ?3)",
+        params![id, now, now - lease_ms],
+    )
+    .map(|n| n == 1)
+}
+
+/// Devolve a reserva (o envio ao agente falhou): o pedido segue `pending` para a pessoa.
+pub fn release_request(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_request SET claimed_at = NULL WHERE id = ?1 AND state = 'pending'", params![id]).map(|_| ())
+}
+
+/// Guarda o pedido inteiro (JSON de `permission::Subject`) para decidir sobre ele, na chegada ou depois.
+pub fn set_subject(conn: &Connection, id: &str, subject: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_request SET subject = ?2 WHERE id = ?1", params![id, subject]).map(|_| ())
+}
+
+pub fn subject_of(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    Ok(conn.query_row("SELECT subject FROM chat_request WHERE id = ?1", params![id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten())
+}
+
+/// Quem respondeu um pedido e por quê (auditoria).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Decision {
+    pub request_id: String,
+    pub answer: String,
+    /// `person`, `policy` ou `rule:<id>`.
+    pub by: Option<String>,
+    pub why: Option<String>,
+}
+
+/// As últimas decisões de uma conversa (quem respondeu e por quê), da mais nova para a mais velha.
+pub fn recent_decisions(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<Decision>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, COALESCE(answer, ''), decided_by, decided_why FROM chat_request
+          WHERE thread_id = ?1 AND state = 'answered' ORDER BY answered_at DESC, id LIMIT ?2",
+    )?;
+    stmt.query_map(params![thread_id, limit], |r| Ok(Decision { request_id: r.get(0)?, answer: r.get(1)?, by: r.get(2)?, why: r.get(3)? }))?.collect()
+}
+
+/// Os pedidos pendentes de TODAS as conversas ativas (a varredura os decide; ver `conversa::permission`).
+pub fn pending_all(conn: &Connection) -> rusqlite::Result<Vec<RequestRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {REQUEST_COLS} FROM chat_request WHERE state = 'pending'
+           AND thread_id IN (SELECT id FROM chat_thread WHERE state = 'active') ORDER BY created_at"
+    ))?;
+    stmt.query_map([], request_of)?.collect()
 }
 
 /// Os pendentes de uma conversa expiram (o turno acabou, ou o processo do agente fechou). Devolve os ids.
@@ -247,4 +314,46 @@ pub fn expire_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<V
     };
     conn.execute("UPDATE chat_request SET state = 'expired' WHERE thread_id = ?1 AND state = 'pending'", params![thread_id])?;
     Ok(ids)
+}
+
+/// O que o `sweep_orphans` marcou.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Sweep {
+    pub runs: usize,
+    pub requests: usize,
+}
+
+/// No arranque do app: nenhum agente de uma conversa sobrevive ao app, então todo turno `inProgress` e todo
+/// pedido `pending` que sobrou de um crash é órfão. O turno vira `interrupted`; o que ficou aberto na ponta da
+/// timeline ganha um `turnEnd` com o motivo (para a tela não mostrar um turno aberto para sempre); o pedido
+/// vira `expired` (clicar nele daria "o agente já fechou"). Nunca apaga linha. Idempotente.
+pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
+    let runs: Vec<(String, String)> = {
+        let mut stmt = conn.prepare("SELECT thread_id, id FROM chat_run WHERE status = 'inProgress'")?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?
+    };
+    for (thread_id, run_id) in &runs {
+        conn.execute(
+            "UPDATE chat_run SET status = 'interrupted', completed_at = COALESCE(completed_at, ?3) WHERE thread_id = ?1 AND id = ?2",
+            params![thread_id, run_id, now],
+        )?;
+        // Só o turno que ficou na ponta da timeline fecha com o `turnEnd`: um fim jogado no meio fecharia o turno errado.
+        let last: Option<i64> = conn.query_row("SELECT MAX(seq) FROM chat_item WHERE thread_id = ?1 AND run_id = ?2", params![thread_id, run_id], |r| r.get(0))?;
+        let Some(last) = last else { continue };
+        let others: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM chat_item WHERE thread_id = ?1 AND seq > ?2 AND COALESCE(run_id, '') != ?3",
+            params![thread_id, last, run_id],
+            |r| r.get(0),
+        )?;
+        let end_id = format!("end:{run_id}");
+        let has_end: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM chat_item WHERE thread_id = ?1 AND id = ?2)", params![thread_id, end_id], |r| r.get(0))?;
+        if others == 0 && !has_end {
+            let mut end = Item::new(crate::canal::timeline::ItemKind::TurnEnd, end_id, Some(now));
+            end.interrupted = Some(false);
+            end.text = Some("O app foi fechado antes de o turno terminar.".into());
+            upsert_item(conn, thread_id, Some(run_id), &end)?;
+        }
+    }
+    let requests = conn.execute("UPDATE chat_request SET state = 'expired' WHERE state = 'pending'", [])?;
+    Ok(Sweep { runs: runs.len(), requests })
 }
