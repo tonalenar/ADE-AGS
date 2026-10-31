@@ -124,7 +124,7 @@ fn high_re() -> &'static [Regex] {
             (r"\bgit\s+branch\s+-D\b", false),
             (r"\bgit\s+checkout\s+--\s", true),
             (r"\brm\s+(-\w*\s+)*-\w*[rR]\w*\b", false),
-            (r"\bsudo\b", true),
+            (r"\b(sudo|doas|pkexec)\b", true),
             (r"\b(chmod|chown)\s+-R\b", true),
             (r"\b(mkfs|dd|shutdown|reboot|diskutil)\b", true),
             (r"\b(kill|killall|pkill|taskkill)\b", true),
@@ -138,26 +138,6 @@ fn high_re() -> &'static [Regex] {
     })
 }
 
-fn read_only_re() -> &'static [Regex] {
-    static RE: OnceLock<Vec<Regex>> = OnceLock::new();
-    RE.get_or_init(|| {
-        all(&[
-            (r"^(ls|ll|cat|head|tail|wc|pwd|echo|which|type|rg|grep|find|fd|tree|stat|file|du|df|less|sort|uniq|diff|date|env|printenv)\b", true),
-            (r"^git\s+(status|diff|log|show|branch|rev-parse|ls-files|blame|remote\s+-v|stash\s+list)\b", true),
-            (r"^(bun|npm|pnpm|yarn)\s+(run\s+)?(test|lint|typecheck|check[:\w-]*|tsc)\b", true),
-            (r"^(bunx|npx)\s+(tsc|vitest|eslint|prettier\s+--check)\b", true),
-            (r"^cargo\s+(test|check|clippy|build|fmt\s+--check|tree|metadata)\b", true),
-            (r"^(tsc|vitest|jest|pytest|go\s+(test|vet|build))\b", true),
-            (r"^ags\s+(test|tab\s+list|chat\s+(list|show)|peer\s+(list|inbox))\b", true),
-        ])
-    })
-}
-
-fn operators() -> &'static Regex {
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| re(r"\s*(?:&&|\|\||;|\|)\s*", false))
-}
-
 fn sensitive_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
@@ -168,14 +148,43 @@ fn sensitive_re() -> &'static Regex {
     })
 }
 
-/// As partes de um comando composto (`a && b | c`), sem as vazias. Pura.
+/// O comando por dentro: as partes, onde ele escreve e se tem algo que não se sabe interpretar com segurança.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShellAnalysis {
+    /// As partes de um comando composto (`a && b | c & d`), sem os redirecionamentos e sem as vazias.
+    pub parts: Vec<String>,
+    /// Crase, `$` (substituição, variável), `<(`, `>(`, heredoc `<<`, barra invertida, aspas vazias ou no meio de uma
+    /// palavra (`r'm'`): nunca casa regra e nunca é «só leitura».
+    pub unsafe_meta: bool,
+    /// Os alvos dos redirecionamentos que ESCREVEM (`>`, `>>`, `&>`, `>|`), menos `/dev/null` e os `2>&1`.
+    pub writes: Vec<String>,
+}
+
+macro_rules! cached {
+    ($pattern:expr) => {{
+        static RE: OnceLock<Regex> = OnceLock::new();
+        RE.get_or_init(|| re($pattern, false))
+    }};
+}
+
+/// Lê o comando sem executar nada: ver [`ShellAnalysis`]. Pura.
+pub fn analyze_command(command: &str) -> ShellAnalysis {
+    let unsafe_meta = cached!(r#"[`$\\]|<\(|>\(|<<|''|""|\w['"]\w"#).is_match(command);
+    let mut writes: Vec<String> = Vec::new();
+    let rest = cached!(r"\d*>&(?:\d+|-)").replace_all(command, " ");
+    let rest = cached!(r"(?:&>>?|\d*>>?)\s*/dev/null\b").replace_all(&rest, " ");
+    let rest = cached!(r"(?:&>>?|>\||\d*>>?)\s*([^\s|&;<>]*)").replace_all(&rest, |caps: &regex::Captures<'_>| {
+        writes.push(caps[1].to_string());
+        " "
+    });
+    let rest = cached!(r"<\s*[^\s|&;<>]+").replace_all(&rest, " ");
+    let parts = cached!(r"\s*(?:&&|\|\||\|&|;|\||&|\r|\n)\s*").split(&rest).map(|p| p.trim().to_string()).filter(|p| !p.is_empty()).collect();
+    ShellAnalysis { parts, unsafe_meta, writes }
+}
+
+/// As partes de um comando composto, sem as vazias. Pura.
 pub fn command_parts(command: &str) -> Vec<String> {
-    command
-        .split('\n')
-        .flat_map(|line| operators().split(line).map(str::to_string).collect::<Vec<_>>())
-        .map(|p| p.trim().to_string())
-        .filter(|p| !p.is_empty())
-        .collect()
+    analyze_command(command).parts
 }
 
 /// O comando acessa a rede? Pura.
@@ -296,25 +305,190 @@ pub fn risk_of(subject: &Subject) -> Risk {
             }
         }
         Kind::Network => Risk::Medium,
-        Kind::Command => {
-            let command = subject.detail.trim();
-            if command.is_empty() {
-                return Risk::Medium;
-            }
-            if high_re().iter().any(|r| r.is_match(command)) {
-                return Risk::High;
-            }
-            if command.contains('`') || command.contains("$(") {
-                return Risk::Medium;
-            }
-            let parts = command_parts(command);
-            if !parts.is_empty() && parts.iter().all(|p| read_only_re().iter().any(|r| r.is_match(p))) {
-                Risk::Low
-            } else {
-                Risk::Medium
-            }
+        Kind::Command => command_risk(subject.detail.trim(), subject.cwd.as_deref()),
+    }
+}
+
+/// Sem aspas e sem barra invertida: `r'm' -rf` e `\rm -rf` são `rm -rf` para o shell.
+fn dequote(text: &str) -> String {
+    text.chars().filter(|c| !matches!(c, '\'' | '"' | '\\')).collect()
+}
+
+fn base_name(word: &str) -> String {
+    word.rsplit(['/', '\\']).next().unwrap_or(word).to_lowercase()
+}
+
+fn is_flag(token: &str) -> bool {
+    token.starts_with('-')
+}
+
+fn words(part: &str) -> Vec<&str> {
+    part.split_whitespace().collect()
+}
+
+/// O caminho cai fora da pasta E é sensível (ou não se entende)? Escrever aí é risco alto.
+fn sensitive_outside(path: &str, cwd: Option<&str>) -> bool {
+    let r = resolve_path(path, cwd);
+    !r.inside && (!r.known || sensitive_re().is_match(&r.full))
+}
+
+const GIT_VALUE_OPTIONS: [&str; 7] = ["-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix", "--config-env"];
+
+/// O subcomando do git, pulando as opções globais (`git -C x -c k=v push`): `(sub, args, globals)`. Pura.
+fn git_call<'a>(tokens: &[&'a str]) -> (&'a str, Vec<&'a str>, Vec<&'a str>) {
+    let mut globals = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() && is_flag(tokens[i]) {
+        globals.push(tokens[i]);
+        i += if GIT_VALUE_OPTIONS.contains(&tokens[i]) { 2 } else { 1 };
+    }
+    let sub = tokens.get(i).copied().unwrap_or("");
+    let args = tokens.get(i + 1..).map(<[&str]>::to_vec).unwrap_or_default();
+    (sub, args, globals)
+}
+
+fn force_flag(t: &str) -> bool {
+    t == "--force" || (t.starts_with('-') && !t.starts_with("--") && t.len() > 1 && t[1..].chars().all(|c| c.is_ascii_alphabetic()) && t.contains('f'))
+}
+
+/// `-` e só letras, com alguma das dadas (`-rf`, `-Rv`).
+fn cluster_with(t: &str, letters: &str) -> bool {
+    t.starts_with('-') && !t.starts_with("--") && t.len() > 1 && t[1..].chars().all(|c| c.is_ascii_alphabetic()) && t[1..].chars().any(|c| letters.contains(c))
+}
+
+fn git_is_high(tokens: &[&str]) -> bool {
+    let (sub, args, _) = git_call(tokens);
+    match sub {
+        "push" | "filter-branch" | "filter-repo" | "rebase" | "update-ref" => true,
+        "reset" => args.contains(&"--hard"),
+        "clean" => args.iter().any(|a| force_flag(a)),
+        "branch" => args.contains(&"-D"),
+        "checkout" => args.contains(&"--"),
+        "gc" => args.iter().any(|a| a.starts_with("--prune")),
+        "reflog" => args.iter().any(|a| *a == "expire" || *a == "delete"),
+        "stash" => args.iter().any(|a| *a == "drop" || *a == "clear"),
+        _ => false,
+    }
+}
+
+fn dangerous_mode(t: &str) -> bool {
+    cached!(r"^(0?777|0?666|[2467][0-7]{3}|[ugoa]*[+=][rwxXst]*s[rwxXst]*|[ugoa]*\+rwx|a[+=]rwx|o\+w|a\+w)$").is_match(t)
+}
+
+/// O destino de `sort -o`/`--output`.
+fn sort_outputs(args: &[&str]) -> Vec<String> {
+    let mut out = Vec::new();
+    for (i, a) in args.iter().enumerate() {
+        if *a == "-o" || *a == "--output" {
+            out.push(args.get(i + 1).copied().unwrap_or("").to_string());
+        } else if let Some(rest) = a.strip_prefix("--output=") {
+            out.push(rest.to_string());
+        } else if a.starts_with("-o") && a.len() > 2 {
+            out.push(a[2..].to_string());
         }
     }
+    out
+}
+
+/// Uma parte do comando (já sem aspas) é de risco ALTO? Qualquer palavra pode ser o comando: `xargs rm -rf`, `sudo`, `find -exec`.
+fn part_is_high(tokens: &[&str], cwd: Option<&str>) -> bool {
+    for (i, token) in tokens.iter().enumerate() {
+        let word = base_name(token);
+        let rest = &tokens[i + 1..];
+        let operands = || rest.iter().filter(|t| !is_flag(t));
+        if word == "rm" && rest.iter().any(|t| *t == "--recursive" || *t == "--no-preserve-root" || force_flag(t) || cluster_with(t, "rR")) {
+            return true;
+        }
+        if matches!(word.as_str(), "chmod" | "chown" | "chgrp") && rest.iter().any(|t| *t == "--recursive" || cluster_with(t, "R")) {
+            return true;
+        }
+        if word == "chmod" && operands().any(|t| dangerous_mode(t)) {
+            return true;
+        }
+        if word == "git" && git_is_high(rest) {
+            return true;
+        }
+        if word == "find" && rest.contains(&"-delete") {
+            return true;
+        }
+        if matches!(word.as_str(), "sudo" | "doas" | "pkexec") {
+            return true;
+        }
+        if matches!(word.as_str(), "mv" | "cp" | "install" | "ln" | "tee") && operands().any(|t| sensitive_outside(t, cwd)) {
+            return true;
+        }
+        if word == "sort" && sort_outputs(rest).iter().any(|t| sensitive_outside(t, cwd)) {
+            return true;
+        }
+    }
+    false
+}
+
+fn no_flags(args: &[&str], bad: &[&str]) -> bool {
+    !args.iter().any(|a| bad.contains(a))
+}
+
+fn git_is_read_only(tokens: &[&str]) -> bool {
+    let (sub, args, globals) = git_call(tokens);
+    // Opção global além de `--no-pager` pode rodar programa (`-c core.pager=…`, `--exec-path`): não é só leitura.
+    if globals.iter().any(|g| *g != "--no-pager" && *g != "-P") || args.iter().any(|a| a.starts_with("--output")) {
+        return false;
+    }
+    match sub {
+        "status" | "diff" | "log" | "show" | "rev-parse" | "ls-files" | "blame" | "shortlog" | "describe" => true,
+        "branch" => args.iter().all(|a| ["-a", "-r", "-v", "-vv", "--list", "--all", "--remotes"].contains(a)),
+        "remote" => args == ["-v"],
+        "stash" => args.first() == Some(&"list"),
+        _ => false,
+    }
+}
+
+/// Os comandos que só leem. Lista curta e de propósito: o que roda outro programa (`env x`, `xargs`, `sh -c`, `time`), abre um
+/// shell (`less`, `man`), escreve (`sort -o`, `tee`) ou executa código do repositório (`bun run test`, `cargo test|build|clippy`,
+/// `vitest`: scripts, `build.rs` e testes do projeto, que o agente acabou de editar) NÃO entra, nem como «baixo risco».
+fn part_is_read_only(part: &str) -> bool {
+    let plain = dequote(part);
+    let tokens = words(&plain);
+    let Some(head) = tokens.first().copied() else { return false };
+    if cached!(r"^[A-Za-z_][A-Za-z0-9_]*=").is_match(head) {
+        return false;
+    }
+    let args = &tokens[1..];
+    match head {
+        "git" => git_is_read_only(args),
+        "ags" => ["tab list", "chat list", "chat show", "peer list", "peer inbox"].contains(&args.iter().take(2).copied().collect::<Vec<_>>().join(" ").as_str()),
+        "ls" | "ll" | "cat" | "head" | "tail" | "wc" | "pwd" | "echo" | "which" | "type" | "grep" | "stat" | "du" | "df" | "diff" | "printenv" => true,
+        "rg" => no_flags(args, &["--pre", "--hostname-bin"]),
+        "date" => no_flags(args, &["-s", "--set"]),
+        "file" => no_flags(args, &["-C"]),
+        "tree" => no_flags(args, &["-o"]),
+        "fd" => no_flags(args, &["-x", "--exec", "-X", "--exec-batch"]),
+        "env" => args.is_empty(),
+        "find" => no_flags(args, &["-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"]),
+        "sort" => sort_outputs(args).is_empty() && !args.iter().any(|a| a.starts_with("--compress-program")),
+        "uniq" => args.iter().filter(|a| !is_flag(a)).count() <= 1,
+        _ => false,
+    }
+}
+
+fn command_risk(command: &str, cwd: Option<&str>) -> Risk {
+    if command.is_empty() {
+        return Risk::Medium;
+    }
+    let analysis = analyze_command(command);
+    let plain = dequote(command);
+    let parts_plain = analyze_command(&plain).parts;
+    let high = [command, plain.as_str()].iter().any(|form| high_re().iter().any(|r| r.is_match(form)))
+        || parts_plain.iter().any(|part| part_is_high(&words(part), cwd))
+        // Redirecionar para um arquivo sensível fora da pasta (`echo x > ~/.zshrc`).
+        || analysis.writes.iter().any(|target| sensitive_outside(&dequote(target), cwd));
+    if high {
+        return Risk::High;
+    }
+    if analysis.unsafe_meta || !analysis.writes.is_empty() || analysis.parts.is_empty() {
+        return Risk::Medium;
+    }
+    if analysis.parts.iter().all(|p| part_is_read_only(p)) { Risk::Low } else { Risk::Medium }
 }
 
 fn escape(text: &str) -> String {
@@ -363,10 +537,13 @@ pub fn rule_matches(rule: &Rule, subject: &Subject) -> bool {
     }
     match subject.kind {
         Kind::Command => {
-            if subject.detail.contains('`') || subject.detail.contains("$(") {
+            // Metacaractere que não se interpreta com segurança (`$`, crase, `<(`, heredoc, barra) ou redirecionamento
+            // que escreve: a regra não decide, a pessoa decide.
+            let analysis = analyze_command(&subject.detail);
+            if analysis.unsafe_meta || !analysis.writes.is_empty() {
                 return false;
             }
-            let parts: Vec<String> = command_parts(&subject.detail).iter().map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).collect();
+            let parts: Vec<String> = analysis.parts.iter().map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).collect();
             let Some(glob) = command_glob(&rule.pattern) else { return false };
             !parts.is_empty() && parts.iter().all(|p| glob.is_match(p))
         }
@@ -550,6 +727,18 @@ mod test {
         }
         for c in f["match"].as_array().unwrap() {
             assert_eq!(rule_matches(&rule_of(&c["rule"]), &subject(&c["ask"])), c["expected"].as_bool().unwrap(), "{c}");
+        }
+        for c in f["shell"].as_array().unwrap() {
+            let a = analyze_command(c["command"].as_str().unwrap());
+            if c.get("parts").is_some() {
+                assert_eq!(a.parts, strings(&c["parts"]), "{c}");
+            }
+            if let Some(unsafe_meta) = c.get("unsafe") {
+                assert_eq!(a.unsafe_meta, unsafe_meta.as_bool().unwrap(), "{c}");
+            }
+            if c.get("writes").is_some() {
+                assert_eq!(a.writes, strings(&c["writes"]), "{c}");
+            }
         }
     }
 

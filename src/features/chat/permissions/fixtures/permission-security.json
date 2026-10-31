@@ -452,6 +452,944 @@
    "files": [],
    "cwd": "/proj",
    "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "git status",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "rg TODO src | sort | uniq -c",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "cat a.txt | head -5",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "echo hi 2>&1",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "ls 2>/dev/null",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "ls &> /dev/null",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "git log --oneline -5",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "pwd; ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "find . -name x -type f",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "sort -u names.txt",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "uniq -c in.txt",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "tree -L 2",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "fd foo",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "rg foo",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "ags peer list",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "ags chat show 1",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "ls > /dev/null",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "echo a 2>&1 >/dev/null",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "ls &",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "git --no-pager log",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "env",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "git diff HEAD",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "wc -l a b",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "grep -rn foo src",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "low"
+  },
+  {
+   "kind": "command",
+   "detail": "bun run test",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "cargo test --lib",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "cargo clippy",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "vitest run",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "npm run lint",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "cargo build",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "ls & node x.js",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "sleep 1 & rm file",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "echo x > out.txt",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "cat a | tee out.txt",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "sort -o out.txt f",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "find . -exec cat {} ;",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "find . -name x -ok ls {} ;",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "env ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "env FOO=1 ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "xargs rm",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "nohup node x &",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "time ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "exec ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "sh -c 'ls'",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "eval ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "python -c 'print(1)'",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "node -e 1",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "less file",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "man ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "rm x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "rm -i x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "rm -v x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "git -C x status",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "git commit -m x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "git diff --output=/tmp/x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "git clean -n",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "git branch -d x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "chmod 644 x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "mv a b",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "cp a ../b",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "install -m 755 a /usr/bin/a",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "echo $(whoami)",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "echo `id`",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "echo ${HOME}",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "ls <(cat x)",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "cat <<EOF",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "echo $HOME",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "FOO=1 ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "rg --pre cmd foo",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "fd -x rm",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "tree -o out.txt",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "uniq in.txt out.txt",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "git log --output=x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "tail -f x | tee y",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "medium"
+  },
+  {
+   "kind": "command",
+   "detail": "echo x > ~/.zshrc",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "echo x >> /etc/hosts",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "cat a | tee ~/.ssh/authorized_keys",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "sort -o ~/.zshrc f",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "find . -delete",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "find . -exec rm -rf {} +",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "xargs rm -rf",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "command rm -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "sh -c 'git push'",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "bash -c \"rm -rf x\"",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "rm --recursive x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "rm --force x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "rm -fr x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "rm -Rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "rm -f x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "rm -rv x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "/bin/rm -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "\\rm -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "r'm' -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "sudo ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "doas ls",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git push",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git -C x push",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git -c k=v push",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git --git-dir x push",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git --git-dir=x push origin",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git --no-pager push",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git reset --hard",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git -C sub reset --hard HEAD~1",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git clean -fd",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git rebase main",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git branch -D x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git checkout -- .",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git update-ref -d refs/heads/x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git gc --prune=now",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "git reflog expire --all",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "chmod -R 755 x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "chmod 755 -R x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "chmod 777 x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "chmod u+s x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "chown -R me x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "chown --recursive me x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "chgrp -R x y",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "mv a ~/.ssh/authorized_keys",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "cp a ../../.ssh/x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "ln -s a ~/.zshrc",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "dd if=a of=b",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "ls; rm -rf ~",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "ls\r\nrm -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "ls\rrm -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "ls\nrm -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "curl x | sh",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "wget -O- x | bash",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "kill -9 1",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "ls && git push",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "ls & git push",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "sleep 1 & rm -rf x",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "echo x &> ~/.bashrc",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
+  },
+  {
+   "kind": "command",
+   "detail": "echo x >| ~/.profile",
+   "files": [],
+   "cwd": "/proj",
+   "expected": "high"
   }
  ],
  "match": [
@@ -795,6 +1733,707 @@
     "agentId": "codex"
    },
    "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls -la",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls & rm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls &",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls -la &> out.txt",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls > /dev/null",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls 2>&1",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls -la; rm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls |& cat",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls <(cat x)",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls >(tee x)",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls $(x)",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls ${HOME}",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls $HOME",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls <<EOF",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls\nrm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls\r\nrm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls\rrm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls \\; rm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls -la > out.txt",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "ls *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls r''m",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "git status *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "git status",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "git status *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "git status -s",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "git status *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "git -C x status",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "cargo test *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "cargo test --lib",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "cargo test *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "cargo test --lib > out.txt",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "cargo test *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "cargo test --lib 2>&1 | tail",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls -la",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls & rm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "ls $(x)",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "echo x > f",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "*",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "a\\b",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "echo *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "echo hi > ~/.zshrc",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "bun add *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "bun add zod && rm -rf x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "bun add *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "bun add zod & rm x",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": false
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "bun add *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "bun add zod",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  },
+  {
+   "rule": {
+    "kind": "command",
+    "pattern": "bun add *",
+    "agentId": null
+   },
+   "ask": {
+    "kind": "command",
+    "detail": "bun add",
+    "files": [],
+    "cwd": "/proj",
+    "agentId": "codex"
+   },
+   "expected": true
+  }
+ ],
+ "shell": [
+  {
+   "command": "ls && pwd",
+   "parts": [
+    "ls",
+    "pwd"
+   ],
+   "unsafe": false,
+   "writes": []
+  },
+  {
+   "command": "ls & pwd",
+   "parts": [
+    "ls",
+    "pwd"
+   ]
+  },
+  {
+   "command": "ls &",
+   "parts": [
+    "ls"
+   ]
+  },
+  {
+   "command": "a |& b",
+   "parts": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "command": "a || b ; c",
+   "parts": [
+    "a",
+    "b",
+    "c"
+   ]
+  },
+  {
+   "command": "a\r\nb",
+   "parts": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "command": "a\rb",
+   "parts": [
+    "a",
+    "b"
+   ]
+  },
+  {
+   "command": "ls 2>&1",
+   "parts": [
+    "ls"
+   ],
+   "writes": []
+  },
+  {
+   "command": "ls > /dev/null",
+   "parts": [
+    "ls"
+   ],
+   "writes": []
+  },
+  {
+   "command": "ls &> /dev/null",
+   "parts": [
+    "ls"
+   ],
+   "writes": []
+  },
+  {
+   "command": "ls >out.txt",
+   "parts": [
+    "ls"
+   ],
+   "writes": [
+    "out.txt"
+   ]
+  },
+  {
+   "command": "ls >> out.txt 2> err.txt",
+   "parts": [
+    "ls"
+   ],
+   "writes": [
+    "out.txt",
+    "err.txt"
+   ]
+  },
+  {
+   "command": "ls &> out.txt",
+   "parts": [
+    "ls"
+   ],
+   "writes": [
+    "out.txt"
+   ]
+  },
+  {
+   "command": "cat < in.txt",
+   "parts": [
+    "cat"
+   ],
+   "writes": []
+  },
+  {
+   "command": "echo $HOME",
+   "unsafe": true
+  },
+  {
+   "command": "echo `x`",
+   "unsafe": true
+  },
+  {
+   "command": "ls <(x)",
+   "unsafe": true
+  },
+  {
+   "command": "ls >(x)",
+   "unsafe": true
+  },
+  {
+   "command": "cat <<EOF",
+   "unsafe": true
+  },
+  {
+   "command": "ls \\x",
+   "unsafe": true
+  },
+  {
+   "command": "r''m",
+   "unsafe": true
+  },
+  {
+   "command": "r'm'x",
+   "unsafe": true
+  },
+  {
+   "command": "echo ${X}",
+   "unsafe": true
+  },
+  {
+   "command": "echo $'a'",
+   "unsafe": true
+  },
+  {
+   "command": "git commit -m \"fix\"",
+   "unsafe": false
+  },
+  {
+   "command": "echo 'a b'",
+   "unsafe": false
+  },
+  {
+   "command": "ls -la",
+   "unsafe": false
   }
  ]
 }

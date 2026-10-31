@@ -22,7 +22,8 @@ const rule = (extra: Partial<PermissionRule>): PermissionRule => ({ id: "r", kin
 describe("risco", () => {
   it("leitura é baixo; instalar é médio; push, rm -r e sudo são altos", () => {
     expect(riskOf(ask({ detail: "git status && rg TODO src" }))).toBe("low");
-    expect(riskOf(ask({ detail: "bun run test" }))).toBe("low");
+    // Rodar o script de teste executa código do repositório (que o agente acabou de editar): não é «só leitura».
+    expect(riskOf(ask({ detail: "bun run test" }))).toBe("medium");
     expect(riskOf(ask({ detail: "bun add @codemirror/lang-html" }))).toBe("medium");
     expect(riskOf(ask({ detail: "git push origin feat/modo-chat" }))).toBe("high");
     expect(riskOf(ask({ detail: "rm -rf build" }))).toBe("high");

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import cases from "@/features/chat/permissions/fixtures/permission-cases.json";
 import security from "@/features/chat/permissions/fixtures/permission-security.json";
-import { commandParts, insideFolder, isNetworkCommand, riskOf, ruleMatches, type AskKind } from "@/features/chat/permissions/permissionModel";
+import { analyzeCommand, commandParts, insideFolder, isNetworkCommand, riskOf, ruleMatches, type AskKind } from "@/features/chat/permissions/permissionModel";
 import { decidePermission, type PermissionKind } from "@/features/chat/team/teamPermissions";
 import type { TeamPolicy } from "@/features/chat/team/ipc";
 
@@ -53,6 +53,15 @@ describe("casos de segurança (escritos à mão)", () => {
   it("risco", () => {
     for (const c of security.risk) {
       expect(riskOf({ kind: c.kind as AskKind, detail: c.detail, files: c.files, cwd: c.cwd }), JSON.stringify(c)).toBe(c.expected);
+    }
+  });
+
+  it("o comando por dentro: partes, redirecionamentos e metacaracteres", () => {
+    for (const c of security.shell as { command: string; parts?: string[]; unsafe?: boolean; writes?: string[] }[]) {
+      const a = analyzeCommand(c.command);
+      if (c.parts) expect(a.parts, JSON.stringify(c)).toEqual(c.parts);
+      if (c.unsafe !== undefined) expect(a.unsafe, JSON.stringify(c)).toBe(c.unsafe);
+      if (c.writes) expect(a.writes, JSON.stringify(c)).toEqual(c.writes);
     }
   });
 

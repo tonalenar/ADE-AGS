@@ -27,7 +27,7 @@
    "detail": "bun run test",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -118,14 +118,14 @@
    "detail": "cargo test --lib",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
    "detail": "cargo clippy --lib",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -167,7 +167,7 @@
    "detail": "git branch -d x",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -237,7 +237,7 @@
    "detail": "echo hi > out.txt",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -300,21 +300,21 @@
    "detail": "npx tsc --noEmit",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
    "detail": "bunx vitest run",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
    "detail": "ags test affected",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -342,21 +342,21 @@
    "detail": "LS",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
    "detail": "GIT STATUS",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
    "detail": "tsc -p .",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -391,7 +391,7 @@
    "detail": "bun run check:babel",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -405,7 +405,7 @@
    "detail": "go test ./...",
    "files": [],
    "cwd": "/Users/ton/Projects/ADE-AGS",
-   "expected": "low"
+   "expected": "medium"
   },
   {
    "kind": "command",
@@ -6004,13 +6004,13 @@
   {
    "command": "echo hi > /etc/hosts",
    "expected": [
-    "echo hi > /etc/hosts"
+    "echo hi"
    ]
   },
   {
    "command": "echo hi > out.txt",
    "expected": [
-    "echo hi > out.txt"
+    "echo hi"
    ]
   },
   {
