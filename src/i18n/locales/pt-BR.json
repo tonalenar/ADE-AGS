@@ -4476,5 +4476,13 @@
   "chat.agentSwitch.loss": "Perde-se o que só {{from}} guardava por dentro (cache e raciocínio interno): a sessão dele fica guardada para o caso de você voltar.",
   "chat.agentSwitch.confirm": "Trocar para {{agent}}",
   "chat.agentSwitch.busy": "Trocando…",
-  "chat.agentSwitch.failed": "Não deu para trocar de agente: {{error}}"
+  "chat.agentSwitch.failed": "Não deu para trocar de agente: {{error}}",
+  "chat.quote.comment": "Comentar",
+  "chat.quote.title": "Comentar um trecho",
+  "chat.quote.field": "Comentário sobre o trecho",
+  "chat.quote.placeholder": "Escreva o comentário…",
+  "chat.quote.hint": "Enter adiciona · Esc fecha",
+  "chat.quote.add": "Adicionar",
+  "chat.quote.list": "Citações",
+  "chat.quote.remove": "Remover citação"
 }

@@ -4476,5 +4476,13 @@
   "chat.agentSwitch.loss": "What only {{from}} kept inside (cache and internal reasoning) is lost: its session stays saved in case you switch back.",
   "chat.agentSwitch.confirm": "Switch to {{agent}}",
   "chat.agentSwitch.busy": "Switching…",
-  "chat.agentSwitch.failed": "Could not switch agent: {{error}}"
+  "chat.agentSwitch.failed": "Could not switch agent: {{error}}",
+  "chat.quote.comment": "Comment",
+  "chat.quote.title": "Comment on a passage",
+  "chat.quote.field": "Comment on the passage",
+  "chat.quote.placeholder": "Write your comment…",
+  "chat.quote.hint": "Enter adds · Esc closes",
+  "chat.quote.add": "Add",
+  "chat.quote.list": "Quotes",
+  "chat.quote.remove": "Remove quote"
 }
