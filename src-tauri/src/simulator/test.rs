@@ -117,6 +117,16 @@ fn hiberna_so_fora_de_vista_depois_do_prazo() {
 }
 
 #[test]
+fn acao_recente_do_agente_mantem_prioridade_normal_fora_de_vista() {
+    use super::lifecycle::wanted_nice;
+    use std::time::Duration;
+    assert_eq!(wanted_nice(true, false, Duration::ZERO), 0);
+    let grace = super::lifecycle::AGENT_PRIORITY_GRACE;
+    assert_eq!(wanted_nice(true, false, grace - Duration::from_nanos(1)), 0);
+    assert_eq!(wanted_nice(true, false, grace), 10);
+}
+
+#[test]
 fn a_prioridade_e_baixa_fora_de_vista_e_normal_quando_se_olha() {
     use super::lifecycle::wanted_nice;
     use std::time::Duration;
@@ -269,4 +279,28 @@ fn o_gesto_de_inicio_comeca_na_borda_e_sobe_sem_sair_dela_em_x() {
     assert_eq!(touch_edge(points[0]), EDGE_BOTTOM);
     assert!(points.last().unwrap().1 < 0.5, "sobe além do meio");
     assert!(points.windows(2).all(|w| w[1].1 < w[0].1 && w[1].0 == w[0].0));
+}
+
+#[test]
+fn restauracao_pendente_nao_duplica_worker_e_corrige_decisao_em_voo() {
+    use super::lifecycle::{PriorityState, wanted_nice};
+    use std::time::Duration;
+    let mut state = PriorityState::default();
+    let idle = wanted_nice(true, false, Duration::MAX);
+    assert_eq!(state.prepare(idle), Some(10));
+    // A ação chega enquanto ps aplica o fundo, antes de nice refletir o resultado.
+    assert!(state.queue_restore());
+    assert!(!state.queue_restore(), "uma thread cobre as ações repetidas");
+    state.finish(idle, true);
+    let active = wanted_nice(true, false, Duration::ZERO);
+    assert_eq!(state.prepare(active), Some(0), "reavalia após I/O, não reaplica decisão antiga");
+    assert!(!state.queue_restore());
+    state.finish(active, true);
+    assert_eq!(state.prepare(active), None);
+    state.pending = false;
+    assert!(!state.queue_restore(), "já normal, sem trabalho pendente");
+    assert_eq!(state.prepare(idle), Some(10));
+    state.finish(idle, false);
+    assert_eq!(state.nice, 0, "falha não altera a prioridade confirmada");
+    assert_eq!(state.applying, None);
 }

@@ -103,7 +103,7 @@ Ligar ou desligar o ⚡ com o aparelho ligado muda a prioridade na hora. Os serv
 A tela recebe o que o iOS desenha: com `ADE_SIMULATOR_FPS=1`, o log mostra quantos quadros por segundo chegam à camada.
 
 O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém usa:
-- **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `nice` no `launchd_sim` do aparelho, que o `ps` mostra com o UDID no caminho, e em todos os descendentes. Os processos novos herdam. Fica em `nice 10` nos primeiros 150 s depois do boot e com a tela fora de vista, e em `nice 0` com a pessoa olhando, para o iOS desenhar mais rápido quando importa.
+- **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `PRIO_DARWIN_BG` via `PRIO_DARWIN_PROCESS` no `launchd_sim` do aparelho e em todos os descendentes. Essa política de CPU e I/O não aparece no `nice` do `ps`. Só entra em segundo plano com a tela fora de vista e sem ação de agente há pelo menos 60 s (`AGENT_PRIORITY_GRACE`). Ao mostrar a tela ou receber ação de agente, restaura a prioridade normal em uma thread, sem esperar o monitor. Não usamos `nice 10`: voltar a `nice 0` pode falhar com `EACCES` sem root no macOS.
 - **Hibernar:** depois de N minutos fora de vista e sem ação de agente (padrão 10; Nunca/5/10/30 no "⋯"), o aparelho é desligado sem perder dados. O nó mostra "Pausado para economizar" com o botão Retomar.
 - **Um por vez** (padrão): ligar um aparelho desliga os outros que a ADE ligou. Os do app Simulator ficam como estão.
 - **Fora de vista:** o nó para de ouvir os quadros (`unregisterScreenCallbacks`) e esconde a view.
