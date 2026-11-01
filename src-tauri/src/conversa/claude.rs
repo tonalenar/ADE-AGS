@@ -414,6 +414,7 @@ fn finish_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, 
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
     save_items(app, db, thread_id, Some(turn), vec![claude_map::turn_end(turn, result, Some(now))]);
+    super::pool::after_turn(app, db, thread_id, result);
 }
 
 fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) {

@@ -31,12 +31,15 @@ pub mod commands;
 pub mod opencode;
 pub mod opencode_map;
 pub mod permission;
+pub mod pool;
 pub mod resume;
 pub mod store;
 pub mod turn;
 pub mod worktree;
 #[cfg(test)]
 mod attach_test;
+#[cfg(test)]
+mod pool_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]

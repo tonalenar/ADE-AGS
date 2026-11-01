@@ -79,3 +79,35 @@ terminal interativo continua sem nenhuma troca ou sugestão automática.
 A seleção pura `pool_failover::replacement` exclui a conta de origem e contas de fora do pool, respeita login, limite, cooldown e estratégia existentes e consulta o catálogo de cada conta. Tenta preservar o modelo. Só um erro classificado como modelo permite mudar para outro modelo com disponibilidade confirmada no catálogo da conta de destino; erros de login/saldo não alteram um modelo explícito. O toast pt-BR/en/es mostra motivo e modelo escolhido.
 
 Sem alternativa elegível, com opt-in desligado ou após uma troca, a tarefa permanece falhada com a ação do erro. A reserva atômica de 1 por task / 3 por pool-hora continua antes do reroute. O cooldown é de 30 minutos. O caminho de terminais não chama o scheduler e não recebe failover. A classificação diferencia erros do provedor de números em caminhos/linhas de código.
+
+## Pool de contas no chat (conversas por protocolo)
+
+O failover acima é da frota headless. No modo chat, uma conversa por protocolo (`conversa/`) também troca de conta quando a dela esgota o limite (`conversa/pool.rs`).
+
+### Regras
+
+| Regra | Como |
+|---|---|
+| Desligado por padrão | `settings` `chat.pool.mode` = `off` (padrão) \| `ask` \| `auto`. Só a pessoa muda (Contas → Pools). O agente, a CLI e mensagens de peers não ligam |
+| Só com pool escolhido | a conversa criada com `pool:<nome>` fica ligada ao pool (`chat.pool.thread.<id>`). Sem pool, não troca. O backend resolve `pool:<nome>` em `api::create` (antes o valor ia cru para `account_id`) |
+| Gatilho | fim de turno com erro classificado `RateLimited` por `runs::failure::classify` (reuso: «hit your limit», «5-hour limit»…). Auth, modelo e outros erros nunca trocam |
+| Escolha da conta | `routing::pick_in_pool` sobre o roster: mesmo agente, logada, sem limite/orçamento estourado, fora do cooldown. A conta que esgotou entra no cooldown de 30 min e é marcada como esgotada até a renovação (`runs.quota.*`), então a frota também a evita |
+| Tetos | no máximo 3 trocas por hora por conversa; nunca encadeia (conta nova esgotando em até 5 min para e avisa) |
+| `ask` | aviso `poolAsk` na timeline com «Continuar na outra conta» / «Agora não» (pendência em `chat.pool.pending.<id>`) |
+| `auto` | troca e avisa (`poolSwitch`); sem conta livre, `poolBlocked` com o motivo |
+| Volta | quando a hora de renovação da conta original passa, a próxima mensagem da pessoa (conversa livre) volta a ela: `auto` volta e avisa; `ask` pergunta (`poolReturnAsk`). Nunca no meio de um turno |
+| Renovação | `reset_at` lê «resets 1:10pm» no fuso do sistema; sem hora legível, vale 5 h |
+
+### Continuidade: handoff por resumo
+
+A sessão do agente mora no perfil da conta (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`): `--resume` de outra conta não acha a sessão. Por isso a troca fecha o processo parado, passa `chat_thread.account_id` para a conta nova, **zera `remote_id`** e manda como primeira mensagem um resumo (`handoff_text`: as últimas 12 falas e o pedido sem resposta) marcado como DADO, nunca instrução. Não copia transcript nem credencial entre perfis. Copiar o transcript para o `--resume` achar a sessão ficou **não implementado** (experimento futuro, só atrás de flag e validado em instância isolada).
+
+### Segurança e política
+
+- Nenhum segredo novo: só ids de conta em `settings`; credenciais continuam no perfil/keyring. Nenhuma migração (só chaves em `settings`, e `set_account`/`clear_remote_id` sobre colunas existentes).
+- **Ressalva de política:** alternar contas para contornar limite pode violar os termos do provedor. O pool serve a contas da própria pessoa, cada uma com o plano dela; a tela de ativação avisa e toda troca fica registrada na conversa.
+- Aba de terminal (TUI): nunca troca nem digita. Ainda não há oferta de abrir aba nova com o resumo (pendente).
+
+### Onde
+
+Backend: `conversa/pool.rs` (pura: `decide`, `reset_at`, `can_return`, `recent`, `handoff_text`; app: `after_turn`, `accept`, `before_send`), ganchos em `turn::finish` e `claude::finish_turn`, comandos `chat_pool_pending|accept|dismiss`. Frontend: `accounts/chatPool.ts`, `ChatPoolMode.tsx`, `chat/timeline/NoticeRow.tsx` (`PoolNotice`). Testes: `conversa/pool_test.rs`, `accounts/tests/chatPool.test.ts`, `chat/tests/noticeRow.test.tsx`.
