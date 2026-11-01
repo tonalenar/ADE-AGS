@@ -2,10 +2,12 @@
 
 No worktree do integrante, use `ags test affected --dry-run` para revisar o plano e
 `ags test affected` para validar a entrega. A seleção reúne os arquivos commitados
-desde o ancestral comum com `origin/master`, as alterações locais (inclusive staged
+desde o ancestral comum com a base do worktree, as alterações locais (inclusive staged
 e exclusões) e os arquivos novos não ignorados. Nomes com espaços são preservados.
 Arquivos sem mapeamento provocam fallback explícito para as suites completas.
-Se `origin/master` estiver indisponível, a CLI falha claramente sem declarar verde.
+A base é `branch.<nome>.agsbase`, se gravada; senão a primeira que existir entre
+`origin/dev`, `gh/dev`, `dev`, `origin/master` e `master`. Sem nenhuma, a CLI falha
+com o `git config branch.<nome>.agsbase <ref>` a rodar, sem declarar verde.
 
 `ags test run frontend|rust|tsc|babel` executa uma suite completa. Os comandos são:
 

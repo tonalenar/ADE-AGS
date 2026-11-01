@@ -25,6 +25,7 @@ USO
 
 TESTES LOCAIS (no worktree atual, sem precisar do app)
   test affected [--dry-run] [--force]          Testes afetados desde a base do worktree + alterações locais
+                                             Base: branch.<nome>.agsbase; senão origin/dev, gh/dev, dev, origin/master, master
   test run <frontend|rust|tsc|babel> [--force]  Suíte completa; reutiliza o verde só com a árvore limpa
   test status                                Últimos resultados deste repositório
   test smoke                                 Roteiro fixo do CLI contra o app aberto (tab, mission, peers, memory, --file)
@@ -616,7 +617,7 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
         let plan = match ade_ags_lib::testspeed::project::detect(&root) {
             ade_ags_lib::testspeed::project::Layout::AdeAgs => {
                 let unsafe_files = test_runner::unsafe_files(&root,&changed)?;
-                ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files).with_changed_base(&test_runner::base_ref(&root))
+                ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files).with_changed_base(&test_runner::base_ref(&root)?)
             }
             ade_ags_lib::testspeed::project::Layout::Generic(suites) => ade_ags_lib::testspeed::affected::plan_generic(&changed, &suites),
         };
