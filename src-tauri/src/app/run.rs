@@ -347,6 +347,7 @@ pub fn run() {
             crate::conversa::chat_pool_accept,
             crate::conversa::chat_pool_dismiss,
             crate::conversa::chat_thread_send,
+            crate::conversa::chat_thread_switch_agent,
             crate::conversa::chat_attachment_inspect,
             crate::conversa::chat_attachment_read,
             crate::conversa::chat_thread_items,

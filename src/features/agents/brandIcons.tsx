@@ -63,11 +63,18 @@ export function KimiIcon({ className }: IconProps) {
   );
 }
 
-/** Cursor Agent. */
+/**
+ * Cursor: o cubo hexagonal com a seta facetada, o mesmo do ícone do Cursor.app. Redesenhado em vetor a partir
+ * dele (geometria medida no ícone de 512 px), monocromático: as faces ficam em opacidades diferentes de
+ * `currentColor`, então pega a cor de onde está (branco no ladrilho do agente, a cor do texto nas abas).
+ */
 export function CursorIcon({ className }: IconProps) {
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
-      <path d="M4.2 2.6c-.8.4-1 1.4-.6 2.2l6.2 16.4c.4 1 1.6 1.2 2.4.4l2.4-2.1 3.2 2.8c.7.6 1.8.2 2-.8l.3-1.2c.2-.7-.3-1.3-1-1.4l-3.1-.5 2.2-2.4c.7-.8.2-2-.9-2.2L4.2 2.6z" />
+    <svg viewBox="100 100 312 312" fill="currentColor" className={className} aria-hidden>
+      <polygon points="256,108 130,182 130,330 256,405" fillOpacity={0.55} />
+      <polygon points="256,108 382,182 382,330 256,405" fillOpacity={0.32} />
+      <polygon points="137,189 378,186 256,255" />
+      <polygon points="256,255 378,186 262,392" fillOpacity={0.85} />
     </svg>
   );
 }

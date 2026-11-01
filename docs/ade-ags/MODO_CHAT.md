@@ -283,6 +283,48 @@ depois disso a miniatura mostra "indisponível" (o caminho continua na mensagem)
 - **Composer.** A altura segue o texto e também a largura da caixa (`ResizeObserver`): abrir o painel direito
   refaz a altura sem digitar.
 
+## Trocar de agente na mesma conversa (como o T3 Code)
+
+Em uma conversa por protocolo (Claude Code, Codex, OpenCode, Antigravity), o seletor de modelo mostra o trilho de
+agentes instalados. Escolher OUTRO agente troca quem responde NESTA conversa, com confirmação a cada troca. Vale também
+para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o terminal é do usuário).
+
+- **Regras.** Só entre turnos e sem pedido do agente esperando resposta (`chat_thread_switch_agent`, `conversa/troca.rs`).
+  Mesmo id, pasta, título, linha do tempo, fila de mensagens (`thread_outbox`) e time. O acesso vira o equivalente do
+  motor novo (o Plano não existe no Codex: vira Supervisionado, e o aviso diz); o esforço zera; a conta do agente
+  antigo não vale no novo (conta principal ou a escolhida).
+- **Sessão nativa.** A do agente que sai fica guardada em `chat_thread_native` (aditiva, nada apaga). Voltar a um agente
+  já usado retoma a sessão dele (na mesma conta) e leva só o resumo do que aconteceu fora (delta); um agente novo, ou
+  de outra conta, recebe o resumo completo.
+- **Resumo (`conversa/handoff.rs`).** Determinístico, sem gastar cota (como o T3 Code): pedido original, falas mais
+  recentes sob um teto (24 mil caracteres, as mais antigas saem e o corte é dito), arquivos alterados, plano e pergunta
+  sem resposta; sem raciocínio escondido. É DADO, nunca instrução: dentro do bloco `untrusted_data` do app, começando por
+  `[ADE AGS]`. Vai na frente da PRÓXIMA mensagem da pessoa (não é um turno à parte) e só sai da pendência quando a
+  mensagem foi enviada de fato. A tela esconde o bloco (termina na marca `[fim do contexto da conversa anterior]`).
+- **Timeline.** Aviso persistente `agentSwitch` («Agora com Codex · modelo» e o que o agente novo recebeu); cada fala do
+  agente leva o logo e o nome de quem a disse (`voicesByItem`); o histórico antigo continua à vista.
+- **Time.** `chat_team.agent_id`/`chat_team_member.agent_id` e o rótulo `Agente · Papel` acompanham a troca.
+- **ai-memory.** É por motor (Claude por processo; os demais sem suporte): o estado é zerado e recalculado ao abrir.
+- **Anexos.** O bloco `[Anexos]` e os caminhos continuam no texto; imagem em linha só se o motor novo for o Claude.
+- **Coordenação com o pool de contas** (`pool-contas`, `conversa/pool.rs`): o resumo dela (`handoff_text`) é o mesmo
+  conceito com outra moldura («conta anterior»). Quando os dois PRs entrarem, `pool.rs` pode chamar `handoff::resumo`
+  (parametrizado por quem sai e quem entra) em vez da função própria; os dois tocam `api.rs::send_mode`, `store.rs`,
+  `mod.rs` e `NoticeRow.tsx`, então o merge pede conferência.
+
+## Acabamento (build local do PR 270/271)
+
+- **Resumo.** Sem lugar ao lado da conversa (janela estreita), o Resumo passa a flutuar POR CIMA dela (`summaryPlacement`:
+  `beside` / `overlay` / `none`). Antes sumia: o botão «Resumo (R)» ficava marcado sem painel e ligar/desligar não trazia nada.
+- **Ações sob a mensagem.** Hora relativa («há 24 minutos») e botões só ao passar o mouse ou focar (`MessageActions`): copiar
+  (texto limpo, sem anexos nem envelope) na pessoa e no agente; «editar e reenviar» na pessoa devolve o texto ao campo
+  (não cancela nada). Ficam para depois: bifurcar a conversa daquele ponto (o `handoff.rs` já serve de base), fixar e ler em voz alta.
+- **Limites de uso.** O cartão lista TODAS as contas conectadas dos agentes que expõem a cota (Claude, Codex e Antigravity),
+  as da conversa primeiro, cada uma com a janela atual e a semana; «não medido» só para o agente que não expõe a cota. O
+  Antigravity sem perfil usa a mesma leitura do canvas (`agy /usage`, por grupo de modelos). Cursor: sem fonte sem ler o token
+  de outro app (ver `.plans/cursor-motor/DESENHO.md`).
+- **Trocar de agente e aprovação.** O Antigravity por `-p` não tem tela de aprovação: em Supervisionado ele NEGA o que pediria
+  aprovação. A confirmação da troca e o aviso do fio dizem isso (`noApproval`); para liberar, mude o acesso.
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:

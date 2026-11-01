@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { setComposing, useChatStore } from "../store";
 import {
-  chatRequestAnswer, chatThreadCreate, chatThreadInterrupt, chatThreadItems, chatThreadRequests, chatThreadRetune, chatThreadSend,
+  chatRequestAnswer, chatThreadCreate, chatThreadInterrupt, chatThreadItems, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
   chatThreadSettle, chatThreads, chatThreadStatus, type ThreadAccess, type ThreadRow,
 } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
@@ -165,6 +165,19 @@ export function retuneThread(id: string, model: string | null, effort: string | 
   chatThreadRetune(id, model, effort, access)
     .then(upsertThread)
     .catch((e) => patchLive(id, (live) => ({ ...live, error: String(e) })));
+}
+
+/**
+ * Troca o agente da conversa (só entre turnos). Devolve o erro em texto para quem pediu mostrar; a conversa e o
+ * aviso «agora com …» chegam pelos eventos.
+ */
+export async function switchThreadAgent(id: string, agentId: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<string | null> {
+  try {
+    upsertThread(await chatThreadSwitchAgent(id, agentId, model, effort, access, null));
+    return null;
+  } catch (e) {
+    return String(e);
+  }
 }
 
 /** Conclui (o agente fecha; reabrir retoma a mesma thread) ou reabre. */
