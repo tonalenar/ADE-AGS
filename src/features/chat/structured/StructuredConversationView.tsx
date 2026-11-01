@@ -116,7 +116,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       <ComposerColumn>
         {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
-        <ChatComposer cwd={thread.cwd}
+        <ChatComposer cwd={thread.cwd} quoteKey={card.tabId}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
           onSubmit={(text, attachments) => {
             if (question) { answer(text); return; }
@@ -147,7 +147,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <ChatFrame composer={composer} list={(bottomInset) => (
-        <TimelineView bottomInset={bottomInset} items={items} loaded={hydrated} working={working || !!request} live
+        <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={items} loaded={hydrated} working={working || !!request} live
           approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
           streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} threadId={thread.id}
           onAnswer={question ? answer : undefined} onResend={resend}
