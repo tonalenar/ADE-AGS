@@ -745,8 +745,17 @@ pub async fn pty_create(
     // El PATH del hijo es el del PTY (en Windows sale del registro, no del proceso de la app: la
     // app puede tener la carpeta de su ejecutable en el suyo y el hijo no).
     let child_path = cmd.get_env("PATH").map(|p| p.to_os_string()).unwrap_or_default();
+    // O `open` da ADE fica na frente para o Expo não abrir o Device Hub. Sem o
+    // bloqueio instalado, o PATH do filho continua o de antes.
     if let Some(path) = path_with_app_dir(&child_path) {
+        let path = if crate::sim_host::shim_installed() {
+            crate::sim_host::path_with_open_shim(&path)
+        } else {
+            path
+        };
         cmd.env("PATH", path);
+    } else if crate::sim_host::shim_installed() {
+        cmd.env("PATH", crate::sim_host::path_with_open_shim(&child_path));
     }
     // Quem respeita `$BROWSER` (Vite com `--open`, `python -m webbrowser`…) abre o endereço pelo `ags`, que leva
     // um `localhost` para um navegador do canvas ligado a este terminal. Só nos terminais da app (precisam do

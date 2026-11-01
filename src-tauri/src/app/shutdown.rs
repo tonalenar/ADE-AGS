@@ -24,7 +24,11 @@ pub(crate) type Step<'a> = &'a mut dyn FnMut();
 pub(crate) fn shutdown_once() {
     run_steps_once(
         &SHUTDOWN,
-        &mut [&mut || crate::ipc::cleanup(), &mut || crate::terminal::kill_all_sessions()],
+        &mut [
+            &mut || crate::ipc::cleanup(),
+            &mut || crate::terminal::kill_all_sessions(),
+            &mut || crate::sim_host::stop(),
+        ],
     );
 }
 
