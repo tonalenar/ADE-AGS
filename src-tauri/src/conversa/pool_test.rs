@@ -143,3 +143,39 @@ fn a_conversa_so_liga_a_um_pool_quando_a_pessoa_escolhe() {
     crate::database::set_setting(&db, "chat.pool.mode", "qualquer-coisa").unwrap();
     assert_eq!(mode(&db), Mode::Off);
 }
+
+fn pool(id: &str, agent: &str, members: &[Option<&str>]) -> crate::accounts::pools::Pool {
+    crate::accounts::pools::Pool { id: id.into(), name: format!("Pool {id}"), agent_id: agent.into(), members: members.iter().map(|m| m.map(String::from)).collect(), strategy: Default::default(), failover: false }
+}
+
+#[test]
+fn oferece_o_pool_que_tem_a_conta_da_conversa() {
+    let pools = [pool("p1", "claude", &[None, Some("ton")]), pool("p2", "codex", &[Some("ton"), Some("x")])];
+    assert_eq!(offer_pool(&pools, "claude", &Some("ton".into())).map(|p| p.id.as_str()), Some("p1"));
+    assert_eq!(offer_pool(&pools, "claude", &None).map(|p| p.id.as_str()), Some("p1"));
+}
+
+#[test]
+fn nao_oferece_pool_de_outro_agente_ou_sem_a_conta_ou_de_uma_so() {
+    let pools = [pool("p2", "codex", &[Some("ton"), Some("x")]), pool("p3", "claude", &[Some("a"), Some("b")]), pool("p4", "claude", &[Some("ton")])];
+    assert!(offer_pool(&pools, "claude", &Some("ton".into())).is_none());
+}
+
+#[test]
+fn o_erro_real_do_claude_e_limite_e_a_hora_sai_do_texto() {
+    use crate::runs::failure::{classify, FailureKind};
+    let erro = "You've hit your 5-hour limit · resets 1:10pm (America/Bahia)";
+    assert_eq!(classify(erro), FailureKind::RateLimited);
+    // 2026-11-01 12:51 local (UTC-3 => 15:51 UTC) -> 13:10 do mesmo dia
+    let now = 1_793_548_260;
+    assert_eq!(reset_at(erro, now, -3 * 3600) - now, 19 * 60);
+}
+
+#[test]
+fn a_linha_result_do_claude_vira_erro_de_limite() {
+    use crate::conversa::claude_map::{Mapper, Out};
+    let line = serde_json::json!({ "type": "result", "subtype": "success", "is_error": true, "result": "You've hit your 5-hour limit · resets 1:10pm (America/Bahia)", "duration_ms": 900 });
+    let out = Mapper::default().feed(&line, 0);
+    let Some(Out::Done(r)) = out.into_iter().next() else { panic!("esperava Done") };
+    assert_eq!(crate::runs::failure::classify(&r.error.unwrap()), crate::runs::failure::FailureKind::RateLimited);
+}

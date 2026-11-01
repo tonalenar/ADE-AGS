@@ -40,7 +40,7 @@ export function NoticeRow({ item, onResend, threadId }: { item: TimelineItem; on
 function PoolNotice({ item, threadId }: { item: TimelineItem; threadId?: string }) {
   const { t } = useTranslation();
   const code = item.label ?? "";
-  const asks = code === "poolAsk" || code === "poolReturnAsk";
+  const asks = code === "poolAsk" || code === "poolReturnAsk" || code === "poolOffer";
   const [pending, setPending] = useState<ChatPoolPending | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -69,7 +69,7 @@ function PoolNotice({ item, threadId }: { item: TimelineItem; threadId?: string 
       {asks && pending && (
         <div className="flex gap-2">
           <button type="button" onClick={accept} className={button}>
-            {t(pending.kind === "return" ? "chat.timeline.notice.poolReturnAccept" : "chat.timeline.notice.poolAccept")}
+            {t(pending.kind === "return" ? "chat.timeline.notice.poolReturnAccept" : pending.kind === "join" ? "chat.timeline.notice.poolJoinAccept" : "chat.timeline.notice.poolAccept")}
           </button>
           <button type="button" onClick={dismiss} className={button}>{t("chat.timeline.notice.poolDismiss")}</button>
         </div>

@@ -7,6 +7,8 @@ import type { AccountUsageSummary, AgentAccount } from "@/features/accounts/type
 import { formatRemaining } from "@/features/accounts/usage";
 import { useUsageStore } from "@/features/canvas/usageStore";
 import { Row, Section } from "@/features/sidePanel/Section";
+import { chatPoolState, type ChatPoolState } from "@/features/accounts/chatPool";
+import { usePools } from "@/features/accounts/pools";
 import { useTabsStore } from "@/features/tabs/store";
 
 import type { ConversationCard } from "../chatModel";
@@ -91,6 +93,8 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   const antigravity = useUsageStore((s) => s.antigravity);
   const [summaries, setSummaries] = useState<Record<string, AccountUsageSummary>>({});
   const [teamOpen, setTeamOpen] = useState(false);
+  const [poolState, setPoolState] = useState<ChatPoolState | null>(null);
+  const pools = usePools();
   useEffect(() => startTeams(), []);
 
   const refs = useMemo(() => [conversation.tabId], [conversation.tabId]);
@@ -116,6 +120,25 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     return () => { alive = false; };
   }, [keys, turnEnds]); // eslint-disable-line react-hooks/exhaustive-deps -- `used` muda com `keys`; `loaded` só vale na primeira vez
 
+  // O pool da conversa: relido junto com a cota (a troca acontece no fim de um turno).
+  const threadId = threadIdOf(conversation.tabId);
+  useEffect(() => {
+    if (!threadId) return;
+    let alive = true;
+    chatPoolState(threadId).then((s) => alive && setPoolState(s), () => undefined);
+    return () => { alive = false; };
+  }, [threadId, turnEnds]);
+  const poolNote = (u: UsedAccount): string | null => {
+    if (!threadId) return null;
+    if (poolState?.poolName) {
+      return poolState.originLabel
+        ? t("chat.summary.limits.poolSwitched", { pool: poolState.poolName, origin: poolState.originLabel })
+        : t("chat.summary.limits.pool", { pool: poolState.poolName });
+    }
+    const offered = pools.find((p) => p.agentId === u.agentId && p.members.length > 1 && p.members.includes(u.accountId ?? null));
+    return offered ? t("chat.summary.limits.poolAvailable", { pool: offered.name }) : null;
+  };
+
   const now = Math.floor(Date.now() / 1000);
   const readingOf = (u: UsedAccount): AccountReading => {
     if (!MEASURED_AGENTS.has(u.agentId)) return { state: "unmeasured", reason: "noSource" };
@@ -136,7 +159,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
       aside={headline !== null && (
         <span className={`text-[11px] tabular-nums ${TEXT[limitLevel(headline)]}`}>{headline}%</span>
       )}>
-      {main && mainReading && <AccountBlock used={main} account={accountOf(main)} reading={mainReading} budget={budgetOf(summaries[accountKeyOf(main.agentId, main.accountId)])} now={now} />}
+      {main && mainReading && <AccountBlock used={main} account={accountOf(main)} reading={mainReading} budget={budgetOf(summaries[accountKeyOf(main.agentId, main.accountId)])} now={now} poolNote={poolNote(main)} />}
       {rest.length > 0 && (
         <>
           <button type="button" onClick={() => setTeamOpen(!teamOpen)} aria-expanded={teamOpen}
@@ -156,13 +179,14 @@ function accountName(account: AgentAccount | null, t: (k: string) => string): st
   return account && !account.id.startsWith("system:") ? account.label ?? account.name : t("accounts.system");
 }
 
-function AccountBlock({ used, account, reading, budget, now }: { used: UsedAccount; account: AgentAccount | null; reading: AccountReading; budget: Budget | null; now: number }) {
+function AccountBlock({ used, account, reading, budget, now, poolNote }: { used: UsedAccount; account: AgentAccount | null; reading: AccountReading; budget: Budget | null; now: number; poolNote: string | null }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
       <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={used.who.join(", ")}>
         {t("chat.summary.limits.account", { account: accountName(account, t) })}
       </div>
+      {poolNote && <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45">{poolNote}</div>}
       {reading.state === "measured" ? (
         <>
           {reading.windows.map((w, i) => <WindowBar key={`${w.kind}:${i}`} window={w} now={now} rejected={reading.rejected} />)}

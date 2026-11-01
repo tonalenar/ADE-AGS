@@ -100,6 +100,11 @@ pub fn chat_pool_pending(db: State<'_, DbConnection>, thread_id: String) -> Opti
 }
 
 #[tauri::command]
+pub fn chat_pool_state(db: State<'_, DbConnection>, thread_id: String) -> super::pool::State {
+    super::pool::state(&db, &thread_id)
+}
+
+#[tauri::command]
 pub async fn chat_pool_accept(app: AppHandle, db: State<'_, DbConnection>, thread_id: String) -> Result<(), String> {
     let db = db.inner().clone();
     super::pool::accept(&app, &db, &thread_id).await

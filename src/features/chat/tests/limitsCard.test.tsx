@@ -3,9 +3,9 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const backend = vi.hoisted(() => ({ teams: [] as unknown[], summary: [] as unknown[] }));
+const backend = vi.hoisted(() => ({ teams: [] as unknown[], summary: [] as unknown[], pools: [] as unknown[], poolState: { poolName: null, originLabel: null } as unknown }));
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: (cmd: string) => Promise.resolve(cmd === "chat_team_list" ? backend.teams : []),
+  invoke: (cmd: string) => Promise.resolve(cmd === "chat_team_list" ? backend.teams : cmd === "chat_pool_state" ? backend.poolState : cmd === "pool_list_all" ? backend.pools : []),
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
 vi.mock("@/features/accounts/ipc", () => ({
@@ -55,7 +55,7 @@ const bars = () => [...host.querySelectorAll("[role=progressbar]")] as HTMLEleme
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   localStorage.clear();
-  backend.teams = []; backend.summary = [];
+  backend.teams = []; backend.summary = []; backend.pools = []; backend.poolState = { poolName: null, originLabel: null };
   refreshes = [];
   useAccountsStore.setState({ accounts: [TON], systemAccounts: [SYS_CLAUDE, SYS_CODEX], capable: [], loaded: true });
   useUsageStore.setState({ claude: {}, codex: {}, antigravity: {}, busy: {} });
@@ -209,5 +209,24 @@ describe("conversa com time", () => {
     expect(text()).toContain("91%");
     expect(text()).toContain("chat.summary.limits.nearLimit");
     expect(text()).not.toContain("Claude · UI");
+  });
+
+  describe("o pool da conversa", () => {
+    const asThread = () => {
+      useStructured.setState({ threads: [{ id: "t1", accountId: "ton" }], live: {}, hydrated: {} } as never);
+      return card();
+    };
+    it("mostra o pool a que a conversa está ligada e a conta de origem depois da troca", async () => {
+      useUsageStore.setState({ claude: { ton: live(10, 10) } });
+      backend.poolState = { poolName: "Pool Teste", originLabel: "Ton" };
+      await mount({ ...asThread(), tabId: "thread:t1" });
+      expect(text()).toContain('chat.summary.limits.poolSwitched{"pool":"Pool Teste","origin":"Ton"}');
+    });
+    it("avisa que a conversa está fora de pool quando a conta dela é de um pool", async () => {
+      useUsageStore.setState({ claude: { ton: live(10, 10) } });
+      backend.pools = [{ id: "p1", name: "Pool Teste", agentId: "claude-code", members: [null, "ton"], strategy: "least_used", failover: false }];
+      await mount({ ...asThread(), tabId: "thread:t1" });
+      expect(text()).toContain('chat.summary.limits.poolAvailable{"pool":"Pool Teste"}');
+    });
   });
 });
