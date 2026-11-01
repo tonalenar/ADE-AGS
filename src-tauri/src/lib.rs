@@ -40,6 +40,7 @@ mod preview;
 mod real_browser;
 mod roles;
 mod simulator;
+mod sim_host;
 mod routines;
 mod runs;
 mod scm;

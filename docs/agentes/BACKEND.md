@@ -28,6 +28,7 @@ Crate `ade-ags` (edition 2024), lib `ade_ags_lib`. O `src/main.rs` chama `ade_ag
 | `decisions/` | Jev/Laya — ver [JEV.md](JEV.md) |
 | `canvas/`, `chat.rs`, `routines.rs`, `floors*.rs`, `design.rs` | canvas (as conexões funcionam como permissões), chat do usuário, rotinas, andares, pranchetas |
 | `preview/` | proxy local do navegador (seletor, rede, mocks, capturas) |
+| `sim_host/` | no macOS, impede o Expo de abrir o Device Hub. A tela do simulador continua em `simulator/` |
 | `forge/`, `scm/`, `explorer/` | GitHub/GitLab/Gitea (token no keyring), git local, árvore e busca |
 | `session/`, `usage/` | descobrir sessões das TUIs; uso, limites, budget, preços |
 | `skills/`, `marketplace/`, `sync/`, `graphify/` | skills (symlink/junction), registries, sync por git |
