@@ -228,6 +228,26 @@ pub fn point_ratio(x: f64, y: f64, screen: (f64, f64)) -> Result<(f64, f64), Str
     touch_ratio(x, y, w, h).ok_or_else(|| "A tela do aparelho ainda não tem tamanho.".into())
 }
 
+/// `IndigoHIDEdge` da borda de baixo. Conferido no aparelho: só com ele o gesto chega à tela inicial.
+pub const EDGE_BOTTOM: u64 = 3;
+/// Até onde um toque ainda começa na borda de baixo (a faixa da barra de início), em proporção da tela.
+const EDGE_BOTTOM_FROM: f64 = 0.985;
+
+/// A borda de onde sai um toque que começa em `ratio` (proporção na superfície em retrato). 0 = nenhuma.
+pub fn touch_edge(ratio: (f64, f64)) -> u64 {
+    if ratio.1 >= EDGE_BOTTOM_FROM { EDGE_BOTTOM } else { 0 }
+}
+
+/// Aparelho sem botão físico: as telas altas (os de botão têm proporção até 16:9, ~1,78).
+pub fn has_home_indicator(points: (f64, f64)) -> bool {
+    points.0 > 0.0 && points.1 / points.0 > 2.0
+}
+
+/// O gesto de ir para a tela inicial: da barra de início até pouco acima do meio, sem esperar nada do iOS.
+pub fn home_gesture_points() -> Vec<(f64, f64)> {
+    swipe_points((0.5, 0.998), (0.5, 0.45), 6)
+}
+
 /// Os pontos de um deslizamento: começo, `steps` passos intermediários e fim.
 pub fn swipe_points(from: (f64, f64), to: (f64, f64), steps: u32) -> Vec<(f64, f64)> {
     let steps = steps.max(1);

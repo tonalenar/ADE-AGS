@@ -131,7 +131,22 @@ pub fn key(udid: &str, name: &str) -> Result<(), String> {
 
 pub fn button(udid: &str, name: &str) -> Result<(), String> {
     let source = model::button_source(name)?;
-    let (_, hid) = connect(udid)?;
+    let (screen, hid) = connect(udid)?;
+    // O botão de início espera um possível segundo clique (~400 ms até o primeiro quadro). Sem botão físico, o
+    // gesto da barra reage na hora. Em paisagem a barra fica em outra borda: segue o botão.
+    if source == model::button_source("home")?
+        && hid.has_edge_touch()
+        && crate::simulator::ops::orientation(udid) == 1
+        && model::has_home_indicator(screen.points())
+    {
+        let points = model::home_gesture_points();
+        hid.touch(points[0], hid::Phase::Down)?;
+        for p in &points[1..] {
+            std::thread::sleep(Duration::from_millis(16));
+            hid.touch(*p, hid::Phase::Move)?;
+        }
+        return hid.touch(*points.last().unwrap_or(&points[0]), hid::Phase::Up);
+    }
     hid.button(source, true)?;
     std::thread::sleep(Duration::from_millis(80));
     hid.button(source, false)

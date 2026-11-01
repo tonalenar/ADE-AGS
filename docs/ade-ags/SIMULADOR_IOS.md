@@ -23,6 +23,8 @@ As APIs foram mapeadas com o REA (`inspect_macho` e `inspect_native_dispatch_met
 - **HID novo do Xcode 27.** A partir do CoreSimulator 1155.4 (o deste Mac é o 1174.9.2), o iOS descarta botão e teclado vindos do Indigo legado, e o toque por ele fica intermitente. Isso foi observado pelo idb, da Meta, que usa o `dtuhidd` sem volta. O `dtuhidd` é um serviço que o CoreSimulator põe dentro do iOS: ele sobe sob demanda e pode sair sozinho.
   - Cada evento é um dicionário XPC `{messageType, isBarrier, featureIdentifier, payload}`.
   - O toque é `{pointOne: {x, y}, eventType: 0/1/2, edge, target}`, com o ponto em proporção 0..1 e a origem no topo.
+  - O campo `edge` diz de que borda o toque saiu. `3` é a de baixo (conferido no aparelho: 0, 1, 2, 4, 5, 6 e 8 não chegam à tela inicial). Um toque que começa nos últimos 1,5% da tela leva esse valor do início ao fim, então arrastar a barra de início com o mouse funciona como no aparelho.
+  - **Início:** em iPhone sem botão físico, em retrato e com o HID novo, o botão "início" faz o gesto da barra. O botão HID leva 390-450 ms até o primeiro quadro; em paisagem e no legado ele continua sendo usado.
   - Os botões usam a página HID 0x0C: home `0x40`, lock e side `0x30`, Siri `0xCF`. O teclado usa o uso HID da tecla, com `state` 1 para descer e 2 para subir.
   - Ao abrir, a ADE manda uma tecla 0 solta e espera a resposta por até 4 s, em até 3 tentativas. Se o `dtuhidd` não responder, a ADE usa o Indigo legado.
   - Os eventos vão por uma fila serial: a interface não espera. Com a conexão morta, o próximo evento abre outra.

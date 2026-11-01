@@ -245,3 +245,28 @@ fn em_paisagem_o_toque_volta_para_a_superficie_em_retrato() {
     assert_eq!(oriented_size((390.0, 844.0), 4), (844.0, 390.0));
     assert_eq!(oriented_size((390.0, 844.0), 2), (390.0, 844.0));
 }
+
+#[test]
+fn o_toque_na_barra_de_inicio_sai_da_borda_de_baixo_e_o_resto_nao() {
+    assert_eq!(touch_edge((0.5, 0.998)), EDGE_BOTTOM);
+    assert_eq!(touch_edge((0.5, 0.985)), EDGE_BOTTOM);
+    assert_eq!(touch_edge((0.5, 0.98)), 0);
+    assert_eq!(touch_edge((0.5, 0.2)), 0);
+}
+
+#[test]
+fn so_iphone_sem_botao_usa_o_gesto_de_inicio() {
+    assert!(has_home_indicator((402.0, 874.0)));
+    assert!(has_home_indicator((390.0, 844.0)));
+    assert!(!has_home_indicator((375.0, 667.0)), "iPhone SE tem botão");
+    assert!(!has_home_indicator((1024.0, 1366.0)), "iPad com proporção baixa");
+    assert!(!has_home_indicator((0.0, 844.0)), "tela sem tamanho");
+}
+
+#[test]
+fn o_gesto_de_inicio_comeca_na_borda_e_sobe_sem_sair_dela_em_x() {
+    let points = home_gesture_points();
+    assert_eq!(touch_edge(points[0]), EDGE_BOTTOM);
+    assert!(points.last().unwrap().1 < 0.5, "sobe além do meio");
+    assert!(points.windows(2).all(|w| w[1].1 < w[0].1 && w[1].0 == w[0].0));
+}
