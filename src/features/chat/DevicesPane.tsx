@@ -1,3 +1,4 @@
+import { observeForegroundApp } from "./foregroundApp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -128,9 +129,6 @@ function sendShotToChat(path: string, t: (k: string) => string) {
 // iOS (prancheta 9)
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-/** De quanto em quanto tempo o painel relê qual app está aberto no aparelho (não há aviso do iOS). */
-const APP_EVERY_MS = 5000;
-
 export function IosPane() {
   const { t } = useTranslation();
   const devices = useSimulatorStore((s) => s.devices);
@@ -139,6 +137,7 @@ export function IosPane() {
   const light = useSimulatorPrefs((s) => s.light);
   const picked = useChatStore((s) => s.devices.ios);
   const [booting, setBooting] = useState(false);
+  const [appRevision, setAppRevision] = useState(0);
   const [bundle, setBundle] = useState<string | null>(null);
   const [landscape, setLandscape] = useState(false);
   const [dark, setDark] = useState<boolean | null>(null);
@@ -152,23 +151,18 @@ export function IosPane() {
 
   const fail = useCallback((e: unknown) => { void AlertaToast(current?.name ?? t("chat.panel.ios"), String(e), "error", 5000); }, [current?.name, t]);
 
-  // O app aberto (para "Reabrir app") e a aparência, relidos enquanto o aparelho está ligado.
+  // Consulta o app ao abrir, trocar aparelho, reabrir app e devolver foco à janela.
   useEffect(() => {
     setBundle(null);
     setDark(null);
     setLandscape(false);
     if (!booted || !udid) return;
     let alive = true;
-    const load = () => {
-      if (document.hidden) return;
-      simulatorForegroundApp(udid).then((b) => alive && setBundle(b)).catch(() => undefined);
-    };
-    load();
+    const stop = observeForegroundApp(window, () => simulatorForegroundApp(udid), setBundle);
     simulatorAppearance(udid).then((a) => alive && setDark(a === "dark")).catch(() => undefined);
     simulatorOrientation(udid).then((o) => alive && setLandscape(o.startsWith("landscape"))).catch(() => undefined);
-    const timer = window.setInterval(load, APP_EVERY_MS);
-    return () => { alive = false; window.clearInterval(timer); };
-  }, [booted, udid]);
+    return () => { alive = false; stop(); };
+  }, [booted, udid, appRevision]);
 
   const boot = async () => {
     if (!current) return;
@@ -199,7 +193,7 @@ export function IosPane() {
         )}
         <span className="flex-1" />
         {booted && bundle && <span className="font-mono text-chat-code text-gray-500 dark:text-white/50 truncate" title={bundle}>{bundle}</span>}
-        <button type="button" disabled={!booted || !bundle} onClick={() => udid && bundle && run(simulatorRelaunch(udid, bundle))}
+        <button type="button" disabled={!booted || !bundle} onClick={() => udid && bundle && run(simulatorRelaunch(udid, bundle).then(() => setAppRevision((n) => n + 1)))}
           className={`h-7 px-2.5 rounded-[7px] text-chat-note border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white/85 ${ctlCls} disabled:opacity-40 disabled:pointer-events-none`}>
           {t("chat.devices.relaunch")}
         </button>

@@ -3,8 +3,8 @@
 //! - **Hibernar**: um aparelho fora de vista e sem agente mexendo por `hibernate_after` é desligado (sem perder
 //!   dados: é um shutdown normal). O nó mostra "Pausado para economizar" e religa com um clique.
 //! - **Um por vez**: ligar um aparelho hiberna os outros que a ADE ligou (os do app Simulator ficam como estão).
-//! - **Prioridade**: no modo leve o iOS fica com prioridade baixa no pico do boot e fora de vista, e volta à
-//!   normal enquanto a pessoa olha a tela (assim ele desenha mais rápido quando importa).
+//! - **Prioridade**: no modo leve o iOS fica com prioridade baixa fora de vista e sem uso recente, e volta à
+//!   normal enquanto a pessoa ou um agente usa a tela (assim ele desenha mais rápido quando importa).
 //!
 //! "À vista" vem do frontend (`simulator_place` com parte visível); "em uso", das ações dos agentes.
 
@@ -20,6 +20,8 @@ use super::ops;
 /// De quanto em quanto tempo o monitor confere.
 const CHECK_EVERY: Duration = Duration::from_secs(20);
 const NICE_LOW: i32 = 10;
+/// Mantém animações e verificações do agente em prioridade normal por 60 s após a última ação.
+pub const AGENT_PRIORITY_GRACE: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone, Copy)]
 pub struct Settings {
@@ -37,10 +39,49 @@ impl Default for Settings {
 
 #[derive(Debug, Clone, Copy)]
 struct Usage {
-    booted_at: Instant,
+    last_used: Option<Instant>,
     last_seen: Instant,
     visible: bool,
-    nice: i32,
+    priority: PriorityState,
+}
+
+/// Estado puro das aplicações: uma restauração enfileirada cobre todas as ações até terminar.
+#[derive(Debug, Default, Clone, Copy)]
+pub(super) struct PriorityState {
+    pub nice: i32,
+    pub pending: bool,
+    pub applying: Option<i32>,
+}
+
+impl PriorityState {
+    pub fn queue_restore(&mut self) -> bool {
+        if self.pending || (self.nice == 0 && self.applying.is_none_or(|n| n == 0)) {
+            return false;
+        }
+        self.pending = true;
+        true
+    }
+
+    pub fn prepare(&mut self, wanted: i32) -> Option<i32> {
+        if self.nice == wanted {
+            return None;
+        }
+        self.applying = Some(wanted);
+        Some(wanted)
+    }
+
+    pub fn finish(&mut self, applied: i32, success: bool) {
+        self.applying = None;
+        if success {
+            self.nice = applied;
+        }
+    }
+}
+
+/// Só as threads de fundo tomam este mutex; nunca os comandos seen/used.
+fn priority_applications() -> &'static Mutex<()> {
+    static P: Mutex<()> = Mutex::new(());
+    &P
 }
 
 fn settings() -> &'static Mutex<Settings> {
@@ -63,10 +104,9 @@ pub fn due(now: Instant, last_seen: Instant, visible: bool, after: Option<Durati
     }
 }
 
-/// A prioridade que o iOS deve ter agora: baixa fora de vista (no modo leve) e normal enquanto à vista (o modo leve
-/// já desliga os 143 serviços de fundo em `slim.rs`; manter o aparelho em prioridade baixa à vista derrubava quadros).
-pub fn wanted_nice(light: bool, visible: bool, _since_boot: Duration) -> i32 {
-    if light && !visible { NICE_LOW } else { 0 }
+/// Pura: só reduz a prioridade fora de vista e após a carência da última ação do agente.
+pub fn wanted_nice(light: bool, visible: bool, since_used: Duration) -> i32 {
+    if light && !visible && since_used >= AGENT_PRIORITY_GRACE { NICE_LOW } else { 0 }
 }
 
 pub fn set_settings(app: &AppHandle, new: Settings) {
@@ -100,7 +140,7 @@ pub fn booted(app: &AppHandle, udid: &str) {
     let now = Instant::now();
     let others: Vec<String> = match usage().lock() {
         Ok(mut map) => {
-            map.insert(udid.to_string(), Usage { booted_at: now, last_seen: now, visible: true, nice: 0 });
+            map.insert(udid.to_string(), Usage { last_used: None, last_seen: now, visible: true, priority: PriorityState::default() });
             map.keys().filter(|k| k.as_str() != udid).cloned().collect()
         }
         Err(_) => Vec::new(),
@@ -122,26 +162,72 @@ pub fn seen(udid: &str, visible: bool) {
                 u.last_seen = Instant::now();
             }
             u.visible = visible;
-            if visible && u.nice != 0 {
-                u.nice = 0;
-                restore_now = true;
+            if visible {
+                restore_now = u.priority.queue_restore();
             }
         }
     }
     if restore_now {
-        let udid = udid.to_string();
-        std::thread::spawn(move || {
-            let _ = ops::set_priority(&udid, 0);
-        });
+        restore_priority(udid);
     }
 }
 
-/// Um agente mexeu no aparelho: conta como uso (não hiberna no meio do trabalho dele).
+/// A pendência já foi marcada em usage(); ações repetidas não criam mais threads.
+fn restore_priority(udid: &str) {
+    let udid = udid.to_string();
+    std::thread::spawn(move || apply_priority(&udid, true));
+}
+
+/// Reavalia dentro da serialização e após cada I/O. Uma ação durante a aplicação de
+/// segundo plano é restaurada antes de liberar a vez para outra aplicação.
+fn apply_priority(udid: &str, restore_worker: bool) {
+    let Ok(_application) = priority_applications().lock() else { return };
+    loop {
+        let light = settings().lock().map(|s| s.light).unwrap_or(true);
+        let wanted = {
+            let Ok(mut map) = usage().lock() else { return };
+            let Some(u) = map.get_mut(udid) else { return };
+            let since_used = u.last_used.map(|last| Instant::now().saturating_duration_since(last)).unwrap_or(Duration::MAX);
+            let wanted = wanted_nice(light, u.visible, since_used);
+            match u.priority.prepare(wanted) {
+                Some(wanted) => wanted,
+                None => {
+                    if restore_worker {
+                        u.priority.pending = false;
+                    }
+                    return;
+                }
+            }
+        };
+        // O ps pode demorar: usage() está livre durante toda a operação.
+        let success = ops::set_priority(udid, wanted).is_ok_and(|n| n > 0);
+        if let Ok(mut map) = usage().lock() {
+            if let Some(u) = map.get_mut(udid) {
+                u.priority.finish(wanted, success);
+                if !success && restore_worker {
+                    u.priority.pending = false;
+                }
+            }
+        }
+        if !success {
+            return;
+        }
+    }
+}
+
+/// Um agente mexeu no aparelho: impede hibernação e restaura prioridade fora da thread de quem chamou.
 pub fn used(udid: &str) {
+    let mut restore_now = false;
     if let Ok(mut map) = usage().lock() {
         if let Some(u) = map.get_mut(udid) {
-            u.last_seen = Instant::now();
+            let now = Instant::now();
+            u.last_seen = now;
+            u.last_used = Some(now);
+            restore_now = u.priority.queue_restore();
         }
+    }
+    if restore_now {
+        restore_priority(udid);
     }
 }
 
@@ -168,14 +254,7 @@ fn start_monitor() {
                 hibernate(&udid, "hibernated");
                 continue;
             }
-            let nice = wanted_nice(current.light, u.visible, now.saturating_duration_since(u.booted_at));
-            if nice != u.nice && ops::set_priority(&udid, nice).is_ok_and(|n| n > 0) {
-                if let Ok(mut map) = usage().lock() {
-                    if let Some(entry) = map.get_mut(&udid) {
-                        entry.nice = nice;
-                    }
-                }
-            }
+            apply_priority(&udid, false);
         }
     });
 }

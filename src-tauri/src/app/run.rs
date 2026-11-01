@@ -56,6 +56,10 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    if let Some(output) = super::arguments::informational_output(std::env::args().skip(1)) {
+        println!("{output}");
+        return;
+    }
     crate::desktop_apps::configure_host_dpi();
     // Antes que nada abra la base: ~/.controlcode (nombre anterior) pasa a ~/.ags sin perder datos.
     crate::util::legacy::migrate_on_startup();

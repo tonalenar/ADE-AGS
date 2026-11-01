@@ -1129,3 +1129,25 @@ fn sim_act_tem_rota_backend_e_scope_do_device_sem_fallback_para_udid_solto() {
     assert!(handler.contains("crate::terminal::authorize"));
     assert!(handler.contains("crate::ipc::current_client_pid"));
 }
+
+#[test]
+fn publicacao_inicial_preserva_dono_vivo_e_assume_apos_sua_saida() {
+    let dir = std::env::temp_dir().join(format!("ade-global-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let global = dir.join("ipc.json");
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let old = super::protocol::Handshake {
+        pid: 123, port: listener.local_addr().unwrap().port(), protocol: 1,
+        token: "antigo".into(), socket: None,
+    };
+    let new = super::protocol::Handshake { pid: 456, token: "novo".into(), ..old.clone() };
+    let original = serde_json::to_string(&old).unwrap();
+    std::fs::write(&global, &original).unwrap();
+    super::server::publish_global(&global, &new).unwrap();
+    assert_eq!(std::fs::read_to_string(&global).unwrap(), original, "segunda instância não toma o global");
+    drop(listener);
+    super::server::publish_global(&global, &new).unwrap();
+    let current: super::protocol::Handshake = serde_json::from_str(&std::fs::read_to_string(&global).unwrap()).unwrap();
+    assert_eq!(current.pid, new.pid, "restart assume o global quando o dono antigo morre");
+    std::fs::remove_dir_all(dir).unwrap();
+}

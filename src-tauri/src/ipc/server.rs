@@ -84,7 +84,7 @@ fn try_start(app: AppHandle) -> Result<(), String> {
     };
     sweep_dead_instances();
     write_handshake(&instance_handshake_path(handshake.pid), &handshake)?;
-    write_handshake(&handshake_path(), &handshake)?;
+    publish_global(&handshake_path(), &handshake)?;
     std::thread::spawn(move || watch_handshakes(&handshake));
 
     std::thread::spawn(move || {
@@ -144,6 +144,14 @@ fn write_handshake(path: &Path, handshake: &Handshake) -> Result<(), String> {
     })
 }
 
+/// Publicação inicial e manutenção compartilham a política de posse do global.
+pub(super) fn publish_global(path: &Path, own: &Handshake) -> Result<(), String> {
+    if global_needs_rewrite(read_handshake(path).as_ref(), own.pid, is_alive) {
+        write_handshake(path, own)?;
+    }
+    Ok(())
+}
+
 fn read_handshake(path: &Path) -> Option<Handshake> {
     serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
 }
@@ -178,9 +186,7 @@ fn watch_handshakes(own: &Handshake) {
         if read_handshake(&instance).is_none_or(|h| h.token != own.token) {
             let _ = write_handshake(&instance, own);
         }
-        if global_needs_rewrite(read_handshake(&global).as_ref(), own.pid, is_alive) {
-            let _ = write_handshake(&global, own);
-        }
+        let _ = publish_global(&global, own);
     }
 }
 
