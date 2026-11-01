@@ -78,6 +78,11 @@ fn close(thread_id: &str) {
     agy::close(thread_id);
 }
 
+/// Fecha o processo do agente (a troca de conta do pool usa).
+pub(super) fn close_process(thread_id: &str) {
+    close(thread_id);
+}
+
 fn db_err(e: impl ToString) -> String {
     e.to_string()
 }
@@ -113,10 +118,25 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
         return Err(access_error(engine, &input.access));
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.lock().map_err(db_err)?;
-    let tuning = Tuning { model: input.model, effort: input.effort, access: input.access };
-    store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, input.account_id.as_deref(), crate::util::now_ts_ms())
-        .map_err(db_err)
+    // `pool:<nome>` no lugar da conta: o pool escolhe a conta agora e a conversa fica ligada a ele (o pool de
+    // contas do chat só troca com o pool escolhido pela pessoa).
+    let (account_id, pool_id) = match input.account_id.as_deref().and_then(crate::accounts::pools::pool_ref) {
+        Some(name) => {
+            let (account, pool) = super::pool::resolve_at_create(db, &input.agent_id, name)?;
+            (account, Some(pool))
+        }
+        None => (input.account_id.clone(), None),
+    };
+    let row = {
+        let conn = db.lock().map_err(db_err)?;
+        let tuning = Tuning { model: input.model, effort: input.effort, access: input.access };
+        store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, account_id.as_deref(), crate::util::now_ts_ms())
+            .map_err(db_err)?
+    };
+    if let Some(pool) = pool_id {
+        super::pool::bind(db, &id, Some(&pool))?;
+    }
+    Ok(row)
 }
 
 fn access_error(engine: Engine, access: &str) -> String {
@@ -141,7 +161,9 @@ pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &st
 /// motores o caminho já está no texto (ver `attach`). Uma imagem que não cabe nos limites segue só
 /// pelo texto: nunca derruba a mensagem.
 pub async fn send_with(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), String> {
-    send_mode(app, db, thread_id, text, SendMode::SteerActive, images).await.map_err(String::from)
+    // A conta original renovou (conversa que trocou pelo pool)? Volta antes de enviar, só com a conversa livre.
+    let text = if status(thread_id).working { text.to_string() } else { super::pool::before_send(app, db, thread_id, text) };
+    send_mode(app, db, thread_id, &text, SendMode::SteerActive, images).await.map_err(String::from)
 }
 
 /// Uma trava por conversa: a checagem do turno e o envio (`turn/start`/`turn/steer`) acontecem juntos, sem

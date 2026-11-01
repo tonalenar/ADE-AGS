@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.43.2
+version: 1.43.3
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -503,6 +503,7 @@ When orchestrating a team with a QA agent, follow the continuous validation mode
    - Final validation before mission delivery is **ONE single full run** of the integrated suite (or delegated to the CI via `gh pr checks <n> --watch`).
 
 2. **No Recurrent Local Full Suite (Point 3):**
+   - `ags test affected` picks the diff base on its own, in this order: `branch.<name>.agsbase` if set; else the first existing of `origin/dev`, `gh/dev`, `dev`, `origin/master`, `master`. With no base at all it fails and prints the exact `git config branch.<name>.agsbase <ref>` to run. It never skips tests silently.
    - Agents **DO NOT** repeat the full test suite locally on routine iterations. Use `ags test affected` (which selectively runs only changed vitest/babel/rust components).
    - **Commit product code before testing.** Run `ags test affected` on a clean product tree (a local commit is enough, even a provisional one). The green result is reused for the same `HEAD^{tree}` and the same command, including from another worktree (`já verde neste hash`). Untracked skill files under `.agents/`, `.claude/`, and the other agent metadata directories do not dirty that cache. Modified or untracked product files still do. Do not vary flags in a way that selects a different suite; equivalent spellings of the same command share a key.
    - When opening a Pull Request, agents wait for CI to validate using GitHub CLI watch mode:

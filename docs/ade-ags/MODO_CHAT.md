@@ -350,3 +350,7 @@ O plano completo, com as fases F2 a F7, fica fora do repositório. Resumo:
 ## Vigia do chat (o orquestrador ciente dos integrantes)
 
 Um time de conversas por protocolo não tem terminal para o Vigia das missões olhar. O **vigia do chat** (`chat_team/watch*.rs`, `ipc/commands/chat_watch.rs`) lê o que o backend já tem (pedidos `chat_request`, turnos `chat_run`, a timeline) e avisa o orquestrador, pela fila durável, quando um integrante: espera a **pessoa** há ≥ 20 s (comando, edição, pergunta), terminou o turno perguntando algo a ela, ou teve o turno falho; e quando a pessoa destrava. «Sem progresso» (15 min sem item novo) é um segundo interruptor, desligado por padrão. Os dois ficam no painel Time (`chat_team.watch`, `chat_team.watch_stall`). Sem LLM e sem cota; só avisa, e a decisão é sempre da pessoa. Detalhes: [`docs/agentes/VIGIA.md`](../agentes/VIGIA.md#no-chat-times-de-conversas-por-protocolo).
+
+## Pool de contas na conversa
+
+Com «pool:Nome» como conta e o interruptor ligado (Contas → Pools → «Pool de contas no chat»: desligado, avisar e perguntar ou automático), uma conversa por protocolo cujo turno falha por limite segue em outra conta do mesmo pool, com o resumo das últimas falas, e volta à original quando ela renova. Detalhes, tetos e a ressalva de política em [POOL_FAILOVER.md](./POOL_FAILOVER.md#pool-de-contas-no-chat-conversas-por-protocolo).

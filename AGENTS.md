@@ -119,6 +119,31 @@ Para **usar** o app pela CLI (abrir abas, peers, portais, memória), siga a skil
 | Testes | `ags test affected` · `bun run test` · `cd src-tauri && cargo test --lib --bin ags` |
 | Esperar CI | `gh pr checks <n> --repo tonalenar/ADE-AGS --watch` |
 | Abrir PR | `gh pr create --repo tonalenar/ADE-AGS --base dev` |
+| App no Mac | `env -u CARGO_TARGET_DIR bun run tauri build --bundles app` |
+
+### 5.1 Gerar o app no Mac
+
+Na raiz do repositório, com a ADE fechada:
+
+```bash
+env -u CARGO_TARGET_DIR bun run tauri build --bundles app
+```
+
+Não ponha `--` antes de `--bundles`: o Tauri entrega esse argumento ao Cargo e o build quebra. Tire o `CARGO_TARGET_DIR` do ambiente. O `stage-cli` só copia a CLI de `src-tauri/target/release/ags`; com a variável apontando para outro target, o `.app` sai sem o `ags`.
+
+`--bundles app` entrega só o `.app`. Sem esse filtro, o `tauri.conf.json` (`bundle.targets: all`) também gera o `.dmg`.
+
+O Tauri roda antes o `beforeBuildCommand`: `bun run build && bun run stage-cli`.
+
+| Passo | O que faz | Saída |
+|---|---|---|
+| `bun run build` | `tsc` e o Vite de produção | `dist/` |
+| `bun run stage-cli` | `cargo build --release --bin ags` e copia o binário | `src-tauri/binaries/ags` (não commitar) |
+| `tauri build` | compila a app em release e empacota | `src-tauri/target/release/bundle/macos/ADE AGS.app` |
+
+Abrir esse `.app` não substitui o de `/Applications`. Copiar por cima do app instalado é instalação: só com OK explícito e com a ADE já fechada, porque isso mata os terminais.
+
+Para desenvolver sem empacotar, `bun run tauri dev` (Vite na porta 1420). No Windows, a instância isolada continua sendo `pwsh scripts/dev-local.ps1 -Run`.
 
 ---
 

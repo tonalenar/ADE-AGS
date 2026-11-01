@@ -125,22 +125,32 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 /// in the plan, so deleting a module cannot silently remove its validation.
 ///
 /// The base is where the worktree started (`branch.<name>.agsbase`, written when a
-/// mission creates it), else the repository's integration base (`origin/dev` in
-/// git-flow, or the remote default) — never the last green tree. A sliding base
-/// can skip a file that was verified only in another worktree, or that changed
-/// again after that green result. Before, it was always
+/// mission creates it), else the first integration ref that exists (`origin/dev`,
+/// `gh/dev`, `dev`), else `origin/master` or `master` — never the last green tree.
+/// A sliding base can skip a file that was verified only in another worktree, or
+/// that changed again after that green result. Before, it was always
 /// `origin/master`: a mission started from `dev` 150+ commits ahead saw `lib.rs` and
 /// `Cargo.lock` as changed and every call ran the full suites.
-pub fn base_ref(root: &Path) -> String {
-    crate::runs::worktrees::recorded_base(root)
-        .or_else(|| crate::runs::worktrees::resolve_base(root, None, false))
-        // Sem base nenhuma, o diff falha com a mensagem de sempre e nenhum teste é pulado.
-        .unwrap_or_else(|| "origin/master".into())
+///
+/// Sem nenhuma dessas refs, erro com o comando para gravar a base: nunca pula testes em silêncio.
+pub fn base_ref(root: &Path) -> Result<String, String> {
+    if let Some(base) = crate::runs::worktrees::recorded_base(root) {
+        return Ok(base);
+    }
+    let found = ["origin/dev", "gh/dev", "dev", "origin/master", "master"]
+        .into_iter()
+        .find(|rev| git(root, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")]).is_ok());
+    found.map(str::to_string).ok_or_else(|| {
+        let branch = git(root, &["symbolic-ref", "--quiet", "--short", "HEAD"]).unwrap_or_else(|_| "<nome>".into());
+        format!(
+            "Nenhuma base para o ags test affected: não existem origin/dev, gh/dev, dev, origin/master nem master. Grave uma com: git config branch.{branch}.agsbase <ref>; nenhum teste foi pulado."
+        )
+    })
 }
 
 pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = std::collections::BTreeSet::new();
-    let range = format!("{}...HEAD", base_ref(root));
+    let range = format!("{}...HEAD", base_ref(root)?);
     for args in [
         vec![
             "diff",
@@ -172,7 +182,7 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
 
 pub fn unsafe_files(root: &Path, changed: &[String]) -> Result<Vec<String>, String> {
     let mut files = std::collections::BTreeSet::new();
-    let range = format!("{}...HEAD", base_ref(root));
+    let range = format!("{}...HEAD", base_ref(root)?);
     for revision in [range.as_str(), "HEAD"] {
         let diff = git(
             root,
@@ -844,6 +854,40 @@ mod tests {
             changed_files(&root).unwrap(),
             vec!["committed file", "staged", "tracked", "untracked"]
         );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn base_do_affected_escolhe_a_base_sem_configuracao() {
+        let root = repository();
+        let initial = git(&root, &["rev-parse", "HEAD"]).unwrap();
+        let original = git(&root, &["symbolic-ref", "--short", "HEAD"]).unwrap();
+        git(&root, &["checkout", "-q", "-b", "feature/teste-base"]).unwrap();
+        git(&root, &["branch", "-D", &original]).unwrap();
+        std::fs::write(root.join("a"), "a").unwrap();
+        git(&root, &["add", "a"]).unwrap();
+        git(&root, &["commit", "-m", "a"]).unwrap();
+        std::fs::write(root.join("b"), "b").unwrap();
+        git(&root, &["add", "b"]).unwrap();
+        git(&root, &["commit", "-m", "b"]).unwrap();
+        let err = changed_files(&root).unwrap_err();
+        assert!(err.contains("git config branch.feature/teste-base.agsbase <ref>"), "{err}");
+        git(&root, &["update-ref", "refs/remotes/gh/dev", "HEAD~1"]).unwrap();
+        assert_eq!(changed_files(&root).unwrap(), vec!["b"]);
+        git(&root, &["update-ref", "refs/heads/dev", &initial]).unwrap();
+        assert_eq!(changed_files(&root).unwrap(), vec!["b"], "gh/dev vence o dev local");
+        git(&root, &["update-ref", "refs/remotes/origin/dev", &initial]).unwrap();
+        assert_eq!(changed_files(&root).unwrap(), vec!["a", "b"], "origin/dev vence gh/dev");
+        git(&root, &["update-ref", "-d", "refs/remotes/origin/dev"]).unwrap();
+        git(&root, &["update-ref", "-d", "refs/remotes/gh/dev"]).unwrap();
+        git(&root, &["update-ref", "-d", "refs/heads/dev"]).unwrap();
+        git(&root, &["update-ref", "refs/remotes/origin/master", &initial]).unwrap();
+        assert_eq!(changed_files(&root).unwrap(), vec!["a", "b"], "origin/master é o último recurso remoto");
+        git(&root, &["update-ref", "-d", "refs/remotes/origin/master"]).unwrap();
+        git(&root, &["update-ref", "refs/heads/master", &initial]).unwrap();
+        assert_eq!(changed_files(&root).unwrap(), vec!["a", "b"], "master local é o último recurso");
+        git(&root, &["config", "branch.feature/teste-base.agsbase", &initial]).unwrap();
+        git(&root, &["update-ref", "refs/remotes/gh/dev", "HEAD~1"]).unwrap();
+        assert_eq!(changed_files(&root).unwrap(), vec!["a", "b"], "a base gravada na branch vence tudo");
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

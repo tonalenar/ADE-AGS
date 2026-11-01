@@ -143,6 +143,17 @@ pub fn set_remote_id(conn: &Connection, id: &str, remote: &str) -> rusqlite::Res
     conn.execute("UPDATE chat_thread SET remote_id = ?2 WHERE id = ?1", params![id, remote]).map(|_| ())
 }
 
+/// Troca a conta da conversa (`None` = a principal do agente). A sessão antiga mora no perfil da conta antiga:
+/// quem troca também chama [`clear_remote_id`].
+pub fn set_account(conn: &Connection, id: &str, account_id: Option<&str>) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_thread SET account_id = ?2 WHERE id = ?1", params![id, account_id]).map(|_| ())
+}
+
+/// Esquece a sessão do agente: a próxima mensagem abre uma nova (sem tentar retomar a de outra conta).
+pub fn clear_remote_id(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_thread SET remote_id = NULL WHERE id = ?1", params![id]).map(|_| ())
+}
+
 pub fn set_tuning(conn: &Connection, id: &str, tuning: &Tuning, now: i64) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE chat_thread SET model = ?2, effort = ?3, access = ?4, updated_at = ?5 WHERE id = ?1",

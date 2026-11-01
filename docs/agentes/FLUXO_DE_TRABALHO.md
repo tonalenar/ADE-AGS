@@ -26,7 +26,7 @@
 | Relatório A/B | `node scripts/ab-report.mjs [grupo]` (lê `data.db` só para leitura) |
 
 ## Testes: rápido, não suíte completa
-- No ciclo interno, use **`ags test affected`**, depois de commitar o código de produto: o cache vale por `HEAD^{tree}`, e a comparação é com `origin/master`. Detalhes em `docs/ade-ags/TEST_SPEED.md` e `TEST_CACHE.md`.
+- No ciclo interno, use **`ags test affected`**, depois de commitar o código de produto: o cache vale por `HEAD^{tree}`, e a comparação é com a base do worktree. A base é `branch.<nome>.agsbase` (se gravada); senão a primeira que existir entre `origin/dev`, `gh/dev`, `dev`, `origin/master` e `master`. Sem nenhuma, o comando falha com o `git config branch.<nome>.agsbase <ref>` a rodar, sem pular testes. Detalhes em `docs/ade-ags/TEST_SPEED.md` e `TEST_CACHE.md`.
 - Suíte completa local **só** em três casos: migração de schema ou DDL; `unsafe`, COM ou Win32; mudança de schema IPC.
 - Não remova targets nem worktrees de uma missão em andamento.
 

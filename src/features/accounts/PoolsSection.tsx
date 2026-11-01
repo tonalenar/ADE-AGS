@@ -5,6 +5,7 @@ import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AccountCapableAgent } from "@/features/accounts/types";
+import { ChatPoolModeSwitch } from "./ChatPoolMode";
 import { STRATEGIES, poolRemove, poolSaveNew, poolSetFailover, usePools, type Pool, type PoolStrategy } from "./pools";
 
 /**
@@ -82,6 +83,7 @@ export function PoolsSection({ agent }: { agent: AccountCapableAgent }) {
         )}
       </div>
       <p className="mb-2 text-[11px] leading-relaxed text-gray-500 dark:text-white/40">{t("accounts.pools.hint", { agent: agent.label })}</p>
+      <ChatPoolModeSwitch />
 
       {pools.map((p) => (
         <div key={p.id} className="flex items-center gap-2 py-1.5 px-2 rounded-lg border border-gray-200 dark:border-white/8 mb-1.5">

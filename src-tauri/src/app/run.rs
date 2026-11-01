@@ -8,6 +8,9 @@ use crate::database::DbConnection;
 /// Restaura la ventana que el usuario va a ver y deja el resto para después del
 /// primer cuadro. Skills, barrido y adjuntos van a un hilo: no bloquean ese cuadro.
 fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
+    // Antes dos terminais restaurados: o `open` do PATH e o chamariz já existem
+    // quando um agente pede o simulador. A tela fica no painel, não numa janela extra.
+    crate::sim_host::start();
     // `--headless`: para CI y scripts. No se restaura el workspace ni se muestra nada;
     // la ventana principal queda creada pero oculta (algunos comandos de la CLI la
     // necesitan para existir) y todo lo demás —IPC, scheduler, bus— corre igual. Las
@@ -340,6 +343,9 @@ pub fn run() {
             crate::conversa::chat_new_worktree,
             crate::conversa::chat_threads,
             crate::conversa::chat_thread_create,
+            crate::conversa::chat_pool_pending,
+            crate::conversa::chat_pool_accept,
+            crate::conversa::chat_pool_dismiss,
             crate::conversa::chat_thread_send,
             crate::conversa::chat_thread_switch_agent,
             crate::conversa::chat_attachment_inspect,

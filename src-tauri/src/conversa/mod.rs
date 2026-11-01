@@ -33,6 +33,7 @@ pub mod commands;
 pub mod opencode;
 pub mod opencode_map;
 pub mod permission;
+pub mod pool;
 pub mod resume;
 pub mod store;
 pub mod troca;
@@ -42,6 +43,8 @@ pub mod worktree;
 mod attach_test;
 #[cfg(test)]
 mod handoff_test;
+#[cfg(test)]
+mod pool_test;
 #[cfg(test)]
 mod troca_test;
 #[cfg(test)]

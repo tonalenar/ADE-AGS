@@ -64,7 +64,9 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, after = null }: {
+export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, after = null, threadId }: {
+  /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
+  threadId?: string;
   /** O espaço no fim da lista para o composer que flutua por cima (`ChatFrame`); 0 = o fim de sempre. */
   bottomInset?: number;
   items: TimelineItem[];
@@ -173,7 +175,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
           <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.empty", { agent: agentLabel })}</p>
         )}
         {turns.map((turn, i) => turn.notice
-          ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} />
+          ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
           : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} />)}
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending /> : null; })}
         {approvalCard}

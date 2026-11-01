@@ -92,3 +92,20 @@ pub fn chat_permission_notify(app: AppHandle, title: String, body: String) -> Re
     let body: String = body.chars().take(300).collect();
     Ok(crate::notifier::show_custom(&app, &title, &body))
 }
+
+/// O que espera a resposta da pessoa no pool de contas da conversa («Continuar na conta B?», «Voltar à A?»).
+#[tauri::command]
+pub fn chat_pool_pending(db: State<'_, DbConnection>, thread_id: String) -> Option<super::pool::Pending> {
+    super::pool::pending(&db, &thread_id)
+}
+
+#[tauri::command]
+pub async fn chat_pool_accept(app: AppHandle, db: State<'_, DbConnection>, thread_id: String) -> Result<(), String> {
+    let db = db.inner().clone();
+    super::pool::accept(&app, &db, &thread_id).await
+}
+
+#[tauri::command]
+pub fn chat_pool_dismiss(db: State<'_, DbConnection>, thread_id: String) {
+    super::pool::dismiss(&db, &thread_id);
+}
