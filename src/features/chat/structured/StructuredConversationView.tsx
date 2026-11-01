@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -26,7 +26,9 @@ import { addPending, dropPending, usePending } from "../timeline/pending";
 import { withDrafts } from "../timeline/streaming";
 import type { RequestRow, ThreadRow } from "./ipc";
 import { EMPTY_LIVE, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
-import { answerRequest, hydrateThread, interruptThread, retuneThread, sendToThread, useStructured } from "./store";
+import { AgentSwitchDialog } from "./AgentSwitchDialog";
+import { answerRequest, hydrateThread, interruptThread, retuneThread, sendToThread, switchThreadAgent, useStructured } from "./store";
+import { switchableAgents } from "./switchModel";
 
 /**
  * Uma conversa por protocolo (o Codex pelo `app-server`, o Claude Code pelo `claude -p`): a mesma
@@ -40,9 +42,13 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   // Orquestrador de um time: "Time | Só o orquestrador", o @agente e o resumo do time (prancheta 15).
   const team = useTeamComposer(card, cards);
   const live = useStructured((s) => s.live[thread.id]) ?? EMPTY_LIVE;
-  const agentInfo = useTabsStore((s) => s.detectedAgents.find((a) => a.id === thread.agentId))
-    ?? { id: thread.agentId, label: card.agentLabel, command: "", available: true };
   const hydrated = useStructured((s) => !!s.hydrated[thread.id]);
+  // Trocar de agente na mesma conversa: a escolha espera a confirmação (a cada troca).
+  const detected = useTabsStore((s) => s.detectedAgents);
+  const switchable = useMemo(() => switchableAgents(detected, thread.agentId, card.agentLabel), [detected, thread.agentId, card.agentLabel]);
+  const [switchTo, setSwitchTo] = useState<{ agentId: string; model: string | null } | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   useEffect(() => hydrateThread(thread.id), [thread.id]);
 
   const request: RequestRow | null = live.requests[0] ?? null;
@@ -96,9 +102,13 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
     </div>
   ) : (
     <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex min-w-0 flex-wrap items-center justify-end gap-x-0.5 gap-y-1">
-      <AgentModelPicker agents={[agentInfo]} showAccount={false} disabled={locked}
+      {/* O trilho de agentes: escolher outro agente troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
+      <AgentModelPicker agents={switchable} showAccount={false} disabled={locked}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
-        onChange={(v) => retuneThread(thread.id, v.model, thread.effort, thread.access)} />
+        onChange={(v) => {
+          if (v.agentId && v.agentId !== thread.agentId) { setSwitchError(null); setSwitchTo({ agentId: v.agentId, model: v.model }); return; }
+          retuneThread(thread.id, v.model, thread.effort, thread.access);
+        }} />
       <EffortMenu agentId={thread.agentId} model={thread.model} account={null} value={thread.effort} disabled={locked}
         onChange={(effort) => retuneThread(thread.id, thread.model, effort, thread.access)} />
       {planSupported(thread.agentId, true) && (
@@ -153,6 +163,18 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           onAnswer={question ? answer : undefined} onResend={resend}
           after={<TeamThreadFeed conversation={card} cards={cards} />} />
       )} />
+      {switchTo && (
+        <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError}
+          onClose={() => setSwitchTo(null)}
+          onConfirm={() => {
+            setSwitching(true);
+            void switchThreadAgent(thread.id, switchTo.agentId, switchTo.model, null, thread.access).then((error) => {
+              setSwitching(false);
+              if (error) setSwitchError(error);
+              else setSwitchTo(null);
+            });
+          }} />
+      )}
     </div>
   );
 }

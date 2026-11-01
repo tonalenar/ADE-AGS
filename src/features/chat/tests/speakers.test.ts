@@ -41,4 +41,10 @@ describe("quem fala e quando aparece o logo e o nome acima do texto", () => {
   it("começar a conversa já com a fala de outro agente mostra o nome dele", () => {
     expect([...speakerHeaders([peer("p1", "Codex")])]).toEqual(["p1"]);
   });
+
+  it("trocar de agente no meio da conversa muda a voz: o agente novo leva o cabeçalho mesmo sem a pessoa falar no meio", () => {
+    const sw = (id: string, from: string, to: string): TimelineItem => ({ kind: "notice", id, label: "agentSwitch", text: JSON.stringify({ from, to, fromLabel: from, toLabel: to, model: null, strategy: "full", accessChanged: false }) });
+    const shown = speakerHeaders([person("u"), self("a1"), self("a2"), sw("n", "claude-code", "codex"), self("a3"), self("a4")]);
+    expect([...shown]).toEqual(["a1", "a3"]);
+  });
 });

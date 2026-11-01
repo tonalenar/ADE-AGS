@@ -248,6 +248,10 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                   {t("chat.picker.opencodeNone")} <code className="font-mono">opencode auth login</code>
                 </p>
               )}
+              {tab === "cursor" && (
+                // O Cursor não tem flag de esforço: cada variante (`…-low`, `…-high`) é um modelo da própria lista.
+                <p className="px-2 py-2 text-chat-caption text-gray-500 dark:text-white/45">{t("chat.picker.cursorEffort")}</p>
+              )}
               {!roster && tab !== "fav" && <p className="px-2 py-3 text-chat-note text-gray-400 dark:text-white/40">{t("chat.picker.loading")}</p>}
             </div>
             {showAccount && <div className="flex items-center gap-2 h-9 shrink-0 px-3 border-t border-gray-200 dark:border-white/[0.08] text-chat-caption text-gray-500 dark:text-white/45">

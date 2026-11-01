@@ -407,6 +407,14 @@ fn discover_catalog(
             if models.is_empty() { return ModelCatalog::unavailable(); }
             Ok(models)
         }
+        ModelSource::CursorModels => {
+            let Some(output) = run_with_env(def.command, &["models"], env) else {
+                return ModelCatalog::unavailable();
+            };
+            let models = parse_cursor_models(&output);
+            if models.is_empty() { return ModelCatalog::unavailable(); }
+            Ok(models)
+        }
         ModelSource::GeminiCatalogue => unreachable!("handled before the installation check"),
         ModelSource::Unknown => return ModelCatalog::unsupported(),
     };
@@ -446,6 +454,28 @@ fn parse_antigravity_models(output: &str) -> Vec<RosterModel> {
             model.default_reasoning = Some(effort.into());
         }
         Some(model)
+    }).collect()
+}
+
+/// A saída de `cursor-agent models`: uma linha `id - Nome` por modelo (o id é o primeiro item). Cabeçalhos,
+/// dicas, cores e repetidos ficam de fora, e as marcas `(default)`/`(current)` saem do nome. O esforço do Cursor
+/// vem DENTRO do id de cada variante (`gpt-5.1-codex-high`): não vira nível à parte, para não prometer um
+/// controle que o CLI não tem. Formato conferido pelo parser de terceiros e pela referência do CLI, não por
+/// uma execução local (o `cursor-agent` não está instalado nesta máquina).
+fn parse_cursor_models(output: &str) -> Vec<RosterModel> {
+    let mut seen = HashSet::new();
+    crate::orchestrator::digest::strip_ansi(output).lines().filter_map(|line| {
+        let (id, name) = line.trim().split_once(" - ")?;
+        let id = id.trim();
+        if id.is_empty() || id.ends_with(':')
+            || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':'))
+            || !seen.insert(id.to_owned()) { return None; }
+        let mut label = name.trim();
+        while let Some(stripped) = label.strip_suffix(')').and_then(|rest| rest.rsplit_once('(')).filter(|(_, mark)| matches!(mark.trim(), "default" | "current" | "current, default" | "default, current")) {
+            label = stripped.0.trim_end();
+        }
+        let label = if label.is_empty() { id } else { label };
+        Some(catalogue_model(id, label, "native", ModelAvailability::Available))
     }).collect()
 }
 
@@ -744,6 +774,19 @@ mod model_cache_tests {
         assert_eq!(models[0].default_reasoning.as_deref(), Some("high"));
         assert!(models[1].reasoning_levels.is_none());
         assert!(parse_antigravity_models("not a model catalogue").is_empty());
+    }
+    #[test]
+    fn cursor_catalogue_lists_id_and_name_and_never_invents_effort() {
+        // O formato `id - Nome` (o id é o primeiro item de cada linha), com cabeçalho, marcas e cores no caminho.
+        let out = "\u{1b}[2mLoading models…\u{1b}[0m\nAvailable models\n\nauto - Auto (default)\ngpt-5.1-codex-high - GPT-5.1 Codex High\nsonnet-4.5-thinking - Claude 4.5 Sonnet (current)\ngpt-5.1-codex-high - Repetido\nTip: use /model - para trocar\nid com espaço - Inválido\n";
+        let models = parse_cursor_models(out);
+        assert_eq!(models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["auto", "gpt-5.1-codex-high", "sonnet-4.5-thinking"]);
+        assert_eq!(models[0].label, "Auto");
+        assert_eq!(models[2].label, "Claude 4.5 Sonnet");
+        // O esforço do Cursor faz parte do id (`…-high`): a variante é um modelo da lista, não um nível à parte.
+        assert!(models.iter().all(|m| m.reasoning_levels.is_none() && m.default_reasoning.is_none()));
+        assert!(models.iter().all(|m| m.source.as_deref() == Some("native") && m.availability == ModelAvailability::Available && m.cost_in.is_none()));
+        assert!(parse_cursor_models("Not logged in. Run cursor-agent login").is_empty());
     }
     #[test]
     fn gemini_reference_catalogue_is_visible_without_claiming_account_access() {

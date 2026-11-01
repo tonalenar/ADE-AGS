@@ -18,6 +18,8 @@ const MODEL_FLAG: Record<string, string> = {
   "gemini-cli": "-m",
   // OpenCode: `opencode --model <provedor/modelo>` (o formato que o catálogo dele lista).
   opencode: "--model",
+  // Cursor Agent: `cursor-agent --model <id>` (os ids vêm de `cursor-agent models`). Esforço não tem flag: vem no id.
+  cursor: "--model",
 };
 
 /**

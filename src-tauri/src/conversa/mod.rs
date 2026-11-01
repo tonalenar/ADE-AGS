@@ -11,6 +11,7 @@
 //! - `agy_map` e `agy`: o mesmo para o Antigravity (`agy --print --output-format stream-json`);
 //! - `turn`: abrir e fechar o turno no banco, comum aos motores mais novos;
 //! - `attach`: os anexos das mensagens (conferir caminhos, miniaturas e imagens em linha do Claude);
+//! - `handoff` e `troca`: trocar de agente na mesma conversa (resumo determinístico e a troca em si);
 //! - `api`: o núcleo (criar, mandar, parar, responder, trocar), usado pela tela, pela CLI e pelo MCP;
 //! - `commands`: os comandos Tauri;
 //! - `worktree`: o worktree de uma conversa nova.
@@ -26,6 +27,7 @@ pub mod codex;
 pub mod codex_map;
 pub mod envio;
 pub mod events;
+pub mod handoff;
 pub mod memoria;
 pub mod commands;
 pub mod opencode;
@@ -33,10 +35,15 @@ pub mod opencode_map;
 pub mod permission;
 pub mod resume;
 pub mod store;
+pub mod troca;
 pub mod turn;
 pub mod worktree;
 #[cfg(test)]
 mod attach_test;
+#[cfg(test)]
+mod handoff_test;
+#[cfg(test)]
+mod troca_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
@@ -45,6 +52,7 @@ mod test_memoria;
 mod test_motores;
 
 pub use attach::*;
+pub use troca::*;
 pub use commands::*;
 pub use store::migrate;
 pub use worktree::*;

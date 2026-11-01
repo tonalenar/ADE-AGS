@@ -4447,5 +4447,17 @@
   "chat.team.watch.on": "Avisar al orquestador cuando un integrante se bloquee",
   "chat.team.watch.hint": "Una petición que espera por ti más de 20 s, una pregunta sin respuesta o un turno fallido se convierte en UN aviso al orquestador (y otro cuando respondes). La decisión sigue siendo tuya: el orquestador no puede aprobar nada.",
   "chat.team.watchStall.on": "Avisar también cuando un integrante no avance",
-  "chat.team.watchStall.hint": "Un integrante trabajando sin ningún elemento nuevo durante 15 min se convierte en UN aviso al orquestador. Solo avisa: no interrumpe ni escribe en la conversación del integrante. Desactivado por defecto."
+  "chat.team.watchStall.hint": "Un integrante trabajando sin ningún elemento nuevo durante 15 min se convierte en UN aviso al orquestador. Solo avisa: no interrumpe ni escribe en la conversación del integrante. Desactivado por defecto.",
+  "chat.picker.cursorEffort": "En Cursor el esfuerzo es parte del modelo: elige la variante de la lista (por ejemplo …-low o …-high).",
+  "chat.timeline.notice.agentSwitch": "Ahora con {{agent}}",
+  "chat.timeline.notice.agentSwitchModel": "Ahora con {{agent}} · {{model}}",
+  "chat.timeline.notice.agentSwitchFull": "{{agent}} recibió un resumen de esta conversación, no la memoria interna de {{from}}.",
+  "chat.timeline.notice.agentSwitchDelta": "{{agent}} volvió a su propia sesión y recibió solo un resumen de lo ocurrido mientras estuvo fuera.",
+  "chat.timeline.notice.agentSwitchAccess": "El modo de acceso elegido no existe en {{agent}}: quedó Supervisado.",
+  "chat.agentSwitch.title": "¿Cambiar a {{agent}}?",
+  "chat.agentSwitch.body": "La conversación sigue aquí, con el mismo historial, la misma carpeta y el mismo equipo. {{agent}} pasa a responder y recibe un resumen de esta conversación (como dato, no como instrucción).",
+  "chat.agentSwitch.loss": "Se pierde lo que solo {{from}} guardaba por dentro (caché y razonamiento interno): su sesión queda guardada por si vuelves.",
+  "chat.agentSwitch.confirm": "Cambiar a {{agent}}",
+  "chat.agentSwitch.busy": "Cambiando…",
+  "chat.agentSwitch.failed": "No se pudo cambiar de agente: {{error}}"
 }

@@ -4447,5 +4447,17 @@
   "chat.team.watch.on": "Avisar o orquestrador quando um integrante travar",
   "chat.team.watch.hint": "Um pedido que espera por você há mais de 20 s, uma pergunta sem resposta ou um turno que falhou vira UM aviso ao orquestrador (e outro quando você responde). A decisão continua sendo sua: o orquestrador não pode liberar nada.",
   "chat.team.watchStall.on": "Avisar também quando um integrante ficar sem progresso",
-  "chat.team.watchStall.hint": "Um integrante trabalhando sem nenhum item novo há 15 min vira UM aviso ao orquestrador. Só avisa: não interrompe nem escreve na conversa do integrante. Desligado por padrão."
+  "chat.team.watchStall.hint": "Um integrante trabalhando sem nenhum item novo há 15 min vira UM aviso ao orquestrador. Só avisa: não interrompe nem escreve na conversa do integrante. Desligado por padrão.",
+  "chat.picker.cursorEffort": "No Cursor o esforço faz parte do modelo: escolha a variante na lista (por exemplo, …-low ou …-high).",
+  "chat.timeline.notice.agentSwitch": "Agora com {{agent}}",
+  "chat.timeline.notice.agentSwitchModel": "Agora com {{agent}} · {{model}}",
+  "chat.timeline.notice.agentSwitchFull": "{{agent}} recebeu um resumo desta conversa, não a memória interna de {{from}}.",
+  "chat.timeline.notice.agentSwitchDelta": "{{agent}} voltou à sessão dele e recebeu só o resumo do que aconteceu enquanto esteve fora.",
+  "chat.timeline.notice.agentSwitchAccess": "O modo de acesso escolhido não existe em {{agent}}: ficou Supervisionado.",
+  "chat.agentSwitch.title": "Trocar para {{agent}}?",
+  "chat.agentSwitch.body": "A conversa continua aqui, com o mesmo histórico, a mesma pasta e o mesmo time. {{agent}} passa a responder e recebe um resumo desta conversa (como dado, não como instrução).",
+  "chat.agentSwitch.loss": "Perde-se o que só {{from}} guardava por dentro (cache e raciocínio interno): a sessão dele fica guardada para o caso de você voltar.",
+  "chat.agentSwitch.confirm": "Trocar para {{agent}}",
+  "chat.agentSwitch.busy": "Trocando…",
+  "chat.agentSwitch.failed": "Não deu para trocar de agente: {{error}}"
 }

@@ -178,6 +178,17 @@ pub(super) fn codex_error(failure: RequestFailure) -> SendError {
 /// de a mensagem chegar ao agente (a sessão não abre, o processo já fechou, o canal de escrita fechou) é
 /// `NotSent`; um pedido que saiu e perdeu a resposta é `Unknown`.
 pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
+    // Conversa que acabou de trocar de agente: o resumo do contexto vai na frente desta mensagem e só sai da fila
+    // de pendências quando a mensagem foi de fato enviada (uma recusa não o perde).
+    let (framed, carries_summary) = super::troca::before_send(db, thread_id, text);
+    let sent = send_framed(app, db, thread_id, &framed, mode, images).await;
+    if carries_summary && sent.is_ok() {
+        super::troca::summary_sent(db, thread_id);
+    }
+    sent
+}
+
+async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
     let gate = send_gate(thread_id);
     let _held = gate.lock().await;
     let row = thread(db, thread_id).map_err(SendError::NotSent)?;
