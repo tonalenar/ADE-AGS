@@ -234,9 +234,9 @@ impl Dtu {
     }
 
     /// Um dedo em `ratio` (0..1, origem no topo).
-    pub fn touch(self: &Arc<Self>, ratio: (f64, f64), phase: Touch) {
+    pub fn touch(self: &Arc<Self>, ratio: (f64, f64), phase: Touch, edge: u64) {
         let point = Dict::new().f64("x", ratio.0).f64("y", ratio.1);
-        let payload = Dict::new().dict("pointOne", point).u64("eventType", phase as u64).u64("edge", 0).u64("target", 0);
+        let payload = Dict::new().dict("pointOne", point).u64("eventType", phase as u64).u64("edge", edge).u64("target", 0);
         self.send(message("IndigoDigitizerEvent", false, payload));
     }
 
