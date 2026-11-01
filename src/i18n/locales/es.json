@@ -4464,5 +4464,13 @@
   "chat.team.watch.on": "Avisar al orquestador cuando un integrante se bloquee",
   "chat.team.watch.hint": "Una petición que espera por ti más de 20 s, una pregunta sin respuesta o un turno fallido se convierte en UN aviso al orquestador (y otro cuando respondes). La decisión sigue siendo tuya: el orquestador no puede aprobar nada.",
   "chat.team.watchStall.on": "Avisar también cuando un integrante no avance",
-  "chat.team.watchStall.hint": "Un integrante trabajando sin ningún elemento nuevo durante 15 min se convierte en UN aviso al orquestador. Solo avisa: no interrumpe ni escribe en la conversación del integrante. Desactivado por defecto."
+  "chat.team.watchStall.hint": "Un integrante trabajando sin ningún elemento nuevo durante 15 min se convierte en UN aviso al orquestador. Solo avisa: no interrumpe ni escribe en la conversación del integrante. Desactivado por defecto.",
+  "chat.quote.comment": "Comentar",
+  "chat.quote.title": "Comentar un fragmento",
+  "chat.quote.field": "Comentario sobre el fragmento",
+  "chat.quote.placeholder": "Escribe tu comentario…",
+  "chat.quote.hint": "Enter añade · Esc cierra",
+  "chat.quote.add": "Añadir",
+  "chat.quote.list": "Citas",
+  "chat.quote.remove": "Quitar cita"
 }

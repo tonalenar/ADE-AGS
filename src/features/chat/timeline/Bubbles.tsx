@@ -5,6 +5,8 @@ import { agentIcon } from "@/features/agents/agentIcons";
 
 import { splitAttachmentBlock } from "../attachments/attachModel";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
+import { splitQuotes } from "../quotes/quoteModel";
+import { QuoteCards } from "../quotes/QuoteCards";
 import { COLLAPSED_PX, overflowsLimit } from "./bubbleModel";
 import { prefersReducedMotion } from "./useRevealedText";
 
@@ -51,13 +53,16 @@ export function Collapsible({ children, innerClass = "" }: { children: React.Rea
 export function PersonBubble({ text, sending = false }: { text: string; sending?: boolean }) {
   const { t } = useTranslation();
   // Os anexos (bloco `[Anexos]` do fim do texto) viram miniaturas ACIMA do texto, como no Claude Code.
-  const { text: body, attachments } = useMemo(() => splitAttachmentBlock(text), [text]);
+  const { text: withQuoted, attachments } = useMemo(() => splitAttachmentBlock(text), [text]);
+  // As citações («Comentar») viram cartões; o texto cru (`[Citação]`, `> trecho`) não aparece.
+  const { text: body, quotes } = useMemo(() => splitQuotes(withQuoted), [withQuoted]);
   return (
     <div className="flex flex-col items-end gap-1" aria-busy={sending || undefined}>
       {attachments.length > 0 && <AttachmentStrip items={attachments} className="justify-end max-w-[85%]" />}
+      {quotes.length > 0 && <QuoteCards items={quotes.map((q, i) => ({ id: String(i), ...q }))} className="max-w-[85%] self-end w-full sm:w-auto" />}
       {body && (
       <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 bg-gray-200/60 dark:bg-white/[0.08] break-words ${sending ? "opacity-70" : ""}`}>
-        <Collapsible><div className="whitespace-pre-wrap">{body}</div></Collapsible>
+        <Collapsible><div data-quotable="" className="whitespace-pre-wrap">{body}</div></Collapsible>
       </div>
       )}
       {sending && <span className="px-2 text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.sending")}</span>}
@@ -94,7 +99,7 @@ export function AgentBubble({ agentId, command, label, sender, receipt = null, h
         </div>
       )}
       <div className="min-w-0 break-words" aria-busy={caret || undefined}>
-        <div className={caret ? "cc-stream-caret" : undefined}>{children}</div>
+        <div data-quotable="" className={caret ? "cc-stream-caret" : undefined}>{children}</div>
       </div>
     </div>
   );

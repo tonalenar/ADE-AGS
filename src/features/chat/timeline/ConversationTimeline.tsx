@@ -18,6 +18,7 @@ import { displayUserText } from "./userMessage";
 import { isFresh } from "./streaming";
 import { commandTitle } from "./toolTitle";
 import { activityOf, joinParts, summarizeTools } from "./workSummary";
+import { SelectionComment } from "../quotes/SelectionComment";
 import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
 import { endOutcome, fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
@@ -62,7 +63,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, after = null, threadId }: {
+export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** O espaço no fim da lista para o composer que flutua por cima (`ChatFrame`); 0 = o fim de sempre. */
@@ -89,6 +90,8 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   onOpenTerminal?: () => void;
   /** Há uma pergunta do agente em aberto: as opções do cartão dela viram botões que respondem por aqui. */
   onAnswer?: (choice: string) => void;
+  /** A conversa de que se pode citar um trecho («Comentar»); sem ela, não há botão. */
+  quoteKey?: string;
   /** Reenvia uma mensagem que saiu da fila do agente sem ser enviada (o aviso «não enviada»). Sem ele, sem o botão. */
   onResend?: (text: string) => void;
   /** Depois dos turnos, no fim do fio: as delegações e entregas do time (`team/TeamThreadFeed`). */
@@ -192,6 +195,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
       </div>
       </AnswerContext.Provider>
       </RevealContext.Provider>
+      {quoteKey && <SelectionComment container={() => scrollRef.current} quoteKey={quoteKey} />}
     </div>
   );
 }

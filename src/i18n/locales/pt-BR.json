@@ -4464,5 +4464,13 @@
   "chat.team.watch.on": "Avisar o orquestrador quando um integrante travar",
   "chat.team.watch.hint": "Um pedido que espera por você há mais de 20 s, uma pergunta sem resposta ou um turno que falhou vira UM aviso ao orquestrador (e outro quando você responde). A decisão continua sendo sua: o orquestrador não pode liberar nada.",
   "chat.team.watchStall.on": "Avisar também quando um integrante ficar sem progresso",
-  "chat.team.watchStall.hint": "Um integrante trabalhando sem nenhum item novo há 15 min vira UM aviso ao orquestrador. Só avisa: não interrompe nem escreve na conversa do integrante. Desligado por padrão."
+  "chat.team.watchStall.hint": "Um integrante trabalhando sem nenhum item novo há 15 min vira UM aviso ao orquestrador. Só avisa: não interrompe nem escreve na conversa do integrante. Desligado por padrão.",
+  "chat.quote.comment": "Comentar",
+  "chat.quote.title": "Comentar um trecho",
+  "chat.quote.field": "Comentário sobre o trecho",
+  "chat.quote.placeholder": "Escreva o comentário…",
+  "chat.quote.hint": "Enter adiciona · Esc fecha",
+  "chat.quote.add": "Adicionar",
+  "chat.quote.list": "Citações",
+  "chat.quote.remove": "Remover citação"
 }
