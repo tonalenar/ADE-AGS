@@ -7,6 +7,13 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { language: "pt-BR" } }),
 }));
 
+const pool = vi.hoisted(() => ({ accepted: [] as string[] }));
+vi.mock("@/features/accounts/chatPool", () => ({
+  chatPoolPending: () => Promise.resolve({ kind: "join", to: null, toLabel: "Pool Teste", request: null }),
+  chatPoolAccept: (id: string) => { pool.accepted.push(id); return Promise.resolve(); },
+  chatPoolDismiss: () => Promise.resolve(),
+}));
+
 import { NoticeRow } from "@/features/chat/timeline/NoticeRow";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
@@ -64,5 +71,13 @@ describe("NoticeRow do pool de contas", () => {
     expect(text).toContain("chat.timeline.notice.poolSwitch");
     expect(text).toContain("Seguindo na conta B");
     expect(host.querySelectorAll("button").length).toBe(0);
+  });
+
+  it("a oferta de pool (conversa fora de pool) mostra «usar o pool» e aceitar chama o backend", async () => {
+    await render(<NoticeRow threadId="t1" item={notice("poolOffer", "A conta Ton esgotou o limite e esta conversa não está num pool.")} />);
+    const accept = [...host.querySelectorAll("button")].find((b) => b.textContent === "chat.timeline.notice.poolJoinAccept");
+    expect(accept).toBeTruthy();
+    await act(async () => { accept!.click(); });
+    expect(pool.accepted).toEqual(["t1"]);
   });
 });
