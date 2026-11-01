@@ -4476,5 +4476,13 @@
   "chat.agentSwitch.loss": "Perde-se o que só {{from}} guardava por dentro (cache e raciocínio interno): a sessão dele fica guardada para o caso de você voltar.",
   "chat.agentSwitch.confirm": "Trocar para {{agent}}",
   "chat.agentSwitch.busy": "Trocando…",
-  "chat.agentSwitch.failed": "Não deu para trocar de agente: {{error}}"
+  "chat.agentSwitch.failed": "Não deu para trocar de agente: {{error}}",
+  "chat.timeline.notice.agentSwitchNoApproval": "{{agent}} não tem tela de aprovação: no acesso Supervisionado ele nega o que pediria aprovação. Para liberar, troque o acesso.",
+  "chat.agentSwitch.noApproval": "{{agent}} não pergunta antes de agir: no acesso Supervisionado ele NEGA o que pediria aprovação. Depois de trocar, mude o acesso (Aceitar edições, Auto ou Total) para liberar.",
+  "chat.message.copy": "Copiar",
+  "chat.message.copied": "Copiado",
+  "chat.message.edit": "Editar e reenviar",
+  "chat.message.editHint": "Põe o texto de volta no campo de mensagem para você editar e reenviar",
+  "chat.summary.limits.others": "Outras contas conectadas ({{count}})",
+  "chat.summary.limits.usedBy": "usada por {{who}}"
 }

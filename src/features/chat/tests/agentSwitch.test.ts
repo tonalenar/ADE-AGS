@@ -12,7 +12,7 @@ const SWITCH = { from: "claude-code", to: "codex", fromLabel: "Claude Code", toL
 
 describe("o aviso «agora com Codex»", () => {
   it("lê o aviso gravado pelo backend", () => {
-    expect(agentSwitchOf(notice("n", SWITCH))).toEqual({ from: "claude-code", to: "codex", fromLabel: "Claude Code", toLabel: "Codex", model: "gpt-6.1-sol", strategy: "full", accessChanged: false });
+    expect(agentSwitchOf(notice("n", SWITCH))).toEqual({ from: "claude-code", to: "codex", fromLabel: "Claude Code", toLabel: "Codex", model: "gpt-6.1-sol", strategy: "full", accessChanged: false, noApproval: false });
   });
 
   it("um aviso de outro tipo ou com texto quebrado não é uma troca (nada estoura)", () => {

@@ -37,9 +37,11 @@ const EMPTY_ITEMS: TimelineItem[] = [];
  * FIXA pelas bordas (`top`/`bottom`): sem isso o `flex-1` do Resumo não vale, ele cresce com o conteúdo, passa
  * da altura e a roda não rola (a barra é escondida, mas a rolagem tem de existir).
  */
-export function SummaryDock({ children }: { children: React.ReactNode }) {
+export function SummaryDock({ children, overlay = false }: { children: React.ReactNode; overlay?: boolean }) {
+  // Por cima da conversa (janela estreita) o Resumo ganha fundo, borda e sombra para ler sobre o texto, e nunca passa da largura da janela.
   return (
-    <div data-summary-dock className="absolute top-[52px] bottom-0 right-3 z-10 flex flex-col min-h-0" style={{ width: SUMMARY_W }}>
+    <div data-summary-dock={overlay ? "overlay" : ""} style={{ width: SUMMARY_W, maxWidth: "calc(100% - 24px)" }}
+      className={`absolute top-[52px] right-3 z-20 flex flex-col min-h-0 ${overlay ? "bottom-3 rounded-2xl bg-white dark:bg-surface-deep shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-12px_rgba(0,0,0,0.45)]" : "bottom-0"}`}>
       {children}
     </div>
   );

@@ -245,9 +245,9 @@ function UserMessage({ item }: { item: TimelineItem }) {
   const text = item.text ?? "";
   const peer = useMemo(() => parsePeerEnvelope(text), [text]);
   const [entering] = useState(() => !!peer && reveal.entering(item.id));
-  if (!peer) return <PersonBubble text={text} />;
+  if (!peer) return <PersonBubble text={text} at={item.at} />;
   return (
-    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering}>
+    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body}>
       <Markdown content={peer.body} tone="chat" />
     </AgentBubble>
   );
@@ -263,7 +263,7 @@ function AgentText({ item }: { item: TimelineItem }) {
   const caret = revealing || reveal.live(item.id);
   const [entering] = useState(() => reveal.entering(item.id));
   return (
-    <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret}>
+    <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""}>
       <Markdown content={text} tone="chat" />
     </AgentBubble>
   );

@@ -4476,5 +4476,13 @@
   "chat.agentSwitch.loss": "What only {{from}} kept inside (cache and internal reasoning) is lost: its session stays saved in case you switch back.",
   "chat.agentSwitch.confirm": "Switch to {{agent}}",
   "chat.agentSwitch.busy": "Switching…",
-  "chat.agentSwitch.failed": "Could not switch agent: {{error}}"
+  "chat.agentSwitch.failed": "Could not switch agent: {{error}}",
+  "chat.timeline.notice.agentSwitchNoApproval": "{{agent}} has no approval prompt: in Supervised access it denies whatever would need approval. Change the access to allow it.",
+  "chat.agentSwitch.noApproval": "{{agent}} does not ask before acting: in Supervised access it DENIES whatever would need approval. After switching, change the access (Accept edits, Auto or Full) to allow it.",
+  "chat.message.copy": "Copy",
+  "chat.message.copied": "Copied",
+  "chat.message.edit": "Edit and resend",
+  "chat.message.editHint": "Puts the text back in the message box so you can edit and resend it",
+  "chat.summary.limits.others": "Other connected accounts ({{count}})",
+  "chat.summary.limits.usedBy": "used by {{who}}"
 }
