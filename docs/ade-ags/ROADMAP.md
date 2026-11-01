@@ -373,6 +373,8 @@ Redução drástica do tempo de feedback de testes para agentes e humanos atrav�
 
 iPhones e iPads do Xcode ligados sem o app Simulator, soltos no canvas com a barra flutuante e a conversa com os agentes conectados. A tela é a `IOSurface` do simulador numa camada nativa, sem cópia; o toque vai pelo HID do SimulatorKit; os agentes pilotam com `ags device …`. No modo leve, o iOS sobe sem os serviços pesados (Siri, widgets, iCloud, Spotlight…): medido no iPhone 17, de 495% para 1% de CPU depois do boot. Os quadros chegam numa fila própria, fora da thread da interface. Como funciona, leveza e o que falta: [SIMULADOR_IOS.md](./SIMULADOR_IOS.md).
 
+A prioridade de segundo plano só entra fora de vista e 60 s após a última ação de agente; a ação restaura a prioridade normal sem esperar o monitor. O painel consulta o app aberto ao montar, trocar aparelho, reabrir o app e recuperar foco, sem intervalo. O executável responde a `--version`/`--help` antes de iniciar Tauri e preserva o handshake global de uma instância viva; cada instância publica também seu handshake próprio. Após um restart, a manutenção assume o global quando a instância antiga sai. Testes isolados usam outro `ADE_AGS_DATA_DIR`.
+
 ## Portal com Chrome real
 
 O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro do app: tela por screencast, login do Google numa janela de Chrome comum encaixada sobre o Portal, uma janela por Portal, zoom, barra de rolagem sobreposta, e o Jev pilotando com cliques e teclas de verdade (`isTrusted`). Desenho, decisões (sem esconder a automação) e limites: [PORTAL_CHROME_REAL.md](./PORTAL_CHROME_REAL.md).
