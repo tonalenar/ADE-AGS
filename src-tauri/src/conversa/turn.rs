@@ -45,6 +45,7 @@ pub fn finish(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, r
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
     emit(app, thread_id, "item", json!({ "item": claude_map::turn_end(turn, result, Some(now)) }));
+    super::pool::after_turn(app, db, thread_id, result);
 }
 
 /// A parte do `finish` que mexe no banco: o status do turno, os pedidos pendentes expirados (devolve os

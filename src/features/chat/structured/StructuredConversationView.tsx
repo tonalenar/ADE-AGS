@@ -149,7 +149,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       <ChatFrame composer={composer} list={(bottomInset) => (
         <TimelineView bottomInset={bottomInset} items={items} loaded={hydrated} working={working || !!request} live
           approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
-          streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending}
+          streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} threadId={thread.id}
           onAnswer={question ? answer : undefined} onResend={resend}
           after={<TeamThreadFeed conversation={card} cards={cards} />} />
       )} />

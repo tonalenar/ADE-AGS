@@ -56,3 +56,13 @@ describe("NoticeRow", () => {
     expect(host.querySelector('[role="status"]')!.textContent).toBe("aviso novo");
   });
 });
+
+describe("NoticeRow do pool de contas", () => {
+  it("a troca mostra o título do código e a frase do app, sem botões", async () => {
+    await render(<NoticeRow threadId="t1" item={notice("poolSwitch", "A conta A esgotou o limite (renova 13:10). Seguindo na conta B.")} />);
+    const text = host.querySelector('[role="status"]')!.textContent!;
+    expect(text).toContain("chat.timeline.notice.poolSwitch");
+    expect(text).toContain("Seguindo na conta B");
+    expect(host.querySelectorAll("button").length).toBe(0);
+  });
+});
