@@ -1279,6 +1279,33 @@ fn a_frota_anota_o_par_asked_decided_da_auditoria_comum() {
     assert_eq!((decided.outcome.as_deref(), decided.decided_by.as_deref()), (Some("cancelled"), Some("app-closed")));
 }
 
+/// O sonhador que pede uma ferramenta proibida recebe `policy` na hora, sem travar: o
+/// registro da auditoria pega o banco depois que a leitura do papel o soltou.
+#[test]
+fn o_sonhador_negado_pela_politica_responde_e_fica_na_auditoria() {
+    use crate::approval_audit::Source;
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    let id = {
+        let conn = db.lock().unwrap();
+        let run = run_en(&conn);
+        let id = tarea_en(&conn, &run);
+        conn.execute("UPDATE tasks SET role = 'dreamer' WHERE id = ?1", [&id]).unwrap();
+        id
+    };
+    let verdict = broker::resolve(&db, &id, "Bash", serde_json::json!({ "command": "ls" }), Duration::from_secs(5));
+    assert_eq!((verdict.allow, verdict.by), (false, broker::DecidedBy::Policy));
+    let conn = db.lock().unwrap();
+    let (outcome, by): (String, String) = conn
+        .query_row(
+            "SELECT outcome, decided_by FROM approval_events WHERE source = ?1 AND owner = ?2 AND phase = 'decided'",
+            [Source::Fleet.as_str(), id.as_str()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((outcome.as_str(), by.as_str()), ("rejected", "policy"));
+}
+
 /// "Permitir siempre" en un agente tiene que destrabar a OTRO agente de la misma carpeta
 /// que pidió exactamente lo mismo — y a ninguno de otra carpeta. Sin esto, el usuario
 /// tendría que contestarle a mano algo que acaba de decir que no quiere contestar más.

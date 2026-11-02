@@ -260,11 +260,15 @@ pub fn resolve(
 ) -> Verdict {
     // Antes que las reglas y sin encolar: lo que un lead no puede hacer no se le pregunta a
     // nadie, así que ni un "Allow" ni una regla recordada pueden cambiar su papel.
-    if let Ok(conn)=db.lock() {if let Ok(Some(task))=super::store::task_by_id(&conn,task_id) {
- if task.role.as_deref()==Some(super::types::role::DREAMER)&&!super::policy::dreamer_may_use(tool_name) {
- let verdict=Verdict{allow:false,reason:Some(super::policy::DREAMER_DENIED.into()),by:DecidedBy::Policy};
- audit(db,&Uuid::new_v4().to_string(),task_id,tool_name,Some(&verdict));
- return verdict;}}}
+    // O lock sai do escopo antes do `audit`, que pega o banco de novo.
+    let dreamer_denied = db.lock().ok().is_some_and(|conn| {
+        matches!(super::store::task_by_id(&conn, task_id), Ok(Some(task)) if task.role.as_deref() == Some(super::types::role::DREAMER))
+    }) && !super::policy::dreamer_may_use(tool_name);
+    if dreamer_denied {
+        let verdict = Verdict { allow: false, reason: Some(super::policy::DREAMER_DENIED.into()), by: DecidedBy::Policy };
+        audit(db, &Uuid::new_v4().to_string(), task_id, tool_name, Some(&verdict));
+        return verdict;
+    }
     if is_coordinator(db, task_id) && !super::policy::lead_may_use(tool_name) {
         let verdict = Verdict { allow: false, reason: Some(super::policy::LEAD_DENIED.into()), by: DecidedBy::Policy };
         audit(db, &Uuid::new_v4().to_string(), task_id, tool_name, Some(&verdict));
