@@ -48,8 +48,11 @@ export function Collapsible({ children, innerClass = "" }: { children: React.Rea
   );
 }
 
-/** A mensagem da pessoa: balão à direita. `sending` = ainda não voltou do agente. */
-export function PersonBubble({ text, sending = false, at }: { text: string; sending?: boolean; at?: number }) {
+/**
+ * A mensagem da pessoa: balão à direita. `sending` = ainda não voltou do agente; `queued` = o agente está num turno
+ * e ela só entra no fio quando o turno dela começar (não é «enviando», é «na fila»).
+ */
+export function PersonBubble({ text, sending = false, queued = false, at }: { text: string; sending?: boolean; queued?: boolean; at?: number }) {
   const { t } = useTranslation();
   // Os anexos (bloco `[Anexos]` do fim do texto) viram miniaturas ACIMA do texto, como no Claude Code.
   const { text: body, attachments } = useMemo(() => splitAttachmentBlock(text), [text]);
@@ -61,7 +64,7 @@ export function PersonBubble({ text, sending = false, at }: { text: string; send
         <Collapsible><div className="whitespace-pre-wrap">{body}</div></Collapsible>
       </div>
       )}
-      {sending && <span className="px-2 text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.sending")}</span>}
+      {sending && <span className="px-2 text-chat-caption text-gray-400 dark:text-white/35">{t(queued ? "chat.timeline.queued" : "chat.timeline.sending")}</span>}
       {!sending && <MessageActions text={body} at={at} editable align="end" />}
     </div>
   );

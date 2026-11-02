@@ -20,6 +20,18 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
 
+describe("mensagem pendente", () => {
+  it("enquanto o agente trabalha a mensagem fica «na fila», não «enviando»", async () => {
+    await render(<PersonBubble text="oi" sending queued />);
+    expect(host.textContent).toContain("chat.timeline.queued");
+    expect(host.textContent).not.toContain("chat.timeline.sending");
+  });
+  it("sem turno aberto continua «enviando»", async () => {
+    await render(<PersonBubble text="oi" sending />);
+    expect(host.textContent).toContain("chat.timeline.sending");
+  });
+});
+
 describe("balão só do usuário", () => {
   it("a mensagem da pessoa tem balão: fundo, cantos arredondados, à direita e com largura máxima", async () => {
     await render(<PersonBubble text="oi" />);

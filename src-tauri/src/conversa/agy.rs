@@ -185,6 +185,16 @@ fn next_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) -> Opti
     }
 }
 
+/// A duração do turno: a que o `agy` informa só vale se couber no relógio do app (mais a folga do relógio dele).
+/// Ele informa a duração da CONVERSA dele, e a troca de agente retoma a conversa do `agy` dias depois: a resposta de
+/// segundos aparecia como «Trabalhou por 20h 21m». Pura.
+pub fn pick_duration(reported_ms: Option<i64>, elapsed_ms: i64) -> i64 {
+    match reported_ms {
+        Some(d) if d >= 0 && d <= elapsed_ms + 5_000 => d,
+        _ => elapsed_ms,
+    }
+}
+
 /// Um turno: sobe o `agy`, lê a saída até o fim e fecha o turno no banco.
 async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) {
     let thread_id = session.thread_id.as_str();
@@ -196,7 +206,7 @@ async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tu
         Err(message) => TurnResult { interrupted: false, error: Some(message), duration_ms: None },
     };
     let mut result = result;
-    result.duration_ms = result.duration_ms.or(Some(started.elapsed().as_millis() as i64));
+    result.duration_ms = Some(pick_duration(result.duration_ms, started.elapsed().as_millis() as i64));
     if session.killed.load(Ordering::SeqCst) {
         result = TurnResult { interrupted: true, error: None, duration_ms: result.duration_ms };
     }

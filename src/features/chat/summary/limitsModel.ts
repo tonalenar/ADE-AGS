@@ -56,7 +56,7 @@ export interface LimitWindow {
   expired: boolean;
 }
 
-export type UnmeasuredReason = "loading" | "failed" | "notLoggedIn" | "apiKey" | "noWindows" | "noSource";
+export type UnmeasuredReason = "loading" | "failed" | "notLoggedIn" | "apiKey" | "noWindows" | "noSource" | "noQuotaSource";
 
 export type AccountReading =
   | { state: "measured"; windows: LimitWindow[]; /** O servidor recusou por limite. */ rejected: boolean }
@@ -205,7 +205,8 @@ export interface AccountEntry {
 /**
  * As contas que o cartão lista: TODAS as conectadas dos agentes que expõem a cota (`measured`), não só as da conversa.
  * As da conversa vêm primeiro (e uma conta que a conversa usa entra mesmo sem login, ou de um agente sem cota, para dizer
- * «não medido» com o motivo). O `agy` local entra como a conta principal do Antigravity quando instalado. Pura.
+ * «não medido» com o motivo). O `agy` local entra como a conta principal do Antigravity quando instalado, e os agentes de
+ * `listedUnmeasured` (o Cursor, que não tem fonte de cota sem ler o token dele) entram por último, se instalados. Pura.
  */
 export function connectedAccounts(input: {
   accounts: AccountLike[];
@@ -213,6 +214,8 @@ export function connectedAccounts(input: {
   used: UsedAccount[];
   measured: ReadonlySet<string>;
   agyInstalled?: boolean;
+  /** Agentes instalados que não expõem a cota mas devem aparecer na lista como conta («não medido»): o Cursor. */
+  listedUnmeasured?: ReadonlySet<string>;
 }): AccountEntry[] {
   const all = [...input.systemAccounts, ...input.accounts];
   const byKey = new Map<string, AccountEntry>();
@@ -233,5 +236,8 @@ export function connectedAccounts(input: {
     .sort((a, b) => agentRank(a.agentId) - agentRank(b.agentId) || Number(b.id.startsWith("system:")) - Number(a.id.startsWith("system:")) || a.name.localeCompare(b.name));
   for (const account of rest) add(account.agentId, account, []);
   if (input.agyInstalled && input.measured.has("antigravity") && !byKey.has("system:antigravity")) add("antigravity", null, []);
+  for (const agentId of input.listedUnmeasured ?? []) {
+    if (![...byKey.values()].some((e) => e.agentId === agentId)) add(agentId, null, []);
+  }
   return [...byKey.values()];
 }

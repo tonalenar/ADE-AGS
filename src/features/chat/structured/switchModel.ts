@@ -14,9 +14,9 @@ export function switchableAgents(detected: AgentInfo[], currentId: string, curre
 }
 
 /**
- * O agente novo não tem tela de aprovação (o Antigravity por `-p` não pergunta) e a conversa está em Supervisionado:
+ * O agente novo não tem tela de aprovação (o Antigravity e o Cursor por `-p` não perguntam) e a conversa está em Supervisionado:
  * o que pediria aprovação é negado. A confirmação da troca avisa antes. Pura.
  */
 export function lacksApproval(agentId: string, access: string): boolean {
-  return agentId === "antigravity" && access === "ask";
+  return (agentId === "antigravity" || agentId === "cursor") && access === "ask";
 }

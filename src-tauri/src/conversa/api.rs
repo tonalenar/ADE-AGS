@@ -15,7 +15,7 @@ use crate::database::DbConnection;
 use super::codex::RequestFailure;
 use super::envio::{SendError, SendMode};
 use super::store::{self, RequestRow, ThreadRow, Tuning};
-use super::{agy, claude, codex, codex_map, opencode};
+use super::{agy, claude, codex, codex_map, cursor, opencode};
 
 /// Quem fala com o agente de uma conversa por protocolo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +28,8 @@ pub enum Engine {
     OpenCode,
     /// `agy --print --output-format stream-json`, um processo por turno (`agy.rs`).
     Antigravity,
+    /// `cursor-agent -p --output-format stream-json`, um processo por turno (`cursor.rs`).
+    Cursor,
 }
 
 impl Engine {
@@ -37,13 +39,18 @@ impl Engine {
             "claude-code" => Some(Engine::Claude),
             "opencode" => Some(Engine::OpenCode),
             "antigravity" => Some(Engine::Antigravity),
+            "cursor" => Some(Engine::Cursor),
             _ => None,
         }
     }
 
     /// Os acessos que o agente aceita. O Plano é um modo do Claude (permissão), do OpenCode (o agente
-    /// `plan`) e do Antigravity (`--mode plan`); o Codex não tem.
+    /// `plan`), do Antigravity (`--mode plan`) e do Cursor (`--mode plan`); o Codex não tem. O Cursor só tem
+    /// Supervisionado, Plano e Acesso total: Aceitar edições e Auto não têm flag documentada.
     pub fn accepts(self, access: &str) -> bool {
+        if self == Engine::Cursor {
+            return matches!(access, "ask" | "plan" | "full");
+        }
         matches!(access, "ask" | "edits" | "safe" | "full") || (self != Engine::Codex && access == "plan")
     }
 }
@@ -68,6 +75,7 @@ fn live_turn(thread_id: &str) -> Option<Option<String>> {
         .or_else(|| claude::get(thread_id).map(|s| s.turn()))
         .or_else(|| opencode::get(thread_id).map(|s| s.turn()))
         .or_else(|| agy::get(thread_id).map(|s| s.turn()))
+        .or_else(|| cursor::get(thread_id).map(|s| s.turn()))
 }
 
 /// Fecha o processo do agente da conversa, qualquer que seja.
@@ -76,6 +84,7 @@ fn close(thread_id: &str) {
     claude::close(thread_id);
     opencode::close(thread_id);
     agy::close(thread_id);
+    cursor::close(thread_id);
 }
 
 /// Fecha o processo do agente (a troca de conta do pool usa).
@@ -142,6 +151,7 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
 fn access_error(engine: Engine, access: &str) -> String {
     match engine {
         Engine::Claude | Engine::OpenCode | Engine::Antigravity => format!("Acesso inválido: {access} (ask, edits, safe, full ou plan)"),
+        Engine::Cursor => format!("Acesso inválido: {access} (ask, full ou plan)"),
         Engine::Codex => format!("Acesso inválido: {access} (ask, edits, safe ou full)"),
     }
 }
@@ -236,6 +246,7 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
             return opencode::send_user(app, db, &session, text).map_err(SendError::NotSent);
         }
         Engine::Antigravity => return agy::send(app, db, thread_id, text).map_err(SendError::NotSent),
+        Engine::Cursor => return cursor::send(app, db, thread_id, text).map_err(SendError::NotSent),
         Engine::Codex => {}
     }
     let session = codex::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
@@ -317,6 +328,10 @@ pub async fn interrupt(thread_id: &str) -> Result<(), String> {
     }
     if agy::get(thread_id).is_some() {
         agy::interrupt(thread_id);
+        return Ok(());
+    }
+    if cursor::get(thread_id).is_some() {
+        cursor::interrupt(thread_id);
         return Ok(());
     }
     let Some(session) = codex::get(thread_id) else { return Ok(()) };

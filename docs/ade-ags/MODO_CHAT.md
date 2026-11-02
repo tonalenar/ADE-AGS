@@ -154,6 +154,25 @@ Com o OpenCode, a conversa nova fala por `opencode acp` (Agent Client Protocol: 
   O OpenCode não tem sandbox nem classificador, então o "Auto" aqui é: edita e busca na web sozinho; comando ainda pergunta.
 - **Modelo e esforço:** `session/set_config_option` na abertura (o modelo antes, porque o esforço depende dele). Um modelo que o OpenCode não lista dá erro claro; um esforço que o modelo não tem fica no padrão. Trocar modelo, esforço ou acesso fecha o processo (no fim do turno) e a próxima mensagem retoma a sessão.
 
+### Cursor por protocolo (`cursor-agent -p` em stream-json)
+
+Com o Cursor, a conversa roda `cursor-agent -p --output-format stream-json --stream-partial-output --trust --workspace <pasta>`,
+**um processo por turno** (`conversa/cursor.rs` e `conversa/cursor_map.rs`), continuando com `--resume <session_id>` (o id vem
+do `system/init` e fica em `chat_thread.remote_id`). O executável é achado pela mesma resolução do app (`util::find_program`:
+PATH do shell de login e a pasta do instalador do Cursor).
+
+- **Conferido só pela doc oficial** (`cursor.com/docs/cli/reference/output-format`), com fixtures dos exemplos dela nos testes
+  (`test_motores.rs::cursor`). **Nenhum turno real foi feito** (cota): os nomes das ferramentas além de `read`/`write`, o evento
+  `thinking` e o desfecho de uma ação recusada são lidos de forma tolerante (o que não conheço vira ferramenta genérica).
+- **Fala.** Com `--stream-partial-output`, os pedaços são os `assistant` COM `timestamp_ms` e SEM `model_call_id`; os outros
+  repetem o texto e são ignorados. A ferramenta (`tool_call` started/completed) fecha a fala antes dela, na ordem do fio.
+- **Acesso.** `ask`: sem flag; no `-p` o que mudaria arquivos ou rodaria comandos não é aplicado (a mesma advertência
+  `noApproval` do Antigravity). `plan`: `--mode plan`. `full`: `--force`. Aceitar edições e Auto não têm flag documentada:
+  o motor não os aceita (`Engine::accepts`), e a troca de agente os converte para Supervisionado dizendo isso.
+- **Modelo e esforço.** O modelo é o id da variante de `cursor-agent --list-models`; o esforço faz parte dele (`…-high`), por
+  isso o controle de esforço fica escondido. Sem conta por conversa (login único do `cursor-agent login`) e sem ai-memory.
+- **Limites.** O fluxo não traz tokens nem cota: o cartão de Limites mostra «não medido · sem fonte de cota».
+
 ### Antigravity por protocolo (`agy --print` em stream-json)
 
 Com o Antigravity, a conversa nova roda `agy --print <mensagem> --output-format stream-json`, **um processo por turno** (`conversa/agy.rs` e `conversa/agy_map.rs`).
@@ -285,7 +304,7 @@ depois disso a miniatura mostra "indisponível" (o caminho continua na mensagem)
 
 ## Trocar de agente na mesma conversa (como o T3 Code)
 
-Em uma conversa por protocolo (Claude Code, Codex, OpenCode, Antigravity), o seletor de modelo mostra o trilho de
+Em uma conversa por protocolo (Claude Code, Codex, OpenCode, Antigravity, Cursor), o seletor de modelo mostra o trilho de
 agentes instalados. Escolher OUTRO agente troca quem responde NESTA conversa, com confirmação a cada troca. Vale também
 para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o terminal é do usuário).
 
@@ -297,8 +316,9 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   já usado retoma a sessão dele (na mesma conta) e leva só o resumo do que aconteceu fora (delta); um agente novo, ou
   de outra conta, recebe o resumo completo.
 - **Resumo (`conversa/handoff.rs`).** Determinístico, sem gastar cota (como o T3 Code): pedido original, falas mais
-  recentes sob um teto (24 mil caracteres, as mais antigas saem e o corte é dito), arquivos alterados, plano e pergunta
-  sem resposta; sem raciocínio escondido. É DADO, nunca instrução: dentro do bloco `untrusted_data` do app, começando por
+  recentes sob o teto do T3 Code (64 000 bytes ≈ 16 mil tokens; as mais antigas saem, o corte é dito e a linha diz como ler o
+  resto), o pedido corrente da pessoa e o último turno do agente anterior logo no começo, a linha-dado «a conversa completa
+  está em `ags chat show <id>` (somente leitura)», arquivos alterados, plano e pergunta sem resposta; sem raciocínio escondido. É DADO, nunca instrução: dentro do bloco `untrusted_data` do app, começando por
   `[ADE AGS]`. Vai na frente da PRÓXIMA mensagem da pessoa (não é um turno à parte) e só sai da pendência quando a
   mensagem foi enviada de fato. A tela esconde o bloco (termina na marca `[fim do contexto da conversa anterior]`).
 - **Timeline.** Aviso persistente `agentSwitch` («Agora com Codex · modelo» e o que o agente novo recebeu); cada fala do
@@ -320,9 +340,12 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   (não cancela nada). Ficam para depois: bifurcar a conversa daquele ponto (o `handoff.rs` já serve de base), fixar e ler em voz alta.
 - **Limites de uso.** O cartão lista TODAS as contas conectadas dos agentes que expõem a cota (Claude, Codex e Antigravity),
   as da conversa primeiro, cada uma com a janela atual e a semana; «não medido» só para o agente que não expõe a cota. O
-  Antigravity sem perfil usa a mesma leitura do canvas (`agy /usage`, por grupo de modelos). Cursor: sem fonte sem ler o token
-  de outro app (ver `.plans/cursor-motor/DESENHO.md`).
-- **Trocar de agente e aprovação.** O Antigravity por `-p` não tem tela de aprovação: em Supervisionado ele NEGA o que pediria
+  Antigravity sem perfil usa a mesma leitura do canvas (`agy /usage`, por grupo de modelos). O Cursor instalado
+  entra na lista como conta («não medido · sem fonte de cota»): o uso dele só sai com o token do Cursor, e o ADE não lê
+  credencial de outro app. Opções (a decisão é do usuário): (a) deixar assim; (b) `cursor-agent status --format json` para
+  mostrar a conta/e-mail (comando do próprio CLI, não mede cota; não verificado aqui); (c) a Admin API do Cursor, só para
+  times, com uma chave que o usuário cadastre no keyring do ADE.
+- **Trocar de agente e aprovação.** O Antigravity e o Cursor por `-p` não têm tela de aprovação: em Supervisionado ele NEGA o que pediria
   aprovação. A confirmação da troca e o aviso do fio dizem isso (`noApproval`); para liberar, mude o acesso.
 
 ## Como não derruba terminais

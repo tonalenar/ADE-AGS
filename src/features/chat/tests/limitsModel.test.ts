@@ -199,6 +199,20 @@ describe("as contas conectadas, todas (não só as da conversa)", () => {
     expect(list[3]!.who).toEqual([]);
   });
 
+  it("o Cursor instalado entra como conta (sem cota medida), depois das medidas; sem instalar, não entra", () => {
+    const list = connectedAccounts({ ...base, used: [], listedUnmeasured: new Set(["cursor"]) });
+    expect(list.map((e) => e.key)).toEqual(["system:claude-code", "ton", "system:codex", "system:cursor"]);
+    expect(list[3]).toMatchObject({ agentId: "cursor", accountId: null, account: null, who: [] });
+    expect(connectedAccounts({ ...base, used: [], listedUnmeasured: new Set() }).map((e) => e.key)).not.toContain("system:cursor");
+  });
+
+  it("uma conversa com o Cursor não repete a conta: a da conversa vem primeiro", () => {
+    const used = usedAccounts([{ name: "Cursor · Revisor", agentId: "cursor", accountId: null }]);
+    const list = connectedAccounts({ ...base, used, listedUnmeasured: new Set(["cursor"]) });
+    expect(list.filter((e) => e.agentId === "cursor")).toHaveLength(1);
+    expect(list[0]).toMatchObject({ agentId: "cursor", who: ["Cursor · Revisor"] });
+  });
+
   it("o agy local (Antigravity sem perfil) é uma conta da lista quando o agy está instalado", () => {
     const list = connectedAccounts({ ...base, used: [], agyInstalled: true });
     expect(list.map((e) => e.key)).toContain("system:antigravity");
