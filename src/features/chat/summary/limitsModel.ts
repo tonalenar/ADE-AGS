@@ -6,7 +6,7 @@
  */
 import type { LiveUsage } from "@/features/accounts/usage";
 import type { AccountLimits } from "@/features/accounts/types";
-import type { AntigravityEntry, CodexEntry } from "@/features/canvas/usageStore";
+import type { AgyEntry, AntigravityEntry, CodexEntry } from "@/features/canvas/usageStore";
 
 /** Acima disto a barra fica âmbar; em 100 está esgotada. */
 export const WARN_ABOVE = 80;
@@ -108,6 +108,29 @@ export function readAntigravity(entry: AntigravityEntry | undefined, loggedIn: b
   return measured([top ? timed("model", top.percent / 100, top.resetsAt, now, top.name, clamp(top.percent)) : null]);
 }
 
+/**
+ * Antigravity sem perfil (o login local do `agy`): a cota por grupo de modelos, cada grupo com a janela de 5 horas e a
+ * semanal, como o `agy /usage` informa. É a mesma leitura do canvas (`useUsageStore.agy`). Pura.
+ */
+export function readAgy(entry: AgyEntry, loggedIn: boolean, now: number): AccountReading {
+  if (!loggedIn) return unmeasured("notLoggedIn");
+  const usage = entry.usage;
+  if (!usage) return unmeasured(entry.failed ? "failed" : "loading");
+  if (!usage.installed) return unmeasured("noSource");
+  const toEpoch = (iso?: string): number | null => {
+    const ms = iso ? Date.parse(iso) : NaN;
+    return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+  };
+  const windows: LimitWindow[] = [];
+  for (const group of usage.groups) {
+    for (const w of group.windows) {
+      const kind: WindowKind = w.kind === "session" ? "session" : w.kind === "weekly" ? "week" : "model";
+      windows.push(timed(kind, w.usedPct / 100, toEpoch(w.resetsAt), now, group.name, clamp(w.usedPct)));
+    }
+  }
+  return measured(windows);
+}
+
 /** O destaque do cabeçalho: a janela mais gasta (100 se o servidor recusou). `null` = nenhum número. */
 export function headlineOf(reading: AccountReading): number | null {
   if (reading.state !== "measured") return null;
@@ -155,4 +178,60 @@ export function usedAccounts(members: { name: string; agentId: string; accountId
     else out.push({ key, agentId: m.agentId, accountId: m.accountId ?? null, who: [m.name] });
   }
   return out;
+}
+
+// ── Todas as contas conectadas ───────────────────────────────────────────────────────────────────────────────
+
+/** O que se precisa de uma conta do ADE para listá-la (o `AgentAccount` tem mais campos). */
+export interface AccountLike {
+  id: string;
+  agentId: string;
+  name: string;
+  label: string | null;
+  loggedIn: boolean;
+}
+
+export interface AccountEntry {
+  key: string;
+  agentId: string;
+  /** `null` = a conta principal do agente. */
+  accountId: string | null;
+  /** A conta do ADE; `null` quando só se sabe do agente (o `agy` local, ou um agente sem conta). */
+  account: AccountLike | null;
+  /** Quem da conversa (e do time) a usa; vazio = outra conta conectada. */
+  who: string[];
+}
+
+/**
+ * As contas que o cartão lista: TODAS as conectadas dos agentes que expõem a cota (`measured`), não só as da conversa.
+ * As da conversa vêm primeiro (e uma conta que a conversa usa entra mesmo sem login, ou de um agente sem cota, para dizer
+ * «não medido» com o motivo). O `agy` local entra como a conta principal do Antigravity quando instalado. Pura.
+ */
+export function connectedAccounts(input: {
+  accounts: AccountLike[];
+  systemAccounts: AccountLike[];
+  used: UsedAccount[];
+  measured: ReadonlySet<string>;
+  agyInstalled?: boolean;
+}): AccountEntry[] {
+  const all = [...input.systemAccounts, ...input.accounts];
+  const byKey = new Map<string, AccountEntry>();
+  const add = (agentId: string, account: AccountLike | null, who: string[]) => {
+    const accountId = account && !account.id.startsWith("system:") ? account.id : null;
+    const key = accountKeyOf(agentId, accountId);
+    if (!byKey.has(key)) byKey.set(key, { key, agentId, accountId, account, who });
+  };
+  const order = [...input.measured];
+  const agentRank = (id: string) => { const i = order.indexOf(id); return i < 0 ? order.length : i; };
+  // As da conversa primeiro, na ordem em que ela as usa.
+  for (const u of input.used) {
+    const account = all.find((a) => (u.accountId ? a.id === u.accountId : a.id === `system:${u.agentId}` || (a.agentId === u.agentId && a.id.startsWith("system:")))) ?? null;
+    add(u.agentId, account, u.who);
+  }
+  const rest = all
+    .filter((a) => input.measured.has(a.agentId) && a.loggedIn)
+    .sort((a, b) => agentRank(a.agentId) - agentRank(b.agentId) || Number(b.id.startsWith("system:")) - Number(a.id.startsWith("system:")) || a.name.localeCompare(b.name));
+  for (const account of rest) add(account.agentId, account, []);
+  if (input.agyInstalled && input.measured.has("antigravity") && !byKey.has("system:antigravity")) add("antigravity", null, []);
+  return [...byKey.values()];
 }

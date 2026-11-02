@@ -54,6 +54,9 @@ pub struct Applied {
     pub to_agent: String,
     /// O acesso pedido não existe no agente novo (o Plano no Codex) e virou Supervisionado.
     pub access_changed: bool,
+    /// O agente novo não tem tela de aprovação (o Antigravity em `-p`) e o acesso é Supervisionado: ele nega o que
+    /// pediria aprovação. A tela avisa para a pessoa trocar o acesso.
+    pub no_approval: bool,
 }
 
 fn db_err(e: impl ToString) -> String {
@@ -99,7 +102,8 @@ pub fn apply_switch(conn: &Connection, thread_id: &str, new: &Switch, now: i64) 
     )
     .map_err(db_err)?;
     let updated = store::thread(conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
-    Ok(Applied { row: updated, strategy, from_agent: row.agent_id, to_agent: new.agent_id.clone(), access_changed })
+    let no_approval = new.agent_id == "antigravity" && access == "ask";
+    Ok(Applied { row: updated, strategy, from_agent: row.agent_id, to_agent: new.agent_id.clone(), access_changed, no_approval })
 }
 
 /// O time acompanha a troca: o agente do integrante (ou do orquestrador) e o nome dele, no formato `Agente · Papel`,
@@ -212,6 +216,7 @@ pub fn notice_text(applied: &Applied) -> String {
         "model": applied.row.model,
         "strategy": if matches!(applied.strategy, Strategy::Full) { "full" } else { "delta" },
         "accessChanged": applied.access_changed,
+        "noApproval": applied.no_approval,
     })
     .to_string()
 }

@@ -4484,5 +4484,13 @@
   "chat.quote.hint": "Enter añade · Esc cierra",
   "chat.quote.add": "Añadir",
   "chat.quote.list": "Citas",
-  "chat.quote.remove": "Quitar cita"
+  "chat.quote.remove": "Quitar cita",
+  "chat.timeline.notice.agentSwitchNoApproval": "{{agent}} no tiene pantalla de aprobación: en acceso Supervisado niega lo que pediría aprobación. Cambia el acceso para permitirlo.",
+  "chat.agentSwitch.noApproval": "{{agent}} no pregunta antes de actuar: en acceso Supervisado NIEGA lo que pediría aprobación. Tras cambiar, ajusta el acceso (Aceptar ediciones, Auto o Total) para permitirlo.",
+  "chat.message.copy": "Copiar",
+  "chat.message.copied": "Copiado",
+  "chat.message.edit": "Editar y reenviar",
+  "chat.message.editHint": "Devuelve el texto al cuadro de mensaje para que lo edites y lo reenvíes",
+  "chat.summary.limits.others": "Otras cuentas conectadas ({{count}})",
+  "chat.summary.limits.usedBy": "usada por {{who}}"
 }

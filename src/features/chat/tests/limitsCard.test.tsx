@@ -25,7 +25,6 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { ConversationCard } from "../chatModel";
 import { useChatLive } from "../liveStore";
 import { useStructured } from "../structured/store";
-import type { TeamView } from "../team/ipc";
 import { useTeamStore } from "../team/teamStore";
 import { LimitsCard } from "../summary/LimitsCard";
 
@@ -48,7 +47,6 @@ let root: Root;
 let host: HTMLDivElement;
 let refreshes: [string, boolean][] = [];
 const mount = (c = card()) => act(async () => { root.render(<LimitsCard conversation={c} />); });
-const click = (el: Element | null | undefined) => act(async () => { (el as HTMLElement).click(); });
 const text = () => host.textContent ?? "";
 const bars = () => [...host.querySelectorAll("[role=progressbar]")] as HTMLElement[];
 
@@ -59,7 +57,7 @@ beforeEach(() => {
   refreshes = [];
   useAccountsStore.setState({ accounts: [TON], systemAccounts: [SYS_CLAUDE, SYS_CODEX], capable: [], loaded: true });
   useUsageStore.setState({ claude: {}, codex: {}, antigravity: {}, busy: {} });
-  useUsageStore.setState({ refresh: (a: AgentAccount, force: boolean) => { refreshes.push([a.id, force]); return Promise.resolve(); } } as never);
+  useUsageStore.setState({ refresh: (a: AgentAccount, force: boolean) => { refreshes.push([a.id, force]); return Promise.resolve(); }, refreshAgy: () => Promise.resolve(), agy: { usage: null, failed: false } } as never);
   useTabsStore.setState({ tabs: [tab()] } as never);
   useStructured.setState({ threads: [], live: {}, hydrated: {} });
   useChatLive.setState({ phase: {} });
@@ -75,7 +73,8 @@ describe("o cartão Limites de uso", () => {
     useUsageStore.setState({ claude: { "system:claude-code": live(42, 17) } });
     await mount();
     expect(text()).toContain("chat.summary.limits.title");
-    expect(text()).toContain('chat.summary.limits.account{"account":"accounts.system"}');
+    expect(text()).toContain("Claude Code");
+    expect(text()).toContain("accounts.system");
     expect(bars().map((b) => b.getAttribute("aria-valuenow"))).toEqual(["42", "17"]);
     expect(text()).toContain("chat.accounts.window");
     expect(text()).toContain("chat.accounts.week");
@@ -86,7 +85,7 @@ describe("o cartão Limites de uso", () => {
     useTabsStore.setState({ tabs: [tab("ton")] } as never);
     useUsageStore.setState({ claude: { "system:claude-code": live(10, 10), ton: live(55, 20) } });
     await mount();
-    expect(text()).toContain('"account":"Ton"');
+    expect(text()).toContain("Ton");
     expect(bars()[0]!.getAttribute("aria-valuenow")).toBe("55");
   });
 
@@ -157,57 +156,64 @@ describe("o cartão Limites de uso", () => {
 describe("atualização: ao abrir e no fim de cada turno, sem polling", () => {
   it("pede a leitura (com a validade do store, sem forçar) ao abrir", async () => {
     await mount();
-    expect(refreshes).toEqual([["system:claude-code", false]]);
+    // todas as contas conectadas (a da conversa primeiro), com a validade do store (nada forçado)
+    expect(refreshes).toEqual([["system:claude-code", false], ["ton", false], ["system:codex", false]]);
   });
 
   it("pede de novo quando o turno termina, e só então", async () => {
     await mount();
-    expect(refreshes).toHaveLength(1);
+    const first = refreshes.length;
+    expect(first).toBe(3);
     await act(async () => { useChatLive.setState({ phase: { "tab-1": "working" } }); });
-    expect(refreshes).toHaveLength(1);
+    expect(refreshes).toHaveLength(first);
     await act(async () => { useChatLive.setState({ phase: { "tab-1": "idle" } }); });
-    expect(refreshes).toHaveLength(2);
+    expect(refreshes).toHaveLength(first * 2);
     await act(async () => { useChatLive.setState({ phase: { "tab-1": "idle" } }); });
-    expect(refreshes).toHaveLength(2);
+    expect(refreshes).toHaveLength(first * 2);
   });
 });
 
-describe("conversa com time", () => {
-  const TEAM = {
-    id: "t1", orchestrator: "tab-1", agentId: "claude-code", label: "Claude Code", cwd: "/repo", title: "", createdAt: 1, updatedAt: 1, headcount: 4,
-    members: [
-      { teamId: "t1", member: "tab-2", agentId: "codex", label: "Codex · Revisor", role: "reviewer", model: null, policy: "read", branch: null, worktree: null, origin: "new", position: 0, createdAt: 1, updatedAt: 1, subagent: false },
-      { teamId: "t1", member: "tab-3", agentId: "claude-code", label: "Claude · Testes", role: "qa", model: null, policy: "ask", branch: null, worktree: null, origin: "new", position: 1, createdAt: 1, updatedAt: 1, subagent: false },
-      { teamId: "t1", member: "tab-4", agentId: "claude-code", label: "Claude · UI", role: "frontend", model: null, policy: "ask", branch: null, worktree: null, origin: "new", position: 2, createdAt: 1, updatedAt: 1, subagent: false },
-    ],
-  } as unknown as TeamView;
-
+describe("todas as contas conectadas, não só as da conversa", () => {
   beforeEach(() => {
-    backend.teams = [TEAM];
-    useTeamStore.setState({ teams: [TEAM] });
-    useTabsStore.setState({ tabs: [tab(), { ...tab(undefined, "codex"), id: "tab-2" }, { ...tab("ton"), id: "tab-3" }, { ...tab(), id: "tab-4" }] } as never);
     useUsageStore.setState({
-      claude: { "system:claude-code": live(42, 17), ton: live(91, 30) },
-      codex: { "system:codex": { usage: { email: null, plan: null, auth: "chatgpt", fetchedAt: NOW, quota: { fiveHour: { utilization: 0.2, resetsAt: NOW + 600 }, sevenDay: null, rejected: false, rejectedUntil: null, overage: false } }, failed: false } },
+      claude: { "system:claude-code": live(42, 17), ton: live(100, 30) },
+      codex: { "system:codex": { usage: { email: null, plan: null, auth: "chatgpt", fetchedAt: NOW, quota: { fiveHour: { utilization: 0.2, resetsAt: NOW + 600 }, sevenDay: { utilization: 0.9, resetsAt: NOW + 86400 }, rejected: false, rejectedUntil: null, overage: false } }, failed: false } },
     });
   });
 
-  it("as contas dos integrantes ficam recolhidas por padrão e a conta repetida não aparece de novo", async () => {
+  it("cada conta tem o seu bloco, com a janela atual e a semana (como a conta principal)", async () => {
     await mount();
-    const toggle = [...host.querySelectorAll("button[aria-expanded]")].find((b) => b.textContent?.includes("teamShow"))!;
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(toggle.textContent).toContain('"count":2');
-    expect(bars()).toHaveLength(2); // só as janelas da conta da própria conversa
+    const text = host.textContent ?? "";
+    expect(text).toContain('chat.summary.limits.others{"count":2}');
+    // Claude principal (2) + Ton (2) + Codex principal (2) = 6 barras
+    expect(bars()).toHaveLength(6);
+    expect(text).toContain("Ton");
+    expect(text).toContain("Codex");
   });
 
-  it("aberto, traz uma linha por conta distinta: quem · conta · % da janela", async () => {
+  it("a conta esgotada fica vermelha e diz «esgotado» (não só a cor)", async () => {
     await mount();
-    await click([...host.querySelectorAll("button[aria-expanded]")].find((b) => b.textContent?.includes("teamShow")));
-    expect(text()).toContain("Codex · Revisor · accounts.system");
-    expect(text()).toContain("20%");
-    expect(text()).toContain("Claude · Testes · Ton");
-    expect(text()).toContain("91%");
-    expect(text()).toContain("chat.summary.limits.nearLimit");
-    expect(text()).not.toContain("Claude · UI");
+    const full = bars().find((b) => b.getAttribute("aria-valuenow") === "100")!;
+    expect(full.querySelector("span")!.className).toContain("bg-rose-500");
+    expect(full.getAttribute("aria-valuetext")).toContain("chat.summary.limits.exhausted");
+  });
+
+  it("«não medido» só para o agente que de fato não expõe a cota (e que a conversa usa)", async () => {
+    useTabsStore.setState({ tabs: [tab(undefined, "gemini-cli")] } as never);
+    await mount(card("gemini-cli", "Gemini"));
+    expect(text()).toContain("chat.summary.limits.reason.noSource");
+    // as outras contas continuam medidas
+    expect(bars().length).toBeGreaterThan(0);
+  });
+
+  it("o Antigravity sem perfil (o login local do agy) mostra as janelas por grupo de modelos, como o canvas", async () => {
+    const iso = new Date((NOW + 3600) * 1000).toISOString();
+    useUsageStore.setState({ agy: { usage: { installed: true, fetchedAt: NOW, cached: false, groups: [{ name: "Gemini", windows: [{ id: "a", kind: "session", usedPct: 33, resetsAt: iso }, { id: "b", kind: "weekly", usedPct: 12 }] }] }, failed: false } } as never);
+    await mount();
+    const values = bars().map((b) => b.getAttribute("aria-valuenow"));
+    expect(values).toContain("33");
+    expect(values).toContain("12");
+    expect(text()).toContain("Antigravity");
+    expect(text()).toContain("Gemini · chat.accounts.window");
   });
 });

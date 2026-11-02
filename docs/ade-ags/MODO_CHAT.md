@@ -311,6 +311,20 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   (parametrizado por quem sai e quem entra) em vez da função própria; os dois tocam `api.rs::send_mode`, `store.rs`,
   `mod.rs` e `NoticeRow.tsx`, então o merge pede conferência.
 
+## Acabamento (build local do PR 270/271)
+
+- **Resumo.** Sem lugar ao lado da conversa (janela estreita), o Resumo passa a flutuar POR CIMA dela (`summaryPlacement`:
+  `beside` / `overlay` / `none`). Antes sumia: o botão «Resumo (R)» ficava marcado sem painel e ligar/desligar não trazia nada.
+- **Ações sob a mensagem.** Hora relativa («há 24 minutos») e botões só ao passar o mouse ou focar (`MessageActions`): copiar
+  (texto limpo, sem anexos nem envelope) na pessoa e no agente; «editar e reenviar» na pessoa devolve o texto ao campo
+  (não cancela nada). Ficam para depois: bifurcar a conversa daquele ponto (o `handoff.rs` já serve de base), fixar e ler em voz alta.
+- **Limites de uso.** O cartão lista TODAS as contas conectadas dos agentes que expõem a cota (Claude, Codex e Antigravity),
+  as da conversa primeiro, cada uma com a janela atual e a semana; «não medido» só para o agente que não expõe a cota. O
+  Antigravity sem perfil usa a mesma leitura do canvas (`agy /usage`, por grupo de modelos). Cursor: sem fonte sem ler o token
+  de outro app (ver `.plans/cursor-motor/DESENHO.md`).
+- **Trocar de agente e aprovação.** O Antigravity por `-p` não tem tela de aprovação: em Supervisionado ele NEGA o que pediria
+  aprovação. A confirmação da troca e o aviso do fio dizem isso (`noApproval`); para liberar, mude o acesso.
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:

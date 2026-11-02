@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  accountKeyOf, budgetOf, headlineOf, limitLevel, readAntigravity, readClaude, readCodex, renewal, usedAccounts,
+  accountKeyOf, budgetOf, connectedAccounts, headlineOf, limitLevel, readAgy, readAntigravity, readClaude, readCodex, renewal, usedAccounts,
   type AccountReading,
 } from "../summary/limitsModel";
 
@@ -151,3 +151,58 @@ describe("contas usadas pela conversa e pelo time", () => {
     ]);
   });
 });
+
+describe("Antigravity: o login local do `agy` (o mesmo do canvas)", () => {
+  const usage = (groups: unknown[], installed = true) => ({ usage: { installed, groups, fetchedAt: NOW, cached: false } as never, failed: false });
+  const win = (id: string, kind: string, usedPct: number, resetsAt?: string) => ({ id, kind, usedPct, ...(resetsAt ? { resetsAt } : {}) });
+
+  it("uma barra por janela de cada grupo de modelos, com o nome do grupo", () => {
+    const iso = new Date((NOW + 3600) * 1000).toISOString();
+    const r = readAgy(usage([{ name: "Gemini", windows: [win("g5", "session", 40, iso), win("gw", "weekly", 10)] }, { name: "Argon", windows: [win("a5", "session", 95)] }]), true, NOW);
+    expect((r as { windows: { kind: string; label: string | null; percent: number | null; resetsAt: number | null }[] }).windows.map((w) => [w.label, w.kind, w.percent, w.resetsAt])).toEqual([
+      ["Gemini", "session", 40, NOW + 3600], ["Gemini", "week", 10, null], ["Argon", "session", 95, null],
+    ]);
+  });
+
+  it("sem o agy, sem leitura ainda, com falha ou sem janelas: «não medido» com o motivo certo", () => {
+    expect(readAgy(usage([], false), true, NOW)).toEqual({ state: "unmeasured", reason: "noSource" });
+    expect(readAgy({ usage: null, failed: false }, true, NOW)).toEqual({ state: "unmeasured", reason: "loading" });
+    expect(readAgy({ usage: null, failed: true }, true, NOW)).toEqual({ state: "unmeasured", reason: "failed" });
+    expect(readAgy(usage([]), true, NOW)).toEqual({ state: "unmeasured", reason: "noWindows" });
+  });
+
+  it("uma janela que já renovou não mostra a porcentagem velha", () => {
+    const past = new Date((NOW - 60) * 1000).toISOString();
+    const r = readAgy(usage([{ name: "Gemini", windows: [win("g5", "session", 99, past)] }]), true, NOW) as { windows: { percent: number | null; expired: boolean }[] };
+    expect(r.windows[0]).toMatchObject({ percent: null, expired: true });
+  });
+});
+
+describe("as contas conectadas, todas (não só as da conversa)", () => {
+  const acc = (id: string, agentId: string, name: string, loggedIn = true) => ({ id, agentId, name, label: null, loggedIn });
+  const base = {
+    systemAccounts: [acc("system:claude-code", "claude-code", "Claude Code"), acc("system:codex", "codex", "Codex"), acc("system:gemini-cli", "gemini-cli", "Gemini")],
+    accounts: [acc("ton", "claude-code", "Ton"), acc("velha", "codex", "Velha", false)],
+    measured: new Set(["claude-code", "codex", "antigravity"]),
+  };
+
+  it("lista as contas conectadas de todos os agentes que expõem a cota; as sem login e as de agente sem cota ficam de fora", () => {
+    const list = connectedAccounts({ ...base, used: [] });
+    expect(list.map((e) => e.key)).toEqual(["system:claude-code", "ton", "system:codex"]);
+  });
+
+  it("as da conversa vêm primeiro (com quem as usa), e uma conta usada entra mesmo sem login ou sem cota", () => {
+    const used = usedAccounts([{ name: "Codex · Backend", agentId: "codex", accountId: null }, { name: "Gemini · Testes", agentId: "gemini-cli", accountId: null }]);
+    const list = connectedAccounts({ ...base, used });
+    expect(list.map((e) => e.key)).toEqual(["system:codex", "system:gemini-cli", "system:claude-code", "ton"]);
+    expect(list[0]!.who).toEqual(["Codex · Backend"]);
+    expect(list[3]!.who).toEqual([]);
+  });
+
+  it("o agy local (Antigravity sem perfil) é uma conta da lista quando o agy está instalado", () => {
+    const list = connectedAccounts({ ...base, used: [], agyInstalled: true });
+    expect(list.map((e) => e.key)).toContain("system:antigravity");
+    expect(connectedAccounts({ ...base, used: [], agyInstalled: false }).map((e) => e.key)).not.toContain("system:antigravity");
+  });
+});
+

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { accountUsageSummary } from "@/features/accounts/ipc";
+import { agentName } from "@/features/agents/agentTile";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AccountUsageSummary, AgentAccount } from "@/features/accounts/types";
 import { formatRemaining } from "@/features/accounts/usage";
@@ -16,8 +17,8 @@ import { useStructured } from "../structured/store";
 import { teamLedBy } from "../team/teamModel";
 import { startTeams, useTeamStore } from "../team/teamStore";
 import {
-  accountKeyOf, budgetOf, headlineOf, limitLevel, readAntigravity, readClaude, readCodex, renewal, usedAccounts,
-  type AccountReading, type Budget, type LimitLevel, type LimitWindow, type UsedAccount,
+  budgetOf, connectedAccounts, headlineOf, limitLevel, readAgy, readAntigravity, readClaude, readCodex, renewal, usedAccounts,
+  type AccountEntry, type AccountLike, type AccountReading, type Budget, type LimitLevel, type LimitWindow,
 } from "./limitsModel";
 
 /** Os agentes cuja cota o ADE mede de verdade (ver `usageStore`). */
@@ -89,45 +90,50 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   const claude = useUsageStore((s) => s.claude);
   const codex = useUsageStore((s) => s.codex);
   const antigravity = useUsageStore((s) => s.antigravity);
+  const agy = useUsageStore((s) => s.agy);
   const [summaries, setSummaries] = useState<Record<string, AccountUsageSummary>>({});
-  const [teamOpen, setTeamOpen] = useState(false);
   useEffect(() => startTeams(), []);
 
   const refs = useMemo(() => [conversation.tabId], [conversation.tabId]);
   const turnEnds = useTurnEnds(refs);
-  const accountOf = (u: UsedAccount): AgentAccount | null =>
-    (u.accountId ? accounts.find((a) => a.id === u.accountId) : systemAccounts.find((a) => a.agentId === u.agentId)) ?? null;
+  // TODAS as contas conectadas dos agentes que expõem a cota, as da conversa primeiro; uma barra por janela em cada.
+  const entries = useMemo(
+    () => connectedAccounts({ accounts, systemAccounts, used, measured: MEASURED_AGENTS, agyInstalled: agy.usage?.installed ?? false }),
+    [accounts, systemAccounts, used, agy.usage?.installed],
+  );
 
-  // Ao abrir o Resumo e ao fim de um turno: relê as contas (login e criação acontecem fora da tela) e a cota.
-  const keys = used.map((u) => u.key).join("|");
+  // Ao abrir o Resumo e ao fim de um turno: relê as contas (login e criação acontecem fora da tela) e a cota de cada
+  // uma, com a validade do store (uma TUI do Claude só sobe se a leitura tiver mais de 5 min); o `agy` local também.
+  const keys = entries.map((e) => e.key).join("|");
   useEffect(() => {
     let alive = true;
     const run = async () => {
       if (!loaded) await useAccountsStore.getState().load().catch(() => undefined);
-      const { accounts: acc, systemAccounts: sys } = useAccountsStore.getState();
-      for (const u of used) {
-        const account = (u.accountId ? acc.find((a) => a.id === u.accountId) : sys.find((a) => a.agentId === u.agentId)) ?? null;
-        if (account && MEASURED_AGENTS.has(u.agentId)) void useUsageStore.getState().refresh(account, false);
+      const { refresh, refreshAgy } = useUsageStore.getState();
+      void refreshAgy(false);
+      for (const entry of entries) {
+        if (entry.account && MEASURED_AGENTS.has(entry.agentId) && !(entry.agentId === "antigravity" && !entry.accountId)) void refresh(entry.account as AgentAccount, false);
       }
       const rows = await accountUsageSummary(1).catch(() => [] as AccountUsageSummary[]);
       if (alive) setSummaries(Object.fromEntries(rows.map((r) => [r.accountKey, r])));
     };
     void run();
     return () => { alive = false; };
-  }, [keys, turnEnds]); // eslint-disable-line react-hooks/exhaustive-deps -- `used` muda com `keys`; `loaded` só vale na primeira vez
+  }, [keys, turnEnds]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
 
   const now = Math.floor(Date.now() / 1000);
-  const readingOf = (u: UsedAccount): AccountReading => {
-    if (!MEASURED_AGENTS.has(u.agentId)) return { state: "unmeasured", reason: "noSource" };
-    const account = accountOf(u);
+  const readingOf = (entry: AccountEntry): AccountReading => {
+    if (!MEASURED_AGENTS.has(entry.agentId)) return { state: "unmeasured", reason: "noSource" };
+    // O Antigravity sem perfil é o login local do `agy`: a mesma leitura do canvas.
+    if (entry.agentId === "antigravity" && !entry.accountId) return readAgy(agy, true, now);
+    const account = entry.account;
     if (!account) return { state: "unmeasured", reason: loaded ? "noSource" : "loading" };
-    const loggedIn = account.loggedIn;
-    if (u.agentId === "claude-code") return readClaude(claude[account.id] ?? null, loggedIn, now);
-    if (u.agentId === "codex") return readCodex(codex[account.id], loggedIn, now);
-    return readAntigravity(antigravity[account.id], loggedIn, now);
+    if (entry.agentId === "claude-code") return readClaude(claude[account.id] ?? null, account.loggedIn, now);
+    if (entry.agentId === "codex") return readCodex(codex[account.id], account.loggedIn, now);
+    return readAntigravity(antigravity[account.id], account.loggedIn, now);
   };
 
-  const [main, ...rest] = used;
+  const [main, ...rest] = entries;
   const mainReading = main ? readingOf(main) : null;
   const headline = mainReading ? headlineOf(mainReading) : null;
 
@@ -136,36 +142,39 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
       aside={headline !== null && (
         <span className={`text-[11px] tabular-nums ${TEXT[limitLevel(headline)]}`}>{headline}%</span>
       )}>
-      {main && mainReading && <AccountBlock used={main} account={accountOf(main)} reading={mainReading} budget={budgetOf(summaries[accountKeyOf(main.agentId, main.accountId)])} now={now} />}
+      {entries.length === 0 && <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.limits.reason.noSource")}</span></Row>}
+      {main && mainReading && (
+        <AccountBlock entry={main} reading={mainReading} budget={budgetOf(summaries[main.key])} now={now} />
+      )}
       {rest.length > 0 && (
-        <>
-          <button type="button" onClick={() => setTeamOpen(!teamOpen)} aria-expanded={teamOpen}
-            className="self-start mt-1 px-1.5 text-[12.5px] text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white">
-            {teamOpen ? t("chat.summary.limits.teamHide") : t("chat.summary.limits.teamShow", { count: rest.length })}
-          </button>
-          {teamOpen && rest.map((u) => (
-            <TeamAccountRow key={u.key} used={u} account={accountOf(u)} reading={readingOf(u)} />
+        <div className="mt-2 pt-3 border-t border-gray-200 dark:border-white/[0.08] flex flex-col gap-4">
+          <div className="px-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400 dark:text-white/35">{t("chat.summary.limits.others", { count: rest.length })}</div>
+          {rest.map((entry) => (
+            <AccountBlock key={entry.key} entry={entry} reading={readingOf(entry)} budget={budgetOf(summaries[entry.key])} now={now} />
           ))}
-        </>
+        </div>
       )}
     </Section>
   );
 }
 
-function accountName(account: AgentAccount | null, t: (k: string) => string): string {
+function accountName(account: AccountLike | null, t: (k: string) => string): string {
   return account && !account.id.startsWith("system:") ? account.label ?? account.name : t("accounts.system");
 }
 
-function AccountBlock({ used, account, reading, budget, now }: { used: UsedAccount; account: AgentAccount | null; reading: AccountReading; budget: Budget | null; now: number }) {
+/** Uma conta: «Agente · conta» (e quem da conversa a usa), e uma barra por janela, ou «não medido» com o motivo. */
+function AccountBlock({ entry, reading, budget, now }: { entry: AccountEntry; reading: AccountReading; budget: Budget | null; now: number }) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2">
-      <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={used.who.join(", ")}>
-        {t("chat.summary.limits.account", { account: accountName(account, t) })}
+      <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={entry.who.join(", ")}>
+        <span className="font-medium text-gray-800 dark:text-white/85">{agentName(entry.agentId)}</span>
+        {" · "}{accountName(entry.account, t)}
+        {entry.who.length > 0 && <span className="text-gray-400 dark:text-white/35">{" · "}{t("chat.summary.limits.usedBy", { who: entry.who.join(", ") })}</span>}
       </div>
       {reading.state === "measured" ? (
         <>
-          {reading.windows.map((w, i) => <WindowBar key={`${w.kind}:${i}`} window={w} now={now} rejected={reading.rejected} />)}
+          {reading.windows.map((w, i) => <WindowBar key={`${w.kind}:${w.label ?? ""}:${i}`} window={w} now={now} rejected={reading.rejected} />)}
           {reading.rejected && reading.windows.length === 0 && <Row><span className={TEXT.full}>{t("chat.summary.limits.exhausted")}</span></Row>}
         </>
       ) : (
@@ -189,7 +198,9 @@ function Unmeasured({ reason }: { reason: string }) {
 
 function WindowBar({ window: w, now, rejected }: { window: LimitWindow; now: number; rejected: boolean }) {
   const { t, i18n } = useTranslation();
-  const label = w.kind === "model" ? w.label ?? "" : w.kind === "session" ? t("chat.accounts.window") : t("chat.accounts.week");
+  const kindLabel = w.kind === "session" ? t("chat.accounts.window") : t("chat.accounts.week");
+  // Um grupo de modelos (Antigravity) leva o nome na frente da janela; a de um modelo é só o nome.
+  const label = w.kind === "model" ? w.label ?? "" : w.label ? `${w.label} · ${kindLabel}` : kindLabel;
   const level = rejected && w.kind === "session" ? "full" : limitLevel(w.percent);
   const when = renewalText(w, now, i18n.language, t);
   return <Bar label={label} percent={w.percent} level={level} detail={w.expired ? t("chat.summary.limits.renewed") : when} />;
@@ -233,22 +244,5 @@ function Bar({ label, percent, level, detail }: { label: string; percent: number
       )}
       {detail && <div className="text-[11.5px] text-gray-400 dark:text-white/35">{detail}</div>}
     </div>
-  );
-}
-
-/** Uma conta usada por outros do time: agente · conta · % da janela atual. */
-function TeamAccountRow({ used, account, reading }: { used: UsedAccount; account: AgentAccount | null; reading: AccountReading }) {
-  const { t } = useTranslation();
-  const session = reading.state === "measured" ? reading.windows.find((w) => w.kind === "session" || w.kind === "model") ?? null : null;
-  const percent = session?.percent ?? null;
-  const level = reading.state === "measured" && reading.rejected ? "full" : limitLevel(percent);
-  const status = reading.state === "measured"
-    ? percent !== null ? `${percent}%` : t("chat.summary.notMeasured")
-    : `${t("chat.summary.notMeasured")} · ${t(`chat.summary.limits.reason.${reading.reason}`)}`;
-  return (
-    <Row title={used.who.join(", ")}
-      trailing={<span className={`shrink-0 tabular-nums text-[12px] ${TEXT[level]}`}>{status}{level === "warn" ? ` · ${t("chat.summary.limits.nearLimit")}` : level === "full" ? ` · ${t("chat.summary.limits.exhausted")}` : ""}</span>}>
-      {used.who[0]} · {accountName(account, t)}
-    </Row>
   );
 }

@@ -10,7 +10,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 import { AgentSwitchDialog } from "../structured/AgentSwitchDialog";
-import { switchableAgents } from "../structured/switchModel";
+import { lacksApproval, switchableAgents } from "../structured/switchModel";
 import { NoticeRow } from "../timeline/NoticeRow";
 import type { TimelineItem } from "../timeline/types";
 
@@ -70,3 +70,23 @@ describe("a confirmação da troca", () => {
     expect(host.textContent).toContain("chat.timeline.notice.agentSwitchAccess");
   });
 });
+
+describe("o Antigravity não tem tela de aprovação", () => {
+  it("só ele, e só no acesso Supervisionado", () => {
+    expect(lacksApproval("antigravity", "ask")).toBe(true);
+    expect(lacksApproval("antigravity", "edits")).toBe(false);
+    expect(lacksApproval("codex", "ask")).toBe(false);
+    expect(lacksApproval("claude-code", "ask")).toBe(false);
+  });
+
+  it("a confirmação avisa antes de trocar, e o aviso do fio repete depois", async () => {
+    const root = createRoot(document.body.appendChild(document.createElement("div")));
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    await act(async () => { root.render(<AgentSwitchDialog from="Claude Code" to="Antigravity" busy={false} error={null} noApproval onConfirm={() => undefined} onClose={() => undefined} />); });
+    expect(document.body.textContent).toContain('chat.agentSwitch.noApproval{"agent":"Antigravity"}');
+    await act(async () => { root.render(<NoticeRow item={{ kind: "notice", id: "n", label: "agentSwitch", text: JSON.stringify({ from: "claude-code", to: "antigravity", fromLabel: "Claude Code", toLabel: "Antigravity", model: null, strategy: "full", accessChanged: false, noApproval: true }) }} />); });
+    expect(document.body.textContent).toContain("chat.timeline.notice.agentSwitchNoApproval");
+    await act(async () => { root.unmount(); });
+  });
+});
+

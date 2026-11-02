@@ -14,6 +14,8 @@ export interface AgentSwitch {
   strategy: "full" | "delta";
   /** O acesso pedido não existe no agente novo e virou Supervisionado. */
   accessChanged: boolean;
+  /** O agente novo não pergunta (Antigravity): no acesso Supervisionado ele nega o que pediria aprovação. */
+  noApproval: boolean;
 }
 
 export function agentSwitchOf(item: TimelineItem): AgentSwitch | null {
@@ -28,6 +30,7 @@ export function agentSwitchOf(item: TimelineItem): AgentSwitch | null {
       model: typeof raw.model === "string" ? raw.model : null,
       strategy: raw.strategy === "delta" ? "delta" : "full",
       accessChanged: raw.accessChanged === true,
+      noApproval: raw.noApproval === true,
     };
   } catch {
     return null;

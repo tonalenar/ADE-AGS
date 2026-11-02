@@ -35,7 +35,7 @@ import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
 import { SummaryDock, SummaryPane } from "./summary/SummaryPane";
 import { useTeamDraft } from "./team/draftStore";
-import { chatInset } from "./summary/summaryLayout";
+import { chatInset, summaryPlacement } from "./summary/summaryLayout";
 import { forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
 import { matchTeamShortcut } from "./panelMenu";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
@@ -79,6 +79,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   // Arquivos do Finder soltos na coluna do chat viram anexos do composer à vista (só os caminhos).
   useChatFileDrop(mainRef);
   const inset = chatInset(panelTab, mainWidth);
+  const summarySpot = summaryPlacement(panelTab, mainWidth);
   const [folder, setFolder] = useState<string | null>(null);
   // O "+" de um projeto na barra pede a tela de conversa nova já nessa pasta: a casca lê o pedido uma vez.
   const composeFolder = useChatStore((s) => s.composeFolder);
@@ -191,8 +192,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             </AttachCwdContext.Provider>
           </div>
           <DropOverlay />
-          {inset > 0 && (
-            <SummaryDock>
+          {summarySpot !== "none" && (
+            <SummaryDock overlay={summarySpot === "overlay"}>
               <SummaryPane conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
             </SummaryDock>
           )}

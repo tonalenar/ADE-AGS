@@ -48,6 +48,20 @@ fn o_plano_que_o_codex_nao_tem_vira_supervisionado_e_o_aviso_diz() {
 }
 
 #[test]
+fn o_antigravity_nao_tem_tela_de_aprovacao_e_a_troca_avisa_quando_o_acesso_e_supervisionado() {
+    // `agy -p` não pergunta: no modo Supervisionado ele NEGA o que pediria aprovação (ver `agy_map::mode_args`).
+    let conn = conn();
+    let applied = apply_switch(&conn, "t1", &to("antigravity", "ask"), 100).unwrap();
+    assert!(applied.no_approval);
+    assert!(super::troca::notice_text(&applied).contains("\"noApproval\":true"));
+    // com o acesso que libera o que ele faz, não há o que avisar
+    let conn = self::conn();
+    assert!(!apply_switch(&conn, "t1", &to("antigravity", "edits"), 100).unwrap().no_approval);
+    let conn = self::conn();
+    assert!(!apply_switch(&conn, "t1", &to("codex", "ask"), 100).unwrap().no_approval, "o Codex tem tela de aprovação");
+}
+
+#[test]
 fn a_sessao_antiga_fica_guardada_e_voltar_a_retoma_com_o_resumo_so_do_intervalo() {
     let conn = conn();
     apply_switch(&conn, "t1", &to("codex", "ask"), 100).unwrap();

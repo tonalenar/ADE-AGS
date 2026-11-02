@@ -4484,5 +4484,13 @@
   "chat.quote.hint": "Enter adiciona · Esc fecha",
   "chat.quote.add": "Adicionar",
   "chat.quote.list": "Citações",
-  "chat.quote.remove": "Remover citação"
+  "chat.quote.remove": "Remover citação",
+  "chat.timeline.notice.agentSwitchNoApproval": "{{agent}} não tem tela de aprovação: no acesso Supervisionado ele nega o que pediria aprovação. Para liberar, troque o acesso.",
+  "chat.agentSwitch.noApproval": "{{agent}} não pergunta antes de agir: no acesso Supervisionado ele NEGA o que pediria aprovação. Depois de trocar, mude o acesso (Aceitar edições, Auto ou Total) para liberar.",
+  "chat.message.copy": "Copiar",
+  "chat.message.copied": "Copiado",
+  "chat.message.edit": "Editar e reenviar",
+  "chat.message.editHint": "Põe o texto de volta no campo de mensagem para você editar e reenviar",
+  "chat.summary.limits.others": "Outras contas conectadas ({{count}})",
+  "chat.summary.limits.usedBy": "usada por {{who}}"
 }

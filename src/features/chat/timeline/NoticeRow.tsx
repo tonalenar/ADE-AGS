@@ -22,6 +22,7 @@ export function NoticeRow({ item, onResend, threadId }: { item: TimelineItem; on
           {change.model ? t("chat.timeline.notice.agentSwitchModel", { agent: change.toLabel, model: change.model }) : t("chat.timeline.notice.agentSwitch", { agent: change.toLabel })}
         </p>
         <p className="m-0">{t(change.strategy === "delta" ? "chat.timeline.notice.agentSwitchDelta" : "chat.timeline.notice.agentSwitchFull", { agent: change.toLabel, from: change.fromLabel })}</p>
+        {change.noApproval && <p className="m-0 text-amber-700 dark:text-amber-400">{t("chat.timeline.notice.agentSwitchNoApproval", { agent: change.toLabel })}</p>}
         {change.accessChanged && <p className="m-0 text-amber-700 dark:text-amber-400">{t("chat.timeline.notice.agentSwitchAccess", { agent: change.toLabel })}</p>}
       </div>
     );

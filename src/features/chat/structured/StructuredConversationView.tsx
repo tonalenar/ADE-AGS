@@ -28,7 +28,7 @@ import type { RequestRow, ThreadRow } from "./ipc";
 import { EMPTY_LIVE, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
 import { AgentSwitchDialog } from "./AgentSwitchDialog";
 import { answerRequest, hydrateThread, interruptThread, retuneThread, sendToThread, switchThreadAgent, useStructured } from "./store";
-import { switchableAgents } from "./switchModel";
+import { lacksApproval, switchableAgents } from "./switchModel";
 
 /**
  * Uma conversa por protocolo (o Codex pelo `app-server`, o Claude Code pelo `claude -p`): a mesma
@@ -164,7 +164,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           after={<TeamThreadFeed conversation={card} cards={cards} />} />
       )} />
       {switchTo && (
-        <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError}
+        <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError} noApproval={lacksApproval(switchTo.agentId, thread.access)}
           onClose={() => setSwitchTo(null)}
           onConfirm={() => {
             setSwitching(true);
