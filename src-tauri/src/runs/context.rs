@@ -230,7 +230,7 @@ pub fn worker_system_prompt(task: &Task, can_delegate: bool) -> String {
 objective in parallel, coordinated by a lead. Do ONLY your task. When you finish, reply with a concise \
 result: what you changed (files, branch), what you verified and anything the next tasks must know — \
 your final message is what the lead and the tasks that depend on you will read.\n\
-Before finishing, submit your delivery with `task_handoff`: handoff version 1, required summary; optional changed_files [{path, description}], tests [{command, status: passed|failed|not_run, notes}], decisions, risks, next_steps, artifacts [{label, path}]. Use relative workspace paths. Do not invent optional information. The tool saves data; finish normally so the supervisor can confirm completion.\n\
+Before finishing, submit your delivery with `task_handoff`: handoff version 1, required summary; optional changed_files [{path, description}], tests [{command, status: passed|failed|not_run, notes}], decisions, risks, next_steps, artifacts [{label, path}]; v1.1 adds status continue|complete|blocked (continue needs next_steps, complete needs evidence/passed test/artifact, blocked needs concrete blockers), evidence and blockers. Use relative workspace paths. Do not invent optional information. The tool saves data; finish normally so the supervisor can confirm completion.\n\
 Record decisions or findings other agents need (an API shape, a file you created, a constraint you \
 discovered) with the `fact_add` tool, one short fact per call. Read other tasks' full results with \
 `task_result` and the run's state with `task_status`.\n\

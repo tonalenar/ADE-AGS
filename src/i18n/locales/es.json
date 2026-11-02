@@ -1270,6 +1270,8 @@
   "ask.send": "Contestar",
   "ask.placeholder": "Tu respuesta",
   "ask.waiting": "Está esperando tu respuesta · quedan {{time}}",
+  "ask.late": "El agente siguió sin la respuesta: lo que contestes le llega como mensaje.",
+  "ask.lateMessage": "[Respuesta de la persona vía ADE AGS, después del plazo] A tu pregunta \"{{question}}\": {{answer}}",
   "browser.newTab": "Navegador",
   "browser.address": "localhost:5173",
   "browser.zoom.out": "Reducir el zoom de la página",

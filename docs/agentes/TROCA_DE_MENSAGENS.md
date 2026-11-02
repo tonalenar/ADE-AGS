@@ -81,6 +81,7 @@
 ## `peer deliver` / `peer handoff`
 - A entrega final no canvas é `ags peer deliver [<nome>] --file x.json`, em **Handoff v1** (`runs::handoff::parse`).
   - JSON inválido mostra o `HANDOFF_TEMPLATE`.
+  - v1.1 (aditivo): `status` opcional. `continue` exige `next_steps`, `complete` exige evidência (`evidence`, um teste `passed` ou um artefato) e `blocked` exige `blockers` concretos. Report que não cumpre é recusado inteiro, nunca truncado.
   - O destino padrão é o orquestrador.
 - O JSON é gravado em `mission_handoffs` e o texto legível em `mission_messages`.
 - No terminal do destino chega `ENTREGA #<id>: resumo · N arquivo(s) · testes … Detalhe: ags peer handoff <id>`.
@@ -109,6 +110,7 @@
   - anel em memória de 2.000 eventos com `seq`, emitido também como `ade-event`;
   - tópicos: `task.*`, `mission.changed`, `approvals.changed`, `account.*`, `peer.message` (cada mudança de estado de uma mensagem: `{id, state, from, to}`) e `peer.queue` (a fila de um destino mudou);
   - consulta: `ags events since|wait --after N --topics …`; `truncated: true` indica que o `after` pedido já saiu do anel;
+  - `events wait` volta na hora com `noProgress: true` e `reason` quando ninguém vai gerar o evento (com `--run`/`--mission`, nenhuma tarefa trabalha nem pode subir; sem eles, nenhum integrante do orquestrador que chama trabalha nem provisiona); `--allow-idle` espera o prazo;
   - é **efêmero**: o que precisa persistir vai para o banco.
 - **Watch** (`orchestrator/watch.rs`):
   - `ags watch add/wait` gera eventos `error`, `exit` e `idle` (padrão de 20 s) para até 3 abas;

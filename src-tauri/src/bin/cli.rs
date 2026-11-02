@@ -69,7 +69,10 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Pergunta a vários AO MESMO TEMPO e espera todos
   peer check <nome> [--lines 60]              O que aparece agora no terminal dele
   peer deliver [<nome>] --file entrega.json   Entrega final estruturada (Handoff v1) ao orquestrador
-                                              (ou a <nome>): ele recebe uma linha com o resumo e o id
+                                              (ou a <nome>): ele recebe uma linha com o resumo e o id.
+                                              v1.1: \"status\" continue (exige next_steps), complete (exige
+                                              evidence, teste passed ou artifact) ou blocked (exige blockers
+                                              concretos); entrega inválida é recusada inteira, nunca cortada
   peer handoff <id>                           O JSON inteiro de uma entrega da sua missão
              (tell/ask/deliver --id <req>: o seu id do pedido. O mesmo id é a mesma mensagem:
               nunca é digitada duas vezes, nem num reenvio depois de um reinício do app)
@@ -94,6 +97,9 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
                                                 --model/--effort explícitos sempre vencem. Sem --agent, o do padrão
               [--fast]                          · modo Fast do Codex (só --agent codex)
               [--floor <andar>]                 · nesse andar (ou `ground`, o térreo)
+                                                Profundidade 1: um agente recrutado não recruta (a profundidade
+                                                gravada nunca desce). Até 12 recrutados abertos por orquestrador.
+                                                No limite volta {refused, reason: depth|active_cap, message}
   peer connect <a> <b>                        Conecta dois agentes da equipe
   peer disconnect <a> <b>                     Desconecta os dois
   peer role <nome> <papel> [--subagent]       Define o papel de um agente da equipe (os sem papel esperam por isso)
@@ -242,8 +248,12 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
 
 EVENTOS (o barramento da frota e das missões)
   events since [--after <seq>] [filtros]      O que aconteceu depois desse número
-  events wait --after <seq> [--timeout 60] [filtros]
-                                              Espera o próximo evento (sem polling)
+  events wait --after <seq> [--timeout 60] [filtros] [--allow-idle]
+                                              Espera o próximo evento (sem polling). Volta na hora com
+                                              `noProgress: true` e `reason` quando ninguém vai gerar o evento:
+                                              com --run/--mission, nenhuma tarefa trabalha nem pode subir; sem
+                                              eles (orquestrador), nenhum integrante trabalha nem provisiona.
+                                              --allow-idle espera o prazo mesmo assim
   Filtros: --topics task.,mission. --run <id> --mission <id> --task <id> --limit 100
 
 MISSÕES (também sem interface: `ade-ags --headless`)
@@ -373,20 +383,52 @@ Sem --account, a tab usa a conta principal (a de sempre).
 agente não inicia. Cada valor pode ser o nome de um item salvo ou um comando literal:
   ags tab create --cwd . --agent claude-code --pre \"ambiente conda\" --pre \"nvm use\"
 
-A saída é sempre uma linha JSON no stdout (exceto `mcp`, que fala JSON-RPC).
+A saída é sempre uma linha JSON no stdout (exceto `mcp`, que fala JSON-RPC). Em `tab output`,
+`tab screen`, `peer check`, `peer pending`, `chat show`, `chat wait` e `recall get`, um texto acima de
+~6.000 tokens vai inteiro para ~/.ags/spill/<aba>/ (privado, apagado após 30 dias) e volta como cabeça,
+cauda e o caminho, com `spilled` dizendo o campo e o arquivo; `--no-spill` devolve tudo.
 Códigos de saída: 0 ok · 1 o comando falhou · 2 uso incorreto · 3 o app não está rodando
 ";
+
+// BEGIN GENERATED: mcp-tools-help (bun run gen:catalogs)
+const MCP_TOOLS_HELP: &str = "\
+FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
+  Navegador: browser_navigate, browser_pick, browser_marked, browser_snapshot, browser_click,
+    browser_act, browser_type, browser_press, browser_select, browser_describe, browser_screenshot,
+    browser_drag, browser_upload, browser_mock, browser_dialogs, browser_hover, browser_scroll,
+    browser_wait, browser_history, browser_resize, browser_layout, browser_console, browser_network,
+    browser_storage, browser_cookies, browser_performance, browser_eval
+  Orquestração da frota: gemini_desktop_status, gemini_desktop_consult, gemini_desktop_result,
+    agent_roster, run_plan, task_add, task_handoff, task_status, task_result, run_await, fact_add,
+    facts_read, fact_read, task_reroute, task_cancel
+  Memória da frota: memory_list, memory_get, memory_search, memory_open, memory_propose,
+    memory_update, memory_delete, memory_promote_fact
+  Conta de git: git_account, git_repos, git_pr_list, git_pr_view, git_checks, git_pr_files,
+    git_issue_list, git_issue_view, git_fetch, git_pull, git_push, git_pr_create, git_issue_create,
+    git_tag, git_release_list, git_release_create, git_comment
+  Pares e time: peer_tell, peer_deliver, peer_handoff, peer_receipt, team_list, team_create,
+    team_link, team_unlink, team_role
+  Conversas do modo chat: chat_list, chat_new, chat_send, chat_wait, chat_show, chat_stop,
+    chat_pending
+  Pranchetas: design_list, design_get, design_view, design_create, design_open, design_page_add,
+    design_page_rename, design_page_delete, design_artboard_add, design_artboard_update,
+    design_artboard_duplicate, design_artboard_delete, design_comment_add, design_comment_resolve,
+    design_note_add
+  Perguntas à pessoa: ask_user
+  Permissão: approve_tool_use
+";
+// END GENERATED: mcp-tools-help
 
 pub(crate) fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
-        eprint!("{USAGE}");
+        eprint!("{USAGE}\n{MCP_TOOLS_HELP}");
         return ExitCode::from(if args.is_empty() { EXIT_USAGE } else { EXIT_OK });
     }
     // `ags tab --help`, `ags mission create --help`: ayuda, no un comando que viaja a la app.
     if args[0] != "mcp" && args.iter().any(|a| a == "--help") {
-        eprint!("{USAGE}");
+        eprint!("{USAGE}\n{MCP_TOOLS_HELP}");
         return ExitCode::from(EXIT_OK);
     }
     if args[0] == "--version" || args[0] == "-V" {
@@ -566,7 +608,12 @@ pub(crate) fn main() -> ExitCode {
 
     match send(&command, parsed.clone()) {
         Ok(response) if response.ok => {
-            let body = response.data.unwrap_or(Value::Null);
+            let mut body = response.data.unwrap_or(Value::Null);
+            // Respostas grandes de leitura vão para `~/.ags/spill/`; `--no-spill` devolve tudo.
+            if ade_ags_lib::ipc::spill::CLI_COMMANDS.contains(&command.as_str()) && parsed.get("noSpill").and_then(Value::as_bool) != Some(true) {
+                let session = std::env::var("ADE_TAB_ID").ok();
+                ade_ags_lib::ipc::spill::spill_json(ade_ags_lib::ipc::spill::root().as_deref(), session.as_deref().unwrap_or("cli"), &mut body);
+            }
             println!("{body}");
             ExitCode::from(EXIT_OK)
         }
@@ -778,7 +825,7 @@ impl CliError {
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 /// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 15] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
+    const GROUPS: [&str; 16] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }

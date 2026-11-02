@@ -590,3 +590,42 @@ mod recruit_default {
         assert_eq!(default_for_mission(&conn, "missing").unwrap(), None);
     }
 }
+
+mod recruit_depth {
+    use crate::squads::recruit::{active_recruits, effective_depth, gate, record, RecruitBook, RecruitGate, DEFAULT_MAX_DEPTH, MAX_ACTIVE_RECRUITS};
+
+    #[test]
+    fn a_profundidade_gravada_nunca_desce() {
+        assert_eq!(effective_depth(None, 0), 0);
+        assert_eq!(effective_depth(Some(1), 0), 1, "retomado não volta a ser topo");
+        assert_eq!(effective_depth(Some(1), 2), 2);
+        let mut book = RecruitBook::new();
+        record(&mut book, "t1", "lead", 2, 10);
+        record(&mut book, "t1", "lead", 1, 20);
+        assert_eq!(book["t1"].depth, 2);
+        assert_eq!(book["t1"].at, 20);
+        record(&mut book, "t2", "lead", 1, 20 + crate::squads::recruit::KEEP_SECS + 1);
+        assert!(!book.contains_key("t1"), "registro velho é podado");
+    }
+
+    #[test]
+    fn padrao_deixa_so_a_aba_da_pessoa_recrutar() {
+        assert_eq!(gate(0, DEFAULT_MAX_DEPTH, 0, MAX_ACTIVE_RECRUITS), RecruitGate::Allowed { child_depth: 1 });
+        let RecruitGate::Refused(why) = gate(1, DEFAULT_MAX_DEPTH, 0, MAX_ACTIVE_RECRUITS) else { panic!("recrutado não recruta") };
+        assert!(why.contains("profundidade 1") && why.contains("limite 1"), "{why}");
+    }
+
+    #[test]
+    fn teto_conta_so_os_recrutados_abertos_de_quem_chama() {
+        let mut book = RecruitBook::new();
+        for i in 0..MAX_ACTIVE_RECRUITS { record(&mut book, &format!("a{i}"), "lead", 1, 0); }
+        record(&mut book, "outro", "lead-2", 1, 0);
+        let mut open: Vec<String> = (0..MAX_ACTIVE_RECRUITS).map(|i| format!("a{i}")).collect();
+        open.push("outro".into());
+        let active = active_recruits(&book, "lead", &open);
+        assert_eq!(active, MAX_ACTIVE_RECRUITS);
+        assert!(matches!(gate(0, DEFAULT_MAX_DEPTH, active, MAX_ACTIVE_RECRUITS), RecruitGate::Refused(m) if m.contains("limite 12")));
+        open.remove(0);
+        assert_eq!(active_recruits(&book, "lead", &open), MAX_ACTIVE_RECRUITS - 1, "aba fechada libera a vaga");
+    }
+}
