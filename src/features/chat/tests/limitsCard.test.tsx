@@ -75,7 +75,7 @@ describe("o cartão Limites de uso", () => {
     useUsageStore.setState({ claude: { "system:claude-code": live(42, 17) } });
     await mount();
     expect(text()).toContain("chat.summary.limits.title");
-    expect(text()).toContain('chat.summary.limits.account{"account":"accounts.system"}');
+    expect(text()).toContain('chat.summary.limits.accountActive{"account":"accounts.system"}');
     expect(bars().map((b) => b.getAttribute("aria-valuenow"))).toEqual(["42", "17"]);
     expect(text()).toContain("chat.accounts.window");
     expect(text()).toContain("chat.accounts.week");

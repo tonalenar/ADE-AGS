@@ -459,6 +459,7 @@ fn return_to_origin(db: &DbConnection, thread_id: &str, now: i64) -> Result<Stri
 /// vai junto na mensagem; «perguntar»: avisa uma vez). Devolve o texto a enviar.
 pub fn before_send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> String {
     let now = crate::util::now_ts();
+    let text = &with_manual_handoff(db, thread_id, text);
     let mode = mode(db);
     let Some(switched) = load::<Switched>(db, &switched_key(thread_id)).filter(|s| can_return(s.origin_resets_at, now)) else { return text.to_string() };
     if mode == Mode::Off || bound(db, thread_id).is_none() || pending(db, thread_id).is_some() {
@@ -487,4 +488,72 @@ pub fn resolve_at_create(db: &DbConnection, agent_id: &str, pool_name: &str) -> 
     let agent = roster.agent(agent_id).ok_or_else(|| format!("'{agent_id}' fora do roster"))?;
     let (account, _) = crate::runs::routing::pick_in_pool(agent, &spec, crate::util::now_ts()).map_err(|e| format!("Pool '{pool_name}': {e}"))?;
     Ok((account, spec.id))
+}
+
+// ── Troca manual de conta (a pessoa escolhe, em qualquer conversa) ──────────────────────────────────────────
+
+fn handoff_key(thread: &str) -> String {
+    format!("chat.account.handoff.{thread}")
+}
+
+/// Pura: a troca manual é permitida? Só entre turnos, sem pedido do agente esperando resposta e para uma conta
+/// que é do agente da conversa (`None` = a principal, sempre do agente).
+pub fn check_manual_switch(working: bool, pending_requests: usize, current: &Option<String>, target: &Option<String>, target_agent: Option<&str>, agent_id: &str) -> Result<(), String> {
+    if working {
+        return Err("Espere o turno terminar para trocar de conta.".into());
+    }
+    if pending_requests > 0 {
+        return Err("Responda ao pedido do agente antes de trocar de conta.".into());
+    }
+    if current == target {
+        return Err("A conversa já usa esta conta.".into());
+    }
+    if target.is_some() && target_agent != Some(agent_id) {
+        return Err("Esta conta não é do agente da conversa.".into());
+    }
+    Ok(())
+}
+
+/// A parte de banco da troca manual: valida, passa a conta, esquece a sessão e deixa o resumo para a próxima
+/// mensagem. Devolve (conta anterior, conta nova). Não conta no teto do pool nem ativa a volta à original.
+pub(super) fn set_account_manual(db: &DbConnection, thread_id: &str, to: &Option<String>, working: bool, now: i64) -> Result<(Option<String>, Option<String>), String> {
+    let row = api::thread(db, thread_id)?;
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let pending = store::pending_requests(&conn, thread_id).map_err(|e| e.to_string())?.len();
+        let target_agent: Option<String> = to.as_deref().and_then(|id| conn.query_row("SELECT agent_id FROM agent_accounts WHERE id = ?1", [id], |r| r.get(0)).ok());
+        check_manual_switch(working, pending, &row.account_id, to, target_agent.as_deref(), &row.agent_id)?;
+    }
+    api::close_process(thread_id);
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::set_account(&conn, thread_id, to.as_deref()).map_err(|e| e.to_string())?;
+        store::clear_remote_id(&conn, thread_id).map_err(|e| e.to_string())?;
+    }
+    // A escolha da pessoa manda: o pool deixa de querer «voltar à original» e a pergunta pendente perde o sentido.
+    save::<Switched>(db, &switched_key(thread_id), None);
+    save::<Pending>(db, &pending_key(thread_id), None);
+    save(db, &handoff_key(thread_id), Some(&now));
+    Ok((row.account_id, to.clone()))
+}
+
+/// Consome o resumo pendente da troca manual: devolve a mensagem com o contexto à frente (uma vez só).
+pub(super) fn with_manual_handoff(db: &DbConnection, thread_id: &str, text: &str) -> String {
+    if load::<i64>(db, &handoff_key(thread_id)).is_none() {
+        return text.to_string();
+    }
+    save::<i64>(db, &handoff_key(thread_id), None);
+    let items = api::items(db, thread_id).unwrap_or_default();
+    if items.is_empty() {
+        return text.to_string();
+    }
+    format!("{}\n{text}", handoff_text(&items, None))
+}
+
+/// A pessoa escolheu a conta da conversa (comando `chat_account_set`): troca entre turnos e avisa na timeline.
+pub fn switch_manual(app: &AppHandle, db: &DbConnection, thread_id: &str, to: Option<String>) -> Result<(), String> {
+    let working = api::status(thread_id).working;
+    let (_, to) = set_account_manual(db, thread_id, &to, working, crate::util::now_ts())?;
+    turn::save_notice(app, db, thread_id, "accountSwitch", &format!("Agora na conta {}. O agente recebe um resumo desta conversa na próxima mensagem.", account_label(db, to.as_deref())));
+    Ok(())
 }

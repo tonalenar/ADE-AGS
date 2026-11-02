@@ -184,7 +184,7 @@ function AccountBlock({ used, account, reading, budget, now, poolNote }: { used:
   return (
     <div className="flex flex-col gap-2">
       <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45 truncate" title={used.who.join(", ")}>
-        {t("chat.summary.limits.account", { account: accountName(account, t) })}
+        {t("chat.summary.limits.accountActive", { account: accountName(account, t) })}
       </div>
       {poolNote && <div className="px-0.5 text-[12px] text-gray-500 dark:text-white/45">{poolNote}</div>}
       {reading.state === "measured" ? (

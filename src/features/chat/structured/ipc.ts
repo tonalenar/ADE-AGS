@@ -68,5 +68,7 @@ export const chatThreadInterrupt = (threadId: string) => invoke<void>("chat_thre
 export const chatRequestAnswer = (requestId: string, choice: string) => invoke<boolean>("chat_request_answer", { requestId, choice });
 export const chatThreadRetune = (threadId: string, model: string | null, effort: string | null, access: ThreadAccess) =>
   invoke<ThreadRow>("chat_thread_retune", { threadId, model, effort, access });
+/** Troca a conta de uma conversa aberta (entre turnos; o agente recebe um resumo na próxima mensagem). */
+export const chatAccountSet = (threadId: string, accountId: string | null) => invoke<void>("chat_account_set", { threadId, accountId });
 export const chatThreadRename = (threadId: string, title: string) => invoke<void>("chat_thread_rename", { threadId, title });
 export const chatThreadSettle = (threadId: string, settled: boolean) => invoke<void>("chat_thread_settle", { threadId, settled });

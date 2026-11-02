@@ -6,6 +6,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { AccessMenu } from "../AccessMenu";
 import { turnLive } from "../activityModel";
 import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
+import { ThreadAccountMenu } from "./ThreadAccountMenu";
 import { BotIcon } from "../chatIcons";
 import { accessModesFor, planSupported, type ConversationCard } from "../chatModel";
 import { messageFor } from "../attachments/send";
@@ -99,6 +100,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       <AgentModelPicker agents={[agentInfo]} showAccount={false} disabled={locked}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
         onChange={(v) => retuneThread(thread.id, v.model, thread.effort, thread.access)} />
+      <ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />
       <EffortMenu agentId={thread.agentId} model={thread.model} account={null} value={thread.effort} disabled={locked}
         onChange={(effort) => retuneThread(thread.id, thread.model, effort, thread.access)} />
       {planSupported(thread.agentId, true) && (

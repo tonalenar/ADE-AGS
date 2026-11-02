@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { setComposing, useChatStore } from "../store";
 import {
-  chatRequestAnswer, chatThreadCreate, chatThreadInterrupt, chatThreadItems, chatThreadRequests, chatThreadRetune, chatThreadSend,
+  chatAccountSet, chatRequestAnswer, chatThreadCreate, chatThreadInterrupt, chatThreadItems, chatThreadRequests, chatThreadRetune, chatThreadSend,
   chatThreadSettle, chatThreads, chatThreadStatus, type ThreadAccess, type ThreadRow,
 } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
@@ -165,6 +165,17 @@ export function retuneThread(id: string, model: string | null, effort: string | 
   chatThreadRetune(id, model, effort, access)
     .then(upsertThread)
     .catch((e) => patchLive(id, (live) => ({ ...live, error: String(e) })));
+}
+
+/** A pessoa escolheu outra conta para a conversa. Devolve o erro (o menu o mostra) ou `null`. */
+export async function switchThreadAccount(id: string, accountId: string | null): Promise<string | null> {
+  try {
+    await chatAccountSet(id, accountId);
+    await reloadThreads();
+    return null;
+  } catch (e) {
+    return String(e);
+  }
 }
 
 /** Conclui (o agente fecha; reabrir retoma a mesma thread) ou reabre. */
