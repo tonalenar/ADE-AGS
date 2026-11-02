@@ -14,7 +14,7 @@ function useOverlaps(load: (() => Promise<ScopeOverlap[]>) | null, key: string):
   useEffect(() => {
     if (!load) { setFound(EMPTY); return; }
     let alive = true;
-    const refresh = () => { load().then((list) => { if (alive) setFound(list); }).catch(() => { if (alive) setFound(EMPTY); }); };
+    const refresh = () => { load().then((list) => { if (alive) setFound(Array.isArray(list) ? list : EMPTY); }).catch(() => { if (alive) setFound(EMPTY); }); };
     refresh();
     const off = listen("cc-peer-message", refresh);
     return () => { alive = false; off.then((fn) => fn()).catch(() => {}); };
