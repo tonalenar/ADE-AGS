@@ -383,6 +383,10 @@ O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro
 
 Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).
 
+## Bancada dos motores por protocolo
+
+Fake de agente com falhas roteirizadas (stall, JSON cortado, queda, cota, `max_tokens`, aprovação, pergunta, modo aleatório com semente) tocado nos mapeadores reais de `claude -p`, `codex app-server` e ACP; replay de transcript de protocolo (`ade-replay` v2) com placeholders tipados, modos `replay`/`refresh`/`record`, oráculo que o refresh não reescreve e guard de ferramenta desconhecida; mock de `invoke` por nome com `assertNoUnmatched()` no front. Usado nos testes de `resume.rs` e do pool de contas. Achou: a queda do Codex sem motivo, o Codex que esgota sem acionar o pool e o `max_tokens` do Claude que acaba como "ok". Uso e limites: [BANCADA_MOTORES.md](./BANCADA_MOTORES.md).
+
 ## Pontos de restauração das abas
 
 A cada mensagem que chega a um agente numa aba (peers, `ags tab send`, chat, rotinas, missões e o Enter no terminal), uma foto dos arquivos da pasta vai para uma ref git escondida (`refs/ags/checkpoints/<aba>/<n>`), sem tocar branch, índice nem stash. No menu da aba: "Pontos de restauração…" (ver o diff desde um ponto, voltar os arquivos até ele com ponto de segurança e trava de pasta compartilhada) e "Marcar ponto". A conversa do agente não volta. Desenho e limites: [CHECKPOINTS_ABAS.md](./CHECKPOINTS_ABAS.md).

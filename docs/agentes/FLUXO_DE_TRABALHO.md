@@ -29,6 +29,7 @@
 - No ciclo interno, use **`ags test affected`**, depois de commitar o código de produto: o cache vale por `HEAD^{tree}`, e a comparação é com a base do worktree. A base é `branch.<nome>.agsbase` (se gravada); senão a primeira que existir entre `origin/dev`, `gh/dev`, `dev`, `origin/master` e `master`. Sem nenhuma, o comando falha com o `git config branch.<nome>.agsbase <ref>` a rodar, sem pular testes. Detalhes em `docs/ade-ags/TEST_SPEED.md` e `TEST_CACHE.md`.
 - Suíte completa local **só** em três casos: migração de schema ou DDL; `unsafe`, COM ou Win32; mudança de schema IPC.
 - Não remova targets nem worktrees de uma missão em andamento.
+- Para os motores por protocolo (conversas do chat), teste com a bancada: fake de agente roteirizado, replay de protocolo e, no front, `src/test/invokeMock.ts`. Ver `docs/ade-ags/BANCADA_MOTORES.md`.
 
 ## Lint dos testes
 `scripts/test-lint.mjs` varre os `*.test.ts(x)` de `src/` e o código de teste Rust (`test.rs`, `*_test.rs`, os `mod` puxados por `#[cfg(test)]` e os blocos `#[cfg(test)] mod x { … }`). Strings e comentários não contam.
