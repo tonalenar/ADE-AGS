@@ -197,6 +197,13 @@ pub fn items(conn: &Connection, thread_id: &str) -> rusqlite::Result<Vec<Item>> 
     Ok(bodies.iter().filter_map(|b| serde_json::from_str(b).ok()).collect())
 }
 
+/// Os últimos `limit` itens da conversa, do mais velho ao mais novo (a ponta, sem ler a conversa inteira).
+pub fn tail_items(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<Item>> {
+    let mut stmt = conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 ORDER BY seq DESC LIMIT ?2")?;
+    let bodies: Vec<String> = stmt.query_map(params![thread_id, limit], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    Ok(bodies.iter().rev().filter_map(|b| serde_json::from_str(b).ok()).collect())
+}
+
 pub fn upsert_run(conn: &Connection, thread_id: &str, run_id: &str, status: &str, started_at: Option<i64>, completed_at: Option<i64>, duration_ms: Option<i64>) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO chat_run (id, thread_id, status, started_at, completed_at, duration_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)

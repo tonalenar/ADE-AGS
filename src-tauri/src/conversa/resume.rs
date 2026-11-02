@@ -127,3 +127,29 @@ pub fn lost_notice(reason: &str) -> String {
         format!("A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele. Motivo: {}", crate::canal::event::clip(reason, 300))
     }
 }
+
+/// A nota honesta que o PRÓXIMO envio leva ao agente quando o turno anterior caiu com ferramenta sem resultado
+/// (aviso `toolOutcomeUnknown` gravado por `turn::record_end`): ele pode ter rodado um `git push`, uma migração
+/// ou um envio, e repeti-lo às cegas faria de novo. Vale só enquanto não houve mensagem da pessoa depois do
+/// aviso. Pura: recebe os itens da conversa (do mais velho ao mais novo).
+pub fn unknown_outcome_note(items: &[crate::canal::timeline::Item]) -> Option<String> {
+    use crate::canal::timeline::ItemKind;
+    for item in items.iter().rev() {
+        match item.kind {
+            ItemKind::User => return None,
+            ItemKind::Notice if item.label.as_deref() == Some("toolOutcomeUnknown") => {
+                return item.text.as_deref().filter(|t| !t.trim().is_empty()).map(|t| format!("[Aviso do ADE AGS, não da pessoa] {t}"));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Pura: a mensagem que vai ao agente, com a nota (se houver) antes do texto da pessoa.
+pub fn with_note(note: Option<&str>, text: &str) -> String {
+    match note {
+        Some(note) => format!("{note}\n\n{text}"),
+        None => text.to_string(),
+    }
+}

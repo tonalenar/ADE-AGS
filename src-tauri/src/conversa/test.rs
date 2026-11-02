@@ -1419,3 +1419,73 @@ mod ponta_a_ponta {
         }
     }
 }
+
+// ── Ferramenta interrompida: TOOL_OUTCOME_UNKNOWN ──────────────────────
+
+mod desfecho_desconhecido {
+    use crate::canal::timeline::{Item, ItemKind, ToolKind, ToolStatus};
+
+    use super::super::resume::{unknown_outcome_note, with_note};
+    use super::super::store;
+    use super::super::turn::{dropped, record_end, StopReason, TOOL_OUTCOME_UNKNOWN};
+    use super::thread;
+
+    fn running(id: &str, name: &str, label: &str) -> Item {
+        Item { name: Some(name.into()), tool: Some(ToolKind::Command), label: Some(label.into()), status: Some(ToolStatus::Running), ..Item::new(ItemKind::Tool, id.into(), Some(10)) }
+    }
+
+    #[test]
+    fn o_turno_que_caiu_com_ferramenta_pendente_marca_o_desfecho_desconhecido() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("c1", "Bash", "git push origin dev")).unwrap();
+        let done = Item { status: Some(ToolStatus::Done), ..running("c0", "Bash", "git status") };
+        store::upsert_item(&conn, "t1", Some("r1"), &done).unwrap();
+        let (result, _) = dropped(false, None, "Claude");
+        record_end(&conn, "t1", "r1", &result, 50);
+        let items = store::items(&conn, "t1").unwrap();
+        let push = items.iter().find(|i| i.id == "c1").unwrap();
+        assert_eq!(push.status, Some(ToolStatus::Error), "a ferramenta não fica rodando para sempre");
+        assert!(push.output.as_deref().is_some_and(|o| o.starts_with(TOOL_OUTCOME_UNKNOWN)), "{push:?}");
+        assert_eq!(items.iter().find(|i| i.id == "c0").unwrap().status, Some(ToolStatus::Done), "a que terminou fica como estava");
+        let notice = items.iter().find(|i| i.kind == ItemKind::Notice).expect("o aviso na timeline");
+        assert_eq!(notice.label.as_deref(), Some("toolOutcomeUnknown"));
+        let text = notice.text.as_deref().unwrap();
+        assert!(text.contains("`Bash git push origin dev`") && text.contains("Só repita se for idempotente") && !text.contains("`Bash git status`"), "{text}");
+        // O próximo envio leva a nota ao agente; depois da mensagem da pessoa, não leva mais.
+        let note = unknown_outcome_note(&items).expect("a nota");
+        assert!(note.starts_with("[Aviso do ADE AGS, não da pessoa] TOOL_OUTCOME_UNKNOWN"), "{note}");
+        assert_eq!(with_note(Some(&note), "continue"), format!("{note}\n\ncontinue"));
+        let mut later = items.clone();
+        later.push(Item { text: Some(format!("{note}\n\ncontinue")), ..Item::new(ItemKind::User, "u2".into(), Some(60)) });
+        assert_eq!(unknown_outcome_note(&later), None);
+    }
+
+    #[test]
+    fn o_turno_que_terminou_bem_ou_sem_ferramenta_pendente_nao_avisa() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("c1", "Bash", "ls")).unwrap();
+        record_end(&conn, "t1", "r1", &Default::default(), 50);
+        assert!(store::items(&conn, "t1").unwrap().iter().all(|i| i.kind != ItemKind::Notice), "terminou bem: o motor fecha a ferramenta");
+        store::upsert_run(&conn, "t1", "r2", "inProgress", Some(60), None, None).unwrap();
+        let (result, _) = dropped(false, None, "Codex");
+        record_end(&conn, "t1", "r2", &result, 70);
+        assert_eq!(unknown_outcome_note(&store::items(&conn, "t1").unwrap()), None, "caiu sem ferramenta pendente do turno");
+    }
+
+    #[test]
+    fn o_stop_reason_separa_timeout_de_interrupcao_e_de_erro() {
+        assert_eq!(StopReason::classify("completed", None, true), StopReason::Completed, "o modelo voltou");
+        assert_eq!(StopReason::classify("interrupted", None, false), StopReason::Aborted);
+        assert_eq!(StopReason::classify("interrupted", None, true), StopReason::Timeout);
+        assert_eq!(StopReason::classify("failed", Some("O processo do Codex fechou"), true), StopReason::Timeout);
+        assert_eq!(StopReason::classify("failed", Some("O processo do Codex fechou"), false), StopReason::Error);
+        assert_eq!(StopReason::classify("failed", Some("O turno parou no limite de tokens do modelo"), false), StopReason::MaxTokens);
+        assert_eq!(StopReason::classify("failed", Some("O modelo recusou o pedido"), false), StopReason::Refusal);
+        let names: Vec<_> = [StopReason::Completed, StopReason::Aborted, StopReason::Error, StopReason::MaxTokens, StopReason::Refusal, StopReason::Timeout].iter().map(|r| r.as_str()).collect();
+        assert_eq!(names, ["completed", "aborted", "error", "max-tokens", "refusal", "timeout"]);
+    }
+}
