@@ -93,7 +93,7 @@ O lead coordena; não modifica o workspace. A regra é **por `task.role == "lead
 
 ### Onde é imposta
 
-1. **No broker** (`runs/broker.rs::resolve`), antes das regras da pasta: se a task é lead e a tool não está em `policy::lead_may_use`, a resposta é negar na hora, `decided_by = policy`. **Não entra na fila, não aparece para o usuário, não grava linha em `task_approvals`.** Nem um "Allow" nem uma regra lembrada mudam o papel do lead. A mensagem é:
+1. **No broker** (`runs/broker.rs::resolve`), antes das regras da pasta: se a task é lead e a tool não está em `policy::lead_may_use`, a resposta é negar na hora, `decided_by = policy`. **Não entra na fila, não aparece para o usuário, não grava linha em `task_approvals`** (só o par `asked`/`decided` com `rejected` na auditoria comum, `approval_events`: ver [SEGURANCA_LOCAL.md](./SEGURANCA_LOCAL.md)). Nem um "Allow" nem uma regra lembrada mudam o papel do lead. A mensagem é:
 
    ```text
    Lead tasks cannot modify the workspace directly.

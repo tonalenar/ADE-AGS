@@ -394,3 +394,7 @@ O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `c
 ## Guia de revisão de PR por IA
 
 Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
+
+## Segurança local: editor, loopback, ambiente e aprovações
+
+Quatro pontos da análise do `deepseek-harness`. O editor salva só se o arquivo tem o mesmo token `tamanho:mtime_ns:inode` de quando abriu, e recria um arquivo apagado com `create_new`. O proxy do navegador recusa `Host` que não é loopback, `Origin` de fora e subrecurso `cross-site` (o HMR do Vite segue funcionando). O ambiente da frota, do MCP do ai-memory e das abas de missão que pedem perde toda variável com `KEY`/`TOKEN`/`SECRET`/`PASSWORD`, menos as do provider; a conta e as `AGS_*`/`ADE_*` entram depois. Frota e chat gravam o mesmo par `asked`/`decided` em `approval_events`, com resultado fechado (`allowed-once`, `rejected`, `cancelled`, `unavailable`). Pendente: onde escolher e guardar o filtro por integrante. Detalhes em [SEGURANCA_LOCAL.md](./SEGURANCA_LOCAL.md).
