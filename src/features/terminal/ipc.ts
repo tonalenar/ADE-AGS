@@ -12,6 +12,9 @@ export interface PtyCreateArgs {
   prelaunch: string[];
   /** Somente para uma nova aba, após confirmação do preview. */
   aiMemoryContinuity?: boolean;
+  /** Integrante de missão que pediu: o ambiente herdado perde as credenciais de outros serviços
+   *  (ver `runs/sandbox.rs`). Ausente = aba da pessoa, como sempre. */
+  scrubSecrets?: boolean;
 }
 
 /** Lanza el proceso y devuelve el id del PTY. El tamaño se fija acá, al nacer. */

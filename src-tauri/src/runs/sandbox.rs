@@ -74,35 +74,77 @@ pub struct Status {
     pub reason: Option<&'static str>,
 }
 
-/// Variables que el agente no tiene por qué heredar de la app: credenciales de otros
-/// servicios. Las de los providers (ANTHROPIC_*, OPENAI_* …) se quedan, porque la cuenta del
-/// sistema las usa; las de la cuenta de la tarea se aplican después y les ganan.
-pub const SCRUBBED_ENV: &[&str] = &[
-    "GH_TOKEN",
-    "GITHUB_TOKEN",
-    "GH_ENTERPRISE_TOKEN",
-    "GITLAB_TOKEN",
-    "GL_TOKEN",
-    "BITBUCKET_TOKEN",
-    "NPM_TOKEN",
-    "NODE_AUTH_TOKEN",
-    "CARGO_REGISTRY_TOKEN",
-    "PYPI_TOKEN",
-    "TWINE_PASSWORD",
-    "HF_TOKEN",
-    "HUGGING_FACE_HUB_TOKEN",
-    "DOCKER_PASSWORD",
-    "DOCKER_AUTH_CONFIG",
-    "VERCEL_TOKEN",
-    "NETLIFY_AUTH_TOKEN",
-    "CLOUDFLARE_API_TOKEN",
-    "DIGITALOCEAN_TOKEN",
-    "HEROKU_API_KEY",
-    "SLACK_TOKEN",
-    "SLACK_BOT_TOKEN",
-    "STRIPE_SECRET_KEY",
-    "SSH_AUTH_SOCK",
+/// As variáveis que o agente não herda da app: credenciais de outros serviços.
+///
+/// Antes era uma lista fixa, e variável nova (`OPENAI_API_KEY_2`, `SUPABASE_SERVICE_TOKEN`) vazava.
+/// Agora é por padrão: sai todo nome com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD`/`PASSWD`, menos as
+/// do provider ([`PROVIDER_ENV`]): sem elas a conta do sistema não loga. As da conta da tarefa
+/// (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`…) e as `AGS_*`/`ADE_*` da app entram depois e ganham.
+const SECRET_WORDS: &[&str] = &["KEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD"];
+
+/// Credenciais que não têm essas palavras no nome.
+const EXTRA_SCRUBBED: &[&str] = &["SSH_AUTH_SOCK", "DOCKER_AUTH_CONFIG"];
+
+/// O que o provider de cada agente lê para logar ou cobrar com a conta do sistema. Fica.
+pub const PROVIDER_ENV: &[&str] = &[
+    // Claude Code (API, OAuth de longa duração, Bedrock).
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_AUTH_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    // Codex e OpenAI (os testes do projeto costumam precisar da `OPENAI_API_KEY`).
+    "OPENAI_API_KEY",
+    "CODEX_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    // Gemini, Antigravity, Cursor, OpenCode e os providers que eles aceitam.
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "JETSKI_OAUTH_TOKEN",
+    "CURSOR_API_KEY",
+    "OPENROUTER_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "MOONSHOT_API_KEY",
+    "KIMI_API_KEY",
+    "MISTRAL_API_KEY",
+    "GROQ_API_KEY",
+    "XAI_API_KEY",
+    "DASHSCOPE_API_KEY",
+    "ZAI_API_KEY",
 ];
+
+/// Os prefixos que, colados na palavra, ainda dizem credencial (`APIKEY`, `AUTHTOKEN`).
+const GLUED_PREFIXES: &[&str] = &["", "API", "ACCESS", "AUTH", "PRIVATE", "CLIENT", "SERVICE", "BOT", "REFRESH", "BEARER", "DB"];
+
+/// Se o nome parece credencial. Por pedaço entre `_`, `-` ou `.`, para `MONKEY_PATCH`,
+/// `KEYBOARD` e `TOKENIZERS_PARALLELISM` não caírem: `API_KEY`, `APIKEY`, `GH_TOKEN`, `_authToken` caem.
+pub fn looks_secret(name: &str) -> bool {
+    let upper = name.to_ascii_uppercase();
+    EXTRA_SCRUBBED.contains(&upper.as_str())
+        || upper.split(['_', '-', '.', '/', ':']).any(|part| {
+            SECRET_WORDS
+                .iter()
+                .any(|word| part.strip_suffix(word).is_some_and(|prefix| GLUED_PREFIXES.contains(&prefix)))
+        })
+}
+
+/// Os nomes a tirar de `inherited`. Ficam as do provider; as `AGS_*`/`ADE_*` saem também
+/// (as que valem, a app reaplica depois).
+pub fn secret_env_names<'a>(inherited: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    inherited
+        .into_iter()
+        .filter(|name| looks_secret(name))
+        .filter(|name| !PROVIDER_ENV.iter().any(|keep| keep.eq_ignore_ascii_case(name)))
+        .map(str::to_string)
+        .collect()
+}
+
+/// Os nomes do ambiente desta app, sem os que não são UTF-8 (não casariam com nada).
+fn inherited_names() -> Vec<String> {
+    std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).collect()
+}
 
 /// Qué puede escribir una tarea.
 #[derive(Debug, Clone, Default)]
@@ -295,9 +337,32 @@ fn seatbelt_escape(s: &str) -> String {
         .collect()
 }
 
-/// Saca del entorno heredado las credenciales de otros servicios.
+/// Tira do ambiente herdado as credenciais de outros serviços (ver [`looks_secret`]). Chame
+/// ANTES de aplicar a conta e as variáveis da app: o que for posto depois fica.
 pub fn scrub_env(command: &mut std::process::Command) {
-    for var in SCRUBBED_ENV {
+    scrub_env_from(command, &inherited_names());
+}
+
+/// [`scrub_env`] com o ambiente herdado explícito (para testar sem mexer no do processo).
+pub fn scrub_env_from(command: &mut std::process::Command, inherited: &[String]) {
+    // Uma `AGS_*`/`ADE_*` que a app já pôs neste comando é gerenciada: não sai.
+    let managed: Vec<String> = command
+        .get_envs()
+        .filter(|(_, v)| v.is_some())
+        .filter_map(|(k, _)| k.to_str().map(str::to_string))
+        .filter(|k| k.starts_with("AGS_") || k.starts_with("ADE_"))
+        .collect();
+    for var in secret_env_names(inherited.iter().map(String::as_str)) {
+        if !managed.contains(&var) {
+            command.env_remove(var);
+        }
+    }
+}
+
+/// O mesmo, para o `CommandBuilder` do PTY (abas de missão que pediram).
+pub fn scrub_pty_env(command: &mut portable_pty::CommandBuilder) {
+    let inherited = inherited_names();
+    for var in secret_env_names(inherited.iter().map(String::as_str)) {
         command.env_remove(var);
     }
 }
@@ -370,12 +435,71 @@ mod tests {
 
     #[test]
     fn scrub_removes_foreign_credentials() {
+        let names = secret_env_names(
+            [
+                "GH_TOKEN",
+                "OPENAI_API_KEY_2",
+                "SUPABASE_SERVICE_TOKEN",
+                "DB_PASSWORD",
+                "STRIPE_SECRET_KEY",
+                "npm_config_//registry.npmjs.org/:_authToken",
+                "SSH_AUTH_SOCK",
+                "AGS_TOKEN",
+            ]
+            .into_iter(),
+        );
+        assert_eq!(names.len(), 8, "{names:?}");
+    }
+
+    #[test]
+    fn scrub_keeps_what_the_provider_and_the_system_need() {
+        let keep = [
+            // Login das contas: Claude, Codex, Cursor, Gemini/Antigravity, Bedrock.
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_AUTH_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "OPENAI_API_KEY",
+            "CODEX_API_KEY",
+            "CURSOR_API_KEY",
+            "GEMINI_API_KEY",
+            "JETSKI_OAUTH_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            // O perfil isolado de cada conta do pool vem por estas, que não são segredo.
+            "CLAUDE_CONFIG_DIR",
+            "CODEX_HOME",
+            "XDG_DATA_HOME",
+            "CURSOR_CONFIG_DIR",
+            // O sistema.
+            "PATH",
+            "HOME",
+            "KEYBOARD_LAYOUT",
+            "MONKEY_PATCH",
+            "TOKENIZERS_PARALLELISM",
+            "GIT_ASKPASS",
+            "ADE_TAB_ID",
+            "ADE_SESSION",
+        ];
+        assert_eq!(secret_env_names(keep.into_iter()), Vec::<String>::new());
+    }
+
+    #[test]
+    fn scrub_runs_before_the_account_and_the_app_vars_win() {
+        let key = "SUPABASE_SERVICE_TOKEN";
+        let inherited = [key.to_string(), "ADE_SESSION_TOKEN".to_string(), "OPENAI_API_KEY".to_string()];
         let mut cmd = std::process::Command::new("x");
-        cmd.env("GH_TOKEN", "secret");
-        scrub_env(&mut cmd);
-        let gh = cmd.get_envs().find(|(k, _)| *k == "GH_TOKEN").map(|(_, v)| v);
-        assert_eq!(gh, Some(None), "GH_TOKEN debe quedar removido");
-        assert!(!SCRUBBED_ENV.iter().any(|v| v.starts_with("ANTHROPIC") || v.starts_with("OPENAI")));
+        cmd.env("ADE_SESSION_TOKEN", "da-app");
+        scrub_env_from(&mut cmd, &inherited);
+        // A conta da tarefa entra depois, como no supervisor.
+        let account: HashMap<String, String> = [("CLAUDE_CONFIG_DIR".to_string(), "/perfil".to_string())].into();
+        crate::agents::apply_account_env(&mut cmd, &account);
+        let env: HashMap<String, Option<String>> = cmd
+            .get_envs()
+            .map(|(k, v)| (k.to_string_lossy().to_string(), v.map(|v| v.to_string_lossy().to_string())))
+            .collect();
+        assert_eq!(env.get(key), Some(&None), "a herdada sai");
+        assert_eq!(env.get("ADE_SESSION_TOKEN"), Some(&Some("da-app".into())), "a da app fica");
+        assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&Some("/perfil".into())), "a da conta fica");
+        assert_eq!(env.get("OPENAI_API_KEY"), None, "a do provider nem é tocada");
     }
 
     #[cfg(windows)]
