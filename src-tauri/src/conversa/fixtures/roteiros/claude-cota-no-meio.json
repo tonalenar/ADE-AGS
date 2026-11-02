@@ -1,0 +1,21 @@
+{
+  "id": "claude-cota-no-meio",
+  "titulo": "Claude: fala, roda um comando e esgota a conta no meio do turno",
+  "roteiro": {
+    "protocolo": "claude-stream",
+    "passos": [
+      { "passo": "sessao", "id": "sessao-a" },
+      { "passo": "texto", "texto": "Vou rodar os testes.", "pedacos": 3 },
+      { "passo": "ferramenta", "nome": "Bash", "entrada": { "command": "cargo test" }, "saida": "ok. 3 passed" },
+      { "passo": "cota", "mensagem": "You've hit your limit · resets 3pm (America/Sao_Paulo)" }
+    ]
+  },
+  "espera": {
+    "fim": "erro",
+    "classe": "rate_limited",
+    "classeParaOPool": "rate_limited",
+    "sessao": "sessao-a",
+    "ferramentas": ["Bash:done"],
+    "textoContem": "Vou rodar os testes."
+  }
+}

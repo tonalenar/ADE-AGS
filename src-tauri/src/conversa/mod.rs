@@ -39,9 +39,15 @@ pub mod worktree;
 #[cfg(test)]
 mod attach_test;
 #[cfg(test)]
+mod bancada;
+#[cfg(test)]
 mod pool_test;
 #[cfg(test)]
+mod replay_protocolo;
+#[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_bancada;
 #[cfg(test)]
 mod test_memoria;
 #[cfg(test)]
