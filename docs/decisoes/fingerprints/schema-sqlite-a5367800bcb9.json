@@ -1,0 +1,10 @@
+{
+  "alvo": "schema-sqlite",
+  "sha256": "a5367800bcb94a24a96f90b62d3caeb355dcae4feb9f4b13b832759d8603b46e",
+  "data": "2026-11-02",
+  "motivo": "linha de base: schema v45 de origin/dev (2adc6ef2), antes de existir o check",
+  "semPerdaDeDados": true,
+  "arquivos": [
+    "src-tauri/src/database/schema.rs"
+  ]
+}
