@@ -3555,7 +3555,7 @@
   "simulator.chat.attach": "Anexar a tela atual",
   "simulator.chat.attached": "tela atual anexada",
   "simulator.chat.send": "Enviar a {{count}}",
-  "simulator.lightOn": "Modo leve ligado: {{count}} processos do iOS em prioridade baixa. Os serviços pesados saem quando o aparelho religar.",
+  "simulator.lightOn": "Modo leve ligado: o iOS vai para a prioridade baixa quando a tela sair de vista. Os serviços pesados saem quando o aparelho religar.",
   "simulator.lightOff": "Modo leve desligado: o iOS voltou à prioridade normal ({{count}} processos). Os serviços voltam quando o aparelho religar.",
   "simulator.lightOnNext": "Modo leve ligado: vale quando o aparelho ligar.",
   "simulator.lightOffNext": "Modo leve desligado: vale quando o aparelho ligar.",

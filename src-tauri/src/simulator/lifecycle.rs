@@ -179,14 +179,15 @@ fn restore_priority(udid: &str) {
 }
 
 /// Reavalia dentro da serialização e após cada I/O. Uma ação durante a aplicação de
-/// segundo plano é restaurada antes de liberar a vez para outra aplicação.
-fn apply_priority(udid: &str, restore_worker: bool) {
-    let Ok(_application) = priority_applications().lock() else { return };
+/// segundo plano é restaurada antes de liberar a vez para outra aplicação. Devolve quantos processos mudaram.
+fn apply_priority(udid: &str, restore_worker: bool) -> usize {
+    let Ok(_application) = priority_applications().lock() else { return 0 };
+    let mut changed = 0;
     loop {
         let light = settings().lock().map(|s| s.light).unwrap_or(true);
         let wanted = {
-            let Ok(mut map) = usage().lock() else { return };
-            let Some(u) = map.get_mut(udid) else { return };
+            let Ok(mut map) = usage().lock() else { return changed };
+            let Some(u) = map.get_mut(udid) else { return changed };
             let since_used = u.last_used.map(|last| Instant::now().saturating_duration_since(last)).unwrap_or(Duration::MAX);
             let wanted = wanted_nice(light, u.visible, since_used);
             match u.priority.prepare(wanted) {
@@ -195,12 +196,14 @@ fn apply_priority(udid: &str, restore_worker: bool) {
                     if restore_worker {
                         u.priority.pending = false;
                     }
-                    return;
+                    return changed;
                 }
             }
         };
         // O ps pode demorar: usage() está livre durante toda a operação.
-        let success = ops::set_priority(udid, wanted).is_ok_and(|n| n > 0);
+        let count = ops::set_priority(udid, wanted).unwrap_or(0);
+        let success = count > 0;
+        changed += count;
         if let Ok(mut map) = usage().lock() {
             if let Some(u) = map.get_mut(udid) {
                 u.priority.finish(wanted, success);
@@ -210,8 +213,26 @@ fn apply_priority(udid: &str, restore_worker: bool) {
             }
         }
         if !success {
-            return;
+            return changed;
         }
+    }
+}
+
+/// O ⚡ com o aparelho ligado: grava a preferência e reavalia a prioridade na hora, pela mesma regra do monitor.
+/// À vista, ou com agente mexendo há pouco, o iOS continua na prioridade normal: baixar ali punha o iOS nos
+/// núcleos de eficiência com a pessoa usando, e o estado daqui não sabia, então nunca restaurava. Um aparelho
+/// que a ADE não ligou não entra no ciclo: só volta à normal. Devolve quantos processos mudaram.
+pub fn set_light(udid: &str, light: bool) -> usize {
+    if let Ok(mut s) = settings().lock() {
+        s.light = light;
+    }
+    let tracked = usage().lock().map(|m| m.contains_key(udid)).unwrap_or(false);
+    if tracked {
+        apply_priority(udid, false)
+    } else if light {
+        0
+    } else {
+        ops::set_priority(udid, 0).unwrap_or(0)
     }
 }
 

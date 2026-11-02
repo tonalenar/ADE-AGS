@@ -98,12 +98,21 @@ Ficam ligados de propósito:
 - Safari e universal links;
 - `assistantd`, `gamed` e `sharingd`, porque sem eles o iOS fica tentando subir de novo.
 
-Ligar ou desligar o ⚡ com o aparelho ligado muda a prioridade na hora. Os serviços só mudam quando o aparelho religa.
+Desligar o ⚡ com o aparelho ligado devolve a prioridade normal na hora. Ligar só grava a preferência: o iOS vai para a prioridade baixa pela regra do ciclo de vida, quando a tela sair de vista. Os serviços só mudam quando o aparelho religa.
 
 A tela recebe o que o iOS desenha: com `ADE_SIMULATOR_FPS=1`, o log mostra quantos quadros por segundo chegam à camada.
 
 O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém usa:
-- **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `PRIO_DARWIN_BG` via `PRIO_DARWIN_PROCESS` no `launchd_sim` do aparelho e em todos os descendentes. Essa política de CPU e I/O não aparece no `nice` do `ps`. Só entra em segundo plano com a tela fora de vista e sem ação de agente há pelo menos 60 s (`AGENT_PRIORITY_GRACE`). Ao mostrar a tela ou receber ação de agente, restaura a prioridade normal em uma thread, sem esperar o monitor. Não usamos `nice 10`: voltar a `nice 0` pode falhar com `EACCES` sem root no macOS.
+- **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `PRIO_DARWIN_BG` via `PRIO_DARWIN_PROCESS` no `launchd_sim` do aparelho e em todos os descendentes. Essa política de CPU e I/O não aparece no `nice` do `ps`. Só entra em segundo plano com o aparelho fora de vista em **todas** as telas que o mostram (o nó do canvas e o painel do modo chat contam juntos) e sem ação de agente há pelo menos 60 s (`AGENT_PRIORITY_GRACE`). Ao mostrar a tela ou receber ação de agente, restaura a prioridade normal em uma thread, sem esperar o monitor. Não usamos `nice 10`: voltar a `nice 0` pode falhar com `EACCES` sem root no macOS.
+  - Por que importa: com o iOS em `PRIO_DARWIN_BG`, a tela trava. Medido no iPhone 17 Pro Max (iOS 27.0, modo leve), num Mac M2 de 8 núcleos e 16 GB (com outro simulador ligado ao lado), com os quadros contados pelos mesmos callbacks da tela e os gestos pelo `dtuhidd`:
+
+    | Cenário | Prioridade normal | `PRIO_DARWIN_BG` |
+    |---|---|---|
+    | Troca de página da tela inicial | 59-87 quadros/s; p95 do intervalo 22-34 ms | 19-34 quadros/s; p95 119-129 ms |
+    | Abrir o Ajustes (`simctl launch`) | 50-64 quadros/s; p95 19-36 ms | 29-65 quadros/s; até 670 ms parado |
+    | Gesto de início | 67-77 quadros/s; p95 19-26 ms; 1º quadro em 2-79 ms | 27-34 quadros/s; 1º quadro em 240-926 ms |
+
+    Antes, o ⚡ baixava a prioridade com a tela à vista, e uma tela fora de vista (ou fechada) tirava de vista o aparelho que outra tela mostrava. Nos dois casos o iOS ficava na prioridade baixa com a pessoa usando.
 - **Hibernar:** depois de N minutos fora de vista e sem ação de agente (padrão 10; Nunca/5/10/30 no "⋯"), o aparelho é desligado sem perder dados. O nó mostra "Pausado para economizar" com o botão Retomar.
 - **Um por vez** (padrão): ligar um aparelho desliga os outros que a ADE ligou. Os do app Simulator ficam como estão.
 - **Fora de vista:** o nó para de ouvir os quadros (`unregisterScreenCallbacks`) e esconde a view.

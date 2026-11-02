@@ -34,22 +34,58 @@ pub fn simulator_settings(app: AppHandle, hibernate_minutes: u32, single: bool, 
     lifecycle::set_settings(&app, lifecycle::Settings { hibernate_after, single, light });
 }
 
-/// Qual aparelho cada tela aberta mostra (as posições chegam pelo id da tela).
-fn screens() -> &'static Mutex<HashMap<String, String>> {
-    static S: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+/// As telas abertas: qual aparelho cada uma mostra e se está à vista agora. O mesmo aparelho pode estar em
+/// mais de uma (o nó do canvas e o painel do modo chat).
+#[derive(Default)]
+pub(super) struct Screens(HashMap<String, (String, bool)>);
+
+impl Screens {
+    /// A tela `id` mostra `udid` (à vista ou não); devolve se o aparelho está à vista em alguma tela.
+    pub fn set(&mut self, id: &str, udid: &str, visible: bool) -> bool {
+        self.0.insert(id.to_string(), (udid.to_string(), visible));
+        self.visible(udid)
+    }
+
+    /// A tela `id` mudou de lugar; devolve o aparelho dela e se ele segue à vista em alguma tela.
+    pub fn seen(&mut self, id: &str, visible: bool) -> Option<(String, bool)> {
+        let udid = {
+            let entry = self.0.get_mut(id)?;
+            entry.1 = visible;
+            entry.0.clone()
+        };
+        let any = self.visible(&udid);
+        Some((udid, any))
+    }
+
+    /// A tela `id` fechou; devolve o aparelho dela e se ele segue à vista em outra.
+    pub fn remove(&mut self, id: &str) -> Option<(String, bool)> {
+        let (udid, _) = self.0.remove(id)?;
+        let any = self.visible(&udid);
+        Some((udid, any))
+    }
+
+    fn visible(&self, udid: &str) -> bool {
+        self.0.values().any(|(u, v)| u == udid && *v)
+    }
+}
+
+fn screens() -> &'static Mutex<Screens> {
+    static S: OnceLock<Mutex<Screens>> = OnceLock::new();
     S.get_or_init(Default::default)
 }
 
+/// O ciclo de vida olha o aparelho, não a tela: um nó do canvas fora de vista (ou uma tela que fechou) não
+/// pode tirar de vista o aparelho que o painel do chat mostra, senão o iOS caía na prioridade baixa em uso.
 fn seen(id: &str, visible: bool) {
-    if let Some(udid) = screens().lock().ok().and_then(|m| m.get(id).cloned()) {
-        lifecycle::seen(&udid, visible);
+    if let Some((udid, any)) = screens().lock().ok().and_then(|mut m| m.seen(id, visible)) {
+        lifecycle::seen(&udid, any);
     }
 }
 
 /// Liga ou desliga o modo leve num aparelho já ligado: a prioridade do iOS muda na hora.
 #[tauri::command(async)]
 pub fn simulator_priority(udid: String, light: bool) -> Result<usize, String> {
-    ops::set_priority(&udid, if light { 10 } else { 0 })
+    Ok(lifecycle::set_light(&udid, light))
 }
 
 #[tauri::command(async)]
@@ -143,10 +179,8 @@ pub fn simulator_screenshot(udid: String) -> Result<String, String> {
 /// Mostra a tela do aparelho `udid` na janela, como a tela `id` (um nó do canvas ou uma aba), em `place`.
 #[tauri::command]
 pub async fn simulator_attach<R: Runtime>(webview: Webview<R>, id: String, udid: String, place: Place) -> Result<(), String> {
-    if let Ok(mut map) = screens().lock() {
-        map.insert(id.clone(), udid.clone());
-    }
-    lifecycle::seen(&udid, place.visible.is_some());
+    let any = screens().lock().map(|mut m| m.set(&id, &udid, place.visible.is_some())).unwrap_or(place.visible.is_some());
+    lifecycle::seen(&udid, any);
     #[cfg(target_os = "macos")]
     {
         let target = udid.clone();
@@ -191,9 +225,8 @@ pub fn simulator_place<R: Runtime>(webview: Webview<R>, id: String, place: Place
 /// Tira a tela `id` da janela (o aparelho continua ligado).
 #[tauri::command]
 pub fn simulator_detach<R: Runtime>(webview: Webview<R>, id: String) -> Result<(), String> {
-    seen(&id, false);
-    if let Ok(mut map) = screens().lock() {
-        map.remove(&id);
+    if let Some((udid, any)) = screens().lock().ok().and_then(|mut m| m.remove(&id)) {
+        lifecycle::seen(&udid, any);
     }
     #[cfg(target_os = "macos")]
     {

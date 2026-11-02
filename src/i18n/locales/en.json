@@ -3555,7 +3555,7 @@
   "simulator.chat.attach": "Attach the current screen",
   "simulator.chat.attached": "current screen attached",
   "simulator.chat.send": "Send to {{count}}",
-  "simulator.lightOn": "Light mode on: {{count}} iOS processes at low priority. Heavy services go away when the device restarts.",
+  "simulator.lightOn": "Light mode on: iOS drops to low priority once the screen is out of view. Heavy services go away when the device restarts.",
   "simulator.lightOff": "Light mode off: iOS is back at normal priority ({{count}} processes). Services come back when the device restarts.",
   "simulator.lightOnNext": "Light mode on: applies when the device boots.",
   "simulator.lightOffNext": "Light mode off: applies when the device boots.",
