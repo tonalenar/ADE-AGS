@@ -100,7 +100,25 @@ Ficam ligados de propósito:
 
 Desligar o ⚡ com o aparelho ligado devolve a prioridade normal na hora. Ligar só grava a preferência: o iOS vai para a prioridade baixa pela regra do ciclo de vida, quando a tela sair de vista. Os serviços só mudam quando o aparelho religa.
 
-A tela recebe o que o iOS desenha: com `ADE_SIMULATOR_FPS=1`, o log mostra quantos quadros por segundo chegam à camada.
+A tela recebe o que o iOS desenha. Com `ADE_SIMULATOR_FPS=1`, o log mostra a cada segundo:
+- quantos quadros chegaram à camada;
+- o maior intervalo entre eles e quantos passaram de 25 ms;
+- quanto a thread da interface atrasou (uma sonda a cada 50 ms; por ela passam o mouse e o toque);
+- com que idade o evento do mouse chegou à tela.
+
+### Onde ainda engasga (medido)
+
+Medido no iPhone 17 Pro Max (iOS 27.0), num Mac M2 de 8 núcleos e 16 GB, com o iOS em prioridade normal. A bancada conta os quadros pelos mesmos callbacks da tela e amostra a superfície a cada vsync do Mac (`CVDisplayLink`); a ADE isolada (`ADE_AGS_DATA_DIR`) foi pilotada por `ags device`.
+
+| Situação | Resultado |
+|---|---|
+| Rolagem, na inércia (o iOS anima sozinho) | ~60 quadros/s; 0-1% dos vsyncs sem quadro novo |
+| Rolagem, com o dedo na tela | 8-25% dos vsyncs sem quadro novo; p95 do intervalo ~30 ms |
+| Toque a 120 Hz solto, a 60 Hz no vsync do Mac ou um por quadro do iOS | o mesmo resultado: o ritmo do toque não é a causa |
+| Volta à 1ª página da tela inicial | parada de 230-300 ms, com e sem o modo leve |
+| ADE isolada ociosa e com um terminal imprimindo sem parar (ADE a 150% de CPU) | a mesma cadência na camada; a interface atrasou no máximo 15 ms |
+
+O que sobra vem do próprio iOS do simulador (SpringBoard, abertura de app, o ritmo do quadro enquanto há toque). Não vem da exibição nem do toque da ADE.
 
 O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém usa:
 - **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `PRIO_DARWIN_BG` via `PRIO_DARWIN_PROCESS` no `launchd_sim` do aparelho e em todos os descendentes. Essa política de CPU e I/O não aparece no `nice` do `ps`. Só entra em segundo plano com o aparelho fora de vista em **todas** as telas que o mostram (o nó do canvas e o painel do modo chat contam juntos) e sem ação de agente há pelo menos 60 s (`AGENT_PRIORITY_GRACE`). Ao mostrar a tela ou receber ação de agente, restaura a prioridade normal em uma thread, sem esperar o monitor. Não usamos `nice 10`: voltar a `nice 0` pode falhar com `EACCES` sem root no macOS.
