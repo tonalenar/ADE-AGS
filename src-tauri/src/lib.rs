@@ -5,6 +5,7 @@
 pub mod ai_memory;
 mod accounts;
 mod agents;
+mod approval_audit;
 mod canal;
 mod canvas;
 mod chat;

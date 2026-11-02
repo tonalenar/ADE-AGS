@@ -59,6 +59,38 @@ fn os_pedidos_pendentes_expiram_e_nao_se_respondem_duas_vezes() {
 }
 
 #[test]
+fn os_pedidos_do_chat_entram_na_auditoria_comum_com_par_asked_decided() {
+    use crate::approval_audit::{pair, Source};
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    let row = |id: &str, kind: &str| RequestRow {
+        id: id.into(), thread_id: "t1".into(), rpc_id: "7".into(), kind: kind.into(), item_id: None,
+        title: "rm -rf build".into(), detail: "rm -rf build".into(), options: json!({ "tool": "Bash" }), state: "pending".into(), created_at: 1,
+    };
+    for (id, kind) in [("a", "command"), ("b", "fileChange"), ("c", "command"), ("p", "question"), ("s", "command")] {
+        store::insert_request(&conn, &row(id, kind)).unwrap();
+    }
+    store::answer_request_by(&conn, "a", "allowSession", 2, "rule:r1", Some("regra")).unwrap();
+    store::answer_request(&conn, "b", "deny", 3).unwrap();
+    store::answer_request(&conn, "c", "resolved", 4).unwrap();
+    store::answer_request(&conn, "p", "sim", 5).unwrap();
+
+    let decided = |id: &str| pair(&conn, Source::Chat, id).unwrap().1.map(|d| (d.outcome.unwrap(), d.decided_by.unwrap(), d.scope));
+    assert_eq!(decided("a"), Some(("allowed-once".into(), "rule:r1".into(), Some("session".into()))));
+    assert_eq!(decided("b"), Some(("rejected".into(), "person".into(), None)));
+    assert_eq!(decided("c"), Some(("cancelled".into(), "agent".into(), None)));
+    assert!(pair(&conn, Source::Chat, "p").unwrap().0.is_none(), "pergunta não é aprovação");
+    let asked = pair(&conn, Source::Chat, "a").unwrap().0.unwrap();
+    assert_eq!((asked.tool.as_deref(), asked.owner.as_deref()), (Some("Bash"), Some("t1")));
+
+    // O que ficou pendente quando o app fechou vira `cancelled`, uma vez só.
+    store::sweep_orphans(&conn, 9).unwrap();
+    assert_eq!(decided("s"), Some(("cancelled".into(), "app-closed".into(), None)));
+    store::sweep_orphans(&conn, 10).unwrap();
+    assert_eq!(decided("a").unwrap().0, "allowed-once", "a varredura não reescreve a primeira decisão");
+}
+
+#[test]
 fn apagar_a_conversa_leva_os_itens_junto() {
     let conn = crate::database::test_db();
     thread(&conn, "t1");
