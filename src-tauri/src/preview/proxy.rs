@@ -45,7 +45,7 @@ use super::log::{
 };
 use super::mocks::{Mock, Mocks};
 use super::rewrite::{
-    inject_picker, is_hop_by_hop, is_local_host, is_own_host, is_own_origin, parse_response_head, rewrite_location,
+    inject_picker, is_hop_by_hop, is_local_host, is_own_host, parse_response_head, rewrite_location,
     rewrite_origin_value, skip_request_header, skip_response_header, PICKER_PATH,
 };
 use super::site::{
@@ -205,20 +205,22 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
 /// podría usarlo: re-apuntando su dominio a 127.0.0.1 (DNS rebinding) para leer las
 /// respuestas, o mandando pedidos y WebSockets cruzados con la sesión del usuario.
 ///
-/// - `Host` tiene que ser el nombre de loopback de este proxy: con rebinding llega el
-///   nombre del atacante.
-/// - `Origin`, cuando viene, tiene que ser el de este proxy. `null` (un iframe con sandbox)
-///   se acepta en pedidos comunes, pero no para abrir un WebSocket, que sí puede leer.
+/// La regla es la de `util::loopback_trust`: `Host` de loopback (contra rebinding), `Origin`
+/// de este proxy (`null` solo fuera de WebSocket) y `Sec-Fetch-Site: cross-site` solo en una
+/// navegación GET — el iframe de la app, que es otro sitio, tiene que poder abrir la página.
 pub(crate) fn request_is_ours<B>(req: &Request<B>, port: u16) -> bool {
-    let host = req.headers().get(HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
-    if !is_own_host(host, port) {
-        return false;
+    let headers = req.headers();
+    let verdict = crate::util::loopback_trust::check(
+        |name| headers.get(name).and_then(|v| v.to_str().ok()),
+        req.method().as_str(),
+        port,
+        is_websocket(req),
+    );
+    if let Err(reason) = verdict {
+        // Solo el motivo y la ruta: la query puede llevar un token.
+        eprintln!("[preview] pedido recusado ({reason:?}) em {}", req.uri().path());
     }
-    match req.headers().get(ORIGIN).map(|v| v.to_str().unwrap_or("")) {
-        None => true,
-        Some("null") => !is_websocket(req),
-        Some(origin) => is_own_origin(origin, port),
-    }
+    verdict.is_ok()
 }
 
 /// Contesta desde una regla, y lo anota como cualquier otro pedido para que se vea en el
