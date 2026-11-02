@@ -103,6 +103,10 @@ O failover acima é da frota headless. No modo chat, uma conversa por protocolo 
 
 A sessão do agente mora no perfil da conta (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`): `--resume` de outra conta não acha a sessão. Por isso a troca fecha o processo parado, passa `chat_thread.account_id` para a conta nova, **zera `remote_id`** e manda como primeira mensagem um resumo (`handoff_text`: as últimas 12 falas e o pedido sem resposta) marcado como DADO, nunca instrução. Não copia transcript nem credencial entre perfis. Copiar o transcript para o `--resume` achar a sessão ficou **não implementado** (experimento futuro, só atrás de flag e validado em instância isolada).
 
+### Escolha manual da conta
+
+Independe do pool: em qualquer conversa por protocolo a pessoa escolhe a conta do agente (`ThreadAccountMenu`, ao lado do modelo; em «Ligar ao time» o seletor de conta do `AgentModelPicker` fica visível). Vale para todo agente com 2+ contas no roster. Estado de cada conta: conectada, limite esgotado (a renovação ainda não passou), sem login. Trocar uma conversa aberta (`chat_account_set` → `pool::switch_manual`) usa a mesma mecânica do pool: só entre turnos e sem pedido pendente, conta do mesmo agente, `account_id` novo, `remote_id` zerado, aviso `accountSwitch` na timeline e o resumo (`handoff_text`, DADO) junto da PRÓXIMA mensagem (`with_manual_handoff`, uma vez). É escolha da pessoa: não conta no teto de trocas do pool, não vira «origem» da volta automática e limpa a pergunta pendente. Aba de terminal (TUI) não troca de conta: a sessão nasce com a conta.
+
 ### Segurança e política
 
 - Nenhum segredo novo: só ids de conta em `settings`; credenciais continuam no perfil/keyring. Nenhuma migração (só chaves em `settings`, e `set_account`/`clear_remote_id` sobre colunas existentes).

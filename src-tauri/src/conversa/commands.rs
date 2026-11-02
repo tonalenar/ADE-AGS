@@ -100,6 +100,11 @@ pub fn chat_pool_pending(db: State<'_, DbConnection>, thread_id: String) -> Opti
 }
 
 #[tauri::command]
+pub fn chat_account_set(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, account_id: Option<String>) -> Result<(), String> {
+    super::pool::switch_manual(&app, &db, &thread_id, account_id)
+}
+
+#[tauri::command]
 pub fn chat_pool_state(db: State<'_, DbConnection>, thread_id: String) -> super::pool::State {
     super::pool::state(&db, &thread_id)
 }

@@ -179,3 +179,62 @@ fn a_linha_result_do_claude_vira_erro_de_limite() {
     let Some(Out::Done(r)) = out.into_iter().next() else { panic!("esperava Done") };
     assert_eq!(crate::runs::failure::classify(&r.error.unwrap()), crate::runs::failure::FailureKind::RateLimited);
 }
+
+#[test]
+fn troca_manual_so_entre_turnos_sem_pedido_e_para_conta_do_agente() {
+    let a = Some("a".to_string());
+    let b = Some("b".to_string());
+    assert!(check_manual_switch(false, 0, &a, &b, Some("claude-code"), "claude-code").is_ok());
+    assert!(check_manual_switch(false, 0, &a, &None, None, "claude-code").is_ok(), "a principal é sempre do agente");
+    assert!(check_manual_switch(true, 0, &a, &b, Some("claude-code"), "claude-code").is_err(), "turno em andamento");
+    assert!(check_manual_switch(false, 1, &a, &b, Some("claude-code"), "claude-code").is_err(), "pedido pendente");
+    assert!(check_manual_switch(false, 0, &a, &a, Some("claude-code"), "claude-code").is_err(), "mesma conta");
+    assert!(check_manual_switch(false, 0, &a, &b, Some("codex"), "claude-code").is_err(), "conta de outro agente");
+    assert!(check_manual_switch(false, 0, &a, &b, None, "claude-code").is_err(), "conta que não existe");
+}
+
+fn db_with_accounts() -> crate::database::DbConnection {
+    let db = db_with_thread();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute_batch(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at) VALUES ('a','claude-code','Ton','/d/a',1), ('b','claude-code','Erist','/d/b',1), ('x','codex','Outra','/d/x',1);",
+        )
+        .unwrap();
+    }
+    db
+}
+
+#[test]
+fn troca_manual_passa_a_conta_zera_a_sessao_e_nao_mexe_no_pool() {
+    let db = db_with_accounts();
+    let (from, to) = set_account_manual(&db, "t1", &Some("b".into()), false, 1_000).unwrap();
+    assert_eq!((from, to), (Some("a".to_string()), Some("b".to_string())));
+    let row = super::api::thread(&db, "t1").unwrap();
+    assert_eq!(row.account_id.as_deref(), Some("b"));
+    assert_eq!(row.remote_id, None);
+    // escolha da pessoa: não vira «origem» do pool nem gasta o teto de trocas
+    assert!(crate::database::get_setting(&db, "chat.pool.switched.t1").unwrap().unwrap_or_default().is_empty());
+}
+
+#[test]
+fn troca_manual_recusa_conta_de_outro_agente_e_turno_em_andamento() {
+    let db = db_with_accounts();
+    assert!(set_account_manual(&db, "t1", &Some("x".into()), false, 1_000).is_err());
+    assert!(set_account_manual(&db, "t1", &Some("b".into()), true, 1_000).is_err());
+    assert_eq!(super::api::thread(&db, "t1").unwrap().account_id.as_deref(), Some("a"));
+}
+
+#[test]
+fn o_resumo_da_troca_manual_vai_uma_vez_com_a_proxima_mensagem() {
+    let db = db_with_accounts();
+    {
+        let conn = db.lock().unwrap();
+        super::store::upsert_item(&conn, "t1", None, &msg(ItemKind::User, "faça X")).unwrap();
+    }
+    set_account_manual(&db, "t1", &Some("b".into()), false, 1_000).unwrap();
+    let first = with_manual_handoff(&db, "t1", "e agora?");
+    assert!(first.ends_with("e agora?"));
+    assert!(first.len() > "e agora?".len(), "leva o resumo à frente");
+    assert_eq!(with_manual_handoff(&db, "t1", "de novo"), "de novo");
+}
