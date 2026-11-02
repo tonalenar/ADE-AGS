@@ -180,7 +180,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         {turns.map((turn, i) => turn.notice
           ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
           : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} />)}
-        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending /> : null; })}
+        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
           <div className="flex flex-col gap-1.5">

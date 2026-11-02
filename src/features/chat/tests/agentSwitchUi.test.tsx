@@ -75,6 +75,8 @@ describe("o Antigravity não tem tela de aprovação", () => {
   it("só ele, e só no acesso Supervisionado", () => {
     expect(lacksApproval("antigravity", "ask")).toBe(true);
     expect(lacksApproval("antigravity", "edits")).toBe(false);
+    expect(lacksApproval("cursor", "ask")).toBe(true);
+    expect(lacksApproval("cursor", "full")).toBe(false);
     expect(lacksApproval("codex", "ask")).toBe(false);
     expect(lacksApproval("claude-code", "ask")).toBe(false);
   });

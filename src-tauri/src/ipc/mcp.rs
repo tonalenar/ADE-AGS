@@ -1487,20 +1487,20 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_new",
-            "description": "Open a new chat-mode conversation with another agent (codex, claude-code, opencode or antigravity) and send the first message. It starts supervised (`access: ask`): commands it wants to run wait for the person's approval in the app. Returns the conversation; then call chat_wait.",
+            "description": "Open a new chat-mode conversation with another agent (codex, claude-code, opencode, antigravity or cursor) and send the first message. It starts supervised (`access: ask`): commands it wants to run wait for the person's approval in the app. Returns the conversation; then call chat_wait.",
             "inputSchema": { "type": "object", "properties": {
                 "text": { "type": "string", "description": "The first message." },
                 "cwd": { "type": "string", "description": "Folder the agent works in (default: yours)." },
-                "agent": { "type": "string", "enum": ["codex", "claude-code", "opencode", "antigravity"], "description": "Agent id (default: codex)." },
+                "agent": { "type": "string", "enum": ["codex", "claude-code", "opencode", "antigravity", "cursor"], "description": "Agent id (default: codex)." },
                 "model": { "type": "string", "description": "Optional model." },
                 "effort": { "type": "string", "description": "Optional reasoning effort (low, medium, high…)." },
-                "access": { "type": "string", "enum": ["ask", "edits", "safe", "full", "plan"], "description": "ask (default): the person approves; edits: file edits pass, the rest asks; safe: writes in the folder, asks when needed; full: no approvals; plan (every agent but codex): plans first; with claude-code the person approves the plan. antigravity never asks: whatever would need approval is denied, so ask there is read-only in practice." },
+                "access": { "type": "string", "enum": ["ask", "edits", "safe", "full", "plan"], "description": "ask (default): the person approves; edits: file edits pass, the rest asks; safe: writes in the folder, asks when needed; full: no approvals; plan (every agent but codex): plans first; with claude-code the person approves the plan. antigravity and cursor never ask: whatever would need approval is denied, so ask there is read-only in practice (cursor only accepts ask, plan and full)." },
                 "title": { "type": "string", "description": "Optional title (default: the first line of the message)." }
             }, "required": ["text"] },
         }),
         json!({
             "name": "chat_send",
-            "description": "Send another message to a chat-mode conversation. During a turn it joins that turn (codex, claude-code) or waits in a queue for the next one (opencode, antigravity).",
+            "description": "Send another message to a chat-mode conversation. During a turn it joins that turn (codex, claude-code) or waits in a queue for the next one (opencode, antigravity, cursor).",
             "inputSchema": { "type": "object", "properties": {
                 "thread": thread.clone(),
                 "text": { "type": "string", "description": "The message." }

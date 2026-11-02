@@ -26,6 +26,12 @@ import {
 /** Os agentes cuja cota o ADE mede de verdade (ver `usageStore`). */
 const MEASURED_AGENTS = new Set(["claude-code", "codex", "antigravity"]);
 
+/**
+ * Os agentes sem fonte de cota que mesmo assim aparecem como conta conectada («não medido · sem fonte de cota»). O Cursor
+ * só expõe o uso com o token dele, e o ADE não lê credencial de outro app (segredos só no keyring do ADE).
+ */
+const LISTED_UNMEASURED = new Set(["cursor"]);
+
 const FILL: Record<LimitLevel, string> = {
   unknown: "bg-gray-300 dark:bg-white/25",
   ok: "bg-accent-500",
@@ -93,6 +99,8 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   const codex = useUsageStore((s) => s.codex);
   const antigravity = useUsageStore((s) => s.antigravity);
   const agy = useUsageStore((s) => s.agy);
+  const detected = useTabsStore((s) => s.detectedAgents);
+  const listedUnmeasured = useMemo(() => new Set(detected.filter((a) => a.available && LISTED_UNMEASURED.has(a.id)).map((a) => a.id)), [detected]);
   const [summaries, setSummaries] = useState<Record<string, AccountUsageSummary>>({});
   const [poolState, setPoolState] = useState<ChatPoolState | null>(null);
   const pools = usePools();
@@ -102,8 +110,8 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
   const turnEnds = useTurnEnds(refs);
   // TODAS as contas conectadas dos agentes que expõem a cota, as da conversa primeiro; uma barra por janela em cada.
   const entries = useMemo(
-    () => connectedAccounts({ accounts, systemAccounts, used, measured: MEASURED_AGENTS, agyInstalled: agy.usage?.installed ?? false }),
-    [accounts, systemAccounts, used, agy.usage?.installed],
+    () => connectedAccounts({ accounts, systemAccounts, used, measured: MEASURED_AGENTS, agyInstalled: agy.usage?.installed ?? false, listedUnmeasured }),
+    [accounts, systemAccounts, used, agy.usage?.installed, listedUnmeasured],
   );
 
   // Ao abrir o Resumo e ao fim de um turno: relê as contas (login e criação acontecem fora da tela) e a cota de cada
@@ -146,7 +154,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
 
   const now = Math.floor(Date.now() / 1000);
   const readingOf = (entry: AccountEntry): AccountReading => {
-    if (!MEASURED_AGENTS.has(entry.agentId)) return { state: "unmeasured", reason: "noSource" };
+    if (!MEASURED_AGENTS.has(entry.agentId)) return { state: "unmeasured", reason: LISTED_UNMEASURED.has(entry.agentId) ? "noQuotaSource" : "noSource" };
     // O Antigravity sem perfil é o login local do `agy`: a mesma leitura do canvas.
     if (entry.agentId === "antigravity" && !entry.accountId) return readAgy(agy, true, now);
     const account = entry.account;

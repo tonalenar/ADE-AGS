@@ -12,7 +12,7 @@ fn edit(id: &str, at: i64, path: &str) -> Item {
 }
 
 fn input<'a>(items: &'a [Item], strategy: Strategy, budget: usize) -> Input<'a> {
-    Input { items, from_label: "Claude Code", to_label: "Codex", strategy, pending_request: None, budget_chars: budget }
+    Input { items, thread_id: "th-42", from_label: "Claude Code", to_label: "Codex", strategy, pending_request: None, budget_chars: budget }
 }
 
 fn conversa() -> Vec<Item> {
@@ -127,4 +127,53 @@ fn raciocinio_uso_e_avisos_ficam_de_fora() {
     ];
     let out = resumo(input(&items, Strategy::Full, DEFAULT_BUDGET));
     assert!(!out.contains("pensamento escondido") && !out.contains("aviso do app"));
+}
+
+/// A frase que situa o agente novo: o pedido corrente da pessoa e o último turno de quem respondia, logo no começo do
+/// dado e dizendo que vale mais que qualquer «handoff pendente» de sessão antiga que o ai-memory tenha injetado na
+/// abertura do processo (foi o que fez o Claude ignorar a conversa real).
+#[test]
+fn o_bloco_abre_com_o_pedido_corrente_e_o_ultimo_turno_do_agente_anterior() {
+    let items = conversa();
+    let out = resumo(input(&items, Strategy::Full, DEFAULT_BUDGET));
+    let data = out.split_once("<untrusted_data").map(|(_, rest)| rest).expect("bloco de dado");
+    let current = data.find("Pedido corrente da pessoa: Agora escreva os testes").expect(&out);
+    let last = data.find("Último turno de Claude Code: Testes escritos em tests/saude.rs").expect(&out);
+    let original = data.find("Pedido original:").expect(&out);
+    assert!(current < original && last < original, "a situação vem antes do resto: {out}");
+    let head = out.split_once("<untrusted_data").unwrap().0;
+    assert!(head.contains("handoff") && head.contains("sessão anterior") && head.contains("prevalece"), "diz que vale mais que um handoff antigo: {head}");
+}
+
+#[test]
+fn o_pedido_corrente_ignora_injecoes_do_app_e_some_sem_fala_da_pessoa() {
+    let items = vec![person("u1", 1, "faça A"), agent("a1", 2, "feito A"), person("i", 3, "[ADE AGS] Você entrou no time como Revisor")];
+    let out = resumo(input(&items, Strategy::Full, DEFAULT_BUDGET));
+    assert!(out.contains("Pedido corrente da pessoa: faça A"), "{out}");
+    let vazio: Vec<Item> = vec![];
+    let out = resumo(input(&vazio, Strategy::Full, DEFAULT_BUDGET));
+    assert!(!out.contains("Pedido corrente") && !out.contains("Último turno"), "{out}");
+}
+
+#[test]
+fn diz_onde_ler_a_conversa_completa_so_para_leitura() {
+    let items = conversa();
+    let out = resumo(input(&items, Strategy::Full, DEFAULT_BUDGET));
+    assert!(out.contains("`ags chat show th-42`") && out.contains("somente leitura"), "{out}");
+    assert!(!out.contains("\n\n"));
+}
+
+#[test]
+fn o_orcamento_padrao_e_o_teto_do_t3_e_o_corte_diz_quantas_e_onde_ler() {
+    assert_eq!(DEFAULT_BUDGET, 64_000, "teto de bytes do T3 (HANDOFF_BYTE_CAP); 16 mil tokens ≈ 64 KB");
+    let items: Vec<Item> = (0..400).map(|i| if i % 2 == 0 { person(&format!("u{i:03}"), i, &format!("pergunta {i:03} {}", "x".repeat(800))) } else { agent(&format!("a{i:03}"), i, &format!("resposta {i:03} {}", "y".repeat(800))) }).collect();
+    let out = resumo(input(&items, Strategy::Full, DEFAULT_BUDGET));
+    assert!(out.len() <= DEFAULT_BUDGET, "{}", out.len());
+    // ordem cronológica entre as falas que ficaram
+    let positions: Vec<usize> = (0..400).filter_map(|i| out.find(&format!("{} {i:03} ", if i % 2 == 0 { "Pessoa: pergunta" } else { "Agente: resposta" }))).collect();
+    assert!(positions.len() > 20 && positions.windows(2).all(|w| w[0] < w[1]), "cronológica: {}", positions.len());
+    assert!(out.contains("resposta 399"), "a mais nova fica");
+    let kept = positions.len();
+    assert!(out.contains(&format!("({} falas mais antigas ficaram de fora", 400 - kept)), "registra exatamente o que ficou de fora ({kept} ficaram): {}", &out[..600]);
+    assert!(out.contains("ags chat show th-42 --last"), "diz como ler o que ficou de fora");
 }

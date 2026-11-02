@@ -99,7 +99,7 @@ fn a_conta_do_agente_antigo_nao_e_levada_para_o_novo() {
 fn recusa_o_mesmo_agente_o_desconhecido_e_o_que_nao_fala_por_protocolo() {
     let conn = conn();
     assert!(apply_switch(&conn, "t1", &to("claude-code", "ask"), 1).unwrap_err().contains("mesmo agente"));
-    assert!(apply_switch(&conn, "t1", &to("cursor", "ask"), 1).unwrap_err().contains("protocolo"));
+    assert!(apply_switch(&conn, "t1", &to("gemini-cli", "ask"), 1).unwrap_err().contains("protocolo"));
     assert!(apply_switch(&conn, "t1", &to("nao-existe", "ask"), 1).is_err());
     assert!(apply_switch(&conn, "nao-existe", &to("codex", "ask"), 1).is_err());
 }
@@ -161,4 +161,23 @@ fn o_resumo_vai_na_frente_da_proxima_mensagem_uma_vez_e_so_sai_da_fila_quando_en
     assert!(before_send(&db, "t1", "de novo").1);
     summary_sent(&db, "t1");
     assert_eq!(before_send(&db, "t1", "e agora").0, "e agora");
+}
+
+/// O Cursor é alvo da troca: em Supervisionado ele nega o que pediria aprovação (o aviso `noApproval`), e Aceitar edições
+/// e Auto, que ele não tem, viram Supervisionado dizendo isso.
+#[test]
+fn trocar_para_o_cursor_avisa_que_ele_nao_pede_aprovacao_e_converte_o_acesso_que_ele_nao_tem() {
+    let conn = conn();
+    let applied = apply_switch(&conn, "t1", &to("cursor", "ask"), 1).unwrap();
+    assert_eq!(applied.row.agent_id, "cursor");
+    assert!(applied.no_approval && !applied.access_changed);
+
+    let conn = super::troca_test::conn();
+    let applied = apply_switch(&conn, "t1", &to("cursor", "edits"), 1).unwrap();
+    assert_eq!(applied.row.access, "ask");
+    assert!(applied.access_changed);
+
+    let conn = super::troca_test::conn();
+    let applied = apply_switch(&conn, "t1", &to("cursor", "full"), 1).unwrap();
+    assert_eq!((applied.row.access.as_str(), applied.access_changed, applied.no_approval), ("full", false, false));
 }

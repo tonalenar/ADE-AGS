@@ -206,6 +206,17 @@ describe("todas as contas conectadas, não só as da conversa", () => {
     expect(bars().length).toBeGreaterThan(0);
   });
 
+  it("o Cursor instalado aparece como conta conectada: «não medido · sem fonte de cota», e não some", async () => {
+    useTabsStore.setState({ tabs: [tab()], detectedAgents: [{ id: "cursor", label: "Cursor", command: "cursor-agent", available: true }] } as never);
+    await mount();
+    expect(text()).toContain("Cursor");
+    expect(text()).toContain("chat.summary.limits.reason.noQuotaSource");
+    // sem o Cursor instalado, ele não é listado
+    useTabsStore.setState({ detectedAgents: [] } as never);
+    await act(async () => { root.render(<LimitsCard conversation={card()} />); });
+    expect(text()).not.toContain("chat.summary.limits.reason.noQuotaSource");
+  });
+
   it("o Antigravity sem perfil (o login local do agy) mostra as janelas por grupo de modelos, como o canvas", async () => {
     const iso = new Date((NOW + 3600) * 1000).toISOString();
     useUsageStore.setState({ agy: { usage: { installed: true, fetchedAt: NOW, cached: false, groups: [{ name: "Gemini", windows: [{ id: "a", kind: "session", usedPct: 33, resetsAt: iso }, { id: "b", kind: "weekly", usedPct: 12 }] }] }, failed: false } } as never);

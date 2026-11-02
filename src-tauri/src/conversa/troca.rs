@@ -20,7 +20,7 @@ use crate::database::DbConnection;
 
 use super::handoff::{self, Strategy};
 use super::store::{self, ThreadRow};
-use super::{agy, api, claude, codex, opencode, turn};
+use super::{agy, api, claude, codex, cursor, opencode, turn};
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
@@ -102,7 +102,7 @@ pub fn apply_switch(conn: &Connection, thread_id: &str, new: &Switch, now: i64) 
     )
     .map_err(db_err)?;
     let updated = store::thread(conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
-    let no_approval = new.agent_id == "antigravity" && access == "ask";
+    let no_approval = matches!(new.agent_id.as_str(), "antigravity" | "cursor") && access == "ask";
     Ok(Applied { row: updated, strategy, from_agent: row.agent_id, to_agent: new.agent_id.clone(), access_changed, no_approval })
 }
 
@@ -179,6 +179,7 @@ pub fn before_send(db: &DbConnection, thread_id: &str, text: &str) -> (String, b
     let strategy = pending.since_ms.map_or(Strategy::Full, |since_ms| Strategy::Delta { since_ms });
     let summary = handoff::resumo(handoff::Input {
         items: &items,
+        thread_id,
         from_label: &pending.from_label,
         to_label: &pending.to_label,
         strategy,
@@ -200,6 +201,7 @@ fn close_processes(thread_id: &str) {
     claude::close(thread_id);
     opencode::close(thread_id);
     agy::close(thread_id);
+    cursor::close(thread_id);
 }
 
 fn label_of(agent_id: &str) -> String {
