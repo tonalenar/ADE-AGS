@@ -9,6 +9,13 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
 
+## Retomada e estado (pontos 15, 8 e 6 do deepseek-harness)
+
+- **Armado não sobrevive ao reinício:** o que foi armado antes do boot (Vigia de missão e de time de conversa, rotina com catch-up, rodada de correção automática de run antigo) espera o botão **Retomar automação** (Missões, QG e barra do canvas). O fechamento antecipado e o "Decisão pendente" do Vigia não se repetem mais ao reabrir.
+- **Integrante `provisioning`:** gravado antes do worktree e da aba (missão) ou da conversa (time do chat), reconciliado no boot para `active` ou `failed`; nomes nunca reutilizados. Migração só aditiva (`mission_member_state`, `chat_team_provision`).
+- **Escopos de escrita:** `Escopo:` na delegação e `write_scopes` no `run_plan`; o canvas e o QG avisam quando duas tarefas em andamento se sobrepõem. Só aviso.
+- Detalhe em [RETOMADA_E_ESTADO.md](./RETOMADA_E_ESTADO.md); skill `ags-orchestrator` 1.44.0.
+
 ## Conector opcional de leitura do ai-memory
 
 Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões recentes usam bridge MCP temporário com workspace/projeto explícitos e apenas `memory_briefing`. Novas abas do Claude podem somar MCP session-aware e hooks nativos; Codex/OpenCode usam intermediário MCP com workspace/projeto fixos, somente quando a pasta identifica um único projeto, com ajuste `ai_memory_tabs_enabled` e sem escrita nas configurações globais dos agentes. A ação explícita “Continuar com outro agente” apresenta preview não consumidor e, após confirmação, abre uma nova aba Claude via `ai-memory run`, preservando a origem; sem handoff abre normalmente. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).

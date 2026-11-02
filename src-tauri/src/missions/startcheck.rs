@@ -16,6 +16,11 @@ pub struct AgentStart {
     pub passed: bool,
     pub submit_retries: usize,
     pub stalled_notifications: usize,
+    /// `provisioning`, `active` ou `failed` (ver `missions::members`); `None` em missões antigas.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -46,7 +51,7 @@ pub fn evaluate(mission_id: &str, names: &[String], spans: &[Span], started_ms: 
             time_until_start_ms: elapsed, exceeded_deadline: exceeded,
             passed: elapsed.is_some_and(|ms| ms <= START_DEADLINE_MS),
             submit_retries: mine.iter().filter(|s| s.kind == "start_retry").count(),
-            stalled_notifications: mine.iter().filter(|s| s.kind == "start_stalled").count() }
+            stalled_notifications: mine.iter().filter(|s| s.kind == "start_stalled").count(), state: None, failure: None }
     }).collect();
     let all_working = !agents.is_empty() && agents.iter().all(|a| a.activity_ms.is_some());
     let passed = !agents.is_empty() && agents.iter().all(|a| a.passed);
@@ -57,14 +62,25 @@ pub fn evaluate(mission_id: &str, names: &[String], spans: &[Span], started_ms: 
 
 pub(crate) fn get(conn: &Connection, mission_id: &str, now: i64) -> Result<StartCheck, String> {
     let mission = super::store::get(conn, mission_id)?.ok_or("Missão não encontrada.")?;
+    // Quem estava `provisioning` e já deu sinal de vida passa a `active` (fora do boot, ninguém falha aqui).
+    super::members::reconcile(conn, Some(mission_id), false, now)?;
+    let states = super::members::states(conn, mission_id)?;
     let spans = super::timings::list(conn, mission_id)?;
     let mut stmt = conn.prepare("SELECT name FROM mission_team_workspaces WHERE mission_id=?1 ORDER BY name").map_err(|e| e.to_string())?;
     let rows = stmt.query_map([mission_id], |r| r.get::<_, String>(0)).map_err(|e| e.to_string())?;
     let mut names = rows.collect::<Result<std::collections::BTreeSet<_>, _>>().map_err(|e| e.to_string())?;
     // Legacy missions without team workspaces still expose their measured agents.
     names.extend(spans.iter().filter(|s| matches!(s.kind.as_str(), "boot" | "start_briefing" | "start_activity") && !s.actor.is_empty()).map(|s| s.actor.clone()));
-    Ok(evaluate(mission_id, &names.into_iter().collect::<Vec<_>>(), &spans,
-        mission.started_at.filter(|s| *s > 0).map(|s| s.saturating_mul(1000)), now))
+    names.extend(states.keys().cloned());
+    let mut check = evaluate(mission_id, &names.into_iter().collect::<Vec<_>>(), &spans,
+        mission.started_at.filter(|s| *s > 0).map(|s| s.saturating_mul(1000)), now);
+    for agent in &mut check.agents {
+        if let Some(known) = states.get(&agent.actor) {
+            agent.state = Some(known.state.clone());
+            agent.failure = known.failure.clone();
+        }
+    }
+    Ok(check)
 }
 
 #[cfg(test)]

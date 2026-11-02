@@ -246,6 +246,7 @@ export function leadBriefing(
     "",
     "INÍCIO RÁPIDO — PRIMEIRA AÇÃO (meta: até ~2 minutos após o briefing):",
     "- Faça um plano curto a partir do objetivo e do contexto já preenchido abaixo. Antes de explorar o código, delegue a CADA integrante com \`ags peer tell \"<nome>\" --file <arquivo>\` (tarefa concreta, escopo, worktree e branch dele). Só depois explore o que faltar.",
+    "- Em cada delegação, ponha uma linha `Escopo: <pastas ou arquivos que ele vai mexer>` (prefixos relativos ao repositório, separados por vírgula). O app avisa quando duas tarefas em andamento se sobrepõem; é só aviso.",
     "- Os membros aguardam sua tarefa sem explorar nem editar. Se alguém não tiver tarefa agora, avise explicitamente para continuar aguardando.",
     "- Depois de delegar, VERIFIQUE que todos estão trabalhando: use `ags peers` e leia a tela de cada um (`ags peer check <nome>`); quem estiver parado ou com texto colado sem enviar, reenvie a tarefa com `ags peer tell`. Uma linha `[AGS] <nome> não mostrou atividade` indica integrante que não arrancou.",
     ...workspaces.filter((w) => w.name === LEAD_NAME).map((w) => `SEU WORKTREE: ${w.cwd}; branch: ${w.branch}. Trabalhe somente nele.\n${w.environment}`),

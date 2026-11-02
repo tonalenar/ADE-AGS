@@ -442,6 +442,19 @@ pub fn can_retry(task: &Task, max_rounds: i64) -> bool {
 
 /// O que fazer quando um worker da frota falha. Ignora lead, falta de sessão e erro de orçamento.
 pub fn on_worker_failure(conn: &Connection, task: &Task) -> Result<FailureOutcome, String> {
+    on_worker_failure_at(conn, task, crate::missions::automation::gate())
+}
+
+/// O mesmo, com o portão do reinício explícito. A rodada automática de um run armado antes do boot
+/// espera a pessoa retomar a automação: a tarefa fica falha, sem rodada aberta (ver `missions::automation`).
+pub fn on_worker_failure_at(conn: &Connection, task: &Task, gate: crate::missions::automation::Gate) -> Result<FailureOutcome, String> {
+    let run_created: Option<i64> = conn
+        .query_row("SELECT created_at FROM runs WHERE id = ?1", [&task.run_id], |r| r.get(0))
+        .optional()
+        .map_err(|e| e.to_string())?;
+    if run_created.is_some_and(|secs| gate.pauses(secs.saturating_mul(1000))) {
+        return Ok(FailureOutcome::Ignored);
+    }
     let max = max_rounds(conn);
     let retry = can_retry(task, max);
     let exhausted = task.role.as_deref() == Some(super::types::role::WORKER)
@@ -1078,6 +1091,30 @@ mod tests {
         let rounds: Vec<_> = spans.iter().filter(|span| span.kind == "fix_round").collect();
         assert_eq!(rounds.len(), 3);
         assert_eq!(max_fix_round_from_detail(&rounds[1].detail), Some(2));
+    }
+
+    #[test]
+    fn a_rodada_automatica_de_um_run_de_antes_do_boot_espera_a_pessoa_retomar() {
+        use crate::missions::automation::Gate;
+        let conn = db();
+        let run = open_run(&conn);
+        let task = worker(&conn, &run.id, "API de login");
+        fail(&conn, &task, "assertion failed em src/login.rs:8");
+        let failed = store::task_by_id(&conn, &task.id).unwrap().unwrap();
+        // O boot veio depois de o run nascer: ele foi armado antes do reinício.
+        let paused = Gate { boot_ms: (run.created_at + 10) * 1000, resumed_at: None };
+        assert_eq!(on_worker_failure_at(&conn, &failed, paused).unwrap(), FailureOutcome::Ignored);
+        let still = store::task_by_id(&conn, &task.id).unwrap().unwrap();
+        assert_eq!(still.status, status::FAILED, "nada volta à fila sem um gesto");
+        assert_eq!(still.fix_round, 0);
+        let resumed = Gate { resumed_at: Some(paused.boot_ms + 1), ..paused };
+        assert_eq!(on_worker_failure_at(&conn, &failed, resumed).unwrap(), FailureOutcome::Retried { round: 1, full_gate: false });
+        // Um run nascido depois do boot é gesto novo: não espera nada.
+        let other = worker(&conn, &run.id, "Fila de e-mail");
+        fail(&conn, &other, "assertion failed em src/mail.rs:2");
+        let failed = store::task_by_id(&conn, &other.id).unwrap().unwrap();
+        let fresh = Gate { boot_ms: (run.created_at - 10) * 1000, resumed_at: None };
+        assert!(matches!(on_worker_failure_at(&conn, &failed, fresh).unwrap(), FailureOutcome::Retried { .. }));
     }
 
     #[test]

@@ -8,6 +8,8 @@ use crate::database::DbConnection;
 /// Restaura la ventana que el usuario va a ver y deja el resto para después del
 /// primer cuadro. Skills, barrido y adjuntos van a un hilo: no bloquean ese cuadro.
 fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
+    // O instante do boot: o que foi armado antes dele espera a pessoa retomar (ver `missions::automation`).
+    crate::missions::automation::mark_boot();
     // Antes dos terminais restaurados: o `open` do PATH e o chamariz já existem
     // quando um agente pede o simulador. A tela fica no painel, não numa janela extra.
     crate::sim_host::start();
@@ -182,6 +184,8 @@ pub fn run() {
             crate::missions::vigia::vigia_check,
             crate::missions::vigia::vigia_report,
             crate::missions::vigia::vigia_notify_user,
+            crate::missions::automation::automation_status,
+            crate::missions::automation::automation_resume,
             crate::terminal::pty_output_total,
             crate::terminal::pty_for_tab,
             crate::terminal::pty_write,
@@ -362,6 +366,9 @@ pub fn run() {
             crate::chat_team::chat_team_list,
             crate::chat_team::chat_team_create,
             crate::chat_team::chat_team_link,
+            crate::chat_team::chat_team_provision_begin,
+            crate::chat_team::chat_team_provision_place,
+            crate::chat_team::chat_team_provision_fail,
             crate::chat_team::chat_team_unlink,
             crate::chat_team::chat_team_update,
             crate::chat_team::chat_team_dissolve,
@@ -572,6 +579,8 @@ pub fn run() {
             crate::usage::plan_limits,
             crate::missions::cleanup::mission_cleanup,
             crate::missions::conflicts::mission_conflicts,
+            crate::missions::conflicts::scopes::mission_scope_overlaps,
+            crate::chat_team::chat_team_overlaps,
             crate::missions::conflicts::mission_resolve_conflict,
             crate::missions::conflicts::mission_conclude_merge,
             // Comandos previos al lanzamiento del agente (entornos aislados)

@@ -26,6 +26,7 @@ vi.mock("@/features/tabs/store", () => ({ useTabsStore: { getState: () => ({ tab
 vi.mock("../store", () => ({ useMissionsStore: { getState: () => ({ missions: [] }) } }));
 vi.mock("../groups", () => ({ missionIndex: () => ({}), tabsByMission: () => ({}) }));
 vi.mock("../vigiaSwitch", () => ({ useVigiaSwitch: { getState: () => ({ enabled: true }) }, vigiaActive: () => true }));
+vi.mock("../automation", () => ({ automationPausedFor: () => false, notePausedTeam: vi.fn() }));
 vi.mock("@/features/terminal/activity", () => ({ lastOutputAt: () => Date.now() - mocks.idleSince }));
 vi.mock("@/features/terminal/terminalRegistry", () => ({ screenOf: () => null, sendWhenReady: mocks.send }));
 vi.mock("@/shared/brand/botToastStore", () => ({ showBotToast: vi.fn() }));

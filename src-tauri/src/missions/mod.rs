@@ -34,6 +34,8 @@ mod active_consistency_test;
 mod worktrees_cleanup_test;
 mod types;
 pub mod active;
+pub mod automation;
+pub mod members;
 pub mod vigia;
 
 pub use types::{

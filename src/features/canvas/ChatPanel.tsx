@@ -25,6 +25,7 @@ import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
 import { dateLocale } from "@/i18n/dateLocale";
 import { useDockWidth } from "./dockWidth";
+import { MissionScopeOverlaps } from "@/features/missions/ScopeOverlapNotice";
 
 /** Los siete hilos, en el orden en que los conoce el backend (`chat::THREADS`). */
 export const THREADS = ["blue", "purple", "pink", "red", "orange", "yellow", "green"] as const;
@@ -468,7 +469,7 @@ ${text}` : text)); setPicking(false); }} />}
       </div>}
     >
       {teamView ? (teamMessages.length + teamApprovals.length + terminalPrompts.length + notes.length > 0
-        ? <div style={{ zoom: chatZoom / 100 }}><TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /></div> : undefined)
+        ? <div style={{ zoom: chatZoom / 100 }}><div className="mb-3 empty:hidden"><MissionScopeOverlaps missionId={missionId} /></div><TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /></div> : undefined)
         : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")} style={{ zoom: chatZoom / 100 }}>
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>

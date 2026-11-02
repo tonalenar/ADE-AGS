@@ -49,7 +49,9 @@ O Vigia supervisiona as equipes em segundo plano, sem terminal próprio, e custa
 - **Persistido** em `localStorage`:
   - `ags.vigia.peers.v1`: mapas `sent`, `got`, `task` e `finished` (tabId → ms). **Não expira.**
   - `ags.vigia.watches.v1`: um `Watch{startedAt, nudges, lastNudge, limitReported, doneAt}` por missão. Expira em 3 dias.
-- **Volátil**: `lastPoke`, `inFlight`, `lastErrorReport`, `pokes`, `loops` e `closingNudges`. Reabrir o app pode repetir um aviso.
+  - No mesmo `Watch` ficam `closingAt`/`closingCount` (fechamento antecipado) e `decisionRound` ("Decisão pendente"): reabrir não os repete.
+- **Volátil**: `lastPoke`, `inFlight`, `lastErrorReport`, `pokes` e `loops`.
+- **Depois de reabrir o app**, a missão iniciada antes do boot fica como com o Vigia desligado (só "entregou") e o time de conversa sem tarefa nova desde o boot fica sem supervisão, até a pessoa apertar **Retomar automação** (`missions/automation.ts`, `docs/ade-ags/RETOMADA_E_ESTADO.md`).
 - O listener atualiza os mapas assim:
   - `finishedAt` recebe a mensagem se `isFinalReport` reconhece uma entrega;
   - se não é final, vai ao lead e não é ask, pergunta ao Jev (`askJevIfFinal`);

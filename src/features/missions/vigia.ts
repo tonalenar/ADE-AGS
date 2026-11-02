@@ -21,6 +21,7 @@ import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
 import { repeatAfterEach } from "./repeatAfterEach";
 import { vigiaActive } from "./vigiaSwitch";
+import { automationPausedFor, notePausedTeam } from "./automation";
 import { conversationWatchable, freshEntries, PEERS_KEEP_MS, userDecisionAllowed } from "./vigiaConversation";
 
 /**
@@ -195,7 +196,11 @@ export function isClosure(text: string | null | undefined): boolean {
 interface VigiaAction { to: string; message: string }
 
 /** Estado do Vigia por missão: quando começou e quantos lembretes foram sem resposta. */
-export interface Watch { startedAt: number; nudges: number; lastNudge?: number; limitReported: boolean; doneAt?: number }
+/**
+ * `closingAt`/`closingCount` (o aviso de fechamento antecipado) e `decisionRound` (a rodada em que o usuário já
+ * recebeu "Decisão pendente") ficam aqui, guardados com o resto: em memória, reabrir o app repetia os dois.
+ */
+export interface Watch { startedAt: number; nudges: number; lastNudge?: number; limitReported: boolean; doneAt?: number; closingAt?: number; closingCount?: number; decisionRound?: number }
 
 /**
  * O estado do Vigia depois de olhar a última TAREFA que o Orquestrador delegou (`latestTask`, o maior
@@ -360,8 +365,25 @@ interface WatchedTeam {
   lead: Tab;
 }
 
-/** Quando o Orquestrador foi avisado do fechamento antecipado de cada time, e quantas vezes seguidas. */
-const closingNudges = new Map<string, { at: number; count: number }>();
+/** Quando o Orquestrador foi avisado do fechamento antecipado de cada time, e quantas vezes seguidas (no `Watch`). */
+function closingOf(id: string): { at: number; count: number } | undefined {
+  const watch = watches.get(id);
+  return watch?.closingAt !== undefined ? { at: watch.closingAt, count: watch.closingCount ?? 0 } : undefined;
+}
+/** Muda o `Watch` no lugar: um `onSent` de outro ciclo ainda segura a referência dele. */
+function patchWatch(mission: WatchedTeam, patch: Partial<Watch>): void {
+  const stored = watches.get(mission.id);
+  if (stored) Object.assign(stored, patch);
+  else watches.set(mission.id, { startedAt: missionStartMs(mission.startedAt, Date.now()), nudges: 0, limitReported: false, ...patch });
+  rememberWatches();
+}
+function clearClosing(id: string): void {
+  const watch = watches.get(id);
+  if (watch?.closingAt === undefined) return;
+  delete watch.closingAt;
+  delete watch.closingCount;
+  rememberWatches();
+}
 /** O mesmo aviso de fechamento antecipado não se repete antes disto. */
 export const CLOSING_COOLDOWN_MS = 3 * 60_000;
 
@@ -402,9 +424,6 @@ function latestTask(mission: WatchedTeam): number | undefined {
   return times.length > 0 ? Math.max(...times) : undefined;
 }
 
-/** A rodada em que cada missão já avisou "Decisão pendente" ao usuário. */
-const userDecisionRounds = new Map<string, number>();
-
 /**
  * Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. A
  * promessa termina quando as consultas ao modelo deste passo terminam: o ciclo (`repeatAfterEach`) só
@@ -438,6 +457,14 @@ export function vigiaTick(now = Date.now()): Promise<void> {
       deliveryOnly(mission, now);
       continue;
     }
+    // Armado antes de o app reabrir: espera a pessoa retomar a automação. Até lá, a missão fica como
+    // com o Vigia desligado (só o "entregou") e a conversa fica sem supervisão.
+    const armedAt = mission.kind === "mission" ? missionStartMs(mission.startedAt, now) : latestTask(mission) ?? 0;
+    if (automationPausedFor(armedAt)) {
+      notePausedTeam(mission.id, mission.title);
+      if (mission.kind === "mission") deliveryOnly(mission, now);
+      continue;
+    }
     watchLoops(team, lead.id, now);
 
     // Fechamento antecipado: o Orquestrador pede o OK para commit/PR com integrante ainda trabalhando.
@@ -450,18 +477,18 @@ export function vigiaTick(now = Date.now()): Promise<void> {
       })),
     });
     if (closing) {
-      const before = closingNudges.get(mission.id);
+      const before = closingOf(mission.id);
       if ((!before || now - before.at >= CLOSING_COOLDOWN_MS) && (before?.count ?? 0) < NUDGE_LIMIT && mayPoke(lead.id, now)) {
         showBotToast({ title: VIGIA_NAME, text: closing.stuck, tone: "warning", ms: 12_000 });
         poke(lead.id, `[${VIGIA_NAME}] ${closing.nudge}`, now, () => {
-          closingNudges.set(mission.id, { at: Date.now(), count: (closingNudges.get(mission.id)?.count ?? 0) + 1 });
+          patchWatch(mission, { closingAt: Date.now(), closingCount: (closingOf(mission.id)?.count ?? 0) + 1 });
           reportToChat(lead.id, reportLine(closing.stuck, `lembrei o ${lead.title.split(" — ")[0]} de esperar a entrega.`, "fechamento antecipado"));
         });
       }
       continue;
     }
     // Voltou ao normal: um próximo fechamento antecipado vale um aviso novo.
-    closingNudges.delete(mission.id);
+    clearClosing(mission.id);
 
     const { watch, finding } = watchState(mission, now);
     if (finding?.kind === "done") {
@@ -525,8 +552,8 @@ export function vigiaTick(now = Date.now()): Promise<void> {
               continue;
             }
             const round = latestTask(mission);
-            if (!userDecisionAllowed(mission.kind, userDecisionRounds.get(mission.id), round)) continue;
-            userDecisionRounds.set(mission.id, round ?? 0);
+            if (!userDecisionAllowed(mission.kind, watches.get(mission.id)?.decisionRound, round)) continue;
+            patchWatch(mission, { decisionRound: round ?? 0 });
             showBotToast({ title: VIGIA_NAME, text: action.message, tone: "warning", ms: 12_000 });
             notifyUser(mission.id, mission.title, "user_decision", action.message);
             reportToChat(lead.id, reportLine(action.message, "avisei você na tela: a decisão é sua.", "aviso"));

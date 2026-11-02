@@ -89,6 +89,9 @@ pub fn add(conn: &Connection, mission_id: &str, span: &NewSpan) -> Result<(), St
             if span.kind == "test" { span.detail.chars().take(16_384).collect::<String>() } else { clip(&span.detail) }],
     )
     .map_err(|e| e.to_string())?;
+    // Um span de início é o sinal de vida do integrante: sai de `provisioning`. Melhor esforço: gravar o
+    // tempo não depende disso (o boot reconcilia o que faltar).
+    let _ = super::members::on_span(conn, mission_id, &span.kind, &clip(&span.actor), crate::util::now_ts_ms());
     Ok(())
 }
 

@@ -538,3 +538,85 @@ fn a_janela_de_resposta_acha_tambem_o_cabecalho_minimo_do_raw_interno() {
     let window = model::reply_window(&items, 9);
     assert_eq!((window.start, window.ended, window.replies), (Some(0), true, vec!["ok".to_string()]));
 }
+
+#[test]
+fn o_integrante_novo_e_gravado_antes_de_abrir_e_o_nome_nunca_se_repete() {
+    let conn = db();
+    let id = team(&conn, "tab-1");
+    let first = api::provision_begin(&conn, &id, "codex", "frontend", "Codex · Frontend", 2).unwrap();
+    assert_eq!(first.state, "provisioning");
+    assert_eq!(first.label, "Codex · Frontend");
+    // Ainda entrando, já aparece no time (a tela mostra) e reserva o nome.
+    let view = api::team_of(&conn, "tab-1").unwrap().unwrap();
+    assert_eq!(view.provisions.len(), 1);
+    let second = api::provision_begin(&conn, &id, "codex", "frontend", "codex · frontend", 3).unwrap();
+    assert_eq!(second.label, "codex · frontend 2");
+    let linked = api::link_provisioned(&conn, &id, member("tab-2", "frontend"), Some(&first.id), false, 4).unwrap();
+    assert_eq!(linked.label, "Codex · Frontend", "o nome é o gravado, não o que a tela mandou");
+    assert_eq!(store::provision(&conn, &first.id).unwrap().unwrap().state, "active");
+    assert!(api::link_provisioned(&conn, &id, member("tab-3", "frontend"), Some(&first.id), false, 5).is_err(), "não liga duas vezes");
+    // A segunda falhou ao abrir; uma terceira com o mesmo nome não reaproveita nem a que falhou.
+    api::provision_fail(&conn, &second.id, None, "worktree recusado", 6).unwrap();
+    let third = api::provision_begin(&conn, &id, "codex", "frontend", "Codex · Frontend", 7).unwrap();
+    assert_eq!(third.label, "Codex · Frontend 3");
+    let view = api::team_of(&conn, "tab-1").unwrap().unwrap();
+    assert_eq!(view.provisions.iter().map(|p| p.state.as_str()).collect::<Vec<_>>(), ["failed", "provisioning"], "a ativa sai da lista");
+}
+
+#[test]
+fn o_boot_decide_quem_ficou_entrando_pelo_estado_real() {
+    let conn = db();
+    let id = team(&conn, "tab-1");
+    let linked = api::provision_begin(&conn, &id, "codex", "qa", "QA", 2).unwrap();
+    let opened = api::provision_begin(&conn, &id, "codex", "qa", "QA", 2).unwrap();
+    let nothing = api::provision_begin(&conn, &id, "codex", "qa", "QA", 2).unwrap();
+    // O app caiu: `linked` chegou a entrar no time (sem a linha virar ativa), `opened` só abriu a conversa.
+    api::link(&conn, &id, member("tab-2", "qa"), false, 3).unwrap();
+    conn.execute("UPDATE chat_team_provision SET member = 'tab-2' WHERE id = ?1", [&linked.id]).unwrap();
+    conn.execute("UPDATE chat_team_provision SET member = 'thread:x' WHERE id = ?1", [&opened.id]).unwrap();
+    assert_eq!(api::reconcile_provisions(&conn, 9).unwrap(), 3);
+    let state = |p: &store::ProvisionRow| store::provision(&conn, &p.id).unwrap().unwrap();
+    assert_eq!(state(&linked).state, "active");
+    assert_eq!(state(&opened).state, "failed");
+    assert!(state(&opened).failure.unwrap().contains("depois de abrir a conversa"));
+    assert!(state(&nothing).failure.unwrap().contains("antes de a conversa"));
+    assert_eq!(api::reconcile_provisions(&conn, 10).unwrap(), 0, "idempotente");
+}
+
+#[test]
+fn o_teto_do_time_conta_quem_ainda_esta_entrando() {
+    let conn = db();
+    let id = team(&conn, "tab-1");
+    for n in 0..model::MAX_MEMBERS {
+        api::provision_begin(&conn, &id, "codex", "qa", &format!("QA {n}"), 2).unwrap();
+    }
+    assert!(api::provision_begin(&conn, &id, "codex", "qa", "Mais um", 3).unwrap_err().contains("integrantes"));
+}
+
+#[test]
+fn nome_unico_sem_distinguir_maiusculas() {
+    let taken = vec!["Ana".to_string(), "ana 2".to_string()];
+    assert_eq!(api::unique_label(&taken, "Bia"), "Bia");
+    assert_eq!(api::unique_label(&taken, "ANA"), "ANA 3");
+}
+
+#[test]
+fn o_time_avisa_quando_duas_delegacoes_em_andamento_se_sobrepoem() {
+    let conn = db();
+    crate::peer_queue::store::migrate(&conn).unwrap();
+    let id = team(&conn, "tab-1");
+    api::link(&conn, &id, member("tab-2", "frontend"), false, 2).unwrap();
+    api::link(&conn, &id, member("tab-3", "backend"), false, 2).unwrap();
+    for (to, name, text) in [("tab-2", "Front", "Tarefa: tela\nEscopo: src/features/chat"), ("tab-3", "Back", "Tarefa: api\nEscopo: src/features/chat/ipc.ts, src-tauri/src/chat_team")] {
+        conn.execute(
+            "INSERT INTO peer_messages (kind, from_tab_id, from_name, to_tab_id, to_name, text, state, created_at, updated_at) VALUES ('tell', 'tab-1', 'Lead', ?1, ?2, ?3, 'delivered', 1, 1)",
+            rusqlite::params![to, name, text],
+        )
+        .unwrap();
+    }
+    let view = api::team_of(&conn, "tab-1").unwrap().unwrap();
+    let found = api::scope_overlaps(&conn, &view).unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!((found[0].a.as_str(), found[0].b.as_str()), ("Front", "Back"));
+    assert_eq!(found[0].paths, vec!["src/features/chat/ipc.ts".to_string()]);
+}
