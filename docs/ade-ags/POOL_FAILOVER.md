@@ -90,6 +90,7 @@ O failover acima é da frota headless. No modo chat, uma conversa por protocolo 
 |---|---|
 | Desligado por padrão | `settings` `chat.pool.mode` = `off` (padrão) \| `ask` \| `auto`. Só a pessoa muda (Contas → Pools). O agente, a CLI e mensagens de peers não ligam |
 | Só com pool escolhido | a conversa criada com `pool:<nome>` fica ligada ao pool (`chat.pool.thread.<id>`). Sem pool, não troca. O backend resolve `pool:<nome>` em `api::create` (antes o valor ia cru para `account_id`) |
+| Conversa fora de pool | se o modo não é `off` e a conta que esgotou é membro de um pool do agente (com 2+ contas), a timeline mostra `poolOffer` («Usar o pool e continuar»). Só a pessoa aceitar liga a conversa ao pool e troca (handoff); nunca troca sozinha, nem em `auto`. `Failover` do pool é outra coisa (só frota headless, desligado por padrão) e não vale para o chat |
 | Gatilho | fim de turno com erro classificado `RateLimited` por `runs::failure::classify` (reuso: «hit your limit», «5-hour limit»…). Auth, modelo e outros erros nunca trocam |
 | Escolha da conta | `routing::pick_in_pool` sobre o roster: mesmo agente, logada, sem limite/orçamento estourado, fora do cooldown. A conta que esgotou entra no cooldown de 30 min e é marcada como esgotada até a renovação (`runs.quota.*`), então a frota também a evita |
 | Tetos | no máximo 3 trocas por hora por conversa; nunca encadeia (conta nova esgotando em até 5 min para e avisa) |
@@ -110,4 +111,4 @@ A sessão do agente mora no perfil da conta (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`):
 
 ### Onde
 
-Backend: `conversa/pool.rs` (pura: `decide`, `reset_at`, `can_return`, `recent`, `handoff_text`; app: `after_turn`, `accept`, `before_send`), ganchos em `turn::finish` e `claude::finish_turn`, comandos `chat_pool_pending|accept|dismiss`. Frontend: `accounts/chatPool.ts`, `ChatPoolMode.tsx`, `chat/timeline/NoticeRow.tsx` (`PoolNotice`). Testes: `conversa/pool_test.rs`, `accounts/tests/chatPool.test.ts`, `chat/tests/noticeRow.test.tsx`.
+Backend: `conversa/pool.rs` (pura: `decide`, `reset_at`, `can_return`, `recent`, `handoff_text`; app: `after_turn`, `accept`, `before_send`), ganchos em `turn::finish` e `claude::finish_turn`, comandos `chat_pool_pending|accept|dismiss|state` (`state` alimenta a linha de pool do cartão «Limites de uso»). Frontend: `accounts/chatPool.ts`, `ChatPoolMode.tsx`, `chat/timeline/NoticeRow.tsx` (`PoolNotice`). Testes: `conversa/pool_test.rs`, `accounts/tests/chatPool.test.ts`, `chat/tests/noticeRow.test.tsx`.

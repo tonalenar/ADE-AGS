@@ -60,6 +60,12 @@ pub enum Decision {
     Switch { to: Option<String> },
 }
 
+/// O pool que a conversa poderia usar: o primeiro do agente que tem a conta atual como membro e mais alguém.
+/// Sem membro, não oferece (outro pool não é da pessoa para esta conta).
+pub fn offer_pool<'a>(pools: &'a [crate::accounts::pools::Pool], agent_id: &str, account: &Option<String>) -> Option<&'a crate::accounts::pools::Pool> {
+    pools.iter().find(|p| p.agent_id == agent_id && p.members.len() > 1 && p.members.contains(account))
+}
+
 pub fn decide(input: Input) -> Decision {
     if input.mode == Mode::Off || input.kind != FailureKind::RateLimited || !input.bound_to_pool {
         return Decision::Skip;
@@ -228,6 +234,23 @@ pub struct Pending {
     pub to_label: String,
     /// O pedido que ficou sem resposta (só em `switch`).
     pub request: Option<String>,
+    /// Só em `join`: o pool a que a conversa passa a pertencer se a pessoa aceitar.
+    #[serde(default)]
+    pub pool_id: Option<String>,
+}
+
+/// O que o cartão «Limites de uso» mostra: o pool a que a conversa está ligada e a conta de origem se já trocou.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct State {
+    pub pool_name: Option<String>,
+    pub origin_label: Option<String>,
+}
+
+pub fn state(db: &DbConnection, thread: &str) -> State {
+    let pool_name = bound(db, thread).and_then(|id| crate::accounts::pools::load(db).into_iter().find(|p| p.id == id).map(|p| p.name));
+    let origin_label = load::<Switched>(db, &switched_key(thread)).map(|s| account_label(db, s.origin.as_deref()));
+    State { pool_name, origin_label }
 }
 
 pub fn pending(db: &DbConnection, thread: &str) -> Option<Pending> {
@@ -276,11 +299,35 @@ fn mark_exhausted(db: &DbConnection, key: &str, resets_at: i64, now: i64) {
 /// tem pool; o resto retorna na hora, sem custo.
 pub fn after_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, result: &super::claude_map::TurnResult) {
     let Some(error) = result.error.clone().filter(|_| !result.interrupted) else { return };
-    if mode(db) == Mode::Off || bound(db, thread_id).is_none() {
+    if mode(db) == Mode::Off {
+        return;
+    }
+    if bound(db, thread_id).is_none() {
+        offer_join(app, db, thread_id, &error);
         return;
     }
     let (app, db, thread_id) = (app.clone(), db.clone(), thread_id.to_string());
     tauri::async_runtime::spawn(async move { on_failure(&app, &db, &thread_id, &error).await });
+}
+
+fn last_request(db: &DbConnection, thread_id: &str) -> Option<String> {
+    api::items(db, thread_id).ok().and_then(|items| items.iter().rev().find(|i| i.kind == crate::canal::timeline::ItemKind::User).and_then(|i| i.text.clone()))
+}
+
+/// A conversa bateu no limite sem estar num pool. Não troca sozinha (a regra é pool escolhido pela pessoa), mas
+/// se a conta dela é de um pool, pergunta se a conversa passa a usá-lo e segue em outra conta.
+fn offer_join(app: &AppHandle, db: &DbConnection, thread_id: &str, error: &str) {
+    let now = crate::util::now_ts();
+    if crate::runs::failure::classify(error) != FailureKind::RateLimited || pending(db, thread_id).is_some() {
+        return;
+    }
+    let Ok(row) = api::thread(db, thread_id) else { return };
+    mark_exhausted(db, &crate::runs::quota::account_key(&row.agent_id, row.account_id.as_deref()), reset_at(error, now, local_offset()), now);
+    let pools = crate::accounts::pools::load(db);
+    let Some(pool) = offer_pool(&pools, &row.agent_id, &row.account_id) else { return };
+    let from = account_label(db, row.account_id.as_deref());
+    save(db, &pending_key(thread_id), Some(&Pending { kind: "join".into(), to: None, to_label: pool.name.clone(), request: last_request(db, thread_id), pool_id: Some(pool.id.clone()) }));
+    turn::save_notice(app, db, thread_id, "poolOffer", &format!("A conta {from} esgotou o limite e esta conversa não está num pool. Usar o pool «{}» e continuar em outra conta dele?", pool.name));
 }
 
 async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: &str) {
@@ -302,7 +349,7 @@ async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: 
         now,
         next: if kind == FailureKind::RateLimited { pick_next(db, &row.agent_id, &pool_id, &row.account_id, now) } else { Ok(None) },
     });
-    let request = api::items(db, thread_id).ok().and_then(|items| items.iter().rev().find(|i| i.kind == crate::canal::timeline::ItemKind::User).and_then(|i| i.text.clone()));
+    let request = last_request(db, thread_id);
     let from = account_label(db, row.account_id.as_deref());
     match decision {
         Decision::Skip => {}
@@ -314,7 +361,7 @@ async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: 
         }
         Decision::Ask { to } => {
             let to_label = account_label(db, to.as_deref());
-            save(db, &pending_key(thread_id), Some(&Pending { kind: "switch".into(), to, to_label: to_label.clone(), request }));
+            save(db, &pending_key(thread_id), Some(&Pending { kind: "switch".into(), to, to_label: to_label.clone(), request, pool_id: None }));
             turn::save_notice(app, db, thread_id, "poolAsk", &format!("A conta {from} esgotou o limite (renova {}). Continuar na conta {to_label}?", clock(resets_at)));
         }
         Decision::Switch { to } => {
@@ -367,6 +414,13 @@ pub(super) fn move_account(db: &DbConnection, thread_id: &str, from: &Option<Str
 pub async fn accept(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<(), String> {
     let pending = pending(db, thread_id).ok_or("Não há nada esperando resposta nesta conversa.")?;
     let now = crate::util::now_ts();
+    if pending.kind == "join" {
+        let pool_id = pending.pool_id.clone().ok_or("O aviso não guardou o pool.")?;
+        let row = api::thread(db, thread_id)?;
+        let to = pick_next(db, &row.agent_id, &pool_id, &row.account_id, now)?;
+        bind(db, thread_id, Some(&pool_id))?;
+        return switch_to(app, db, thread_id, &pool_id, to, pending.request, now + WINDOW_SECS, now).await;
+    }
     if pending.kind == "return" {
         let context = return_to_origin(db, thread_id, now)?;
         turn::save_notice(app, db, thread_id, "poolReturn", &format!("A conta original renovou. Voltando para a conta {}.", pending.to_label));
@@ -412,7 +466,7 @@ pub fn before_send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &s
     }
     let label = account_label(db, switched.origin.as_deref());
     if mode == Mode::Ask {
-        save(db, &pending_key(thread_id), Some(&Pending { kind: "return".into(), to: switched.origin, to_label: label.clone(), request: None }));
+        save(db, &pending_key(thread_id), Some(&Pending { kind: "return".into(), to: switched.origin, to_label: label.clone(), request: None, pool_id: None }));
         turn::save_notice(app, db, thread_id, "poolReturnAsk", &format!("A conta {label} renovou. Voltar para ela?"));
         return text.to_string();
     }
