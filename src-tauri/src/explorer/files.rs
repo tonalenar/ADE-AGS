@@ -1,8 +1,10 @@
 //! Leer y guardar un archivo del workspace, para las tabs de archivo.
 //!
 //! La tab no guarda el archivo en memoria como fuente de verdad: el disco lo es, porque
-//! los agentes escriben ahí todo el tiempo. Por eso cada lectura devuelve la fecha de
-//! modificación, y guardar exige presentarla — si otro la cambió en el medio, no se pisa.
+//! los agentes escriben ahí todo el tiempo. Por eso cada lectura devuelve un token de versión
+//! (`tamanho:mtime_ns[:inode]`), y guardar exige presentarlo — si otro lo cambió en el medio,
+//! no se pisa. Só o mtime não bastava: disco com resolução grossa ou `cp -p`/`touch -r` mantêm
+//! o mtime de um arquivo que mudou, e o `rename` de outro editor troca o inode.
 
 use std::io::Read;
 use std::path::Path;
@@ -35,9 +37,9 @@ const IMAGES: &[(&str, &str)] = &[
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum FileContent {
-    Text { content: String, mtime: i64, size: u64 },
+    Text { content: String, mtime: i64, size: u64, version: String },
     /// `data:` listo para un `<img>`.
-    Image { data_url: String, mtime: i64, size: u64 },
+    Image { data_url: String, mtime: i64, size: u64, version: String },
     /// No es texto (o no es UTF-8). Se dice en vez de mostrar basura: y editar basura y
     /// guardarla corrompería el archivo.
     Binary { size: u64 },
@@ -47,16 +49,41 @@ pub enum FileContent {
 #[derive(Debug, Serialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum WriteOutcome {
-    Saved { mtime: i64 },
-    /// Cambió en disco desde que se leyó. No se escribió nada.
-    Conflict { mtime: i64 },
+    Saved { mtime: i64, version: String },
+    /// Cambió en disco desde que se leyó (o sumió, `version: None`; ou já existe, num pedido de
+    /// criação). No se escribió nada.
+    Conflict { mtime: Option<i64>, version: Option<String> },
 }
+
+/// O `expected_version` de quem quer criar: grava só se o nome ainda está livre (`create_new`).
+pub const ABSENT: &str = "absent";
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileStat {
     pub mtime: i64,
     pub size: u64,
+    pub version: String,
+}
+
+/// O token de versão: tamanho, mtime em nanossegundos e, onde existe, o inode. Opaco para o
+/// front: só se compara por igualdade.
+pub(crate) fn version_token(meta: &std::fs::Metadata) -> String {
+    let ns = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        format!("{}:{ns}:{}", meta.len(), meta.ino())
+    }
+    #[cfg(not(unix))]
+    {
+        format!("{}:{ns}", meta.len())
+    }
 }
 
 /// Milisegundos desde epoch. En `i64` y no `u128` porque viaja a JS como número.
@@ -86,6 +113,7 @@ pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
     }
     let size = meta.len();
     let mtime = mtime_ms(&meta);
+    let version = version_token(&meta);
 
     if let Some(mime) = image_mime(file) {
         if size > MAX_IMAGE {
@@ -93,7 +121,7 @@ pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
         }
         let bytes = std::fs::read(file).map_err(|e| e.to_string())?;
         let data = base64::engine::general_purpose::STANDARD.encode(bytes);
-        return Ok(FileContent::Image { data_url: format!("data:{mime};base64,{data}"), mtime, size });
+        return Ok(FileContent::Image { data_url: format!("data:{mime};base64,{data}"), mtime, size, version });
     }
 
     if size > MAX_TEXT {
@@ -109,7 +137,7 @@ pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
         return Ok(FileContent::Binary { size });
     }
     match String::from_utf8(bytes) {
-        Ok(content) => Ok(FileContent::Text { content, mtime, size }),
+        Ok(content) => Ok(FileContent::Text { content, mtime, size, version }),
         Err(_) => Ok(FileContent::Binary { size }),
     }
 }
@@ -118,37 +146,72 @@ pub fn explorer_read_file(path: String) -> Result<FileContent, String> {
 #[tauri::command]
 pub fn explorer_file_stat(path: String) -> Result<Option<FileStat>, String> {
     match std::fs::metadata(&path) {
-        Ok(meta) => Ok(Some(FileStat { mtime: mtime_ms(&meta), size: meta.len() })),
+        Ok(meta) => Ok(Some(FileStat { mtime: mtime_ms(&meta), size: meta.len(), version: version_token(&meta) })),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.to_string()),
     }
 }
 
-/// Guarda solo si el archivo sigue como estaba cuando se leyó (`expected_mtime`).
+/// Guarda solo si el archivo sigue como estaba cuando se leyó (`expected_version`).
 ///
 /// Sin esa condición, guardar una tab abierta hace un rato pisaría en silencio lo que un
 /// agente escribió mientras tanto — y es exactamente lo que pasa en esta app todo el día.
+///
+/// - `None`: sobrescreve sem olhar (o usuário escolheu, ou é um "salvar como").
+/// - `Some(ABSENT)`: cria; se o nome já foi ocupado, é conflito (`create_new`, sem corrida).
+/// - `Some(token)`: o arquivo precisa ter esse token. Se sumiu, é conflito: recriar é outra
+///   decisão, que o front pede com `ABSENT`.
 #[tauri::command]
 pub fn explorer_write_file(
     path: String,
     content: String,
-    expected_mtime: Option<i64>,
+    expected_version: Option<String>,
 ) -> Result<WriteOutcome, String> {
     // Se escribe sobre el archivo REAL: si la ruta es un symlink (las skills adjuntas lo
     // son), un rename sobre el enlace lo reemplazaría por un archivo suelto y la skill
     // dejaría de recibir cambios.
     let target = std::fs::canonicalize(&path).unwrap_or_else(|_| Path::new(&path).to_path_buf());
+    let current = std::fs::metadata(&target).ok();
+    let conflict = |meta: Option<&std::fs::Metadata>| WriteOutcome::Conflict {
+        mtime: meta.map(mtime_ms),
+        version: meta.map(version_token),
+    };
 
-    if let (Some(expected), Ok(meta)) = (expected_mtime, std::fs::metadata(&target)) {
-        let current = mtime_ms(&meta);
-        if current != expected {
-            return Ok(WriteOutcome::Conflict { mtime: current });
+    match expected_version.as_deref() {
+        Some(ABSENT) => {
+            if current.is_some() {
+                return Ok(conflict(current.as_ref()));
+            }
+            match create_new(&target, content.as_bytes()) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    return Ok(conflict(std::fs::metadata(&target).ok().as_ref()));
+                }
+                Err(e) => return Err(format!("no se pudo crear {}: {e}", target.display())),
+            }
         }
+        Some(expected) => match &current {
+            Some(meta) if version_token(meta) == expected => write_atomic(&target, content.as_bytes())?,
+            other => return Ok(conflict(other.as_ref())),
+        },
+        None => write_atomic(&target, content.as_bytes())?,
     }
 
-    write_atomic(&target, content.as_bytes())?;
     let meta = std::fs::metadata(&target).map_err(|e| e.to_string())?;
-    Ok(WriteOutcome::Saved { mtime: mtime_ms(&meta) })
+    Ok(WriteOutcome::Saved { mtime: mtime_ms(&meta), version: version_token(&meta) })
+}
+
+/// Cria o arquivo no mesmo syscall que confere que o nome está livre. Se a escrita falhar
+/// no meio, apaga o que criou: não deixa um arquivo pela metade com o nome do usuário.
+fn create_new(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    if let Err(e) = file.write_all(bytes).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(path);
+        return Err(e);
+    }
+    Ok(())
 }
 
 /// Temporal al lado y `rename`: un corte a mitad de camino deja el original intacto. El
