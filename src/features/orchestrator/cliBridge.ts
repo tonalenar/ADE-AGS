@@ -21,7 +21,7 @@ import { openDesignInPanel } from "@/features/chat/store";
 import { designRoute, parseDesignOpen } from "@/features/design/openRoute";
 import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
-import { screenOf } from "@/features/terminal/terminalRegistry";
+import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
 import { AGENT_PORTAL_SIZE } from "@/features/canvas/board";
@@ -198,27 +198,35 @@ async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
  * Un agente preguntándole algo a la persona. Se resuelve cuando contesta (o cuando cierra
  * la tarjeta, que también es una respuesta) — del otro lado el agente está esperando.
  */
+/** Prazo vencido. Um símbolo, não um texto: a pessoa pode responder "pending" de verdade. */
+const ASK_PENDING = Symbol("pending");
+
 async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   const question = str(args, "question");
   if (!question) throw new Error("Falta a pergunta");
   const options = Array.isArray(args.options) ? args.options.filter((o): o is string => typeof o === "string") : [];
-  const timeoutMs = (typeof args.timeout_s === "number" ? args.timeout_s : 1800) * 1000;
+  const timeoutMs = (typeof args.timeout_s === "number" ? args.timeout_s : 600) * 1000;
   const owner = ownerOf(args);
 
-  const answer = await new Promise<string | null>((resolve) => {
+  const answer = await new Promise<string | null | typeof ASK_PENDING>((resolve) => {
     const id = crypto.randomUUID();
     let done = false;
-    const once = (value: string | null) => {
+    const once = (value: string | null | typeof ASK_PENDING) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       resolve(value);
     };
-    // Vence también de este lado: si nadie la mira, la tarjeta se va sola en vez de
-    // quedarse para siempre ofreciendo contestar algo que ya no espera nadie.
+    // Vence o prazo: o agente recebe `pending` (nunca uma resposta) e segue. A pergunta de uma aba
+    // fica na tela, e a resposta tardia chega a ela como mensagem; a de uma tarefa da frota sai.
     const timer = setTimeout(() => {
-      useAskStore.getState().answer(id, null);
-      once(null);
+      if (owner?.kind === "tab") {
+        const tabId = owner.id;
+        useAskStore.getState().expire(id, (late) => sendWhenReady(tabId, i18n.t("ask.lateMessage", { question, answer: late })));
+      } else {
+        useAskStore.getState().answer(id, null);
+      }
+      once(ASK_PENDING);
     }, timeoutMs);
     useAskStore.getState().add({
       id,
@@ -232,6 +240,7 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
     });
   });
 
+  if (answer === ASK_PENDING) return { status: "pending", lateAsMessage: owner?.kind === "tab" };
   if (answer === null) {
     throw new Error("O usuário não respondeu: siga com o que puder decidir sozinho, ou deixe anotado no seu resultado.");
   }

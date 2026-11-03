@@ -297,7 +297,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "app.status" => app_status(app),
         // El bus de eventos (ver `crate::bus`): ponerse al día y esperar lo siguiente.
         "events.since" => events_since(args),
-        "events.wait" => events_wait(args),
+        "events.wait" => events_wait(app, args),
         // Misiones y aprobaciones sin la interfaz (modo headless, CI).
         "mission.create" => missions::mission_create(app, args),
         "mission.start" => missions::mission_start(app, args),

@@ -52,15 +52,26 @@ jobs:
 
       - run: bun install --frozen-lockfile
 
+      # Schema SQLite ou protocolo IPC mudou sem registro de reconhecimento? Falha aqui, antes
+      # de gastar minutos de teste. Ver docs/decisoes/FINGERPRINT.md.
+      - name: Fingerprint do schema e do protocolo
+        run: node scripts/fingerprint.mjs
+
       - name: Tests del frontend
         run: |
           bunx tsc --noEmit
           node scripts/babel-parse-check.mjs src
           node scripts/test-lint.mjs
+          bun scripts/check-catalogs.ts
           bun run test
 
       - name: Tests de Rust
         run: cd src-tauri && cargo test --lib --bin ags
+
+      # Usa o binário de teste que o passo anterior já compilou (5 processos frescos por caso).
+      # Gate por razão e orçamento calibrado: docs/ade-ags/bench/COMPLEXIDADE.md.
+      - name: Bench de complexidade
+        run: node scripts/bench-rust.mjs
 
   # Atrapa lo que solo rompe en Windows (código `#[cfg(windows)]`, imports que solo usa
   # Windows) y que el job de Linux no compila. Sin bun ni dependencias de sistema: en debug

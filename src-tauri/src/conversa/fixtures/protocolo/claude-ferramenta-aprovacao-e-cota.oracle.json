@@ -1,0 +1,8 @@
+{
+  "checks": [
+    { "label": "a sessão é a do init", "expect": { "sessao": "{{session:1}}" } },
+    { "label": "a linha cortada é pulada sem derrubar o turno", "expect": { "ignoradas": 1, "textoContem": "Vou ler o Cargo.toml." } },
+    { "label": "as duas ferramentas fecham e o comando passou pela aprovação", "expect": { "ferramentas": ["Read:done", "Bash:done"], "pedidos": ["command"] } },
+    { "label": "o limite da conta é erro do turno e chega ao pool como limite", "expect": { "fim": "erro", "classe": "rate_limited", "classeParaOPool": "rate_limited", "erroContem": "resets 3pm" } }
+  ]
+}

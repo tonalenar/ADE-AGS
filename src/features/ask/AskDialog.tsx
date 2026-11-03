@@ -106,7 +106,7 @@ export function AskDialog() {
         )}
 
         <p className="text-[11px] text-gray-400 dark:text-white/35">
-          {t("ask.waiting", { time: left(remaining) })}
+          {question.late ? t("ask.late") : t("ask.waiting", { time: left(remaining) })}
         </p>
       </div>
     </AppDialog>

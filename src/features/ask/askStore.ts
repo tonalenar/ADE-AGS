@@ -20,6 +20,8 @@ export interface UserQuestion {
   fromId: string;
   /** Cuándo vence, para que la tarjeta no prometa una espera infinita. */
   expiresAt: number;
+  /** Venceu o prazo: o agente já recebeu `pending` e seguiu. A resposta, se vier, vira mensagem. */
+  late?: boolean;
   resolve: (answer: string | null) => void;
 }
 
@@ -28,6 +30,8 @@ interface AskState {
   add: (q: UserQuestion) => void;
   /** Contesta una y la saca. `null` = la cerró sin contestar. */
   answer: (id: string, answer: string | null) => void;
+  /** Vence o prazo sem tirar a pergunta da tela: quem responder depois chama `deliver`. */
+  expire: (id: string, deliver: (answer: string) => void) => void;
 }
 
 export const useAskStore = create<AskState>((set, get) => ({
@@ -39,4 +43,10 @@ export const useAskStore = create<AskState>((set, get) => ({
     set((s) => ({ questions: s.questions.filter((x) => x.id !== id) }));
     q.resolve(answer);
   },
+  expire: (id, deliver) =>
+    set((s) => ({
+      questions: s.questions.map((q) =>
+        q.id === id ? { ...q, late: true, resolve: (answer) => { if (answer !== null) deliver(answer); } } : q,
+      ),
+    })),
 }));
