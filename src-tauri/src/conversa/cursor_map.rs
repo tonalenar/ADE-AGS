@@ -187,7 +187,7 @@ impl Mapper {
         // A ferramenta entra depois do que o agente já disse e pensou: a ordem do fio é a do que aconteceu.
         self.flush_thought(at, out);
         self.flush_said(at, out);
-        let Some((key, body)) = line.get("tool_call").and_then(Value::as_object).and_then(|o| o.iter().next()) else { return };
+        let Some((key, body)) = line.get("tool_call").and_then(Value::as_object).and_then(tool_entry) else { return };
         let call = str_of(line, "call_id").map(str::to_string).unwrap_or_else(|| format!("n{}", self.tools.len()));
         let args = body.get("args").cloned().unwrap_or(Value::Null);
         let mut item = tool_item(&format!("cursor:{}:c{call}", self.turn), &agy_name(key), &with_aliases(&args), at);
@@ -218,6 +218,13 @@ impl Mapper {
         let duration_ms = line.get("duration_ms").and_then(Value::as_i64);
         out.push(Out::Done(TurnResult { interrupted: false, error, duration_ms }));
     }
+}
+
+/// A ferramenta de um `tool_call`: a entrada `<nome>ToolCall`. O `cursor-agent` também põe campos soltos ao lado dela
+/// (como `completedAtMs`, um número); pegar a primeira chave do objeto dava a ferramenta «completedatms», sem argumento
+/// nem resultado. Sem nenhuma `…ToolCall`, vale a primeira entrada que é um objeto (nome novo ainda desconhecido).
+fn tool_entry(object: &Map<String, Value>) -> Option<(&String, &Value)> {
+    object.iter().find(|(k, v)| k.ends_with("ToolCall") && v.is_object()).or_else(|| object.iter().find(|(_, v)| v.is_object()))
 }
 
 /// O nome que o mapa de ferramentas do `agy_map` entende, a partir do `<nome>ToolCall` do Cursor.

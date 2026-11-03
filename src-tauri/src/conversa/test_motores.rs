@@ -652,6 +652,24 @@ mod cursor {
     }
 
     #[test]
+    fn campo_solto_ao_lado_da_ferramenta_nao_vira_o_nome_dela() {
+        // Visto num turno real: `completedAtMs` (um número) vem antes de `shellToolCall` na ordem das chaves.
+        let line = json!({ "type": "tool_call", "subtype": "completed", "call_id": "c1", "session_id": SID, "tool_call": {
+            "completedAtMs": 1793708684633u64,
+            "shellToolCall": { "args": { "command": "ls" }, "result": { "success": { "stdout": "a.txt" } } } } });
+        let mut mapper = Mapper::new("t");
+        let outs = feed_all(&mut mapper, &[line]);
+        let got = items(&outs);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].name.as_deref(), Some("Bash"), "{:?}", got[0]);
+        assert!(got[0].output.as_deref().unwrap_or("").contains("a.txt"), "{:?}", got[0]);
+        // Sem `…ToolCall`, a primeira entrada que é objeto ainda vira a ferramenta.
+        let odd = json!({ "type": "tool_call", "subtype": "started", "call_id": "c2", "session_id": SID, "tool_call": { "startedAtMs": 1, "fooBarCall": { "args": {} } } });
+        let outs = feed_all(&mut Mapper::new("t"), &[odd]);
+        assert_eq!(items(&outs)[0].name.as_deref(), Some("foobarcall"));
+    }
+
+    #[test]
     fn ferramenta_com_erro_ou_recusada_fica_marcada_e_a_recusa_diz_como_liberar() {
         let done = |result: Value| json!({ "type": "tool_call", "subtype": "completed", "call_id": "x", "tool_call": { "shellToolCall": { "args": { "command": "rm -rf dist" }, "result": result } }, "session_id": SID });
         let status = |result: Value| {
