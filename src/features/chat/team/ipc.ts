@@ -28,10 +28,13 @@ export interface TeamMember {
   subagent: boolean;
 }
 
+/** De onde o time nasceu (espelho de `chat_team::store::ORIGIN_*`). */
+export type TeamOrigin = "chat" | "canvas" | "mission";
+
 /** Espelho de `chat_team::api::TeamView`. */
 export interface TeamView {
   id: string;
-  /** A conversa que coordena: o id da aba ou `thread:<id>`. */
+  /** A conversa que coordena: o id da aba ou `thread:<id>`. Vazio = time sem orquestrador (a coroa saiu do canvas). */
   orchestrator: string;
   agentId: string;
   label: string;
@@ -47,6 +50,12 @@ export interface TeamView {
   watch?: boolean;
   /** ...e de um integrante sem progresso. Ausente = desligado. */
   watchStall?: boolean;
+  /** De onde o time nasceu. Ausente = backend antigo (`chat`). */
+  origin?: TeamOrigin;
+  /** Onde mora a coroa no canvas (pasta, `#c:` ou `#m:`), quando se sabe. */
+  boardKey?: string | null;
+  /** A missão espelhada (só `origin = "mission"`). */
+  missionId?: string | null;
   members: TeamMember[];
   /** Os integrantes mais o orquestrador. */
   headcount: number;
@@ -144,6 +153,45 @@ export const chatTeamUnlink = (teamId: string, member: string) => invoke<boolean
 
 export const chatTeamUpdate = (input: { teamId: string; member: string; role?: string; policy?: TeamPolicy; label?: string; subagent?: boolean }) =>
   invoke<TeamMember>("chat_team_update", { input });
+
+/** Um cordado da coroa que entra no time promovido (papel e subagente lidos do quadro). */
+export interface PromoteMember {
+  member: string;
+  agentId?: string;
+  label?: string;
+  role?: string;
+  subagent?: boolean;
+}
+
+/** Espelho de `chat_team::api::Promoted`. */
+export interface Promoted {
+  team: TeamView;
+  created: boolean;
+  adopted: string[];
+  skipped: { member: string; reason: string }[];
+}
+
+/** Promove uma coroa do canvas a time (`origin = "canvas"`). Só linhas no banco: não abre processo nem worktree. */
+export const chatTeamPromote = (input: {
+  orchestrator: string;
+  agentId?: string;
+  label?: string;
+  cwd?: string;
+  title?: string;
+  boardKey?: string | null;
+  members: PromoteMember[];
+}) => invoke<Promoted>("chat_team_promote", { input });
+
+/** A coroa saiu do canvas: tira SÓ o papel de orquestrador; o time e os integrantes ficam. */
+export const chatTeamUnlead = (teamId: string) => invoke<boolean>("chat_team_unlead", { teamId });
+
+/** Dá um orquestrador a um time sem (ou troca o dele). */
+export const chatTeamLead = (input: { teamId: string; orchestrator: string; agentId?: string; label?: string }) =>
+  invoke<TeamView>("chat_team_lead", { input });
+
+/** Troca a ref (aba ↔ `thread:<id>`) no roster e nas cordas do canvas. `null` = a ref antiga não estava em time. */
+export const chatTeamRebind = (oldRef: string, newRef: string) =>
+  invoke<{ teamId: string; role: "orchestrator" | "member" } | null>("chat_team_rebind", { oldRef, newRef });
 
 export const chatTeamDissolve = (teamId: string) => invoke<boolean>("chat_team_dissolve", { teamId });
 

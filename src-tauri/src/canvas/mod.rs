@@ -278,6 +278,58 @@ pub fn mission_of_tab(boards: &Boards, tab: &str) -> Option<String> {
     })
 }
 
+/// Todas as refs (abas e conversas) que estão em algum canvas de missão (`#m:`), como nó ou orquestradora.
+pub fn mission_refs(boards: &Boards) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for (key, board) in boards {
+        if !key.rsplit_once(MISSION_SEP).is_some_and(|(_, mission)| !mission.is_empty()) {
+            continue;
+        }
+        out.extend(board.orchestrators.iter().cloned());
+        if let Some(nodes) = board.nodes.as_object() {
+            out.extend(nodes.keys().cloned());
+        }
+    }
+    out
+}
+
+/// Troca a ref `old` por `new` em todos os quadros: nó, cordas, coroa, papel e subagente. Pura. Devolve as
+/// chaves dos quadros que mudaram (só esses precisam ser gravados).
+pub fn rebind_ref(boards: &mut Boards, old: &str, new: &str) -> Vec<String> {
+    let mut changed = Vec::new();
+    for (key, board) in boards.iter_mut() {
+        let mut touched = false;
+        for edge in &mut board.edges {
+            for end in [&mut edge.a, &mut edge.b] {
+                if end == old {
+                    *end = new.to_string();
+                    touched = true;
+                }
+            }
+        }
+        for slot in board.orchestrators.iter_mut().chain(board.subagents.iter_mut()) {
+            if slot == old {
+                *slot = new.to_string();
+                touched = true;
+            }
+        }
+        if let Some(role) = board.roles.remove(old) {
+            board.roles.insert(new.to_string(), role);
+            touched = true;
+        }
+        if let Some(nodes) = board.nodes.as_object_mut()
+            && let Some(node) = nodes.remove(old)
+        {
+            nodes.insert(new.to_string(), node);
+            touched = true;
+        }
+        if touched {
+            changed.push(key.clone());
+        }
+    }
+    changed
+}
+
 /// O papel mostrado no nó de `tab` (o que o usuário escolheu ou o orquestrador definiu), se houver.
 pub fn role_of(boards: &Boards, tab: &str) -> Option<String> {
     boards.values().find_map(|b| b.roles.get(tab).cloned()).filter(|r| !r.trim().is_empty())

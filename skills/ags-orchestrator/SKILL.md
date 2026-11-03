@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.45.0
+version: 1.46.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -1008,8 +1008,13 @@ arrived, and `stopped` gives the reason when the turn ended with no reply (error
 process gone). Repeating the same `ask` while it still waits **joins the same wait** (`joined: true`):
 the member is not asked twice, and a timeout alone does not close it.
 
+A team has an `origin` (`chat` built in the chat, `canvas` promoted from a crown and cords on the
+canvas, `mission` a read-only mirror of a mission) and a `led` flag. Removing the crown on the canvas
+only removes the orchestrator: the team and its members stay (`led: false`, `orchestrator.id` empty)
+until someone is crowned over them. Promoting a team never opens a process, terminal or worktree.
+
 ```bash
-ags team list                                   # orchestrator + members: role, policy, model, branch, working
+ags team list                                   # origin + orchestrator + members: role, policy, model, branch, working
 ags peer tell "Codex · UI" --task "ChatView + Composer with vitest tests" --expecting "a handoff"
 ags peer deliver --file handoff.json            # a member's final delivery (Handoff v1), to the orchestrator
 ```

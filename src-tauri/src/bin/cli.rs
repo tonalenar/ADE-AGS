@@ -105,7 +105,7 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer role <nome> <papel> [--subagent]       Define o papel de um agente da equipe (os sem papel esperam por isso)
 
 TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por protocolo); as cordas do canvas autorizam
-  team list                                   O seu time: orquestrador, integrantes, papel, política, branch e estado
+  team list                                   O seu time: origem (chat, canvas ou mission), orquestrador, integrantes, papel, política, branch e estado
   team create [--title \"...\"]                 Faz do seu canvas um time (só quem a pessoa coroou); quem já está
                                               ligado a você entra junto, supervisionado
   Só o orquestrador do time:

@@ -399,7 +399,7 @@ mod do_banco {
         for id in ["lead", "codex"] {
             chat::insert_thread(&conn, id, "codex", "/r", id, &chat::Tuning { access: "ask".into(), ..Default::default() }, None, NOW - 3_600_000).unwrap();
         }
-        let team = api::create(&conn, NewTeam { orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "Claude Code".into(), cwd: "/r".into(), title: "t".into() }, 1).unwrap().0.team.id;
+        let team = api::create(&conn, NewTeam { orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "Claude Code".into(), cwd: "/r".into(), title: "t".into(), ..Default::default() }, 1).unwrap().0.team.id;
         let member = NewMember { member: "thread:codex".into(), agent_id: "codex".into(), label: "Codex Backend".into(), role: "backend".into(), ..Default::default() };
         api::link(&conn, &team, member, false, 2).unwrap();
         World { conn, team }

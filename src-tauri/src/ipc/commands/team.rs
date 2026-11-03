@@ -237,6 +237,8 @@ fn describe_team(view: &api::TeamView, tabs: &[OpenTab]) -> Value {
     json!({
         "id": view.team.id,
         "title": view.team.title,
+        // De onde o time nasceu (`chat`, `canvas`, `mission`) e onde mora a coroa; `led` = tem orquestrador.
+        "origin": view.team.origin, "boardKey": view.team.board_key, "missionId": view.team.mission_id, "led": view.team.led(),
         "orchestrator": { "id": view.team.orchestrator, "name": name_of(&view.team.orchestrator).unwrap_or_else(|| view.team.label.clone()), "agent": view.team.agent_id },
         "members": members,
         "headcount": view.headcount,
@@ -271,6 +273,9 @@ pub(super) fn team_create(app: &AppHandle, args: &Value) -> Result<Value, String
         label: me.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
         cwd: me.as_ref().map(|m| m.cwd.clone()).unwrap_or_default(),
         title: arg_str_opt(args, "title").unwrap_or_default(),
+        // A coroa foi dada no canvas: o time nasce dali (`origin = canvas`), e a tela promove o resto.
+        origin: Some(store::ORIGIN_CANVAS.into()),
+        ..Default::default()
     };
     let roles = crate::canvas::roles::all();
     let direct = crate::canvas::peers_of(&boards, &from);

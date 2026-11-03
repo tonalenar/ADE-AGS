@@ -38,7 +38,8 @@ fn err(e: rusqlite::Error) -> String {
 pub fn gather(conn: &Connection, now: i64) -> Result<Vec<Watched>, String> {
     let mut out = Vec::new();
     for team in store::teams(conn)? {
-        if !team.watch && !team.watch_stall {
+        // Sem orquestrador (a coroa saiu do canvas) não há a quem avisar; origem de missão é do Vigia da missão.
+        if (!team.watch && !team.watch_stall) || !team.led() || team.origin == store::ORIGIN_MISSION {
             continue;
         }
         let orchestrator_open = match model::thread_id_of(&team.orchestrator) {

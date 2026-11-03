@@ -54,7 +54,7 @@ fn lead_of(app: &AppHandle, tab: &str) -> Option<String> {
         && let Ok(conn) = db.lock()
         && let Some(view) = crate::chat_team::api::team_of(&conn, tab).ok().flatten()
     {
-        return (view.team.orchestrator != tab).then(|| crate::chat_team::api::orchestrator_peer_name(&conn, &view.team));
+        return (view.team.led() && view.team.orchestrator != tab).then(|| crate::chat_team::api::orchestrator_peer_name(&conn, &view.team));
     }
     let boards = crate::canvas::load_boards();
     if crate::canvas::is_orchestrator(&boards, tab) {

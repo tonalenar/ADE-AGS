@@ -202,6 +202,27 @@ Com o Antigravity, a conversa nova roda `agy --print <mensagem> --output-format 
 - **Onde aparece:** a aba "Time" do painel direito abre sozinha ao abrir uma conversa que está num time (uma vez por conversa); a sidebar agrupa os integrantes sob o orquestrador com o selo "TIME · N"; o cabeçalho mostra "Orquestrador · X"; o composer do orquestrador tem "Time | Só o orquestrador" à esquerda e o menu do @agente; o fio termina com os cartões das delegações e o resumo das entregas.
 - **Permissões:** `team/teamPermissions.ts` diz de quem é o pedido (papel, política, time) e o que a política decide sozinha. O `PermissionsManager` aplica a política antes das regras "Sempre permitir": só leitura nega (e diz ao agente por quê), o que a política deixa passa sozinho, o resto vai às regras e à pessoa; risco alto nunca é automático. O cartão e a caixa mostram o papel e a política (`TeamRoleTag`).
 
+### Time único: origem, promoção do canvas e coroa tirada (E2 da unificação)
+
+O roster do chat (`chat_team` + `chat_team_member`) é a fonte única do time, qualquer que seja o modo onde ele nasceu. Colunas aditivas em `chat_team` (protegidas por `store::has_column`, sem subir `user_version`; linhas antigas ficam `origin = 'chat'`):
+
+- `origin`: `chat` (montado no chat), `canvas` (promovido de uma coroa com cordados) ou `mission` (linha-espelho de uma missão, a E5; o motor da missão não se funde ao roster);
+- `board_key`: onde mora a coroa no canvas (pasta ou `#c:`);
+- `mission_id`: só `origin = 'mission'`.
+
+Comandos (em `chat_team/commands.rs`, funções puras em `api.rs`):
+
+| Comando | O que faz |
+|---|---|
+| `chat_team_promote` | Cria o time a partir de uma coroa do canvas e dos cordados (`origin = 'canvas'`). **Só grava linhas**: não abre processo, PTY nem worktree. Idempotente. Quem já é de outro time ou de uma missão volta em `skipped`. Recusa o quadro `#m:`. |
+| `chat_team_unlead` | A coroa saiu do canvas: tira **só o papel de orquestrador**. O time, os integrantes, as regras e o histórico ficam. Idempotente. |
+| `chat_team_lead` | Dá um orquestrador a um time que ficou sem (ou troca o dele). Se ele era integrante do mesmo time, deixa de ser. |
+| `chat_team_rebind(old_ref, new_ref)` | Troca a ref (aba ↔ `thread:<id>`) no roster **e nas cordas** do `canvas.json` (nó, cordas, coroa, papel, subagente). Só o endereço: quem converte (fecha uma, abre a outra) é quem chama (E6). |
+
+Um time sem orquestrador tem `orchestrator = ""` para fora (a coluna é `NOT NULL UNIQUE`; por dentro guarda `none:<id do time>`). Ele continua com integrantes, escopo `t:<id>` e aceita ligar mais gente; o vigia do chat o pula (não há a quem avisar). Promover uma coroa sobre integrantes de um time sem orquestrador (ou coroar um dos próprios integrantes) faz a coroa **assumir esse time** em vez de criar outro. O invariante "um agente, um time" vale em todos os caminhos e também contra integrantes de missão (quadros `#m:` e linhas `origin = 'mission'`).
+
+`ags team list` mostra `origin`, `boardKey`, `missionId` e `led`. O evento `cc-chat-team` sai em todas as mudanças. O front (E3) é quem decide **quando** promover (só quando a pessoa mexe, nunca no boot) e quem reaplica o canvas depois de `rebind`/`unlead`.
+
 ## Retomada, fila e avisos na timeline (etapa 3 do harness)
 
 - **Retomar uma sessão que falha não esquece em silêncio** (`conversa/resume.rs`): o erro de `--resume`/`thread/resume`/`session/resume` é `Gone` (a sessão não existe: abre outra), `Transient` (2 retentativas com pausa curta; se persistir, abre outra), `Timeout` (NÃO abre outra: a sessão pode existir; falha e a pessoa tenta de novo) ou `Fatal` (o processo não sobe, ou modelo/modo não aplicam: falha). Ao abrir outra, a timeline recebe um item `notice` (`resumeLost`) e a tela diz que o agente recomeçou sem o histórico; o id da sessão anterior só é trocado depois de a nova abrir.
