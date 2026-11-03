@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.44.0
+version: 1.45.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -819,11 +819,19 @@ ags device say iPhone "Login fixed: the button no longer hides under the keyboar
   the other connected agents and the user see it, together with the actions you took.
 - `ags sim act iPhone "Open General in Settings" --expect "text:iPhone Storage" --steps 8 --timeout 115`
   runs the shared observe/decide/act/verify loop using simulator screenshots and existing HID.
-  Run it from an ADE terminal: it requires the app-issued PTY session and descendant process;
-  CLI flags cannot replace that identity.
+  Run it from an ADE terminal tab (app-issued PTY session + descendant process) or from an ADE
+  protocol conversation (Codex, Claude, OpenCode, Antigravity: the app recognises the engine
+  process of that `thread:<id>`, no token). CLI flags cannot replace that identity.
   Enable Jev, browser step and visual fallback in Decisions first. It uses only the configured
   provider; no Chrome/CDP or WebView2 is involved. `--timeout` is seconds (10–1800); individual
   native operations have their own bounded timeout and may finish after that deadline.
+- `ags desk act "Open Mail and show the inbox" --expect "text:Inbox" --steps 8` is the same loop for
+  the **user's Mac screen** (computer use). Same identity rules as `sim act`, same Jev/visual
+  settings. The person gets a dialog **before anything is photographed** (no switch, no flag can
+  skip it) and confirms sensitive or uncertain actions one by one; every question and answer is
+  audited (`approval_audit`, `computer_use:*`). Main display only; needs macOS Accessibility and
+  Screen Recording for ADE. `--fill screen=value` follows the same rules as `sim act`. Prefer
+  `sim act`/`portal act` when the target is a simulator or the canvas browser.
 - `ags sim act iPhone "Fill the already focused field" --fill "screen=hello" --expect "text:hello"`
   inserts local text into the input you already focused. Only one nonempty printable US-ASCII `screen` fill is supported; controls, including Enter/Tab,
   are rejected before acting.
@@ -1276,6 +1284,7 @@ flags of each command.
 | DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device launch`, `device close`, `device`, `device open`, `device button`, `device say` |
 | PORTAIS DO CANVAS | `portals`, `portal create`, `portal close`, `open`, `portal navigate`, `portal snapshot`, `portal`, `portal type`, `portal press`, `portal reset`, `portal act` |
 | SIMULADOR IOS | `sim act` |
+| COMPUTER USE DO MAC | `desk act` |
 | CHAT COM O USUÁRIO | `say`, `recall` |
 | ROTINAS | `routines`, `routine create`, `routine`, `routine edit` |
 | ANDARES | `floors`, `floor create` |

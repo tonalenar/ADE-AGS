@@ -248,6 +248,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Claude: {e}"))?;
+    crate::chat_team::env::register_process(&row.id, child.id());
     memoria::record(app, db, row, &memory.state, memory.notice.as_deref());
     let stdin = child.stdin.take().ok_or("sem stdin")?;
     let stdout = child.stdout.take().ok_or("sem stdout")?;

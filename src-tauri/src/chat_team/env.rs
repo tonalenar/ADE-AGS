@@ -3,7 +3,8 @@
 //! cartão `thread:<id>`) e onde está o `ags` (a pasta do app no PATH, como nos terminais).
 //!
 //! `ADE_TAB_ID` não é segurança (ver `ipc/commands/peers.rs`): é o alcance de trabalho. `ADE_SESSION`
-//! não vai: a memória e o quadro da missão continuam só dos terminais.
+//! não vai: a memória e o quadro da missão continuam só dos terminais. As ações do Jev e do computer
+//! use reconhecem a conversa pelo PID do motor (`register_process`), não por token.
 
 use std::ffi::OsString;
 
@@ -17,6 +18,14 @@ pub fn thread_env(thread_id: &str) -> Vec<(String, OsString)> {
         out.push(("PATH".to_string(), path));
     }
     out
+}
+
+/// Registra o processo do motor da conversa: é com o PID dele que o app reconhece, sem token, quem chama
+/// `sim act` e o computer use por esta conversa (`terminal::authorize_actor`).
+pub fn register_process(thread_id: &str, pid: Option<u32>) {
+    if let Some(pid) = pid {
+        crate::terminal::register_conversation(&format!("{THREAD_PREFIX}{thread_id}"), pid);
+    }
 }
 
 /// O PATH com a pasta do executável do app no fim, se o `ags` estiver lá e ela ainda não estiver no

@@ -686,3 +686,23 @@ fn sim_act_ignora_identidade_e_sessao_injetadas_em_flags(){
     caller_from("sim.act",&mut args,Some("tab-real".into()),Some("sessao-real".into()));
     assert_eq!(args["from"],"tab-real");assert_eq!(args["session"],"sessao-real");assert!(args.get("taskId").is_none());assert!(args.get("mission").is_none());
 }
+
+#[test]
+fn desk_act_tem_so_o_objetivo_posicional_e_o_mesmo_prazo_do_sim_act() {
+    let args = parse("desk.act", &["abrir o Mail", "--expect", "text:Caixa de Entrada", "--steps", "4", "--timeout", "90"]).unwrap();
+    assert_eq!(args["goal"], "abrir o Mail");
+    assert!(args.get("name").is_none());
+    assert_eq!(args["expect"], json!(["text:Caixa de Entrada"]));
+    assert_eq!(read_timeout_for("desk.act", &args).as_secs(), 165);
+}
+
+#[test]
+fn conversa_chama_sim_e_desk_so_com_a_aba_thread_e_sem_sessao_mesmo_com_flag_forjada() {
+    for command in ["sim.act", "desk.act"] {
+        let mut args = json!({"from": "tab-de-terminal", "session": "forjada", "mission": "m"});
+        caller_from(command, &mut args, Some("thread:abc".into()), None);
+        assert_eq!(args["from"], "thread:abc", "{command}");
+        assert!(args.get("session").is_none(), "{command}: conversa não tem ADE_SESSION e a flag não vale");
+        assert!(args.get("mission").is_none());
+    }
+}

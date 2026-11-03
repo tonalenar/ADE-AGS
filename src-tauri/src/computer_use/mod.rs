@@ -386,3 +386,4 @@ fn run_inner(
 mod test;
 
 pub(crate) mod ios;
+pub(crate) mod desktop;

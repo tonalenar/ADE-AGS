@@ -169,6 +169,11 @@ SIMULADOR IOS — nó conectado ao seu terminal; Jev e reserva visual habilitado
   sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
                                               Foto + HID; confirmação de ações sensíveis na UI; --fill só no campo já focado
 
+COMPUTER USE DO MAC — você comanda a tela do usuário; Jev e reserva visual habilitados; a pessoa autoriza cada objetivo
+  desk act \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
+                                              Foto da tela + OCR local + cliques/rolagem; a pessoa responde um diálogo ANTES de qualquer foto
+                                              e confirma cada ação sensível; --fill só no campo já focado. Funciona em terminal e em conversa
+
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
       [--file <caminho>]                      · o texto a partir de um arquivo
@@ -826,7 +831,7 @@ impl CliError {
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 /// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 16] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events."];
+    const GROUPS: [&str; 17] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }
@@ -840,7 +845,7 @@ fn with_caller(command: &str, mut parsed: Value) -> Value {
 }
 
 fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: Option<String>) {
-    if command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") {
+    if command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") || command.starts_with("desk.") {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");
@@ -1048,6 +1053,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "portal.open" => &["url"],
         "portal.close" => &["name"],
         "portal.act" | "sim.act" => &["name", "goal"],
+        "desk.act" => &["goal"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],
         "portal.click" | "portal.hover" => &["name", "target"],
@@ -1333,7 +1339,7 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         c if c.starts_with("portal.") => Duration::from_secs(120),
         // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).
         "device.start" => Duration::from_secs(150),
-        "sim.act" => Duration::from_secs(args.get("timeout").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(115).clamp(10, 1800) + 75),
+        "sim.act" | "desk.act" => Duration::from_secs(args.get("timeout").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(115).clamp(10, 1800) + 75),
         c if c.starts_with("device.") => Duration::from_secs(60),
         // `routine run` espera a que el agente de destino se calle (hasta 60 s).
         "routine.run" => Duration::from_secs(120),

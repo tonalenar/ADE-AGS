@@ -28,7 +28,7 @@ Backend com detecção de versão, status e leitura de bastões/páginas por sub
 
 ## Computer use em múltiplas superfícies — iOS
 
-Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. macOS genérico e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
+Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. `ags desk act` (tela do Mac, com consentimento por objetivo) e o reconhecimento de conversas por protocolo em `sim act`/`desk act` entraram em seguida; árvore AX e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
 
 ## CLIs fora do PATH e instalação pela ADE
 
