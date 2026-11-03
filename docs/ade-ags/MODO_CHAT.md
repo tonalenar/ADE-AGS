@@ -223,6 +223,15 @@ Um time sem orquestrador tem `orchestrator = ""` para fora (a coluna é `NOT NUL
 
 `ags team list` mostra `origin`, `boardKey`, `missionId` e `led`. O evento `cc-chat-team` sai em todas as mudanças. O front (E3) é quem decide **quando** promover (só quando a pessoa mexe, nunca no boot) e quem reaplica o canvas depois de `rebind`/`unlead`.
 
+### Missão no chat, nas abas e no canvas (E5)
+
+A missão **continua dona do motor** (worktrees, entrega, orçamento, `confirm_spend`, Vigia do front, chat da equipe `m:<id>`); o chat só a **mostra** e a **dispara**.
+
+- **Espelho:** ao iniciar o time em terminais (`startMissionInTerminals`, depois de `mission_start_terminals` e do canvas `#m:`), o front chama `chat_team_mission_mirror` e grava uma linha `origin = 'mission'` (`mission_id`, `board_key = #m:`) com o lead como orquestrador e os integrantes que são abas. **Só linhas no banco**; regravar troca o roster da mesma missão; quem já é de um time do chat fica de fora (`skipped`). Sem terminal de orquestrador (Gemini Desktop) não há espelho. A linha sai com `chat_team_mission_unmirror` quando a missão fecha (`done`, `done_without_delivery`, `cancelled`, `failed`: varredura em `missions/watcher.ts` via `mirror.ts::staleMirrors`). Não fecha agente nenhum.
+- **O espelho é invisível ao comportamento do chat:** `store::team_of` (escopo do chat da equipe, política, alias de peer, `ags team list` de quem chama) ignora `origin = 'mission'`; só `team_of_any` (o invariante "um agente, um time", `rebind`) o enxerga. O vigia do chat o pula (`watch_db.rs`): **um time nunca tem os dois vigias**. No front, o espelho fica em `useTeamStore.missionTeams`, **fora de `teams`**: não entra em canvas, política nem composer.
+- **Sidebar (chat, Abas e Canvas):** os terminais da missão voltam à lista de conversas (antes `AppSessionsSidebar` os escondia com `missionOf`) e o espelho os agrupa sob o orquestrador, com o selo **MISSÃO · N** (o clique abre a tela de missões). Nenhum `<Terminal>` muda de `key`, pai ou ponto de montagem. A seção de missões (`MissionsSection`) deixou de repetir os terminais embaixo de cada missão.
+- **Criar e iniciar:** a `MissionsSection` (criar `+`, **Iniciar**, **Encerrar**) agora também mora na sidebar do chat; é a mesma de Abas e Canvas e usa os mesmos comandos (`missions.create`, `startMissionInTerminals`). Criar missão nunca lança processo; iniciar é gesto explícito, com `confirm_spend` e orçamento como sempre.
+
 ## Retomada, fila e avisos na timeline (etapa 3 do harness)
 
 - **Retomar uma sessão que falha não esquece em silêncio** (`conversa/resume.rs`): o erro de `--resume`/`thread/resume`/`session/resume` é `Gone` (a sessão não existe: abre outra), `Transient` (2 retentativas com pausa curta; se persistir, abre outra), `Timeout` (NÃO abre outra: a sessão pode existir; falha e a pessoa tenta de novo) ou `Fatal` (o processo não sobe, ou modelo/modo não aplicam: falha). Ao abrir outra, a timeline recebe um item `notice` (`resumeLost`) e a tela diz que o agente recomeçou sem o histórico; o id da sessão anterior só é trocado depois de a nova abrir.

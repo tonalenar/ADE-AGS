@@ -4161,6 +4161,8 @@
   "chat.team.thread": "chat conversation",
   "chat.team.tab": "tab (TUI)",
   "chat.team.badge": "TEAM · {{n}}",
+  "chat.team.missionBadge": "MISSION · {{n}}",
+  "chat.team.missionBadgeTitle": "{{title}}: open the missions screen",
   "chat.team.orchestratorBadge": "Orchestrator · {{agent}}",
   "chat.team.memberBadge": "Team · {{role}}",
   "chat.team.roles.orchestrator": "Orchestrator",

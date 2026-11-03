@@ -220,6 +220,67 @@ pub fn promote(conn: &Connection, promotion: Promotion, mission_refs: &std::coll
     Ok(Promoted { team: view, created, adopted, skipped })
 }
 
+/// O que o espelho de uma missão recebe: o orquestrador (a aba do lead) e os integrantes abertos.
+#[derive(Clone, Debug, Default)]
+pub struct MissionMirror {
+    pub team: NewTeam,
+    pub members: Vec<NewMember>,
+}
+
+/// O que `mirror_mission` devolve.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Mirrored {
+    pub team: TeamView,
+    /// Os que não entraram no espelho e por quê (já são de um time do chat, por exemplo).
+    pub skipped: Vec<Skipped>,
+}
+
+/// Grava (ou regrava) a linha-espelho `origin = 'mission'` de uma missão iniciada em terminais. **Só linhas no
+/// banco**: não abre processo, PTY nem worktree, e não funde a missão no roster do chat (a missão segue dona do
+/// motor, do chat da equipe `m:<id>` e do vigia: o espelho é invisível para `scope_of`, política e alias de peer,
+/// ver `store::team_of`). Idempotente: o espelho anterior da mesma missão é trocado pelo roster atual.
+/// Recusa um orquestrador que já lidera ou integra um time do chat.
+pub fn mirror_mission(conn: &Connection, mirror: MissionMirror, now: i64) -> Result<Mirrored, String> {
+    let mut input = mirror.team;
+    let mission_id = input.mission_id.clone().unwrap_or_default();
+    if mission_id.trim().is_empty() {
+        return Err("Falta a missão do espelho.".into());
+    }
+    if let Some(old) = store::team_of_mission(conn, &mission_id)? {
+        store::delete_team(conn, &old.id)?;
+    }
+    input.origin = Some(store::ORIGIN_MISSION.into());
+    let orchestrator = input.orchestrator.trim().to_string();
+    if let Some(other) = store::team_of_any(conn, &orchestrator)? {
+        return Err(format!("Esta conversa já está no time de {}: o espelho da missão não a toma.", label_or(&other.label, &other.orchestrator)));
+    }
+    let (view, _) = create(conn, input, now)?;
+    let team_id = view.team.id.clone();
+    let mut skipped = Vec::new();
+    for mut member in mirror.members {
+        let id = member.member.trim().to_string();
+        if id.is_empty() || id == orchestrator {
+            continue;
+        }
+        if member.origin.is_empty() {
+            member.origin = "existing".into();
+        }
+        if let Err(reason) = link(conn, &team_id, member, false, now) {
+            skipped.push(Skipped { member: id, reason });
+        }
+    }
+    Ok(Mirrored { team: view_by_id(conn, &team_id)?, skipped })
+}
+
+/// Tira o espelho de uma missão (ela fechou). Idempotente: `false` se não havia. Não fecha agente nenhum.
+pub fn unmirror_mission(conn: &Connection, mission_id: &str) -> Result<bool, String> {
+    match store::team_of_mission(conn, mission_id)? {
+        Some(team) => store::delete_team(conn, &team.id),
+        None => Ok(false),
+    }
+}
+
 fn view_by_id(conn: &Connection, team_id: &str) -> Result<TeamView, String> {
     let team = store::team(conn, team_id)?.ok_or("Esse time não existe mais.")?;
     view(conn, team)
@@ -279,7 +340,7 @@ pub fn rebind(conn: &Connection, old_ref: &str, new_ref: &str, now: i64) -> Resu
     if old == new {
         return Ok(None);
     }
-    if store::team_of(conn, new)?.is_some() {
+    if store::team_of_any(conn, new)?.is_some() {
         return Err("A conversa nova já está em um time: desligue-a de lá antes.".into());
     }
     Ok(store::rebind(conn, old, new, now)?.map(|(team_id, role)| Rebound { team_id, role }))

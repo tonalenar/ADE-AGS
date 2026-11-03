@@ -8,7 +8,7 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
-- **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3; a missão é a E5. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+- **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3. **Missão no chat (E5):** `chat_team_mission_mirror`/`_unmirror` gravam e tiram a linha `origin='mission'` ao iniciar/fechar a missão em terminais; grupo "Missão X" com selo na sidebar (chat, Abas, Canvas) e criar/iniciar missão também no chat. A missão segue dona do motor. Ver [MODO_CHAT.md](./MODO_CHAT.md).
 
 ## Retomada e estado (pontos 15, 8 e 6 do deepseek-harness)
 

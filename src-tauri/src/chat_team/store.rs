@@ -475,12 +475,32 @@ pub fn team_joined_by(conn: &Connection, member: &str) -> Result<Option<TeamRow>
     .map_err(err)
 }
 
-/// O time de `member`, como orquestrador ou como integrante.
-pub fn team_of(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
+/// O time de `member`, como orquestrador ou como integrante, **incluindo** a linha-espelho de uma missão.
+/// Serve para o invariante "um agente em um time só"; o comportamento (escopo do chat, política, alias de
+/// peer) usa [`team_of`], que não enxerga o espelho.
+pub fn team_of_any(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
     match team_led_by(conn, member)? {
         Some(team) => Ok(Some(team)),
         None => team_joined_by(conn, member),
     }
+}
+
+/// O time do modo chat de `member` (orquestrador ou integrante). A linha-espelho de uma missão
+/// (`origin = 'mission'`) NÃO conta: a missão é dona do motor, do chat da equipe (`m:<id>`) e do vigia,
+/// e o espelho existe só para o chat mostrá-la.
+pub fn team_of(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
+    Ok(team_of_any(conn, member)?.filter(|t| t.origin != ORIGIN_MISSION))
+}
+
+/// A linha-espelho de uma missão.
+pub fn team_of_mission(conn: &Connection, mission_id: &str) -> Result<Option<TeamRow>, String> {
+    if mission_id.is_empty() {
+        return Ok(None);
+    }
+    migrate(conn).map_err(err)?;
+    conn.query_row(&format!("SELECT {TEAM_COLUMNS} FROM chat_team WHERE origin = 'mission' AND mission_id = ?1"), [mission_id], team_row)
+        .optional()
+        .map_err(err)
 }
 
 pub fn teams(conn: &Connection) -> Result<Vec<TeamRow>, String> {

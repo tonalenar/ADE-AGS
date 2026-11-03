@@ -4161,6 +4161,8 @@
   "chat.team.thread": "conversa no chat",
   "chat.team.tab": "aba (TUI)",
   "chat.team.badge": "TIME · {{n}}",
+  "chat.team.missionBadge": "MISSÃO · {{n}}",
+  "chat.team.missionBadgeTitle": "{{title}}: abrir a tela de missões",
   "chat.team.orchestratorBadge": "Orquestrador · {{agent}}",
   "chat.team.memberBadge": "Time · {{role}}",
   "chat.team.roles.orchestrator": "Orquestrador",

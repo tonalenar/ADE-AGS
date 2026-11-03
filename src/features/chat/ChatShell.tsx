@@ -13,6 +13,7 @@ import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
 import { chatProjects, conversationCards, type ChatProject, type ConversationCard } from "./chatModel";
+import { MissionsSection } from "@/features/missions/MissionsSection";
 import { ChatSidebar, IconButton, ProjectBadge, type FolderDiff } from "./ChatSidebar";
 import { ChatPage } from "./ChatPage";
 import { SettingsSidebar, SpacesSidebar } from "./ChatPageSidebar";
@@ -151,7 +152,9 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
       {sidebarOpen && !page && (
         <ChatSidebar cards={cards} closed={closed} diffs={diffs} selectedId={active?.tabId ?? null}
           onCollapse={() => setSidebarOpen(false)} onAddProject={() => { void addProject(); }}
-          onReopen={(cwd) => { void reopenFolder(cwd); }} />
+          onReopen={(cwd) => { void reopenFolder(cwd); }}
+          // As missões também se criam e se iniciam daqui (mesmos comandos das Abas e do Canvas).
+          extraTop={<MissionsSection cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} />} />
       )}
 
       {page && (

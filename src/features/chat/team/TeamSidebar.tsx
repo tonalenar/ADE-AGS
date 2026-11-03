@@ -1,8 +1,12 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate, type NavigateFunction } from "react-router-dom";
+
+import { useUiStore } from "@/app/uiStore";
 
 import type { ConversationCard } from "../chatModel";
 import { openMember } from "./TeamPanel";
+import type { TeamView } from "./ipc";
 import { AgentMono, useRoleLabel } from "./TeamParts";
 import { CONVERSATION_DRAG_MIME, memberState, sidebarGrouping, stateTone, teamLedBy, type SidebarGrouping } from "./teamModel";
 import { startTeams, useTeamStore } from "./teamStore";
@@ -16,18 +20,35 @@ import { useTeamLive } from "./useTeamLive";
 /** Quem fica indentado sob quem. `nested` sai da lista principal. */
 export function useTeamGrouping(cards: ConversationCard[]): SidebarGrouping {
   const teams = useTeamStore((s) => s.teams);
+  const mirrors = useTeamStore((s) => s.missionTeams);
   useEffect(() => startTeams(), []);
   const keys = cards.map((c) => c.tabId).join("\n");
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => sidebarGrouping(keys ? keys.split("\n") : [], teams), [keys, teams]);
+  return useMemo(() => sidebarGrouping(keys ? keys.split("\n") : [], [...teams, ...mirrors]), [keys, teams, mirrors]);
 }
 
 /** O selo do cartão do orquestrador: "TIME · 4" (conta o orquestrador). */
 export function TeamBadge({ convKey }: { convKey: string }) {
   const { t } = useTranslation();
   const team = useTeamStore((s) => teamLedBy(s.teams, convKey));
+  const mission = useTeamStore((s) => teamLedBy(s.missionTeams, convKey));
+  if (!team && mission) return <MissionBadge team={mission} />;
   if (!team) return null;
   return <span className="shrink-0 text-[11px] font-semibold text-accent-700 dark:text-accent-400">{t("chat.team.badge", { n: team.headcount })}</span>;
+}
+
+/** O selo "MISSÃO · N" do orquestrador de uma missão: o clique leva à tela de missões, sem tocar em terminal nenhum. */
+function MissionBadge({ team }: { team: TeamView }) {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  return (
+    <span role="link" tabIndex={0} title={t("chat.team.missionBadgeTitle", { title: team.title })}
+      onClick={(e) => { e.stopPropagation(); openMissionPage(team.missionId, navigate); }}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); openMissionPage(team.missionId, navigate); } }}
+      className="shrink-0 cursor-pointer text-[11px] font-semibold text-emerald-700 dark:text-emerald-400 hover:underline">
+      {t("chat.team.missionBadge", { n: team.headcount })}
+    </span>
+  );
 }
 
 /** Os integrantes sob o cartão do orquestrador, indentados, com o papel e o estado. */
@@ -39,7 +60,7 @@ export function TeamMembers({ orchestrator, members, cards, selectedId }: {
   selectedId: string | null;
 }) {
   const roleLabel = useRoleLabel();
-  const team = useTeamStore((s) => teamLedBy(s.teams, orchestrator));
+  const team = useTeamStore((s) => teamLedBy(s.teams, orchestrator) ?? teamLedBy(s.missionTeams, orchestrator));
   const feed = useTeamStore((s) => (team ? s.feeds[team.id] : undefined));
   const live = useTeamLive(cards);
   const { t } = useTranslation();
@@ -87,4 +108,10 @@ export function conversationDragProps(key: string): { draggable: true; onDragSta
       e.dataTransfer.effectAllowed = "link";
     },
   };
+}
+
+/** Leva à tela de missões com a missão escolhida (o atalho do selo "MISSÃO"). */
+function openMissionPage(missionId: string | null | undefined, navigate: NavigateFunction): void {
+  if (missionId) useUiStore.getState().requestMission(missionId);
+  navigate("/missions");
 }

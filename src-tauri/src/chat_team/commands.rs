@@ -121,6 +121,93 @@ pub fn chat_team_promote(app: AppHandle, db: State<'_, DbConnection>, input: Pro
     Ok(promoted)
 }
 
+/// Um integrante da missão que entra no espelho.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorMember {
+    pub member: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub subagent: Option<bool>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub worktree: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorInput {
+    pub mission_id: String,
+    pub orchestrator: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub title: String,
+    /// A chave do quadro da missão (`...#m:<id>`).
+    #[serde(default)]
+    pub board_key: Option<String>,
+    #[serde(default)]
+    pub members: Vec<MirrorMember>,
+}
+
+/// Grava a linha-espelho `origin = 'mission'` de uma missão que acabou de abrir seu time em terminais, para o
+/// chat mostrá-la. **Só grava linhas** (nada de processo, PTY ou worktree) e a missão segue dona de tudo.
+#[tauri::command]
+pub fn chat_team_mission_mirror(app: AppHandle, db: State<'_, DbConnection>, input: MirrorInput) -> Result<api::Mirrored, String> {
+    let members = input
+        .members
+        .into_iter()
+        .map(|m| NewMember {
+            member: m.member,
+            agent_id: m.agent_id,
+            label: m.label,
+            role: m.role,
+            subagent: m.subagent,
+            branch: m.branch,
+            worktree: m.worktree,
+            origin: "new".into(),
+            ..Default::default()
+        })
+        .collect();
+    let mirror = api::MissionMirror {
+        team: NewTeam {
+            orchestrator: input.orchestrator,
+            agent_id: input.agent_id,
+            label: input.label,
+            cwd: input.cwd,
+            title: input.title,
+            board_key: input.board_key,
+            mission_id: Some(input.mission_id),
+            ..Default::default()
+        },
+        members,
+    };
+    let mirrored = api::mirror_mission(&*lock(&db)?, mirror, crate::util::now_ts_ms())?;
+    announce(&app, &mirrored.team.team.id);
+    Ok(mirrored)
+}
+
+/// A missão fechou: tira o espelho. Não fecha agente nem terminal.
+#[tauri::command]
+pub fn chat_team_mission_unmirror(app: AppHandle, db: State<'_, DbConnection>, mission_id: String) -> Result<bool, String> {
+    let existing = crate::chat_team::store::team_of_mission(&*lock(&db)?, &mission_id)?;
+    let done = api::unmirror_mission(&*lock(&db)?, &mission_id)?;
+    if let Some(team) = existing {
+        announce(&app, &team.id);
+    }
+    Ok(done)
+}
+
 /// A coroa saiu do canvas: tira SÓ o papel de orquestrador. O time e os integrantes ficam e o time pode receber
 /// outro orquestrador (`chat_team_lead`).
 #[tauri::command]
