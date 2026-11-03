@@ -5,7 +5,9 @@ use std::collections::VecDeque;
 
 use serde::Serialize;
 
+use super::context::Meter;
 use super::event::{clip, ends_with_question, Decision, EndReason, Event, Tokens};
+use super::repeat::{Counter, Repeat};
 
 /// Com um turno aberto e o arquivo parado há mais que isto, o estado deixa de valer: o agente
 /// pode ter morrido no meio do turno (ou trocado de sessão com `/clear`). Uma ferramenta longa
@@ -77,8 +79,15 @@ pub struct TabState {
     pub usage: Usage,
     /// Carimbo do último evento aplicado (ms).
     pub last_event_at: Option<i64>,
+    /// O último degrau (3, 5, 8) da mesma chamada de ferramenta repetida desde a última mensagem humana
+    /// (ver `repeat`). Só para quem supervisiona: nada escreve no agente por causa disto.
+    pub repeat: Option<Repeat>,
+    /// Quanto da janela de contexto a conversa ocupa (`usage` real + estimativa do que veio depois).
+    pub context: Option<Meter>,
     #[serde(skip)]
     usage_keys: VecDeque<(String, Tokens)>,
+    #[serde(skip)]
+    calls: Counter,
 }
 
 impl Default for TabState {
@@ -98,7 +107,10 @@ impl Default for TabState {
             ends_with_question: false,
             usage: Usage { total_scope: "observed", ..Usage::default() },
             last_event_at: None,
+            repeat: None,
+            context: None,
             usage_keys: VecDeque::new(),
+            calls: Counter::default(),
         }
     }
 }
@@ -125,6 +137,9 @@ impl TabState {
                 if self.phase != Phase::Working {
                     self.last_text = None;
                 }
+                // Uma mensagem nova (da pessoa, ou dela no meio do turno) zera a contagem de repetição.
+                self.calls.reset();
+                self.repeat = None;
                 self.open_turn(at, false);
             }
             Event::TurnEnded { reason, text } => {
@@ -144,11 +159,17 @@ impl TabState {
                 self.ends_with_question =
                     reason == EndReason::Completed && self.last_text.as_deref().is_some_and(ends_with_question);
             }
-            Event::ToolStarted { id, name, summary } => {
+            Event::ToolStarted { id, name, summary, key } => {
                 // Ferramenta sem prompt visto: um turno que começou antes do trecho lido, ou a
                 // continuação depois de um hook de Stop.
                 self.open_turn(at, true);
                 if !self.tools.iter().any(|t| t.id == id) {
+                    if let Some(hit) = self.calls.record(&key, &name, &summary, at) {
+                        self.repeat = Some(hit);
+                    }
+                    if let Some(meter) = self.context.as_mut() {
+                        meter.grow(name.len() + summary.len());
+                    }
                     self.tools.push(PendingTool { id, name, summary, since_ms: at });
                 }
             }
@@ -173,7 +194,13 @@ impl TabState {
                 self.approval = Some(PendingTool { id, name: "approval".into(), summary, since_ms: at });
             }
             Event::AssistantText(text) => {
+                if let Some(meter) = self.context.as_mut() {
+                    meter.grow(text.chars().count());
+                }
                 self.last_text = Some(clip(&text, 2000));
+            }
+            Event::Context { used, window, model } => {
+                self.context.get_or_insert_with(Meter::default).anchor(used, window, model.as_deref());
             }
             Event::Usage { key, last, total } => {
                 self.usage.last = Some(last);
@@ -216,7 +243,7 @@ impl TabState {
     pub fn signature(&self) -> String {
         let tools: Vec<&str> = self.tools.iter().map(|t| t.id.as_str()).collect();
         format!(
-            "{:?}|{}|{:?}|{}|{}|{}|{}|{}",
+            "{:?}|{}|{:?}|{}|{}|{}|{}|{}|{}|{}",
             self.phase,
             self.turns,
             self.end_reason,
@@ -225,6 +252,8 @@ impl TabState {
             self.approval.as_ref().map(|a| a.id.as_str()).unwrap_or(""),
             self.ends_with_question,
             self.usage.total.output,
+            self.repeat.as_ref().map(|r| format!("{}:{}", r.key, r.step)).unwrap_or_default(),
+            self.context.as_ref().is_some_and(Meter::near_limit),
         )
     }
 }

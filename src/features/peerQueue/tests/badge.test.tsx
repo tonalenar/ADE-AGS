@@ -3,11 +3,13 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { invokeMock, useInvokeMock } from "@/test/invokeMock";
+
 import { PeerQueueBadge } from "../PeerQueueBadge";
 import type { PeerMessage } from "../types";
 
-const { invoke, handlers } = vi.hoisted(() => ({ invoke: vi.fn(), handlers: [] as (() => void)[] }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+const { handlers } = vi.hoisted(() => ({ handlers: [] as (() => void)[] }));
+vi.mock("@tauri-apps/api/core", () => import("@/test/invokeMock").then((m) => m.tauriCoreMock()));
 vi.mock("@tauri-apps/api/event", () => ({
   listen: (_: string, cb: () => void) => { handlers.push(cb); return Promise.resolve(() => {}); },
 }));
@@ -29,16 +31,15 @@ let queue: PeerMessage[] = [];
 let host: HTMLDivElement;
 let root: Root;
 
+useInvokeMock();
+
 beforeEach(() => {
   counts = [{ tabId: "t1", count: 2 }];
   queue = [msg(1, "rode os testes\nsegunda linha"), msg(2, "revise o PR")];
-  invoke.mockReset();
-  invoke.mockImplementation((cmd: string, args?: { id?: number; text?: string }) => {
-    if (cmd === "peer_queue_counts") return Promise.resolve(counts);
-    if (cmd === "peer_queue_list") return Promise.resolve(queue);
-    if (cmd === "peer_queue_edit") return Promise.resolve({ ...queue[0], text: args?.text });
-    return Promise.resolve(queue[0]);
-  });
+  invokeMock
+    .on("peer_queue_counts", () => counts)
+    .on("peer_queue_list", () => queue)
+    .on("peer_queue_edit", ({ text }) => ({ ...queue[0], text }));
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -65,23 +66,26 @@ describe("selo da fila de mensagens", () => {
     await flush();
     await act(async () => { byText("peerQueue.badge:2")!.click(); });
     await flush();
-    expect(invoke).toHaveBeenCalledWith("peer_queue_list", { tabId: "t1" });
+    expect(invokeMock.calls("peer_queue_list")).toContainEqual({ tabId: "t1" });
     expect(document.body.textContent).toContain("rode os testes");
     expect(document.body.textContent).not.toContain("segunda linha");
 
+    invokeMock.once("peer_queue_send_now", () => queue[0]);
     await act(async () => { byText("peerQueue.sendNow")!.click(); });
     await flush();
-    expect(invoke).toHaveBeenCalledWith("peer_queue_send_now", { id: 1 });
+    expect(invokeMock.calls("peer_queue_send_now")).toEqual([{ id: 1 }]);
 
     await act(async () => { byText("peerQueue.cancel")!.click(); });
-    expect(invoke).not.toHaveBeenCalledWith("peer_queue_cancel", expect.anything());
+    expect(invokeMock.calls("peer_queue_cancel")).toEqual([]);
+    invokeMock.once("peer_queue_cancel", () => queue[0]);
     await act(async () => { byText("peerQueue.cancelConfirm")!.click(); });
     await flush();
-    expect(invoke).toHaveBeenCalledWith("peer_queue_cancel", { id: 1 });
+    expect(invokeMock.calls("peer_queue_cancel")).toEqual([{ id: 1 }]);
 
+    invokeMock.once("peer_queue_move", () => queue[0]);
     await act(async () => { byText("peerQueue.moveDown")!.click(); });
     await flush();
-    expect(invoke).toHaveBeenCalledWith("peer_queue_move", { id: 1, delta: 1 });
+    expect(invokeMock.calls("peer_queue_move")).toEqual([{ id: 1, delta: 1 }]);
 
     await act(async () => { byText("peerQueue.edit")!.click(); });
     const area = document.querySelector("textarea")!;
@@ -93,7 +97,7 @@ describe("selo da fila de mensagens", () => {
     });
     await act(async () => { byText("peerQueue.save")!.click(); });
     await flush();
-    expect(invoke).toHaveBeenCalledWith("peer_queue_edit", { id: 1, text: "rode só os de peers" });
+    expect(invokeMock.calls("peer_queue_edit")).toEqual([{ id: 1, text: "rode só os de peers" }]);
     expect(document.querySelector("textarea")).toBeNull();
   });
 });

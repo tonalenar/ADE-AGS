@@ -207,6 +207,12 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
     if !admits(mode, status(thread_id).working) {
         return Err(SendError::Busy);
     }
+    // O turno anterior caiu com ferramenta sem resultado: o agente fica sabendo antes da mensagem nova.
+    let noted = {
+        let conn = db.lock().map_err(|e| SendError::NotSent(db_err(e)))?;
+        super::resume::unknown_outcome_note(&store::tail_items(&conn, thread_id, 50).unwrap_or_default())
+    };
+    let text = &super::resume::with_note(noted.as_deref(), text);
     // Por motor, o que um `Err` quer dizer (revisado caso a caso; na dúvida seria `Unknown`):
     // - Claude: `session` só sobe o processo e o `initialize`; `send_user` falha só se o canal de escrita
     //   já fechou, e aí nada foi escrito;

@@ -1,0 +1,11 @@
+{
+  "id": "codex-retomada-recusada",
+  "titulo": "Codex: o thread/resume é recusado (a thread não existe nesta conta)",
+  "roteiro": {
+    "protocolo": "codex-app-server",
+    "passos": [
+      { "passo": "recusa", "mensagem": "no rollout found for thread id thr_velha" }
+    ]
+  },
+  "espera": { "retomada": "gone", "fim": "aberto" }
+}

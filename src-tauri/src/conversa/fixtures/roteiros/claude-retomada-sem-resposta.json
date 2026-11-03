@@ -1,0 +1,12 @@
+{
+  "id": "claude-retomada-sem-resposta",
+  "titulo": "Claude: o processo abre e não responde ao initialize por 61 s",
+  "roteiro": {
+    "protocolo": "claude-stream",
+    "passos": [
+      { "passo": "stall", "ms": 61000 },
+      { "passo": "sessao", "id": "tarde-demais" }
+    ]
+  },
+  "espera": { "retomada": "timeout", "sessao": "" }
+}

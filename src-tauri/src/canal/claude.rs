@@ -5,6 +5,7 @@
 use serde_json::Value;
 
 use super::event::{clip, first_line, Decision, EndReason, Event, Tokens};
+use super::repeat::call_key;
 
 /// O que o Claude Code escreve como mensagem do usuário quando a pessoa aperta Esc.
 const INTERRUPTED: &str = "[Request interrupted by user";
@@ -169,7 +170,7 @@ fn assistant_events(line: &Value) -> Vec<Event> {
                         continue;
                     }
                     let input = block.get("input").cloned().unwrap_or(Value::Null);
-                    out.push(Event::ToolStarted { id: id.clone(), name: name.clone(), summary: tool_summary(&name, &input) });
+                    out.push(Event::ToolStarted { id: id.clone(), name: name.clone(), summary: tool_summary(&name, &input), key: call_key(&name, &input) });
                     if name == "AskUserQuestion" {
                         out.extend(question_of(&id, &input));
                     }
@@ -181,6 +182,12 @@ fn assistant_events(line: &Value) -> Vec<Event> {
     if let Some(last) = usage_of(message) {
         let key = message.get("id").and_then(Value::as_str).map(str::to_string);
         out.push(Event::Usage { key, last, total: None });
+        // O contexto da resposta: tudo o que entrou nela. Respostas `<synthetic>` (erro, interrupção) vêm zeradas.
+        let model = message.get("model").and_then(Value::as_str).filter(|m| *m != "<synthetic>");
+        let used = last.input + last.cached + last.cache_write;
+        if used > 0 && model.is_some() {
+            out.push(Event::Context { used, window: None, model: model.map(str::to_string) });
+        }
     }
     if message.get("stop_reason").and_then(Value::as_str) == Some("end_turn") {
         out.push(Event::TurnEnded { reason: EndReason::Completed, text: last_text });

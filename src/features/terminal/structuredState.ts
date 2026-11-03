@@ -29,6 +29,10 @@ export interface StructuredSnapshot {
   /** Quando o turno atual começou e quando o último acabou (ms; o `TabState` do canal). */
   turnStartedAt?: number | null;
   turnEndedAt?: number | null;
+  /** O último degrau (3, 5, 8) da mesma chamada repetida desde a última mensagem (`canal::repeat`). */
+  repeat?: { key: string; name: string; summary: string; count: number; step: number; atMs: number } | null;
+  /** O medidor de contexto (`canal::context`): `usage` real da última resposta + caracteres depois dela. */
+  context?: { anchorTokens: number; extraChars: number; windowTokens: number; model: string | null } | null;
 }
 
 /** O evento do backend: um estado novo, ou a aba que deixou de ter canal. */

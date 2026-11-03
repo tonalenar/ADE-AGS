@@ -28,6 +28,14 @@ fn rust_module_is_deduced_from_path() {
 }
 
 #[test]
+fn bench_fixtures_run_the_module_that_reads_them() {
+    // `conversa/test_bancada.rs` lê as pastas de fixtures em tempo de execução: o filtro tem que ser o do módulo.
+    let plan = p(&["src-tauri/src/conversa/fixtures/protocolo/acp-pedido-e-max-tokens.json", "src-tauri/src/conversa/fixtures/roteiros/claude-cota-no-meio.json"]);
+    assert_eq!(suites(&plan), ["rust"]);
+    assert_eq!(plan.steps[0].args, ["test", "--lib", "--", "conversa::"]);
+}
+
+#[test]
 fn mixed_change_runs_both_sides() {
     let plan = p(&["src/App.tsx", "src-tauri/src/database/schema.rs"]);
     assert_eq!(suites(&plan), ["babel", "tsc", "frontend", "rust"]);

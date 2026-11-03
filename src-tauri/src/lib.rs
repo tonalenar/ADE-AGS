@@ -14,6 +14,8 @@ mod compare;
 mod conversa;
 pub mod computer_use;
 mod app;
+#[cfg(test)]
+mod bench;
 mod bus;
 mod database;
 mod decisions;

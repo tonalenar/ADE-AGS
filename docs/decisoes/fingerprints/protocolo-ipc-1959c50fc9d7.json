@@ -1,0 +1,9 @@
+{
+  "alvo": "protocolo-ipc",
+  "sha256": "1959c50fc9d72ff4680f71ca321f72ecbe76e71760f07fa6dea2b7d3200d5a66",
+  "data": "2026-11-02",
+  "motivo": "linha de base: protocolo IPC de origin/dev (2adc6ef2), antes de existir o check",
+  "arquivos": [
+    "src-tauri/src/ipc/protocol.rs"
+  ]
+}

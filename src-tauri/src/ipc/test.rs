@@ -1151,3 +1151,60 @@ fn publicacao_inicial_preserva_dono_vivo_e_assume_apos_sua_saida() {
     assert_eq!(current.pid, new.pid, "restart assume o global quando o dono antigo morre");
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+// ── Contratos do deepseek-harness (pontos 3, 5, 7, 14, 19 e 22) ──────────
+
+/// Uma tool que devolve texto enorme chega ao agente como cabeça, cauda e o caminho do spill; a
+/// decisão de permissão (`approve_tool_use`) nunca passa pelo spill.
+#[test]
+fn resposta_grande_de_tool_vira_spill_e_a_permissao_nao() {
+    let big: String = (0..4000).map(|i| format!("linha {i}\n")).collect();
+    let tab = McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-9".into()), mission: None, role: None };
+    let reply = big.clone();
+    let out = raw_session(&tab, &[call(1, "run_await", json!({}))], move |_, _| Ok(json!({ "text": reply.clone() })));
+    let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.len() < big.len() && text.contains("bytes omitidos") && text.contains("tab-9"), "{}", &text[..200.min(text.len())]);
+    let path = text.split(" O texto inteiro está em ").nth(1).and_then(|r| r.split(" — ").next()).unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), big);
+
+    let task = McpContext::Task("t-1".into());
+    let decision = serde_json::to_string(&json!({ "behavior": "deny", "message": big })).unwrap();
+    let out = raw_session(&task, &[call(2, "approve_tool_use", json!({ "tool_name": "Bash", "input": {} }))], move |_, _| Ok(json!({ "text": decision.clone() })));
+    assert!(!out[0]["result"]["content"][0]["text"].as_str().unwrap().contains("bytes omitidos"));
+}
+
+/// `ask_user` documenta o prazo: `pending` nunca é aprovação, e o integrante leva a dúvida ao lead.
+#[test]
+fn ask_user_diz_que_o_prazo_vira_pending_e_nao_aprovacao() {
+    let tab = McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-1".into()), mission: None, role: None };
+    let out = raw_session(&tab, &[json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })], |_, _| Ok(json!({})));
+    let tools = out[0]["result"]["tools"].as_array().unwrap();
+    let ask = tools.iter().find(|t| t["name"] == super::mcp::ASK_TOOL).unwrap();
+    let description = ask["description"].as_str().unwrap();
+    assert!(description.contains("`status: \"pending\"`") && description.contains("NOT an answer nor an approval"), "{description}");
+    assert!(description.contains("ask_lead"));
+    assert!(ask["inputSchema"]["properties"]["timeout_s"]["description"].as_str().unwrap().contains("Default 600"));
+    // O `pending` que a app devolve chega ao agente como texto, não como erro nem aprovação.
+    let out = raw_session(&tab, &[call(2, "ask_user", json!({ "question": "Qual conta?" }))], |_, _| {
+        Ok(json!({ "status": "pending", "text": "PENDENTE: a pessoa não respondeu" }))
+    });
+    assert!(out[0]["result"].get("isError").is_none());
+    assert!(out[0]["result"]["content"][0]["text"].as_str().unwrap().starts_with("PENDENTE"));
+}
+
+/// A CLI manda quem chama (`from`) no `events.*`, para o `wait` saber se é um orquestrador; e a
+/// ajuda documenta `--allow-idle`, a recusa do recruit, o v1.1 do deliver e o spill.
+#[test]
+fn a_cli_documenta_e_identifica_os_contratos_novos() {
+    let cli = include_str!("../bin/cli.rs");
+    let groups = cli.split("const GROUPS").nth(1).and_then(|r| r.split("];").next()).unwrap();
+    assert!(groups.contains("\"events.\""), "events.* precisa do `from`");
+    for needle in ["--allow-idle", "noProgress", "depth|active_cap", "v1.1", "--no-spill", "MCP_TOOLS_HELP", "BEGIN GENERATED: mcp-tools-help"] {
+        assert!(cli.contains(needle), "a ajuda não menciona {needle}");
+    }
+    assert!(include_str!("commands/dispatch.rs").contains("\"events.wait\" => events_wait(app, args)"));
+    let skill = include_str!("../../../skills/ags-orchestrator/SKILL.md");
+    for needle in ["noProgress", "active_cap", "`blocked` needs", "status: \"pending\"", "~/.ags/spill/", "BEGIN GENERATED: cli-commands", "BEGIN GENERATED: mcp-tools"] {
+        assert!(skill.contains(needle), "a skill não menciona {needle}");
+    }
+}

@@ -1,0 +1,22 @@
+{
+  "id": "acp-stall-e-max-tokens",
+  "titulo": "OpenCode (ACP): fica 9 min calado no meio do turno e para no limite de tokens",
+  "roteiro": {
+    "protocolo": "acp",
+    "passos": [
+      { "passo": "sessao", "id": "ses_1" },
+      { "passo": "texto", "texto": "Começando a refatoração", "pedacos": 2 },
+      { "passo": "stall", "ms": 540000 },
+      { "passo": "ferramenta", "nome": "bash", "entrada": { "command": "bun test" }, "saida": "1 fail", "erro": true },
+      { "passo": "maxTokens" }
+    ]
+  },
+  "espera": {
+    "fim": "erro",
+    "erroContem": "limite de tokens",
+    "classe": "other",
+    "silencioMinMs": 540000,
+    "ferramentas": ["Bash:error"],
+    "textoContem": "Começando a refatoração"
+  }
+}

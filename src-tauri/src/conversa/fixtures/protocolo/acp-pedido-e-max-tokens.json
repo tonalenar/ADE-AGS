@@ -1,0 +1,276 @@
+{
+  "agent": "opencode",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": false,
+    "deltas": [
+      [
+        "oc:bancada:t1",
+        "Preciso achar os usos."
+      ],
+      [
+        "oc:bancada:m2",
+        "Vou editar "
+      ],
+      [
+        "oc:bancada:m2",
+        "o lib.rs."
+      ]
+    ],
+    "fim": {
+      "durationMs": null,
+      "error": "O turno parou no limite de tokens do modelo",
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000000120,
+        "id": "oc:bancada:t1",
+        "kind": "reasoning",
+        "text": "Preciso achar os usos."
+      },
+      {
+        "at": 1790000000160,
+        "id": "oc:bancada:m2",
+        "kind": "assistant",
+        "text": "Vou editar o lib.rs."
+      },
+      {
+        "added": 1,
+        "at": 1790000000160,
+        "id": "e1",
+        "kind": "tool",
+        "name": "Edit",
+        "path": "{{cwd}}/src/lib.rs",
+        "removed": 1,
+        "status": "done",
+        "tool": "edit"
+      },
+      {
+        "at": 1790000000170,
+        "id": "usage:bancada",
+        "kind": "usage",
+        "tokens": 1000
+      }
+    ],
+    "pedidos": [
+      {
+        "kind": "fileChange",
+        "title": "{{cwd}}/src/lib.rs"
+      }
+    ],
+    "sessao": "{{session:1}}"
+  },
+  "format": "ade-replay",
+  "id": "acp-pedido-e-max-tokens",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "formas de conversa/test_motores.rs (mod opencode) e de opencode_map.rs",
+    "kind": "synthesized",
+    "recordedAt": null,
+    "tuiVersion": null
+  },
+  "protocol": "acp",
+  "title": "OpenCode (ACP): pensa, pede permissão, edita um arquivo e o turno para no limite de tokens",
+  "transcript": [
+    {
+      "atMs": 0,
+      "in": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "method": "initialize",
+        "params": {
+          "protocolVersion": 1
+        }
+      }
+    },
+    {
+      "atMs": 30,
+      "out": {
+        "id": 1,
+        "jsonrpc": "2.0",
+        "result": {
+          "protocolVersion": 1
+        }
+      }
+    },
+    {
+      "atMs": 40,
+      "in": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "method": "session/new",
+        "params": {
+          "cwd": "{{cwd}}",
+          "mcpServers": []
+        }
+      }
+    },
+    {
+      "atMs": 90,
+      "out": {
+        "id": 2,
+        "jsonrpc": "2.0",
+        "result": {
+          "sessionId": "{{session:1}}"
+        }
+      }
+    },
+    {
+      "atMs": 100,
+      "in": {
+        "id": 3,
+        "jsonrpc": "2.0",
+        "method": "session/prompt",
+        "params": {
+          "prompt": [
+            {
+              "text": "renomeie a função",
+              "type": "text"
+            }
+          ],
+          "sessionId": "{{session:1}}"
+        }
+      }
+    },
+    {
+      "atMs": 110,
+      "out": {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+          "sessionId": "{{session:1}}",
+          "update": {
+            "content": {
+              "text": "Preciso achar os usos.",
+              "type": "text"
+            },
+            "sessionUpdate": "agent_thought_chunk"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 120,
+      "out": {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+          "sessionId": "{{session:1}}",
+          "update": {
+            "content": {
+              "text": "Vou editar ",
+              "type": "text"
+            },
+            "sessionUpdate": "agent_message_chunk"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 130,
+      "out": {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+          "sessionId": "{{session:1}}",
+          "update": {
+            "content": {
+              "text": "o lib.rs.",
+              "type": "text"
+            },
+            "sessionUpdate": "agent_message_chunk"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 140,
+      "out": {
+        "id": 7,
+        "jsonrpc": "2.0",
+        "method": "session/request_permission",
+        "params": {
+          "options": [
+            {
+              "kind": "allow_once",
+              "name": "Permitir",
+              "optionId": "a"
+            },
+            {
+              "kind": "reject_once",
+              "name": "Negar",
+              "optionId": "r"
+            }
+          ],
+          "sessionId": "{{session:1}}",
+          "toolCall": {
+            "kind": "edit",
+            "locations": [
+              {
+                "path": "{{cwd}}/src/lib.rs"
+              }
+            ],
+            "title": "edit",
+            "toolCallId": "e1"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 150,
+      "in": {
+        "id": 7,
+        "jsonrpc": "2.0",
+        "result": {
+          "outcome": {
+            "optionId": "a",
+            "outcome": "selected"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 160,
+      "out": {
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+          "sessionId": "{{session:1}}",
+          "update": {
+            "content": [
+              {
+                "newText": "fn b() {}\n",
+                "oldText": "fn a() {}\n",
+                "path": "{{cwd}}/src/lib.rs",
+                "type": "diff"
+              }
+            ],
+            "kind": "edit",
+            "sessionUpdate": "tool_call",
+            "status": "completed",
+            "title": "edit",
+            "toolCallId": "e1"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 170,
+      "out": {
+        "id": 3,
+        "jsonrpc": "2.0",
+        "result": {
+          "stopReason": "max_tokens",
+          "usage": {
+            "inputTokens": 900,
+            "outputTokens": 100
+          }
+        }
+      }
+    }
+  ],
+  "version": 2
+}

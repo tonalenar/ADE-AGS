@@ -171,11 +171,18 @@ pub struct PtyExitPayload {
 fn append_to_buffer(id: u32, chunk: &[u8]) {
     let mut buffers = buffers();
     let buf = buffers.entry(id).or_default();
-    buf.data.extend_from_slice(chunk);
+    push_capped(&mut buf.data, chunk, MAX_BUFFER_BYTES, TRIM_MARGIN_BYTES);
     buf.total_bytes += chunk.len() as u64;
-    if buf.data.len() > MAX_BUFFER_BYTES + TRIM_MARGIN_BYTES {
-        let excess = buf.data.len() - MAX_BUFFER_BYTES;
-        buf.data.drain(0..excess);
+}
+
+/// Acrescenta `chunk` e, passado `max + margin`, corta o começo até sobrar `max`. Pura: o gate de
+/// complexidade (`crate::bench`) mede com tetos 32× diferentes que o custo de ingestão não cresce
+/// junto com o teto.
+pub(crate) fn push_capped(data: &mut Vec<u8>, chunk: &[u8], max: usize, margin: usize) {
+    data.extend_from_slice(chunk);
+    if data.len() > max + margin {
+        let excess = data.len() - max;
+        data.drain(0..excess);
     }
 }
 

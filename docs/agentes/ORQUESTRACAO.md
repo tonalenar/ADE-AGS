@@ -169,6 +169,7 @@ Arquivo: `runs/fixrounds.rs`.
   - é **congelado no Run** (`run_squad_members`), e um Squad referenciado não pode ser apagado.
 - **Recrutamento**: `ags peer recruit <nome> [--agent --model --effort --fast --role --account --floor]`, só pelo orquestrador.
   - O LLM é resolvido por `squads/recruit.rs`: o explícito vence o padrão do Squad, que vence o padrão do provider.
+  - Profundidade monotônica (`squads/recruit.rs`, gravada em `~/.ags/recruits.json`): vale `max(gravado, atual)`, a aba da pessoa é 0 e o padrão é 1, então um recrutado não recruta. Até 12 recrutados abertos por orquestrador. No limite, `{refused, reason: depth|active_cap, message}` com exit 0, antes de pedir orçamento ou abrir aba.
   - Em missão: `confirm_spend` (o teto do orçamento bloqueia) e um worktree isolado.
 - **Andares**: `ags floor create <nome> [--from <branch>]` cria worktree, branch e canvas próprios a partir do HEAD.
   - Não há comando de apagar.
