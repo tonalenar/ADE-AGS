@@ -304,3 +304,25 @@ fn restauracao_pendente_nao_duplica_worker_e_corrige_decisao_em_voo() {
     assert_eq!(state.nice, 0, "falha não altera a prioridade confirmada");
     assert_eq!(state.applying, None);
 }
+
+#[test]
+fn o_aparelho_segue_a_vista_enquanto_alguma_tela_dele_estiver_a_vista() {
+    use super::commands::Screens;
+    let mut screens = Screens::default();
+    assert!(screens.set("chat-devices", "A", true));
+    // O nó do canvas do mesmo aparelho abre fora de vista: o painel do chat continua mostrando.
+    assert!(screens.set("no-1", "A", false), "uma tela fora de vista não tira o aparelho de vista");
+    assert_eq!(screens.seen("no-1", false), Some(("A".into(), true)));
+    assert_eq!(screens.remove("no-1"), Some(("A".into(), true)), "fechar o nó não esconde o painel");
+    assert_eq!(screens.seen("chat-devices", false), Some(("A".into(), false)));
+    assert_eq!(screens.seen("chat-devices", true), Some(("A".into(), true)));
+    assert!(!screens.set("no-2", "B", false), "outro aparelho não herda a vista");
+    assert_eq!(screens.remove("chat-devices"), Some(("A".into(), false)));
+    assert_eq!(screens.seen("sumiu", true), None);
+}
+
+#[test]
+fn ligar_o_modo_leve_nao_baixa_a_prioridade_de_quem_a_ade_nao_acompanha() {
+    // Sem o ciclo de vida saber do aparelho, baixar a prioridade não teria quem a restaurasse.
+    assert_eq!(super::lifecycle::set_light("aparelho-fora-do-ciclo", true), 0);
+}

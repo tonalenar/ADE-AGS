@@ -3557,7 +3557,7 @@
   "simulator.chat.attach": "Adjuntar la pantalla actual",
   "simulator.chat.attached": "pantalla actual adjunta",
   "simulator.chat.send": "Enviar a {{count}}",
-  "simulator.lightOn": "Modo liviano activado: {{count}} procesos de iOS con prioridad baja. Los servicios pesados salen cuando el dispositivo se reinicie.",
+  "simulator.lightOn": "Modo liviano activado: iOS pasa a prioridad baja cuando la pantalla deja de estar a la vista. Los servicios pesados salen cuando el dispositivo se reinicie.",
   "simulator.lightOff": "Modo liviano desactivado: iOS volvió a la prioridad normal ({{count}} procesos). Los servicios vuelven cuando el dispositivo se reinicie.",
   "simulator.lightOnNext": "Modo liviano activado: vale cuando el dispositivo encienda.",
   "simulator.lightOffNext": "Modo liviano desactivado: vale cuando el dispositivo encienda.",
