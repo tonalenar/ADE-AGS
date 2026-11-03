@@ -24,6 +24,7 @@
 - Limites: 256 conexões e 8 MB por request. O token é comparado em tempo constante.
 - `memory.*` e `swarm.*` exigem `ADE_SESSION` e que o processo seja descendente do PTY da aba (`terminal/session.rs::authorize`).
 - `memory.compact` e `workspace.restore` são negados a agentes (`AGENT_MAINTENANCE_DENIED`): só pela UI.
+- Conversa por protocolo (`thread:<id>`) também recebe `ADE_SESSION`, emitido por processo do motor e válido após `register_process` (`chat_team/env.rs`).
 - `ADE_TAB_ID` identifica quem chama, mas **não é segurança**.
 - A saída é sempre uma linha JSON no stdout; ajuda e erros de uso vão para o stderr.
 

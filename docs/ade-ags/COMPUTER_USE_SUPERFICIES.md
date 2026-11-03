@@ -25,11 +25,22 @@ A mensagem antiga "sim act exige a sessão de um terminal ADE AGS" vinha de `ter
 | Quem chama | Caminho até o Jev | Identidade verificada | Antes | Agora |
 |---|---|---|---|---|
 | Claude Code, Codex, Gemini, OpenCode, Antigravity, Cursor em **aba de terminal** | `ags portal act`, `ags sim act`, `ags desk act` (shell); MCP `browser_act` | token `ADE_SESSION` + PID descendente do PTY | `sim act` ok; `portal act` só confia no `from` | igual, mais `desk act` |
-| Codex, Claude, OpenCode, Antigravity em **conversa por protocolo** (`conversa/`) | `ags …` pelo shell do agente | `thread:<id>` + PID do cliente descendente do processo do motor (registrado após o spawn; sem token) | `sim act` recusado | `sim act` e `desk act` ok |
-| Cursor em conversa (`conversa/cursor.rs`, PR em outra sessão) | idem | o spawn precisa chamar `chat_team::env::register_process` | recusado | **pendente** até esse PR registrar o PID |
+| Codex, Claude, OpenCode, Antigravity em **conversa por protocolo** (`conversa/`) | `ags …` pelo shell do agente | `thread:<id>` + PID do cliente descendente do processo do motor (registrado após cada spawn); também recebe `ADE_SESSION` | `sim act` recusado | `sim act` e `desk act` ok |
+| Cursor em conversa | idem | não existe motor de Cursor em `conversa/` (só TUI); se entrar, o spawn precisa chamar `chat_team::env::register_process` | n/a | n/a |
 | MCP `ags mcp` (browser/design) | escopo por `tabId` informado | não verifica sessão | só navegador | sem tool de computer use: o CLI é o caminho |
 
-A conversa nunca recebe `ADE_SESSION`: `memory.*` e `swarm.*` continuam só de terminal. Sem PID do peer (plataforma sem a API) a conversa é recusada. Um terminal que afirma ser `thread:x` não descende do processo daquela conversa e é recusado.
+A conversa por protocolo recebe `ADE_SESSION` (decisão do usuário, P7 do desenho de unificação): `chat_team::env::thread_env` emite um token novo a cada processo do motor, que só vale depois de `register_process` saber o PID (um respawn troca o token, como num PTY novo). O token fica só na memória do app e no ambiente do motor; não é segredo do keyring. Com ele a conversa usa `memory.*`/`swarm.*` (memória e quadro da missão). Sem PID do peer (plataforma sem a API) a conversa é recusada. Um terminal que afirma ser `thread:x` não descende do processo daquela conversa e é recusado.
+
+## O que cada um alcança (`surfaces::reach`)
+
+Uma função só, `surfaces::reach(actor)`, devolve o que uma aba ou `thread:<id>` alcança. Listagem (`ags device list`, `ags portal list`) e autorização (`ags device *`, `ags sim act`, cada passo do computer use iOS) usam a mesma lista, e o `sim act` refaz a pergunta a cada passo.
+
+| Origem | Como entra | `control` | O que pode |
+|---|---|---|---|
+| Canvas | portal ligado por corda ao ator (orquestrador: também os do time) | sempre | tudo |
+| Painel do chat | aparelho aberto no painel direito (`chat:<udid\|serial>`), sem corda | a chave "Permitir que agentes controlem dispositivos" | sem a chave só `shot` e `tree`; `sim act` e o resto exigem a chave |
+
+Um aparelho do painel que também é portal ligado ao ator aparece só como o portal. O `desk act` não passa por aqui: depende só do ator e da aprovação na UI. O bloqueio do device hub não mudou. Teste: matriz `{aba, thread} × {corda, painel, nenhum} × {controle ligado, desligado} × {shot, act}` em `src-tauri/src/surfaces/test.rs`.
 
 ## Computer use do Mac (`ags desk act`)
 

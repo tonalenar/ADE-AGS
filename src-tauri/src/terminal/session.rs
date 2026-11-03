@@ -55,6 +55,8 @@ struct Sessions {
     by_tab: HashMap<String, String>,
     /// Conversas por protocolo: o PID do processo do motor, por `thread:<id>`. Sem token.
     conversations: HashMap<String, u32>,
+    /// Token já entregue ao ambiente de uma conversa (`thread_env`) que espera o PID do motor para virar sessão.
+    pending: HashMap<String, String>,
 }
 
 fn registry() -> MutexGuard<'static, Sessions> {
@@ -63,6 +65,7 @@ fn registry() -> MutexGuard<'static, Sessions> {
             by_token: HashMap::new(),
             by_tab: HashMap::new(),
             conversations: HashMap::new(),
+            pending: HashMap::new(),
         })
     });
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
@@ -83,7 +86,10 @@ pub(crate) fn ancestry_required() -> bool {
 /// Publica o token já gerado para o PTY desta aba, amarrado ao PID do
 /// processo que o PTY lançou. Substitui o token anterior da mesma aba.
 pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) {
-    let mut sessions = registry();
+    publish_in(&mut registry(), tab_id, token, root_pid);
+}
+
+fn publish_in(sessions: &mut Sessions, tab_id: &str, token: &str, root_pid: u32) {
     if let Some(previous) = sessions.by_tab.insert(tab_id.to_string(), token.to_string()) {
         if previous != token {
             sessions.by_token.remove(&previous);
@@ -95,12 +101,29 @@ pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) {
     );
 }
 
+/// Emite o `ADE_SESSION` do próximo processo do motor de `thread:<id>`. Fica pendente até
+/// [`register_conversation`] saber o PID; um respawn emite outro e o anterior deixa de valer, como num PTY novo.
+/// É um token de memória do processo (nunca vai para disco, banco, log ou URL), igual ao dos terminais.
+pub(crate) fn issue_conversation_token(tab_id: &str) -> Option<String> {
+    if !tab_id.starts_with(crate::chat_team::model::THREAD_PREFIX) {
+        return None;
+    }
+    let token = uuid::Uuid::new_v4().to_string();
+    registry().pending.insert(tab_id.to_string(), token.clone());
+    Some(token)
+}
+
 /// Registra o processo do motor de uma conversa por protocolo (`thread:<id>`). Cada conversa tem o seu
-/// processo; um respawn da mesma conversa troca o PID. Conversa não recebe `ADE_SESSION`: a identidade
-/// dela é a ancestralidade do PID do cliente (ver [`authorize_actor`]).
+/// processo; um respawn da mesma conversa troca o PID. Com o token emitido por [`issue_conversation_token`] a
+/// conversa também tem sessão (memória e quadro da missão); sem ele, vale só a ancestralidade do PID do
+/// cliente (ver [`authorize_actor`]).
 pub(crate) fn register_conversation(tab_id: &str, root_pid: u32) {
     if tab_id.starts_with(crate::chat_team::model::THREAD_PREFIX) && root_pid > 0 {
-        registry().conversations.insert(tab_id.to_string(), root_pid);
+        let mut sessions = registry();
+        sessions.conversations.insert(tab_id.to_string(), root_pid);
+        if let Some(token) = sessions.pending.remove(tab_id) {
+            publish_in(&mut sessions, tab_id, &token, root_pid);
+        }
     }
 }
 
