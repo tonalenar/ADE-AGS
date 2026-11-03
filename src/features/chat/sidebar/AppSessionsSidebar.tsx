@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { useUiStore } from "@/app/uiStore";
 import { MissionsSection } from "@/features/missions/MissionsSection";
-import { useMissionIndex } from "@/features/missions/groups";
+import { useConversations } from "../unified/useConversations";
 import { useTabsStore } from "@/features/tabs/store";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
@@ -29,7 +29,7 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   const threads = useStructured((s) => s.threads);
   const detected = useTabsStore((s) => s.detectedAgents);
   const activeTabId = useTabsStore((s) => s.activeTabId);
-  const missionOf = useMissionIndex();
+  const conversations = useConversations();
   const pet = usePetStatus();
   const chatMode = useUiStore((s) => s.chatMode);
   const setShellMode = useUiStore((s) => s.setShellMode);
@@ -39,9 +39,10 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   const cards = useMemo(() => {
     const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? id;
     // As terminais de uma missão ficam na seção de missões (acima), não soltas na lista.
-    return [...threadCards(threads, groups, labelOf, null), ...conversationCards(groups).filter((c) => !missionOf[c.tabId])]
+    const inMission = new Set(conversations.filter((c) => c.missionId).map((c) => c.ref));
+    return [...threadCards(threads, groups, labelOf, null), ...conversationCards(groups).filter((c) => !inMission.has(c.tabId))]
       .sort((a, b) => b.openedAt - a.openedAt);
-  }, [groups, threads, detected, missionOf]);
+  }, [groups, threads, detected, conversations]);
   const closed = useMemo(() => {
     const open = new Set(cards.map((c) => c.cwd));
     return groups.flatMap((g) => g.workspaces).filter((w) => w.closed && !open.has(w.cwd)).map((w): ChatProject => ({ cwd: w.cwd, name: w.title, branch: w.branch }));

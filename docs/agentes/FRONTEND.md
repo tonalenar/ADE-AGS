@@ -37,6 +37,7 @@ React 19 + TypeScript + Vite 7 + Tailwind 4 + Zustand 5, com xterm e @xyflow. O 
 |---|---|
 | `tabs` | abas, layout em grupos estilo VS Code, `persistence.ts` (SQLite com debounce) |
 | `terminal` | xterm + PTY, `terminalRegistry.ts` (`sendWhenReady`, `pasteIntoTab`), replay sem perda |
+| `chat/unified` | modelo único de leitura da conversa (`UnifiedConversation`, `selectConversations`, `useConversations()`): abas + protocolo + times + canvas; a ref é `tab.id` ou `thread:<id>`, sem UUID novo. Chat, abas e canvas devem ler daqui |
 | `canvas` | canvas @xyflow, chat, TeamFeed, rotinas, andares, `design/` |
 | `missions` | missões, `terminals.ts` (iniciar time, briefings), `vigia*.ts`, `watcher.ts`, `stalled.ts`, `leadStall.ts` |
 | `orchestrator` | `cliBridge.ts`, o lado front da CLI `ags` |

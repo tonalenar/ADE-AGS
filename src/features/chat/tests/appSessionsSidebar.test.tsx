@@ -9,7 +9,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => un
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onResized: () => Promise.resolve(() => undefined) }) }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: "pt-BR" } }) }));
 vi.mock("@/features/missions/MissionsSection", () => ({ MissionsSection: () => <div data-testid="missoes" /> }));
-vi.mock("@/features/missions/groups", () => ({ useMissionIndex: () => ({ "tab-m": "mission-1" }) }));
+vi.mock("../unified/useConversations", () => ({ useConversations: () => [{ ref: "tab-m", missionId: "mission-1" }] }));
 vi.mock("@/shared/brand/Pet", () => ({ usePetStatus: () => ({}), PetCard: () => <div data-testid="pet" /> }));
 
 import { useTabsStore } from "@/features/tabs/store";
