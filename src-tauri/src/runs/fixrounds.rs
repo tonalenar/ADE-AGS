@@ -452,7 +452,9 @@ pub fn on_worker_failure_at(conn: &Connection, task: &Task, gate: crate::mission
         .query_row("SELECT created_at FROM runs WHERE id = ?1", [&task.run_id], |r| r.get(0))
         .optional()
         .map_err(|e| e.to_string())?;
-    if run_created.is_some_and(|secs| gate.pauses(secs.saturating_mul(1000))) {
+    // `created_at` é em segundos: conta o fim do segundo, para um run nascido no mesmo segundo do
+    // boot não passar por armado antes dele.
+    if run_created.is_some_and(|secs| gate.pauses(secs.saturating_mul(1000).saturating_add(999))) {
         return Ok(FailureOutcome::Ignored);
     }
     let max = max_rounds(conn);

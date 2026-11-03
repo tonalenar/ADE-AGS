@@ -50,9 +50,10 @@ pub fn paused_for(armed_at_ms: i64) -> bool {
     gate().pauses(armed_at_ms)
 }
 
-/// O mesmo, com o instante em segundos (como `missions.started_at` e `runs.created_at`).
+/// O mesmo, com o instante em segundos (como `missions.started_at` e `runs.created_at`). Conta o
+/// fim do segundo: o que nasceu no mesmo segundo do boot não passa por armado antes dele.
 pub fn paused_for_secs(armed_at_secs: i64) -> bool {
-    paused_for(armed_at_secs.saturating_mul(1000))
+    paused_for(armed_at_secs.saturating_mul(1000).saturating_add(999))
 }
 
 /// Uma missão em andamento que foi iniciada antes do boot.
