@@ -153,6 +153,9 @@ pub enum ModelSource {
     GeminiCatalogue,
     /// Models returned by the authenticated `agy models` command.
     AntigravityModels,
+    /// Models returned by `cursor-agent models`: one `id - Name` line each. Effort is part of the id of each
+    /// variant (`…-high`), so it is never exposed as a separate level.
+    CursorModels,
     /// No se sabe listarlos.
     Unknown,
 }
@@ -391,7 +394,7 @@ pub const AGENTS: &[AgentDef] = &[
         assign_session: None,
         assign_id_prefix: "",
         sessions: SessionSource::None,
-        models: ModelSource::Unknown,
+        models: ModelSource::CursorModels,
         mcp: McpStyle::None,
     },
     AgentDef {

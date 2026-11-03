@@ -7,6 +7,9 @@ import { AttachmentStrip } from "./attachments/AttachmentStrip";
 import { registerDropSink } from "./attachments/dropRegistry";
 import { useAttachments } from "./attachments/useAttachments";
 import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./chatIcons";
+import { withQuotes } from "./quotes/quoteModel";
+import { QuoteCards } from "./quotes/QuoteCards";
+import { clearQuotesFor, removeQuoteFor, useQuotes } from "./quotes/quoteStore";
 import { useChatStore } from "./store";
 
 /** O caminho do arquivo relativo à pasta da conversa (com `/`), ou o absoluto se for de fora. Pura. */
@@ -41,7 +44,7 @@ export interface ComposerAddonContext {
  * o clipe os põem numa fileira de miniaturas acima do texto; o bloco (miniaturas + texto) cresce até 40%
  * da janela e depois rola por dentro, sem barra, com o enviar sempre à vista. Enviar só com anexos vale.
  */
-export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onStop, onQueue, queued = 0, cwd = null, disabled = false, autoFocus = false }: {
+export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onStop, onQueue, queued = 0, cwd = null, disabled = false, autoFocus = false, quoteKey = null }: {
   placeholder: string;
   /** Logo depois do anexar, à esquerda (o segmentado "Time | Só o orquestrador", prancheta 15). */
   leading?: React.ReactNode;
@@ -61,6 +64,8 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   cwd?: string | null;
   disabled?: boolean;
   autoFocus?: boolean;
+  /** A conversa de que vêm as citações («Comentar»): elas viram cartões acima do campo e vão na mensagem. */
+  quoteKey?: string | null;
 }) {
   const { t } = useTranslation();
   const [text, setText] = useState("");
@@ -79,8 +84,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   }, [text]);
   const apply = (next: string, at: number) => { pendingCaret.current = at; setText(next); };
   const attachments = useAttachments();
-  const canSend = canSubmit(text, attachments.list.length, disabled, busy);
-  const stopping = !!onStop && text.trim().length === 0 && attachments.list.length === 0;
+  const quotes = useQuotes(quoteKey);
+  const extras = attachments.list.length + quotes.length;
+  const canSend = canSubmit(text, extras, disabled, busy);
+  const stopping = !!onStop && text.trim().length === 0 && extras === 0;
   // O que se solta na janela chega aqui (o ouvinte nativo está no ChatShell).
   useEffect(() => registerDropSink({ addPaths: (paths) => { void attachments.addPaths(paths); } }), [attachments.addPaths]); // eslint-disable-line react-hooks/exhaustive-deps -- `addPaths` é estável
 
@@ -114,7 +121,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     // Escrevendo no fim, o cursor acompanha o texto que desce.
     if (scroller.current && el.selectionStart === el.value.length) scroller.current.scrollTop = scroller.current.scrollHeight;
   }, []);
-  useLayoutEffect(fit, [fit, text, attachments.list.length]);
+  useLayoutEffect(fit, [fit, text, extras]);
   useEffect(() => {
     const el = ref.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -129,19 +136,22 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   }, [fit]);
 
   const queue = () => {
-    if (!onQueue || !canSubmit(text, attachments.list.length, disabled, false)) return;
-    onQueue(text, attachments.list);
+    if (!onQueue || !canSubmit(text, extras, disabled, false)) return;
+    onQueue(withQuotes(text, quotes), attachments.list);
     setText("");
     attachments.clear();
+    if (quoteKey) clearQuotesFor(quoteKey);
   };
 
   const submit = async () => {
     if (!canSend) return;
     setBusy(true);
     try {
-      if ((await onSubmit(text, attachments.list)) !== false) {
+      // As citações vão depois do texto (o `@agente` do começo continua valendo) e antes dos anexos.
+      if ((await onSubmit(withQuotes(text, quotes), attachments.list)) !== false) {
         setText("");
         attachments.clear();
+        if (quoteKey) clearQuotesFor(quoteKey);
       }
     } catch {
       /* quem envia mostra o erro; o texto fica para tentar de novo */
@@ -168,15 +178,16 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     >
       {addon?.({ text, caret, apply })}
       <div ref={scroller} style={{ maxHeight }} className="cc-scroll-hidden">
-        <AttachmentStrip items={attachments.list} onRemove={attachments.remove} cwd={cwd} className="px-4 pt-3.5" />
+        <QuoteCards items={quotes} onRemove={(id) => { if (quoteKey) removeQuoteFor(quoteKey, id); }} className="px-4 pt-3.5" />
+        <AttachmentStrip items={attachments.list} onRemove={attachments.remove} cwd={cwd} className={`px-4 ${quotes.length > 0 ? "pt-2" : "pt-3.5"}`} />
         {attachments.notices.length > 0 && (
           <ul role="status" className="list-none m-0 px-5 pt-2 flex flex-col gap-0.5 text-chat-caption text-amber-700 dark:text-amber-400">
             {attachments.notices.map((n) => <li key={n}>{n}</li>)}
           </ul>
         )}
-      <label className={`block px-5 pb-2 ${attachments.list.length > 0 ? "pt-3" : "pt-4"}`}>
+      <label className={`block px-5 pb-2 ${extras > 0 ? "pt-3" : "pt-4"}`}>
         <span className="sr-only">{t("chat.composer.label")}</span>
-        <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus}
+        <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus} data-chat-composer=""
           onPaste={attachments.onPaste}
           onChange={(e) => { setText(e.target.value); setCaret(e.target.selectionStart); }}
           onSelect={(e) => setCaret(e.currentTarget.selectionStart)}

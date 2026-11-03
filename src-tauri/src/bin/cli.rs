@@ -233,10 +233,11 @@ OBSERVAR TABS (modo push — evita o polling)
 CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code, OpenCode e Antigravity)
   chat list [--all]                           Conversas ativas (--all: também as concluídas)
   chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
-           [--agent codex|claude-code|opencode|antigravity] [--model ...] [--effort ...] [--title ...] [--account <id>]
+           [--agent codex|claude-code|opencode|antigravity|cursor] [--model ...] [--effort ...] [--title ...] [--account <id>]
            [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
                                               plan: todos menos o Codex (planeja antes de editar);
-                                              antigravity: sem aprovação (o que pediria é negado)
+                                              antigravity e cursor: sem aprovação (o que pediria é negado);
+                                              cursor: só ask|plan|full
   chat send <id> \"...\"                        Manda outra mensagem (Codex e Claude Code: entra no turno; OpenCode e Antigravity: fica na fila)
   chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
   chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente

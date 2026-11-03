@@ -307,6 +307,19 @@ mod agy {
         json!({ "event": "step_update", "step_update": s })
     }
 
+    /// «Trabalhou por 20h 21m» numa resposta de segundos: o `agy` informa `duration_seconds` da CONVERSA dele (que a
+    /// troca de agente retoma no dia seguinte), não do turno. Vale o relógio do app; o do agy só se couber nele.
+    #[test]
+    fn a_duracao_do_turno_nunca_passa_do_relogio_do_app() {
+        use crate::conversa::agy::pick_duration;
+        let (twenty_hours, eight_s) = (73_260_000, 8_000);
+        assert_eq!(pick_duration(Some(twenty_hours), eight_s), eight_s, "a duração da conversa inteira não é a do turno");
+        assert_eq!(pick_duration(Some(7_200), eight_s), 7_200, "uma duração que cabe no turno é a do agente (só o modelo)");
+        assert_eq!(pick_duration(Some(eight_s + 3_000), eight_s), eight_s + 3_000, "com folga de relógio");
+        assert_eq!(pick_duration(None, eight_s), eight_s);
+        assert_eq!(pick_duration(Some(-5), eight_s), eight_s);
+    }
+
     #[test]
     fn o_acesso_vira_flags_do_agy() {
         assert!(access_flags("ask").is_empty());
@@ -527,4 +540,183 @@ fn criar_e_trocar_com_os_agentes_novos() {
     assert_eq!((row.model.as_deref(), row.effort.as_deref(), row.access.as_str()), (Some("gemini-4-argon-high"), Some("high"), "full"));
     assert_eq!(api::status(&agy.id), api::ThreadStatus { alive: false, working: false });
     assert_eq!(api::status(&opencode.id), api::ThreadStatus { alive: false, working: false });
+}
+
+/// O Cursor (`cursor-agent -p --output-format stream-json`): o mapeamento puro, com as linhas do exemplo da documentação
+/// oficial (`cursor.com/docs/cli/reference/output-format`). Nenhum turno real foi feito (gastaria a cota da pessoa): os
+/// nomes das ferramentas que a doc não mostra são tratados de forma tolerante, e isso fica dito em `cursor_map`.
+mod cursor {
+    use super::*;
+    use crate::conversa::cursor_map::{access_flags, error_from_stderr, launch_args, Mapper, Out};
+
+    fn items(outs: &[Out]) -> Vec<&Item> {
+        outs.iter().filter_map(|o| if let Out::Item(i) = o { Some(&**i) } else { None }).collect()
+    }
+    fn deltas(outs: &[Out]) -> String {
+        outs.iter().filter_map(|o| if let Out::Delta { delta, kind: DeltaKind::Assistant, .. } = o { Some(delta.as_str()) } else { None }).collect()
+    }
+    fn feed_all(mapper: &mut Mapper, lines: &[Value]) -> Vec<Out> {
+        lines.iter().flat_map(|l| mapper.feed(l, 100)).collect()
+    }
+
+    const SID: &str = "c6b62c6f-7ead-4fd6-9922-e952131177ff";
+    fn init() -> Value { json!({ "type": "system", "subtype": "init", "apiKeySource": "login", "cwd": "/p", "session_id": SID, "model": "Claude 4 Sonnet", "permissionMode": "default" }) }
+    fn delta(text: &str, ts: i64) -> Value { json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] }, "session_id": SID, "timestamp_ms": ts }) }
+    fn result_ok(text: &str) -> Value { json!({ "type": "result", "subtype": "success", "duration_ms": 5234, "duration_api_ms": 5234, "is_error": false, "result": text, "session_id": SID, "request_id": "r" }) }
+    fn read_started() -> Value { json!({ "type": "tool_call", "subtype": "started", "call_id": "toolu_1", "tool_call": { "readToolCall": { "args": { "path": "README.md" } } }, "session_id": SID }) }
+    fn read_done() -> Value {
+        json!({ "type": "tool_call", "subtype": "completed", "call_id": "toolu_1", "session_id": SID, "tool_call": { "readToolCall": {
+            "args": { "path": "README.md" }, "result": { "success": { "content": "# Project", "isEmpty": false, "exceededLimit": false, "totalLines": 54, "totalChars": 1254 } } } } })
+    }
+
+    #[test]
+    fn o_acesso_vira_flags_e_so_ask_plan_e_full_sao_aceitos() {
+        assert!(access_flags("ask").is_empty());
+        assert_eq!(access_flags("plan"), ["--mode", "plan"]);
+        assert_eq!(access_flags("full"), ["--force"]);
+        // Aceitar edições e Auto não têm flag documentada: o motor não os aceita (nada de prometer o que não foi provado).
+        assert!(!Engine::Cursor.accepts("edits") && !Engine::Cursor.accepts("safe"));
+        assert!(Engine::Cursor.accepts("ask") && Engine::Cursor.accepts("plan") && Engine::Cursor.accepts("full"));
+        assert_eq!(Engine::of("cursor"), Some(Engine::Cursor));
+    }
+
+    #[test]
+    fn os_argumentos_do_turno_levam_pasta_modelo_conversa_e_a_mensagem_por_ultimo() {
+        let fresh = launch_args(&row("cursor", "plan"), "olá", None);
+        assert_eq!(fresh[..5], ["-p", "--output-format", "stream-json", "--stream-partial-output", "--trust"]);
+        assert!(fresh.windows(2).any(|w| w == ["--workspace", "/p"]), "{fresh:?}");
+        assert!(fresh.windows(2).any(|w| w == ["--mode", "plan"]));
+        assert!(fresh.windows(2).any(|w| w == ["--model", "anthropic/claude-sonnet-5-5"]), "o modelo é o id da variante (o esforço vai nele)");
+        assert!(!fresh.iter().any(|a| a == "--resume" || a == "--effort"), "{fresh:?}");
+        assert_eq!(fresh.last().unwrap(), "olá");
+        let resumed = launch_args(&row("cursor", "full"), "mais", Some(SID));
+        assert!(resumed.windows(2).any(|w| w == ["--resume", SID]));
+        assert!(resumed.iter().any(|a| a == "--force"));
+        // Uma mensagem que começa por «-» não vira flag do CLI.
+        assert_eq!(launch_args(&row("cursor", "ask"), "-x marca", None).last().unwrap(), " -x marca");
+    }
+
+    #[test]
+    fn o_init_guarda_a_conversa_uma_vez() {
+        let mut mapper = Mapper::new("t1");
+        let outs = feed_all(&mut mapper, &[init(), json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": "oi" }] }, "session_id": SID }), delta("a", 1)]);
+        assert_eq!(outs.iter().filter(|o| matches!(o, Out::Session(id) if id == SID)).count(), 1, "{outs:?}");
+        assert!(mapper.feed(&result_ok("a"), 1).iter().all(|o| !matches!(o, Out::Session(_))), "não repete");
+    }
+
+    #[test]
+    fn a_fala_vem_em_pedacos_sem_duplicar_o_texto_que_o_cursor_repete() {
+        let mut mapper = Mapper::new("t1");
+        let flush = json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": "Olá, mundo" }] }, "session_id": SID, "timestamp_ms": 9, "model_call_id": "mc1" });
+        let final_msg = json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": "Olá, mundo" }] }, "session_id": SID });
+        let outs = feed_all(&mut mapper, &[init(), delta("Olá, ", 1), delta("mundo", 2), flush, final_msg, result_ok("Olá, mundo")]);
+        assert_eq!(deltas(&outs), "Olá, mundo", "só os pedaços (com carimbo e sem model_call_id) são fala");
+        let said: Vec<&Item> = items(&outs).into_iter().filter(|i| i.kind == ItemKind::Assistant).collect();
+        assert_eq!(said.len(), 1, "{said:?}");
+        assert_eq!(said[0].text.as_deref(), Some("Olá, mundo"));
+    }
+
+    #[test]
+    fn a_ferramenta_comeca_rodando_acaba_pronta_e_fecha_a_fala_antes_dela() {
+        let mut mapper = Mapper::new("t1");
+        let outs = feed_all(&mut mapper, &[init(), delta("Vou ler.", 1), read_started(), read_done(), delta("Pronto.", 2), result_ok("Pronto.")]);
+        let all = items(&outs);
+        let order: Vec<(ItemKind, Option<ToolStatus>)> = all.iter().map(|i| (i.kind, i.status)).collect();
+        assert_eq!(order, [
+            (ItemKind::Assistant, None),
+            (ItemKind::Tool, Some(ToolStatus::Running)),
+            (ItemKind::Tool, Some(ToolStatus::Done)),
+            (ItemKind::Assistant, None),
+        ], "{all:?}");
+        assert_eq!(all[0].text.as_deref(), Some("Vou ler."));
+        assert_eq!(all[1].id, all[2].id, "o mesmo item, atualizado");
+        assert_eq!(all[2].tool, Some(ToolKind::Read));
+        assert_eq!(all[2].path.as_deref(), Some("README.md"));
+        assert_eq!(all[3].text.as_deref(), Some("Pronto."));
+    }
+
+    #[test]
+    fn comando_edicao_e_busca_viram_as_ferramentas_da_timeline_e_nome_desconhecido_fica_generico() {
+        let call = |id: &str, key: &str, args: Value| json!({ "type": "tool_call", "subtype": "started", "call_id": id, "tool_call": { key: { "args": args } }, "session_id": SID });
+        let mut mapper = Mapper::new("t1");
+        let outs = feed_all(&mut mapper, &[
+            call("a", "shellToolCall", json!({ "command": "ls -la" })),
+            call("b", "writeToolCall", json!({ "path": "summary.txt", "fileText": "linha 1\nlinha 2" })),
+            call("c", "grepToolCall", json!({ "pattern": "TODO", "path": "src" })),
+            call("d", "mcpToolCall", json!({ "name": "fetch", "toolName": "fetch" })),
+            call("e", "cursorMagicToolCall", json!({ "x": 1 })),
+        ]);
+        let kinds: Vec<Option<ToolKind>> = items(&outs).iter().map(|i| i.tool).collect();
+        assert_eq!(&kinds[..3], [Some(ToolKind::Command), Some(ToolKind::Write), Some(ToolKind::Search)], "{kinds:?}");
+        assert_eq!(kinds.len(), 5, "uma ferramenta que não conheço não some");
+    }
+
+    #[test]
+    fn ferramenta_com_erro_ou_recusada_fica_marcada_e_a_recusa_diz_como_liberar() {
+        let done = |result: Value| json!({ "type": "tool_call", "subtype": "completed", "call_id": "x", "tool_call": { "shellToolCall": { "args": { "command": "rm -rf dist" }, "result": result } }, "session_id": SID });
+        let status = |result: Value| {
+            let mut mapper = Mapper::new("t");
+            let outs = feed_all(&mut mapper, &[done(result)]);
+            let item = items(&outs).last().map(|i| (*i).clone()).unwrap();
+            (item.status.unwrap(), item.output)
+        };
+        assert_eq!(status(json!({ "success": { "stdout": "ok", "exitCode": 0 } })), (ToolStatus::Done, Some("ok".into())));
+        assert_eq!(status(json!({ "success": { "stdout": "", "stderr": "falhou", "exitCode": 2 } })).0, ToolStatus::Error);
+        assert_eq!(status(json!({ "error": { "message": "sem permissão" } })), (ToolStatus::Error, Some("sem permissão".into())));
+        let (st, output) = status(json!({ "rejected": { "reason": "needs approval" } }));
+        assert_eq!(st, ToolStatus::Denied);
+        assert!(output.unwrap().contains("Troque o acesso"), "diz como liberar");
+    }
+
+    #[test]
+    fn o_raciocinio_vira_item_so_quando_fecha() {
+        let mut mapper = Mapper::new("t1");
+        let think = |sub: &str, text: &str| json!({ "type": "thinking", "subtype": sub, "text": text, "session_id": SID, "timestamp_ms": 1 });
+        let outs = feed_all(&mut mapper, &[think("delta", "pensando "), think("delta", "mais"), think("completed", ""), result_ok("")]);
+        assert!(outs.iter().any(|o| matches!(o, Out::Delta { kind: DeltaKind::Reasoning, .. })));
+        let reasoning: Vec<&Item> = items(&outs).into_iter().filter(|i| i.kind == ItemKind::Reasoning).collect();
+        assert_eq!(reasoning.len(), 1);
+        assert_eq!(reasoning[0].text.as_deref(), Some("pensando mais"));
+    }
+
+    #[test]
+    fn sem_pedacos_a_resposta_final_do_result_e_a_fala() {
+        let mut mapper = Mapper::new("t1");
+        let outs = feed_all(&mut mapper, &[init(), result_ok("Resposta inteira")]);
+        let said: Vec<&Item> = items(&outs).into_iter().filter(|i| i.kind == ItemKind::Assistant).collect();
+        assert_eq!(said.len(), 1);
+        assert_eq!(said[0].text.as_deref(), Some("Resposta inteira"));
+        let Some(Out::Done(done)) = outs.last() else { panic!("{outs:?}") };
+        assert!(done.error.is_none() && !done.interrupted);
+        assert_eq!(done.duration_ms, Some(5234));
+    }
+
+    #[test]
+    fn o_result_com_erro_encerra_o_turno_com_a_mensagem() {
+        let mut mapper = Mapper::new("t1");
+        let err = json!({ "type": "result", "subtype": "error", "is_error": true, "result": "Usage limit reached", "duration_ms": 10, "session_id": SID });
+        let outs = feed_all(&mut mapper, &[init(), delta("meio", 1), err]);
+        let Some(Out::Done(done)) = outs.last() else { panic!("{outs:?}") };
+        assert_eq!(done.error.as_deref(), Some("Usage limit reached"));
+        let said: Vec<&Item> = items(&outs).into_iter().filter(|i| i.kind == ItemKind::Assistant).collect();
+        assert_eq!(said.len(), 1, "a fala parcial não se perde");
+    }
+
+    #[test]
+    fn o_fluxo_que_acaba_sem_result_fecha_a_fala_aberta() {
+        let mut mapper = Mapper::new("t1");
+        let _ = feed_all(&mut mapper, &[init(), delta("quase", 1)]);
+        let rest = mapper.finish(Some(100));
+        let said: Vec<&Item> = items(&rest).into_iter().filter(|i| i.kind == ItemKind::Assistant).collect();
+        assert_eq!(said.len(), 1);
+        assert_eq!(said[0].text.as_deref(), Some("quase"));
+        assert!(mapper.finish(Some(101)).is_empty(), "não fecha duas vezes");
+    }
+
+    #[test]
+    fn o_erro_do_stderr_e_a_ultima_linha_com_texto() {
+        let tail = vec!["aviso qualquer".to_string(), "Error: not logged in. Run `cursor-agent login`".to_string(), "  ".to_string()];
+        assert_eq!(error_from_stderr(&tail), "Error: not logged in. Run `cursor-agent login`");
+        assert_eq!(error_from_stderr(&[]), "O Cursor terminou sem responder");
+    }
 }

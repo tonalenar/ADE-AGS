@@ -138,7 +138,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
     <ComposerColumn>
       {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
       {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
-      <ChatComposer cwd={card.cwd}
+      <ChatComposer cwd={card.cwd} quoteKey={card.tabId}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
         onSubmit={(text, attachments) => {
           const prepared = team && text.trim() ? team.prepare(text, { key: card.tabId, items }, attachments) : { text, onSent: () => undefined };
@@ -188,7 +188,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   return (
     <div className="flex-1 min-h-0 flex flex-col">
     <ChatFrame composer={composer} list={(bottomInset) => (
-      <TimelineView bottomInset={bottomInset} items={items} loaded={loaded} missing={loaded && !read} truncated={!!read?.truncated}
+      <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={items} loaded={loaded} missing={loaded && !read} truncated={!!read?.truncated}
         working={busy || approval !== null} approval={null} live
         approvalCard={approval ? <PermissionCard ask={approval} terminal /> : null}
         agentLabel={card.agentLabel} agentId={card.agentId} pending={pending} onOpenTerminal={() => setTerminalOpen(card.tabId, true)}

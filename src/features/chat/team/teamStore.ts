@@ -344,6 +344,8 @@ export interface NewMemberInput {
   model: string | null;
   /** O esforço do agente novo (`null` = o padrão dele; só vale nos agentes que têm esforço). */
   effort?: string | null;
+  /** A conta do agente novo (id, `pool:<nome>` ou `null` = a principal); só nas conversas por protocolo. */
+  account?: string | null;
   /** Por protocolo, sem TUI (Codex e Claude Code), como as conversas novas do chat. */
   structured: boolean;
   /** Já nasce como subagente (o interruptor do canvas). */
@@ -387,7 +389,7 @@ export async function spawnMember(input: NewMemberInput): Promise<SpawnedMember>
     const cwd = place?.cwd ?? input.cwd;
     const { access, plan } = conversationAccess(input.policy, agent.id);
     if (input.structured && STRUCTURED_AGENTS.has(agent.id)) {
-      const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: null });
+      const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: input.account ?? null });
       await reloadThreads();
       const ref = threadKey(row.id);
       return { ref, label, place, provision: provision.id, close: closing(ref, () => settleThread(row.id, true)) };

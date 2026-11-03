@@ -77,7 +77,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has {
         conn.execute_batch("ALTER TABLE chat_thread ADD COLUMN memory TEXT;")?;
     }
-    Ok(())
+    // As sessões nativas guardadas de cada agente que já esteve na conversa (trocar de agente, `troca.rs`): aditiva.
+    super::troca::migrate(conn)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
