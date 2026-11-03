@@ -258,7 +258,8 @@ async fn el_websocket_del_recargado_en_caliente_atraviesa_el_proxy() {
 
     let mut sock = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
     let handshake = format!(
-        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nOrigin: {}\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+        // Como o navegador manda o socket do HMR do Vite: mesmo origem, `Sec-Fetch-Mode: websocket`.
+        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nOrigin: {}\r\nSec-Fetch-Site: same-origin\r\nSec-Fetch-Mode: websocket\r\nSec-Fetch-Dest: empty\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
         target.proxy_origin
     );
     sock.write_all(handshake.as_bytes()).await.unwrap();
@@ -275,6 +276,25 @@ async fn el_websocket_del_recargado_en_caliente_atraviesa_el_proxy() {
     let mut echo = [0u8; 4];
     sock.read_exact(&mut echo).await.unwrap();
     assert_eq!(&echo, b"ping");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn um_websocket_cross_site_nao_chega_ao_dev_server() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let proxy_port: u16 = target.proxy_origin.rsplit(':').next().unwrap().parse().unwrap();
+
+    let mut sock = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
+    // Um site do navegador do sistema que forjou só o `Sec-Fetch-Site` (o `Origin` ele não
+    // controla; aqui falta, como num cliente que tenta passar sem ele).
+    let handshake = format!(
+        "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{proxy_port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-Fetch-Site: cross-site\r\nSec-Fetch-Mode: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"
+    );
+    sock.write_all(handshake.as_bytes()).await.unwrap();
+    let mut buf = vec![0u8; 4096];
+    let n = sock.read(&mut buf).await.unwrap();
+    let head = String::from_utf8_lossy(&buf[..n]);
+    assert!(head.starts_with("HTTP/1.1 403"), "{head}");
 }
 
 // ── El log del proxy: red y cookies ──────────────────────────────
@@ -1270,6 +1290,33 @@ fn el_proxy_rechaza_otros_hosts_y_otros_origenes() {
     // `null`: un iframe con sandbox. Pedidos sí, WebSocket no.
     assert!(request_is_ours(&req("localhost:4100", Some("null"), false), 4100));
     assert!(!request_is_ours(&req("localhost:4100", Some("null"), true), 4100));
+}
+
+#[test]
+fn o_proxy_recusa_subrecurso_cross_site_mas_deixa_a_aba_da_app_navegar() {
+    use super::proxy::request_is_ours;
+    let req = |method: &str, site: &str, mode: &str, dest: &str| {
+        hyper::Request::builder()
+            .method(method)
+            .uri("/api/apagar?id=1")
+            .header("host", "localhost:4100")
+            .header("sec-fetch-site", site)
+            .header("sec-fetch-mode", mode)
+            .header("sec-fetch-dest", dest)
+            .body(())
+            .unwrap()
+    };
+    // `<img src>` de outro site: sem `Origin`, com a sessão do projeto. Hoje passava.
+    assert!(!request_is_ours(&req("GET", "cross-site", "no-cors", "image"), 4100));
+    assert!(!request_is_ours(&req("GET", "cross-site", "no-cors", "script"), 4100));
+    // O iframe da app (tauri://localhost) é outro site, e precisa abrir a página.
+    assert!(request_is_ours(&req("GET", "cross-site", "navigate", "iframe"), 4100));
+    // Um formulário de outro site que navega com POST não.
+    assert!(!request_is_ours(&req("POST", "cross-site", "navigate", "iframe"), 4100));
+    // A página pedindo os módulos e o HMR do Vite: mesmo origem.
+    assert!(request_is_ours(&req("GET", "same-origin", "cors", "script"), 4100));
+    assert!(request_is_ours(&req("GET", "same-site", "no-cors", "image"), 4100));
+    assert!(request_is_ours(&req("GET", "none", "navigate", "document"), 4100));
 }
 
 #[test]

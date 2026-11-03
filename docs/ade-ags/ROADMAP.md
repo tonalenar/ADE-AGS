@@ -16,6 +16,12 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Escopos de escrita:** `Escopo:` na delegação e `write_scopes` no `run_plan`; o canvas e o QG avisam quando duas tarefas em andamento se sobrepõem. Só aviso.
 - Detalhe em [RETOMADA_E_ESTADO.md](./RETOMADA_E_ESTADO.md); skill `ags-orchestrator` 1.44.0.
 
+## Processo e qualidade (pontos 23–25 da análise do deepseek-harness)
+
+- **Postmortems numerados** em [postmortem/](./postmortem/README.md): 0001 Vigia segundos × ms (A1), 0002 HMR derrubando PTYs, 0003 sessão `opencode_stream` (A2), 0004 avisos repetidos do Vigia.
+- **Fingerprint** SHA-256 do schema SQLite e do protocolo IPC, com registro de reconhecimento obrigatório no CI: [FINGERPRINT.md](../decisoes/FINGERPRINT.md).
+- **Bench de complexidade** com gate por razão e orçamento calibrado (`digest`, transcript do canal, scrollback do PTY): [bench/COMPLEXIDADE.md](./bench/COMPLEXIDADE.md). Achou e corrigiu um O(n²) no `digest` (13,26× → 1,22×).
+
 ## Conector opcional de leitura do ai-memory
 
 Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões recentes usam bridge MCP temporário com workspace/projeto explícitos e apenas `memory_briefing`. Novas abas do Claude podem somar MCP session-aware e hooks nativos; Codex/OpenCode usam intermediário MCP com workspace/projeto fixos, somente quando a pasta identifica um único projeto, com ajuste `ai_memory_tabs_enabled` e sem escrita nas configurações globais dos agentes. A ação explícita “Continuar com outro agente” apresenta preview não consumidor e, após confirmação, abre uma nova aba Claude via `ai-memory run`, preservando a origem; sem handoff abre normalmente. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
@@ -390,6 +396,10 @@ O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro
 
 Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).
 
+## Bancada dos motores por protocolo
+
+Fake de agente com falhas roteirizadas (stall, JSON cortado, queda, cota, `max_tokens`, aprovação, pergunta, modo aleatório com semente) tocado nos mapeadores reais de `claude -p`, `codex app-server` e ACP; replay de transcript de protocolo (`ade-replay` v2) com placeholders tipados, modos `replay`/`refresh`/`record`, oráculo que o refresh não reescreve e guard de ferramenta desconhecida; mock de `invoke` por nome com `assertNoUnmatched()` no front. Usado nos testes de `resume.rs` e do pool de contas. Achou: a queda do Codex sem motivo, o Codex que esgota sem acionar o pool e o `max_tokens` do Claude que acaba como "ok". Uso e limites: [BANCADA_MOTORES.md](./BANCADA_MOTORES.md).
+
 ## Pontos de restauração das abas
 
 A cada mensagem que chega a um agente numa aba (peers, `ags tab send`, chat, rotinas, missões e o Enter no terminal), uma foto dos arquivos da pasta vai para uma ref git escondida (`refs/ags/checkpoints/<aba>/<n>`), sem tocar branch, índice nem stash. No menu da aba: "Pontos de restauração…" (ver o diff desde um ponto, voltar os arquivos até ele com ponto de segurança e trava de pasta compartilhada) e "Marcar ponto". A conversa do agente não volta. Desenho e limites: [CHECKPOINTS_ABAS.md](./CHECKPOINTS_ABAS.md).
@@ -401,3 +411,16 @@ O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `c
 ## Guia de revisão de PR por IA
 
 Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
+
+## Segurança local: editor, loopback, ambiente e aprovações
+
+Quatro pontos da análise do `deepseek-harness`. O editor salva só se o arquivo tem o mesmo token `tamanho:mtime_ns:inode` de quando abriu, e recria um arquivo apagado com `create_new`. O proxy do navegador recusa `Host` que não é loopback, `Origin` de fora e subrecurso `cross-site` (o HMR do Vite segue funcionando). O ambiente da frota, do MCP do ai-memory e das abas de missão que pedem perde toda variável com `KEY`/`TOKEN`/`SECRET`/`PASSWORD`, menos as do provider; a conta e as `AGS_*`/`ADE_*` entram depois. Frota e chat gravam o mesmo par `asked`/`decided` em `approval_events`, com resultado fechado (`allowed-once`, `rejected`, `cancelled`, `unavailable`). Pendente: onde escolher e guardar o filtro por integrante. Detalhes em [SEGURANCA_LOCAL.md](./SEGURANCA_LOCAL.md).
+
+## Contratos da CLI e do MCP (pontos do deepseek-harness)
+
+- **Spill das respostas grandes** (`ipc/spill.rs`): acima de ~6.000 tokens, o resultado de uma tool do MCP ou de `tab output`/`tab screen`/`peer check`/`peer pending`/`chat show`/`chat wait`/`recall get` vai inteiro para `~/.ags/spill/<aba ou tarefa>/<aleatório>.txt` (pasta 0700, arquivo 0600, nunca dentro de um repositório, apagado após 30 dias) e o agente recebe cabeça, cauda e o caminho. `--no-spill` desliga na CLI.
+- **`noProgress` na hora**: `ags events wait` (com `--run`/`--mission`, ou de um orquestrador) e o `run_await` da frota voltam logo quando nada trabalha nem provisiona, em vez de esperar o prazo. `--allow-idle` espera mesmo assim.
+- **Profundidade e teto do `peer recruit`** (`squads/recruit.rs`): antes só havia a exigência da coroa. Agora a profundidade fica gravada (`~/.ags/recruits.json`, nunca desce), o padrão é 1 (recrutado não recruta) e há até 12 recrutados abertos por orquestrador; no limite, `{refused, reason, message}`.
+- **Handoff v1.1** (`runs/handoff.rs`, aditivo): `status` opcional; `continue` exige `next_steps`, `complete` exige evidência (`evidence`, teste `passed` ou artefato), `blocked` exige `blockers` concretos. Report inválido é recusado inteiro.
+- **`ask_user` com prazo** (padrão 600 s): ao vencer devolve `pending` (nunca aprovação), a pergunta fica na tela e a resposta tardia chega à aba como mensagem. Integrante de time recebe `refused` (`ask_lead`) e leva a dúvida ao orquestrador.
+- **Regiões geradas**: a lista de tools na ajuda do `ags`, a tabela de tools da skill e de [CLI_MCP.md](../agentes/CLI_MCP.md#mcp) e o índice de comandos da skill saem do código entre `BEGIN/END GENERATED` (`bun run gen:catalogs`); `bun run check:catalogs` e um teste vitest conferem o frescor.

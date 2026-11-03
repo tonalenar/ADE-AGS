@@ -1,0 +1,10 @@
+{
+  "alvo": "schema-sqlite",
+  "sha256": "fdb8acad8240af15082e744bcfe260f086a76b4245efd13696c7210889a20fa8",
+  "data": "2026-11-03",
+  "motivo": "tabela nova approval_events (auditoria comum das aprovações da frota e do chat), CREATE TABLE IF NOT EXISTS, sem subir user_version",
+  "semPerdaDeDados": true,
+  "arquivos": [
+    "src-tauri/src/database/schema.rs"
+  ]
+}

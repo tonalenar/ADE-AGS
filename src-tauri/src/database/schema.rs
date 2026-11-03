@@ -1188,6 +1188,8 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     // Log da sombra de decisões (Laya/Jev). Também sem subir user_version: o backup
     // por VACUUM só dispara quando a versão muda, e os testes cravam a v41.
     crate::decisions::log::migrate(conn)?;
+    // A auditoria comum das aprovações (frota e chat): tabela nova, também sem subir user_version.
+    crate::approval_audit::migrate(conn)?;
     // Fila da exportação Markdown. Sem subir user_version: o migrate inteiro roda
     // em toda abertura, e CREATE IF NOT EXISTS pega bases que já estão na v41.
     // Subir a versão quebraria os testes que cravam 41 e forçaria um backup VACUUM.

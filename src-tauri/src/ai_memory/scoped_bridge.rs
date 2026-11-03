@@ -132,6 +132,8 @@ async fn serve_with(
         return Err(io::Error::other("Projeto reservado não permitido."));
     }
     let mut command = crate::util::spawn::hidden_command(crate::util::external_path(program));
+    // O bridge MCP é lançado pela ADE: sem as credenciais herdadas (ver `runs::sandbox::scrub_env`).
+    crate::runs::sandbox::scrub_env(&mut command);
     command
         .args(["mcp-bridge", "--no-session-id"])
         .current_dir(cwd)

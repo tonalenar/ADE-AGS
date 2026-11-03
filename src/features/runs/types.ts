@@ -256,4 +256,8 @@ export interface StructuredHandoff {
   risks: string[];
   next_steps: string[];
   artifacts: { label: string; path: string }[];
+  /** v1.1 (aditivo): `continue` exige next_steps, `complete` evidência, `blocked` um bloqueio. */
+  status?: "continue" | "complete" | "blocked";
+  evidence?: string[];
+  blockers?: string[];
 }

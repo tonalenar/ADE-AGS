@@ -7,6 +7,7 @@
 //! - [`install`] — instalar/desinstalar el binario `ags` en el PATH del usuario.
 //! - [`mcp`] — el servidor MCP que les da a los agentes sus herramientas.
 //! - [`cancel`] — las llamadas de ese servidor que el agente canceló.
+//! - [`spill`] — respostas grandes da CLI e do MCP vão para `~/.ags/spill/` (cabeça, cauda e caminho).
 
 pub mod bridge;
 pub mod cancel;
@@ -15,6 +16,7 @@ pub mod install;
 pub mod mcp;
 pub mod protocol;
 mod server;
+pub mod spill;
 mod transport;
 #[cfg(test)]
 mod test;

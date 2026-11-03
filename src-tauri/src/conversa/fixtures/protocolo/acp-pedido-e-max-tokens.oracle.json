@@ -1,0 +1,8 @@
+{
+  "checks": [
+    { "label": "a sessão é a do session/new", "expect": { "sessao": "{{session:1}}" } },
+    { "label": "o pedido de edição vira aprovação de arquivo", "expect": { "pedidos": ["fileChange"] } },
+    { "label": "a edição aparece como edição feita", "expect": { "ferramentas": ["Edit:done"], "textoContem": "Vou editar o lib.rs." } },
+    { "label": "o limite de tokens é erro do turno, mas não é limite da conta", "expect": { "fim": "erro", "erroContem": "limite de tokens", "classe": "other" } }
+  ]
+}

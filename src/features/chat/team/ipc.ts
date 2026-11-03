@@ -76,6 +76,9 @@ export interface TeamHandoff {
     tests?: { command: string; status: "passed" | "failed" | "not_run" }[];
     risks?: string[];
     next_steps?: string[];
+    status?: "continue" | "complete" | "blocked";
+    evidence?: string[];
+    blockers?: string[];
   };
 }
 

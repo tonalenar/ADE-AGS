@@ -18,6 +18,7 @@ import { useMissionsStore } from "./store";
 import { isWorking } from "./stalled";
 import { prematureClosing } from "./vigiaClosing";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
+import { contextDue, contextNudge, contextPressure, contextStuck, REPEAT_DONE, repeatKey, repeatStuck } from "./vigiaSignals";
 import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
 import { repeatAfterEach } from "./repeatAfterEach";
 import { vigiaActive } from "./vigiaSwitch";
@@ -345,6 +346,43 @@ function watchLoops(team: readonly { id: string; title: string; agentId: string 
   }
 }
 
+/** Os degraus de repetição já avisados (aba, turno, chamada, degrau). Volátil, como os laços. */
+const repeats = new Set<string>();
+/** Quando cada terminal foi avisado do contexto quase cheio. */
+const contextReports = new Map<string, number>();
+
+/**
+ * Os sinais do canal estruturado (Claude Code e Codex): a mesma chamada de ferramenta repetida (só avisa no chat,
+ * como o laço do Codex) e o contexto quase cheio de um integrante (chat e uma cutucada ao Orquestrador, que é
+ * quem pode pedir o handoff). Nunca escreve no terminal do integrante.
+ */
+function watchSignals(team: readonly Tab[], lead: Tab, now: number): void {
+  for (const tab of team) {
+    const snapshot = structuredOf(tab.id);
+    if (!snapshot) continue;
+    const name = tab.title.split(" — ")[0];
+    const key = repeatKey(tab.id, snapshot);
+    if (key && !repeats.has(key)) {
+      repeats.add(key);
+      const stuck = repeatStuck(name, snapshot);
+      showBotToast({ title: VIGIA_NAME, text: stuck, tone: "warning", ms: 12_000 });
+      reportToChat(lead.id, reportLine(stuck, REPEAT_DONE, "possível laço"));
+    }
+    if (tab.id === lead.id) continue;
+    const pressure = contextPressure(snapshot);
+    if (pressure === null || !contextDue(pressure, contextReports.get(tab.id), now)) continue;
+    contextReports.set(tab.id, now);
+    const stuck = contextStuck(name, pressure);
+    if (mayPoke(lead.id, now)) {
+      poke(lead.id, `[${VIGIA_NAME}] ${contextNudge(name, pressure)}`, now, () => {
+        reportToChat(lead.id, reportLine(stuck, `avisei o ${lead.title.split(" — ")[0]} para pedir o estado ou um handoff.`, "atenção"));
+      });
+    } else {
+      reportToChat(lead.id, reportLine(stuck, "só avisei aqui: o Orquestrador estava ocupado.", "atenção"));
+    }
+  }
+}
+
 /**
  * Quando a missão começou, em milissegundos (a unidade de `now`). `mission.startedAt` vem do banco
  * em SEGUNDOS (epoch); sem converter, `now - startedAt` vale ~1,8e12 e o primeiro ciclo já acusa
@@ -466,6 +504,7 @@ export function vigiaTick(now = Date.now()): Promise<void> {
       continue;
     }
     watchLoops(team, lead.id, now);
+    watchSignals(team, lead, now);
 
     // Fechamento antecipado: o Orquestrador pede o OK para commit/PR com integrante ainda trabalhando.
     const closing = prematureClosing({

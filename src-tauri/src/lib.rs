@@ -5,6 +5,7 @@
 pub mod ai_memory;
 mod accounts;
 mod agents;
+mod approval_audit;
 mod canal;
 mod canvas;
 mod chat;
@@ -13,6 +14,8 @@ mod compare;
 mod conversa;
 pub mod computer_use;
 mod app;
+#[cfg(test)]
+mod bench;
 mod bus;
 mod database;
 mod decisions;

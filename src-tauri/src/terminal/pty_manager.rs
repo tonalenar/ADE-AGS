@@ -171,11 +171,18 @@ pub struct PtyExitPayload {
 fn append_to_buffer(id: u32, chunk: &[u8]) {
     let mut buffers = buffers();
     let buf = buffers.entry(id).or_default();
-    buf.data.extend_from_slice(chunk);
+    push_capped(&mut buf.data, chunk, MAX_BUFFER_BYTES, TRIM_MARGIN_BYTES);
     buf.total_bytes += chunk.len() as u64;
-    if buf.data.len() > MAX_BUFFER_BYTES + TRIM_MARGIN_BYTES {
-        let excess = buf.data.len() - MAX_BUFFER_BYTES;
-        buf.data.drain(0..excess);
+}
+
+/// Acrescenta `chunk` e, passado `max + margin`, corta o começo até sobrar `max`. Pura: o gate de
+/// complexidade (`crate::bench`) mede com tetos 32× diferentes que o custo de ingestão não cresce
+/// junto com o teto.
+pub(crate) fn push_capped(data: &mut Vec<u8>, chunk: &[u8], max: usize, margin: usize) {
+    data.extend_from_slice(chunk);
+    if data.len() > max + margin {
+        let excess = data.len() - max;
+        data.drain(0..excess);
     }
 }
 
@@ -650,6 +657,9 @@ pub async fn pty_create(
     prelaunch: Option<Vec<String>>,
     // Só nasce após confirmação explícita no preview; nunca se aplica a PTY vivo.
     ai_memory_continuity: Option<bool>,
+    // Aba de integrante de missão que pediu: o ambiente herdado perde as credenciais de outros
+    // serviços (ver `runs::sandbox::scrub_env`). Ausente = como sempre: aba da pessoa.
+    scrub_secrets: Option<bool>,
     app: AppHandle,
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
@@ -741,6 +751,10 @@ pub async fn pty_create(
     cmd.env("COLORTERM", "truecolor");
     for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
         cmd.env_remove(var);
+    }
+    // Antes da conta, do env da TUI e das `ADE_*`: o que vem depois disto fica.
+    if scrub_secrets.unwrap_or(false) {
+        crate::runs::sandbox::scrub_pty_env(&mut cmd);
     }
     // El PATH del hijo es el del PTY (en Windows sale del registro, no del proceso de la app: la
     // app puede tener la carpeta de su ejecutable en el suyo y el hijo no).

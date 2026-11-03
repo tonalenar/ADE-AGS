@@ -1,0 +1,261 @@
+{
+  "agent": "claude-code",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": false,
+    "deltas": [
+      [
+        "msg_1#0",
+        "Vou ler "
+      ],
+      [
+        "msg_1#0",
+        "o Cargo.toml."
+      ]
+    ],
+    "fim": {
+      "durationMs": 4200,
+      "error": "You've hit your limit · resets 3pm (America/Sao_Paulo)",
+      "interrupted": false
+    },
+    "ignoradas": 1,
+    "itens": [
+      {
+        "at": 1790000000050,
+        "id": "msg_1#0",
+        "kind": "assistant",
+        "text": "Vou ler o Cargo.toml."
+      },
+      {
+        "at": 1790000000050,
+        "id": "toolu_1",
+        "kind": "tool",
+        "name": "Read",
+        "output": "[package]\nname = \"x\"",
+        "path": "{{cwd}}/Cargo.toml",
+        "status": "done",
+        "tool": "read"
+      },
+      {
+        "at": 1790000000100,
+        "id": "toolu_2",
+        "kind": "tool",
+        "label": "cargo test",
+        "name": "Bash",
+        "output": "test result: ok. 3 passed",
+        "status": "done",
+        "tool": "command"
+      }
+    ],
+    "pedidos": [
+      {
+        "kind": "command",
+        "title": "cargo test"
+      }
+    ],
+    "sessao": "{{session:1}}"
+  },
+  "format": "ade-replay",
+  "id": "claude-ferramenta-aprovacao-e-cota",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "formato de src-tauri/src/runs/fixtures/claude_stream.jsonl e dos testes de conversa/test.rs (mod claude)",
+    "kind": "synthesized",
+    "recordedAt": null,
+    "tuiVersion": null
+  },
+  "protocol": "claude-stream",
+  "title": "Claude: lê um arquivo, pede para rodar um comando e esgota a conta antes de acabar",
+  "transcript": [
+    {
+      "atMs": 0,
+      "in": {
+        "message": {
+          "content": [
+            {
+              "text": "rode os testes",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        "type": "user"
+      }
+    },
+    {
+      "atMs": 5,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "hook_started",
+        "type": "system"
+      }
+    },
+    {
+      "atMs": 10,
+      "out": {
+        "cwd": "{{cwd}}",
+        "permissionMode": "default",
+        "session_id": "{{session:1}}",
+        "subtype": "init",
+        "type": "system"
+      }
+    },
+    {
+      "atMs": 20,
+      "out": {
+        "type": "rate_limit_event"
+      }
+    },
+    {
+      "atMs": 30,
+      "out": {
+        "api_message_id": "msg_1",
+        "event": {
+          "delta": {
+            "text": "Vou ler ",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        },
+        "type": "stream_event"
+      }
+    },
+    {
+      "atMs": 40,
+      "out": {
+        "api_message_id": "msg_1",
+        "event": {
+          "delta": {
+            "text": "o Cargo.toml.",
+            "type": "text_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        },
+        "type": "stream_event"
+      }
+    },
+    {
+      "atMs": 50,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "Vou ler o Cargo.toml.",
+              "type": "text"
+            },
+            {
+              "id": "toolu_1",
+              "input": {
+                "file_path": "{{cwd}}/Cargo.toml"
+              },
+              "name": "Read",
+              "type": "tool_use"
+            }
+          ],
+          "id": "msg_1",
+          "role": "assistant"
+        },
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 60,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "content": "[package]\nname = \"x\"",
+              "tool_use_id": "toolu_1",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "type": "user"
+      }
+    },
+    {
+      "atMs": 70,
+      "raw": "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_2\",\"content\":[{\"ty"
+    },
+    {
+      "atMs": 80,
+      "out": {
+        "request": {
+          "input": {
+            "command": "cargo test"
+          },
+          "subtype": "can_use_tool",
+          "tool_name": "Bash",
+          "tool_use_id": "toolu_2"
+        },
+        "request_id": "req_1",
+        "type": "control_request"
+      }
+    },
+    {
+      "atMs": 90,
+      "in": {
+        "response": {
+          "request_id": "req_1",
+          "response": {
+            "behavior": "allow"
+          },
+          "subtype": "success"
+        },
+        "type": "control_response"
+      }
+    },
+    {
+      "atMs": 100,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "id": "toolu_2",
+              "input": {
+                "command": "cargo test"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "id": "msg_3",
+          "role": "assistant"
+        },
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 4100,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "content": "test result: ok. 3 passed",
+              "is_error": false,
+              "tool_use_id": "toolu_2",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "type": "user"
+      }
+    },
+    {
+      "atMs": 4200,
+      "out": {
+        "duration_ms": 4200,
+        "is_error": true,
+        "result": "You've hit your limit · resets 3pm (America/Sao_Paulo)",
+        "subtype": "success",
+        "type": "result"
+      }
+    }
+  ],
+  "version": 2
+}

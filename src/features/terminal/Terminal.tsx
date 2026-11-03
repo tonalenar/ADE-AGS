@@ -81,6 +81,8 @@ interface TerminalProps {
   /** Comandos a ejecutar antes del agente, sin resolver todavía (ver el store `prelaunch`).
    *  Se resuelven acá adentro, justo antes de spawnear, por el mismo motivo que la cuenta. */
   prelaunch?: PrelaunchStep[];
+  /** Tirar as credenciais herdadas do ambiente (integrante de missão que pediu). */
+  scrubSecrets?: boolean;
   onReady?: (id: number) => void;
   onExit?: (code: number) => void;
   onSessionDiscovered?: (sessionId: string) => void;
@@ -111,6 +113,7 @@ function TerminalImpl({
   env,
   accountId,
   prelaunch,
+  scrubSecrets,
   onReady,
   onExit,
   onSessionDiscovered,
@@ -525,6 +528,7 @@ function TerminalImpl({
           ),
           prelaunch: resolvedPrelaunch,
           ...(peekContinuity(tabId) ? { aiMemoryContinuity: true } : {}),
+          ...(scrubSecrets ? { scrubSecrets: true } : {}),
         });
         takeContinuity(tabId); // o PTY nasceu: a intenção foi usada. Numa falha ela fica para a nova tentativa.
         ptyIdRef.current = ptyId;

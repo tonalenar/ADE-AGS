@@ -279,3 +279,46 @@ fn mission_squad_edits_preserve_handoff_origin_dependencies_and_snapshot() {
     assert_eq!(member.reasoning_effort.as_deref(), Some("low"));
     assert_eq!(historical.structured_handoff.unwrap().summary, "HISTORICAL_HANDOFF");
 }
+
+#[test]
+fn v1_1_status_rules_reject_whole_report_instead_of_truncating() {
+    let base = |extra: Value| { let mut v = json!({"version":1,"summary":"Entrega"}); for (k, x) in extra.as_object().unwrap() { v[k] = x.clone(); } v };
+    // continue exige próximos passos
+    assert!(parse(&base(json!({"status":"continue"}))).unwrap_err().contains("next_steps"));
+    assert!(parse(&base(json!({"status":"continue","next_steps":["Ligar o endpoint na UI"]}))).is_ok());
+    // complete exige evidência: evidence, teste passed ou artefato
+    assert!(parse(&base(json!({"status":"complete"}))).unwrap_err().contains("evidência"));
+    assert!(parse(&base(json!({"status":"complete","tests":[{"command":"cargo test","status":"failed"}]}))).is_err());
+    assert!(parse(&base(json!({"status":"complete","tests":[{"command":"cargo test","status":"not_run"}]}))).is_err());
+    assert!(parse(&base(json!({"status":"complete","evidence":["cargo test: 42 passed"]}))).is_ok());
+    assert!(parse(&base(json!({"status":"complete","tests":[{"command":"cargo test","status":"passed"}]}))).is_ok());
+    assert!(parse(&base(json!({"status":"complete","artifacts":[{"label":"Captura","path":"docs/a.png"}]}))).is_ok());
+    // blocked exige bloqueio concreto
+    for vague in [json!([]), json!(["n/a"]), json!(["bloqueado"]), json!(["  TBD  "]), json!(["curto"])] {
+        assert!(parse(&base(json!({"status":"blocked","blockers":vague}))).is_err(), "{vague}");
+    }
+    assert!(parse(&base(json!({"status":"blocked","blockers":["Falta a chave STRIPE_TEST no keyring"]}))).is_ok());
+    // status desconhecido e limites também valem para os campos novos
+    assert!(parse(&base(json!({"status":"done"}))).is_err());
+    assert!(parse(&base(json!({"evidence":vec!["x";MAX_ITEMS+1]}))).is_err());
+    assert!(parse(&base(json!({"blockers":["x".repeat(MAX_TEXT_BYTES+1)]}))).is_err());
+    // o report recusado não é guardado pela metade
+    let conn=test_db();let run=run(&conn);let task=worker(&conn,&run,"Backend");
+    assert!(store::save_handoff(&conn,&task.id,&base(json!({"status":"complete"}))).is_err());
+    assert!(store::task_by_id(&conn,&task.id).unwrap().unwrap().structured_handoff.is_none());
+}
+
+#[test]
+fn v1_1_fields_are_additive_and_v1_payloads_serialize_unchanged() {
+    let v1 = parse(&fixture()).unwrap();
+    assert!(v1.status.is_none() && v1.evidence.is_empty() && v1.blockers.is_empty());
+    let raw = serde_json::to_value(&v1).unwrap();
+    for key in ["status", "evidence", "blockers"] { assert!(raw.get(key).is_none(), "{key} não pode aparecer num v1"); }
+    let v11 = json!({"version":1,"summary":"x","status":"blocked","blockers":["Sem acesso ao repositório privado X"],"evidence":["log"]});
+    let back = serde_json::to_value(parse(&v11).unwrap()).unwrap();
+    for key in ["status", "evidence", "blockers"] { assert_eq!(back[key], v11[key]); }
+    assert_eq!(parse(&back).unwrap(), parse(&v11).unwrap());
+    let props = &schema()["properties"];
+    assert_eq!(props["status"]["enum"], json!(["continue","complete","blocked"]));
+    assert!(props["evidence"].is_object() && props["blockers"].is_object());
+}

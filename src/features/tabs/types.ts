@@ -44,6 +44,10 @@ export interface Tab {
    *  Se guarda el id y no las variables ya resueltas: si la cuenta se renombra o se muda
    *  de carpeta, la tab restaurada sigue apuntando a la cuenta correcta. */
   accountId?: string;
+  /** Integrante de missão que pediu um ambiente sem as credenciais herdadas (ver `runs/sandbox.rs`).
+   *  Só desta corrida, não se persiste: recarregar a janela reanexa o PTY vivo, que já nasceu assim;
+   *  reabrir o app relança a aba sem o filtro. */
+  scrubSecrets?: boolean;
   /** Comandos que corren antes del agente (ver el store `prelaunch`). Se guardan las
    *  referencias a los presets y no su texto, así editar uno alcanza a las tabs guardadas. */
   prelaunch?: PrelaunchStep[];

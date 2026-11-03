@@ -140,6 +140,9 @@ pub fn seed_history_workspace(conn: &Connection) -> Result<TestWorkspaceSummary,
         risks: vec!["Tokens sem expiracao curta sao vulneraveis a replay".into()],
         next_steps: vec!["Integrar com middleware HTTP".into()],
         artifacts: vec![],
+        status: None,
+        evidence: vec![],
+        blockers: vec![],
     };
     let auth_handoff_json = serde_json::to_string(&auth_handoff).map_err(|e| e.to_string())?;
 
@@ -164,6 +167,9 @@ pub fn seed_history_workspace(conn: &Connection) -> Result<TestWorkspaceSummary,
         risks: vec![],
         next_steps: vec![],
         artifacts: vec![],
+        status: None,
+        evidence: vec![],
+        blockers: vec![],
     };
     let server_handoff_json = serde_json::to_string(&server_handoff).map_err(|e| e.to_string())?;
 
