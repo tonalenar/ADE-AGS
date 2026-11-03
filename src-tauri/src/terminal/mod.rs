@@ -25,7 +25,7 @@ mod win_conpty;
 pub use pty_manager::*;
 pub(crate) use pty_manager::open_pty;
 pub use session::SESSION_ENV;
-pub(crate) use session::{authorize, publish_token, register_conversation, release_token};
+pub(crate) use session::{authorize, issue_conversation_token, publish_token, register_conversation, release_token};
 pub(crate) use session::authorize_actor;
 #[cfg(test)]
 pub(crate) use session::ancestry_required;
