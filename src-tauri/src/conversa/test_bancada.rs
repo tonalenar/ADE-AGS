@@ -1,0 +1,505 @@
+//! Os motores, a retomada e o pool de contas na bancada (`bancada.rs`): roteiros com falhas tocados pelos
+//! mapeadores de verdade, sem processo, sem cota e sem relógio. E o replay de protocolo (`replay_protocolo.rs`).
+
+use std::cell::RefCell;
+use std::path::Path;
+use std::time::Duration;
+
+use serde::Deserialize;
+use serde_json::json;
+
+use super::bancada::{abrir, conferir, simular, tocar, Espera, Passo, Protocolo, Roteiro};
+use super::pool::{decide, move_account, reset_at, Decision, Input, Mode};
+use super::resume::{open_resuming, Opened, ResumeFailure, RETRY_PAUSES};
+use crate::runs::failure::FailureKind;
+
+const PROTOCOLOS: [Protocolo; 3] = [Protocolo::ClaudeStream, Protocolo::CodexAppServer, Protocolo::Acp];
+
+fn sem_placeholder(s: &str) -> String {
+    s.to_string()
+}
+
+// ── O fake de agente ──────────────────────────────────────────────────────
+
+mod fake {
+    use super::*;
+
+    #[test]
+    fn o_mesmo_roteiro_vira_o_mesmo_turno_nos_tres_protocolos() {
+        for protocolo in PROTOCOLOS {
+            let r = simular(&Roteiro::new(protocolo, vec![
+                Passo::Sessao { id: "s1".into() },
+                Passo::Texto { texto: "Pronto, rodei os testes.".into(), pedacos: 2 },
+                Passo::Ferramenta { nome: "Bash".into(), entrada: json!({ "command": "cargo test" }), saida: "ok".into(), erro: false },
+                Passo::Fim,
+            ])).unwrap();
+            assert_eq!(r.sessao(), Some("s1"), "{protocolo:?}");
+            assert_eq!(r.ferramentas(), ["Bash:done"], "{protocolo:?}");
+            assert!(r.texto().contains("Pronto, rodei os testes."), "{protocolo:?}: {}", r.texto());
+            assert!(!r.deltas.is_empty(), "{protocolo:?}: os pedaços vão à janela");
+            let fim = r.fim.as_ref().expect("o turno acabou");
+            assert!(!fim.interrupted && fim.error.is_none(), "{protocolo:?}");
+        }
+    }
+
+    #[test]
+    fn os_pedacos_e_o_texto_final_tem_o_mesmo_id() {
+        for protocolo in PROTOCOLOS {
+            let r = simular(&Roteiro::new(protocolo, vec![Passo::Sessao { id: "s".into() }, Passo::Texto { texto: "abcdef".into(), pedacos: 3 }, Passo::Fim])).unwrap();
+            let fala = r.itens.iter().find(|i| i.text.as_deref() == Some("abcdef")).expect("o texto fecha inteiro");
+            assert!(r.deltas.iter().all(|(id, _)| *id == fala.id), "{protocolo:?}: {:?} vs {}", r.deltas, fala.id);
+            assert_eq!(r.deltas.iter().map(|(_, d)| d.as_str()).collect::<String>(), "abcdef", "{protocolo:?}");
+        }
+    }
+
+    #[test]
+    fn a_linha_cortada_e_pulada_e_o_turno_segue() {
+        for protocolo in PROTOCOLOS {
+            let r = simular(&Roteiro::new(protocolo, vec![Passo::Sessao { id: "s".into() }, Passo::JsonMalformado, Passo::Texto { texto: "segui".into(), pedacos: 0 }, Passo::Fim])).unwrap();
+            assert_eq!(r.ignoradas, 1, "{protocolo:?}");
+            assert!(r.texto().contains("segui"), "{protocolo:?}");
+            assert!(r.fim.is_some(), "{protocolo:?}");
+        }
+    }
+
+    #[test]
+    fn a_queda_no_meio_do_turno_vira_erro_com_o_motivo_do_stderr() {
+        for protocolo in PROTOCOLOS {
+            let r = simular(&Roteiro::new(protocolo, vec![
+                Passo::Sessao { id: "s".into() },
+                Passo::Aprovacao { comando: "rm -rf x".into() },
+                Passo::Desconecta { stderr: Some("warning: depreciado\npanic: sem memória\nwarn: tchau".into()) },
+            ])).unwrap();
+            assert!(r.caiu, "{protocolo:?}");
+            // Achado da bancada: o Codex guarda o stderr só no log, e a queda dele chega à tela sem o motivo.
+            let motivo = if protocolo == Protocolo::CodexAppServer { "O processo do Codex fechou no meio do turno" } else { "panic: sem memória" };
+            assert_eq!(r.erro(), Some(motivo), "{protocolo:?}: o aviso não vira o motivo");
+            assert_eq!(r.pedidos.len(), 1, "{protocolo:?}");
+        }
+        let sem_stderr = simular(&Roteiro::new(Protocolo::ClaudeStream, vec![Passo::Sessao { id: "s".into() }, Passo::Desconecta { stderr: None }])).unwrap();
+        assert_eq!(sem_stderr.erro(), Some("O processo do Claude fechou no meio do turno"));
+    }
+
+    #[test]
+    fn aprovacao_e_pergunta_viram_pedidos_a_pessoa() {
+        for protocolo in [Protocolo::ClaudeStream, Protocolo::CodexAppServer] {
+            let r = simular(&Roteiro::new(protocolo, vec![
+                Passo::Sessao { id: "s".into() },
+                Passo::Aprovacao { comando: "git push --force".into() },
+                Passo::Pergunta { pergunta: "Sigo?".into(), opcoes: vec!["Sim".into(), "Não".into()] },
+            ])).unwrap();
+            let kinds: Vec<&str> = r.pedidos.iter().map(|p| p.kind.as_str()).collect();
+            assert_eq!(kinds, ["command", "question"], "{protocolo:?}");
+            assert_eq!(r.pedidos[0].title, "git push --force", "{protocolo:?}");
+        }
+        let acp = simular(&Roteiro::new(Protocolo::Acp, vec![Passo::Sessao { id: "s".into() }, Passo::Aprovacao { comando: "git push --force".into() }])).unwrap();
+        assert_eq!((acp.pedidos[0].kind.as_str(), acp.pedidos[0].title.as_str()), ("command", "git push --force"));
+        assert!(tocar(&Roteiro::new(Protocolo::Acp, vec![Passo::Pergunta { pergunta: "?".into(), opcoes: vec![] }])).is_err(), "o ACP não pergunta");
+    }
+
+    #[test]
+    fn interrupcao_nao_e_erro_e_max_tokens_e_so_no_acp_e_no_codex() {
+        for protocolo in PROTOCOLOS {
+            let r = simular(&Roteiro::new(protocolo, vec![Passo::Sessao { id: "s".into() }, Passo::Interrompido])).unwrap();
+            let fim = r.fim.unwrap();
+            assert!(fim.interrupted && fim.error.is_none(), "{protocolo:?}: {fim:?}");
+        }
+        let max = |p| simular(&Roteiro::new(p, vec![Passo::Sessao { id: "s".into() }, Passo::MaxTokens])).unwrap();
+        assert!(max(Protocolo::Acp).erro().is_some_and(|e| e.contains("limite de tokens")));
+        assert!(max(Protocolo::CodexAppServer).erro().is_some_and(|e| e.contains("max_output_tokens")));
+        // Achado da bancada: o `claude_map` não lê o `stop_reason` da mensagem; um turno cortado no limite de tokens
+        // acaba como "ok" na timeline. Registrado aqui para quem corrigir mudar este teste.
+        assert_eq!(max(Protocolo::ClaudeStream).fim.unwrap().error, None);
+    }
+
+    #[test]
+    fn o_silencio_so_anda_o_relogio_falso() {
+        let r = simular(&Roteiro::new(Protocolo::CodexAppServer, vec![
+            Passo::Sessao { id: "s".into() },
+            Passo::Texto { texto: "antes".into(), pedacos: 0 },
+            Passo::Stall { ms: 9 * 60_000 },
+            Passo::Texto { texto: "depois".into(), pedacos: 0 },
+        ])).unwrap();
+        assert!(r.silencio_max_ms >= 9 * 60_000);
+        assert!(r.fim.is_none(), "o turno ainda está aberto: é o que o Vigia vê como parado");
+        let carimbos: Vec<i64> = r.itens.iter().filter_map(|i| i.at).collect();
+        assert!(carimbos[1] - carimbos[0] >= 9 * 60_000, "os carimbos são do relógio falso: {carimbos:?}");
+    }
+
+    #[test]
+    fn o_modo_aleatorio_e_reproduzivel_pela_semente() {
+        for protocolo in PROTOCOLOS {
+            assert_eq!(Roteiro::aleatorio(protocolo, 7, 8), Roteiro::aleatorio(protocolo, 7, 8));
+            assert_ne!(Roteiro::aleatorio(protocolo, 7, 8), Roteiro::aleatorio(protocolo, 8, 8));
+        }
+    }
+
+    /// Propriedades que valem para qualquer roteiro. Uma falha diz a semente; `BANCADA_SEED=<n>` roda só ela.
+    #[test]
+    fn roteiros_sorteados_nunca_quebram_o_motor() {
+        let sementes: Vec<u64> = match std::env::var("BANCADA_SEED").ok().and_then(|s| s.parse().ok()) {
+            Some(seed) => vec![seed],
+            None => (0..300).collect(),
+        };
+        for protocolo in PROTOCOLOS {
+            for &seed in &sementes {
+                let roteiro = Roteiro::aleatorio(protocolo, seed, 10);
+                let saidas = tocar(&roteiro).unwrap_or_else(|e| panic!("{protocolo:?} semente {seed}: {e}"));
+                let r = super::super::bancada::rodar(protocolo, &saidas);
+                let ctx = format!("{protocolo:?} semente {seed}: {roteiro:?}");
+                let conta = |f: fn(&Passo) -> bool| roteiro.passos.iter().filter(|p| f(p)).count();
+                assert_eq!(r.sessao(), Some(format!("sessao-{seed}").as_str()), "{ctx}");
+                assert_eq!(r.ignoradas, conta(|p| matches!(p, Passo::JsonMalformado)), "{ctx}");
+                assert_eq!(r.pedidos.len(), conta(|p| matches!(p, Passo::Aprovacao { .. } | Passo::Pergunta { .. })), "{ctx}");
+                let mut ids: Vec<&str> = r.itens.iter().map(|i| i.id.as_str()).collect();
+                ids.sort();
+                ids.dedup();
+                assert_eq!(ids.len(), r.itens.len(), "{ctx}: um item não pode aparecer duas vezes");
+                match roteiro.passos.last() {
+                    Some(Passo::Cota { .. }) => assert_eq!(r.classe_para_o_pool(), Some(FailureKind::RateLimited), "{ctx}"),
+                    Some(Passo::Interrompido) => assert_eq!(r.classe_para_o_pool(), None, "{ctx}: parar não troca de conta"),
+                    // O Codex só abre o turno com o primeiro item: cair antes dele não é turno perdido.
+                    Some(Passo::Desconecta { .. }) if protocolo == Protocolo::CodexAppServer && !abriu_turno(&roteiro) => assert!(!r.caiu && r.fim.is_none(), "{ctx}"),
+                    Some(Passo::Desconecta { .. }) => assert!(r.caiu, "{ctx}"),
+                    Some(Passo::Fim) => assert!(r.fim.as_ref().is_some_and(|f| f.error.is_none()), "{ctx}"),
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn abriu_turno(roteiro: &Roteiro) -> bool {
+    roteiro.passos.iter().skip(1).any(|p| !matches!(p, Passo::Stall { .. } | Passo::JsonMalformado | Passo::Desconecta { .. }))
+}
+
+// ── Roteiros em fixture (`conversa/fixtures/roteiros/*.json`) ─────────────────
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RoteiroFixture {
+    id: String,
+    titulo: String,
+    roteiro: Roteiro,
+    espera: Espera,
+}
+
+#[test]
+fn os_roteiros_das_fixtures_cumprem_o_que_prometem() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/conversa/fixtures/roteiros");
+    let mut vistos = 0;
+    let mut falhas = Vec::new();
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        let texto = std::fs::read_to_string(&path).unwrap();
+        let f: RoteiroFixture = serde_json::from_str(&texto).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        assert_eq!(path.file_stem().unwrap().to_string_lossy(), f.id, "o nome do arquivo é o id");
+        assert!(!f.titulo.trim().is_empty());
+        let r = simular(&f.roteiro).unwrap_or_else(|e| panic!("{}: {e}", f.id));
+        falhas.extend(conferir(&f.espera, &r, f.roteiro.protocolo, &sem_placeholder).into_iter().map(|e| format!("{}: {e}", f.id)));
+        vistos += 1;
+    }
+    assert!(vistos >= 3, "as fixtures sumiram de {}", dir.display());
+    assert!(falhas.is_empty(), "{}", falhas.join("\n"));
+}
+
+#[test]
+fn uma_chave_errada_na_espera_nao_passa_calada() {
+    assert!(serde_json::from_value::<Espera>(json!({ "fim": "ok", "clase": "rate_limited" })).is_err());
+    assert!(serde_json::from_value::<Passo>(json!({ "passo": "stall", "segundos": 3 })).is_err());
+}
+
+// ── A retomada (`resume.rs`) com sessões abertas pela bancada ─────────────────
+
+/// `open_resuming` com cada tentativa de retomada tocando o roteiro seguinte; a sessão nova é outro roteiro.
+fn retomar(protocolo: Protocolo, tentativas: Vec<Vec<Passo>>, nova: Vec<Passo>) -> (Result<Opened<String>, String>, usize, Vec<Duration>) {
+    let tentativas = RefCell::new(tentativas.into_iter());
+    let novas = RefCell::new(0usize);
+    let pausas = RefCell::new(Vec::new());
+    let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(open_resuming(
+        || {
+            let passos = tentativas.borrow_mut().next().expect("tentativa a mais");
+            async move { abrir(&Roteiro::new(protocolo, passos)) }
+        },
+        || {
+            *novas.borrow_mut() += 1;
+            let r = abrir(&Roteiro::new(protocolo, nova.clone())).map_err(ResumeFailure::into_message);
+            async move { r }
+        },
+        |wait| {
+            pausas.borrow_mut().push(wait);
+            async {}
+        },
+    ));
+    (out, *novas.borrow(), pausas.into_inner())
+}
+
+mod retomada {
+    use super::*;
+
+    fn sessao(id: &str) -> Vec<Passo> {
+        vec![Passo::Sessao { id: id.into() }]
+    }
+
+    #[test]
+    fn a_thread_que_o_codex_recusa_abre_outra_e_avisa() {
+        let (out, novas, pausas) = retomar(Protocolo::CodexAppServer, vec![vec![Passo::Recusa { mensagem: "no rollout found for thread id thr_9".into() }]], sessao("thr_nova"));
+        assert_eq!(out, Ok(Opened { session: "thr_nova".into(), lost: Some("no rollout found for thread id thr_9".into()) }));
+        assert_eq!((novas, pausas.len()), (1, 0), "a recusa do servidor é `Gone`: sem retentativa");
+    }
+
+    #[test]
+    fn o_claude_que_nao_acha_a_sessao_abre_outra() {
+        let (out, novas, _) = retomar(Protocolo::ClaudeStream, vec![vec![Passo::Recusa { mensagem: "No conversation found with session ID: abc".into() }]], sessao("nova"));
+        assert_eq!(out.unwrap().lost.as_deref(), Some("No conversation found with session ID: abc"));
+        assert_eq!(novas, 1);
+    }
+
+    #[test]
+    fn o_silencio_na_abertura_e_prazo_e_nao_troca_a_sessao() {
+        for protocolo in PROTOCOLOS {
+            let (out, novas, _) = retomar(protocolo, vec![vec![Passo::Stall { ms: 61_000 }, Passo::Sessao { id: "tarde".into() }]], sessao("nova"));
+            let erro = out.unwrap_err();
+            assert!(erro.contains("Ela foi mantida") && erro.contains("não respondeu"), "{protocolo:?}: {erro}");
+            assert_eq!(novas, 0, "{protocolo:?}: a sessão pode existir");
+        }
+        // 59 s ainda está no prazo.
+        let (out, _, _) = retomar(Protocolo::Acp, vec![vec![Passo::Stall { ms: 59_000 }, Passo::Sessao { id: "a-tempo".into() }]], sessao("nova"));
+        assert_eq!(out.unwrap(), Opened { session: "a-tempo".into(), lost: None });
+    }
+
+    #[test]
+    fn o_processo_que_cai_ao_abrir_tenta_de_novo_e_nao_esquece_se_voltar() {
+        for protocolo in PROTOCOLOS {
+            let caiu = vec![Passo::Desconecta { stderr: None }];
+            let (out, novas, pausas) = retomar(protocolo, vec![caiu.clone(), sessao("antiga")], sessao("nova"));
+            assert_eq!(out, Ok(Opened { session: "antiga".into(), lost: None }), "{protocolo:?}");
+            assert_eq!((novas, pausas), (0, vec![RETRY_PAUSES[0]]), "{protocolo:?}");
+            let (out, novas, pausas) = retomar(protocolo, vec![caiu.clone(), caiu.clone(), caiu], sessao("nova"));
+            assert_eq!(out.unwrap().lost.as_deref(), Some(format!("O processo do {} fechou", match protocolo {
+                Protocolo::ClaudeStream => "Claude",
+                Protocolo::CodexAppServer => "Codex",
+                Protocolo::Acp => "OpenCode",
+            }).as_str()), "{protocolo:?}");
+            assert_eq!((novas, pausas), (1, RETRY_PAUSES.to_vec()), "{protocolo:?}");
+        }
+    }
+}
+
+// ── O pool de contas (`pool.rs`) com o erro que o motor produziu ──────────────
+
+mod pool {
+    use super::*;
+
+    /// 11:34 locais (UTC-3), como em `pool_test.rs`.
+    const AGORA: i64 = 1_793_543_640;
+    const FUSO: i64 = -3 * 3600;
+    const COTA: &str = "You've hit your limit · resets 3pm (America/Sao_Paulo)";
+
+    fn turno_que_esgota(protocolo: Protocolo, sessao: &str) -> super::super::bancada::Resultado {
+        simular(&Roteiro::new(protocolo, vec![
+            Passo::Sessao { id: sessao.into() },
+            Passo::Texto { texto: "trabalhando".into(), pedacos: 0 },
+            Passo::Cota { mensagem: COTA.into() },
+        ])).unwrap()
+    }
+
+    fn decisao(mode: Mode, kind: FailureKind, switched_this_turn: bool, history: &[i64]) -> Decision {
+        decide(Input { mode, kind, bound_to_pool: true, switched_this_turn, history, now: AGORA, next: Ok(Some("b".into())) })
+    }
+
+    #[test]
+    fn a_cota_de_qualquer_motor_chega_ao_pool_como_limite_com_a_hora_da_renovacao() {
+        for protocolo in PROTOCOLOS {
+            let r = turno_que_esgota(protocolo, "s");
+            let erro = r.erro().unwrap_or_else(|| panic!("{protocolo:?}: o turno falhou"));
+            assert_eq!(r.classe_para_o_pool(), Some(FailureKind::RateLimited), "{protocolo:?}: {erro}");
+            assert_eq!(reset_at(erro, AGORA, FUSO), AGORA + 3 * 3600 + 26 * 60, "{protocolo:?}: renova às 15:00 locais");
+            assert_eq!(decisao(Mode::Auto, FailureKind::RateLimited, false, &[]), Decision::Switch { to: Some("b".into()) });
+        }
+    }
+
+    #[test]
+    fn parar_ou_cair_nao_troca_de_conta() {
+        let parado = simular(&Roteiro::new(Protocolo::ClaudeStream, vec![Passo::Sessao { id: "s".into() }, Passo::Interrompido])).unwrap();
+        assert_eq!(parado.classe_para_o_pool(), None);
+        let caiu = simular(&Roteiro::new(Protocolo::ClaudeStream, vec![Passo::Sessao { id: "s".into() }, Passo::Desconecta { stderr: Some("Segmentation fault".into()) }])).unwrap();
+        let kind = caiu.classe_para_o_pool().unwrap();
+        assert_eq!(decisao(Mode::Auto, kind, false, &[]), Decision::Skip, "só o limite troca de conta");
+    }
+
+    #[test]
+    fn a_troca_abre_sessao_nova_na_outra_conta_e_a_segunda_cota_nao_encadeia() {
+        let db = {
+            let conn = crate::database::test_db();
+            super::super::store::migrate(&conn).unwrap();
+            let tuning = super::super::store::Tuning { model: None, effort: None, access: "ask".into() };
+            super::super::store::insert_thread(&conn, "t1", "claude-code", "/tmp/p", "Título", &tuning, Some("a"), 1).unwrap();
+            std::sync::Arc::new(std::sync::Mutex::new(conn))
+        };
+        // 1º turno na conta A: a sessão é gravada, e o turno esgota.
+        let primeiro = turno_que_esgota(Protocolo::ClaudeStream, "sessao-da-conta-a");
+        {
+            let conn = db.lock().unwrap();
+            super::super::store::set_remote_id(&conn, "t1", primeiro.sessao().unwrap()).unwrap();
+        }
+        let kind = primeiro.classe_para_o_pool().unwrap();
+        let Decision::Switch { to } = decisao(Mode::Auto, kind, false, &[]) else { panic!("devia trocar") };
+        move_account(&db, "t1", &Some("a".into()), &to, reset_at(primeiro.erro().unwrap(), AGORA, FUSO), AGORA).unwrap();
+        let row = super::super::api::thread(&db, "t1").unwrap();
+        assert_eq!((row.account_id.as_deref(), row.remote_id.as_deref()), (Some("b"), None), "a conta B não retoma a sessão da A");
+
+        // 2º turno, na conta B: sem `remote_id`, a conversa abre do zero (outra sessão) e esgota de novo logo depois.
+        let segundo = turno_que_esgota(Protocolo::ClaudeStream, "sessao-da-conta-b");
+        assert_ne!(segundo.sessao(), primeiro.sessao());
+        let history = [AGORA];
+        assert!(matches!(decisao(Mode::Auto, segundo.classe_para_o_pool().unwrap(), true, &history), Decision::Blocked(_)), "não encadeia trocas no mesmo turno");
+        // Perguntar em vez de trocar: a mesma cota vira a pergunta.
+        assert_eq!(decisao(Mode::Ask, FailureKind::RateLimited, false, &history), Decision::Ask { to: Some("b".into()) });
+    }
+}
+
+// ── O replay de protocolo (`ade-replay` v2) ──────────────────────────────────
+
+mod replay_protocolo {
+    use serde_json::Value;
+
+    use super::super::replay_protocolo::*;
+
+    fn fixture(transcript: Value, protocol: &str) -> String {
+        serde_json::json!({
+            "format": "ade-replay", "version": 2, "kind": "protocolo", "id": "x", "agent": "claude-code", "protocol": protocol,
+            "title": "t", "origin": { "kind": "synthesized", "basis": "teste" }, "transcript": transcript,
+        }).to_string()
+    }
+
+    fn oraculo(checks: Value) -> Oraculo {
+        ler_oraculo(&serde_json::json!({ "checks": checks }).to_string()).unwrap()
+    }
+
+    /// Todas as fixtures da pasta, no modo pedido (`ADE_REPLAY_MODE`). `refresh` regrava só o `expected` do
+    /// `<id>.json`, e só se o oráculo passar.
+    #[test]
+    fn as_fixtures_de_protocolo_batem_com_o_oraculo_e_o_snapshot() {
+        let modo = Modo::do_ambiente().unwrap();
+        if modo == Modo::Record {
+            return;
+        }
+        let pares = fixtures(&pasta()).unwrap();
+        assert!(pares.len() >= 3, "as fixtures sumiram de {}", pasta().display());
+        let mut falhas = Vec::new();
+        for (arquivo, arquivo_oraculo) in pares {
+            let texto = std::fs::read_to_string(&arquivo).unwrap();
+            let resultado = (|| {
+                let f = ler(&texto)?;
+                if arquivo.file_stem().map(|s| s.to_string_lossy().into_owned()) != Some(f.id.clone()) {
+                    return Err(format!("{}: o nome do arquivo é o id", arquivo.display()));
+                }
+                let o = std::fs::read_to_string(&arquivo_oraculo).map_err(|_| format!("{}: falta o oráculo {}", f.id, arquivo_oraculo.display()))?;
+                let novo = tocar(&f, &ler_oraculo(&o)?)?;
+                match modo {
+                    Modo::Refresh => std::fs::write(&arquivo, com_snapshot(&texto, &novo)?).map_err(|e| e.to_string()),
+                    _ => conferir_snapshot(&f, &novo),
+                }
+            })();
+            if let Err(e) = resultado {
+                falhas.push(e);
+            }
+        }
+        assert!(falhas.is_empty(), "{}", falhas.join("\n\n"));
+    }
+
+    /// `ADE_REPLAY_MODE=record ADE_REPLAY_SOURCE=<.jsonl> ADE_REPLAY_ID=<id> ADE_REPLAY_PROTOCOL=<protocolo>
+    /// [ADE_REPLAY_AGENT=…] [ADE_REPLAY_CWD=…]`: cria a fixture e um oráculo vazio (que reprova até ser escrito).
+    #[test]
+    fn gravar_fixture_de_protocolo() {
+        if Modo::do_ambiente() != Ok(Modo::Record) {
+            return;
+        }
+        let var = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("record precisa de {k}"));
+        let id = var("ADE_REPLAY_ID");
+        let jsonl = std::fs::read_to_string(var("ADE_REPLAY_SOURCE")).unwrap();
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok();
+        let cwd = std::env::var("ADE_REPLAY_CWD").ok();
+        let agent = std::env::var("ADE_REPLAY_AGENT").unwrap_or_else(|_| "claude-code".into());
+        let texto = gravar(&id, &agent, &var("ADE_REPLAY_PROTOCOL"), &jsonl, cwd.as_deref(), home.as_deref()).unwrap();
+        let destino = pasta().join(format!("{id}.json"));
+        assert!(!destino.exists(), "{} já existe: apague antes de gravar de novo", destino.display());
+        std::fs::write(&destino, texto).unwrap();
+        let oraculo = pasta().join(format!("{id}.oracle.json"));
+        if !oraculo.exists() {
+            std::fs::write(oraculo, "{\n  \"checks\": []\n}\n").unwrap();
+        }
+    }
+
+    #[test]
+    fn os_placeholders_sao_tipados() {
+        assert_eq!(expandir("{{session:2}} em {{cwd}}").unwrap(), format!("{} em {CWD}", session_id(2)));
+        assert!(expandir("{{sesion:1}}").unwrap_err().contains("desconhecido"));
+        assert!(expandir("{{session:0}}").is_err() && expandir("{{session}}").is_err() && expandir("{{cwd:1}}").is_err());
+        assert_eq!(recolocar(&format!("{} {CWD}/a {HOME}", session_id(3)), 5), "{{session:3}} {{cwd}}/a {{home}}");
+    }
+
+    #[test]
+    fn gravar_troca_uuids_e_caminhos_por_placeholders_e_recusa_segredo() {
+        let a = "11111111-2222-3333-4444-555555555555";
+        let b = "99999999-8888-7777-6666-555555555555";
+        let jsonl = format!("{{\"session_id\":\"{a}\",\"cwd\":\"/Users/ton/p\"}}\n{{\"x\":\"{b}\",\"y\":\"{a}\",\"h\":\"/Users/ton/.claude\"}}\nnao-json\n");
+        let texto = gravar("g", "claude-code", "claude-stream", &jsonl, Some("/Users/ton/p"), Some("/Users/ton")).unwrap();
+        assert!(!texto.contains(a) && !texto.contains("/Users/ton"), "{texto}");
+        assert!(texto.contains("{{session:1}}") && texto.contains("{{session:2}}") && texto.contains("{{cwd}}") && texto.contains("{{home}}/.claude"));
+        assert!(texto.contains("\"raw\": \"nao-json\""));
+        let f = ler(&texto).unwrap();
+        assert_eq!(f.transcript.len(), 3);
+        assert!(gravar("g", "claude-code", "claude-stream", "{\"x\":\"Authorization: Bearer abc.def.ghi\"}", None, None).is_err());
+    }
+
+    #[test]
+    fn o_guard_recusa_ferramenta_desconhecida() {
+        let texto = fixture(serde_json::json!([
+            { "atMs": 0, "out": { "type": "system", "subtype": "init", "session_id": "{{session:1}}" } },
+            { "atMs": 10, "out": { "type": "assistant", "message": { "id": "m", "content": [{ "type": "tool_use", "id": "t1", "name": "FerramentaNova", "input": {} }] } } },
+        ]), "claude-stream");
+        let f = ler(&texto).unwrap();
+        let erro = tocar(&f, &oraculo(serde_json::json!([{ "label": "abre", "expect": { "sessao": "{{session:1}}" } }]))).unwrap_err();
+        assert!(erro.contains("FerramentaNova") && erro.contains("não conhece"), "{erro}");
+    }
+
+    #[test]
+    fn sem_oraculo_ou_com_formato_errado_nao_roda() {
+        assert!(ler_oraculo("{\"checks\": []}").unwrap_err().contains("ao menos um"));
+        assert!(ler_oraculo("{\"checks\": [{\"label\": \"x\", \"expect\": {\"fimm\": \"ok\"}}]}").is_err());
+        let v1 = fixture(serde_json::json!([]), "acp").replace("\"version\":2", "\"version\":1");
+        assert!(ler(&v1).is_err());
+        let dois = fixture(serde_json::json!([{ "atMs": 0, "out": {}, "raw": "x" }]), "acp");
+        assert!(ler(&dois).unwrap_err().contains("exatamente um"));
+    }
+
+    /// O ponto do oráculo: um mapeador que regrediu muda o snapshot, e o refresh gravaria a regressão como certa.
+    /// Com o oráculo escrito à mão, o `tocar` falha antes de qualquer escrita.
+    #[test]
+    fn o_refresh_nao_aprova_uma_regressao() {
+        let texto = fixture(serde_json::json!([
+            { "atMs": 0, "out": { "type": "system", "subtype": "init", "session_id": "{{session:1}}" } },
+            { "atMs": 10, "out": { "type": "result", "subtype": "success", "is_error": true, "result": "You've hit your limit" } },
+        ]), "claude-stream");
+        let f = ler(&texto).unwrap();
+        let certo = oraculo(serde_json::json!([{ "label": "esgotou", "expect": { "fim": "erro", "classe": "rate_limited" } }]));
+        assert!(tocar(&f, &certo).is_ok());
+        // A "regressão": o oráculo diz uma coisa e o motor faz outra.
+        let errado = oraculo(serde_json::json!([{ "label": "acabou bem", "expect": { "fim": "ok" } }]));
+        let erro = tocar(&f, &errado).unwrap_err();
+        assert!(erro.contains("o refresh não regrava"), "{erro}");
+    }
+
+    #[test]
+    fn o_refresh_so_troca_o_expected() {
+        let texto = fixture(serde_json::json!([]), "acp");
+        let novo = com_snapshot(&texto, &serde_json::json!({ "sessao": null })).unwrap();
+        let antes: Value = serde_json::from_str(&texto).unwrap();
+        let mut depois: Value = serde_json::from_str(&novo).unwrap();
+        assert_eq!(depois["expected"], serde_json::json!({ "sessao": null }));
+        depois.as_object_mut().unwrap().remove("expected");
+        assert_eq!(antes, depois);
+    }
+}

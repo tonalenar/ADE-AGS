@@ -9,6 +9,12 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
 
+## Processo e qualidade (pontos 23–25 da análise do deepseek-harness)
+
+- **Postmortems numerados** em [postmortem/](./postmortem/README.md): 0001 Vigia segundos × ms (A1), 0002 HMR derrubando PTYs, 0003 sessão `opencode_stream` (A2), 0004 avisos repetidos do Vigia.
+- **Fingerprint** SHA-256 do schema SQLite e do protocolo IPC, com registro de reconhecimento obrigatório no CI: [FINGERPRINT.md](../decisoes/FINGERPRINT.md).
+- **Bench de complexidade** com gate por razão e orçamento calibrado (`digest`, transcript do canal, scrollback do PTY): [bench/COMPLEXIDADE.md](./bench/COMPLEXIDADE.md). Achou e corrigiu um O(n²) no `digest` (13,26× → 1,22×).
+
 ## Conector opcional de leitura do ai-memory
 
 Backend com detecção de versão, status e leitura de bastões/páginas por subprocesso, sempre marcado `UNTRUSTED`. Não instala, captura, aceita bastões nem importa memória. Sessões recentes usam bridge MCP temporário com workspace/projeto explícitos e apenas `memory_briefing`. Novas abas do Claude podem somar MCP session-aware e hooks nativos; Codex/OpenCode usam intermediário MCP com workspace/projeto fixos, somente quando a pasta identifica um único projeto, com ajuste `ai_memory_tabs_enabled` e sem escrita nas configurações globais dos agentes. A ação explícita “Continuar com outro agente” apresenta preview não consumidor e, após confirmação, abre uma nova aba Claude via `ai-memory run`, preservando a origem; sem handoff abre normalmente. Contrato dos comandos e DTOs em [AI_MEMORY_CONNECTOR.md](./AI_MEMORY_CONNECTOR.md).
@@ -382,6 +388,10 @@ O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro
 ## Testes por replay das telas dos agentes
 
 Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).
+
+## Bancada dos motores por protocolo
+
+Fake de agente com falhas roteirizadas (stall, JSON cortado, queda, cota, `max_tokens`, aprovação, pergunta, modo aleatório com semente) tocado nos mapeadores reais de `claude -p`, `codex app-server` e ACP; replay de transcript de protocolo (`ade-replay` v2) com placeholders tipados, modos `replay`/`refresh`/`record`, oráculo que o refresh não reescreve e guard de ferramenta desconhecida; mock de `invoke` por nome com `assertNoUnmatched()` no front. Usado nos testes de `resume.rs` e do pool de contas. Achou: a queda do Codex sem motivo, o Codex que esgota sem acionar o pool e o `max_tokens` do Claude que acaba como "ok". Uso e limites: [BANCADA_MOTORES.md](./BANCADA_MOTORES.md).
 
 ## Pontos de restauração das abas
 

@@ -1,0 +1,21 @@
+{
+  "id": "codex-aprovacao-json-quebrado-e-queda",
+  "titulo": "Codex: pede aprovação, escreve uma linha cortada e o processo cai no meio do turno",
+  "roteiro": {
+    "protocolo": "codex-app-server",
+    "passos": [
+      { "passo": "sessao", "id": "thr_1" },
+      { "passo": "aprovacao", "comando": "rm -rf build" },
+      { "passo": "jsonMalformado" },
+      { "passo": "pergunta", "pergunta": "Apago também o cache?", "opcoes": ["Sim", "Não"] },
+      { "passo": "desconecta", "stderr": "thread 'main' panicked at src/lib.rs:9\nerror: conexão perdida" }
+    ]
+  },
+  "espera": {
+    "fim": "caiu",
+    "erroContem": "O processo do Codex fechou no meio do turno",
+    "pedidos": ["command", "question"],
+    "ignoradas": 1,
+    "classeParaOPool": "other"
+  }
+}
