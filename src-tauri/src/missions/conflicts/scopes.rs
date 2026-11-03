@@ -351,7 +351,10 @@ mod test {
         }
         let found = run_overlaps(&conn, &run.id).unwrap();
         assert_eq!(found.len(), 1);
-        assert_eq!((found[0].a.as_str(), found[0].b.as_str()), ("API", "Mais API"));
+        // As tarefas nascem no mesmo milissegundo: a ordem do par não é garantida.
+        let mut pair = [found[0].a.as_str(), found[0].b.as_str()];
+        pair.sort();
+        assert_eq!(pair, ["API", "Mais API"]);
         assert_eq!(mission_overlaps(&conn, "m").unwrap(), found, "sem mensagens, só a frota");
     }
 }
