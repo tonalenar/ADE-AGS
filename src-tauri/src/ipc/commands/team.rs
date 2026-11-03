@@ -302,7 +302,9 @@ pub(super) fn team_create(app: &AppHandle, args: &Value) -> Result<Value, String
 /// O time que `from` coordena, ou o erro que explica.
 fn led_team(db: &DbConnection, from: &str) -> Result<api::TeamView, String> {
     with_conn(db, |conn| {
-        let team = store::team_led_by(conn, from)?.ok_or("Só o orquestrador do time liga, desliga e muda o papel dos integrantes (veja `ags team list`).")?;
+        let team = store::team_led_by(conn, from)?
+            .filter(|t| t.origin != store::ORIGIN_MISSION)
+            .ok_or("Só o orquestrador do time liga, desliga e muda o papel dos integrantes (veja `ags team list`).")?;
         api::view(conn, team)
     })
 }

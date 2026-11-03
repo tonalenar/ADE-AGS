@@ -820,3 +820,83 @@ fn as_refs_de_missao_vem_so_dos_quadros_de_missao() {
     let refs = mission_refs(&boards);
     assert!(refs.contains("lead") && refs.contains("w1") && !refs.contains("solta"));
 }
+
+fn mirror(mission: &str, orchestrator: &str, members: &[&str]) -> api::MissionMirror {
+    api::MissionMirror {
+        team: NewTeam {
+            orchestrator: orchestrator.into(),
+            agent_id: "claude-code".into(),
+            label: "Orquestrador".into(),
+            cwd: "/r".into(),
+            title: "Missão X".into(),
+            board_key: Some(format!("/r#m:{mission}")),
+            mission_id: Some(mission.into()),
+            ..Default::default()
+        },
+        members: members.iter().map(|m| member(m, "backend")).collect(),
+    }
+}
+
+#[test]
+fn o_espelho_da_missao_grava_a_origem_e_os_integrantes() {
+    let conn = db();
+    let out = api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-b"]), 1).unwrap();
+    assert_eq!(out.team.team.origin, store::ORIGIN_MISSION);
+    assert_eq!(out.team.team.mission_id.as_deref(), Some("m1"));
+    assert_eq!(out.team.team.board_key.as_deref(), Some("/r#m:m1"));
+    assert_eq!(out.team.members.len(), 2);
+    assert!(out.skipped.is_empty());
+}
+
+#[test]
+fn o_espelho_e_idempotente_e_troca_o_roster() {
+    let conn = db();
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-b"]), 1).unwrap();
+    let again = api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-c"]), 2).unwrap();
+    assert_eq!(store::teams(&conn).unwrap().len(), 1, "regravar não duplica");
+    assert_eq!(again.team.members.iter().map(|m| m.member.as_str()).collect::<Vec<_>>(), ["tab-a", "tab-c"]);
+}
+
+#[test]
+fn o_espelho_nao_muda_o_escopo_o_alias_nem_a_politica_da_missao() {
+    let conn = db();
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a"]), 1).unwrap();
+    assert_eq!(api::scope_of(&conn, "tab-lead"), None, "o chat da equipe da missão segue sendo m:<id>");
+    assert_eq!(api::scope_of(&conn, "tab-a"), None);
+    assert!(api::team_of(&conn, "tab-a").unwrap().is_none(), "o espelho não é o time do chat");
+    assert_eq!(store::teams(&conn).unwrap().len(), 1, "mas a lista (a sidebar) o enxerga");
+}
+
+#[test]
+fn o_espelho_conta_no_um_time_so() {
+    let conn = db();
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a"]), 1).unwrap();
+    let chat = team(&conn, "tab-9");
+    assert!(api::link(&conn, &chat, member("tab-a", "qa"), false, 2).unwrap_err().contains("outro time"));
+    assert!(api::rebind(&conn, "tab-9", "tab-a", 3).unwrap_err().contains("já está em um time"));
+}
+
+#[test]
+fn o_espelho_nao_toma_quem_ja_e_de_um_time_do_chat() {
+    let conn = db();
+    let chat = team(&conn, "tab-9");
+    api::link(&conn, &chat, member("tab-a", "qa"), false, 2).unwrap();
+    let out = api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-b"]), 3).unwrap();
+    assert_eq!(out.skipped.iter().map(|s| s.member.as_str()).collect::<Vec<_>>(), ["tab-a"]);
+    assert_eq!(out.team.members.len(), 1);
+    assert!(api::mirror_mission(&conn, mirror("m2", "tab-9", &[]), 4).is_err(), "orquestrador de time do chat");
+    assert!(api::team_of(&conn, "tab-a").unwrap().is_some_and(|v| v.team.id == chat), "o time do chat não é tocado");
+}
+
+#[test]
+fn desespelhar_tira_so_a_linha_da_missao() {
+    let conn = db();
+    let chat = team(&conn, "tab-9");
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a"]), 1).unwrap();
+    assert!(api::unmirror_mission(&conn, "m1").unwrap());
+    assert!(!api::unmirror_mission(&conn, "m1").unwrap(), "idempotente");
+    let left = store::teams(&conn).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].id, chat);
+    assert!(api::mirror_mission(&conn, mirror("", "tab-x", &[]), 2).is_err());
+}

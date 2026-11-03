@@ -38,7 +38,7 @@ const isArchived = (m: MissionSummary) => isArchivedMission(m);
  * plegadas, las archivadas (terminadas, canceladas o fallidas). Un clic lleva al canvas de la
  * misión; "iniciar" abre su equipo en terminales.
  */
-export function MissionsSection() {
+export function MissionsSection({ cwd: cwdOverride }: { cwd?: string | null } = {}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const workspaceId = useTabsStore((s) => s.workspaceId);
@@ -46,7 +46,9 @@ export function MissionsSection() {
   const pending = usePendingMemoryStore((s) => s.counts);
   const pendingTotal = totalPending(pending);
   const tabs = useTabsStore((s) => s.tabs);
-  const cwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? "");
+  const activeCwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? "");
+  // No chat a conversa aberta pode ser por protocolo (sem aba): quem monta a sidebar diz a pasta.
+  const cwd = activeCwd || cwdOverride || "";
   const missions = useMissionsStore((s) => s.missions);
   const load = useMissionsStore((s) => s.load);
   const squads = useSquadsStore((s) => s.squads);
@@ -56,7 +58,6 @@ export function MissionsSection() {
   const index = useMissionIndex();
   const open = useMemo(() => tabsByMission(index, tabs), [index, tabs]);
   const activeTabId = useTabsStore((s) => s.activeTabId);
-  const activateTab = useTabsStore((s) => s.activateTab);
   const [showArchived, setShowArchived] = useState(false);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -133,7 +134,6 @@ export function MissionsSection() {
     const mine = open[m.id]?.length ?? 0;
     const active = !!activeTabId && open[m.id]?.includes(activeTabId);
     const runless = m.status === "running" && m.activeRunId === null;
-    const terminals = (open[m.id] ?? []).map((id) => tabs.find((tab) => tab.id === id)).filter((tab) => !!tab);
     return (
       <div key={m.id}>
       <div
@@ -182,17 +182,6 @@ export function MissionsSection() {
           </span>
         )}
       </div>
-      {/* Sus terminales, agrupadas debajo: cada una con lo que hace. */}
-      {terminals.map((tab) => (
-        <button key={tab!.id} type="button"
-          onClick={() => { activateTab(tab!.id); navigate("/workspace"); }}
-          className={`flex items-center gap-2 w-full h-6 pl-7 pr-2 mx-1 rounded-md text-left text-[11.5px] ${tab!.id === activeTabId
-            ? "text-gray-900 dark:text-white bg-accent-500/15"
-            : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/5"}`}>
-          <span className="w-1 h-1 rounded-full bg-gray-400 dark:bg-white/30 shrink-0" />
-          <span title={tab!.title} className="truncate">{tab!.title}</span>
-        </button>
-      ))}
       </div>
     );
   };

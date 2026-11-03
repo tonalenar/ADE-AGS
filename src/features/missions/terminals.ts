@@ -12,6 +12,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
 
 import { getAutonomy, withAutonomy } from "./autonomy";
+import { mirrorInput, mirrorMission } from "./mirror";
 import { withModel } from "./modelFlags";
 import { STALL_GRACE_MS, shouldWarnStalled, startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
 import { useStallAlerts } from "./stallAlerts";
@@ -492,6 +493,18 @@ export async function startMissionInTerminals(
     memberTabIds.map((tabId, i) => ({ tabId, roleId: team[i].roleId ? team[i].roleLabel : null, subagent: team[i].subagent })),
   );
   setWorkMode(key, "canvas");
+  // O chat, as abas e o canvas passam a mostrar o grupo "Missão X". Só uma linha-espelho no banco (a missão
+  // segue dona de tudo) e, se falhar, a missão segue sem o espelho.
+  const mirror = mirrorInput({
+    mission: { id: mission.id, title: mission.title, cwd: mission.cwd },
+    boardKey: key,
+    lead: leadAgentId === "gemini-desktop" ? null : { tabId: leadTabId, agentId: leadAgentId, label: LEAD_NAME },
+    members: team.flatMap((m, i) => (m.agentId === "gemini-desktop" ? [] : [{
+      tabId: memberTabIds[i], agentId: m.agentId, name: m.name, roleLabel: m.roleId ? m.roleLabel : "", subagent: m.subagent,
+      branch: memberWorkspaces[i].branch, worktree: memberWorkspaces[i].root,
+    }])),
+  });
+  if (mirror) void mirrorMission(mirror).catch((e) => console.warn("[missão] espelho no chat:", e));
   const firstTerminal = leadAgentId === "gemini-desktop" ? memberTabIds.find((_,i) => team[i].agentId !== "gemini-desktop") : leadTabId;
   if (firstTerminal) activateTab(firstTerminal);
   if (desktopCount) (await import("@/features/tabs/viewStore")).useViewTabsStore.getState().openGemini(mission.cwd);

@@ -4161,6 +4161,8 @@
   "chat.team.thread": "conversación en el chat",
   "chat.team.tab": "pestaña (TUI)",
   "chat.team.badge": "EQUIPO · {{n}}",
+  "chat.team.missionBadge": "MISIÓN · {{n}}",
+  "chat.team.missionBadgeTitle": "{{title}}: abrir la pantalla de misiones",
   "chat.team.orchestratorBadge": "Orquestador · {{agent}}",
   "chat.team.memberBadge": "Equipo · {{role}}",
   "chat.team.roles.orchestrator": "Orquestador",

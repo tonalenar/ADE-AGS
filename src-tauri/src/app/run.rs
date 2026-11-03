@@ -376,6 +376,8 @@ pub fn run() {
             crate::chat_team::chat_team_unlead,
             crate::chat_team::chat_team_lead,
             crate::chat_team::chat_team_rebind,
+            crate::chat_team::chat_team_mission_mirror,
+            crate::chat_team::chat_team_mission_unmirror,
             crate::chat_team::chat_team_feed,
             crate::chat_team::chat_team_handoff,
             crate::chat_team::chat_team_notice,

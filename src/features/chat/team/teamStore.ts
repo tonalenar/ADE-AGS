@@ -24,6 +24,8 @@ import {
   type TeamFeedItem, type TeamPolicy, type TeamView,
 } from "./ipc";
 import { chatTeamAllowTools, chatTeamAutoDecide, chatTeamWatch, chatTeamWatchStall } from "../permissions/ipc";
+import { splitMirrors } from "@/features/missions/mirror";
+
 import { canvasPlan, runCanvasPlan } from "./teamCanvas";
 import { useTeamIndex } from "./teamIndex";
 import { projectCanvas, promotePlan, reversePlan, roleIdOfLabel, type CanvasProjection, type PromoteAgent, type PromoteOp, type ReverseOp } from "./teamMirror";
@@ -36,6 +38,11 @@ import { conversationAccess, defaultPolicy, TEAM_ROLES, type ComposerTarget } fr
  */
 interface TeamState {
   teams: TeamView[];
+  /**
+   * Os espelhos de missão (`origin = "mission"`): só a sidebar e as abas os mostram. Ficam FORA de `teams` de
+   * propósito: política, canvas, vigia e composer do chat não valem para eles (a missão é dona de tudo isso).
+   */
+  missionTeams: TeamView[];
   loaded: boolean;
   /** O fio de cada time, por id. */
   feeds: Record<string, TeamFeedItem[]>;
@@ -49,7 +56,7 @@ interface TeamState {
   adding: Record<string, boolean>;
 }
 
-export const useTeamStore = create<TeamState>(() => ({ teams: [], loaded: false, feeds: {}, targets: {}, told: {}, sendErrors: {}, adding: {} }));
+export const useTeamStore = create<TeamState>(() => ({ teams: [], missionTeams: [], loaded: false, feeds: {}, targets: {}, told: {}, sendErrors: {}, adding: {} }));
 // A grade das Abas lê a lista daqui, sem depender deste módulo (ver `teamIndex.ts`).
 useTeamStore.subscribe((state, prev) => { if (state.teams !== prev.teams) useTeamIndex.setState({ teams: state.teams }); });
 
@@ -60,8 +67,8 @@ function upsertTeam(team: TeamView): void {
 }
 
 export async function reloadTeams(): Promise<TeamView[]> {
-  const teams = await chatTeamList();
-  useTeamStore.setState({ teams, loaded: true });
+  const { teams, missionTeams } = splitMirrors(await chatTeamList());
+  useTeamStore.setState({ teams, missionTeams, loaded: true });
   return teams;
 }
 

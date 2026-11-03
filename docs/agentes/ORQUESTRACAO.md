@@ -49,6 +49,8 @@
 ## Missão em terminais: "iniciar time"
 O fluxo está em `src/features/missions/terminals.ts::startMissionInTerminals` e `src-tauri/src/missions/team.rs`.
 
+Ao fim, o front grava a **linha-espelho** `origin = 'mission'` no `chat_team` (`chat_team_mission_mirror`) para o chat, as abas e o canvas mostrarem o grupo "Missão X"; ela sai quando a missão fecha. Não funde a missão no roster do chat e é invisível a escopo, política, alias de peer e vigia do chat. Ver [MODO_CHAT.md](../ade-ags/MODO_CHAT.md#missão-no-chat-nas-abas-e-no-canvas-e5).
+
 1. **Valida tudo antes de qualquer efeito.**
    - `teamOf(squad)` monta um integrante por membro.
    - `agentFor` confere a instalação e monta o comando com modelo, esforço e Fast.
