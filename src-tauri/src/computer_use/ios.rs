@@ -23,6 +23,9 @@ fn active() -> &'static Mutex<HashSet<String>> {
 }
 // Guarda persistente, sem valor digitado: reiniciar o app não libera fotos de fills antigos.
 fn marked(db: &DbConnection, udid: &str) -> Result<bool, String> {
+    marked_key(db, &format!("computer_use.ios.private.{udid}"))
+}
+pub(super) fn marked_key(db: &DbConnection, key: &str) -> Result<bool, String> {
     use rusqlite::OptionalExtension;
     let conn = db
         .lock()
@@ -30,7 +33,7 @@ fn marked(db: &DbConnection, udid: &str) -> Result<bool, String> {
     let value: Option<String> = conn
         .query_row(
             "SELECT value FROM settings WHERE key=?1",
-            [format!("computer_use.ios.private.{udid}")],
+            [key],
             |r| r.get(0),
         )
         .optional()
@@ -38,7 +41,10 @@ fn marked(db: &DbConnection, udid: &str) -> Result<bool, String> {
     Ok(value.as_deref() == Some("1"))
 }
 fn mark(db: &DbConnection, udid: &str, private: bool) -> Result<(), String> {
-    db.lock().map_err(|_|"Estado de privacidade indisponível.")?.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",rusqlite::params![format!("computer_use.ios.private.{udid}"),if private {"1"} else {"0"}]).map_err(|_|"Estado de privacidade indisponível.")?;
+    mark_key(db, &format!("computer_use.ios.private.{udid}"), private)
+}
+pub(super) fn mark_key(db: &DbConnection, key: &str, private: bool) -> Result<(), String> {
+    db.lock().map_err(|_|"Estado de privacidade indisponível.")?.execute("INSERT INTO settings(key,value) VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",rusqlite::params![key,if private {"1"} else {"0"}]).map_err(|_|"Estado de privacidade indisponível.")?;
     Ok(())
 }
 struct Lease(String);
@@ -50,14 +56,14 @@ impl Drop for Lease {
     }
 }
 #[derive(Clone, serde::Deserialize)]
-struct Label {
-    text: String,
-    left: f64,
-    right: f64,
-    top: f64,
-    bottom: f64,
+pub(super) struct Label {
+    pub text: String,
+    pub left: f64,
+    pub right: f64,
+    pub top: f64,
+    pub bottom: f64,
 }
-fn named_point(point: Option<(f64, f64)>, labels: &[Label]) -> bool {
+pub(super) fn named_point(point: Option<(f64, f64)>, labels: &[Label]) -> bool {
     point.is_some_and(|(x, y)| {
         labels.iter().any(|l| {
             !l.text.trim().is_empty()
@@ -69,11 +75,11 @@ fn named_point(point: Option<(f64, f64)>, labels: &[Label]) -> bool {
     })
 }
 #[derive(Default)]
-struct Frame {
-    labels: Vec<Label>,
-    path: PathBuf,
-    revision: String,
-    pick: Option<computer::Pick>,
+pub(super) struct Frame {
+    pub labels: Vec<Label>,
+    pub path: PathBuf,
+    pub revision: String,
+    pub pick: Option<computer::Pick>,
 }
 impl Drop for Frame {
     fn drop(&mut self) {
@@ -116,7 +122,7 @@ pub(crate) fn private_screen(text: &str) -> bool {
         .iter()
         .any(|v| lower.contains(v))
 }
-fn image_revision(bytes: &[u8]) -> Result<String, String> {
+pub(super) fn image_revision(bytes: &[u8]) -> Result<String, String> {
     if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         return Err("Foto PNG inválida.".into());
     }
@@ -157,13 +163,17 @@ fn capture(udid: &str, deadline: Instant) -> Result<(PathBuf, String), String> {
         return Err("Prazo de captura esgotado.".into());
     }
     let tmp = PathBuf::from(ops::screenshot(udid)?);
+    prepare_photo(tmp, udid, "ios-act", deadline)
+}
+/// Reduz a foto a 1.200 px, na pasta de capturas permitida, e calcula a revisão. Apaga `tmp`.
+pub(super) fn prepare_photo(tmp: PathBuf, id: &str, prefix: &str, deadline: Instant) -> Result<(PathBuf, String), String> {
     if Instant::now() >= deadline {
         let _ = std::fs::remove_file(tmp);
         return Err("Prazo de captura esgotado.".into());
     }
     let dir = crate::preview::capture::capture_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let path = dir.join(format!("ios-act-{}.png", uuid::Uuid::new_v4().simple()));
+    let path = dir.join(format!("{prefix}-{}.png", uuid::Uuid::new_v4().simple()));
     let mut cmd = crate::util::spawn::hidden_command("/usr/bin/sips");
     cmd.args(["-Z", "1200"]).arg(&tmp).arg("--out").arg(&path);
     let result = crate::util::spawn::output(
@@ -188,14 +198,14 @@ fn capture(udid: &str, deadline: Instant) -> Result<(PathBuf, String), String> {
         .map_err(|_| "Foto indisponível.".to_string())
         .and_then(|bytes| image_revision(&bytes));
     match revision {
-        Ok(revision) => Ok((path, format!("{udid}:{revision}"))),
+        Ok(revision) => Ok((path, format!("{id}:{revision}"))),
         Err(error) => {
             let _ = std::fs::remove_file(path);
             Err(error)
         }
     }
 }
-fn ocr(path: &std::path::Path, deadline: Instant) -> Result<(String, Vec<Label>), String> {
+pub(super) fn ocr(path: &std::path::Path, deadline: Instant) -> Result<(String, Vec<Label>), String> {
     if Instant::now() >= deadline {
         return Err("Prazo do OCR local esgotado.".into());
     }
@@ -442,7 +452,7 @@ impl Surface for IosSurface {
         Ok(true)
     }
 }
-fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) -> Result<Decision, String> {
+pub(super) fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) -> Result<Decision, String> {
     let (operation, target) = match pick.operation.as_str() {
         "click" => (Operation::Click, Some("screen".into())),
         "type" => (Operation::Type, Some("screen".into())),
@@ -463,10 +473,11 @@ fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) -> Result<D
     })
 }
 
-struct VisualDecider {
-    db: DbConnection,
-    frame: Arc<Mutex<Frame>>,
-    allow_type: bool,
+pub(super) struct VisualDecider {
+    pub db: DbConnection,
+    pub frame: Arc<Mutex<Frame>>,
+    pub allow_type: bool,
+    pub surface: &'static str,
 }
 impl Decider for VisualDecider {
     fn decide(
@@ -490,6 +501,7 @@ impl Decider for VisualDecider {
                 recent: &recent,
                 path: &path,
                 allow_type: self.allow_type,
+                surface: self.surface,
             },
         )?;
         let decision = {
@@ -565,6 +577,7 @@ pub(crate) fn act(
         db,
         frame,
         allow_type: request.fills.contains_key("screen"),
+        surface: "iOS",
     };
     Ok(run(request, &mut surface, &mut decider))
 }

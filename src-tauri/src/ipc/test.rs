@@ -1131,6 +1131,17 @@ fn sim_act_tem_rota_backend_e_scope_do_device_sem_fallback_para_udid_solto() {
 }
 
 #[test]
+fn desk_act_usa_a_mesma_identidade_do_sim_act_e_nao_aceita_o_from_sem_verificar() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    let handler = include_str!("commands/desk_act.rs");
+    assert!(dispatch.contains("\"desk.act\" => super::desk_act::act(app, args)"));
+    assert!(handler.contains("crate::terminal::authorize_actor"));
+    assert!(handler.contains("crate::ipc::current_client_pid"));
+    // A identidade é conferida antes de qualquer captura.
+    assert!(handler.find("authorize_actor").unwrap() < handler.find("desktop::act").unwrap());
+}
+
+#[test]
 fn publicacao_inicial_preserva_dono_vivo_e_assume_apos_sua_saida() {
     let dir = std::env::temp_dir().join(format!("ade-global-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
