@@ -641,12 +641,30 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         None => None,
     };
 
+    // Profundidade monotônica e teto de ativos, antes de pedir orçamento ou abrir aba.
+    let tabs = open_tabs(app)?;
+    let book = crate::squads::recruit::load_book();
+    let open_ids: Vec<String> = tabs.iter().map(|t| t.id.clone()).collect();
+    let recruiter_depth = crate::squads::recruit::effective_depth(book.get(&me.id).map(|r| r.depth), 0);
+    let active = crate::squads::recruit::active_recruits(&book, &me.id, &open_ids);
+    let child_depth = match crate::squads::recruit::gate(
+        recruiter_depth,
+        crate::squads::recruit::DEFAULT_MAX_DEPTH,
+        active,
+        crate::squads::recruit::MAX_ACTIVE_RECRUITS,
+    ) {
+        crate::squads::recruit::RecruitGate::Allowed { child_depth } => child_depth,
+        crate::squads::recruit::RecruitGate::Refused(message) => {
+            let reason = if active >= crate::squads::recruit::MAX_ACTIVE_RECRUITS { "active_cap" } else { "depth" };
+            return Ok(json!({ "refused": true, "reason": reason, "message": message, "depth": recruiter_depth, "active": active }));
+        }
+    };
+
     let boards = crate::canvas::load_boards();
     let mission_id = crate::canvas::mission_of_tab(&boards, &me.id);
     if let Some(id) = &mission_id {
         crate::usage::confirm_spend(app, super::shared::db(app)?.inner(), id, "peer recruit")?;
     }
-    let tabs = open_tabs(app)?;
     if tabs.iter().any(|t| t.name.eq_ignore_ascii_case(name.trim()) && (t.cwd == me.cwd || mission_id.as_ref().is_some_and(|id| crate::canvas::mission_of_tab(&boards, &t.id).as_ref() == Some(id)))) {
         return Err(format!("Já existe um agente chamado '{name}' nesta equipe. Escolha outro nome."));
     }
@@ -729,6 +747,12 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     }
     let created = tab_create(app, &create)?;
     let tab_id = created.get("tabId").and_then(Value::as_str).ok_or("A aba foi criada sem id")?.to_string();
+    // Falhar ao gravar não desfaz a aba aberta: só avisa (o teto volta a valer no próximo recruit).
+    if let Err(error) = crate::squads::recruit::update_book(|book| {
+        crate::squads::recruit::record(book, &tab_id, &me.id, child_depth, crate::util::now_ts())
+    }) {
+        eprintln!("[ags] aviso: não gravei a profundidade de {tab_id}: {error}");
+    }
 
     let label = role.as_ref().map(|r| r.label.clone());
     canvas_change(app, &me, "canvas.recruited", json!({ "cwd": cwd, "tabId": tab_id, "near": me.id, "role": label }))?;
@@ -736,6 +760,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let mut out = json!({ "recruited": {
         "id": tab_id, "name": name, "agent": agent, "cwd": cwd,
         "model": llm.model, "effort": llm.effort, "fast": llm.fast, "llmSource": llm.source.as_str(),
+        "depth": child_depth,
     } });
     let prompt = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty());
     // O bloco de ambiente sempre vai primeiro, mesmo sem tarefa: o recruit já sabe onde
@@ -993,7 +1018,9 @@ pub(crate) fn tell_reply(peer: Value, sent: &Sent) -> Value {
 }
 
 /// O modelo que o `peer deliver` mostra quando o JSON não passa: o Handoff Structured v1.
-pub(crate) const HANDOFF_TEMPLATE: &str = r#"{"version":1,"summary":"o que foi entregue, em 1-3 frases","changed_files":[{"path":"src/caminho/relativo.ts","description":"o que mudou"}],"tests":[{"command":"ags test affected","status":"passed"}],"decisions":["decisão tomada"],"risks":["o que pode quebrar"],"next_steps":["o que falta"]}"#;
+pub(crate) const HANDOFF_TEMPLATE: &str = r#"{"version":1,"summary":"o que foi entregue, em 1-3 frases","changed_files":[{"path":"src/caminho/relativo.ts","description":"o que mudou"}],"tests":[{"command":"ags test affected","status":"passed"}],"decisions":["decisão tomada"],"risks":["o que pode quebrar"],"next_steps":["o que falta"],"status":"complete","evidence":["saída do comando que prova a entrega"]}"#;
+/// v1.1: o que cada `status` exige, dito junto do modelo quando a entrega é recusada.
+pub(crate) const HANDOFF_STATUS_RULES: &str = "status (opcional, v1.1): \"continue\" exige next_steps; \"complete\" exige evidence, um teste passed ou um artifact; \"blocked\" exige blockers com o bloqueio concreto. Entrega que não cumpre é recusada inteira: corrija e reenvie.";
 
 /// A linha que chega ao terminal do destino: o essencial, sem colar o JSON. Pura.
 pub(crate) fn handoff_line(handoff: &crate::runs::handoff::StructuredHandoff, id: i64) -> String {
@@ -1003,6 +1030,13 @@ pub(crate) fn handoff_line(handoff: &crate::runs::handoff::StructuredHandoff, id
     let passed = handoff.tests.iter().filter(|t| t.status == TestStatus::Passed).count();
     let failed = handoff.tests.iter().filter(|t| t.status == TestStatus::Failed).count();
     let mut parts = vec![format!("ENTREGA #{id}: {summary}")];
+    if let Some(status) = handoff.status {
+        parts.push(match status {
+            crate::runs::handoff::HandoffStatus::Continue => "continua".to_string(),
+            crate::runs::handoff::HandoffStatus::Complete => "concluída".to_string(),
+            crate::runs::handoff::HandoffStatus::Blocked => format!("BLOQUEADA ({})", handoff.blockers.len()),
+        });
+    }
     parts.push(format!("{} arquivo(s)", handoff.changed_files.len()));
     parts.push(format!("testes: {passed} ok, {failed} falhou"));
     if !handoff.risks.is_empty() {
@@ -1032,6 +1066,8 @@ pub(crate) fn handoff_text(handoff: &crate::runs::handoff::StructuredHandoff) ->
     list("Decisões", handoff.decisions.clone(), &mut out);
     list("Riscos", handoff.risks.clone(), &mut out);
     list("Pendências", handoff.next_steps.clone(), &mut out);
+    list("Evidências", handoff.evidence.clone(), &mut out);
+    list("Bloqueios", handoff.blockers.clone(), &mut out);
     out.join("\n")
 }
 
@@ -1044,7 +1080,7 @@ pub(super) fn peer_deliver(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let raw = arg_str(args, "text")?;
     let value: Value = serde_json::from_str(raw.trim())
         .map_err(|e| format!("A entrega não é um JSON válido ({e}). Modelo:\n{HANDOFF_TEMPLATE}"))?;
-    let handoff = crate::runs::handoff::parse(&value).map_err(|e| format!("{e}. Modelo:\n{HANDOFF_TEMPLATE}"))?;
+    let handoff = crate::runs::handoff::parse(&value).map_err(|e| format!("{e}. {HANDOFF_STATUS_RULES} Modelo:\n{HANDOFF_TEMPLATE}"))?;
     let (me, list) = peers(app, &from)?;
     let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
     let boards = crate::canvas::load_boards();
@@ -1945,6 +1981,14 @@ mod handoff_tests {
         let text = handoff_text(&handoff);
         assert!(text.contains("Arquivos:\n- src/caminho/relativo.ts — o que mudou"), "{text}");
         assert!(text.contains("ags test affected (passed)"));
+        assert!(line.contains("concluída") && text.contains("Evidências:\n- saída do comando"), "{line}\n{text}");
+    }
+
+    #[test]
+    fn entrega_bloqueada_aparece_na_linha_e_no_texto() {
+        let handoff = crate::runs::handoff::parse(&serde_json::json!({"version":1,"summary":"Parei","status":"blocked","blockers":["Falta a chave de teste do Stripe"]})).unwrap();
+        assert!(handoff_line(&handoff, 3).contains("BLOQUEADA (1)"));
+        assert!(handoff_text(&handoff).contains("Bloqueios:\n- Falta a chave de teste do Stripe"));
     }
 }
 

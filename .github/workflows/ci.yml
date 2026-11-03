@@ -62,6 +62,7 @@ jobs:
           bunx tsc --noEmit
           node scripts/babel-parse-check.mjs src
           node scripts/test-lint.mjs
+          bun scripts/check-catalogs.ts
           bun run test
 
       - name: Tests de Rust

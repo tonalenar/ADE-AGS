@@ -1270,6 +1270,8 @@
   "ask.send": "Answer",
   "ask.placeholder": "Your answer",
   "ask.waiting": "Waiting for your answer · {{time}} left",
+  "ask.late": "The agent moved on without the answer: whatever you reply reaches it as a message.",
+  "ask.lateMessage": "[Answer from the person via ADE AGS, after the deadline] To your question \"{{question}}\": {{answer}}",
   "browser.newTab": "Browser",
   "browser.address": "localhost:5173",
   "browser.zoom.out": "Zoom page out",

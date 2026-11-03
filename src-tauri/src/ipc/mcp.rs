@@ -55,6 +55,15 @@ pub enum McpContext {
 }
 
 impl McpContext {
+    /// A pasta de spill desta sessão: a tarefa ou a aba (nunca o `ADE_SESSION`).
+    fn spill_session(&self) -> String {
+        match self {
+            McpContext::Task(id) => format!("task-{id}"),
+            McpContext::Cwd { tab: Some(tab), .. } => tab.clone(),
+            McpContext::Cwd { .. } => "mcp".into(),
+        }
+    }
+
     /// Cómo se identifica ante la app: la tarea, o la carpeta.
     fn scope(&self) -> Value {
         match self {
@@ -947,6 +956,19 @@ fn call_tool<F>(context: &McpContext, name: &str, args: Value, send: &mut F) -> 
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
+    // A decisão de permissão é um JSON que o cliente lê: nunca passa pelo spill.
+    if name == TOOL_NAME {
+        return call_tool_inner(context, name, args, send);
+    }
+    let mut result = call_tool_inner(context, name, args, send);
+    super::spill::spill_tool_result(super::spill::root().as_deref(), &context.spill_session(), &mut result);
+    result
+}
+
+fn call_tool_inner<F>(context: &McpContext, name: &str, args: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
     if let (McpContext::Task(task_id), TOOL_NAME) = (context, name) {
         approve(task_id, &args, send)
     } else if let Some(tool) = BROWSER_TOOLS.iter().find(|t| t.name == name) {
@@ -1368,7 +1390,7 @@ fn peer_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "peer_deliver",
-            "description": "Final structured delivery (Handoff v1) to the orchestrator, or to `to`. The recipient gets one line with the summary and an id; the full handoff is stored. Fields: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; relative paths.",
+            "description": "Final structured delivery (Handoff v1) to the orchestrator, or to `to`. The recipient gets one line with the summary and an id; the full handoff is stored. Fields: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; relative paths. Optional v1.1: status continue (requires next_steps), complete (requires evidence, a passed test or an artifact) or blocked (requires concrete blockers); an invalid report is rejected whole, never truncated.",
             "inputSchema": { "type": "object", "properties": {
                 "to": { "type": "string", "description": "Optional: who receives it (default: your orchestrator)." },
                 "handoff": { "type": "object", "description": "The Handoff v1 object." },
@@ -1658,7 +1680,9 @@ where
 fn ask_schema() -> Value {
     json!({
         "name": ASK_TOOL,
-        "description": "Ask the user a question and wait for their answer. Use it when the answer cannot be found in the code or the page and guessing would waste the work: which of two designs they want, which account to test with, whether to keep or drop something. With `options` the user gets one button per option and you get the one they picked; without them they type a free answer. Keep it to one question at a time, and only when you are actually blocked — every question stops the person.",
+        "description": "Ask the user a question and wait for their answer. Use it when the answer cannot be found in the code or the page and guessing would waste the work: which of two designs they want, which account to test with, whether to keep or drop something. With `options` the user gets one button per option and you get the one they picked; without them they type a free answer. Keep it to one question at a time, and only when you are actually blocked — every question stops the person. \
+When the deadline passes you get `status: \"pending\"`: that is NOT an answer nor an approval — carry on with what does not depend on it; \
+a late answer reaches your terminal as a message, so do not ask again. A team member gets `refused` (`reason: ask_lead`): take the question to the orchestrator with `ags peer tell`.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1669,7 +1693,7 @@ fn ask_schema() -> Value {
                     "description": "Up to 6 answers to choose from. Leave it out for a free-text answer.",
                 },
                 "placeholder": { "type": "string", "description": "Hint inside the text box, when there are no options." },
-                "timeout_s": { "type": "number", "description": "Seconds to wait (30-1800). Default 1800." },
+                "timeout_s": { "type": "number", "description": "Seconds to wait (30-1800). Default 600; then `pending`." },
             },
             "required": ["question"],
         },

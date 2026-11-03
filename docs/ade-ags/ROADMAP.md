@@ -404,3 +404,12 @@ O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `c
 ## Guia de revisão de PR por IA
 
 Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
+
+## Contratos da CLI e do MCP (pontos do deepseek-harness)
+
+- **Spill das respostas grandes** (`ipc/spill.rs`): acima de ~6.000 tokens, o resultado de uma tool do MCP ou de `tab output`/`tab screen`/`peer check`/`peer pending`/`chat show`/`chat wait`/`recall get` vai inteiro para `~/.ags/spill/<aba ou tarefa>/<aleatório>.txt` (pasta 0700, arquivo 0600, nunca dentro de um repositório, apagado após 30 dias) e o agente recebe cabeça, cauda e o caminho. `--no-spill` desliga na CLI.
+- **`noProgress` na hora**: `ags events wait` (com `--run`/`--mission`, ou de um orquestrador) e o `run_await` da frota voltam logo quando nada trabalha nem provisiona, em vez de esperar o prazo. `--allow-idle` espera mesmo assim.
+- **Profundidade e teto do `peer recruit`** (`squads/recruit.rs`): antes só havia a exigência da coroa. Agora a profundidade fica gravada (`~/.ags/recruits.json`, nunca desce), o padrão é 1 (recrutado não recruta) e há até 12 recrutados abertos por orquestrador; no limite, `{refused, reason, message}`.
+- **Handoff v1.1** (`runs/handoff.rs`, aditivo): `status` opcional; `continue` exige `next_steps`, `complete` exige evidência (`evidence`, teste `passed` ou artefato), `blocked` exige `blockers` concretos. Report inválido é recusado inteiro.
+- **`ask_user` com prazo** (padrão 600 s): ao vencer devolve `pending` (nunca aprovação), a pergunta fica na tela e a resposta tardia chega à aba como mensagem. Integrante de time recebe `refused` (`ask_lead`) e leva a dúvida ao orquestrador.
+- **Regiões geradas**: a lista de tools na ajuda do `ags`, a tabela de tools da skill e de [CLI_MCP.md](../agentes/CLI_MCP.md#mcp) e o índice de comandos da skill saem do código entre `BEGIN/END GENERATED` (`bun run gen:catalogs`); `bun run check:catalogs` e um teste vitest conferem o frescor.
