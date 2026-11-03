@@ -4481,5 +4481,19 @@
   "chat.team.provision.failed": "não entrou no time: {{reason}}",
   "missions.scopes.title": "Escopos de escrita sobrepostos",
   "missions.scopes.pair": "{{a}} e {{b}} vão mexer em: {{paths}}",
-  "missions.scopes.hint": "Só um aviso, nada foi bloqueado: combine quem mexe onde ou faça uma depois da outra, antes que vire conflito no merge."
+  "missions.scopes.hint": "Só um aviso, nada foi bloqueado: combine quem mexe onde ou faça uma depois da outra, antes que vire conflito no merge.",
+  "tabs.team.title": "Time",
+  "tabs.team.origin.chat": "chat",
+  "tabs.team.origin.canvas": "canvas",
+  "tabs.team.origin.mission": "missão",
+  "tabs.team.originHint": "Onde o time nasceu",
+  "tabs.team.protocol": "protocolo",
+  "tabs.team.protocolHint": "Conversa por protocolo: sem terminal, só a timeline",
+  "tabs.team.openInChat": "Abrir no chat",
+  "tabs.team.createHint": "Faz desta aba a orquestradora de um time (o mesmo time do chat e do canvas)",
+  "tabs.team.action.create": "Criar time",
+  "tabs.team.action.link": "Ligar ao time ativo",
+  "tabs.team.action.unlink": "Desligar do time",
+  "tabs.team.action.lead": "Tornar orquestrador",
+  "tabs.team.action.unlead": "Tirar de orquestrador"
 }

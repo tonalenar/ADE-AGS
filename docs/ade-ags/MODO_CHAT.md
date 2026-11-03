@@ -223,6 +223,14 @@ Um time sem orquestrador tem `orchestrator = ""` para fora (a coluna é `NOT NUL
 
 `ags team list` mostra `origin`, `boardKey`, `missionId` e `led`. O evento `cc-chat-team` sai em todas as mudanças. O front (E3) é quem decide **quando** promover (só quando a pessoa mexe, nunca no boot) e quem reaplica o canvas depois de `rebind`/`unlead`.
 
+### O time nas Abas (E4 da unificação)
+
+- A vista de Abas lê o **modelo único** (`chat/unified`, `useConversations()`): a grade do time (`canvas/gridMode.ts`, `useMissionGrid`) e o `placementsFrom` usam `tabs/teamTabs.ts` (puro: `teamGroups`, `teamGridRefs`, `terminalRefs`, `teamMenuActions`). O time montado no chat, no canvas ou por missão aparece igual, com a mesma ref e o mesmo papel.
+- **Selo de origem** (`chat`, `canvas`, `missão`) na marca do time (`TeamTabMarks`), na aba e na grade.
+- **Protocolo**: todo agente novo nasce com terminal. Quem já nasceu por protocolo (`thread:<id>`) não tem aba: entra na grade como painel de timeline (`tabs/ProtocolPane.tsx`, o mesmo `TimelineView` do chat, React puro, só leitura, com o selo "protocolo") e como entrada na barra (`TeamTabsGroup`, que abre a timeline numa gaveta). `placementsFrom` só posiciona terminais (`terminalRefs`): a ref de protocolo nunca vira placement.
+- **Ações do time** no menu da aba e no botão "Criar time" da barra, sem lógica nova: `makeOrchestrator`, `linkExisting`, `unlinkMember` e, novos, `chat/team/teamLead.ts` (`leadTeam`/`unleadTeam` sobre `chat_team_lead`/`chat_team_unlead`; tirar a coroa tira só o papel, o time fica).
+- Nada muda a `key`, o pai ou o ponto de montagem dos terminais: a grade só desenha huecos e painéis React.
+
 ## Retomada, fila e avisos na timeline (etapa 3 do harness)
 
 - **Retomar uma sessão que falha não esquece em silêncio** (`conversa/resume.rs`): o erro de `--resume`/`thread/resume`/`session/resume` é `Gone` (a sessão não existe: abre outra), `Transient` (2 retentativas com pausa curta; se persistir, abre outra), `Timeout` (NÃO abre outra: a sessão pode existir; falha e a pessoa tenta de novo) ou `Fatal` (o processo não sobe, ou modelo/modo não aplicam: falha). Ao abrir outra, a timeline recebe um item `notice` (`resumeLost`) e a tela diz que o agente recomeçou sem o histórico; o id da sessão anterior só é trocado depois de a nova abrir.

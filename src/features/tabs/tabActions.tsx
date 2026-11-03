@@ -19,6 +19,9 @@ import { groupOf, isAgentKey, keyId, type SplitSide } from "@/features/tabs/layo
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { teamMenuActions } from "@/features/tabs/teamTabs";
+import { runTeamAction } from "@/features/tabs/teamTabActions";
+import { useConversations } from "@/features/chat/unified/useConversations";
 import { ContinueAgentDialog } from "./ContinueAgentDialog";
 import { requestContinuity } from "./continuity";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
@@ -30,6 +33,7 @@ import { tabCheckpointCreate } from "@/features/tabCheckpoints/ipc";
 import { AlertaToast } from "@/shared/ui/alerts";
 import i18n from "@/i18n";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { UsersIcon } from "@/features/chat/chatIcons";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 
 /**
@@ -157,6 +161,8 @@ export function TabDialogs() {
   const views = useViewTabsStore((s) => s.views);
   const restartAgent = useTabsStore((s) => s.restartAgent);
   const close = (patch: Partial<TabActionsState>) => useTabActions.setState(patch);
+  const conversations = useConversations();
+  const activeTeamId = conversations.find((c) => c.ref === activeTab?.id)?.teamId ?? null;
 
   const menuItems = () => {
     if (!menu) return [];
@@ -217,6 +223,17 @@ export function TabDialogs() {
         icon: <CopyIcon className="w-4 h-4" />,
         onSelect: () => { duplicateWithOtherAgent(tab).catch(console.error); },
       }]),
+      // O time (o mesmo do chat e do canvas): criar, ligar, desligar, tornar ou tirar orquestrador.
+      ...teamMenuActions(conversations, tab.id, activeTeamId).map((action, i) => ({
+        key: `team-${action}`,
+        label: t(`tabs.team.action.${action}`),
+        icon: <UsersIcon className="w-4 h-4" />,
+        separator: i === 0,
+        onSelect: () => {
+          const conv = conversations.find((c) => c.ref === tab.id);
+          if (conv) void runTeamAction(action, conv, activeTeamId);
+        },
+      })),
       { ...split[0], separator: true },
       split[1],
       { key: "close", label: t("tabs.close"), icon: <CloseIcon className="w-4 h-4" />, danger: true, separator: true, onSelect: () => requestCloseItem(menu.key) },

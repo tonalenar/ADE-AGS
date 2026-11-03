@@ -4481,5 +4481,19 @@
   "chat.team.provision.failed": "did not join the team: {{reason}}",
   "missions.scopes.title": "Overlapping write scopes",
   "missions.scopes.pair": "{{a}} and {{b}} will both touch: {{paths}}",
-  "missions.scopes.hint": "Just a warning, nothing was blocked: agree on who touches what or run one after the other before it becomes a merge conflict."
+  "missions.scopes.hint": "Just a warning, nothing was blocked: agree on who touches what or run one after the other before it becomes a merge conflict.",
+  "tabs.team.title": "Team",
+  "tabs.team.origin.chat": "chat",
+  "tabs.team.origin.canvas": "canvas",
+  "tabs.team.origin.mission": "mission",
+  "tabs.team.originHint": "Where the team was born",
+  "tabs.team.protocol": "protocol",
+  "tabs.team.protocolHint": "Protocol conversation: no terminal, timeline only",
+  "tabs.team.openInChat": "Open in chat",
+  "tabs.team.createHint": "Makes this tab the orchestrator of a team (the same team as in chat and canvas)",
+  "tabs.team.action.create": "Create team",
+  "tabs.team.action.link": "Link to active team",
+  "tabs.team.action.unlink": "Unlink from team",
+  "tabs.team.action.lead": "Make orchestrator",
+  "tabs.team.action.unlead": "Remove as orchestrator"
 }

@@ -4481,5 +4481,19 @@
   "chat.team.provision.failed": "no entró al equipo: {{reason}}",
   "missions.scopes.title": "Alcances de escritura superpuestos",
   "missions.scopes.pair": "{{a}} y {{b}} van a tocar: {{paths}}",
-  "missions.scopes.hint": "Solo un aviso, nada se bloqueó: acuerden quién toca qué o háganlas una después de la otra antes de que sea un conflicto en el merge."
+  "missions.scopes.hint": "Solo un aviso, nada se bloqueó: acuerden quién toca qué o háganlas una después de la otra antes de que sea un conflicto en el merge.",
+  "tabs.team.title": "Equipo",
+  "tabs.team.origin.chat": "chat",
+  "tabs.team.origin.canvas": "canvas",
+  "tabs.team.origin.mission": "misión",
+  "tabs.team.originHint": "Dónde nació el equipo",
+  "tabs.team.protocol": "protocolo",
+  "tabs.team.protocolHint": "Conversación por protocolo: sin terminal, solo la línea de tiempo",
+  "tabs.team.openInChat": "Abrir en el chat",
+  "tabs.team.createHint": "Hace de esta pestaña la orquestadora de un equipo (el mismo equipo del chat y del canvas)",
+  "tabs.team.action.create": "Crear equipo",
+  "tabs.team.action.link": "Vincular al equipo activo",
+  "tabs.team.action.unlink": "Desvincular del equipo",
+  "tabs.team.action.lead": "Hacer orquestador",
+  "tabs.team.action.unlead": "Quitar de orquestador"
 }

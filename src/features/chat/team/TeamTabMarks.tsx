@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
-import { placeOf } from "./teamModel";
+import { isThreadRef, placeOf } from "./teamModel";
 import { TeamNodeBadge } from "./TeamNodeBadge";
 import { startTeams, useTeamStore } from "./teamStore";
 import { useRoleLabel } from "./TeamParts";
@@ -23,6 +23,8 @@ export function TeamTabMarks({ tabId, compact = false }: { tabId: string; compac
   const member = place.member;
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5 text-[10.5px]">
+      {place.team.origin && <span className={PILL} title={t("tabs.team.originHint")}>{t(`tabs.team.origin.${place.team.origin}`)}</span>}
+      {isThreadRef(tabId) && <span className={PILL} title={t("tabs.team.protocolHint")}>{t("tabs.team.protocol")}</span>}
       <span className={PILL} title={t("chat.team.node.title")}>{member ? roleLabel(member.role) : t("canvas.orchestrator")}</span>
       {member?.subagent && <span className={PILL}>{t("role.subagentTag")}</span>}
       {!compact && <TeamNodeBadge tabId={tabId} />}
