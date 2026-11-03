@@ -84,6 +84,32 @@ pub struct Verdict {
 
 const RULE_DENIED: &str = "uma regra desta pasta o nega";
 
+impl Verdict {
+    /// O resultado no vocabulário comum de `approval_audit`. Só `allow` vira `allowed-once`, por
+    /// construção: o registro nunca diz "liberado" de algo que o agente recebeu negado.
+    pub fn outcome(&self) -> crate::approval_audit::Outcome {
+        use crate::approval_audit::Outcome;
+        match (self.allow, self.by) {
+            (true, _) => Outcome::AllowedOnce,
+            (false, DecidedBy::Timeout) => Outcome::Unavailable,
+            (false, DecidedBy::Cancelled) => Outcome::Cancelled,
+            (false, DecidedBy::User | DecidedBy::Rule | DecidedBy::Policy) => Outcome::Rejected,
+        }
+    }
+}
+
+/// O par `asked`/`decided` da auditoria comum (`approval_audit`). `verdict = None` = só o `asked`.
+/// Best-effort, como o `record`: sem o registro, o agente recebe a mesma resposta.
+fn audit(db: &DbConnection, id: &str, task_id: &str, tool_name: &str, verdict: Option<&Verdict>) {
+    use crate::approval_audit::{self, Source};
+    let Ok(conn) = db.lock() else { return };
+    let now = now_ts();
+    let _ = approval_audit::asked(&conn, Source::Fleet, id, task_id, tool_name, now);
+    if let Some(verdict) = verdict {
+        let _ = approval_audit::decided(&conn, Source::Fleet, id, verdict.outcome(), None, verdict.by.as_str(), now);
+    }
+}
+
 struct Waiting {
     pending: PendingApproval,
     verdict: Option<Verdict>,
@@ -234,11 +260,19 @@ pub fn resolve(
 ) -> Verdict {
     // Antes que las reglas y sin encolar: lo que un lead no puede hacer no se le pregunta a
     // nadie, así que ni un "Allow" ni una regla recordada pueden cambiar su papel.
-    if let Ok(conn)=db.lock() {if let Ok(Some(task))=super::store::task_by_id(&conn,task_id) {
- if task.role.as_deref()==Some(super::types::role::DREAMER)&&!super::policy::dreamer_may_use(tool_name) {
- return Verdict{allow:false,reason:Some(super::policy::DREAMER_DENIED.into()),by:DecidedBy::Policy};}}}
+    // O lock sai do escopo antes do `audit`, que pega o banco de novo.
+    let dreamer_denied = db.lock().ok().is_some_and(|conn| {
+        matches!(super::store::task_by_id(&conn, task_id), Ok(Some(task)) if task.role.as_deref() == Some(super::types::role::DREAMER))
+    }) && !super::policy::dreamer_may_use(tool_name);
+    if dreamer_denied {
+        let verdict = Verdict { allow: false, reason: Some(super::policy::DREAMER_DENIED.into()), by: DecidedBy::Policy };
+        audit(db, &Uuid::new_v4().to_string(), task_id, tool_name, Some(&verdict));
+        return verdict;
+    }
     if is_coordinator(db, task_id) && !super::policy::lead_may_use(tool_name) {
-        return Verdict { allow: false, reason: Some(super::policy::LEAD_DENIED.into()), by: DecidedBy::Policy };
+        let verdict = Verdict { allow: false, reason: Some(super::policy::LEAD_DENIED.into()), by: DecidedBy::Policy };
+        audit(db, &Uuid::new_v4().to_string(), task_id, tool_name, Some(&verdict));
+        return verdict;
     }
     let rules = rules_for_task(db, task_id);
     // Las reglas y el "recordar" miran las rutas como si la tarea corriera en el proyecto,
@@ -248,18 +282,26 @@ pub fn resolve(
 
     match rules::decide(&rules, tool_name, &as_project) {
         Decision::Allow => {
-            record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(true), DecidedBy::Rule);
-            Verdict { allow: true, reason: None, by: DecidedBy::Rule }
+            let id = Uuid::new_v4().to_string();
+            record(db, &id, task_id, tool_name, &input, Some(true), DecidedBy::Rule);
+            let verdict = Verdict { allow: true, reason: None, by: DecidedBy::Rule };
+            audit(db, &id, task_id, tool_name, Some(&verdict));
+            verdict
         }
         Decision::Deny => {
-            record(db, &Uuid::new_v4().to_string(), task_id, tool_name, &input, Some(false), DecidedBy::Rule);
-            Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule }
+            let id = Uuid::new_v4().to_string();
+            record(db, &id, task_id, tool_name, &input, Some(false), DecidedBy::Rule);
+            let verdict = Verdict { allow: false, reason: Some(RULE_DENIED.into()), by: DecidedBy::Rule };
+            audit(db, &id, task_id, tool_name, Some(&verdict));
+            verdict
         }
         Decision::Ask => {
             let id = Uuid::new_v4().to_string();
             record(db, &id, task_id, tool_name, &input, None, DecidedBy::User);
+            audit(db, &id, task_id, tool_name, None);
             let verdict = ask(&id, task_id, tool_name, as_project, timeout);
             close_row(db, &id, &verdict);
+            audit(db, &id, task_id, tool_name, Some(&verdict));
             verdict
         }
     }
@@ -391,6 +433,21 @@ fn close_row(db: &DbConnection, id: &str, verdict: &Verdict) {
 /// todavía hiciera falta decidirlo.
 pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    let orphans: Vec<String> = conn
+        .prepare("SELECT id FROM task_approvals WHERE status = 'pending'")
+        .and_then(|mut stmt| stmt.query_map([], |r| r.get(0))?.collect())
+        .unwrap_or_default();
+    for id in &orphans {
+        let _ = crate::approval_audit::decided(
+            &conn,
+            crate::approval_audit::Source::Fleet,
+            id,
+            crate::approval_audit::Outcome::Cancelled,
+            None,
+            "app-closed",
+            now_ts(),
+        );
+    }
     conn.execute(
         "UPDATE task_approvals SET status = 'denied', decided_by = 'cancelled',
                                    reason = ?1, decided_at = ?2

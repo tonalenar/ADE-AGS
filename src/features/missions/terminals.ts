@@ -33,6 +33,9 @@ export interface TeamMember {
   /** Modo Fast de Codex del Squad; solo Codex lo aplica. */
   fast?: boolean;
   accountId: string | null;
+  /** O terminal nasce sem as credenciais herdadas da app (`KEY`/`TOKEN`/`SECRET`/`PASSWORD`, menos as
+   *  do provider). Ver `runs/sandbox.rs`. */
+  scrubSecrets?: boolean;
   /** Vazio = sem especificação: o orquestrador define o papel (ags peer role). */
   roleId: string;
   /** Subagente extra do Squad. */
@@ -479,7 +482,7 @@ export async function startMissionInTerminals(
     accountId: squad && !squad.lead.autoAccount ? squad.lead.accountId ?? undefined : mission.autoAccount ? undefined : mission.leadAccountId ?? undefined,
   });
   const memberTabIds = team.map((m, i) =>
-    m.agentId === "gemini-desktop" ? desktopNode() : addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined }),
+    m.agentId === "gemini-desktop" ? desktopNode() : addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined, scrubSecrets: m.scrubSecrets }),
   );
 
   canvasActions.buildMissionTeam(

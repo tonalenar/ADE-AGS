@@ -155,6 +155,9 @@ impl Client {
                 .ok_or_else(|| io::Error::from(io::ErrorKind::NotFound))?,
         );
         let mut command = crate::util::launch::external_command(&program, args)?;
+        // Um MCP que a ADE lança não herda as credenciais da app (ver `runs::sandbox::scrub_env`):
+        // com embedding `none`, o ai-memory não precisa de nenhuma.
+        crate::runs::sandbox::scrub_env(&mut command);
         // O resolvedor nativo considera marker, rotas de home e identidade git.
         // Forçar nomes no ADE divergiria da captura; não lemos esses arquivos.
         let cwd = external_path(&self.cwd);

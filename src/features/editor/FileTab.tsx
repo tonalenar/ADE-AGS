@@ -11,7 +11,8 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { relativeTo, type FileView } from "@/features/tabs/viewTabs";
 
 import { CodeEditor, type EditorHandle } from "./CodeEditor";
-import { fileStat, readFile, writeFile, type FileContent } from "./ipc";
+import { bannerForConflict, expectedVersionForSave } from "./fileVersion";
+import { fileStat, readFile, writeFile, type FileContent, type FileVersion } from "./ipc";
 import { isMarkdownPath, rememberMarkdownPreview } from "./markdown";
 
 // Diferida: el render de Markdown (con su parser de HTML) solo se baja la primera vez que
@@ -48,10 +49,11 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const [banner, setBanner] = useState<Banner>(null);
   const [saving, setSaving] = useState(false);
   const editor = useRef<EditorHandle | null>(null);
-  const mtime = useRef<number | null>(null);
+  /** O token de versão (`tamanho:mtime:inode`) do que está no editor. */
+  const version = useRef<FileVersion | null>(null);
   const dirty = useRef(false);
   /** Un cambio en disco que el usuario ya decidió ignorar: no se vuelve a avisar. */
-  const ignoredMtime = useRef<number | null>(null);
+  const ignoredVersion = useRef<FileVersion | null>(null);
   /** La versión del índice de git, para las marcas de cambios al margen. */
   const [baseline, setBaseline] = useState<string | null>(null);
   /** Dónde está el archivo dentro de su repo. `null` = fuera de git; sin resolver todavía
@@ -74,7 +76,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   const load = useCallback(async (intoEditor: boolean) => {
     const next = await readFile(view.path);
     if (next.kind === "text") {
-      mtime.current = next.mtime;
+      version.current = next.version;
       if (intoEditor && editor.current) editor.current.setDoc(next.content);
       else setContent(next);
       // Un agente reescribió el documento mientras se lee: la vista previa lo acompaña.
@@ -121,12 +123,13 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     if (!editor.current || saving) return;
     setSaving(true);
     try {
-      const outcome = await writeFile(view.path, editor.current.getDoc(), overwrite ? null : mtime.current);
+      const expected = expectedVersionForSave({ overwrite, deleted: banner === "deleted", version: version.current });
+      const outcome = await writeFile(view.path, editor.current.getDoc(), expected);
       if (outcome.kind === "conflict") {
-        setBanner("conflict");
+        setBanner(bannerForConflict(outcome));
       } else {
-        mtime.current = outcome.mtime;
-        ignoredMtime.current = null;
+        version.current = outcome.version;
+        ignoredVersion.current = null;
         setDirty(false);
         setBanner(null);
       }
@@ -135,27 +138,27 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
     } finally {
       setSaving(false);
     }
-  }, [saving, view.path, setDirty]);
+  }, [saving, banner, view.path, setDirty]);
 
   useEffect(() => {
     if (!active || content?.kind !== "text") return;
     // O `git show :arquivo` da linha de base é um processo novo: antes rodava a cada 2 s, mesmo
     // sem mudança. Agora só quando o arquivo muda, ou a cada ~30 s (pega commits e `git add`).
     let ticks = 0;
-    let lastSeenMtime: number | null = null;
+    let lastSeen: FileVersion | null = null;
     const id = setInterval(async () => {
       if (document.visibilityState !== "visible") return;
       const stat = await fileStat(view.path).catch(() => undefined);
       ticks += 1;
-      const fileChanged = stat ? stat.mtime !== lastSeenMtime : false;
-      if (stat) lastSeenMtime = stat.mtime;
+      const fileChanged = stat ? stat.version !== lastSeen : false;
+      if (stat) lastSeen = stat.version;
       if (fileChanged || ticks % 15 === 0) loadBaseline();
       if (stat === undefined) return;
       if (stat === null) {
         setBanner("deleted");
         return;
       }
-      if (mtime.current === null || stat.mtime === mtime.current || stat.mtime === ignoredMtime.current) return;
+      if (version.current === null || stat.version === version.current || stat.version === ignoredVersion.current) return;
       if (dirty.current) setBanner((b) => (b === "conflict" ? b : "changed"));
       else load(true).catch((e) => setError(String(e)));
     }, WATCH_MS);
@@ -247,7 +250,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
           {banner === "changed" && (
             <Button size="sm" variant="ghost" onClick={async () => {
               const stat = await fileStat(view.path).catch(() => null);
-              ignoredMtime.current = stat?.mtime ?? null;
+              ignoredVersion.current = stat?.version ?? null;
               setBanner(null);
             }}>
               {t("editor.keepMine")}

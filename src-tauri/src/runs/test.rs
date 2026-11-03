@@ -1203,6 +1203,109 @@ fn una_regla_guardada_contesta_sin_preguntar_y_queda_anotada() {
     assert_eq!((status.as_str(), by.as_str()), ("allowed", "rule"));
 }
 
+/// A frota anota o mesmo par `asked`/`decided` que o chat (`approval_audit`), com o resultado
+/// fechado: regra que libera = `allowed-once`, regra que nega = `rejected`, prazo vencido =
+/// `unavailable`, app fechado no meio = `cancelled`.
+#[test]
+fn a_frota_anota_o_par_asked_decided_da_auditoria_comum() {
+    use crate::approval_audit::{pair, Source};
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    let id = {
+        let conn = db.lock().unwrap();
+        let run = run_en(&conn);
+        store::upsert_rule(&conn, "/tmp/proy", "Bash(git status)", true).unwrap();
+        store::upsert_rule(&conn, "/tmp/proy", "Bash(git push*)", false).unwrap();
+        tarea_en(&conn, &run)
+    };
+    let resolve = |cmd: &str, timeout: Duration| {
+        broker::resolve(&db, &id, "Bash", serde_json::json!({ "command": cmd }), timeout)
+    };
+    assert!(resolve("git status", Duration::from_secs(5)).allow);
+    assert!(!resolve("git push origin dev", Duration::from_secs(5)).allow);
+    let vencido = resolve("cargo publish", Duration::from_millis(20));
+    assert_eq!(vencido.by, broker::DecidedBy::Timeout);
+
+    let conn = db.lock().unwrap();
+    let mut rows: Vec<(String, String)> = conn
+        .prepare("SELECT id, status FROM task_approvals WHERE task_id = ?1")
+        .unwrap()
+        .query_map([&id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    rows.sort_by(|a, b| a.1.cmp(&b.1));
+    let outcomes: Vec<(String, String, String)> = rows
+        .iter()
+        .map(|(call, _)| {
+            let (asked, decided) = pair(&conn, Source::Fleet, call).unwrap();
+            let (asked, decided) = (asked.expect("asked"), decided.expect("decided"));
+            assert_eq!(decided.asked_id.as_deref(), Some(asked.id.as_str()));
+            assert_eq!(asked.tool.as_deref(), Some("Bash"));
+            (decided.outcome.unwrap(), decided.decided_by.unwrap(), call.clone())
+        })
+        .map(|(o, by, call)| (o, by, call))
+        .collect();
+    let mut seen: Vec<(String, String)> = outcomes.into_iter().map(|(o, by, _)| (o, by)).collect();
+    seen.sort();
+    assert_eq!(
+        seen,
+        [
+            ("allowed-once".to_string(), "rule".to_string()),
+            ("rejected".to_string(), "rule".to_string()),
+            ("unavailable".to_string(), "timeout".to_string()),
+        ]
+    );
+    // Nenhum `asked` copiou o comando.
+    let leaked: i64 = conn
+        .query_row("SELECT COUNT(*) FROM approval_events WHERE tool LIKE '%git%' OR tool LIKE '%cargo%'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(leaked, 0);
+    drop(conn);
+
+    // Um pedido que ficou `pending` quando o app fechou fecha como `cancelled`.
+    {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO task_approvals (id, task_id, tool_name, input_json, status, asked_at) VALUES ('orfao', ?1, 'Edit', '{}', 'pending', 1)",
+            [&id],
+        )
+        .unwrap();
+        crate::approval_audit::asked(&conn, Source::Fleet, "orfao", &id, "Edit", 1).unwrap();
+    }
+    broker::sweep_orphans(&db).unwrap();
+    let conn = db.lock().unwrap();
+    let decided = pair(&conn, Source::Fleet, "orfao").unwrap().1.unwrap();
+    assert_eq!((decided.outcome.as_deref(), decided.decided_by.as_deref()), (Some("cancelled"), Some("app-closed")));
+}
+
+/// O sonhador que pede uma ferramenta proibida recebe `policy` na hora, sem travar: o
+/// registro da auditoria pega o banco depois que a leitura do papel o soltou.
+#[test]
+fn o_sonhador_negado_pela_politica_responde_e_fica_na_auditoria() {
+    use crate::approval_audit::Source;
+    let _serial = con_broker_limpio();
+    let db = db_compartida();
+    let id = {
+        let conn = db.lock().unwrap();
+        let run = run_en(&conn);
+        let id = tarea_en(&conn, &run);
+        conn.execute("UPDATE tasks SET role = 'dreamer' WHERE id = ?1", [&id]).unwrap();
+        id
+    };
+    let verdict = broker::resolve(&db, &id, "Bash", serde_json::json!({ "command": "ls" }), Duration::from_secs(5));
+    assert_eq!((verdict.allow, verdict.by), (false, broker::DecidedBy::Policy));
+    let conn = db.lock().unwrap();
+    let (outcome, by): (String, String) = conn
+        .query_row(
+            "SELECT outcome, decided_by FROM approval_events WHERE source = ?1 AND owner = ?2 AND phase = 'decided'",
+            [Source::Fleet.as_str(), id.as_str()],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!((outcome.as_str(), by.as_str()), ("rejected", "policy"));
+}
+
 /// "Permitir siempre" en un agente tiene que destrabar a OTRO agente de la misma carpeta
 /// que pidió exactamente lo mismo — y a ninguno de otra carpeta. Sin esto, el usuario
 /// tendría que contestarle a mano algo que acaba de decir que no quiere contestar más.

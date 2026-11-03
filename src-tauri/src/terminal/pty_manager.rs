@@ -657,6 +657,9 @@ pub async fn pty_create(
     prelaunch: Option<Vec<String>>,
     // Só nasce após confirmação explícita no preview; nunca se aplica a PTY vivo.
     ai_memory_continuity: Option<bool>,
+    // Aba de integrante de missão que pediu: o ambiente herdado perde as credenciais de outros
+    // serviços (ver `runs::sandbox::scrub_env`). Ausente = como sempre: aba da pessoa.
+    scrub_secrets: Option<bool>,
     app: AppHandle,
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
@@ -748,6 +751,10 @@ pub async fn pty_create(
     cmd.env("COLORTERM", "truecolor");
     for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
         cmd.env_remove(var);
+    }
+    // Antes da conta, do env da TUI e das `ADE_*`: o que vem depois disto fica.
+    if scrub_secrets.unwrap_or(false) {
+        crate::runs::sandbox::scrub_pty_env(&mut cmd);
     }
     // El PATH del hijo es el del PTY (en Windows sale del registro, no del proceso de la app: la
     // app puede tener la carpeta de su ejecutable en el suyo y el hijo no).
