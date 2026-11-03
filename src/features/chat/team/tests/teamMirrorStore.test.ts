@@ -109,15 +109,30 @@ describe("o espelho canvas -> chat no app", () => {
     expect(calls("chat_team_update")[0]![1].input).toMatchObject({ member: "a", role: "Arquiteto", subagent: true });
   });
 
-  it("tirar a coroa não desfaz o time nem gera comando", async () => {
+  it("tirar a coroa tira só o papel de orquestrador: o time e os integrantes ficam", async () => {
     canvasActions().connect(KEY, "lead", "a");
     await settle();
     backend.calls = [];
     canvasActions().toggleOrchestrator(KEY, "lead");
     await settle();
     expect(backend.calls.filter(([c]) => ["chat_team_link", "chat_team_unlink", "chat_team_update", "chat_team_dissolve"].includes(c))).toEqual([]);
+    expect(calls("chat_team_unlead")).toHaveLength(1);
     expect((backend.team as { members: unknown[] }).members).toHaveLength(1);
+    // Quieto depois: nada de repetir.
+    await settle();
+    expect(calls("chat_team_unlead")).toHaveLength(1);
   });
+
+  it("fechar a aba do orquestrador (a coroa vai junto) não tira o orquestrador do time", async () => {
+    canvasActions().connect(KEY, "lead", "a");
+    await settle();
+    backend.calls = [];
+    tabsStore.useTabsStore.setState({ tabs: [tab("a", "codex"), tab("sh", "bash")] } as never);
+    canvasActions().toggleOrchestrator(KEY, "lead");
+    await settle();
+    expect(calls("chat_team_unlead")).toHaveLength(0);
+  });
+
 
   it("corda para um terminal comum (shell) não vira integrante", async () => {
     canvasActions().connect(KEY, "lead", "sh");

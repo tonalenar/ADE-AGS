@@ -223,6 +223,18 @@ Um time sem orquestrador tem `orchestrator = ""` para fora (a coluna é `NOT NUL
 
 `ags team list` mostra `origin`, `boardKey`, `missionId` e `led`. O evento `cc-chat-team` sai em todas as mudanças. O front (E3) é quem decide **quando** promover (só quando a pessoa mexe, nunca no boot) e quem reaplica o canvas depois de `rebind`/`unlead`.
 
+### Espelho canvas → chat (E3 da unificação)
+
+O front (`chat/team/teamMirror.ts`, `teamStore.ts`) decide **quando** o canvas vira time. Tudo puro em `teamMirror.ts`, executado dentro do `runMirror` (debounce de 300 ms; `syncing` impede reagir ao que o próprio time escreveu):
+
+- **Promover (`promotePlan(boards, teams, agents, { only })`).** Uma coroa de canvas de pasta ou `#c:` (nunca `#m:` nem `#cmp:`) que não lidera time, não é integrante de time com orquestrador nem de missão, e tem ao menos uma corda a um agente (aba de agente ou conversa por protocolo) vira time via `chat_team_promote` (`origin = 'canvas'`, papel e subagente lidos do quadro). **Só quando a pessoa mexe:** o observador do canvas marca só os canvases que **ganharam** uma coroa ou uma corda (reconciliar com as abas só tira, e o canvas lido do disco no boot é ignorado), e o plano olha só esses. Nada de backfill ao abrir o app: um canvas antigo é promovido quando a pessoa coroa ou liga algo nele. Mover um nó não conta.
+- **Promover nunca lança processo.** Só linhas no banco (`chat_team_promote`); não abre aba, PTY, conversa nem worktree, e não abre o painel Time. A linha de base do time novo nasce adotada (`adoptBaseline`), então o canvas não é reescrito. Há teste que conta os comandos de spawn (`teamPromoteStore.test.ts`).
+- **Coroa tirada.** Se o time tinha linha de base, a coroa não está em canvas nenhum e a conversa do orquestrador segue aberta, `reversePlan` emite `unlead` (`chat_team_unlead`): sai só o papel de orquestrador; o time, os integrantes e as cordas ficam. Fechar a aba leva a coroa junto (`reconcile`) e **não** é gesto da pessoa. `canvasPlan` não faz nada num time sem orquestrador (não coroa `""`). Coroar de novo um integrante (ou o antigo orquestrador com as mesmas cordas) faz a coroa assumir o time sem orquestrador.
+- **Um time só, com missão.** `reversePlan` e `promotePlan` também deixam de fora quem está num canvas `#m:` (`missionRefsOf`, espelho de `canvas::mission_refs`).
+- **Idempotência.** Teste: promover e depois `canvasPlan`, `reversePlan` e `promotePlan` devolvem lista vazia.
+
+Conversa por protocolo no canvas (D3, `Board.threads`): **fora desta etapa.** Todo agente novo nasce com terminal (decisão do usuário), então o nó de conversa só serviria ao que já existe por protocolo, e a corda/papel dessas conversas já valem (o `reconcile` mantém a corda `thread:`). Fazer o cartão exige campo novo em `Board` (TS e Rust, com `#[serde(default)]`), renderização e a mesma peça nas abas (E4); o custo e o risco de perder dado no save não compensam agora. Fica para quando houver pedido.
+
 ## Retomada, fila e avisos na timeline (etapa 3 do harness)
 
 - **Retomar uma sessão que falha não esquece em silêncio** (`conversa/resume.rs`): o erro de `--resume`/`thread/resume`/`session/resume` é `Gone` (a sessão não existe: abre outra), `Transient` (2 retentativas com pausa curta; se persistir, abre outra), `Timeout` (NÃO abre outra: a sessão pode existir; falha e a pessoa tenta de novo) ou `Fatal` (o processo não sobe, ou modelo/modo não aplicam: falha). Ao abrir outra, a timeline recebe um item `notice` (`resumeLost`) e a tela diz que o agente recomeçou sem o histórico; o id da sessão anterior só é trocado depois de a nova abrir.
