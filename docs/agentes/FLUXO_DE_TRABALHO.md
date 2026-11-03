@@ -18,6 +18,8 @@
 | Typecheck | `bunx tsc --noEmit` |
 | Babel | `bun run check:babel` |
 | Lint dos testes | `bun run check:test-lint` (`-- --todas` lista tudo; `-- --update-baseline` regrava o baseline) |
+| Fingerprint do schema e do protocolo | `bun run check:fingerprint`; mudou de propósito: `node scripts/fingerprint.mjs --reconhecer <alvo> --motivo "…"` (ver [FINGERPRINT.md](../decisoes/FINGERPRINT.md)) |
+| Bench de complexidade | `bun run bench:rust` (`--n 9`, `--casos digest`, `--json`); ver [COMPLEXIDADE.md](../ade-ags/bench/COMPLEXIDADE.md) |
 | Testes front | `bun run test` / `bunx vitest run <arquivo>` |
 | Testes Rust | `cd src-tauri && cargo test --lib --bin ags` |
 | Só o afetado | `ags test affected [--dry-run]` · `ags test run frontend\|rust\|tsc\|babel` · `ags test status` |
@@ -51,10 +53,12 @@ Roda em todo PR, mas ignora `**.md` e `docs/**`.
 
 | SO | Job | O que roda | Tempo |
 |---|---|---|---|
-| Linux | `test` | `bunx tsc --noEmit` → `node scripts/babel-parse-check.mjs src` → `node scripts/test-lint.mjs` → `bun run test` → `cargo test --lib --bin ags` | ~4 min |
+| Linux | `test` | `node scripts/fingerprint.mjs` → `bunx tsc --noEmit` → `node scripts/babel-parse-check.mjs src` → `node scripts/test-lint.mjs` → `bun run test` → `cargo test --lib --bin ags` → `node scripts/bench-rust.mjs` | ~4 min (o bench não foi medido no CI) |
 | Windows | `check (windows)` | `cargo check --lib --bins --tests` | ~1m40s |
 
 - Não há clippy nem fmt no CI.
+- **Fingerprint:** mudou `database/schema.rs` ou `ipc/protocol.rs` (fora comentário e espaço)? O CI falha até haver um registro em `docs/decisoes/fingerprints/`. O do schema tem de afirmar `semPerdaDeDados`.
+- **Bench:** gate por razão (dimensão 32× maior → custo ≤ 4×) e orçamento calibrado, sem override por ambiente. Mudou o desempenho de propósito? Meça e atualize `ESPERADO_MS` em `scripts/bench-rust.mjs` no mesmo PR.
 - Para esperar o CI, use `gh pr checks <n> --repo tonalenar/ADE-AGS --watch`. **Nunca** faça polling com `sleep`/`Start-Sleep`.
 - O release (`release.yml`) roda em tags `v*`, numa matriz de 6 alvos. As notas ficam em `.github/releases/<tag>.md`, em inglês e escritas à mão.
 
@@ -85,6 +89,7 @@ Roda em todo PR, mas ignora `**.md` e `docs/**`.
   - rodadas de teste: `RELATORIO_TESTE_V<n>.md`;
   - etapas: `ETAPA_<n>_*.md`;
   - decisões: `docs/decisoes/<TEMA>.md`;
+  - postmortems: `docs/ade-ags/postmortem/NNNN-titulo.md`, no formato do [README](../ade-ags/postmortem/README.md) (resumo de 30 s, linha do tempo, causa, redes que falharam, guardrails com link, fonte de cada fato);
   - bench: `docs/ade-ags/bench/`.
 - `ROADMAP.md` é o índice vivo; `ARCHITECTURE.md` é a visão geral.
 - Estilo: frases curtas, tabelas, citações `arquivo:linha`, "não medido" em vez de número inventado.

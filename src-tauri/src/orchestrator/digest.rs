@@ -21,6 +21,8 @@
 //! patrón de error mal clasificado es ruido menor; lo que no puede pasar es perder una
 //! línea de error, y por eso se extraen antes de recortar la cola.
 
+use std::collections::HashMap;
+
 /// Un error o warning más largo que esto casi siempre trae un stack o un dump: se corta y
 /// el modelo puede pedir el crudo con `--raw` si de verdad lo necesita.
 pub(crate) const MAX_LINE_CHARS: usize = 400;
@@ -177,11 +179,16 @@ fn truncate(line: &str) -> String {
 
 /// Agrega preservando el orden de aparición y colapsando repetidos NO consecutivos (el
 /// mismo error emitido tres veces en momentos distintos es una sola señal).
-fn push_unique(target: &mut Vec<(String, usize)>, line: &str) {
-    if let Some(entry) = target.iter_mut().find(|(t, _)| t == line) {
-        entry.1 += 1;
+///
+/// O `index` (texto → posição em `target`) troca a busca linear por uma consulta: com milhares
+/// de erros distintos (um `tsc` quebrado no scrollback de 3 MiB) a busca deixava o digest O(n²).
+/// O gate `bench::digest_custo_por_linha` mede isso.
+fn push_unique(target: &mut Vec<(String, usize)>, index: &mut HashMap<String, usize>, line: &str) {
+    if let Some(&i) = index.get(line) {
+        target[i].1 += 1;
         return;
     }
+    index.insert(line.to_string(), target.len());
     target.push((line.to_string(), 1));
 }
 
@@ -242,10 +249,11 @@ pub fn digest(raw: &str, tail_lines: usize) -> Digest {
 
     let mut errors: Vec<(String, usize)> = Vec::new();
     let mut warnings: Vec<(String, usize)> = Vec::new();
+    let (mut error_index, mut warning_index) = (HashMap::new(), HashMap::new());
     for line in &rendered {
         match classify(line) {
-            Some(Severity::Error) => push_unique(&mut errors, line),
-            Some(Severity::Warning) => push_unique(&mut warnings, line),
+            Some(Severity::Error) => push_unique(&mut errors, &mut error_index, line),
+            Some(Severity::Warning) => push_unique(&mut warnings, &mut warning_index, line),
             None => {}
         }
     }
