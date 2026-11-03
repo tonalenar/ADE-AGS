@@ -9,6 +9,7 @@
 use serde_json::Value;
 
 use super::event::{clip, first_line, EndReason, Event, Tokens};
+use super::repeat::call_key;
 
 fn tokens_of(v: &Value) -> Option<Tokens> {
     let n = |key: &str| v.get(key).and_then(Value::as_u64).unwrap_or(0);
@@ -46,6 +47,16 @@ fn call_summary(payload: &Value) -> String {
     String::new()
 }
 
+/// Os argumentos de uma chamada, para a chave de repetição: o JSON de `arguments` (ou a string crua, se não
+/// for JSON) ou o `input` de uma ferramenta custom.
+fn call_args(payload: &Value) -> Value {
+    match payload.get("arguments") {
+        Some(Value::String(raw)) => serde_json::from_str(raw).unwrap_or_else(|_| Value::String(raw.clone())),
+        Some(other) => other.clone(),
+        None => payload.get("input").or_else(|| payload.get("action")).cloned().unwrap_or(Value::Null),
+    }
+}
+
 /// A pergunta de um `request_user_input` (modo plano). Formato não visto nesta máquina: lê-se o
 /// que der, sem falhar.
 fn question_of(id: &str, payload: &Value) -> Option<Event> {
@@ -75,7 +86,14 @@ pub fn events(line: &Value) -> Vec<Event> {
                 let Some(info) = payload.get("info").filter(|i| !i.is_null()) else { return vec![] };
                 let Some(last) = info.get("last_token_usage").and_then(tokens_of) else { return vec![] };
                 let total = info.get("total_token_usage").and_then(tokens_of);
-                vec![Event::Usage { key: None, last, total }]
+                let mut out = vec![Event::Usage { key: None, last, total }];
+                // O contexto atual: a entrada da última chamada (com o cache); a janela vem no próprio evento.
+                let used = last.input + last.cached;
+                let window = info.get("model_context_window").and_then(Value::as_u64).filter(|w| *w > 0);
+                if used > 0 && window.is_some() {
+                    out.push(Event::Context { used, window, model: None });
+                }
+                out
             }
             "agent_message" => payload
                 .get("message")
@@ -98,7 +116,7 @@ pub fn events(line: &Value) -> Vec<Event> {
             "function_call" | "custom_tool_call" | "local_shell_call" => {
                 let Some(id) = payload.get("call_id").and_then(Value::as_str).filter(|s| !s.is_empty()) else { return vec![] };
                 let name = payload.get("name").and_then(Value::as_str).unwrap_or(kind).to_string();
-                let mut out = vec![Event::ToolStarted { id: id.to_string(), name: name.clone(), summary: call_summary(payload) }];
+                let mut out = vec![Event::ToolStarted { id: id.to_string(), name: name.clone(), summary: call_summary(payload), key: call_key(&name, &call_args(payload)) }];
                 if name == "request_user_input" {
                     out.extend(question_of(id, payload));
                 }

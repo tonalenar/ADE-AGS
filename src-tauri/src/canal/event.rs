@@ -57,8 +57,9 @@ pub enum Event {
     TurnStarted,
     /// O turno acabou. `text` é a última fala do agente, quando a linha a traz.
     TurnEnded { reason: EndReason, text: Option<String> },
-    /// Uma ferramenta foi chamada e ainda não tem resultado.
-    ToolStarted { id: String, name: String, summary: String },
+    /// Uma ferramenta foi chamada e ainda não tem resultado. `key` = a chave da chamada (JSON canônico de
+    /// ferramenta + argumentos, ver `repeat::call_key`), para achar a mesma chamada repetida.
+    ToolStarted { id: String, name: String, summary: String, key: String },
     /// O resultado da ferramenta chegou.
     ToolFinished { id: String, decision: Option<Decision> },
     /// O agente fez uma pergunta com opções e espera a resposta (`AskUserQuestion` no Claude).
@@ -71,6 +72,9 @@ pub enum Event {
     /// uma linha por bloco, todas com o mesmo `usage`); `total` é o acumulado da sessão quando
     /// o próprio agente o informa (Codex).
     Usage { key: Option<String>, last: Tokens, total: Option<Tokens> },
+    /// O tamanho do contexto da última chamada ao modelo (tokens), pelo `usage` real, com a janela quando o
+    /// próprio agente a informa (Codex) e o modelo quando a linha o traz (Claude).
+    Context { used: u64, window: Option<u64>, model: Option<String> },
 }
 
 /// Corta um texto em `max` caracteres, sem partir um caractere.

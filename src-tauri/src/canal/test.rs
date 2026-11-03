@@ -349,7 +349,7 @@ fn o_tracker_le_o_arquivo_que_cresce() {
 fn working_with_tool(since: i64) -> TabState {
     let mut state = TabState::default();
     state.apply(Event::TurnStarted, 0);
-    state.apply(Event::ToolStarted { id: "t1".into(), name: "Bash".into(), summary: "git push".into() }, since);
+    state.apply(Event::ToolStarted { id: "t1".into(), name: "Bash".into(), summary: "git push".into(), key: "k1".into() }, since);
     state
 }
 
@@ -370,7 +370,7 @@ fn aprovacao_so_com_ferramenta_pendente_e_dialogo_na_tela() {
 fn pergunta_e_fim_de_turno_com_pergunta_viram_pendencias() {
     let mut state = TabState::default();
     state.apply(Event::TurnStarted, 0);
-    state.apply(Event::ToolStarted { id: "q".into(), name: "AskUserQuestion".into(), summary: String::new() }, 0);
+    state.apply(Event::ToolStarted { id: "q".into(), name: "AskUserQuestion".into(), summary: String::new(), key: String::new() }, 0);
     state.apply(Event::Question { id: "q".into(), text: "Qual?".into(), options: vec!["A".into(), "B".into()] }, 0);
     let s = pending::signals(&state, Some(true), 60_000);
     assert_eq!(s.len(), 1, "o diálogo da pergunta não vira também aprovação: {s:?}");
@@ -666,4 +666,114 @@ mod timeline_tests {
         assert_eq!(t.items.last().and_then(|i| i.text.as_deref()), Some("no fim"));
         std::fs::remove_dir_all(&dir).ok();
     }
+}
+
+// ── Chamada repetida (escada 3/5/8) e medidor de contexto ─────────────
+
+fn c_call(id: &str, name: &str, input: serde_json::Value) -> serde_json::Value {
+    json!({"type":"assistant","isSidechain":false,"timestamp":"2026-10-22T10:00:01.000Z",
+           "message":{"id":format!("msg_{id}"),"role":"assistant","content":[{"type":"tool_use","id":id,"name":name,"input":input}],"stop_reason":"tool_use"}})
+}
+
+#[test]
+fn a_chave_da_chamada_ignora_a_ordem_dos_argumentos() {
+    use super::repeat::{call_key, canonical_json};
+    assert_eq!(canonical_json(&json!({"b": [1, {"d": 2, "c": 3}], "a": "x"})), r#"{"a":"x","b":[1,{"c":3,"d":2}]}"#);
+    assert_eq!(call_key("Bash", &json!({"command": "ls", "timeout": 5})), call_key("Bash", &json!({"timeout": 5, "command": "ls"})));
+    assert_ne!(call_key("Bash", &json!({"command": "ls"})), call_key("Bash", &json!({"command": "ls -la"})));
+    assert_ne!(call_key("Bash", &json!({"command": "ls"})), call_key("Read", &json!({"command": "ls"})));
+    // Estável entre execuções: a chave vai para o `client_id` dos avisos.
+    assert_eq!(call_key("Bash", &json!({"command": "ls"})).len(), 16);
+}
+
+#[test]
+fn a_mesma_chamada_avisa_na_terceira_quinta_e_oitava_vez() {
+    let mut lines = vec![c_user("rode os testes")];
+    let mut steps = Vec::new();
+    let mut state = TabState::default();
+    for (i, l) in lines.drain(..).enumerate() {
+        for e in parse_line("claude-code", &line(l)).1 {
+            state.apply(e, i as i64);
+        }
+    }
+    for n in 1..=9 {
+        let call = c_call(&format!("t{n}"), "Bash", json!({"command": "cargo test", "description": "testes"}));
+        for e in parse_line("claude-code", &line(call)).1 {
+            state.apply(e, n);
+        }
+        if let Some(r) = &state.repeat {
+            if steps.last() != Some(&r.step) {
+                steps.push(r.step);
+            }
+            assert_eq!((r.name.as_str(), r.summary.as_str()), ("Bash", "cargo test"));
+        }
+    }
+    assert_eq!(steps, vec![3, 5, 8]);
+    assert_eq!(state.repeat.as_ref().map(|r| r.count), Some(8), "depois do 8º degrau não há outro");
+}
+
+#[test]
+fn chamadas_diferentes_nao_contam_e_mensagem_humana_zera() {
+    let mut lines = vec![c_user("comece")];
+    for n in 0..2 {
+        lines.push(c_call(&format!("a{n}"), "Read", json!({"file_path": "/repo/a.rs"})));
+    }
+    lines.push(c_call("b", "Read", json!({"file_path": "/repo/b.rs"})));
+    lines.push(c_user("e agora?"));
+    lines.push(c_call("a9", "Read", json!({"file_path": "/repo/a.rs"})));
+    lines.push(c_call("a10", "Read", json!({"file_path": "/repo/a.rs"})));
+    let state = apply_all("claude-code", &lines);
+    assert_eq!(state.repeat, None, "a mensagem nova zerou: só 2 iguais depois dela");
+}
+
+#[test]
+fn a_mesma_linha_relida_nao_conta_duas_vezes() {
+    let call = c_call("t1", "Bash", json!({"command": "ls"}));
+    let state = apply_all("claude-code", &[c_user("x"), call.clone(), call.clone(), call]);
+    assert_eq!(state.repeat, None, "mesmo id de ferramenta é a mesma chamada");
+}
+
+#[test]
+fn o_contexto_do_claude_se_ancora_no_usage_e_estima_o_que_veio_depois() {
+    let answer = json!({"type":"assistant","isSidechain":false,"timestamp":"2026-10-22T10:00:01.000Z",
+        "message":{"id":"msg_9","model":"claude-opus-5-5","role":"assistant","content":[{"type":"text","text":"ok"}],
+                   "usage":{"input_tokens":1000,"output_tokens":5,"cache_read_input_tokens":150_000,"cache_creation_input_tokens":9000}}});
+    let state = apply_all("claude-code", &[c_user("x"), answer]);
+    let meter = state.context.clone().expect("medidor");
+    assert_eq!((meter.anchor_tokens, meter.window_tokens), (160_000, 200_000));
+    assert!(meter.near_limit(), "160k de 200k = 80%");
+    // Depois da âncora, o texto entra como estimativa de 4 caracteres por token.
+    let mut state = state;
+    state.apply(Event::AssistantText("a".repeat(4_001)), 9);
+    assert_eq!(state.context.as_ref().map(|m| m.used_tokens()), Some(161_001));
+    // Uma resposta `<synthetic>` (erro de API) não mexe na âncora.
+    let synthetic = json!({"type":"assistant","isSidechain":false,"message":{"id":"msg_s","model":"<synthetic>","role":"assistant","content":[],"usage":{"input_tokens":0,"output_tokens":0}}});
+    for e in parse_line("claude-code", &line(synthetic)).1 {
+        state.apply(e, 10);
+    }
+    assert_eq!(state.context.as_ref().map(|m| m.anchor_tokens), Some(160_000));
+}
+
+#[test]
+fn o_contexto_do_codex_usa_a_janela_do_proprio_evento() {
+    let count = x_event(json!({"type":"token_count","info":{
+        "last_token_usage":{"input_tokens":200_000,"cached_input_tokens":150_000,"output_tokens":50},
+        "total_token_usage":{"input_tokens":900_000,"cached_input_tokens":700_000,"output_tokens":300},
+        "model_context_window":258_400}}));
+    let state = apply_all("codex", &[x_event(json!({"type":"task_started"})), count]);
+    let meter = state.context.expect("medidor");
+    assert_eq!((meter.anchor_tokens, meter.window_tokens), (200_000, 258_400));
+    assert!(!meter.near_limit(), "77%");
+}
+
+#[test]
+fn a_repeticao_do_codex_le_os_argumentos_json() {
+    let call = |id: &str, args: &str| x_item(json!({"type":"function_call","call_id":id,"name":"shell","arguments":args}));
+    let state = apply_all("codex", &[
+        x_event(json!({"type":"task_started"})),
+        call("c1", r#"{"command":["bash","-lc","cargo build"],"timeout_ms":1000}"#),
+        call("c2", r#"{"timeout_ms":1000,"command":["bash","-lc","cargo build"]}"#),
+        call("c3", r#"{"command":["bash","-lc","cargo build"],"timeout_ms":1000}"#),
+    ]);
+    assert_eq!(state.repeat.as_ref().map(|r| (r.step, r.summary.as_str())), Some((3, "bash -lc cargo build")));
 }

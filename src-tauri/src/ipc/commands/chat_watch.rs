@@ -64,21 +64,27 @@ fn with_conn<T>(app: &AppHandle, f: impl FnOnce(&rusqlite::Connection) -> Result
 
 /// Uma passada: avisa o que venceu e devolve o próximo prazo (ms do relógio do banco), se algum está correndo.
 fn tick(app: &AppHandle) -> Result<Option<i64>, String> {
-    let (queued, wake) = with_conn(app, |conn| {
+    let (queued, wake, marked) = with_conn(app, |conn| {
         let now = store::db_now(conn)?;
         let mut queued = Vec::new();
+        let mut marked = Vec::new();
         let mut wake: Option<i64> = None;
         for watched in watch_db::gather(conn, now)? {
             let plan = watch::evaluate(&watched.input, now);
+            marked.extend(watch_db::mark_timeouts(conn, &plan, now)?);
             queued.extend(watch_db::queue(conn, &watched, &plan, now)?);
             wake = match (wake, plan.wake_at) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),
             };
         }
-        Ok((queued, wake))
+        Ok((queued, wake, marked))
     })?;
-    // O lock do banco já foi solto: acordar o entregador fala com a fila.
+    // O lock do banco já foi solto: a marca de TIMEOUT aparece na conversa aberta.
+    for (thread_id, item) in &marked {
+        crate::conversa::events::emit(app, thread_id, "item", serde_json::json!({ "item": item }));
+    }
+    // Acordar o entregador fala com a fila.
     for msg in &queued {
         changed(app, Some(&msg.to_tab_id));
         ensure_worker(app, &msg.to_tab_id);
