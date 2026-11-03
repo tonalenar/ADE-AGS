@@ -228,7 +228,7 @@ struct IosSurface {
     typed_this_run: bool,
     app: AppHandle,
     from: String,
-    session: String,
+    session: Option<String>,
     client_pid: Option<u32>,
     node: String,
     udid: String,
@@ -258,7 +258,7 @@ impl Surface for IosSurface {
         if Instant::now() >= self.deadline {
             return Err(Failure::Timeout);
         }
-        crate::terminal::authorize(Some(&self.session), Some(&self.from), self.client_pid)
+        crate::terminal::authorize_actor(self.session.as_deref(), Some(&self.from), self.client_pid)
             .map_err(|_| Failure::OutsideScope)?;
         let boards = canvas::load_boards();
         let allowed = canvas::portals_for(&boards, &self.from)
@@ -507,7 +507,7 @@ impl Decider for VisualDecider {
 
 pub(crate) struct Caller {
     pub tab: String,
-    pub session: String,
+    pub session: Option<String>,
     pub client_pid: Option<u32>,
 }
 

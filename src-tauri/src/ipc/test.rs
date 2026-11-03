@@ -1126,7 +1126,7 @@ fn sim_act_tem_rota_backend_e_scope_do_device_sem_fallback_para_udid_solto() {
     assert!(dispatch.contains("\"sim.act\" => super::sim_act::act(app, args)"));
     assert!(handler.contains("super::devices::ios_target"));
     assert!(devices.contains("pub(super) fn ios_target"));
-    assert!(handler.contains("crate::terminal::authorize"));
+    assert!(handler.contains("crate::terminal::authorize_actor"));
     assert!(handler.contains("crate::ipc::current_client_pid"));
 }
 
