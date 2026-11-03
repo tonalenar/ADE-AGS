@@ -9,6 +9,13 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
 
+## Retomada e estado (pontos 15, 8 e 6 do deepseek-harness)
+
+- **Armado não sobrevive ao reinício:** o que foi armado antes do boot (Vigia de missão e de time de conversa, rotina com catch-up, rodada de correção automática de run antigo) espera o botão **Retomar automação** (Missões, QG e barra do canvas). O fechamento antecipado e o "Decisão pendente" do Vigia não se repetem mais ao reabrir.
+- **Integrante `provisioning`:** gravado antes do worktree e da aba (missão) ou da conversa (time do chat), reconciliado no boot para `active` ou `failed`; nomes nunca reutilizados. Migração só aditiva (`mission_member_state`, `chat_team_provision`).
+- **Escopos de escrita:** `Escopo:` na delegação e `write_scopes` no `run_plan`; o canvas e o QG avisam quando duas tarefas em andamento se sobrepõem. Só aviso.
+- Detalhe em [RETOMADA_E_ESTADO.md](./RETOMADA_E_ESTADO.md); skill `ags-orchestrator` 1.44.0.
+
 ## Processo e qualidade (pontos 23–25 da análise do deepseek-harness)
 
 - **Postmortems numerados** em [postmortem/](./postmortem/README.md): 0001 Vigia segundos × ms (A1), 0002 HMR derrubando PTYs, 0003 sessão `opencode_stream` (A2), 0004 avisos repetidos do Vigia.

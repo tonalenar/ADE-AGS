@@ -85,6 +85,26 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS chat_permission_import (id INTEGER PRIMARY KEY CHECK(id = 1), at INTEGER NOT NULL);",
     )?;
     import_legacy_rules(conn)?;
+    // O integrante novo gravado ANTES de abrir a conversa e o worktree (`provisioning`), reconciliado no
+    // boot para `active` ou `failed` (ver `api::reconcile_provisions`). Aditiva; nenhuma linha se perde: a
+    // linha falha fica, com o motivo e o worktree que sobrou.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS chat_team_provision (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES chat_team(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            agent_id TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT '',
+            member TEXT,
+            worktree TEXT,
+            branch TEXT,
+            state TEXT NOT NULL DEFAULT 'provisioning' CHECK(state IN ('provisioning','active','failed')),
+            failure TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_team_provision_team ON chat_team_provision(team_id, state);",
+    )?;
     Ok(())
 }
 
@@ -476,7 +496,99 @@ pub fn delete_member(conn: &Connection, member: &str, now: i64) -> Result<bool, 
 pub fn delete_team(conn: &Connection, team_id: &str) -> Result<bool, String> {
     migrate(conn).map_err(err)?;
     conn.execute("DELETE FROM chat_team_member WHERE team_id = ?1", [team_id]).map_err(err)?;
+    conn.execute("DELETE FROM chat_team_provision WHERE team_id = ?1", [team_id]).map_err(err)?;
     Ok(conn.execute("DELETE FROM chat_team WHERE id = ?1", [team_id]).map_err(err)? > 0)
+}
+
+/// Um integrante novo, do momento em que a pessoa pediu até entrar no time.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionRow {
+    pub id: String,
+    pub team_id: String,
+    /// O nome dele no time, único entre todos os que o time já teve.
+    pub label: String,
+    pub agent_id: String,
+    pub role: String,
+    /// A conversa aberta para ele (id da aba ou `thread:<id>`), quando chegou a abrir.
+    pub member: Option<String>,
+    pub worktree: Option<String>,
+    pub branch: Option<String>,
+    /// `provisioning`, `active` ou `failed`.
+    pub state: String,
+    pub failure: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+const PROVISION_COLUMNS: &str = "id, team_id, label, agent_id, role, member, worktree, branch, state, failure, created_at, updated_at";
+
+fn provision_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProvisionRow> {
+    Ok(ProvisionRow {
+        id: r.get(0)?,
+        team_id: r.get(1)?,
+        label: r.get(2)?,
+        agent_id: r.get(3)?,
+        role: r.get(4)?,
+        member: r.get(5)?,
+        worktree: r.get(6)?,
+        branch: r.get(7)?,
+        state: r.get(8)?,
+        failure: r.get(9)?,
+        created_at: r.get(10)?,
+        updated_at: r.get(11)?,
+    })
+}
+
+pub fn insert_provision(conn: &Connection, row: &ProvisionRow) -> Result<(), String> {
+    migrate(conn).map_err(err)?;
+    conn.execute(
+        &format!("INSERT INTO chat_team_provision ({PROVISION_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+        params![row.id, row.team_id, row.label, row.agent_id, row.role, row.member, row.worktree, row.branch, row.state, row.failure, row.created_at, row.updated_at],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+pub fn provision(conn: &Connection, id: &str) -> Result<Option<ProvisionRow>, String> {
+    migrate(conn).map_err(err)?;
+    conn.query_row(&format!("SELECT {PROVISION_COLUMNS} FROM chat_team_provision WHERE id = ?1"), [id], provision_row).optional().map_err(err)
+}
+
+/// As do time, ou (sem `team_id`) as que ainda estão `provisioning` em qualquer time.
+pub fn provisions(conn: &Connection, team_id: Option<&str>) -> Result<Vec<ProvisionRow>, String> {
+    migrate(conn).map_err(err)?;
+    let sql = format!(
+        "SELECT {PROVISION_COLUMNS} FROM chat_team_provision
+         WHERE (?1 IS NOT NULL AND team_id = ?1) OR (?1 IS NULL AND state = 'provisioning') ORDER BY created_at, id"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(err)?;
+    let rows = stmt.query_map([team_id], provision_row).map_err(err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+}
+
+/// Muda o estado de uma em `provisioning` (as decididas não voltam atrás). `false` = não mudou.
+pub fn settle_provision(conn: &Connection, id: &str, state: &str, member: Option<&str>, failure: Option<&str>, now: i64) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    let failure: Option<String> = failure.map(|f| f.chars().take(500).collect());
+    Ok(conn
+        .execute(
+            "UPDATE chat_team_provision SET state = ?2, member = COALESCE(?3, member), failure = ?4, updated_at = ?5 WHERE id = ?1 AND state = 'provisioning'",
+            params![id, state, member, failure, now],
+        )
+        .map_err(err)?
+        > 0)
+}
+
+/// Anota o worktree criado para ela (a conversa ainda vai abrir).
+pub fn provision_place(conn: &Connection, id: &str, worktree: Option<&str>, branch: Option<&str>, now: i64) -> Result<(), String> {
+    migrate(conn).map_err(err)?;
+    conn.execute(
+        "UPDATE chat_team_provision SET worktree = ?2, branch = ?3, updated_at = ?4 WHERE id = ?1 AND state = 'provisioning'",
+        params![id, worktree, branch, now],
+    )
+    .map_err(err)?;
+    Ok(())
 }
 
 fn touch(conn: &Connection, team_id: &str, now: i64) -> Result<(), String> {

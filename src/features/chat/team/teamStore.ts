@@ -17,7 +17,8 @@ import { addPending, dropPending } from "../timeline/pending";
 import type { TimelineItem } from "../timeline/types";
 import { reloadThreads, sendToThread, settleThread } from "../structured/store";
 import {
-  chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
+  chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamProvisionBegin, chatTeamProvisionFail, chatTeamProvisionPlace,
+  chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
   type TeamFeedItem, type TeamPolicy, type TeamView,
 } from "./ipc";
 import { chatTeamAllowTools, chatTeamAutoDecide, chatTeamWatch, chatTeamWatchStall } from "../permissions/ipc";
@@ -355,6 +356,8 @@ export interface SpawnedMember {
   label: string;
   /** O worktree `team/<papel>` criado (fica no disco: nada o apaga). */
   place: { cwd: string; branch: string; root: string } | null;
+  /** O registro `provisioning` gravado antes de abrir (ver `chatTeamProvisionBegin`). */
+  provision: string;
   /** Fecha a conversa (a aba fecha; a por protocolo é concluída). */
   close: () => void;
 }
@@ -365,24 +368,42 @@ export interface SpawnedMember {
  */
 export async function spawnMember(input: NewMemberInput): Promise<SpawnedMember> {
   const { agent } = input;
-  const place = input.worktree ? await chatTeamWorktree(input.cwd, input.role) : null;
-  const cwd = place?.cwd ?? input.cwd;
   const roleLabel = i18n.t(`chat.team.roles.${input.role}`, { defaultValue: input.role });
-  const label = `${agent.label} · ${roleLabel}`;
-  const { access, plan } = conversationAccess(input.policy, agent.id);
-  if (input.structured && STRUCTURED_AGENTS.has(agent.id)) {
-    const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: null });
-    await reloadThreads();
-    return { ref: threadKey(row.id), label, place, close: () => settleThread(row.id, true) };
+  // Gravado ANTES do worktree e da conversa: se o app cair no meio, o boot decide pelo estado real. O nome
+  // volta único ("Codex · QA 2"), nunca o de alguém que o time já teve.
+  const provision = await chatTeamProvisionBegin({ teamId: input.teamId, agentId: agent.id, role: input.role, label: `${agent.label} · ${roleLabel}` });
+  const label = provision.label;
+  const fail = (reason: unknown, member: string | null = null) => {
+    chatTeamProvisionFail(provision.id, member, String(reason)).catch(() => {});
+  };
+  // Fechar antes de ligar: a linha `provisioning` vira `failed` (depois de ligada, não muda).
+  const closing = (ref: string, close: () => void) => () => {
+    fail(i18n.t("chat.team.provision.closed"), ref);
+    close();
+  };
+  try {
+    const place = input.worktree ? await chatTeamWorktree(input.cwd, input.role) : null;
+    if (place) chatTeamProvisionPlace(provision.id, place.root, place.branch).catch(() => {});
+    const cwd = place?.cwd ?? input.cwd;
+    const { access, plan } = conversationAccess(input.policy, agent.id);
+    if (input.structured && STRUCTURED_AGENTS.has(agent.id)) {
+      const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: null });
+      await reloadThreads();
+      const ref = threadKey(row.id);
+      return { ref, label, place, provision: provision.id, close: closing(ref, () => settleThread(row.id, true)) };
+    }
+    const tabs = useTabsStore.getState();
+    const before = tabs.activeTabId;
+    const command = chatCommand(agent.id, agent.command, { model: input.model, effort: input.effort ?? null, access, plan });
+    const ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true });
+    registerPendingSkillSetup(ref, attachSkillsToTab(ref, tabs.workspaceId, []));
+    // A tela segue na conversa do orquestrador (a aba nova não rouba a vez).
+    if (before && !useChatStore.getState().thread) useTabsStore.getState().activateTab(before);
+    return { ref, label, place, provision: provision.id, close: closing(ref, () => useTabsStore.getState().closeTab(ref)) };
+  } catch (e) {
+    fail(e);
+    throw e;
   }
-  const tabs = useTabsStore.getState();
-  const before = tabs.activeTabId;
-  const command = chatCommand(agent.id, agent.command, { model: input.model, effort: input.effort ?? null, access, plan });
-  const ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true });
-  registerPendingSkillSetup(ref, attachSkillsToTab(ref, tabs.workspaceId, []));
-  // A tela segue na conversa do orquestrador (a aba nova não rouba a vez).
-  if (before && !useChatStore.getState().thread) useTabsStore.getState().activateTab(before);
-  return { ref, label, place, close: () => useTabsStore.getState().closeTab(ref) };
 }
 
 /**
@@ -405,6 +426,7 @@ export async function linkSpawned(input: NewMemberInput, spawned: SpawnedMember)
   const linked = await chatTeamLink({
     teamId: input.teamId, member: spawned.ref, agentId: input.agent.id, label: spawned.label, role: input.role, model: input.model, policy: input.policy,
     branch: spawned.place?.branch ?? null, worktree: spawned.place?.root ?? null, origin: "new", subagent: input.subagent,
+    provision: spawned.provision,
   });
   await finishLink(input.teamId, spawned.ref, linked.briefing);
 }

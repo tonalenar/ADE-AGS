@@ -13,7 +13,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 use super::model::{self, Named, Policy, MAX_MEMBERS};
-use super::store::{self, FeedRow, MemberPatch, MemberRow, NewMember, TeamRow};
+use super::store::{self, FeedRow, MemberPatch, MemberRow, NewMember, ProvisionRow, TeamRow};
 
 /// O time inteiro, como a tela e `ags team list` mostram.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -24,6 +24,8 @@ pub struct TeamView {
     pub members: Vec<MemberRow>,
     /// "4 agentes": o orquestrador conta.
     pub headcount: usize,
+    /// Os integrantes novos que ainda não entraram (`provisioning`) ou que não chegaram a entrar (`failed`).
+    pub provisions: Vec<ProvisionRow>,
 }
 
 /// Quem vai coordenar.
@@ -38,7 +40,8 @@ pub struct NewTeam {
 
 pub fn view(conn: &Connection, team: TeamRow) -> Result<TeamView, String> {
     let members = store::members(conn, &team.id)?;
-    Ok(TeamView { headcount: model::headcount(members.len()), members, team })
+    let provisions = store::provisions(conn, Some(&team.id))?.into_iter().filter(|p| p.state != "active").collect();
+    Ok(TeamView { headcount: model::headcount(members.len()), members, team, provisions })
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<TeamView>, String> {
@@ -155,6 +158,90 @@ pub fn link(conn: &Connection, team_id: &str, mut new: NewMember, by_agent: bool
     store::member(conn, &member)?.ok_or_else(|| "O integrante não foi gravado.".to_string())
 }
 
+/// O nome de quem entra, sem repetir nenhum que o time já teve (ligado, saindo ou que falhou ao entrar):
+/// "Claude Code · Frontend", depois "Claude Code · Frontend 2". Sem distinguir maiúsculas. Pura.
+pub fn unique_label(taken: &[String], wanted: &str) -> String {
+    let wanted = wanted.trim();
+    let used: std::collections::HashSet<String> = taken.iter().map(|t| t.trim().to_lowercase()).collect();
+    if !used.contains(&wanted.to_lowercase()) {
+        return wanted.to_string();
+    }
+    (2..).map(|n| format!("{wanted} {n}")).find(|label| !used.contains(&label.to_lowercase())).unwrap_or_default()
+}
+
+/// Grava o integrante novo como `provisioning` ANTES de abrir a conversa e o worktree. O nome sai único
+/// ([`unique_label`]); o teto do time conta quem ainda está entrando.
+pub fn provision_begin(conn: &Connection, team_id: &str, agent_id: &str, role: &str, label: &str, now: i64) -> Result<ProvisionRow, String> {
+    let team = store::team(conn, team_id)?.ok_or("Esse time não existe mais.")?;
+    let members = store::members(conn, &team.id)?;
+    let provisions = store::provisions(conn, Some(&team.id))?;
+    let entering = provisions.iter().filter(|p| p.state == "provisioning").count();
+    if members.len() + entering >= MAX_MEMBERS {
+        return Err(format!("O time já tem {MAX_MEMBERS} integrantes: desligue alguém antes."));
+    }
+    let wanted = model::clean_label(label);
+    if wanted.is_empty() {
+        return Err("O integrante novo precisa de um nome.".into());
+    }
+    let taken: Vec<String> = members.iter().map(|m| m.label.clone()).chain(provisions.iter().map(|p| p.label.clone())).collect();
+    let row = ProvisionRow {
+        id: uuid::Uuid::new_v4().to_string(),
+        team_id: team.id,
+        label: unique_label(&taken, &wanted),
+        agent_id: agent_id.to_string(),
+        role: role.trim().to_string(),
+        member: None,
+        worktree: None,
+        branch: None,
+        state: "provisioning".into(),
+        failure: None,
+        created_at: now,
+        updated_at: now,
+    };
+    store::insert_provision(conn, &row)?;
+    Ok(row)
+}
+
+/// Abrir a conversa ou o worktree falhou: fica `failed`, com o motivo. A conversa que chegou a abrir
+/// (`member`) fica anotada para a pessoa achar.
+pub fn provision_fail(conn: &Connection, id: &str, member: Option<&str>, reason: &str, now: i64) -> Result<bool, String> {
+    store::settle_provision(conn, id, "failed", member, Some(reason), now)
+}
+
+/// Liga a conversa aberta para um integrante em `provisioning`: ele passa a `active`. Sem `provision`, é
+/// o [`link`] de sempre (uma conversa que já existia).
+pub fn link_provisioned(conn: &Connection, team_id: &str, mut new: NewMember, provision: Option<&str>, by_agent: bool, now: i64) -> Result<MemberRow, String> {
+    let Some(id) = provision else { return link(conn, team_id, new, by_agent, now) };
+    let row = store::provision(conn, id)?.filter(|p| p.team_id == team_id).ok_or("Esse integrante novo não é deste time.")?;
+    if row.state != "provisioning" {
+        return Err(format!("{} não está mais entrando no time ({}).", row.label, row.state));
+    }
+    new.label = row.label.clone();
+    let member = link(conn, team_id, new, by_agent, now).inspect_err(|error| {
+        let _ = provision_fail(conn, id, None, error, now);
+    })?;
+    store::settle_provision(conn, id, "active", Some(&member.member), None, now)?;
+    Ok(member)
+}
+
+/// No boot: quem ficou `provisioning` (o app caiu no meio) vira `active` se a conversa dele está no time,
+/// senão `failed`. Devolve quantos mudaram.
+pub fn reconcile_provisions(conn: &Connection, now: i64) -> Result<usize, String> {
+    let mut changed = 0;
+    for row in store::provisions(conn, None)? {
+        let linked = row.member.as_deref().map(|m| store::member(conn, m)).transpose()?.flatten().is_some_and(|m| m.team_id == row.team_id);
+        let (state, failure) = match (linked, &row.member) {
+            (true, _) => ("active", None),
+            (false, Some(_)) => ("failed", Some("o app fechou depois de abrir a conversa e antes de ligá-la ao time")),
+            (false, None) => ("failed", Some("o app fechou antes de a conversa do integrante abrir")),
+        };
+        if store::settle_provision(conn, &row.id, state, None, failure, now)? {
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
 /// Desliga um integrante. `false` = não estava no time.
 pub fn unlink(conn: &Connection, team_id: &str, member: &str, now: i64) -> Result<bool, String> {
     match store::member(conn, member)? {
@@ -235,6 +322,20 @@ pub fn feed_items(orchestrator: &str, rows: &[FeedRow]) -> Vec<FeedItem> {
 pub fn handoff_number(line: &str) -> Option<i64> {
     let rest = line.trim_start().strip_prefix("ENTREGA #")?;
     rest.split(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
+/// As delegações em andamento do time que declaram escopos sobrepostos (`Escopo:` na delegação). Só aviso:
+/// a tela mostra, nada é bloqueado (ver `missions::conflicts::scopes`).
+pub fn scope_overlaps(conn: &Connection, team: &TeamView) -> Result<Vec<crate::missions::conflicts::scopes::Overlap>, String> {
+    use crate::missions::conflicts::scopes;
+    let members: Vec<String> = team.members.iter().map(|m| m.member.clone()).collect();
+    // As 200 mais novas bastam: uma delegação em andamento mais velha que isso já não é "agora".
+    let rows = store::feed(conn, &team.team.orchestrator, &members, 200)?;
+    let messages: Vec<scopes::Message> = rows
+        .iter()
+        .map(|r| scopes::Message { kind: r.kind.clone(), to: r.to.clone(), to_name: r.to_name.clone(), from: r.from.clone(), text: r.text.clone() })
+        .collect();
+    Ok(scopes::overlaps(&scopes::in_progress(&messages)))
 }
 
 pub fn feed(conn: &Connection, team: &TeamView, limit: i64) -> Result<Vec<FeedItem>, String> {

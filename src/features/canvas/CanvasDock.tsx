@@ -7,6 +7,7 @@ import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 
 import { useVigiaSwitch } from "@/features/missions/vigiaSwitch";
+import { ensureAutomation, hasPaused, resumeAutomation, useAutomation } from "@/features/missions/automation";
 
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useDockWidth } from "./dockWidth";
@@ -63,6 +64,7 @@ function Svg({ children }: { children: React.ReactNode }) {
 const LayersIcon = () => <Svg><path d="M12 3l9 5-9 5-9-5 9-5Z" /><path d="M3 13l9 5 9-5" /></Svg>;
 const MapIcon = () => <Svg><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" /><path d="M9 4v14M15 6v14" /></Svg>;
 const ChatIcon = () => <Svg><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.5A8 8 0 1 1 21 12Z" /></Svg>;
+const ResumeIcon = () => <Svg><path d="M8 5v14l11-7Z" /></Svg>;
 const EyeIcon = () => <Svg><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></Svg>;
 const ClockIcon = () => <Svg><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
 const RefreshIcon = ({ spin }: { spin: boolean }) => (
@@ -173,6 +175,8 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
   const sameWidth = dockWidth > 0 ? { width: dockWidth } : undefined;
   const vigiaOn = useVigiaSwitch((s) => s.enabled);
   const toggleVigia = useVigiaSwitch((s) => s.toggle);
+  const automationPaused = useAutomation(hasPaused);
+  useEffect(() => ensureAutomation(), []);
   useEffect(() => startUsagePolling(accounts), [accounts]);
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
   useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
@@ -214,6 +218,9 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
           )}
         </Pill>
         <Pill label={t(vigiaOn ? "canvas.vigia.on" : "canvas.vigia.off")} active={vigiaOn} onClick={toggleVigia}><EyeIcon /></Pill>
+        {automationPaused && (
+          <Pill label={t("automation.resume")} active={false} onClick={() => void resumeAutomation().catch(() => {})} className="text-amber-600 dark:text-amber-300"><ResumeIcon /></Pill>
+        )}
         {hasDesign && (
           <Pill label={t("canvas.design.hint")} active={panel === "design"} onClick={() => onTogglePanel("design")} className="relative">
             <DesignIcon />

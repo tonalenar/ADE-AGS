@@ -54,6 +54,19 @@ fn validate_members(members: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Grava o integrante como `provisioning` antes de qualquer efeito e o marca `failed` se a preparação
+/// falhar (ver `missions::members`).
+fn prepare_member(db: &crate::database::DbConnection, mission: &super::Mission, name: &str, base: &Path, start: &str) -> Result<TeamWorkspace, String> {
+    super::members::begin(&*db.lock().map_err(|e| e.to_string())?, &mission.id, name, crate::util::now_ts_ms())?;
+    prepare_one(db, mission, name, base, start).inspect_err(|error| record_failure(db, &mission.id, name, error))
+}
+
+fn record_failure(db: &crate::database::DbConnection, mission_id: &str, name: &str, error: &str) {
+    if let Ok(conn) = db.lock() {
+        let _ = super::members::fail(&conn, mission_id, name, error, crate::util::now_ts_ms());
+    }
+}
+
 fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, name: &str, base: &Path, start: &str) -> Result<TeamWorkspace, String> {
     let existing: Option<(String, String, String)> = db.lock().map_err(|e| e.to_string())?.query_row(
         "SELECT cwd, root, branch FROM mission_team_workspaces WHERE mission_id=?1 AND name=?2",
@@ -137,7 +150,9 @@ pub(crate) fn prepare_recruit(db: &crate::database::DbConnection, mission_id: &s
     let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
     trust_claude_worktrees(&db, &base);
     let start = mission_start(db, &mission, false);
-    prepare_one(db, &mission, name, &base, &start)
+    // Nome novo, gravado antes do worktree: um nome que a missão já usou é recusado.
+    super::members::begin_recruit(&*db.lock().map_err(|e| e.to_string())?, mission_id, name, crate::util::now_ts_ms())?;
+    prepare_one(db, &mission, name, &base, &start).inspect_err(|error| record_failure(db, mission_id, name, error))
 }
 
 #[tauri::command]
@@ -164,7 +179,7 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
                 scope.spawn(move || {
                     let mut last = Err(String::new());
                     for attempt in 0..RETRY_BACKOFF_MS.len() + 1 {
-                        last = prepare_one(db, mission, name, base, start);
+                        last = prepare_member(db, mission, name, base, start);
                         match &last {
                             Err(e) if is_transient_git_error(e) && attempt < RETRY_BACKOFF_MS.len() => {
                                 std::thread::sleep(std::time::Duration::from_millis(RETRY_BACKOFF_MS[attempt]));

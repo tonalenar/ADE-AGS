@@ -499,6 +499,13 @@ ags peer disconnect Backend Tests
 - Coordinate, don't micromanage: give each recruit one clear task, use `peer ask` when you
   need the answer to continue and `peer tell` when you don't, and check on long work with
   `peer check` instead of asking again.
+- **Declare the write scope of each task.** Put one line `Escopo: src/features/chat/, src-tauri/src/chat_team/`
+  in the delegation (path prefixes relative to the repo, comma-separated; `Write scopes:` also
+  works). When two tasks in progress overlap, the canvas and the HQ warn the user and you — it
+  is only a warning, nothing is blocked: agree on who touches what or run them one after the
+  other. A task without the line is left out of the check.
+- **Recruit names are never reused in a mission.** Recruiting "Ana" again after the first "Ana"
+  left is refused (her worktree and branch are still on disk): pick another name, like "Ana 2".
 
 ### QA in the flow and test speed rules (Point 3 & Point 5)
 
@@ -1073,7 +1080,14 @@ ags run reroute-task --task <key|id> --agent opencode   # same branch and worktr
 
 Without `--cwd` or `--run-id`, these act on the last run launched from the folder you're in.
 Declaring a whole plan (`run plan --json-args '{...}'`) is easier through the `run_plan`
-MCP tool; use the CLI for it only if you don't have that tool.
+MCP tool; use the CLI for it only if you don't have that tool. Each task may declare
+`write_scopes` (path prefixes it will touch, e.g. `["src/auth/", "docs/auth.md"]`): an invalid
+one (absolute, `..`, a wildcard in the middle) rejects the whole plan, and tasks in progress
+that overlap come back as a warning in the reply (never blocked).
+
+After the app restarts, automation that was armed before (Watcher nudges, catch-up routines,
+automatic fix rounds of runs created before the restart) waits until the user presses
+**Resume automation**. There is no command for it: don't try to resume it yourself.
 
 ## The project browser
 

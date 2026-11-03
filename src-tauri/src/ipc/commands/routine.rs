@@ -130,7 +130,12 @@ pub fn start_scheduler(app: AppHandle) {
             std::thread::sleep(TICK);
             // Las perdidas con la app cerrada que pidieron recuperarse: una vez, cuando su
             // destino esté abierto (al arrancar, las pestañas tardan en volver).
-            for id in routines::pending_catch_up(&routines::all()) {
+            // Depois de reabrir, a recuperação espera a pessoa retomar a automação (ver
+            // `missions::automation`); o prazo de 15 min conta a partir daí.
+            let gate = crate::missions::automation::gate();
+            let pending = if gate.pauses(0) { Vec::new() } else { routines::pending_catch_up(&routines::all()) };
+            let started = crate::missions::automation::catch_up_started(gate, started);
+            for id in pending {
                 {
                     let mut busy = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
                     if !busy.insert(id.clone()) {

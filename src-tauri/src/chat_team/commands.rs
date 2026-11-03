@@ -78,6 +78,9 @@ pub struct LinkInput {
     pub origin: Option<String>,
     #[serde(default)]
     pub subagent: Option<bool>,
+    /// O integrante novo gravado por `chat_team_provision_begin` antes de abrir a conversa.
+    #[serde(default)]
+    pub provision: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -123,7 +126,7 @@ pub fn chat_team_link(app: AppHandle, db: State<'_, DbConnection>, input: LinkIn
     };
     let (member, orchestrator) = {
         let conn = lock(&db)?;
-        let member = api::link(&conn, &input.team_id, new, false, crate::util::now_ts_ms())?;
+        let member = api::link_provisioned(&conn, &input.team_id, new, input.provision.as_deref(), false, crate::util::now_ts_ms())?;
         let team = crate::chat_team::store::team(&conn, &input.team_id)?.ok_or("Esse time não existe mais.")?;
         let name = api::orchestrator_peer_name(&conn, &team);
         (member, name)
@@ -132,6 +135,54 @@ pub fn chat_team_link(app: AppHandle, db: State<'_, DbConnection>, input: LinkIn
     let briefing = briefing_for(&orchestrator, &member, &role_label, &instructions);
     announce(&app, &input.team_id);
     Ok(Linked { member, briefing, role_label })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionInput {
+    pub team_id: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub role: String,
+    pub label: String,
+}
+
+/// Grava o integrante novo (`provisioning`) antes de abrir a conversa e o worktree; devolve o nome único.
+#[tauri::command]
+pub fn chat_team_provision_begin(app: AppHandle, db: State<'_, DbConnection>, input: ProvisionInput) -> Result<super::store::ProvisionRow, String> {
+    let row = api::provision_begin(&*lock(&db)?, &input.team_id, &input.agent_id, &input.role, &input.label, crate::util::now_ts_ms())?;
+    announce(&app, &input.team_id);
+    Ok(row)
+}
+
+/// O worktree do integrante novo ficou pronto (a conversa ainda vai abrir).
+#[tauri::command]
+pub fn chat_team_provision_place(db: State<'_, DbConnection>, id: String, worktree: Option<String>, branch: Option<String>) -> Result<(), String> {
+    super::store::provision_place(&*lock(&db)?, &id, worktree.as_deref(), branch.as_deref(), crate::util::now_ts_ms())
+}
+
+/// Abrir a conversa ou o worktree do integrante novo falhou.
+#[tauri::command]
+pub fn chat_team_provision_fail(app: AppHandle, db: State<'_, DbConnection>, id: String, member: Option<String>, reason: String) -> Result<bool, String> {
+    let (done, team) = {
+        let conn = lock(&db)?;
+        let done = api::provision_fail(&conn, &id, member.as_deref(), &reason, crate::util::now_ts_ms())?;
+        (done, super::store::provision(&conn, &id)?.map(|p| p.team_id))
+    };
+    if let Some(team) = team {
+        announce(&app, &team);
+    }
+    Ok(done)
+}
+
+/// As delegações em andamento do time com escopos de escrita sobrepostos (só aviso).
+#[tauri::command]
+pub fn chat_team_overlaps(db: State<'_, DbConnection>, team_id: String) -> Result<Vec<crate::missions::conflicts::scopes::Overlap>, String> {
+    let conn = lock(&db)?;
+    let team = crate::chat_team::store::team(&conn, &team_id)?.ok_or("Esse time não existe mais.")?;
+    let view = api::view(&conn, team)?;
+    api::scope_overlaps(&conn, &view)
 }
 
 #[tauri::command]

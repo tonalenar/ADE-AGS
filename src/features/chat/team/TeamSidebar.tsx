@@ -42,7 +42,9 @@ export function TeamMembers({ orchestrator, members, cards, selectedId }: {
   const team = useTeamStore((s) => teamLedBy(s.teams, orchestrator));
   const feed = useTeamStore((s) => (team ? s.feeds[team.id] : undefined));
   const live = useTeamLive(cards);
-  if (!team || members.length === 0) return null;
+  const { t } = useTranslation();
+  const pending = team?.provisions ?? [];
+  if (!team || (members.length === 0 && pending.length === 0)) return null;
   return (
     <div role="group" className="flex flex-col">
       {members.map((ref) => {
@@ -62,6 +64,16 @@ export function TeamMembers({ orchestrator, members, cards, selectedId }: {
           </button>
         );
       })}
+      {pending.map((p) => (
+        // Gravado antes de a conversa abrir: "entrando no time…" ou o motivo de não ter entrado.
+        <div key={p.id} title={p.failure ?? undefined}
+          className="ml-[18px] flex w-[calc(100%-18px)] items-center gap-2 h-8 pl-3 pr-2 border-l border-gray-300 dark:border-white/15 text-[12px] text-gray-500 dark:text-white/45">
+          <AgentMono agentId={p.agentId} label={p.label} size={14} />
+          <span className="flex-1 min-w-0 truncate">
+            {p.label} · {p.state === "failed" ? t("chat.team.provision.failed", { reason: p.failure ?? "" }) : t("chat.team.provision.entering")}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

@@ -4468,5 +4468,18 @@
   "chat.team.watch.on": "Avisar al orquestador cuando un integrante se bloquee",
   "chat.team.watch.hint": "Una petición que espera por ti más de 20 s, una pregunta sin respuesta o un turno fallido se convierte en UN aviso al orquestador (y otro cuando respondes). La decisión sigue siendo tuya: el orquestador no puede aprobar nada.",
   "chat.team.watchStall.on": "Avisar también cuando un integrante no avance",
-  "chat.team.watchStall.hint": "Un integrante trabajando sin ningún elemento nuevo durante 15 min se convierte en UN aviso al orquestador. Solo avisa: no interrumpe ni escribe en la conversación del integrante. Desactivado por defecto."
+  "chat.team.watchStall.hint": "Un integrante trabajando sin ningún elemento nuevo durante 15 min se convierte en UN aviso al orquestador. Solo avisa: no interrumpe ni escribe en la conversación del integrante. Desactivado por defecto.",
+  "automation.paused.title": "Automatización en pausa desde que la app se reabrió",
+  "automation.paused.detail": "Lo que estaba armado antes de cerrar no vuelve solo: el Vigía no le avisa a nadie, las rutinas perdidas no se recuperan y la flota no abre ronda de corrección automática hasta que reanudes.",
+  "automation.paused.teams": "Equipos: {{names}}",
+  "automation.paused.routines": "Rutinas por recuperar: {{names}}",
+  "automation.paused.fixRounds_one": "{{count}} ronda de corrección se interrumpió por el cierre y no vuelve ni con el botón: reabre la tarea desde la Flota.",
+  "automation.paused.fixRounds_other": "{{count}} rondas de corrección se interrumpieron por el cierre y no vuelven ni con el botón: reabre las tareas desde la Flota.",
+  "automation.resume": "Reanudar automatización",
+  "chat.team.provision.closed": "la conversación se cerró antes de entrar al equipo",
+  "chat.team.provision.entering": "entrando al equipo…",
+  "chat.team.provision.failed": "no entró al equipo: {{reason}}",
+  "missions.scopes.title": "Alcances de escritura superpuestos",
+  "missions.scopes.pair": "{{a}} y {{b}} van a tocar: {{paths}}",
+  "missions.scopes.hint": "Solo un aviso, nada se bloqueó: acuerden quién toca qué o háganlas una después de la otra antes de que sea un conflicto en el merge."
 }

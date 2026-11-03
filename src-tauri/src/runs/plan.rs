@@ -49,6 +49,10 @@ pub struct PlanTask {
     /// Key, id ou work_key da entrega que esta tarefa corrige. O teto é o dela.
     #[serde(default, alias = "fixes")]
     pub corrects: Option<String>,
+    /// Os prefixos de caminho que a tarefa vai tocar (`src/features/chat/`). Duas tarefas em andamento que
+    /// se sobrepõem geram um aviso; nada é bloqueado (ver `missions::conflicts::scopes`).
+    #[serde(default, alias = "writeScopes")]
+    pub write_scopes: Vec<String>,
 }
 
 fn valid_key(key: &str) -> bool {
@@ -166,6 +170,9 @@ pub fn validate(tasks: &[PlanTask], existing: &HashSet<String>) -> Result<Vec<Pl
         if task.budget_usd.is_some_and(|b| b.is_nan() || b <= 0.0) {
             errors.push(format!("'{}' tem um orçamento que não é positivo", task.key));
         }
+        if let Err(error) = crate::missions::conflicts::scopes::validate(&task.write_scopes) {
+            errors.push(format!("'{}' tem write_scopes inválido: {error}", task.key));
+        }
         for dep in &task.depends_on {
             if dep == &task.key {
                 errors.push(format!("'{}' depende de sí misma", task.key));
@@ -178,7 +185,11 @@ pub fn validate(tasks: &[PlanTask], existing: &HashSet<String>) -> Result<Vec<Pl
         return Err(errors.join("\n"));
     }
 
-    topological(tasks)
+    let mut order = topological(tasks)?;
+    for task in &mut order {
+        task.write_scopes = crate::missions::conflicts::scopes::validate(&task.write_scopes)?;
+    }
+    Ok(order)
 }
 
 /// Orden de Kahn sobre las dependencias internas del plan. Las que apuntan a tareas que ya

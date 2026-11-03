@@ -1,0 +1,10 @@
+{
+  "alvo": "schema-sqlite",
+  "sha256": "1a1e9237972c20137eac35609cede0a2f2776f4da45977077b371a6fc4c1a332",
+  "data": "2026-11-03",
+  "motivo": "tabela nova mission_member_state (integrante provisioning/active/failed, reconciliado no boot), CREATE TABLE IF NOT EXISTS, sem subir user_version",
+  "semPerdaDeDados": true,
+  "arquivos": [
+    "src-tauri/src/database/schema.rs"
+  ]
+}

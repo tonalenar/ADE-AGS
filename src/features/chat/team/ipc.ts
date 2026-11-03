@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { ScopeOverlap } from "@/features/missions/conflictsTypes";
 
 /**
  * O time de agentes do modo chat (`src-tauri/src/chat_team/commands.rs`). As funções são finas: a
@@ -49,6 +50,8 @@ export interface TeamView {
   members: TeamMember[];
   /** Os integrantes mais o orquestrador. */
   headcount: number;
+  /** Os novos que ainda estão entrando ou que não chegaram a entrar (ausente em backend antigo). */
+  provisions?: TeamProvision[];
 }
 
 /** Espelho de `chat_team::api::FeedItem`. */
@@ -92,6 +95,25 @@ export interface LinkInput {
   origin?: "new" | "existing";
   /** `undefined` = não disse: nasce como não subagente (e, se já estava no time, fica como está). */
   subagent?: boolean;
+  /** O integrante novo gravado por `chatTeamProvisionBegin` antes de abrir a conversa. */
+  provision?: string | null;
+}
+
+/** Um integrante novo, do pedido até entrar no time (`chat_team/store.rs::ProvisionRow`). */
+export interface TeamProvision {
+  id: string;
+  teamId: string;
+  /** Único entre todos os que o time já teve ("Codex · QA 2"). */
+  label: string;
+  agentId: string;
+  role: string;
+  member: string | null;
+  worktree: string | null;
+  branch: string | null;
+  state: "provisioning" | "active" | "failed";
+  failure: string | null;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface Linked {
@@ -108,6 +130,16 @@ export const chatTeamCreate = (input: { orchestrator: string; agentId: string; l
 
 export const chatTeamLink = (input: LinkInput) => invoke<Linked>("chat_team_link", { input });
 
+/** Grava o integrante novo (`provisioning`) ANTES de abrir a conversa e o worktree; devolve o nome único. */
+export const chatTeamProvisionBegin = (input: { teamId: string; agentId: string; role: string; label: string }) =>
+  invoke<TeamProvision>("chat_team_provision_begin", { input });
+
+export const chatTeamProvisionPlace = (id: string, worktree: string | null, branch: string | null) =>
+  invoke<void>("chat_team_provision_place", { id, worktree, branch });
+
+export const chatTeamProvisionFail = (id: string, member: string | null, reason: string) =>
+  invoke<boolean>("chat_team_provision_fail", { id, member, reason });
+
 export const chatTeamUnlink = (teamId: string, member: string) => invoke<boolean>("chat_team_unlink", { teamId, member });
 
 export const chatTeamUpdate = (input: { teamId: string; member: string; role?: string; policy?: TeamPolicy; label?: string; subagent?: boolean }) =>
@@ -123,3 +155,7 @@ export const chatTeamNotice = (teamId: string) => invoke<string>("chat_team_noti
 
 /** Um worktree `team/<papel>` para um integrante novo (a partir do último commit da pasta). */
 export const chatTeamWorktree = (cwd: string, role: string) => invoke<{ cwd: string; branch: string; root: string }>("chat_team_worktree", { cwd, role });
+
+/** As delegações em andamento do time com escopos de escrita sobrepostos (`Escopo:` na delegação). Só aviso. */
+export const chatTeamOverlaps = (teamId: string) =>
+  invoke<ScopeOverlap[]>("chat_team_overlaps", { teamId });

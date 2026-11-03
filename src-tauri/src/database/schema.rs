@@ -1080,6 +1080,17 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         PRIMARY KEY (mission_id, name), UNIQUE(root), UNIQUE(branch)
     );")?;
     if user_version(conn)? < 32 { set_user_version(conn, 32)?; }
+    // Estado de cada integrante de missão em terminais (`missions::members`): gravado como `provisioning`
+    // antes do worktree e da aba, reconciliado no boot. Aditiva e idempotente, sem subir o user_version.
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_member_state (
+        mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        state TEXT NOT NULL DEFAULT 'provisioning' CHECK(state IN ('provisioning','active','failed')),
+        failure TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (mission_id, name)
+    );")?;
     // v33: Durable ownership survives closing a terminal; no FK to disposable tabs.
     conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_usage_tabs (
         mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,

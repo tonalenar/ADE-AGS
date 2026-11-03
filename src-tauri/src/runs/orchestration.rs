@@ -315,7 +315,10 @@ fn add_tasks(
     } else {
         format!("Tarea '{}' agregada al run {}.", created[0], run.id)
     };
-    Ok(format!("{head}\n\n{}", board(&conn, &run)?))
+    // Só aviso: duas tarefas em andamento declarando o mesmo lugar (`write_scopes`).
+    let warning = crate::missions::conflicts::scopes::warning_text(&crate::missions::conflicts::scopes::run_overlaps(&conn, &run.id).unwrap_or_default());
+    let warning = if warning.is_empty() { String::new() } else { format!("\n\n{warning}") };
+    Ok(format!("{head}{warning}\n\n{}", board(&conn, &run)?))
 }
 
 /// Valida, rutea y crea las filas del plan, sin despachar nada. Devuelve el run y las keys
@@ -576,12 +579,14 @@ pub(crate) fn plan_tasks(
             let (assignment, complexity, isolate_default) = &assignments[&t.key];
             let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
             let schema = t.result_schema.as_ref().map(Value::to_string);
+            // O escopo declarado vai no prompt: o worker o vê, e o aviso de sobreposição o lê dali.
+            let prompt = crate::missions::conflicts::scopes::prompt_with_scopes(&t.prompt, &t.write_scopes);
             let created = store::create_task(
                 &tx,
                 &store::NewTask {
                     run_id: &run.id,
                     title: &t.title,
-                    prompt: &t.prompt,
+                    prompt: &prompt,
                     agent_id: &assignment.agent_id,
                     account_id: assignment.account_id.as_deref(),
                     auto_account: assignment.auto_account,

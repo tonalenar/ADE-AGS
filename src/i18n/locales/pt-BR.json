@@ -4468,5 +4468,18 @@
   "chat.team.watch.on": "Avisar o orquestrador quando um integrante travar",
   "chat.team.watch.hint": "Um pedido que espera por você há mais de 20 s, uma pergunta sem resposta ou um turno que falhou vira UM aviso ao orquestrador (e outro quando você responde). A decisão continua sendo sua: o orquestrador não pode liberar nada.",
   "chat.team.watchStall.on": "Avisar também quando um integrante ficar sem progresso",
-  "chat.team.watchStall.hint": "Um integrante trabalhando sem nenhum item novo há 15 min vira UM aviso ao orquestrador. Só avisa: não interrompe nem escreve na conversa do integrante. Desligado por padrão."
+  "chat.team.watchStall.hint": "Um integrante trabalhando sem nenhum item novo há 15 min vira UM aviso ao orquestrador. Só avisa: não interrompe nem escreve na conversa do integrante. Desligado por padrão.",
+  "automation.paused.title": "Automação pausada desde que o app reabriu",
+  "automation.paused.detail": "O que estava armado antes de fechar não volta sozinho: o Vigia não cutuca ninguém, as rotinas perdidas não são recuperadas e a frota não abre rodada de correção automática até você retomar.",
+  "automation.paused.teams": "Equipes: {{names}}",
+  "automation.paused.routines": "Rotinas a recuperar: {{names}}",
+  "automation.paused.fixRounds_one": "{{count}} rodada de correção foi interrompida pelo fechamento e não volta nem com o botão: reabra a tarefa pela Frota.",
+  "automation.paused.fixRounds_other": "{{count}} rodadas de correção foram interrompidas pelo fechamento e não voltam nem com o botão: reabra as tarefas pela Frota.",
+  "automation.resume": "Retomar automação",
+  "chat.team.provision.closed": "a conversa foi fechada antes de entrar no time",
+  "chat.team.provision.entering": "entrando no time…",
+  "chat.team.provision.failed": "não entrou no time: {{reason}}",
+  "missions.scopes.title": "Escopos de escrita sobrepostos",
+  "missions.scopes.pair": "{{a}} e {{b}} vão mexer em: {{paths}}",
+  "missions.scopes.hint": "Só um aviso, nada foi bloqueado: combine quem mexe onde ou faça uma depois da outra, antes que vire conflito no merge."
 }

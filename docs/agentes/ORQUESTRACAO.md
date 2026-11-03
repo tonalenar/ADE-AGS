@@ -20,6 +20,9 @@
 ## Regras para quem mexe no código
 - O status de missão headless só muda por `refresh_run_status → missions::store::refresh_for_run`. O de missão em terminais, só por `mark_started_terminals`/`finish_terminals`.
 - O start é atômico e protegido contra start duplo.
+- **Armado não sobrevive ao reinício**: automação armada antes do boot (Vigia, catch-up de rotina, rodada de correção automática de run antigo) espera o botão "Retomar automação" (`missions/automation.rs`). Não crie CLI nem MCP para retomar.
+- **Integrante `provisioning`**: grave antes de criar worktree, aba ou conversa (`missions/members.rs`, `chat_team_provision`); o boot reconcilia. Nome de integrante nunca se reutiliza na missão nem no time.
+- Escopos de escrita (`Escopo:` na delegação, `write_scopes` no plano) só **avisam** sobreposição (`missions/conflicts/scopes.rs`); nunca bloqueie por eles.
 - Criar ou editar uma missão **nunca** lança PTY, processo ou worktree. Há teste que conta os três.
 - A política do lead é **por papel, nunca por provider**, e vem antes das regras do broker. Não adicione `if provider`.
 - Tudo o que vem de outro agente (facts, handoffs, memória, HTML de design) é dado não confiável: mantenha o envelope e a neutralização.

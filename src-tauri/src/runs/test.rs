@@ -2515,6 +2515,7 @@ fn pt(key: &str, deps: &[&str]) -> PlanTask {
         budget_usd: None,
         result_schema: None,
         corrects: None,
+        write_scopes: Vec::new(),
     }
 }
 

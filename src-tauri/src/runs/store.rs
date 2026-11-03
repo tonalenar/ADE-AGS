@@ -1077,13 +1077,17 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
 /// fila en `running` después de reabrir no es una tarea viva, es una que murió sin que
 /// nadie llegara a anotarlo — y dejarla así la mostraría para siempre como si estuviera
 /// trabajando. Corre en el arranque, junto al resto de la puesta a punto de la base.
+/// O erro que o sweep do boot grava numa tarefa que estava rodando (a tela de retomar conta as rodadas
+/// de correção interrompidas por ele, ver `missions::automation`).
+pub const SWEPT_RUNNING_ERROR: &str = "o app foi fechado enquanto esta tarefa rodava";
+
 pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let now = now_ts();
     let n = conn
         .execute(
             "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status IN ('ready', 'running')",
-            rusqlite::params![status::FAILED, "o app foi fechado enquanto esta tarefa rodava", now],
+            rusqlite::params![status::FAILED, SWEPT_RUNNING_ERROR, now],
         )
         .map_err(|e| e.to_string())?;
     // Las que esperaban turno no se relanzan solas al reabrir: su lead murió con la app, y
