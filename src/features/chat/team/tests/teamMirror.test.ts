@@ -103,11 +103,11 @@ describe("o sentido canvas -> chat", () => {
     expect(plan(t, { [KEY]: setRole(start, "a", "BACKEND", true) }, base)).toEqual([{ kind: "update", teamId: "t1", ref: "a", role: "backend", subagent: true }]);
   });
 
-  it("tirar a coroa não desfaz o time nem gera operação", () => {
+  it("tirar a coroa tira só o papel de orquestrador: nada de unlink nem de dissolver", () => {
     const t = team([["a", "qa"]]);
     const start = addEdge(board(["a"]), "lead", "a", "e1");
     const base = baselineOf(t, { [KEY]: start });
-    expect(plan(t, { [KEY]: { ...start, orchestrators: [] } }, base)).toEqual([]);
+    expect(plan(t, { [KEY]: { ...start, orchestrators: [] } }, base)).toEqual([{ kind: "unlead", teamId: "t1" }]);
   });
 
   it("sem linha de base o plano não adivinha: só adota", () => {

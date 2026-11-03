@@ -9,6 +9,7 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
 - **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3; a missão é a E5. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+- **Time único (E3, espelho canvas → chat):** `promotePlan` promove a coroa de um canvas de pasta ou `#c:` a time do chat quando a pessoa coroa ou liga algo (nunca no boot, nunca `#m:`, nunca lança processo); tirar a coroa tira só o papel de orquestrador (`chat_team_unlead`); o invariante de um time só conta também a missão. O nó de conversa por protocolo no canvas ficou de fora. Ver [MODO_CHAT.md](./MODO_CHAT.md).
 
 ## Retomada e estado (pontos 15, 8 e 6 do deepseek-harness)
 
