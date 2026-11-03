@@ -2,6 +2,8 @@
 
 O ADE descobre o estado de um agente lendo a tela dele: trabalhando, parado, esperando aprovação, mensagem colada sem envio. É a parte mais frágil do app, porque cada TUI (Claude Code, Codex, OpenCode, Gemini, Kimi, Hermes, Antigravity) desenha de um jeito e muda de versão sem aviso.
 
+> Este doc é o **v1** (telas de PTY). O replay das conversas por protocolo (linhas JSON do stdio, `ade-replay` v2, com placeholders, `refresh` e oráculo) está em [BANCADA_MOTORES.md](./BANCADA_MOTORES.md#2-replay-de-protocolo-ade-replay-v2).
+
 Os testes por replay pegam a **saída crua de um PTY**, pedaço por pedaço e no tempo em que chegou, e passam pelos **detectores de verdade**, sem app, sem PTY e sem relógio real. A ideia veio dos testes de transcrição gravada do T3 Code.
 
 ## Onde fica

@@ -1,0 +1,8 @@
+{
+  "checks": [
+    { "label": "a thread retomada é a mesma", "expect": { "sessao": "{{session:1}}" } },
+    { "label": "saída diferente de zero é ferramenta com erro", "expect": { "ferramentas": ["Bash:error"] } },
+    { "label": "o pedido de editar arquivo vira aprovação", "expect": { "pedidos": ["fileChange"] } },
+    { "label": "a queda fecha o turno; o Codex não diz o motivo (o stderr vai só para o log)", "expect": { "fim": "caiu", "erroContem": "O processo do Codex fechou no meio do turno" } }
+  ]
+}
