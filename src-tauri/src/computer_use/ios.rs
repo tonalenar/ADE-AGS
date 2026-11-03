@@ -270,19 +270,7 @@ impl Surface for IosSurface {
         }
         crate::terminal::authorize_actor(self.session.as_deref(), Some(&self.from), self.client_pid)
             .map_err(|_| Failure::OutsideScope)?;
-        let boards = canvas::load_boards();
-        let allowed = canvas::portals_for(&boards, &self.from)
-            .iter()
-            .any(|(key, id)| {
-                id == &self.node
-                    && boards
-                        .get(key)
-                        .and_then(|b| b.portals.get(id))
-                        .is_some_and(|p| {
-                            p.kind.as_deref() == Some("ios")
-                                && p.udid.as_deref() == Some(&self.udid)
-                        })
-            });
+        let allowed = crate::ipc::commands::devices::ios_still_allowed(&self.from, &self.node, &self.udid);
         if !allowed {
             return Err(Failure::OutsideScope);
         }

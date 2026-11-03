@@ -490,6 +490,17 @@ mod test {
     }
 }
 
+/// O nó iOS ainda é do chamador? Vale o portal do canvas ligado a ele e também o aparelho do painel do
+/// chat, que não tem corda; este só vale com a chave "Permitir que agentes controlem dispositivos" ligada.
+pub(crate) fn ios_still_allowed(from: &str, node: &str, udid: &str) -> bool {
+    reachable(from).iter().any(|d| {
+        d.id == node
+            && d.portal.kind.as_deref() == Some("ios")
+            && d.portal.udid.as_deref() == Some(udid)
+            && d.chat.unwrap_or(true)
+    })
+}
+
 /// Resolve só nós iOS alcançáveis pelo chamador; não aceita UDID solto como autorização.
 pub(super) fn ios_target(from: &str, name: &str) -> Result<(String, String), String> {
     let list = reachable(from);
