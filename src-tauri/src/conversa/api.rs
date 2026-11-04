@@ -15,7 +15,7 @@ use crate::database::DbConnection;
 use super::codex::RequestFailure;
 use super::envio::{SendError, SendMode};
 use super::store::{self, RequestRow, ThreadRow, Tuning};
-use super::{agy, claude, codex, codex_map, opencode};
+use super::{agy, claude, codex, codex_map, cursor, opencode};
 
 /// Quem fala com o agente de uma conversa por protocolo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,6 +28,8 @@ pub enum Engine {
     OpenCode,
     /// `agy --print --output-format stream-json`, um processo por turno (`agy.rs`).
     Antigravity,
+    /// `cursor-agent -p --output-format stream-json`, um processo por turno (`cursor.rs`).
+    Cursor,
 }
 
 impl Engine {
@@ -37,13 +39,18 @@ impl Engine {
             "claude-code" => Some(Engine::Claude),
             "opencode" => Some(Engine::OpenCode),
             "antigravity" => Some(Engine::Antigravity),
+            "cursor" => Some(Engine::Cursor),
             _ => None,
         }
     }
 
     /// Os acessos que o agente aceita. O Plano é um modo do Claude (permissão), do OpenCode (o agente
-    /// `plan`) e do Antigravity (`--mode plan`); o Codex não tem.
+    /// `plan`), do Antigravity (`--mode plan`) e do Cursor (`--mode plan`); o Codex não tem. O Cursor só tem
+    /// Supervisionado, Plano e Acesso total: Aceitar edições e Auto não têm flag documentada.
     pub fn accepts(self, access: &str) -> bool {
+        if self == Engine::Cursor {
+            return matches!(access, "ask" | "plan" | "full");
+        }
         matches!(access, "ask" | "edits" | "safe" | "full") || (self != Engine::Codex && access == "plan")
     }
 }
@@ -68,6 +75,7 @@ fn live_turn(thread_id: &str) -> Option<Option<String>> {
         .or_else(|| claude::get(thread_id).map(|s| s.turn()))
         .or_else(|| opencode::get(thread_id).map(|s| s.turn()))
         .or_else(|| agy::get(thread_id).map(|s| s.turn()))
+        .or_else(|| cursor::get(thread_id).map(|s| s.turn()))
 }
 
 /// Fecha o processo do agente da conversa, qualquer que seja.
@@ -76,6 +84,12 @@ fn close(thread_id: &str) {
     claude::close(thread_id);
     opencode::close(thread_id);
     agy::close(thread_id);
+    cursor::close(thread_id);
+}
+
+/// Fecha o processo do agente (a troca de conta do pool usa).
+pub(super) fn close_process(thread_id: &str) {
+    close(thread_id);
 }
 
 fn db_err(e: impl ToString) -> String {
@@ -113,15 +127,31 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
         return Err(access_error(engine, &input.access));
     }
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.lock().map_err(db_err)?;
-    let tuning = Tuning { model: input.model, effort: input.effort, access: input.access };
-    store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, input.account_id.as_deref(), crate::util::now_ts_ms())
-        .map_err(db_err)
+    // `pool:<nome>` no lugar da conta: o pool escolhe a conta agora e a conversa fica ligada a ele (o pool de
+    // contas do chat só troca com o pool escolhido pela pessoa).
+    let (account_id, pool_id) = match input.account_id.as_deref().and_then(crate::accounts::pools::pool_ref) {
+        Some(name) => {
+            let (account, pool) = super::pool::resolve_at_create(db, &input.agent_id, name)?;
+            (account, Some(pool))
+        }
+        None => (input.account_id.clone(), None),
+    };
+    let row = {
+        let conn = db.lock().map_err(db_err)?;
+        let tuning = Tuning { model: input.model, effort: input.effort, access: input.access };
+        store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, account_id.as_deref(), crate::util::now_ts_ms())
+            .map_err(db_err)?
+    };
+    if let Some(pool) = pool_id {
+        super::pool::bind(db, &id, Some(&pool))?;
+    }
+    Ok(row)
 }
 
 fn access_error(engine: Engine, access: &str) -> String {
     match engine {
         Engine::Claude | Engine::OpenCode | Engine::Antigravity => format!("Acesso inválido: {access} (ask, edits, safe, full ou plan)"),
+        Engine::Cursor => format!("Acesso inválido: {access} (ask, full ou plan)"),
         Engine::Codex => format!("Acesso inválido: {access} (ask, edits, safe ou full)"),
     }
 }
@@ -141,7 +171,9 @@ pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &st
 /// motores o caminho já está no texto (ver `attach`). Uma imagem que não cabe nos limites segue só
 /// pelo texto: nunca derruba a mensagem.
 pub async fn send_with(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), String> {
-    send_mode(app, db, thread_id, text, SendMode::SteerActive, images).await.map_err(String::from)
+    // A conta original renovou (conversa que trocou pelo pool)? Volta antes de enviar, só com a conversa livre.
+    let text = if status(thread_id).working { text.to_string() } else { super::pool::before_send(app, db, thread_id, text) };
+    send_mode(app, db, thread_id, &text, SendMode::SteerActive, images).await.map_err(String::from)
 }
 
 /// Uma trava por conversa: a checagem do turno e o envio (`turn/start`/`turn/steer`) acontecem juntos, sem
@@ -178,6 +210,17 @@ pub(super) fn codex_error(failure: RequestFailure) -> SendError {
 /// de a mensagem chegar ao agente (a sessão não abre, o processo já fechou, o canal de escrita fechou) é
 /// `NotSent`; um pedido que saiu e perdeu a resposta é `Unknown`.
 pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
+    // Conversa que acabou de trocar de agente: o resumo do contexto vai na frente desta mensagem e só sai da fila
+    // de pendências quando a mensagem foi de fato enviada (uma recusa não o perde).
+    let (framed, carries_summary) = super::troca::before_send(db, thread_id, text);
+    let sent = send_framed(app, db, thread_id, &framed, mode, images).await;
+    if carries_summary && sent.is_ok() {
+        super::troca::summary_sent(db, thread_id);
+    }
+    sent
+}
+
+async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
     let gate = send_gate(thread_id);
     let _held = gate.lock().await;
     let row = thread(db, thread_id).map_err(SendError::NotSent)?;
@@ -185,6 +228,12 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
     if !admits(mode, status(thread_id).working) {
         return Err(SendError::Busy);
     }
+    // O turno anterior caiu com ferramenta sem resultado: o agente fica sabendo antes da mensagem nova.
+    let noted = {
+        let conn = db.lock().map_err(|e| SendError::NotSent(db_err(e)))?;
+        super::resume::unknown_outcome_note(&store::tail_items(&conn, thread_id, 50).unwrap_or_default())
+    };
+    let text = &super::resume::with_note(noted.as_deref(), text);
     // Por motor, o que um `Err` quer dizer (revisado caso a caso; na dúvida seria `Unknown`):
     // - Claude: `session` só sobe o processo e o `initialize`; `send_user` falha só se o canal de escrita
     //   já fechou, e aí nada foi escrito;
@@ -203,6 +252,7 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
             return opencode::send_user(app, db, &session, text).map_err(SendError::NotSent);
         }
         Engine::Antigravity => return agy::send(app, db, thread_id, text).map_err(SendError::NotSent),
+        Engine::Cursor => return cursor::send(app, db, thread_id, text).map_err(SendError::NotSent),
         Engine::Codex => {}
     }
     let session = codex::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
@@ -284,6 +334,10 @@ pub async fn interrupt(thread_id: &str) -> Result<(), String> {
     }
     if agy::get(thread_id).is_some() {
         agy::interrupt(thread_id);
+        return Ok(());
+    }
+    if cursor::get(thread_id).is_some() {
+        cursor::interrupt(thread_id);
         return Ok(());
     }
     let Some(session) = codex::get(thread_id) else { return Ok(()) };

@@ -223,7 +223,8 @@ fn cursor() {
     assert!(!caps.sessions);
     assert!(!caps.resume);
     assert!(!caps.mcp);
-    assert!(!caps.models);
+    // Lista os modelos com `cursor-agent models` (o esforço vem no id da variante).
+    assert!(caps.models);
     assert!(!caps.headless);
     assert!(!caps.orchestration);
     assert!(agent.headless().is_none());

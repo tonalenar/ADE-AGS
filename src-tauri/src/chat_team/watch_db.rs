@@ -8,14 +8,19 @@ use rusqlite::{params, Connection};
 use super::model;
 use super::store::{self, MemberRow, TeamRow};
 use super::watch::{Flags, Input, Member, Req, ReqState, Sent, Turn, TurnStatus, KEY_PREFIX};
-use crate::canal::timeline::{Item, ItemKind};
+use crate::canal::context::{claude_window, pressure_of};
+use crate::canal::repeat::{call_key, Call};
+use crate::canal::timeline::{Item, ItemKind, ToolStatus};
 use crate::conversa::store as chat;
 use crate::peer_queue::store::{admit, Admission, NewMessage, PeerMessage, State};
 
 /// Um aviso de mais de tanto tempo já não decide nada: a chave some da conta (a fila apaga as mensagens velhas).
 const SENT_HISTORY_MS: i64 = 7 * 24 * 3_600_000;
-/// Quantos itens da ponta da conversa o vigia lê para achar a fala que fechou o turno.
-const TAIL_ITEMS: i64 = 40;
+/// Quantos itens da ponta da conversa o vigia lê: a fala que fechou o turno, as chamadas desde a última mensagem
+/// da pessoa (a 8ª repetição precisa caber, com falas e uso no meio) e o último `usage`.
+const TAIL_ITEMS: i64 = 160;
+/// Uma tarefa entregue um pouco ANTES de o turno começar ainda é a que o abriu (a fila grava e depois envia).
+const TASK_SLACK_MS: i64 = 10_000;
 
 /// Um time vigiado: o time, o nome com que o orquestrador é chamado no `ags peer` e o que se sabe agora.
 pub struct Watched {
@@ -33,7 +38,8 @@ fn err(e: rusqlite::Error) -> String {
 pub fn gather(conn: &Connection, now: i64) -> Result<Vec<Watched>, String> {
     let mut out = Vec::new();
     for team in store::teams(conn)? {
-        if !team.watch && !team.watch_stall {
+        // Sem orquestrador (a coroa saiu do canvas) não há a quem avisar; origem de missão é do Vigia da missão.
+        if (!team.watch && !team.watch_stall) || !team.led() || team.origin == store::ORIGIN_MISSION {
             continue;
         }
         let orchestrator_open = match model::thread_id_of(&team.orchestrator) {
@@ -47,7 +53,7 @@ pub fn gather(conn: &Connection, now: i64) -> Result<Vec<Watched>, String> {
         let keys: HashSet<&str> = sent.iter().map(|s| s.key.as_str()).collect();
         let mut members = Vec::new();
         for m in store::members(conn, &team.id)? {
-            if let Some(view) = member_view(conn, &m, &keys)? {
+            if let Some(view) = member_view(conn, &m, &team.orchestrator, &keys)? {
                 members.push(view);
             }
         }
@@ -81,7 +87,7 @@ fn sent_keys(conn: &Connection, orchestrator: &str, now: i64) -> Result<Vec<Sent
     Ok(list)
 }
 
-fn member_view(conn: &Connection, m: &MemberRow, sent: &HashSet<&str>) -> Result<Option<Member>, String> {
+fn member_view(conn: &Connection, m: &MemberRow, orchestrator: &str, sent: &HashSet<&str>) -> Result<Option<Member>, String> {
     let Some(thread_id) = model::thread_id_of(&m.member) else { return Ok(None) };
     let Some(thread) = chat::thread(conn, thread_id).map_err(err)?.filter(|t| t.state == "active") else { return Ok(None) };
     let label = if m.label.trim().is_empty() { thread.title.clone() } else { m.label.clone() };
@@ -91,7 +97,19 @@ fn member_view(conn: &Connection, m: &MemberRow, sent: &HashSet<&str>) -> Result
         .map_err(err)?;
     let items = tail_items(conn, thread_id)?;
     // A atividade é a mais recente entre o carimbo da conversa (`touch` a cada item gravado) e o do último item.
-    let last_activity = items.iter().filter_map(|i| i.at).fold(thread.updated_at, i64::max);
+    // Um aviso do próprio app (a marca de TIMEOUT, por exemplo) não é atividade do agente.
+    let last_activity = items.iter().filter(|i| i.kind != ItemKind::Notice).filter_map(|i| i.at).fold(thread.updated_at, i64::max);
+    let since_person = items.iter().rposition(|i| i.kind == ItemKind::User).map_or(0, |p| p + 1);
+    let recent = &items[since_person..];
+    let awaiting_model = working.is_some() && !recent.iter().any(|i| i.kind == ItemKind::Tool && i.status == Some(ToolStatus::Running));
+    let timeout_marked = working.as_ref().is_some_and(|(run, _)| has_item(&items, &crate::conversa::turn::timeout_item_id(run)));
+    let mut last_turn = last_turn(conn, thread_id, &items)?;
+    if let Some(t) = last_turn.as_mut() {
+        t.timed_out = has_item(&items, &crate::conversa::turn::timeout_item_id(&t.run_id));
+        let (from_orchestrator, reported) = turn_messages(conn, &m.member, orchestrator, t)?;
+        t.from_orchestrator = from_orchestrator;
+        t.reported = reported;
+    }
     Ok(Some(Member {
         id: m.member.clone(),
         label,
@@ -99,8 +117,72 @@ fn member_view(conn: &Connection, m: &MemberRow, sent: &HashSet<&str>) -> Result
         working,
         last_activity,
         requests: requests(conn, thread_id, sent)?,
-        last_turn: last_turn(conn, thread_id, &items)?,
+        last_turn,
+        awaiting_model,
+        timeout_marked,
+        calls: calls_of(recent),
+        context: context_of(&thread.agent_id, thread.model.as_deref(), &items),
     }))
+}
+
+fn has_item(items: &[Item], id: &str) -> bool {
+    items.iter().any(|i| i.id == id)
+}
+
+/// As chamadas de ferramenta, com a chave de repetição. A conversa guarda o resumo da chamada (o comando, o
+/// arquivo, o padrão), não os argumentos crus: a chave é o JSON canônico desse resumo. Pura.
+pub fn calls_of(items: &[Item]) -> Vec<Call> {
+    items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Tool)
+        .map(|i| {
+            let name = i.name.clone().unwrap_or_default();
+            let args = serde_json::json!({
+                "label": i.label, "path": i.path, "added": i.added, "removed": i.removed,
+                "question": i.question.as_ref().map(|q| q.text.clone()),
+            });
+            Call { key: call_key(&name, &args), summary: crate::conversa::turn::tool_call_label(i).trim_start_matches(name.as_str()).trim().to_string(), name }
+        })
+        .collect()
+}
+
+/// A pressão de contexto de uma conversa do Claude: o último `usage` real (o contexto da mensagem) mais a
+/// estimativa do texto depois dele. Os outros motores gravam o uso por TURNO (não o tamanho do contexto):
+/// `None` (não medido). Pura. O segundo campo é a chave da medida (o `usage` que a ancorou).
+pub fn context_of(agent_id: &str, model: Option<&str>, items: &[Item]) -> Option<(f64, String)> {
+    if agent_id != "claude-code" {
+        return None;
+    }
+    let at = items.iter().rposition(|i| i.kind == ItemKind::Usage)?;
+    let anchor = items[at].tokens?;
+    let extra: u64 = items[at + 1..]
+        .iter()
+        .map(|i| i.text.as_deref().map_or(0, |t| t.chars().count()) + i.label.as_deref().map_or(0, |t| t.chars().count()))
+        .sum::<usize>() as u64;
+    Some((pressure_of(anchor, extra, claude_window(model, anchor)), items[at].id.clone()))
+}
+
+/// O turno foi aberto por uma tarefa do orquestrador (um `tell`, ou um `ask` sem resposta automática) e o
+/// integrante mandou mensagem a ele durante o turno?
+fn turn_messages(conn: &Connection, member: &str, orchestrator: &str, t: &Turn) -> Result<(bool, bool), String> {
+    let Some(started) = t.started_at else { return Ok((false, false)) };
+    let from: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM peer_messages WHERE from_tab_id = ?1 AND to_tab_id = ?2 AND kind IN ('tell', 'ask', 'handoff')
+               AND NOT (kind = 'ask' AND reply = 1) AND COALESCE(delivered_at, created_at) BETWEEN ?3 AND ?4",
+            params![orchestrator, member, started - TASK_SLACK_MS, t.completed_at],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    let back: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM peer_messages WHERE from_tab_id = ?1 AND to_tab_id = ?2 AND kind IN ('tell', 'ask', 'handoff')
+               AND created_at BETWEEN ?3 AND ?4",
+            params![member, orchestrator, started, t.completed_at + TASK_SLACK_MS],
+            |r| r.get(0),
+        )
+        .map_err(err)?;
+    Ok((from > 0, back > 0))
 }
 
 fn none_if_empty<T>(e: rusqlite::Error) -> rusqlite::Result<Option<T>> {
@@ -152,13 +234,17 @@ fn question_options(options: &serde_json::Value) -> Vec<String> {
 fn last_turn(conn: &Connection, thread_id: &str, items: &[Item]) -> Result<Option<Turn>, String> {
     let run = conn
         .prepare(
-            "SELECT id, status, COALESCE(completed_at, started_at, 0) FROM chat_run
+            "SELECT id, status, COALESCE(completed_at, started_at, 0), started_at FROM chat_run
               WHERE thread_id = ?1 AND status IN ('completed', 'failed', 'interrupted')
               ORDER BY COALESCE(completed_at, started_at) DESC, rowid DESC LIMIT 1",
         )
-        .and_then(|mut s| s.query_row([thread_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))).map(Some).or_else(none_if_empty))
+        .and_then(|mut s| {
+            s.query_row([thread_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?, r.get::<_, Option<i64>>(3)?)))
+                .map(Some)
+                .or_else(none_if_empty)
+        })
         .map_err(err)?;
-    let Some((run_id, status, completed_at)) = run else { return Ok(None) };
+    let Some((run_id, status, completed_at, started_at)) = run else { return Ok(None) };
     let end_id = format!("end:{run_id}");
     let end = items.iter().position(|i| i.kind == ItemKind::TurnEnd && i.id == end_id);
     let status = match status.as_str() {
@@ -171,7 +257,7 @@ fn last_turn(conn: &Connection, thread_id: &str, items: &[Item]) -> Result<Optio
         items[..p].iter().rev().take_while(|i| !matches!(i.kind, ItemKind::TurnEnd | ItemKind::User)).find(|i| i.kind == ItemKind::Assistant).and_then(|i| i.text.clone())
     });
     let replied_after = end.is_some_and(|p| items[p + 1..].iter().any(|i| i.kind == ItemKind::User));
-    Ok(Some(Turn { run_id, status, completed_at, error, final_text, replied_after }))
+    Ok(Some(Turn { run_id, status, completed_at, started_at, error, final_text, replied_after, from_orchestrator: false, reported: false, timed_out: false }))
 }
 
 /// Os últimos itens da conversa, do mais velho para o mais novo. Um corpo ilegível (de uma versão futura) fica de fora.
@@ -181,6 +267,19 @@ fn tail_items(conn: &Connection, thread_id: &str) -> Result<Vec<Item>, String> {
     let mut items: Vec<Item> = bodies.iter().filter_map(|b| serde_json::from_str(b).ok()).collect();
     items.reverse();
     Ok(items)
+}
+
+/// Grava na timeline de cada integrante a marca de TIMEOUT do watchdog (id fixo por turno: gravar de novo não
+/// duplica). Devolve o que gravou (conversa, item), para a janela. Não escreve nada ao agente.
+pub fn mark_timeouts(conn: &Connection, plan: &super::watch::Plan, now: i64) -> Result<Vec<(String, Item)>, String> {
+    let mut out = Vec::new();
+    for t in &plan.timeouts {
+        let Some(thread_id) = model::thread_id_of(&t.member) else { continue };
+        let item = crate::conversa::turn::timeout_item(&t.run_id, t.idle_ms, now);
+        chat::upsert_item(conn, thread_id, Some(&t.run_id), &item).map_err(err)?;
+        out.push((thread_id.to_string(), item));
+    }
+    Ok(out)
 }
 
 /// Põe os avisos do plano na fila durável do orquestrador (`peer_messages`), um por chave: a mesma chave nunca entra

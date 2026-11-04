@@ -20,6 +20,11 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
 import { useWorkMode } from "@/features/canvas/store";
 import { GRID_SLOT, gridColumns, useMissionGrid } from "@/features/canvas/gridMode";
+import { threadIdOf, threadKey } from "@/features/chat/structured/model";
+import { useStructured } from "@/features/chat/structured/store";
+import { useChatStore } from "@/features/chat/store";
+import { useConversations } from "@/features/chat/unified/useConversations";
+import { ProtocolPane } from "@/features/tabs/ProtocolPane";
 import { TeamTabMarks } from "@/features/chat/team/TeamTabMarks";
 import { useChatShell } from "@/app/uiStore";
 
@@ -123,6 +128,27 @@ export function EditorArea() {
         </div>
       )}
       {!chat && !canvas && !grid && <TabDragOverlay />}
+      {!chat && !canvas && <SelectedProtocolPane />}
+    </div>
+  );
+}
+
+/**
+ * A conversa por protocolo escolhida (qualquer uma, de time ou não) nas Abas: a timeline em React puro por cima
+ * da área, sem terminal. Escolher uma aba a tira da frente (ver `selectionActions`).
+ */
+function SelectedProtocolPane() {
+  const thread = useChatStore((s) => s.thread);
+  const conversations = useConversations();
+  const row = useStructured((s) => (thread ? s.threads.find((t) => t.id === thread) : undefined));
+  if (!thread || !row) return null;
+  const conv = conversations.find((c) => c.ref === threadKey(thread));
+  return (
+    <div data-selected-protocol={thread} className="absolute inset-0 flex flex-col bg-white dark:bg-surface-deep" style={{ zIndex: 30 }}>
+      <div className="shrink-0 h-8 px-3 flex items-center truncate text-[12px] font-medium bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300">
+        <span className="min-w-0 truncate">{conv?.title ?? row.title}</span>
+      </div>
+      <ProtocolPane threadId={thread} agentId={row.agentId} agentLabel={row.agentId} />
     </div>
   );
 }
@@ -136,6 +162,7 @@ function MissionGrid({ ids }: { ids: string[] }) {
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const activateTab = useTabsStore((s) => s.activateTab);
+  const conversations = useConversations();
   const { t } = useTranslation();
   const cols = gridColumns(ids.length);
   const focusPane = (id: string) => {
@@ -147,6 +174,21 @@ function MissionGrid({ ids }: { ids: string[] }) {
     <div className="absolute inset-0 pointer-events-none grid"
       style={{ zIndex: 10, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: "minmax(0, 1fr)" }}>
       {ids.map((id) => {
+        // Conversa por protocolo: sem terminal, o painel é a timeline (React puro). Os terminais seguem
+        // em `TerminalPanel`, por cima do hueco.
+        const threadId = threadIdOf(id);
+        if (threadId) {
+          const conv = conversations.find((c) => c.ref === id);
+          return (
+            <div key={id} data-grid-pane={id} className="flex flex-col min-w-0 min-h-0 border border-gray-200 dark:border-gray-800">
+              <div className="shrink-0 h-6 px-2 flex items-center truncate text-[11px] font-medium bg-gray-100 dark:bg-gray-900 text-gray-500 dark:text-gray-400">
+                <span className="min-w-0 truncate">{conv?.title ?? ""}</span>
+                <span className="ml-2"><TeamTabMarks tabId={id} /></span>
+              </div>
+              <ProtocolPane threadId={threadId} agentId={conv?.agentId ?? ""} agentLabel={conv?.agentId ?? ""} />
+            </div>
+          );
+        }
         const active = id === activeTabId;
         const title = tabs.find((tab) => tab.id === id)?.title ?? "";
         return (

@@ -27,3 +27,13 @@ export interface IntegrationConflicts {
   against: string;
   files: ConflictFile[];
 }
+
+/** Duas tarefas em andamento que declaram o mesmo lugar (`missions/conflicts/scopes.rs::Overlap`). */
+export interface ScopeOverlap {
+  a: string;
+  aTask: string;
+  b: string;
+  bTask: string;
+  /** Os lugares em comum (`.` = o repositório inteiro). */
+  paths: string[];
+}

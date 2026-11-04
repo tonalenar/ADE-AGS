@@ -45,6 +45,19 @@ fn run(app: AppHandle) {
                     eprintln!("[runs] no se pudieron cerrar las tareas huérfanas: {error}")
                 }
             }
+            // Integrantes que ficaram `provisioning` (o app caiu entre gravar e abrir): `active` ou `failed`
+            // pelo estado real (ver `missions::members` e `chat_team::api::reconcile_provisions`).
+            if let Ok(conn) = db.lock() {
+                let now = crate::util::now_ts_ms();
+                match crate::missions::members::reconcile(&conn, None, true, now) {
+                    Ok(n) if n > 0 => eprintln!("[missions] {n} integrante(s) reconciliado(s) no boot"),
+                    Ok(_) => {}
+                    Err(error) => eprintln!("[missions] não foi possível reconciliar os integrantes: {error}"),
+                }
+                if let Err(error) = crate::chat_team::api::reconcile_provisions(&conn, now) {
+                    eprintln!("[chat_team] não foi possível reconciliar os integrantes: {error}");
+                }
+            }
             if let Err(error) = crate::runs::sweep_orphan_approvals(&db) {
                 eprintln!("[runs] no se pudieron cerrar los permisos huérfanos: {error}");
             }

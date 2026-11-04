@@ -77,7 +77,8 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has {
         conn.execute_batch("ALTER TABLE chat_thread ADD COLUMN memory TEXT;")?;
     }
-    Ok(())
+    // As sessões nativas guardadas de cada agente que já esteve na conversa (trocar de agente, `troca.rs`): aditiva.
+    super::troca::migrate(conn)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -142,6 +143,17 @@ pub fn set_remote_id(conn: &Connection, id: &str, remote: &str) -> rusqlite::Res
     conn.execute("UPDATE chat_thread SET remote_id = ?2 WHERE id = ?1", params![id, remote]).map(|_| ())
 }
 
+/// Troca a conta da conversa (`None` = a principal do agente). A sessão antiga mora no perfil da conta antiga:
+/// quem troca também chama [`clear_remote_id`].
+pub fn set_account(conn: &Connection, id: &str, account_id: Option<&str>) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_thread SET account_id = ?2 WHERE id = ?1", params![id, account_id]).map(|_| ())
+}
+
+/// Esquece a sessão do agente: a próxima mensagem abre uma nova (sem tentar retomar a de outra conta).
+pub fn clear_remote_id(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_thread SET remote_id = NULL WHERE id = ?1", params![id]).map(|_| ())
+}
+
 pub fn set_tuning(conn: &Connection, id: &str, tuning: &Tuning, now: i64) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE chat_thread SET model = ?2, effort = ?3, access = ?4, updated_at = ?5 WHERE id = ?1",
@@ -184,6 +196,13 @@ pub fn items(conn: &Connection, thread_id: &str) -> rusqlite::Result<Vec<Item>> 
     let mut stmt = conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 ORDER BY seq")?;
     let bodies: Vec<String> = stmt.query_map(params![thread_id], |r| r.get(0))?.collect::<Result<_, _>>()?;
     Ok(bodies.iter().filter_map(|b| serde_json::from_str(b).ok()).collect())
+}
+
+/// Os últimos `limit` itens da conversa, do mais velho ao mais novo (a ponta, sem ler a conversa inteira).
+pub fn tail_items(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<Item>> {
+    let mut stmt = conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 ORDER BY seq DESC LIMIT ?2")?;
+    let bodies: Vec<String> = stmt.query_map(params![thread_id, limit], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    Ok(bodies.iter().rev().filter_map(|b| serde_json::from_str(b).ok()).collect())
 }
 
 pub fn upsert_run(conn: &Connection, thread_id: &str, run_id: &str, status: &str, started_at: Option<i64>, completed_at: Option<i64>, duration_ms: Option<i64>) -> rusqlite::Result<()> {
@@ -238,8 +257,19 @@ pub fn insert_request(conn: &Connection, row: &RequestRow) -> rusqlite::Result<(
         "INSERT OR REPLACE INTO chat_request (id, thread_id, rpc_id, kind, item_id, title, detail, options, state, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'pending', ?9)",
         params![row.id, row.thread_id, row.rpc_id, row.kind, row.item_id, row.title, row.detail, row.options.to_string(), row.created_at],
-    )
-    .map(|_| ())
+    )?;
+    // O `asked` da auditoria comum (`approval_audit`). Pergunta não é aprovação: fica de fora. Só o nome da
+    // ferramenta (ou o tipo); o comando e o arquivo ficam no pedido. Best-effort: não impede o pedido.
+    if row.kind != "question" {
+        let tool = row.options.get("tool").and_then(serde_json::Value::as_str).unwrap_or(&row.kind);
+        let _ = crate::approval_audit::asked(conn, crate::approval_audit::Source::Chat, &row.id, &row.thread_id, tool, row.created_at);
+    }
+    Ok(())
+}
+
+/// O `decided` da auditoria comum. Só grava se houve `asked` (perguntas não têm) e se é a primeira decisão.
+fn audit_decided(conn: &Connection, id: &str, outcome: crate::approval_audit::Outcome, scope: Option<&str>, by: &str, now: i64) {
+    let _ = crate::approval_audit::decided(conn, crate::approval_audit::Source::Chat, id, outcome, scope, by, now);
 }
 
 pub fn request(conn: &Connection, id: &str) -> rusqlite::Result<Option<RequestRow>> {
@@ -258,12 +288,17 @@ pub fn answer_request(conn: &Connection, id: &str, answer: &str, now: i64) -> ru
 
 /// Como `answer_request`, dizendo quem respondeu (`person`, `policy`, `rule:<id>`) e por quê (auditoria).
 pub fn answer_request_by(conn: &Connection, id: &str, answer: &str, now: i64, by: &str, why: Option<&str>) -> rusqlite::Result<bool> {
-    conn.execute(
+    let changed = conn.execute(
         "UPDATE chat_request SET state = 'answered', answer = ?2, answered_at = ?3, decided_by = ?4, decided_why = ?5
           WHERE id = ?1 AND state = 'pending'",
         params![id, answer, now, by, why],
-    )
-    .map(|n| n > 0)
+    )? > 0;
+    if changed {
+        let (outcome, scope) = crate::approval_audit::outcome_of_choice(answer);
+        // `resolved` chega por `answer_request` ("pela pessoa"), mas quem desistiu foi o motor.
+        audit_decided(conn, id, outcome, scope, if answer == "resolved" { "agent" } else { by }, now);
+    }
+    Ok(changed)
 }
 
 /// RESERVA o pedido para responder ao agente: só um quem chega primeiro, e só se ele ainda está `pending`. A reserva
@@ -325,6 +360,10 @@ pub fn expire_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<V
         stmt.query_map(params![thread_id], |r| r.get(0))?.collect::<Result<_, _>>()?
     };
     conn.execute("UPDATE chat_request SET state = 'expired' WHERE thread_id = ?1 AND state = 'pending'", params![thread_id])?;
+    let now = crate::util::now_ts_ms();
+    for id in &ids {
+        audit_decided(conn, id, crate::approval_audit::Outcome::Cancelled, None, "expired", now);
+    }
     Ok(ids)
 }
 
@@ -365,6 +404,13 @@ pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
             end.text = Some("O app foi fechado antes de o turno terminar.".into());
             upsert_item(conn, thread_id, Some(run_id), &end)?;
         }
+    }
+    let orphans: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT id FROM chat_request WHERE state = 'pending'")?;
+        stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    for id in &orphans {
+        audit_decided(conn, id, crate::approval_audit::Outcome::Cancelled, None, "app-closed", now);
     }
     let requests = conn.execute("UPDATE chat_request SET state = 'expired' WHERE state = 'pending'", [])?;
     Ok(Sweep { runs: runs.len(), requests })

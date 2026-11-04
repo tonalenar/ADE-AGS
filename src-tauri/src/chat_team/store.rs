@@ -66,6 +66,18 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             conn.execute(&format!("ALTER TABLE chat_team ADD COLUMN {column} INTEGER NOT NULL DEFAULT {default}"), [])?;
         }
     }
+    // De onde o time nasceu (`chat`, `canvas` ou `mission`), onde mora a coroa dele (`board_key`: pasta, `#c:` ou
+    // `#m:`) e a missão espelhada (`mission_id`, só `origin = 'mission'`). Aditivas e protegidas por `has_column`:
+    // as linhas antigas ficam `origin = 'chat'`, nada se apaga e o user_version não sobe.
+    for (column, ddl) in [
+        ("origin", "TEXT NOT NULL DEFAULT 'chat'"),
+        ("board_key", "TEXT"),
+        ("mission_id", "TEXT"),
+    ] {
+        if !has_column(conn, "chat_team", column)? {
+            conn.execute(&format!("ALTER TABLE chat_team ADD COLUMN {column} {ddl}"), [])?;
+        }
+    }
     // As regras «Sempre permitir», criadas SÓ pela pessoa (tela). `role` e `team_id` estão preparados e ainda
     // não se avaliam (`permission::auto_allow_rule`).
     conn.execute_batch(
@@ -85,7 +97,32 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         CREATE TABLE IF NOT EXISTS chat_permission_import (id INTEGER PRIMARY KEY CHECK(id = 1), at INTEGER NOT NULL);",
     )?;
     import_legacy_rules(conn)?;
+    // O integrante novo gravado ANTES de abrir a conversa e o worktree (`provisioning`), reconciliado no
+    // boot para `active` ou `failed` (ver `api::reconcile_provisions`). Aditiva; nenhuma linha se perde: a
+    // linha falha fica, com o motivo e o worktree que sobrou.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS chat_team_provision (
+            id TEXT PRIMARY KEY,
+            team_id TEXT NOT NULL REFERENCES chat_team(id) ON DELETE CASCADE,
+            label TEXT NOT NULL,
+            agent_id TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT '',
+            member TEXT,
+            worktree TEXT,
+            branch TEXT,
+            state TEXT NOT NULL DEFAULT 'provisioning' CHECK(state IN ('provisioning','active','failed')),
+            failure TEXT,
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_chat_team_provision_team ON chat_team_provision(team_id, state);",
+    )?;
     Ok(())
+}
+
+/// A coluna existe na tabela? (a base das migrações aditivas deste módulo)
+pub fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    conn.prepare("SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2")?.exists([table, column])
 }
 
 /// Uma vez só: copia as regras que a tela guardava nos settings (`chat.permissions.rules`) para a tabela. NÃO
@@ -267,6 +304,36 @@ pub struct TeamRow {
     pub watch: bool,
     /// ...e do «sem progresso» (padrão: desligado).
     pub watch_stall: bool,
+    /// De onde o time nasceu: [`ORIGIN_CHAT`], [`ORIGIN_CANVAS`] ou [`ORIGIN_MISSION`].
+    pub origin: String,
+    /// Onde mora a coroa dele no canvas (a chave do quadro: pasta, `#c:` ou `#m:`), quando se sabe.
+    pub board_key: Option<String>,
+    /// A missão que a linha espelha (só `origin = 'mission'`).
+    pub mission_id: Option<String>,
+}
+
+pub const ORIGIN_CHAT: &str = "chat";
+pub const ORIGIN_CANVAS: &str = "canvas";
+pub const ORIGIN_MISSION: &str = "mission";
+
+/// O orquestrador de um time sem orquestrador fica gravado como `none:<id do time>`: a coluna é
+/// `NOT NULL UNIQUE` (e não dá para afrouxar sem recriar a tabela), então cada time ganha um valor
+/// próprio que nunca é uma conversa. Para fora (`TeamRow`, CLI, tela) ele é a string vazia.
+const NO_ORCHESTRATOR: &str = "none:";
+
+fn stored_orchestrator(team_id: &str, orchestrator: &str) -> String {
+    if orchestrator.is_empty() { format!("{NO_ORCHESTRATOR}{team_id}") } else { orchestrator.to_string() }
+}
+
+fn shown_orchestrator(stored: String) -> String {
+    if stored.starts_with(NO_ORCHESTRATOR) { String::new() } else { stored }
+}
+
+impl TeamRow {
+    /// O time tem quem o coordene? (a coroa tirada no canvas deixa o time sem orquestrador)
+    pub fn led(&self) -> bool {
+        !self.orchestrator.is_empty()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -319,13 +386,13 @@ pub struct MemberPatch {
     pub subagent: Option<bool>,
 }
 
-const TEAM_COLUMNS: &str = "id, orchestrator, agent_id, label, cwd, title, created_at, updated_at, auto_decide, allow_tools, watch, watch_stall";
+const TEAM_COLUMNS: &str = "id, orchestrator, agent_id, label, cwd, title, created_at, updated_at, auto_decide, allow_tools, watch, watch_stall, origin, board_key, mission_id";
 const MEMBER_COLUMNS: &str = "team_id, member, agent_id, label, role, model, policy, branch, worktree, origin, position, created_at, updated_at, subagent";
 
 fn team_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamRow> {
     Ok(TeamRow {
         id: r.get(0)?,
-        orchestrator: r.get(1)?,
+        orchestrator: shown_orchestrator(r.get(1)?),
         agent_id: r.get(2)?,
         label: r.get(3)?,
         cwd: r.get(4)?,
@@ -336,6 +403,9 @@ fn team_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<TeamRow> {
         allow_tools: r.get::<_, i64>(9)? != 0,
         watch: r.get::<_, i64>(10)? != 0,
         watch_stall: r.get::<_, i64>(11)? != 0,
+        origin: r.get(12)?,
+        board_key: r.get(13)?,
+        mission_id: r.get(14)?,
     })
 }
 
@@ -367,8 +437,11 @@ fn err(e: rusqlite::Error) -> String {
 pub fn insert_team(conn: &Connection, row: &TeamRow) -> Result<(), String> {
     migrate(conn).map_err(err)?;
     conn.execute(
-        &format!("INSERT INTO chat_team ({TEAM_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
-        params![row.id, row.orchestrator, row.agent_id, row.label, row.cwd, row.title, row.created_at, row.updated_at, row.auto_decide as i64, row.allow_tools as i64, row.watch as i64, row.watch_stall as i64],
+        &format!("INSERT INTO chat_team ({TEAM_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"),
+        params![
+            row.id, stored_orchestrator(&row.id, &row.orchestrator), row.agent_id, row.label, row.cwd, row.title, row.created_at, row.updated_at,
+            row.auto_decide as i64, row.allow_tools as i64, row.watch as i64, row.watch_stall as i64, row.origin, row.board_key, row.mission_id
+        ],
     )
     .map_err(err)?;
     Ok(())
@@ -380,6 +453,9 @@ pub fn team(conn: &Connection, id: &str) -> Result<Option<TeamRow>, String> {
 }
 
 pub fn team_led_by(conn: &Connection, orchestrator: &str) -> Result<Option<TeamRow>, String> {
+    if orchestrator.is_empty() {
+        return Ok(None);
+    }
     migrate(conn).map_err(err)?;
     conn.query_row(&format!("SELECT {TEAM_COLUMNS} FROM chat_team WHERE orchestrator = ?1"), [orchestrator], team_row)
         .optional()
@@ -390,7 +466,7 @@ pub fn team_led_by(conn: &Connection, orchestrator: &str) -> Result<Option<TeamR
 pub fn team_joined_by(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
     migrate(conn).map_err(err)?;
     conn.query_row(
-        "SELECT t.id, t.orchestrator, t.agent_id, t.label, t.cwd, t.title, t.created_at, t.updated_at, t.auto_decide, t.allow_tools, t.watch, t.watch_stall
+        "SELECT t.id, t.orchestrator, t.agent_id, t.label, t.cwd, t.title, t.created_at, t.updated_at, t.auto_decide, t.allow_tools, t.watch, t.watch_stall, t.origin, t.board_key, t.mission_id
          FROM chat_team t JOIN chat_team_member m ON m.team_id = t.id WHERE m.member = ?1",
         [member],
         team_row,
@@ -399,12 +475,32 @@ pub fn team_joined_by(conn: &Connection, member: &str) -> Result<Option<TeamRow>
     .map_err(err)
 }
 
-/// O time de `member`, como orquestrador ou como integrante.
-pub fn team_of(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
+/// O time de `member`, como orquestrador ou como integrante, **incluindo** a linha-espelho de uma missão.
+/// Serve para o invariante "um agente em um time só"; o comportamento (escopo do chat, política, alias de
+/// peer) usa [`team_of`], que não enxerga o espelho.
+pub fn team_of_any(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
     match team_led_by(conn, member)? {
         Some(team) => Ok(Some(team)),
         None => team_joined_by(conn, member),
     }
+}
+
+/// O time do modo chat de `member` (orquestrador ou integrante). A linha-espelho de uma missão
+/// (`origin = 'mission'`) NÃO conta: a missão é dona do motor, do chat da equipe (`m:<id>`) e do vigia,
+/// e o espelho existe só para o chat mostrá-la.
+pub fn team_of(conn: &Connection, member: &str) -> Result<Option<TeamRow>, String> {
+    Ok(team_of_any(conn, member)?.filter(|t| t.origin != ORIGIN_MISSION))
+}
+
+/// A linha-espelho de uma missão.
+pub fn team_of_mission(conn: &Connection, mission_id: &str) -> Result<Option<TeamRow>, String> {
+    if mission_id.is_empty() {
+        return Ok(None);
+    }
+    migrate(conn).map_err(err)?;
+    conn.query_row(&format!("SELECT {TEAM_COLUMNS} FROM chat_team WHERE origin = 'mission' AND mission_id = ?1"), [mission_id], team_row)
+        .optional()
+        .map_err(err)
 }
 
 pub fn teams(conn: &Connection) -> Result<Vec<TeamRow>, String> {
@@ -472,11 +568,151 @@ pub fn delete_member(conn: &Connection, member: &str, now: i64) -> Result<bool, 
     Ok(true)
 }
 
+/// Tira o orquestrador do time (a coroa saiu do canvas): o time e os integrantes ficam. `false` = o time não
+/// existe ou já estava sem orquestrador.
+pub fn clear_orchestrator(conn: &Connection, team_id: &str, now: i64) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    Ok(conn
+        .execute(
+            "UPDATE chat_team SET orchestrator = ?2, updated_at = ?3 WHERE id = ?1 AND orchestrator NOT LIKE 'none:%'",
+            params![team_id, stored_orchestrator(team_id, ""), now],
+        )
+        .map_err(err)?
+        > 0)
+}
+
+/// Dá um orquestrador a um time que não tem (ou troca o dele). Quem chama já conferiu o invariante.
+pub fn set_orchestrator(conn: &Connection, team_id: &str, orchestrator: &str, agent_id: &str, label: &str, now: i64) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    Ok(conn
+        .execute(
+            "UPDATE chat_team SET orchestrator = ?2, agent_id = ?3, label = ?4, updated_at = ?5 WHERE id = ?1",
+            params![team_id, stored_orchestrator(team_id, orchestrator), agent_id, label, now],
+        )
+        .map_err(err)?
+        > 0)
+}
+
+/// Guarda onde mora a coroa do time no canvas.
+pub fn set_board_key(conn: &Connection, team_id: &str, board_key: Option<&str>, now: i64) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    Ok(conn.execute("UPDATE chat_team SET board_key = ?2, updated_at = ?3 WHERE id = ?1", params![team_id, board_key, now]).map_err(err)? > 0)
+}
+
+/// Troca a ref de uma conversa (o id da aba ou `thread:<id>`) no roster: como orquestrador e como integrante.
+/// Devolve o time e o que mudou. `None` = a ref antiga não estava em time nenhum.
+pub fn rebind(conn: &Connection, old: &str, new: &str, now: i64) -> Result<Option<(String, &'static str)>, String> {
+    migrate(conn).map_err(err)?;
+    conn.execute("UPDATE chat_team_provision SET member = ?2 WHERE member = ?1", params![old, new]).map_err(err)?;
+    if let Some(team) = team_led_by(conn, old)? {
+        conn.execute("UPDATE chat_team SET orchestrator = ?2, updated_at = ?3 WHERE id = ?1", params![team.id, new, now]).map_err(err)?;
+        return Ok(Some((team.id, "orchestrator")));
+    }
+    if let Some(row) = member(conn, old)? {
+        conn.execute("UPDATE chat_team_member SET member = ?2, updated_at = ?3 WHERE member = ?1", params![old, new, now]).map_err(err)?;
+        touch(conn, &row.team_id, now)?;
+        return Ok(Some((row.team_id, "member")));
+    }
+    Ok(None)
+}
+
 /// Desfaz o time (só a pessoa, na tela): os integrantes saem junto. As conversas continuam.
 pub fn delete_team(conn: &Connection, team_id: &str) -> Result<bool, String> {
     migrate(conn).map_err(err)?;
     conn.execute("DELETE FROM chat_team_member WHERE team_id = ?1", [team_id]).map_err(err)?;
+    conn.execute("DELETE FROM chat_team_provision WHERE team_id = ?1", [team_id]).map_err(err)?;
     Ok(conn.execute("DELETE FROM chat_team WHERE id = ?1", [team_id]).map_err(err)? > 0)
+}
+
+/// Um integrante novo, do momento em que a pessoa pediu até entrar no time.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionRow {
+    pub id: String,
+    pub team_id: String,
+    /// O nome dele no time, único entre todos os que o time já teve.
+    pub label: String,
+    pub agent_id: String,
+    pub role: String,
+    /// A conversa aberta para ele (id da aba ou `thread:<id>`), quando chegou a abrir.
+    pub member: Option<String>,
+    pub worktree: Option<String>,
+    pub branch: Option<String>,
+    /// `provisioning`, `active` ou `failed`.
+    pub state: String,
+    pub failure: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+const PROVISION_COLUMNS: &str = "id, team_id, label, agent_id, role, member, worktree, branch, state, failure, created_at, updated_at";
+
+fn provision_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<ProvisionRow> {
+    Ok(ProvisionRow {
+        id: r.get(0)?,
+        team_id: r.get(1)?,
+        label: r.get(2)?,
+        agent_id: r.get(3)?,
+        role: r.get(4)?,
+        member: r.get(5)?,
+        worktree: r.get(6)?,
+        branch: r.get(7)?,
+        state: r.get(8)?,
+        failure: r.get(9)?,
+        created_at: r.get(10)?,
+        updated_at: r.get(11)?,
+    })
+}
+
+pub fn insert_provision(conn: &Connection, row: &ProvisionRow) -> Result<(), String> {
+    migrate(conn).map_err(err)?;
+    conn.execute(
+        &format!("INSERT INTO chat_team_provision ({PROVISION_COLUMNS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"),
+        params![row.id, row.team_id, row.label, row.agent_id, row.role, row.member, row.worktree, row.branch, row.state, row.failure, row.created_at, row.updated_at],
+    )
+    .map_err(err)?;
+    Ok(())
+}
+
+pub fn provision(conn: &Connection, id: &str) -> Result<Option<ProvisionRow>, String> {
+    migrate(conn).map_err(err)?;
+    conn.query_row(&format!("SELECT {PROVISION_COLUMNS} FROM chat_team_provision WHERE id = ?1"), [id], provision_row).optional().map_err(err)
+}
+
+/// As do time, ou (sem `team_id`) as que ainda estão `provisioning` em qualquer time.
+pub fn provisions(conn: &Connection, team_id: Option<&str>) -> Result<Vec<ProvisionRow>, String> {
+    migrate(conn).map_err(err)?;
+    let sql = format!(
+        "SELECT {PROVISION_COLUMNS} FROM chat_team_provision
+         WHERE (?1 IS NOT NULL AND team_id = ?1) OR (?1 IS NULL AND state = 'provisioning') ORDER BY created_at, id"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(err)?;
+    let rows = stmt.query_map([team_id], provision_row).map_err(err)?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+}
+
+/// Muda o estado de uma em `provisioning` (as decididas não voltam atrás). `false` = não mudou.
+pub fn settle_provision(conn: &Connection, id: &str, state: &str, member: Option<&str>, failure: Option<&str>, now: i64) -> Result<bool, String> {
+    migrate(conn).map_err(err)?;
+    let failure: Option<String> = failure.map(|f| f.chars().take(500).collect());
+    Ok(conn
+        .execute(
+            "UPDATE chat_team_provision SET state = ?2, member = COALESCE(?3, member), failure = ?4, updated_at = ?5 WHERE id = ?1 AND state = 'provisioning'",
+            params![id, state, member, failure, now],
+        )
+        .map_err(err)?
+        > 0)
+}
+
+/// Anota o worktree criado para ela (a conversa ainda vai abrir).
+pub fn provision_place(conn: &Connection, id: &str, worktree: Option<&str>, branch: Option<&str>, now: i64) -> Result<(), String> {
+    migrate(conn).map_err(err)?;
+    conn.execute(
+        "UPDATE chat_team_provision SET worktree = ?2, branch = ?3, updated_at = ?4 WHERE id = ?1 AND state = 'provisioning'",
+        params![id, worktree, branch, now],
+    )
+    .map_err(err)?;
+    Ok(())
 }
 
 fn touch(conn: &Connection, team_id: &str, now: i64) -> Result<(), String> {

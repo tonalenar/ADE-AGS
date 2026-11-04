@@ -24,6 +24,7 @@ interface TabsState {
     historyId?: string;
     accountId?: string;
     prelaunch?: PrelaunchStep[];
+    scrubSecrets?: boolean;
     /** Solo al MOVER una tab entre ventanas: conserva cuándo se abrió de verdad. Es el
      *  piso temporal del descubrimiento de sesión, así que ponerle "ahora" descarta el
      *  transcript de un proceso que puede llevar horas vivo. */
@@ -49,6 +50,9 @@ function baseName(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
 
+/** Quem quer saber quando uma aba é ATIVADA por gesto (mesmo que já fosse a ativa, o que o `subscribe` não distingue). */
+export const activationListeners = new Set<(id: string) => void>();
+
 export const useTabsStore = create<TabsState>((set) => ({
   tabs: [],
   activeTabId: null,
@@ -57,7 +61,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
-  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch, openedAt }) => {
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch, scrubSecrets, openedAt }) => {
     const id = crypto.randomUUID();
     const computedTitle =
       title ??
@@ -78,6 +82,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           historyId,
           accountId,
           prelaunch,
+          ...(scrubSecrets ? { scrubSecrets: true } : {}),
           openedAt: openedAt ?? Math.floor(Date.now() / 1000),
         },
       ],
@@ -97,7 +102,10 @@ export const useTabsStore = create<TabsState>((set) => ({
       return { tabs: next, activeTabId: nextActive };
     }),
 
-  activateTab: (id) => set({ activeTabId: id }),
+  activateTab: (id) => {
+    set({ activeTabId: id });
+    for (const listener of activationListeners) listener(id);
+  },
 
   renameTab: (id, title) =>
     set((state) => ({

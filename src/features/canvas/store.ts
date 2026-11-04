@@ -6,7 +6,7 @@ import { comparablePath } from "@/features/tabs/viewTabs";
 
 import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
-  addStroke, addText, removeFolder, updateFolder,
+  addStroke, addText, addThreadNode, removeThreadNode, removeFolder, updateFolder,
   emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
   buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, moveTerminals, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
@@ -28,13 +28,18 @@ interface CanvasState {
   liveRects: Record<string, Rect>;
   desktopRects: Record<string, Rect>;
   desktopFocus: { key: string; id: string; nonce: number } | null;
+  /** Pedido de "centrar e selecionar" uma conversa (terminal ou cartão) no canvas dela: a sidebar, uma aba ou o chat. */
+  focus: { key: string; ref: string; nonce: number } | null;
+  /** O canvas da conversa por protocolo aberta (`thread:<id>`): a aba ativa não diz qual canvas mostrar quando a seleção é um cartão. */
+  activeThread: { ref: string; key: string } | null;
   /** Os canvases salvos já foram lidos do disco. Antes disso "a aba não está em nenhum canvas" é falso: quem decide
    *  por isso (adotar abas numa conversa, avisar o orquestrador) espera. */
   loaded: boolean;
 }
 
-export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, desktopRects: {}, desktopFocus: null, loaded: false }));
+export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, desktopRects: {}, desktopFocus: null, focus: null, activeThread: null, loaded: false }));
 let desktopFocusSequence = 0;
+let focusSequence = 0;
 
 let windowLabel = "main";
 
@@ -108,7 +113,7 @@ export function missionOfTab(tab: { id: string; cwd: string }, boards?: Record<s
 /** La clave del canvas del agente activo: el de su misión o el de su carpeta. */
 export function useActiveBoardKey(): string | null {
   const active = useTabsStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
-  return useCanvasStore((s) => (active ? boardKeyOfTab(active, s.boards) : null));
+  return useCanvasStore((s) => s.activeThread?.key ?? (active ? boardKeyOfTab(active, s.boards) : null));
 }
 
 export function useWorkMode(): WorkMode {
@@ -165,8 +170,15 @@ function updateBoard(key: string, fn: (b: Board) => Board): void {
 
 export const canvasActions = {
   focusDesktop: (key: string, id: string) => useCanvasStore.setState({ desktopFocus: { key, id, nonce: ++desktopFocusSequence } }),
+  /** Dá um cartão à conversa por protocolo `ref` no canvas `key` (num lugar livre; já tendo, não muda nada). */
+  addThread: (key: string, ref: string) => updateBoard(key, (b) => addThreadNode(b, ref)),
+  removeThread: (key: string, ref: string) => updateBoard(key, (b) => removeThreadNode(b, ref)),
+  /** Pede ao canvas `key` que centre e destaque `ref` (a conversa escolhida fora dele). */
+  focusRef: (key: string, ref: string) => useCanvasStore.setState({ focus: { key, ref, nonce: ++focusSequence } }),
   moveNode: (key: string, id: string, patch: Partial<Box>) =>
     updateBoard(key, (b) => {
+      const thread = b.threads[id];
+      if (thread) return { ...b, threads: { ...b.threads, [id]: { ...thread, ...patch } } };
       const note = b.notes[id];
       if (note) return setNoteBox(b, id, patch);
       const portal = b.portals[id];
@@ -371,7 +383,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], threads: b?.threads ?? {}, roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards }, loaded: true });
       unsub = useTabsStore.subscribe(syncBoards);

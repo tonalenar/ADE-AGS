@@ -1,0 +1,181 @@
+{
+  "agent": "codex",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": true,
+    "deltas": [
+      [
+        "msg_1",
+        "Rodando o build."
+      ]
+    ],
+    "fim": {
+      "durationMs": null,
+      "error": "O processo do Codex fechou no meio do turno",
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000000150,
+        "id": "msg_1",
+        "kind": "assistant",
+        "text": "Rodando o build."
+      },
+      {
+        "at": 1790000009160,
+        "id": "call_1",
+        "kind": "tool",
+        "label": "bun run build",
+        "name": "Bash",
+        "output": "error TS2322",
+        "status": "error",
+        "tool": "command"
+      }
+    ],
+    "pedidos": [
+      {
+        "kind": "fileChange",
+        "title": "{{cwd}}/src"
+      }
+    ],
+    "sessao": "{{session:1}}"
+  },
+  "format": "ade-replay",
+  "id": "codex-comando-falha-e-queda",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "métodos de conversa/codex.rs (on_notification, on_request) e itens de conversa/test.rs",
+    "kind": "synthesized",
+    "recordedAt": null,
+    "tuiVersion": null
+  },
+  "protocol": "codex-app-server",
+  "title": "Codex: retoma a thread, roda um comando que falha, avisa um erro e o processo cai no meio do turno",
+  "transcript": [
+    {
+      "atMs": 0,
+      "in": {
+        "id": 1,
+        "method": "thread/resume",
+        "params": {
+          "cwd": "{{cwd}}",
+          "threadId": "{{session:1}}"
+        }
+      }
+    },
+    {
+      "atMs": 120,
+      "out": {
+        "id": 1,
+        "result": {
+          "thread": {
+            "id": "{{session:1}}"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 130,
+      "out": {
+        "method": "turn/started",
+        "params": {
+          "turn": {
+            "id": "turn_1",
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 140,
+      "out": {
+        "method": "item/agentMessage/delta",
+        "params": {
+          "delta": "Rodando o build.",
+          "itemId": "msg_1",
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "atMs": 150,
+      "out": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "id": "msg_1",
+            "text": "Rodando o build.",
+            "type": "agentMessage"
+          },
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "atMs": 160,
+      "out": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "command": "bun run build",
+            "id": "call_1",
+            "status": "inProgress",
+            "type": "commandExecution"
+          },
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "atMs": 9160,
+      "out": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "aggregatedOutput": "error TS2322",
+            "command": "bun run build",
+            "exitCode": 2,
+            "id": "call_1",
+            "status": "completed",
+            "type": "commandExecution"
+          },
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "atMs": 9200,
+      "out": {
+        "method": "error",
+        "params": {
+          "error": {
+            "message": "stream disconnected before completion"
+          },
+          "willRetry": true
+        }
+      }
+    },
+    {
+      "atMs": 9300,
+      "out": {
+        "id": 105,
+        "method": "item/fileChange/requestApproval",
+        "params": {
+          "grantRoot": "{{cwd}}/src",
+          "itemId": "patch_1",
+          "reason": "editar fora do permitido",
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "atMs": 9400,
+      "close": {
+        "stderr": "warning: config antiga\nError: stream disconnected before completion: Transport error"
+      }
+    }
+  ],
+  "version": 2
+}

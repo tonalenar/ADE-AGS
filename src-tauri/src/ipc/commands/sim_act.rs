@@ -1,7 +1,7 @@
 //! `ags sim act`: mesma identidade/alcance do device, com visão e HID no simulador iOS.
 use crate::{
     computer_use::{self, Request},
-    ipc::protocol::{arg_str, arg_u64_checked},
+    ipc::protocol::{arg_str, arg_str_opt, arg_u64_checked},
 };
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, time::Duration};
@@ -71,11 +71,11 @@ pub(super) fn parse(args: &Value) -> Result<(Request, Duration), String> {
 pub(super) fn act(app: &AppHandle, args: &Value) -> Result<Value, String> {
     // Parser e escopo vêm antes de captura ou consulta paga.
     let (request, timeout) = parse(args)?;
-    let session = arg_str(args, "session")
-        .map_err(|_| "sim act exige a sessão de um terminal ADE AGS.".to_string())?;
+    // Terminal de aba: token + PID. Conversa por protocolo: `thread:<id>` + PID do motor (sem token).
+    let session = arg_str_opt(args, "session").filter(|s| !s.trim().is_empty());
     let client_pid = crate::ipc::current_client_pid();
-    let from = crate::terminal::authorize(
-        Some(&session),
+    let from = crate::terminal::authorize_actor(
+        session.as_deref(),
         args.get("from").and_then(Value::as_str),
         client_pid,
     )?;

@@ -92,6 +92,10 @@ Todos nascem **desligados**.
 - **Scorecard da limpeza**: apagar pelo diálogo vira uma rejeição humana, o que mede o recall e os falsos alarmes do Jev.
 - **Promover** um ponto de sombra para ativo exige concordância ≥ 90%, p95 aceitável e revisão das discordâncias (`docs/decisoes/LAYA_LOCAL.md`). Ainda não há interruptor para isso.
 
+## Quem pode chamar o piloto e o computer use
+- Terminal de aba: token `ADE_SESSION` + PID descendente. Conversa por protocolo: `thread:<id>` + PID do cliente descendente do processo do motor (`chat_team::env::register_process`, chamado em cada `spawn`; **motor novo de conversa precisa registrar**; a conversa também recebe `ADE_SESSION`, emitido em `thread_env`). O que cada ator alcança (portais do canvas e aparelhos do painel do chat) vem de `surfaces::reach`, para listar e autorizar. Tudo em `terminal::authorize_actor`; `memory.*`/`swarm.*` seguem só em `authorize`. Tabela completa em [COMPUTER_USE_SUPERFICIES.md](../ade-ags/COMPUTER_USE_SUPERFICIES.md#quem-pode-chamar).
+- `ags desk act` comanda a tela do Mac: consentimento da pessoa a cada objetivo, confirmação por ação sensível, auditoria `approval_audit` (`computer_use:*`). Risco alto nunca é automático e o Jev só eleva risco.
+
 ## Piloto do navegador (`ags portal act` / MCP `browser_act`)
 - **Comando**: `ags portal act <portal> "objetivo" [--fill campo=valor]… [--expect text:|url:|count:|absent:…]… [--steps 8]`.
   - Timeout de 115 s.

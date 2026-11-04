@@ -4,6 +4,7 @@ pub mod datadir;
 pub mod external_path;
 pub mod launch;
 pub mod legacy;
+pub mod loopback_trust;
 pub mod path_env;
 mod proc;
 pub mod spawn;

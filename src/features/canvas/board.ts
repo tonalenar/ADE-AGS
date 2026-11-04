@@ -123,6 +123,9 @@ export interface Board {
   images: Record<string, CanvasImage>;
   folders: Record<string, CanvasFolder>;
   drawings: Stroke[];
+  /** Os nós das conversas por protocolo (`thread:<id>` → retângulo): um cartão com a timeline, sem terminal. Aditivo:
+   *  um canvas antigo não os tem. */
+  threads: Record<string, Box>;
   /** El papel con que se recrutó cada agente (id de tab → nombre del papel). Solo una
    *  etiqueta para el nodo: no da ni quita permisos. */
   roles: Record<string, string>;
@@ -135,11 +138,36 @@ export interface Board {
 }
 
 export function emptyBoard(): Board {
-  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
+  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], threads: {}, roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
 /** O prefixo do id de uma conversa por protocolo no canvas (o mesmo de `chat/structured/model.ts`). */
 export const THREAD_REF_PREFIX = "thread:";
+
+/** O tamanho padrão do cartão de uma conversa por protocolo no canvas. */
+export const THREAD_SIZE = { w: 460, h: 540 };
+
+/** Os retângulos de tudo o que ocupa lugar no canvas, para um nó novo não cair em cima. */
+function occupied(board: Board): Box[] {
+  return [
+    ...Object.values(board.nodes), ...Object.values(board.threads),
+    ...Object.values(board.notes).map((n) => n.box), ...Object.values(board.portals).map((n) => n.box),
+    ...Object.values(board.folders).map((n) => n.box), ...Object.values(board.images).map((n) => n.box),
+  ];
+}
+
+/** Dá um nó à conversa por protocolo `ref`, num lugar livre. Já tendo, devolve o MESMO canvas. Pura. */
+export function addThreadNode(board: Board, ref: string, size: { w: number; h: number } = THREAD_SIZE): Board {
+  if (ref in board.threads) return board;
+  return { ...board, threads: { ...board.threads, [ref]: nextFreeBox(occupied(board), size) } };
+}
+
+/** Tira o nó de uma conversa (a corda e a coroa seguem com o time). Pura. */
+export function removeThreadNode(board: Board, ref: string): Board {
+  if (!(ref in board.threads)) return board;
+  const { [ref]: _gone, ...threads } = board.threads;
+  return { ...board, threads };
+}
 
 /**
  * Pone el canvas al día con las tabs abiertas: cada tab nueva recibe un lugar libre, y las
@@ -147,7 +175,7 @@ export const THREAD_REF_PREFIX = "thread:";
  * sería un permiso colgando). Devuelve el MISMO objeto si no cambió nada, para que quien
  * lo guarda no escriba por gusto.
  */
-export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = tabIds): Board {
+export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = tabIds, liveThreads?: Set<string>): Board {
   const open = new Set(tabIds);
   const kept = Object.entries(board.nodes).filter(([id]) => open.has(id));
   const missing = tabIds.filter((id) => !(id in board.nodes));
@@ -172,9 +200,14 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
     ? board.roles
     : Object.fromEntries(Object.entries(board.roles).filter(([id]) => participant(id)));
   const subagents = board.subagents.every((id) => open.has(id)) ? board.subagents : board.subagents.filter((id) => open.has(id));
+  // O nó de uma conversa por protocolo só some quando se SABE que ela acabou (`liveThreads` dado); sem a lista
+  // (ainda não carregou) nada some, como as abas antes de restaurar.
+  const threads = !liveThreads || Object.keys(board.threads).every((id) => liveThreads.has(id))
+    ? board.threads
+    : Object.fromEntries(Object.entries(board.threads).filter(([id]) => liveThreads.has(id)));
 
   if (
-    missing.length === 0 && kept.length === Object.keys(board.nodes).length &&
+    threads === board.threads && missing.length === 0 && kept.length === Object.keys(board.nodes).length &&
     edges.length === board.edges.length && orchestrators.length === board.orchestrators.length &&
     roles === board.roles && subagents === board.subagents
   ) {
@@ -183,8 +216,8 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
 
   const nodes: Record<string, Box> = Object.fromEntries(kept);
   const noteBoxes = [...Object.values(board.notes), ...Object.values(board.portals)].map((n) => n.box);
-  for (const id of missing) nodes[id] = nextFreeBox([...Object.values(nodes), ...noteBoxes]);
-  return { ...board, nodes, edges, orchestrators, roles, subagents };
+  for (const id of missing) nodes[id] = nextFreeBox([...Object.values(nodes), ...Object.values(threads), ...noteBoxes]);
+  return { ...board, nodes, threads, edges, orchestrators, roles, subagents };
 }
 
 /**
@@ -385,7 +418,7 @@ export function neighbors(board: Board, tabId: string): string[] {
 
 /** Dónde está un nodo, sea terminal o nota. */
 export function boxOf(board: Board, id: string): Box | undefined {
-  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box ?? board.texts[id]?.box ?? board.images[id]?.box ?? board.folders[id]?.box;
+  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box ?? board.texts[id]?.box ?? board.images[id]?.box ?? board.folders[id]?.box ?? board.threads[id];
 }
 
 export const NOTE_SIZE = { w: 320, h: 240 };
@@ -410,7 +443,7 @@ export function defaultNoteName(content: string): string {
   return first ? first.slice(0, 40) : defaultNote();
 }
 
-function overlaps(a: Box, b: Box): boolean {
+export function overlaps(a: Box, b: Box): boolean {
   return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 }
 

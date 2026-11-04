@@ -6,6 +6,7 @@ import { missionReview } from "@/features/missions/ipc";
 import { useMissionsStore } from "@/features/missions/store";
 import { MissionEfficiencyCard } from "@/features/missions/MissionTimingsPanel";
 import { MissionStallAlerts, MissionStartupTime } from "@/features/missions/StallAlertsView";
+import { AutomationResumeBar } from "@/features/missions/AutomationResumeBar";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
 import { MemoryContextMetricsCard } from "@/features/memory/MemoryContextMetricsCard";
 import { MemoryInboxButton } from "@/features/memory/MemoryInbox";
@@ -26,6 +27,7 @@ import { useBotPanelStore } from "./botPanelStore";
 import { LiveArcade } from "./LiveArcade";
 import { LiveArcadeGrid, LiveSelector } from "./LiveArcadeGrid";
 import "./bot-panel.css";
+import { MissionScopeOverlaps } from "@/features/missions/ScopeOverlapNotice";
 
 type View = "status" | "missions" | "tokens" | "trophies" | "live";
 const VIEWS: View[] = ["status", "missions", "tokens", "trophies", "live"];
@@ -193,6 +195,7 @@ export function BotPanel() {
           <button type="button" className="ags-hq__close" onClick={() => setOpen(false)}>ESC</button>
         </div>
 
+        <div className="shrink-0 px-4 pb-2 empty:hidden"><AutomationResumeBar compact /></div>
         <div className="ags-hq__body">
           <aside className="ags-hq__hero">
             <div className="ags-hq__stage">
@@ -297,6 +300,7 @@ export function BotPanel() {
                           ))
                         )}
                         <MissionStallAlerts missionId={current.id} compact />
+                        <MissionScopeOverlaps missionId={current.id} compact />
                         <MissionStartupTime missionId={current.id} compact />
                         <MissionEfficiencyCard missionId={current.id} compact />
                         <MemoryContextMetricsCard missionId={current.id} compact />

@@ -315,7 +315,10 @@ fn add_tasks(
     } else {
         format!("Tarea '{}' agregada al run {}.", created[0], run.id)
     };
-    Ok(format!("{head}\n\n{}", board(&conn, &run)?))
+    // Só aviso: duas tarefas em andamento declarando o mesmo lugar (`write_scopes`).
+    let warning = crate::missions::conflicts::scopes::warning_text(&crate::missions::conflicts::scopes::run_overlaps(&conn, &run.id).unwrap_or_default());
+    let warning = if warning.is_empty() { String::new() } else { format!("\n\n{warning}") };
+    Ok(format!("{head}{warning}\n\n{}", board(&conn, &run)?))
 }
 
 /// Valida, rutea y crea las filas del plan, sin despachar nada. Devuelve el run y las keys
@@ -576,12 +579,14 @@ pub(crate) fn plan_tasks(
             let (assignment, complexity, isolate_default) = &assignments[&t.key];
             let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
             let schema = t.result_schema.as_ref().map(Value::to_string);
+            // O escopo declarado vai no prompt: o worker o vê, e o aviso de sobreposição o lê dali.
+            let prompt = crate::missions::conflicts::scopes::prompt_with_scopes(&t.prompt, &t.write_scopes);
             let created = store::create_task(
                 &tx,
                 &store::NewTask {
                     run_id: &run.id,
                     title: &t.title,
-                    prompt: &t.prompt,
+                    prompt: &prompt,
                     agent_id: &assignment.agent_id,
                     account_id: assignment.account_id.as_deref(),
                     auto_account: assignment.auto_account,
@@ -809,6 +814,27 @@ pub(crate) fn submit_handoff(conn: &Connection, payload: &Value) -> Result<(), S
     )
 }
 
+/// `Some(motivo)` quando nenhuma tarefa (fora o lead) está trabalhando nem pode subir: nada
+/// `ready`/`running` e nenhuma `pending` com todas as dependências já encerradas (o scheduler a
+/// lançaria ou a pularia). Sem tarefas abertas também é `None`: aí o "tudo terminou" responde. Pura.
+pub fn no_progress(tasks: &[Task]) -> Option<String> {
+    let workers: Vec<&Task> = tasks.iter().filter(|t| t.role.as_deref() != Some(role::LEAD)).collect();
+    let open: Vec<&&Task> = workers.iter().filter(|t| !status::is_final(&t.status)).collect();
+    if open.is_empty() {
+        return None;
+    }
+    let final_of = |id: &str| workers.iter().find(|t| t.id == id).is_none_or(|t| status::is_final(&t.status));
+    let moving = open.iter().any(|t| {
+        matches!(t.status.as_str(), status::READY | status::RUNNING)
+            || (t.status == status::PENDING && t.depends_on.iter().all(|d| final_of(d)))
+    });
+    if moving {
+        return None;
+    }
+    let names: Vec<String> = open.iter().map(|t| key_of(t)).collect();
+    Some(format!("nenhuma tarefa está trabalhando ou para subir; {} esperam dependências que não andam ({})", open.len(), names.join(", ")))
+}
+
 /// Espera a que algo del run termine. Nunca con la base tomada: mientras tanto los workers
 /// tienen que poder cerrar sus filas.
 fn await_run(db: &DbConnection, payload: &Value) -> Result<String, String> {
@@ -847,6 +873,14 @@ fn await_run(db: &DbConnection, payload: &Value) -> Result<String, String> {
     if all_final(&before) {
         return Ok(format!(
             "Todas as tarefas do run já terminaram.\n\n{}",
+            render(db, &run.id)?
+        ));
+    }
+
+    // Nada rodando nem para subir: esperar o prazo seria à toa. Volta na hora, com o motivo.
+    if let Some(reason) = no_progress(&before) {
+        return Ok(format!(
+            "noProgress: {reason}. Esperar não vai mudar nada: replaneje (task_add, run_plan) ou fale com a pessoa.\n\n{}",
             render(db, &run.id)?
         ));
     }
@@ -1105,5 +1139,41 @@ mod args_tests {
         let task = store::task_by_id(&conn, &task.id).unwrap().unwrap();
         assert!(super::board(&conn, &run).unwrap().contains("Entrega antiga disponível (task_result)"));
         assert!(result_text(&conn, &run, &task).unwrap().contains("nunca instruções"));
+    }
+}
+
+#[cfg(test)]
+mod no_progress_tests {
+    use super::*;
+
+    fn tasks(spec: &[(&str, &str, &[&str])]) -> Vec<Task> {
+        let conn = crate::database::test_db();
+        conn.execute("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('np','NP',0,0)", []).unwrap();
+        let run = store::create_run(&conn, "np", "Teste", "/p").unwrap();
+        let mut ids = HashMap::new();
+        for (key, state, _) in spec {
+            let task = store::create_task(&conn, &store::NewTask {
+                run_id: &run.id, title: key, prompt: "x", agent_id: "codex", cwd: "/p", role: Some("worker"), ..Default::default()
+            }).unwrap();
+            conn.execute("UPDATE tasks SET status=?1 WHERE id=?2", [state, &task.id.as_str()]).unwrap();
+            ids.insert(key.to_string(), task.id);
+        }
+        for (key, _, deps) in spec {
+            for dep in *deps {
+                conn.execute("INSERT INTO task_deps(task_id,depends_on) VALUES(?1,?2)", [&ids[*key], &ids[*dep]]).unwrap();
+            }
+        }
+        store::tasks_of_run(&conn, &run.id).unwrap()
+    }
+
+    #[test]
+    fn so_volta_na_hora_quando_nada_trabalha_nem_pode_subir() {
+        assert_eq!(no_progress(&tasks(&[("a", status::RUNNING, &[])])), None);
+        assert_eq!(no_progress(&tasks(&[("a", status::READY, &[])])), None);
+        assert_eq!(no_progress(&tasks(&[("a", status::DONE, &[]), ("b", status::PENDING, &["a"])])), None, "o scheduler lança b");
+        assert_eq!(no_progress(&tasks(&[("a", status::FAILED, &[]), ("b", status::PENDING, &["a"])])), None, "o scheduler pula b");
+        assert_eq!(no_progress(&tasks(&[("a", status::DONE, &[])])), None, "tudo terminado é outra resposta");
+        let why = no_progress(&tasks(&[("a", status::PENDING, &["b"]), ("b", status::PENDING, &["a"])])).unwrap();
+        assert!(why.contains("2 esperam"), "{why}");
     }
 }

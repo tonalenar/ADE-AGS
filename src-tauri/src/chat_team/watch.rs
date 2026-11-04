@@ -13,11 +13,24 @@
 //! - **destravou**: a pessoa respondeu o pedido de que ele foi avisado (ou ele expirou);
 //! - **sem progresso**: um integrante trabalhando sem nenhum item novo há [`STALL_AFTER_MS`]. Interruptor
 //!   `watch_stall` (desligado por padrão, como o Vigia das missões). Só avisa: nunca interrompe nem escreve na
-//!   conversa do integrante.
+//!   conversa do integrante;
+//! - **TIMEOUT** (watchdog): turno aberto ESPERANDO O MODELO (nenhuma ferramenta rodando, nenhum pedido à pessoa)
+//!   sem item novo há [`TIMEOUT_AFTER_MS`]. Sempre marca a timeline do integrante (código `turnTimeout`, distinto
+//!   de interrompido e de erro); com `watch_stall`, avisa também o orquestrador. Nada é interrompido;
+//! - **chamada repetida**: a mesma ferramenta com os mesmos argumentos 3, 5 e 8 vezes desde a última mensagem da
+//!   pessoa (`canal::repeat`). Interruptor `watch_stall`;
+//! - **contexto quase cheio**: o integrante passou de ~80% da janela (`canal::context`). Interruptor `watch`;
+//! - **terminou**: o turno pedido pelo orquestrador acabou sem o integrante mandar mensagem a ele. Vai tipado, com
+//!   o `stopReason` (`completed`/`aborted`/`error`/`max-tokens`/`refusal`/`timeout`) e o texto final. Interruptor
+//!   `watch`.
 //!
 //! A decisão de um pedido é SEMPRE da pessoa: o aviso diz isso e o orquestrador não tem como liberar nada.
 
 use std::collections::HashSet;
+
+use crate::canal::context::WARN_PRESSURE;
+use crate::canal::repeat::{highest_steps, Call};
+use crate::conversa::turn::StopReason;
 
 /// Há quanto tempo um pedido pendente (ou um turno que terminou perguntando) vira aviso. Dá à pessoa a chance de
 /// responder logo e ao "Sempre permitir"/à política de decidir antes que alguém precise saber.
@@ -25,6 +38,14 @@ pub const BLOCK_AFTER_MS: i64 = 20_000;
 /// Sem nenhum item novo por tanto tempo, um turno em andamento é «sem progresso». Generoso: um agente pensando
 /// ou rodando uma suíte longa não produz item por vários minutos.
 pub const STALL_AFTER_MS: i64 = 15 * 60_000;
+/// O watchdog: um turno esperando o modelo (sem ferramenta rodando, sem pedido à pessoa) sem item novo por tanto
+/// tempo é `TIMEOUT`. Mais curto que o «sem progresso», que vale também para uma ferramenta longa.
+pub const TIMEOUT_AFTER_MS: i64 = 5 * 60_000;
+/// O mesmo integrante só é avisado de novo do contexto quase cheio depois disto (a pressão segue alta até o
+/// auto-compact, e cada resposta nova não é um aviso novo).
+pub const CONTEXT_REPEAT_MS: i64 = 60 * 60_000;
+/// O tamanho máximo do diagnóstico (o erro do turno) dentro de um aviso.
+pub const DIAGNOSTIC_MAX_BYTES: usize = 4 * 1024;
 /// Um turno que acabou há mais que isto não gera aviso (um app que abre depois de horas não deve despejar o passado).
 pub const RECENT_MS: i64 = 30 * 60_000;
 /// O teto de avisos do vigia ao mesmo orquestrador, por janela. O que passa disso espera a janela andar.
@@ -76,15 +97,23 @@ pub struct Turn {
     pub run_id: String,
     pub status: TurnStatus,
     pub completed_at: i64,
+    /// Quando o turno começou (ms), se o banco sabe.
+    pub started_at: Option<i64>,
     /// O erro de um turno que falhou.
     pub error: Option<String>,
     /// A última fala do agente no turno.
     pub final_text: Option<String>,
     /// A pessoa (ou o orquestrador) falou na conversa DEPOIS do fim do turno.
     pub replied_after: bool,
+    /// O turno foi aberto por uma tarefa (`tell`) do orquestrador, e não por um `ask` cuja resposta já volta sozinha.
+    pub from_orchestrator: bool,
+    /// O integrante mandou mensagem ao orquestrador durante o turno (o «terminou» seria repetição).
+    pub reported: bool,
+    /// O watchdog marcou `TIMEOUT` neste turno antes de ele acabar.
+    pub timed_out: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Member {
     /// `thread:<id>`.
     pub id: String,
@@ -96,6 +125,14 @@ pub struct Member {
     pub last_activity: i64,
     pub requests: Vec<Req>,
     pub last_turn: Option<Turn>,
+    /// O turno em andamento espera o modelo: nenhuma ferramenta rodando (o watchdog só arma assim).
+    pub awaiting_model: bool,
+    /// O watchdog já marcou o turno em andamento como `TIMEOUT` na timeline.
+    pub timeout_marked: bool,
+    /// As chamadas de ferramenta desde a última mensagem da pessoa, na ordem.
+    pub calls: Vec<Call>,
+    /// A fração da janela de contexto ocupada (`usage` real + estimativa), quando se sabe, e o turno da medida.
+    pub context: Option<(f64, String)>,
 }
 
 /// Um aviso do vigia já enviado: a chave e quando.
@@ -119,9 +156,19 @@ pub struct Notice {
     pub text: String,
 }
 
+/// O watchdog disparou: o turno `run_id` de `member` vira `TIMEOUT` na timeline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Timeout {
+    pub member: String,
+    pub run_id: String,
+    pub idle_ms: i64,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Plan {
     pub notices: Vec<Notice>,
+    /// As marcas de `TIMEOUT` a gravar na timeline (independem do teto e dos interruptores de aviso).
+    pub timeouts: Vec<Timeout>,
     /// Quando olhar de novo por causa de um prazo (ms), se algum está correndo.
     pub wake_at: Option<i64>,
     /// Quantos avisos o teto segurou.
@@ -138,11 +185,18 @@ pub fn evaluate(input: &Input, now: i64) -> Plan {
     let mut wake: Option<i64> = None;
     let mut found: Vec<Notice> = Vec::new();
     for m in &input.members {
+        if let Some(t) = watchdog(m, now, &mut wake) {
+            plan.timeouts.push(t);
+        }
         if input.flags.blocks {
             blocks(m, &sent, now, &mut found, &mut wake);
+            finished(m, &sent, now, &mut found);
+            context(m, input, now, &mut found);
         }
         if input.flags.stall {
+            timed_out(m, &sent, now, &mut found);
             stalled(m, &sent, now, &mut found, &mut wake);
+            repeated(m, &sent, &mut found);
         }
     }
     // O teto: o que já foi enviado na janela conta; o excesso espera (a chave não é gravada, então volta depois).
@@ -215,7 +269,8 @@ fn stalled(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>, wa
         return;
     }
     let key = format!("{KEY_PREFIX}stall-{}-{run}", m.id);
-    if sent.contains(key.as_str()) {
+    // O TIMEOUT do mesmo turno já disse o essencial.
+    if sent.contains(key.as_str()) || sent.contains(format!("{KEY_PREFIX}timeout-{}-{run}", m.id).as_str()) {
         return;
     }
     let base = m.last_activity.max(*started);
@@ -225,6 +280,79 @@ fn stalled(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>, wa
     } else {
         wake_at(wake, due, now);
     }
+}
+
+/// O watchdog: só arma com turno aberto esperando o modelo e sem pedido à pessoa. Devolve a marca a gravar.
+fn watchdog(m: &Member, now: i64, wake: &mut Option<i64>) -> Option<Timeout> {
+    let (run, started) = m.working.as_ref()?;
+    if !m.awaiting_model || m.timeout_marked || m.requests.iter().any(|r| r.state == ReqState::Pending) {
+        return None;
+    }
+    let base = m.last_activity.max(*started);
+    let due = base + TIMEOUT_AFTER_MS;
+    if now >= due {
+        Some(Timeout { member: m.id.clone(), run_id: run.clone(), idle_ms: now - base })
+    } else {
+        wake_at(wake, due, now);
+        None
+    }
+}
+
+/// O aviso de `TIMEOUT` ao orquestrador (com `watch_stall`), uma vez por turno. Lê a mesma condição do watchdog.
+fn timed_out(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>) {
+    let Some((run, started)) = &m.working else { return };
+    if !m.awaiting_model || m.requests.iter().any(|r| r.state == ReqState::Pending) {
+        return;
+    }
+    let key = format!("{KEY_PREFIX}timeout-{}-{run}", m.id);
+    let base = m.last_activity.max(*started);
+    if sent.contains(key.as_str()) || now < base + TIMEOUT_AFTER_MS {
+        return;
+    }
+    out.push(Notice { key, member: m.id.clone(), text: timeout_text(m, now - base) });
+}
+
+/// O «terminou» tipado: o turno que o orquestrador pediu acabou e o integrante não mandou mensagem a ele.
+fn finished(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>) {
+    let Some(t) = &m.last_turn else { return };
+    if now - t.completed_at > RECENT_MS || !t.from_orchestrator || t.reported || t.replied_after {
+        return;
+    }
+    // O turno que falhou já tem o aviso dele; o que terminou perguntando à pessoa, também.
+    if t.status == TurnStatus::Failed || (t.status == TurnStatus::Completed && t.final_text.as_deref().is_some_and(asks_the_person)) {
+        return;
+    }
+    let key = format!("{KEY_PREFIX}end-{}-{}", m.id, t.run_id);
+    if !sent.contains(key.as_str()) {
+        out.push(Notice { key, member: m.id.clone(), text: finished_text(m, t) });
+    }
+}
+
+/// A mesma chamada repetida: um aviso por degrau (3, 5, 8) e por chamada. Pula os degraus já passados.
+fn repeated(m: &Member, sent: &HashSet<&str>, out: &mut Vec<Notice>) {
+    for hit in highest_steps(&m.calls) {
+        let key = format!("{KEY_PREFIX}rep-{}-{}-{}", m.id, hit.key, hit.step);
+        if !sent.contains(key.as_str()) {
+            out.push(Notice { key, member: m.id.clone(), text: repeat_text(m, &hit.name, &hit.summary, hit.count) });
+        }
+    }
+}
+
+/// O contexto quase cheio: no máximo um aviso por integrante a cada [`CONTEXT_REPEAT_MS`].
+fn context(m: &Member, input: &Input, now: i64, out: &mut Vec<Notice>) {
+    let Some((pressure, run)) = &m.context else { return };
+    if *pressure < WARN_PRESSURE {
+        return;
+    }
+    let prefix = format!("{KEY_PREFIX}ctx-{}-", m.id);
+    if input.sent.iter().any(|s| s.key.starts_with(&prefix) && now - s.at < CONTEXT_REPEAT_MS) {
+        return;
+    }
+    let key = format!("{prefix}{run}");
+    if input.sent.iter().any(|s| s.key == key) {
+        return;
+    }
+    out.push(Notice { key, member: m.id.clone(), text: context_text(m, *pressure) });
 }
 
 // ── Os textos (vão ao orquestrador; o que vem do integrante é dado) ──────
@@ -294,9 +422,81 @@ fn asked_text(m: &Member, t: &Turn) -> String {
 fn failed_text(m: &Member, t: &Turn) -> String {
     let error = t.error.as_deref().unwrap_or("sem motivo");
     format!(
-        "{MARK} {}: o turno falhou: \"{}\". Veja o motivo antes de reenviar a tarefa; se for permissão, login ou limite de uso, a decisão é da pessoa. {DATA_NOTE}",
+        "{MARK} {}: o turno falhou: \"{}\". stopReason: {}. Veja o motivo antes de reenviar a tarefa; se for permissão, login ou limite de uso, a decisão é da pessoa. {DATA_NOTE}",
         who(m),
-        clean(error, 300)
+        diagnostic(error),
+        stop_of(t).as_str()
+    )
+}
+
+/// O `stopReason` de um turno que acabou.
+fn stop_of(t: &Turn) -> StopReason {
+    let status = match t.status {
+        TurnStatus::Completed => "completed",
+        TurnStatus::Failed => "failed",
+        TurnStatus::Interrupted => "interrupted",
+    };
+    StopReason::classify(status, t.error.as_deref(), t.timed_out)
+}
+
+/// O diagnóstico de um turno (o erro) para dentro do aviso: uma linha, até [`DIAGNOSTIC_MAX_BYTES`], e NADA que
+/// pareça segredo (o detector rígido da memória decide; na dúvida, o texto sai inteiro do aviso).
+pub fn diagnostic(text: &str) -> String {
+    if crate::memory::agent::looks_like_secret(text) {
+        return "(diagnóstico omitido: parece conter um segredo; veja a conversa do integrante)".to_string();
+    }
+    let line = clean(text, usize::MAX);
+    if line.len() <= DIAGNOSTIC_MAX_BYTES {
+        return line;
+    }
+    let mut cut = DIAGNOSTIC_MAX_BYTES - '…'.len_utf8();
+    while !line.is_char_boundary(cut) {
+        cut -= 1;
+    }
+    format!("{}…", &line[..cut])
+}
+
+fn timeout_text(m: &Member, idle: i64) -> String {
+    format!(
+        "{MARK} {}: TIMEOUT do turno. Nenhum evento do agente há {} com o turno aberto, sem ferramenta rodando e sem pedido à pessoa (o modelo parou de responder?). Não é interrupção nem erro: nada foi interrompido nem escrito na conversa dele. Se precisar, peça o status com ags peer ask ou avise a pessoa.",
+        who(m),
+        age(idle)
+    )
+}
+
+fn finished_text(m: &Member, t: &Turn) -> String {
+    let reason = stop_of(t);
+    let last = t.final_text.as_deref().map(last_paragraph).filter(|l| !l.trim().is_empty());
+    let text = match last {
+        Some(last) => format!(" Texto final: \"{}\".", clean(last, 600)),
+        None => " Sem texto final.".to_string(),
+    };
+    let what = match reason {
+        StopReason::Completed => "terminou o turno",
+        StopReason::Aborted => "teve o turno interrompido (pela pessoa ou pelo app)",
+        StopReason::Timeout => "teve o turno encerrado depois de um TIMEOUT",
+        _ => "parou o turno",
+    };
+    format!(
+        "{MARK} {} {what} sem mandar mensagem a você. stopReason: {}.{text} Confira o resultado antes de seguir; não repita a tarefa sem ver o estado. {DATA_NOTE}",
+        who(m),
+        reason.as_str()
+    )
+}
+
+fn repeat_text(m: &Member, name: &str, summary: &str, count: u32) -> String {
+    let call = if summary.trim().is_empty() { clean(name, 60) } else { format!("{} {}", clean(name, 60), clean(summary, 160)) };
+    format!(
+        "{MARK} {}: possível laço. Chamou {count} vezes a mesma ferramenta com os mesmos argumentos (\"{call}\") desde a última mensagem da pessoa. É só um aviso: nada foi interrompido nem escrito na conversa dele. Se precisar, peça o status com ags peer ask. {DATA_NOTE}",
+        who(m)
+    )
+}
+
+fn context_text(m: &Member, pressure: f64) -> String {
+    format!(
+        "{MARK} {}: o contexto está em ~{}% da janela do modelo. Perto do auto-compact, ele pode esquecer detalhes do que fez: se a tarefa é longa, peça agora um resumo do estado (arquivos, erros, próximo passo) ou um handoff. Só leitura: nada foi escrito na conversa dele.",
+        who(m),
+        (pressure * 100.0).round() as i64
     )
 }
 

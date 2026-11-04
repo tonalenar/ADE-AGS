@@ -20,6 +20,9 @@
 ## Regras para quem mexe no código
 - O status de missão headless só muda por `refresh_run_status → missions::store::refresh_for_run`. O de missão em terminais, só por `mark_started_terminals`/`finish_terminals`.
 - O start é atômico e protegido contra start duplo.
+- **Armado não sobrevive ao reinício**: automação armada antes do boot (Vigia, catch-up de rotina, rodada de correção automática de run antigo) espera o botão "Retomar automação" (`missions/automation.rs`). Não crie CLI nem MCP para retomar.
+- **Integrante `provisioning`**: grave antes de criar worktree, aba ou conversa (`missions/members.rs`, `chat_team_provision`); o boot reconcilia. Nome de integrante nunca se reutiliza na missão nem no time.
+- Escopos de escrita (`Escopo:` na delegação, `write_scopes` no plano) só **avisam** sobreposição (`missions/conflicts/scopes.rs`); nunca bloqueie por eles.
 - Criar ou editar uma missão **nunca** lança PTY, processo ou worktree. Há teste que conta os três.
 - A política do lead é **por papel, nunca por provider**, e vem antes das regras do broker. Não adicione `if provider`.
 - Tudo o que vem de outro agente (facts, handoffs, memória, HTML de design) é dado não confiável: mantenha o envelope e a neutralização.
@@ -45,6 +48,8 @@
 
 ## Missão em terminais: "iniciar time"
 O fluxo está em `src/features/missions/terminals.ts::startMissionInTerminals` e `src-tauri/src/missions/team.rs`.
+
+Ao fim, o front grava a **linha-espelho** `origin = 'mission'` no `chat_team` (`chat_team_mission_mirror`) para o chat, as abas e o canvas mostrarem o grupo "Missão X"; ela sai quando a missão fecha. Não funde a missão no roster do chat e é invisível a escopo, política, alias de peer e vigia do chat. Ver [MODO_CHAT.md](../ade-ags/MODO_CHAT.md#missão-no-chat-nas-abas-e-no-canvas-e5).
 
 1. **Valida tudo antes de qualquer efeito.**
    - `teamOf(squad)` monta um integrante por membro.
@@ -169,6 +174,7 @@ Arquivo: `runs/fixrounds.rs`.
   - é **congelado no Run** (`run_squad_members`), e um Squad referenciado não pode ser apagado.
 - **Recrutamento**: `ags peer recruit <nome> [--agent --model --effort --fast --role --account --floor]`, só pelo orquestrador.
   - O LLM é resolvido por `squads/recruit.rs`: o explícito vence o padrão do Squad, que vence o padrão do provider.
+  - Profundidade monotônica (`squads/recruit.rs`, gravada em `~/.ags/recruits.json`): vale `max(gravado, atual)`, a aba da pessoa é 0 e o padrão é 1, então um recrutado não recruta. Até 12 recrutados abertos por orquestrador. No limite, `{refused, reason: depth|active_cap, message}` com exit 0, antes de pedir orçamento ou abrir aba.
   - Em missão: `confirm_spend` (o teto do orçamento bloqueia) e um worktree isolado.
 - **Andares**: `ags floor create <nome> [--from <branch>]` cria worktree, branch e canvas próprios a partir do HEAD.
   - Não há comando de apagar.

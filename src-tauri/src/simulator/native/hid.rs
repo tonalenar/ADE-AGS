@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use block2::RcBlock;
@@ -14,6 +14,7 @@ use objc2::runtime::AnyObject;
 use objc2::sel;
 
 use super::dtu::{self, Dtu, Touch};
+use crate::simulator::model;
 use super::kit::{self, CGPoint, CGSize};
 use super::objc::{blocks, call, class, Shared};
 
@@ -44,6 +45,8 @@ pub struct Hid {
     /// de toque, para um arrasto atrasado nunca sair depois do dedo subir.
     pending: Mutex<Option<(f64, f64)>>,
     retrying: AtomicBool,
+    /// A borda do gesto em curso (`model::touch_edge`).
+    edge: AtomicU64,
 }
 
 // SAFETY: o cliente de HID manda por uma porta mach e é chamado de qualquer fila pelo próprio SimulatorKit.
@@ -65,7 +68,7 @@ impl Hid {
             }
         };
         let client = if dtu.is_some() { None } else { Some(Self::legacy(device)?) };
-        Ok(Hid { dtu, client, queue: DispatchQueue::new("ade.simulator.hid", None), pending: Mutex::new(None), retrying: AtomicBool::new(false) })
+        Ok(Hid { dtu, client, queue: DispatchQueue::new("ade.simulator.hid", None), pending: Mutex::new(None), retrying: AtomicBool::new(false), edge: AtomicU64::new(0) })
     }
 
     fn legacy(device: &Shared) -> Result<Shared, String> {
@@ -102,11 +105,18 @@ impl Hid {
     /// depois.
     pub fn touch(self: &Arc<Self>, ratio: (f64, f64), phase: Phase) -> Result<(), String> {
         if let Some(dtu) = &self.dtu {
+            // A borda vale o gesto inteiro: é decidida quando o dedo desce e só sai quando ele sobe.
+            if phase == Phase::Down {
+                self.edge.store(model::touch_edge(ratio), Ordering::Relaxed);
+            }
             dtu.touch(ratio, match phase {
                 Phase::Down => Touch::Start,
                 Phase::Move => Touch::Position,
                 Phase::Up => Touch::End,
-            });
+            }, self.edge.load(Ordering::Relaxed));
+            if phase == Phase::Up {
+                self.edge.store(0, Ordering::Relaxed);
+            }
             return Ok(());
         }
         let kit = kit::kit()?;
@@ -137,6 +147,11 @@ impl Hid {
                 let _ = this.touch(ratio, Phase::Move);
             }
         });
+    }
+
+    /// O HID novo é o único que leva a borda do toque, que o gesto de início precisa.
+    pub fn has_edge_touch(&self) -> bool {
+        self.dtu.is_some()
     }
 
     pub fn button(&self, source: i32, down: bool) -> Result<(), String> {

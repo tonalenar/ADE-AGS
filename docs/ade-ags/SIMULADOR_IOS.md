@@ -23,6 +23,8 @@ As APIs foram mapeadas com o REA (`inspect_macho` e `inspect_native_dispatch_met
 - **HID novo do Xcode 27.** A partir do CoreSimulator 1155.4 (o deste Mac é o 1174.9.2), o iOS descarta botão e teclado vindos do Indigo legado, e o toque por ele fica intermitente. Isso foi observado pelo idb, da Meta, que usa o `dtuhidd` sem volta. O `dtuhidd` é um serviço que o CoreSimulator põe dentro do iOS: ele sobe sob demanda e pode sair sozinho.
   - Cada evento é um dicionário XPC `{messageType, isBarrier, featureIdentifier, payload}`.
   - O toque é `{pointOne: {x, y}, eventType: 0/1/2, edge, target}`, com o ponto em proporção 0..1 e a origem no topo.
+  - O campo `edge` diz de que borda o toque saiu. `3` é a de baixo (conferido no aparelho: 0, 1, 2, 4, 5, 6 e 8 não chegam à tela inicial). Um toque que começa nos últimos 1,5% da tela leva esse valor do início ao fim, então arrastar a barra de início com o mouse funciona como no aparelho.
+  - **Início:** em iPhone sem botão físico, em retrato e com o HID novo, o botão "início" faz o gesto da barra. O botão HID leva 390-450 ms até o primeiro quadro; em paisagem e no legado ele continua sendo usado.
   - Os botões usam a página HID 0x0C: home `0x40`, lock e side `0x30`, Siri `0xCF`. O teclado usa o uso HID da tecla, com `state` 1 para descer e 2 para subir.
   - Ao abrir, a ADE manda uma tecla 0 solta e espera a resposta por até 4 s, em até 3 tentativas. Se o `dtuhidd` não responder, a ADE usa o Indigo legado.
   - Os eventos vão por uma fila serial: a interface não espera. Com a conexão morta, o próximo evento abre outra.
@@ -96,12 +98,51 @@ Ficam ligados de propósito:
 - Safari e universal links;
 - `assistantd`, `gamed` e `sharingd`, porque sem eles o iOS fica tentando subir de novo.
 
-Ligar ou desligar o ⚡ com o aparelho ligado muda a prioridade na hora. Os serviços só mudam quando o aparelho religa.
+Desligar o ⚡ com o aparelho ligado devolve a prioridade normal na hora. Ligar só grava a preferência: o iOS vai para a prioridade baixa pela regra do ciclo de vida, quando a tela sair de vista. Os serviços só mudam quando o aparelho religa.
 
-A tela recebe o que o iOS desenha: com `ADE_SIMULATOR_FPS=1`, o log mostra quantos quadros por segundo chegam à camada.
+A tela recebe o que o iOS desenha. Com `ADE_SIMULATOR_FPS=1`, o log mostra a cada segundo:
+- quantos quadros chegaram à camada;
+- o maior intervalo entre eles e quantos passaram de 25 ms;
+- quanto a thread da interface atrasou (uma sonda a cada 50 ms; por ela passam o mouse e o toque);
+- com que idade o evento do mouse chegou à tela.
+
+### Onde ainda engasga (medido)
+
+Medido no iPhone 17 Pro Max (iOS 27.0), num Mac M2 de 8 núcleos e 16 GB, com o iOS em prioridade normal. A bancada conta os quadros pelos mesmos callbacks da tela e amostra a superfície a cada vsync do Mac (`CVDisplayLink`); a ADE isolada (`ADE_AGS_DATA_DIR`) foi pilotada por `ags device`.
+
+| Situação | Resultado |
+|---|---|
+| Rolagem, na inércia (o iOS anima sozinho) | ~60 quadros/s; 0-1% dos vsyncs sem quadro novo |
+| Rolagem, com o dedo na tela | 8-25% dos vsyncs sem quadro novo; p95 do intervalo ~30 ms |
+| Toque a 120 Hz solto, a 60 Hz no vsync do Mac ou um por quadro do iOS | o mesmo resultado: o ritmo do toque não é a causa |
+| Volta à 1ª página da tela inicial | parada de 230-300 ms, com e sem o modo leve |
+| ADE isolada ociosa e com um terminal imprimindo sem parar (ADE a 150% de CPU) | a mesma cadência na camada; a interface atrasou no máximo 15 ms |
+
+O que sobra vem do próprio iOS do simulador (SpringBoard, abertura de app, o ritmo do quadro enquanto há toque). Não vem da exibição nem do toque da ADE.
+
+O que foi tentado para o iOS do simulador desenhar mais liso:
+
+| Alavanca | Resultado |
+|---|---|
+| Aparelho sem ProMotion (iPhone 17e) no lugar do Pro Max | um pouco melhor na rolagem (com o dedo, 19% contra 27% dos vsyncs sem quadro novo; na inércia, 6% contra 19%); a parada de ~300 ms na troca de página fica. As rajadas abaixo de 8 ms também aparecem no 17e: não é o iOS tentando 120 Hz |
+| Escala menor na tela da ADE | não muda nada no iOS: ele desenha sempre na resolução do aparelho, e a camada só redimensiona |
+| GPU | o Mac M2 tem uma GPU só; não há o que escolher |
+| Prioridade acima da normal | sem root, não dá: `setpriority(PRIO_DARWIN_ROLE)` em processo do iOS devolve `ENOTSUP`. O `launchd_sim` já dá papel de foco ao SpringBoard e ao app à frente |
+| O visualizador da Apple (Device Hub) | usa o mesmo `SimDisplayRenderableView` do SimulatorKit, sem display link próprio e sem sinal de visibilidade, foco ou taxa para o iOS (só `setDisplayBacklightActive:`). A comparação medida lado a lado depende de escolher o aparelho na janela dele (um clique) e não foi feita |
+
+Para a ADE, o que dá para fazer é o que já faz: manter o iOS na prioridade normal com a tela à vista e mostrar cada quadro no vsync seguinte. Um iPhone menor ajuda um pouco na rolagem.
 
 O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém usa:
-- **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `nice` no `launchd_sim` do aparelho, que o `ps` mostra com o UDID no caminho, e em todos os descendentes. Os processos novos herdam. Fica em `nice 10` nos primeiros 150 s depois do boot e com a tela fora de vista, e em `nice 0` com a pessoa olhando, para o iOS desenhar mais rápido quando importa.
+- **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `PRIO_DARWIN_BG` via `PRIO_DARWIN_PROCESS` no `launchd_sim` do aparelho e em todos os descendentes. Essa política de CPU e I/O não aparece no `nice` do `ps`. Só entra em segundo plano com o aparelho fora de vista em **todas** as telas que o mostram (o nó do canvas e o painel do modo chat contam juntos) e sem ação de agente há pelo menos 60 s (`AGENT_PRIORITY_GRACE`). Ao mostrar a tela ou receber ação de agente, restaura a prioridade normal em uma thread, sem esperar o monitor. Não usamos `nice 10`: voltar a `nice 0` pode falhar com `EACCES` sem root no macOS.
+  - Por que importa: com o iOS em `PRIO_DARWIN_BG`, a tela trava. Medido no iPhone 17 Pro Max (iOS 27.0, modo leve), num Mac M2 de 8 núcleos e 16 GB (com outro simulador ligado ao lado), com os quadros contados pelos mesmos callbacks da tela e os gestos pelo `dtuhidd`:
+
+    | Cenário | Prioridade normal | `PRIO_DARWIN_BG` |
+    |---|---|---|
+    | Troca de página da tela inicial | 59-87 quadros/s; p95 do intervalo 22-34 ms | 19-34 quadros/s; p95 119-129 ms |
+    | Abrir o Ajustes (`simctl launch`) | 50-64 quadros/s; p95 19-36 ms | 29-65 quadros/s; até 670 ms parado |
+    | Gesto de início | 67-77 quadros/s; p95 19-26 ms; 1º quadro em 2-79 ms | 27-34 quadros/s; 1º quadro em 240-926 ms |
+
+    Antes, o ⚡ baixava a prioridade com a tela à vista, e uma tela fora de vista (ou fechada) tirava de vista o aparelho que outra tela mostrava. Nos dois casos o iOS ficava na prioridade baixa com a pessoa usando.
 - **Hibernar:** depois de N minutos fora de vista e sem ação de agente (padrão 10; Nunca/5/10/30 no "⋯"), o aparelho é desligado sem perder dados. O nó mostra "Pausado para economizar" com o botão Retomar.
 - **Um por vez** (padrão): ligar um aparelho desliga os outros que a ADE ligou. Os do app Simulator ficam como estão.
 - **Fora de vista:** o nó para de ouvir os quadros (`unregisterScreenCallbacks`) e esconde a view.

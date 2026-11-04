@@ -8,6 +8,24 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
+- **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3; a missão é a E5. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+- **A conversa segue o modo:** seleção única (`selectedRef`/`selectConversation`) em Chat, Abas e Canvas; `Board.threads` e o cartão da conversa por protocolo no canvas; `ProtocolPane` nas Abas para qualquer conversa. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+- **Time único (E3, espelho canvas → chat):** `promotePlan` promove a coroa de um canvas de pasta ou `#c:` a time do chat quando a pessoa coroa ou liga algo (nunca no boot, nunca `#m:`, nunca lança processo); tirar a coroa tira só o papel de orquestrador (`chat_team_unlead`); o invariante de um time só conta também a missão. O nó de conversa por protocolo no canvas ficou de fora. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+
+- **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3. **Missão no chat (E5):** `chat_team_mission_mirror`/`_unmirror` gravam e tiram a linha `origin='mission'` ao iniciar/fechar a missão em terminais; grupo "Missão X" com selo na sidebar (chat, Abas, Canvas) e criar/iniciar missão também no chat. A missão segue dona do motor. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+
+## Retomada e estado (pontos 15, 8 e 6 do deepseek-harness)
+
+- **Armado não sobrevive ao reinício:** o que foi armado antes do boot (Vigia de missão e de time de conversa, rotina com catch-up, rodada de correção automática de run antigo) espera o botão **Retomar automação** (Missões, QG e barra do canvas). O fechamento antecipado e o "Decisão pendente" do Vigia não se repetem mais ao reabrir.
+- **Integrante `provisioning`:** gravado antes do worktree e da aba (missão) ou da conversa (time do chat), reconciliado no boot para `active` ou `failed`; nomes nunca reutilizados. Migração só aditiva (`mission_member_state`, `chat_team_provision`).
+- **Escopos de escrita:** `Escopo:` na delegação e `write_scopes` no `run_plan`; o canvas e o QG avisam quando duas tarefas em andamento se sobrepõem. Só aviso.
+- Detalhe em [RETOMADA_E_ESTADO.md](./RETOMADA_E_ESTADO.md); skill `ags-orchestrator` 1.44.0.
+
+## Processo e qualidade (pontos 23–25 da análise do deepseek-harness)
+
+- **Postmortems numerados** em [postmortem/](./postmortem/README.md): 0001 Vigia segundos × ms (A1), 0002 HMR derrubando PTYs, 0003 sessão `opencode_stream` (A2), 0004 avisos repetidos do Vigia.
+- **Fingerprint** SHA-256 do schema SQLite e do protocolo IPC, com registro de reconhecimento obrigatório no CI: [FINGERPRINT.md](../decisoes/FINGERPRINT.md).
+- **Bench de complexidade** com gate por razão e orçamento calibrado (`digest`, transcript do canal, scrollback do PTY): [bench/COMPLEXIDADE.md](./bench/COMPLEXIDADE.md). Achou e corrigiu um O(n²) no `digest` (13,26× → 1,22×).
 
 ## Conector opcional de leitura do ai-memory
 
@@ -15,7 +33,7 @@ Backend com detecção de versão, status e leitura de bastões/páginas por sub
 
 ## Computer use em múltiplas superfícies — iOS
 
-Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. macOS genérico e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
+Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. `ags desk act` (tela do Mac, com consentimento por objetivo) e o reconhecimento de conversas por protocolo em `sim act`/`desk act` entraram em seguida; árvore AX e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
 
 ## CLIs fora do PATH e instalação pela ADE
 
@@ -214,7 +232,7 @@ A integração nativa oferece Lead e Worker, model discovery via `agy models` e 
 Ponto 1: precheck de instalação, sessão, catálogo por conta e limite antes do lançamento. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
 
 Ponto 1, revisão QA: aviso de erro traduzido na lista de missões e bloqueio preventivo quando a conta principal não está exposta no roster.
-Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI, com uma troca por task, cooldown e auditoria traduzida. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md) e [POOL_FAILOVER.md](./POOL_FAILOVER.md).
+Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI, com uma troca por task, cooldown e auditoria traduzida. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md) e [POOL_FAILOVER.md](./POOL_FAILOVER.md). O mesmo pool agora vale para conversas do modo chat por protocolo (desligado por padrão; `avisar e perguntar` ou `automático`).
 
 ## 17. Classificação de falhas (Etapa 10, ponto 3)
 
@@ -373,6 +391,8 @@ Redução drástica do tempo de feedback de testes para agentes e humanos atrav�
 
 iPhones e iPads do Xcode ligados sem o app Simulator, soltos no canvas com a barra flutuante e a conversa com os agentes conectados. A tela é a `IOSurface` do simulador numa camada nativa, sem cópia; o toque vai pelo HID do SimulatorKit; os agentes pilotam com `ags device …`. No modo leve, o iOS sobe sem os serviços pesados (Siri, widgets, iCloud, Spotlight…): medido no iPhone 17, de 495% para 1% de CPU depois do boot. Os quadros chegam numa fila própria, fora da thread da interface. Como funciona, leveza e o que falta: [SIMULADOR_IOS.md](./SIMULADOR_IOS.md).
 
+A prioridade de segundo plano só entra fora de vista e 60 s após a última ação de agente; a ação restaura a prioridade normal sem esperar o monitor. O painel consulta o app aberto ao montar, trocar aparelho, reabrir o app e recuperar foco, sem intervalo. O executável responde a `--version`/`--help` antes de iniciar Tauri e preserva o handshake global de uma instância viva; cada instância publica também seu handshake próprio. Após um restart, a manutenção assume o global quando a instância antiga sai. Testes isolados usam outro `ADE_AGS_DATA_DIR`.
+
 ## Portal com Chrome real
 
 O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro do app: tela por screencast, login do Google numa janela de Chrome comum encaixada sobre o Portal, uma janela por Portal, zoom, barra de rolagem sobreposta, e o Jev pilotando com cliques e teclas de verdade (`isTrusted`). Desenho, decisões (sem esconder a automação) e limites: [PORTAL_CHROME_REAL.md](./PORTAL_CHROME_REAL.md).
@@ -380,6 +400,10 @@ O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro
 ## Testes por replay das telas dos agentes
 
 Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).
+
+## Bancada dos motores por protocolo
+
+Fake de agente com falhas roteirizadas (stall, JSON cortado, queda, cota, `max_tokens`, aprovação, pergunta, modo aleatório com semente) tocado nos mapeadores reais de `claude -p`, `codex app-server` e ACP; replay de transcript de protocolo (`ade-replay` v2) com placeholders tipados, modos `replay`/`refresh`/`record`, oráculo que o refresh não reescreve e guard de ferramenta desconhecida; mock de `invoke` por nome com `assertNoUnmatched()` no front. Usado nos testes de `resume.rs` e do pool de contas. Achou: a queda do Codex sem motivo, o Codex que esgota sem acionar o pool e o `max_tokens` do Claude que acaba como "ok". Uso e limites: [BANCADA_MOTORES.md](./BANCADA_MOTORES.md).
 
 ## Pontos de restauração das abas
 
@@ -392,3 +416,16 @@ O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `c
 ## Guia de revisão de PR por IA
 
 Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
+
+## Segurança local: editor, loopback, ambiente e aprovações
+
+Quatro pontos da análise do `deepseek-harness`. O editor salva só se o arquivo tem o mesmo token `tamanho:mtime_ns:inode` de quando abriu, e recria um arquivo apagado com `create_new`. O proxy do navegador recusa `Host` que não é loopback, `Origin` de fora e subrecurso `cross-site` (o HMR do Vite segue funcionando). O ambiente da frota, do MCP do ai-memory e das abas de missão que pedem perde toda variável com `KEY`/`TOKEN`/`SECRET`/`PASSWORD`, menos as do provider; a conta e as `AGS_*`/`ADE_*` entram depois. Frota e chat gravam o mesmo par `asked`/`decided` em `approval_events`, com resultado fechado (`allowed-once`, `rejected`, `cancelled`, `unavailable`). Pendente: onde escolher e guardar o filtro por integrante. Detalhes em [SEGURANCA_LOCAL.md](./SEGURANCA_LOCAL.md).
+
+## Contratos da CLI e do MCP (pontos do deepseek-harness)
+
+- **Spill das respostas grandes** (`ipc/spill.rs`): acima de ~6.000 tokens, o resultado de uma tool do MCP ou de `tab output`/`tab screen`/`peer check`/`peer pending`/`chat show`/`chat wait`/`recall get` vai inteiro para `~/.ags/spill/<aba ou tarefa>/<aleatório>.txt` (pasta 0700, arquivo 0600, nunca dentro de um repositório, apagado após 30 dias) e o agente recebe cabeça, cauda e o caminho. `--no-spill` desliga na CLI.
+- **`noProgress` na hora**: `ags events wait` (com `--run`/`--mission`, ou de um orquestrador) e o `run_await` da frota voltam logo quando nada trabalha nem provisiona, em vez de esperar o prazo. `--allow-idle` espera mesmo assim.
+- **Profundidade e teto do `peer recruit`** (`squads/recruit.rs`): antes só havia a exigência da coroa. Agora a profundidade fica gravada (`~/.ags/recruits.json`, nunca desce), o padrão é 1 (recrutado não recruta) e há até 12 recrutados abertos por orquestrador; no limite, `{refused, reason, message}`.
+- **Handoff v1.1** (`runs/handoff.rs`, aditivo): `status` opcional; `continue` exige `next_steps`, `complete` exige evidência (`evidence`, teste `passed` ou artefato), `blocked` exige `blockers` concretos. Report inválido é recusado inteiro.
+- **`ask_user` com prazo** (padrão 600 s): ao vencer devolve `pending` (nunca aprovação), a pergunta fica na tela e a resposta tardia chega à aba como mensagem. Integrante de time recebe `refused` (`ask_lead`) e leva a dúvida ao orquestrador.
+- **Regiões geradas**: a lista de tools na ajuda do `ags`, a tabela de tools da skill e de [CLI_MCP.md](../agentes/CLI_MCP.md#mcp) e o índice de comandos da skill saem do código entre `BEGIN/END GENERATED` (`bun run gen:catalogs`); `bun run check:catalogs` e um teste vitest conferem o frescor.

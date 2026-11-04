@@ -75,13 +75,7 @@ pub(crate) fn rewrite_location(value: &str, target_origin: &str, proxy_origin: &
 /// puerto. Un sitio que re-apunte su dominio a 127.0.0.1 (DNS rebinding) llega con su
 /// propio nombre y no pasa.
 pub(crate) fn is_own_host(host: &str, port: u16) -> bool {
-    let Some((name, p)) = host.rsplit_once(':') else { return false };
-    p.parse::<u16>().ok() == Some(port) && matches!(name.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "[::1]")
-}
-
-/// Si un `Origin` es el de este proxy (`http://localhost:<puerto>` y sus equivalentes).
-pub(crate) fn is_own_origin(origin: &str, port: u16) -> bool {
-    origin.strip_prefix("http://").is_some_and(|host| is_own_host(host, port))
+    crate::util::loopback_trust::is_loopback_host(host, port)
 }
 
 /// Un servidor que valida `Origin`/`Referer` (Vite con sus WebSocket, frameworks con CSRF)

@@ -25,6 +25,7 @@ O Vigia supervisiona as equipes em segundo plano, sem terminal próprio, e custa
 | `vigiaLoop.ts` | laço do Codex |
 | `vigiaPoke.ts` | `pokeAllowed`, `isFinalReport`, `memberFinished` |
 | `vigiaSwitch.ts` | interruptor (`useVigiaSwitch`) |
+| `vigiaSignals.ts` | sinais do canal estruturado: chamada repetida e contexto quase cheio |
 | `src-tauri/src/missions/vigia.rs` | comandos `vigia_check`, `vigia_report`, `vigia_notify_user` (registrados em `app/run.rs`) |
 | `src-tauri/src/decisions/delivery.rs` | `decision_classify_report` (ponto Jev `delivery_gate`) |
 | `src-tauri/src/missions/messages.rs` | `record_vigia` (TeamFeed) |
@@ -32,6 +33,7 @@ O Vigia supervisiona as equipes em segundo plano, sem terminal próprio, e custa
 | `TeamFeed.tsx`, `teamFeedModel.ts` | `VigiaCard`, `isVigiaMessage`, `parseVigiaText` |
 | `missions/terminals.ts` | linha do Vigia no briefing do lead |
 | `missions/watcher.ts`, `stalled.ts`, `leadStall.ts`, `stallAlerts.ts` | detectores irmãos (fora do interruptor) |
+| `src-tauri/src/canal/repeat.rs`, `canal/context.rs` | chave canônica e escada 3/5/8; medidor de contexto (puros) |
 
 ## Interruptor
 - `localStorage` `ags.vigia.enabled`: só liga com `"1"`, então o padrão é desligado.
@@ -49,7 +51,9 @@ O Vigia supervisiona as equipes em segundo plano, sem terminal próprio, e custa
 - **Persistido** em `localStorage`:
   - `ags.vigia.peers.v1`: mapas `sent`, `got`, `task` e `finished` (tabId → ms). **Não expira.**
   - `ags.vigia.watches.v1`: um `Watch{startedAt, nudges, lastNudge, limitReported, doneAt}` por missão. Expira em 3 dias.
-- **Volátil**: `lastPoke`, `inFlight`, `lastErrorReport`, `pokes`, `loops` e `closingNudges`. Reabrir o app pode repetir um aviso.
+  - No mesmo `Watch` ficam `closingAt`/`closingCount` (fechamento antecipado) e `decisionRound` ("Decisão pendente"): reabrir não os repete.
+- **Volátil**: `lastPoke`, `inFlight`, `lastErrorReport`, `pokes` e `loops`.
+- **Depois de reabrir o app**, a missão iniciada antes do boot fica como com o Vigia desligado (só "entregou") e o time de conversa sem tarefa nova desde o boot fica sem supervisão, até a pessoa apertar **Retomar automação** (`missions/automation.ts`, `docs/ade-ags/RETOMADA_E_ESTADO.md`).
 - O listener atualiza os mapas assim:
   - `finishedAt` recebe a mensagem se `isFinalReport` reconhece uma entrega;
   - se não é final, vai ao lead e não é ask, pergunta ao Jev (`askJevIfFinal`);
@@ -128,6 +132,13 @@ Os membros são o time sem o lead. Para cada um: `hasTask` = recebeu qualquer me
 - **Ação**: toast e chat "possível laço: X está há N min no mesmo "Working"… Feito: só avisei, não interrompi o agente. Para destravar: Esc no terminal dele e uma mensagem pedindo para retomar de onde parou."
 - **Nunca foi exercitado ao vivo**: os testes foram modelados sobre a tela observada.
 
+## Sinais do canal: chamada repetida e contexto
+Só com o Vigia ligado, para as abas Claude Code e Codex da equipe (o canal estruturado já calcula; o Vigia só lê o `cc-structured-state`):
+- **Chamada repetida** (`canal/repeat.rs`): a mesma ferramenta com os mesmos argumentos (JSON canônico) 3, 5 e 8 vezes desde a última mensagem que abriu turno. Cada degrau sai uma vez por turno: toast e chat "**Vigia** — possível laço: X chamou N vezes a mesma ferramenta… Feito: só avisei, não interrompi o agente nem escrevi no terminal dele." Vale para o lead também. Não cutuca ninguém.
+- **Contexto quase cheio** (`canal/context.rs`): o integrante (não o lead) passou de 80% da janela (`usage` real + 4 caracteres/token do que veio depois). No máximo uma vez por hora por terminal. Cutuca o lead (se `mayPoke`) pedindo um resumo do estado ou um handoff; com o lead ocupado, só registra no chat (rótulo `atenção`).
+- Estado volátil (`repeats`, `contextReports`): reabrir o app pode repetir um aviso.
+- O degrau 3/5/8 e o limiar 0,8 vêm do deepseek-harness e **não foram calibrados em uso real** aqui.
+
 ## Camada 2: modelo barato (`vigia_check`)
 - **Roda só se**:
   - o Vigia está ligado;
@@ -202,15 +213,22 @@ O Vigia acima só enxerga terminais e missões do canvas. No modo chat, o orques
   - **bloqueio**: pedido (`chat_request`: comando, edição, pergunta) pendente há ≥ 20 s; turno que terminou com pergunta/pedido de autorização à pessoa sem resposta; turno que falhou (com o erro);
   - **destravou**: a pessoa respondeu (ou o pedido expirou) o pedido de que ele foi avisado;
   - **sem progresso**: turno em andamento sem item novo há ≥ 15 min (só com o interruptor `watch_stall`; não vale enquanto há pedido pendente, que já é o aviso do bloqueio).
+- **Mais avisos** (pontos 1, 11, 13 e 16 da análise do deepseek-harness):
+  - **terminou** (`end-`, com `watch`): o último turno foi aberto por uma tarefa do orquestrador (`tell`, `handoff` ou `ask` sem resposta automática, entregue até 10 s antes do início) e o integrante não mandou mensagem a ele até o fim. Leva o `stopReason` (`conversa/turn.rs::StopReason`: `completed`, `aborted`, `error`, `max-tokens`, `refusal`, `timeout`) e o último parágrafo da fala (até 600 caracteres). Não sai para turno que falhou (tem o aviso de falha, agora também com o `stopReason`) nem para o que terminou perguntando à pessoa. Pedido pela pessoa direto ao integrante: não sai.
+  - **diagnóstico** do turno que falhou: uma linha, até 4 KB; se `memory::agent::looks_like_secret` acusa, sai «diagnóstico omitido».
+  - **contexto** (`ctx-`, com `watch`): ≥ 80% da janela, só conversas do Claude (o último item `usage` é o contexto da mensagem; os outros motores gravam o uso do turno e ficam como «não medido»). Uma vez por hora por integrante.
+  - **chamada repetida** (`rep-`, com `watch_stall`): as chamadas desde a última mensagem da pessoa (lidas dos 160 itens da ponta). A conversa guarda o resumo da chamada, não os argumentos crus: a chave é o JSON canônico de nome + resumo (comando, arquivo, padrão, linhas). Um aviso por degrau; se o vigia olha tarde, sai só o degrau mais alto.
+  - **TIMEOUT** (watchdog): arma só com turno aberto **esperando o modelo** (nenhuma ferramenta `running` desde a pessoa, nenhum pedido pendente). Com 5 min (`TIMEOUT_AFTER_MS`) sem item novo: grava na timeline o aviso `turnTimeout` (id fixo `n:turnTimeout:<turno>`, sempre, independente dos interruptores de aviso) e, com `watch_stall`, avisa o orquestrador (`timeout-`); o «sem progresso» do mesmo turno não sai depois. Nada é interrompido. O turno que depois acaba interrompido ou com erro sai como `timeout` no «terminou». Os avisos do app (`notice`) não contam como atividade.
 - **Interruptores** (painel Time, só a pessoa): `chat_team.watch` (bloqueios e «destravou», ligado por padrão) e `chat_team.watch_stall` (desligado por padrão, como o Vigia nasce desligado). Colunas aditivas; nada é apagado.
 - **Entrega**: `peer_messages` do orquestrador para ele mesmo (`kind: notice`, `raw`), pela fila durável e o `thread_outbox`. Não passa por `peer tell` de agente; de si para si, então a falha do aviso nunca acorda o integrante. A chave já usada nunca volta à fila (nem `unconfirmed` reenvia). Teto de 8 avisos por 10 min por time; o excesso espera a janela andar. Turnos que acabaram há mais de 30 min não geram aviso (o app que abre horas depois não despeja o passado).
 - **Regras**: só avisa; nunca escreve na conversa do integrante, nunca interrompe um turno e nunca responde um pedido. A decisão de um pedido é **da pessoa**: o aviso diz isso, e o texto do integrante dentro dele (título, erro, opções) vai numa linha só, cortado e marcado como dado, não ordem.
 - **A falha da mensagem do próprio orquestrador** (`unconfirmed`/`expired`) já volta a ele pelo aviso de falha da fila (`failure_notice`); o vigia do chat não a repete.
 - **Detecção de «terminou perguntando»**: o último parágrafo da última fala do agente termina em `?`, ou pede autorização/resposta («preciso de autorização», «aguardo sua…»). Heurística conservadora; calibre em `asks_the_person`.
-- **Testes**: `chat_team/watch_test.rs` (puro, banco em memória, sem relógio). Prova real com agentes só com OK do usuário.
+- **Ferramenta interrompida** (`conversa/turn.rs::record_end`): um turno que acaba com erro ou interrompido com ferramenta `running` marca cada uma como erro com a saída `TOOL_OUTCOME_UNKNOWN: …` e grava o aviso `toolOutcomeUnknown`. O próximo envio (`conversa/api.rs::send_mode`) leva antes do texto a nota `[Aviso do ADE AGS, não da pessoa] TOOL_OUTCOME_UNKNOWN: … Só repita se for idempotente; senão confira o estado…` (`resume::unknown_outcome_note`), enquanto não houver mensagem da pessoa depois do aviso. A nota fica visível na bolha da pessoa.
+- **Testes**: `chat_team/watch_test.rs` (puro, banco em memória, sem relógio), `canal/test.rs` (repetição e contexto) e `conversa/test.rs::desfecho_desconhecido`. Prova real com agentes só com OK do usuário.
 
 ## Testes
-- Front (`src/features/missions/tests/`): `vigia.test.ts`, `vigiaWatchdog.test.ts` (regras, cooldown, limite, `missionStartMs`, `refreshWatch`), `vigiaDelivery.test.ts` (integração com mocks), `vigiaPoke.test.ts`, `vigiaLoop.test.ts`, `vigiaClosing.test.ts`, `vigiaSwitch.test.ts`; irmãos em `stalled.test.ts`, `stallWorking.test.ts`, `leadStall.test.ts`, `stallAlerts.test.tsx`; feed em `canvas/tests/teamFeedModel.test.ts`.
+- Front (`src/features/missions/tests/`): `vigia.test.ts`, `vigiaWatchdog.test.ts` (regras, cooldown, limite, `missionStartMs`, `refreshWatch`), `vigiaDelivery.test.ts` (integração com mocks), `vigiaPoke.test.ts`, `vigiaLoop.test.ts`, `vigiaClosing.test.ts`, `vigiaSwitch.test.ts`, `vigiaSignals.test.ts`; irmãos em `stalled.test.ts`, `stallWorking.test.ts`, `leadStall.test.ts`, `stallAlerts.test.tsx`; feed em `canvas/tests/teamFeedModel.test.ts`.
 - Rust: os testes de `vigia.rs` (`user_notice`, `parse_actions`, `tail_lines`), `messages.rs`, `delivery.rs` e `decisions/test.rs`.
 - Rodar: `bunx vitest run src/features/missions/tests/vigia` · `cd src-tauri && cargo test vigia` · ou `ags test affected`.
 

@@ -282,20 +282,20 @@ fn una_linea_enorme_se_recorta_alrededor_de_la_coincidencia() {
 
 // ── Tabs de archivo ──────────────────────────────────────────────
 
-use super::files::{explorer_read_file, explorer_write_file, FileContent, WriteOutcome};
+use super::files::{explorer_read_file, explorer_write_file, FileContent, WriteOutcome, ABSENT};
 
 #[test]
 fn guardar_no_pisa_lo_que_otro_escribio_despues_de_abrir() {
     let dir = fixture("guardar", &[("nota.md", "uno")]);
     let path = dir.join("nota.md").to_string_lossy().to_string();
 
-    let FileContent::Text { mtime, .. } = explorer_read_file(path.clone()).unwrap() else { panic!("texto") };
+    let FileContent::Text { version, .. } = explorer_read_file(path.clone()).unwrap() else { panic!("texto") };
 
     // Un agente escribe mientras la tab está abierta.
     std::thread::sleep(std::time::Duration::from_millis(20));
     std::fs::write(&path, "lo del agente").unwrap();
 
-    let outcome = explorer_write_file(path.clone(), "lo del usuario".into(), Some(mtime)).unwrap();
+    let outcome = explorer_write_file(path.clone(), "lo del usuario".into(), Some(version)).unwrap();
     assert!(matches!(outcome, WriteOutcome::Conflict { .. }));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "lo del agente");
 
@@ -303,6 +303,63 @@ fn guardar_no_pisa_lo_que_otro_escribio_despues_de_abrir() {
     let outcome = explorer_write_file(path.clone(), "lo del usuario".into(), None).unwrap();
     assert!(matches!(outcome, WriteOutcome::Saved { .. }));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "lo del usuario");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn salvar_percebe_edicao_que_manteve_o_mtime_mas_mudou_o_tamanho() {
+    // Disco com mtime grosso (FAT, alguns montados) ou um agente que restaura o mtime (`cp -p`,
+    // `touch -r`): só o mtime não basta. O token de versão leva o tamanho junto.
+    let dir = fixture("guardar-mtime", &[("nota.md", "uno")]);
+    let path = dir.join("nota.md").to_string_lossy().to_string();
+    let FileContent::Text { version, .. } = explorer_read_file(path.clone()).unwrap() else { panic!("texto") };
+    let antes = std::fs::metadata(&path).unwrap().modified().unwrap();
+
+    std::fs::write(&path, "lo del agente, más largo").unwrap();
+    std::fs::File::options().write(true).open(&path).unwrap().set_modified(antes).unwrap();
+
+    let outcome = explorer_write_file(path.clone(), "lo del usuario".into(), Some(version)).unwrap();
+    assert!(matches!(outcome, WriteOutcome::Conflict { .. }), "{outcome:?}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "lo del agente, más largo");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn salvar_arquivo_apagado_com_a_aba_aberta_e_conflito_e_recriar_usa_create_new() {
+    let dir = fixture("guardar-borrado", &[("nota.md", "uno")]);
+    let path = dir.join("nota.md").to_string_lossy().to_string();
+    let FileContent::Text { version, .. } = explorer_read_file(path.clone()).unwrap() else { panic!("texto") };
+
+    // Um agente apagou: salvar com o token antigo não recria em silêncio.
+    std::fs::remove_file(&path).unwrap();
+    let outcome = explorer_write_file(path.clone(), "lo del usuario".into(), Some(version)).unwrap();
+    assert!(matches!(outcome, WriteOutcome::Conflict { version: None, .. }), "{outcome:?}");
+    assert!(std::fs::metadata(&path).is_err());
+
+    // Recriar pede `absent`: só cria se o nome continua livre.
+    let outcome = explorer_write_file(path.clone(), "uno".into(), Some(ABSENT.into())).unwrap();
+    assert!(matches!(outcome, WriteOutcome::Saved { .. }), "{outcome:?}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "uno");
+
+    // O nome foi ocupado (por um agente) antes do segundo pedido de criação: não pisa.
+    let outcome = explorer_write_file(path.clone(), "otro".into(), Some(ABSENT.into())).unwrap();
+    assert!(matches!(outcome, WriteOutcome::Conflict { version: Some(_), .. }), "{outcome:?}");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "uno");
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn o_token_de_versao_muda_com_o_conteudo_e_nao_com_a_leitura() {
+    let dir = fixture("guardar-token", &[("nota.md", "uno")]);
+    let path = dir.join("nota.md").to_string_lossy().to_string();
+    let FileContent::Text { version: a, .. } = explorer_read_file(path.clone()).unwrap() else { panic!() };
+    let FileContent::Text { version: b, .. } = explorer_read_file(path.clone()).unwrap() else { panic!() };
+    assert_eq!(a, b);
+    let WriteOutcome::Saved { version: c, .. } = explorer_write_file(path.clone(), "dos!".into(), Some(a.clone())).unwrap() else {
+        panic!("salvo")
+    };
+    assert_ne!(a, c);
+    assert_eq!(super::files::explorer_file_stat(path).unwrap().unwrap().version, c);
     std::fs::remove_dir_all(dir).ok();
 }
 

@@ -12,6 +12,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
 
 import { getAutonomy, withAutonomy } from "./autonomy";
+import { mirrorInput, mirrorMission } from "./mirror";
 import { withModel } from "./modelFlags";
 import { STALL_GRACE_MS, shouldWarnStalled, startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
 import { useStallAlerts } from "./stallAlerts";
@@ -33,6 +34,9 @@ export interface TeamMember {
   /** Modo Fast de Codex del Squad; solo Codex lo aplica. */
   fast?: boolean;
   accountId: string | null;
+  /** O terminal nasce sem as credenciais herdadas da app (`KEY`/`TOKEN`/`SECRET`/`PASSWORD`, menos as
+   *  do provider). Ver `runs/sandbox.rs`. */
+  scrubSecrets?: boolean;
   /** Vazio = sem especificação: o orquestrador define o papel (ags peer role). */
   roleId: string;
   /** Subagente extra do Squad. */
@@ -246,6 +250,7 @@ export function leadBriefing(
     "",
     "INÍCIO RÁPIDO — PRIMEIRA AÇÃO (meta: até ~2 minutos após o briefing):",
     "- Faça um plano curto a partir do objetivo e do contexto já preenchido abaixo. Antes de explorar o código, delegue a CADA integrante com \`ags peer tell \"<nome>\" --file <arquivo>\` (tarefa concreta, escopo, worktree e branch dele). Só depois explore o que faltar.",
+    "- Em cada delegação, ponha uma linha `Escopo: <pastas ou arquivos que ele vai mexer>` (prefixos relativos ao repositório, separados por vírgula). O app avisa quando duas tarefas em andamento se sobrepõem; é só aviso.",
     "- Os membros aguardam sua tarefa sem explorar nem editar. Se alguém não tiver tarefa agora, avise explicitamente para continuar aguardando.",
     "- Depois de delegar, VERIFIQUE que todos estão trabalhando: use `ags peers` e leia a tela de cada um (`ags peer check <nome>`); quem estiver parado ou com texto colado sem enviar, reenvie a tarefa com `ags peer tell`. Uma linha `[AGS] <nome> não mostrou atividade` indica integrante que não arrancou.",
     ...workspaces.filter((w) => w.name === LEAD_NAME).map((w) => `SEU WORKTREE: ${w.cwd}; branch: ${w.branch}. Trabalhe somente nele.\n${w.environment}`),
@@ -364,7 +369,7 @@ export function memberBriefing(
     `- ${BROWSER_HINT}`,
     "",
     ...(deliverToQa ? [`Ao concluir uma entrega, mande-a DIRETO ao QA por \`ags peer tell "${deliverToQa}" --file <arquivo>\` (branch, commit, o que mudou e como testar), sem esperar o orquestrador repassar.`] : []),
-    "Ao concluir, faça a entrega final ESTRUTURADA ao orquestrador: escreva um JSON (Handoff v1) num arquivo fora do repositório e rode `ags peer deliver --file <arquivo>`. Campos: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; caminhos relativos. Se o JSON não passar, o comando mostra um modelo. Ele recebe uma linha com o resumo e o id; o detalhe fica guardado.",
+    "Ao concluir, faça a entrega final ESTRUTURADA ao orquestrador: escreva um JSON (Handoff v1) num arquivo fora do repositório e rode `ags peer deliver --file <arquivo>`. Campos: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; caminhos relativos. Opcional (v1.1): status continue (exige next_steps), complete (exige evidence ou teste passed) ou blocked (exige blockers concretos). Se o JSON não passar, o comando mostra um modelo. Ele recebe uma linha com o resumo e o id; o detalhe fica guardado.",
     `Só se o deliver não estiver disponível, mande UMA mensagem final curta por \`ags peer tell "${LEAD_NAME}"\` com resultado, decisões, arquivos tocados, testes e bloqueios.`,
     ...(mission.id ? [
       `Se aprendeu algo durável e não óbvio no código (uma decisão, uma restrição, uma armadilha), sugira até 1 memória antes de reportar: \`ags memory suggest --mission ${mission.id} --scope workspace --kind decision|constraint|finding --key <nome-curto> --body "..."\`. Mesma chave de uma memória existente = proposta de correção dela. Nunca segredos.`,
@@ -479,7 +484,7 @@ export async function startMissionInTerminals(
     accountId: squad && !squad.lead.autoAccount ? squad.lead.accountId ?? undefined : mission.autoAccount ? undefined : mission.leadAccountId ?? undefined,
   });
   const memberTabIds = team.map((m, i) =>
-    m.agentId === "gemini-desktop" ? desktopNode() : addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined }),
+    m.agentId === "gemini-desktop" ? desktopNode() : addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined, scrubSecrets: m.scrubSecrets }),
   );
 
   canvasActions.buildMissionTeam(
@@ -488,6 +493,18 @@ export async function startMissionInTerminals(
     memberTabIds.map((tabId, i) => ({ tabId, roleId: team[i].roleId ? team[i].roleLabel : null, subagent: team[i].subagent })),
   );
   setWorkMode(key, "canvas");
+  // O chat, as abas e o canvas passam a mostrar o grupo "Missão X". Só uma linha-espelho no banco (a missão
+  // segue dona de tudo) e, se falhar, a missão segue sem o espelho.
+  const mirror = mirrorInput({
+    mission: { id: mission.id, title: mission.title, cwd: mission.cwd },
+    boardKey: key,
+    lead: leadAgentId === "gemini-desktop" ? null : { tabId: leadTabId, agentId: leadAgentId, label: LEAD_NAME },
+    members: team.flatMap((m, i) => (m.agentId === "gemini-desktop" ? [] : [{
+      tabId: memberTabIds[i], agentId: m.agentId, name: m.name, roleLabel: m.roleId ? m.roleLabel : "", subagent: m.subagent,
+      branch: memberWorkspaces[i].branch, worktree: memberWorkspaces[i].root,
+    }])),
+  });
+  if (mirror) void mirrorMission(mirror).catch((e) => console.warn("[missão] espelho no chat:", e));
   const firstTerminal = leadAgentId === "gemini-desktop" ? memberTabIds.find((_,i) => team[i].agentId !== "gemini-desktop") : leadTabId;
   if (firstTerminal) activateTab(firstTerminal);
   if (desktopCount) (await import("@/features/tabs/viewStore")).useViewTabsStore.getState().openGemini(mission.cwd);

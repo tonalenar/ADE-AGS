@@ -11,6 +11,7 @@ import { AgentMono, PanelHeader, StateDot, useRoleLabel } from "./TeamParts";
 import { CONVERSATION_DRAG_MIME, defaultPolicy, placeOf, rosterRows, takenRefs, type RosterRow } from "./teamModel";
 import { dissolveTeam, linkExisting, loadFeed, makeOrchestrator, setAdding, setAllowTools, setAutoDecide, setWatch, setWatchStall, startTeams, unlinkMember, useTeamStore } from "./teamStore";
 import { useTeamLive } from "./useTeamLive";
+import { ChatTeamScopeOverlaps } from "@/features/missions/ScopeOverlapNotice";
 
 /** Abre a conversa de um integrante (a aba ou a conversa por protocolo). */
 export function openMember(ref: string): void {
@@ -94,6 +95,7 @@ export function TeamPanel({ conversation, cards }: { conversation: ConversationC
       {adding[team.id] && <LinkAgentForm key={team.id} team={team} cards={cards} />}
       {dropping && <p className="mx-3.5 mt-2.5 mb-0 text-chat-caption text-accent-700 dark:text-accent-400">{t("chat.team.drop")}</p>}
       {error && <p role="alert" className="mx-3.5 mt-2.5 mb-0 text-chat-caption text-red-700 dark:text-red-400">{error}</p>}
+      <div className="mx-3.5 mt-2.5 empty:hidden"><ChatTeamScopeOverlaps teamId={team.id} /></div>
       <ul aria-label={t("chat.team.title")} className="list-none m-0 p-2.5 flex flex-col gap-2 cc-scroll-hidden min-h-0 flex-1">
         {rows.map((row) => <MemberCard key={row.ref} row={row} teamId={team.id} />)}
       </ul>

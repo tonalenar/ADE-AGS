@@ -43,7 +43,9 @@ transcript da TUI ──(Tailer: só o que cresceu)──► parser do agente �
 
 ### Eventos normalizados (`canal/event.rs`)
 
-`TurnStarted`, `TurnEnded{completed|interrupted, última fala}`, `ToolStarted{id, nome, resumo}`, `ToolFinished{id, decisão}`, `Question{id, texto, opções}`, `ApprovalRequested` (só se um agente passar a gravar), `AssistantText`, `Usage{last, total}`. Tokens normalizados: `input` é sempre a entrada **não** cacheada.
+`TurnStarted`, `TurnEnded{completed|interrupted, última fala}`, `ToolStarted{id, nome, resumo, chave}`, `ToolFinished{id, decisão}`, `Question{id, texto, opções}`, `ApprovalRequested` (só se um agente passar a gravar), `AssistantText`, `Usage{last, total}`, `Context{usado, janela, modelo}`. Tokens normalizados: `input` é sempre a entrada **não** cacheada.
+
+A `chave` de uma chamada é o hash FNV-1a do JSON canônico `{tool, args}` (chaves em ordem; `canal/repeat.rs`): a mesma chamada com os argumentos em outra ordem tem a mesma chave, e ela é estável entre execuções. O `Context` do Claude é `input + cache lido + cache gravado` da resposta (sem as `<synthetic>`); o do Codex é a entrada da última chamada, com a janela `model_context_window` do próprio `token_count`.
 
 ### Estado por aba (`canal/state.rs`)
 
@@ -51,6 +53,9 @@ transcript da TUI ──(Tailer: só o que cresceu)──► parser do agente �
 - Ferramenta sem prompt visto abre um turno **deduzido** (`inferred: true`): turno que começou antes do trecho lido, ou continuação depois de um hook de Stop.
 - **Estado velho**: turno aberto com o arquivo parado há mais de 10 min (`STALE_OPEN_MS`) vira `unknown` (`stale: true`). Uma ferramenta longa não escreve nada enquanto roda, por isso o prazo é generoso.
 - `endsWithQuestion`: a última linha da fala (fora de bloco de código) termina em `?`.
+- `repeat`: o último degrau (3, 5 ou 8) da **mesma chamada** de ferramenta desde a última mensagem que abriu turno (`canal/repeat.rs`). Cada degrau aparece uma vez; um prompt novo zera a contagem. A mesma linha relida (mesmo id de ferramenta) não conta duas vezes.
+- `context`: o medidor (`canal/context.rs`): `anchorTokens` (o `usage` real da última resposta), `extraChars` (falas e chamadas vistas depois dela, estimadas a 4 caracteres por token) e `windowTokens` (Codex: do evento; Claude: 200 mil, ou 1 milhão com `[1m]` ou uso acima disso). A pressão é `(âncora + ⌈extra/4⌉) / janela`; o aviso sai a partir de 0,8.
+- Os dois são só leitura: quem os usa é o Vigia (`missions/vigiaSignals.ts`, ver [VIGIA.md](../agentes/VIGIA.md#sinais-do-canal-chamada-repetida-e-contexto)). Nada escreve no agente por causa deles.
 
 ### O laço (`ipc/commands/canal.rs`)
 

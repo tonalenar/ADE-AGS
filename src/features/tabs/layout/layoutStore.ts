@@ -7,10 +7,11 @@ import { comparablePath } from "@/features/tabs/viewTabs";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { useChatStore } from "@/features/chat/store";
 import { gridPlacements, useMissionGrid } from "@/features/canvas/gridMode";
+import { terminalRefs, teamGridRefs } from "@/features/tabs/teamTabs";
+import { selectConversations } from "@/features/chat/unified/selectConversations";
+import { useStructured } from "@/features/chat/structured/store";
 import { gridTabs } from "@/features/canvas/gridMode";
 import { useTeamIndex } from "@/features/chat/team/teamIndex";
-import { teamGridIds } from "@/features/chat/team/teamModel";
-import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore, useWorkMode, type WorkMode } from "@/features/canvas/store";
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
@@ -410,7 +411,8 @@ export function placementsFrom(input: PlacementInput): Placements {
   if (mode === "canvas") return canvasPlacements(liveRects, activeTabId, activeViewId);
   if (grid) {
     const visible = new Map<string, Placement>();
-    for (const [id, rect] of gridPlacements(grid, slots)) visible.set(agentKey(id), { groupId: CANVAS_GROUP, rect });
+    // Conversa por protocolo no time não tem terminal: o painel dela é React puro, fora do layout.
+    for (const [id, rect] of gridPlacements(terminalRefs(grid), slots)) visible.set(agentKey(id), { groupId: CANVAS_GROUP, rect });
     const focused = activeTabId ? agentKey(activeTabId) : null;
     return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
   }
@@ -466,7 +468,7 @@ export function currentPlacements(): Placements {
   const key = active ? boardKeyOfTab(active, canvas.boards) : null;
   const mode: WorkMode = key ? canvas.modes[key] ?? "tabs" : "tabs";
   const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
-  const team = teamGridIds(useTeamIndex.getState().teams, activeTabId, tabs.filter((t) => t.agentId !== SHELL_AGENT_ID).map((t) => t.id));
+  const team = teamGridRefs(selectConversations({ tabs, threads: useStructured.getState().threads, teams: useTeamIndex.getState().teams, boards: canvas.boards }), activeTabId);
   const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), team, mode, tabIds });
   const chat = chatShellOn(useUiStore.getState()) ? { slot: useChatStore.getState().slot, browser: useChatStore.getState().browser } : null;
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects: canvas.liveRects, grid, chat });

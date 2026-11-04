@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 import i18n from "i18next";
 
+import type { Board } from "@/features/canvas/board";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
@@ -15,15 +16,19 @@ import { chatThreadCreate } from "../structured/ipc";
 import { STRUCTURED_AGENTS, threadIdOf, threadKey } from "../structured/model";
 import { addPending, dropPending } from "../timeline/pending";
 import type { TimelineItem } from "../timeline/types";
-import { reloadThreads, sendToThread, settleThread } from "../structured/store";
+import { reloadThreads, sendToThread, settleThread, useStructured } from "../structured/store";
+import { selectConversations } from "../unified/selectConversations";
 import {
-  chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
+  chatTeamCreate, chatTeamDissolve, chatTeamFeed, chatTeamLink, chatTeamList, chatTeamProvisionBegin, chatTeamProvisionFail, chatTeamProvisionPlace,
+  chatTeamPromote, chatTeamUnlead, chatTeamUnlink, chatTeamUpdate, chatTeamWorktree,
   type TeamFeedItem, type TeamPolicy, type TeamView,
 } from "./ipc";
 import { chatTeamAllowTools, chatTeamAutoDecide, chatTeamWatch, chatTeamWatchStall } from "../permissions/ipc";
+import { splitMirrors } from "@/features/missions/mirror";
+
 import { canvasPlan, runCanvasPlan } from "./teamCanvas";
 import { useTeamIndex } from "./teamIndex";
-import { projectCanvas, reversePlan, roleIdOfLabel, type CanvasProjection, type ReverseOp } from "./teamMirror";
+import { projectCanvas, promotePlan, reversePlan, roleIdOfLabel, type CanvasProjection, type PromoteAgent, type PromoteOp, type ReverseOp } from "./teamMirror";
 import { conversationAccess, defaultPolicy, TEAM_ROLES, type ComposerTarget } from "./teamModel";
 
 /**
@@ -33,6 +38,11 @@ import { conversationAccess, defaultPolicy, TEAM_ROLES, type ComposerTarget } fr
  */
 interface TeamState {
   teams: TeamView[];
+  /**
+   * Os espelhos de missão (`origin = "mission"`): só a sidebar e as abas os mostram. Ficam FORA de `teams` de
+   * propósito: política, canvas, vigia e composer do chat não valem para eles (a missão é dona de tudo isso).
+   */
+  missionTeams: TeamView[];
   loaded: boolean;
   /** O fio de cada time, por id. */
   feeds: Record<string, TeamFeedItem[]>;
@@ -46,7 +56,7 @@ interface TeamState {
   adding: Record<string, boolean>;
 }
 
-export const useTeamStore = create<TeamState>(() => ({ teams: [], loaded: false, feeds: {}, targets: {}, told: {}, sendErrors: {}, adding: {} }));
+export const useTeamStore = create<TeamState>(() => ({ teams: [], missionTeams: [], loaded: false, feeds: {}, targets: {}, told: {}, sendErrors: {}, adding: {} }));
 // A grade das Abas lê a lista daqui, sem depender deste módulo (ver `teamIndex.ts`).
 useTeamStore.subscribe((state, prev) => { if (state.teams !== prev.teams) useTeamIndex.setState({ teams: state.teams }); });
 
@@ -57,8 +67,8 @@ function upsertTeam(team: TeamView): void {
 }
 
 export async function reloadTeams(): Promise<TeamView[]> {
-  const teams = await chatTeamList();
-  useTeamStore.setState({ teams, loaded: true });
+  const { teams, missionTeams } = splitMirrors(await chatTeamList());
+  useTeamStore.setState({ teams, missionTeams, loaded: true });
   return teams;
 }
 
@@ -161,6 +171,8 @@ let syncing = false;
 let mirroring = false;
 let mirrorAgain = false;
 let mirrorTimer: ReturnType<typeof setTimeout> | null = null;
+/** Os canvases em que a pessoa coroou ou ligou algo desde o último espelho: só neles uma coroa vira time. */
+const touchedBoards = new Set<string>();
 
 function isAgentTab(ref: string): boolean {
   return useTabsStore.getState().tabs.some((t) => t.id === ref && t.agentId !== SHELL_AGENT_ID);
@@ -186,8 +198,40 @@ function mirrorOps(): ReverseOp[] {
   });
 }
 
+/** As conversas que um time pode ter: abas de agente (sem shell) e conversas por protocolo ativas. */
+function promoteAgents(): PromoteAgent[] {
+  const { tabs } = useTabsStore.getState();
+  const label = new Map(tabs.map((t) => [t.id, t.agentLabel]));
+  const { teams } = useTeamStore.getState();
+  return selectConversations({ tabs, threads: useStructured.getState().threads, teams, boards: useCanvasStore.getState().boards })
+    .map((c) => ({ ref: c.ref, agentId: c.agentId, label: label.get(c.ref) ?? c.agentId, title: c.title, cwd: c.cwd }));
+}
+
+/**
+ * Coroa que a pessoa pôs num canvas de pasta ou de espaço (`#c:`) e que não lidera time: vira time do chat.
+ * Só linhas no banco (`chat_team_promote`): não abre aba, PTY nem worktree, e o canvas não é reescrito (a linha
+ * de base do time novo já nasce adotada).
+ */
+async function applyPromote(op: PromoteOp): Promise<void> {
+  const { orchestrator } = op;
+  const promoted = await chatTeamPromote({
+    orchestrator: orchestrator.ref, agentId: orchestrator.agentId, label: orchestrator.label, cwd: orchestrator.cwd, title: orchestrator.title,
+    boardKey: op.boardKey, members: op.members,
+  });
+  upsertTeam(promoted.team);
+  adoptBaseline(promoted.team);
+  void loadFeed(promoted.team.id);
+}
+
 async function applyReverse(op: ReverseOp): Promise<void> {
   switch (op.kind) {
+    case "unlead": {
+      // A coroa saiu do canvas: só o papel de orquestrador sai do time.
+      delete baselines[op.teamId];
+      await chatTeamUnlead(op.teamId);
+      await reloadTeams();
+      return;
+    }
     case "link": {
       const tab = useTabsStore.getState().tabs.find((t) => t.id === op.ref);
       if (!tab) return;
@@ -215,16 +259,40 @@ async function runMirror(): Promise<void> {
       // canvas (chat -> canvas) é adotado de novo em `syncTeamCanvas`.
       for (const team of useTeamStore.getState().teams) adoptBaseline(team);
       for (const op of ops) await applyReverse(op).catch((e) => console.warn("[time] espelho canvas -> chat:", e));
+      // Depois do que o time já tinha: coroas novas viram time (só nos canvases em que a pessoa mexeu).
+      const only = [...touchedBoards];
+      touchedBoards.clear();
+      const promotions = only.length === 0 ? [] : promotePlan(useCanvasStore.getState().boards, useTeamStore.getState().teams, promoteAgents(), {
+        roleIdOf: (label) => roleIdOfLabel(label, TEAM_ROLES, roleName), only,
+      });
+      for (const op of promotions) await applyPromote(op).catch((e) => console.warn("[time] promoção da coroa:", e));
     } while (mirrorAgain);
   } finally {
     mirroring = false;
   }
 }
 
+/** Os canvases que ganharam uma coroa ou uma corda (a reconciliação com as abas só tira). */
+function boardsGained(before: Record<string, Board>, after: Record<string, Board>): string[] {
+  const out: string[] = [];
+  for (const [key, board] of Object.entries(after)) {
+    const old = before[key];
+    if (old === board) continue;
+    const edge = (e: { a: string; b: string }) => (e.a < e.b ? `${e.a}|${e.b}` : `${e.b}|${e.a}`);
+    const oldEdges = new Set((old?.edges ?? []).map(edge));
+    const gained = board.orchestrators.some((id) => !old?.orchestrators.includes(id)) || board.edges.some((e) => !oldEdges.has(edge(e)));
+    if (gained) out.push(key);
+  }
+  return out;
+}
+
 /** Observa o canvas: uma mudança que não veio do time vira, em instantes, comando do time (uma vez por janela). */
 function startCanvasMirror(): void {
   useCanvasStore.subscribe((state, prev) => {
     if (syncing || state.boards === prev.boards) return;
+    // O canvas lido do disco não é gesto da pessoa: nada de promover o que já existia ao abrir o app.
+    if (!prev.loaded) return;
+    for (const key of boardsGained(prev.boards, state.boards)) touchedBoards.add(key);
     if (mirrorTimer) clearTimeout(mirrorTimer);
     // Arrastar um nó muda o canvas a cada quadro: o plano só roda quando a pessoa parar.
     mirrorTimer = setTimeout(() => { mirrorTimer = null; void runMirror(); }, 300);
@@ -343,6 +411,8 @@ export interface NewMemberInput {
   model: string | null;
   /** O esforço do agente novo (`null` = o padrão dele; só vale nos agentes que têm esforço). */
   effort?: string | null;
+  /** A conta do agente novo (id, `pool:<nome>` ou `null` = a principal); só nas conversas por protocolo. */
+  account?: string | null;
   /** Por protocolo, sem TUI (Codex e Claude Code), como as conversas novas do chat. */
   structured: boolean;
   /** Já nasce como subagente (o interruptor do canvas). */
@@ -355,6 +425,8 @@ export interface SpawnedMember {
   label: string;
   /** O worktree `team/<papel>` criado (fica no disco: nada o apaga). */
   place: { cwd: string; branch: string; root: string } | null;
+  /** O registro `provisioning` gravado antes de abrir (ver `chatTeamProvisionBegin`). */
+  provision: string;
   /** Fecha a conversa (a aba fecha; a por protocolo é concluída). */
   close: () => void;
 }
@@ -365,24 +437,42 @@ export interface SpawnedMember {
  */
 export async function spawnMember(input: NewMemberInput): Promise<SpawnedMember> {
   const { agent } = input;
-  const place = input.worktree ? await chatTeamWorktree(input.cwd, input.role) : null;
-  const cwd = place?.cwd ?? input.cwd;
   const roleLabel = i18n.t(`chat.team.roles.${input.role}`, { defaultValue: input.role });
-  const label = `${agent.label} · ${roleLabel}`;
-  const { access, plan } = conversationAccess(input.policy, agent.id);
-  if (input.structured && STRUCTURED_AGENTS.has(agent.id)) {
-    const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: null });
-    await reloadThreads();
-    return { ref: threadKey(row.id), label, place, close: () => settleThread(row.id, true) };
+  // Gravado ANTES do worktree e da conversa: se o app cair no meio, o boot decide pelo estado real. O nome
+  // volta único ("Codex · QA 2"), nunca o de alguém que o time já teve.
+  const provision = await chatTeamProvisionBegin({ teamId: input.teamId, agentId: agent.id, role: input.role, label: `${agent.label} · ${roleLabel}` });
+  const label = provision.label;
+  const fail = (reason: unknown, member: string | null = null) => {
+    chatTeamProvisionFail(provision.id, member, String(reason)).catch(() => {});
+  };
+  // Fechar antes de ligar: a linha `provisioning` vira `failed` (depois de ligada, não muda).
+  const closing = (ref: string, close: () => void) => () => {
+    fail(i18n.t("chat.team.provision.closed"), ref);
+    close();
+  };
+  try {
+    const place = input.worktree ? await chatTeamWorktree(input.cwd, input.role) : null;
+    if (place) chatTeamProvisionPlace(provision.id, place.root, place.branch).catch(() => {});
+    const cwd = place?.cwd ?? input.cwd;
+    const { access, plan } = conversationAccess(input.policy, agent.id);
+    if (input.structured && STRUCTURED_AGENTS.has(agent.id)) {
+      const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: input.account ?? null });
+      await reloadThreads();
+      const ref = threadKey(row.id);
+      return { ref, label, place, provision: provision.id, close: closing(ref, () => settleThread(row.id, true)) };
+    }
+    const tabs = useTabsStore.getState();
+    const before = tabs.activeTabId;
+    const command = chatCommand(agent.id, agent.command, { model: input.model, effort: input.effort ?? null, access, plan });
+    const ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true });
+    registerPendingSkillSetup(ref, attachSkillsToTab(ref, tabs.workspaceId, []));
+    // A tela segue na conversa do orquestrador (a aba nova não rouba a vez).
+    if (before && !useChatStore.getState().thread) useTabsStore.getState().activateTab(before);
+    return { ref, label, place, provision: provision.id, close: closing(ref, () => useTabsStore.getState().closeTab(ref)) };
+  } catch (e) {
+    fail(e);
+    throw e;
   }
-  const tabs = useTabsStore.getState();
-  const before = tabs.activeTabId;
-  const command = chatCommand(agent.id, agent.command, { model: input.model, effort: input.effort ?? null, access, plan });
-  const ref = tabs.addTab({ cwd, agent: { ...agent, command }, title: label, titleIsCustom: true });
-  registerPendingSkillSetup(ref, attachSkillsToTab(ref, tabs.workspaceId, []));
-  // A tela segue na conversa do orquestrador (a aba nova não rouba a vez).
-  if (before && !useChatStore.getState().thread) useTabsStore.getState().activateTab(before);
-  return { ref, label, place, close: () => useTabsStore.getState().closeTab(ref) };
 }
 
 /**
@@ -405,6 +495,7 @@ export async function linkSpawned(input: NewMemberInput, spawned: SpawnedMember)
   const linked = await chatTeamLink({
     teamId: input.teamId, member: spawned.ref, agentId: input.agent.id, label: spawned.label, role: input.role, model: input.model, policy: input.policy,
     branch: spawned.place?.branch ?? null, worktree: spawned.place?.root ?? null, origin: "new", subagent: input.subagent,
+    provision: spawned.provision,
   });
   await finishLink(input.teamId, spawned.ref, linked.briefing);
 }

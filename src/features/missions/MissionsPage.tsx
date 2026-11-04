@@ -34,6 +34,7 @@ import { MissionMap } from "./MissionMap";
 import { MemoryContextMetricsCard } from "@/features/memory/MemoryContextMetricsCard";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
 import { MissionStallAlerts, MissionStartupTime } from "./StallAlertsView";
+import { AutomationResumeBar } from "./AutomationResumeBar";
 import { MissionTokensPanel } from "./MissionTokensPanel";
 import { startMissionInTerminals } from "./terminals";
 import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
@@ -51,6 +52,7 @@ import {
 } from "./missionView";
 import { useMissionsStore } from "./store";
 import type { MissionDetail, MissionSummary, TerminalDeliveryInput } from "./types";
+import { MissionScopeOverlaps } from "./ScopeOverlapNotice";
 
 /** El evento del supervisor cuando cambia una tarea. Debe coincidir con `runs/supervisor.rs`. */
 const TASK_CHANGED = "cc-task-changed";
@@ -258,6 +260,8 @@ export function MissionsPage() {
           {t("missions.new")}
         </Button>
       </div>
+
+      <div className="shrink-0 px-4 pt-3 empty:hidden"><AutomationResumeBar /></div>
 
       {error && (
         <div className="shrink-0 px-4 py-2 text-[11px] border-b text-red-600 dark:text-red-400
@@ -774,6 +778,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         <Section title={t("missions.timings.title")}>
           <div className="flex flex-col gap-3">
             <MissionStallAlerts missionId={mission.id} />
+            <MissionScopeOverlaps missionId={mission.id} />
             <MissionStartupTime missionId={mission.id} />
             <MissionTimingsPanel missionId={mission.id} />
             <MemoryContextMetricsCard missionId={mission.id} />

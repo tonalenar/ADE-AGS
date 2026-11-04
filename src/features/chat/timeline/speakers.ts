@@ -6,6 +6,7 @@
  * não repetem a linha. A mensagem da pessoa zera a sequência e nunca leva cabeçalho. Pura.
  */
 import { parsePeerEnvelope } from "./peerEnvelope";
+import { voicesByItem } from "./agentSwitch";
 import type { TimelineItem } from "./types";
 
 const SELF = "self";
@@ -15,9 +16,11 @@ const PERSON = "person";
 export function speakerHeaders(items: TimelineItem[]): Set<string> {
   const shown = new Set<string>();
   let previous: string | null = null;
+  // Trocar de agente no meio da conversa muda a voz: a primeira fala do agente novo leva o logo e o nome dele.
+  const voices = voicesByItem(items);
   for (const item of items) {
     let speaker: string | null = null;
-    if (item.kind === "assistant") speaker = SELF;
+    if (item.kind === "assistant") speaker = voices.has(item.id) ? `${SELF}:${voices.get(item.id)!.id}` : SELF;
     else if (item.kind === "user") {
       const peer = parsePeerEnvelope(item.text ?? "");
       speaker = peer ? `peer:${peer.sender}` : PERSON;

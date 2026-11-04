@@ -48,11 +48,208 @@ pub struct CreateInput {
 pub fn chat_team_create(app: AppHandle, db: State<'_, DbConnection>, input: CreateInput) -> Result<TeamView, String> {
     let (team, _) = api::create(
         &*lock(&db)?,
-        NewTeam { orchestrator: input.orchestrator, agent_id: input.agent_id, label: input.label, cwd: input.cwd, title: input.title },
+        NewTeam { orchestrator: input.orchestrator, agent_id: input.agent_id, label: input.label, cwd: input.cwd, title: input.title, ..Default::default() },
         crate::util::now_ts_ms(),
     )?;
     announce(&app, &team.team.id);
     Ok(team)
+}
+
+/// Um cordado da coroa que vira integrante do time promovido.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromoteMember {
+    pub member: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub label: String,
+    /// O papel lido do quadro (vazio = generalista).
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub subagent: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PromoteInput {
+    pub orchestrator: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub title: String,
+    /// A chave do quadro onde a coroa mora (pasta ou `#c:`; o quadro de missão `#m:` não se promove).
+    #[serde(default)]
+    pub board_key: Option<String>,
+    #[serde(default)]
+    pub members: Vec<PromoteMember>,
+}
+
+/// Promove uma coroa do canvas (com os cordados) a time do chat, `origin = 'canvas'`. **Só grava linhas:** não
+/// abre processo, PTY nem worktree. Quem já é de outro time ou de uma missão fica em `skipped`.
+#[tauri::command]
+pub fn chat_team_promote(app: AppHandle, db: State<'_, DbConnection>, input: PromoteInput) -> Result<api::Promoted, String> {
+    if input.board_key.as_deref().is_some_and(|k| k.contains("#m:")) {
+        return Err("O quadro de uma missão não vira time do chat: o time dela é o da missão.".into());
+    }
+    let roles = crate::canvas::roles::all();
+    let members = input
+        .members
+        .into_iter()
+        .map(|m| NewMember {
+            member: m.member,
+            agent_id: m.agent_id,
+            label: m.label,
+            role: if m.role.trim().is_empty() { String::new() } else { model::role_id(&roles, &m.role).unwrap_or_else(|| m.role.trim().to_string()) },
+            subagent: m.subagent,
+            origin: "existing".into(),
+            ..Default::default()
+        })
+        .collect();
+    let promotion = api::Promotion {
+        team: NewTeam { orchestrator: input.orchestrator, agent_id: input.agent_id, label: input.label, cwd: input.cwd, title: input.title, board_key: input.board_key, ..Default::default() },
+        members,
+    };
+    let mission_refs = crate::canvas::mission_refs(&crate::canvas::load_boards());
+    let promoted = api::promote(&*lock(&db)?, promotion, &mission_refs, crate::util::now_ts_ms())?;
+    announce(&app, &promoted.team.team.id);
+    Ok(promoted)
+}
+
+/// Um integrante da missão que entra no espelho.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorMember {
+    pub member: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub subagent: Option<bool>,
+    #[serde(default)]
+    pub branch: Option<String>,
+    #[serde(default)]
+    pub worktree: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MirrorInput {
+    pub mission_id: String,
+    pub orchestrator: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default)]
+    pub cwd: String,
+    #[serde(default)]
+    pub title: String,
+    /// A chave do quadro da missão (`...#m:<id>`).
+    #[serde(default)]
+    pub board_key: Option<String>,
+    #[serde(default)]
+    pub members: Vec<MirrorMember>,
+}
+
+/// Grava a linha-espelho `origin = 'mission'` de uma missão que acabou de abrir seu time em terminais, para o
+/// chat mostrá-la. **Só grava linhas** (nada de processo, PTY ou worktree) e a missão segue dona de tudo.
+#[tauri::command]
+pub fn chat_team_mission_mirror(app: AppHandle, db: State<'_, DbConnection>, input: MirrorInput) -> Result<api::Mirrored, String> {
+    let members = input
+        .members
+        .into_iter()
+        .map(|m| NewMember {
+            member: m.member,
+            agent_id: m.agent_id,
+            label: m.label,
+            role: m.role,
+            subagent: m.subagent,
+            branch: m.branch,
+            worktree: m.worktree,
+            origin: "new".into(),
+            ..Default::default()
+        })
+        .collect();
+    let mirror = api::MissionMirror {
+        team: NewTeam {
+            orchestrator: input.orchestrator,
+            agent_id: input.agent_id,
+            label: input.label,
+            cwd: input.cwd,
+            title: input.title,
+            board_key: input.board_key,
+            mission_id: Some(input.mission_id),
+            ..Default::default()
+        },
+        members,
+    };
+    let mirrored = api::mirror_mission(&*lock(&db)?, mirror, crate::util::now_ts_ms())?;
+    announce(&app, &mirrored.team.team.id);
+    Ok(mirrored)
+}
+
+/// A missão fechou: tira o espelho. Não fecha agente nem terminal.
+#[tauri::command]
+pub fn chat_team_mission_unmirror(app: AppHandle, db: State<'_, DbConnection>, mission_id: String) -> Result<bool, String> {
+    let existing = crate::chat_team::store::team_of_mission(&*lock(&db)?, &mission_id)?;
+    let done = api::unmirror_mission(&*lock(&db)?, &mission_id)?;
+    if let Some(team) = existing {
+        announce(&app, &team.id);
+    }
+    Ok(done)
+}
+
+/// A coroa saiu do canvas: tira SÓ o papel de orquestrador. O time e os integrantes ficam e o time pode receber
+/// outro orquestrador (`chat_team_lead`).
+#[tauri::command]
+pub fn chat_team_unlead(app: AppHandle, db: State<'_, DbConnection>, team_id: String) -> Result<bool, String> {
+    let done = api::unlead(&*lock(&db)?, &team_id, crate::util::now_ts_ms())?;
+    announce(&app, &team_id);
+    Ok(done)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeadInput {
+    pub team_id: String,
+    pub orchestrator: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub label: String,
+}
+
+/// Dá um orquestrador a um time que ficou sem (ou troca o dele).
+#[tauri::command]
+pub fn chat_team_lead(app: AppHandle, db: State<'_, DbConnection>, input: LeadInput) -> Result<TeamView, String> {
+    let view = api::lead(&*lock(&db)?, &input.team_id, &input.orchestrator, &input.agent_id, &input.label, crate::util::now_ts_ms())?;
+    announce(&app, &input.team_id);
+    Ok(view)
+}
+
+/// Troca a ref de um integrante (ou do orquestrador) no roster **e nas cordas** do canvas: aba ↔ `thread:<id>`.
+/// É só a troca de endereço; quem converte (fecha uma, abre a outra) é quem chama.
+#[tauri::command]
+pub fn chat_team_rebind(app: AppHandle, db: State<'_, DbConnection>, old_ref: String, new_ref: String) -> Result<Option<api::Rebound>, String> {
+    let rebound = api::rebind(&*lock(&db)?, &old_ref, &new_ref, crate::util::now_ts_ms())?;
+    let Some(rebound) = rebound else { return Ok(None) };
+    let mut boards = crate::canvas::load_boards();
+    for key in crate::canvas::rebind_ref(&mut boards, old_ref.trim(), new_ref.trim()) {
+        if let Some(board) = boards.get(&key) {
+            crate::canvas::save_board(&key, board.clone())?;
+        }
+    }
+    announce(&app, &rebound.team_id);
+    Ok(Some(rebound))
 }
 
 #[derive(Deserialize)]
@@ -78,6 +275,9 @@ pub struct LinkInput {
     pub origin: Option<String>,
     #[serde(default)]
     pub subagent: Option<bool>,
+    /// O integrante novo gravado por `chat_team_provision_begin` antes de abrir a conversa.
+    #[serde(default)]
+    pub provision: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -123,7 +323,7 @@ pub fn chat_team_link(app: AppHandle, db: State<'_, DbConnection>, input: LinkIn
     };
     let (member, orchestrator) = {
         let conn = lock(&db)?;
-        let member = api::link(&conn, &input.team_id, new, false, crate::util::now_ts_ms())?;
+        let member = api::link_provisioned(&conn, &input.team_id, new, input.provision.as_deref(), false, crate::util::now_ts_ms())?;
         let team = crate::chat_team::store::team(&conn, &input.team_id)?.ok_or("Esse time não existe mais.")?;
         let name = api::orchestrator_peer_name(&conn, &team);
         (member, name)
@@ -132,6 +332,54 @@ pub fn chat_team_link(app: AppHandle, db: State<'_, DbConnection>, input: LinkIn
     let briefing = briefing_for(&orchestrator, &member, &role_label, &instructions);
     announce(&app, &input.team_id);
     Ok(Linked { member, briefing, role_label })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProvisionInput {
+    pub team_id: String,
+    #[serde(default)]
+    pub agent_id: String,
+    #[serde(default)]
+    pub role: String,
+    pub label: String,
+}
+
+/// Grava o integrante novo (`provisioning`) antes de abrir a conversa e o worktree; devolve o nome único.
+#[tauri::command]
+pub fn chat_team_provision_begin(app: AppHandle, db: State<'_, DbConnection>, input: ProvisionInput) -> Result<super::store::ProvisionRow, String> {
+    let row = api::provision_begin(&*lock(&db)?, &input.team_id, &input.agent_id, &input.role, &input.label, crate::util::now_ts_ms())?;
+    announce(&app, &input.team_id);
+    Ok(row)
+}
+
+/// O worktree do integrante novo ficou pronto (a conversa ainda vai abrir).
+#[tauri::command]
+pub fn chat_team_provision_place(db: State<'_, DbConnection>, id: String, worktree: Option<String>, branch: Option<String>) -> Result<(), String> {
+    super::store::provision_place(&*lock(&db)?, &id, worktree.as_deref(), branch.as_deref(), crate::util::now_ts_ms())
+}
+
+/// Abrir a conversa ou o worktree do integrante novo falhou.
+#[tauri::command]
+pub fn chat_team_provision_fail(app: AppHandle, db: State<'_, DbConnection>, id: String, member: Option<String>, reason: String) -> Result<bool, String> {
+    let (done, team) = {
+        let conn = lock(&db)?;
+        let done = api::provision_fail(&conn, &id, member.as_deref(), &reason, crate::util::now_ts_ms())?;
+        (done, super::store::provision(&conn, &id)?.map(|p| p.team_id))
+    };
+    if let Some(team) = team {
+        announce(&app, &team);
+    }
+    Ok(done)
+}
+
+/// As delegações em andamento do time com escopos de escrita sobrepostos (só aviso).
+#[tauri::command]
+pub fn chat_team_overlaps(db: State<'_, DbConnection>, team_id: String) -> Result<Vec<crate::missions::conflicts::scopes::Overlap>, String> {
+    let conn = lock(&db)?;
+    let team = crate::chat_team::store::team(&conn, &team_id)?.ok_or("Esse time não existe mais.")?;
+    let view = api::view(&conn, team)?;
+    api::scope_overlaps(&conn, &view)
 }
 
 #[tauri::command]

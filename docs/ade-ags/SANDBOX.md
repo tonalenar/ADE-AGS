@@ -8,7 +8,7 @@ Com o sandbox, um agente da frota **lê tudo, mas só escreve** em:
 - o diretório da conta (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_DATA_HOME`…) e os diretórios dos agentes no home (`~/.claude`, `~/.codex`, `~/.cache`…);
 - os temporários.
 
-Além disso, credenciais de outros serviços (`GH_TOKEN`, `NPM_TOKEN`, `SSH_AUTH_SOCK`…) saem do ambiente. As dos providers ficam.
+Além disso, credenciais de outros serviços saem do ambiente: toda variável com `KEY`, `TOKEN`, `SECRET` ou `PASSWORD` no nome, mais `SSH_AUTH_SOCK`. As dos providers ficam, e a conta da tarefa entra depois. A regra e onde mais ela vale: [SEGURANCA_LOCAL.md](./SEGURANCA_LOCAL.md#3-segredos-fora-do-ambiente-dos-agentes-por-padrão-ponto-18).
 
 | Plataforma | Mecanismo | Escrita limitada |
 |---|---|---|

@@ -117,6 +117,16 @@ fn hiberna_so_fora_de_vista_depois_do_prazo() {
 }
 
 #[test]
+fn acao_recente_do_agente_mantem_prioridade_normal_fora_de_vista() {
+    use super::lifecycle::wanted_nice;
+    use std::time::Duration;
+    assert_eq!(wanted_nice(true, false, Duration::ZERO), 0);
+    let grace = super::lifecycle::AGENT_PRIORITY_GRACE;
+    assert_eq!(wanted_nice(true, false, grace - Duration::from_nanos(1)), 0);
+    assert_eq!(wanted_nice(true, false, grace), 10);
+}
+
+#[test]
 fn a_prioridade_e_baixa_fora_de_vista_e_normal_quando_se_olha() {
     use super::lifecycle::wanted_nice;
     use std::time::Duration;
@@ -244,4 +254,75 @@ fn em_paisagem_o_toque_volta_para_a_superficie_em_retrato() {
     assert_eq!(display_quarter_turns(1), 0);
     assert_eq!(oriented_size((390.0, 844.0), 4), (844.0, 390.0));
     assert_eq!(oriented_size((390.0, 844.0), 2), (390.0, 844.0));
+}
+
+#[test]
+fn o_toque_na_barra_de_inicio_sai_da_borda_de_baixo_e_o_resto_nao() {
+    assert_eq!(touch_edge((0.5, 0.998)), EDGE_BOTTOM);
+    assert_eq!(touch_edge((0.5, 0.985)), EDGE_BOTTOM);
+    assert_eq!(touch_edge((0.5, 0.98)), 0);
+    assert_eq!(touch_edge((0.5, 0.2)), 0);
+}
+
+#[test]
+fn so_iphone_sem_botao_usa_o_gesto_de_inicio() {
+    assert!(has_home_indicator((402.0, 874.0)));
+    assert!(has_home_indicator((390.0, 844.0)));
+    assert!(!has_home_indicator((375.0, 667.0)), "iPhone SE tem botão");
+    assert!(!has_home_indicator((1024.0, 1366.0)), "iPad com proporção baixa");
+    assert!(!has_home_indicator((0.0, 844.0)), "tela sem tamanho");
+}
+
+#[test]
+fn o_gesto_de_inicio_comeca_na_borda_e_sobe_sem_sair_dela_em_x() {
+    let points = home_gesture_points();
+    assert_eq!(touch_edge(points[0]), EDGE_BOTTOM);
+    assert!(points.last().unwrap().1 < 0.5, "sobe além do meio");
+    assert!(points.windows(2).all(|w| w[1].1 < w[0].1 && w[1].0 == w[0].0));
+}
+
+#[test]
+fn restauracao_pendente_nao_duplica_worker_e_corrige_decisao_em_voo() {
+    use super::lifecycle::{PriorityState, wanted_nice};
+    use std::time::Duration;
+    let mut state = PriorityState::default();
+    let idle = wanted_nice(true, false, Duration::MAX);
+    assert_eq!(state.prepare(idle), Some(10));
+    // A ação chega enquanto ps aplica o fundo, antes de nice refletir o resultado.
+    assert!(state.queue_restore());
+    assert!(!state.queue_restore(), "uma thread cobre as ações repetidas");
+    state.finish(idle, true);
+    let active = wanted_nice(true, false, Duration::ZERO);
+    assert_eq!(state.prepare(active), Some(0), "reavalia após I/O, não reaplica decisão antiga");
+    assert!(!state.queue_restore());
+    state.finish(active, true);
+    assert_eq!(state.prepare(active), None);
+    state.pending = false;
+    assert!(!state.queue_restore(), "já normal, sem trabalho pendente");
+    assert_eq!(state.prepare(idle), Some(10));
+    state.finish(idle, false);
+    assert_eq!(state.nice, 0, "falha não altera a prioridade confirmada");
+    assert_eq!(state.applying, None);
+}
+
+#[test]
+fn o_aparelho_segue_a_vista_enquanto_alguma_tela_dele_estiver_a_vista() {
+    use super::commands::Screens;
+    let mut screens = Screens::default();
+    assert!(screens.set("chat-devices", "A", true));
+    // O nó do canvas do mesmo aparelho abre fora de vista: o painel do chat continua mostrando.
+    assert!(screens.set("no-1", "A", false), "uma tela fora de vista não tira o aparelho de vista");
+    assert_eq!(screens.seen("no-1", false), Some(("A".into(), true)));
+    assert_eq!(screens.remove("no-1"), Some(("A".into(), true)), "fechar o nó não esconde o painel");
+    assert_eq!(screens.seen("chat-devices", false), Some(("A".into(), false)));
+    assert_eq!(screens.seen("chat-devices", true), Some(("A".into(), true)));
+    assert!(!screens.set("no-2", "B", false), "outro aparelho não herda a vista");
+    assert_eq!(screens.remove("chat-devices"), Some(("A".into(), false)));
+    assert_eq!(screens.seen("sumiu", true), None);
+}
+
+#[test]
+fn ligar_o_modo_leve_nao_baixa_a_prioridade_de_quem_a_ade_nao_acompanha() {
+    // Sem o ciclo de vida saber do aparelho, baixar a prioridade não teria quem a restaurasse.
+    assert_eq!(super::lifecycle::set_light("aparelho-fora-do-ciclo", true), 0);
 }

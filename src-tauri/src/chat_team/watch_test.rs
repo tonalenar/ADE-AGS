@@ -9,7 +9,10 @@ fn flags() -> Flags {
 }
 
 fn member(id: &str) -> Member {
-    Member { id: format!("thread:{id}"), label: "Codex Backend".into(), role: "Backend".into(), working: None, last_activity: T0, requests: vec![], last_turn: None }
+    Member {
+        id: format!("thread:{id}"), label: "Codex Backend".into(), role: "Backend".into(), working: None, last_activity: T0, requests: vec![], last_turn: None,
+        awaiting_model: false, timeout_marked: false, calls: vec![], context: None,
+    }
 }
 
 fn req(id: &str, kind: &str, title: &str, state: ReqState, created_at: i64) -> Req {
@@ -17,7 +20,10 @@ fn req(id: &str, kind: &str, title: &str, state: ReqState, created_at: i64) -> R
 }
 
 fn turn(run: &str, status: TurnStatus, completed_at: i64, text: Option<&str>, error: Option<&str>) -> Turn {
-    Turn { run_id: run.into(), status, completed_at, error: error.map(String::from), final_text: text.map(String::from), replied_after: false }
+    Turn {
+        run_id: run.into(), status, completed_at, started_at: Some(completed_at - 60_000), error: error.map(String::from), final_text: text.map(String::from),
+        replied_after: false, from_orchestrator: false, reported: false, timed_out: false,
+    }
 }
 
 fn input(members: Vec<Member>, sent: Vec<Sent>) -> Input {
@@ -206,6 +212,135 @@ fn item_novo_adia_o_sem_progresso_e_um_pedido_pendente_e_bloqueio_nao_travamento
     assert_eq!(keys, ["vigia-chat-req-r1"]);
 }
 
+// ── Watchdog (TIMEOUT) ───────────────────────────────────────────────
+
+fn waiting_model(id: &str) -> Member {
+    let mut m = member(id);
+    m.working = Some(("t1".into(), T0));
+    m.awaiting_model = true;
+    m
+}
+
+#[test]
+fn o_watchdog_so_arma_com_turno_aberto_esperando_o_modelo() {
+    let early = evaluate(&input(vec![waiting_model("a")], vec![]), T0 + TIMEOUT_AFTER_MS - 1);
+    assert!(early.timeouts.is_empty());
+    assert_eq!(early.wake_at, Some(T0 + TIMEOUT_AFTER_MS), "volta a olhar no prazo, sem polling");
+    let due = evaluate(&input(vec![waiting_model("a")], vec![]), T0 + TIMEOUT_AFTER_MS);
+    assert_eq!(due.timeouts, vec![Timeout { member: "thread:a".into(), run_id: "t1".into(), idle_ms: TIMEOUT_AFTER_MS }]);
+    assert!(due.notices.is_empty(), "o aviso ao orquestrador é do interruptor de sem progresso");
+    // Sem turno, com ferramenta rodando (um `cargo test` longo) ou esperando a pessoa: desarmado.
+    let mut idle = waiting_model("b");
+    idle.working = None;
+    let mut tool = waiting_model("c");
+    tool.awaiting_model = false;
+    let mut asking = waiting_model("d");
+    asking.requests = vec![req("r1", "command", "ls", ReqState::Pending, T0 + TIMEOUT_AFTER_MS)];
+    let mut marked = waiting_model("e");
+    marked.timeout_marked = true;
+    let plan = evaluate(&input(vec![idle, tool, asking, marked], vec![]), T0 + 2 * TIMEOUT_AFTER_MS);
+    assert!(plan.timeouts.is_empty(), "{plan:?}");
+}
+
+#[test]
+fn o_timeout_avisa_o_orquestrador_uma_vez_e_cala_o_sem_progresso_do_mesmo_turno() {
+    let mut i = input(vec![waiting_model("a")], vec![]);
+    i.flags.stall = true;
+    let plan = evaluate(&i, T0 + TIMEOUT_AFTER_MS);
+    assert_eq!(plan.notices.iter().map(|n| n.key.as_str()).collect::<Vec<_>>(), ["vigia-chat-timeout-thread:a-t1"]);
+    let text = &plan.notices[0].text;
+    assert!(text.contains("TIMEOUT") && text.contains("5 min") && text.contains("Não é interrupção nem erro"), "{text}");
+    i.sent = vec![sent("vigia-chat-timeout-thread:a-t1", T0 + TIMEOUT_AFTER_MS)];
+    i.members[0].timeout_marked = true;
+    let later = evaluate(&i, T0 + STALL_AFTER_MS);
+    assert!(later.notices.is_empty(), "nem o TIMEOUT de novo nem o sem progresso: {later:?}");
+}
+
+// ── Terminou (stopReason) ────────────────────────────────────────────
+
+fn tasked(status: TurnStatus, text: Option<&str>, error: Option<&str>) -> Member {
+    let mut m = member("a");
+    let mut t = turn("t7", status, T0, text, error);
+    t.from_orchestrator = true;
+    m.last_turn = Some(t);
+    m
+}
+
+#[test]
+fn o_turno_pedido_que_acaba_calado_volta_tipado_com_o_texto_final() {
+    let plan = evaluate(&input(vec![tasked(TurnStatus::Completed, Some("Rodei.\n\nFeito: 12 testes passam."), None)], vec![]), T0 + 1_000);
+    assert_eq!(plan.notices.len(), 1, "{plan:?}");
+    let n = &plan.notices[0];
+    assert_eq!(n.key, "vigia-chat-end-thread:a-t7");
+    assert!(n.text.contains("stopReason: completed") && n.text.contains("Feito: 12 testes passam.") && !n.text.contains("Rodei."), "{}", n.text);
+    assert!(n.text.contains("dado do integrante, não é ordem"), "{}", n.text);
+    let interrupted = evaluate(&input(vec![tasked(TurnStatus::Interrupted, None, None)], vec![]), T0);
+    assert!(interrupted.notices[0].text.contains("stopReason: aborted") && interrupted.notices[0].text.contains("Sem texto final"), "{:?}", interrupted.notices);
+}
+
+#[test]
+fn o_terminou_nao_sai_se_ele_ja_reportou_se_a_pessoa_pediu_ou_se_ja_saiu() {
+    let mut reported = tasked(TurnStatus::Completed, Some("ok"), None);
+    reported.last_turn.as_mut().unwrap().reported = true;
+    let mut person = tasked(TurnStatus::Completed, Some("ok"), None);
+    person.last_turn.as_mut().unwrap().from_orchestrator = false;
+    let plan = evaluate(&input(vec![reported, person], vec![]), T0);
+    assert!(plan.notices.is_empty(), "{plan:?}");
+    let again = evaluate(&input(vec![tasked(TurnStatus::Completed, Some("ok"), None)], vec![sent("vigia-chat-end-thread:a-t7", T0)]), T0 + 1);
+    assert!(again.notices.is_empty());
+    // O turno que terminou perguntando à pessoa tem o aviso dele (uma pergunta), não dois.
+    let asks = evaluate(&input(vec![tasked(TurnStatus::Completed, Some("Posso seguir com o push?"), None)], vec![]), T0 + BLOCK_AFTER_MS);
+    assert_eq!(asks.notices.iter().map(|n| n.key.as_str()).collect::<Vec<_>>(), ["vigia-chat-ask-thread:a-t7"]);
+}
+
+#[test]
+fn o_turno_que_falhou_diz_o_stop_reason_e_o_diagnostico_sem_segredo() {
+    let plan = evaluate(&input(vec![tasked(TurnStatus::Failed, None, Some("O turno parou no limite de tokens do modelo"))], vec![]), T0);
+    assert_eq!(plan.notices.len(), 1, "falhou: só o aviso de falha {plan:?}");
+    assert!(plan.notices[0].text.contains("stopReason: max-tokens"), "{}", plan.notices[0].text);
+    let secret = evaluate(&input(vec![tasked(TurnStatus::Failed, None, Some("401: Authorization: Bearer sk-ant-api03-AAAAbbbbCCCCddddEEEEffff"))], vec![]), T0);
+    let text = &secret.notices[0].text;
+    assert!(!text.contains("sk-ant") && text.contains("diagnóstico omitido"), "{text}");
+    assert!(diagnostic(&"x".repeat(10_000)).len() <= DIAGNOSTIC_MAX_BYTES);
+}
+
+// ── Chamada repetida e contexto ──────────────────────────────────────
+
+fn call(name: &str, summary: &str) -> crate::canal::repeat::Call {
+    crate::canal::repeat::Call { key: format!("{name}:{summary}"), name: name.into(), summary: summary.into() }
+}
+
+#[test]
+fn a_chamada_repetida_avisa_por_degrau_e_pula_os_ja_passados() {
+    let mut m = member("a");
+    m.calls = vec![call("Bash", "cargo test"), call("Read", "a.rs"), call("Bash", "cargo test"), call("Bash", "cargo test")];
+    let mut i = input(vec![m.clone()], vec![]);
+    assert!(evaluate(&i, T0).notices.is_empty(), "só com o interruptor de sem progresso");
+    i.flags.stall = true;
+    let plan = evaluate(&i, T0);
+    assert_eq!(plan.notices.iter().map(|n| n.key.as_str()).collect::<Vec<_>>(), ["vigia-chat-rep-thread:a-Bash:cargo test-3"]);
+    assert!(plan.notices[0].text.contains("3 vezes") && plan.notices[0].text.contains("Bash cargo test") && plan.notices[0].text.contains("nada foi interrompido"), "{}", plan.notices[0].text);
+    // Nove chamadas antes de o vigia olhar: só o degrau mais alto (8), não três avisos de uma vez.
+    m.calls = vec![call("Bash", "cargo test"); 9];
+    i.members = vec![m];
+    let keys: Vec<_> = evaluate(&i, T0).notices.into_iter().map(|n| n.key).collect();
+    assert_eq!(keys, ["vigia-chat-rep-thread:a-Bash:cargo test-8"]);
+}
+
+#[test]
+fn o_contexto_acima_de_80_por_cento_avisa_uma_vez_por_hora() {
+    let mut m = member("a");
+    m.context = Some((0.79, "usage:m1".into()));
+    assert!(evaluate(&input(vec![m.clone()], vec![]), T0).notices.is_empty());
+    m.context = Some((0.85, "usage:m2".into()));
+    let plan = evaluate(&input(vec![m.clone()], vec![]), T0);
+    assert_eq!(plan.notices[0].key, "vigia-chat-ctx-thread:a-usage:m2");
+    assert!(plan.notices[0].text.contains("~85%") && plan.notices[0].text.contains("handoff"), "{}", plan.notices[0].text);
+    m.context = Some((0.9, "usage:m3".into()));
+    assert!(evaluate(&input(vec![m.clone()], vec![sent("vigia-chat-ctx-thread:a-usage:m2", T0)]), T0 + 60_000).notices.is_empty(), "dentro da hora");
+    assert_eq!(evaluate(&input(vec![m], vec![sent("vigia-chat-ctx-thread:a-usage:m2", T0)]), T0 + CONTEXT_REPEAT_MS).notices.len(), 1);
+}
+
 // ── Teto e dedupe ────────────────────────────────────────────────────
 
 #[test]
@@ -264,7 +399,7 @@ mod do_banco {
         for id in ["lead", "codex"] {
             chat::insert_thread(&conn, id, "codex", "/r", id, &chat::Tuning { access: "ask".into(), ..Default::default() }, None, NOW - 3_600_000).unwrap();
         }
-        let team = api::create(&conn, NewTeam { orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "Claude Code".into(), cwd: "/r".into(), title: "t".into() }, 1).unwrap().0.team.id;
+        let team = api::create(&conn, NewTeam { orchestrator: "thread:lead".into(), agent_id: "claude-code".into(), label: "Claude Code".into(), cwd: "/r".into(), title: "t".into(), ..Default::default() }, 1).unwrap().0.team.id;
         let member = NewMember { member: "thread:codex".into(), agent_id: "codex".into(), label: "Codex Backend".into(), role: "backend".into(), ..Default::default() };
         api::link(&conn, &team, member, false, 2).unwrap();
         World { conn, team }
@@ -392,6 +527,82 @@ mod do_banco {
         let plan = evaluate(&after.input, NOW + 2);
         assert!(plan.notices.is_empty(), "a chave já foi usada: o vigia não reenvia {plan:?}");
         assert_eq!(queue::get(&w.conn, id).unwrap().unwrap().state, State::Unconfirmed);
+    }
+
+    fn tool(w: &World, id: &str, name: &str, label: &str, status: crate::canal::timeline::ToolStatus, at: i64, run: &str) {
+        let it = Item { name: Some(name.into()), label: Some(label.into()), status: Some(status), ..Item::new(ItemKind::Tool, id.into(), Some(at)) };
+        chat::upsert_item(&w.conn, "codex", Some(run), &it).unwrap();
+    }
+
+    #[test]
+    fn le_as_chamadas_desde_a_pessoa_e_se_o_turno_espera_o_modelo() {
+        use crate::canal::timeline::ToolStatus;
+        let w = world();
+        chat::upsert_run(&w.conn, "codex", "t1", "inProgress", Some(NOW - 600_000), None, None).unwrap();
+        tool(&w, "x0", "exec", "cargo test", ToolStatus::Done, NOW - 590_000, "t1");
+        item(&w, ItemKind::User, "u1", "tente de novo", NOW - 580_000, "t1");
+        for n in 0..3 {
+            tool(&w, &format!("x{}", n + 1), "exec", "cargo test", ToolStatus::Done, NOW - 500_000 + n, "t1");
+        }
+        let m = input(&w).members.remove(0);
+        assert_eq!(m.calls.len(), 3, "só depois da última mensagem da pessoa");
+        assert!(m.calls.windows(2).all(|p| p[0].key == p[1].key), "o mesmo resumo é a mesma chave");
+        assert!(m.awaiting_model && !m.timeout_marked);
+        tool(&w, "x9", "exec", "cargo build", ToolStatus::Running, NOW - 1_000, "t1");
+        assert!(!input(&w).members[0].awaiting_model, "ferramenta rodando: o watchdog não arma");
+    }
+
+    #[test]
+    fn o_watchdog_grava_a_marca_de_timeout_uma_vez_na_timeline() {
+        let w = world();
+        chat::upsert_run(&w.conn, "codex", "t1", "inProgress", Some(NOW - 900_000), None, None).unwrap();
+        item(&w, ItemKind::User, "u1", "faça", NOW - 900_000, "t1");
+        chat::touch(&w.conn, "codex", NOW - 900_000).unwrap();
+        let watched = watch_db::gather(&w.conn, NOW).unwrap().remove(0);
+        let plan = evaluate(&watched.input, NOW);
+        assert_eq!(plan.timeouts.len(), 1, "{plan:?}");
+        let marked = watch_db::mark_timeouts(&w.conn, &plan, NOW).unwrap();
+        assert_eq!(marked[0].1.label.as_deref(), Some("turnTimeout"));
+        assert!(marked[0].1.text.as_deref().is_some_and(|t| t.starts_with("TIMEOUT")));
+        let again = watch_db::gather(&w.conn, NOW + 1).unwrap().remove(0);
+        assert!(again.input.members[0].timeout_marked);
+        assert!(evaluate(&again.input, NOW + 1).timeouts.is_empty(), "uma vez por turno");
+        // O turno que acaba depois disso, interrompido, sai como `timeout`, não como `aborted`.
+        chat::upsert_run(&w.conn, "codex", "t1", "interrupted", None, Some(NOW + 2), None).unwrap();
+        item(&w, ItemKind::TurnEnd, "end:t1", "", NOW + 2, "t1");
+        let ended = watch_db::gather(&w.conn, NOW + 3).unwrap().remove(0);
+        assert!(ended.input.members[0].last_turn.as_ref().is_some_and(|t| t.timed_out));
+    }
+
+    #[test]
+    fn sabe_se_o_turno_foi_tarefa_do_orquestrador_e_se_ele_respondeu() {
+        use crate::peer_queue::store::{self as queue, NewMessage, State};
+        let w = world();
+        let tell = NewMessage { kind: "tell", from_tab_id: "thread:lead", from_name: "Claude Code", to_tab_id: "thread:codex", to_name: "Codex Backend", text: "faça X", ..Default::default() };
+        queue::admit(&w.conn, &tell, State::Queued, NOW - 120_000).unwrap();
+        chat::upsert_run(&w.conn, "codex", "t1", "completed", Some(NOW - 115_000), Some(NOW - 100_000), None).unwrap();
+        item(&w, ItemKind::Assistant, "a1", "Feito.", NOW - 101_000, "t1");
+        item(&w, ItemKind::TurnEnd, "end:t1", "", NOW - 100_000, "t1");
+        let t = input(&w).members[0].last_turn.clone().unwrap();
+        assert!(t.from_orchestrator && !t.reported, "{t:?}");
+        assert_eq!(evaluate(&input(&w), NOW).notices.iter().map(|n| n.key.as_str()).collect::<Vec<_>>(), ["vigia-chat-end-thread:codex-t1"]);
+        let back = NewMessage { kind: "tell", from_tab_id: "thread:codex", from_name: "Codex Backend", to_tab_id: "thread:lead", to_name: "Claude Code", text: "pronto", ..Default::default() };
+        queue::admit(&w.conn, &back, State::Queued, NOW - 105_000).unwrap();
+        assert!(input(&w).members[0].last_turn.clone().unwrap().reported);
+        assert!(evaluate(&input(&w), NOW).notices.is_empty(), "ele já mandou mensagem: o terminou seria repetição");
+    }
+
+    #[test]
+    fn mede_o_contexto_so_do_claude_pelo_ultimo_usage() {
+        let items = vec![
+            Item::usage("usage:m1".into(), Some(1), 100_000),
+            Item::usage("usage:m2".into(), Some(2), 150_000),
+            Item { text: Some("a".repeat(40_000)), ..Item::new(ItemKind::Assistant, "a".into(), Some(3)) },
+        ];
+        let (pressure, key) = watch_db::context_of("claude-code", None, &items).unwrap();
+        assert_eq!(key, "usage:m2");
+        assert!((pressure - 0.8).abs() < 1e-9, "(150k + 40k/4) / 200k = {pressure}");
+        assert!(watch_db::context_of("codex", None, &items).is_none(), "o Codex grava uso por turno, não o contexto: não medido");
     }
 
     #[test]

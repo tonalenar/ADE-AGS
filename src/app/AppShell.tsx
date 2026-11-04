@@ -10,6 +10,7 @@ import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRai
 import { CommandPalette } from "@/features/palette/CommandPalette";
 import { CompareHost } from "@/features/compare/CompareHost";
 import { boardKeyOfTab, initCanvasSync, setWorkMode } from "@/features/canvas/store";
+import { startSelectionSync } from "@/features/chat/unified/selectionActions";
 import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
 import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckpointsCapture";
@@ -193,6 +194,9 @@ export function AppShell() {
 
     return () => { unlisten?.(); };
   }, []);
+
+  // A seleção única de conversa: o canvas da conversa por protocolo aberta, e ativar uma aba fecha a conversa por protocolo.
+  useEffect(() => startSelectionSync(), []);
 
   // Restaura el estado de tabs de esta ventana (mismas tabs/cwd/agente/orden con que se cerró).
   useEffect(() => {

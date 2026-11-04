@@ -19,7 +19,7 @@ use crate::simulator::{model, ops};
 /// no canvas nem conversa própria: não se emite nada para ele (o painel mostra a tela ao vivo e o agente
 /// responde no próprio terminal), em vez de mandar um evento para um nó que não existe.
 fn activity(app: &AppHandle, node: &str, agent: &str, kind: &str, text: &str) {
-    if node.starts_with(super::devices::CHAT_PREFIX) {
+    if node.starts_with(crate::surfaces::CHAT_PREFIX) {
         return;
     }
     let _ = app.emit("simulator-activity", json!({ "node": node, "agent": agent, "kind": kind, "text": text, "at": crate::util::now_ts_ms() }));
@@ -59,7 +59,7 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
     let who = json!({ "id": id, "name": portal.name, "kind": "ios", "udid": portal.udid });
     let agent = agent_name(app, from);
     if action == "say" {
-        if id.starts_with(super::devices::CHAT_PREFIX) {
+        if id.starts_with(crate::surfaces::CHAT_PREFIX) {
             return Err("`ags device say` é a conversa do nó do simulador no canvas; este aparelho está no painel do chat: responda pelo seu terminal.".into());
         }
         let text = arg_str(args, "text")?;

@@ -37,6 +37,7 @@ React 19 + TypeScript + Vite 7 + Tailwind 4 + Zustand 5, com xterm e @xyflow. O 
 |---|---|
 | `tabs` | abas, layout em grupos estilo VS Code, `persistence.ts` (SQLite com debounce) |
 | `terminal` | xterm + PTY, `terminalRegistry.ts` (`sendWhenReady`, `pasteIntoTab`), replay sem perda |
+| `chat/unified` | modelo único de leitura da conversa (`UnifiedConversation`, `selectConversations`, `useConversations()`): abas + protocolo + times + canvas; a ref é `tab.id` ou `thread:<id>`, sem UUID novo. Chat, abas e canvas devem ler daqui |
 | `canvas` | canvas @xyflow, chat, TeamFeed, rotinas, andares, `design/` |
 | `missions` | missões, `terminals.ts` (iniciar time, briefings), `vigia*.ts`, `watcher.ts`, `stalled.ts`, `leadStall.ts` |
 | `orchestrator` | `cliBridge.ts`, o lado front da CLI `ags` |
@@ -101,7 +102,7 @@ React 19 + TypeScript + Vite 7 + Tailwind 4 + Zustand 5, com xterm e @xyflow. O 
 
 ## Pontos frágeis
 - `tabs/store.ts`, `layout/layoutStore.ts`, `canvas/store.ts`, `terminal/terminalRegistry.ts`, `missions/terminals.ts` e `tabs/persistence.ts` guardam estado de módulo. Um HMR desses módulos com o app em uso pode derrubar terminais: veja as regras de ouro no `AGENTS.md`.
-- `vigia.ts` mantém `watches` e `closingNudges` só em memória: um reinício repete avisos.
+- `vigia.ts` guarda `watches` (com o fechamento antecipado e o "Decisão pendente") no `localStorage`; `lastPoke`, `loops` e os erros do modelo seguem só em memória.
 - Botões da janela, nativos de cada sistema (`app/WindowLights.tsx`):
   - `WindowLights` vai no cabeçalho da esquerda e só reserva o lugar. No macOS os semáforos são os do AppKit, posicionados pelo `window_controls_place`.
   - `WindowControls` vai no fim do cabeçalho da direita e desenha os botões do Windows e do Linux.

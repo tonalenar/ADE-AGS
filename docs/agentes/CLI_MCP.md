@@ -24,6 +24,7 @@
 - Limites: 256 conexões e 8 MB por request. O token é comparado em tempo constante.
 - `memory.*` e `swarm.*` exigem `ADE_SESSION` e que o processo seja descendente do PTY da aba (`terminal/session.rs::authorize`).
 - `memory.compact` e `workspace.restore` são negados a agentes (`AGENT_MAINTENANCE_DENIED`): só pela UI.
+- Conversa por protocolo (`thread:<id>`) também recebe `ADE_SESSION`, emitido por processo do motor e válido após `register_process` (`chat_team/env.rs`).
 - `ADE_TAB_ID` identifica quem chama, mas **não é segurança**.
 - A saída é sempre uma linha JSON no stdout; ajuda e erros de uso vão para o stderr.
 
@@ -38,7 +39,7 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
 3. Em `bin/cli.rs`, escreva o USAGE (em PT-BR) e os `positionals()`. Se o comando precisar da identidade da aba, inclua o grupo em `with_caller()`; atalhos de uma palavra ficam em `shortcut()`.
 4. Se o comando vier por MCP, mexa em `ipc/mcp.rs` (e em `runs/orchestration.rs`). Se só o front sabe executá-lo, mexa em `src/features/orchestrator/cliBridge.ts`.
 5. Os testes de contrato em `ipc/test.rs` leem esses arquivos com `include_str!`: um comando que a CLI oferece e ninguém atende quebra o teste.
-6. Atualize `skills/ags-orchestrator/SKILL.md` (e a versão dela).
+6. Atualize `skills/ags-orchestrator/SKILL.md` (e a versão dela) e rode `bun run gen:catalogs`: o índice de comandos e a lista de tools da skill, da ajuda e deste doc são regiões geradas (`BEGIN/END GENERATED`), conferidas por `bun run check:catalogs`.
 
 ## MCP
 - `ags mcp --cwd <pasta> [--tab id] [--mission id] [--role]` serve as abas interativas; `ags mcp --task <id>` serve as tasks da frota.
@@ -46,6 +47,26 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
 - O servidor se chama `ags`; as tools aparecem como `mcp__ags__…`, e a de permissão é `approve_tool_use`. Os configs ficam em `~/.ags/mcp/`.
 - As tools `memory_*` só existem para tasks da frota. Abas de TUI usam a CLI.
 - Papéis de somente leitura recebem só a power `Read` (`powers_for_role`; `docs/ade-ags/MCP_MISSION_SCOPE.md`).
+- Resposta grande (acima de ~6.000 tokens) de uma tool, ou de `tab output`/`tab screen`/`peer check`/`peer pending`/`chat show`/`chat wait`/`recall get` na CLI, vai inteira para `~/.ags/spill/<aba ou tarefa>/<aleatório>.txt` (pasta 0700, arquivo 0600, nunca dentro de um repositório, apagado após 30 dias); o agente recebe cabeça, cauda e o caminho (`ipc/spill.rs`). Na CLI, `--no-spill` devolve tudo.
+- `ask_user` tem prazo (padrão 600 s): ao vencer devolve `status: "pending"`, nunca aprovação, e a resposta tardia chega à aba como mensagem. Integrante de time recebe `refused` (`ask_lead`) e leva a dúvida ao orquestrador.
+
+### Tools (região gerada)
+A tabela abaixo sai de `ipc/mcp.rs` e `forge/tools.rs`; o mesmo vale para a ajuda de `ags` e para a skill. Mudou uma tool ou um comando? Rode `bun run gen:catalogs`; o CI roda `bun run check:catalogs`.
+
+<!-- BEGIN GENERATED: mcp-tools -->
+<!-- Gerado por `bun run gen:catalogs` a partir do código; não edite à mão. -->
+| Family | Who sees it | Tools |
+|---|---|---|
+| Browser | every session | `browser_navigate`, `browser_pick`, `browser_marked`, `browser_snapshot`, `browser_click`, `browser_act`, `browser_type`, `browser_press`, `browser_select`, `browser_describe`, `browser_screenshot`, `browser_drag`, `browser_upload`, `browser_mock`, `browser_dialogs`, `browser_hover`, `browser_scroll`, `browser_wait`, `browser_history`, `browser_resize`, `browser_layout`, `browser_console`, `browser_network`, `browser_storage`, `browser_cookies`, `browser_performance`, `browser_eval` |
+| Fleet orchestration | every session (read-only roles get only the Read power) | `gemini_desktop_status`, `gemini_desktop_consult`, `gemini_desktop_result`, `agent_roster`, `run_plan`, `task_add`, `task_handoff`, `task_status`, `task_result`, `run_await`, `fact_add`, `facts_read`, `fact_read`, `task_reroute`, `task_cancel` |
+| Fleet memory | fleet tasks only (`--task`) | `memory_list`, `memory_get`, `memory_search`, `memory_open`, `memory_propose`, `memory_update`, `memory_delete`, `memory_promote_fact` |
+| Git account | every session | `git_account`, `git_repos`, `git_pr_list`, `git_pr_view`, `git_checks`, `git_pr_files`, `git_issue_list`, `git_issue_view`, `git_fetch`, `git_pull`, `git_push`, `git_pr_create`, `git_issue_create`, `git_tag`, `git_release_list`, `git_release_create`, `git_comment` |
+| Peers and team | interactive tabs (`--tab`) | `peer_tell`, `peer_deliver`, `peer_handoff`, `peer_receipt`, `team_list`, `team_create`, `team_link`, `team_unlink`, `team_role` |
+| Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_new`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending` |
+| Designs | interactive sessions (`--cwd`) | `design_list`, `design_get`, `design_view`, `design_create`, `design_open`, `design_page_add`, `design_page_rename`, `design_page_delete`, `design_artboard_add`, `design_artboard_update`, `design_artboard_duplicate`, `design_artboard_delete`, `design_comment_add`, `design_comment_resolve`, `design_note_add` |
+| Questions to the person | every session (team members get `refused`, see above) | `ask_user` |
+| Permission | fleet tasks only (`--task`) | `approve_tool_use` |
+<!-- END GENERATED: mcp-tools -->
 
 ## Dados em disco
 | Onde | O quê |

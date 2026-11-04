@@ -55,3 +55,15 @@ fn o_drop_nativo_continua_ligado() {
         }
     }
 }
+
+#[test]
+fn opcoes_informativas_saem_sem_iniciar_o_app() {
+    use super::arguments::informational_output;
+    for flag in ["--version", "-V"] {
+        assert_eq!(informational_output([flag.into()]), Some(format!("ade-ags {}", env!("CARGO_PKG_VERSION"))));
+    }
+    for flag in ["--help", "-h"] {
+        assert!(informational_output([flag.into()]).unwrap().contains("--headless"));
+    }
+    assert!(informational_output(["--headless".into()]).is_none());
+}

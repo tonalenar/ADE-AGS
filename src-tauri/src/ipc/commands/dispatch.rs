@@ -174,6 +174,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "device.list" => device_list(app, args),
         "device.create" => device_create(app, args),
         "sim.act" => super::sim_act::act(app, args),
+        "desk.act" => super::desk_act::act(app, args),
         "device.start" => device_action(app, args, "start"),
         "device.tap" => device_action(app, args, "tap"),
         "device.swipe" => device_action(app, args, "swipe"),
@@ -297,7 +298,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "app.status" => app_status(app),
         // El bus de eventos (ver `crate::bus`): ponerse al día y esperar lo siguiente.
         "events.since" => events_since(args),
-        "events.wait" => events_wait(args),
+        "events.wait" => events_wait(app, args),
         // Misiones y aprobaciones sin la interfaz (modo headless, CI).
         "mission.create" => missions::mission_create(app, args),
         "mission.start" => missions::mission_start(app, args),

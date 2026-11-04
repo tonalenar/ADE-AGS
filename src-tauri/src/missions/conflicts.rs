@@ -1,4 +1,6 @@
 //! Resolve only files in a mission's isolated integration worktree and active merge.
+//! O aviso que antecipa o conflito (escopos de escrita sobrepostos) fica em [`scopes`].
+pub mod scopes;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
