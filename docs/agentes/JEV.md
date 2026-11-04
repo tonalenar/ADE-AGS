@@ -94,11 +94,12 @@ Todos nascem **desligados**.
 
 ## Quem pode chamar o piloto e o computer use
 - Terminal de aba: token `ADE_SESSION` + PID descendente. Conversa por protocolo: `thread:<id>` + PID do cliente descendente do processo do motor (`chat_team::env::register_process`, chamado em cada `spawn`; **motor novo de conversa precisa registrar**; a conversa também recebe `ADE_SESSION`, emitido em `thread_env`). O que cada ator alcança (portais do canvas e aparelhos do painel do chat) vem de `surfaces::reach`, para listar e autorizar. Tudo em `terminal::authorize_actor`; `memory.*`/`swarm.*` seguem só em `authorize`. Tabela completa em [COMPUTER_USE_SUPERFICIES.md](../ade-ags/COMPUTER_USE_SUPERFICIES.md#quem-pode-chamar).
+- Pelo MCP: `browser_act`, `sim_act` e `desk_act` chamam o mesmo caminho da CLI e a mesma autorização (`ipc/mcp.rs`, `COMPUTER_USE_TOOLS`). O agente lê `report.status` (`done`/`unverified`/`blocked`/`unsure`/`stuck`/`limit`); exit 0 não é sucesso e `blocked` não se repete igual (skill, seção "Computer use with Jev").
 - `ags desk act` comanda a tela do Mac: consentimento da pessoa a cada objetivo, confirmação por ação sensível, auditoria `approval_audit` (`computer_use:*`). Risco alto nunca é automático e o Jev só eleva risco.
 
 ## Piloto do navegador (`ags portal act` / MCP `browser_act`)
-- **Comando**: `ags portal act <portal> "objetivo" [--fill campo=valor]… [--expect text:|url:|count:|absent:…]… [--steps 8]`.
-  - Timeout de 115 s.
+- **Comando**: `ags portal act <portal> "objetivo" [--fill campo=valor]… [--expect text:|url:|count:|absent:…]… [--steps 8] [--timeout 115]`.
+  - Prazo padrão de 115 s, faixa 10–1.800 (`--timeout`; no MCP, `timeout`). É o mesmo de `sim act`/`desk act` e inclui o tempo de a pessoa confirmar.
   - Um `--expect` malformado é recusado antes de agir.
 - **Laço** (`src/features/browser/jevPilot.ts`):
   1. Preconecta e lê o histórico do portal (`portalLedger.ts`).

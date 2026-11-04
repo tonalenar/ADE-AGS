@@ -20,13 +20,14 @@ describe("regiões geradas (scripts/check-catalogs.ts)", () => {
       'const PEER_TOOLS: &[(&str, &str)] = &[\n    ("peer_tell", "peer.tell"),\n];',
       'const CHAT_TOOLS: &[ChatTool] = &[\n    ChatTool { name: "chat_list", ipc: "chat.list" },\n];',
       'const DESIGN_TOOLS: &[DesignTool] = &[\n];',
+      'const COMPUTER_USE_TOOLS: &[ComputerUseTool] = &[\n    ComputerUseTool { name: "sim_act", dispatch: "sim.act" },\n];',
     ].join("\n");
     const git = 'pub(crate) const GIT_TOOLS: &[GitTool] = &[\n    GitTool { name: "git_push" },\n];';
     const families = mcpTools(mcp, git);
     expect(families.map((f) => [f.family, f.tools])).toEqual([
       ["Browser", ["browser_click"]], ["Fleet orchestration", ["run_plan"]], ["Fleet memory", ["memory_get"]],
       ["Git account", ["git_push"]], ["Peers and team", ["peer_tell"]], ["Chat-mode conversations", ["chat_list"]],
-      ["Questions to the person", ["ask_user"]], ["Permission", ["approve_tool_use"]],
+      ["Computer use", ["sim_act"]], ["Questions to the person", ["ask_user"]], ["Permission", ["approve_tool_use"]],
     ]);
     expect(() => rustBlock(mcp, "NOPE")).toThrow();
   });

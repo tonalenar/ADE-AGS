@@ -26,7 +26,7 @@ import { ContinueAgentDialog } from "./ContinueAgentDialog";
 import { requestContinuity } from "./continuity";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
 import { MEMORY_SUGGEST_HINT, memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
-import { BROWSER_HINT } from "@/features/canvas/portalNotice";
+import { BROWSER_HINT, computerUseHint } from "@/features/canvas/portalNotice";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { CheckpointsDialog } from "@/features/tabCheckpoints/CheckpointsDialog";
 import { tabCheckpointCreate } from "@/features/tabCheckpoints/ipc";
@@ -329,7 +329,8 @@ export function TabDialogs() {
             // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele,
             // e que pode sugerir memória ao projeto. Num rascunho o aviso fica de fora: é a pergunta da
             // pessoa, não um briefing.
-            const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}\n${MEMORY_SUGGEST_HINT}`;
+            const desk = computerUseHint();
+            const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}\n${desk ? `${desk}\n` : ""}${MEMORY_SUGGEST_HINT}`;
             const text = [briefing, startupText(memory, prompt), hint].filter(Boolean).join("\n\n");
             if (text) sendWhenReady(tabId, text, draft ? { draft: true } : undefined);
           });

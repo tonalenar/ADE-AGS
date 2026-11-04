@@ -163,18 +163,23 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal screenshot|console|layout <portal>   Foto, console e medidas
                                               (sem eval, upload nem cookies: isso é do usuário)
   portal reset <portal>                       Zera o site aberto no portal (cookies, storage) e o histórico dos act: recarregue depois
-  portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8]
+  portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8] [--timeout 115]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
                                               Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
+                                              --expect text:|url:|count:|absent: confere o fim por código; sem ele o máximo é «não verificado»
 
 SIMULADOR IOS — nó conectado ao seu terminal; Jev e reserva visual habilitados
   sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
                                               Foto + HID; confirmação de ações sensíveis na UI; --fill só no campo já focado
+                                              Um act por aparelho. Exit 0 só diz que veio o relatório: leia report.status
+                                              (done · unverified · blocked · unsure · stuck · limit; blocked não se repete igual)
+                                              --timeout inclui a pessoa responder a confirmação: com confirmação, use 300
 
 COMPUTER USE DO MAC — você comanda a tela do usuário; Jev e reserva visual habilitados; a pessoa autoriza cada objetivo
   desk act \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
                                               Foto da tela + OCR local + cliques/rolagem; a pessoa responde um diálogo ANTES de qualquer foto
                                               e confirma cada ação sensível; --fill só no campo já focado. Funciona em terminal e em conversa
+                                              Um act por vez no Mac. Como a pessoa sempre responde, use --timeout 300
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
@@ -422,6 +427,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
     design_page_rename, design_page_delete, design_artboard_add, design_artboard_update,
     design_artboard_duplicate, design_artboard_delete, design_comment_add, design_comment_resolve,
     design_note_add
+  Computer use: sim_act, desk_act
   Perguntas à pessoa: ask_user
   Permissão: approve_tool_use
 ";
@@ -1319,6 +1325,10 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let asked = args.pointer("/request/timeout_s").and_then(Value::as_u64).unwrap_or(120).clamp(10, 600);
             Duration::from_secs(asked + 60)
         }
+        // `act` encadeia passos e pode esperar a pessoa confirmar: o prazo pedido (padrão 115 s), mais margem.
+        "browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("act") => {
+            Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.pointer("/request/timeout")) + 30)
+        }
         "browser.run" => Duration::from_secs(ade_ags_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
         // Esperar a que terminen workers: lo que pidió el agente, más margen.
         "run.await" => {
@@ -1339,11 +1349,13 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         "chat.new" | "chat.send" | "chat.stop" => Duration::from_secs(150),
         "fix.list" | "fix.decide" => Duration::from_secs(60),
+        // O `portal act` espera o prazo pedido (padrão 115 s, o backend corta nele), mais margem.
+        "portal.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 30),
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
         // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).
         "device.start" => Duration::from_secs(150),
-        "sim.act" | "desk.act" => Duration::from_secs(args.get("timeout").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(115).clamp(10, 1800) + 75),
+        "sim.act" | "desk.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 75),
         c if c.starts_with("device.") => Duration::from_secs(60),
         // `routine run` espera a que el agente de destino se calle (hasta 60 s).
         "routine.run" => Duration::from_secs(120),
@@ -1438,7 +1450,14 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     let request = Request { token: handshake.token.clone(), command: command.to_string(), args };
     let payload = serde_json::to_string(&request).map_err(|e| CliError::new(e.to_string(), EXIT_USAGE))?;
     let line = ade_ags_lib::ipc::exchange(&handshake, &payload, timeout).map_err(|e| {
-        if e.retryable { CliError::not_yet(e.message) } else { CliError::new(e.message, EXIT_NO_APP) }
+        // Negado pelo sandbox: o app está aberto, então não é exit 3 ("abra o app").
+        if e.denied {
+            CliError::new(e.message, EXIT_COMMAND_FAILED)
+        } else if e.retryable {
+            CliError::not_yet(e.message)
+        } else {
+            CliError::new(e.message, EXIT_NO_APP)
+        }
     })?;
 
     serde_json::from_str(&line).map_err(|e| CliError::new(format!("Resposta ilegível do app: {e}"), EXIT_NO_APP))

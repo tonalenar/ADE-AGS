@@ -33,12 +33,20 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 /// Nome da variável que o app grava no PTY e a CLI lê. O agente não escolhe o valor.
 pub const SESSION_ENV: &str = "ADE_SESSION";
 
-const ERR_MISSING: &str = "Este comando só funciona dentro de um terminal do ADE AGS (sessão do terminal ausente).";
-const ERR_UNKNOWN: &str = "A sessão deste terminal não é reconhecida. Reabra o terminal da aba.";
-const ERR_FORGED: &str = "ADE_TAB_ID não corresponde a este terminal.";
-const ERR_NO_PID: &str = "Não foi possível confirmar o processo deste terminal (PID do cliente ausente). O comando foi recusado.";
-const ERR_CONVERSATION_UNKNOWN: &str = "Esta conversa não tem um processo registrado no ADE AGS (ela precisa estar aberta no app).";
-const ERR_ANCESTRY: &str = "O processo que chamou este comando não pertence ao terminal desta aba. O comando foi recusado.";
+// Cada erro diz o que fazer: quem lê é o agente, e um "recusado" seco o fazia tentar de novo do mesmo jeito.
+const ERR_MISSING: &str = "Este comando só funciona dentro de um terminal do ADE AGS (sessão do terminal ausente). \
+Rode o `ags` no shell da própria aba ou conversa aberta no app. Se você está nela, algo limpou o ambiente \
+(sandbox do agente, `env -i`, sudo, um servidor MCP lançado fora dela): confira com `echo $ADE_TAB_ID`; sem valor, peça à pessoa para abrir o agente por uma aba do ADE AGS.";
+const ERR_UNKNOWN: &str = "A sessão deste terminal não é reconhecida (o app reiniciou ou o terminal foi trocado). \
+Peça à pessoa para reabrir o terminal desta aba ou retomar a conversa; não reinicie o app por isso.";
+const ERR_FORGED: &str = "ADE_TAB_ID não corresponde a este terminal. Não defina ADE_TAB_ID, ADE_SESSION nem --from à mão: \
+use o ambiente que o app deu a este terminal.";
+const ERR_NO_PID: &str = "Não foi possível confirmar o processo deste terminal (PID do cliente ausente). O comando foi recusado. \
+Use o `ags` que vem com o app (`ags --version`) direto do shell do agente: ele fala pelo socket local, que informa o PID; TCP e proxies não informam.";
+const ERR_CONVERSATION_UNKNOWN: &str = "Esta conversa não tem um processo registrado no ADE AGS (ela precisa estar aberta no app). \
+Mande uma mensagem na conversa para o agente voltar e repita o comando de dentro dela.";
+const ERR_ANCESTRY: &str = "O processo que chamou este comando não pertence ao terminal desta aba. O comando foi recusado. \
+Rode o `ags` no próprio shell da aba ou da conversa: um daemon, `nohup`/`setsid`, outro terminal ou um servidor lançado fora dela não herdam a identidade.";
 
 /// Profundidade máxima da caminhada de pais. Um ciclo ou uma árvore
 /// absurda fecha em vez de andar para sempre.
@@ -428,5 +436,21 @@ mod tests {
         assert!(stranger.contains("não pertence"), "{stranger}");
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    #[test]
+    fn cada_recusa_diz_o_que_fazer_e_nenhuma_manda_reiniciar_o_app() {
+        for err in [ERR_MISSING, ERR_UNKNOWN, ERR_FORGED, ERR_NO_PID, ERR_CONVERSATION_UNKNOWN, ERR_ANCESTRY] {
+            assert!(
+                ["Rode ", "Peça ", "Use ", "Mande ", "Não defina "].iter().any(|verb| err.contains(verb)),
+                "a recusa precisa dizer o próximo passo: {err}"
+            );
+            // Reiniciar o app fecha os terminais e agentes da pessoa (AGENTS.md, regra 2.1).
+            assert!(!err.contains("Reinicie o app"), "{err}");
+        }
+        // Mensagens antigas continuam reconhecíveis por quem as procura (cli_smoke, chat_team::env).
+        assert!(ERR_MISSING.contains("sessão do terminal ausente"));
+        assert!(ERR_UNKNOWN.contains("não é reconhecida"));
+        assert!(ERR_ANCESTRY.contains("não pertence"));
     }
 }
