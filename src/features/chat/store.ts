@@ -71,6 +71,15 @@ const PANELS: readonly string[] = ["summary", "diff", "files", "browser", "desig
  * O painel lembrado: a superfície que estava à vista, ou `"none"` (a pessoa o fechou). Sem nada
  * guardado, ou com lixo, abre no Resumo (o padrão). Pura.
  */
+/**
+ * As superfícies abertas quando o app reabre: a aba salva volta à vista, e se ela é uma superfície (o iPhone, o
+ * Android, o navegador…) tem de voltar aberta também. Sem isso o painel mostrava o iPhone, mas o compartilhamento
+ * com os agentes (`sharedDevices`) saía vazio e `ags sim act` dizia "não está conectado com você". Pura.
+ */
+export function initialSurfaces(panel: RightPanelTab | null): Surface[] {
+  return panel && (SURFACES as RightPanelTab[]).includes(panel) ? [panel as Surface] : [];
+}
+
 export function parsePanel(raw: string | null): RightPanelTab | null {
   if (raw === "none") return null;
   // O Time só abre quando a pessoa o pede naquela hora: nunca volta sozinho ao reabrir o app.
@@ -123,8 +132,11 @@ function readControl(): boolean {
   }
 }
 
+const initialPanel = readPanel();
+
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: readPanel(), lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, thread: null, surfaces: [],
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, thread: null,
+  surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, designOpen: null, panelWidth: readWidth(),
   queues: {},
 }));
