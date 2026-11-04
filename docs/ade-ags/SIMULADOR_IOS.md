@@ -16,6 +16,7 @@ As APIs foram mapeadas com o REA (`inspect_macho` e `inspect_native_dispatch_met
 | Toque, botões e teclado | o `dtuhidd` por XPC: `-[SimDevice lookup:error:]` com `com.apple.coredevice.feature.remote.hid.digitizer`, `xpc_endpoint_create_mach_port_4sim`, `xpc_connection_enable_sim2host_4sim`; eventos `IndigoDigitizerEvent`, `IndigoButtonEvent`, `IndigoKeyboardButtonEvent` | `simulator/native/dtu.rs` |
 | Toque, botões e teclado (reserva) | `SimDeviceLegacyHIDClient` (`initWithDevice:error:`, `sendWithMessage:freeWhenDone:completionQueue:completion:`) com as mensagens Indigo `IndigoHIDMessageForMouseNSEvent`, `…ForButton` e `…ForKeyboardArbitrary` | `simulator/native/hid.rs`, `kit.rs` |
 | Abrir URL, abrir e fechar app, foto | `xcrun simctl openurl / launch / terminate / io screenshot` (públicos) | `simulator/mod.rs` (`ops`) |
+| Foto do computer use | `framebufferSurface` da tela LCD; `IOSurfaceLock` só leitura, cópia BGRA conferida pelo seed; PNG pelo CoreGraphics/ImageIO; `simctl io screenshot` de reserva | `simulator/native/screen.rs` (`Surface`), `computer_use/capture.rs` |
 
 ### Detalhes que importam
 
@@ -150,6 +151,41 @@ O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém u
 - **Um por vez** (padrão): ligar um aparelho desliga os outros que a ADE ligou. Os do app Simulator ficam como estão.
 - **Fora de vista:** o nó para de ouvir os quadros (`unregisterScreenCallbacks`) e esconde a view.
 - **Desligar** fica no menu "⋯"; fechar a ADE desliga tudo (sem `persist`).
+
+## Computer use: velocidade (medido)
+
+O `ags sim act` fotografa, lê e confere a tela a cada passo (ver [COMPUTER_USE_SUPERFICIES.md](COMPUTER_USE_SUPERFICIES.md#laço-e-integração)). Antes, cada passo chamava o `simctl` duas vezes (observar e conferir antes do HID), o `sips` duas vezes e o `swift -e` uma. Agora tudo roda dentro do processo, pela `IOSurface` que o painel já mostra:
+
+- **foto**: os pixels da superfície (cópia em ~1 ms, refeita se o seed mudou no meio), PNG reduzido pelo ImageIO;
+- **revisão**: SHA-256 dos pixels crus; conferir antes de tocar é só ler e somar de novo, sem PNG;
+- **OCR**: o Vision (`VNRecognizeTextRequest`) em processo, aquecido numa thread no primeiro `act`;
+- **tela assentada**: pelos quadros (seed), não por pausas fixas.
+
+O caminho antigo fica de reserva: aparelho girado, outro formato de tela, Intel (só o OCR) ou falha.
+
+Medido em 2026-11-04 no iPhone 17e (iOS 27.0), num Mac M2, com a tela parada, só lendo (sem tocar nem abrir nada), mediana de 8, em release:
+
+```sh
+BENCH_UDID=<udid> cargo test --release --lib computer_use::capture::test::bancada -- --ignored --nocapture
+```
+
+| Etapa | Antes | Agora |
+|---|---|---|
+| Foto | `simctl io screenshot` 1.423 ms | `IOSurface` + PNG 72 ms (tela 6 ms, cópia 0,7 ms, hash 33 ms, PNG ~32 ms) |
+| Redução a 1.200 px | `sips` 89 ms | dentro da foto (o ImageIO sozinho num PNG em disco: 45 ms) |
+| OCR | `swift -e` 507 ms | Vision em processo 137 ms (máx. 268) |
+| Conferência antes do HID | outra foto + `sips`, ~1,5 s | releitura dos pixels 40 ms |
+| Espera da tela | 0,8 s fixos por tentativa, só com tela sem texto | 0,1 s sem quadro (1ª foto), 0,3 s sem quadro e ≥ 0,6 s após a ação |
+| **Passo sem o Jev** (espera + foto + OCR + conferência) | **3.519 ms** | **340 ms** na 1ª foto; ~0,7-0,9 s depois de uma ação, por causa do mínimo de 0,6 s |
+
+Com o Jev (~0,5 s, medido no `decision_shadow_log`, não refeito aqui: custa cota), o passo cai de ~4-5 s para ~0,9 s no primeiro e ~1,3-1,5 s nos seguintes (soma das etapas medidas; o percurso completo com o Jev real não foi medido).
+
+Achados:
+
+- **A primeira leitura do Vision num executável novo levou 70 s** (binário de teste recém-compilado; o mesmo binário de novo: 95-250 ms). É o mesmo custo visto com o `swiftc`. Num app recém-atualizado seria o primeiro `act` parado, então o OCR em processo só entra depois de uma leitura de aquecimento numa imagem fixa; até lá, o `swift -e`.
+- **O hash pesa metade da foto** (33 ms para 11,8 MB). Ele é o que garante "nunca tocar numa tela diferente da que o Jev viu", então ficou inteiro: comparar só o seed não basta, porque uma troca de superfície ou uma escrita fora do ritmo dos quadros passaria.
+- O `simctl` levava 1,4 s e, sem querer, dava tempo à tela de reagir ao toque. O mínimo de 0,6 s depois da ação substitui essa espera de propósito; com ela mais curta, a foto pode mostrar a tela antiga e o Jev mandaria tocar de novo.
+- A foto nativa sai igual à do `simctl` (mesma tela, de pé, sem máscara), com 554 × 1.200 como o `sips`.
 
 ## No canvas
 
