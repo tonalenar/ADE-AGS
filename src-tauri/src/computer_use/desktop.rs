@@ -126,7 +126,8 @@ fn ask_audited(
         Err(_) => (Outcome::Unavailable, "timeout", false),
     };
     audit_decided(db, &call, outcome, by);
-    out.map(|_| ok)
+    // Sem resposta é recusa, não falha da superfície: a auditoria já registrou `Unavailable`.
+    Ok(ok)
 }
 /// O pedido `user.ask` de uma confirmação. Leva o dono (`owner`), senão o diálogo não sabe que agente
 /// pergunta, e a `review` estruturada, para o diálogo mostrar a foto em vez de um caminho.

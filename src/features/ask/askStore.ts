@@ -58,6 +58,9 @@ interface AskState {
   answer: (id: string, answer: string | null) => void;
   /** Vence o prazo sem tirar a pergunta da tela: quem responder depois chama `deliver`. */
   expire: (id: string, deliver: (answer: string) => void) => void;
+  /** Tira a pergunta da tela SEM responder: o prazo venceu e quem perguntou já recebeu `pending`.
+   *  `answer(id, null)` aqui viraria "o usuário não respondeu", que do outro lado é erro. */
+  drop: (id: string) => void;
 }
 
 export const useAskStore = create<AskState>((set, get) => ({
@@ -69,6 +72,7 @@ export const useAskStore = create<AskState>((set, get) => ({
     set((s) => ({ questions: s.questions.filter((x) => x.id !== id) }));
     q.resolve(answer);
   },
+  drop: (id) => set((s) => ({ questions: s.questions.filter((x) => x.id !== id) })),
   expire: (id, deliver) =>
     set((s) => ({
       questions: s.questions.map((q) =>

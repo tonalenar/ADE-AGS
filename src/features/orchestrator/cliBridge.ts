@@ -224,7 +224,9 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
         const tabId = owner.id;
         useAskStore.getState().expire(id, (late) => sendWhenReady(tabId, i18n.t("ask.lateMessage", { question, answer: late })));
       } else {
-        useAskStore.getState().answer(id, null);
+        // Sem aba para a resposta tardia: sai da tela. Nunca `answer(id, null)`: resolveria `null`
+        // antes do `pending`, e o agente (ou o computer use) leria "não respondeu" como falha.
+        useAskStore.getState().drop(id);
       }
       once(ASK_PENDING);
     }, timeoutMs);

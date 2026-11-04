@@ -334,8 +334,12 @@ impl IosSurface {
         }
         let options: &[&str] = if review.is_some() { &[ALLOW, ALWAYS, DENY] } else { &[ALLOW, DENY] };
         let payload = super::desktop::ask_payload(question, options, &self.from, seconds, review);
-        let out = ask_frontend_within(&self.app, "user.ask", &payload, None, Duration::from_secs(seconds + 1))
-            .and_then(unwrap_frontend_result)?;
+        // Sem resposta (fechou, prazo, tela indisponível) é recusa, não falha da superfície: nada foi feito.
+        let Ok(out) = ask_frontend_within(&self.app, "user.ask", &payload, None, Duration::from_secs(seconds + 1))
+            .and_then(unwrap_frontend_result)
+        else {
+            return Ok(Answer::No);
+        };
         Ok(match out["text"].as_str() {
             Some(ALLOW) => Answer::Once,
             Some(ALWAYS) if options.contains(&ALWAYS) => Answer::Always,

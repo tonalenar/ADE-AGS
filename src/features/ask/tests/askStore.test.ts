@@ -28,4 +28,12 @@ describe("askStore: prazo vencido", () => {
     expect(deliver).not.toHaveBeenCalled();
     expect(useAskStore.getState().questions).toHaveLength(0);
   });
+
+  it("prazo vencido sem aba tira da tela sem responder null", () => {
+    const resolve = vi.fn();
+    useAskStore.getState().add(question(resolve));
+    useAskStore.getState().drop("q1");
+    expect(useAskStore.getState().questions).toHaveLength(0);
+    expect(resolve).not.toHaveBeenCalled();
+  });
 });
