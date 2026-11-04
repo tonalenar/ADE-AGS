@@ -72,6 +72,10 @@ A implementação iOS (`computer_use/ios.rs`) faz:
 7. Nova foto antes do HID, inclusive após o diálogo. A revisão usa UDID e hash dos dados de imagem do PNG, ignorando metadados como timestamps. Mudança invalida a decisão sem tocar.
 8. Toque em coordenadas normalizadas convertido para pontos do iOS, `type_text` ou `swipe` existentes. A foto seguinte verifica o resultado. Foto e dimensão incompatíveis com o HID são recusadas; rotação ainda não é suportada.
 
+**Texto do OCR como opção.** As linhas que o OCR local leu na foto vão ao Jev como a pergunta `rotulo`: até 60 textos, sem repetição e só com letra ou número. O valor de `--fill` nunca vai, porque uma foto que o contenha já é bloqueada antes. No clique, se o Jev escolher um texto com probabilidade de pelo menos 0,5, o toque cai no centro da caixa do OCR; a caixa desenhada pelo provedor só vale sem texto confiável, e aí com o piso de 0,85. O motivo foi medido: tocar na aba "Plano" de um app saiu como `scroll_up` com 0,28 quando o Jev só tinha a foto, e o piloto recusou a ação.
+
+**Gestos do iOS.** No iOS, o Jev pode escolher `swipe_left` e `swipe_right`, que são traços horizontais na altura do meio e longe das bordas, e `home`, que é o botão de início. Os três são da família de `scroll`, ação comum sem confirmação, cada um com seu alvo. No Mac eles não existem.
+
 O provedor escolhe somente operações e caixas tipadas. Operações desconhecidas, probabilidades ausentes/inválidas e caixas fora da imagem são recusadas. O núcleo mantém os pisos existentes de 0,4 para ação e 0,75 para conclusão; a caixa usa o piso visual de 0,85. O rótulo é avaliado por probabilidade, nunca pela confiança alternativa de uma escolha.
 
 Não há espera fixa ou repetição automática de mutação depois de erro de transporte. A ação é registrada antes da execução, porque o SO pode aplicar o efeito e só depois retornar erro. A revisão estrita pode parar em telas animadas; a guarda não deve ser desativada. O histórico anticiclo do núcleo vale dentro do `act`, não é um livro-razão persistente entre chamadas.
@@ -88,7 +92,7 @@ O marcador sobrevive ao reinício do app. Num `act` posterior, a pessoa precisa 
 
 Toda ação sensível ou de efeito incerto pede confirmação **por ação**, sem memória de aprovação. O risco da decisão visual só pode elevar o risco: texto local sensível, clique sem rótulo OCR próximo e digitação também exigem confirmação. Navegação ordinária com rótulo reconhecido e classificação segura, e rolagem ordinária, seguem sem diálogo. Sem resposta, recusa, prazo vencido, revogação de alcance ou revisão alterada, não age. O diálogo apresenta operação, alvo, ponto e caminho da foto local para revisão; o usuário também vê o simulador no canvas. Não há alteração nova de frontend.
 
-O log existente registra `browser_vision`, hash do objetivo, operação, probabilidade, latência e `foto_enviada=true superficie=ios` quando o transporte retorna uma resposta válida. Falha de envio registra `foto_envio_tentado=true`, sem afirmar recebimento. Não guarda pixels, OCR, valores digitados, caminho ou exceção crua. As capturas temporárias são removidas ao substituir/descartar a observação.
+O log existente registra `browser_vision`, hash do objetivo, operação, probabilidade, latência e `foto_enviada=true superficie=<ios|desktop> rotulos=<n>` quando o transporte retorna uma resposta válida. Falha de envio registra `foto_envio_tentado=true`, sem afirmar recebimento. Não guarda pixels, OCR, valores digitados, caminho ou exceção crua. As capturas temporárias são removidas ao substituir/descartar a observação.
 
 ## Estado das outras superfícies
 
