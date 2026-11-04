@@ -127,6 +127,7 @@ O que foi tentado para o iOS do simulador desenhar mais liso:
 | Alavanca | Resultado |
 |---|---|
 | Aparelho sem ProMotion (iPhone 17e) no lugar do Pro Max | um pouco melhor na rolagem (com o dedo, 19% contra 27% dos vsyncs sem quadro novo; na inércia, 6% contra 19%); a parada de ~300 ms na troca de página fica. As rajadas abaixo de 8 ms também aparecem no 17e: não é o iOS tentando 120 Hz |
+| Zoom da Tela (canvas menor, como o NeoSimulator faz) | não ajuda. O modo "Zoomed" do iPhone 17 pede um canvas de 960×2079 em vez de 1206×2622 (`DBSDisplayZoomConfigurationController` e `SFBDisplaySetCanvasSize`), mas a `IOSurface` continua com 1206×2622. Com um site animado no Safari, a CPU do iOS ficou em 66% e 57% com zoom, contra 47% e 56% sem zoom: está dentro do ruído. Além disso, o zoom aumenta a interface, e quem testa o app passaria a ver outra tela. O reinício do SpringBoard que o modo pede (`FBSSystemService`) exige um entitlement que o simulador recusa em assinatura ad-hoc |
 | Escala menor na tela da ADE | não muda nada no iOS: ele desenha sempre na resolução do aparelho, e a camada só redimensiona |
 | GPU | o Mac M2 tem uma GPU só; não há o que escolher |
 | Prioridade acima da normal | sem root, não dá: `setpriority(PRIO_DARWIN_ROLE)` em processo do iOS devolve `ENOTSUP`. O `launchd_sim` já dá papel de foco ao SpringBoard e ao app à frente |
