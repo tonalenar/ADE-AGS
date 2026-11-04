@@ -288,6 +288,20 @@ fn typed_flags_are_converted() {
     assert_eq!(v["lines"], serde_json::json!(50));
 }
 
+#[test]
+fn o_act_espera_o_prazo_pedido_igual_no_portal_no_navegador_do_mcp_no_simulador_e_no_mac() {
+    // Padrão 115 s, mais a margem de cada caminho; nunca os 60 s das outras operações do navegador.
+    assert_eq!(read_timeout_for("portal.act", &json!({})), Duration::from_secs(145));
+    assert_eq!(read_timeout_for("portal.act", &json!({ "timeout": 300 })), Duration::from_secs(330));
+    assert_eq!(read_timeout_for("browser.run", &json!({ "request": { "op": "act" } })), Duration::from_secs(145));
+    assert_eq!(read_timeout_for("browser.run", &json!({ "request": { "op": "act", "timeout": 300 } })), Duration::from_secs(330));
+    assert_eq!(read_timeout_for("browser.run", &json!({ "request": { "op": "click" } })), Duration::from_secs(75));
+    assert_eq!(read_timeout_for("sim.act", &json!({ "timeout": "300" })), Duration::from_secs(375));
+    assert_eq!(read_timeout_for("desk.act", &json!({})), Duration::from_secs(190));
+    // Outras ações do portal seguem com os 120 s de sempre.
+    assert_eq!(read_timeout_for("portal.click", &json!({})), Duration::from_secs(120));
+}
+
 /// `watch wait` bloquea hasta 300s por defecto. Con el timeout fijo de 30s de antes,
 /// la CLI cortaba la conexión mucho antes de que la app tuviera algo que contar y el
 /// modo push no habría funcionado nunca.

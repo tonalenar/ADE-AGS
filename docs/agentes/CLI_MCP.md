@@ -17,10 +17,12 @@
 
 ## Protocolo
 - Uma linha JSON `{token, command: "grupo.ação", args}` → `{ok, data, error}` (`ipc/protocol.rs`, `PROTOCOL_VERSION = 1`).
-- Transporte: TCP em `127.0.0.1`, numa porta aleatória.
-  - O handshake fica em `~/.ags/ipc.json` (global) e em `~/.ags/ipc/<pid>.json`.
-  - Os filhos herdam `AGS_HANDSHAKE`.
-  - No Windows, um named pipe por PID (`\\.\pipe\ags-ipc-<pid>`) identifica o processo chamador.
+- Transporte (`ipc/transport.rs`): a CLI usa o canal que entrega o PID de quem chama, quando o handshake o anuncia (campo `socket`):
+  - macOS e Linux: socket Unix `~/.ags/ipc/<pid>.sock` (macOS lê o PID com `LOCAL_PEERPID`; Linux com `SO_PEERCRED`);
+  - Windows: um named pipe por PID (`\\.\pipe\ags-ipc-<pid>`), com `GetNamedPipeClientProcessId`;
+  - TCP em `127.0.0.1`, numa porta aleatória, segue de pé para provar que o app está vivo e para CLIs antigas; não tem PID, então memória, swarm e computer use fecham por ele.
+  - O handshake fica em `~/.ags/ipc.json` (global) e em `~/.ags/ipc/<pid>.json`. Os filhos herdam `AGS_HANDSHAKE`.
+- **Sandbox do agente**: um sandbox que bloqueia AF_UNIX (o `workspace-write` do Codex, o seatbelt fechado do Gemini, o sandbox do Bash do Claude Code) faz todo `ags` falhar com `Operation not permitted`. A CLI devolve exit 1 com o que fazer em cada agente e **nunca** manda reiniciar o app (`credential_connect_error`). Opções e medições em [`COMPUTER_USE_SUPERFICIES.md`](../ade-ags/COMPUTER_USE_SUPERFICIES.md#sandbox-dos-agentes).
 - Limites: 256 conexões e 8 MB por request. O token é comparado em tempo constante.
 - `memory.*` e `swarm.*` exigem `ADE_SESSION` e que o processo seja descendente do PTY da aba (`terminal/session.rs::authorize`).
 - `memory.compact` e `workspace.restore` são negados a agentes (`AGENT_MAINTENANCE_DENIED`): só pela UI.
@@ -48,6 +50,7 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
 - As tools `memory_*` só existem para tasks da frota. Abas de TUI usam a CLI.
 - Papéis de somente leitura recebem só a power `Read` (`powers_for_role`; `docs/ade-ags/MCP_MISSION_SCOPE.md`).
 - Resposta grande (acima de ~6.000 tokens) de uma tool, ou de `tab output`/`tab screen`/`peer check`/`peer pending`/`chat show`/`chat wait`/`recall get` na CLI, vai inteira para `~/.ags/spill/<aba ou tarefa>/<aleatório>.txt` (pasta 0700, arquivo 0600, nunca dentro de um repositório, apagado após 30 dias); o agente recebe cabeça, cauda e o caminho (`ipc/spill.rs`). Na CLI, `--no-spill` devolve tudo.
+- `browser_act`, `sim_act` e `desk_act` são o `portal act`/`sim act`/`desk act` da CLI, com o mesmo prazo (`timeout`, padrão 115 s, faixa 10–1.800, `ipc::mcp::act_timeout_secs`). `sim_act`/`desk_act` repassam a identidade herdada pelo processo do MCP (`ADE_TAB_ID`, `ADE_SESSION` ou o `--tab`) e o backend confere com `authorize_actor`; o `from`/`session` mandado pelo modelo é descartado. Não existem para tarefas da frota. `sim_act` se aprova sozinha (como o navegador); `desk_act` pede aprovação na TUI.
 - `ask_user` tem prazo (padrão 600 s): ao vencer devolve `status: "pending"`, nunca aprovação, e a resposta tardia chega à aba como mensagem. Integrante de time recebe `refused` (`ask_lead`) e leva a dúvida ao orquestrador.
 
 ### Tools (região gerada)
@@ -64,6 +67,7 @@ A tabela abaixo sai de `ipc/mcp.rs` e `forge/tools.rs`; o mesmo vale para a ajud
 | Peers and team | interactive tabs (`--tab`) | `peer_tell`, `peer_deliver`, `peer_handoff`, `peer_receipt`, `team_list`, `team_create`, `team_link`, `team_unlink`, `team_role` |
 | Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_new`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending` |
 | Designs | interactive sessions (`--cwd`) | `design_list`, `design_get`, `design_view`, `design_create`, `design_open`, `design_page_add`, `design_page_rename`, `design_page_delete`, `design_artboard_add`, `design_artboard_update`, `design_artboard_duplicate`, `design_artboard_delete`, `design_comment_add`, `design_comment_resolve`, `design_note_add` |
+| Computer use | interactive sessions (`--cwd`); the app checks the caller's tab or conversation | `sim_act`, `desk_act` |
 | Questions to the person | every session (team members get `refused`, see above) | `ask_user` |
 | Permission | fleet tasks only (`--task`) | `approve_tool_use` |
 <!-- END GENERATED: mcp-tools -->

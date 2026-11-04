@@ -25,8 +25,8 @@ use crate::ipc::protocol::{arg_str, arg_str_opt};
 
 /// Cuánto puede tardar una acción en la página (cargar, esperar un texto…).
 const ACTION_TIMEOUT_S: u64 = 90;
-/// `act` encadeia vários passos (cada um é um snapshot, uma pergunta ao Jev e uma ação).
-const ACT_TIMEOUT_S: u64 = 115;
+// `act` encadeia vários passos (cada um é um snapshot, uma pergunta ao Jev e uma ação): o prazo
+// padrão e a faixa ficam em `ipc::mcp::act_timeout_secs`, os mesmos do MCP `browser_act`.
 
 /// Qué acciones admite un portal y cómo se arma su pedido. Es la lista del frontend
 /// (`PORTAL_OPS`); está acá también para fallar con un mensaje útil antes de molestarlo.
@@ -439,6 +439,15 @@ pub(super) fn portal_open(app: &AppHandle, args: &Value) -> Result<Value, String
     Ok(json!({ "opened": "canvas", "created": made.get("created").cloned().unwrap_or(Value::Null) }))
 }
 
+/// O `--timeout` do `portal act`, em segundos. Fora da faixa é erro de uso (como no `sim act`), não um corte silencioso.
+fn act_timeout(args: &Value) -> Result<u64, String> {
+    let asked = crate::ipc::protocol::arg_u64_checked(args, "timeout")?;
+    match asked {
+        Some(s) if !crate::ipc::mcp::ACT_TIMEOUT_RANGE.contains(&s) => Err("--timeout precisa estar entre 10 e 1800 segundos.".into()),
+        _ => Ok(crate::ipc::mcp::act_timeout_secs(args.get("timeout"))),
+    }
+}
+
 /// `ags portal <acción> <portal> …`: lo que el agente le pide a ese navegador.
 pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Result<Value, String> {
     let from = caller(args)?;
@@ -446,6 +455,7 @@ pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Resu
     let portals = reachable(&boards, &from);
     let target = resolve_portal(&portals, &arg_str(args, "name")?)?;
     let request = request_for(action, args)?;
+    let wait = if action == "act" { act_timeout(args)? } else { ACTION_TIMEOUT_S };
 
     // El proyecto del agente: es el límite de lo que el navegador puede tocar.
     let cwd = open_tabs(app)?.into_iter().find(|t| t.id == from).map(|t| t.cwd).unwrap_or_default();
@@ -459,7 +469,7 @@ pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Resu
         "canvas.portal",
         &json!({ "op": "run", "cwd": cwd, "id": target.id, "request": request, "owner": owner }),
         Some(window_of(&target.key)),
-        std::time::Duration::from_secs(if action == "act" { ACT_TIMEOUT_S } else { ACTION_TIMEOUT_S }),
+        std::time::Duration::from_secs(wait),
     )
     .and_then(unwrap_frontend_result);
     let out = match asked {
@@ -577,6 +587,16 @@ mod test {
         for banned in ["eval", "upload", "cookies", "storage", "mock", "drag"] {
             let err = request_for(banned, &json!({})).unwrap_err();
             assert!(err.contains("não admite"), "{banned}: {err}");
+        }
+    }
+
+    #[test]
+    fn o_prazo_do_act_vem_do_timeout_com_o_padrao_e_a_faixa_do_sim_act() {
+        assert_eq!(super::act_timeout(&json!({ "goal": "x" })).unwrap(), 115);
+        assert_eq!(super::act_timeout(&json!({ "goal": "x", "timeout": 300 })).unwrap(), 300);
+        assert_eq!(super::act_timeout(&json!({ "goal": "x", "timeout": "300" })).unwrap(), 300);
+        for bad in [json!(5), json!(4000), json!("muito")] {
+            assert!(super::act_timeout(&json!({ "goal": "x", "timeout": bad })).is_err(), "{bad}");
         }
     }
 

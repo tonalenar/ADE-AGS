@@ -44,6 +44,20 @@ pub const APPROVAL_TIMEOUT_SECS: u64 = 3600;
 /// `eval` lento (30 s), con margen.
 pub const BROWSER_TIMEOUT_SECS: u64 = 60;
 
+/// Prazo padrão de um `act` (navegador, simulador iOS e Mac), igual na CLI e no MCP. Inclui o
+/// tempo de a pessoa responder a uma confirmação: quem espera uma pede mais (`timeout`).
+pub const ACT_TIMEOUT_SECS: u64 = 115;
+/// Faixa aceita para o `timeout` de um `act`, em segundos.
+pub const ACT_TIMEOUT_RANGE: std::ops::RangeInclusive<u64> = 10..=1800;
+
+/// O prazo pedido para um `act` (número ou texto), dentro da faixa; sem pedido, o padrão.
+pub fn act_timeout_secs(asked: Option<&Value>) -> u64 {
+    asked
+        .and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())))
+        .unwrap_or(ACT_TIMEOUT_SECS)
+        .clamp(*ACT_TIMEOUT_RANGE.start(), *ACT_TIMEOUT_RANGE.end())
+}
+
 /// Para quién corre este servidor.
 #[derive(Debug, Clone, PartialEq)]
 pub enum McpContext {
@@ -93,6 +107,11 @@ browser_press using those refs (or give a whole multi-step goal to browser_act, 
 to test responsive layouts. There are no screenshots in these tools: read the page through snapshots; when you need \
 an image of a page, `ags portal screenshot <portal>` saves a PNG and returns its path. Never launch your own browser \
 window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas.\n\
+Computer use: browser_act (canvas browser), sim_act (an iOS simulator connected to you) and desk_act (the Mac screen; \
+the person consents at the start of every act) let Jev drive a whole goal. Pass expects so success is checked, read \
+report.status (done / unverified / blocked / unsure / stuck / limit): a call that returns is not a success by itself, \
+and a blocked act must not be retried unchanged. timeout includes the person answering a confirmation: use 300 when \
+one is likely. One act at a time per device.\n\
 Orchestration: split a large objective into tasks that other agents run in parallel (each in its own git \
 worktree), visible to the user in ADE AGS's fleet console. agent_roster shows what can run now; run_plan \
 declares the task DAG; run_await waits for progress; task_result reads what a task delivered; fact_add shares \
@@ -141,6 +160,7 @@ pub(crate) fn tool_names() -> Vec<&'static str> {
     let mut names: Vec<&str> = BROWSER_TOOLS.iter().map(|t| t.name).collect();
     names.extend(ORCHESTRATION_TOOLS.iter().map(|t| t.name));
     names.extend(GIT_TOOLS.iter().map(|t| t.name));
+    names.extend(COMPUTER_USE_TOOLS.iter().map(|t| t.name));
     names.push(ASK_TOOL);
     names.push(TOOL_NAME);
     names
@@ -275,6 +295,7 @@ returns the page as it ended: check it, or pass expects so the tool checks for y
                     "description": "What PROVES success, checked by code on the final page (not by Jev): \"text:Your cart is empty\", \"url:/cart\", \"count:1\" (cart items) or \"count:2@Mug\", \"absent:Something went wrong\". Strongly recommended for cart, form submit and filter goals: the report then says DONE (verified) or DOES NOT MATCH.",
                 },
                 "steps": { "type": "number", "description": "Max decisions (1-15). Default 8." },
+                "timeout": { "type": "number", "description": "Seconds to wait for the whole act (10-1800). Default 115, the same as `ags portal act`." },
             })
         },
         required: &["goal"],
@@ -564,6 +585,123 @@ pub fn browser_tool_names() -> Vec<String> {
         .filter(|t| !BROWSER_NEEDS_APPROVAL.contains(&t.name))
         .map(|t| format!("mcp__{SERVER_NAME}__{}", t.name))
         .collect()
+}
+
+// ── Computer use (simulador iOS e Mac) ─────────────────────────
+
+/// O computer use pelo MCP: o mesmo `sim.act`/`desk.act` da CLI (`ipc/commands/sim_act.rs`,
+/// `desk_act.rs`), com a mesma autorização do ator (`terminal::authorize_actor`). O servidor
+/// não decide quem pode: repassa a identidade que herdou do processo do agente (`ADE_TAB_ID` e
+/// `ADE_SESSION`, como a CLI faz em `with_caller`) e o backend confere token e PID. Só das abas e
+/// conversas (`--cwd`): uma tarefa da frota não tem terminal nem conversa que a identifique.
+struct ComputerUseTool {
+    name: &'static str,
+    /// O comando do despachador.
+    dispatch: &'static str,
+}
+
+const COMPUTER_USE_TOOLS: &[ComputerUseTool] = &[
+    ComputerUseTool { name: "sim_act", dispatch: "sim.act" },
+    ComputerUseTool { name: "desk_act", dispatch: "desk.act" },
+];
+
+/// O que um relatório de `act` quer dizer, igual para as duas tools (e para o `browser_act`).
+const ACT_REPORT: &str = "Returns `text` and `report`. Read `report.status`, not just the absence of an error: done = the expects matched on screen; unverified = Jev says done but nothing checked it (pass expects); blocked = a guard, the person or the surface stopped it (do NOT retry the same call: read `report.reason`, fix the cause or ask the person); unsure / stuck = Jev could not pick a safe next step (rephrase the goal with every choice spelled out, or do that step yourself); limit = steps or timeout ran out (raise steps/timeout, or split the goal). Only one act runs at a time per device (and one on the Mac).";
+
+fn computer_use_schemas() -> Vec<Value> {
+    let goal = json!({ "type": "string", "description": "What to achieve, with every choice spelled out, in the language the screen uses." });
+    let fill = json!({ "type": "string", "description": "Optional: text to type into the field that is ALREADY focused, as \"screen=value\" (US ASCII, no Enter/Tab). The value never leaves the machine." });
+    let expects = json!({
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "What PROVES success, checked by local OCR (not by Jev): \"text:Some text\" (only text: is accepted). Pick text that only appears AFTER the goal is reached; without expects the best result is `unverified`.",
+    });
+    let steps = json!({ "type": "integer", "description": "Max decisions (1-15). Default 8." });
+    let timeout = json!({ "type": "integer", "description": "Seconds for the whole act (10-1800). Default 115. It INCLUDES the time the person takes to answer a confirmation in the app: use 300 when one is likely (typing, a risky control, the Mac's start-of-act consent)." });
+    vec![
+        json!({
+            "name": "sim_act",
+            "description": format!("Reach a goal on an iOS simulator that the user connected to you on the ADE canvas (or opened in the chat panel with device control on): Jev looks at the screen and taps, scrolls or types while this tool does it, the same as `ags sim act`. Use `ags device list` to see which simulators you reach. Needs Settings → Decisions → Jev with the browser pilot and the visual fallback turned on. Risky taps and typing ask the person first. {ACT_REPORT}"),
+            "inputSchema": { "type": "object", "properties": {
+                "name": { "type": "string", "description": "The simulator node's name or id, as `ags device list` shows it." },
+                "goal": goal.clone(),
+                "fill": fill.clone(),
+                "expects": expects.clone(),
+                "steps": steps.clone(),
+                "timeout": timeout.clone(),
+            }, "required": ["name", "goal"] },
+        }),
+        json!({
+            "name": "desk_act",
+            "description": format!("Reach a goal on the user's Mac screen (main display), the same as `ags desk act`: Jev looks at a screenshot and clicks, scrolls or types. The person is asked at the start of EVERY act before anything is captured, and again for typing or risky clicks; without their yes the report is `blocked`. Needs Accessibility and Screen Recording for ADE AGS and Settings → Decisions → Jev. macOS only. {ACT_REPORT}"),
+            "inputSchema": { "type": "object", "properties": {
+                "goal": goal,
+                "fill": fill,
+                "expects": expects,
+                "steps": steps,
+                "timeout": timeout,
+            }, "required": ["goal"] },
+        }),
+    ]
+}
+
+/// Os argumentos de um `act` com a identidade de quem chama. Pura: `tab`/`session` são o
+/// `ADE_TAB_ID`/`ADE_SESSION` do processo (ou a aba do `--tab`). O que o modelo mandou como
+/// `from`/`session` é descartado, como na CLI: identidade não vem de argumento.
+pub(crate) fn computer_use_args(context: &McpContext, arguments: Value, tab: Option<String>, session: Option<String>) -> Value {
+    let mut args = match arguments {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    for key in ["from", "session", "mission", "missionId", "taskId"] {
+        args.remove(key);
+    }
+    // Um cliente que manda `300.0` não pode cair no "precisa ser inteiro" do parser da CLI.
+    for key in ["steps", "timeout"] {
+        if let Some(whole) = args.get(key).and_then(Value::as_f64).filter(|n| n.fract() == 0.0 && *n >= 0.0) {
+            args.insert(key.into(), json!(whole as u64));
+        }
+    }
+    // `expects` (como no browser_act) vira o `expect` que o parser da CLI lê.
+    if let Some(expects) = args.remove("expects") {
+        args.entry("expect").or_insert(expects);
+    }
+    let context_tab = match context {
+        McpContext::Cwd { tab, .. } => tab.clone(),
+        McpContext::Task(_) => None,
+    };
+    if let Some(tab) = tab.filter(|t| !t.is_empty()).or(context_tab) {
+        args.insert("from".into(), json!(tab));
+    }
+    if let Some(session) = session.filter(|s| !s.is_empty()) {
+        args.insert("session".into(), json!(session));
+    }
+    Value::Object(args)
+}
+
+fn computer_use<F>(context: &McpContext, tool: &ComputerUseTool, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    if matches!(context, McpContext::Task(_)) {
+        return tool_error("O computer use não está disponível para tarefas da frota: só para abas e conversas do ADE AGS.");
+    }
+    let args = computer_use_args(
+        context,
+        arguments,
+        std::env::var("ADE_TAB_ID").ok(),
+        std::env::var(crate::terminal::SESSION_ENV).ok(),
+    );
+    match send(tool.dispatch, args) {
+        Ok(data) => {
+            let text = data.get("text").and_then(Value::as_str).unwrap_or("").to_string();
+            let report = data.get("report").cloned().unwrap_or(Value::Null);
+            let status = report.get("status").and_then(Value::as_str).unwrap_or("?");
+            let body = json!({ "status": status, "text": text, "report": report });
+            json!({ "content": [{ "type": "text", "text": body.to_string() }] })
+        }
+        Err(e) => tool_error(&e),
+    }
 }
 
 // ── Orquestación ────────────────────────────────────────────────
@@ -973,6 +1111,8 @@ where
         approve(task_id, &args, send)
     } else if let Some(tool) = BROWSER_TOOLS.iter().find(|t| t.name == name) {
         browser(context, tool, args, send)
+    } else if let Some(tool) = COMPUTER_USE_TOOLS.iter().find(|t| t.name == name) {
+        computer_use(context, tool, args, send)
     } else if let Some(tool) = ORCHESTRATION_TOOLS.iter().find(|t| t.name == name) {
         orchestrate(context, tool, args, send)
     } else if let Some(tool) = GIT_TOOLS.iter().find(|t| t.name == name) {
@@ -1237,6 +1377,8 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         let read_only = allowed_powers.is_some_and(|powers| !powers.contains(&OrchestrationPower::Spawn));
         tools.extend(chat_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         tools.extend(design_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
+        // Como o navegador, o computer use vale para todo papel (QA testa no simulador).
+        tools.extend(computer_use_schemas());
     }
     tools.push(ask_schema());
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
@@ -1308,7 +1450,7 @@ pub(crate) fn annotations(name: &str) -> Value {
         "readOnlyHint": read_only,
         // El navegador habla con páginas de verdad y git con el host remoto; la orquestación
         // y las preguntas quedan dentro de la app.
-        "openWorldHint": name.starts_with("browser_") || name.starts_with("git_"),
+        "openWorldHint": name.starts_with("browser_") || name.starts_with("git_") || COMPUTER_USE_TOOLS.iter().any(|t| t.name == name),
     });
     if !read_only {
         a["destructiveHint"] = json!(DESTRUCTIVE.contains(&name));
@@ -1340,6 +1482,9 @@ pub fn auto_approved(name: &str) -> bool {
         })
         || name == ASK_TOOL
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
+        // O simulador é como o navegador do canvas: a corda é a autorização. A tela do Mac, não:
+        // a TUI pede aprovação, além do consentimento que o app pede no início de cada act.
+        || name == "sim_act"
 }
 
 /// Las tools de una tab (sin la de permisos, que es solo de las tareas de fondo), con si se
