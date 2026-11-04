@@ -192,6 +192,15 @@ fn hermes() {
 }
 
 #[test]
+fn antigravity_recebe_as_skills_do_projeto_em_agents_skills() {
+    let agent = adapter("antigravity");
+    // O `agy` lê `<workspace>/.agents/skills/<nome>/SKILL.md` (o mesmo lugar do Codex): é por aí que a
+    // skill `ags-orchestrator` (computer use, peers, portais) chega a ele.
+    assert_eq!(agent.def().skills_dir, Some(".agents/skills"));
+    assert!(agent.capabilities().skills);
+}
+
+#[test]
 fn hermes_recebe_o_mcp_numa_config_gerenciada_que_so_traz_o_ags() {
     let yaml = crate::ipc::mcp::hermes_managed_config(r"C:\Program Files\ADE AGSgs.exe", &["mcp", "--cwd", r"C:\proj", "--tab", "t1"]);
     // YAML em estilo JSON: válido para o Hermes, sem gerador de YAML.

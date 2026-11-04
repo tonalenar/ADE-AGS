@@ -1,9 +1,9 @@
 ---
 name: ags-orchestrator
-description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.47.0
+description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
+version: 1.48.0
 categories: [orchestration, tooling]
-compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
+compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
 ---
 
@@ -25,6 +25,7 @@ of asking the user to click through the UI.
 | QA in the flow and test speed rules | [QA in the flow & test speed](#qa-in-the-flow-and-test-speed-rules-point-3--point-5) |
 | Find, read or write skills | [Skills](#installing-skills) |
 | Check on background fleet tasks | [The fleet](#the-fleet-background-agents) |
+| Let Jev click through a page, a simulator or the Mac | [Computer use with Jev](#computer-use-with-jev-portal-act-sim-act-desk-act) |
 
 ## Before anything else
 
@@ -36,6 +37,13 @@ Every command prints **one line of JSON to stdout**. Exit codes: `0` success,
 `1` the app rejected the command (read `.error`), `2` bad usage, `3` the app isn't running.
 
 If you get `3`, stop and tell the user to open ADE AGS — do not try to work around it.
+
+If a command fails with `Operation not permitted` / "the agent's sandbox blocked the ADE AGS socket", the
+app **is** running: your sandbox is blocking its local socket (`~/.ags/ipc/<pid>.sock`). Never restart the
+app (it kills the user's terminals). In Codex, rerun the same `ags` command asking for escalation
+(`sandbox_permissions: "require_escalated"`, justification "talk to ADE AGS over its local socket") and let
+the person approve it, ideally for the session; do not switch to `danger-full-access` for it. See
+[Sandboxes](#sandboxes-codex-gemini-claude-code).
 
 When you run inside one of the app's tabs, `ags` always reaches **the instance that opened
 that tab** (it inherits `AGS_HANDSHAKE`), even if the user has another ADE AGS
@@ -737,6 +745,8 @@ ags portal close Docs                       # clean up what you created
   user and each loaded page costs memory. Only portals connected to you can be closed.
 - If an action times out the error says why (window hidden, interface busy, page loading, no runtime). An
   `act` that times out keeps the steps it already did in the error: check `ags portal snapshot` before repeating them.
+- For a whole flow (log in, fill a form, add to cart), let Jev drive with `ags portal act`; see
+  [Computer use with Jev](#computer-use-with-jev-portal-act-sim-act-desk-act).
 
 ### Account pools
 
@@ -819,15 +829,17 @@ ags device say iPhone "Login fixed: the button no longer hides under the keyboar
 - The node has a **chat**: what the user writes there reaches every agent connected to it (with
   the current screen attached). Answer there with `ags device say`, not in your terminal only;
   the other connected agents and the user see it, together with the actions you took.
-- `ags sim act iPhone "Open General in Settings" --expect "text:iPhone Storage" --steps 8 --timeout 115`
+- `ags sim act iPhone "Open General in Settings" --expect "text:iPhone Storage" --steps 8 --timeout 300`
+  (see [Computer use with Jev](#computer-use-with-jev-portal-act-sim-act-desk-act) for statuses and timeouts)
   runs the shared observe/decide/act/verify loop using simulator screenshots and existing HID.
   Run it from an ADE terminal tab (app-issued PTY session + descendant process) or from an ADE
   protocol conversation (Codex, Claude, OpenCode, Antigravity: the app recognises the engine
   process of that `thread:<id>`, no token). CLI flags cannot replace that identity.
   Enable Jev, browser step and visual fallback in Decisions first. It uses only the configured
-  provider; no Chrome/CDP or WebView2 is involved. `--timeout` is seconds (10–1800); individual
-  native operations have their own bounded timeout and may finish after that deadline.
-- `ags desk act "Open Mail and show the inbox" --expect "text:Inbox" --steps 8` is the same loop for
+  provider; no Chrome/CDP or WebView2 is involved. `--timeout` is seconds (10–1800, default 115) and
+  **includes the time the person takes to answer a confirmation**; individual native operations have
+  their own bounded timeout and may finish after that deadline.
+- `ags desk act "Open Mail and show the inbox" --expect "text:Inbox" --steps 8 --timeout 300` is the same loop for
   the **user's Mac screen** (computer use). Same identity rules as `sim act`, same Jev/visual
   settings. The person gets a dialog **before anything is photographed** (no switch, no flag can
   skip it) and confirms sensitive or uncertain actions one by one; every question and answer is
@@ -861,6 +873,75 @@ Devices the user opens in the right panel of chat mode are shared with every age
 connected ones: `ags device list` shows them with `"source": "chat"` and an id like `chat:<udid|serial>`.
 Unless the user turned on "Allow agents to control devices" in that panel (`"control": true`), you can
 only look at them (`shot`, `tree`); every other action fails. `say` does not apply to them.
+
+### Computer use with Jev (`portal act`, `sim act`, `desk act`)
+
+Jev (the app's typed decision model) can reach a whole goal for you: it looks at the target, picks the next
+click, tap, scroll or typing, the app does it and checks again. Same loop on three surfaces:
+
+| Target | CLI | MCP tool | Who it reaches | Checks (`--expect`) |
+|---|---|---|---|---|
+| Canvas browser (portal) | `ags portal act <portal> "goal"` | `browser_act` | portals connected to you | `text:` `url:` `count:` `absent:` |
+| iOS simulator (macOS) | `ags sim act <simulator> "goal"` | `sim_act` | simulators connected to you, or opened in the chat panel with device control on | `text:` (local OCR) |
+| The user's Mac screen | `ags desk act "goal"` | `desk_act` | the main display, after the person consents to **this** goal | `text:` (local OCR) |
+
+```bash
+ags portal act Shop "log in, add the Backpack to the cart and open the cart" \
+  --fill "Username=standard_user" --fill "Password=secret_sauce" --expect "text:Your Cart" --steps 12
+ags sim act iPhone "Open General in Settings" --expect "text:iPhone Storage" --timeout 300
+ags desk act "Open Mail and show the inbox" --expect "text:Inbox" --timeout 300
+```
+
+Flags (all three): `--steps 1..15` (default 8), `--timeout 10..1800` seconds (default 115), `--expect`
+(repeatable) and `--fill`. In the browser `--fill "Field label=value"` (repeatable, the label must look like
+the field's); on iOS and the Mac a single `--fill "screen=value"` types into the field that is **already
+focused** (US ASCII, no Enter/Tab). Typed values never leave the machine. Enable Settings → Decisions → Jev
+(browser pilot; visual fallback for iOS and the Mac) first: nothing is turned on for you.
+
+**Read `report.status`, not the exit code.** Exit `0` only means a report came back:
+
+| `report.status` | Meaning | What to do |
+|---|---|---|
+| `done` | your `--expect` matched on screen | report success |
+| `unverified` | Jev says done, nothing checked it | look yourself (`portal snapshot`, `device shot`) or rerun with an `--expect` that only appears at the end |
+| `blocked` | a guard, the person or the surface stopped it (refused or unanswered confirmation, secret on screen, invalid goal, missing permission) | **do not repeat the same call**: read `report.reason`, fix the cause or ask the person; a confirmation that timed out can be retried with a longer `--timeout` |
+| `unsure` / `stuck` | Jev found no safe next step | rephrase the goal with every choice spelled out, split it, or do that step by hand |
+| `limit` | steps ran out | raise `--steps` (max 15) or split the goal |
+
+The browser text says the same as **DONE (verified)**, **DONE (unverified)** or **DOES NOT MATCH**. A deadline
+that runs out mid-act is an error (exit 1) that keeps the steps already done: look before repeating them.
+
+**Timeouts include the person.** Typing, a risky control (pay, delete, sign out, send…) and every
+`desk act` ask the person in the app, and the clock keeps running while they read. With a likely
+confirmation use `--timeout 300`; the CLI waits that long plus a margin, and the MCP tools take the same
+`timeout`. Without an answer in time the act is `blocked` ("the person did not confirm"), never a failure of Jev.
+
+**One act at a time.** One per simulator and one on the Mac (a global lock): a second one is refused while
+the first runs. Do not start acts in parallel on the same target; on the Mac, not at all.
+
+**Who may call.** The app checks who you are, not your flags: a terminal tab (its `ADE_SESSION` token and a
+process that descends from that terminal) or a protocol conversation (`thread:<id>` and a process that
+descends from that conversation's engine). Run `ags` from your own shell; a daemon, `nohup`, another
+terminal or a server started elsewhere is refused. Each refusal says what to do.
+
+**Which agents.** Claude Code, Codex, Gemini CLI, OpenCode, Kimi, Hermes, Antigravity and Cursor all reach
+it through the `ags` CLI in their shell, in a tab. Codex, Claude Code, OpenCode, Antigravity and Cursor
+also run as chat-mode conversations, with the same CLI. The MCP tools (`browser_act`, `sim_act`,
+`desk_act`) exist where ADE AGS injects its MCP server: Claude Code and OpenCode tabs, and Hermes.
+
+#### Sandboxes (Codex, Gemini, Claude Code)
+
+`ags` talks to the app over a local Unix socket (`~/.ags/ipc/<pid>.sock` on macOS and Linux, a named pipe
+on Windows). A sandbox that blocks AF_UNIX connections makes **every** `ags` command fail with
+`Operation not permitted (os error 1)`, while the app is fine.
+
+- **Codex** (`workspace-write`, the default of chat-mode conversations): rerun the `ags` command with
+  `sandbox_permissions: "require_escalated"` and a one-line justification; the person approves it (for the
+  session, so it is asked once). Never ask for `danger-full-access` just for this.
+- **Gemini CLI**: without `--sandbox` nothing is blocked; with the macOS seatbelt use a profile that allows
+  network (`permissive-open`, the default); inside docker/podman the socket does not exist.
+- **Claude Code** with its Bash sandbox on: the person allows the socket folder in
+  `sandbox.network.allowUnixSockets` (only `~/.ags/ipc`), or approves running `ags` outside the sandbox.
 
 ### Telling the user
 
@@ -1325,6 +1406,7 @@ flags of each command.
 | Peers and team | interactive tabs (`--tab`) | `peer_tell`, `peer_deliver`, `peer_handoff`, `peer_receipt`, `team_list`, `team_create`, `team_link`, `team_unlink`, `team_role` |
 | Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_new`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending` |
 | Designs | interactive sessions (`--cwd`) | `design_list`, `design_get`, `design_view`, `design_create`, `design_open`, `design_page_add`, `design_page_rename`, `design_page_delete`, `design_artboard_add`, `design_artboard_update`, `design_artboard_duplicate`, `design_artboard_delete`, `design_comment_add`, `design_comment_resolve`, `design_note_add` |
+| Computer use | interactive sessions (`--cwd`); the app checks the caller's tab or conversation | `sim_act`, `desk_act` |
 | Questions to the person | every session (team members get `refused`, see above) | `ask_user` |
 | Permission | fleet tasks only (`--task`) | `approve_tool_use` |
 <!-- END GENERATED: mcp-tools -->

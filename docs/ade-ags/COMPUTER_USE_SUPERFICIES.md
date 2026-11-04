@@ -3,7 +3,7 @@
 ## Uso
 
 ```sh
-ags sim act iPhone "Abra Geral nos Ajustes" --expect "text:Armazenamento do iPhone" --steps 8 --timeout 115
+ags sim act iPhone "Abra Geral nos Ajustes" --expect "text:Armazenamento do iPhone" --steps 8 --timeout 300
 ags sim act iPhone "Preencha o campo já focado" --fill "screen=exemplo" --expect "text:exemplo"
 ```
 
@@ -12,9 +12,11 @@ A chamada exige a identidade de quem chama, verificada pelo backend (veja "Quem 
 Em Ajustes → Decisões, é necessário habilitar Jev, o piloto do navegador e a reserva visual. Nada é ligado automaticamente. O comando usa somente o provedor e a URL configurados, sem fallback para outro serviço. O transporte visual existente usa `jev-preview`; provedores sem suporte a imagem são recusados antes de capturar. A CLI instalada só terá o comando depois de uma atualização autorizada; o código novo não altera o app instalado.
 
 - `--steps`: 1–15, padrão 8.
-- `--timeout`: segundos, 10–1.800, padrão 115. O prazo é conferido entre fases, inclusive depois de OCR/diálogos. Uma operação nativa já iniciada tem prazo próprio (até 60 s no `simctl`) e pode terminar depois do orçamento. A CLI reserva mais 75 s para esse encerramento.
+- `--timeout`: segundos, 10–1.800, padrão 115. **O prazo inclui o tempo de a pessoa responder a uma confirmação** (digitar, controle de risco, consentimento do Mac): com confirmação provável, use 300. O mesmo padrão e a mesma faixa valem para `portal act` e para as tools MCP (`browser_act`, `sim_act`, `desk_act`), por `ipc::mcp::act_timeout_secs`. O prazo é conferido entre fases, inclusive depois de OCR/diálogos. Uma operação nativa já iniciada tem prazo próprio (até 60 s no `simctl`) e pode terminar depois do orçamento. A CLI reserva mais 75 s para esse encerramento.
 - `--fill screen=valor`: um preenchimento no campo **já focado**. O modelo não gera texto. Usa o teclado US ASCII do HID existente; texto vazio, caracteres não suportados e controles (inclusive Enter/Tab) são recusados antes de agir. Não limpa automaticamente conteúdo anterior e não envia Enter.
 - `--expect text:trecho`: repetível, todos os trechos precisam aparecer no OCR local. `url:`, `count:` e `absent:` são recusados antes de agir: ainda não existe árvore AX no iOS. A verificação é textual e pode falhar por OCR.
+
+Apenas um `act` por vez: um por simulador e um no Mac (trava global); o segundo é recusado enquanto o primeiro roda.
 
 A resposta JSON inclui `text` legível, como no `portal act`, e `report` com status, ações/tentativas, contagem de observações e chamadas ao decisor. O exit 0 da CLI indica que o relatório foi obtido; confira `report.status` para saber se o objetivo foi atingido. `done` exige expectativas locais satisfeitas; a conclusão do Jev sem expectativas é `unverified`. Limite, incerteza e falha não são apresentados como sucesso. O resumo também aparece na conversa do nó do simulador, sem valores digitados.
 
@@ -22,14 +24,59 @@ A resposta JSON inclui `text` legível, como no `portal act`, e `report` com sta
 
 A mensagem antiga "sim act exige a sessão de um terminal ADE AGS" vinha de `terminal::authorize`: token `ADE_SESSION` + PID descendente do PTY. Só terminais de aba recebem o token; as conversas por protocolo recebiam apenas `ADE_TAB_ID=thread:<id>`, que não é segurança. Hoje `terminal::authorize_actor` aceita os dois, sem abrir brecha:
 
-| Quem chama | Caminho até o Jev | Identidade verificada | Antes | Agora |
-|---|---|---|---|---|
-| Claude Code, Codex, Gemini, OpenCode, Antigravity, Cursor em **aba de terminal** | `ags portal act`, `ags sim act`, `ags desk act` (shell); MCP `browser_act` | token `ADE_SESSION` + PID descendente do PTY | `sim act` ok; `portal act` só confia no `from` | igual, mais `desk act` |
-| Codex, Claude, OpenCode, Antigravity em **conversa por protocolo** (`conversa/`) | `ags …` pelo shell do agente | `thread:<id>` + PID do cliente descendente do processo do motor (registrado após cada spawn); também recebe `ADE_SESSION` | `sim act` recusado | `sim act` e `desk act` ok |
-| Cursor em conversa | idem | não existe motor de Cursor em `conversa/` (só TUI); se entrar, o spawn precisa chamar `chat_team::env::register_process` | n/a | n/a |
-| MCP `ags mcp` (browser/design) | escopo por `tabId` informado | não verifica sessão | só navegador | sem tool de computer use: o CLI é o caminho |
+| Quem chama | Caminho até o Jev | Identidade verificada | Estado |
+|---|---|---|---|
+| Claude Code, Codex, Gemini, OpenCode, Kimi, Hermes, Antigravity, Cursor em **aba de terminal** | `ags portal act`, `ags sim act`, `ags desk act` (shell) | token `ADE_SESSION` + PID descendente do PTY | ok |
+| Codex, Claude Code, OpenCode, Antigravity, Cursor em **conversa por protocolo** (`conversa/`) | `ags …` pelo shell do agente | `thread:<id>` + PID do cliente descendente do processo do motor (`register_process` nos cinco motores); também recebe `ADE_SESSION` | ok |
+| MCP `ags mcp --cwd` (abas de Claude Code e OpenCode; Hermes pela config gerenciada) | `browser_act`, `sim_act`, `desk_act` | `sim_act`/`desk_act` repassam o `ADE_TAB_ID`/`ADE_SESSION` que o processo do MCP herdou (ou o `--tab`) e o backend confere com `authorize_actor`, como na CLI; argumentos `from`/`session` do modelo são descartados | ok |
+| MCP `ags mcp --task` (frota) | `browser_act` | escopo pela tarefa | sem computer use: não há aba nem conversa que identifique a tarefa |
+
+Gemini, Kimi e Hermes não têm motor de conversa (só aba PTY). O Codex não recebe o MCP do ADE AGS (`McpStyle::None`): usa a CLI. As conversas por protocolo também não recebem o MCP: usam a CLI.
 
 A conversa por protocolo recebe `ADE_SESSION` (decisão do usuário, P7 do desenho de unificação): `chat_team::env::thread_env` emite um token novo a cada processo do motor, que só vale depois de `register_process` saber o PID (um respawn troca o token, como num PTY novo). O token fica só na memória do app e no ambiente do motor; não é segredo do keyring. Com ele a conversa usa `memory.*`/`swarm.*` (memória e quadro da missão). Sem PID do peer (plataforma sem a API) a conversa é recusada. Um terminal que afirma ser `thread:x` não descende do processo daquela conversa e é recusado.
+
+## Sandbox dos agentes
+
+O `ags` fala com o app por um socket Unix (`~/.ags/ipc/<pid>.sock`, macOS e Linux) ou um named pipe (Windows), que entrega o PID de quem chama. Um sandbox que bloqueia conexões AF_UNIX faz **todo** comando `ags` falhar com `Operation not permitted (os error 1)`, com o app de pé. A CLI reconhece o caso (`ipc::transport::credential_connect_error`): sai com exit 1 (não 3, "abra o app"), não manda reiniciar o app e diz o que fazer em cada agente (`CODEX_SANDBOX` → Codex, `SANDBOX` → Gemini).
+
+**Codex (medido no `codex-cli 0.166.0`, sem modelo e sem cota).** Servidor de socket Unix descartável numa pasta de teste e cliente rodando dentro do sandbox, por `codex sandbox` e pelo caminho real da conversa (`codex app-server` + `command/exec`, que usa a política do sandbox sem chamar o modelo):
+
+| Configuração | Socket da pasta liberada | Outro socket | Rede externa (`curl`) | TCP direto |
+|---|---|---|---|---|
+| `workspace-write` (o padrão da conversa, `access_policy`) | recusado (os error 1) | recusado | recusada | recusado |
+| `codex sandbox --allow-unix-socket <pasta>` (flag só do comando `sandbox`) | ok | recusado | — | — |
+| perfil `[permissions.ags]` com `network.unix_sockets = {"<pasta>"="allow"}` | recusado | recusado | recusada | — |
+| o mesmo perfil + `network.enabled = true` | ok | recusado | **liberada (200)** | — |
+| o mesmo + `--enable network_proxy` (feature **experimental**) | ok | recusado | recusada pelo proxy (403) | recusado |
+
+`ADE_TAB_ID` e `ADE_SESSION` chegam ao shell do Codex na conversa (o padrão de `shell_environment_policy` herda o ambiente). Na aba PTY a ADE já põe `ADE_TAB_ID` por `-c shell_environment_policy.set` e `ADE_SESSION` por perfil 0600 (`pty_manager::with_codex_identity`).
+
+Conclusão: a liberação estreita (só a pasta `~/.ags/ipc`, rede fechada) existe, mas depende da feature experimental `network_proxy`; sem ela, a mesma config **abre a rede geral**. Por isso **nada foi aplicado** ao sandbox: a decisão é do usuário. Opções:
+
+1. **Escalonamento por comando (hoje, sem mudança de código).** O Codex pede `sandbox_permissions: "require_escalated"` ao rodar `ags`; a pessoa aprova (uma vez ou para a sessão). A skill, o aviso de erro e as instruções do MCP ensinam isso. Foi o que passou no teste real.
+2. **Perfil estreito na conversa.** `thread/start` aceita `config`: um perfil `extends = ":workspace"` com `network = { enabled = true, unix_sockets = { "~/.ags/ipc" = "allow" } }` e `features.network_proxy = true`. Liberaria só o socket, mas uma versão do Codex sem o proxy (ou que mude a feature) abriria a rede inteira. Exigiria conferir a versão/feature antes de aplicar.
+3. **Regra de exec** (`~/.codex/rules/*.rules`, `prefix_rule(["ags"], decision="allow")`). Rodaria o `ags` inteiro fora do sandbox sem perguntar; mexe no `~/.codex` do usuário. Mais amplo que (1).
+
+`danger-full-access` não é opção.
+
+**Gemini CLI.** Sem `--sandbox` não há bloqueio. No macOS o perfil padrão `permissive-open` permite rede de saída (inclui AF_UNIX); os perfis `*-closed`/`restrictive-*` bloqueiam; em docker/podman o socket não existe. **Não verificado aqui** (o `gemini` não está instalado nesta máquina).
+
+**Claude Code** com o sandbox do Bash ligado: `sandbox.network.allowUnixSockets` com a pasta `~/.ags/ipc`. A ADE não liga esse sandbox nas abas.
+
+## Agente × superfície
+
+| Agente | Aba PTY: CLI | Aba PTY: MCP (`browser_act`/`sim_act`/`desk_act`) | Conversa por protocolo | Skill `ags-orchestrator` |
+|---|---|---|---|---|
+| Claude Code | ok | ok (`--mcp-config`) | ok (CLI) | `.claude/skills` |
+| Codex | ok com escalonamento quando o sandbox bloqueia | — (não recebe o MCP) | ok com escalonamento (`workspace-write`) | `.agents/skills` |
+| Gemini CLI | ok (sem `--sandbox` ou com `permissive-open`) | — | sem motor | `.agents/skills` |
+| OpenCode | ok | ok (`OPENCODE_CONFIG_CONTENT`) | ok (CLI) | `.agents/skills` |
+| Kimi | ok | — | sem motor | `.agents/skills` |
+| Hermes | ok | MCP gerenciado; herança de `ADE_SESSION` não verificada | sem motor | não recebe: as skills dele ficam em `~/.hermes/skills`, fora do projeto |
+| Antigravity | ok | — | ok (CLI) | `.agents/skills` (o `agy` 1.5.0 lê essa pasta) |
+| Cursor | ok | — | ok (CLI) | `.cursor/skills` |
+
+Estado pelo código e pelos testes com fakes (`ipc/test.rs`, `agents/contract.rs`, `terminal/session.rs`, `ipc/transport.rs`). O percurso real com Jev em cada CLI **não foi medido**: custa cota e exige OK.
 
 ## O que cada um alcança (`surfaces::reach`)
 
@@ -45,7 +92,7 @@ Um aparelho do painel que também é portal ligado ao ator aparece só como o po
 ## Computer use do Mac (`ags desk act`)
 
 ```sh
-ags desk act "Abra o Mail e mostre a caixa de entrada" --expect "text:Caixa de Entrada" --steps 8 --timeout 115
+ags desk act "Abra o Mail e mostre a caixa de entrada" --expect "text:Caixa de Entrada" --steps 8 --timeout 300
 ```
 
 Mesmo núcleo do iOS (`computer_use::run`), com `computer_use/desktop.rs`: foto da tela principal (`screencapture`), OCR local, entrada por CGEvent (`desk_input.swift`, só `click`/`scroll`/`type`/`bounds`/`check`). Regras:

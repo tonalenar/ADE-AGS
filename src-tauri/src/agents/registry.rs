@@ -368,7 +368,10 @@ pub const AGENTS: &[AgentDef] = &[
         // Terminal interactivo, con alguien mirando. Los runs autónomos no leen esto.
         launch_args: Some(&["--dangerously-skip-permissions"]),
         version_flag: "--version",
-        skills_dir: None,
+        // O `agy` (verificado no 1.5.0, nas instruções embutidas no binário) descobre skills em
+        // `<workspace>/.agents/skills/<nome>/SKILL.md`, a mesma pasta do Codex e do Gemini: sem isto
+        // a skill `ags-orchestrator` nunca chegava ao Antigravity.
+        skills_dir: Some(".agents/skills"),
         // Native OS keyring account. Task config isolation does not isolate OAuth accounts.
         profile: None,
         resume: None,
