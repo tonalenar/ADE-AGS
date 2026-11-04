@@ -65,7 +65,7 @@ O que **não** funciona: a opção de boot `disabled_jobs`. Nem o `simctl boot -
 
 O que funciona (`simulator/slim.rs`, descoberto pela ferramenta simslim): o `launchd_sim` lê, quando sobe, a lista de serviços desligados de `/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist` (rótulo → `true`). No modo leve, com o aparelho desligado, a ADE:
 1. guarda o original (`disabled.ade-original.plist`);
-2. acrescenta 143 rótulos;
+2. acrescenta 157 rótulos;
 3. liga o aparelho;
 4. espera a tela e os primeiros serviços do `launchd_sim`;
 5. devolve o original.
@@ -81,6 +81,8 @@ Medido no iPhone 17 (iOS 27.0), ligado pelo `simctl boot`. A CPU e os processos 
 | CPU do iOS, 120 s | 495% | 1% |
 | Memória comprimida no Mac, 120 s | 7,0 GB | 0,5 GB |
 | Soma do `phys_footprint` | ~20 GB | ~11,8 GB |
+
+Os 14 rótulos de Wallet, mídia e tarefas de fundo do Safari vieram do catálogo do NeoSimulator, que também vem do simslim. Medido no iPhone 17 (iOS 27.1), pelo `simctl boot`, aos 120 s, em duas rodadas alternadas: 125 → 91 e 90 → 82 processos do iOS, com CPU de 0-1% nos dois casos. O Safari e os Ajustes abriram em todas as rodadas. As categorias "Loja" e "Web" do NeoSimulator ficam de fora: tirariam push, compras, App Store, universal links e push de sites.
 
 Com o original devolvido logo depois do boot: 93 processos e 1% de CPU aos 45 s e aos 120 s, e o arquivo igual ao original antes e depois de desligar.
 
@@ -161,6 +163,8 @@ O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém u
 ## Agentes
 
 `ags device …` aceita nós iOS. Veja a skill `ags-orchestrator`, seção "iOS simulators on the canvas".
+
+**Área de transferência:** no "⋯" da barra do nó e do painel do chat, "Colar no aparelho o que o Mac copiou" e "Trazer para o Mac o que o aparelho copiou". Os agentes leem o que o aparelho copiou com `ags device clipboard <aparelho>` e põem texto nele com `ags device clipboard <aparelho> "texto"`. Tudo vai pelo `xcrun devicectl device pasteboard` (CoreDevice), que leva texto, imagem e os outros tipos. O `simctl pbcopy` (SimPasteboard) ainda lê, mas, segundo o NeoSimulator, no iOS 27.2 já não substitui o conteúdo do aparelho.
 
 **Girar:** o botão ↻ da barra do nó, o do painel do chat e `ags device rotate <aparelho> [left|right]` giram um quarto de volta pelo mesmo caminho (`simulator::rotate_device`): um `GSEvent` de orientação para a `PurpleWorkspacePort` (`native/purple.rs`). Depois do giro, as telas abertas se endireitam e o evento `simulator-orientation` deita a moldura em todas as telas que mostram o aparelho, mantendo a escala. No Android, `ags device rotate` alterna retrato e paisagem.
 
