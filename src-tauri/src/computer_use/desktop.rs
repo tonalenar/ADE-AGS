@@ -382,6 +382,7 @@ pub(crate) fn act(
         frame,
         allow_type: request.fills.contains_key("screen"),
         surface: "desktop",
+        gestures: false,
     };
     Ok(run(request, &mut surface, &mut decider))
 }

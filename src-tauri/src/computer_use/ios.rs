@@ -248,8 +248,39 @@ struct IosSurface {
     frame: Arc<Mutex<Frame>>,
     fills: Vec<String>,
     expect: Vec<String>,
+    /// O OCR da foto que `settled` já leu, para a observação não ler de novo.
+    read_ahead: Option<(String, Vec<Label>)>,
 }
+/// Menos que isto de linhas de texto é tela ainda carregando (um app abrindo, uma transição).
+const MIN_LABELS: usize = 2;
+/// Quantas vezes esperar a tela assentar antes de mostrar o que houver ao decisor, e quanto esperar.
+const SETTLE_TRIES: usize = 6;
+const SETTLE_WAIT: Duration = Duration::from_millis(800);
+
+/// Esperar outra foto: só com a tela quase sem texto, tentativas sobrando e prazo para mais uma espera.
+pub(super) fn should_settle(labels: usize, try_no: usize, time_left: Duration) -> bool {
+    labels < MIN_LABELS && try_no + 1 < SETTLE_TRIES && time_left > SETTLE_WAIT * 4
+}
+
 impl IosSurface {
+    /// A foto de uma tela já assentada: logo depois de abrir um app o iOS ainda está desenhando e o OCR lê só o
+    /// relógio. Uma foto assim faria o decisor gastar uma consulta para responder "não sei". O OCR feito aqui é
+    /// reaproveitado pela observação.
+    fn settled(&mut self) -> Result<(PathBuf, String), String> {
+        let mut try_no = 0;
+        loop {
+            let (path, revision) = capture(&self.udid, self.deadline)?;
+            let read = ocr(&path, self.deadline)?;
+            if !should_settle(read.1.len(), try_no, self.deadline.saturating_duration_since(Instant::now())) {
+                self.read_ahead = Some(read);
+                return Ok((path, revision));
+            }
+            let _ = std::fs::remove_file(&path);
+            try_no += 1;
+            std::thread::sleep(SETTLE_WAIT);
+        }
+    }
+
     fn ask(&self, question: &str) -> Result<bool, String> {
         let seconds = self
             .deadline
@@ -281,7 +312,7 @@ impl Surface for IosSurface {
         Ok(())
     }
     fn observe(&mut self) -> Result<Observation, String> {
-        let (path, revision) = capture(&self.udid, self.deadline)?;
+        let (path, revision) = self.settled()?;
         let mut fresh = Frame {
             labels: vec![],
             path,
@@ -301,7 +332,10 @@ impl Surface for IosSurface {
                 "Orientação da foto não confere com o HID; rotação ainda não é suportada.".into(),
             );
         }
-        let (text, labels) = ocr(&fresh.path, self.deadline)?;
+        let (text, labels) = match self.read_ahead.take() {
+            Some(read) => read,
+            None => ocr(&fresh.path, self.deadline)?,
+        };
         fresh.labels = labels;
         let mut local_only = marked(&self.db, &self.udid)?;
         let ordinary =
@@ -345,6 +379,24 @@ impl Surface for IosSurface {
                 Target {
                     id: "scroll_down".into(),
                     label: "Rolar para cima".into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
+                Target {
+                    id: "swipe_left".into(),
+                    label: "Deslizar para a esquerda".into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
+                Target {
+                    id: "swipe_right".into(),
+                    label: "Deslizar para a direita".into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
+                Target {
+                    id: "home".into(),
+                    label: "Ir para a tela inicial".into(),
                     operations: vec![Operation::Scroll],
                     risk: Risk::Ordinary,
                 },
@@ -422,29 +474,37 @@ impl Surface for IosSurface {
                     .map_err(|_| "Autorização expirou antes de digitar.")?;
                 ops::type_text(&self.udid, text)?;
             }
-            Operation::Scroll => {
-                let (a, b) = if action.target.as_deref() == Some("scroll_up") {
-                    (0.75, 0.25)
-                } else {
-                    (0.25, 0.75)
-                };
-                ops::swipe(
-                    &self.udid,
-                    (self.width / 2., self.height * a),
-                    (self.width / 2., self.height * b),
-                    300,
-                )?;
-            }
+            Operation::Scroll => match action.target.as_deref() {
+                Some("home") => ops::button(&self.udid, "home")?,
+                Some(target) => {
+                    let ((x1, y1), (x2, y2)) = gesture_line(target).ok_or("Gesto iOS não oferecido.")?;
+                    ops::swipe(&self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 300)?;
+                }
+                None => return Err("Gesto iOS sem alvo.".into()),
+            },
             _ => return Err("Operação iOS não oferecida.".into()),
         }
         Ok(true)
     }
 }
+/// O traço do dedo de cada gesto, em proporção da tela: rolar na vertical pelo meio; deslizar na horizontal na
+/// altura do meio, longe das bordas (a borda esquerda vira "voltar" e a de baixo, a barra de início).
+pub(super) fn gesture_line(target: &str) -> Option<((f64, f64), (f64, f64))> {
+    Some(match target {
+        "scroll_up" => ((0.5, 0.75), (0.5, 0.25)),
+        "scroll_down" => ((0.5, 0.25), (0.5, 0.75)),
+        "swipe_left" => ((0.8, 0.5), (0.2, 0.5)),
+        "swipe_right" => ((0.2, 0.5), (0.8, 0.5)),
+        _ => return None,
+    })
+}
+
 pub(super) fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) -> Result<Decision, String> {
     let (operation, target) = match pick.operation.as_str() {
         "click" => (Operation::Click, Some("screen".into())),
         "type" => (Operation::Type, Some("screen".into())),
-        "scroll_up" | "scroll_down" => (Operation::Scroll, Some(pick.operation.clone())),
+        // Os gestos são da família do rolar: movimento comum, sem efeito sensível, cada um com seu alvo.
+        "scroll_up" | "scroll_down" | "swipe_left" | "swipe_right" | "home" => (Operation::Scroll, Some(pick.operation.clone())),
         "done" => (Operation::Done, None),
         "stuck" => (Operation::Stuck, None),
         _ => return Err("Operação não oferecida.".into()),
@@ -466,6 +526,8 @@ pub(super) struct VisualDecider {
     pub frame: Arc<Mutex<Frame>>,
     pub allow_type: bool,
     pub surface: &'static str,
+    /// Deslizar para os lados e ir para a tela inicial (só no iOS).
+    pub gestures: bool,
 }
 impl Decider for VisualDecider {
     fn decide(
@@ -474,12 +536,20 @@ impl Decider for VisualDecider {
         obs: &Observation,
         actions: &[Action],
     ) -> Result<Decision, String> {
-        let path = {
+        let (path, labels) = {
             let f = self.frame.lock().map_err(|_| "Foto indisponível.")?;
             if f.revision != obs.revision {
                 return Err("Foto desatualizada.".into());
             }
-            f.path.to_string_lossy().into_owned()
+            let labels: Vec<computer::TextBox> = f
+                .labels
+                .iter()
+                .map(|l| computer::TextBox {
+                    text: l.text.clone(),
+                    rect: crate::decisions::vision::Rect { left: l.left, right: l.right, top: l.top, bottom: l.bottom },
+                })
+                .collect();
+            (f.path.to_string_lossy().into_owned(), labels)
         };
         let recent = serde_json::to_string(actions).map_err(|_| "Histórico inválido.")?;
         let pick = computer::pick(
@@ -490,6 +560,8 @@ impl Decider for VisualDecider {
                 path: &path,
                 allow_type: self.allow_type,
                 surface: self.surface,
+                labels: &labels,
+                gestures: self.gestures,
             },
         )?;
         let decision = {
@@ -560,12 +632,14 @@ pub(crate) fn act(
         frame: frame.clone(),
         fills: request.fills.values().cloned().collect(),
         expect: request.expect.clone(),
+        read_ahead: None,
     };
     let mut decider = VisualDecider {
         db,
         frame,
         allow_type: request.fills.contains_key("screen"),
         surface: "iOS",
+        gestures: true,
     };
     Ok(run(request, &mut surface, &mut decider))
 }
@@ -715,10 +789,34 @@ mod flow_test {
             let pick = computer::parse(
                 r#"{"answers":{"operacao":{"choice":"click","probabilities":{"click":0.98}},"alvo":{"box":{"left":0.2,"right":0.4,"top":0.1,"bottom":0.3},"confidence":0.95},"concluido":{"choice":"no","probabilities":{"no":0.99}},"sensivel":{"choice":"yes","probabilities":{"yes":0.99}}}}"#,
                 false,
+                true,
+                &[],
             )?;
             *self.point.lock().unwrap() = pick.point;
             decision_for(&pick, &obs.text, &[])
         }
+    }
+    #[test]
+    fn tela_quase_sem_texto_espera_assentar_sem_passar_do_prazo_nem_das_tentativas() {
+        let folga = Duration::from_secs(30);
+        assert!(should_settle(1, 0, folga), "só o relógio: app ainda abrindo");
+        assert!(should_settle(0, 1, folga));
+        assert!(!should_settle(1, SETTLE_TRIES - 1, folga), "na última tentativa mostra o que houver");
+        assert!(!should_settle(MIN_LABELS, 0, folga), "tela com texto segue na hora");
+        assert!(!should_settle(0, 0, SETTLE_WAIT), "sem prazo, não espera");
+    }
+    #[test]
+    fn gestos_viram_rolar_com_alvo_proprio_sem_confirmacao_e_com_traco_longe_das_bordas() {
+        for op in ["swipe_left", "swipe_right", "home", "scroll_up"] {
+            let pick = computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point: None, confirm: false };
+            let d = decision_for(&pick, "Início", &[]).unwrap();
+            assert_eq!(d.action, Action { operation: Operation::Scroll, target: Some(op.into()) });
+            assert!(!d.requires_confirmation, "{op}");
+        }
+        let ((x1, y1), (x2, y2)) = gesture_line("swipe_left").unwrap();
+        assert!(x1 > x2 && y1 == y2 && x2 >= 0.1 && x1 <= 0.9);
+        assert!(gesture_line("swipe_right").is_some_and(|((a, _), (b, _))| a < b));
+        assert!(gesture_line("home").is_none(), "o início é o botão, não um traço");
     }
     #[test]
     fn foto_jev_tipado_confirmacao_hid_e_verificacao_fecham_o_percurso_simulado() {
@@ -750,3 +848,4 @@ mod flow_test {
         }
     }
 }
+
