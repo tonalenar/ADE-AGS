@@ -4,8 +4,8 @@ import { accessModesFor, PROTOCOL_AGENTS, planSupported } from "@/features/chat/
 import { STRUCTURED_AGENTS } from "@/features/chat/structured/model";
 
 describe("agentes por protocolo (espelho de conversa::api::Engine)", () => {
-  it("os quatro agentes falam por protocolo, e os outros seguem na TUI", () => {
-    expect([...STRUCTURED_AGENTS].sort()).toEqual(["antigravity", "claude-code", "codex", "opencode"]);
+  it("os cinco agentes falam por protocolo, e os outros seguem na TUI", () => {
+    expect([...STRUCTURED_AGENTS].sort()).toEqual(["antigravity", "claude-code", "codex", "cursor", "opencode"]);
     expect(STRUCTURED_AGENTS.has("gemini-cli")).toBe(false);
   });
 
@@ -14,6 +14,13 @@ describe("agentes por protocolo (espelho de conversa::api::Engine)", () => {
       expect(accessModesFor(id, true)).toEqual(["ask", "edits", "safe", "full"]);
       expect(planSupported(id, true)).toBe(true);
     }
+  });
+
+  it("o Cursor por protocolo tem Supervisionado, Acesso total e o Plano; Aceitar edições e Auto não têm flag documentada", () => {
+    expect(accessModesFor("cursor", true)).toEqual(["ask", "full"]);
+    expect(planSupported("cursor", true)).toBe(true);
+    // Na TUI continua o que sempre foi.
+    expect(planSupported("cursor")).toBe(false);
   });
 
   it("na TUI esses agentes continuam com os flags da TUI", () => {

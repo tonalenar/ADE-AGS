@@ -208,3 +208,23 @@ fn la_mision_de_una_tab_sale_de_la_clave_del_canvas_de_misiones() {
     assert_eq!(mission_of_tab(&boards, "solo"), None, "el canvas de la carpeta no es una misión");
     assert_eq!(mission_of_tab(&boards, "ghost"), None);
 }
+
+#[test]
+fn os_nos_de_conversa_por_protocolo_sobrevivem_ao_salvar_e_canvas_antigo_abre_sem_eles() {
+    // O front escreve `threads`; passar pelo struct (carregar e salvar) não pode perdê-lo.
+    let json = serde_json::json!({
+        "main|/p": {
+            "nodes": {},
+            "edges": [{ "id": "e1", "a": "t1", "b": "thread:abc" }],
+            "threads": { "thread:abc": { "x": 10, "y": 20, "w": 460, "h": 540 } }
+        }
+    });
+    let boards: Boards = serde_json::from_value(json).unwrap();
+    let back = serde_json::to_value(&boards).unwrap();
+    assert_eq!(back["main|/p"]["threads"]["thread:abc"]["w"], 460);
+    assert_eq!(back["main|/p"]["edges"][0]["b"], "thread:abc");
+
+    // Um canvas de antes do campo: abre, e `threads` vem vazio (não some nem quebra).
+    let old: Boards = serde_json::from_value(serde_json::json!({ "main|/q": { "nodes": {} } })).unwrap();
+    assert!(old["main|/q"].threads.is_null());
+}

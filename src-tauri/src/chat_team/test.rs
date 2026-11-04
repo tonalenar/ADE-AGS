@@ -9,7 +9,7 @@ fn db() -> rusqlite::Connection {
 }
 
 fn team(conn: &rusqlite::Connection, orchestrator: &str) -> String {
-    let input = NewTeam { orchestrator: orchestrator.into(), agent_id: "claude-code".into(), label: "Claude Code".into(), cwd: "/r".into(), title: "Modo chat".into() };
+    let input = NewTeam { orchestrator: orchestrator.into(), agent_id: "claude-code".into(), label: "Claude Code".into(), cwd: "/r".into(), title: "Modo chat".into(), ..Default::default() };
     api::create(conn, input, 1).unwrap().0.team.id
 }
 
@@ -619,4 +619,284 @@ fn o_time_avisa_quando_duas_delegacoes_em_andamento_se_sobrepoem() {
     assert_eq!(found.len(), 1);
     assert_eq!((found[0].a.as_str(), found[0].b.as_str()), ("Front", "Back"));
     assert_eq!(found[0].paths, vec!["src/features/chat/ipc.ts".to_string()]);
+}
+
+// ── E2: origem do time, promoção, coroa tirada e troca de ref ────────────
+
+fn promotion(orchestrator: &str, members: &[(&str, &str)]) -> api::Promotion {
+    api::Promotion {
+        team: NewTeam { orchestrator: orchestrator.into(), agent_id: "claude-code".into(), label: "Lead".into(), cwd: "/r".into(), board_key: Some("main|/r".into()), ..Default::default() },
+        members: members.iter().map(|(id, role)| member(id, role)).collect(),
+    }
+}
+
+fn no_missions() -> std::collections::HashSet<String> {
+    Default::default()
+}
+
+#[test]
+fn a_migracao_das_colunas_novas_preserva_o_time_antigo_e_roda_duas_vezes() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    // O esquema de antes da E2: sem origin, board_key e mission_id.
+    conn.execute_batch(
+        "CREATE TABLE chat_team (id TEXT PRIMARY KEY, orchestrator TEXT NOT NULL UNIQUE, agent_id TEXT NOT NULL DEFAULT '', label TEXT NOT NULL DEFAULT '',
+            cwd TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+         INSERT INTO chat_team (id, orchestrator, created_at, updated_at) VALUES ('velho', 'tab-1', 1, 1);",
+    )
+    .unwrap();
+    store::migrate(&conn).unwrap();
+    store::migrate(&conn).unwrap();
+    for column in ["origin", "board_key", "mission_id"] {
+        assert!(store::has_column(&conn, "chat_team", column).unwrap(), "{column} entrou");
+    }
+    let old = store::team(&conn, "velho").unwrap().unwrap();
+    assert_eq!((old.origin.as_str(), old.board_key, old.mission_id), ("chat", None, None), "linha antiga = origin chat");
+    assert_eq!(old.orchestrator, "tab-1");
+}
+
+#[test]
+fn o_time_do_chat_nasce_com_origem_chat() {
+    let conn = db();
+    let id = team(&conn, "tab-1");
+    assert_eq!(store::team(&conn, &id).unwrap().unwrap().origin, "chat");
+    let row = api::create(&conn, NewTeam { orchestrator: "tab-9".into(), origin: Some("mission".into()), mission_id: Some("m1".into()), ..Default::default() }, 2).unwrap().0.team;
+    assert_eq!((row.origin.as_str(), row.mission_id.as_deref()), ("mission", Some("m1")));
+    let bad = api::create(&conn, NewTeam { orchestrator: "tab-8".into(), origin: Some("lixo".into()), ..Default::default() }, 3).unwrap().0.team;
+    assert_eq!(bad.origin, "chat", "origem desconhecida vira chat");
+}
+
+#[test]
+fn promover_a_coroa_cria_o_time_canvas_so_com_linhas_no_banco() {
+    let conn = db();
+    // Uma aba e uma conversa de verdade que já existem: promover não pode tocar nelas.
+    conn.execute("INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1', 'W', 0, 0)", []).unwrap();
+    let tables: Vec<String> = conn
+        .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'chat_team%'")
+        .unwrap()
+        .query_map([], |r| r.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    let count = |conn: &rusqlite::Connection| -> Vec<i64> {
+        tables.iter().map(|t| conn.query_row(&format!("SELECT COUNT(*) FROM \"{t}\""), [], |r| r.get(0)).unwrap()).collect()
+    };
+    let before = count(&conn);
+    let done = api::promote(&conn, promotion("tab-lead", &[("tab-a", "frontend"), ("thread:b", "qa")]), &no_missions(), 5).unwrap();
+    assert!(done.created);
+    assert_eq!(done.adopted, ["tab-a", "thread:b"]);
+    assert!(done.skipped.is_empty());
+    assert_eq!((done.team.team.origin.as_str(), done.team.team.board_key.as_deref()), ("canvas", Some("main|/r")));
+    assert_eq!(done.team.headcount, 3);
+    assert_eq!(count(&conn), before, "promover só grava em chat_team*: nenhuma aba, conversa, fila ou missão nasce (e a API só recebe &Connection: não há como lançar processo, PTY ou worktree)");
+    assert_eq!(store::member(&conn, "tab-a").unwrap().unwrap().role, "frontend");
+}
+
+#[test]
+fn promover_de_novo_e_idempotente_e_liga_so_os_que_faltam() {
+    let conn = db();
+    let first = api::promote(&conn, promotion("tab-lead", &[("tab-a", "qa")]), &no_missions(), 5).unwrap();
+    let again = api::promote(&conn, promotion("tab-lead", &[("tab-a", "qa"), ("tab-b", "qa")]), &no_missions(), 6).unwrap();
+    assert!(!again.created);
+    assert_eq!(again.team.team.id, first.team.team.id);
+    assert_eq!(again.adopted, ["tab-b"], "tab-a já estava: não conta como nova");
+    assert_eq!(store::teams(&conn).unwrap().len(), 1);
+}
+
+#[test]
+fn promover_respeita_o_invariante_de_um_time_so_e_as_missoes() {
+    let conn = db();
+    let chat = team(&conn, "tab-chat");
+    api::link(&conn, &chat, member("tab-a", "qa"), false, 2).unwrap();
+    let missions: std::collections::HashSet<String> = ["tab-m".to_string()].into();
+    let done = api::promote(&conn, promotion("tab-lead", &[("tab-a", "qa"), ("tab-m", "qa"), ("tab-ok", "qa")]), &missions, 5).unwrap();
+    assert_eq!(done.adopted, ["tab-ok"]);
+    let why: Vec<(&str, bool)> = done.skipped.iter().map(|s| (s.member.as_str(), !s.reason.is_empty())).collect();
+    assert_eq!(why, [("tab-a", true), ("tab-m", true)]);
+    assert_eq!(store::member(&conn, "tab-a").unwrap().unwrap().team_id, chat, "continua no time de antes");
+    // Orquestrador que já é integrante de outro time, ou de missão: recusa, sem criar nada.
+    assert!(api::promote(&conn, promotion("tab-a", &[]), &no_missions(), 6).unwrap_err().contains("integrante"));
+    assert!(api::promote(&conn, promotion("tab-m", &[]), &missions, 6).unwrap_err().contains("missão"));
+    assert_eq!(store::teams(&conn).unwrap().len(), 2);
+    // Integrantes de um time espelho de missão também ficam de fora.
+    let mirror = api::create(&conn, NewTeam { orchestrator: "tab-ml".into(), origin: Some("mission".into()), mission_id: Some("m1".into()), ..Default::default() }, 7).unwrap().0.team.id;
+    api::link(&conn, &mirror, member("tab-x", "qa"), false, 8).unwrap();
+    let done = api::promote(&conn, promotion("tab-lead2", &[("tab-x", "qa")]), &no_missions(), 9).unwrap();
+    assert_eq!(done.skipped.len(), 1);
+}
+
+#[test]
+fn tirar_a_coroa_mantem_o_time_e_todos_os_integrantes() {
+    let conn = db();
+    let id = api::promote(&conn, promotion("tab-lead", &[("tab-a", "frontend"), ("thread:b", "qa")]), &no_missions(), 5).unwrap().team.team.id;
+    assert!(api::unlead(&conn, &id, 6).unwrap());
+    assert!(!api::unlead(&conn, &id, 7).unwrap(), "idempotente: já estava sem orquestrador");
+    let view = api::team_of(&conn, "tab-a").unwrap().expect("o time continua");
+    assert!(!view.team.led());
+    assert_eq!(view.team.orchestrator, "");
+    assert_eq!(view.members.len(), 2, "ninguém sai");
+    assert!(api::team_of(&conn, "tab-lead").unwrap().is_none(), "a coroa que saiu deixou de ser do time");
+    assert!(store::team_led_by(&conn, "").unwrap().is_none());
+    // Dois times sem orquestrador convivem (a coluna é UNIQUE, cada um ganha o seu valor interno).
+    let other = api::promote(&conn, promotion("tab-lead2", &[("tab-c", "qa")]), &no_missions(), 8).unwrap().team.team.id;
+    api::unlead(&conn, &other, 9).unwrap();
+    assert_eq!(store::teams(&conn).unwrap().iter().filter(|t| !t.led()).count(), 2);
+    // Um time sem orquestrador ainda aceita integrante e o escopo do chat da equipe continua.
+    api::link(&conn, &id, member("tab-d", "qa"), false, 10).unwrap();
+    assert_eq!(api::scope_of(&conn, "tab-d"), Some(format!("t:{id}")));
+}
+
+#[test]
+fn o_time_sem_orquestrador_recebe_outro_pela_promocao_ou_por_lead() {
+    let conn = db();
+    let id = api::promote(&conn, promotion("tab-lead", &[("tab-a", "frontend"), ("tab-b", "qa")]), &no_missions(), 5).unwrap().team.team.id;
+    api::unlead(&conn, &id, 6).unwrap();
+    // Coroar um dos integrantes: ele assume e deixa de ser integrante (o time é o mesmo).
+    let done = api::promote(&conn, promotion("tab-a", &[("tab-b", "qa")]), &no_missions(), 7).unwrap();
+    assert!(!done.created);
+    assert_eq!(done.team.team.id, id);
+    assert_eq!(done.team.team.orchestrator, "tab-a");
+    assert_eq!(done.team.members.iter().map(|m| m.member.as_str()).collect::<Vec<_>>(), ["tab-b"]);
+    // Outra coroa, nova, sobre os integrantes de um time sem orquestrador também assume o time.
+    api::unlead(&conn, &id, 8).unwrap();
+    let again = api::promote(&conn, promotion("tab-novo", &[("tab-b", "qa")]), &no_missions(), 9).unwrap();
+    assert_eq!((again.team.team.id.as_str(), again.team.team.orchestrator.as_str()), (id.as_str(), "tab-novo"));
+    assert_eq!(store::teams(&conn).unwrap().len(), 1, "nenhum time novo");
+    // lead recusa quem já está noutro lugar.
+    let other = team(&conn, "tab-outro");
+    api::unlead(&conn, &id, 10).unwrap();
+    assert!(api::lead(&conn, &id, "tab-outro", "", "", 11).unwrap_err().contains("orquestradora"));
+    api::link(&conn, &other, member("tab-z", "qa"), false, 12).unwrap();
+    assert!(api::lead(&conn, &id, "tab-z", "", "", 13).unwrap_err().contains("integrante"));
+    assert_eq!(api::lead(&conn, &id, "tab-livre", "codex", "Livre", 14).unwrap().team.orchestrator, "tab-livre");
+}
+
+#[test]
+fn rebind_troca_a_ref_no_roster_sem_perder_papel_nem_time() {
+    let conn = db();
+    let id = api::promote(&conn, promotion("tab-lead", &[("tab-a", "frontend")]), &no_missions(), 5).unwrap().team.team.id;
+    api::update(&conn, &id, "tab-a", MemberPatch { policy: Some(Policy::Edits), ..Default::default() }, false, 6).unwrap();
+    let r = api::rebind(&conn, "tab-a", "thread:novo", 7).unwrap().unwrap();
+    assert_eq!((r.team_id.as_str(), r.role), (id.as_str(), "member"));
+    assert!(store::member(&conn, "tab-a").unwrap().is_none());
+    let moved = store::member(&conn, "thread:novo").unwrap().unwrap();
+    assert_eq!((moved.role.as_str(), moved.policy, moved.team_id.as_str()), ("frontend", Policy::Edits, id.as_str()));
+    // O orquestrador também.
+    assert_eq!(api::rebind(&conn, "tab-lead", "thread:lead", 8).unwrap().unwrap().role, "orchestrator");
+    assert_eq!(store::team(&conn, &id).unwrap().unwrap().orchestrator, "thread:lead");
+    // Sem time: nada muda. Para quem já está em time: recusa. Igual: nada a fazer.
+    assert!(api::rebind(&conn, "tab-solta", "tab-outra", 9).unwrap().is_none());
+    let other = team(&conn, "tab-o");
+    assert!(api::rebind(&conn, "tab-o", "thread:novo", 10).unwrap_err().contains("já está em um time"));
+    assert_eq!(store::team(&conn, &other).unwrap().unwrap().orchestrator, "tab-o");
+    assert!(api::rebind(&conn, "thread:novo", "thread:novo", 11).unwrap().is_none());
+    assert!(api::rebind(&conn, "", "x", 12).is_err());
+}
+
+#[test]
+fn rebind_troca_a_ref_nas_cordas_do_canvas() {
+    use crate::canvas::{rebind_ref, Board, Boards, Edge};
+    let mut board = Board { orchestrators: vec!["tab-lead".into()], subagents: vec!["tab-a".into()], ..Default::default() };
+    board.edges = vec![Edge { id: "e1".into(), a: "tab-lead".into(), b: "tab-a".into() }, Edge { id: "e2".into(), a: "tab-a".into(), b: "tab-b".into() }];
+    board.roles.insert("tab-a".into(), "frontend".into());
+    board.nodes = serde_json::json!({ "tab-a": { "x": 1 }, "tab-b": { "x": 2 } });
+    let mut boards: Boards = Boards::new();
+    boards.insert("main|/r".into(), board);
+    boards.insert("outro".into(), Board::default());
+    assert_eq!(rebind_ref(&mut boards, "tab-a", "thread:n"), ["main|/r"], "só o quadro que mudou");
+    let b = &boards["main|/r"];
+    assert_eq!((b.edges[0].b.as_str(), b.edges[1].a.as_str()), ("thread:n", "thread:n"));
+    assert_eq!(b.subagents, ["thread:n"]);
+    assert_eq!(b.roles.get("thread:n").map(String::as_str), Some("frontend"));
+    assert!(b.nodes.get("tab-a").is_none() && b.nodes.get("thread:n").is_some());
+    assert!(rebind_ref(&mut boards, "nada", "x").is_empty());
+}
+
+#[test]
+fn as_refs_de_missao_vem_so_dos_quadros_de_missao() {
+    use crate::canvas::{mission_refs, Board, Boards};
+    let mut boards: Boards = Boards::new();
+    boards.insert("main|/r#m:m1".into(), Board { orchestrators: vec!["lead".into()], nodes: serde_json::json!({ "w1": {} }), ..Default::default() });
+    boards.insert("main|/r".into(), Board { orchestrators: vec!["solta".into()], ..Default::default() });
+    let refs = mission_refs(&boards);
+    assert!(refs.contains("lead") && refs.contains("w1") && !refs.contains("solta"));
+}
+
+fn mirror(mission: &str, orchestrator: &str, members: &[&str]) -> api::MissionMirror {
+    api::MissionMirror {
+        team: NewTeam {
+            orchestrator: orchestrator.into(),
+            agent_id: "claude-code".into(),
+            label: "Orquestrador".into(),
+            cwd: "/r".into(),
+            title: "Missão X".into(),
+            board_key: Some(format!("/r#m:{mission}")),
+            mission_id: Some(mission.into()),
+            ..Default::default()
+        },
+        members: members.iter().map(|m| member(m, "backend")).collect(),
+    }
+}
+
+#[test]
+fn o_espelho_da_missao_grava_a_origem_e_os_integrantes() {
+    let conn = db();
+    let out = api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-b"]), 1).unwrap();
+    assert_eq!(out.team.team.origin, store::ORIGIN_MISSION);
+    assert_eq!(out.team.team.mission_id.as_deref(), Some("m1"));
+    assert_eq!(out.team.team.board_key.as_deref(), Some("/r#m:m1"));
+    assert_eq!(out.team.members.len(), 2);
+    assert!(out.skipped.is_empty());
+}
+
+#[test]
+fn o_espelho_e_idempotente_e_troca_o_roster() {
+    let conn = db();
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-b"]), 1).unwrap();
+    let again = api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-c"]), 2).unwrap();
+    assert_eq!(store::teams(&conn).unwrap().len(), 1, "regravar não duplica");
+    assert_eq!(again.team.members.iter().map(|m| m.member.as_str()).collect::<Vec<_>>(), ["tab-a", "tab-c"]);
+}
+
+#[test]
+fn o_espelho_nao_muda_o_escopo_o_alias_nem_a_politica_da_missao() {
+    let conn = db();
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a"]), 1).unwrap();
+    assert_eq!(api::scope_of(&conn, "tab-lead"), None, "o chat da equipe da missão segue sendo m:<id>");
+    assert_eq!(api::scope_of(&conn, "tab-a"), None);
+    assert!(api::team_of(&conn, "tab-a").unwrap().is_none(), "o espelho não é o time do chat");
+    assert_eq!(store::teams(&conn).unwrap().len(), 1, "mas a lista (a sidebar) o enxerga");
+}
+
+#[test]
+fn o_espelho_conta_no_um_time_so() {
+    let conn = db();
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a"]), 1).unwrap();
+    let chat = team(&conn, "tab-9");
+    assert!(api::link(&conn, &chat, member("tab-a", "qa"), false, 2).unwrap_err().contains("outro time"));
+    assert!(api::rebind(&conn, "tab-9", "tab-a", 3).unwrap_err().contains("já está em um time"));
+}
+
+#[test]
+fn o_espelho_nao_toma_quem_ja_e_de_um_time_do_chat() {
+    let conn = db();
+    let chat = team(&conn, "tab-9");
+    api::link(&conn, &chat, member("tab-a", "qa"), false, 2).unwrap();
+    let out = api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a", "tab-b"]), 3).unwrap();
+    assert_eq!(out.skipped.iter().map(|s| s.member.as_str()).collect::<Vec<_>>(), ["tab-a"]);
+    assert_eq!(out.team.members.len(), 1);
+    assert!(api::mirror_mission(&conn, mirror("m2", "tab-9", &[]), 4).is_err(), "orquestrador de time do chat");
+    assert!(api::team_of(&conn, "tab-a").unwrap().is_some_and(|v| v.team.id == chat), "o time do chat não é tocado");
+}
+
+#[test]
+fn desespelhar_tira_so_a_linha_da_missao() {
+    let conn = db();
+    let chat = team(&conn, "tab-9");
+    api::mirror_mission(&conn, mirror("m1", "tab-lead", &["tab-a"]), 1).unwrap();
+    assert!(api::unmirror_mission(&conn, "m1").unwrap());
+    assert!(!api::unmirror_mission(&conn, "m1").unwrap(), "idempotente");
+    let left = store::teams(&conn).unwrap();
+    assert_eq!(left.len(), 1);
+    assert_eq!(left[0].id, chat);
+    assert!(api::mirror_mission(&conn, mirror("", "tab-x", &[]), 2).is_err());
 }

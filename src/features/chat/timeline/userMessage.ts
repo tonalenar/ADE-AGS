@@ -4,6 +4,7 @@
  * Entram como mensagem da pessoa coisas que não são dela:
  * - injeções do ADE, que começam com `[ADE AGS]` (resumo do time, "você é o orquestrador", "você entrou
  *   no time…"): somem da tela;
+ * - o resumo da conversa anterior, que vai na frente da primeira mensagem depois de trocar de agente: some só ele;
  * - o resumo do time colado na frente do que a pessoa digitou (`rosterNotice` + linha em branco +
  *   texto): some só o resumo;
  * - o prefixo do seletor "Só o orquestrador" (`LEAD_ONLY_PREFIX`): some, fica o texto da pessoa.
@@ -12,10 +13,12 @@
  * `peerEnvelope.ts` como balão do remetente. Puro.
  */
 
+/** A última linha do resumo que a conversa leva ao trocar de agente (`conversa/handoff.rs::END_MARK`). */
+const HANDOFF_END = "[fim do contexto da conversa anterior]";
 const INJECTION = /^\s*\[ADE AGS\]/;
 const LEAD_ONLY = /^\s*\[Só o orquestrador\][^\n]*(?:\n|$)/;
 /** Os fechos dos resumos do time que o composer cola na frente do texto da pessoa (`teamModel.rosterNotice`). */
-const ROSTER_TAILS = ["Use `ags team list` para ver o time.", "ligar agentes no painel Time."];
+const ROSTER_TAILS = ["Use `ags team list` para ver o time.", "ligar agentes no painel Time.", HANDOFF_END];
 
 /** O texto começa com uma injeção do ADE (`[ADE AGS] …`)? Não confunde com `[Mensagem de X via ADE AGS]`. */
 export function isSystemInjection(text: string): boolean {

@@ -8,6 +8,11 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
+- **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3; a missão é a E5. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+- **A conversa segue o modo:** seleção única (`selectedRef`/`selectConversation`) em Chat, Abas e Canvas; `Board.threads` e o cartão da conversa por protocolo no canvas; `ProtocolPane` nas Abas para qualquer conversa. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+- **Time único (E3, espelho canvas → chat):** `promotePlan` promove a coroa de um canvas de pasta ou `#c:` a time do chat quando a pessoa coroa ou liga algo (nunca no boot, nunca `#m:`, nunca lança processo); tirar a coroa tira só o papel de orquestrador (`chat_team_unlead`); o invariante de um time só conta também a missão. O nó de conversa por protocolo no canvas ficou de fora. Ver [MODO_CHAT.md](./MODO_CHAT.md).
+
+- **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3. **Missão no chat (E5):** `chat_team_mission_mirror`/`_unmirror` gravam e tiram a linha `origin='mission'` ao iniciar/fechar a missão em terminais; grupo "Missão X" com selo na sidebar (chat, Abas, Canvas) e criar/iniciar missão também no chat. A missão segue dona do motor. Ver [MODO_CHAT.md](./MODO_CHAT.md).
 
 ## Retomada e estado (pontos 15, 8 e 6 do deepseek-harness)
 
@@ -28,7 +33,7 @@ Backend com detecção de versão, status e leitura de bastões/páginas por sub
 
 ## Computer use em múltiplas superfícies — iOS
 
-Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. macOS genérico e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
+Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. `ags desk act` (tela do Mac, com consentimento por objetivo) e o reconhecimento de conversas por protocolo em `sim act`/`desk act` entraram em seguida; árvore AX e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
 
 ## CLIs fora do PATH e instalação pela ADE
 

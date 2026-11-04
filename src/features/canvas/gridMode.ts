@@ -1,10 +1,9 @@
 import { useMemo } from "react";
 
 import { boardKeyOfTab, conversationOfKey, missionOfKey, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
-import { useTeamIndex } from "@/features/chat/team/teamIndex";
-import { teamGridIds } from "@/features/chat/team/teamModel";
+import { useConversations } from "@/features/chat/unified/useConversations";
+import { teamGridRefs } from "@/features/tabs/teamTabs";
 import { useTabsStore } from "@/features/tabs/store";
-import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
@@ -70,11 +69,10 @@ export function useMissionGrid(): string[] | null {
     [key, tabs, boards],
   );
   const joined = ids.join("|");
-  // O time do chat da aba ativa (só agentes abertos): a grade dele no lugar da de missão.
-  const teams = useTeamIndex((s) => s.teams);
+  // O time da aba ativa, do modelo único (terminais e conversas por protocolo): a grade dele no lugar da de missão.
+  const conversations = useConversations();
   const activeTabId = useTabsStore((s) => s.activeTabId);
-  const agentTabs = useTabsStore((s) => s.tabs.filter((t) => t.agentId !== SHELL_AGENT_ID).map((t) => t.id).join("|"));
-  const teamJoined = useMemo(() => teamGridIds(teams, activeTabId, agentTabs ? agentTabs.split("|") : [])?.join("|") ?? "", [teams, activeTabId, agentTabs]);
+  const teamJoined = useMemo(() => teamGridRefs(conversations, activeTabId)?.join("|") ?? "", [conversations, activeTabId]);
   return useMemo(
     () => (viewActive ? null : gridTabs({
       on, mission: missionOfKey(key) ?? conversationOfKey(key), team: teamJoined ? teamJoined.split("|") : null, mode, tabIds: joined ? joined.split("|") : [],

@@ -50,13 +50,16 @@ const PLAN_FLAG: Record<string, string> = { "claude-code": "--permission-mode pl
  * - Claude Code (`claude -p`): `--permission-mode`, com o Plano;
  * - OpenCode (`opencode acp`): a política de permissões no ambiente do processo e o agente `plan`;
  * - Antigravity (`agy --print`): `--mode accept-edits|auto|plan` e `--dangerously-skip-permissions`;
- *   no `-p` ele não pergunta, então Supervisionado é só leitura na prática.
+ *   no `-p` ele não pergunta, então Supervisionado é só leitura na prática;
+ * - Cursor (`cursor-agent -p`): `--mode plan` e `--force`; também não pergunta. Aceitar edições e Auto não têm flag
+ *   documentada, então ficam de fora.
  */
 export const PROTOCOL_AGENTS: Record<string, { access: ChatAccess[]; plan: boolean }> = {
   codex: { access: ["ask", "safe", "full"], plan: false },
   "claude-code": { access: ["ask", "edits", "safe", "full"], plan: true },
   opencode: { access: ["ask", "edits", "safe", "full"], plan: true },
   antigravity: { access: ["ask", "edits", "safe", "full"], plan: true },
+  cursor: { access: ["ask", "full"], plan: true },
 };
 
 /**

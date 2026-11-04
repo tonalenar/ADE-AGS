@@ -5,7 +5,7 @@
 //! pero apuntando a ESE navegador por nombre, no al de la carpeta.
 //!
 //! **Permiso:** las mismas conexiones que entre agentes y notas (ver
-//! `crate::canvas::portals_for`): un agente maneja los portales conectados con él; una
+//! `crate::surfaces::reach`): un agente maneja los portales conectados con él; una
 //! orquestadora, también los de su equipo.
 //!
 //! **Alcance:** una lista corta de acciones (ver `ACTIONS`). Nada que ejecute código en la
@@ -43,13 +43,10 @@ pub(crate) struct Reachable {
 }
 
 fn reachable(boards: &Boards, from: &str) -> Vec<Reachable> {
-    canvas::portals_for(boards, from)
+    crate::surfaces::canvas_portals(boards, from)
         .into_iter()
-        .filter_map(|(key, id)| {
-            let portal = boards.get(&key)?.portals.get(&id)?.clone();
-            if portal.kind.as_deref() == Some("gemini") { return None; }
-            Some(Reachable { key, id, portal })
-        })
+        .filter(|r| r.kind() != Some("gemini"))
+        .filter_map(|r| Some(Reachable { key: r.board?, id: r.id, portal: r.portal }))
         .collect()
 }
 

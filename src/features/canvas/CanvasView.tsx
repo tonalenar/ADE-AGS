@@ -70,6 +70,11 @@ import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
 import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { ThreadNode, type ThreadFlowNode } from "./ThreadNode";
+import { selectConversation } from "@/features/chat/unified/selectionActions";
+import { useSelectedRef } from "@/features/chat/unified/useConversations";
+import { threadIdOf } from "@/features/chat/structured/model";
+import { useStructured } from "@/features/chat/structured/store";
 import { ComparisonBar } from "@/features/compare/ComparisonBar";
 import { openCompareDialog } from "@/features/compare/store";
 import { cleanPreviewLines } from "./previewText";
@@ -119,7 +124,7 @@ interface PortalNodeData extends Record<string, unknown> {
 }
 
 type PortalFlowNode = Node<PortalNodeData, "portal">;
-type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
+type FlowNode = AgentFlowNode | ThreadFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
 
 // El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
@@ -193,6 +198,8 @@ function CanvasInner() {
   const allTabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const activateTab = useTabsStore((s) => s.activateTab);
+  // A seleção única (a mesma do chat e das abas): a aba ativa OU a conversa por protocolo aberta.
+  const selected = useSelectedRef();
   const rf = useReactFlow();
 
   const tabs = useMemo(() => (key ? allTabs.filter((t) => boardKeyOfTab(t) === key) : []), [allTabs, key]);
@@ -294,6 +301,32 @@ function CanvasInner() {
     // Solo cuando cambia el agente activo, no con cada paneo.
   }, [activeTabId]);
 
+  // A conversa por protocolo à vista ganha o cartão dela neste canvas (só quando é a escolhida, nada em massa no
+  // boot), e as que o time liga por corda também: sem cartão a corda ficaria sem ponta.
+  const liveThreadIds = useStructured((s) => s.threads);
+  const activeThreadKey = useCanvasStore((s) => s.activeThread?.key ?? null);
+  useEffect(() => {
+    if (!key) return;
+    if (selected && threadIdOf(selected) && activeThreadKey === key) canvasActions.addThread(key, selected);
+  }, [key, selected, activeThreadKey]);
+  useEffect(() => {
+    if (!key) return;
+    const alive = new Set(liveThreadIds.filter((t) => t.state === "active").map((t) => `thread:${t.id}`));
+    for (const e of board.edges) for (const end of [e.a, e.b]) if (alive.has(end) && !(end in board.threads)) canvasActions.addThread(key, end);
+  }, [key, board.edges, board.threads, liveThreadIds]);
+
+  // "Centrar e selecionar": a conversa escolhida fora do canvas (sidebar, aba, chat) vem para o meio da tela.
+  const focusReq = useCanvasStore((s) => s.focus);
+  const handledFocus = useRef(focusReq?.nonce ?? 0);
+  useEffect(() => {
+    if (!focusReq || focusReq.nonce === handledFocus.current || focusReq.key !== key || size.width === 0) return;
+    const current = useCanvasStore.getState().boards[key ?? ""];
+    const box = current?.threads[focusReq.ref] ?? current?.nodes[focusReq.ref];
+    if (!box) return; // o cartão ainda não nasceu: o efeito roda de novo quando o canvas mudar
+    handledFocus.current = focusReq.nonce;
+    rf.setViewport(focusViewport(box, size.width, size.height), { duration: 220 });
+  }, [focusReq, key, size.width, size.height, board.threads, board.nodes]);
+
   // Un panel a la vez: los dos se abren en el mismo lugar.
   const [panel, setPanel] = useState<DockPanel | null>(null);
   const pet = usePetStatus();
@@ -360,7 +393,7 @@ function CanvasInner() {
       position: { x: box.x, y: box.y },
       width: box.w,
       height: box.h,
-      selected: tab.id === activeTabId,
+      selected: tab.id === selected,
       // Con la terminal viva encima del nodo, solo la cabecera queda libre para agarrar;
       // alejado, la tarjeta es una vista previa y se agarra de cualquier lado.
       dragHandle: live ? ".ade-node-drag" : undefined,
@@ -385,7 +418,7 @@ function CanvasInner() {
       },
     }];
     // `focusNode` cambia con cada render y no aporta nada nuevo al nodo.
-  }), [tabs, board, activeTabId, live]);
+  }), [tabs, board, activeTabId, selected, live]);
 
   // Las notas tapadas por otra de su pila no se dibujan: se ve la del frente.
   const rawNoteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).filter(([id]) => !isHiddenNote(board, id)).map(([id, note]) => ({
@@ -454,6 +487,15 @@ function CanvasInner() {
     data: { id, cwd: portalCwd, folder },
   })), [board.folders, selectedNote, portalCwd]);
 
+  const rawThreadNodes: ThreadFlowNode[] = useMemo(() => Object.entries(board.threads).flatMap(([ref, box]) => {
+    const threadId = threadIdOf(ref);
+    return threadId ? [{
+      id: ref, type: "thread" as const, position: { x: box.x, y: box.y }, width: box.w, height: box.h,
+      selected: ref === selected, dragHandle: ".ade-node-drag", deletable: false,
+      data: { ref, threadId },
+    }] : [];
+  }), [board.threads, selected]);
+  const threadNodes = useStable(rawThreadNodes, (n: ThreadFlowNode) => [n.id, n.position.x, n.position.y, n.width, n.height, n.selected].join("|"));
   const agentNodes = useStable(rawAgentNodes, agentSig);
   const folderNodes = useStable(rawFolderNodes, folderSig);
   const textNodes = useStable(rawTextNodes, textSig);
@@ -491,8 +533,8 @@ function CanvasInner() {
   }), [groups, dragPos, design.details, t]);
 
   const nodes: FlowNode[] = useMemo(
-    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...textNodes],
-    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, textNodes],
+    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...threadNodes, ...textNodes],
+    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, threadNodes, textNodes],
   );
 
   // El modo de foco (solo el diseño) y a qué abre: el aviso, el botón EDITAR de un nodo o el último diseño.
@@ -565,7 +607,8 @@ function CanvasInner() {
       } else if (c.type === "dimensions" && c.resizing && c.dimensions) {
         canvasActions.moveNode(key, c.id, { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) });
       } else if (c.type === "select") {
-        if (isFreeNodeId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
+        if (threadIdOf(c.id)) { if (c.selected && c.id !== selected) selectConversation(c.id); }
+        else if (isFreeNodeId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
         else if (c.selected) activateTab(c.id);
       }
     }
@@ -1392,5 +1435,5 @@ const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowN
     : <PortalNode {...props} />;
 });
 
-const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
+const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, thread: ThreadNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
 const EDGE_TYPES = { link: CordEdge };

@@ -18,6 +18,8 @@ import { displayUserText } from "./userMessage";
 import { isFresh } from "./streaming";
 import { commandTitle } from "./toolTitle";
 import { activityOf, joinParts, summarizeTools } from "./workSummary";
+import { SelectionComment } from "../quotes/SelectionComment";
+import { voicesByItem } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
 import { endOutcome, fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
@@ -38,8 +40,9 @@ interface RevealOf {
   live: (id: string) => boolean;
   /** A mensagem chegou depois de a conversa abrir: entra com um fade/slide curto (uma vez só). */
   entering: (id: string) => boolean;
-  /** Quem fala nas falas do agente da conversa. */
+  /** Quem fala nas falas do agente da conversa (e, depois de trocar de agente, quem falou cada uma). */
   agent: { id: string; label: string };
+  voiceOf: (itemId: string) => { id: string; label: string };
   /** As falas que levam o logo e o nome de quem fala acima do texto (`speakers.ts`). */
   headers: ReadonlySet<string>;
 }
@@ -47,7 +50,7 @@ interface RevealOf {
 /** Responder a pergunta em aberto pelo cartão dela (só nas conversas por protocolo, com uma pergunta esperando). */
 const AnswerContext = createContext<((choice: string) => void) | null>(null);
 
-const RevealContext = createContext<RevealOf>({ animate: () => false, live: () => false, entering: () => false, agent: { id: "", label: "" }, headers: new Set() });
+const RevealContext = createContext<RevealOf>({ animate: () => false, live: () => false, entering: () => false, agent: { id: "", label: "" }, voiceOf: () => ({ id: "", label: "" }), headers: new Set() });
 
 /** O pedido que espera a pessoa, como a timeline o mostra. */
 export interface ApprovalNote {
@@ -62,7 +65,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, after = null, threadId }: {
+export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** O espaço no fim da lista para o composer que flutua por cima (`ChatFrame`); 0 = o fim de sempre. */
@@ -89,6 +92,8 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   onOpenTerminal?: () => void;
   /** Há uma pergunta do agente em aberto: as opções do cartão dela viram botões que respondem por aqui. */
   onAnswer?: (choice: string) => void;
+  /** A conversa de que se pode citar um trecho («Comentar»); sem ela, não há botão. */
+  quoteKey?: string;
   /** Reenvia uma mensagem que saiu da fila do agente sem ser enviada (o aviso «não enviada»). Sem ele, sem o botão. */
   onResend?: (text: string) => void;
   /** Depois dos turnos, no fim do fio: as delegações e entregas do time (`team/TeamThreadFeed`). */
@@ -106,6 +111,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   // Cada mensagem entra animada uma única vez (remontar ao mudar de lugar no turno não repete).
   const entered = useRef<Set<string>>(new Set());
   const headers = useMemo(() => speakerHeaders(items), [items]);
+  const voices = useMemo(() => voicesByItem(items), [items]);
   const reveal = useMemo<RevealOf>(() => ({
     animate: (item) => !!streaming?.has(item.id) || (baseline.current !== null && isFresh(item, baseline.current, mountedAt)),
     live: (id) => working && !!streaming?.has(id),
@@ -115,8 +121,9 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
       return true;
     },
     agent: { id: agentId, label: agentLabel },
+    voiceOf: (itemId) => voices.get(itemId) ?? { id: agentId, label: agentLabel },
     headers,
-  }), [streaming, mountedAt, working, agentId, agentLabel, headers]);
+  }), [streaming, mountedAt, working, agentId, agentLabel, headers, voices]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -173,7 +180,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         {turns.map((turn, i) => turn.notice
           ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
           : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} />)}
-        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending /> : null; })}
+        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
           <div className="flex flex-col gap-1.5">
@@ -192,6 +199,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
       </div>
       </AnswerContext.Provider>
       </RevealContext.Provider>
+      {quoteKey && <SelectionComment container={() => scrollRef.current} quoteKey={quoteKey} />}
     </div>
   );
 }
@@ -241,9 +249,9 @@ function UserMessage({ item }: { item: TimelineItem }) {
   const text = item.text ?? "";
   const peer = useMemo(() => parsePeerEnvelope(text), [text]);
   const [entering] = useState(() => !!peer && reveal.entering(item.id));
-  if (!peer) return <PersonBubble text={text} />;
+  if (!peer) return <PersonBubble text={text} at={item.at} />;
   return (
-    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering}>
+    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body}>
       <Markdown content={peer.body} tone="chat" />
     </AgentBubble>
   );
@@ -259,7 +267,7 @@ function AgentText({ item }: { item: TimelineItem }) {
   const caret = revealing || reveal.live(item.id);
   const [entering] = useState(() => reveal.entering(item.id));
   return (
-    <AgentBubble agentId={reveal.agent.id} label={reveal.agent.label} header={reveal.headers.has(item.id)} entering={entering} caret={caret}>
+    <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""}>
       <Markdown content={text} tone="chat" />
     </AgentBubble>
   );

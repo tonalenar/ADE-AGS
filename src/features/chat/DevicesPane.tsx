@@ -14,7 +14,7 @@ import { ChatSwitch } from "@/features/settings/SettingsSection";
 
 import {
   BackTriangleIcon, CameraIcon, CheckIcon, ChevronDownIcon, CircleIcon, ContrastIcon, FaceIdIcon, HomeIcon, KeyboardIcon,
-  LogIcon, MoreVerticalIcon, PhoneIcon, PinIcon, RotateIcon, SquareIcon, VolumeIcon,
+  LogIcon, MoreVerticalIcon, PhoneIcon, PinIcon, ReloadIcon, RotateIcon, SquareIcon, VolumeIcon,
 } from "./chatIcons";
 import { mentionFor } from "./ChatComposer";
 import {
@@ -32,13 +32,35 @@ import { usePopover } from "./usePopover";
  * (`SimulatorScreen`, sem copiar quadros); o Android, quadros do `adb` com toque e deslizar.
  */
 
-const toolbarCls = "h-12 shrink-0 flex items-center gap-2 px-3 border-b border-gray-200 dark:border-white/[0.08] text-chat-note";
 const ctlCls = "hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white";
 const ibCls = `w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-500 dark:text-white/50 ${ctlCls} disabled:opacity-40 disabled:pointer-events-none`;
 const popCls = "absolute z-50 rounded-xl p-1.5 text-chat-note bg-white dark:bg-surface-raised shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]";
 const itemCls = "w-full h-8 px-2 rounded-md flex items-center gap-2 text-left text-gray-800 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-40";
 const fieldCls = "h-8 min-w-0 px-2.5 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.04] text-chat-note text-gray-900 dark:text-white outline-none focus:border-accent-500";
 const okCls = "text-emerald-700 dark:text-emerald-400";
+
+/**
+ * A barra de cima. Cada peça fica numa linha só (`whitespace-nowrap`) e as secundárias somem conforme a largura DO
+ * PAINEL (`@container`, não a da janela): o painel vai de ~360 a ~700 px e antes o texto quebrava em duas linhas e o
+ * seletor sumia. Abaixo de `@[26rem]` fica só o essencial; o nome do aparelho é o que encolhe (`truncate`).
+ */
+function PaneToolbar({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="@container shrink-0 border-b border-gray-200 dark:border-white/[0.08]">
+      <div className="h-12 flex items-center gap-2 px-3 text-chat-note whitespace-nowrap">{children}</div>
+    </div>
+  );
+}
+
+/** O estado do aparelho: a bolinha sempre, a palavra quando cabe. */
+function StatusDot({ on, label }: { on: boolean; label: string }) {
+  return (
+    <span className="shrink-0 inline-flex items-center gap-1.5" title={label} aria-label={label} role="status">
+      <span aria-hidden="true" className={`w-2 h-2 rounded-full ${on ? "bg-emerald-500 dark:bg-emerald-400" : "bg-gray-400 dark:bg-white/35"}`} />
+      <span className={`hidden @[26rem]:inline ${on ? okCls : "text-gray-500 dark:text-white/50"}`}>{label}</span>
+    </span>
+  );
+}
 
 /** O tamanho de um elemento, acompanhado. */
 function useBoxSize() {
@@ -184,20 +206,18 @@ export function IosPane() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className={toolbarCls}>
+      <PaneToolbar>
         <IosPicker devices={devices} current={current} loaded={loaded} />
-        {current && (
-          <span className={booted ? okCls : "text-gray-500 dark:text-white/50"}>
-            ● {booting ? t("simulator.booting") : booted ? t("chat.devices.on") : t("chat.devices.off")}
-          </span>
-        )}
+        {current && <StatusDot on={booted} label={booting ? t("simulator.booting") : booted ? t("chat.devices.on") : t("chat.devices.off")} />}
         <span className="flex-1" />
-        {booted && bundle && <span className="font-mono text-chat-code text-gray-500 dark:text-white/50 truncate" title={bundle}>{bundle}</span>}
-        <button type="button" disabled={!booted || !bundle} onClick={() => udid && bundle && run(simulatorRelaunch(udid, bundle).then(() => setAppRevision((n) => n + 1)))}
-          className={`h-7 px-2.5 rounded-[7px] text-chat-note border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white/85 ${ctlCls} disabled:opacity-40 disabled:pointer-events-none`}>
-          {t("chat.devices.relaunch")}
+        {booted && bundle && <span className="hidden @[34rem]:block min-w-0 max-w-[45%] font-mono text-chat-code text-gray-500 dark:text-white/50 truncate" title={bundle}>{bundle}</span>}
+        <button type="button" disabled={!booted || !bundle} title={t("chat.devices.relaunch")} aria-label={t("chat.devices.relaunch")}
+          onClick={() => udid && bundle && run(simulatorRelaunch(udid, bundle).then(() => setAppRevision((n) => n + 1)))}
+          className={`shrink-0 h-7 px-2 inline-flex items-center gap-1.5 rounded-[7px] text-chat-note border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white/85 ${ctlCls} disabled:opacity-40 disabled:pointer-events-none`}>
+          <ReloadIcon className="w-3.5 h-3.5" />
+          <span className="hidden @[30rem]:inline">{t("chat.devices.relaunch")}</span>
         </button>
-      </div>
+      </PaneToolbar>
 
       <div className="flex-1 min-h-0 flex bg-gray-100 dark:bg-white/[0.02]">
         <div ref={ref} className="flex-1 min-w-0 flex items-center justify-center p-5">
@@ -206,7 +226,7 @@ export function IosPane() {
           ) : frame.outerW > 0 && (
             <div className="shrink-0 box-border bg-gray-900 shadow-[0_0_0_2px_rgba(58,58,60,1),0_24px_48px_-20px_rgba(0,0,0,0.45)]"
               style={{ width: frame.outerW, height: frame.outerH, padding: frame.pad, borderRadius: frame.outerRadius }}>
-              <div className="relative h-full w-full overflow-hidden bg-gray-100 dark:bg-black" style={{ borderRadius: frame.screenRadius }}>
+              <div className={`relative h-full w-full overflow-hidden ${booted ? "bg-black" : "bg-gray-100 dark:bg-black"}`} style={{ borderRadius: frame.screenRadius }}>
                 {booted ? (
                   <SimulatorScreen screenId="chat-devices" udid={current.udid} radius={frame.screenRadius} onError={fail} />
                 ) : (
@@ -270,12 +290,12 @@ function IosPicker({ devices, current, loaded }: { devices: SimDevice[]; current
     [t("simulator.group.ipad"), devices.filter((d) => d.family === "ipad")],
   ];
   return (
-    <div ref={ref} className="relative min-w-0">
+    <div ref={ref} className="relative min-w-0 shrink">
       <button type="button" onClick={() => { if (!open) void refreshDevices(); setOpen(!open); }} aria-haspopup="listbox" aria-expanded={open} aria-label={t("simulator.pick")}
         className={`inline-flex max-w-full items-center gap-2 h-[30px] px-2.5 rounded-lg border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white ${ctlCls}`}>
         <PhoneIcon className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate">{current ? iosLabel(current.name, current.runtime) : loaded ? t("chat.devices.noIos") : t("chat.panel.loading")}</span>
-        <span className="shrink-0 text-gray-500 dark:text-white/50">{t("chat.devices.simulator")}</span>
+        <span className="hidden @[30rem]:inline shrink-0 text-gray-500 dark:text-white/50">{t("chat.devices.simulator")}</span>
         <ChevronDownIcon className="w-3 h-3 shrink-0" />
       </button>
       {open && (
@@ -489,7 +509,7 @@ export function AndroidPane() {
 
   return (
     <div className="h-full flex flex-col">
-      <div className={toolbarCls}>
+      <PaneToolbar>
         {ready.length > 0 ? (
           <div role="group" aria-label={t("chat.devices.device")} className="flex min-w-0 gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
             {ready.map((d) => {
@@ -507,10 +527,10 @@ export function AndroidPane() {
         ) : (
           <span className="truncate text-gray-500 dark:text-white/50">{list && !list.adb ? t("chat.devices.noAdbShort") : t("chat.devices.noAndroid")}</span>
         )}
-        {info && <span className={`shrink-0 ${okCls}`}>● {info.emulator ? t("chat.devices.on") : t("chat.devices.usbOn")}</span>}
+        {info && <StatusDot on label={info.emulator ? t("chat.devices.on") : t("chat.devices.usbOn")} />}
         <span className="flex-1" />
-        {chosen && <span className="font-mono text-chat-code text-gray-500 dark:text-white/50 truncate">adb · {chosen}</span>}
-      </div>
+        {chosen && <span className="hidden @[34rem]:block min-w-0 font-mono text-chat-code text-gray-500 dark:text-white/50 truncate">adb · {chosen}</span>}
+      </PaneToolbar>
 
       <div className="flex-1 min-h-0 flex bg-gray-100 dark:bg-white/[0.02]">
         <div ref={ref} className="flex-1 min-w-0 flex items-center justify-center p-5">

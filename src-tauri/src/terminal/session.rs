@@ -37,6 +37,7 @@ const ERR_MISSING: &str = "Este comando só funciona dentro de um terminal do AD
 const ERR_UNKNOWN: &str = "A sessão deste terminal não é reconhecida. Reabra o terminal da aba.";
 const ERR_FORGED: &str = "ADE_TAB_ID não corresponde a este terminal.";
 const ERR_NO_PID: &str = "Não foi possível confirmar o processo deste terminal (PID do cliente ausente). O comando foi recusado.";
+const ERR_CONVERSATION_UNKNOWN: &str = "Esta conversa não tem um processo registrado no ADE AGS (ela precisa estar aberta no app).";
 const ERR_ANCESTRY: &str = "O processo que chamou este comando não pertence ao terminal desta aba. O comando foi recusado.";
 
 /// Profundidade máxima da caminhada de pais. Um ciclo ou uma árvore
@@ -52,6 +53,10 @@ struct Bound {
 struct Sessions {
     by_token: HashMap<String, Bound>,
     by_tab: HashMap<String, String>,
+    /// Conversas por protocolo: o PID do processo do motor, por `thread:<id>`. Sem token.
+    conversations: HashMap<String, u32>,
+    /// Token já entregue ao ambiente de uma conversa (`thread_env`) que espera o PID do motor para virar sessão.
+    pending: HashMap<String, String>,
 }
 
 fn registry() -> MutexGuard<'static, Sessions> {
@@ -59,6 +64,8 @@ fn registry() -> MutexGuard<'static, Sessions> {
         Mutex::new(Sessions {
             by_token: HashMap::new(),
             by_tab: HashMap::new(),
+            conversations: HashMap::new(),
+            pending: HashMap::new(),
         })
     });
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
@@ -79,7 +86,10 @@ pub(crate) fn ancestry_required() -> bool {
 /// Publica o token já gerado para o PTY desta aba, amarrado ao PID do
 /// processo que o PTY lançou. Substitui o token anterior da mesma aba.
 pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) {
-    let mut sessions = registry();
+    publish_in(&mut registry(), tab_id, token, root_pid);
+}
+
+fn publish_in(sessions: &mut Sessions, tab_id: &str, token: &str, root_pid: u32) {
     if let Some(previous) = sessions.by_tab.insert(tab_id.to_string(), token.to_string()) {
         if previous != token {
             sessions.by_token.remove(&previous);
@@ -89,6 +99,32 @@ pub(crate) fn publish_token(tab_id: &str, token: &str, root_pid: u32) {
         token.to_string(),
         Bound { tab: tab_id.to_string(), root_pid },
     );
+}
+
+/// Emite o `ADE_SESSION` do próximo processo do motor de `thread:<id>`. Fica pendente até
+/// [`register_conversation`] saber o PID; um respawn emite outro e o anterior deixa de valer, como num PTY novo.
+/// É um token de memória do processo (nunca vai para disco, banco, log ou URL), igual ao dos terminais.
+pub(crate) fn issue_conversation_token(tab_id: &str) -> Option<String> {
+    if !tab_id.starts_with(crate::chat_team::model::THREAD_PREFIX) {
+        return None;
+    }
+    let token = uuid::Uuid::new_v4().to_string();
+    registry().pending.insert(tab_id.to_string(), token.clone());
+    Some(token)
+}
+
+/// Registra o processo do motor de uma conversa por protocolo (`thread:<id>`). Cada conversa tem o seu
+/// processo; um respawn da mesma conversa troca o PID. Com o token emitido por [`issue_conversation_token`] a
+/// conversa também tem sessão (memória e quadro da missão); sem ele, vale só a ancestralidade do PID do
+/// cliente (ver [`authorize_actor`]).
+pub(crate) fn register_conversation(tab_id: &str, root_pid: u32) {
+    if tab_id.starts_with(crate::chat_team::model::THREAD_PREFIX) && root_pid > 0 {
+        let mut sessions = registry();
+        sessions.conversations.insert(tab_id.to_string(), root_pid);
+        if let Some(token) = sessions.pending.remove(tab_id) {
+            publish_in(&mut sessions, tab_id, &token, root_pid);
+        }
+    }
 }
 
 /// O PTY saiu do registro (fechou, foi substituído ou a app encerrou a sessão).
@@ -139,6 +175,31 @@ pub fn authorize(session: Option<&str>, claimed_tab: Option<&str>, client_pid: O
         return Err(ERR_ANCESTRY.into());
     }
     Ok(bound.tab)
+}
+
+/// Quem chama as ações do Jev e do computer use: um terminal de aba (token + ancestralidade, como
+/// [`authorize`]) ou uma conversa por protocolo, sem token, cujo PID de cliente precisa descender do
+/// processo registrado para aquela `thread:<id>`. Sem PID do peer (plataforma sem a API) a conversa é
+/// recusada: não há como provar a identidade, e o token não existe para ela.
+///
+/// Só quem chama isto aceita conversa. `memory.*` e `swarm.*` continuam em [`authorize`], só de terminal.
+pub fn authorize_actor(session: Option<&str>, claimed_tab: Option<&str>, client_pid: Option<u32>) -> Result<String, String> {
+    if session.map(str::trim).is_some_and(|value| !value.is_empty()) {
+        return authorize(session, claimed_tab, client_pid);
+    }
+    let tab = claimed_tab.map(str::trim).filter(|value| value.starts_with(crate::chat_team::model::THREAD_PREFIX));
+    let Some(tab) = tab else {
+        return Err(ERR_MISSING.into());
+    };
+    let Some(root) = registry().conversations.get(tab).copied() else {
+        return Err(ERR_CONVERSATION_UNKNOWN.into());
+    };
+    let client = client_pid.filter(|pid| *pid > 0);
+    match (ancestry_required(), client) {
+        (true, Some(pid)) if descends_from(pid, root, parent_pid) => Ok(tab.to_string()),
+        (true, Some(_)) => Err(ERR_ANCESTRY.into()),
+        _ => Err(ERR_NO_PID.into()),
+    }
 }
 
 /// `client` é `root` ou um descendente, segundo `parent`. Para no init,
@@ -297,6 +358,29 @@ mod tests {
         assert_eq!(verified_tab(Some(&second), Some(&tab)).unwrap(), tab);
         release_token(&second);
         assert!(verified_tab(Some(&second), Some(&tab)).unwrap_err().contains("não é reconhecida"));
+    }
+
+    #[test]
+    fn conversa_sem_token_so_passa_pelo_pid_do_proprio_processo() {
+        let thread = format!("{}teste-actor", crate::chat_team::model::THREAD_PREFIX);
+        let outra = format!("{}teste-outra", crate::chat_team::model::THREAD_PREFIX);
+        // Sem registro: recusada, mesmo com PID.
+        assert!(authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap_err().contains("não tem um processo"));
+        register_conversation(&thread, std::process::id());
+        if ancestry_required() {
+            assert_eq!(authorize_actor(None, Some(&thread), Some(std::process::id())).unwrap(), thread);
+            assert!(authorize_actor(None, Some(&thread), None).unwrap_err().contains("PID"));
+            assert!(authorize_actor(None, Some(&thread), Some(1)).unwrap_err().contains("não pertence"));
+            // Outra conversa não herda o processo desta.
+            register_conversation(&outra, std::process::id().wrapping_add(7_000_000));
+            assert!(authorize_actor(None, Some(&outra), Some(std::process::id())).is_err());
+        }
+        // Terminal sem token continua recusado, e o `authorize` de memória/swarm não aceita conversa.
+        assert!(authorize_actor(None, Some("tab-de-terminal"), Some(std::process::id())).unwrap_err().contains("ausente"));
+        assert!(authorize(None, Some(&thread), Some(std::process::id())).is_err());
+        // Token de terminal não vale para outra aba mesmo com o PID certo.
+        let issued = Issued::new("actor");
+        assert!(authorize_actor(Some(&issued.token), Some(&thread), Some(std::process::id())).unwrap_err().contains("ADE_TAB_ID"));
     }
 
     #[test]

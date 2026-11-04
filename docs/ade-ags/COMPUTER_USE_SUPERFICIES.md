@@ -7,7 +7,7 @@ ags sim act iPhone "Abra Geral nos Ajustes" --expect "text:Armazenamento do iPho
 ags sim act iPhone "Preencha o campo já focado" --fill "screen=exemplo" --expect "text:exemplo"
 ```
 
-A chamada exige a sessão do PTY emitida pela ADE e PID descendente no socket de credencial. Flags não substituem a identidade; sessão e alcance são revalidados durante o laço. O nome/id precisa identificar um nó iOS conectado ao terminal chamador. O aparelho precisa estar ligado. Um UDID isolado não concede alcance. Apenas um `act` pode usar o aparelho por vez.
+A chamada exige a identidade de quem chama, verificada pelo backend (veja "Quem pode chamar"). Flags não substituem a identidade; sessão e alcance são revalidados durante o laço. O nome/id precisa identificar um nó iOS conectado ao terminal chamador. O aparelho precisa estar ligado. Um UDID isolado não concede alcance. Apenas um `act` pode usar o aparelho por vez.
 
 Em Ajustes → Decisões, é necessário habilitar Jev, o piloto do navegador e a reserva visual. Nada é ligado automaticamente. O comando usa somente o provedor e a URL configurados, sem fallback para outro serviço. O transporte visual existente usa `jev-preview`; provedores sem suporte a imagem são recusados antes de capturar. A CLI instalada só terá o comando depois de uma atualização autorizada; o código novo não altera o app instalado.
 
@@ -17,6 +17,45 @@ Em Ajustes → Decisões, é necessário habilitar Jev, o piloto do navegador e 
 - `--expect text:trecho`: repetível, todos os trechos precisam aparecer no OCR local. `url:`, `count:` e `absent:` são recusados antes de agir: ainda não existe árvore AX no iOS. A verificação é textual e pode falhar por OCR.
 
 A resposta JSON inclui `text` legível, como no `portal act`, e `report` com status, ações/tentativas, contagem de observações e chamadas ao decisor. O exit 0 da CLI indica que o relatório foi obtido; confira `report.status` para saber se o objetivo foi atingido. `done` exige expectativas locais satisfeitas; a conclusão do Jev sem expectativas é `unverified`. Limite, incerteza e falha não são apresentados como sucesso. O resumo também aparece na conversa do nó do simulador, sem valores digitados.
+
+## Quem pode chamar
+
+A mensagem antiga "sim act exige a sessão de um terminal ADE AGS" vinha de `terminal::authorize`: token `ADE_SESSION` + PID descendente do PTY. Só terminais de aba recebem o token; as conversas por protocolo recebiam apenas `ADE_TAB_ID=thread:<id>`, que não é segurança. Hoje `terminal::authorize_actor` aceita os dois, sem abrir brecha:
+
+| Quem chama | Caminho até o Jev | Identidade verificada | Antes | Agora |
+|---|---|---|---|---|
+| Claude Code, Codex, Gemini, OpenCode, Antigravity, Cursor em **aba de terminal** | `ags portal act`, `ags sim act`, `ags desk act` (shell); MCP `browser_act` | token `ADE_SESSION` + PID descendente do PTY | `sim act` ok; `portal act` só confia no `from` | igual, mais `desk act` |
+| Codex, Claude, OpenCode, Antigravity em **conversa por protocolo** (`conversa/`) | `ags …` pelo shell do agente | `thread:<id>` + PID do cliente descendente do processo do motor (registrado após cada spawn); também recebe `ADE_SESSION` | `sim act` recusado | `sim act` e `desk act` ok |
+| Cursor em conversa | idem | não existe motor de Cursor em `conversa/` (só TUI); se entrar, o spawn precisa chamar `chat_team::env::register_process` | n/a | n/a |
+| MCP `ags mcp` (browser/design) | escopo por `tabId` informado | não verifica sessão | só navegador | sem tool de computer use: o CLI é o caminho |
+
+A conversa por protocolo recebe `ADE_SESSION` (decisão do usuário, P7 do desenho de unificação): `chat_team::env::thread_env` emite um token novo a cada processo do motor, que só vale depois de `register_process` saber o PID (um respawn troca o token, como num PTY novo). O token fica só na memória do app e no ambiente do motor; não é segredo do keyring. Com ele a conversa usa `memory.*`/`swarm.*` (memória e quadro da missão). Sem PID do peer (plataforma sem a API) a conversa é recusada. Um terminal que afirma ser `thread:x` não descende do processo daquela conversa e é recusado.
+
+## O que cada um alcança (`surfaces::reach`)
+
+Uma função só, `surfaces::reach(actor)`, devolve o que uma aba ou `thread:<id>` alcança. Listagem (`ags device list`, `ags portal list`) e autorização (`ags device *`, `ags sim act`, cada passo do computer use iOS) usam a mesma lista, e o `sim act` refaz a pergunta a cada passo.
+
+| Origem | Como entra | `control` | O que pode |
+|---|---|---|---|
+| Canvas | portal ligado por corda ao ator (orquestrador: também os do time) | sempre | tudo |
+| Painel do chat | aparelho aberto no painel direito (`chat:<udid\|serial>`), sem corda | a chave "Permitir que agentes controlem dispositivos" | sem a chave só `shot` e `tree`; `sim act` e o resto exigem a chave |
+
+Um aparelho do painel que também é portal ligado ao ator aparece só como o portal. O `desk act` não passa por aqui: depende só do ator e da aprovação na UI. O bloqueio do device hub não mudou. Teste: matriz `{aba, thread} × {corda, painel, nenhum} × {controle ligado, desligado} × {shot, act}` em `src-tauri/src/surfaces/test.rs`.
+
+## Computer use do Mac (`ags desk act`)
+
+```sh
+ags desk act "Abra o Mail e mostre a caixa de entrada" --expect "text:Caixa de Entrada" --steps 8 --timeout 115
+```
+
+Mesmo núcleo do iOS (`computer_use::run`), com `computer_use/desktop.rs`: foto da tela principal (`screencapture`), OCR local, entrada por CGEvent (`desk_input.swift`, só `click`/`scroll`/`type`/`bounds`/`check`). Regras:
+
+- **Sem cartão no canvas, a autorização é a pessoa**: um diálogo no início de cada act, antes de qualquer foto. Não há interruptor, flag ou memória de aprovação. Recusa, prazo ou falha do diálogo → `blocked`, nada observado.
+- Ação sensível/incerta (digitar, clique sem rótulo OCR, rótulo de risco, risco do decisor) pede confirmação **por ação**; teclas soltas e Enter não existem. Probabilidade, nunca `confidence`; piso 0,4 para agir e 0,75 para concluir.
+- Privacidade igual à do iOS: OCR com segredo/campo privado não sai; `--fill` nunca vai ao provedor; marcador persistente `computer_use.desktop.private` depois de digitar. A tela inteira pode conter outros apps: a foto só sai depois do consentimento inicial e do detector local, por melhor esforço.
+- **Auditoria comum** (`approval_audit`, origem `chat`, ferramenta `computer_use:desktop|click|type|scroll|privacy`): cada pergunta gera `asked` e cada resposta `decided` (`allowed-once`/`rejected`/`unavailable`), sem objetivo, valores ou foto. O log do Jev registra a consulta como no iOS.
+- Exige Acessibilidade e Gravação de Tela para a ADE; sem elas, recusa com a instrução antes de perguntar. Só a tela principal; um act por vez.
+- Teste com fakes: `computer_use/desktop/test.rs` (parser de tela, rolagem, consentimento, auditoria) e o núcleo já coberto em `computer_use/test.rs`. Percurso real (permissões, latência, cliques) **não foi medido**: exige o app com permissões e Jev autorizado, com teto.
 
 ## Laço e integração
 
@@ -59,6 +98,7 @@ O log existente registra `browser_vision`, hash do objetivo, operação, probabi
 | Simulador iOS | Driver visual + HID e `ags sim act` conectados; AX ainda pendente |
 | `real_browser` / `RealBrowserView` | WebView2 filho do Portal no Windows; não é navegador externo do Mac; preservado |
 | `desktop_apps` | Gemini Desktop Windows; driver macOS AXUIElement + ScreenCaptureKit ainda pendente |
+| Tela do Mac (`desk act`) | Driver visual (foto + OCR + CGEvent) com consentimento por objetivo; sem árvore AX ainda |
 | Navegador externo Mac | Próxima etapa, como app do driver macOS; não será uma extensão do WebView2 |
 
 ## Validação e limites

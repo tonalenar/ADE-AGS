@@ -60,6 +60,8 @@ export function canvasPlan(input: CanvasInput): CanvasOp[] {
   const lead = team.orchestrator;
   const leadKey = leadBoardKey(input);
   const ops: CanvasOp[] = [];
+  // Sem orquestrador (a coroa saiu do canvas): o time continua no chat e o canvas fica como a pessoa deixou.
+  if (!lead) return ops;
   const disconnectAll = (ref: string) => {
     for (const key of keysWithEdge(boards, lead, ref)) ops.push({ kind: "disconnect", key, a: lead, b: ref });
   };

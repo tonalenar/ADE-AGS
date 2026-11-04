@@ -51,7 +51,7 @@ describe("gridPlacements integration & regressão de quadro vazio", () => {
     it("layoutStore.usePlacements utiliza gridPlacements para mapear terminais visíveis no grid", () => {
       const code = fs.readFileSync(layoutStoreFile, "utf-8");
       expect(code).toContain("import { gridPlacements, useMissionGrid } from \"@/features/canvas/gridMode\";");
-      expect(code).toMatch(/for\s*\(\s*const\s*\[id,\s*rect\]\s*of\s*gridPlacements\(grid,\s*slots\)\s*\)/);
+      expect(code).toMatch(/for\s*\(\s*const\s*\[id,\s*rect\]\s*of\s*gridPlacements\(terminalRefs\(grid\),\s*slots\)\s*\)/);
     });
   });
 

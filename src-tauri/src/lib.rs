@@ -30,6 +30,7 @@ mod floors_land;
 mod forge;
 mod graphify;
 pub mod ipc;
+mod surfaces;
 mod marketplace;
 mod memory;
 pub mod missions;

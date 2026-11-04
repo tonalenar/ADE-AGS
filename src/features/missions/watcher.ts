@@ -19,6 +19,8 @@ import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
 import { addAsks, applyLeadMessage, deriveAlerts, findLeadStalls, findScreenAsks, leadStallMessage, leadStallSpan, markLeadAlerted, parseLeadStallMs, type PendingAsks } from "./leadStall";
 import { useStallAlerts } from "./stallAlerts";
+import { staleMirrors, unmirrorMission } from "./mirror";
+import { useTeamStore } from "@/features/chat/team/teamStore";
 import { useVigiaDriver } from "./vigia";
 import { missionTurns } from "./turns";
 
@@ -280,4 +282,10 @@ export function useMissionWatcher(): void {
     const { closeTab } = useTabsStore.getState();
     finishedMissionTabs(missions, index, tabs).forEach((id) => closeTab(id));
   }, [missions, index, tabs]);
+
+  // O espelho da missão no chat sai quando ela fecha (só a linha; o motor e os agentes são da missão).
+  const mirrors = useTeamStore((s) => s.missionTeams);
+  useEffect(() => {
+    for (const id of staleMirrors(mirrors, missions)) void unmirrorMission(id).catch(() => undefined);
+  }, [mirrors, missions]);
 }

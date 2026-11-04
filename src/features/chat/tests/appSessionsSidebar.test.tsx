@@ -9,7 +9,6 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => un
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onResized: () => Promise.resolve(() => undefined) }) }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key, i18n: { language: "pt-BR" } }) }));
 vi.mock("@/features/missions/MissionsSection", () => ({ MissionsSection: () => <div data-testid="missoes" /> }));
-vi.mock("@/features/missions/groups", () => ({ useMissionIndex: () => ({ "tab-m": "mission-1" }) }));
 vi.mock("@/shared/brand/Pet", () => ({ usePetStatus: () => ({}), PetCard: () => <div data-testid="pet" /> }));
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -47,11 +46,12 @@ describe("a barra de sessões nas Abas e no Canvas", () => {
     expect(host.querySelector("[aria-label='chat.sidebar.new']")).not.toBeNull();
   });
 
-  it("mantém as missões no alto e o pet embaixo, e as terminais de missão ficam fora da lista", async () => {
+  it("mantém as missões no alto e o pet embaixo, e ", async () => {
     await mount();
     expect(host.querySelector("[data-testid=missoes]")).not.toBeNull();
     expect(host.querySelector("[data-testid=pet]")).not.toBeNull();
-    expect(host.textContent).not.toContain("Da missão");
+    // Antes o filtro `missionOf` escondia o terminal da missão; agora o grupo "Missão X" é mostrado, sem remontar terminal.
+    expect(host.textContent).toContain("Da missão");
   });
 
   it("abrir uma conversa ativa a aba e leva à tela do workspace", async () => {

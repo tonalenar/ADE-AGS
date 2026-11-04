@@ -275,7 +275,7 @@ fn find_peer_or_alias<'a>(peers: &'a [OpenTab], to: &str, alias: Option<(&str, &
 pub(crate) fn team_alias(app: &AppHandle, from: &str) -> Option<(String, String)> {
     let db = super::shared::db(app).ok()?;
     let conn = db.lock().ok()?;
-    let team = crate::chat_team::store::team_of(&conn, from).ok().flatten()?;
+    let team = crate::chat_team::store::team_of(&conn, from).ok().flatten().filter(|t| t.led())?;
     Some((team.label, team.orchestrator))
 }
 

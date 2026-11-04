@@ -13,13 +13,13 @@ describe("os painéis da direita rolam (sem barra visível)", () => {
   const summary = read("../summary/SummaryPane.tsx");
 
   it("o dock do Resumo é uma coluna flex de altura fixa pelas bordas, e o Resumo ocupa o resto", () => {
-    expect(summary).toMatch(/data-summary-dock className="absolute top-\[52px\] bottom-0 right-3 z-10 flex flex-col min-h-0"/);
+    expect(summary).toMatch(/absolute top-\[52px\] right-3 z-20 flex flex-col min-h-0/);
     expect(summary).toMatch(/<div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">/);
   });
 
   it("o ChatShell usa o dock (e não um div solto sem flex)", () => {
     const shell = read("../ChatShell.tsx");
-    expect(shell).toContain("<SummaryDock>");
+    expect(shell).toMatch(/<SummaryDock overlay=\{summarySpot === "overlay"\}>/);
     expect(shell).not.toMatch(/absolute top-\[52px\] bottom-0 right-3 z-10" style/);
   });
 
