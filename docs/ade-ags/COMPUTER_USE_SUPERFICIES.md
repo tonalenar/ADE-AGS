@@ -74,6 +74,8 @@ A implementação iOS (`computer_use/ios.rs`) faz:
 
 **Texto do OCR como opção.** As linhas que o OCR local leu na foto vão ao Jev como a pergunta `rotulo`: até 60 textos, sem repetição e só com letra ou número. O valor de `--fill` nunca vai, porque uma foto que o contenha já é bloqueada antes. No clique, se o Jev escolher um texto com probabilidade de pelo menos 0,5, o toque cai no centro da caixa do OCR; a caixa desenhada pelo provedor só vale sem texto confiável, e aí com o piso de 0,85. O motivo foi medido: tocar na aba "Plano" de um app saiu como `scroll_up` com 0,28 quando o Jev só tinha a foto, e o piloto recusou a ação.
 
+**Tela assentada.** Logo depois de abrir um app, o iOS ainda está desenhando e o OCR lê só o relógio: os Ajustes levaram cerca de 6 s para aparecer. Uma foto com menos de 2 textos não vai ao Jev. O piloto espera 0,8 s e tira outra foto, até 6 vezes e sempre dentro do prazo do `act`; o OCR dessa última foto é reaproveitado pela observação.
+
 **Gestos do iOS.** No iOS, o Jev pode escolher `swipe_left` e `swipe_right`, que são traços horizontais na altura do meio e longe das bordas, e `home`, que é o botão de início. Os três são da família de `scroll`, ação comum sem confirmação, cada um com seu alvo. No Mac eles não existem.
 
 O provedor escolhe somente operações e caixas tipadas. Operações desconhecidas, probabilidades ausentes/inválidas e caixas fora da imagem são recusadas. O núcleo mantém os pisos existentes de 0,4 para ação e 0,75 para conclusão; a caixa usa o piso visual de 0,85. O rótulo é avaliado por probabilidade, nunca pela confiança alternativa de uma escolha.

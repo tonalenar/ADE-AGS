@@ -248,8 +248,39 @@ struct IosSurface {
     frame: Arc<Mutex<Frame>>,
     fills: Vec<String>,
     expect: Vec<String>,
+    /// O OCR da foto que `settled` já leu, para a observação não ler de novo.
+    read_ahead: Option<(String, Vec<Label>)>,
 }
+/// Menos que isto de linhas de texto é tela ainda carregando (um app abrindo, uma transição).
+const MIN_LABELS: usize = 2;
+/// Quantas vezes esperar a tela assentar antes de mostrar o que houver ao decisor, e quanto esperar.
+const SETTLE_TRIES: usize = 6;
+const SETTLE_WAIT: Duration = Duration::from_millis(800);
+
+/// Esperar outra foto: só com a tela quase sem texto, tentativas sobrando e prazo para mais uma espera.
+pub(super) fn should_settle(labels: usize, try_no: usize, time_left: Duration) -> bool {
+    labels < MIN_LABELS && try_no + 1 < SETTLE_TRIES && time_left > SETTLE_WAIT * 4
+}
+
 impl IosSurface {
+    /// A foto de uma tela já assentada: logo depois de abrir um app o iOS ainda está desenhando e o OCR lê só o
+    /// relógio. Uma foto assim faria o decisor gastar uma consulta para responder "não sei". O OCR feito aqui é
+    /// reaproveitado pela observação.
+    fn settled(&mut self) -> Result<(PathBuf, String), String> {
+        let mut try_no = 0;
+        loop {
+            let (path, revision) = capture(&self.udid, self.deadline)?;
+            let read = ocr(&path, self.deadline)?;
+            if !should_settle(read.1.len(), try_no, self.deadline.saturating_duration_since(Instant::now())) {
+                self.read_ahead = Some(read);
+                return Ok((path, revision));
+            }
+            let _ = std::fs::remove_file(&path);
+            try_no += 1;
+            std::thread::sleep(SETTLE_WAIT);
+        }
+    }
+
     fn ask(&self, question: &str) -> Result<bool, String> {
         let seconds = self
             .deadline
@@ -281,7 +312,7 @@ impl Surface for IosSurface {
         Ok(())
     }
     fn observe(&mut self) -> Result<Observation, String> {
-        let (path, revision) = capture(&self.udid, self.deadline)?;
+        let (path, revision) = self.settled()?;
         let mut fresh = Frame {
             labels: vec![],
             path,
@@ -301,7 +332,10 @@ impl Surface for IosSurface {
                 "Orientação da foto não confere com o HID; rotação ainda não é suportada.".into(),
             );
         }
-        let (text, labels) = ocr(&fresh.path, self.deadline)?;
+        let (text, labels) = match self.read_ahead.take() {
+            Some(read) => read,
+            None => ocr(&fresh.path, self.deadline)?,
+        };
         fresh.labels = labels;
         let mut local_only = marked(&self.db, &self.udid)?;
         let ordinary =
@@ -598,6 +632,7 @@ pub(crate) fn act(
         frame: frame.clone(),
         fills: request.fills.values().cloned().collect(),
         expect: request.expect.clone(),
+        read_ahead: None,
     };
     let mut decider = VisualDecider {
         db,
@@ -762,6 +797,15 @@ mod flow_test {
         }
     }
     #[test]
+    fn tela_quase_sem_texto_espera_assentar_sem_passar_do_prazo_nem_das_tentativas() {
+        let folga = Duration::from_secs(30);
+        assert!(should_settle(1, 0, folga), "só o relógio: app ainda abrindo");
+        assert!(should_settle(0, 1, folga));
+        assert!(!should_settle(1, SETTLE_TRIES - 1, folga), "na última tentativa mostra o que houver");
+        assert!(!should_settle(MIN_LABELS, 0, folga), "tela com texto segue na hora");
+        assert!(!should_settle(0, 0, SETTLE_WAIT), "sem prazo, não espera");
+    }
+    #[test]
     fn gestos_viram_rolar_com_alvo_proprio_sem_confirmacao_e_com_traco_longe_das_bordas() {
         for op in ["swipe_left", "swipe_right", "home", "scroll_up"] {
             let pick = computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point: None, confirm: false };
@@ -804,3 +848,4 @@ mod flow_test {
         }
     }
 }
+
