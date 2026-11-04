@@ -1219,3 +1219,15 @@ fn a_cli_documenta_e_identifica_os_contratos_novos() {
         assert!(skill.contains(needle), "a skill não menciona {needle}");
     }
 }
+
+#[test]
+fn device_rotate_tem_rota_acao_e_o_mesmo_giro_do_canvas() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    let devices = include_str!("commands/devices.rs");
+    let ios = include_str!("commands/simulators.rs");
+    assert!(dispatch.contains("\"device.rotate\" => device_action(app, args, \"rotate\")"));
+    assert!(devices.contains("\"say\", \"rotate\"]"));
+    // O agente gira pelo mesmo caminho da barra e do painel: endireita as telas e avisa o frontend.
+    assert!(ios.contains("crate::simulator::rotate_device(app, &udid, &dir)"));
+    assert!(include_str!("../simulator/commands.rs").contains("app.emit(\"simulator-orientation\""));
+}

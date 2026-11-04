@@ -162,12 +162,13 @@ O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém u
 
 `ags device …` aceita nós iOS. Veja a skill `ags-orchestrator`, seção "iOS simulators on the canvas".
 
+**Girar:** o botão ↻ da barra do nó, o do painel do chat e `ags device rotate <aparelho> [left|right]` giram um quarto de volta pelo mesmo caminho (`simulator::rotate_device`): um `GSEvent` de orientação para a `PurpleWorkspacePort` (`native/purple.rs`). Depois do giro, as telas abertas se endireitam e o evento `simulator-orientation` deita a moldura em todas as telas que mostram o aparelho, mantendo a escala. No Android, `ags device rotate` alterna retrato e paisagem.
+
 As coordenadas são **pontos do iOS**. `open`, `button` e `say` só existem no iOS.
 
 ## Ainda não
 
 - `tree` e `tap --text`: a acessibilidade do iOS existe no SimulatorKit (`AXPTranslator`), mas ainda não foi ligada.
-- Girar o aparelho.
 - Aviso automático de crash na conversa.
 - A aba "Simulador" e o botão "Abrir no simulador" do navegador.
 - Reconectar sozinho quando o `CoreSimulatorService` reinicia (hoje a tela some até a ADE reabrir).

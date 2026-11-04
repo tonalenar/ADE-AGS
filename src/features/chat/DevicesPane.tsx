@@ -2,11 +2,15 @@ import { observeForegroundApp } from "./foregroundApp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import { toDevicePoint } from "@/features/canvas/DeviceNode";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { DEFAULT_SCREEN } from "@/features/simulator/geometry";
-import { simulatorBoot, simulatorButton, simulatorOpenUrl, simulatorPriority, simulatorScreenshot, simulatorShutdown, type SimDevice } from "@/features/simulator/ipc";
+import {
+  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorOpenUrl, simulatorPriority, simulatorScreenshot, simulatorShutdown,
+  type SimDevice, type SimOrientationEvent,
+} from "@/features/simulator/ipc";
 import { useSimulatorPrefs } from "@/features/simulator/prefs";
 import { SimulatorScreen } from "@/features/simulator/SimulatorScreen";
 import { refreshDevices, setDeviceState, useSimulatorStore } from "@/features/simulator/store";
@@ -183,7 +187,11 @@ export function IosPane() {
     const stop = observeForegroundApp(window, () => simulatorForegroundApp(udid), setBundle);
     simulatorAppearance(udid).then((a) => alive && setDark(a === "dark")).catch(() => undefined);
     simulatorOrientation(udid).then((o) => alive && setLandscape(o.startsWith("landscape"))).catch(() => undefined);
-    return () => { alive = false; stop(); };
+    // Giros feitos no canvas ou por `ags device rotate` também deitam a moldura aqui.
+    const off = listen<SimOrientationEvent>(SIMULATOR_ORIENTATION_EVENT, (e) => {
+      if (alive && e.payload.udid === udid) setLandscape(e.payload.orientation.startsWith("landscape"));
+    });
+    return () => { alive = false; stop(); void off.then((f) => f()); };
   }, [booted, udid, appRevision]);
 
   const boot = async () => {

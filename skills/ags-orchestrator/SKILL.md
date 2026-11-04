@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.46.0
+version: 1.47.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -811,6 +811,7 @@ ags device swipe iPhone --dir up              # or --x1 --y1 --x2 --y2 [--ms 300
 ags device type iPhone "ton@example.com"      # US keyboard ASCII only
 ags device key iPhone enter                   # enter, escape, delete, tab, space, up/down/left/right
 ags device button iPhone home                 # home, lock, side, siri
+ags device rotate iPhone left                 # a quarter turn (left = counter-clockwise, right); on Android it toggles portrait/landscape
 ags device say iPhone "Login fixed: the button no longer hides under the keyboard."
 ```
 
@@ -1286,7 +1287,7 @@ flags of each command.
 | TIME DO MODO CHAT | `team list`, `team create`, `team link`, `team unlink`, `team role` |
 | CORREÇÕES | `fix list`, `fix decide` |
 | POOLS DE CONTAS | `pools`, `pool create`, `pool delete` |
-| DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device launch`, `device close`, `device`, `device open`, `device button`, `device say` |
+| DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device launch`, `device close`, `device`, `device open`, `device button`, `device rotate`, `device say` |
 | PORTAIS DO CANVAS | `portals`, `portal create`, `portal close`, `open`, `portal navigate`, `portal snapshot`, `portal`, `portal type`, `portal press`, `portal reset`, `portal act` |
 | SIMULADOR IOS | `sim act` |
 | COMPUTER USE DO MAC | `desk act` |

@@ -3531,6 +3531,7 @@
   "simulator.state.booted": "On",
   "simulator.home": "Home",
   "simulator.lock": "Lock",
+  "simulator.rotate": "Rotate",
   "simulator.shot": "Screenshot",
   "simulator.shotSaved": "Screenshot saved to {{path}}",
   "simulator.more": "More",

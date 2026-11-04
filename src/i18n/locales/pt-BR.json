@@ -3531,6 +3531,7 @@
   "simulator.state.booted": "Ligado",
   "simulator.home": "Início",
   "simulator.lock": "Bloquear",
+  "simulator.rotate": "Girar",
   "simulator.shot": "Captura de tela",
   "simulator.shotSaved": "Captura salva em {{path}}",
   "simulator.more": "Mais",

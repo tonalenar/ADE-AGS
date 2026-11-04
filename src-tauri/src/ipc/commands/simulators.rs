@@ -109,6 +109,11 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
             ops::key(&udid, &key)?;
             json!({ "device": who, "key": key })
         }
+        "rotate" => {
+            let dir = arg_str_opt(args, "dir").unwrap_or_else(|| "left".to_string());
+            let orientation = crate::simulator::rotate_device(app, &udid, &dir)?;
+            json!({ "device": who, "orientation": orientation })
+        }
         "button" => {
             let button = arg_str(args, "button")?;
             ops::button(&udid, &button)?;

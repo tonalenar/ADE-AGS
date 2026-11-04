@@ -187,6 +187,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "device.open" => device_action(app, args, "open"),
         "device.button" => device_action(app, args, "button"),
         "device.say" => device_action(app, args, "say"),
+        "device.rotate" => device_action(app, args, "rotate"),
         "portal.list" => portal_list(app, args),
         "portal.create" => portal_create(app, args),
         "portal.open" => portal_open(app, args),

@@ -142,6 +142,7 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   Só no iOS (coordenadas em pontos do iOS, as do `shot`):
   device open <dispositivo> <url>             Abre a URL no Safari do aparelho (localhost funciona)
   device button <dispositivo> home|lock|side|siri   Aperta um botão físico
+  device rotate <dispositivo> [left|right]    Gira o aparelho um quarto de volta (padrão left; no Android alterna retrato/paisagem)
   device say <dispositivo> \"mensagem\"         Responde na conversa do simulador (a pessoa e os outros agentes veem)
   Aparelhos do painel do modo chat (id chat:<udid|serial>) também aparecem em `devices`, para qualquer aba;
   sem a chave \"Permitir que agentes controlem dispositivos\" da pessoa, só shot e tree
@@ -1069,6 +1070,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "device.launch" | "device.close" => &["name", "package"],
         "device.open" => &["name", "url"],
         "device.button" => &["name", "button"],
+        "device.rotate" => &["name", "dir"],
         "device.say" => &["name", "text"],
         "device.tap" | "device.swipe" => &["name"],
         "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"

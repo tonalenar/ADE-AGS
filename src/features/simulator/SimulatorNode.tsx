@@ -1,5 +1,6 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import { Position } from "@xyflow/react";
 
 import { CordPort } from "@/features/canvas/cords";
@@ -8,8 +9,11 @@ import { canvasActions, useActiveBoardKey, useCanvasStore } from "@/features/can
 import { useTabsStore } from "@/features/tabs/store";
 import { AlertaToast } from "@/shared/ui/alerts";
 
-import { clampScale, DEFAULT_SCREEN, nodeSize, phoneOf, scaleOf, SIM_GAP_X, SIM_GAP_Y, stepScale, type SimScreen } from "./geometry";
-import { simulatorBoot, simulatorButton, simulatorPriority, simulatorScreenshot, simulatorShutdown, type SimDevice } from "./ipc";
+import { clampScale, DEFAULT_SCREEN, isLandscape, nodeSize, orientedScreen, phoneOf, scaleOf, SIM_GAP_X, SIM_GAP_Y, stepScale, type SimScreen } from "./geometry";
+import {
+  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
+  simulatorShutdown, type SimDevice, type SimOrientationEvent,
+} from "./ipc";
 import { SimulatorBar } from "./SimulatorBar";
 import { SimulatorChat, type SimAgent } from "./SimulatorChat";
 import { SimulatorScreen } from "./SimulatorScreen";
@@ -48,6 +52,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const [booting, setBooting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closeArmed, setCloseArmed] = useState(false);
+  const [landscape, setLandscape] = useState(false);
 
   useEffect(() => {
     listenActivity();
@@ -58,12 +63,30 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   }, [loaded]);
 
   const current = deviceByUdid(devices, portal.udid);
-  const screen = screenOf(current);
+  const booted = current?.state === "booted";
+  // A moldura deita com o iOS: a orientação vem do backend ao ligar e a cada giro (de qualquer tela ou agente).
+  const screen = orientedScreen(screenOf(current), landscape && booted);
+
+  useEffect(() => {
+    const udid = portal.udid;
+    if (!udid || !booted) {
+      setLandscape(false);
+      return;
+    }
+    let alive = true;
+    simulatorOrientation(udid).then((o) => alive && turnRef.current(isLandscape(o))).catch(() => undefined);
+    const off = listen<SimOrientationEvent>(SIMULATOR_ORIENTATION_EVENT, (e) => {
+      if (alive && e.payload.udid === udid) turnRef.current(isLandscape(e.payload.orientation));
+    });
+    return () => {
+      alive = false;
+      void off.then((f) => f());
+    };
+  }, [portal.udid, booted]);
   const scale = scaleOf(screen, portal.box.h);
   const chat = !!portal.chat;
   const phone = phoneOf(screen, scale);
   const state: SimDevice["state"] | "error" = error ? "error" : booting ? "booting" : current?.state ?? "shutdown";
-  const booted = current?.state === "booted";
 
   const agents: SimAgent[] = useMemo(() => agentsKey.split("\n").filter(Boolean).map((row) => {
     const [tabId, name, agentId] = row.split("\t");
@@ -84,6 +107,16 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       canvasActions.moveNode(key, id, { ...portal.box, w: size.w, h: size.h });
     }
   }, [key, id, screen.width, screen.height, scale, chat]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Deitar ou levantar a moldura mantém a escala: o box troca de largura e altura na mesma passada (sem isso,
+  // a escala relida do box antigo pularia). Pela ref, o ouvinte do evento usa sempre a versão atual.
+  const turn = (next: boolean) => {
+    if (next === landscape) return;
+    resize(orientedScreen(screenOf(current), next && booted), scale, chat);
+    setLandscape(next);
+  };
+  const turnRef = useRef(turn);
+  turnRef.current = turn;
 
   const fail = (e: unknown) => {
     setError(String(e));
@@ -120,6 +153,9 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       } catch (e) {
         fail(e);
       }
+    },
+    onRotate: () => {
+      if (portal.udid) simulatorRotate(portal.udid, landscape ? "right" : "left").then((o) => turnRef.current(isLandscape(o))).catch(fail);
     },
     onChat: () => resize(screen, scale, !chat, { chat: !chat }),
     onScale: (direction: 1 | -1) => resize(screen, stepScale(screen, scale, direction), chat),

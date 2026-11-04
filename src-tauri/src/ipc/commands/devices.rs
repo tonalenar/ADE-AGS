@@ -25,7 +25,7 @@ use crate::ipc::bridge::{ask_frontend_within, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt};
 
 /// `open`, `button` e `say` só existem no simulador iOS (ver `simulators`).
-pub(crate) const ACTIONS: &[&str] = &["tap", "swipe", "type", "key", "launch", "close", "shot", "tree", "start", "open", "button", "say"];
+pub(crate) const ACTIONS: &[&str] = &["tap", "swipe", "type", "key", "launch", "close", "shot", "tree", "start", "open", "button", "say", "rotate"];
 
 /// Cuánto se espera a que un emulador recién arrancado termine de iniciar.
 const BOOT_WAIT: Duration = Duration::from_secs(120);
@@ -181,6 +181,11 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
     }
     if matches!(action, "open" | "button" | "say") {
         return Err(format!("`ags device {action}` é só do simulador iOS; no Android use `key`/`launch`."));
+    }
+    if action == "rotate" {
+        let serial = android::pick_serial(target.portal.serial.as_deref(), &android::devices()?)?;
+        let rotation = android::rotate(&serial)?;
+        return Ok(json!({ "device": describe(target), "rotation": rotation }));
     }
     if action == "start" {
         return start(target, args);
