@@ -306,7 +306,10 @@ fn run_inner(
         report.queries += 1;
         let decision = decider.decide(&provider_goal, &observation, &report.actions)?;
         if !decision.probability.is_finite() || !(0.4..=1.0).contains(&decision.probability) {
-            return Ok((Status::Unsure, "Sem probabilidade suficiente para agir."));
+            return Ok((
+                Status::Unsure,
+                "Sem certeza suficiente para agir; nada foi feito. Se o alvo é um ícone sem texto, descreva-o pela posição (ex.: \"o 4º ícone da barra inferior\") ou use `ags device tap` com coordenadas de `ags device shot`.",
+            ));
         }
         let action = decision.action;
         match action.operation {

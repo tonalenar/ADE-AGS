@@ -63,9 +63,15 @@ pub(crate) fn forget_trust(db: &DbConnection) -> Result<usize, String> {
     conn.execute("DELETE FROM settings WHERE key LIKE ?1", [format!("{TRUST_PREFIX}%")])
         .map_err(|_| "Não consegui esquecer as autorizações.".to_string())
 }
-/// O que pergunta mesmo com "sempre": tocar num controle de pagar, apagar, senha, sair, enviar…
-pub(super) fn always_asks(action: &Action, label: &str) -> bool {
-    action.operation == Operation::Click && sensitive_label(label)
+/// O que pergunta mesmo com "sempre": tocar num controle de pagar, apagar, senha, sair, enviar…, e tocar
+/// num controle SEM texto (um ícone) que o próprio Jev não deu como claramente seguro (`jev_unsure`): sem
+/// rótulo, o julgamento dele é a única pista de que o ícone não é uma lixeira.
+pub(super) fn always_asks(action: &Action, label: Option<&str>, jev_unsure: bool) -> bool {
+    action.operation == Operation::Click
+        && match label {
+            Some(label) => sensitive_label(label),
+            None => jev_unsure,
+        }
 }
 fn mark(db: &DbConnection, udid: &str, private: bool) -> Result<(), String> {
     mark_key(db, &format!("computer_use.ios.private.{udid}"), private)
@@ -542,23 +548,15 @@ impl Surface for IosSurface {
             return Ok(false);
         }
         let point = frame.pick.as_ref().and_then(|p| p.point);
-        let label = point
-            .and_then(|(x, y)| {
-                frame.labels.iter().find(|l| {
-                    x >= l.left - 0.02
-                        && x <= l.right + 0.02
-                        && y >= l.top - 0.02
-                        && y <= l.bottom + 0.02
-                })
-            })
-            .map(|l| l.text.chars().take(200).collect::<String>())
-            .unwrap_or_else(|| "controle sem rótulo reconhecido".into());
+        let jev_unsure = frame.pick.as_ref().is_none_or(|p| p.confirm);
+        let named = label_at(point, &frame.labels).map(|t| t.chars().take(200).collect::<String>());
+        let label = named.clone().unwrap_or_else(|| "controle sem rótulo reconhecido".into());
         let typed = self.fills.first().map_or(0, |v| v.chars().count());
         let operation = super::desktop::describe(action, &label, typed, "Tocar");
         let path = frame.path.clone();
         drop(frame);
         // A pessoa já disse "sempre" para este aparelho: só o que é de fato perigoso volta a perguntar.
-        if !always_asks(action, &label) && trusted(&self.db, &self.udid)? {
+        if !always_asks(action, named.as_deref(), jev_unsure) && trusted(&self.db, &self.udid)? {
             return Ok(true);
         }
         let question =
@@ -974,16 +972,20 @@ mod flow_test {
     fn sempre_nao_cobre_tocar_em_pagar_apagar_ou_sair() {
         let click = Action { operation: Operation::Click, target: Some("screen".into()) };
         let scroll = Action { operation: Operation::Scroll, target: Some("scroll_up".into()) };
-        assert!(always_asks(&click, "Excluir conta"));
-        assert!(always_asks(&click, "Sair"));
-        assert!(!always_asks(&click, "Continuar como Eriston"));
-        assert!(!always_asks(&scroll, "Sair"));
+        assert!(always_asks(&click, Some("Excluir conta"), false));
+        assert!(always_asks(&click, Some("Sair"), false));
+        assert!(!always_asks(&click, Some("Continuar como Eriston"), true));
+        assert!(!always_asks(&scroll, Some("Sair"), true));
+        // Ícone sem texto: segue o julgamento do Jev.
+        assert!(always_asks(&click, None, true));
+        assert!(!always_asks(&click, None, false));
+        assert!(!always_asks(&scroll, None, true));
     }
     #[test]
     fn risco_vem_do_controle_tocado_nao_de_uma_palavra_em_outro_canto_da_tela() {
         let label = |text: &str, top: f64| Label { text: text.into(), left: 0.1, right: 0.9, top, bottom: top + 0.05 };
         let labels = vec![label("Geral", 0.2), label("Sair", 0.8)];
-        let pick = |op: &str, point| computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point, confirm: false };
+        let pick = |op: &str, point| computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point, confirm: false, box_confidence: None };
         let text = "Geral\nSair";
         assert!(!decision_for(&pick("click", Some((0.5, 0.22))), text, &labels).unwrap().requires_confirmation, "tocar em «Geral»");
         assert!(!decision_for(&pick("scroll_up", None), text, &labels).unwrap().requires_confirmation, "rolar não é sair");
@@ -997,7 +999,7 @@ mod flow_test {
     #[test]
     fn gestos_viram_rolar_com_alvo_proprio_sem_confirmacao_e_com_traco_longe_das_bordas() {
         for op in ["swipe_left", "swipe_right", "home", "scroll_up"] {
-            let pick = computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point: None, confirm: false };
+            let pick = computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point: None, confirm: false, box_confidence: None };
             let d = decision_for(&pick, "Início", &[]).unwrap();
             assert_eq!(d.action, Action { operation: Operation::Scroll, target: Some(op.into()) });
             assert!(!d.requires_confirmation, "{op}");

@@ -26,6 +26,10 @@ pub(crate) struct TextBox {
 const MAX_LABELS: usize = 60;
 /// Probabilidade mínima para tocar pelo texto escolhido em vez da caixa desenhada.
 const LABEL_MIN_P: f64 = 0.5;
+/// Confiança mínima da caixa desenhada (alvo sem texto no OCR, como um ícone). É o piso calibrado do
+/// piloto do navegador (`MIN_BOX_CONFIDENCE` em `jevPilot.ts`; `docs/ade-ags/bench/calibracao-limites.md`).
+/// Abaixo dele não é erro: é incerteza, e o laço devolve `unsure`.
+const BOX_MIN_CONFIDENCE: f64 = 0.6;
 /// As operações de gesto (só no iOS), na mesma família de `scroll_*`.
 pub(crate) const GESTURES: [&str; 3] = ["swipe_left", "swipe_right", "home"];
 
@@ -50,6 +54,8 @@ pub(crate) struct Pick {
     pub goal_done: Option<f64>,
     pub point: Option<(f64, f64)>,
     pub confirm: bool,
+    /// A confiança da caixa desenhada, quando o toque saiu dela (vai ao log, para calibrar).
+    pub box_confidence: Option<f64>,
 }
 
 pub(crate) fn body(q: &Query<'_>) -> Value {
@@ -129,6 +135,8 @@ pub(crate) fn parse(text: &str, allow_type: bool, gestures: bool, labels: &[Text
         .and_then(|(id, _)| id.strip_prefix('t')?.parse::<usize>().ok())
         .and_then(|i| label_options(labels).into_iter().find(|(n, _)| *n == i))
         .map(|(i, _)| labels[i].rect.center());
+    let mut probability = probability;
+    let mut box_confidence = None;
     let point = if let Some(point) = by_label {
         Some(point)
     } else if operation == "click" {
@@ -140,14 +148,15 @@ pub(crate) fn parse(text: &str, allow_type: bool, gestures: bool, labels: &[Text
             top: edge("top")?,
             bottom: edge("bottom")?,
         };
-        if !r.valid()
-            || !a["alvo"]["confidence"]
-                .as_f64()
-                .is_some_and(|c| c.is_finite() && (0.85..=1.0).contains(&c))
-        {
-            return Err("Caixa visual sem certeza suficiente.".into());
+        let confidence = a["alvo"]["confidence"].as_f64().filter(|c| c.is_finite());
+        box_confidence = confidence;
+        if r.valid() && confidence.is_some_and(|c| (BOX_MIN_CONFIDENCE..=1.0).contains(&c)) {
+            Some(r.center())
+        } else {
+            // O Jev quer tocar, mas não sabe bem onde: incerteza, não falha.
+            probability = 0.0;
+            None
         }
-        Some(r.center())
     } else {
         None
     };
@@ -157,7 +166,23 @@ pub(crate) fn parse(text: &str, allow_type: bool, gestures: bool, labels: &[Text
         goal_done,
         point,
         confirm,
+        box_confidence,
     })
+}
+
+/// O motivo de uma recusa, curto e sem dados, para o log dizer o que falhou ("falha_visual" sozinho não dizia).
+fn reject_code(error: &str) -> &'static str {
+    if error.starts_with("O Jev") {
+        "falha_visual:http"
+    } else if error.starts_with("Resposta visual inválida") {
+        "falha_visual:json"
+    } else if error.starts_with("Operação visual não oferecida") {
+        "falha_visual:operacao"
+    } else if error.starts_with("Caixa incompleta") {
+        "falha_visual:caixa"
+    } else {
+        "falha_visual"
+    }
 }
 
 fn enabled_settings(db: &DbConnection) -> Result<config::Settings, String> {
@@ -215,9 +240,9 @@ pub(crate) fn pick(db: &DbConnection, q: &Query<'_>) -> Result<Pick, String> {
                 ),
                 provider_decision: result.as_ref().ok().map(|v| v.operation.clone()),
                 probability: result.as_ref().ok().map(|v| v.probability),
-                confidence: None,
+                confidence: result.as_ref().ok().and_then(|p| p.box_confidence),
                 latency_ms: Some(started.elapsed().as_millis().min(i64::MAX as u128) as i64),
-                error: result.as_ref().err().map(|_| "falha_visual".into()),
+                error: result.as_ref().err().map(|e| reject_code(e).into()),
                 input_tokens: None,
                 output_tokens: None,
             },
@@ -272,12 +297,15 @@ mod test {
         assert!(!p.confirm);
         let (x, y) = p.point.unwrap();
         assert!((x - 0.3).abs() < 1e-9 && (y - 0.2).abs() < 1e-9);
+        // Caixa fora da foto: incerteza (sem ponto, probabilidade 0), nunca um toque.
         let mut bad = reply("click");
         bad["answers"]["alvo"]["box"]["left"] = json!(-0.2);
-        assert!(parse(&bad.to_string(), false, false, &[]).is_err());
+        let p = parse(&bad.to_string(), false, false, &[]).unwrap();
+        assert!(p.point.is_none() && p.probability == 0.0);
         let mut bad = reply("click");
         bad["answers"]["alvo"]["confidence"] = json!(0.1);
-        assert!(parse(&bad.to_string(), false, false, &[]).is_err());
+        let p = parse(&bad.to_string(), false, false, &[]).unwrap();
+        assert!(p.point.is_none() && p.probability == 0.0 && p.box_confidence == Some(0.1));
     }
     #[test]
     fn operacao_nao_oferecida_e_probability_ausente_sao_recusadas() {
@@ -342,10 +370,22 @@ mod label_test {
         assert!((x - 0.2).abs() < 1e-9 && (y - 0.94).abs() < 1e-9);
         // Texto com pouca probabilidade, `none` ou id fora da lista: volta à caixa desenhada, que precisa de certeza.
         for rotulo in [Some(("t2", 0.3)), Some(("none", 0.9)), Some(("t1", 0.9)), Some(("t99", 0.9)), None] {
-            assert!(parse(&reply("click", rotulo, 0.2), false, true, &labels).is_err(), "{rotulo:?}");
+            let weak = parse(&reply("click", rotulo, 0.2), false, true, &labels).unwrap();
+            assert!(weak.point.is_none() && weak.probability == 0.0, "{rotulo:?}");
             let (x, _) = parse(&reply("click", rotulo, 0.9), false, true, &labels).unwrap().point.unwrap();
             assert!((x - 0.65).abs() < 1e-9, "{rotulo:?}");
         }
+    }
+    #[test]
+    fn icone_sem_texto_usa_o_piso_calibrado_e_abaixo_dele_e_incerteza_nao_falha() {
+        let labels = boxes();
+        // Ícone da barra sem texto: a caixa com 0,7 passa (piso calibrado do navegador, 0,6).
+        let p = parse(&reply("click", Some(("none", 0.9)), 0.7), false, true, &labels).unwrap();
+        assert!(p.point.is_some() && p.probability >= 0.4, "{p:?}");
+        assert_eq!(p.box_confidence, Some(0.7));
+        // Abaixo do piso: incerteza (sem ponto, probabilidade 0 → o laço devolve `unsure`), nunca erro.
+        let p = parse(&reply("click", None, 0.4), false, true, &labels).unwrap();
+        assert!(p.point.is_none() && p.probability == 0.0, "{p:?}");
     }
     #[test]
     fn gestos_so_valem_onde_foram_oferecidos() {
