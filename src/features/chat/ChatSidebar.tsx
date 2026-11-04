@@ -10,7 +10,8 @@ import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPale
 import { homeDir } from "@/shared/ipc/window";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 
-import { newConversation, newConversationIn, openConversation } from "./chatActions";
+import { newConversation, newConversationIn } from "./chatActions";
+import { selectConversation } from "./unified/selectionActions";
 import { BotIcon, BranchIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, DesignIcon, EyeIcon, FilterIcon, FolderPlusIcon, GlobeIcon, ListIcon, MoreHorizontalIcon, NewChatIcon, PenIcon, PlusIcon, PullRequestIcon, PushPinIcon, SearchIcon, SettingsIcon, SidebarIcon, UsageIcon, UsersIcon, WarnIcon, WrenchIcon, XIcon } from "./chatIcons";
 import { projectTone, type ChatProject, type ConversationCard } from "./chatModel";
 import { useLiveSummary } from "./liveSummary";
@@ -23,17 +24,15 @@ import { addSurface } from "./store";
 import { buildSections, cleanTitle, countStates, initialOf, stepFocus, toggleAllProjects, visibleIds, type SessionSection } from "./sidebar/sessionsModel";
 import { closeWorkspaceFolder, forgetWorkspaceFolder } from "./sidebar/workspaceActions";
 import { useAutoUnread } from "./sidebar/useAutoUnread";
-import { folderName, threadIdOf } from "./structured/model";
+import { folderName, threadIdOf, threadKey } from "./structured/model";
 import { chatThreadRename } from "./structured/ipc";
-import { openThread, reloadThreads, settleThread, useStructured } from "./structured/store";
+import { reloadThreads, settleThread, useStructured } from "./structured/store";
 import { TeamBadge, TeamMembers, conversationDragProps, useTeamGrouping } from "./team/TeamSidebar";
 import { usePopover } from "./usePopover";
 
 /** Abre o cartão: a conversa por protocolo, ou a aba do agente. */
 function openCard(key: string): void {
-  const threadId = threadIdOf(key);
-  if (threadId) openThread(threadId);
-  else openConversation(key);
+  selectConversation(key);
 }
 
 /** A largura da sidebar (a padrão do T3 Code). */
@@ -297,7 +296,7 @@ export function ChatSidebar({ cards, closed, diffs, selectedId, onCollapse, onAd
               ))}
               {settledThreads.map((th) => (
                 <SlimRow key={th.id} name={folderName(th.cwd)} title={th.title} agentId={th.agentId}
-                  onOpen={() => { settleThread(th.id, false); openThread(th.id); onOpened?.(); }} />
+                  onOpen={() => { settleThread(th.id, false); selectConversation(threadKey(th.id)); onOpened?.(); }} />
               ))}
               {closed.map((p) => (
                 <div key={p.cwd} className="group flex items-center rounded-md hover:bg-white dark:hover:bg-white/[0.05]"

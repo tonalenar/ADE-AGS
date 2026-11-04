@@ -50,6 +50,9 @@ function baseName(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? path;
 }
 
+/** Quem quer saber quando uma aba é ATIVADA por gesto (mesmo que já fosse a ativa, o que o `subscribe` não distingue). */
+export const activationListeners = new Set<(id: string) => void>();
+
 export const useTabsStore = create<TabsState>((set) => ({
   tabs: [],
   activeTabId: null,
@@ -99,7 +102,10 @@ export const useTabsStore = create<TabsState>((set) => ({
       return { tabs: next, activeTabId: nextActive };
     }),
 
-  activateTab: (id) => set({ activeTabId: id }),
+  activateTab: (id) => {
+    set({ activeTabId: id });
+    for (const listener of activationListeners) listener(id);
+  },
 
   renameTab: (id, title) =>
     set((state) => ({

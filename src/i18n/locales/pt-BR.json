@@ -2542,6 +2542,7 @@
   "canvas.actual": "100%",
   "canvas.liveHint": "Volta a 100% no agente ativo: os terminais só ficam interativos em 100%.",
   "canvas.fit": "Ver todos",
+  "canvas.thread.missing": "Conversa não encontrada",
   "canvas.focusHint": "Arraste para mover · duplo clique para abrir em 100%",
   "canvas.links_one": "{{count}} conexão",
   "canvas.links_other": "{{count}} conexões",

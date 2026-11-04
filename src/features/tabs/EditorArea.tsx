@@ -20,7 +20,9 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
 import { useWorkMode } from "@/features/canvas/store";
 import { GRID_SLOT, gridColumns, useMissionGrid } from "@/features/canvas/gridMode";
-import { threadIdOf } from "@/features/chat/structured/model";
+import { threadIdOf, threadKey } from "@/features/chat/structured/model";
+import { useStructured } from "@/features/chat/structured/store";
+import { useChatStore } from "@/features/chat/store";
 import { useConversations } from "@/features/chat/unified/useConversations";
 import { ProtocolPane } from "@/features/tabs/ProtocolPane";
 import { TeamTabMarks } from "@/features/chat/team/TeamTabMarks";
@@ -126,6 +128,27 @@ export function EditorArea() {
         </div>
       )}
       {!chat && !canvas && !grid && <TabDragOverlay />}
+      {!chat && !canvas && <SelectedProtocolPane />}
+    </div>
+  );
+}
+
+/**
+ * A conversa por protocolo escolhida (qualquer uma, de time ou não) nas Abas: a timeline em React puro por cima
+ * da área, sem terminal. Escolher uma aba a tira da frente (ver `selectionActions`).
+ */
+function SelectedProtocolPane() {
+  const thread = useChatStore((s) => s.thread);
+  const conversations = useConversations();
+  const row = useStructured((s) => (thread ? s.threads.find((t) => t.id === thread) : undefined));
+  if (!thread || !row) return null;
+  const conv = conversations.find((c) => c.ref === threadKey(thread));
+  return (
+    <div data-selected-protocol={thread} className="absolute inset-0 flex flex-col bg-white dark:bg-surface-deep" style={{ zIndex: 30 }}>
+      <div className="shrink-0 h-8 px-3 flex items-center truncate text-[12px] font-medium bg-gray-100 dark:bg-gray-900 text-gray-600 dark:text-gray-300">
+        <span className="min-w-0 truncate">{conv?.title ?? row.title}</span>
+      </div>
+      <ProtocolPane threadId={thread} agentId={row.agentId} agentLabel={row.agentId} />
     </div>
   );
 }

@@ -73,6 +73,10 @@ pub struct Board {
     pub folders: Value,
     #[serde(default)]
     pub drawings: Value,
+    /// Os nós das conversas por protocolo (`thread:<id>` → retângulo). Só o frontend os desenha; tem que
+    /// estar no struct para sobreviver ao salvar. Ausente em canvas antigo.
+    #[serde(default)]
+    pub threads: Value,
 }
 
 /// Un portal: un navegador dentro del canvas que los agentes conectados manejan con

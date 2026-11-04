@@ -260,7 +260,7 @@ O front (`chat/team/teamMirror.ts`, `teamStore.ts`) decide **quando** o canvas v
 - **Um time só, com missão.** `reversePlan` e `promotePlan` também deixam de fora quem está num canvas `#m:` (`missionRefsOf`, espelho de `canvas::mission_refs`).
 - **Idempotência.** Teste: promover e depois `canvasPlan`, `reversePlan` e `promotePlan` devolvem lista vazia.
 
-Conversa por protocolo no canvas (D3, `Board.threads`): **fora desta etapa.** Todo agente novo nasce com terminal (decisão do usuário), então o nó de conversa só serviria ao que já existe por protocolo, e a corda/papel dessas conversas já valem (o `reconcile` mantém a corda `thread:`). Fazer o cartão exige campo novo em `Board` (TS e Rust, com `#[serde(default)]`), renderização e a mesma peça nas abas (E4); o custo e o risco de perder dado no save não compensam agora. Fica para quando houver pedido.
+Conversa por protocolo no canvas (D3, `Board.threads`): **feita em "A conversa segue o modo" (abaixo).** O corte da E3 foi um engano: as conversas do usuário no chat SÃO por protocolo, então o cartão é essencial.
 
 ### Missão no chat, nas abas e no canvas (E5)
 
@@ -270,6 +270,16 @@ A missão **continua dona do motor** (worktrees, entrega, orçamento, `confirm_s
 - **O espelho é invisível ao comportamento do chat:** `store::team_of` (escopo do chat da equipe, política, alias de peer, `ags team list` de quem chama) ignora `origin = 'mission'`; só `team_of_any` (o invariante "um agente, um time", `rebind`) o enxerga. O vigia do chat o pula (`watch_db.rs`): **um time nunca tem os dois vigias**. No front, o espelho fica em `useTeamStore.missionTeams`, **fora de `teams`**: não entra em canvas, política nem composer.
 - **Sidebar (chat, Abas e Canvas):** os terminais da missão voltam à lista de conversas (antes `AppSessionsSidebar` os escondia com `missionOf`) e o espelho os agrupa sob o orquestrador, com o selo **MISSÃO · N** (o clique abre a tela de missões). Nenhum `<Terminal>` muda de `key`, pai ou ponto de montagem. A seção de missões (`MissionsSection`) deixou de repetir os terminais embaixo de cada missão.
 - **Criar e iniciar:** a `MissionsSection` (criar `+`, **Iniciar**, **Encerrar**) agora também mora na sidebar do chat; é a mesma de Abas e Canvas e usa os mesmos comandos (`missions.create`, `startMissionInTerminals`). Criar missão nunca lança processo; iniciar é gesto explícito, com `confirm_spend` e orçamento como sempre.
+
+### A conversa segue o modo (uma conversa só em Chat, Abas e Canvas)
+
+A conversa escolhida é a **mesma** nos três modos, e trocar de conversa em qualquer um reflete nos outros.
+
+- **Seleção única:** a ref (`tab.id` ou `thread:<id>`) à vista é `selectedRef({ thread, activeTabId })` (`chat/unified/selection.ts`; hook `useSelectedRef`). A conversa por protocolo aberta vence a aba ativa; **ativar uma aba** (a tira, o canvas, a sidebar, mesmo a que já é a ativa: `activationListeners` do store de abas) fecha a conversa por protocolo. A sidebar das Abas e do Canvas marca a seleção por essa ref.
+- **`selectConversation(ref)`** (`unified/selectionActions.ts`) é o único caminho da sidebar: protocolo abre a conversa; TUI ativa a aba; nos dois casos pede ao canvas que centre o nó (`canvasActions.focusRef`). Só estado: nenhum `<Terminal>` muda de `key`, pai ou ponto de montagem. `startSelectionSync` (no `AppShell`) mantém `useCanvasStore.activeThread` (o canvas da conversa por protocolo aberta) em dia, venha a abertura de onde vier.
+- **Canvas:** `Board.threads` (`thread:<id>` → retângulo; TS `canvas/board.ts`, Rust `canvas/mod.rs` com `#[serde(default)]`, teste de ida e volta em `canvas/test.rs`). O cartão (`ThreadNode.tsx`) reaproveita `StructuredConversationView` (timeline, estado, aprovação e composer), em React puro, sem xterm. O cartão nasce **quando a conversa é escolhida** com o canvas dela no modo Canvas, ou quando uma corda do time a liga a algo; nunca em massa no boot. `addThreadNode` acha um lugar livre sem cobrir terminais, notas, portais, pastas, imagens nem outros cartões. `reconcile` mantém a corda **e** o nó; só descarta o nó se receber `liveThreads` (conversa encerrada) e, sem essa lista, nada some. O canvas da conversa é (`homeBoardKey`): onde já há nó dela (o especial vence), senão onde está a coroa do time, senão a pasta do `cwd`.
+- **Abas:** qualquer conversa por protocolo escolhida (de time ou não) abre o `ProtocolPane` por cima da área (`EditorArea::SelectedProtocolPane`); os terminais seguem montados por baixo.
+- **Não verificado visualmente** nesta etapa (sem instância isolada rodada): só vitest, tipos e o teste Rust.
 
 ## Retomada, fila e avisos na timeline (etapa 3 do harness)
 

@@ -2542,6 +2542,7 @@
   "canvas.actual": "100%",
   "canvas.liveHint": "Back to 100% on the active agent: terminals are only interactive at 100%.",
   "canvas.fit": "Fit all",
+  "canvas.thread.missing": "Conversation not found",
   "canvas.focusHint": "Drag to move · double-click to open at 100%",
   "canvas.links_one": "{{count}} connection",
   "canvas.links_other": "{{count}} connections",

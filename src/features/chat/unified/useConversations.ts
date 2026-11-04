@@ -2,9 +2,11 @@ import { useMemo } from "react";
 
 import { useCanvasStore } from "@/features/canvas/store";
 import { useStructured } from "@/features/chat/structured/store";
+import { useChatStore } from "@/features/chat/store";
 import { useTeamIndex } from "@/features/chat/team/teamIndex";
 import { useTabsStore } from "@/features/tabs/store";
 
+import { selectedRef } from "./selection";
 import { selectConversations } from "./selectConversations";
 import type { UnifiedConversation } from "./types";
 
@@ -15,4 +17,11 @@ export function useConversations(): UnifiedConversation[] {
   const teams = useTeamIndex((s) => s.teams);
   const boards = useCanvasStore((s) => s.boards);
   return useMemo(() => selectConversations({ tabs, threads, teams, boards }), [tabs, threads, teams, boards]);
+}
+
+/** A ref da conversa à vista (a mesma em Chat, Abas e Canvas): ver `selectedRef`. */
+export function useSelectedRef(): string | null {
+  const thread = useChatStore((s) => s.thread);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  return selectedRef({ thread, activeTabId });
 }

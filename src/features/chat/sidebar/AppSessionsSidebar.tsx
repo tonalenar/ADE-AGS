@@ -16,6 +16,7 @@ import { addSurface } from "../store";
 import { startQueueRunner } from "../queueRunner";
 import { startStructured, useStructured } from "../structured/store";
 import { threadCards } from "../structured/model";
+import { useSelectedRef } from "../unified/useConversations";
 
 /**
  * A MESMA barra de sessões do modo chat, nas Abas e no Canvas (no lugar do painel de workspaces): as
@@ -27,7 +28,7 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   const navigate = useNavigate();
   const threads = useStructured((s) => s.threads);
   const detected = useTabsStore((s) => s.detectedAgents);
-  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const selected = useSelectedRef();
   const pet = usePetStatus();
   const chatMode = useUiStore((s) => s.chatMode);
   const setShellMode = useUiStore((s) => s.setShellMode);
@@ -48,7 +49,7 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   }, [groups, cards]);
   const diffs = useFolderDiffs(cards);
   return (
-    <ChatSidebar cards={cards} closed={closed} diffs={diffs} selectedId={activeTabId} width={width}
+    <ChatSidebar cards={cards} closed={closed} diffs={diffs} selectedId={selected} width={width}
       showHeader={false} showFooter={false}
       onCollapse={() => undefined}
       onNew={() => navigate("/")} onAddProject={() => navigate("/")}

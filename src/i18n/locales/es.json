@@ -2542,6 +2542,7 @@
   "canvas.actual": "100%",
   "canvas.liveHint": "Volver al 100 % en el agente activo: las terminales solo son interactivas al 100 %.",
   "canvas.fit": "Ver todos",
+  "canvas.thread.missing": "Conversación no encontrada",
   "canvas.focusHint": "Arrastrá para mover · doble clic para abrir al 100 %",
   "canvas.links_one": "{{count}} conexión",
   "canvas.links_other": "{{count}} conexiones",
