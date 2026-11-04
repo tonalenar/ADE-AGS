@@ -308,6 +308,7 @@ impl ScreenView {
     }
 
     fn touch(&self, event: &NSEvent, phase: Phase) {
+        note_input_age(event);
         let point = self.convertPoint_fromView(event.locationInWindow(), None);
         self.touch_at(point.x, point.y, phase);
     }
@@ -576,8 +577,9 @@ fn activity(visible: bool) {
     });
 }
 
-/// `ADE_SIMULATOR_FPS=1`: escreve no log quantos quadros por segundo chegam à camada (para separar engasgo do
-/// iOS de engasgo da exibição). Desligado, custa uma leitura de `OnceLock`.
+/// `ADE_SIMULATOR_FPS=1`: a cada segundo, no log, quantos quadros chegaram à camada, o maior intervalo entre eles,
+/// quantos passaram de 25 ms e quanto a thread da interface (por onde passam o mouse e o toque) atrasou. Separa
+/// engasgo do iOS de engasgo nosso. Desligado, custa uma leitura de `OnceLock`.
 fn debug_on() -> bool {
     static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *ON.get_or_init(|| std::env::var_os("ADE_SIMULATOR_FPS").is_some())
@@ -589,22 +591,82 @@ fn debug(what: &str) {
     }
 }
 
+/// A janela de um segundo do diagnóstico. A fila de quadros é serial, mas pode rodar em threads diferentes: a
+/// contagem não é por thread.
+struct FpsWindow {
+    count: u32,
+    start: Option<std::time::Instant>,
+    last: Option<std::time::Instant>,
+    max_gap_ms: f64,
+    slow: u32,
+    ui_lag_ms: f64,
+    input_age_ms: f64,
+}
+
+const EMPTY_WINDOW: FpsWindow = FpsWindow { count: 0, start: None, last: None, max_gap_ms: 0.0, slow: 0, ui_lag_ms: 0.0, input_age_ms: 0.0 };
+static FPS_WINDOW: Mutex<FpsWindow> = Mutex::new(EMPTY_WINDOW);
+
 fn count_frame() {
     use std::time::Instant;
     if !debug_on() {
         return;
     }
-    // A fila de quadros é serial, mas pode rodar em threads diferentes: a contagem não é por thread.
-    static WINDOW: Mutex<(u32, Option<Instant>)> = Mutex::new((0, None));
-    let Ok(mut w) = WINDOW.lock() else { return };
-    let (count, start) = *w;
-    let start = start.unwrap_or_else(Instant::now);
-    let elapsed = start.elapsed().as_secs_f64();
+    let Ok(mut w) = FPS_WINDOW.lock() else { return };
+    let now = Instant::now();
+    if let Some(last) = w.last {
+        let gap = (now - last).as_secs_f64() * 1000.0;
+        // Uma pausa longa é a tela parada, não engasgo: só conta dentro de uma sequência de quadros.
+        if gap < 500.0 {
+            w.max_gap_ms = w.max_gap_ms.max(gap);
+            w.slow += u32::from(gap > 25.0);
+        }
+    }
+    w.last = Some(now);
+    w.count += 1;
+    let start = *w.start.get_or_insert(now);
+    let elapsed = (now - start).as_secs_f64();
     if elapsed >= 1.0 {
-        eprintln!("[simulator] {:.0} atualizações/s", f64::from(count + 1) / elapsed);
-        *w = (0, Some(Instant::now()));
-    } else {
-        *w = (count + 1, Some(start));
+        eprintln!(
+            "[simulator] {:.0} atualizações/s · maior intervalo {:.0} ms · {} acima de 25 ms · interface atrasou até {:.0} ms · mouse chegou com até {:.0} ms",
+            f64::from(w.count) / elapsed, w.max_gap_ms, w.slow, w.ui_lag_ms, w.input_age_ms
+        );
+        *w = FpsWindow { start: Some(now), last: Some(now), ..EMPTY_WINDOW };
+    }
+}
+
+/// Com o diagnóstico ligado, a cada 50 ms mede quanto a thread da interface demora a atender (o atraso que o mouse
+/// e o toque também sofrem). Uma vez por processo; desligado, não roda.
+fn probe_ui() {
+    static ON: OnceLock<()> = OnceLock::new();
+    if !debug_on() || ON.set(()).is_err() {
+        return;
+    }
+    fn tick() {
+        let sent = std::time::Instant::now();
+        DispatchQueue::main().exec_async(move || {
+            let lag = sent.elapsed().as_secs_f64() * 1000.0;
+            if let Ok(mut w) = FPS_WINDOW.lock() {
+                w.ui_lag_ms = w.ui_lag_ms.max(lag);
+            }
+        });
+        let _ = frame_queue().after(DispatchTime::NOW.time(50_000_000), tick);
+    }
+    tick();
+}
+
+/// Quanto o evento do mouse esperou até chegar à view (o relógio do `NSEvent` é o `systemUptime`).
+fn note_input_age(event: &NSEvent) {
+    if !debug_on() {
+        return;
+    }
+    // SAFETY: NSProcessInfo público.
+    let uptime = unsafe {
+        let info = call!(class(c"NSProcessInfo").expect("Foundation"), sel!(processInfo); -> *mut AnyObject);
+        call!(info, sel!(systemUptime); -> f64)
+    };
+    let age = (uptime - event.timestamp()) * 1000.0;
+    if let Ok(mut w) = FPS_WINDOW.lock() {
+        w.input_age_ms = w.input_age_ms.max(age);
     }
 }
 
@@ -625,6 +687,7 @@ fn listen(entry: &Entry) {
     let on_frame = entry.presenter.clone();
     let on_surface = entry.presenter.clone();
     debug("ouvindo os quadros");
+    probe_ui();
     activity(true);
     // Um aviso por quadro que o iOS apresenta (60/s com animação). O de retângulos de dano não entra: chega várias
     // vezes por quadro, e registrado com o mesmo UUID substituía este (o quadro nunca chegava).

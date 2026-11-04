@@ -27,6 +27,12 @@ describe("withModel", () => {
     expect(withModel("kimi-code", "kimi", "x", "high")).toBe("kimi");
   });
 
+  it("Cursor recebe só o modelo (`--model <id>`): o esforço é parte do id da variante, nunca uma flag", () => {
+    expect(withModel("cursor", "cursor-agent", "gpt-5.1-codex-high", "high")).toBe("cursor-agent --model gpt-5.1-codex-high");
+    expect(withModel("cursor", "cursor-agent", null, "high")).toBe("cursor-agent");
+    expect(withModel("cursor", "cursor-agent --model auto", "gpt-5", null)).toBe("cursor-agent --model auto");
+  });
+
   it("OpenCode recebe só o modelo (provedor/modelo), sem esforço", () => {
     expect(withModel("opencode", "opencode", "openai/gpt-4.1-mini", "high")).toBe("opencode --model openai/gpt-4.1-mini");
     expect(withModel("opencode", "opencode", null, "high")).toBe("opencode");

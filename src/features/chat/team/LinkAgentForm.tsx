@@ -28,6 +28,8 @@ export interface LinkValue {
   worktree: boolean;
   model: string | null;
   effort: string | null;
+  /** A conta (ou `pool:<nome>`) do agente novo; `null` = a principal. Só quando o formulário pede conta. */
+  account?: string | null;
 }
 
 export function conversationRefOf(card: ConversationCard): ConversationRef {
@@ -43,16 +45,16 @@ export function LinkAgentForm({ team, cards }: { team: TeamView; cards: Conversa
   const teams = useTeamStore((s) => s.teams);
   const taken = useMemo(() => takenRefs(teams), [teams]);
   const usedAgentIds = useMemo(() => [team.agentId, ...team.members.map((m) => m.agentId)], [team]);
-  const submit = async ({ pick, role, policy, subagent, worktree, model, effort }: LinkValue) => {
+  const submit = async ({ pick, role, policy, subagent, worktree, model, effort, account }: LinkValue) => {
     if (!pick) return;
     if (pick.kind === "existing") {
       await linkExisting(team.id, conversationRefOf(pick.card), role, policy, subagent);
     } else {
-      await linkNew({ teamId: team.id, agent: pick.agent, role, policy, cwd: team.cwd, worktree, model, effort, structured: loadChatPrefs().structured, subagent });
+      await linkNew({ teamId: team.id, agent: pick.agent, role, policy, cwd: team.cwd, worktree, model, effort, account: account ?? null, structured: loadChatPrefs().structured, subagent });
     }
     setAdding(team.id, false);
   };
-  return <LinkAgentFields key={team.id} usedAgentIds={usedAgentIds} taken={taken} cards={cards} onSubmit={submit} onCancel={() => setAdding(team.id, false)} />;
+  return <LinkAgentFields key={team.id} accountChoice usedAgentIds={usedAgentIds} taken={taken} cards={cards} onSubmit={submit} onCancel={() => setAdding(team.id, false)} />;
 }
 
 /**
@@ -60,7 +62,9 @@ export function LinkAgentForm({ team, cards }: { team: TeamView; cards: Conversa
  * da tela "Nova conversa" (`DraftTeamPanel`). `initial` abre já preenchido para editar um integrante do
  * rascunho (o agente fica travado: para trocá-lo, remove-se e liga-se outro).
  */
-export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, title, submitLabel, dragHint = true, onSubmit, onCancel }: {
+export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, title, submitLabel, dragHint = true, accountChoice = false, onSubmit, onCancel }: {
+  /** Mostra a escolha de conta do agente novo (só onde a conta chega à conversa: «Ligar ao time»). */
+  accountChoice?: boolean;
   /** Os agentes que o time já tem (o formulário sugere um que falte). */
   usedAgentIds: string[];
   /** As conversas que já estão em algum time (não são oferecidas). */
@@ -88,10 +92,10 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
     return agent ? { kind: "new", agent } : open[0] ? { kind: "existing", card: open[0] } : null;
   });
   // O modelo e o esforço do agente novo (`null` = o padrão dele); trocar de agente zera os dois.
-  const [tune, setTune] = useState<{ model: string | null; effort: string | null }>(
-    () => (initial?.kind === "new" ? { model: initial.model, effort: initial.effort } : { model: null, effort: null }));
+  const [tune, setTune] = useState<{ model: string | null; effort: string | null; account: string | null }>(
+    () => (initial?.kind === "new" ? { model: initial.model, effort: initial.effort, account: null } : { model: null, effort: null, account: null }));
   const choose = (next: LinkPick) => {
-    if (!(pick?.kind === "new" && next.kind === "new" && pick.agent.id === next.agent.id)) setTune({ model: null, effort: null });
+    if (!(pick?.kind === "new" && next.kind === "new" && pick.agent.id === next.agent.id)) setTune({ model: null, effort: null, account: null });
     setPick(next);
   };
   const [role, setRole] = useState<string>(initial?.role ?? "reviewer");
@@ -120,7 +124,7 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
     setBusy(true);
     setError("");
     try {
-      await onSubmit({ pick: locked ? null : pick, role, policy, subagent, worktree, model: tune.model, effort: tune.effort });
+      await onSubmit({ pick: locked ? null : pick, role, policy, subagent, worktree, model: tune.model, effort: tune.effort, account: accountChoice ? tune.account : null });
     } catch (e) {
       setError(t("chat.team.errors.link", { error: String(e) }));
     } finally {
@@ -176,8 +180,8 @@ export function LinkAgentFields({ usedAgentIds, taken, cards, initial = null, ti
       </Row>
       {freshAgent && (
         <Row label={t("chat.team.form.model")}>
-          <AgentModelPicker agents={[freshAgent]} value={{ agentId: freshAgent.id, model: tune.model, effort: tune.effort, account: null }}
-            onChange={(v) => setTune((cur) => ({ ...cur, model: v.model }))} showAccount={false} placement="below" />
+          <AgentModelPicker agents={[freshAgent]} value={{ agentId: freshAgent.id, model: tune.model, effort: tune.effort, account: accountChoice ? tune.account : null }}
+            onChange={(v) => setTune((cur) => ({ ...cur, model: v.model, account: accountChoice ? v.account : null }))} showAccount={accountChoice} placement="below" />
         </Row>
       )}
       {freshAgent && (
