@@ -120,6 +120,18 @@ Medido no iPhone 17 Pro Max (iOS 27.0), num Mac M2 de 8 núcleos e 16 GB, com o 
 
 O que sobra vem do próprio iOS do simulador (SpringBoard, abertura de app, o ritmo do quadro enquanto há toque). Não vem da exibição nem do toque da ADE.
 
+O que foi tentado para o iOS do simulador desenhar mais liso:
+
+| Alavanca | Resultado |
+|---|---|
+| Aparelho sem ProMotion (iPhone 17e) no lugar do Pro Max | um pouco melhor na rolagem (com o dedo, 19% contra 27% dos vsyncs sem quadro novo; na inércia, 6% contra 19%); a parada de ~300 ms na troca de página fica. As rajadas abaixo de 8 ms também aparecem no 17e: não é o iOS tentando 120 Hz |
+| Escala menor na tela da ADE | não muda nada no iOS: ele desenha sempre na resolução do aparelho, e a camada só redimensiona |
+| GPU | o Mac M2 tem uma GPU só; não há o que escolher |
+| Prioridade acima da normal | sem root, não dá: `setpriority(PRIO_DARWIN_ROLE)` em processo do iOS devolve `ENOTSUP`. O `launchd_sim` já dá papel de foco ao SpringBoard e ao app à frente |
+| O visualizador da Apple (Device Hub) | usa o mesmo `SimDisplayRenderableView` do SimulatorKit, sem display link próprio e sem sinal de visibilidade, foco ou taxa para o iOS (só `setDisplayBacklightActive:`). A comparação medida lado a lado depende de escolher o aparelho na janela dele (um clique) e não foi feita |
+
+Para a ADE, o que dá para fazer é o que já faz: manter o iOS na prioridade normal com a tela à vista e mostrar cada quadro no vsync seguinte. Um iPhone menor ajuda um pouco na rolagem.
+
 O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém usa:
 - **Prioridade (modo leve, padrão, botão ⚡, junto com os serviços desligados acima):** `native::set_priority` aplica `PRIO_DARWIN_BG` via `PRIO_DARWIN_PROCESS` no `launchd_sim` do aparelho e em todos os descendentes. Essa política de CPU e I/O não aparece no `nice` do `ps`. Só entra em segundo plano com o aparelho fora de vista em **todas** as telas que o mostram (o nó do canvas e o painel do modo chat contam juntos) e sem ação de agente há pelo menos 60 s (`AGENT_PRIORITY_GRACE`). Ao mostrar a tela ou receber ação de agente, restaura a prioridade normal em uma thread, sem esperar o monitor. Não usamos `nice 10`: voltar a `nice 0` pode falhar com `EACCES` sem root no macOS.
   - Por que importa: com o iOS em `PRIO_DARWIN_BG`, a tela trava. Medido no iPhone 17 Pro Max (iOS 27.0, modo leve), num Mac M2 de 8 núcleos e 16 GB (com outro simulador ligado ao lado), com os quadros contados pelos mesmos callbacks da tela e os gestos pelo `dtuhidd`:
