@@ -19,6 +19,7 @@ function Svg({ children }: { children: ReactNode }) {
 const ICONS = {
   home: <Svg><path d="M4 11l8-7 8 7v9H4z" /></Svg>,
   lock: <Svg><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></Svg>,
+  rotate: <Svg><path d="M4 12a8 8 0 1 0 2.3-5.6" /><path d="M4 4v4h4" /></Svg>,
   shot: <Svg><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></Svg>,
   chat: <Svg><path d="M4 5h16v11H9l-5 4z" /></Svg>,
   more: <Svg><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Svg>,
@@ -111,9 +112,11 @@ export interface SimBarActions {
   onOpenPicker: () => void;
   onButton: (name: "home" | "lock") => void;
   onShot: () => void;
+  onRotate: () => void;
   onChat: () => void;
   onScale: (direction: 1 | -1) => void;
   onLight: () => void;
+  onClipboard: (direction: "toDevice" | "toMac") => void;
   onShutdown: () => void;
   onHibernate: (minutes: number) => void;
   onSingle: () => void;
@@ -168,6 +171,7 @@ export function SimulatorBar({ full, devices, current, state, scale, light, hibe
       {full ? <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/12" /> : <span className="flex-1" />}
       <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("home")} title={t("simulator.home")} aria-label={t("simulator.home")}>{ICONS.home}</button>
       <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("lock")} title={t("simulator.lock")} aria-label={t("simulator.lock")}>{ICONS.lock}</button>
+      <button type="button" className={button} disabled={!on} onClick={actions.onRotate} title={t("simulator.rotate")} aria-label={t("simulator.rotate")}>{ICONS.rotate}</button>
       <button type="button" className={button} disabled={!on} onClick={actions.onShot} title={t("simulator.shot")} aria-label={t("simulator.shot")}>{ICONS.shot}</button>
       {full && (
         <>
@@ -217,6 +221,15 @@ export function SimulatorBar({ full, devices, current, state, scale, light, hibe
             <button type="button" role="menuitemcheckbox" aria-checked={single} onClick={actions.onSingle}
               className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">
               <span className="flex-1">{t("simulator.single")}</span>{single && <span aria-hidden>✓</span>}
+            </button>
+            <div className="mx-1.5 my-1 h-px bg-white/8" />
+            <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toDevice"); }}
+              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+              {t("simulator.clipboardToDevice")}
+            </button>
+            <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toMac"); }}
+              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+              {t("simulator.clipboardToMac")}
             </button>
             <div className="mx-1.5 my-1 h-px bg-white/8" />
             <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onShutdown(); }}

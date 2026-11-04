@@ -65,7 +65,7 @@ O que **não** funciona: a opção de boot `disabled_jobs`. Nem o `simctl boot -
 
 O que funciona (`simulator/slim.rs`, descoberto pela ferramenta simslim): o `launchd_sim` lê, quando sobe, a lista de serviços desligados de `/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist` (rótulo → `true`). No modo leve, com o aparelho desligado, a ADE:
 1. guarda o original (`disabled.ade-original.plist`);
-2. acrescenta 143 rótulos;
+2. acrescenta 157 rótulos;
 3. liga o aparelho;
 4. espera a tela e os primeiros serviços do `launchd_sim`;
 5. devolve o original.
@@ -81,6 +81,8 @@ Medido no iPhone 17 (iOS 27.0), ligado pelo `simctl boot`. A CPU e os processos 
 | CPU do iOS, 120 s | 495% | 1% |
 | Memória comprimida no Mac, 120 s | 7,0 GB | 0,5 GB |
 | Soma do `phys_footprint` | ~20 GB | ~11,8 GB |
+
+Os 14 rótulos de Wallet, mídia e tarefas de fundo do Safari vieram do catálogo do NeoSimulator, que também vem do simslim. Medido no iPhone 17 (iOS 27.1), pelo `simctl boot`, aos 120 s, em duas rodadas alternadas: 125 → 91 e 90 → 82 processos do iOS, com CPU de 0-1% nos dois casos. O Safari e os Ajustes abriram em todas as rodadas. As categorias "Loja" e "Web" do NeoSimulator ficam de fora: tirariam push, compras, App Store, universal links e push de sites.
 
 Com o original devolvido logo depois do boot: 93 processos e 1% de CPU aos 45 s e aos 120 s, e o arquivo igual ao original antes e depois de desligar.
 
@@ -125,6 +127,7 @@ O que foi tentado para o iOS do simulador desenhar mais liso:
 | Alavanca | Resultado |
 |---|---|
 | Aparelho sem ProMotion (iPhone 17e) no lugar do Pro Max | um pouco melhor na rolagem (com o dedo, 19% contra 27% dos vsyncs sem quadro novo; na inércia, 6% contra 19%); a parada de ~300 ms na troca de página fica. As rajadas abaixo de 8 ms também aparecem no 17e: não é o iOS tentando 120 Hz |
+| Zoom da Tela (canvas menor, como o NeoSimulator faz) | não ajuda. O modo "Zoomed" do iPhone 17 pede um canvas de 960×2079 em vez de 1206×2622 (`DBSDisplayZoomConfigurationController` e `SFBDisplaySetCanvasSize`), mas a `IOSurface` continua com 1206×2622. Com um site animado no Safari, a CPU do iOS ficou em 66% e 57% com zoom, contra 47% e 56% sem zoom: está dentro do ruído. Além disso, o zoom aumenta a interface, e quem testa o app passaria a ver outra tela. O reinício do SpringBoard que o modo pede (`FBSSystemService`) exige um entitlement que o simulador recusa em assinatura ad-hoc |
 | Escala menor na tela da ADE | não muda nada no iOS: ele desenha sempre na resolução do aparelho, e a camada só redimensiona |
 | GPU | o Mac M2 tem uma GPU só; não há o que escolher |
 | Prioridade acima da normal | sem root, não dá: `setpriority(PRIO_DARWIN_ROLE)` em processo do iOS devolve `ENOTSUP`. O `launchd_sim` já dá papel de foco ao SpringBoard e ao app à frente |
@@ -162,12 +165,15 @@ O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém u
 
 `ags device …` aceita nós iOS. Veja a skill `ags-orchestrator`, seção "iOS simulators on the canvas".
 
+**Área de transferência:** no "⋯" da barra do nó e do painel do chat, "Colar no aparelho o que o Mac copiou" e "Trazer para o Mac o que o aparelho copiou". Os agentes leem o que o aparelho copiou com `ags device clipboard <aparelho>` e põem texto nele com `ags device clipboard <aparelho> "texto"`. Tudo vai pelo `xcrun devicectl device pasteboard` (CoreDevice), que leva texto, imagem e os outros tipos. O `simctl pbcopy` (SimPasteboard) ainda lê, mas, segundo o NeoSimulator, no iOS 27.2 já não substitui o conteúdo do aparelho.
+
+**Girar:** o botão ↻ da barra do nó, o do painel do chat e `ags device rotate <aparelho> [left|right]` giram um quarto de volta pelo mesmo caminho (`simulator::rotate_device`): um `GSEvent` de orientação para a `PurpleWorkspacePort` (`native/purple.rs`). Depois do giro, as telas abertas se endireitam e o evento `simulator-orientation` deita a moldura em todas as telas que mostram o aparelho, mantendo a escala. No Android, `ags device rotate` alterna retrato e paisagem.
+
 As coordenadas são **pontos do iOS**. `open`, `button` e `say` só existem no iOS.
 
 ## Ainda não
 
 - `tree` e `tap --text`: a acessibilidade do iOS existe no SimulatorKit (`AXPTranslator`), mas ainda não foi ligada.
-- Girar o aparelho.
 - Aviso automático de crash na conversa.
 - A aba "Simulador" e o botão "Abrir no simulador" do navegador.
 - Reconectar sozinho quando o `CoreSimulatorService` reinicia (hoje a tela some até a ADE reabrir).

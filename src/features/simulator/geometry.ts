@@ -23,6 +23,16 @@ export interface SimScreen {
 /** O aparelho que ainda não se conhece (a lista do Xcode não chegou): um iPhone de tamanho comum. */
 export const DEFAULT_SCREEN: SimScreen = { width: 402, height: 874, family: "iphone" };
 
+/** A tela como aparece: deitada (largura e altura trocadas) quando o iOS está em paisagem. */
+export function orientedScreen(screen: SimScreen, landscape: boolean): SimScreen {
+  return landscape ? { ...screen, width: screen.height, height: screen.width } : screen;
+}
+
+/** A orientação (`portrait`, `landscapeLeft`…) deita a tela. */
+export function isLandscape(orientation: string): boolean {
+  return orientation.startsWith("landscape");
+}
+
 export interface PhoneGeometry {
   /** O aparelho com a moldura. */
   w: number;

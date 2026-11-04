@@ -1219,3 +1219,26 @@ fn a_cli_documenta_e_identifica_os_contratos_novos() {
         assert!(skill.contains(needle), "a skill não menciona {needle}");
     }
 }
+
+#[test]
+fn device_rotate_tem_rota_acao_e_o_mesmo_giro_do_canvas() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    let devices = include_str!("commands/devices.rs");
+    let ios = include_str!("commands/simulators.rs");
+    assert!(dispatch.contains("\"device.rotate\" => device_action(app, args, \"rotate\")"));
+    assert!(devices.contains("\"rotate\", ") || devices.contains("\"rotate\"]"));
+    // O agente gira pelo mesmo caminho da barra e do painel: endireita as telas e avisa o frontend.
+    assert!(ios.contains("crate::simulator::rotate_device(app, &udid, &dir)"));
+    assert!(include_str!("../simulator/commands.rs").contains("app.emit(\"simulator-orientation\""));
+}
+
+#[test]
+fn device_clipboard_le_e_escreve_pelo_devicectl() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    let ios = include_str!("commands/simulators.rs");
+    let ops = include_str!("../simulator/mod.rs");
+    assert!(dispatch.contains("\"device.clipboard\" => device_action(app, args, \"clipboard\")"));
+    assert!(ios.contains("ops::set_clipboard_text(&udid, &text)") && ios.contains("ops::clipboard_text(&udid)"));
+    // O caminho público do Xcode 27 (CoreDevice), não o SimPasteboard, que no iOS 27.2 já não substitui o conteúdo.
+    assert!(ops.contains("[\"devicectl\", \"device\", \"pasteboard\"]"));
+}

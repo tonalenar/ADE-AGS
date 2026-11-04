@@ -109,6 +109,18 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
             ops::key(&udid, &key)?;
             json!({ "device": who, "key": key })
         }
+        "clipboard" => match arg_str_opt(args, "text") {
+            Some(text) => {
+                ops::set_clipboard_text(&udid, &text)?;
+                json!({ "device": who, "copied": text.chars().count() })
+            }
+            None => json!({ "device": who, "clipboard": ops::clipboard_text(&udid)? }),
+        },
+        "rotate" => {
+            let dir = arg_str_opt(args, "dir").unwrap_or_else(|| "left".to_string());
+            let orientation = crate::simulator::rotate_device(app, &udid, &dir)?;
+            json!({ "device": who, "orientation": orientation })
+        }
         "button" => {
             let button = arg_str(args, "button")?;
             ops::button(&udid, &button)?;

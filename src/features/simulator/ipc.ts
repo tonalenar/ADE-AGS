@@ -55,3 +55,16 @@ export const simulatorDetach = (id: string) => invoke<void>("simulator_detach", 
 /** Manda a mensagem da pessoa a todos os agentes ligados ao nó `node` do canvas `key`. */
 export const simulatorTell = (key: string, node: string, name: string, text: string, shot: string | null) =>
   invoke<{ sent: string[] }>("simulator_tell", { key, node, name, text, shot });
+
+/** Gira um quarto de volta (`left` = anti-horário); devolve a orientação nova (`portrait`, `landscapeLeft`…). */
+export const simulatorRotate = (udid: string, direction: "left" | "right") => invoke<string>("simulator_rotate", { udid, direction });
+
+/** A última orientação que a ADE mandou ao aparelho. */
+export const simulatorOrientation = (udid: string) => invoke<string>("simulator_orientation", { udid });
+
+/** Evento do backend quando o aparelho gira (pela barra, pelo painel do chat ou por `ags device rotate`). */
+export const SIMULATOR_ORIENTATION_EVENT = "simulator-orientation";
+export interface SimOrientationEvent { udid: string; orientation: string }
+
+/** Área de transferência: `toDevice` leva o que o Mac copiou ao aparelho; `toMac` traz o que o aparelho copiou. */
+export const simulatorClipboard = (udid: string, direction: "toDevice" | "toMac") => invoke<void>("simulator_clipboard", { udid, direction });
