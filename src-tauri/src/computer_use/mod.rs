@@ -368,7 +368,7 @@ fn run_inner(
             })
             || action.operation == Operation::Key;
         if sensitive && !surface.confirm(&observation.revision, &action)? {
-            return Ok((Status::Blocked, "A pessoa não confirmou a ação na UI."));
+            return Ok((Status::Blocked, "A pessoa não confirmou a ação na UI (recusou, fechou ou o prazo do act venceu); nada foi feito. Peça de novo com --timeout maior ou espere a pessoa."));
         }
         // Checa a autorização de novo: o canvas pode mudar enquanto o diálogo está aberto.
         surface.authorize()?;

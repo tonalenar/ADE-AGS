@@ -12,7 +12,7 @@ import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { comparablePath } from "@/features/tabs/viewTabs";
 import i18n from "@/i18n";
 import { useRunsStore } from "@/features/runs/store";
-import { useAskStore } from "@/features/ask/askStore";
+import { parseReview, useAskStore } from "@/features/ask/askStore";
 import { getAutonomy } from "@/features/missions/autonomy";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
@@ -224,7 +224,9 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
         const tabId = owner.id;
         useAskStore.getState().expire(id, (late) => sendWhenReady(tabId, i18n.t("ask.lateMessage", { question, answer: late })));
       } else {
-        useAskStore.getState().answer(id, null);
+        // Sem aba para a resposta tardia: sai da tela. Nunca `answer(id, null)`: resolveria `null`
+        // antes do `pending`, e o agente (ou o computer use) leria "não respondeu" como falha.
+        useAskStore.getState().drop(id);
       }
       once(ASK_PENDING);
     }, timeoutMs);
@@ -233,9 +235,10 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
       question,
       options,
       placeholder: str(args, "placeholder"),
-      from: owner?.label ?? str(args, "cwd") ?? "un agente",
+      from: owner?.label ?? str(args, "cwd") ?? i18n.t("ask.someone"),
       fromId: owner?.id ?? str(args, "cwd") ?? "?",
       expiresAt: Date.now() + timeoutMs,
+      review: parseReview(args.review),
       resolve: once,
     });
   });

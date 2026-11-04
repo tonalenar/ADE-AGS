@@ -268,6 +268,8 @@ export function setDeviceControl(on: boolean): void {
     /* sem armazenamento: vale só nesta sessão */
   }
   useChatStore.setState({ deviceControl: on });
+  // Desligar é revogar: o "sempre" que a pessoa deu ao JEV deixa de valer.
+  if (!on) void import("./devicesIpc").then((m) => m.computerUseForget()).catch(() => undefined);
 }
 
 /** Põe um texto no composer da conversa aberta (a captura de um aparelho, como `@caminho`). */

@@ -25,3 +25,6 @@ export const androidScreenshot = (serial: string) => invoke<string>("android_scr
 
 /** Os aparelhos que o painel mostra, para os agentes alcançarem (`ags device`); `control` = a chave do painel. */
 export const devicesShare = (devices: SharedDevice[], control: boolean) => invoke<void>("devices_share", { devices, control });
+
+/** Esquece o "Autorizar sempre neste aparelho" do JEV; ver `computer_use_forget` em `ipc/commands/devices.rs`. */
+export const computerUseForget = () => invoke<number>("computer_use_forget");
