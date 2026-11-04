@@ -64,23 +64,29 @@ Mesmo núcleo do iOS (`computer_use::run`), com `computer_use/desktop.rs`: foto 
 A implementação iOS (`computer_use/ios.rs`) faz:
 
 1. Revalidação de alcance no canvas, UDID, aparelho ligado e prazo.
-2. Foto pelo `ops::screenshot` existente, sem tocar no caminho de quadros. `sips` reduz o lado maior a 1.200 pixels na pasta de capturas permitida pelo app.
-3. OCR local pelo Vision do macOS, executado pelo Swift do Xcode, sem consulta externa. A API usada é [VNRecognizeTextRequest](https://developer.apple.com/documentation/vision/recognizing-text-in-images).
+2. Foto dentro do processo (`computer_use/capture.rs`): os pixels saem da `IOSurface` da tela, a mesma que o painel mostra, e viram um PNG de no máximo 1.200 pixels no lado maior pelo CoreGraphics/ImageIO, na pasta de capturas permitida pelo app. A cópia só vale se o seed da superfície for o mesmo antes e depois (nunca meio quadro). Com o aparelho girado, num formato de tela diferente de BGRA ou se a leitura falhar, a foto volta ao `simctl io screenshot` + `sips`.
+3. OCR local pelo Vision do macOS (`VNRecognizeTextRequest`) dentro do processo, no Apple Silicon, com o mesmo JSON do `ios_ocr.swift` (teste com imagem fixa, `computer_use/fixtures/ocr-ajustes.png`). A primeira leitura de um executável novo leva 44-70 s, então ela é feita numa imagem fixa numa thread à parte, ao começar o primeiro `act`; até ela voltar, e no Intel, o OCR segue pelo Swift do Xcode (`swift -e`). Nenhuma consulta externa. A API usada é [VNRecognizeTextRequest](https://developer.apple.com/documentation/vision/recognizing-text-in-images).
 4. Aplicação das guardas locais antes do provedor e verificação das expectativas.
 5. Uma consulta de imagem com escolhas fechadas: clicar, digitar quando há fill local, rolar em cada direção, concluir ou parar; perguntas separadas de caixa, conclusão e risco.
 6. Confirmação humana quando necessária na UI existente (`user.ask`).
-7. Nova foto antes do HID, inclusive após o diálogo. A revisão usa UDID e hash dos dados de imagem do PNG, ignorando metadados como timestamps. Mudança invalida a decisão sem tocar.
+7. Conferência da tela antes do HID, inclusive após o diálogo. Na foto nativa, a revisão é o SHA-256 dos pixels crus da `IOSurface` (com dimensões e UDID, prefixo `px:`); conferir é ler e somar de novo os pixels (~40 ms), sem outra foto. No caminho do `simctl`, a revisão é o hash dos dados de imagem do PNG, ignorando metadados, e conferir é outra foto. As duas revisões nunca casam entre si: se a observação veio de um caminho e a conferência do outro, a tela conta como mudada. Mudança invalida a decisão sem tocar.
 8. Toque em coordenadas normalizadas convertido para pontos do iOS, `type_text` ou `swipe` existentes. A foto seguinte verifica o resultado. Foto e dimensão incompatíveis com o HID são recusadas; rotação ainda não é suportada.
 
 **Texto do OCR como opção.** As linhas que o OCR local leu na foto vão ao Jev como a pergunta `rotulo`: até 60 textos, sem repetição e só com letra ou número. O valor de `--fill` nunca vai, porque uma foto que o contenha já é bloqueada antes. No clique, se o Jev escolher um texto com probabilidade de pelo menos 0,5, o toque cai no centro da caixa do OCR; a caixa desenhada pelo provedor só vale sem texto confiável, e aí com o piso de 0,85. O motivo foi medido: tocar na aba "Plano" de um app saiu como `scroll_up` com 0,28 quando o Jev só tinha a foto, e o piloto recusou a ação.
 
-**Tela assentada.** Logo depois de abrir um app, o iOS ainda está desenhando e o OCR lê só o relógio: os Ajustes levaram cerca de 6 s para aparecer. Uma foto com menos de 2 textos não vai ao Jev. O piloto espera 0,8 s e tira outra foto, até 6 vezes e sempre dentro do prazo do `act`; o OCR dessa última foto é reaproveitado pela observação.
+**Tela assentada.** Com a foto nativa, a espera segue os quadros da tela (o seed da `IOSurface` anda a cada quadro que o iOS escreve; lido a cada 20 ms, memória local, sem registrar outro ouvinte de quadros no CoreSimulator, que disputaria a fila do painel):
+
+- depois de uma ação, a foto espera pelo menos 0,6 s a partir do HID (um app pode demorar a começar a reagir, e a tela velha faria o Jev mandar tocar de novo; antes, a lentidão do `simctl` fazia essa espera sem querer) e 0,3 s sem quadro novo;
+- na primeira foto do `act`, só 0,1 s sem quadro novo;
+- animação contínua (vídeo, indicador girando) desiste em 2,5 s e fotografa assim mesmo; a conferência antes do HID continua valendo.
+
+Logo depois de abrir um app, o iOS ainda está desenhando e o OCR lê só o relógio: os Ajustes levaram cerca de 6 s para aparecer. Uma foto com menos de 2 textos não vai ao Jev: o piloto espera o próximo quadro (até 0,8 s; sem foto nativa, 0,8 s fixos) e tira outra foto, até 6 vezes e sempre dentro do prazo do `act`; o OCR dessa última foto é reaproveitado pela observação. Números medidos em [SIMULADOR_IOS.md](SIMULADOR_IOS.md#computer-use-velocidade-medido).
 
 **Gestos do iOS.** No iOS, o Jev pode escolher `swipe_left` e `swipe_right`, que são traços horizontais na altura do meio e longe das bordas, e `home`, que é o botão de início. Os três são da família de `scroll`, ação comum sem confirmação, cada um com seu alvo. No Mac eles não existem.
 
 O provedor escolhe somente operações e caixas tipadas. Operações desconhecidas, probabilidades ausentes/inválidas e caixas fora da imagem são recusadas. O núcleo mantém os pisos existentes de 0,4 para ação e 0,75 para conclusão; a caixa usa o piso visual de 0,85. O rótulo é avaliado por probabilidade, nunca pela confiança alternativa de uma escolha.
 
-Não há espera fixa ou repetição automática de mutação depois de erro de transporte. A ação é registrada antes da execução, porque o SO pode aplicar o efeito e só depois retornar erro. A revisão estrita pode parar em telas animadas; a guarda não deve ser desativada. O histórico anticiclo do núcleo vale dentro do `act`, não é um livro-razão persistente entre chamadas.
+Não há repetição automática de mutação depois de erro de transporte. A ação é registrada antes da execução, porque o SO pode aplicar o efeito e só depois retornar erro. A revisão estrita pode parar em telas animadas; a guarda não deve ser desativada. O histórico anticiclo do núcleo vale dentro do `act`, não é um livro-razão persistente entre chamadas.
 
 ## Decisão de privacidade e consentimento
 

@@ -385,5 +385,6 @@ fn run_inner(
 #[cfg(test)]
 mod test;
 
+mod capture;
 pub(crate) mod ios;
 pub(crate) mod desktop;

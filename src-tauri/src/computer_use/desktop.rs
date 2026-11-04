@@ -386,6 +386,7 @@ pub(crate) fn act(
     }
     let _lease = Lease;
     computer::ready(&db)?;
+    super::capture::warm_ocr();
     match input(&["check"], deadline)?.status.code() {
         Some(0) => {}
         Some(3) => return Err(Failure::AccessibilityPermission.message().into()),

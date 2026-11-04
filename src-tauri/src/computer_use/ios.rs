@@ -199,12 +199,54 @@ pub(super) fn image_revision(bytes: &[u8]) -> Result<String, String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
-fn capture(udid: &str, deadline: Instant) -> Result<(PathBuf, String), String> {
+/// Uma foto do simulador. `frame` (id da superfície, seed) só existe na foto nativa.
+struct Photo {
+    path: PathBuf,
+    revision: String,
+    frame: Option<(u32, u32)>,
+}
+/// Foto pela `IOSurface` da tela, dentro do processo (~0,1 s); se não der, pelo `simctl` (~1,4 s).
+fn capture(udid: &str, deadline: Instant) -> Result<Photo, String> {
     if Instant::now() >= deadline {
         return Err("Prazo de captura esgotado.".into());
     }
+    let dir = crate::preview::capture::capture_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("ios-act-{}.png", uuid::Uuid::new_v4().simple()));
+    match super::capture::ios_shot(udid, &path) {
+        Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame) }),
+        Err(error) => {
+            let _ = std::fs::remove_file(&path);
+            fallback_note("foto", &error);
+        }
+    }
     let tmp = PathBuf::from(ops::screenshot(udid)?);
-    prepare_photo(tmp, udid, "ios-act", deadline)
+    let (path, revision) = prepare_photo(tmp, udid, "ios-act", deadline)?;
+    Ok(Photo { path, revision, frame: None })
+}
+/// A revisão da tela agora, para conferir antes de tocar. Pela `IOSurface` é só ler e somar os pixels (sem PNG);
+/// pelo `simctl`, outra foto inteira. Uma revisão de um caminho nunca casa com a do outro: na dúvida, desatualizada.
+fn current_revision(udid: &str, deadline: Instant) -> Result<String, String> {
+    if Instant::now() >= deadline {
+        return Err("Prazo de captura esgotado.".into());
+    }
+    match super::capture::ios_revision(udid) {
+        Ok(revision) => Ok(revision),
+        Err(error) => {
+            fallback_note("revisão", &error);
+            let photo = capture(udid, deadline)?;
+            let _ = std::fs::remove_file(&photo.path);
+            Ok(photo.revision)
+        }
+    }
+}
+/// Uma vez por processo e por caso, no log: por que o caminho rápido não serviu (sem dados da tela).
+pub(super) fn fallback_note(what: &str, error: &str) {
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let key = format!("{what}: {error}");
+    if SEEN.get_or_init(Default::default).lock().is_ok_and(|mut s| s.insert(key.clone())) {
+        eprintln!("[computer_use] {key}; usando o caminho antigo.");
+    }
 }
 /// Reduz a foto a 1.200 px, na pasta de capturas permitida, e calcula a revisão. Apaga `tmp`.
 pub(super) fn prepare_photo(tmp: PathBuf, id: &str, prefix: &str, deadline: Instant) -> Result<(PathBuf, String), String> {
@@ -215,23 +257,25 @@ pub(super) fn prepare_photo(tmp: PathBuf, id: &str, prefix: &str, deadline: Inst
     let dir = crate::preview::capture::capture_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{prefix}-{}.png", uuid::Uuid::new_v4().simple()));
-    let mut cmd = crate::util::spawn::hidden_command("/usr/bin/sips");
-    cmd.args(["-Z", "1200"]).arg(&tmp).arg("--out").arg(&path);
-    let result = crate::util::spawn::output(
-        &mut cmd,
-        deadline
-            .saturating_duration_since(Instant::now())
-            .min(Duration::from_secs(15)),
-    );
-    let _ = std::fs::remove_file(tmp);
-    let out = match result {
-        Ok(out) => out,
-        Err(_) => {
+    // Dentro do processo (ImageIO); o `sips` fica de reserva.
+    let reduced = match super::capture::downscale(&tmp, &path, super::capture::MAX_SIDE) {
+        Ok(()) => true,
+        Err(error) => {
             let _ = std::fs::remove_file(&path);
-            return Err("Não consegui preparar a foto.".into());
+            fallback_note("redução", &error);
+            let mut cmd = crate::util::spawn::hidden_command("/usr/bin/sips");
+            cmd.args(["-Z", "1200"]).arg(&tmp).arg("--out").arg(&path);
+            crate::util::spawn::output(
+                &mut cmd,
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_secs(15)),
+            )
+            .is_ok_and(|out| out.status.success())
         }
     };
-    if !out.status.success() {
+    let _ = std::fs::remove_file(tmp);
+    if !reduced {
         let _ = std::fs::remove_file(path);
         return Err("Não consegui preparar a foto.".into());
     }
@@ -250,6 +294,26 @@ pub(super) fn ocr(path: &std::path::Path, deadline: Instant) -> Result<(String, 
     if Instant::now() >= deadline {
         return Err("Prazo do OCR local esgotado.".into());
     }
+    // O Vision dentro do processo (~0,1 s); o `swift -e` (~0,5 s, compila o script a cada vez) fica de reserva.
+    let lines = match super::capture::ocr(path) {
+        Ok(lines) => lines,
+        Err(error) => {
+            fallback_note("OCR", &error);
+            swift_ocr(path, deadline)?
+        }
+    };
+    let text = lines
+        .iter()
+        .map(|l| l.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.len() > 24_000 {
+        return Err("Texto da foto excedeu o limite local.".into());
+    }
+    Ok((text, lines))
+}
+/// O OCR antigo, pelo Swift do Xcode: o mesmo Vision num processo à parte.
+pub(super) fn swift_ocr(path: &std::path::Path, deadline: Instant) -> Result<Vec<Label>, String> {
     let mut cmd = crate::util::spawn::hidden_command("/usr/bin/swift");
     cmd.arg("-e").arg(include_str!("ios_ocr.swift")).arg(path);
     let out = crate::util::spawn::output(
@@ -262,17 +326,7 @@ pub(super) fn ocr(path: &std::path::Path, deadline: Instant) -> Result<(String, 
     if !out.status.success() {
         return Err("OCR local falhou; não enviei a foto.".into());
     }
-    let lines: Vec<Label> =
-        serde_json::from_slice(&out.stdout).map_err(|_| "OCR local inválido.")?;
-    let text = lines
-        .iter()
-        .map(|l| l.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if text.len() > 24_000 {
-        return Err("Texto da foto excedeu o limite local.".into());
-    }
-    Ok((text, lines))
+    serde_json::from_slice(&out.stdout).map_err(|_| "OCR local inválido.".into())
 }
 struct IosSurface {
     db: DbConnection,
@@ -291,12 +345,25 @@ struct IosSurface {
     expect: Vec<String>,
     /// O OCR da foto que `settled` já leu, para a observação não ler de novo.
     read_ahead: Option<(String, Vec<Label>)>,
+    /// Quando a última ação foi mandada ao HID: a foto seguinte espera `AFTER_ACTION` a partir daí.
+    acted_at: Option<Instant>,
 }
 /// Menos que isto de linhas de texto é tela ainda carregando (um app abrindo, uma transição).
 const MIN_LABELS: usize = 2;
-/// Quantas vezes esperar a tela assentar antes de mostrar o que houver ao decisor, e quanto esperar.
+/// Quantas vezes esperar a tela assentar antes de mostrar o que houver ao decisor, e quanto esperar no máximo por
+/// um quadro novo (ou, sem foto nativa, quanto esperar sem saber).
 const SETTLE_TRIES: usize = 6;
 const SETTLE_WAIT: Duration = Duration::from_millis(800);
+/// Tela parada: nenhum quadro novo por este tempo. Uma transição do iOS dura ~350 ms e manda quadros seguidos.
+const QUIET: Duration = Duration::from_millis(300);
+/// O teto da espera por tela parada: um vídeo ou um indicador girando nunca param.
+const QUIET_CAP: Duration = Duration::from_millis(2_500);
+/// Na primeira foto do `act` não houve ação nossa: basta conferir que nada está animando agora.
+const QUIET_FIRST: Duration = Duration::from_millis(100);
+/// O mínimo entre uma ação e a foto seguinte, mesmo com a tela parada: um app pode levar centenas de ms para começar
+/// a reagir (rede, abrir), e uma foto antes disso mostraria a tela velha, que o Jev mandaria tocar de novo. Antes o
+/// `simctl` levava ~1,4 s e fazia essa espera sem querer.
+const AFTER_ACTION: Duration = Duration::from_millis(600);
 
 /// Esperar outra foto: só com a tela quase sem texto, tentativas sobrando e prazo para mais uma espera.
 pub(super) fn should_settle(labels: usize, try_no: usize, time_left: Duration) -> bool {
@@ -307,18 +374,32 @@ impl IosSurface {
     /// A foto de uma tela já assentada: logo depois de abrir um app o iOS ainda está desenhando e o OCR lê só o
     /// relógio. Uma foto assim faria o decisor gastar uma consulta para responder "não sei". O OCR feito aqui é
     /// reaproveitado pela observação.
+    ///
+    /// Com a foto nativa, a espera segue os quadros: fotografa quando a tela fica `QUIET` sem quadro novo, e uma
+    /// tela quase sem texto espera o próximo quadro (até `SETTLE_WAIT`) em vez de uma pausa fixa. Sem ela, a
+    /// pausa fixa de antes.
     fn settled(&mut self) -> Result<(PathBuf, String), String> {
         let mut try_no = 0;
         loop {
-            let (path, revision) = capture(&self.udid, self.deadline)?;
-            let read = ocr(&path, self.deadline)?;
+            let left = self.deadline.saturating_duration_since(Instant::now());
+            // Sem foto nativa a espera não tem como ver quadros e só segue; a captura escolhe o caminho.
+            let not_before = self.acted_at.map(|t| t + AFTER_ACTION).filter(|t| *t < self.deadline);
+            let quiet = if self.acted_at.is_some() { QUIET } else { QUIET_FIRST };
+            let _ = super::capture::ios_quiet(&self.udid, quiet, QUIET_CAP.min(left / 4), not_before);
+            let photo = capture(&self.udid, self.deadline)?;
+            let read = ocr(&photo.path, self.deadline)?;
             if !should_settle(read.1.len(), try_no, self.deadline.saturating_duration_since(Instant::now())) {
                 self.read_ahead = Some(read);
-                return Ok((path, revision));
+                return Ok((photo.path, photo.revision));
             }
-            let _ = std::fs::remove_file(&path);
             try_no += 1;
-            std::thread::sleep(SETTLE_WAIT);
+            let _ = std::fs::remove_file(&photo.path);
+            match photo.frame {
+                Some(frame) => {
+                    let _ = super::capture::ios_changed(&self.udid, frame, SETTLE_WAIT);
+                }
+                None => std::thread::sleep(SETTLE_WAIT),
+            }
         }
     }
 
@@ -401,8 +482,7 @@ impl Surface for IosSurface {
                 fresh.path.display()
             );
             if self.ask(&question, None)? != Answer::No {
-                let (check, current) = capture(&self.udid, self.deadline)?;
-                let _ = std::fs::remove_file(check);
+                let current = current_revision(&self.udid, self.deadline)?;
                 self.authorize().map_err(|_| "Autorização expirou.")?;
                 if current == revision {
                     mark(&self.db, &self.udid, false)?;
@@ -499,9 +579,9 @@ impl Surface for IosSurface {
         action: &Action,
         value: Option<&str>,
     ) -> Result<bool, String> {
-        // A foto é conferida depois de decidir e depois do eventual diálogo humano.
-        let (path, current) = capture(&self.udid, self.deadline)?;
-        let _ = std::fs::remove_file(path);
+        // A tela é conferida depois de decidir e depois do eventual diálogo humano: os mesmos pixels que o Jev viu,
+        // ou não toca. Pela `IOSurface` é uma leitura, não outra foto.
+        let current = current_revision(&self.udid, self.deadline)?;
         if current != revision {
             return Ok(false);
         }
@@ -516,6 +596,8 @@ impl Surface for IosSurface {
             .ok_or("Ação sem decisão visual.")?
             .clone();
         drop(frame);
+        // Antes do HID: mesmo se ele falhar depois de agir, a foto seguinte espera o mínimo.
+        self.acted_at = Some(Instant::now());
         match action.operation {
             Operation::Click => {
                 let (x, y) = pick.point.ok_or("Toque sem coordenada validada.")?;
@@ -540,6 +622,8 @@ impl Surface for IosSurface {
             },
             _ => return Err("Operação iOS não oferecida.".into()),
         }
+        // E de novo ao terminar: o gesto leva 300 ms, e o mínimo conta a partir do dedo solto.
+        self.acted_at = Some(Instant::now());
         Ok(true)
     }
 }
@@ -668,6 +752,7 @@ pub(crate) fn act(
     }
     let _lease = Lease(udid.into());
     computer::ready(&db)?;
+    super::capture::warm_ocr();
     let device = ops::devices()?
         .into_iter()
         .find(|d| d.udid == udid)
@@ -696,6 +781,7 @@ pub(crate) fn act(
         fills: request.fills.values().cloned().collect(),
         expect: request.expect.clone(),
         read_ahead: None,
+        acted_at: None,
     };
     let mut decider = VisualDecider {
         db,
