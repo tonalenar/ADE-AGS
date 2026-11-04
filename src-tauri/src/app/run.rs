@@ -259,6 +259,7 @@ pub fn run() {
             crate::android::android_logcat,
             crate::android::android_screenshot,
             crate::ipc::commands::devices::devices_share,
+            crate::ipc::commands::devices::computer_use_forget,
             // Rotinas: mensajes programados a un agente o al usuario
             crate::ipc::commands::peer_queue::peer_queue_counts,
             crate::ipc::commands::peer_queue::peer_queue_list,

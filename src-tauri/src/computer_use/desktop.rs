@@ -14,7 +14,7 @@ use crate::{
     decisions::vision::computer,
     ipc::bridge::{ask_frontend_within, unwrap_frontend_result},
 };
-use serde_json::json;
+use serde_json::{json, Value};
 use std::{
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
@@ -100,6 +100,7 @@ fn ask_audited(
     options: [&str; 2],
     allow: &str,
     deadline: Instant,
+    review: Option<Value>,
 ) -> Result<bool, String> {
     let seconds = deadline
         .saturating_duration_since(Instant::now())
@@ -114,7 +115,7 @@ fn ask_audited(
     let out = ask_frontend_within(
         app,
         "user.ask",
-        &json!({"question": question, "options": options, "tabId": from, "timeout_s": seconds}),
+        &ask_payload(question, &options, from, seconds, review),
         None,
         Duration::from_secs(seconds + 1),
     )
@@ -127,6 +128,60 @@ fn ask_audited(
     audit_decided(db, &call, outcome, by);
     out.map(|_| ok)
 }
+/// O pedido `user.ask` de uma confirmação. Leva o dono (`owner`), senão o diálogo não sabe que agente
+/// pergunta, e a `review` estruturada, para o diálogo mostrar a foto em vez de um caminho.
+pub(super) fn ask_payload(question: &str, options: &[&str], from: &str, seconds: u64, review: Option<Value>) -> Value {
+    json!({
+        "question": question,
+        "options": options,
+        "tabId": from,
+        "owner": { "kind": "tab", "id": from },
+        "timeout_s": seconds,
+        "review": review,
+    })
+}
+
+/// A ação em palavras de gente, igual no Mac e no iOS: o gesto diz para onde vai, não só "rolar".
+pub(super) fn describe(action: &Action, label: &str, typed: usize, tap: &str) -> String {
+    match action.operation {
+        Operation::Click => format!("{tap} em «{label}»"),
+        Operation::Type => format!("Digitar {typed} caracteres locais no campo já focado"),
+        Operation::Scroll => match action.target.as_deref() {
+            Some("scroll_up") => "Rolar para baixo".into(),
+            Some("scroll_down") => "Rolar para cima".into(),
+            Some("swipe_left") => "Deslizar para a esquerda".into(),
+            Some("swipe_right") => "Deslizar para a direita".into(),
+            Some("home") => "Ir para a tela inicial".into(),
+            _ => "Rolar a tela".into(),
+        },
+        _ => "Executar ação".into(),
+    }
+}
+
+/// O texto da confirmação, para a auditoria e para quem lê só texto. Sem `None` cru: o ponto só
+/// aparece quando existe.
+pub(super) fn confirm_question(place: &str, what: &str, photo: &str, point: Option<(f64, f64)>) -> String {
+    let point = point
+        .map(|(x, y)| format!("\nPonto na foto: {:.0}% da largura, {:.0}% da altura.", x * 100.0, y * 100.0))
+        .unwrap_or_default();
+    format!(
+        "Confirma esta ação {place}?\n{what}.\nO efeito foi classificado como sensível ou incerto.\nFoto local para revisão: {photo}{point}\nA aprovação vale só para esta ação nesta tela."
+    )
+}
+
+/// O que o diálogo desenha: onde, o quê, a foto (URL de dados, já reduzida a 1.200 px) e o ponto em
+/// proporção. Foto ilegível não impede a pergunta: o diálogo cai no texto.
+pub(super) fn review(surface: &str, action: &str, photo: &std::path::Path, point: Option<(f64, f64)>) -> Value {
+    let image = crate::conversa::attach::read_preview(&photo.to_string_lossy()).ok().map(|i| i.data_url);
+    json!({
+        "kind": "computer_use",
+        "surface": surface,
+        "action": action,
+        "image": image,
+        "point": point.map(|(x, y)| [x, y]),
+    })
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -210,7 +265,7 @@ impl Surface for DeskSurface {
                 "Privacidade do Mac: um act anterior digitou dados locais. Apague TODOS os valores escritos por --fill antes de continuar. Confirma que nenhum deles está visível na tela agora?\nFoto local: {}\nSe algum valor ainda aparece, recuse.",
                 fresh.path.display()
             );
-            if ask_audited(&self.app, &self.db, &self.from, "computer_use:privacy", &question, [ALLOW, DENY], ALLOW, self.deadline)? {
+            if ask_audited(&self.app, &self.db, &self.from, "computer_use:privacy", &question, [ALLOW, DENY], ALLOW, self.deadline, None)? {
                 let (check, current) = self.photo()?;
                 let _ = std::fs::remove_file(check);
                 self.authorize().map_err(|_| "Autorização expirou.")?;
@@ -256,22 +311,17 @@ impl Surface for DeskSurface {
                 .unwrap_or_else(|| "controle sem rótulo reconhecido".into());
             (label, point, frame.path.display().to_string())
         };
-        let (tool, what) = match action.operation {
-            Operation::Click => ("computer_use:click", format!("Clicar em «{label}»")),
-            Operation::Type => (
-                "computer_use:type",
-                format!(
-                    "Digitar {} caracteres locais no campo já focado",
-                    self.fills.first().map_or(0, |v| v.chars().count())
-                ),
-            ),
-            Operation::Scroll => ("computer_use:scroll", "Rolar a tela".into()),
-            _ => ("computer_use:other", "Executar ação".into()),
+        let tool = match action.operation {
+            Operation::Click => "computer_use:click",
+            Operation::Type => "computer_use:type",
+            Operation::Scroll => "computer_use:scroll",
+            _ => "computer_use:other",
         };
-        let question = format!(
-            "Confirma esta ação no seu Mac?\n{what}.\nO efeito foi classificado como sensível ou incerto.\nFoto local para revisão: {path}\nPonto na foto (proporção): {point:?}. A aprovação vale só para esta ação nesta tela."
-        );
-        ask_audited(&self.app, &self.db, &self.from, tool, &question, [ALLOW, DENY], ALLOW, self.deadline)
+        let typed = self.fills.first().map_or(0, |v| v.chars().count());
+        let what = describe(action, &label, typed, "Clicar");
+        let question = confirm_question("no seu Mac", &what, &path, point);
+        let review = review("mac", &what, std::path::Path::new(&path), point);
+        ask_audited(&self.app, &self.db, &self.from, tool, &question, [ALLOW, DENY], ALLOW, self.deadline, Some(review))
     }
     fn execute(&mut self, revision: &str, action: &Action, value: Option<&str>) -> Result<bool, String> {
         let (path, current) = self.photo()?;
@@ -353,6 +403,7 @@ pub(crate) fn act(
         [GRANT, DENY],
         GRANT,
         deadline,
+        None,
     )? {
         return Ok(Report {
             status: Status::Blocked,

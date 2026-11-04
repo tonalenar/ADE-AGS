@@ -51,3 +51,30 @@ fn o_script_de_entrada_so_conhece_comandos_fechados() {
     }
     assert!(!INPUT.contains("Process()") && !INPUT.contains("NSTask") && !INPUT.contains("URLSession"));
 }
+
+#[test]
+fn confirmacao_leva_o_dono_e_a_foto_e_o_texto_nao_vaza_none() {
+    let p = ask_payload("q", &[ALLOW, DENY], "tab-1", 60, Some(json!({"kind": "computer_use"})));
+    assert_eq!(p["owner"], json!({"kind": "tab", "id": "tab-1"}), "sem dono o diálogo diz «un agente»");
+    assert_eq!(p["review"]["kind"], "computer_use");
+    assert!(ask_payload("q", &[ALLOW, DENY], "t", 60, None)["review"].is_null());
+
+    let sem_ponto = confirm_question("no seu Mac", "Rolar para baixo", "/f.png", None);
+    assert!(!sem_ponto.contains("None") && !sem_ponto.contains("Ponto"), "{sem_ponto}");
+    let com_ponto = confirm_question("no seu Mac", "x", "/f.png", Some((0.4711, 0.84)));
+    assert!(com_ponto.contains("47% da largura, 84% da altura"), "{com_ponto}");
+
+    let review = review("ios", "Tocar em «Geral»", std::path::Path::new("/nao/existe.png"), Some((0.5, 0.25)));
+    assert!(review["image"].is_null(), "foto ilegível cai no texto, sem derrubar a pergunta");
+    assert_eq!(review["point"], json!([0.5, 0.25]));
+}
+
+#[test]
+fn gesto_diz_para_onde_vai() {
+    let scroll = |t: &str| Action { operation: Operation::Scroll, target: Some(t.into()) };
+    assert_eq!(describe(&scroll("swipe_left"), "", 0, "Tocar"), "Deslizar para a esquerda");
+    assert_eq!(describe(&scroll("home"), "", 0, "Tocar"), "Ir para a tela inicial");
+    assert_eq!(describe(&scroll("scroll_up"), "", 0, "Tocar"), "Rolar para baixo");
+    let click = Action { operation: Operation::Click, target: Some("screen".into()) };
+    assert_eq!(describe(&click, "Geral", 0, "Clicar"), "Clicar em «Geral»");
+}

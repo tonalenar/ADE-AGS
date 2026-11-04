@@ -12,7 +12,7 @@ import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { comparablePath } from "@/features/tabs/viewTabs";
 import i18n from "@/i18n";
 import { useRunsStore } from "@/features/runs/store";
-import { useAskStore } from "@/features/ask/askStore";
+import { parseReview, useAskStore } from "@/features/ask/askStore";
 import { getAutonomy } from "@/features/missions/autonomy";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
@@ -233,9 +233,10 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
       question,
       options,
       placeholder: str(args, "placeholder"),
-      from: owner?.label ?? str(args, "cwd") ?? "un agente",
+      from: owner?.label ?? str(args, "cwd") ?? i18n.t("ask.someone"),
       fromId: owner?.id ?? str(args, "cwd") ?? "?",
       expiresAt: Date.now() + timeoutMs,
+      review: parseReview(args.review),
       resolve: once,
     });
   });

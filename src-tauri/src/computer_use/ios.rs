@@ -7,7 +7,6 @@ use crate::{
     ipc::bridge::{ask_frontend_within, unwrap_frontend_result},
     simulator::ops,
 };
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -40,6 +39,34 @@ pub(super) fn marked_key(db: &DbConnection, key: &str) -> Result<bool, String> {
         .map_err(|_| "Estado de privacidade indisponível.")?;
     Ok(value.as_deref() == Some("1"))
 }
+pub(super) const ALLOW: &str = "Autorizar esta ação";
+pub(super) const ALWAYS: &str = "Autorizar sempre neste aparelho";
+pub(super) const DENY: &str = "Recusar";
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Answer {
+    Once,
+    Always,
+    No,
+}
+/// "Sempre neste aparelho", gravado no banco: vale entre sessões até a pessoa desligar a chave
+/// "Permitir que agentes controlem dispositivos" (`computer_use_forget`).
+const TRUST_PREFIX: &str = "computer_use.ios.trust.";
+fn trusted(db: &DbConnection, udid: &str) -> Result<bool, String> {
+    marked_key(db, &format!("{TRUST_PREFIX}{udid}"))
+}
+fn trust(db: &DbConnection, udid: &str, on: bool) -> Result<(), String> {
+    mark_key(db, &format!("{TRUST_PREFIX}{udid}"), on)
+}
+/// Esquece o "sempre" de todos os aparelhos. Devolve quantos estavam marcados.
+pub(crate) fn forget_trust(db: &DbConnection) -> Result<usize, String> {
+    let conn = db.lock().map_err(|_| "Estado indisponível.")?;
+    conn.execute("DELETE FROM settings WHERE key LIKE ?1", [format!("{TRUST_PREFIX}%")])
+        .map_err(|_| "Não consegui esquecer as autorizações.".to_string())
+}
+/// O que pergunta mesmo com "sempre": tocar num controle de pagar, apagar, senha, sair, enviar…
+pub(super) fn always_asks(action: &Action, label: &str) -> bool {
+    action.operation == Operation::Click && sensitive_label(label)
+}
 fn mark(db: &DbConnection, udid: &str, private: bool) -> Result<(), String> {
     mark_key(db, &format!("computer_use.ios.private.{udid}"), private)
 }
@@ -62,6 +89,20 @@ pub(super) struct Label {
     pub right: f64,
     pub top: f64,
     pub bottom: f64,
+}
+/// O texto do controle sob o ponto, com a mesma folga de `named_point`.
+pub(super) fn label_at(point: Option<(f64, f64)>, labels: &[Label]) -> Option<&str> {
+    let (x, y) = point?;
+    labels
+        .iter()
+        .find(|l| {
+            !l.text.trim().is_empty()
+                && x >= l.left - 0.02
+                && x <= l.right + 0.02
+                && y >= l.top - 0.02
+                && y <= l.bottom + 0.02
+        })
+        .map(|l| l.text.as_str())
 }
 pub(super) fn named_point(point: Option<(f64, f64)>, labels: &[Label]) -> bool {
     point.is_some_and(|(x, y)| {
@@ -281,17 +322,25 @@ impl IosSurface {
         }
     }
 
-    fn ask(&self, question: &str) -> Result<bool, String> {
+    /// A confirmação por ação oferece "sempre neste aparelho"; a de privacidade (`review` = None), não.
+    fn ask(&self, question: &str, review: Option<serde_json::Value>) -> Result<Answer, String> {
         let seconds = self
             .deadline
             .saturating_duration_since(Instant::now())
             .as_secs()
             .min(1800);
         if seconds == 0 {
-            return Ok(false);
+            return Ok(Answer::No);
         }
-        let out=ask_frontend_within(&self.app,"user.ask",&json!({"question":question,"options":["Autorizar esta ação","Recusar"],"tabId":self.from,"timeout_s":seconds}),None,Duration::from_secs(seconds+1)).and_then(unwrap_frontend_result)?;
-        Ok(out["text"] == "Autorizar esta ação")
+        let options: &[&str] = if review.is_some() { &[ALLOW, ALWAYS, DENY] } else { &[ALLOW, DENY] };
+        let payload = super::desktop::ask_payload(question, options, &self.from, seconds, review);
+        let out = ask_frontend_within(&self.app, "user.ask", &payload, None, Duration::from_secs(seconds + 1))
+            .and_then(unwrap_frontend_result)?;
+        Ok(match out["text"].as_str() {
+            Some(ALLOW) => Answer::Once,
+            Some(ALWAYS) if options.contains(&ALWAYS) => Answer::Always,
+            _ => Answer::No,
+        })
     }
 }
 impl Surface for IosSurface {
@@ -347,7 +396,7 @@ impl Surface for IosSurface {
                 "Privacidade do simulador: um act anterior digitou dados locais. Limpe TODOS os dados escritos por --fill antes de continuar. Confirma que nenhum desses valores está visível nesta foto atual?\nFoto local: {}\nSe algum valor ainda aparece, recuse. Esta confirmação não autoriza fotos de senha detectada.",
                 fresh.path.display()
             );
-            if self.ask(&question)? {
+            if self.ask(&question, None)? != Answer::No {
                 let (check, current) = capture(&self.udid, self.deadline)?;
                 let _ = std::fs::remove_file(check);
                 self.authorize().map_err(|_| "Autorização expirou.")?;
@@ -420,22 +469,25 @@ impl Surface for IosSurface {
             })
             .map(|l| l.text.chars().take(200).collect::<String>())
             .unwrap_or_else(|| "controle sem rótulo reconhecido".into());
-        let operation = match action.operation {
-            Operation::Click => format!("Tocar em «{label}»"),
-            Operation::Type => format!(
-                "Digitar {} caracteres locais no campo já focado",
-                self.fills.first().map_or(0, |v| v.chars().count())
-            ),
-            Operation::Scroll => "Rolar a tela".into(),
-            _ => "Executar ação".into(),
-        };
-        let question = format!(
-            "Confirma esta ação no simulador iOS?\n{operation}.\nO efeito foi classificado como sensível ou incerto.\nFoto local para revisão: {}\nPonto na foto (proporção): {:?}. A aprovação vale só para esta ação nesta tela.",
-            frame.path.display(),
-            point
-        );
+        let typed = self.fills.first().map_or(0, |v| v.chars().count());
+        let operation = super::desktop::describe(action, &label, typed, "Tocar");
+        let path = frame.path.clone();
         drop(frame);
-        self.ask(&question)
+        // A pessoa já disse "sempre" para este aparelho: só o que é de fato perigoso volta a perguntar.
+        if !always_asks(action, &label) && trusted(&self.db, &self.udid)? {
+            return Ok(true);
+        }
+        let question =
+            super::desktop::confirm_question("no simulador iOS", &operation, &path.display().to_string(), point);
+        let review = super::desktop::review("ios", &operation, &path, point);
+        match self.ask(&question, Some(review))? {
+            Answer::Always => {
+                trust(&self.db, &self.udid, true)?;
+                Ok(true)
+            }
+            Answer::Once => Ok(true),
+            Answer::No => Ok(false),
+        }
     }
     fn execute(
         &mut self,
@@ -510,9 +562,16 @@ pub(super) fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) 
         _ => return Err("Operação não oferecida.".into()),
     };
     let unnamed_click = operation == Operation::Click && !named_point(pick.point, labels);
+    // O risco é do controle tocado, não da tela inteira: um "Sair" no canto da tela não torna
+    // sensível rolar nem tocar em «Geral». Sem rótulos (teste, OCR vazio), vale o texto todo.
+    let touched = if labels.is_empty() {
+        sensitive_label(text)
+    } else {
+        operation == Operation::Click && label_at(pick.point, labels).is_some_and(sensitive_label)
+    };
     Ok(Decision {
         requires_confirmation: pick.confirm
-            || sensitive_label(text)
+            || touched
             || unnamed_click
             || operation == Operation::Type,
         action: Action { operation, target },
@@ -804,6 +863,46 @@ mod flow_test {
         assert!(!should_settle(1, SETTLE_TRIES - 1, folga), "na última tentativa mostra o que houver");
         assert!(!should_settle(MIN_LABELS, 0, folga), "tela com texto segue na hora");
         assert!(!should_settle(0, 0, SETTLE_WAIT), "sem prazo, não espera");
+    }
+    #[test]
+    fn sempre_neste_aparelho_fica_no_banco_e_esquecer_apaga_tudo() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);").unwrap();
+        let db: DbConnection = Arc::new(Mutex::new(conn));
+        assert!(!trusted(&db, "A").unwrap());
+        trust(&db, "A", true).unwrap();
+        trust(&db, "B", true).unwrap();
+        assert!(trusted(&db, "A").unwrap() && !trusted(&db, "C").unwrap());
+        assert_eq!(forget_trust(&db).unwrap(), 2);
+        assert!(!trusted(&db, "A").unwrap() && !trusted(&db, "B").unwrap());
+        // A marca de privacidade de fills não é uma confiança e não some junto.
+        mark(&db, "A", true).unwrap();
+        forget_trust(&db).unwrap();
+        assert!(marked(&db, "A").unwrap());
+    }
+    #[test]
+    fn sempre_nao_cobre_tocar_em_pagar_apagar_ou_sair() {
+        let click = Action { operation: Operation::Click, target: Some("screen".into()) };
+        let scroll = Action { operation: Operation::Scroll, target: Some("scroll_up".into()) };
+        assert!(always_asks(&click, "Excluir conta"));
+        assert!(always_asks(&click, "Sair"));
+        assert!(!always_asks(&click, "Continuar como Eriston"));
+        assert!(!always_asks(&scroll, "Sair"));
+    }
+    #[test]
+    fn risco_vem_do_controle_tocado_nao_de_uma_palavra_em_outro_canto_da_tela() {
+        let label = |text: &str, top: f64| Label { text: text.into(), left: 0.1, right: 0.9, top, bottom: top + 0.05 };
+        let labels = vec![label("Geral", 0.2), label("Sair", 0.8)];
+        let pick = |op: &str, point| computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point, confirm: false };
+        let text = "Geral\nSair";
+        assert!(!decision_for(&pick("click", Some((0.5, 0.22))), text, &labels).unwrap().requires_confirmation, "tocar em «Geral»");
+        assert!(!decision_for(&pick("scroll_up", None), text, &labels).unwrap().requires_confirmation, "rolar não é sair");
+        assert!(decision_for(&pick("click", Some((0.5, 0.82))), text, &labels).unwrap().requires_confirmation, "tocar em «Sair»");
+        // O julgamento do Jev continua valendo, e sem rótulos o texto todo segue conservador.
+        let mut jev = pick("scroll_up", None);
+        jev.confirm = true;
+        assert!(decision_for(&jev, text, &labels).unwrap().requires_confirmation);
+        assert!(decision_for(&pick("scroll_up", None), text, &[]).unwrap().requires_confirmation);
     }
     #[test]
     fn gestos_viram_rolar_com_alvo_proprio_sem_confirmacao_e_com_traco_longe_das_bordas() {
