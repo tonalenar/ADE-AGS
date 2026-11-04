@@ -11,7 +11,7 @@ import { AlertaToast } from "@/shared/ui/alerts";
 
 import { clampScale, DEFAULT_SCREEN, isLandscape, nodeSize, orientedScreen, phoneOf, scaleOf, SIM_GAP_X, SIM_GAP_Y, stepScale, type SimScreen } from "./geometry";
 import {
-  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
+  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
   simulatorShutdown, type SimDevice, type SimOrientationEvent,
 } from "./ipc";
 import { SimulatorBar } from "./SimulatorBar";
@@ -169,6 +169,15 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       try {
         const count = await simulatorPriority(portal.udid, next);
         void AlertaToast(portal.name, t(next ? "simulator.lightOn" : "simulator.lightOff", { count }), "success", 3500);
+      } catch (e) {
+        fail(e);
+      }
+    },
+    onClipboard: async (direction: "toDevice" | "toMac") => {
+      if (!portal.udid) return;
+      try {
+        await simulatorClipboard(portal.udid, direction);
+        void AlertaToast(portal.name, t(direction === "toDevice" ? "simulator.clipboardSentToDevice" : "simulator.clipboardSentToMac"), "success", 3000);
       } catch (e) {
         fail(e);
       }

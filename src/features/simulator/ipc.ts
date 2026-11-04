@@ -65,3 +65,6 @@ export const simulatorOrientation = (udid: string) => invoke<string>("simulator_
 /** Evento do backend quando o aparelho gira (pela barra, pelo painel do chat ou por `ags device rotate`). */
 export const SIMULATOR_ORIENTATION_EVENT = "simulator-orientation";
 export interface SimOrientationEvent { udid: string; orientation: string }
+
+/** Área de transferência: `toDevice` leva o que o Mac copiou ao aparelho; `toMac` traz o que o aparelho copiou. */
+export const simulatorClipboard = (udid: string, direction: "toDevice" | "toMac") => invoke<void>("simulator_clipboard", { udid, direction });

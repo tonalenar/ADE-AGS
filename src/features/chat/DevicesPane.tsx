@@ -8,7 +8,7 @@ import { toDevicePoint } from "@/features/canvas/DeviceNode";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { DEFAULT_SCREEN } from "@/features/simulator/geometry";
 import {
-  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorOpenUrl, simulatorPriority, simulatorScreenshot, simulatorShutdown,
+  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOpenUrl, simulatorPriority, simulatorScreenshot, simulatorShutdown,
   type SimDevice, type SimOrientationEvent,
 } from "@/features/simulator/ipc";
 import { useSimulatorPrefs } from "@/features/simulator/prefs";
@@ -407,6 +407,8 @@ function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevic
           <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t("chat.devices.openUrl")} aria-label={t("chat.devices.openUrl")} className={`${fieldCls} flex-1`} />
         </form>
       )}
+      {booted && <button type="button" onClick={() => { simulatorClipboard(device.udid, "toDevice").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToDevice")}</button>}
+      {booted && <button type="button" onClick={() => { simulatorClipboard(device.udid, "toMac").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToMac")}</button>}
       <button type="button" onClick={toggleLight} className={itemCls} title={t("simulator.light")}>
         <span className="w-4 shrink-0">{light && <CheckIcon className="w-3.5 h-3.5" />}</span>{t("simulator.lightShort")}
       </button>

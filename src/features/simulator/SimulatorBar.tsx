@@ -116,6 +116,7 @@ export interface SimBarActions {
   onChat: () => void;
   onScale: (direction: 1 | -1) => void;
   onLight: () => void;
+  onClipboard: (direction: "toDevice" | "toMac") => void;
   onShutdown: () => void;
   onHibernate: (minutes: number) => void;
   onSingle: () => void;
@@ -220,6 +221,15 @@ export function SimulatorBar({ full, devices, current, state, scale, light, hibe
             <button type="button" role="menuitemcheckbox" aria-checked={single} onClick={actions.onSingle}
               className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">
               <span className="flex-1">{t("simulator.single")}</span>{single && <span aria-hidden>✓</span>}
+            </button>
+            <div className="mx-1.5 my-1 h-px bg-white/8" />
+            <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toDevice"); }}
+              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+              {t("simulator.clipboardToDevice")}
+            </button>
+            <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toMac"); }}
+              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+              {t("simulator.clipboardToMac")}
             </button>
             <div className="mx-1.5 my-1 h-px bg-white/8" />
             <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onShutdown(); }}

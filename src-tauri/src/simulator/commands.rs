@@ -168,6 +168,17 @@ pub(crate) fn rotate_device(app: &AppHandle, udid: &str, direction: &str) -> Res
     Ok(orientation)
 }
 
+/// Área de transferência entre o Mac e o aparelho: `toDevice` leva o que o Mac copiou; `toMac` traz o que o
+/// aparelho copiou. Pelo `devicectl` (CoreDevice), com todos os tipos.
+#[tauri::command(async)]
+pub fn simulator_clipboard(udid: String, direction: String) -> Result<(), String> {
+    match direction.as_str() {
+        "toDevice" => ops::clipboard_to_device(&udid),
+        "toMac" => ops::clipboard_to_mac(&udid),
+        other => Err(format!("Direção da área de transferência desconhecida: '{other}' (use toDevice ou toMac).")),
+    }
+}
+
 /// A última orientação que a ADE mandou ao aparelho (`portrait`, `landscapeLeft`…): a tela que abre
 /// depois de um giro já desenha a moldura deitada.
 #[tauri::command]
