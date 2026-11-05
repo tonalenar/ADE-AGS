@@ -478,6 +478,43 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
 - **Trocar de agente e aprovação.** O Antigravity e o Cursor por `-p` não têm tela de aprovação: em Supervisionado ele NEGA o que pediria
   aprovação. A confirmação da troca e o aviso do fio dizem isso (`noApproval`); para liberar, mude o acesso.
 
+## Tarefas em segundo plano (como no Claude Code)
+
+O painel lista os subagentes e os comandos que o agente deixa rodando na conversa por protocolo, em árvore.
+
+- **Entrada:** o botão da fileira do cabeçalho (`tasks/TasksButton.tsx`), sempre à vista e nunca no ⋯. Mostra um selo
+  com quantas rodam e fica destacado por 4 s quando uma começa. O painel nunca abre sozinho.
+- **Painel:** é a aba `tasks` do painel direito (`tasks/TasksPanel.tsx`) e segue as regras do Resumo. Abrir substitui a
+  coluna fixa do Resumo; fechar a traz de volta. Com o painel aberto, o Resumo vira o cartão flutuante. Não volta aberto ao
+  reabrir o app.
+  - O cabeçalho tem três botões: limpar as concluídas, expandir sobre a conversa (o maximizar do painel) e fechar.
+  - **Em execução N:** cada linha tem o tempo correndo e o parar. Os filhos ficam debaixo do pai, no "▸ N tarefas".
+  - **Concluído N:** começa recolhido. Mostra o status (concluída, falhou, parada, interrompida) e a duração.
+- **Detalhe** (o chevron): o pedido, a saída do shell ou o que o subagente fez, e o resultado. A seta volta à lista (Esc
+  também) e devolve o foco à linha.
+
+### O que cada motor expõe
+
+| Motor | De onde vêm as tarefas | Parar uma tarefa só |
+|---|---|---|
+| Claude Code (`claude -p`, 2.1.318) | linhas `system` `task_started` (com `parent_task_id`, `tool_use_id`, `task_type` `local_bash`/`local_agent`), `task_progress`, `task_updated`, `task_notification` e `background_tasks_changed`; o que o subagente faz vem nas linhas com `parent_tool_use_id` (`taskItem`) | `control_request` `stop_task` (`chat_task_stop`). A saída do shell vem do `get_task_output`, que lê os últimos 8 KiB sem turno de modelo (`chat_task_output`) |
+| Codex (`app-server` 0.166) | itens `collabAgentToolCall` (`spawnAgent` e os `agentsStates`) e `subAgentActivity` | não tem: o `turn/interrupt` pediria o turno da thread do subagente, que o app não acompanha. O botão fica desligado, com o motivo |
+| OpenCode, Cursor, Antigravity | a ferramenta `task` da timeline, que já está no banco | não tem. O botão fica desligado; o Parar do composer para o turno inteiro |
+| Conversa de TUI | — (o próprio `/tasks` da TUI) | — |
+
+- O backend fica em `conversa/tarefas.rs`, que é puro. O `claude_map` entrega `Out::Task` e `Out::SubItem`; o `codex.rs`
+  emite os eventos dos itens. Nada disso abre turno nem vai à tabela `chat_item`.
+- O app nunca para a conversa inteira por este botão e nunca encerra processo por nome.
+- **Guardar:** a store (`tasks/tasksStore.ts`) separa as tarefas por conversa (`thread:<id>`). Ela grava na tabela
+  `settings` (`chat.tasks`), sem tabela nova e sem migração.
+  - Ao reabrir o app, o que rodava volta como "interrompida", porque o processo do agente morre com o app.
+  - O que o subagente fez fica só na memória.
+- **Conferido ao vivo** no Claude Code 2.1.318, com duas conversas mínimas com o haiku:
+  - os eventos chegam como descrito;
+  - `get_task_output` lê a saída no meio e no fim;
+  - `stop_task` mata só aquele shell (`task_updated` `killed` e depois `task_notification` `stopped`).
+- **Não conferido ao vivo:** o Codex (só os tipos gerados) e um subagente aninhado de verdade (`parent_task_id`).
+
 ## Como não derruba terminais
 
 - O workspace continua montado por baixo da casca do chat:
