@@ -147,7 +147,11 @@ ADE_AGS_DATA_DIR=<pasta> ADE_IPHONE_FPS=1 env -u CARGO_TARGET_DIR bun run tauri 
 | Sessão longa com Receiver Report | 150 s sem queda (helper sozinho); 170 s sem queda dentro da ADE: 2.902 quadros, 0 perdas, 0 descartes |
 | PLI + FIR → IDR | 30–150 ms (3 de 3 pedidos) |
 
-**Toque não medido no aparelho.** A sonda de toque (um toque em área vazia da tela inicial, deslizar uma página e voltar, o início uma vez) foi preparada e conferida contra uma foto do aparelho desbloqueado na tela inicial, mas o envio foi barrado pelo controle de permissões da sessão e não aconteceu. Fica para quando a pessoa liberar direto: o atraso toque→quadro sai no log com `ADE_IPHONE_FPS=1` ("entrada→1º quadro novo"), e o roteiro está descrito no PR.
+**Imagem corrompida sob movimento (USB), em investigação.** Rolando o X, a pessoa viu blocos misturados, com um quadro limpo de vez em quando. Com a imagem ruim, a montagem contava 0 perdas, 0 quadros incompletos e 0 recusados pelo VideoToolbox, com ~550 fragmentos FU por segundo. Uma captura crua do stream (só leitura) não mostrou PACI nem várias fatias por quadro: o transporte e a montagem estão limpos. A hipótese que sobra é a exibição: o pool do VideoToolbox reescrevendo uma `IOSurface` que a tela ainda compõe (antes, só 3 quadros ficavam retidos). Agora ficam até 16 (~266 ms). O `IOSurfaceIsInUse` não serve de prova: diz "em uso" para todos os buffers do pool o tempo todo. Para separar decodificação de exibição, o teste ignorado `iphone::native::replay` passa uma gravação do stream pelo mesmo caminho e salva PNGs.
+
+Outra descoberta: com duas sessões abertas no mesmo aparelho, só a mais recente recebe o vídeo.
+
+**Toque:** a pessoa confirmou que clique e arrasto chegam ao aparelho. O log ("entrada→1º quadro novo", com `ADE_IPHONE_FPS=1`) mostrou de 3 a 33 ms até o primeiro quadro novo chegar, mais ~4 ms de decodificação. É um teto otimista: um quadro que já vinha chegando também conta.
 
 **USB não foi medido** (o aparelho estava só no Wi-Fi). O túnel do Wi-Fi caiu várias vezes na sondagem e no teste (`tunnelState: connecting` com o aparelho bloqueado): a sessão mostrou "Reconectando…" e voltou sozinha quando o túnel voltou.
 
