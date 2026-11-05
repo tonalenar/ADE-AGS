@@ -14,7 +14,8 @@ import {
   SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
   simulatorShutdown, type SimDevice, type SimOrientationEvent,
 } from "./ipc";
-import { isPhysicalId, physicalScreen } from "@/features/iphone/model";
+import { canTouch, isPhysicalId, physicalScreen } from "@/features/iphone/model";
+import { SideButtons } from "@/features/iphone/PhysicalControls";
 import { PhysicalMirror } from "@/features/iphone/PhysicalParts";
 import { refreshPhysical, useIphoneStore, useMirrorStatus } from "@/features/iphone/store";
 
@@ -242,6 +243,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
                 ? "0 0 0 1px var(--color-accent-400), 0 30px 80px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(0,0,0,0.9)"
                 : "0 0 0 1px rgba(255,255,255,0.08), 0 30px 80px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(0,0,0,0.9)",
             }}>
+            {physicalId && physical?.family !== "ipad" && <SideButtons device={physicalId} name={portal.name} height={phone.h} ready={canTouch(mirror)} />}
             <div className="nodrag nowheel nopan relative h-full w-full overflow-hidden bg-black" style={{ borderRadius: phone.screenRadius }}>
               {physicalId ? (
                 <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror} radius={phone.screenRadius} onError={fail} />

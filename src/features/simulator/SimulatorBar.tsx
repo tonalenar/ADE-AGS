@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { PhysicalSection, MirrorStatusLine } from "@/features/iphone/PhysicalParts";
-import { statusView, type MirrorStatus, type PhysicalDevice } from "@/features/iphone/model";
+import { PhysicalMenu, useDeviceActions } from "@/features/iphone/PhysicalControls";
+import { canTouch, statusView, type MirrorStatus, type PhysicalDevice } from "@/features/iphone/model";
 import { watchPhysical } from "@/features/iphone/store";
 
 import { SIM_BAR_H } from "./geometry";
@@ -118,6 +119,15 @@ function DevicePicker({ devices, current, picked, state, label, onPick, onOpen }
   );
 }
 
+/** O início do aparelho físico (o gesto da barra, como no aparelho). */
+function PhysicalHome({ device, name, ready }: { device: string; name: string; ready: boolean }) {
+  const { t } = useTranslation();
+  const act = useDeviceActions(device, name);
+  return (
+    <button type="button" className={button} disabled={!ready} onClick={act.home} title={t("iphone.home")} aria-label={t("iphone.home")}>{ICONS.home}</button>
+  );
+}
+
 export interface SimBarActions {
   onPick: (udid: string) => void;
   onOpenPicker: () => void;
@@ -141,8 +151,8 @@ export interface SimBarActions {
  */
 export function SimulatorBar({ full, devices, current, physical, state, scale, light, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
   full: boolean;
-  /** O nó mostra um aparelho físico: só ver, sem os controles do simulador (início, bloquear, girar, foto, conversa,
-   *  modo leve, desligar). */
+  /** O nó mostra um aparelho físico: o início e o "⋯" com Sistema e Botões; sem os controles que só o simulador
+   *  tem (girar, foto, conversa, modo leve, hibernar, desligar). */
   physical?: { id: string; device: PhysicalDevice | undefined; status: MirrorStatus | undefined };
   devices: SimDevice[];
   current: SimDevice | undefined;
@@ -189,6 +199,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
         <>
           <MirrorStatusLine status={physical.status} className="ml-1.5 shrink text-[11px] text-white/70" />
           <span className="flex-1" />
+          <PhysicalHome device={physical.id} name={label} ready={canTouch(physical.status)} />
         </>
       ) : full ? <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/12" /> : <span className="flex-1" />}
       {!physical && (
@@ -231,7 +242,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
                 {zoom}
               </div>
             )}
-            {physical && <p className="m-0 px-2.5 py-1.5 text-[11px] leading-snug text-white/55">{t("iphone.viewOnly")}</p>}
+            {physical && <PhysicalMenu device={physical.id} name={label} tone="dark" ready={canTouch(physical.status)} onDone={() => setMenu(false)} />}
             {!full && !physical && (
               <button type="button" role="menuitemcheckbox" aria-checked={light} onClick={actions.onLight}
                 className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">

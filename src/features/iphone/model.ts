@@ -39,6 +39,30 @@ export interface MirrorStatus {
   transport: Transport | null;
   display: { w: number; h: number } | null;
   error: string | null;
+  /** O toque do aparelho está pronto (HID do CoreDevice aberto). */
+  input?: boolean;
+}
+
+/** Os gestos do sistema do menu "Sistema" (nomes do backend, `iphone::model::gesture`). */
+export const SYSTEM_GESTURES = ["controlCenter", "notificationCenter", "spotlight"] as const;
+export type SystemGesture = (typeof SYSTEM_GESTURES)[number];
+
+/** Os botões físicos do menu "Botões" (nomes do backend, `iphone::model::button_usage`). */
+export const HARDWARE_BUTTONS = ["volumeUp", "volumeDown", "mute", "siri", "lock"] as const;
+export type HardwareButton = (typeof HARDWARE_BUTTONS)[number];
+
+/** Os botões na lateral da moldura do iPhone: à esquerda o de ação e o volume; à direita o lateral. Posição em
+ *  proporção da altura do aparelho (topo e altura do botão). */
+export const SIDE_BUTTONS: { button: HardwareButton; side: "left" | "right"; top: number; height: number }[] = [
+  { button: "mute", side: "left", top: 0.18, height: 0.045 },
+  { button: "volumeUp", side: "left", top: 0.25, height: 0.075 },
+  { button: "volumeDown", side: "left", top: 0.34, height: 0.075 },
+  { button: "lock", side: "right", top: 0.27, height: 0.11 },
+];
+
+/** Dá para mandar toque agora? */
+export function canTouch(status: MirrorStatus | undefined): boolean {
+  return status?.state === "live" && status.input === true;
 }
 
 export function isPhysicalId(id: string | null | undefined): id is string {

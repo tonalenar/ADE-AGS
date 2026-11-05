@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_SCREEN } from "@/features/simulator/geometry";
 
 import {
-  deviceHint, isPhysicalId, isReady, physicalScreen, pickedPhysical, sortForPicker, statusView, type MirrorStatus, type PhysicalDevice,
+  canTouch, deviceHint, HARDWARE_BUTTONS, isPhysicalId, SIDE_BUTTONS, isReady, physicalScreen, pickedPhysical, sortForPicker, statusView, type MirrorStatus, type PhysicalDevice,
 } from "../model";
 
 const phone = (over: Partial<PhysicalDevice> = {}): PhysicalDevice => ({
@@ -66,5 +66,20 @@ describe("aparelho físico", () => {
     expect(pickedPhysical("device:EC4D6C18-E117-53B6-8063-DB1821935BBB")).toBe("device:EC4D6C18-E117-53B6-8063-DB1821935BBB");
     expect(pickedPhysical("lixo")).toBeNull();
     expect(pickedPhysical(null)).toBeNull();
+  });
+
+  it("só dá para tocar com o espelho ligado e o HID pronto", () => {
+    expect(canTouch(status({ input: true }))).toBe(true);
+    expect(canTouch(status({ input: false }))).toBe(false);
+    expect(canTouch(status({ state: "reconnecting", input: true }))).toBe(false);
+    expect(canTouch(undefined)).toBe(false);
+  });
+
+  it("os botões da lateral são botões físicos conhecidos e cabem na moldura", () => {
+    for (const b of SIDE_BUTTONS) {
+      expect(HARDWARE_BUTTONS).toContain(b.button);
+      expect(b.top + b.height).toBeLessThan(1);
+    }
+    expect(SIDE_BUTTONS.filter((b) => b.side === "right").map((b) => b.button)).toEqual(["lock"]);
   });
 });

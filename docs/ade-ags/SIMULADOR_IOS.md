@@ -209,7 +209,7 @@ As coordenadas são **pontos do iOS**. `open`, `button` e `say` só existem no i
 
 ## Aparelho físico
 
-O mesmo seletor também lista iPhones e iPads de verdade (só ver, por enquanto). Ver [ESPELHAMENTO_IPHONE.md](ESPELHAMENTO_IPHONE.md).
+O mesmo seletor também lista iPhones e iPads de verdade, com toque, botões e teclado pelo HID do CoreDevice. Ver [ESPELHAMENTO_IPHONE.md](ESPELHAMENTO_IPHONE.md).
 
 ## Ainda não
 

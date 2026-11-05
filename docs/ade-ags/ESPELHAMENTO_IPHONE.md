@@ -2,9 +2,9 @@
 
 A tela de um iPhone ou iPad de verdade, pelo cabo ou pelo Wi-Fi, no mesmo lugar do simulador: no nó iOS do canvas e no painel iOS do modo chat. O seletor ganhou duas seções: **Aparelhos** (os físicos que o CoreDevice conhece, com USB ou Wi-Fi, modelo e iOS) e **Simuladores** (a lista do Xcode de sempre).
 
-**Por enquanto, só ver.** Nada de toque, botão, teclado ou HID: o clique na tela espelhada não vai para o aparelho, e os controles do simulador (início, bloquear, girar, foto, aparência, localização, Face ID, teclado, modo leve, desligar, conversa com os agentes) somem quando o aparelho é físico. `ags device` e `sim act` recusam um nó que mostra aparelho físico. Nada é instalado, reiniciado ou mudado no aparelho.
+**Ver e controlar.** Clicar e arrastar na tela espelhada toca o aparelho; com a tela em foco, o teclado do Mac digita nele. A barra e o painel têm o início e o "⋯" com **Sistema** (Central de Controle, Central de Notificações, Busca) e **Botões** (volume, mudo, Siri, bloquear); a moldura do canvas tem os botões da lateral. Os agentes usam `ags device` e `sim act` com a mesma autorização do simulador e uma confirmação a mais por ser o aparelho de verdade (ver [Agentes](#agentes)). Nada é instalado, reiniciado ou mudado no aparelho por conta própria.
 
-Próximos passos (outros PRs): toque e botões, os painéis laterais (ajustes, informações, apps, falhas, build & run), `ags device` com controle pelos agentes e a captura para o computer use.
+Próximos passos (outros PRs): os painéis laterais (ajustes, informações, apps, falhas, build & run) e o toque com dois dedos pela interface.
 
 ## Como funciona
 
@@ -86,14 +86,40 @@ O stream sempre é parado no aparelho: no `stop` da ADE, quando a última tela f
 
 - Os quadros entram na camada por uma fila serial própria (`ade.iphone.frames`, QoS `userInteractive`), numa `CATransaction` explícita, e os 3 últimos `CVPixelBuffer` ficam retidos para o pool do VideoToolbox não escrever por cima do que a GPU compõe.
 - A camada é transparente até o primeiro quadro e quando a conexão some: aí aparece o estado que o frontend desenha por baixo ("Abrindo a tela do aparelho…", "Sem conexão…").
-- Só ver: dentro da região à vista a view fica com o clique e o rolar (para o canvas não arrastar por baixo) e não faz nada com eles.
+- **Toque:** dentro da região à vista, o clique e o arrasto viram toque em proporção da tela (a view mostra a tela já recortada, sem as bordas de alinhamento do vídeo, então a proporção da view é a da tela: `model::view_touch`). O arrasto sai no máximo a cada 8 ms. Um arrasto que começa nos últimos 1,5% de baixo leva a borda `bottom` do início ao fim (a barra de início); nos de cima, `top` (as centrais).
+- **Teclado:** com a view em foco, as teclas com nome pelo código da tecla e o resto pelo caractere (teclado US, o mesmo mapa do simulador).
+- O botão direito e a roda param na view (o canvas não arrasta por baixo) e não vão ao aparelho.
 
 ## Interface
 
 - **Seletor** (barra do nó e painel do chat): "Aparelhos" em cima, com etiqueta USB/Wi-Fi, modelo e iOS; os que não estão prontos aparecem apagados com o que falta ("Toque em “Confiar” no aparelho", "Ligue o Modo de Desenvolvedor", "Desconectado"). A lista é relida a cada 4 s só enquanto o seletor está aberto.
 - **Estado vazio** (`iphone/ConnectHint.tsx`): o aparelho, o cabo e o Wi-Fi levando ao "Este Mac", com os passos (desbloquear, "Confiar", Modo de Desenvolvedor). Respeita `prefers-reduced-motion` (`App.css`, `ade-connect-*`).
-- **Nó do canvas**: a mesma moldura do simulador, com a tela em pontos (@3x nos iPhones grandes, @2x nos pequenos e no iPad, `iphone/model.ts`), a linha de estado na barra e o "⋯" só com zoom e fechar.
-- **Painel do chat**: `iphone/PhysicalPane.tsx`, sem a coluna de controles e sem a chave dos agentes. O aparelho físico não vai para `sharedDevices` (os agentes não o recebem).
+- **Nó do canvas**: a mesma moldura do simulador, com a tela em pontos (@3x nos iPhones grandes, @2x nos pequenos e no iPad, `iphone/model.ts`), a linha de estado e o início na barra, o "⋯" com zoom, Sistema, Botões e fechar, e os botões da lateral da moldura com o nome ao passar o mouse (`iphone/PhysicalControls.tsx`). Sem o toque pronto, eles ficam apagados.
+- **Painel do chat**: `iphone/PhysicalPane.tsx`, com a coluna (início e "⋯") e a chave "Permitir que agentes controlem dispositivos". O aparelho vai para os agentes como o simulador (`sharedDevices`, id `device:<id>`).
+
+## HID: toque, botões e teclado
+
+Mapeado pelos símbolos do `CoreDeviceUtilities.framework` (Xcode 27) e conferido nos descritores em tempo de execução: os protocolos `HIDDigitizer`, `HIDButton`, `HIDKeyboard` e `DeviceCapabilityProtocol` **não** são presos a classe (o bit `ClassConstraint` do descritor é 1) e são resilientes (`IsResilient`), então a existencial é a opaca comum e as chamadas vão pelos *dispatch thunks*. As enumerações (`DigitizerEventType`, `DigitizerEdge`, `DigitizerTarget`, `HIDButtonState`) também são resilientes: cada caso vem do símbolo `enum case for …`.
+
+| Parte | API | Onde |
+|---|---|---|
+| Pegar a capacidade | `RemoteDevice.getImplementation<A: DeviceCapability>(for: CapabilityStaticMember<A>) async throws -> A.ProtocolType`, com `CapabilityStaticMember<HIDDeviceCapability>.digitizer/.button/.keyboard` | `helpers/iphone-mirror/Sources/main.swift` (dentro de um genérico, o valor sai como `Any` com o tipo real do framework e depois vira `any HIDDigitizer`) |
+| Toque | `HIDDigitizer.send(pointOne: CGPoint, pointTwo: CGPoint?, eventType: .start/.position/.end, edge: .none/.top/.bottom, target: .mainScreen)`; `sendBarrier()` ao soltar | idem |
+| Botões | `HIDButton.sendCustomButton(usagePage:usageCode:state: .down/.up)`; página 0x0C: início 0x40, bloquear/lateral 0x30, volume 0xE9/0xEA, mudo 0xE2, Siri 0xCF | idem; nomes em `iphone::model::button_usage` |
+| Teclado | `HIDKeyboard.send(key: HIDKeyboardUsageCode(rawValue:), state:)` (uso HID; Shift = 0xE1) | idem; `iphone::model::text_lines` |
+| Gestos do sistema | arrastos: Central de Controle de (0,9; 0,005) a (0,9; 0,45) com borda `top`; Notificações de (0,2; 0,005) a (0,2; 0,6) com `top`; Busca de (0,5; 0,35) a (0,5; 0,6); início de (0,5; 0,995) a (0,5; 0,7) com `bottom` | `iphone::model::gesture` |
+
+O helper lê uma linha por comando no stdin (`touch start|move|end x y [x2 y2] edge`, `button página uso down|up`, `key uso down|up`) e as executa na thread do stdin, uma de cada vez, na ordem (a fila serial). O HID é pedido depois de o vídeo abrir; quando fica pronto, o helper avisa `inputReady` e a linha de estado libera os controles (`MirrorStatus.input`). Uma entrada que falha vira `inputError` no log. As coordenadas vão em proporção da tela em pé (0..1, origem no topo), o mesmo formato do `dtuhidd` do simulador.
+
+## Agentes
+
+O aparelho físico entra pelo mesmo alcance do simulador (`surfaces`): corda no canvas, ou o painel do chat com a chave "Permitir que agentes controlem dispositivos". Por ser o celular de verdade, há uma camada a mais:
+
+- **`ags device`** (`ipc::commands::simulators::physical`): `shot` passa; `tap`, `swipe`, `key` e `button` perguntam à pessoa no app, com a foto atual e o ponto, até ela responder "Autorizar sempre neste aparelho" (`computer_use.ios.trust.device:<id>`, a mesma chave do `sim act`, apagada quando a pessoa desliga a chave do painel); `type` pergunta **sempre** (não se sabe em que campo o texto cai). Sem resposta = recusa (`computer_use::ios::confirm_physical`, regra pura em `iphone::model::agent_asks`, testada).
+- **`sim act`** (`computer_use::ios`): o mesmo laço do simulador, com a foto do último quadro do espelho (`Presenter::snapshot`, recortada; sem quadro, `devicectl device capture screenshot`) e o HID do aparelho (`iphone::ops`). A confirmação é a do simulador, sem atalho: o "sempre" por aparelho e o `always_asks` (rótulos sensíveis, ícones sem rótulo, teclas).
+- Não existem no aparelho físico: `start`, `open`, `launch`, `close`, `rotate`, `clipboard`, `tree` e `tap --text` (erro antes de qualquer pergunta).
+- Sem ninguém olhando, a primeira ação de um agente liga o espelho (uma "tela" `agent:<id>`, que sai de vista no fim da ação) e espera o toque ficar pronto por até 20 s; a sessão para sozinha 15 s depois.
+- Os cliques da pessoa no espelho, a barra, o "⋯" e os botões da moldura não perguntam nada: é a pessoa.
 
 ## Medições
 
@@ -112,6 +138,8 @@ ADE_AGS_DATA_DIR=<pasta> ADE_IPHONE_FPS=1 env -u CARGO_TARGET_DIR bun run tauri 
 | Abrir (spawn → `started`) | ~1–3 s com o túnel de pé; até 8 s quando o túnel do Wi-Fi está se refazendo |
 | Sessão longa com Receiver Report | 150 s sem queda (helper sozinho); 170 s sem queda dentro da ADE: 2.902 quadros, 0 perdas, 0 descartes |
 | PLI + FIR → IDR | 30–150 ms (3 de 3 pedidos) |
+
+**Toque não medido no aparelho.** A sonda de toque (um toque em área vazia da tela inicial, deslizar uma página e voltar, o início uma vez) foi preparada e conferida contra uma foto do aparelho desbloqueado na tela inicial, mas o envio foi barrado pelo controle de permissões da sessão e não aconteceu. Fica para quando a pessoa liberar direto: o atraso toque→quadro sai no log com `ADE_IPHONE_FPS=1` ("entrada→1º quadro novo"), e o roteiro está descrito no PR.
 
 **USB não foi medido** (o aparelho estava só no Wi-Fi). O túnel do Wi-Fi caiu várias vezes na sondagem e no teste (`tunnelState: connecting` com o aparelho bloqueado): a sessão mostrou "Reconectando…" e voltou sozinha quando o túnel voltou.
 
