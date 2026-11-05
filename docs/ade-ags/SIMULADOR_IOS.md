@@ -207,6 +207,10 @@ Achados:
 
 As coordenadas são **pontos do iOS**. `open`, `button` e `say` só existem no iOS.
 
+## Aparelho físico
+
+O mesmo seletor também lista iPhones e iPads de verdade, com toque, botões e teclado pelo HID do CoreDevice. Ver [ESPELHAMENTO_IPHONE.md](ESPELHAMENTO_IPHONE.md).
+
 ## Ainda não
 
 - `tree` e `tap --text`: a acessibilidade do iOS existe no SimulatorKit (`AXPTranslator`), mas ainda não foi ligada.

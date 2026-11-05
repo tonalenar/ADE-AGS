@@ -910,6 +910,20 @@ button[class*="hover:bg-[var(--nui-danger-hover"]:not(:disabled):hover { backgro
   .ade-device-in, .ade-window-in, .ade-device-bar-in { animation: none; }
 }
 
+/* Estado vazio do iPhone físico (iphone/ConnectHint): o cabo e o Wi-Fi levando ao Mac, num ritmo calmo. */
+@keyframes ade-connect-flow { to { stroke-dashoffset: -20; } }
+@keyframes ade-connect-wave { 0%, 100% { opacity: 0.2; } 45% { opacity: 1; } }
+@keyframes ade-connect-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+.ade-connect-flow { stroke-dasharray: 2 8; animation: ade-connect-flow 1.2s linear infinite; }
+.ade-connect-wave { animation: ade-connect-wave 2s ease-in-out infinite; }
+.ade-connect-wave-2 { animation-delay: 0.25s; }
+.ade-connect-wave-3 { animation-delay: 0.5s; }
+.ade-connect-float { animation: ade-connect-float 3.4s ease-in-out infinite; transform-box: fill-box; }
+@media (prefers-reduced-motion: reduce) {
+  .ade-connect-flow, .ade-connect-wave, .ade-connect-float { animation: none; }
+  .ade-connect-wave { opacity: 0.8; }
+}
+
 /* Os três pontos do "agente trabalhando" (prancheta 13): 5 px, pulso de 1,2 s, um atrás do outro. */
 @keyframes cc-dot-pulse {
   0%, 100% { opacity: 0.25; }

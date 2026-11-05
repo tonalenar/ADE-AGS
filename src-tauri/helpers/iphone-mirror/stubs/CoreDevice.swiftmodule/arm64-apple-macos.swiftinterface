@@ -1,0 +1,147 @@
+// swift-interface-format-version: 1.0
+// swift-module-flags: -target arm64-apple-macos14.0 -enable-library-evolution -module-name CoreDevice
+// Interface escrita à mão: declara só o que o espelhamento usa. Os tipos de DeviceMediaStream moram fisicamente no
+// CoreDeviceUtilities (reexportado pelo CoreDevice), mas são mangleados como CoreDevice. Mapa e cuidados em
+// docs/ade-ags/ESPELHAMENTO_IPHONE.md. Uma assinatura errada aqui derruba o helper, nunca o app.
+import Swift
+import Foundation
+import Dispatch
+import CoreGraphics
+import _Concurrency
+import CoreDeviceProtocols
+
+public class DeviceManager {
+  public static var shared: CoreDevice.DeviceManager { get }
+  public func awaitFullInitialization() async
+  public var devices: [Foundation.UUID : CoreDevice.RemoteDevice] { get }
+}
+
+public class RemoteDevice {
+  public var deviceIdentifier: Foundation.UUID { get }
+  public var deviceInfo: CoreDeviceProtocols.DeviceInfo { get }
+  public func connect() async throws
+  public func getImplementation<A>(for: CoreDevice.CapabilityStaticMember<A>) async throws -> A.ProtocolType where A : CoreDevice.DeviceCapability
+}
+
+// ── HID (toque, botões, teclado) ──
+// Conferido nos descritores do framework: os protocolos não são presos a classe e são resilientes (chamados por
+// dispatch thunk), então a ordem e a quantidade de requisitos declarados aqui não mudam a chamada.
+
+public protocol DeviceCapability {
+  associatedtype ProtocolType
+  associatedtype ImplType
+}
+
+public struct CapabilityStaticMember<A> {}
+
+public struct HIDDeviceCapability {}
+
+public struct DigitizerHIDCapability : CoreDevice.DeviceCapability {
+  public typealias ProtocolType = any CoreDevice.HIDDigitizer
+  public typealias ImplType = Any
+}
+
+public struct ButtonHIDCapability : CoreDevice.DeviceCapability {
+  public typealias ProtocolType = any CoreDevice.HIDButton
+  public typealias ImplType = Any
+}
+
+public struct KeyboardHIDCapability : CoreDevice.DeviceCapability {
+  public typealias ProtocolType = any CoreDevice.HIDKeyboard
+  public typealias ImplType = Any
+}
+
+extension CoreDevice.CapabilityStaticMember where A == CoreDevice.HIDDeviceCapability {
+  public static var digitizer: CoreDevice.CapabilityStaticMember<CoreDevice.DigitizerHIDCapability> { get }
+  public static var button: CoreDevice.CapabilityStaticMember<CoreDevice.ButtonHIDCapability> { get }
+  public static var keyboard: CoreDevice.CapabilityStaticMember<CoreDevice.KeyboardHIDCapability> { get }
+}
+
+public protocol DeviceCapabilityProtocol {}
+
+public enum DigitizerEventType { case start; case position; case end }
+public enum DigitizerEdge { case none; case top; case bottom; case left; case right }
+public enum DigitizerTarget { case mainScreen }
+public enum HIDButtonState { case down; case up }
+
+public struct HIDKeyboardUsageCode {
+  public init(rawValue: Swift.UInt16)
+}
+
+public protocol HIDDigitizer : CoreDevice.DeviceCapabilityProtocol {
+  func sendBarrier()
+}
+extension CoreDevice.HIDDigitizer {
+  public func send(pointOne: CoreGraphics.CGPoint, pointTwo: CoreGraphics.CGPoint?, eventType: CoreDevice.DigitizerEventType, edge: CoreDevice.DigitizerEdge, target: CoreDevice.DigitizerTarget) throws
+}
+
+public protocol HIDButton : CoreDevice.DeviceCapabilityProtocol {
+  func sendCustomButton(usagePage: Swift.Int, usageCode: Swift.Int, state: CoreDevice.HIDButtonState) throws
+  func sendBarrier()
+}
+
+public protocol HIDKeyboard : CoreDevice.DeviceCapabilityProtocol {
+  func send(key: CoreDevice.HIDKeyboardUsageCode, state: CoreDevice.HIDButtonState) throws
+  func sendBarrier()
+}
+
+public struct DisplayInfo {}
+
+// Tem de ser `indirect`: sem isso o layout não bate com o do framework e o `swift_retain` cai.
+public indirect enum CodableValue {
+  case bool(Swift.Bool)
+  case int(Swift.Int)
+  case uint(Swift.UInt)
+  case double(Swift.Double)
+  case string(Swift.String)
+  case data(Foundation.Data)
+  case uuid(Foundation.UUID)
+  case array([CoreDevice.CodableValue])
+  case dictionary([Swift.String : CoreDevice.CodableValue])
+}
+
+public struct DeviceMediaStream {
+  public enum StreamType { case audio; case video }
+  public enum Direction { case input; case output }
+  public static var kAVCMediaStreamOptionClientName: Swift.String { get }
+  public static var kAVCMediaStreamOptionClientSessionID: Swift.String { get }
+  public struct SupportInfo {
+    public var supportedFeatures: Swift.UInt64 { get }
+  }
+  public struct SupportInfoResponse {
+    public var common: CoreDevice.DeviceMediaStream.SupportInfo { get }
+  }
+  public struct NetworkInfo {
+    public var ipv6Address: Swift.String { get }
+    public var port: Swift.UInt16 { get }
+  }
+  public struct MediaStreamConfig {}
+  public struct ConnectionInfo {
+    public var receiver: CoreDevice.DeviceMediaStream.NetworkInfo { get }
+    public var sender: CoreDevice.DeviceMediaStream.NetworkInfo { get }
+    public var streamConfig: CoreDevice.DeviceMediaStream.MediaStreamConfig { get }
+  }
+  public struct StartRequest {
+    public init(timeout: Swift.UInt, type: CoreDevice.DeviceMediaStream.StreamType, direction: CoreDevice.DeviceMediaStream.Direction, negotiatorOffer: Foundation.Data, clientSupportedFeatures: Swift.UInt64, receiverIP: Swift.String?, receiverPort: Swift.UInt16?, options: [Swift.String : CoreDevice.CodableValue])
+  }
+  public struct StartResponse {
+    public var connection: CoreDevice.DeviceMediaStream.ConnectionInfo { get }
+    public var negotiatorAnswer: Foundation.Data { get }
+  }
+  public struct StopRequest {
+    public init(stopAll: Swift.Bool, identifiers: [Swift.UInt32]?)
+  }
+  public struct StopResponse {}
+}
+
+public struct MediaStreamFunctions {
+  public init(device: CoreDevice.RemoteDevice)
+  public var mediaStreamSupportInfo: CoreDevice.DeviceMediaStream.SupportInfoResponse { get async throws }
+  public func startMediaStream(with: CoreDevice.DeviceMediaStream.StartRequest) async throws -> CoreDevice.DeviceMediaStream.StartResponse
+  public func stopMediaStream(with: CoreDevice.DeviceMediaStream.StopRequest) async throws -> CoreDevice.DeviceMediaStream.StopResponse
+  public static func getNegotiatorOptions(for: CoreDeviceProtocols.DeviceInfo) -> [Swift.String : any Swift.Sendable]
+}
+
+extension CoreDevice.RemoteDevice {
+  public func getDisplayInfo(completingOn: Dispatch.DispatchQueue?, completion: @escaping (Swift.Result<CoreDevice.DisplayInfo, any Swift.Error>) -> ())
+}

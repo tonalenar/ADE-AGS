@@ -67,6 +67,9 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
         return Ok(json!({ "device": who, "said": true, "note": "A pessoa vê na conversa do simulador." }));
     }
     let udid = udid_of(portal)?;
+    if crate::iphone::model::is_physical(&udid) {
+        return physical(app, from, id, &who, &agent, &udid, args, action, shots);
+    }
     if action == "start" {
         ops::boot(&udid, true)?;
         crate::simulator::lifecycle::booted(app, &udid);
@@ -159,6 +162,103 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
             .map(|v| v.to_string()).unwrap_or_default()),
     };
     activity(app, id, &agent, "action", detail.trim());
+    Ok(result)
+}
+
+/// Uma ação de `ags device` num iPhone ou iPad físico (`device:<id>`). O alcance já foi conferido (corda no canvas, ou
+/// a chave do painel do chat); por ser o aparelho de verdade, tocar, deslizar, tecla e botão ainda perguntam à pessoa
+/// até ela dizer "sempre neste aparelho", e digitar texto pergunta sempre (`computer_use::ios::confirm_physical`).
+#[allow(clippy::too_many_arguments)]
+fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, device: &str, args: &Value, action: &str, shots: std::path::PathBuf) -> Result<Value, String> {
+    use crate::iphone::{model as phone, ops as po};
+    if phone::agent_unsupported(action) {
+        return Err(format!("No iPhone físico `ags device {action}` ainda não existe: use tap, swipe, type, key, button e shot (pontos do iOS)."));
+    }
+    let db = super::shared::db(app)?.inner().clone();
+    // Pergunta à pessoa, com a foto da tela e o ponto (em proporção) quando há um.
+    let ask = |what: &str, point: Option<(f64, f64)>| -> Result<(), String> {
+        let photo = po::screenshot(app, device).ok();
+        let ok = crate::computer_use::ios::confirm_physical(app, &db, from, device, action, what, photo.as_deref().map(std::path::Path::new), point)?;
+        if let Some(p) = photo {
+            let _ = std::fs::remove_file(p);
+        }
+        if ok { Ok(()) } else { Err("A pessoa não autorizou esta ação no iPhone físico.".into()) }
+    };
+    let asks = |trusted: bool| phone::agent_asks(action, trusted);
+    let trusted = crate::computer_use::ios::trusted_device(&db, device)?;
+    let result = match action {
+        "tap" => {
+            if arg_str_opt(args, "text").is_some_and(|t| !t.trim().is_empty()) {
+                return Err("No iPhone físico o `tap --text` ainda não existe: tire uma foto (`ags device shot`) e toque por --x/--y em pontos.".into());
+            }
+            let (x, y) = (need(args, "x", action)?, need(args, "y", action)?);
+            let ratio = phone::point_ratio(x, y, po::points(app, device)?)?;
+            if asks(trusted) {
+                ask(&format!("Tocar em ({x:.0}, {y:.0}) pontos"), Some(ratio))?;
+            }
+            po::tap(app, device, x, y)?;
+            json!({ "device": who, "tapped": [x, y] })
+        }
+        "swipe" => {
+            let size = po::points(app, device)?;
+            let (from_pt, to_pt) = match arg_str_opt(args, "dir") {
+                Some(dir) => {
+                    let (x1, y1, x2, y2) = super::devices::swipe_by_direction(&dir, size.0 as u32, size.1 as u32)?;
+                    ((f64::from(x1), f64::from(y1)), (f64::from(x2), f64::from(y2)))
+                }
+                None => ((need(args, "x1", action)?, need(args, "y1", action)?), (need(args, "x2", action)?, need(args, "y2", action)?)),
+            };
+            let ms = num(args, "ms")?.unwrap_or(300.0).max(50.0) as u64;
+            if asks(trusted) {
+                let start = phone::point_ratio(from_pt.0, from_pt.1, size)?;
+                ask(&format!("Deslizar de ({:.0}, {:.0}) a ({:.0}, {:.0}) pontos", from_pt.0, from_pt.1, to_pt.0, to_pt.1), Some(start))?;
+            }
+            po::swipe(app, device, from_pt, to_pt, ms)?;
+            json!({ "device": who, "swiped": [from_pt.0, from_pt.1, to_pt.0, to_pt.1] })
+        }
+        "type" => {
+            let text = arg_str(args, "text")?;
+            phone::text_lines(&text)?;
+            ask(&format!("Digitar {} caracteres no campo que estiver em foco", text.chars().count()), None)?;
+            po::type_text(app, device, &text)?;
+            json!({ "device": who, "typed": text.chars().count() })
+        }
+        "key" => {
+            let key = arg_str(args, "key")?;
+            phone::key_lines(&key)?;
+            if asks(trusted) {
+                ask(&format!("Apertar a tecla «{key}»"), None)?;
+            }
+            po::key(app, device, &key)?;
+            json!({ "device": who, "key": key })
+        }
+        "button" => {
+            let button = arg_str(args, "button")?;
+            let gesture = phone::gesture(&button).is_some() && phone::button_usage(&button).is_none();
+            if !gesture && phone::button_usage(&button).is_none() {
+                return Err(format!("Botão desconhecido: \"{button}\". Use home, lock, volumeUp, volumeDown, mute, siri, controlCenter, notificationCenter ou spotlight."));
+            }
+            if asks(trusted) {
+                ask(&format!("Apertar «{button}»"), None)?;
+            }
+            if gesture { po::gesture(app, device, &button)? } else { po::button(app, device, &button)? }
+            json!({ "device": who, "button": button })
+        }
+        "shot" => {
+            let tmp = po::screenshot(app, device)?;
+            let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
+            let path = shots.join(format!("iphone-{stamp}.png"));
+            std::fs::rename(&tmp, &path).or_else(|_| std::fs::copy(&tmp, &path).map(|_| ())).map_err(|e| e.to_string())?;
+            let (w, h) = po::points(app, device).unwrap_or((0.0, 0.0));
+            json!({ "device": who, "path": path.to_string_lossy(), "width": w, "height": h, "units": "pontos do iOS (use estes em --x/--y)" })
+        }
+        other => return Err(format!("O iPhone físico não admite '{other}'.")),
+    };
+    let detail = match action {
+        "type" | "shot" => action.to_string(),
+        _ => format!("{action} {}", args.get("x").or(args.get("key")).or(args.get("button")).or(args.get("dir")).map(|v| v.to_string()).unwrap_or_default()),
+    };
+    activity(app, id, agent, "action", detail.trim());
     Ok(result)
 }
 

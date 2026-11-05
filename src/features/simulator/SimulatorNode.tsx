@@ -14,6 +14,11 @@ import {
   SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
   simulatorShutdown, type SimDevice, type SimOrientationEvent,
 } from "./ipc";
+import { canTouch, frameLayout, isPhysicalId, physicalScreen } from "@/features/iphone/model";
+import { DeviceFrame, screenRadiusOf } from "@/features/iphone/DeviceFrame";
+import { PhysicalMirror } from "@/features/iphone/PhysicalParts";
+import { refreshPhysical, useIphoneStore, useMirrorStatus } from "@/features/iphone/store";
+
 import { SimulatorBar } from "./SimulatorBar";
 import { SimulatorChat, type SimAgent } from "./SimulatorChat";
 import { SimulatorScreen } from "./SimulatorScreen";
@@ -62,10 +67,18 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     }
   }, [loaded]);
 
-  const current = deviceByUdid(devices, portal.udid);
+  // O nó pode mostrar um iPhone ou iPad físico (`device:<id>`): só ver, sem os controles do simulador.
+  const physicalId = isPhysicalId(portal.udid) ? portal.udid : null;
+  const physical = useIphoneStore((s) => (physicalId ? s.devices.find((d) => d.id === physicalId) : undefined));
+  const mirror = useMirrorStatus(physicalId);
+  const physicalLoaded = useIphoneStore((s) => s.loaded);
+  useEffect(() => { if (physicalId) void refreshPhysical(); }, [physicalId]);
+  const current = physicalId ? undefined : deviceByUdid(devices, portal.udid);
   const booted = current?.state === "booted";
   // A moldura deita com o iOS: a orientação vem do backend ao ligar e a cada giro (de qualquer tela ou agente).
-  const screen = orientedScreen(screenOf(current), landscape && booted);
+  const screen = physicalId
+    ? physicalScreen(mirror?.display ?? null, physical?.family ?? "iphone")
+    : orientedScreen(screenOf(current), landscape && booted);
 
   useEffect(() => {
     const udid = portal.udid;
@@ -84,7 +97,8 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     };
   }, [portal.udid, booted]);
   const scale = scaleOf(screen, portal.box.h);
-  const chat = !!portal.chat;
+  // A conversa com os agentes é do simulador: o aparelho físico ainda não é pilotado por eles.
+  const chat = !!portal.chat && !physicalId;
   const phone = phoneOf(screen, scale);
   const state: SimDevice["state"] | "error" = error ? "error" : booting ? "booting" : current?.state ?? "shutdown";
 
@@ -140,6 +154,12 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const actions = {
     onPick: (udid: string) => {
       setError(null);
+      if (isPhysicalId(udid)) {
+        const device = useIphoneStore.getState().devices.find((d) => d.id === udid);
+        const next = physicalScreen(useIphoneStore.getState().statuses[udid]?.display ?? null, device?.family ?? "iphone");
+        resize(next, clampScale(next, scale), false, { udid, name: device?.name ?? portal.name, chat: false });
+        return;
+      }
       const next = screenOf(deviceByUdid(devices, udid));
       resize(next, clampScale(next, scale), chat, { udid, name: deviceByUdid(devices, udid)?.name ?? portal.name });
     },
@@ -212,9 +232,20 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
       <div className="flex h-full w-full flex-col" style={{ gap: SIM_GAP_Y }}>
         <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light}
+          physical={physicalId ? { id: physicalId, device: physical, status: mirror } : undefined}
           hibernateMin={hibernateMin} single={single}
           agents={agents.length} chatOpen={chat} closeArmed={closeArmed} actions={actions} />
         <div className="flex min-h-0 flex-1" style={{ gap: SIM_GAP_X }}>
+          {physicalId ? (
+            // O aparelho físico: a moldura do modelo, com os botões da lateral funcionando (ver `iphone/DeviceFrame`).
+            <div className="nodrag nowheel nopan flex shrink-0 items-center justify-center" style={{ width: phone.w, height: phone.h }}>
+              <DeviceFrame device={physicalId} name={portal.name} layout={frameLayout(physical?.model ?? "", physical?.family ?? "iphone")}
+                screen={{ width: Math.round(phone.screenW), height: Math.round(phone.screenH) }} enabled={canTouch(mirror)}>
+                <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror}
+                  radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW))} onError={fail} />
+              </DeviceFrame>
+            </div>
+          ) : (
           <div className="relative shrink-0 bg-gradient-to-br from-surface-overlay via-surface to-surface-raised"
             style={{
               width: phone.w, height: phone.h, borderRadius: phone.outerRadius, padding: phone.bezel,
@@ -245,6 +276,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
               )}
             </div>
           </div>
+          )}
           {chat && key && (
             <SimulatorChat boardKey={key} node={id} name={portal.name} udid={portal.udid} booted={booted} agents={agents}
               onClose={() => resize(screen, scale, false, { chat: false })} />

@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
-description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.50.0
+description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
+version: 1.51.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -915,6 +915,32 @@ ags device say iPhone "Login fixed: the button no longer hides under the keyboar
   iCloud sign-in, Mail/Calendar/Contacts sync, Health, Maps, News and iMessage. Push, purchases,
   the App Store, Safari and universal links still work. If the app under test needs one of the
   services that are off, ask the user to turn ⚡ off: the change takes effect when the device reboots.
+
+### Real iPhones and iPads (macOS, Xcode 27)
+
+The same iOS node (and the iOS tab of the chat panel) can show the user's **real** iPhone or iPad, over USB
+or Wi-Fi, picked by the user under "Devices" in the node's picker. `ags device list` shows its `udid` as
+`device:<CoreDevice id>`. It is the user's own phone, so the rules are stricter than on a simulator:
+
+```bash
+ags device shot iPhone                        # PNG of the live mirror + screen size in points (no question asked)
+ags device tap iPhone --x 201 --y 610         # points, like the simulator
+ags device swipe iPhone --dir left            # or --x1 --y1 --x2 --y2 [--ms 300]
+ags device key iPhone enter
+ags device button iPhone home                 # home, lock, volumeUp, volumeDown, mute, siri,
+                                              # controlCenter, notificationCenter, spotlight
+ags device type iPhone "hello"                # US keyboard ASCII only
+ags sim act iPhone "Open the Settings search" --expect "text:Search" --steps 6
+```
+
+- **Every** `tap`, `swipe`, `key` and `button` asks the user in the app (with the current photo) until they
+  answer "Autorizar sempre neste aparelho" for that phone; `type` asks **every time**. No answer = refused.
+  `sim act` uses the same per-device "always" and still asks for sensitive labels, unlabeled icons and typing.
+- You only reach it when connected by a cord on the canvas, or when the user turned on "Allow agents to
+  control devices" in the chat panel. Never ask the user to switch these off to go faster.
+- Not available on a real device: `start`, `open`, `launch`, `close`, `rotate`, `clipboard`, `tree`,
+  `tap --text`. Nothing installs, reboots or changes settings on the phone by itself.
+- The phone must be unlocked and the mirror connected; the first action waits up to 20 s for it.
 
 ### Devices from the chat panel
 

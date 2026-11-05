@@ -37,7 +37,7 @@ unsafe extern "C" {
 
 #[repr(C)]
 #[derive(Clone, Copy)]
-struct CGRect {
+pub(crate) struct CGRect {
     origin: CGPoint,
     size: CGSize,
 }
@@ -61,15 +61,16 @@ unsafe extern "C" {
     fn CGPathRelease(path: *mut c_void);
 }
 
-fn cg_rect(x: f64, y: f64, width: f64, height: f64) -> CGRect {
+pub(crate) fn cg_rect(x: f64, y: f64, width: f64, height: f64) -> CGRect {
     CGRect { origin: CGPoint { x, y }, size: CGSize { width, height } }
 }
 
 /// Uso HID do Shift esquerdo.
 const SHIFT: u32 = 0xe1;
 
+/// A máscara que a camada tem agora (para não refazer a mesma a cada quadro do canvas).
 #[derive(PartialEq)]
-struct AppliedRegion {
+pub(crate) struct AppliedRegion {
     width: u64,
     height: u64,
     visible: Rect,
@@ -345,70 +346,79 @@ impl ScreenView {
         }
     }
 
-    /// O que da tela aparece: o retângulo arredondado da tela, cortado na parte à vista e sem os buracos (menus,
-    /// diálogos do app por cima). Quando a tela inteira está à vista e sem buracos, usa o `cornerRadius` contínuo
-    /// direto na camada (sem `CAShapeLayer`, evitando composição intermediária fora da tela no `WindowServer`);
-    /// só cria máscara `CGPath` quando há recorte nas bordas ou buracos por cima.
+    /// O que da tela aparece: ver `apply_region`.
     fn set_region(&self, visible: Rect, holes: &[Rect], radius: f64) {
         let bounds = self.bounds();
-        let (w, h) = (bounds.size.width, bounds.size.height);
-        let radius = radius.clamp(0.0, w.min(h) / 2.0);
-        let next = AppliedRegion {
-            width: w.to_bits(),
-            height: h.to_bits(),
-            visible,
-            holes: holes.to_vec(),
-            radius: radius.to_bits(),
-        };
-        if self.ivars().applied.borrow().as_ref() == Some(&next) {
-            return;
-        }
-        *self.ivars().applied.borrow_mut() = Some(next);
-
-        let full = holes.is_empty()
-            && visible.x.abs() <= 0.5
-            && visible.y.abs() <= 0.5
-            && (visible.width - w).abs() <= 0.5
-            && (visible.height - h).abs() <= 0.5;
-        let flip = |r: &Rect| cg_rect(r.x, r.y, r.width, r.height);
-        let layer = self.layer();
-        // SAFETY: CoreGraphics e CALayer/CAShapeLayer públicos; mudanças em transação sem animação implícita.
-        unsafe {
-            transaction(|| {
-                if full {
-                    call!(layer, sel!(setMask:), std::ptr::null_mut::<AnyObject>() => *mut AnyObject; -> ());
-                    let curve = ns_string("continuous");
-                    call!(layer, sel!(setCornerCurve:), Retained::as_ptr(&curve) as *mut AnyObject => *mut AnyObject; -> ());
-                    call!(layer, sel!(setCornerRadius:), radius => f64; -> ());
-                    call!(layer, sel!(setMasksToBounds:), radius > 0.0 => bool; -> ());
-                } else {
-                    call!(layer, sel!(setCornerRadius:), 0.0f64 => f64; -> ());
-                    call!(layer, sel!(setMasksToBounds:), false => bool; -> ());
-                    let mut path = CGPathCreateWithRoundedRect(cg_rect(0.0, 0.0, w, h), radius, radius, std::ptr::null());
-                    let clip = CGPathCreateWithRect(flip(&visible), std::ptr::null());
-                    let cut = CGPathCreateCopyByIntersectingPath(path, clip, false);
-                    CGPathRelease(clip);
-                    CGPathRelease(path);
-                    path = cut;
-                    for hole in holes {
-                        let hole_path = CGPathCreateWithRect(flip(hole), std::ptr::null());
-                        let cut = CGPathCreateCopyBySubtractingPath(path, hole_path, false);
-                        CGPathRelease(hole_path);
-                        CGPathRelease(path);
-                        path = cut;
-                    }
-                    let mask = call!(class(c"CAShapeLayer").expect("QuartzCore"), sel!(layer); -> *mut AnyObject);
-                    call!(mask, sel!(setFrame:), cg_rect(0.0, 0.0, w, h) => CGRect; -> ());
-                    call!(mask, sel!(setPath:), path => *mut c_void; -> ());
-                    call!(layer, sel!(setMask:), mask => *mut AnyObject; -> ());
-                    CGPathRelease(path);
-                }
-            });
-        }
+        // SAFETY: a camada da view, na thread da interface.
+        unsafe { apply_region(self.layer(), bounds.size.width, bounds.size.height, visible, holes, radius, &self.ivars().applied) };
         // A área de toque (coordenadas da view): a parte visível sem os buracos. Os cantos arredondados ficam de
         // fora do toque só pela máscara; um clique ali ainda vira toque na borda da tela, como no Simulator.
         *self.ivars().region.borrow_mut() = model::subtract(visible, holes);
     }
+}
+
+/// O que da tela aparece: o retângulo arredondado da tela, cortado na parte à vista e sem os buracos (menus,
+/// diálogos do app por cima). Quando a tela inteira está à vista e sem buracos, usa o `cornerRadius` contínuo
+/// direto na camada (sem `CAShapeLayer`, evitando composição intermediária fora da tela no `WindowServer`);
+/// só cria máscara `CGPath` quando há recorte nas bordas ou buracos por cima. Também serve à tela do iPhone
+/// físico (`iphone::native::view`). Devolve se mudou algo.
+///
+/// # Safety
+/// `layer` é a camada viva da view, na thread da interface.
+pub(crate) unsafe fn apply_region(layer: *mut AnyObject, w: f64, h: f64, visible: Rect, holes: &[Rect], radius: f64, applied: &RefCell<Option<AppliedRegion>>) -> bool {
+    let radius = radius.clamp(0.0, w.min(h) / 2.0);
+    let next = AppliedRegion {
+        width: w.to_bits(),
+        height: h.to_bits(),
+        visible,
+        holes: holes.to_vec(),
+        radius: radius.to_bits(),
+    };
+    if applied.borrow().as_ref() == Some(&next) {
+        return false;
+    }
+    *applied.borrow_mut() = Some(next);
+
+    let full = holes.is_empty()
+        && visible.x.abs() <= 0.5
+        && visible.y.abs() <= 0.5
+        && (visible.width - w).abs() <= 0.5
+        && (visible.height - h).abs() <= 0.5;
+    let flip = |r: &Rect| cg_rect(r.x, r.y, r.width, r.height);
+    // SAFETY: CoreGraphics e CALayer/CAShapeLayer públicos; mudanças em transação sem animação implícita.
+    unsafe {
+        transaction(|| {
+            if full {
+                call!(layer, sel!(setMask:), std::ptr::null_mut::<AnyObject>() => *mut AnyObject; -> ());
+                let curve = ns_string("continuous");
+                call!(layer, sel!(setCornerCurve:), Retained::as_ptr(&curve) as *mut AnyObject => *mut AnyObject; -> ());
+                call!(layer, sel!(setCornerRadius:), radius => f64; -> ());
+                call!(layer, sel!(setMasksToBounds:), radius > 0.0 => bool; -> ());
+            } else {
+                call!(layer, sel!(setCornerRadius:), 0.0f64 => f64; -> ());
+                call!(layer, sel!(setMasksToBounds:), false => bool; -> ());
+                let mut path = CGPathCreateWithRoundedRect(cg_rect(0.0, 0.0, w, h), radius, radius, std::ptr::null());
+                let clip = CGPathCreateWithRect(flip(&visible), std::ptr::null());
+                let cut = CGPathCreateCopyByIntersectingPath(path, clip, false);
+                CGPathRelease(clip);
+                CGPathRelease(path);
+                path = cut;
+                for hole in holes {
+                    let hole_path = CGPathCreateWithRect(flip(hole), std::ptr::null());
+                    let cut = CGPathCreateCopyBySubtractingPath(path, hole_path, false);
+                    CGPathRelease(hole_path);
+                    CGPathRelease(path);
+                    path = cut;
+                }
+                let mask = call!(class(c"CAShapeLayer").expect("QuartzCore"), sel!(layer); -> *mut AnyObject);
+                call!(mask, sel!(setFrame:), cg_rect(0.0, 0.0, w, h) => CGRect; -> ());
+                call!(mask, sel!(setPath:), path => *mut c_void; -> ());
+                call!(layer, sel!(setMask:), mask => *mut AnyObject; -> ());
+                CGPathRelease(path);
+            }
+        });
+    }
+    true
 }
 
 /// A fila dos quadros: serial e na prioridade da interface, mas fora dela.
@@ -440,7 +450,7 @@ struct Presenter {
 ///
 /// # Safety
 /// `work` só mexe em camadas.
-unsafe fn transaction(work: impl FnOnce()) {
+pub(crate) unsafe fn transaction(work: impl FnOnce()) {
     unsafe {
         let ca = class(c"CATransaction").expect("QuartzCore");
         call!(ca, sel!(begin); -> ());

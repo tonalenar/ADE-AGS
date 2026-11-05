@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## iPhone e iPad físicos ao lado do simulador
+
+O seletor do nó iOS e do painel iOS do chat ganhou "Aparelhos" (os físicos do CoreDevice, com USB ou Wi-Fi, modelo e iOS) acima de "Simuladores". O aparelho escolhido aparece ao vivo na mesma moldura do simulador, com a linha de estado (ligado, reconectando, sem conexão) e reconexão sozinha quando o túnel cai. Sem aparelho pronto, um estado vazio animado ensina a ligar pelo cabo ou Wi-Fi, tocar em "Confiar" e ligar o Modo de Desenvolvedor. A conversa com o CoreDevice fica num helper Swift à parte (`ade-iphone-mirror`); o app decodifica o HEVC com o VideoToolbox e mostra a `IOSurface` numa camada nativa, como no simulador. Medido no Wi-Fi: ~60 quadros/s, chegada→quadro p50 ~3 ms. **Controle:** clique e arrasto tocam o aparelho e o teclado digita, pelo HID do CoreDevice; a barra e o painel têm início, Sistema (centrais e Busca) e Botões; os agentes usam `ags device` e `sim act` com o alcance do simulador e confirmação por ação até a pessoa autorizar "sempre neste aparelho" (`type` pergunta sempre). Os painéis laterais ficam para os próximos PRs. Como funciona, mapa das APIs e medições: [ESPELHAMENTO_IPHONE.md](./ESPELHAMENTO_IPHONE.md).
+
 ## Modo chat (estilo T3 Code), experimental
 
 Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações → Modo chat. `Chat | Abas | Canvas` e Ctrl+Shift+L alternam. Detalhes em [MODO_CHAT.md](./MODO_CHAT.md).
