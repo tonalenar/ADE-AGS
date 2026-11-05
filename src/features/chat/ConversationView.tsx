@@ -22,7 +22,7 @@ import { ContextStrip } from "./NewConversation";
 import { PermissionCard } from "./permissions/PermissionCard";
 import { usePendingAsks } from "./permissions/permissionsStore";
 import { queueOrSend } from "./queueRunner";
-import { setChatSlot, setTerminalOpen, useChatStore } from "./store";
+import { setChatSlot, setTerminalOpen, unqueueMessage, useChatStore, type QueuedMessage } from "./store";
 import { TeamMentionMenu, useTeamComposer } from "./team/TeamComposer";
 import { TeamThreadFeed } from "./team/TeamThreadFeed";
 import { TimelineView } from "./timeline/ConversationTimeline";
@@ -30,6 +30,9 @@ import { addPending, usePending } from "./timeline/pending";
 import { useConversationTimeline } from "./timeline/useConversationTimeline";
 
 /** A tecla da fila como a pessoa a digita (⌘⏎ no macOS). */
+/** A fila vazia, estável (o seletor do store não devolve um array novo a cada render). */
+export const NO_QUEUE: QueuedMessage[] = [];
+
 export const QUEUE_KEY = DESKTOP_OS === "macos" ? "⌘⏎" : "Ctrl+⏎";
 
 /** O contêiner contra o qual o retângulo é medido: a casca do chat cobre a mesma área que as abas. */
@@ -83,7 +86,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   // O pedido da TUI vem do store único das permissões (o `PermissionsManager` lê a tela).
   const asks = usePendingAsks();
   const approval = useMemo(() => asks.find((a) => a.conversation === card.tabId) ?? null, [asks, card.tabId]);
-  const queued = useChatStore((s) => s.queues[card.tabId]?.length ?? 0);
+  const queue = useChatStore((s) => s.queues[card.tabId]) ?? NO_QUEUE;
   const { timeline: read, loaded, phase } = useConversationTimeline(card.tabId);
   const items = useMemo(() => read?.items ?? [], [read]);
   const live = useMemo(() => turnLive(items, !!approval), [items, approval]);
@@ -153,7 +156,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
         onQueue={(text, attachments) => {
           const prepared = team ? team.prepare(text, { key: card.tabId, items }, attachments) : { text, onSent: () => undefined };
           if (prepared !== null) { queueOrSend(card.tabId, messageFor(card.tabId, prepared.text, attachments).text); prepared.onSent(); }
-        }} queued={queued}
+        }} queue={queue} onUnqueue={(id) => unqueueMessage(card.tabId, id)}
         onStop={busy && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
         leading={team?.controls}
         addon={team ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}

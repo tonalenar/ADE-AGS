@@ -29,14 +29,14 @@ export function useActivityText(activity: Activity): string {
 const MARK: Record<ToolStatus, string> = { running: "…", done: "✓", error: "✗", denied: "⊘" };
 
 /**
- * A linha viva acima do composer: os pontos, a atividade, o tempo e os tokens do turno e o botão que
- * abre os últimos comandos e o raciocínio mais recente.
+ * A linha viva acima do composer: os pontos, «Trabalhando…», o tempo e os tokens do turno e o botão que abre os
+ * últimos comandos e o raciocínio mais recente. Não repete o que o agente está rodando nem o «Pensando…»: isso já
+ * está na timeline, logo acima (o comando inteiro aqui cortava no meio e empilhava duas linhas iguais).
  */
 export function ActivityLine({ live, startedAt }: { live: TurnLive; startedAt: number | null }) {
   const { t, i18n } = useTranslation();
   const [open, setOpen] = useState(false);
   const now = useNow(true);
-  const text = useActivityText(live.activity);
   const since = live.startedAt ?? startedAt;
   const meta = [
     since !== null ? formatElapsed(now - since) : null,
@@ -47,7 +47,7 @@ export function ActivityLine({ live, startedAt }: { live: TurnLive; startedAt: n
     <>
       <div role="status" aria-live="polite" className="flex items-center gap-2.5 px-1.5 pt-2 pb-2.5 text-chat-ui text-gray-600 dark:text-white/60">
         <Dots />
-        <span className="min-w-0 truncate font-medium text-gray-900 dark:text-white">{text}</span>
+        <span className="min-w-0 truncate font-medium text-gray-900 dark:text-white">{t("chat.timeline.working")}</span>
         {/* O tempo muda a cada segundo: fora do anúncio, para o leitor de tela não repetir a linha. */}
         {meta && <span aria-hidden="true" className="shrink-0 whitespace-nowrap text-gray-500 dark:text-white/45">{meta}</span>}
         <span className="flex-1" />

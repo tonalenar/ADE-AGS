@@ -54,13 +54,29 @@ const PLAN_FLAG: Record<string, string> = { "claude-code": "--permission-mode pl
  * - Cursor (`cursor-agent -p`): `--mode plan` e `--force`; também não pergunta. Aceitar edições e Auto não têm flag
  *   documentada, então ficam de fora.
  */
-export const PROTOCOL_AGENTS: Record<string, { access: ChatAccess[]; plan: boolean }> = {
-  codex: { access: ["ask", "safe", "full"], plan: false },
-  "claude-code": { access: ["ask", "edits", "safe", "full"], plan: true },
-  opencode: { access: ["ask", "edits", "safe", "full"], plan: true },
-  antigravity: { access: ["ask", "edits", "safe", "full"], plan: true },
-  cursor: { access: ["ask", "full"], plan: true },
+/**
+ * `midTurn`: o que o «enviar agora» faz com o agente trabalhando.
+ * - `steer`: a mensagem entra no turno em andamento (o `turn/steer` do Codex; o stdin do `claude -p`, que a lê no meio
+ *   do turno ou logo depois dele, sem parar nada);
+ * - `interrupt`: o motor não aceita entrada no meio do turno (um processo por turno no Cursor e no Antigravity; o
+ *   `session/prompt` do OpenCode): o turno para e a mensagem vai como o próximo, com a mesma sessão (nada do que
+ *   foi feito se perde).
+ */
+export type MidTurn = "steer" | "interrupt";
+
+export const PROTOCOL_AGENTS: Record<string, { access: ChatAccess[]; plan: boolean; midTurn: MidTurn }> = {
+  codex: { access: ["ask", "safe", "full"], plan: false, midTurn: "steer" },
+  "claude-code": { access: ["ask", "edits", "safe", "full"], plan: true, midTurn: "steer" },
+  opencode: { access: ["ask", "edits", "safe", "full"], plan: true, midTurn: "interrupt" },
+  antigravity: { access: ["ask", "edits", "safe", "full"], plan: true, midTurn: "interrupt" },
+  cursor: { access: ["ask", "full"], plan: true, midTurn: "interrupt" },
 };
+
+/** O «enviar agora» deste agente por protocolo (ver [`MidTurn`]). Um motor desconhecido para o turno: é o que
+ * nunca promete o que não faz. Pura. */
+export function midTurnOf(agentId: string): MidTurn {
+  return PROTOCOL_AGENTS[agentId]?.midTurn ?? "interrupt";
+}
 
 /**
  * Os modos que este agente aceita. Supervisionado sempre (é não passar nada). Com `protocol`
