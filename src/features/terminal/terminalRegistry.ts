@@ -250,6 +250,20 @@ export function registerTerminal(tabId: string, term: Terminal): () => void {
   };
 }
 
+/**
+ * Roda um comando num shell vivo (o «Rodar» de um bloco de código do chat): cola e dá um Enter, e o foco vai ao
+ * terminal. Sem as novas tentativas de Enter do `pasteIntoTab`: elas são para TUIs que engolem o Enter, e num shell
+ * um Enter a mais poderia responder sozinho a uma pergunta do próprio comando. `false` sem terminal viva.
+ */
+export function runInTerminal(tabId: string, text: string): boolean {
+  const term = terminals.get(tabId);
+  if (!term || tabPtyState(tabId) !== "live") return false;
+  term.paste(text);
+  setTimeout(() => term.input("\r"), 80);
+  term.focus();
+  return true;
+}
+
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
  *  tiene una terminal viva. */
 export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): boolean {

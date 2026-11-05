@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 
-import type { ImageLoader, MarkdownTone } from "./Markdown";
+import type { CodeBlockRenderer, ImageLoader, MarkdownTone } from "./Markdown";
 
 /**
  * O `Markdown` (react-markdown + remark-gfm) sob demanda, para quem é montado com o app (notas de
@@ -8,10 +8,10 @@ import type { ImageLoader, MarkdownTone } from "./Markdown";
  */
 const Impl = lazy(() => import("./Markdown").then((m) => ({ default: m.Markdown })));
 
-export function Markdown({ content, loadImage, tone }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone }) {
+export function Markdown({ content, loadImage, tone, renderCodeBlock }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
   return (
     <Suspense fallback={<div className={`whitespace-pre-wrap break-words ${tone === "chat" ? "text-chat-prose" : "text-[12px]"}`}>{content}</div>}>
-      <Impl content={content} loadImage={loadImage} tone={tone} />
+      <Impl content={content} loadImage={loadImage} tone={tone} renderCodeBlock={renderCodeBlock} />
     </Suspense>
   );
 }

@@ -32,6 +32,8 @@ interface ChatState {
   panelMaximized: boolean;
   /** O navegador da aba Navegador e onde desenhá-lo (como o terminal: por slot, sem remontar). */
   browser: { viewId: string; rect: Rect } | null;
+  /** O terminal da aba Terminal do painel (uma aba de shell na pasta da conversa) e onde desenhá-lo, como o navegador. */
+  shell: { tabId: string; rect: Rect } | null;
   /** A conversa por protocolo aberta (ver `structured/`); `null` = a da aba ativa. */
   thread: string | null;
   /** As superfícies abertas no painel direito, além do Diff, na ordem em que foram abertas (prancheta 8). */
@@ -55,11 +57,11 @@ interface ChatState {
 export interface DesignOpenRequest { designId: string; artboardId?: string | null; pageId?: string | null; seq: number }
 
 /** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
-export type Surface = Exclude<RightPanelTab, "summary" | "diff" | "empty">;
+export type Surface = Exclude<RightPanelTab, "summary" | "diff" | "shell" | "empty">;
 export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android"];
 
 /** `summary`: o Resumo, a superfície padrão com os cartões (`summary/SummaryPane.tsx`). `team`: o painel Time do time de agentes (pranchetas 15 e 16, `team/TeamPanel.tsx`). `empty`: o estado vazio do T3. */
-export type RightPanelTab = "summary" | "diff" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
+export type RightPanelTab = "summary" | "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
@@ -135,7 +137,7 @@ function readControl(): boolean {
 const initialPanel = readPanel();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, thread: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, shell: null, thread: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, designOpen: null, panelWidth: readWidth(),
   queues: {},
@@ -178,6 +180,13 @@ const sameRect = (a: Rect | null, b: Rect | null) =>
 export function setChatSlot(slot: Rect | null): void {
   if (sameRect(useChatStore.getState().slot, slot)) return;
   useChatStore.setState({ slot });
+}
+
+/** Publica o espaço do terminal da aba Terminal do painel (como `setChatSlot`, só muda com o retângulo). */
+export function setChatShell(shell: { tabId: string; rect: Rect } | null): void {
+  const now = useChatStore.getState().shell;
+  if (now === shell || (now && shell && now.tabId === shell.tabId && sameRect(now.rect, shell.rect))) return;
+  useChatStore.setState({ shell });
 }
 
 /** Abre a tela "Nova conversa" já com essa pasta escolhida (o "+" do cabeçalho de um projeto). */

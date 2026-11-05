@@ -27,6 +27,19 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
   - O laço do canal avisa `cc-conversation-grew` quando o arquivo cresce, e a janela relê.
 - **Desenho (prancheta 2):** cada turno tem a bolha da pessoa e o fold "Trabalhou por …" com as ferramentas e falas intermediárias. A resposta final e o cartão "N arquivos alterados" (com "Abrir diff") ficam fora do fold. Enquanto o agente trabalha, aparece "Trabalhando há …".
 - **O terminal do agente** fica numa gaveta de 280 px (botão no cabeçalho), posicionada por slot e sem remontar. Agentes sem transcript continuam com o terminal como corpo da conversa.
+- **O terminal da conversa** (o >_ do cabeçalho, tecla T do painel): na conversa de TUI com timeline, o >_ alterna a
+  gaveta do agente. Nas outras (por protocolo, ou TUI que já é o corpo), abre a aba **Terminal** do painel direito: um
+  shell de verdade (PTY) na pasta da conversa (`RightPanel.tsx::ShellSurface`, `shellTerminal.ts`).
+  - O shell é uma aba `bash` comum da pasta. A já existente é reaproveitada, como o navegador da pasta. Criá-la não troca
+    a conversa aberta, e ela aparece no modo Abas.
+  - Como o navegador, ela não é montada no painel: o painel publica o slot (`useChatStore.shell`), e
+    `placementsFrom`/`chatPlacements` a posiciona. Fechar o painel ou trocar de conversa só a esconde.
+- **Blocos de código** (`timeline/CodeBlockFrame.tsx`, `codeRun.ts`): cada bloco ganha **Copiar** (o código, sem o
+  fim de linha). Bloco de shell (`bash`, `sh`, `shell`, `zsh`, `console`…) ganha também **Rodar**, que abre o terminal
+  da conversa e manda o comando com um Enter (`terminalRegistry.runInTerminal`, sem as novas tentativas de Enter das
+  TUIs). Num bloco `console`, vão só as linhas `$ …`, sem o prompt. Nada roda sem o clique. Fora da conversa aberta (sem
+  `RunCodeContext`), o bloco só copia. O `Markdown` compartilhado recebe a moldura por `renderCodeBlock`.
+- **Copiar a mensagem** já existia: ao passar o mouse, sob cada fala e cada balão (`MessageActions`), leva o Markdown.
 - **Aprovações:**
   - O detector do canvas (`terminalPrompts.ts`) lê o diálogo da TUI.
   - O composer mostra Recusar / Sempre nesta sessão / Aprovar e manda a tecla da opção (`answerTerminalPrompt`).

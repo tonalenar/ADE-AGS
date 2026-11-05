@@ -97,10 +97,18 @@ export function onEntryKey(e: React.KeyboardEvent, available: PanelAvailability,
   onChoose(entry.id);
 }
 
-/** Um clique num ícone: o ativo recolhe o painel; os outros abrem a superfície; o terminal alterna a gaveta. */
-export function choosePanel(id: PanelChoice, tabId: string | null, terminalOn: boolean): void {
+/**
+ * Um clique num ícone: o ativo recolhe o painel; os outros abrem a superfície. O terminal alterna a gaveta do agente
+ * (`drawerTabId`: a conversa de TUI com timeline); sem gaveta (conversa por protocolo, ou TUI que já é o corpo), abre
+ * a aba Terminal do painel, um shell na pasta da conversa.
+ */
+export function choosePanel(id: PanelChoice, drawerTabId: string | null, terminalOn: boolean): void {
   if (id === "pr") return;
-  if (id === "terminal") { if (tabId) setTerminalOpen(tabId, !terminalOn); return; }
+  if (id === "terminal") {
+    if (drawerTabId) setTerminalOpen(drawerTabId, !terminalOn);
+    else setRightPanel(useChatStore.getState().panel === "shell" ? null : "shell");
+    return;
+  }
   if (useChatStore.getState().panel === id) setRightPanel(null);
   else if (id === "summary" || id === "diff") setRightPanel(id);
   else addSurface(id);
@@ -110,16 +118,17 @@ export function choosePanel(id: PanelChoice, tabId: string | null, terminalOn: b
  * A fileira de ícones do painel (Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e o ⋯), como a do
  * Claude Code. Fica no cabeçalho principal da janela; com o painel maximizado, no cabeçalho dele.
  */
-export function PanelToolbar({ tabId, terminalAvailable }: { tabId: string | null; terminalAvailable: boolean }) {
+export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: string | null; terminalAvailable: boolean }) {
   const { t } = useTranslation();
   const panel = useChatStore((s) => s.panel);
-  const terminalOn = useChatStore((s) => (tabId ? s.terminalOpen[tabId] ?? false : false));
+  const drawerOn = useChatStore((s) => (drawerTabId ? s.terminalOpen[drawerTabId] ?? false : false));
   const available: PanelAvailability = { terminal: terminalAvailable, pr: false };
-  const choose = (id: PanelChoice) => choosePanel(id, tabId, terminalOn);
+  const choose = (id: PanelChoice) => choosePanel(id, drawerTabId, drawerOn);
+  const terminalActive = drawerTabId ? drawerOn : panel === "shell";
   return (
     <div role="toolbar" aria-label={t("chat.panel.label")} className="flex items-center gap-0.5 shrink-0" data-tauri-drag-region="false">
       {ROW_CHOICES.map((id) => (
-        <RowIcon key={id} id={id} active={id === "terminal" ? terminalOn : isRowActive(id, panel)} available={available} onChoose={choose} />
+        <RowIcon key={id} id={id} active={id === "terminal" ? terminalActive : isRowActive(id, panel)} available={available} onChoose={choose} />
       ))}
       <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android" || panel === "team"} />
     </div>

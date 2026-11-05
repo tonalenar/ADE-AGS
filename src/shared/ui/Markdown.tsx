@@ -95,7 +95,41 @@ const TONE: Record<MarkdownTone, { root: string; h1: string; h2: string; h3: str
   },
 };
 
-export function Markdown({ content, loadImage, tone = "compact" }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone }) {
+/** Um bloco de código (` ``` `): o texto, a classe de linguagem (`language-bash`) e o `<pre>` já desenhado. */
+export interface CodeBlock {
+  code: string;
+  className: string | null;
+  pre: React.ReactNode;
+}
+
+/** Quem usa o markdown pode envolver cada bloco de código (o chat põe Rodar e Copiar). */
+export type CodeBlockRenderer = (block: CodeBlock) => React.ReactNode;
+
+/** Um nó da árvore que o `react-markdown` passa aos componentes (hast), só o que se lê aqui. */
+interface HastNode {
+  type?: string;
+  tagName?: string;
+  value?: string;
+  properties?: { className?: unknown };
+  children?: HastNode[];
+}
+
+/** O texto de um nó, com os filhos. */
+function hastText(node: HastNode | undefined): string {
+  if (!node) return "";
+  if (node.type === "text") return node.value ?? "";
+  return (node.children ?? []).map(hastText).join("");
+}
+
+/** O texto e a classe do `<code>` dentro de um `<pre>`. Puro. */
+export function codeOfPre(node: HastNode | undefined): { code: string; className: string | null } {
+  const code = node?.children?.find((c) => c.type === "element" && c.tagName === "code");
+  const raw = code?.properties?.className;
+  const className = Array.isArray(raw) ? raw.join(" ") : typeof raw === "string" ? raw : null;
+  return { code: hastText(code ?? node), className };
+}
+
+export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
   const size = TONE[tone];
   // El frontmatter no es prosa: sin sacarlo, los `---` se renderizan como una línea
   // horizontal y los campos como un párrafo suelto arriba de todo. Los datos que trae ya
@@ -137,14 +171,19 @@ export function Markdown({ content, loadImage, tone = "compact" }: { content: st
               </code>
             );
           },
-          pre: (p) => (
-            <pre
-              className="my-2 p-3 rounded-lg overflow-x-auto
-                bg-gray-100 dark:bg-black/30
-                border border-gray-200 dark:border-white/8"
-              {...p}
-            />
-          ),
+          pre: ({ node, ...p }) => {
+            // Com moldura de quem usa, a caixa (fundo e borda) é dela: o `<pre>` fica só com o recuo.
+            const pre = (
+              <pre
+                className={renderCodeBlock ? "m-0 p-3 overflow-x-auto" : `my-2 p-3 rounded-lg overflow-x-auto
+                  bg-gray-100 dark:bg-black/30
+                  border border-gray-200 dark:border-white/8`}
+                {...p}
+              />
+            );
+            if (!renderCodeBlock) return pre;
+            return renderCodeBlock({ ...codeOfPre(node as HastNode | undefined), pre });
+          },
           table: (p) => (
             <div className="my-2 overflow-x-auto">
               <table className={`${size.table} border-collapse`} {...p} />
