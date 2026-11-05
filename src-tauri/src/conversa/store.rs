@@ -379,9 +379,25 @@ pub struct Sweep {
 /// timeline ganha um `turnEnd` com o motivo (para a tela não mostrar um turno aberto para sempre); o pedido
 /// vira `expired` (clicar nele daria "o agente já fechou"). Nunca apaga linha. Idempotente.
 pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
+    let runs = close_orphan_runs(conn, None, now, "O app foi fechado antes de o turno terminar.")?;
+    let orphans: Vec<String> = {
+        let mut stmt = conn.prepare("SELECT id FROM chat_request WHERE state = 'pending'")?;
+        stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+    };
+    for id in &orphans {
+        audit_decided(conn, id, crate::approval_audit::Outcome::Cancelled, None, "app-closed", now);
+    }
+    let requests = conn.execute("UPDATE chat_request SET state = 'expired' WHERE state = 'pending'", [])?;
+    Ok(Sweep { runs: runs.len(), requests })
+}
+
+/// Fecha os turnos `inProgress` sem agente vivo (de uma conversa, ou de todas): viram `interrupted`, e o que ficou na
+/// ponta da timeline ganha um `turnEnd` com `reason`. Devolve os turnos fechados (conversa, turno). Nunca apaga linha.
+/// O arranque usa em todas; o Parar, numa conversa cujo agente já não existe (a tela ficaria em «Pensando…»).
+pub fn close_orphan_runs(conn: &Connection, thread: Option<&str>, now: i64, reason: &str) -> rusqlite::Result<Vec<(String, String)>> {
     let runs: Vec<(String, String)> = {
-        let mut stmt = conn.prepare("SELECT thread_id, id FROM chat_run WHERE status = 'inProgress'")?;
-        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?
+        let mut stmt = conn.prepare("SELECT thread_id, id FROM chat_run WHERE status = 'inProgress' AND (?1 IS NULL OR thread_id = ?1)")?;
+        stmt.query_map(params![thread], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?
     };
     for (thread_id, run_id) in &runs {
         conn.execute(
@@ -401,17 +417,9 @@ pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
         if others == 0 && !has_end {
             let mut end = Item::new(crate::canal::timeline::ItemKind::TurnEnd, end_id, Some(now));
             end.interrupted = Some(false);
-            end.text = Some("O app foi fechado antes de o turno terminar.".into());
+            end.text = Some(reason.into());
             upsert_item(conn, thread_id, Some(run_id), &end)?;
         }
     }
-    let orphans: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT id FROM chat_request WHERE state = 'pending'")?;
-        stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
-    };
-    for id in &orphans {
-        audit_decided(conn, id, crate::approval_audit::Outcome::Cancelled, None, "app-closed", now);
-    }
-    let requests = conn.execute("UPDATE chat_request SET state = 'expired' WHERE state = 'pending'", [])?;
-    Ok(Sweep { runs: runs.len(), requests })
+    Ok(runs)
 }

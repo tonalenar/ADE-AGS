@@ -29,6 +29,27 @@ use super::{store, turn};
 
 /// Linhas finais do stderr guardadas para explicar um processo que fechou sem `result`.
 const STDERR_TAIL: usize = 20;
+/// Folga para o `cursor-agent` sair sozinho depois do fim do turno, antes de ser encerrado.
+const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// O stdout do `cursor-agent` como fonte do `read_turn`: cada espera respeita o prazo de silêncio do turno.
+struct Stdout(tokio::io::Lines<BufReader<tokio::process::ChildStdout>>);
+
+impl map::Source for Stdout {
+    async fn next(&mut self, quiet: Option<std::time::Duration>) -> map::Read {
+        let line = match quiet {
+            Some(limit) => match tokio::time::timeout(limit, self.0.next_line()).await {
+                Ok(line) => line,
+                Err(_) => return map::Read::Quiet,
+            },
+            None => self.0.next_line().await,
+        };
+        match line {
+            Ok(Some(line)) => map::Read::Line(line),
+            _ => map::Read::Eof,
+        }
+    }
+}
 
 pub struct Session {
     thread_id: String,
@@ -261,29 +282,32 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
     });
 
     let mut mapper = Mapper::new(turn_id);
-    let mut done: Option<TurnResult> = None;
-    let apply = |outs: Vec<Out>, done: &mut Option<TurnResult>| {
+    let apply = |outs: Vec<Out>| {
         for out in outs {
             match out {
                 Out::Item(item) => turn::save_items(app, db, thread_id, Some(turn_id), vec![*item]),
                 // O texto chegando vai só à janela: o banco grava o item completo.
                 Out::Delta { item_id, delta, kind } => emit(app, thread_id, "delta", json!({ "itemId": item_id, "delta": delta, "kind": kind.as_str() })),
                 Out::Session(id) => remember(db, session, &id),
-                Out::Done(result) => *done = Some(result),
+                // O `read_turn` devolve o fim do turno; não chega aqui.
+                Out::Done(_) => {}
             }
         }
     };
-    let mut lines = BufReader::new(stdout).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        apply(mapper.feed(&value, crate::util::now_ts_ms()), &mut done);
-    }
-    // Acabou sem `result` (parado, ou caiu): a fala que ficou aberta não se perde.
-    apply(mapper.finish(Some(crate::util::now_ts_ms())), &mut done);
-    // O processo acabou: espera sair (sem segurar o lock) e junta o stderr.
+    let mut source = Stdout(BufReader::new(stdout).lines());
+    // Para no `result`, no EOF ou no silêncio vencido; a fala que ficou aberta não se perde.
+    let done = map::read_turn(&mut mapper, &mut source, apply, crate::util::now_ts_ms).await;
+    // O processo pode seguir vivo depois do `result` (um servidor em segundo plano o segura): uma folga para sair
+    // sozinho e então morre. O que ele deixou rodando (o Metro do app) não é tocado.
     let child = session.child.lock().ok().and_then(|mut c| c.take());
     let status = match child {
-        Some(mut child) => child.wait().await.ok(),
+        Some(mut child) => match tokio::time::timeout(EXIT_GRACE, child.wait()).await {
+            Ok(status) => status.ok(),
+            Err(_) => {
+                let _ = child.start_kill();
+                child.wait().await.ok()
+            }
+        },
         None => None,
     };
     if let Some(task) = stderr_task {

@@ -172,6 +172,15 @@ PATH do shell de login e a pasta do instalador do Cursor).
 - **Modelo e esforço.** O modelo é o id da variante de `cursor-agent --list-models`; o esforço faz parte dele (`…-high`), por
   isso o controle de esforço fica escondido. Sem conta por conversa (login único do `cursor-agent login`) e sem ai-memory.
 - **Limites.** O fluxo não traz tokens nem cota: o cartão de Limites mostra «não medido · sem fonte de cota».
+- **Fim do turno.** O turno fecha no `result`, sem esperar o processo sair: um servidor que o agente deixou em segundo plano
+  (o Metro de um `npx expo start`) mantém o `cursor-agent` vivo, e o EOF nunca chega. Isso deixou uma conversa 9 h em
+  «Pensando…», com a resposta só na janela e a fila presa. O processo ganha 3 s para sair e então é encerrado. O que ele
+  deixou rodando não é tocado. Sem `result` e sem EOF, vale o **prazo de silêncio** (`cursor_map::quiet_after`):
+  - **3 min depois da fala, sem ferramenta aberta:** o turno acaba bem, porque a resposta veio;
+  - **15 min sem sinal:** o turno fecha com erro;
+  - **ferramenta rodando:** sem prazo, porque um build longo é legítimo.
+- **Parar sem agente vivo** (todos os motores, `api::stop`, também `ags chat stop`): fecha no banco o turno que ficou aberto
+  daquela conversa, com o fim «o agente já não estava rodando», e a janela volta a ociosa. Antes, o Parar não fazia nada.
 
 ### Antigravity por protocolo (`agy --print` em stream-json)
 

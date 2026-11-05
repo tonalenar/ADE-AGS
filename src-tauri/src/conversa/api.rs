@@ -324,6 +324,30 @@ pub fn status(thread_id: &str) -> ThreadStatus {
     }
 }
 
+/// O Parar da pessoa: para o turno do agente vivo; sem agente vivo, fecha o turno que ficou aberto no banco (um
+/// agente que morreu sem fechar o turno deixaria a tela em «Pensando…» e a fila presa para sempre).
+pub async fn stop(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<(), String> {
+    if live_turn(thread_id).is_some() {
+        return interrupt(thread_id).await;
+    }
+    let now = crate::util::now_ts_ms();
+    // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
+    let ends: Vec<Item> = {
+        let conn = db.lock().map_err(db_err)?;
+        let closed = store::close_orphan_runs(&conn, Some(thread_id), now, STOPPED_ORPHAN).map_err(db_err)?;
+        let ids: Vec<String> = closed.iter().map(|(_, run)| format!("end:{run}")).collect();
+        if ids.is_empty() { Vec::new() } else { store::items(&conn, thread_id).map_err(db_err)?.into_iter().filter(|i| ids.contains(&i.id)).collect() }
+    };
+    for end in ends {
+        super::events::emit(app, thread_id, "item", json!({ "item": end }));
+    }
+    super::events::emit(app, thread_id, "phase", json!({ "phase": "idle" }));
+    Ok(())
+}
+
+/// O fim do turno que o Parar fechou sem agente vivo.
+pub const STOPPED_ORPHAN: &str = "O turno foi parado: o agente já não estava rodando.";
+
 /// Para o turno em andamento.
 pub async fn interrupt(thread_id: &str) -> Result<(), String> {
     if let Some(session) = claude::get(thread_id) {

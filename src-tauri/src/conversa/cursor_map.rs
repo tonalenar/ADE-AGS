@@ -29,6 +29,13 @@ use super::store::ThreadRow;
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;
 
+/// Silêncio depois da fala, sem ferramenta aberta, que fecha o turno. O `cursor-agent` pode nunca mandar o `result`
+/// nem sair (um servidor que o agente deixou em segundo plano o mantém vivo); a resposta já veio, então o turno
+/// acabou. Folga para o modelo montar uma ferramenta grande depois de falar.
+pub const QUIET_AFTER_SPEECH: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+/// Silêncio sem fala e sem ferramenta aberta que fecha o turno com erro. Ferramenta rodando não tem prazo.
+pub const QUIET_MAX: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+
 const DENIED: &str = "Negado: o modo de execução do chat não aprova esta ação sem alguém para aprovar. Troque o acesso para liberar.";
 
 fn str_of<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -117,6 +124,28 @@ impl Mapper {
         let mut out = Vec::new();
         self.flush_thought(now, &mut out);
         self.flush_said(now, &mut out);
+        out
+    }
+
+    /// O prazo de silêncio da próxima espera: nenhum com ferramenta rodando (um build longo é legítimo);
+    /// [`QUIET_AFTER_SPEECH`] com a fala aberta (a resposta veio e nada mais começou); [`QUIET_MAX`] no resto.
+    pub fn quiet_after(&self) -> Option<std::time::Duration> {
+        if self.tools.values().any(|t| t.status == Some(ToolStatus::Running)) {
+            return None;
+        }
+        Some(if self.said.is_some() { QUIET_AFTER_SPEECH } else { QUIET_MAX })
+    }
+
+    /// O silêncio venceu: fecha o que ficou aberto e encerra o turno. Depois da fala, o turno acabou bem (a resposta
+    /// veio); sem ela, é erro, dito em minutos.
+    pub fn quiet_end(&mut self, waited: std::time::Duration, now: Option<i64>) -> Vec<Out> {
+        let answered = self.said.is_some();
+        let mut out = self.finish(now);
+        let error = (!answered).then(|| {
+            let minutes = waited.as_secs().div_ceil(60).max(1);
+            format!("O Cursor ficou {minutes} min sem dar sinal e o turno foi fechado. A conversa continua: mande outra mensagem.")
+        });
+        out.push(Out::Done(TurnResult { interrupted: false, error, duration_ms: None }));
         out
     }
 
@@ -273,6 +302,55 @@ fn outcome(result: Option<&Value>) -> (ToolStatus, Option<String>) {
         return (ToolStatus::Error, text(&["stderr", "stdout", "output"]));
     }
     (ToolStatus::Done, text(&["content", "stdout", "output", "text", "result"]))
+}
+
+/// O que a fonte de linhas do turno devolve: uma linha, o fim do fluxo (EOF) ou o silêncio vencido.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Read {
+    Line(String),
+    Eof,
+    Quiet,
+}
+
+/// De onde vêm as linhas do turno: o stdout do `cursor-agent` no app, uma lista nos testes. `quiet` é o prazo de
+/// silêncio desta espera (`None` = sem prazo); vencido, a fonte devolve [`Read::Quiet`].
+pub trait Source {
+    fn next(&mut self, quiet: Option<std::time::Duration>) -> impl std::future::Future<Output = Read> + Send;
+}
+
+/// Lê o turno inteiro e devolve o `result`, se veio. `apply` recebe o que cada linha virou.
+pub async fn read_turn<S: Source>(mapper: &mut Mapper, source: &mut S, mut apply: impl FnMut(Vec<Out>), now: impl Fn() -> i64) -> Option<TurnResult> {
+    let mut done = None;
+    // Para no `result`: o processo pode seguir vivo depois dele (e o EOF nunca chegar). Sem `result`, para no EOF
+    // ou no silêncio vencido (`Mapper::quiet_after`).
+    while done.is_none() {
+        let quiet = mapper.quiet_after();
+        match source.next(quiet).await {
+            Read::Line(line) => {
+                let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+                let mut outs = mapper.feed(&value, now());
+                if let Some(pos) = outs.iter().position(|o| matches!(o, Out::Done(_)))
+                    && let Out::Done(result) = outs.remove(pos)
+                {
+                    done = Some(result);
+                }
+                apply(outs);
+            }
+            Read::Eof => break,
+            Read::Quiet => {
+                let mut outs = mapper.quiet_end(quiet.unwrap_or_default(), Some(now()));
+                if let Some(pos) = outs.iter().position(|o| matches!(o, Out::Done(_)))
+                    && let Out::Done(result) = outs.remove(pos)
+                {
+                    done = Some(result);
+                }
+                apply(outs);
+                return done;
+            }
+        }
+    }
+    apply(mapper.finish(Some(now())));
+    done
 }
 
 /// O erro de um turno que acabou sem `result`: a última linha com texto do stderr. Pura.
