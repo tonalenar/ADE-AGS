@@ -55,6 +55,20 @@ pub async fn chat_thread_interrupt(app: AppHandle, db: State<'_, DbConnection>, 
     api::stop(&app, &db, &thread_id).await
 }
 
+/// Para uma tarefa em segundo plano (um shell ou um subagente do Claude Code), sem parar o turno.
+#[tauri::command]
+pub async fn chat_task_stop(db: State<'_, DbConnection>, thread_id: String, task_id: String) -> Result<(), String> {
+    let db = db.inner().clone();
+    api::stop_task(&db, &thread_id, &task_id).await
+}
+
+/// O fim da saída de um shell em segundo plano (`{output, total_bytes, truncated}`).
+#[tauri::command]
+pub async fn chat_task_output(db: State<'_, DbConnection>, thread_id: String, task_id: String) -> Result<serde_json::Value, String> {
+    let db = db.inner().clone();
+    api::task_output(&db, &thread_id, &task_id).await
+}
+
 #[tauri::command]
 pub fn chat_request_answer(app: AppHandle, db: State<'_, DbConnection>, request_id: String, choice: String) -> Result<bool, String> {
     api::answer(&app, &db, &request_id, &choice)

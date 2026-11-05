@@ -118,6 +118,10 @@ pub enum Out {
     Session(String),
     /// O turno acabou.
     Done(TurnResult),
+    /// Uma tarefa em segundo plano começou, mudou ou acabou (ver `tarefas`).
+    Task(Value),
+    /// Um item do que um subagente faz, dentro da tarefa dele (`parent` = o `tool_use_id` que o lançou).
+    SubItem { parent: String, item: Box<Item> },
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -149,9 +153,16 @@ impl Mapper {
 
     /// O que uma linha da saída vira. `now` é o carimbo das linhas que não trazem o seu.
     pub fn feed(&mut self, line: &Value, now: i64) -> Vec<Out> {
-        // O que um subagente faz fica dentro da ferramenta dele (como `isSidechain` no transcript).
-        if line.get("parent_tool_use_id").is_some_and(|p| !p.is_null()) {
-            return Vec::new();
+        // As tarefas em segundo plano (os shells e os subagentes) vão ao painel de tarefas (`tarefas`).
+        if let Some(task) = super::tarefas::claude_task(line, now) {
+            return vec![Out::Task(task)];
+        }
+        // O que um subagente faz fica fora da timeline (como `isSidechain` no transcript): vai à tarefa dele.
+        if let Some(parent) = line.get("parent_tool_use_id").filter(|p| !p.is_null()) {
+            return match parent.as_str().filter(|p| !p.is_empty()) {
+                Some(parent) => self.sidechain(parent, line, now),
+                None => Vec::new(),
+            };
         }
         let at = Some(str_of(line, "timestamp").and_then(parse_ts_ms).unwrap_or(now));
         match str_of(line, "type").unwrap_or("") {
@@ -168,6 +179,26 @@ impl Mapper {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// Uma linha do subagente (`parent` = o `tool_use_id` que o lançou): o texto e as ferramentas dele, sem o uso
+    /// (que é do subagente) e sem os pedaços de texto (a conversa não ganha rascunho). Uma fala do usuário dentro do
+    /// subagente (o prompt dele, um "interrompido") não mexe no turno da conversa.
+    fn sidechain(&mut self, parent: &str, line: &Value, now: i64) -> Vec<Out> {
+        let at = Some(str_of(line, "timestamp").and_then(parse_ts_ms).unwrap_or(now));
+        let interrupted = self.interrupted;
+        let outs = match str_of(line, "type").unwrap_or("") {
+            "assistant" => self.assistant(line, at),
+            "user" => self.user(line),
+            _ => Vec::new(),
+        };
+        self.interrupted = interrupted;
+        outs.into_iter()
+            .filter_map(|out| match out {
+                Out::Item(item) if item.kind != ItemKind::Usage => Some(Out::SubItem { parent: parent.to_string(), item }),
+                _ => None,
+            })
+            .collect()
     }
 
     fn system(&self, line: &Value) -> Vec<Out> {

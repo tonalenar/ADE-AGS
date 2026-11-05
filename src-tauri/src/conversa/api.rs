@@ -369,6 +369,38 @@ pub async fn interrupt(thread_id: &str) -> Result<(), String> {
     session.request("turn/interrupt", json!({ "threadId": remote, "turnId": turn })).await.map(|_| ())
 }
 
+/// O motivo de não parar uma tarefa só: o motor não tem como (só o Claude Code tem `stop_task`).
+pub const NO_TASK_STOP: &str = "Este agente não para uma tarefa só; o Parar do composer para o turno inteiro.";
+
+/// Para UMA tarefa em segundo plano da conversa (um shell ou um subagente), sem mexer no turno nem nas
+/// outras: o `control_request` `stop_task` do Claude Code. O fim chega pelo evento `task`
+/// (`task_notification` com `stopped`). Nos outros motores, recusa com o motivo.
+pub async fn stop_task(db: &DbConnection, thread_id: &str, task_id: &str) -> Result<(), String> {
+    let session = claude_task_session(db, thread_id, task_id)?;
+    session.control("stop_task", json!({ "task_id": task_id })).await.map(|_| ())
+}
+
+/// O fim da saída de um shell em segundo plano (os últimos 8 KiB, `get_task_output` do Claude Code):
+/// `{output, total_bytes, truncated}`. Só leitura, sem turno de modelo.
+pub async fn task_output(db: &DbConnection, thread_id: &str, task_id: &str) -> Result<Value, String> {
+    let session = claude_task_session(db, thread_id, task_id)?;
+    session.control("get_task_output", json!({ "task_id": task_id })).await
+}
+
+/// A sessão viva do Claude que tem a tarefa; o motivo, se não há como falar com ela.
+fn claude_task_session(db: &DbConnection, thread_id: &str, task_id: &str) -> Result<Arc<claude::Session>, String> {
+    if task_id.trim().is_empty() {
+        return Err("Tarefa inválida".into());
+    }
+    if Engine::of(&thread(db, thread_id)?.agent_id) != Some(Engine::Claude) {
+        return Err(NO_TASK_STOP.into());
+    }
+    claude::get(thread_id).ok_or_else(|| TASK_PROCESS_CLOSED.to_string())
+}
+
+/// O processo do Claude fechou: as tarefas dele já pararam junto.
+pub const TASK_PROCESS_CLOSED: &str = "O processo do Claude desta conversa já fechou; as tarefas dele pararam junto.";
+
 /// Responde a um pedido do agente: `allow`, `allowSession` ou `deny` numa aprovação; o texto da
 /// resposta numa pergunta. `false` se o pedido já não estava pendente.
 pub fn answer(app: &AppHandle, db: &DbConnection, request_id: &str, choice: &str) -> Result<bool, String> {

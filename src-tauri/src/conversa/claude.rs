@@ -446,6 +446,10 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
                 }
             }
         }
+        // As tarefas em segundo plano e o que um subagente faz vão só à janela (o painel de tarefas): não abrem turno,
+        // porque o aviso de fim de um shell chega entre turnos, e não entram no banco da timeline.
+        Out::Task(task) => emit(app, thread_id, "task", json!({ "task": task })),
+        Out::SubItem { parent, item } => emit(app, thread_id, "taskItem", json!({ "parentToolUseId": parent, "item": item })),
         Out::Done(result) => {
             let Some(turn) = session.turn() else { return };
             session.set_turn(None);
