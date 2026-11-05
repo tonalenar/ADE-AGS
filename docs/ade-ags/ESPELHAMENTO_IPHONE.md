@@ -147,6 +147,8 @@ ADE_AGS_DATA_DIR=<pasta> ADE_IPHONE_FPS=1 env -u CARGO_TARGET_DIR bun run tauri 
 | Sessão longa com Receiver Report | 150 s sem queda (helper sozinho); 170 s sem queda dentro da ADE: 2.902 quadros, 0 perdas, 0 descartes |
 | PLI + FIR → IDR | 30–150 ms (3 de 3 pedidos) |
 
+O painel e a barra do canvas mostram a taxa medida a cada segundo. A contagem usa os quadros entregues à camada nativa, uma vez por aparelho, mesmo quando mais de uma tela mostra o vídeo. A taxa real varia com os quadros enviados pelo iPhone.
+
 **Corrupção durante rolagem rápida (USB).** A oferta padrão do AVConference incluía `VRAE:0`, que impedia o encoder de adaptar a resolução. Sob movimento rápido, o iPhone descartava quadros para se manter no limite de banda. O mosaico aparecia também ao decodificar a gravação no FFmpeg, com zero perdas de sequência. O helper remove `VRAE:0` da oferta e preserva os outros recursos. No iPhone 15 Pro Max com iOS 27.2, o CoreDevice confirmou `FLS;SW:1`, e o teste no X deixou de mostrar blocos misturados na rolagem rápida. [Medições independentes do pymobiledevice3](https://github.com/doronz88/pymobiledevice3/blob/776d601cec83b894c3ad0eeee8ab4db375a46e4a/pymobiledevice3/remote/core_device/MOTION_TEAR_FINDINGS.md).
 
 Outra descoberta: com duas sessões abertas no mesmo aparelho, só a mais recente recebe o vídeo.

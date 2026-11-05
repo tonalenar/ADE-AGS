@@ -366,6 +366,7 @@ pub struct Presenter {
     display: Mutex<Option<(u32, u32)>>,
     held: Mutex<VecDeque<PixelBuffer>>,
     failures: std::sync::atomic::AtomicU32,
+    presented: std::sync::atomic::AtomicU64,
     stats: Mutex<Stats>,
     /// Atraso da captura no aparelho até a chegada no Mac, por quadro (estimativa pelo RTCP), para o diagnóstico.
     capture: Mutex<HashMap<u64, f64>>,
@@ -408,6 +409,7 @@ impl Presenter {
             display: Mutex::new(None),
             held: Mutex::new(VecDeque::new()),
             failures: std::sync::atomic::AtomicU32::new(0),
+            presented: std::sync::atomic::AtomicU64::new(0),
             stats: Mutex::new(Stats::default()),
             capture: Mutex::new(HashMap::new()),
         })
@@ -417,6 +419,10 @@ impl Presenter {
         if let (Some(d), Ok(mut slot)) = (display, self.display.lock()) {
             *slot = Some(d);
         }
+    }
+
+    pub fn presented(&self) -> u64 {
+        self.presented.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Quantos quadros o decodificador recusou até agora.
@@ -597,6 +603,9 @@ impl FrameSink for Sink {
                         }
                     })
                 };
+                if !layers.is_empty() {
+                    this.presented.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
             if let Ok(mut held) = this.held.lock() {
                 held.push_back(buffer);

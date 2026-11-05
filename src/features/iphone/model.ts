@@ -41,6 +41,7 @@ export interface MirrorStatus {
   error: string | null;
   /** O toque do aparelho está pronto (HID do CoreDevice aberto). */
   input?: boolean;
+  fps?: number | null;
 }
 
 /** Os gestos do sistema do menu "Sistema" (nomes do backend, `iphone::model::gesture`). */

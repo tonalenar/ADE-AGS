@@ -104,6 +104,9 @@ export function MirrorStatusLine({ status, className = "" }: { status: MirrorSta
     <span role="status" className={`inline-flex min-w-0 items-center gap-1.5 ${className}`} title={status?.error ?? text}>
       <span aria-hidden="true" className={`h-2 w-2 shrink-0 rounded-full ${DOT[view.tone]} ${view.tone === "wait" ? "animate-pulse motion-reduce:animate-none" : ""}`} />
       <span className="truncate">{text}</span>
+      {status?.state === "live" && status.fps != null && (
+        <span aria-live="off" className="shrink-0 tabular-nums">{t("iphone.status.fps", { count: status.fps })}</span>
+      )}
     </span>
   );
 }
