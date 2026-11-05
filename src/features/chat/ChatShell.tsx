@@ -36,9 +36,7 @@ import { runInShell } from "./shellTerminal";
 import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
-import { SummaryDock, SummaryPane } from "./summary/SummaryPane";
 import { useTeamDraft } from "./team/draftStore";
-import { chatInset, summaryPlacement } from "./summary/summaryLayout";
 import { forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
 import { matchTeamShortcut } from "./panelMenu";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
@@ -75,14 +73,11 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const composing = useChatStore((s) => s.composing);
   const panelOpen = useChatStore((s) => s.panel !== null);
-  const panelTab = useChatStore((s) => s.panel);
   const maximized = useChatStore((s) => s.panelMaximized);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { ref: mainRef, width: mainWidth } = useElementWidth<HTMLElement>();
+  const { ref: mainRef } = useElementWidth<HTMLElement>();
   // Arquivos do Finder soltos na coluna do chat viram anexos do composer à vista (só os caminhos).
   useChatFileDrop(mainRef);
-  const inset = chatInset(panelTab, mainWidth);
-  const summarySpot = summaryPlacement(panelTab, mainWidth);
   const [folder, setFolder] = useState<string | null>(null);
   // O "+" de um projeto na barra pede a tela de conversa nova já nessa pasta: a casca lê o pedido uma vez.
   const composeFolder = useChatStore((s) => s.composeFolder);
@@ -167,7 +162,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
       )}
 
       {!page && !(panelOpen && maximized) && (
-        <main ref={mainRef} className="relative flex-1 min-w-[440px] flex flex-col">
+        <main ref={mainRef} className="@container/main relative flex-1 min-w-[440px] flex flex-col">
           <header data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-3 pl-5 pr-3 text-chat-ui select-none">
             {!sidebarOpen && (
               <>
@@ -192,8 +187,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             {!panelOpen && <WindowControls className="-mr-3" />}
           </header>
 
-          {/* A conversa cede o lado direito ao Resumo (solto, sem coluna); sem lugar, o Resumo some. */}
-          <div className="flex-1 min-h-0 flex flex-col" style={{ paddingRight: inset }}>
+          {/* O Resumo é uma aba do painel direito (coluna própria, `RightPanel`): a conversa nunca fica por baixo dele. */}
+          <div className="flex-1 min-h-0 flex flex-col">
             <AttachCwdContext.Provider value={active?.cwd ?? null}>
               {/* O «Rodar» dos blocos de código vai ao terminal da pasta da conversa aberta. */}
               <RunCodeContext.Provider value={runCode}>
@@ -203,11 +198,6 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             </AttachCwdContext.Provider>
           </div>
           <DropOverlay />
-          {summarySpot !== "none" && (
-            <SummaryDock overlay={summarySpot === "overlay"}>
-              <SummaryPane conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
-            </SummaryDock>
-          )}
         </main>
       )}
 

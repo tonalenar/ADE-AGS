@@ -106,13 +106,14 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   ) : (
     <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">
       {/* O trilho de agentes: escolher outro agente troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
+      {/* A conta da conversa mora dentro do seletor de agente/modelo (no rodapé do popover), não solta no composer. */}
       <AgentModelPicker agents={switchable} showAccount={false} disabled={locked}
+        accountSlot={<ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
         onChange={(v) => {
           if (v.agentId && v.agentId !== thread.agentId) { setSwitchError(null); setSwitchTo({ agentId: v.agentId, model: v.model }); return; }
           retuneThread(thread.id, v.model, thread.effort, thread.access);
         }} />
-      <ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />
       <EffortMenu agentId={thread.agentId} model={thread.model} account={null} value={thread.effort} disabled={locked}
         onChange={(effort) => retuneThread(thread.id, thread.model, effort, thread.access)} />
       {planSupported(thread.agentId, true) && (

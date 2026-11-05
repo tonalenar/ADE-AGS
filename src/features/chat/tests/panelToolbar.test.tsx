@@ -79,7 +79,14 @@ describe("a fileira de ícones (no cabeçalho principal)", () => {
   it("o ⋯ abre Design, Android, Time e PR com as mesmas teclas", async () => {
     await mountToolbar();
     await click(host.querySelector("[aria-label='chat.panel.more']"));
-    expect([...host.querySelectorAll("[role=menuitem]")].map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "O", "P"]);
+    const items = [...host.querySelectorAll("[role=menuitem]")];
+    const wide = items.filter((e) => !e.closest("li")?.className.includes("@min-[36rem]/main:hidden"));
+    expect(wide.map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "O", "P"]);
+    // Na conversa estreita, Diff, Navegador e Arquivos saem da fileira e aparecem aqui (só nela: a classe os esconde na larga).
+    const compact = items.filter((e) => e.closest("li")?.className.includes("@min-[36rem]/main:hidden"));
+    expect(compact.map((e) => e.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("chat.panel.open.diff"), expect.stringContaining("chat.panel.open.browser"), expect.stringContaining("chat.panel.open.files")]));
+    expect(host.querySelector("[aria-label='chat.panel.open.diff']")?.className).toContain("@max-[36rem]/main:hidden");
+    expect(host.querySelector("[aria-label='chat.panel.open.summary']")?.className).not.toContain("hidden");
     await click(host.querySelector("[role=menuitem][aria-keyshortcuts='O']"));
     expect(useChatStore.getState().panel).toBe("team");
   });
@@ -122,7 +129,7 @@ describe("o dock (coluna com borda) só abriga as outras superfícies", () => {
     const shells = useTabsStore.getState().tabs.filter((t) => t.agentId === "bash");
     expect(shells.map((t) => t.cwd)).toEqual(["/repo"]);
     expect(useTabsStore.getState().activeTabId).toBe("tab-1");
-    expect(host.querySelector(`[data-chat-shell="${shells[0]!.id}"]`)).not.toBeNull();
+    expect(host.querySelector(`[data-chat-shell-slot="${shells[0]!.id}"]`)).not.toBeNull();
     // O terminal não é montado no painel: o `TerminalPanel` o desenha por cima do slot.
     expect(host.querySelector(".xterm")).toBeNull();
     await act(async () => { root.render(<div />); });
@@ -130,9 +137,18 @@ describe("o dock (coluna com borda) só abriga as outras superfícies", () => {
     expect(useTabsStore.getState().tabs.filter((t) => t.agentId === "bash")).toHaveLength(1);
   });
 
-  it("com o Resumo à vista não há coluna nenhuma", async () => {
+  it("o Resumo é uma coluna do painel, de largura fixa e sem a alça de arrastar (empurra a conversa, nunca a cobre)", async () => {
+    useChatStore.setState({ panel: "summary", panelWidth: 720 });
     await mountDock();
-    expect(host.querySelector("aside")).toBeNull();
+    const aside = host.querySelector("aside") as HTMLElement;
+    expect(aside).not.toBeNull();
+    expect(aside.style.width).toBe("360px");
+    expect(aside.querySelector("[role=separator]")).toBeNull();
+    // As outras superfícies seguem a largura arrastada, com a alça.
+    useChatStore.setState({ panel: "files" });
+    await mountDock();
+    expect((host.querySelector("aside") as HTMLElement).style.width).toBe("720px");
+    expect(host.querySelector("aside [role=separator]")).not.toBeNull();
   });
 
   it("com Arquivos à vista a coluna aparece, com borda e sem a fileira de ícones (ela está no cabeçalho)", async () => {

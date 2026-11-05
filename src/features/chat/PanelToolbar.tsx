@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 
 import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GlobeIcon, MaximizeIcon, MoreHorizontalIcon, PhoneIcon, PullRequestIcon, TerminalIcon, UsersIcon } from "./chatIcons";
-import { entryForKey, isAvailable, keyLabel, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type PanelAvailability, type PanelChoice } from "./panelMenu";
+import { COMPACT_HIDDEN, entryForKey, isAvailable, keyLabel, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import { addSurface, setRightPanel, setTerminalOpen, togglePanelMaximized, useChatStore } from "./store";
 import { usePopover } from "./usePopover";
 
@@ -21,7 +21,7 @@ export function isRowActive(id: PanelChoice, panel: string | null): boolean {
 }
 
 /** Um ícone da fileira: tooltip com o nome e a tecla, e o fundo arredondado quando é o que está à vista. */
-export function RowIcon({ id, active, available, onChoose }: { id: PanelChoice; active: boolean; available: PanelAvailability; onChoose: (id: PanelChoice) => void }) {
+export function RowIcon({ id, active, available, onChoose, className = "" }: { id: PanelChoice; active: boolean; available: PanelAvailability; onChoose: (id: PanelChoice) => void; className?: string }) {
   const { t } = useTranslation();
   const Icon = ROW_ICON[id]!;
   const entry = PANEL_ENTRIES.find((e) => e.id === id)!;
@@ -30,7 +30,7 @@ export function RowIcon({ id, active, available, onChoose }: { id: PanelChoice; 
   return (
     <button type="button" disabled={!on} aria-label={name} title={`${name} (${keyLabel(entry)})`} aria-pressed={active} aria-keyshortcuts={keyLabel(entry)}
       onClick={() => onChoose(id)}
-      className={`w-8 h-8 shrink-0 flex items-center justify-center rounded-lg transition-colors disabled:opacity-35
+      className={`w-8 h-8 shrink-0 flex items-center justify-center rounded-lg transition-colors disabled:opacity-35 ${className}
         ${active ? "bg-gray-200/80 dark:bg-white/[0.12] text-gray-900 dark:text-white" : "text-gray-500 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white"}`}>
       <Icon className="w-[18px] h-[18px]" />
     </button>
@@ -44,7 +44,7 @@ export function MoreMenu({ available, onChoose, active }: { available: PanelAvai
   const pick = (id: PanelChoice) => { onChoose(id); setOpen(false); };
   const maximized = useChatStore((s) => s.panelMaximized);
   const panel = useChatStore((s) => s.panel);
-  // O dock só existe com uma superfície que não é o Resumo (que flutua, sem coluna).
+  // Maximizar vale para as superfícies; o Resumo é uma coluna estreita de cartões, de largura fixa.
   const docked = panel !== null && panel !== "summary";
   return (
     <div ref={ref} className="relative">
@@ -57,11 +57,13 @@ export function MoreMenu({ available, onChoose, active }: { available: PanelAvai
           className="absolute right-0 top-full mt-1 z-50 w-[240px] p-1 rounded-lg bg-white dark:bg-surface-raised outline-none
           shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           <ul className="list-none m-0 p-0 flex flex-col gap-0.5">
-            {MORE_ENTRIES.map((entry) => {
+            {/* Na conversa estreita (`@container/main`), os ícones que saíram da fileira aparecem aqui primeiro. */}
+            {[...COMPACT_HIDDEN.filter((id) => id !== panel).map((id) => PANEL_ENTRIES.find((e) => e.id === id)!), ...MORE_ENTRIES].map((entry) => {
               const Icon = ENTRY_ICON[entry.id];
               const on = isAvailable(entry.id, available);
+              const compact = COMPACT_HIDDEN.includes(entry.id);
               return (
-                <li key={entry.id} role="none">
+                <li key={entry.id} role="none" className={compact ? "@min-[36rem]/main:hidden" : undefined}>
                   <button type="button" role="menuitem" disabled={!on} aria-disabled={!on} aria-keyshortcuts={keyLabel(entry)} onClick={() => pick(entry.id)}
                     className={`w-full h-9 px-2.5 rounded-lg flex items-center gap-2.5 text-left text-chat-ui ${on ? "text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.07]" : "text-gray-400 dark:text-white/30 cursor-default"}`}>
                     <Icon className="w-4 h-4 shrink-0" />
@@ -127,9 +129,12 @@ export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: 
   const terminalActive = drawerTabId ? drawerOn : panel === "shell";
   return (
     <div role="toolbar" aria-label={t("chat.panel.label")} className="flex items-center gap-0.5 shrink-0" data-tauri-drag-region="false">
-      {ROW_CHOICES.map((id) => (
-        <RowIcon key={id} id={id} active={id === "terminal" ? terminalActive : isRowActive(id, panel)} available={available} onChoose={choose} />
-      ))}
+      {ROW_CHOICES.map((id) => {
+        const active = id === "terminal" ? terminalActive : isRowActive(id, panel);
+        // Conversa estreita: Diff, Navegador e Arquivos vão para o ⋯ (menos o que está à vista).
+        return <RowIcon key={id} id={id} active={active} available={available} onChoose={choose}
+          className={COMPACT_HIDDEN.includes(id) && !active ? "@max-[36rem]/main:hidden" : ""} />;
+      })}
       <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android" || panel === "team"} />
     </div>
   );

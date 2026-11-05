@@ -30,8 +30,12 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 - **O terminal da conversa** (o >_ do cabeçalho, tecla T do painel): na conversa de TUI com timeline, o >_ alterna a
   gaveta do agente. Nas outras (por protocolo, ou TUI que já é o corpo), abre a aba **Terminal** do painel direito: um
   shell de verdade (PTY) na pasta da conversa (`RightPanel.tsx::ShellSurface`, `shellTerminal.ts`).
-  - O shell é uma aba `bash` comum da pasta. A já existente é reaproveitada, como o navegador da pasta. Criá-la não troca
-    a conversa aberta, e ela aparece no modo Abas.
+  - O shell é o de login da pessoa (`"$SHELL" -l`, lido de `agentSearchPath`; o zsh no macOS), numa aba de shell da
+    pasta. O agente de shell do app roda `bash`, e no macOS isso abria o bash 3.2 com o aviso do zsh. A aba com esse
+    shell é reaproveitada, como o navegador da pasta; dois pedidos seguidos dão uma aba só. Criá-la não troca a conversa
+    aberta, e ela aparece no modo Abas.
+  - O retângulo do slot é medido em relação à casca do chat a partir do PAI do slot (`rectInShell`): o slot carregava o
+    mesmo atributo da casca (`data-chat-shell`) e o terminal aparecia no canto de cima da janela, por cima da sidebar.
   - Como o navegador, ela não é montada no painel: o painel publica o slot (`useChatStore.shell`), e
     `placementsFrom`/`chatPlacements` a posiciona. Fechar o painel ou trocar de conversa só a esconde.
 - **Blocos de código** (`timeline/CodeBlockFrame.tsx`, `codeRun.ts`): cada bloco ganha **Copiar** (o código, sem o
@@ -384,8 +388,8 @@ depois disso a miniatura mostra "indisponível" (o caminho continua na mensagem)
 - **Perguntas.** O cartão «O agente fez uma pergunta» de uma conversa por protocolo responde ao clique enquanto a
   pergunta espera (as opções são botões); respondida, vira registro. Listas em texto do agente nunca viram botão.
   Em abas com TUI o cartão continua levando ao terminal.
-- **Rolagem.** O Resumo solto fica num dock de altura fixa em coluna flex (`SummaryDock`); sem isso o miolo crescia
-  com o conteúdo e a roda não rolava.
+- **Rolagem.** O Resumo é o miolo (`flex-1 min-h-0`) da coluna do painel direito; sem isso o miolo crescia com o
+  conteúdo e a roda não rolava.
 - **Composer.** A altura segue o texto e também a largura da caixa (`ResizeObserver`): abrir o painel direito
   refaz a altura sem digitar.
 
@@ -420,8 +424,16 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
 
 ## Acabamento (build local do PR 270/271)
 
-- **Resumo.** Sem lugar ao lado da conversa (janela estreita), o Resumo passa a flutuar POR CIMA dela (`summaryPlacement`:
-  `beside` / `overlay` / `none`). Antes sumia: o botão «Resumo (R)» ficava marcado sem painel e ligar/desligar não trazia nada.
+- **Resumo.** É uma aba do painel direito, numa coluna própria (`RightPanel`, `summaryLayout.ts`): 360 px fixos, sem alça de
+  arrastar, encolhendo até 280 px. Antes ele flutuava dentro da conversa: numa janela de ~1000 px passava POR CIMA do
+  texto, e com outra superfície (simulador, navegador, terminal) sumia. Agora empurra a conversa e, com outra superfície,
+  é a outra aba do mesmo painel, a um clique na fileira de ícones.
+- **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
+  conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
+  (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de
+  fechar o painel.
+- **Conta da conversa.** Fica dentro do seletor de agente/modelo, no rodapé do popover (`AgentModelPicker.accountSlot`,
+  `ThreadAccountMenu`), e não como um seletor solto no composer entre o modelo e o esforço.
 - **Ações sob a mensagem.** Hora relativa («há 24 minutos») e botões só ao passar o mouse ou focar (`MessageActions`): copiar
   (texto limpo, sem anexos nem envelope) na pessoa e no agente; «editar e reenviar» na pessoa devolve o texto ao campo
   (não cancela nada). Ficam para depois: bifurcar a conversa daquele ponto (o `handoff.rs` já serve de base), fixar e ler em voz alta.
