@@ -127,6 +127,8 @@ pub(super) struct Frame {
     pub path: PathBuf,
     pub revision: String,
     pub pick: Option<computer::Pick>,
+    /// O traço que tira o alvo de baixo do teclado ou da barra, quando o toque escolhido cairia coberto (`cover`).
+    pub reveal: Option<((f64, f64), (f64, f64))>,
 }
 impl Drop for Frame {
     fn drop(&mut self) {
@@ -210,6 +212,8 @@ struct Photo {
     path: PathBuf,
     revision: String,
     frame: Option<(u32, u32)>,
+    /// Só na foto nativa: a grade de brilho (`visual`). Pelo `simctl` não há pixels crus.
+    thumb: Option<super::visual::Thumb>,
 }
 /// Foto pela `IOSurface` da tela, dentro do processo (~0,1 s); se não der, pelo `simctl` (~1,4 s).
 fn capture(udid: &str, deadline: Instant) -> Result<Photo, String> {
@@ -220,7 +224,7 @@ fn capture(udid: &str, deadline: Instant) -> Result<Photo, String> {
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("ios-act-{}.png", uuid::Uuid::new_v4().simple()));
     match super::capture::ios_shot(udid, &path) {
-        Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame) }),
+        Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame), thumb: shot.thumb }),
         Err(error) => {
             let _ = std::fs::remove_file(&path);
             fallback_note("foto", &error);
@@ -228,7 +232,7 @@ fn capture(udid: &str, deadline: Instant) -> Result<Photo, String> {
     }
     let tmp = PathBuf::from(ops::screenshot(udid)?);
     let (path, revision) = prepare_photo(tmp, udid, "ios-act", deadline)?;
-    Ok(Photo { path, revision, frame: None })
+    Ok(Photo { path, revision, frame: None, thumb: None })
 }
 /// A revisão da tela agora, para conferir antes de tocar. Pela `IOSurface` é só ler e somar os pixels (sem PNG);
 /// pelo `simctl`, outra foto inteira. Uma revisão de um caminho nunca casa com a do outro: na dúvida, desatualizada.
@@ -353,6 +357,8 @@ struct IosSurface {
     read_ahead: Option<(String, Vec<Label>)>,
     /// Quando a última ação foi mandada ao HID: a foto seguinte espera `AFTER_ACTION` a partir daí.
     acted_at: Option<Instant>,
+    /// A grade de brilho da última foto assentada, para a observação.
+    thumb: Option<super::visual::Thumb>,
 }
 /// Menos que isto de linhas de texto é tela ainda carregando (um app abrindo, uma transição).
 const MIN_LABELS: usize = 2;
@@ -396,6 +402,7 @@ impl IosSurface {
             let read = ocr(&photo.path, self.deadline)?;
             if !should_settle(read.1.len(), try_no, self.deadline.saturating_duration_since(Instant::now())) {
                 self.read_ahead = Some(read);
+                self.thumb = photo.thumb;
                 return Ok((photo.path, photo.revision));
             }
             try_no += 1;
@@ -458,6 +465,7 @@ impl Surface for IosSurface {
             path,
             revision: revision.clone(),
             pick: None,
+            reveal: None,
         };
         self.authorize()
             .map_err(|_| "Autorização ou prazo expirou durante a captura.")?;
@@ -502,6 +510,7 @@ impl Surface for IosSurface {
             revision,
             text,
             safe_for_provider: safe,
+            pixels: self.thumb.take(),
             targets: vec![
                 Target {
                     id: "screen".into(),
@@ -539,6 +548,12 @@ impl Surface for IosSurface {
                     operations: vec![Operation::Scroll],
                     risk: Risk::Ordinary,
                 },
+                Target {
+                    id: REVEAL.into(),
+                    label: REVEAL_LABEL.into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
             ],
         })
     }
@@ -549,6 +564,8 @@ impl Surface for IosSurface {
         }
         let point = frame.pick.as_ref().and_then(|p| p.point);
         let jev_unsure = frame.pick.as_ref().is_none_or(|p| p.confirm);
+        // Tocar numa tecla digita sem --fill: nem o "sempre neste aparelho" dispensa a pessoa.
+        let key = super::cover::keyboard_key(point, &frame.labels);
         let named = label_at(point, &frame.labels).map(|t| t.chars().take(200).collect::<String>());
         let label = named.clone().unwrap_or_else(|| "controle sem rótulo reconhecido".into());
         let typed = self.fills.first().map_or(0, |v| v.chars().count());
@@ -556,7 +573,7 @@ impl Surface for IosSurface {
         let path = frame.path.clone();
         drop(frame);
         // A pessoa já disse "sempre" para este aparelho: só o que é de fato perigoso volta a perguntar.
-        if !always_asks(action, named.as_deref(), jev_unsure) && trusted(&self.db, &self.udid)? {
+        if !key && !always_asks(action, named.as_deref(), jev_unsure) && trusted(&self.db, &self.udid)? {
             return Ok(true);
         }
         let question =
@@ -612,6 +629,16 @@ impl Surface for IosSurface {
             }
             Operation::Scroll => match action.target.as_deref() {
                 Some("home") => ops::button(&self.udid, "home")?,
+                Some(REVEAL) => {
+                    let ((x1, y1), (x2, y2)) = self
+                        .frame
+                        .lock()
+                        .map_err(|_| "Foto indisponível.")?
+                        .reveal
+                        .ok_or("Rolagem sem alvo coberto.")?;
+                    // Devagar, para o conteúdo parar perto de onde o dedo soltou (um traço rápido embala a lista).
+                    ops::swipe(&self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 600)?;
+                }
                 Some(target) => {
                     let ((x1, y1), (x2, y2)) = gesture_line(target).ok_or("Gesto iOS não oferecido.")?;
                     ops::swipe(&self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 300)?;
@@ -625,6 +652,9 @@ impl Surface for IosSurface {
         Ok(true)
     }
 }
+/// O nome do alvo `reveal` na observação. Sem palavra de risco (um "sair" aqui faria o núcleo pedir confirmação para
+/// uma rolagem): o teste `rotulo_do_reveal_nao_e_sensivel` cobra.
+pub(super) const REVEAL_LABEL: &str = "Rolar até liberar o alvo coberto pelo teclado ou pela barra";
 /// O traço do dedo de cada gesto, em proporção da tela: rolar na vertical pelo meio; deslizar na horizontal na
 /// altura do meio, longe das bordas (a borda esquerda vira "voltar" e a de baixo, a barra de início).
 pub(super) fn gesture_line(target: &str) -> Option<((f64, f64), (f64, f64))> {
@@ -643,6 +673,8 @@ pub(super) fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) 
         "type" => (Operation::Type, Some("screen".into())),
         // Os gestos são da família do rolar: movimento comum, sem efeito sensível, cada um com seu alvo.
         "scroll_up" | "scroll_down" | "swipe_left" | "swipe_right" | "home" => (Operation::Scroll, Some(pick.operation.clone())),
+        // Nosso, não do Jev: o toque escolhido cairia sob o teclado ou a barra, então primeiro rola (`cover`).
+        "reveal" => (Operation::Scroll, Some(REVEAL.into())),
         "done" => (Operation::Done, None),
         "stuck" => (Operation::Stuck, None),
         _ => return Err("Operação não oferecida.".into()),
@@ -655,10 +687,16 @@ pub(super) fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) 
     } else {
         operation == Operation::Click && label_at(pick.point, labels).is_some_and(sensitive_label)
     };
+    if operation == Operation::Scroll && pick.operation == "reveal" {
+        // Rolar o conteúdo dentro da área livre: movimento comum, sem efeito sensível.
+        return Ok(Decision { requires_confirmation: false, action: Action { operation, target }, probability: pick.probability, goal_done: pick.goal_done });
+    }
+    let key = operation == Operation::Click && super::cover::keyboard_key(pick.point, labels);
     Ok(Decision {
         requires_confirmation: pick.confirm
             || touched
             || unnamed_click
+            || key
             || operation == Operation::Type,
         action: Action { operation, target },
         probability: pick.probability,
@@ -673,6 +711,8 @@ pub(super) struct VisualDecider {
     pub surface: &'static str,
     /// Deslizar para os lados e ir para a tela inicial (só no iOS).
     pub gestures: bool,
+    /// Rolar antes de tocar quando o alvo está sob o teclado ou a barra flutuante (só no iOS).
+    pub reveal: bool,
 }
 impl Decider for VisualDecider {
     fn decide(
@@ -709,6 +749,10 @@ impl Decider for VisualDecider {
                 gestures: self.gestures,
             },
         )?;
+        let (pick, line) = {
+            let f = self.frame.lock().map_err(|_| "Foto indisponível.")?;
+            if self.reveal { uncover(pick, &f.labels) } else { (pick, None) }
+        };
         let decision = {
             let f = self.frame.lock().map_err(|_| "Foto indisponível.")?;
             decision_for(&pick, &obs.text, &f.labels)?
@@ -718,7 +762,26 @@ impl Decider for VisualDecider {
             return Err("Foto desatualizada.".into());
         }
         f.pick = Some(pick);
+        f.reveal = line;
         Ok(decision)
+    }
+}
+
+/// Um toque que cairia sob o teclado, a barra flutuante ou cortado na borda vira "rolar até liberar": o próximo
+/// passo olha de novo e o Jev escolhe o alvo já visível. Sem espaço livre para rolar, é incerteza (nada é tocado).
+pub(super) fn uncover(mut pick: computer::Pick, labels: &[Label]) -> (computer::Pick, Option<((f64, f64), (f64, f64))>) {
+    let Some(point) = pick.point.filter(|_| pick.operation == "click") else { return (pick, None) };
+    let Some(zone) = super::cover::covered(point, pick.label, labels) else { return (pick, None) };
+    match super::cover::reveal_line(point.1, zone) {
+        Some(line) => {
+            pick.operation = "reveal".into();
+            pick.point = None;
+            (pick, Some(line))
+        }
+        None => {
+            pick.probability = 0.0;
+            (pick, None)
+        }
     }
 }
 
@@ -780,6 +843,7 @@ pub(crate) fn act(
         expect: request.expect.clone(),
         read_ahead: None,
         acted_at: None,
+        thumb: None,
     };
     let mut decider = VisualDecider {
         db,
@@ -787,6 +851,7 @@ pub(crate) fn act(
         allow_type: request.fills.contains_key("screen"),
         surface: "iOS",
         gestures: true,
+        reveal: true,
     };
     Ok(run(request, &mut surface, &mut decider))
 }
@@ -897,6 +962,7 @@ mod flow_test {
                 }
                 .into(),
                 safe_for_provider: true,
+                pixels: None,
                 targets: vec![Target {
                     id: "screen".into(),
                     label: "Controle na foto".into(),
@@ -985,7 +1051,7 @@ mod flow_test {
     fn risco_vem_do_controle_tocado_nao_de_uma_palavra_em_outro_canto_da_tela() {
         let label = |text: &str, top: f64| Label { text: text.into(), left: 0.1, right: 0.9, top, bottom: top + 0.05 };
         let labels = vec![label("Geral", 0.2), label("Sair", 0.8)];
-        let pick = |op: &str, point| computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point, confirm: false, box_confidence: None };
+        let pick = |op: &str, point| computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point, confirm: false, box_confidence: None, label: None };
         let text = "Geral\nSair";
         assert!(!decision_for(&pick("click", Some((0.5, 0.22))), text, &labels).unwrap().requires_confirmation, "tocar em «Geral»");
         assert!(!decision_for(&pick("scroll_up", None), text, &labels).unwrap().requires_confirmation, "rolar não é sair");
@@ -996,10 +1062,53 @@ mod flow_test {
         assert!(decision_for(&jev, text, &labels).unwrap().requires_confirmation);
         assert!(decision_for(&pick("scroll_up", None), text, &[]).unwrap().requires_confirmation);
     }
+    fn lbl(text: &str, left: f64, top: f64, right: f64, bottom: f64) -> Label {
+        Label { text: text.into(), left, right, top, bottom }
+    }
+    #[test]
+    fn toque_no_checkbox_sob_a_barra_vira_rolar_ate_liberar_sem_confirmacao() {
+        // Nutriton, iPhone 17e: o checkbox em y=756 e a barra flutuante em y=757 (de 852 pontos).
+        let labels = vec![
+            lbl("Meta diária", 0.05, 0.30, 0.30, 0.32),
+            lbl("Beber 2 copos antes do almoço", 0.15, 0.875, 0.70, 0.898),
+            lbl("Hoje", 0.08, 0.93, 0.18, 0.95),
+            lbl("Plano", 0.30, 0.93, 0.42, 0.95),
+            lbl("Água", 0.55, 0.93, 0.66, 0.95),
+            lbl("Perfil", 0.80, 0.93, 0.92, 0.95),
+        ];
+        let click = computer::Pick { operation: "click".into(), probability: 0.9, goal_done: None, point: Some((0.42, 0.887)), confirm: false, box_confidence: None, label: Some(1) };
+        let (pick, line) = uncover(click, &labels);
+        assert_eq!(pick.operation, "reveal");
+        let ((_, from), (_, to)) = line.expect("traço para subir o conteúdo");
+        assert!(from < 0.88 && to < from, "começa acima da barra e sobe");
+        let d = decision_for(&pick, "", &labels).unwrap();
+        assert_eq!(d.action, Action { operation: Operation::Scroll, target: Some(REVEAL.into()) });
+        assert!(!d.requires_confirmation);
+        // A aba da própria barra continua um toque normal.
+        let tab = computer::Pick { operation: "click".into(), probability: 0.9, goal_done: None, point: Some((0.36, 0.94)), confirm: false, box_confidence: None, label: Some(3) };
+        assert_eq!(uncover(tab, &labels).0.operation, "click");
+    }
+    #[test]
+    fn rotulo_do_reveal_nao_e_sensivel() {
+        assert!(!sensitive_label(REVEAL_LABEL), "uma rolagem nunca pode parecer ação de risco");
+    }
+    #[test]
+    fn tocar_numa_tecla_digita_sem_fill_e_sempre_pede_a_pessoa() {
+        let mut labels = vec![lbl("Quantidade", 0.05, 0.30, 0.30, 0.32)];
+        for (i, k) in ["1", "2", "ABC", "3", "DEF", "4", "GHI"].iter().enumerate() {
+            let x = 0.1 + (i % 3) as f64 * 0.3;
+            let y = 0.66 + (i / 3) as f64 * 0.06;
+            labels.push(lbl(k, x, y, x + 0.04, y + 0.02));
+        }
+        let key = computer::Pick { operation: "click".into(), probability: 0.95, goal_done: None, point: Some((0.12, 0.67)), confirm: false, box_confidence: None, label: Some(1) };
+        let (key, line) = uncover(key, &labels);
+        assert_eq!((key.operation.as_str(), line), ("click", None), "uma tecla não é coberta: é o teclado");
+        assert!(decision_for(&key, "", &labels).unwrap().requires_confirmation);
+    }
     #[test]
     fn gestos_viram_rolar_com_alvo_proprio_sem_confirmacao_e_com_traco_longe_das_bordas() {
         for op in ["swipe_left", "swipe_right", "home", "scroll_up"] {
-            let pick = computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point: None, confirm: false, box_confidence: None };
+            let pick = computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point: None, confirm: false, box_confidence: None, label: None };
             let d = decision_for(&pick, "Início", &[]).unwrap();
             assert_eq!(d.action, Action { operation: Operation::Scroll, target: Some(op.into()) });
             assert!(!d.requires_confirmation, "{op}");
@@ -1029,6 +1138,7 @@ mod flow_test {
                 goal: "abrir painel".into(),
                 fills: Default::default(),
                 expect: vec!["PAINEL ABERTO".into()],
+                visual: vec![],
                 steps: 1,
             };
             let report = run(&request, &mut surface, &mut MockJev { point });

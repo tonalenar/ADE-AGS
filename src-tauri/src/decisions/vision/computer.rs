@@ -56,6 +56,9 @@ pub(crate) struct Pick {
     pub confirm: bool,
     /// A confiança da caixa desenhada, quando o toque saiu dela (vai ao log, para calibrar).
     pub box_confidence: Option<f64>,
+    /// O índice (em `labels`) do texto do OCR escolhido, quando o toque saiu dele: o driver confere se esse texto
+    /// está sob o teclado ou a barra (`computer_use::cover`).
+    pub label: Option<usize>,
 }
 
 pub(crate) fn body(q: &Query<'_>) -> Value {
@@ -134,7 +137,9 @@ pub(crate) fn parse(text: &str, allow_type: bool, gestures: bool, labels: &[Text
         .filter(|(_, p)| *p >= LABEL_MIN_P)
         .and_then(|(id, _)| id.strip_prefix('t')?.parse::<usize>().ok())
         .and_then(|i| label_options(labels).into_iter().find(|(n, _)| *n == i))
-        .map(|(i, _)| labels[i].rect.center());
+        .map(|(i, _)| i);
+    let label = by_label;
+    let by_label = by_label.map(|i| labels[i].rect.center());
     let mut probability = probability;
     let mut box_confidence = None;
     let point = if let Some(point) = by_label {
@@ -167,6 +172,7 @@ pub(crate) fn parse(text: &str, allow_type: bool, gestures: bool, labels: &[Text
         point,
         confirm,
         box_confidence,
+        label,
     })
 }
 

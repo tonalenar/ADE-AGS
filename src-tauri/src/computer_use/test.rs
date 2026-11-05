@@ -6,6 +6,7 @@ fn observation(revision: &str, text: &str) -> Observation {
         revision: revision.into(),
         text: text.into(),
         safe_for_provider: true,
+        pixels: None,
         targets: vec![Target {
             id: "e1".into(),
             label: "Abrir detalhes".into(),
@@ -19,6 +20,7 @@ fn request() -> Request {
         goal: "abrir detalhes".into(),
         fills: BTreeMap::new(),
         expect: vec!["DETALHES ABERTOS".into()],
+        visual: vec![],
         steps: 3,
     }
 }
@@ -485,4 +487,58 @@ fn fill_repetido_no_objetivo_e_redigido_antes_do_decisor() {
     assert_eq!(report.status, Status::Done);
     assert!(!jev.inner.sent.join(" ").contains("laranja"));
     assert!(jev.inner.sent[0].contains("[valor local]"));
+}
+
+/// Uma grade de brilho lisa, para os testes do efeito por pixels sem foto.
+fn thumb(level: u8) -> visual::Thumb {
+    visual::Thumb(vec![level; visual::COLS * visual::ROWS])
+}
+
+#[test]
+fn tema_trocado_so_na_paleta_verifica_por_pixels_e_o_relatorio_mostra_o_efeito() {
+    // O texto do OCR é o mesmo antes e depois: só a paleta mudou (tema claro → escuro).
+    let mut req = request();
+    req.expect = vec![];
+    req.visual = vec![visual::Visual::Darker];
+    let mut before = observation("a", "Tema");
+    before.pixels = Some(thumb(240));
+    let mut after = observation("b", "Tema");
+    after.pixels = Some(thumb(20));
+    let mut driver = Mock::new(vec![before, after], vec![]);
+    let report = run(&req, &mut driver, &mut model(vec![decision(Operation::Click)]));
+    assert_eq!(report.status, Status::Done, "{}", report.reason);
+    assert_eq!(report.effects.len(), 1);
+    let effect = report.effects[0].expect("as duas fotos tinham pixels");
+    assert!(effect.changed > 0.9 && effect.luma < -0.5, "{effect:?}");
+}
+
+#[test]
+fn expectativa_visual_sem_pixels_nunca_vira_feito() {
+    // Pelo caminho do simctl não há grade: o Jev pode dizer que terminou, mas sem prova não é `done`.
+    let mut req = request();
+    req.expect = vec![];
+    req.visual = vec![visual::Visual::Changed];
+    let mut driver = Mock::new(vec![observation("a", "Tema"), observation("b", "Tema")], vec![]);
+    let report = run(&req, &mut driver, &mut model(vec![decision(Operation::Click), decision(Operation::Done)]));
+    assert_eq!(report.status, Status::Unsure, "{}", report.reason);
+    assert_eq!(report.effects, vec![None]);
+}
+
+#[test]
+fn rolar_para_liberar_o_alvo_que_nao_mexe_a_tela_para_com_incerteza_sem_tocar() {
+    let mut req = request();
+    req.steps = 3;
+    let mut screen = observation("a", "lista");
+    screen.targets.push(Target { id: REVEAL.into(), label: "Rolar".into(), operations: vec![Operation::Scroll], risk: Risk::Ordinary });
+    let reveal = Decision {
+        requires_confirmation: false,
+        action: Action { operation: Operation::Scroll, target: Some(REVEAL.into()) },
+        probability: 0.9,
+        goal_done: None,
+    };
+    let mut driver = Mock::new(vec![screen.clone(), screen.clone(), screen], vec![]);
+    let report = run(&req, &mut driver, &mut model(vec![reveal.clone(), reveal]));
+    assert_eq!(report.status, Status::Unsure);
+    assert!(report.reason.contains("teclado ou a barra"), "{}", report.reason);
+    assert_eq!(driver.executions, 1, "rolou uma vez; o toque coberto nunca aconteceu");
 }

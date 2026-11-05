@@ -616,6 +616,12 @@ fn computer_use_schemas() -> Vec<Value> {
         "items": { "type": "string" },
         "description": "What PROVES success, checked by local OCR (not by Jev): \"text:Some text\" (only text: is accepted). Pick text that only appears AFTER the goal is reached; without expects the best result is `unverified`.",
     });
+    // No iOS a tela também é conferida pelos pixels: o tema que troca só a paleta não muda o texto do OCR.
+    let sim_expects = json!({
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "What PROVES success, checked locally (not by Jev): \"text:Some text\" (local OCR), or \"visual:changed\" / \"visual:darker\" / \"visual:lighter\" (the screen's pixels against the first photo of the act; use it when only colors change, such as switching to the dark theme). Pick something that only becomes true AFTER the goal is reached; without expects the best result is `unverified`. `report.effects` gives each action's pixel effect.",
+    });
     let steps = json!({ "type": "integer", "description": "Max decisions (1-15). Default 8." });
     let timeout = json!({ "type": "integer", "description": "Seconds for the whole act (10-1800). Default 115. It INCLUDES the time the person takes to answer a confirmation in the app: use 300 when one is likely (typing, a risky control, the Mac's start-of-act consent)." });
     vec![
@@ -626,7 +632,7 @@ fn computer_use_schemas() -> Vec<Value> {
                 "name": { "type": "string", "description": "The simulator node's name or id, as `ags device list` shows it." },
                 "goal": goal.clone(),
                 "fill": fill.clone(),
-                "expects": expects.clone(),
+                "expects": sim_expects,
                 "steps": steps.clone(),
                 "timeout": timeout.clone(),
             }, "required": ["name", "goal"] },
