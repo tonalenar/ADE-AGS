@@ -424,17 +424,22 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
 
 ## Acabamento (build local do PR 270/271)
 
-- **Resumo.** É um cartão flutuante, como o do Claude Code (`summary/SummaryPopover.tsx`, `useChatStore.summaryOpen`): logo
-  abaixo do cabeçalho, com a borda direita na borda direita da coluna da conversa (encostado no painel direito, sem
-  cobri-lo), 380 px crescendo para a esquerda. É um cartão único: as seções são blocos com divisória fina
-  (`SectionsInOneCard`), não um cartão cada. As cores são as do tema (`bg-white`/`surface-raised`), com borda e sombra.
-  Quem o desenha é a coluna da conversa (`<main>`, `relative`), então a posição acompanha o redimensionamento e o
-  painel abrindo e fechando. Fica POR CIMA da conversa,
-  sem empurrar o layout nem mexer no painel direito: o simulador, o navegador e o terminal continuam no lugar. Fecha com
-  clique fora, com Esc (o foco volta ao ícone) e ao trocar de conversa; ao abrir, o foco entra no cartão. Com o painel
-  maximizado, abrir o Resumo restaura o painel antes, para o cartão flutuar sobre a conversa e não sobre o simulador ou o
-  navegador, que são nativos. Não é mais aba do painel: um `summary` lembrado de antes reabre o painel fechado. Antes ele
-  ficava fixo dentro da conversa e, numa janela de ~1000 px, cobria o texto; com outra superfície aberta, sumia.
+- **Resumo** (como no Claude Code). O ícone do Resumo liga e desliga o Resumo (`summaryPinned`, lembrado; ligado por
+  padrão).
+  - **Sem outro painel:** é uma coluna fixa à direita (420 px, encolhe até 300), abaixo da barra de ícones. A barra fica
+    com a largura inteira, acima dela, e nunca é coberta. Tem o fundo do tema, divisória à esquerda e as seções em
+    linhas com divisórias finas (`SectionsInOneCard`), sem um cartão cada. Nunca cobre a conversa nem o composer.
+  - **Outro painel** (simulador, navegador, terminal, arquivos, prancheta) substitui a coluna. Fechar o painel a traz
+    de volta, se o Resumo estiver ligado.
+  - **Com outro painel aberto**, o ícone abre o cartão flutuante (`summary/SummaryPopover.tsx`, `summaryOpen`), um pouco
+    menor (340 px). Ele fica logo abaixo do cabeçalho, com a borda direita encostada no painel, e é desenhado pela
+    coluna da conversa (`<main>`), então acompanha o redimensionamento. Fecha com clique fora, com Esc (o foco volta ao
+    ícone), ao trocar de conversa e ao fechar o painel. Com o painel maximizado, abrir o cartão restaura o painel antes,
+    para ele não cair sobre o simulador ou o navegador, que são nativos.
+- **Prancheta em tela cheia** (`/design/:id`, `chatSpaces.isFullscreenRoute`). Ocupa a janela toda, sem a sidebar de
+  Espaços, que antes aparecia por cima. Tem «Sair da tela cheia» sempre à vista no cabeçalho, e o Esc também sai. Na
+  barra da prancheta, à direita, fica só o botão de tela cheia: o de alternar o painel lateral do estúdio parecia
+  duplicado e saiu, mas o painel continua no atalho ⌘\.
 - **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
   conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
   (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de

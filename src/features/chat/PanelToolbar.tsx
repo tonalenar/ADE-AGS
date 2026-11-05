@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 
 import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GlobeIcon, MaximizeIcon, MoreHorizontalIcon, PhoneIcon, PullRequestIcon, TerminalIcon, UsersIcon } from "./chatIcons";
 import { COMPACT_HIDDEN, entryForKey, isAvailable, keyLabel, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type PanelAvailability, type PanelChoice } from "./panelMenu";
-import { addSurface, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleSummary, useChatStore } from "./store";
+import { addSurface, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleSummary, toggleSummaryPinned, useChatStore } from "./store";
 import { SUMMARY_ANCHOR_ATTR } from "./summary/SummaryPopover";
 import { usePopover } from "./usePopover";
 
@@ -111,10 +111,15 @@ export function choosePanel(id: PanelChoice, drawerTabId: string | null, termina
     else setRightPanel(useChatStore.getState().panel === "shell" ? null : "shell");
     return;
   }
-  // O Resumo é um cartão flutuante, não uma aba: não mexe no painel. Com o painel maximizado, ele volta ao tamanho
-  // normal antes, para o cartão flutuar sobre a conversa (e não sobre o simulador ou o navegador, que são nativos).
+  // O Resumo não é aba do painel. Sem painel aberto, o ícone liga e desliga a coluna fixa. Com painel, abre o cartão
+  // flutuante, sem mexer no painel; com o painel maximizado, ele volta ao tamanho normal antes, para o cartão flutuar
+  // sobre a conversa (e não sobre o simulador ou o navegador, que são nativos).
   if (id === "summary") {
     const s = useChatStore.getState();
+    if (s.panel === null) {
+      toggleSummaryPinned();
+      return;
+    }
     if (!s.summaryOpen && s.panelMaximized) togglePanelMaximized();
     toggleSummary();
     return;
@@ -131,7 +136,8 @@ export function choosePanel(id: PanelChoice, drawerTabId: string | null, termina
 export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: string | null; terminalAvailable: boolean }) {
   const { t } = useTranslation();
   const panel = useChatStore((s) => s.panel);
-  const summaryOpen = useChatStore((s) => s.summaryOpen);
+  // O ícone do Resumo fica marcado com a coluna à vista (sem painel) ou com o cartão aberto (com painel).
+  const summaryOn = useChatStore((s) => (s.panel === null ? s.summaryPinned : s.summaryOpen));
   const drawerOn = useChatStore((s) => (drawerTabId ? s.terminalOpen[drawerTabId] ?? false : false));
   const available: PanelAvailability = { terminal: terminalAvailable, pr: false };
   const choose = (id: PanelChoice) => choosePanel(id, drawerTabId, drawerOn);
@@ -144,7 +150,7 @@ export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: 
           // está aberto. O atributo diz ao cartão que clicar no ícone não é «fora».
           return (
             <span key={id} {...{ [SUMMARY_ANCHOR_ATTR]: "" }} className="contents">
-              <RowIcon id={id} active={summaryOpen} available={available} onChoose={choose} />
+              <RowIcon id={id} active={summaryOn} available={available} onChoose={choose} />
             </span>
           );
         }

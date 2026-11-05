@@ -11,7 +11,7 @@ import { chromeInsets } from "./chromeInsets";
 import { canZoomIn, canZoomOut, presetOf, ZOOM_LIMITS, ZOOM_PRESETS, zoomReadout } from "./camera";
 import {
   ArrowIcon, BackIcon, CaretIcon, CheckIcon, CommentIcon, DotsIcon, ExportIcon, FrameIcon, HandIcon, LineIcon, NoteIcon, OvalIcon,
-  PanelIcon, PenIcon, PencilIcon, PlusIcon, RectIcon, SelectIcon, TextIcon,
+  PenIcon, PencilIcon, PlusIcon, RectIcon, SelectIcon, TextIcon,
 } from "./studioIcons";
 import { DRAW_TOOLS, SHAPE_TOOLS, TOOLS, type DrawTool, type ShapeTool, type Tool } from "./studioModel";
 
@@ -60,8 +60,6 @@ export function StudioToolbar(p: {
   lastShape: ShapeTool;
   guides: boolean;
   onToggleGuides: () => void;
-  panelOpen: boolean;
-  onTogglePanel: () => void;
   /** Exportar a prancheta selecionada; `null` = nenhuma (uma só) selecionada. */
   exportBoard: { onHtml: () => void; onPdf: () => void } | null;
   /** Espaço à direita para o X da tela cheia (RouteModal). */
@@ -109,10 +107,8 @@ export function StudioToolbar(p: {
       <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
         <ExportMenu {...p} />
         <ZoomMenu {...p} />
-        <button type="button" aria-pressed={p.panelOpen} onClick={p.onTogglePanel} className={toolBtn(p.panelOpen)}
-          title={`${t("design.panel.toggle")} (${p.mod}\\)`} aria-label={t("design.panel.toggle")}>
-          <PanelIcon />
-        </button>
+        {/* Sem o botão de alternar o painel lateral do estúdio: ao lado do de tela cheia ele parecia duplicado (o painel
+            direito do chat tem o próprio). O painel do estúdio continua no atalho (⌘\ ou Ctrl+\). */}
         {p.trailing}
       </div>
     </Bar>

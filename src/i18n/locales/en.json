@@ -3709,6 +3709,7 @@
   "chat.timeline.openDiff": "Open diff",
   "chat.panel.label": "Right panel",
   "chat.panel.toggle": "Toggle the right panel",
+  "chat.page.exitFullscreen": "Exit full screen",
   "chat.panel.diff": "Diff",
   "chat.panel.files": "Files",
   "chat.panel.maximize": "Maximize the panel",

@@ -19,7 +19,12 @@ describe("os painéis da direita rolam (sem barra visível)", () => {
 
   it("o Resumo não é coluna do painel nem fica fixo por cima da conversa: é o cartão do ícone", () => {
     expect(read("../RightPanel.tsx")).not.toMatch(/SummaryPane/);
-    expect(read("../ChatShell.tsx")).toMatch(/<SummaryPopover onClose=\{closeSummary\}>\s*<SummaryPane inCard /);
+    const shell = read("../ChatShell.tsx");
+    // Sem painel: a coluna fixa abaixo do cabeçalho (o cabeçalho fica com a largura inteira, acima dela).
+    expect(shell).toMatch(/\{summaryPinned && !panelOpen && \(\s*<aside aria-label=\{t\("chat.panel.open.summary"\)\} data-summary-column/);
+    // Com painel: o cartão flutuante, menor.
+    expect(shell).toMatch(/\{summaryOpen && panelOpen && \(\s*<SummaryPopover width=\{SUMMARY_POPOVER_W\}/);
+    expect(shell.indexOf("</header>")).toBeLessThan(shell.indexOf("data-summary-column"));
     expect(summary).not.toMatch(/SummaryDock/);
   });
 

@@ -8,7 +8,7 @@ import { WindowControls, WindowLights } from "@/app/WindowLights";
 import { hasOpenDialog } from "@/shared/ui/openDialog";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
 
-import { SidebarIcon } from "./chatIcons";
+import { MinimizeIcon, SidebarIcon } from "./chatIcons";
 import { settingsLabelKey } from "./chatSettingsNav";
 import { IconButton } from "./ChatSidebar";
 import { isSettingsRoute, spaceForPath } from "./chatSpaces";
@@ -18,9 +18,11 @@ import { isSettingsRoute, spaceForPath } from "./chatSpaces";
  * cabeçalho de 52 px com o caminho e o conteúdo de sempre por baixo. Escape volta à conversa, com as
  * mesmas exceções do `RouteModal` (um diálogo ou um popup aberto é o dono do Escape).
  */
-export function ChatPage({ onClose, sidebarOpen, onExpandSidebar, children }: {
+export function ChatPage({ onClose, sidebarOpen, onExpandSidebar, fullscreen = false, children }: {
   onClose: () => void;
   sidebarOpen: boolean;
+  /** Tela cheia de verdade (a prancheta): sem a sidebar e com «Sair da tela cheia» sempre à vista (e o Esc). */
+  fullscreen?: boolean;
   onExpandSidebar: () => void;
   children: React.ReactNode;
 }) {
@@ -52,7 +54,7 @@ export function ChatPage({ onClose, sidebarOpen, onExpandSidebar, children }: {
         {!sidebarOpen && (
           <>
             <WindowLights />
-            <IconButton label={t("chat.sidebar.expand")} onClick={onExpandSidebar}><SidebarIcon className="w-4 h-4" /></IconButton>
+            {!fullscreen && <IconButton label={t("chat.sidebar.expand")} onClick={onExpandSidebar}><SidebarIcon className="w-4 h-4" /></IconButton>}
           </>
         )}
         <span data-tauri-drag-region className="flex-1 min-w-0 flex items-center gap-3 truncate">
@@ -60,6 +62,12 @@ export function ChatPage({ onClose, sidebarOpen, onExpandSidebar, children }: {
           {settings && title && <span aria-hidden="true" className="text-gray-300 dark:text-white/25">/</span>}
           {title && <span className="font-medium truncate">{title}</span>}
         </span>
+        {fullscreen && (
+          <button type="button" onClick={onClose} title={`${t("chat.page.exitFullscreen")} (Esc)`}
+            className="shrink-0 h-7 px-2.5 inline-flex items-center gap-1.5 rounded-md text-chat-caption font-medium text-gray-700 dark:text-white/80 border border-gray-200 dark:border-white/[0.1] hover:bg-gray-100 dark:hover:bg-white/[0.07]">
+            <MinimizeIcon className="w-3.5 h-3.5" />{t("chat.page.exitFullscreen")}
+          </button>
+        )}
         <WindowControls className="-mr-3" />
       </header>
       {/* As telas são de altura completa e rolam por dentro (como no `RouteModal`). */}

@@ -24,8 +24,13 @@ interface ChatState {
   terminalOpen: Record<string, boolean>;
   /** O painel direito e a aba dele; `null` = fechado; `"empty"` = aberto sem nada aberto ("Abrir uma superfície"). */
   panel: RightPanelTab | null;
-  /** O Resumo aberto: um cartão flutuante ancorado no ícone, por cima da conversa (fecha com clique fora, Esc ou
-   * ao trocar de conversa). Independe do painel direito, que fica onde está. */
+  /**
+   * O Resumo ligado (o ícone dele marcado; lembrado): sem outro painel aberto, ele é a coluna fixa à direita da conversa,
+   * abaixo da barra de ícones, como no Claude Code. Abrir outro painel a substitui; fechar o painel a traz de volta.
+   */
+  summaryPinned: boolean;
+  /** Com outro painel aberto: o Resumo como cartão flutuante encostado no painel (fecha com clique fora, Esc, ao
+   * trocar de conversa ou ao fechar o painel). */
   summaryOpen: boolean;
   /** A aba que estava à vista quando o painel foi fechado: reabrir volta nela. `null` = nenhuma (reabre vazio). */
   lastPanel: Exclude<RightPanelTab, "empty"> | null;
@@ -64,8 +69,8 @@ export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty">;
 export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android"];
 
 /**
- * As abas do painel direito. O Resumo não é uma delas: é um cartão flutuante ancorado no ícone (`summaryOpen`,
- * `summary/SummaryPopover.tsx`), como no Claude Code. `team`: o painel Time do time de agentes (pranchetas 15 e 16,
+ * As abas do painel direito. O Resumo não é uma delas: sem painel ele é a coluna fixa da conversa (`summaryPinned`),
+ * com painel é um cartão flutuante (`summaryOpen`, `summary/SummaryPopover.tsx`), como no Claude Code. `team`: o painel Time do time de agentes (pranchetas 15 e 16,
  * `team/TeamPanel.tsx`). `empty`: o estado vazio do T3.
  */
 export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
@@ -134,6 +139,17 @@ function readWidth(): number {
   }
 }
 
+const SUMMARY_KEY = "ags.chat.summaryPinned";
+
+/** O Resumo ligado, lembrado entre aberturas; ligado por padrão (como no Claude Code). */
+function readSummaryPinned(): boolean {
+  try {
+    return localStorage.getItem(SUMMARY_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
 function readControl(): boolean {
   try {
     return localStorage.getItem(CONTROL_KEY) !== "off";
@@ -145,7 +161,7 @@ function readControl(): boolean {
 const initialPanel = readPanel();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, shell: null, thread: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, shell: null, thread: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, designOpen: null, panelWidth: readWidth(),
   queues: {},
@@ -249,7 +265,8 @@ export function setRightPanel(panel: RightPanelTab | null): void {
     if (panel) return { panel };
     // Ao fechar, lembra a aba à vista (o vazio não conta); fechar de novo, já fechado, não apaga a lembrança.
     const last = s.panel && s.panel !== "empty" ? s.panel : s.lastPanel;
-    return { panel: null, panelMaximized: false, lastPanel: last };
+    // O cartão flutuante do Resumo só existe com painel; sem ele, volta a coluna (se o Resumo estiver ligado).
+    return { panel: null, panelMaximized: false, lastPanel: last, summaryOpen: false };
   });
 }
 
@@ -291,9 +308,20 @@ export function toggleRightPanel(): void {
   setRightPanel(s.panel ? null : s.lastPanel ?? "empty");
 }
 
-/** Abre ou fecha o Resumo flutuante. */
+/** Abre ou fecha o Resumo flutuante (com outro painel aberto). */
 export function toggleSummary(): void {
   useChatStore.setState((s) => ({ summaryOpen: !s.summaryOpen }));
+}
+
+/** Liga ou desliga o Resumo (a coluna fixa, sem painel aberto). Lembrado. */
+export function toggleSummaryPinned(): void {
+  const next = !useChatStore.getState().summaryPinned;
+  useChatStore.setState({ summaryPinned: next, summaryOpen: false });
+  try {
+    localStorage.setItem(SUMMARY_KEY, next ? "on" : "off");
+  } catch {
+    /* sem lembrar, vale nesta sessão */
+  }
 }
 
 /** Fecha o Resumo flutuante (clique fora, Esc, troca de conversa). */

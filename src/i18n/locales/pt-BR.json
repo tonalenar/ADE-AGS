@@ -3709,6 +3709,7 @@
   "chat.timeline.openDiff": "Abrir diff",
   "chat.panel.label": "Painel direito",
   "chat.panel.toggle": "Alternar o painel direito",
+  "chat.page.exitFullscreen": "Sair da tela cheia",
   "chat.panel.diff": "Diff",
   "chat.panel.files": "Arquivos",
   "chat.panel.maximize": "Maximizar o painel",
