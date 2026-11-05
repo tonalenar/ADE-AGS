@@ -39,6 +39,10 @@ describe("a coluna do composer", () => {
     expect((await renderAt(440)).style.paddingInline).toBe("16px");
     expect((await renderAt(720)).style.paddingInline).toBe("48px");
   });
+
+  it("é o container `composer` das container queries", async () => {
+    expect((await renderAt(650)).className).toContain("@container/composer");
+  });
 });
 
 describe("a linha de controles do composer", () => {
@@ -46,17 +50,23 @@ describe("a linha de controles do composer", () => {
     root.render(<ChatComposer placeholder="p" onSubmit={() => undefined} controls={controls} leading={leading} />);
   });
 
-  it("quebra em duas linhas em vez de estourar, com o enviar por último no grupo da direita", async () => {
+  it("fica numa linha só e só quebra na coluna muito estreita, com o enviar por último no grupo da direita", async () => {
     await mount(<button type="button">modelo</button>, <button type="button">Time</button>);
     const row = host.querySelector("[data-composer-row]") as HTMLElement;
-    expect(row.className).toContain("flex-wrap");
+    // Com o painel do simulador aberto (~650 px), o modelo e «Construir» desciam para uma segunda linha.
+    expect(row.className).toContain("flex-nowrap");
+    expect(row.className).toContain("@max-[28rem]/composer:flex-wrap");
     const right = host.querySelector("[data-composer-right]") as HTMLElement;
     expect(right.className).toContain("ml-auto");
     const last = right.lastElementChild as HTMLButtonElement;
     expect(last.type).toBe("submit");
     expect(last.getAttribute("aria-label")).toBe("chat.composer.send");
-    // O grupo dos controles também quebra: nada passa da borda do cartão.
-    expect((host.querySelector("[data-composer-controls]") as HTMLElement).className).toContain("flex-wrap");
+    // Os controles encolhem por dentro (o nome do modelo trunca) em vez de quebrar.
+    const controls = host.querySelector("[data-composer-controls]") as HTMLElement;
+    expect(controls.className).toContain("min-w-0");
+    expect(controls.className).toContain("flex-nowrap");
+    expect(right.className).toContain("min-w-0");
+    expect((host.querySelector("[data-composer-left]") as HTMLElement).className).toContain("shrink-0");
   });
 
   it("anexar e o segmentado ficam à esquerda; os controles à direita", async () => {

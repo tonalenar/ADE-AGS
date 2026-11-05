@@ -50,7 +50,7 @@ interface ChatState {
   /** O design pedido para a aba Design (`ags design open`); `seq` muda a cada pedido. */
   designOpen: DesignOpenRequest | null;
   /** As mensagens na fila de cada conversa (⌘⏎ com o agente trabalhando), na ordem. */
-  queues: Record<string, string[]>;
+  queues: Record<string, QueuedMessage[]>;
 }
 
 /** Um pedido de abrir um design no painel: o design e, se vier, a prancheta e a página. */
@@ -143,11 +143,30 @@ export const useChatStore = create<ChatState>(() => ({
   queues: {},
 }));
 
-/** Põe uma mensagem no fim da fila da conversa. */
-export function enqueueMessage(key: string, text: string): void {
+/**
+ * Uma mensagem esperando a vez no composer. `now` = a pessoa pediu «enviar agora» num motor que não aceita entrada no
+ * meio do turno: ela vai na frente, assim que o turno parar.
+ */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  now?: boolean;
+}
+
+let queueSeq = 0;
+
+/** Põe uma mensagem na fila da conversa: no fim, ou na frente (`now`, o «enviar agora» que para o turno). */
+export function enqueueMessage(key: string, text: string, now = false): void {
   const clean = text.trim();
   if (!clean) return;
-  useChatStore.setState((s) => ({ queues: { ...s.queues, [key]: [...(s.queues[key] ?? []), clean] } }));
+  queueSeq += 1;
+  const item: QueuedMessage = now ? { id: `q${queueSeq}`, text: clean, now } : { id: `q${queueSeq}`, text: clean };
+  useChatStore.setState((s) => {
+    const list = s.queues[key] ?? [];
+    // As de «agora» saem antes das outras, na ordem em que vieram.
+    const at = now ? list.filter((m) => m.now).length : list.length;
+    return { queues: { ...s.queues, [key]: [...list.slice(0, at), item, ...list.slice(at)] } };
+  });
 }
 
 /** Tira a primeira mensagem da fila (a que vai sair agora). */
@@ -155,13 +174,26 @@ export function dequeueMessage(key: string): string | null {
   const list = useChatStore.getState().queues[key] ?? [];
   if (list.length === 0) return null;
   const [first, ...rest] = list;
+  setQueue(key, rest);
+  return first!.text;
+}
+
+/** Tira da fila a mensagem `id` e devolve o texto dela (para editar no composer), ou `null` se já saiu. */
+export function unqueueMessage(key: string, id: string): string | null {
+  const list = useChatStore.getState().queues[key] ?? [];
+  const found = list.find((m) => m.id === id);
+  if (!found) return null;
+  setQueue(key, list.filter((m) => m.id !== id));
+  return found.text;
+}
+
+function setQueue(key: string, list: QueuedMessage[]): void {
   useChatStore.setState((s) => {
     const queues = { ...s.queues };
-    if (rest.length > 0) queues[key] = rest;
+    if (list.length > 0) queues[key] = list;
     else delete queues[key];
     return { queues };
   });
-  return first!;
 }
 
 /** Esvazia a fila de uma conversa. */

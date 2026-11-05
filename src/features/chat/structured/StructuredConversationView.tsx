@@ -8,18 +8,18 @@ import { turnLive } from "../activityModel";
 import { AgentModelPicker, EffortMenu } from "../AgentModelPicker";
 import { ThreadAccountMenu } from "./ThreadAccountMenu";
 import { BotIcon } from "../chatIcons";
-import { accessModesFor, planSupported, type ConversationCard } from "../chatModel";
+import { accessModesFor, midTurnOf, planSupported, type ConversationCard } from "../chatModel";
 import { messageFor } from "../attachments/send";
 import { ChatComposer } from "../ChatComposer";
 import { ChatFrame } from "../ChatFrame";
 import { ComposerColumn } from "../ComposerColumn";
-import { QUEUE_KEY } from "../ConversationView";
+import { NO_QUEUE, QUEUE_KEY } from "../ConversationView";
 import { ActivityLine } from "../LiveActivity";
 import { ContextStrip } from "../NewConversation";
 import { PermissionCard } from "../permissions/PermissionCard";
 import { usePendingAsks } from "../permissions/permissionsStore";
-import { queueOrSend } from "../queueRunner";
-import { useChatStore } from "../store";
+import { queueOrSend, sendNow } from "../queueRunner";
+import { unqueueMessage, useChatStore } from "../store";
 import { TeamMentionMenu, useTeamComposer } from "../team/TeamComposer";
 import { TeamThreadFeed } from "../team/TeamThreadFeed";
 import { TimelineView, type ApprovalNote } from "../timeline/ConversationTimeline";
@@ -58,7 +58,9 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   const asks = usePendingAsks();
   const ask = useMemo(() => (request ? asks.find((a) => a.ref.source === "thread" && a.ref.requestId === request.id) ?? null : null), [asks, request]);
   const key = `thread:${thread.id}`;
-  const queued = useChatStore((s) => s.queues[key]?.length ?? 0);
+  const queue = useChatStore((s) => s.queues[key]) ?? NO_QUEUE;
+  // O que o ⏎ faz com o agente trabalhando: entra no turno (Codex, Claude) ou para o turno e vai como o próximo.
+  const midTurn = midTurnOf(thread.agentId);
   // O texto chegando entra na timeline como item (o mesmo id do item final), e o raciocínio
   // chegando alimenta a linha viva.
   const items = useMemo(() => withDrafts(live.items, live.drafts), [live.items, live.drafts]);
@@ -102,7 +104,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       )}
     </div>
   ) : (
-    <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex min-w-0 flex-wrap items-center justify-end gap-x-0.5 gap-y-1">
+    <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">
       {/* O trilho de agentes: escolher outro agente troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
       <AgentModelPicker agents={switchable} showAccount={false} disabled={locked}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
@@ -116,9 +118,10 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       {planSupported(thread.agentId, true) && (
         <button type="button" disabled={locked} aria-pressed={plan} onClick={() => retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access))}
           title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
-          className="flex items-center gap-1.5 h-7 px-2 rounded-lg text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50 disabled:hover:bg-transparent">
-          <BotIcon className="w-4 h-4 text-gray-500 dark:text-white/45" />
-          {plan ? t("chat.plan.plan") : t("chat.plan.build")}
+          className="flex shrink-0 items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50 disabled:hover:bg-transparent">
+          <BotIcon className="w-4 h-4 shrink-0 text-gray-500 dark:text-white/45" />
+          {/* Coluna estreita: só o ícone; o rótulo segue para o leitor de tela e o tooltip diz o modo. */}
+          <span className="@max-[30rem]/composer:sr-only">{plan ? t("chat.plan.plan") : t("chat.plan.build")}</span>
         </button>
       )}
     </div>
@@ -129,22 +132,29 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
         {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd} quoteKey={card.tabId}
-          placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
+          placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working ? t(midTurn === "steer" ? "chat.composer.queueHintSteer" : "chat.composer.queueHintInterrupt", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
           onSubmit={(text, attachments) => {
             if (question) { answer(text); return; }
             const prepared = team && text.trim() ? team.prepare(text, { key, items }, attachments) : { text, onSent: () => undefined };
             if (prepared === null) return;
             // O caminho de cada anexo vai no texto (bloco `[Anexos]`) e as imagens também em linha, onde o motor aceita.
             const sent = messageFor(key, prepared.text, attachments);
-            // A mensagem aparece na hora; se o backend recusar, sai do fio e o erro aparece no aviso.
-            const mark = sent.text.trim() ? addPending(key, sent.text.trim(), items) : null;
-            sendToThread(thread.id, sent.text, mark ? () => dropPending(key, mark) : undefined, prepared.onSent, sent.images);
+            const deliver = () => {
+              // A mensagem aparece na hora; se o backend recusar, sai do fio e o erro aparece no aviso.
+              const mark = sent.text.trim() ? addPending(key, sent.text.trim(), items) : null;
+              sendToThread(thread.id, sent.text, mark ? () => dropPending(key, mark) : undefined, prepared.onSent, sent.images);
+            };
+            // Com um pedido esperando a pessoa, a mensagem vai como sempre (redireciona o agente).
+            if (request) { deliver(); return; }
+            // «Enviar agora»: no motor que não aceita entrada no meio do turno, o turno para e ela sai em seguida
+            // (aparece acima da caixa até sair). As imagens em linha só existem no Claude, que entra no turno.
+            if (sendNow(key, sent.text, midTurn, deliver) === "interrupting") prepared.onSent();
           }}
           onQueue={question ? null : (text, attachments) => {
             const prepared = team ? team.prepare(text, { key, items }, attachments) : { text, onSent: () => undefined };
             // A fila do composer não avisa quando a mensagem sai: o resumo do time conta como entregue ao enfileirar.
             if (prepared !== null) { queueOrSend(key, messageFor(key, prepared.text, attachments).text); prepared.onSent(); }
-          }} queued={queued}
+          }} queue={queue} onUnqueue={(id) => unqueueMessage(key, id)}
           leading={question ? null : team?.controls}
           addon={team && !question ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}
           onStop={working && !request ? () => interruptThread(thread.id) : null}
