@@ -59,6 +59,18 @@ export function openShellPanel(): void {
 }
 
 /**
+ * O terminal do painel pedido pelo agente da conversa (`ags tab create --agent bash` de dentro do chat, ou
+ * `--in-chat`): abre a aba Terminal do painel e devolve o shell da pasta, o MESMO em que a pessoa digita (por
+ * isso o agente lê com `tab output` o que ela escreveu). `reused` = o shell já existia. Não troca a conversa aberta.
+ */
+export async function openChatTerminal(cwd: string): Promise<{ tabId: string; reused: boolean }> {
+  const before = new Set(useTabsStore.getState().tabs.map((t) => t.id));
+  openShellPanel();
+  const tabId = await ensureShellTab(cwd);
+  return { tabId, reused: before.has(tabId) };
+}
+
+/**
  * «Rodar» de um bloco de código: abre o terminal da conversa e manda o comando, com Enter. Só sai de um clique da
  * pessoa no botão do bloco; nada roda sozinho.
  */

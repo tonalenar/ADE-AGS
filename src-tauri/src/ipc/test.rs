@@ -1325,3 +1325,21 @@ fn device_clipboard_le_e_escreve_pelo_devicectl() {
     // O caminho público do Xcode 27 (CoreDevice), não o SimPasteboard, que no iOS 27.2 já não substitui o conteúdo.
     assert!(ops.contains("[\"devicectl\", \"device\", \"pasteboard\"]"));
 }
+
+#[test]
+fn o_terminal_do_chat_tem_quem_o_atenda_nos_dois_lados() {
+    // O backend pede ao front o shell do painel (`chatShell`), e o front o abre pelo mesmo caminho da aba Terminal.
+    let tabs = include_str!("commands/tabs.rs");
+    assert!(tabs.contains("\"chatShell\": true"), "o backend não pede o terminal do chat");
+    let bridge = include_str!("../../../src/features/orchestrator/cliBridge.ts");
+    assert!(bridge.contains("args.chatShell === true"), "o frontend não atende o terminal do chat");
+    assert!(bridge.contains("openChatTerminal("), "o frontend não usa o shell do painel");
+    // A CLI documenta as flags novas e leva quem chama no `tab create`.
+    let cli = include_str!("../bin/cli.rs");
+    assert!(cli.contains("--in-chat") && cli.contains("--new-tab"), "o USAGE não mostra --in-chat/--new-tab");
+    assert!(cli.contains("command == \"tab.create\""), "a CLI não manda quem chama no tab create");
+    // A skill ensina o caminho, e o que fazer quando ele falha.
+    let skill = include_str!("../../../skills/ags-orchestrator/SKILL.md");
+    assert!(skill.contains("### Interactive commands from a chat conversation"), "a skill não ensina o terminal do chat");
+    assert!(skill.contains("--in-chat"), "a skill não mostra --in-chat");
+}

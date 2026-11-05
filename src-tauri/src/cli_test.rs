@@ -720,3 +720,18 @@ fn conversa_chama_sim_e_desk_so_com_a_aba_thread_e_sem_sessao_mesmo_com_flag_for
         assert!(args.get("mission").is_none());
     }
 }
+
+#[test]
+fn tab_create_leva_quem_chama_para_achar_o_terminal_do_chat() {
+    // A conversa do chat (`ADE_TAB_ID=thread:<id>`) pede um shell: o app precisa saber de qual conversa é o painel.
+    assert!(takes_caller("tab.create"));
+    // O resto do grupo `tab` segue sem `from`: o id da aba já diz o destino.
+    assert!(!takes_caller("tab.send"));
+    assert!(!takes_caller("tab.output"));
+    let mut args = json!({ "agent": "bash" });
+    caller_from("tab.create", &mut args, Some("thread:abc".into()), None);
+    assert_eq!(args["from"], "thread:abc");
+    let args = parse("tab.create", &["--agent", "bash", "--in-chat", "--initprompt", "supabase login"]).unwrap();
+    assert_eq!(args["inChat"], true);
+    assert_eq!(args["initprompt"], "supabase login");
+}
