@@ -46,12 +46,19 @@ TABS
              [--pre-preset <nome>]            · força que seja um item salvo, não um comando
              [--initprompt \"...\"]             · prompt inicial, enviado com Enter
              [--window <label>]                 quando a TUI terminou de iniciar
+  tab create --agent bash [--initprompt \"...\"]  De uma conversa do chat (ADE_TAB_ID=thread:<id>): abre o
+                                              terminal do painel direito do chat, na pasta da conversa, e
+                                              devolve o id dele. É o shell que a pessoa vê e digita: use-o
+                                              para comando interativo (login, código, pergunta, assistente)
+             [--in-chat]                      · o mesmo de qualquer conversa ou aba do chat (sem --agent)
+             [--new-tab]                      · uma aba comum, fora do painel
   tab close <id>                              Fecha uma tab
   tab output <id> [--lines 40]                O que é NOVO desde a leitura anterior,
              [--full] [--raw]                 comprimido (erros, avisos, final)
   tab send <id> \"...\" [--no-enter]            Escreve no terminal dela (+ Enter) —
                                               assim a conversa segue com
                                               uma tab que já está aberta
+                                              (num shell vai a linha crua, uma vez só)
 
 AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peers                                       Quem está conectado a você
@@ -840,9 +847,16 @@ impl CliError {
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 /// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
-fn with_caller(command: &str, mut parsed: Value) -> Value {
+/// Os comandos que levam quem chama (`from`). O `tab create` o leva para achar o terminal do painel da
+/// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); o resto do grupo `tab` já diz o destino
+/// pelo id da aba. Pura.
+fn takes_caller(command: &str) -> bool {
     const GROUPS: [&str; 17] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events."];
-    if !GROUPS.iter().any(|g| command.starts_with(g)) {
+    command == "tab.create" || GROUPS.iter().any(|g| command.starts_with(g))
+}
+
+fn with_caller(command: &str, mut parsed: Value) -> Value {
+    if !takes_caller(command) {
         return parsed;
     }
     caller_from(

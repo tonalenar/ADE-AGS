@@ -38,6 +38,20 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
     mesmo atributo da casca (`data-chat-shell`) e o terminal aparecia no canto de cima da janela, por cima da sidebar.
   - Como o navegador, ela não é montada no painel: o painel publica o slot (`useChatStore.shell`), e
     `placementsFrom`/`chatPlacements` a posiciona. Fechar o painel ou trocar de conversa só a esconde.
+  - **O agente da conversa usa o mesmo terminal** para comando interativo (login, código de verificação, pergunta,
+    assistente `npx`): `ags tab create --agent bash --initprompt "supabase login"` chamado de uma conversa
+    (`ADE_TAB_ID=thread:<id>`), ou `--in-chat` de qualquer conversa ou aba do chat. A CLI manda quem chama (`from`) no
+    `tab.create`; o backend (`ipc/commands/tabs.rs::chat_terminal_target`) troca a pasta pela da conversa (a do
+    registro da conversa, ou a da aba) e pede ao front `tab.create` com `chatShell`; o `cliBridge` abre a aba Terminal
+    do painel (`shellTerminal.ts::openChatTerminal`) e devolve o id do shell (`reused`, `visible`). Depois,
+    `ags tab send`/`tab output` nesse id. A pessoa digita no mesmo PTY, e o agente vê com `tab output`. `--new-tab`
+    volta à aba comum. Não há tool MCP: as de aba não são expostas por MCP.
+  - Num shell (`bash`, inclusive este), `tab send` e o primeiro comando vão como linha crua, uma vez só
+    (`tabs.rs::submit_style`): sem as novas tentativas das TUIs, que digitavam de novo um código num prompt sem eco,
+    e sem a ficha do ponto de restauração, que guardaria o texto (pode ser um código) no banco.
+  - Sem como abrir o terminal (sandbox, app fechado, erro), a skill manda o agente pôr o comando num bloco ```bash, um
+    por bloco, para a pessoa usar o **Rodar** ou colar no terminal ao lado; nunca rodar o interativo no shell
+    escondido do agente.
 - **Blocos de código** (`timeline/CodeBlockFrame.tsx`, `codeRun.ts`): cada bloco ganha **Copiar** (o código, sem o
   fim de linha). Bloco de shell (`bash`, `sh`, `shell`, `zsh`, `console`…) ganha também **Rodar**, que abre o terminal
   da conversa e manda o comando com um Enter (`terminalRegistry.runInTerminal`, sem as novas tentativas de Enter das

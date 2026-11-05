@@ -8,6 +8,7 @@
 - Informe ao usuário os ids das abas que você abriu.
 - **Nunca faça polling.** Use `ags watch add/wait` ou `ags events wait`.
 - Observe no máximo 3 abas. Comandos longos vão numa aba de terminal (`--agent bash`).
+- Comando interativo (login, código, pergunta, assistente) nunca roda no shell escondido do agente. De uma conversa do chat, `ags tab create --agent bash --initprompt "…"` (ou `--in-chat`) usa o terminal do painel direito, o mesmo em que a pessoa digita; sem ele, o comando vai num bloco ```bash para o **Rodar** do chat.
 - Aba que você não abriu é do usuário.
 - Exit codes:
   - 0: ok;
