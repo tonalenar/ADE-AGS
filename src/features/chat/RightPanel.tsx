@@ -47,8 +47,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   // A gaveta do agente: só a conversa de TUI com timeline. As outras abrem a aba Terminal (um shell na pasta).
   const drawerTabId = tabId && conversation && hasTimeline(conversation.agentId) ? tabId : null;
   const drawerOn = useChatStore((s) => (drawerTabId ? s.terminalOpen[drawerTabId] ?? false : false));
-  // O Resumo não é coluna: flutua ao lado da conversa (`ChatShell`). Aqui só moram as outras superfícies.
-  if (!panel || panel === "summary") return null;
+  if (!panel) return null;
   // O PR ainda não tem aba no painel (esmaecido).
   const available: PanelAvailability = { terminal: !!conversation && !!cwd, pr: false };
   const choose = (id: PanelChoice) => choosePanel(id, drawerTabId, drawerOn);
@@ -59,7 +58,9 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   return (
     <aside aria-label={t("chat.panel.label")}
       style={maximized ? undefined : { width: panelWidth }}
-      className={`${maximized ? "flex-1" : "shrink"} relative min-w-[360px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
+      // A coluna encolhe até 280 px: numa janela de ~1000 px, sidebar, conversa (440 px no mínimo, com o cabeçalho
+      // inteiro) e painel cabem sem nada passar da borda da janela (com 360 px, o terminal e o simulador eram cortados).
+      className={`${maximized ? "flex-1" : "shrink"} relative min-w-[280px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
       {!maximized && <ResizeHandle />}
       {/* Sem faixa de cabeçalho: a fileira de ícones e o recolher moram no cabeçalho principal e cada superfície
           começa no topo da coluna. Fica só uma região de arrasto fina (não cobre os botões da superfície). */}
@@ -250,21 +251,37 @@ function SurfaceLauncher({ available, onChoose }: { available: PanelAvailability
  * o navegador, ele não é montado aqui: esta tela reserva o espaço e publica (`setChatShell`), e o `TerminalPanel`
  * desenha a aba de shell por cima. Fechar o painel ou trocar de conversa esconde o shell, sem matá-lo.
  */
+/**
+ * O retângulo de um slot do painel relativo à casca do chat (`[data-chat-shell]`), que é onde o `TerminalPanel` e o
+ * `ViewTabsHost` desenham. A base é procurada a partir do PAI do slot: um slot que carregasse o mesmo atributo seria a
+ * própria base, e o retângulo sairia em (0, 0) — o terminal da conversa aparecia no canto de cima, por cima da sidebar.
+ * `null` sem casca ou sem tamanho ainda. Pura (só lê o DOM).
+ */
+export function rectInShell(el: Element | null): { left: number; top: number; width: number; height: number } | null {
+  const base = el?.parentElement?.closest(`[${CHAT_SHELL_ATTR}]`) ?? null;
+  if (!el || !base) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  const b = base.getBoundingClientRect();
+  return { left: Math.round(r.left - b.left), top: Math.round(r.top - b.top), width: Math.round(r.width), height: Math.round(r.height) };
+}
+
 function ShellSurface({ cwd }: { cwd: string }) {
   const { t } = useTranslation();
   const slotRef = useRef<HTMLDivElement>(null);
   const [tabId, setTabId] = useState<string | null>(null);
-  useEffect(() => { setTabId(ensureShellTab(cwd)); }, [cwd]);
+  useEffect(() => {
+    let alive = true;
+    void ensureShellTab(cwd).then((id) => { if (alive) setTabId(id); });
+    return () => { alive = false; };
+  }, [cwd]);
   // A aba pode ser fechada no modo Abas: some do slot (e o próximo clique no >_ abre outra).
   const alive = useTabsStore((s) => (tabId ? s.tabs.some((tab) => tab.id === tabId) : false));
 
   const measure = useCallback(() => {
-    const el = slotRef.current;
-    const base = el?.closest(`[${CHAT_SHELL_ATTR}]`);
-    if (!el || !base || !tabId || !alive) return setChatShell(null);
-    const r = el.getBoundingClientRect();
-    const b = base.getBoundingClientRect();
-    setChatShell({ tabId, rect: { left: Math.round(r.left - b.left), top: Math.round(r.top - b.top), width: Math.round(r.width), height: Math.round(r.height) } });
+    const rect = rectInShell(slotRef.current);
+    if (!rect || !tabId || !alive) return setChatShell(null);
+    setChatShell({ tabId, rect });
   }, [tabId, alive]);
 
   useLayoutEffect(() => measure());
@@ -286,7 +303,7 @@ function ShellSurface({ cwd }: { cwd: string }) {
         <span className="flex-1 min-w-0 truncate font-mono text-chat-caption" title={cwd}>{cwd}</span>
       </div>
       <div className="flex-1 min-h-0 p-2 bg-white dark:bg-black">
-        <div ref={slotRef} data-chat-shell={tabId ?? ""} className="h-full" />
+        <div ref={slotRef} data-chat-shell-slot={tabId ?? ""} className="h-full" />
       </div>
     </section>
   );
@@ -309,12 +326,9 @@ function BrowserSurface({ cwd }: { cwd: string }) {
   }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- um navegador por pasta, criado uma vez
 
   const measure = useCallback(() => {
-    const el = slotRef.current;
-    const base = el?.closest(`[${CHAT_SHELL_ATTR}]`);
-    if (!el || !base || !viewId) return setChatBrowser(null);
-    const r = el.getBoundingClientRect();
-    const b = base.getBoundingClientRect();
-    setChatBrowser({ viewId, rect: { left: Math.round(r.left - b.left), top: Math.round(r.top - b.top), width: Math.round(r.width), height: Math.round(r.height) } });
+    const rect = rectInShell(slotRef.current);
+    if (!rect || !viewId) return setChatBrowser(null);
+    setChatBrowser({ viewId, rect });
   }, [viewId]);
 
   useLayoutEffect(() => measure());

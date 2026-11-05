@@ -31,6 +31,14 @@ export function isSettingsRoute(pathname: string): boolean {
   return pathname === "/settings" || pathname.startsWith("/settings/");
 }
 
+/**
+ * Uma rota de tela cheia de verdade: a prancheta (`/design/:id`) ocupa a janela toda, sem a sidebar de Espaços (que
+ * aparecia por cima dela) e com «Sair da tela cheia» sempre à vista. Pura.
+ */
+export function isFullscreenRoute(pathname: string): boolean {
+  return pathname.startsWith("/design/");
+}
+
 /** O espaço da rota aberta (o detalhe de uma skill é Skills; os registries, Marketplace). */
 export function spaceForPath(pathname: string): ChatSpace | null {
   if (isSettingsRoute(pathname)) return null;

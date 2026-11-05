@@ -30,8 +30,12 @@ export function runnableCommand(lang: string | null, code: string): string | nul
   return text.trim() ? text : null;
 }
 
-/** A aba de shell da pasta da conversa, se já houver (é reaproveitada, como o navegador da pasta). */
-export function findShellTab(tabs: readonly Pick<Tab, "id" | "agentId" | "cwd">[], cwd: string): string | null {
+/**
+ * A aba de shell da pasta da conversa, se já houver (é reaproveitada, como o navegador da pasta). Com `command`, só a
+ * que roda esse comando (o shell de login): a aba bash que o >_ abria antes fica onde está, sem virar o terminal da
+ * conversa.
+ */
+export function findShellTab(tabs: readonly (Pick<Tab, "id" | "agentId" | "cwd"> & { command?: string })[], cwd: string, command: string | null = null): string | null {
   const want = comparablePath(cwd);
-  return tabs.find((t) => t.agentId === SHELL_AGENT_ID && comparablePath(t.cwd) === want)?.id ?? null;
+  return tabs.find((t) => t.agentId === SHELL_AGENT_ID && comparablePath(t.cwd) === want && (command === null || t.command === command))?.id ?? null;
 }

@@ -7,7 +7,7 @@ import { hasBrowserMcp } from "@/features/browser/tabMcp";
 import { ScmPanel } from "@/features/scm/ScmPanel";
 import { ConnectorsSection, ContextSection } from "@/features/sidePanel/AgentSections";
 import { folderLabel, shortTokens } from "@/features/sidePanel/panelModel";
-import { Row, Section } from "@/features/sidePanel/Section";
+import { Row, Section, SectionsInOneCard } from "@/features/sidePanel/Section";
 import { PR_STATE, usePulls } from "@/features/sidePanel/SessionPanel";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -27,25 +27,9 @@ import { useConversationTimeline } from "../timeline/useConversationTimeline";
 import type { TimelineItem } from "../timeline/types";
 import { useWorkingDiff } from "../useWorkingDiff";
 import { LimitsCard } from "./LimitsCard";
-import { SUMMARY_W } from "./summaryLayout";
 import { connectorsOf, contextOf, diffTotals, filesFromHandoffs, memoryConnectorOf, outputsFromItems, pickOutputs, type OutputFile } from "./summaryModel";
 
 const EMPTY_ITEMS: TimelineItem[] = [];
-
-/**
- * O espaço do Resumo solto ao lado da conversa (320 px, do cabeçalho ao pé). É uma coluna flex de altura
- * FIXA pelas bordas (`top`/`bottom`): sem isso o `flex-1` do Resumo não vale, ele cresce com o conteúdo, passa
- * da altura e a roda não rola (a barra é escondida, mas a rolagem tem de existir).
- */
-export function SummaryDock({ children, overlay = false }: { children: React.ReactNode; overlay?: boolean }) {
-  // Por cima da conversa (janela estreita) o Resumo ganha fundo, borda e sombra para ler sobre o texto, e nunca passa da largura da janela.
-  return (
-    <div data-summary-dock={overlay ? "overlay" : ""} style={{ width: SUMMARY_W, maxWidth: "calc(100% - 24px)" }}
-      className={`absolute top-[52px] right-3 z-20 flex flex-col min-h-0 ${overlay ? "bottom-3 rounded-2xl bg-white dark:bg-surface-deep shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-12px_rgba(0,0,0,0.45)]" : "bottom-0"}`}>
-      {children}
-    </div>
-  );
-}
 
 /** Os itens da conversa: da timeline da aba (TUI) ou dos eventos da conversa por protocolo. */
 function useConversationItems(conversation: ConversationCard | null): TimelineItem[] {
@@ -62,14 +46,19 @@ function useConversationItems(conversation: ConversationCard | null): TimelineIt
  * Limites de uso, Conectores, Saídas e Alterações. Os dados são os que o ADE já tem (git, forge, transcript, config dos
  * MCPs); o que não tem fonte fica de fora ou como "não medido", nunca inventado.
  */
-export function SummaryPane({ conversation, cwd, tabId }: { conversation: ConversationCard | null; cwd: string | null; tabId: string | null }) {
+export function SummaryPane({ conversation, cwd, tabId, inCard = false }: {
+  conversation: ConversationCard | null; cwd: string | null; tabId: string | null;
+  /** Dentro do cartão flutuante: as seções viram blocos com divisórias, sem um cartão cada (como o do Claude Code). */
+  inCard?: boolean;
+}) {
   const { t } = useTranslation();
   // A aba da conversa (TUI): tem sessão e config, e os cartões de Contexto e Conectores leem o disco. A
   // conversa por protocolo não tem aba: esses dois cartões usam o que o app recebe dos eventos.
   const tab = useTabsStore((s) => s.tabs.find((x) => x.id === conversation?.tabId) ?? null);
   if (!conversation || !cwd) return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.summary.none")}</p>;
   return (
-    <div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">
+    <SectionsInOneCard.Provider value={inCard}>
+    <div className={inCard ? "flex-1 min-h-0 cc-scroll-hidden py-1 flex flex-col" : "flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3"}>
       <EnvironmentCard conversation={conversation} cwd={cwd} />
       {tab ? <ContextSection tab={tab} flat /> : <ThreadContextCard conversation={conversation} />}
       <LimitsCard conversation={conversation} />
@@ -77,6 +66,7 @@ export function SummaryPane({ conversation, cwd, tabId }: { conversation: Conver
       <OutputsCard conversation={conversation} cwd={cwd} />
       <ChangesCard conversation={conversation} cwd={cwd} tabId={tabId} />
     </div>
+    </SectionsInOneCard.Provider>
   );
 }
 

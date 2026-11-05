@@ -62,7 +62,7 @@ pub fn items_of(item: &Value, at: Option<i64>) -> Vec<Item> {
             if text.is_empty() {
                 return Vec::new();
             }
-            vec![Item { text: Some(clip(&text.join("\n\n"), TEXT_MAX)), ..Item::new(ItemKind::User, id, at) }]
+            vec![Item { text: Some(super::handoff::clip_user(&text.join("\n\n"), TEXT_MAX)), ..Item::new(ItemKind::User, id, at) }]
         }
         "agentMessage" => {
             let text = str_of(item, "text").unwrap_or("");

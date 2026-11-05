@@ -17,6 +17,28 @@ pub const DEFAULT_BUDGET: usize = 64_000;
 /// A última linha do resumo; a tela a usa para esconder o bloco e mostrar só a fala da pessoa.
 pub const END_MARK: &str = "[fim do contexto da conversa anterior]";
 
+/// O texto de uma fala da pessoa como ela é GRAVADA na timeline, em até `max` caracteres, sem perder a fala dela.
+///
+/// A primeira mensagem depois de trocar de agente leva o resumo da conversa anterior na frente (até ~64 KB, ver
+/// [`DEFAULT_BUDGET`]). Cortada pelo fim, como as outras, a gravação perdia a marca [`END_MARK`] e tudo o que a
+/// pessoa escreveu: a tela escondia o item (uma injeção `[ADE AGS]` sem fim) e o balão otimista ficava «Na fila» até
+/// sumir. Aqui quem encolhe é o resumo; a marca e a fala ficam. O agente recebe o texto inteiro: só a gravação é
+/// cortada. Pura.
+pub fn clip_user(text: &str, max: usize) -> String {
+    let text = text.trim();
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let Some(at) = text.find(END_MARK) else { return clip(text, max) };
+    let (head, tail) = text.split_at(at);
+    let tail_chars = tail.chars().count();
+    // Sem lugar nem para a marca: fica só a fala da pessoa.
+    if tail_chars + 2 >= max {
+        return clip(&tail[END_MARK.len()..], max);
+    }
+    format!("{}\n{tail}", clip(head.trim_end(), max - tail_chars - 1))
+}
+
 const START_MARK: &str = "[ADE AGS] Contexto da conversa anterior";
 const SNIPPET: usize = 1_200;
 const MAX_FILES: usize = 30;
