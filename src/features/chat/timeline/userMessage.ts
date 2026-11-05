@@ -7,7 +7,11 @@
  * - o resumo da conversa anterior, que vai na frente da primeira mensagem depois de trocar de agente: some só ele;
  * - o resumo do time colado na frente do que a pessoa digitou (`rosterNotice` + linha em branco +
  *   texto): some só o resumo;
- * - o prefixo do seletor "Só o orquestrador" (`LEAD_ONLY_PREFIX`): some, fica o texto da pessoa.
+ * - o prefixo do seletor "Só o orquestrador" (`LEAD_ONLY_PREFIX`): some, fica o texto da pessoa;
+ * - o aviso que o backend põe na frente do envio quando o turno anterior caiu com ferramenta sem resultado
+ *   (`[Aviso do ADE AGS, não da pessoa] TOOL_OUTCOME_UNKNOWN…`, `conversa/resume.rs`): some (a timeline já o mostra
+ *   como aviso próprio). Sem isso a fala aparecia com o aviso colado e o balão otimista não achava o eco: ficava
+ *   «Na fila» no fim da timeline até sumir.
  *
  * `[Mensagem de X via ADE AGS]` NÃO é injeção: é o envelope de outro agente, tratado por
  * `peerEnvelope.ts` como balão do remetente. Puro.
@@ -16,6 +20,8 @@
 /** A última linha do resumo que a conversa leva ao trocar de agente (`conversa/handoff.rs::END_MARK`). */
 const HANDOFF_END = "[fim do contexto da conversa anterior]";
 const INJECTION = /^\s*\[ADE AGS\]/;
+/** O aviso do backend antes do texto (`resume::unknown_outcome_note`): um parágrafo, até a primeira linha em branco. */
+const BACKEND_NOTE = /^\s*\[Aviso do ADE AGS, não da pessoa\][\s\S]*?(?:\n\s*\n|$)/;
 const LEAD_ONLY = /^\s*\[Só o orquestrador\][^\n]*(?:\n|$)/;
 /** Os fechos dos resumos do time que o composer cola na frente do texto da pessoa (`teamModel.rosterNotice`). */
 const ROSTER_TAILS = ["Use `ags team list` para ver o time.", "ligar agentes no painel Time.", HANDOFF_END];
@@ -30,7 +36,7 @@ export function isSystemInjection(text: string): boolean {
  * Injeção seguida de linha em branco só vira texto da pessoa se for o resumo do time conhecido.
  */
 export function displayUserText(text: string): string | null {
-  let out = text;
+  let out = text.replace(BACKEND_NOTE, "");
   if (isSystemInjection(out)) {
     const cut = out.search(/\n\s*\n/);
     const head = cut < 0 ? out : out.slice(0, cut);

@@ -388,8 +388,8 @@ depois disso a miniatura mostra "indisponível" (o caminho continua na mensagem)
 - **Perguntas.** O cartão «O agente fez uma pergunta» de uma conversa por protocolo responde ao clique enquanto a
   pergunta espera (as opções são botões); respondida, vira registro. Listas em texto do agente nunca viram botão.
   Em abas com TUI o cartão continua levando ao terminal.
-- **Rolagem.** O Resumo é o miolo (`flex-1 min-h-0`) da coluna do painel direito; sem isso o miolo crescia com o
-  conteúdo e a roda não rolava.
+- **Rolagem.** O Resumo é o miolo (`flex-1 min-h-0`) do cartão flutuante, que é uma coluna flex de altura limitada;
+  sem isso o miolo crescia com o conteúdo e a roda não rolava.
 - **Composer.** A altura segue o texto e também a largura da caixa (`ResizeObserver`): abrir o painel direito
   refaz a altura sem digitar.
 
@@ -424,14 +424,23 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
 
 ## Acabamento (build local do PR 270/271)
 
-- **Resumo.** É uma aba do painel direito, numa coluna própria (`RightPanel`, `summaryLayout.ts`): 360 px fixos, sem alça de
-  arrastar, encolhendo até 280 px. Antes ele flutuava dentro da conversa: numa janela de ~1000 px passava POR CIMA do
-  texto, e com outra superfície (simulador, navegador, terminal) sumia. Agora empurra a conversa e, com outra superfície,
-  é a outra aba do mesmo painel, a um clique na fileira de ícones.
+- **Resumo.** É um cartão flutuante, como o do Claude Code (`summary/SummaryPopover.tsx`, `useChatStore.summaryOpen`): ancorado
+  logo abaixo do ícone dele, alinhado à direita, com 380 px, cantos arredondados, borda e sombra. Fica POR CIMA da conversa,
+  sem empurrar o layout nem mexer no painel direito: o simulador, o navegador e o terminal continuam no lugar. Fecha com
+  clique fora, com Esc (o foco volta ao ícone) e ao trocar de conversa; ao abrir, o foco entra no cartão. Com o painel
+  maximizado, abrir o Resumo restaura o painel antes, para o cartão flutuar sobre a conversa e não sobre o simulador ou o
+  navegador, que são nativos. Não é mais aba do painel: um `summary` lembrado de antes reabre o painel fechado. Antes ele
+  ficava fixo dentro da conversa e, numa janela de ~1000 px, cobria o texto; com outra superfície aberta, sumia.
 - **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
   conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
   (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de
   fechar o painel.
+- **A fala depois de trocar de agente.** A primeira mensagem depois da troca leva o resumo da conversa anterior na frente
+  (até ~64 KB). A gravação cortava em 20 000 caracteres pelo fim: perdia a marca de fim do resumo e a fala da pessoa. A
+  tela escondia o item, e o balão otimista ficava «Na fila» no fim da timeline até sumir. Agora `handoff::clip_user`
+  encolhe o resumo e preserva a marca e a fala; o agente sempre recebeu o texto inteiro. A tela também tira da fala o
+  aviso `[Aviso do ADE AGS, não da pessoa] TOOL_OUTCOME_UNKNOWN…`, que já aparece como aviso próprio
+  (`userMessage.ts`). Antes, ele colava na fala e impedia o balão de achar o eco.
 - **Conta da conversa.** Fica dentro do seletor de agente/modelo, no rodapé do popover (`AgentModelPicker.accountSlot`,
   `ThreadAccountMenu`), e não como um seletor solto no composer entre o modelo e o esforço.
 - **Ações sob a mensagem.** Hora relativa («há 24 minutos») e botões só ao passar o mouse ou focar (`MessageActions`): copiar

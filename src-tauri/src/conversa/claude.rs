@@ -22,7 +22,6 @@ use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::canal::event::clip;
 use crate::canal::timeline::{Item, ItemKind};
 use crate::database::DbConnection;
 
@@ -537,7 +536,7 @@ fn resolve_rpc(app: &AppHandle, db: &DbConnection, session: &Session, request_id
 pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, images: Vec<Value>) -> Result<(), String> {
     session.send(&claude_map::user_message_with(text, images))?;
     let turn = begin_turn(app, db, session);
-    let item = Item { text: Some(clip(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
+    let item = Item { text: Some(super::handoff::clip_user(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
     save_items(app, db, &session.thread_id, Some(&turn), vec![item]);
     Ok(())
 }
