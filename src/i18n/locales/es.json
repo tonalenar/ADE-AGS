@@ -4558,6 +4558,11 @@
   "chat.message.copied": "Copiado",
   "chat.message.edit": "Editar y reenviar",
   "chat.message.editHint": "Devuelve el texto al cuadro de mensaje para que lo edites y lo reenvíes",
+  "chat.code.run": "Ejecutar",
+  "chat.code.runHint": "Ejecutar en la terminal de la conversación",
+  "chat.code.copy": "Copiar código",
+  "chat.shell.label": "Terminal de la conversación",
+  "chat.shell.title": "Terminal",
   "chat.summary.limits.others": "Otras cuentas conectadas ({{count}})",
   "chat.summary.limits.usedBy": "usada por {{who}}"
 }

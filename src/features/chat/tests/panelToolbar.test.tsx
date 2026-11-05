@@ -14,10 +14,13 @@ vi.mock("../devicesIpc", () => ({ devicesShare: () => Promise.resolve() }));
 import { PanelToolbar } from "../PanelToolbar";
 import { RightPanel } from "../RightPanel";
 import { useChatStore } from "../store";
+import type { ConversationCard } from "../chatModel";
+import { useTabsStore } from "@/features/tabs/store";
 
 let root: Root;
 let host: HTMLDivElement;
-const mountToolbar = (terminalAvailable = false) => act(async () => { root.render(<PanelToolbar tabId="tab-1" terminalAvailable={terminalAvailable} />); });
+const mountToolbar = (terminalAvailable = false, drawerTabId: string | null = "tab-1") =>
+  act(async () => { root.render(<PanelToolbar drawerTabId={drawerTabId} terminalAvailable={terminalAvailable} />); });
 const icon = (name: string) => host.querySelector(`[role=toolbar] [aria-label="${name}"]`) as HTMLButtonElement | null;
 const click = (el: Element | null) => act(async () => { (el as HTMLElement).click(); });
 
@@ -61,6 +64,18 @@ describe("a fileira de ícones (no cabeçalho principal)", () => {
     expect(useChatStore.getState().terminalOpen["tab-1"]).toBe(false);
   });
 
+  it("sem gaveta (conversa por protocolo), o terminal abre e fecha a aba Terminal do painel", async () => {
+    await mountToolbar(true, null);
+    const terminal = icon("chat.panel.open.terminal")!;
+    expect(terminal.disabled).toBe(false);
+    await click(terminal);
+    expect(useChatStore.getState().panel).toBe("shell");
+    expect(icon("chat.panel.open.terminal")!.getAttribute("aria-pressed")).toBe("true");
+    expect(useChatStore.getState().terminalOpen).toEqual({});
+    await click(icon("chat.panel.open.terminal"));
+    expect(useChatStore.getState().panel).toBeNull();
+  });
+
   it("o ⋯ abre Design, Android, Time e PR com as mesmas teclas", async () => {
     await mountToolbar();
     await click(host.querySelector("[aria-label='chat.panel.more']"));
@@ -98,6 +113,22 @@ describe("o \"expandir\" do painel mora no ⋯ do cabeçalho principal", () => {
 
 describe("o dock (coluna com borda) só abriga as outras superfícies", () => {
   const mountDock = () => act(async () => { root.render(<RightPanel tabId="tab-1" cwd="/repo" project="repo" conversation={null} cards={[]} />); });
+
+  it("a aba Terminal abre um shell na pasta da conversa, sem trocar a conversa aberta, e reaproveita o da pasta", async () => {
+    useTabsStore.setState({ tabs: [], activeTabId: "tab-1" });
+    useChatStore.setState({ panel: "shell", shell: null });
+    const conversation = { tabId: "thread:t1", agentId: "cursor", cwd: "/repo" } as unknown as ConversationCard;
+    await act(async () => { root.render(<RightPanel tabId={null} cwd="/repo" project="repo" conversation={conversation} cards={[]} />); });
+    const shells = useTabsStore.getState().tabs.filter((t) => t.agentId === "bash");
+    expect(shells.map((t) => t.cwd)).toEqual(["/repo"]);
+    expect(useTabsStore.getState().activeTabId).toBe("tab-1");
+    expect(host.querySelector(`[data-chat-shell="${shells[0]!.id}"]`)).not.toBeNull();
+    // O terminal não é montado no painel: o `TerminalPanel` o desenha por cima do slot.
+    expect(host.querySelector(".xterm")).toBeNull();
+    await act(async () => { root.render(<div />); });
+    await act(async () => { root.render(<RightPanel tabId={null} cwd="/repo" project="repo" conversation={conversation} cards={[]} />); });
+    expect(useTabsStore.getState().tabs.filter((t) => t.agentId === "bash")).toHaveLength(1);
+  });
 
   it("com o Resumo à vista não há coluna nenhuma", async () => {
     await mountDock();

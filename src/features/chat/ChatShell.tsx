@@ -32,6 +32,8 @@ import { setInboxOpen, usePermissions } from "./permissions/permissionsStore";
 import { startQueueRunner } from "./queueRunner";
 import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
+import { runInShell } from "./shellTerminal";
+import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
 import { SummaryDock, SummaryPane } from "./summary/SummaryPane";
@@ -93,6 +95,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const active = composing ? null : threadCard ?? cards.find((c) => c.tabId === activeTabId) ?? null;
   const activeThread = active ? threads.find((th) => th.id === threadIdOf(active.tabId)) ?? null : null;
   const diffs = useFolderDiffs(cards);
+  const activeCwd = active?.cwd ?? null;
+  const runCode = useMemo(() => (activeCwd ? (command: string) => runInShell(activeCwd, command) : null), [activeCwd]);
 
   useEffect(() => startChatLive(), []);
   useEffect(() => startStructured(), []);
@@ -181,7 +185,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             {/* O seletor fica aqui (não cabe no cabeçalho da barra lateral) e nunca encolhe: o breadcrumb é que cede. */}
             <ShellModeSwitch className="shrink-0" />
             {/* A fileira de ícones do painel, como no Claude Code: Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e ⋯. */}
-            <PanelToolbar tabId={activeThread ? null : active?.tabId ?? null} terminalAvailable={!!active && !activeThread && hasTimeline(active.agentId)} />
+            {/* O >_ alterna a gaveta do agente (TUI com timeline) ou abre a aba Terminal do painel (um shell na pasta). */}
+            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} />
             <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
             {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
             {!panelOpen && <WindowControls className="-mr-3" />}
@@ -190,8 +195,11 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
           {/* A conversa cede o lado direito ao Resumo (solto, sem coluna); sem lugar, o Resumo some. */}
           <div className="flex-1 min-h-0 flex flex-col" style={{ paddingRight: inset }}>
             <AttachCwdContext.Provider value={active?.cwd ?? null}>
+              {/* O «Rodar» dos blocos de código vai ao terminal da pasta da conversa aberta. */}
+              <RunCodeContext.Provider value={runCode}>
               {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} cards={cards} />
                 : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
+              </RunCodeContext.Provider>
             </AttachCwdContext.Provider>
           </div>
           <DropOverlay />

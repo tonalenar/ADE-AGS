@@ -11,6 +11,7 @@ import { useChatWidthClass } from "../chatLook";
 import { PlanCard } from "../LiveActivity";
 import { setRightPanel } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
+import { renderChatCodeBlock } from "./CodeBlockFrame";
 import { parsePeerEnvelope, senderAgent } from "./peerEnvelope";
 import { speakerHeaders } from "./speakers";
 import type { PendingSend } from "./pending";
@@ -252,7 +253,7 @@ function UserMessage({ item }: { item: TimelineItem }) {
   if (!peer) return <PersonBubble text={text} at={item.at} />;
   return (
     <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body}>
-      <Markdown content={peer.body} tone="chat" />
+      <Markdown content={peer.body} tone="chat" renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
@@ -268,7 +269,7 @@ function AgentText({ item }: { item: TimelineItem }) {
   const [entering] = useState(() => reveal.entering(item.id));
   return (
     <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""}>
-      <Markdown content={text} tone="chat" />
+      <Markdown content={text} tone="chat" renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
