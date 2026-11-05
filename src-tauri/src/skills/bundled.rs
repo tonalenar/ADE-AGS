@@ -29,7 +29,15 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 /// Carpetas dentro de `skills/` del repo que se empaquetan con la app.
-pub(super) const BUNDLED: &[&str] = &["ags-orchestrator"];
+///
+/// `jev-sim-use` e `agent-desktop` são de terceiros, copiadas numa tag fixa e conferidas por hash
+/// (`skills/vendor.lock.json`, `scripts/vendor-skills.ts`): a versão nova só chega com uma versão nova da app.
+pub(super) const BUNDLED: &[&str] = &["ags-orchestrator", "jev-sim-use", "agent-desktop"];
+
+/// As de computer use nascem ligadas para todos os agentes (`always`): sem isso a pessoa teria de anexá-las projeto
+/// a projeto, e o pedido "mexe no simulador" chegaria a um agente que não as conhece. Desligar no painel vale para
+/// sempre, inclusive nas atualizações.
+pub(super) const ALWAYS_ON: &[&str] = &["jev-sim-use", "agent-desktop"];
 
 /// Se guarda como si viniera de un repositorio llamado "ADE AGS": le da su propio
 /// bucket en el store (no se mezcla con las que el usuario instaló a mano) y hace que la
@@ -82,7 +90,8 @@ pub(super) fn decide(previous: Option<&Provisioned>, installed_version: Option<&
 pub fn ensure_bundled_skills(app: &AppHandle, db: &DbConnection) {
     for name in BUNDLED {
         let result = match bundled_dir(app, name) {
-            Some(source) => ensure_one(db, name, &source),
+            // Com terminal aberto (agente ou missão), a atualização espera a próxima abertura da app.
+            Some(source) => ensure_one_when(db, name, &source, !crate::terminal::live_update_tabs().is_empty()),
             None => Err("no se encontró la carpeta empaquetada".to_string()),
         };
         if let Err(e) = result {
@@ -93,7 +102,14 @@ pub fn ensure_bundled_skills(app: &AppHandle, db: &DbConnection) {
 
 /// Separado de la resolución de rutas para poder ejercitarlo sin un `AppHandle`: acá está
 /// todo lo que toca el disco del usuario y su base, que es lo que vale la pena probar.
+#[cfg(test)]
 pub(super) fn ensure_one(db: &DbConnection, name: &str, source: &Path) -> Result<(), String> {
+    ensure_one_when(db, name, source, false)
+}
+
+/// `terminals_open`: há PTY vivo agora. A instalação segue (não há o que trocar por baixo de ninguém); a atualização
+/// fica para a próxima abertura, porque trocar a skill sob um agente que já a leu deixaria a sessão com duas versões.
+pub(super) fn ensure_one_when(db: &DbConnection, name: &str, source: &Path, terminals_open: bool) -> Result<(), String> {
     let skill_md = source.join("SKILL.md");
     let (meta, _) = scan_skill_file(&skill_md)
         .ok_or_else(|| format!("no se pudo leer {}", skill_md.display()))?;
@@ -109,6 +125,10 @@ pub(super) fn ensure_one(db: &DbConnection, name: &str, source: &Path) -> Result
         Action::Skip => return Ok(()),
 
         Action::Update => {
+            if terminals_open {
+                eprintln!("[ade-ags] skill incluida '{name}': há terminais abertos; a atualização fica para a próxima abertura");
+                return Ok(());
+            }
             let (id, old_version) = installed.expect("Update solo sale con fila instalada");
             let dest = PathBuf::from(&previous.expect("hay fila, hubo registro").path);
             update_in_place(db, &id, source, &dest, &meta, &version)?;
@@ -135,6 +155,9 @@ pub(super) fn ensure_one(db: &DbConnection, name: &str, source: &Path) -> Result
                 Provisioned { version: version.clone(), path: info.source_path },
             );
             write_provisioned(db, &provisioned)?;
+            if ALWAYS_ON.contains(&name) {
+                super::always::enable_on_install(db, &info.id)?;
+            }
             eprintln!("[ade-ags] skill incluida '{name}' instalada (v{version})");
         }
     }
@@ -192,10 +215,20 @@ fn update_in_place(
     meta: &super::types::SkillFrontmatter,
     version: &str,
 ) -> Result<(), String> {
+    // Copia ao lado e troca com dois renames: quem ler a skill no meio vê a versão velha ou a nova, nunca a metade.
+    let staging = dest.with_extension("ade-new");
+    let old = dest.with_extension("ade-old");
+    let _ = std::fs::remove_dir_all(&staging);
+    let _ = std::fs::remove_dir_all(&old);
+    copy_dir_recursive(source, &staging).map_err(|e| e.to_string())?;
     if dest.exists() {
-        std::fs::remove_dir_all(dest).map_err(|e| e.to_string())?;
+        std::fs::rename(dest, &old).map_err(|e| e.to_string())?;
     }
-    copy_dir_recursive(source, dest).map_err(|e| e.to_string())?;
+    if let Err(e) = std::fs::rename(&staging, dest) {
+        let _ = std::fs::rename(&old, dest);
+        return Err(e.to_string());
+    }
+    let _ = std::fs::remove_dir_all(&old);
 
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(

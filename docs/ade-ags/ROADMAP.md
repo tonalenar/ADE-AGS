@@ -35,6 +35,18 @@ Backend com detecção de versão, status e leitura de bastões/páginas por sub
 
 Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. `ags desk act` (tela do Mac, com consentimento por objetivo) e o reconhecimento de conversas por protocolo em `sim act`/`desk act` entraram em seguida; árvore AX e navegador externo continuam pendentes. Para todos os agentes: tools MCP `sim_act`/`desk_act` com a mesma autorização da CLI, prazo único do `act` (115 s, `timeout` até 1.800) também no `browser_act`, aviso de sandbox no lugar de "reinicie o app", skill chegando ao Antigravity (`.agents/skills`) e o sandbox do Codex medido (a liberação estreita do socket depende de feature experimental; aplicar é decisão do usuário). A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
 
+## Skills de computer use embutidas e o simulador mais firme
+
+`jev-sim-use` (0.4.2) e `agent-desktop` (v1.2.0) vêm com o app, fixadas por tag, commit e SHA-256, e se atualizam com ele. Nascem ligadas para todos os agentes pela chave nova "Ativa em todos os agentes" do painel de Skills. Elas complementam o `act` nativo: leem a árvore de acessibilidade e cobrem o Android; a ação continua no `act`, com confirmação e privacidade. Detalhe em [SKILLS_TERCEIROS.md](./SKILLS_TERCEIROS.md).
+
+No `sim act`:
+- um alvo sob o teclado, sob a barra flutuante ou cortado na borda leva primeiro uma rolagem (`reveal`);
+- tocar numa tecla sempre pede a pessoa;
+- `--expect visual:changed|darker|lighter` confere pelos pixels (o tema que só troca a paleta);
+- `report.effects` mostra o efeito de cada ação.
+
+No painel Decisões, a concordância deixou de contar os pontos sem heurística, que derrubavam o número para 1%.
+
 ## CLIs fora do PATH e instalação pela ADE
 
 No macOS a lista e o terminal acham o Claude do aplicativo e o `cursor-agent` sem estarem no PATH. O Cursor entra na fábrica sem sessão, conta isolada nem MCP. A tela de Agentes instala Codex, Gemini e Kimi com o comando npm/bun já fixo; Claude, OpenCode, Hermes, Cursor e Antigravity só mostram o comando, sem executá-lo. Detalhe em [AGENT_UPDATES.md](./AGENT_UPDATES.md).

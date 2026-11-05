@@ -43,6 +43,10 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
 5. Os testes de contrato em `ipc/test.rs` leem esses arquivos com `include_str!`: um comando que a CLI oferece e ninguém atende quebra o teste.
 6. Atualize `skills/ags-orchestrator/SKILL.md` (e a versão dela) e rode `bun run gen:catalogs`: o índice de comandos e a lista de tools da skill, da ajuda e deste doc são regiões geradas (`BEGIN/END GENERATED`), conferidas por `bun run check:catalogs`.
 
+## Skills embutidas
+- `ags-orchestrator` é nossa: mude o `SKILL.md` e suba a versão.
+- `jev-sim-use` e `agent-desktop` são de terceiros, fixadas em `skills/vendor.lock.json`. **Não as edite à mão**, fora o bloco `ADE AGS:BEGIN/END`. Para atualizar, use `bun scripts/vendor-skills.ts --update <nome> --tag <tag> --commit <sha>`; o teste de hash quebra com qualquer outra mudança. Detalhe em [`SKILLS_TERCEIROS.md`](../ade-ags/SKILLS_TERCEIROS.md).
+
 ## MCP
 - `ags mcp --cwd <pasta> [--tab id] [--mission id] [--role]` serve as abas interativas; `ags mcp --task <id>` serve as tasks da frota.
 - É JSON-RPC 2.0 por stdio, e funciona como ponte: cada `tools/call` vira um `Request` do mesmo protocolo.

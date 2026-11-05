@@ -18,6 +18,8 @@ pub(super) struct Shot {
     pub revision: String,
     /// O quadro que a foto pegou: (id da superfície, seed).
     pub frame: (u32, u32),
+    /// A grade de brilho dos pixels crus, para medir o efeito de uma ação (`visual`).
+    pub thumb: Option<super::visual::Thumb>,
 }
 
 /// O lado maior do PNG que vai ao decisor (o mesmo `sips -Z 1200` de antes).
@@ -346,8 +348,9 @@ mod mac {
     pub(in crate::computer_use) fn ios_shot(udid: &str, out: &Path) -> Result<Shot, String> {
         let mut pixels = surface(udid)?.pixels()?;
         let revision = pixel_revision(udid, pixels.width, pixels.height, &pixels.data);
+        let thumb = super::super::visual::thumb_from_bgra(&pixels.data, pixels.width, pixels.height);
         png_from_bgra(&mut pixels.data, pixels.width, pixels.height, out, MAX_SIDE)?;
-        Ok(Shot { path: out.to_path_buf(), revision, frame: (pixels.surface, pixels.seed) })
+        Ok(Shot { path: out.to_path_buf(), revision, frame: (pixels.surface, pixels.seed), thumb })
     }
 
     pub(in crate::computer_use) fn ios_revision(udid: &str) -> Result<String, String> {
@@ -399,7 +402,7 @@ mod mac {
 #[cfg(target_os = "macos")]
 pub(super) use mac::{downscale, ios_changed, ios_quiet, ios_revision, ios_shot, ocr, warm_ocr};
 #[cfg(all(test, target_os = "macos"))]
-use mac::read_text;
+pub(super) use mac::read_text;
 #[cfg(all(test, target_os = "macos"))]
 use mac::ios_frame;
 #[cfg(target_os = "macos")]

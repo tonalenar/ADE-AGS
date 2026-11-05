@@ -89,6 +89,8 @@ Todos nascem **desligados**.
   - `blind_rate`;
   - provedor A × B e cada um contra o humano;
   - exportação em CSV.
+- **Concordância só onde há heurística.** `browser_step` e `browser_vision` decidem sem regra local: a coluna `heuristic` guarda metadados (`foto_enviada=true superficie=ios rotulos=23`), e comparar isso com a decisão daria sempre "discorda". O resumo (`shadowSummary`, `NO_HEURISTIC` em `decisionsModel.ts`) e o cartão do ponto deixam esses dois fora da concordância; erros e latência continuam contando. Antes, com o computer use em uso, o resumo mostrava 1% (2 de 199): numa cópia do banco em 2026-11-05, havia 203 linhas visuais e 4 do `delivery_gate`, com 2 iguais.
+- **`decisions.timeout_ms` (800) não vale para tudo.** Ele é o prazo dos pontos que ajudam (uma tentativa). O piloto usa o adaptativo (3×p95 + 400 ms, no mínimo 3 s sem amostras, teto 12 s). A visão usa no mínimo 8 s (`vision.rs`, `send`). Na mesma cópia do banco, não houve nenhum timeout: a visão chegou a 3,8 s e o `delivery_gate` ficou em no máximo 491 ms. Os 8 erros (4%) foram todos `falha_visual` antes do PR 290, a caixa com piso 0,85 que hoje é `unsure`.
 - **Scorecard da limpeza**: apagar pelo diálogo vira uma rejeição humana, o que mede o recall e os falsos alarmes do Jev.
 - **Promover** um ponto de sombra para ativo exige concordância ≥ 90%, p95 aceitável e revisão das discordâncias (`docs/decisoes/LAYA_LOCAL.md`). Ainda não há interruptor para isso.
 

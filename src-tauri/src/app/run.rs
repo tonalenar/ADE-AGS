@@ -634,6 +634,8 @@ pub fn run() {
             crate::skills::check_symlinks_health,
             crate::skills::sync_workspace_skills,
             crate::skills::reconcile_tab_skills,
+            crate::skills::list_always_on_skills,
+            crate::skills::set_skill_always_on,
             crate::skills::check_session_skills,
             crate::skills::restore_session_skills,
             crate::ipc::bridge::cli_respond,

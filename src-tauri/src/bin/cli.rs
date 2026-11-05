@@ -169,8 +169,10 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
                                               --expect text:|url:|count:|absent: confere o fim por código; sem ele o máximo é «não verificado»
 
 SIMULADOR IOS — nó conectado ao seu terminal; Jev e reserva visual habilitados
-  sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
+  sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho|visual:changed|darker|lighter]... [--steps 8] [--timeout 115]
                                               Foto + HID; confirmação de ações sensíveis na UI; --fill só no campo já focado
+                                              visual: confere os pixels contra a 1ª foto (tema que só troca a paleta); report.effects por ação
+                                              Alvo sob o teclado ou a barra: rola antes (scroll → reveal); tecla sempre pergunta à pessoa
                                               Um act por aparelho. Exit 0 só diz que veio o relatório: leia report.status
                                               (done · unverified · blocked · unsure · stuck · limit; blocked não se repete igual)
                                               --timeout inclui a pessoa responder a confirmação: com confirmação, use 300

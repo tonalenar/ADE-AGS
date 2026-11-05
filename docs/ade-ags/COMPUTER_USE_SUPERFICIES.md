@@ -15,6 +15,7 @@ Em Ajustes → Decisões, é necessário habilitar Jev, o piloto do navegador e 
 - `--timeout`: segundos, 10–1.800, padrão 115. **O prazo inclui o tempo de a pessoa responder a uma confirmação** (digitar, controle de risco, consentimento do Mac): com confirmação provável, use 300. O mesmo padrão e a mesma faixa valem para `portal act` e para as tools MCP (`browser_act`, `sim_act`, `desk_act`), por `ipc::mcp::act_timeout_secs`. O prazo é conferido entre fases, inclusive depois de OCR/diálogos. Uma operação nativa já iniciada tem prazo próprio (até 60 s no `simctl`) e pode terminar depois do orçamento. A CLI reserva mais 75 s para esse encerramento.
 - `--fill screen=valor`: um preenchimento no campo **já focado**. O modelo não gera texto. Usa o teclado US ASCII do HID existente; texto vazio, caracteres não suportados e controles (inclusive Enter/Tab) são recusados antes de agir. Não limpa automaticamente conteúdo anterior e não envia Enter.
 - `--expect text:trecho`: repetível, todos os trechos precisam aparecer no OCR local. `url:`, `count:` e `absent:` são recusados antes de agir: ainda não existe árvore AX no iOS. A verificação é textual e pode falhar por OCR.
+- `--expect visual:changed|darker|lighter` (só iOS; o `desk act` recusa): compara os pixels da foto atual com a primeira do `act`. Veja "Efeito por pixels".
 
 Apenas um `act` por vez: um por simulador e um no Mac (trava global); o segundo é recusado enquanto o primeiro roda.
 
@@ -131,7 +132,32 @@ Logo depois de abrir um app, o iOS ainda está desenhando e o OCR lê só o rel�
 
 **Gestos do iOS.** No iOS, o Jev pode escolher `swipe_left` e `swipe_right`, que são traços horizontais na altura do meio e longe das bordas, e `home`, que é o botão de início. Os três são da família de `scroll`, ação comum sem confirmação, cada um com seu alvo. No Mac eles não existem.
 
-O provedor escolhe somente operações e caixas tipadas. Operações desconhecidas, probabilidades ausentes/inválidas e caixas fora da imagem são recusadas. O núcleo mantém os pisos existentes de 0,4 para ação e 0,75 para conclusão; a caixa usa o piso visual de 0,85. O rótulo é avaliado por probabilidade, nunca pela confiança alternativa de uma escolha.
+**Alvo coberto (`computer_use/cover.rs`).** Antes de tocar, o driver confere se o texto que o Jev escolheu está numa zona coberta. As zonas vêm só do OCR local, das caixas da foto:
+
+| Zona | Como é reconhecida | O que conta como coberto |
+|---|---|---|
+| Teclado | pelo menos 6 teclas na metade de baixo (um caractere, `ABC`…`WXYZ` ou uma linha `QWERTYUIOP` lida junta) | o que fica abaixo do topo do teclado, com 0,06 de folga para a barra de sugestões |
+| Barra flutuante | a linha mais baixa de 3 ou mais rótulos curtos, com o centro abaixo de 0,80 e espalhados por 45% da largura | o que fica abaixo do topo dela, com 0,05 de folga para os ícones |
+| Borda | a base do texto em 0,985 ou mais | o próprio texto, cortado |
+
+O alvo coberto não é tocado. A ação vira `scroll` com alvo `reveal`: um traço lento (600 ms) que começa na área livre e sobe o conteúdo o quanto falta. Em seguida, o laço olha de novo. Se a tela não muda, o act termina `unsure`, sem tocar.
+
+Três casos são exceção:
+- Tocar no próprio rótulo da barra (uma aba) é normal.
+- Um ícone escolhido pela caixa desenhada não conta como coberto.
+- Tocar numa tecla digita sem `--fill`. Por isso pede a pessoa sempre, mesmo com "Sempre neste aparelho".
+
+Dados: o checkbox do Nutriton em y=756 sob a barra em y=757 (iPhone 17e, 852 pontos). Na foto real do teclado numérico do Nutriton, o OCR do Vision levou 399 ms para ler 29 textos. Ele achou o topo do teclado em 0,624, e as teclas começam em 0,684. Todas as teclas lidas pediram a pessoa, e nenhum campo de cima ficou coberto. Essa medição achou um defeito: a última linha (`PQRS TUV WXYZ`) passava por barra. A correção está no teste `ocr_real_do_teclado_numerico…`. A bancada é `COVER_PNG=<foto> cargo test --lib computer_use::cover::test::bancada -- --ignored --nocapture`.
+
+**Efeito por pixels (`computer_use/visual.rs`).** A foto nativa guarda uma grade de brilho de 24 × 48 células, tirada dos pixels crus antes do PNG. Leva menos de 1 ms. A grade fica local e nunca vai ao provedor.
+- `report.effects` traz, para cada ação, a fração de células que mudou (mais de 24 níveis de 255) e a variação do brilho médio.
+- `--expect visual:changed` vale com 2% de células mudadas em relação à primeira foto do act.
+- `visual:darker` e `visual:lighter` valem com uma variação de brilho de 0,08 ou mais.
+- Sem grade (foto pelo `simctl`, rotação), a expectativa visual nunca se cumpre: fica `unsure`/`limit`, não `done`.
+
+O caso medido foi o tema claro/escuro do Nutriton: o toque funcionou, mas um verificador só por estrutura (a árvore do `jev-sim-use`) relatou "nenhum efeito visível". No `act` nativo, a revisão já era o hash dos pixels, então o toque não parecia repetido. Faltava a prova de que mudou, e agora ela existe.
+
+O provedor escolhe somente operações e caixas tipadas. Operações desconhecidas, probabilidades ausentes/inválidas e caixas fora da imagem são recusadas. O núcleo mantém os pisos existentes de 0,4 para ação e 0,75 para conclusão; a caixa desenhada usa o piso visual de 0,6 (era 0,85 até o PR 290). O rótulo é avaliado por probabilidade, nunca pela confiança alternativa de uma escolha.
 
 Não há repetição automática de mutação depois de erro de transporte. A ação é registrada antes da execução, porque o SO pode aplicar o efeito e só depois retornar erro. A revisão estrita pode parar em telas animadas; a guarda não deve ser desativada. O histórico anticiclo do núcleo vale dentro do `act`, não é um livro-razão persistente entre chamadas.
 
@@ -152,6 +178,10 @@ Toda ação sensível ou de efeito incerto pede confirmação **por ação**. O 
 **Sempre neste aparelho (só iOS).** A pessoa pode autorizar de uma vez um simulador: a chave `computer_use.ios.trust.<udid>` fica em `settings` e vale entre sessões. Com ela, o JEV não pergunta mais naquele aparelho, exceto ao tocar num controle de risco (pagar, apagar, senha, sair, enviar…), que continua perguntando. Desligar "Permitir que agentes controlem dispositivos" no painel chama `computer_use_forget` e apaga todas essas chaves; fechar o painel ou o app não apaga. A marca de privacidade dos fills é outra chave e não some junto. O Mac não tem essa opção: a autorização dele é a pergunta no início de cada `desk act`.
 
 O log existente registra `browser_vision`, hash do objetivo, operação, probabilidade, latência e `foto_enviada=true superficie=<ios|desktop> rotulos=<n>` quando o transporte retorna uma resposta válida. Falha de envio registra `foto_envio_tentado=true`, sem afirmar recebimento. Não guarda pixels, OCR, valores digitados, caminho ou exceção crua. As capturas temporárias são removidas ao substituir/descartar a observação.
+
+## Skills de terceiros (`jev-sim-use`, `agent-desktop`)
+
+Elas vêm com o app e nascem ligadas para todos os agentes, mas não substituem o `act`. Elas leem a árvore de acessibilidade (simulador e Mac) e cobrem o Android. Toda ação com o Jev da ADE continua aqui, com confirmação, privacidade e um act por vez. A tabela de quando usar cada uma e as decisões em aberto estão em [SKILLS_TERCEIROS.md](SKILLS_TERCEIROS.md).
 
 ## Estado das outras superfícies
 

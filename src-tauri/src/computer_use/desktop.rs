@@ -248,6 +248,7 @@ impl Surface for DeskSurface {
             path,
             revision: revision.clone(),
             pick: None,
+            reveal: None,
         };
         self.authorize()
             .map_err(|_| "Autorização ou prazo expirou durante a captura.")?;
@@ -288,6 +289,7 @@ impl Surface for DeskSurface {
             revision,
             text,
             safe_for_provider: safe,
+            pixels: None,
             targets: vec![
                 target("screen", "Controle na foto atual", vec![Operation::Click, Operation::Type]),
                 target("scroll_up", "Rolar para baixo", vec![Operation::Scroll]),
@@ -413,6 +415,7 @@ pub(crate) fn act(
             reason: "A pessoa não autorizou o controle do Mac; nada foi observado.".into(),
             observations: 0,
             queries: 0,
+            effects: vec![],
         });
     }
     let frame = Arc::new(Mutex::new(Frame::default()));
@@ -436,6 +439,7 @@ pub(crate) fn act(
         allow_type: request.fills.contains_key("screen"),
         surface: "desktop",
         gestures: false,
+        reveal: false,
     };
     Ok(run(request, &mut surface, &mut decider))
 }
