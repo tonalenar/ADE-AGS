@@ -30,7 +30,11 @@ fn agent_name(app: &AppHandle, tab: &str) -> String {
 }
 
 fn udid_of(portal: &Portal) -> Result<String, String> {
-    portal.udid.clone().filter(|u| !u.is_empty()).ok_or_else(|| "Esse simulador ainda não tem aparelho escolhido: a pessoa escolhe na barra dele.".into())
+    let udid = portal.udid.clone().filter(|u| !u.is_empty()).ok_or("Esse simulador ainda não tem aparelho escolhido: a pessoa escolhe na barra dele.")?;
+    if crate::iphone::model::is_physical(&udid) {
+        return Err(crate::iphone::model::AGENTS_NOT_YET.into());
+    }
+    Ok(udid)
 }
 
 /// O tamanho da tela em pontos, como se vê (em paisagem, deitada: é o que o `shot` mostra), para `swipe --dir`

@@ -1,0 +1,5 @@
+// swift-interface-format-version: 1.0
+// swift-module-flags: -target arm64-apple-macos14.0 -enable-library-evolution -module-name CoreDeviceProtocols
+// Stub: o tipo mora no CoreDeviceUtilities, mangleado como CoreDeviceProtocols.
+import Swift
+public struct DeviceInfo {}
