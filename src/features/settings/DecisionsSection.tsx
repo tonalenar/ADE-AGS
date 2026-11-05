@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
+import { NO_HEURISTIC, POINT_MODE, shadowSummary, type PointMode } from "@/features/settings/decisionsModel";
 import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
@@ -501,12 +501,14 @@ export function DecisionsSection() {
                 </div>
                 <div className="grid grid-cols-3 gap-3 sm:grid-cols-6">
                   <Stat label={t("settings.decisions.col.total")} value={String(point.total)} />
-                  <Stat label={t("settings.decisions.agreement")} value={pct(point.agreementRate)} muted={point.lowSample} />
+                  <Stat label={t("settings.decisions.agreement")} value={NO_HEURISTIC.has(point.point) ? "—" : pct(point.agreementRate)} muted={point.lowSample} />
                   <Stat label={t("settings.decisions.latency")} value={`${point.p50Ms ?? "—"} / ${point.p95Ms ?? "—"} ms`} />
                   <Stat label={t("settings.decisions.errors")} value={pct(point.errorRate)} />
                   <Stat label={t("settings.decisions.timeouts")} value={pct(point.timeoutRate)} />
                 </div>
-                {point.lowSample && (
+                {NO_HEURISTIC.has(point.point) ? (
+                  <p className="mt-2 text-[12px] text-gray-500 dark:text-white/45">{t("settings.decisions.noHeuristic")}</p>
+                ) : point.lowSample && (
                   <p className="mt-2 text-[12px] text-amber-700 dark:text-amber-300">
                     {t("settings.decisions.lowSample", { have: point.compared, n: report.minSample })}
                   </p>
