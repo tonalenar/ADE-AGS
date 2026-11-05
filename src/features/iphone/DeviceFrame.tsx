@@ -43,11 +43,14 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
           ${pressed ? "bg-accent-500" : "bg-gray-400 dark:bg-surface-overlay hover:bg-gray-500 dark:hover:bg-gray-500"} disabled:opacity-60`}
         style={pos} />
       {hover && (
-        <span role="tooltip" className="pointer-events-none absolute z-20 whitespace-nowrap rounded-md px-2 py-1 text-[11px] font-medium
+        <span role="tooltip" className="pointer-events-none absolute z-20 w-max max-w-[calc(100%_-_24px)] whitespace-normal break-words rounded-md px-2 py-1 text-[11px] font-medium
           bg-gray-900 text-white dark:bg-surface-raised dark:ring-1 dark:ring-white/10 shadow-lg"
+          // Por dentro da moldura (à direita dos botões da esquerda, à esquerda do da direita, abaixo do superior): fora
+          // dela a legenda passava da borda do painel e era cortada. Por cima da tela nativa, o `role="tooltip"` abre um
+          // buraco na camada (ver `browser/nativeSurface.ts::OVERLAYS`).
           style={b.side === "top"
-            ? { top: -thick - 30, left: pos.left }
-            : { top: (pos.top as number) + (pos.height as number) / 2 - 12, ...(b.side === "left" ? { right: `calc(100% + ${thick + 8}px)` } : { left: `calc(100% + ${thick + 8}px)` }) }}>
+            ? { top: thick + 8, left: "50%", transform: "translateX(-50%)" }
+            : { top: (pos.top as number) + (pos.height as number) / 2 - 12, ...(b.side === "left" ? { left: thick + 10 } : { right: thick + 10 }) }}>
           {label}
         </span>
       )}
