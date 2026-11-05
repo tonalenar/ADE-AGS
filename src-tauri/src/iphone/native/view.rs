@@ -21,7 +21,7 @@ use objc2_app_kit::{NSEvent, NSResponder, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use super::decoder::{FrameSink, OSStatus, PixelBuffer};
-use crate::iphone::model::{self, Edge, TouchPhase};
+use crate::iphone::model::{self, Edge, Pinch, ScrollDrag, ScrollPhase, TouchPhase};
 use crate::iphone::session::InputTx;
 use crate::simulator::model::{Place, Rect};
 use crate::simulator::native::objc::{call, class, ns_string, retain, Shared};
@@ -34,6 +34,9 @@ pub struct Ivars {
     input: InputTx,
     /// O dedo que está na tela: a borda de onde saiu (fica a mesma até soltar) e o último envio de arrasto.
     touch: Cell<Option<(Edge, std::time::Instant)>>,
+    /// O dedo da rolagem com dois dedos e os dois da pinça.
+    scroll: RefCell<ScrollDrag>,
+    pinch: RefCell<Pinch>,
     /// Onde a view fica com o mouse, em coordenadas da view (origem no topo). Vazio = nada à vista.
     region: RefCell<Vec<Rect>>,
     applied: RefCell<Option<AppliedRegion>>,
@@ -81,12 +84,29 @@ define_class!(
             self.touch(event, TouchPhase::End);
         }
 
-        // O botão direito e a roda não têm equivalente no aparelho: param aqui (o canvas não arrasta por baixo).
+        // O botão direito não tem equivalente no aparelho: para aqui (o canvas não arrasta por baixo).
         #[unsafe(method(rightMouseDown:))]
         fn right_mouse_down(&self, _event: &NSEvent) {}
 
+        /// Rolagem com dois dedos (e a roda do mouse) → um dedo arrastando no aparelho.
         #[unsafe(method(scrollWheel:))]
-        fn scroll_wheel(&self, _event: &NSEvent) {}
+        fn scroll_wheel(&self, event: &NSEvent) {
+            self.scroll(event);
+        }
+
+        /// Pinça do trackpad → dois dedos em volta do cursor.
+        #[unsafe(method(magnifyWithEvent:))]
+        fn magnify_with_event(&self, event: &NSEvent) {
+            self.pinch(event);
+        }
+
+        /// Atalhos com ⌘ no espelho em foco: ⌘↑/⌘↓ volume, ⌘L lateral, ⌘⇧H início. Só quando a tela é a primeira a
+        /// responder: fora dela, o atalho é do app.
+        #[unsafe(method(performKeyEquivalent:))]
+        fn perform_key_equivalent(&self, event: &NSEvent) -> bool {
+            let focused = self.window().and_then(|w| w.firstResponder()).is_some_and(|r| std::ptr::eq(Retained::as_ptr(&r).cast::<u8>(), (self as *const Self).cast::<u8>()));
+            focused && self.shortcut(event)
+        }
 
         #[unsafe(method(keyDown:))]
         fn key_down(&self, event: &NSEvent) {
@@ -131,7 +151,10 @@ impl MirrorView {
             call!(content, sel!(setContentsGravity:), Retained::as_ptr(&gravity) as *mut AnyObject => *mut AnyObject; -> ());
             retain(content).expect("CALayer")
         };
-        let this = Self::alloc(mtm).set_ivars(Ivars { content, input, touch: Cell::new(None), region: RefCell::new(Vec::new()), applied: RefCell::new(None) });
+        let this = Self::alloc(mtm).set_ivars(Ivars {
+            content, input, touch: Cell::new(None), scroll: RefCell::new(ScrollDrag::default()), pinch: RefCell::new(Pinch::default()),
+            region: RefCell::new(Vec::new()), applied: RefCell::new(None),
+        });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         // SAFETY: CALayer público. Camada nossa (layer-hosting), transparente: até o primeiro quadro (e sem conexão)
@@ -178,6 +201,78 @@ impl MirrorView {
         }
         state.set(if phase == TouchPhase::End { None } else { Some((edge, now)) });
         self.ivars().input.send(vec![model::touch_line(phase, ratio, None, edge)]);
+    }
+
+    fn phase_of(event: &NSEvent) -> Option<ScrollPhase> {
+        // NSEventPhase: began 1, stationary 2, changed 4, ended 8, cancelled 16, mayBegin 32.
+        let phase = event.phase().0;
+        Some(match phase {
+            0 => ScrollPhase::None,
+            p if p & 0x1 != 0 => ScrollPhase::Began,
+            p if p & 0x4 != 0 => ScrollPhase::Changed,
+            p if p & (0x8 | 0x10) != 0 => ScrollPhase::Ended,
+            _ => return None,
+        })
+    }
+
+    fn send_points(&self, phase: TouchPhase, a: (f64, f64), b: Option<(f64, f64)>) {
+        let bounds = self.bounds();
+        let (w, h) = (bounds.size.width, bounds.size.height);
+        let ratio = |p: (f64, f64)| crate::simulator::model::touch_ratio(p.0, p.1, w, h);
+        let Some(ra) = ratio(a) else { return };
+        let rb = b.and_then(ratio);
+        self.ivars().input.send(vec![model::touch_line(phase, ra, rb, Edge::None)]);
+    }
+
+    fn scroll(&self, event: &NSEvent) {
+        // Com o dedo do mouse na tela, a rolagem espera (não dá para ter dois gestos de um dedo ao mesmo tempo).
+        if self.ivars().touch.get().is_some() {
+            return;
+        }
+        let Some(phase) = Self::phase_of(event) else { return };
+        let cursor = self.convertPoint_fromView(event.locationInWindow(), None);
+        let bounds = self.bounds();
+        let momentum = event.momentumPhase().0 != 0;
+        let steps = self.ivars().scroll.borrow_mut().event(
+            phase, momentum, (cursor.x, cursor.y), (event.scrollingDeltaX(), event.scrollingDeltaY()),
+            event.hasPreciseScrollingDeltas(), (bounds.size.width, bounds.size.height),
+        );
+        for (touch, point) in steps {
+            self.send_points(touch, point, None);
+        }
+    }
+
+    fn pinch(&self, event: &NSEvent) {
+        let Some(phase) = Self::phase_of(event) else { return };
+        let cursor = self.convertPoint_fromView(event.locationInWindow(), None);
+        let bounds = self.bounds();
+        if let Some((touch, a, b)) = self.ivars().pinch.borrow_mut().event(phase, (cursor.x, cursor.y), event.magnification(), (bounds.size.width, bounds.size.height)) {
+            self.send_points(touch, a, Some(b));
+        }
+    }
+
+    fn shortcut(&self, event: &NSEvent) -> bool {
+        const COMMAND: usize = 1 << 20;
+        const SHIFT: usize = 1 << 17;
+        let flags = event.modifierFlags().0;
+        let Some(action) = model::shortcut(event.keyCode(), flags & COMMAND != 0, flags & SHIFT != 0) else { return false };
+        let input = self.ivars().input.clone();
+        // O botão fica apertado um instante (o iOS não vê um aperto de 0 ms), fora da thread da interface.
+        let _ = std::thread::Builder::new().name("ade-iphone-atalho".into()).spawn(move || match action {
+            model::Shortcut::Button(name) => {
+                if let (Ok(down), Ok(up)) = (model::button_state_line(name, true), model::button_state_line(name, false)) {
+                    input.send(vec![down]);
+                    std::thread::park_timeout(std::time::Duration::from_millis(90));
+                    input.send(vec![up]);
+                }
+            }
+            model::Shortcut::Home => {
+                if let Some(g) = model::gesture("home") {
+                    crate::iphone::ops::drag(&input, g.from, g.to, g.ms, g.edge, g.hold_ms);
+                }
+            }
+        });
+        true
     }
 
     /// Teclas do Mac → teclado do aparelho: as com nome pelo código da tecla, o resto pelo caractere (teclado US).
@@ -246,9 +341,8 @@ fn frame_queue() -> &'static DispatchQueue {
     })
 }
 
-/// Quantos quadros ficam retidos depois de mostrados: o pool do VideoToolbox não reusa a superfície que ainda está
-/// na tela (sem isso, um quadro novo podia ser escrito por cima do que a GPU compõe).
-const HELD: usize = 3;
+/// No máximo quantos quadros mostrados ficam retidos esperando a tela largar a superfície (`model::release_plan`).
+const HELD_CAP: usize = 16;
 
 /// O diagnóstico de `ADE_IPHONE_FPS=1`: a cada segundo, quadros mostrados, maior intervalo e atrasos.
 #[derive(Default)]
@@ -260,6 +354,10 @@ struct Stats {
     decode_ms: Vec<f64>,
     capture_ms: Vec<f64>,
     failures: u32,
+    /// Quadros que a regra antiga (3 retidos) teria devolvido ao pool com a tela ainda usando; e os soltos à força.
+    unsafe_before: usize,
+    forced: usize,
+    held_max: usize,
 }
 
 /// As camadas que mostram um aparelho e o último quadro dele. Uma por aparelho, compartilhada pelas telas.
@@ -281,6 +379,7 @@ unsafe extern "C" {
     fn IOSurfaceGetBytesPerRow(buffer: *const c_void) -> usize;
     fn IOSurfaceGetWidth(buffer: *const c_void) -> usize;
     fn IOSurfaceGetHeight(buffer: *const c_void) -> usize;
+    fn IOSurfaceIsInUse(buffer: *const c_void) -> bool;
 }
 
 pub fn debug_on() -> bool {
@@ -457,8 +556,8 @@ impl Presenter {
             let capture50 = percentile(&mut s.capture_ms, 0.5);
             let capture90 = percentile(&mut s.capture_ms, 0.9);
             eprintln!(
-                "[iphone] {:.0} quadros/s · maior intervalo {gap:.0} ms · chegada→quadro p50 {decode50:.1} ms (máx {decode_max:.1}) · captura→quadro p50 {capture50:.0} ms p90 {capture90:.0} ms (estimativa) · {failures} recusados",
-                f64::from(frames) / elapsed
+                "[iphone] {:.0} quadros/s · maior intervalo {gap:.0} ms · chegada→quadro p50 {decode50:.1} ms (máx {decode_max:.1}) · captura→quadro p50 {capture50:.0} ms p90 {capture90:.0} ms (estimativa) · {failures} recusados · superfícies: {} ainda na tela pela regra antiga, {} soltas à força, até {} retidas",
+                f64::from(frames) / elapsed, s.unsafe_before, s.forced, s.held_max
             );
             *s = Stats { start: Some(now), last: s.last, ..Stats::default() };
         }
@@ -501,8 +600,20 @@ impl FrameSink for Sink {
             }
             if let Ok(mut held) = this.held.lock() {
                 held.push_back(buffer);
-                while held.len() > HELD {
-                    held.pop_front();
+                // Só devolve ao pool a superfície que a tela não usa mais (senão o próximo quadro é escrito por cima
+                // do que a GPU ainda compõe: blocos de dois quadros misturados na rolagem).
+                // SAFETY: superfícies vivas (os buffers estão retidos aqui).
+                let in_use: Vec<bool> = held.iter().map(|b| unsafe { IOSurfaceIsInUse(b.surface() as *const c_void) }).collect();
+                let plan = model::release_plan(&in_use, HELD_CAP);
+                for i in plan.release.iter().rev() {
+                    held.remove(*i);
+                }
+                if debug_on() {
+                    if let Ok(mut s) = this.stats.lock() {
+                        s.unsafe_before += plan.unsafe_before.min(1);
+                        s.forced += plan.forced;
+                        s.held_max = s.held_max.max(held.len());
+                    }
                 }
             }
         });

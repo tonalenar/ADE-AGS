@@ -56,13 +56,14 @@ Cuidados que custaram horas na sondagem:
 ### O vídeo
 
 - RTP sobre UDP/IPv6 dentro do túnel do CoreDevice, **sem criptografia**, com RTCP na mesma porta (RFC 5761). Payload type 100, relógio de 24 kHz, extensão de cabeçalho da Apple (perfis 0x9001 e 0x9011).
-- HEVC pela RFC 7798: NAL simples, agregação (AP, 48) e fragmento (FU, 49). VPS, SPS e PPS vêm num AP antes de cada IDR (tipo 20, `IDR_N_LP`). 4:2:0, 8 bits, faixa cheia.
+- HEVC pela RFC 7798: NAL simples, agregação (AP, 48), fragmento (FU, 49) e PACI (50, que embrulha um dos três: desembrulhado pela §4.4.4; não foi visto no aparelho, mas um PACI descartado sumiria com um quadro sem aviso). Um pacote de tipo sem definição (51–63) deixa o quadro incompleto. VPS, SPS e PPS vêm num AP antes de cada IDR (tipo 20, `IDR_N_LP`). 4:2:0, 8 bits, faixa cheia.
 - O quadro decodificado tem 1296×2816 para uma tela de 1290×2796: as bordas de alinhamento ficam **à direita e embaixo** (medido: as colunas 1290–1295 são pretas). O recorte é o `contentsRect` da camada (`model::contents_rect`, com a origem embaixo do Core Animation).
 - **Só um IDR no começo** (`KeyFrameInterval: 0`). Depois de uma perda, a ADE descarta os quadros até chegar um IRAP e pede um ao aparelho com RTCP PLI + FIR (`keyframe` no stdin do helper). Medido: o IDR chega em 30–150 ms. Sem resposta em 2,5 s, a sessão é refeita (stream novo começa com IDR).
 - O aparelho derruba a sessão sem RTCP por 15 s (`RTCPTimeoutEnabled: true`, `RTCPTimeoutInterval: 15`). O helper manda um Receiver Report por segundo (RFC 3550, com a maior sequência, as perdas e o LSR/DLSR do último SR). Medido: 150 s ligados sem queda.
 - Com a tela parada, o aparelho manda menos quadros e chega a parar o vídeo por até 11 s (medido), mas o Sender Report do RTCP continua a cada segundo. Por isso o vigia conta qualquer datagrama: 3 s sem nenhum quer dizer que caiu.
 - Um quadro-chave a cada 10 s (`KEYFRAME_REFRESH`), mesmo sem perda: limita qualquer deriva que a montagem não veja. Uma vez, logo depois de o app de dev reiniciar, a tela saiu com blocos corrompidos sem nenhuma perda contada; não se repetiu. O aparelho atende ~metade desses pedidos com a tela parada.
 - Um decodificador novo (parâmetros novos) só recebe quadros a partir de um IRAP.
+- Qualquer quadro que sai incompleto da montagem (sem salto de sequência, por exemplo um tipo de pacote desconhecido) conta como perda: a tela segura o último quadro bom e a ADE pede um quadro-chave. O diagnóstico (`ADE_IPHONE_FPS=1`) mostra perdas, incompletos e os tipos de pacote por segundo.
 
 ## A conexão
 
@@ -88,14 +89,21 @@ O stream sempre é parado no aparelho: no `stop` da ADE, quando a última tela f
 - A camada é transparente até o primeiro quadro e quando a conexão some: aí aparece o estado que o frontend desenha por baixo ("Abrindo a tela do aparelho…", "Sem conexão…").
 - **Toque:** dentro da região à vista, o clique e o arrasto viram toque em proporção da tela (a view mostra a tela já recortada, sem as bordas de alinhamento do vídeo, então a proporção da view é a da tela: `model::view_touch`). O arrasto sai no máximo a cada 8 ms. Um arrasto que começa nos últimos 1,5% de baixo leva a borda `bottom` do início ao fim (a barra de início); nos de cima, `top` (as centrais).
 - **Teclado:** com a view em foco, as teclas com nome pelo código da tecla e o resto pelo caractere (teclado US, o mesmo mapa do simulador).
-- O botão direito e a roda param na view (o canvas não arrasta por baixo) e não vão ao aparelho.
+- **Rolagem com dois dedos** (`scrollWheel:`): vira um dedo arrastando no digitalizador (`model::ScrollDrag`, testado). O dedo desce no cursor no começo do gesto, anda com os deltas (a direção já vem da preferência do Mac: rolagem natural move o conteúdo junto com os dedos) e solta no fim; a inércia do Mac fica de fora e o iOS aplica a dele pela velocidade do dedo ao soltar. Horizontal também. A roda do mouse vira um arrasto curto por clique. O HID de rolagem do CoreDevice (`ScrollHIDCapability`) não serve aqui: o alvo dele é o dial e a Digital Crown (`ScrollTarget.dial/digitalCrown`).
+- **Pinça do trackpad** (`magnifyWithEvent:`): dois dedos em volta do cursor, que se afastam ou se aproximam com a ampliação (`model::Pinch`), pelo `pointTwo` do digitalizador.
+- **Atalhos** com a tela em foco: ⌘↑ e ⌘↓ volume, ⌘L botão lateral, ⌘⇧H início (`model::shortcut`, por `performKeyEquivalent:`, só quando a tela é a primeira a responder).
+- O botão direito para na view (o canvas não arrasta por baixo) e não vai ao aparelho.
 
 ## Interface
 
 - **Seletor** (barra do nó e painel do chat): "Aparelhos" em cima, com etiqueta USB/Wi-Fi, modelo e iOS; os que não estão prontos aparecem apagados com o que falta ("Toque em “Confiar” no aparelho", "Ligue o Modo de Desenvolvedor", "Desconectado"). A lista é relida a cada 4 s só enquanto o seletor está aberto.
 - **Estado vazio** (`iphone/ConnectHint.tsx`): o aparelho, o cabo e o Wi-Fi levando ao "Este Mac", com os passos (desbloquear, "Confiar", Modo de Desenvolvedor). Respeita `prefers-reduced-motion` (`App.css`, `ade-connect-*`).
-- **Nó do canvas**: a mesma moldura do simulador, com a tela em pontos (@3x nos iPhones grandes, @2x nos pequenos e no iPad, `iphone/model.ts`), a linha de estado e o início na barra, o "⋯" com zoom, Sistema, Botões e fechar, e os botões da lateral da moldura com o nome ao passar o mouse (`iphone/PhysicalControls.tsx`). Sem o toque pronto, eles ficam apagados.
-- **Painel do chat**: `iphone/PhysicalPane.tsx`, com a coluna (início e "⋯") e a chave "Permitir que agentes controlem dispositivos". O aparelho vai para os agentes como o simulador (`sharedDevices`, id `device:<id>`).
+- **Moldura** (`iphone/DeviceFrame.tsx`, no nó do canvas e no painel do chat): a do modelo (`model::frameLayout`), clara ou escura com o tema, com a Ilha Dinâmica (desenhada enquanto o vídeo não chega) e os **botões físicos na borda**: à esquerda o botão de ação (ou a chave de silêncio nos modelos antigos) e o volume, à direita o lateral; no iPad, o superior e o volume. Eles funcionam: descer o ponteiro aperta o botão de verdade e subir solta (`iphone_button_state`), então segurar o lateral chama a Siri como no aparelho. Acendem enquanto apertados e mostram o nome ao lado ao passar o mouse ("Aumentar volume ⌘↑", "Botão lateral ⌘L · segure para a Siri", "Botão de ação · modo silencioso"). As posições são das medidas da Apple, aproximadas.
+- **Pílula embaixo do aparelho** (`iphone/DeviceBar.tsx`, painel do chat): o estado ao vivo, início, alternador de apps (subir da borda e segurar), foto da tela (salva em Imagens e oferece copiar para a área de transferência do Mac), gravar a tela (desligado: chega depois), girar (desligado: o aparelho gira sozinho) e o "⋯" com Sistema e Botões.
+- **Coluna da direita** do painel: digitar no aparelho por um campo, ampliar, reduzir, ajustar ao painel e tamanho real (1:1 = um pixel CSS por ponto do iOS), com o zoom atual embaixo.
+- **Nó do canvas**: a mesma moldura, com a tela em pontos (@3x nos iPhones grandes, @2x nos pequenos e no iPad), a linha de estado e o início na barra de cima, e o "⋯" com zoom, Sistema, Botões e fechar. Sem o toque pronto, os controles ficam apagados.
+- **Painel do chat**: `iphone/PhysicalPane.tsx`, com a chave "Permitir que agentes controlem dispositivos" embaixo. O aparelho vai para os agentes como o simulador (`sharedDevices`, id `device:<id>`).
+- A moldura realista é só do aparelho físico; o simulador segue com a moldura dele (a troca fica para depois).
 
 ## HID: toque, botões e teclado
 

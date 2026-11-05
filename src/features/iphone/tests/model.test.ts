@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_SCREEN } from "@/features/simulator/geometry";
 
 import {
-  canTouch, deviceHint, HARDWARE_BUTTONS, isPhysicalId, SIDE_BUTTONS, isReady, physicalScreen, pickedPhysical, sortForPicker, statusView, type MirrorStatus, type PhysicalDevice,
+  canTouch, deviceHint, isPhysicalId, isReady, physicalScreen, pickedPhysical, sortForPicker, statusView, type MirrorStatus, type PhysicalDevice,
 } from "../model";
 
 const phone = (over: Partial<PhysicalDevice> = {}): PhysicalDevice => ({
@@ -75,11 +75,34 @@ describe("aparelho físico", () => {
     expect(canTouch(undefined)).toBe(false);
   });
 
-  it("os botões da lateral são botões físicos conhecidos e cabem na moldura", () => {
-    for (const b of SIDE_BUTTONS) {
-      expect(HARDWARE_BUTTONS).toContain(b.button);
-      expect(b.top + b.height).toBeLessThan(1);
-    }
-    expect(SIDE_BUTTONS.filter((b) => b.side === "right").map((b) => b.button)).toEqual(["lock"]);
+});
+
+import { frameLayout, fitScale, stepZoom, ZOOM } from "../model";
+
+describe("moldura e zoom do aparelho físico", () => {
+  it("o 15 Pro Max tem o botão de ação, o volume à esquerda e o lateral à direita", () => {
+    const f = frameLayout("iPhone 15 Pro Max", "iphone");
+    expect(f.buttons.map((b) => `${b.side}:${b.button}`)).toEqual(["left:mute", "left:volumeUp", "left:volumeDown", "right:lock"]);
+    expect(f.buttons[0].kind).toBe("action");
+    expect(f.island).toBe(true);
+    for (const b of f.buttons) expect(b.top + b.height).toBeLessThan(0.6);
+  });
+
+  it("modelo antigo tem a chave de silêncio no lugar do botão de ação; iPad tem só o superior e o volume", () => {
+    expect(frameLayout("iPhone 14", "iphone").buttons[0].kind).toBe("switch");
+    expect(frameLayout("iPhone 16e", "iphone").buttons[0].kind).toBe("action");
+    expect(frameLayout("iPhone 12", "iphone").island).toBe(false);
+    const ipad = frameLayout("iPad Air", "ipad");
+    expect(ipad.island).toBe(false);
+    expect(ipad.buttons.map((b) => b.button)).toEqual(["lock", "volumeUp", "volumeDown"]);
+  });
+
+  it("ajustar cabe na caixa; 1:1 é um pixel CSS por ponto; os passos ficam entre os limites", () => {
+    const screen = { width: 430, height: 932 };
+    expect(fitScale(screen, { w: 500, h: 1000 }, 0.05)).toBeCloseTo(1000 / (932 + 430 * 0.1), 5);
+    expect(fitScale(screen, { w: 0, h: 0 }, 0.05)).toBe(ZOOM.min);
+    expect(stepZoom(1, 1)).toBeCloseTo(1.1, 5);
+    expect(stepZoom(ZOOM.max, 1)).toBe(ZOOM.max);
+    expect(stepZoom(ZOOM.min, -1)).toBe(ZOOM.min);
   });
 });

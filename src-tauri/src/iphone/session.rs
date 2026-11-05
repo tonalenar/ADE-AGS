@@ -430,10 +430,16 @@ impl Worker {
                         }
                         continue;
                     }
+                    let dropped_before = depacketizer.dropped;
                     let pushed = depacketizer.push(&packet);
                     if pushed.gap {
                         gate.on_gap(ms(now));
                         diag.2 += 1;
+                    }
+                    if depacketizer.dropped != dropped_before {
+                        // Um quadro saiu incompleto sem salto de sequência: os seguintes dependem dele. Mesmo caminho
+                        // da perda: segura o último quadro bom e pede um quadro-chave.
+                        gate.on_gap(ms(now));
                     }
                     if debug_on() {
                         if let Some(u) = &pushed.unit {
@@ -441,7 +447,10 @@ impl Worker {
                             diag.3 += u64::from(u.irap);
                         }
                         if now.duration_since(diag.0) >= Duration::from_secs(1) {
-                            eprintln!("[iphone] montagem: {} quadros, {} perdas, {} IRAP, {} descartados por gate, {} incompletos (total)", diag.1, diag.2, diag.3, diag.4, depacketizer.dropped);
+                            eprintln!(
+                                "[iphone] montagem: {} quadros, {} perdas, {} IRAP, {} descartados por gate, {} incompletos (total) · tipos de pacote {:?}",
+                                diag.1, diag.2, diag.3, diag.4, depacketizer.dropped, depacketizer.packet_kinds()
+                            );
                             diag = (now, 0, 0, 0, 0);
                         }
                     }

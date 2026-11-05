@@ -2,3 +2,5 @@
 
 pub mod decoder;
 pub mod view;
+#[cfg(test)]
+mod replay;

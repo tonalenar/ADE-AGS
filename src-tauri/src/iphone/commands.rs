@@ -290,3 +290,58 @@ pub fn iphone_button(app: tauri::AppHandle, device: String, name: String) -> Res
 pub fn iphone_gesture(app: tauri::AppHandle, device: String, name: String) -> Result<(), String> {
     super::ops::gesture(&app, &device, &name)
 }
+
+/// A pessoa segura ou solta um botão da lateral da moldura (`down`): segurar o lateral chama a Siri, como no aparelho.
+#[tauri::command(async)]
+pub fn iphone_button_state(app: tauri::AppHandle, device: String, name: String, down: bool) -> Result<(), String> {
+    super::ops::button_state(&app, &device, &name, down)
+}
+
+/// A pessoa digitou um texto para o aparelho (teclado US, só ASCII).
+#[tauri::command(async)]
+pub fn iphone_type(app: tauri::AppHandle, device: String, text: String) -> Result<(), String> {
+    super::ops::type_text(&app, &device, &text)
+}
+
+/// A foto da tela (o último quadro do espelho, sem as bordas do vídeo) num PNG; devolve o caminho.
+#[tauri::command(async)]
+pub fn iphone_screenshot(app: tauri::AppHandle, device: String) -> Result<String, String> {
+    let tmp = super::ops::screenshot(&app, &device)?;
+    let dir = dirs::picture_dir().or_else(dirs::download_dir).unwrap_or_else(std::env::temp_dir);
+    let path = dir.join(format!("iPhone {}.png", chrono::Local::now().format("%Y-%m-%d %H.%M.%S")));
+    std::fs::rename(&tmp, &path).or_else(|_| std::fs::copy(&tmp, &path).map(|_| ())).map_err(|e| e.to_string())?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// Copia um PNG para a área de transferência do Mac (a foto da tela, para colar em outro lugar).
+#[tauri::command(async)]
+pub fn iphone_copy_image(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use objc2::rc::Retained;
+        use objc2::runtime::AnyObject;
+        use objc2::sel;
+        use crate::simulator::native::objc::{call, class, ns_string};
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        if !bytes.starts_with(b"\x89PNG") {
+            return Err("Isso não é um PNG.".into());
+        }
+        let data = objc2_foundation::NSData::with_bytes(&bytes);
+        let kind = ns_string("public.png");
+        // SAFETY: NSPasteboard público; os objetos vivem até o fim da chamada.
+        unsafe {
+            let board = call!(class(c"NSPasteboard").ok_or("Sem área de transferência.")?, sel!(generalPasteboard); -> *mut AnyObject);
+            call!(board, sel!(clearContents); -> isize);
+            let ok = call!(board, sel!(setData:forType:), Retained::as_ptr(&data) as *mut AnyObject => *mut AnyObject, Retained::as_ptr(&kind) as *mut AnyObject => *mut AnyObject; -> bool);
+            if !ok {
+                return Err("Não deu para copiar a foto.".into());
+            }
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Err("Só no macOS.".into())
+    }
+}

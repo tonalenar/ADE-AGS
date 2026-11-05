@@ -203,6 +203,8 @@ pub mod nal {
     /// Agregação (vários NALs num pacote) e fragmento (um NAL em vários pacotes).
     pub const AP: u8 = 48;
     pub const FU: u8 = 49;
+    /// Informação de conteúdo do payload: embrulha um NAL, um AP ou um FU.
+    pub const PACI: u8 = 50;
 
     pub fn kind(nal: &[u8]) -> u8 {
         nal.first().map(|b| (b >> 1) & 0x3f).unwrap_or(0xff)
@@ -270,6 +272,7 @@ pub struct Depacketizer {
     params_new: bool,
     /// Quadros descartados por estarem incompletos (para o diagnóstico).
     pub dropped: u64,
+    kinds: std::collections::BTreeMap<u8, u64>,
 }
 
 /// RTP e RTCP na mesma porta (RFC 5761): o RTCP tem o 2º byte entre 192 e 223.
@@ -331,7 +334,52 @@ impl Depacketizer {
             self.damaged = out.gap;
         }
 
-        let payload = &pkt[start..end];
+        self.payload(&pkt[start..end]);
+
+        if marker {
+            out.unit = self.finish(ts);
+        }
+        out
+    }
+
+    /// Quantos pacotes de cada tipo de payload chegaram (48 = AP, 49 = FU, 50 = PACI; o resto, NAL simples): para o
+    /// diagnóstico.
+    pub fn packet_kinds(&self) -> &std::collections::BTreeMap<u8, u64> {
+        &self.kinds
+    }
+
+    /// O conteúdo de um pacote RTP: NAL simples, agregação (AP), fragmento (FU) ou PACI, que embrulha um dos três.
+    fn payload(&mut self, payload: &[u8]) {
+        let kind = nal::kind(payload);
+        *self.kinds.entry(kind).or_insert(0) += 1;
+        match kind {
+            nal::PACI => {
+                // RFC 7798 §4.4.4: depois do PayloadHdr, A(1) cType(6) PHSsize(5) F0-2(3) Y(1) e PHSsize bytes de PHES.
+                // O pacote de dentro reaproveita o PayloadHdr com o tipo trocado por cType e o F pelo A.
+                if payload.len() < 4 {
+                    self.damaged = true;
+                    return;
+                }
+                let a = payload[2] >> 7;
+                let ctype = (payload[2] >> 1) & 0x3f;
+                let phs = usize::from(((payload[2] & 1) << 4) | (payload[3] >> 4));
+                let start = 4 + phs;
+                if start > payload.len() || ctype == nal::PACI {
+                    self.damaged = true;
+                    return;
+                }
+                let mut inner = Vec::with_capacity(2 + payload.len() - start);
+                inner.push((a << 7) | (ctype << 1) | (payload[0] & 1));
+                inner.push(payload[1]);
+                inner.extend_from_slice(&payload[start..]);
+                // Conta só o de dentro (o PACI já entrou na contagem acima).
+                self.payload_inner(&inner);
+            }
+            _ => self.payload_inner(payload),
+        }
+    }
+
+    fn payload_inner(&mut self, payload: &[u8]) {
         match nal::kind(payload) {
             nal::AP => {
                 let mut i = 2;
@@ -367,14 +415,10 @@ impl Depacketizer {
                     }
                 }
             }
-            50 => {} // PACI: só informação
+            // 51 a 63: tipos sem definição no RTP do HEVC. Um quadro com eles fica incompleto, e isso tem de aparecer.
+            k if k > nal::PACI => self.damaged = true,
             _ => self.add(payload.to_vec()),
         }
-
-        if marker {
-            out.unit = self.finish(ts);
-        }
-        out
     }
 
     fn start_unit(&mut self, ts: u32) {
@@ -739,6 +783,8 @@ pub struct Gesture {
     pub to: (f64, f64),
     pub edge: Edge,
     pub ms: u64,
+    /// Quanto o dedo fica parado no fim antes de soltar (o alternador de apps pede o dedo parado).
+    pub hold_ms: u64,
 }
 
 /// Central de Controle (de cima, à direita), Central de Notificações (de cima, à esquerda), Busca (para baixo no
@@ -746,10 +792,11 @@ pub struct Gesture {
 pub fn gesture(name: &str) -> Option<Gesture> {
     let key: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
     Some(match key.as_str() {
-        "controlcenter" | "centraldecontrole" => Gesture { from: (0.9, 0.005), to: (0.9, 0.45), edge: Edge::Top, ms: 350 },
-        "notificationcenter" | "notifications" | "centraldenotificacoes" => Gesture { from: (0.2, 0.005), to: (0.2, 0.6), edge: Edge::Top, ms: 350 },
-        "spotlight" | "busca" | "search" => Gesture { from: (0.5, 0.35), to: (0.5, 0.6), edge: Edge::None, ms: 300 },
-        "home" | "inicio" => Gesture { from: (0.5, 0.995), to: (0.5, 0.7), edge: Edge::Bottom, ms: 250 },
+        "controlcenter" | "centraldecontrole" => Gesture { from: (0.9, 0.005), to: (0.9, 0.45), edge: Edge::Top, ms: 350, hold_ms: 0 },
+        "notificationcenter" | "notifications" | "centraldenotificacoes" => Gesture { from: (0.2, 0.005), to: (0.2, 0.6), edge: Edge::Top, ms: 350, hold_ms: 0 },
+        "spotlight" | "busca" | "search" => Gesture { from: (0.5, 0.35), to: (0.5, 0.6), edge: Edge::None, ms: 300, hold_ms: 0 },
+        "home" | "inicio" => Gesture { from: (0.5, 0.995), to: (0.5, 0.7), edge: Edge::Bottom, ms: 250, hold_ms: 0 },
+        "appswitcher" | "apps" | "alternador" => Gesture { from: (0.5, 0.995), to: (0.5, 0.62), edge: Edge::Bottom, ms: 350, hold_ms: 450 },
         _ => return None,
     })
 }
@@ -812,4 +859,177 @@ pub fn agent_asks(action: &str, trusted: bool) -> bool {
         "type" => true,
         _ => !trusted,
     }
+}
+
+
+// ── Rolagem do trackpad e pinça: viram dedos no digitalizador ──
+// O HID de rolagem do CoreDevice é do dial e da Digital Crown (`ScrollTarget.dial/digitalCrown`), não do conteúdo
+// do iPhone: a rolagem com dois dedos vira um dedo arrastando, como no simulador.
+
+/// A fase de um evento de rolagem ou de pinça do Mac. `None` = roda do mouse (sem fases).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScrollPhase {
+    None,
+    Began,
+    Changed,
+    Ended,
+}
+
+/// Um dedo que segue a rolagem do trackpad. Coordenadas da view (origem no topo).
+#[derive(Debug, Default)]
+pub struct ScrollDrag {
+    finger: Option<(f64, f64)>,
+}
+
+/// Quanto um clique da roda do mouse (sem deltas precisos) arrasta, em pontos.
+const WHEEL_STEP: f64 = 12.0;
+
+impl ScrollDrag {
+    fn clamp(p: (f64, f64), size: (f64, f64)) -> (f64, f64) {
+        (p.0.clamp(1.0, (size.0 - 1.0).max(1.0)), p.1.clamp(1.0, (size.1 - 1.0).max(1.0)))
+    }
+
+    /// Um evento de rolagem → os toques a mandar. A direção já vem da preferência do Mac (rolagem natural): o dedo
+    /// no aparelho anda com o conteúdo. A inércia do Mac (`momentum`) fica de fora: o iOS aplica a dele quando o dedo
+    /// solta.
+    pub fn event(&mut self, phase: ScrollPhase, momentum: bool, cursor: (f64, f64), delta: (f64, f64), precise: bool, size: (f64, f64)) -> Vec<(TouchPhase, (f64, f64))> {
+        if momentum {
+            return Vec::new();
+        }
+        let scale = if precise { 1.0 } else { WHEEL_STEP };
+        let step = |from: (f64, f64)| Self::clamp((from.0 + delta.0 * scale, from.1 + delta.1 * scale), size);
+        match phase {
+            ScrollPhase::None => {
+                let start = Self::clamp(cursor, size);
+                let end = step(start);
+                vec![(TouchPhase::Start, start), (TouchPhase::Move, end), (TouchPhase::End, end)]
+            }
+            ScrollPhase::Began | ScrollPhase::Changed => {
+                let mut out = Vec::new();
+                let from = match self.finger {
+                    Some(p) => p,
+                    None => {
+                        let start = Self::clamp(cursor, size);
+                        out.push((TouchPhase::Start, start));
+                        start
+                    }
+                };
+                let next = step(from);
+                if next != from || out.len() == 1 {
+                    out.push((TouchPhase::Move, next));
+                }
+                self.finger = Some(next);
+                out
+            }
+            ScrollPhase::Ended => self.finger.take().map(|p| vec![(TouchPhase::End, p)]).unwrap_or_default(),
+        }
+    }
+}
+
+/// Dois dedos que seguem a pinça do trackpad, em volta do cursor.
+#[derive(Debug, Default)]
+pub struct Pinch {
+    center: Option<(f64, f64)>,
+    scale: f64,
+}
+
+/// A distância inicial entre os dedos, em proporção da largura da tela.
+const PINCH_START: f64 = 0.2;
+
+impl Pinch {
+    fn fingers(&self, size: (f64, f64)) -> ((f64, f64), (f64, f64)) {
+        let c = self.center.unwrap_or((size.0 / 2.0, size.1 / 2.0));
+        let half = (size.0 * PINCH_START * self.scale / 2.0).clamp(4.0, size.0 / 2.0);
+        let clamp = |x: f64| x.clamp(1.0, (size.0 - 1.0).max(1.0));
+        ((clamp(c.0 - half), c.1), (clamp(c.0 + half), c.1))
+    }
+
+    /// Um evento de pinça (`magnification` = quanto mudou desde o anterior) → a fase e os dois dedos.
+    pub fn event(&mut self, phase: ScrollPhase, cursor: (f64, f64), magnification: f64, size: (f64, f64)) -> Option<(TouchPhase, (f64, f64), (f64, f64))> {
+        match phase {
+            ScrollPhase::Began => {
+                self.center = Some(ScrollDrag::clamp(cursor, size));
+                self.scale = (1.0 + magnification).max(0.1);
+                let (a, b) = self.fingers(size);
+                Some((TouchPhase::Start, a, b))
+            }
+            ScrollPhase::Changed => {
+                self.center?;
+                self.scale = (self.scale + magnification).max(0.1);
+                let (a, b) = self.fingers(size);
+                Some((TouchPhase::Move, a, b))
+            }
+            ScrollPhase::Ended => {
+                self.center?;
+                let (a, b) = self.fingers(size);
+                self.center = None;
+                Some((TouchPhase::End, a, b))
+            }
+            ScrollPhase::None => None,
+        }
+    }
+}
+
+
+/// Um botão apertado ou solto (para segurar: o lateral segurado chama a Siri, o volume segurado continua).
+pub fn button_state_line(name: &str, down: bool) -> Result<String, String> {
+    let (page, code) = button_usage(name).ok_or_else(|| format!("Botão desconhecido: \"{name}\"."))?;
+    Ok(format!("button {page} {code} {}", if down { "down" } else { "up" }))
+}
+
+/// O que um atalho com ⌘ faz no espelho em foco.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shortcut {
+    Button(&'static str),
+    Home,
+}
+
+/// ⌘↑ e ⌘↓ = volume, ⌘L = bloquear (botão lateral), ⌘⇧H = início. `key` = código de tecla do Mac.
+pub fn shortcut(key: u16, command: bool, shift: bool) -> Option<Shortcut> {
+    if !command {
+        return None;
+    }
+    match (key, shift) {
+        (126, _) => Some(Shortcut::Button("volumeUp")),
+        (125, _) => Some(Shortcut::Button("volumeDown")),
+        (37, false) => Some(Shortcut::Button("lock")),
+        (4, true) => Some(Shortcut::Home),
+        _ => None,
+    }
+}
+
+
+// ── Quando soltar um quadro já mostrado ──
+
+/// O que soltar da fila de quadros mostrados (do mais velho ao mais novo).
+#[derive(Debug, Default, PartialEq)]
+pub struct ReleasePlan {
+    /// Os índices a soltar.
+    pub release: Vec<usize>,
+    /// Quantos saíram ainda em uso pela tela, por excesso (passaram de `cap`).
+    pub forced: usize,
+    /// Quantos a regra antiga (guardar só os 3 últimos) teria soltado com a tela ainda usando: o perigo medido.
+    pub unsafe_before: usize,
+}
+
+/// Os dois quadros mais novos ficam sempre; os outros saem só quando a tela não os usa mais (`IOSurfaceIsInUse`):
+/// senão o pool do VideoToolbox escreve o quadro seguinte numa superfície que a GPU ainda compõe, e aparecem blocos
+/// de dois quadros misturados. Passando de `cap`, os mais velhos saem mesmo em uso (a memória não cresce sem fim).
+pub fn release_plan(in_use: &[bool], cap: usize) -> ReleasePlan {
+    const KEEP: usize = 2;
+    const OLD_HELD: usize = 3;
+    let n = in_use.len();
+    let mut plan = ReleasePlan::default();
+    let older = n.saturating_sub(KEEP);
+    let over = n.saturating_sub(cap);
+    for (i, used) in in_use.iter().enumerate().take(older) {
+        if i < over {
+            plan.release.push(i);
+            plan.forced += usize::from(*used);
+        } else if !used {
+            plan.release.push(i);
+        }
+    }
+    plan.unsafe_before = in_use.iter().take(n.saturating_sub(OLD_HELD)).filter(|u| **u).count();
+    plan
 }

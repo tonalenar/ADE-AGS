@@ -525,3 +525,149 @@ fn eventos_do_hid_do_helper() {
     assert_eq!(parse_event(br#"{"event":"inputReady"}"#), HelperEvent::InputReady { touch: false, buttons: false, keyboard: false });
     assert_eq!(parse_event(br#"{"event":"inputError","message":"O aparelho recusou a entrada.","command":"touch start"}"#), HelperEvent::InputError("O aparelho recusou a entrada.".into()));
 }
+
+/// Um pacote PACI (RFC 7798 §4.4.4) que embrulha `inner` (um pacote sem o cabeçalho de 2 bytes, que o PACI reaproveita
+/// com o tipo `ctype`), com `phes` bytes de extensão.
+fn paci(ctype: u8, inner_body: &[u8], phes: &[u8]) -> Vec<u8> {
+    let mut p = vec![50 << 1, 1];
+    let phs = phes.len() as u8;
+    // A(1) | cType(6) | PHSsize(5) | F0 F1 F2 (3) | Y(1)
+    p.push((ctype << 1) | (phs >> 4));
+    p.push((phs & 0x0f) << 4);
+    p.extend_from_slice(phes);
+    p.extend_from_slice(inner_body);
+    p
+}
+
+#[test]
+fn pacote_paci_com_nal_simples_entra_no_quadro_em_vez_de_sumir() {
+    let mut d = Depacketizer::default();
+    // Um quadro P (tipo 1) inteiro, embrulhado num PACI com 3 bytes de extensão.
+    let out = d.push(&rtp(1, 10, true, &paci(1, b"delta", &[9, 9, 9])));
+    let unit = out.unit.expect("o quadro do PACI tem de sair");
+    assert_eq!(unit.nals, vec![nal_of(1, b"delta")]);
+    assert_eq!(d.packet_kinds().get(&50), Some(&1));
+}
+
+#[test]
+fn pacote_paci_com_fragmento_monta_o_nal() {
+    let mut d = Depacketizer::default();
+    let unit = nal_of(1, &[5u8; 900]);
+    let parts = fus(&unit, 3);
+    // O primeiro fragmento vem embrulhado num PACI (sem o cabeçalho de 2 bytes do FU, que o PACI reaproveita).
+    d.push(&rtp(1, 20, false, &paci(nal::FU, &parts[0][2..], &[])));
+    d.push(&rtp(2, 20, false, &parts[1]));
+    let out = d.push(&rtp(3, 20, true, &parts[2]));
+    assert_eq!(out.unit.unwrap().nals, vec![unit]);
+}
+
+#[test]
+fn tipo_de_pacote_desconhecido_vira_quadro_danificado_e_nao_some_calado() {
+    let mut d = Depacketizer::default();
+    let mut weird = vec![60 << 1, 1];
+    weird.extend_from_slice(b"???");
+    // O pacote estranho fecha o quadro: não sai (danificado) e conta como descartado.
+    assert_eq!(d.push(&rtp(1, 30, true, &weird)).unit, None);
+    assert_eq!(d.dropped, 1);
+}
+
+// ── Rolagem do trackpad e pinça ──
+
+const VIEW: (f64, f64) = (430.0, 932.0);
+
+#[test]
+fn rolagem_com_fases_vira_um_dedo_que_desce_anda_e_solta() {
+    let mut s = ScrollDrag::default();
+    // Dedos começam no meio; o conteúdo sobe (delta negativo na rolagem natural): o dedo no aparelho sobe junto.
+    assert_eq!(s.event(ScrollPhase::Began, false, (200.0, 500.0), (0.0, -10.0), true, VIEW), vec![(TouchPhase::Start, (200.0, 500.0)), (TouchPhase::Move, (200.0, 490.0))]);
+    assert_eq!(s.event(ScrollPhase::Changed, false, (0.0, 0.0), (5.0, -20.0), true, VIEW), vec![(TouchPhase::Move, (205.0, 470.0))]);
+    // Soltar: o iOS aplica a inércia dele pela velocidade do arrasto.
+    assert_eq!(s.event(ScrollPhase::Ended, false, (0.0, 0.0), (0.0, 0.0), true, VIEW), vec![(TouchPhase::End, (205.0, 470.0))]);
+    // A inércia do Mac fica de fora (senão o dedo voltaria a descer).
+    assert!(s.event(ScrollPhase::None, true, (0.0, 0.0), (0.0, -30.0), true, VIEW).is_empty());
+}
+
+#[test]
+fn rolagem_horizontal_e_presa_dentro_da_tela() {
+    let mut s = ScrollDrag::default();
+    s.event(ScrollPhase::Began, false, (420.0, 10.0), (0.0, 0.0), true, VIEW);
+    let out = s.event(ScrollPhase::Changed, false, (0.0, 0.0), (50.0, -50.0), true, VIEW);
+    assert_eq!(out, vec![(TouchPhase::Move, (429.0, 1.0))]);
+}
+
+#[test]
+fn roda_do_mouse_vira_um_arrasto_curto_e_mudanca_sem_inicio_comeca_no_cursor() {
+    let mut s = ScrollDrag::default();
+    let out = s.event(ScrollPhase::None, false, (100.0, 400.0), (0.0, -1.0), false, VIEW);
+    assert_eq!(out, vec![(TouchPhase::Start, (100.0, 400.0)), (TouchPhase::Move, (100.0, 388.0)), (TouchPhase::End, (100.0, 388.0))]);
+    // Uma mudança que chegou sem o "começou" (o Mac às vezes perde): começa ali mesmo.
+    let out = s.event(ScrollPhase::Changed, false, (50.0, 50.0), (0.0, 10.0), true, VIEW);
+    assert_eq!(out, vec![(TouchPhase::Start, (50.0, 50.0)), (TouchPhase::Move, (50.0, 60.0))]);
+}
+
+#[test]
+fn pinca_abre_e_fecha_dois_dedos_em_volta_do_cursor() {
+    let mut p = Pinch::default();
+    let start = p.event(ScrollPhase::Began, (215.0, 466.0), 0.0, VIEW).unwrap();
+    assert_eq!(start.0, TouchPhase::Start);
+    let (a, b) = (start.1, start.2);
+    assert!((a.1 - 466.0).abs() < 1e-9 && (b.1 - 466.0).abs() < 1e-9 && a.0 < 215.0 && b.0 > 215.0);
+    let spread0 = b.0 - a.0;
+    // Ampliar 50%: os dedos se afastam na mesma proporção, em volta do mesmo centro.
+    let (phase, a2, b2) = p.event(ScrollPhase::Changed, (0.0, 0.0), 0.5, VIEW).unwrap();
+    assert_eq!(phase, TouchPhase::Move);
+    assert!(((b2.0 - a2.0) - spread0 * 1.5).abs() < 1e-9 && ((a2.0 + b2.0) / 2.0 - 215.0).abs() < 1e-9);
+    let (phase, ..) = p.event(ScrollPhase::Ended, (0.0, 0.0), 0.0, VIEW).unwrap();
+    assert_eq!(phase, TouchPhase::End);
+    assert!(p.event(ScrollPhase::Changed, (0.0, 0.0), 0.1, VIEW).is_none());
+}
+
+#[test]
+fn toque_com_dois_dedos_vira_linha_com_o_segundo_ponto() {
+    assert_eq!(touch_line(TouchPhase::Move, (0.4, 0.5), Some((0.6, 0.5)), Edge::None), "touch move 0.4000 0.5000 0.6000 0.5000 none");
+}
+
+#[test]
+fn alternador_de_apps_sobe_da_borda_e_segura_antes_de_soltar() {
+    let g = gesture("appSwitcher").unwrap();
+    assert!(g.from.1 > 0.98 && g.to.1 < 0.8 && g.edge == Edge::Bottom && g.hold_ms >= 300);
+    assert_eq!(gesture("home").unwrap().hold_ms, 0);
+}
+
+#[test]
+fn botao_segurado_desce_e_sobe_em_linhas_separadas() {
+    assert_eq!(button_state_line("lock", true).unwrap(), "button 12 48 down");
+    assert_eq!(button_state_line("volumeUp", false).unwrap(), "button 12 233 up");
+    assert!(button_state_line("formatar", true).is_err());
+}
+
+#[test]
+fn atalhos_do_teclado_com_command_viram_botoes() {
+    // Códigos de tecla do Mac: 126 = seta para cima, 125 = para baixo, 37 = L, 4 = H.
+    assert_eq!(shortcut(126, true, false), Some(Shortcut::Button("volumeUp")));
+    assert_eq!(shortcut(125, true, false), Some(Shortcut::Button("volumeDown")));
+    assert_eq!(shortcut(37, true, false), Some(Shortcut::Button("lock")));
+    assert_eq!(shortcut(4, true, true), Some(Shortcut::Home));
+    assert_eq!(shortcut(126, false, false), None);
+    assert_eq!(shortcut(4, true, false), None);
+}
+
+// ── Quando soltar um quadro mostrado (o pool do VideoToolbox reaproveita a superfície) ──
+
+#[test]
+fn so_solta_o_quadro_que_a_tela_nao_usa_mais_e_guarda_os_dois_mais_novos() {
+    // Do mais velho ao mais novo: em uso pela tela?
+    let plan = release_plan(&[false, true, false, true, false], 16);
+    // Os dois mais novos ficam sempre; dos outros, só sai o que a tela largou.
+    assert_eq!(plan.release, vec![0, 2]);
+    assert_eq!(plan.forced, 0);
+    // A regra antiga (guardar 3) teria soltado o índice 1, ainda na tela: é o perigo que a conta mostra.
+    assert_eq!(plan.unsafe_before, 1);
+}
+
+#[test]
+fn com_quadros_demais_presos_solta_os_mais_velhos_mesmo_em_uso() {
+    let plan = release_plan(&[true; 20], 16);
+    assert_eq!(plan.release, vec![0, 1, 2, 3]);
+    assert_eq!(plan.forced, 4);
+}

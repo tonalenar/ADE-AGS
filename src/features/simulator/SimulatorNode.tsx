@@ -14,8 +14,8 @@ import {
   SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
   simulatorShutdown, type SimDevice, type SimOrientationEvent,
 } from "./ipc";
-import { canTouch, isPhysicalId, physicalScreen } from "@/features/iphone/model";
-import { SideButtons } from "@/features/iphone/PhysicalControls";
+import { canTouch, frameLayout, isPhysicalId, physicalScreen } from "@/features/iphone/model";
+import { DeviceFrame, screenRadiusOf } from "@/features/iphone/DeviceFrame";
 import { PhysicalMirror } from "@/features/iphone/PhysicalParts";
 import { refreshPhysical, useIphoneStore, useMirrorStatus } from "@/features/iphone/store";
 
@@ -236,6 +236,16 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
           hibernateMin={hibernateMin} single={single}
           agents={agents.length} chatOpen={chat} closeArmed={closeArmed} actions={actions} />
         <div className="flex min-h-0 flex-1" style={{ gap: SIM_GAP_X }}>
+          {physicalId ? (
+            // O aparelho físico: a moldura do modelo, com os botões da lateral funcionando (ver `iphone/DeviceFrame`).
+            <div className="nodrag nowheel nopan flex shrink-0 items-center justify-center" style={{ width: phone.w, height: phone.h }}>
+              <DeviceFrame device={physicalId} name={portal.name} layout={frameLayout(physical?.model ?? "", physical?.family ?? "iphone")}
+                screen={{ width: Math.round(phone.screenW), height: Math.round(phone.screenH) }} enabled={canTouch(mirror)}>
+                <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror}
+                  radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW))} onError={fail} />
+              </DeviceFrame>
+            </div>
+          ) : (
           <div className="relative shrink-0 bg-gradient-to-br from-surface-overlay via-surface to-surface-raised"
             style={{
               width: phone.w, height: phone.h, borderRadius: phone.outerRadius, padding: phone.bezel,
@@ -243,11 +253,8 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
                 ? "0 0 0 1px var(--color-accent-400), 0 30px 80px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(0,0,0,0.9)"
                 : "0 0 0 1px rgba(255,255,255,0.08), 0 30px 80px rgba(0,0,0,0.55), inset 0 0 0 2px rgba(0,0,0,0.9)",
             }}>
-            {physicalId && physical?.family !== "ipad" && <SideButtons device={physicalId} name={portal.name} height={phone.h} ready={canTouch(mirror)} />}
             <div className="nodrag nowheel nopan relative h-full w-full overflow-hidden bg-black" style={{ borderRadius: phone.screenRadius }}>
-              {physicalId ? (
-                <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror} radius={phone.screenRadius} onError={fail} />
-              ) : booted && portal.udid && !booting ? (
+              {booted && portal.udid && !booting ? (
                 <SimulatorScreen screenId={id} udid={portal.udid} radius={phone.screenRadius} onError={fail} />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
@@ -269,6 +276,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
               )}
             </div>
           </div>
+          )}
           {chat && key && (
             <SimulatorChat boardKey={key} node={id} name={portal.name} udid={portal.udid} booted={booted} agents={agents}
               onClose={() => resize(screen, scale, false, { chat: false })} />

@@ -51,15 +51,6 @@ export type SystemGesture = (typeof SYSTEM_GESTURES)[number];
 export const HARDWARE_BUTTONS = ["volumeUp", "volumeDown", "mute", "siri", "lock"] as const;
 export type HardwareButton = (typeof HARDWARE_BUTTONS)[number];
 
-/** Os botões na lateral da moldura do iPhone: à esquerda o de ação e o volume; à direita o lateral. Posição em
- *  proporção da altura do aparelho (topo e altura do botão). */
-export const SIDE_BUTTONS: { button: HardwareButton; side: "left" | "right"; top: number; height: number }[] = [
-  { button: "mute", side: "left", top: 0.18, height: 0.045 },
-  { button: "volumeUp", side: "left", top: 0.25, height: 0.075 },
-  { button: "volumeDown", side: "left", top: 0.34, height: 0.075 },
-  { button: "lock", side: "right", top: 0.27, height: 0.11 },
-];
-
 /** Dá para mandar toque agora? */
 export function canTouch(status: MirrorStatus | undefined): boolean {
   return status?.state === "live" && status.input === true;
@@ -107,4 +98,78 @@ export function statusView(status: MirrorStatus | undefined): { tone: "ok" | "wa
   const tone = state === "live" ? "ok" : state === "connecting" || state === "reconnecting" ? "wait" : "off";
   const via = status?.transport && status.transport !== "none" && (state === "live" || state === "reconnecting") ? `iphone.transport.${status.transport}` : null;
   return { tone, key: `iphone.status.${state}`, transport: via };
+}
+
+/** Um botão da lateral da moldura: onde fica (proporção da altura do aparelho) e o que aperta. */
+export interface FrameButton {
+  button: HardwareButton;
+  side: "left" | "right" | "top";
+  top: number;
+  height: number;
+  /** `action` = o botão de ação; `switch` = a chave de silêncio dos modelos antigos; `button` = um botão comum. */
+  kind: "action" | "switch" | "button";
+}
+
+export interface FrameLayout {
+  buttons: FrameButton[];
+  /** A Ilha Dinâmica (desenhada só enquanto o vídeo não chega: depois o próprio aparelho a desenha). */
+  island: boolean;
+  /** A borda em volta da tela, em proporção da largura da tela; e o raio dos cantos da tela, idem. */
+  bezel: number;
+  radius: number;
+}
+
+/** Modelos com o botão de ação (15 Pro, 16, 17 e o 16e). */
+function hasActionButton(model: string): boolean {
+  return /iPhone 15 Pro|iPhone 1[6-9]|iPhone [2-9]\d/.test(model);
+}
+
+/** Modelos com a Ilha Dinâmica (14 Pro em diante, e todos do 15 em diante). */
+function hasIsland(model: string): boolean {
+  return /iPhone 14 Pro|iPhone 1[5-9]|iPhone [2-9]\d/.test(model) && !/iPhone 16e/.test(model);
+}
+
+/**
+ * A moldura do modelo: a posição dos botões (das medidas da Apple, aproximadas), a borda e os cantos. Os iPhones com
+ * Face ID dividem o mesmo desenho; a diferença é o botão de ação ou a chave de silêncio. O iPad tem o botão superior.
+ */
+export function frameLayout(model: string, family: "iphone" | "ipad"): FrameLayout {
+  if (family === "ipad") {
+    return {
+      buttons: [
+        { button: "lock", side: "top", top: 0.78, height: 0.08, kind: "button" },
+        { button: "volumeUp", side: "right", top: 0.1, height: 0.06, kind: "button" },
+        { button: "volumeDown", side: "right", top: 0.17, height: 0.06, kind: "button" },
+      ],
+      island: false,
+      bezel: 0.055,
+      radius: 0.045,
+    };
+  }
+  const action = hasActionButton(model);
+  return {
+    buttons: [
+      { button: "mute", side: "left", top: action ? 0.19 : 0.17, height: action ? 0.045 : 0.035, kind: action ? "action" : "switch" },
+      { button: "volumeUp", side: "left", top: 0.255, height: 0.075, kind: "button" },
+      { button: "volumeDown", side: "left", top: 0.35, height: 0.075, kind: "button" },
+      { button: "lock", side: "right", top: 0.27, height: 0.115, kind: "button" },
+    ],
+    island: hasIsland(model),
+    bezel: 0.04,
+    radius: 0.135,
+  };
+}
+
+/** O zoom do aparelho no painel: 1 = um pixel CSS por ponto do iOS. */
+export const ZOOM = { min: 0.25, max: 2, step: 0.1 } as const;
+
+/** O zoom que faz o aparelho (tela + borda) caber em `box`. */
+export function fitScale(screen: { width: number; height: number }, box: { w: number; h: number }, bezel: number): number {
+  if (box.w <= 0 || box.h <= 0 || screen.width <= 0 || screen.height <= 0) return ZOOM.min;
+  const outer = { w: screen.width * (1 + 2 * bezel), h: screen.height + screen.width * 2 * bezel };
+  return Math.max(ZOOM.min, Math.min(ZOOM.max, box.w / outer.w, box.h / outer.h));
+}
+
+export function stepZoom(zoom: number, direction: 1 | -1): number {
+  return Math.round(Math.min(ZOOM.max, Math.max(ZOOM.min, zoom + direction * ZOOM.step)) * 100) / 100;
 }

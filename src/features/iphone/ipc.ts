@@ -32,3 +32,18 @@ export const iphoneButton = (device: string, name: HardwareButton | "home") => i
 
 /** Um gesto do sistema: Central de Controle, Central de Notificações, Busca ou início. */
 export const iphoneGesture = (device: string, name: SystemGesture | "home") => invoke<void>("iphone_gesture", { device, name });
+
+/** Segura (`down`) ou solta um botão: os botões da lateral da moldura (segurar o lateral chama a Siri). */
+export const iphoneButtonState = (device: string, name: HardwareButton, down: boolean) => invoke<void>("iphone_button_state", { device, name, down });
+
+/** O alternador de apps (subir da borda de baixo e segurar). */
+export const iphoneAppSwitcher = (device: string) => invoke<void>("iphone_gesture", { device, name: "appSwitcher" });
+
+/** Digita o texto no aparelho (teclado US, só ASCII). */
+export const iphoneType = (device: string, text: string) => invoke<void>("iphone_type", { device, text });
+
+/** Salva a foto da tela em Imagens; devolve o caminho. */
+export const iphoneScreenshot = (device: string) => invoke<string>("iphone_screenshot", { device });
+
+/** Copia um PNG para a área de transferência do Mac. */
+export const iphoneCopyImage = (path: string) => invoke<void>("iphone_copy_image", { path });

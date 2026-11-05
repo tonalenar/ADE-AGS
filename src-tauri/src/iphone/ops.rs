@@ -71,11 +71,15 @@ mod mac {
         Ok(())
     }
 
-    fn drag(input: &InputTx, from: (f64, f64), to: (f64, f64), ms: u64, edge: Edge) {
+    /// Um arrasto de `from` a `to` em `ms`; `hold` = quanto o dedo fica parado no fim antes de soltar.
+    pub(crate) fn drag(input: &InputTx, from: (f64, f64), to: (f64, f64), ms: u64, edge: Edge, hold: u64) {
         let steps = (ms / 16).clamp(4, 120) as u32;
         let lines = model::swipe_lines(from, to, steps, edge);
         let last = lines.len() - 1;
         for (i, line) in lines.into_iter().enumerate() {
+            if i == last && hold > 0 {
+                pause(hold);
+            }
             input.send(vec![line]);
             if i < last {
                 pause(16);
@@ -88,7 +92,7 @@ mod mac {
         let r = ready(app, device)?;
         let size = r.points()?;
         let (a, b) = (model::point_ratio(from.0, from.1, size)?, model::point_ratio(to.0, to.1, size)?);
-        drag(&r.input, a, b, ms, Edge::None);
+        drag(&r.input, a, b, ms, Edge::None, 0);
         Ok(())
     }
 
@@ -116,9 +120,16 @@ mod mac {
 
     /// Um gesto do sistema: Central de Controle, Central de Notificações, Busca ou início.
     pub fn gesture(app: &AppHandle, device: &str, name: &str) -> Result<(), String> {
-        let g = model::gesture(name).ok_or_else(|| format!("Gesto desconhecido: \"{name}\" (controlCenter, notificationCenter, spotlight ou home)."))?;
+        let g = model::gesture(name).ok_or_else(|| format!("Gesto desconhecido: \"{name}\" (controlCenter, notificationCenter, spotlight, appSwitcher ou home)."))?;
         let r = ready(app, device)?;
-        drag(&r.input, g.from, g.to, g.ms, g.edge);
+        drag(&r.input, g.from, g.to, g.ms, g.edge, g.hold_ms);
+        Ok(())
+    }
+
+    /// Aperta (`down`) ou solta um botão: para segurar (o lateral segurado chama a Siri).
+    pub fn button_state(app: &AppHandle, device: &str, name: &str, down: bool) -> Result<(), String> {
+        let line = model::button_state_line(name, down)?;
+        ready(app, device)?.input.send(vec![line]);
         Ok(())
     }
 
@@ -161,6 +172,7 @@ mod none {
     pub fn key(_: &AppHandle, _: &str, _: &str) -> Result<(), String> { Err(NO.into()) }
     pub fn button(_: &AppHandle, _: &str, _: &str) -> Result<(), String> { Err(NO.into()) }
     pub fn gesture(_: &AppHandle, _: &str, _: &str) -> Result<(), String> { Err(NO.into()) }
+    pub fn button_state(_: &AppHandle, _: &str, _: &str, _: bool) -> Result<(), String> { Err(NO.into()) }
     pub fn screenshot(_: &AppHandle, _: &str) -> Result<String, String> { Err(NO.into()) }
 }
 

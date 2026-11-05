@@ -4,7 +4,7 @@ import { AlertaToast } from "@/shared/ui/alerts";
 
 import type { Tone } from "./ConnectHint";
 import { iphoneButton, iphoneGesture } from "./ipc";
-import { HARDWARE_BUTTONS, SIDE_BUTTONS, SYSTEM_GESTURES, type HardwareButton, type SystemGesture } from "./model";
+import { HARDWARE_BUTTONS, SYSTEM_GESTURES, type HardwareButton, type SystemGesture } from "./model";
 
 /** Manda um botão ou gesto ao aparelho. É a pessoa mexendo: não pede confirmação; o erro vira aviso. */
 export function useDeviceActions(device: string, name: string) {
@@ -53,23 +53,5 @@ export function PhysicalMenu({ device, name, tone, ready, onDone }: { device: st
       ))}
       {!ready && <p className="m-0 px-2.5 py-1.5 text-[11px] leading-snug opacity-60">{t("iphone.notReady")}</p>}
     </div>
-  );
-}
-
-/**
- * Os botões físicos na lateral da moldura do iPhone (ação e volume à esquerda, lateral à direita), com o nome ao
- * passar o mouse, como no aparelho. `height` = a altura do aparelho em px.
- */
-export function SideButtons({ device, name, height, ready }: { device: string; name: string; height: number; ready: boolean }) {
-  const act = useDeviceActions(device, name);
-  return (
-    <>
-      {SIDE_BUTTONS.map((b) => (
-        <button key={b.button} type="button" disabled={!ready} title={act.label.button(b.button)} aria-label={act.label.button(b.button)}
-          onClick={() => act.button(b.button)}
-          className={`nodrag absolute w-[5px] rounded-sm bg-surface-overlay ring-1 ring-black/60 hover:bg-accent-500 disabled:opacity-50 disabled:hover:bg-surface-overlay ${b.side === "left" ? "-left-[4px]" : "-right-[4px]"}`}
-          style={{ top: Math.round(b.top * height), height: Math.max(10, Math.round(b.height * height)) }} />
-      ))}
-    </>
   );
 }
