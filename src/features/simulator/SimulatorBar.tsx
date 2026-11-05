@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { PhysicalSection, MirrorStatusLine } from "@/features/iphone/PhysicalParts";
+import { statusView, type MirrorStatus, type PhysicalDevice } from "@/features/iphone/model";
+import { watchPhysical } from "@/features/iphone/store";
+
 import { SIM_BAR_H } from "./geometry";
 import { HIBERNATE_OPTIONS } from "./prefs";
 import type { SimDevice } from "./ipc";
@@ -47,10 +51,12 @@ function useDismiss(open: boolean, close: () => void) {
   return ref;
 }
 
-/** O seletor de aparelho: busca, iPhones e iPads do Xcode, com o estado de cada um. */
-function DevicePicker({ devices, current, state, label, onPick, onOpen }: {
+/** O seletor de aparelho: os físicos ("Aparelhos", pelo CoreDevice) e os do Xcode ("Simuladores"), com busca e o
+ *  estado de cada um. `picked` = o id escolhido (UDID do simulador ou `device:<id>` do físico). */
+function DevicePicker({ devices, current, picked, state, label, onPick, onOpen }: {
   devices: SimDevice[];
   current: SimDevice | undefined;
+  picked: string | undefined;
   state: SimDevice["state"] | "error";
   label: string;
   onPick: (udid: string) => void;
@@ -60,6 +66,8 @@ function DevicePicker({ devices, current, state, label, onPick, onOpen }: {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useDismiss(open, () => setOpen(false));
+  // A lista dos físicos fica em dia enquanto o seletor está aberto (um iPhone demora a aparecer no Wi-Fi).
+  useEffect(() => (open ? watchPhysical() : undefined), [open]);
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return devices.filter((d) => !q || d.name.toLowerCase().includes(q) || d.runtime.toLowerCase().includes(q));
@@ -82,6 +90,9 @@ function DevicePicker({ devices, current, state, label, onPick, onOpen }: {
             bg-surface-raised/97 ring-1 ring-white/10 shadow-[0_18px_50px_rgba(0,0,0,0.5)]">
           <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("simulator.search")}
             className="mb-1 h-7 w-full rounded-md border border-white/8 bg-black/25 px-2.5 text-[12px] text-white outline-none placeholder:text-white/40" />
+          <PhysicalSection tone="dark" current={picked} onPick={(d) => { onPick(d.id); setOpen(false); }} />
+          <div className="mx-1.5 my-1 h-px bg-white/8" />
+          <div className="px-2.5 pb-0.5 pt-1.5 text-[11px] font-semibold text-white/70">{t("iphone.section.simulators")}</div>
           {groups.filter(([, list]) => list.length > 0).map(([title, list]) => (
             <div key={title}>
               <div className="px-2.5 pb-1 pt-2 text-[10.5px] font-semibold uppercase tracking-wide text-white/45">{title}</div>
@@ -128,8 +139,11 @@ export interface SimBarActions {
  * arrastam (`nodrag`). `full` = a conversa está aberta e a barra cobre o bloco inteiro (aparelho + conversa);
  * compacta, ela tem a largura do aparelho e o zoom, o modo leve, desligar e fechar vão para o "⋯".
  */
-export function SimulatorBar({ full, devices, current, state, scale, light, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
+export function SimulatorBar({ full, devices, current, physical, state, scale, light, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
   full: boolean;
+  /** O nó mostra um aparelho físico: só ver, sem os controles do simulador (início, bloquear, girar, foto, conversa,
+   *  modo leve, desligar). */
+  physical?: { id: string; device: PhysicalDevice | undefined; status: MirrorStatus | undefined };
   devices: SimDevice[];
   current: SimDevice | undefined;
   state: SimDevice["state"] | "error";
@@ -145,8 +159,11 @@ export function SimulatorBar({ full, devices, current, state, scale, light, hibe
   const { t } = useTranslation();
   const [menu, setMenu] = useState(false);
   const menuRef = useDismiss(menu, () => setMenu(false));
-  const on = state === "booted";
-  const label = current ? (full ? current.name : current.name.replace(/^iPhone |^iPad /, "")) : t("simulator.pick");
+  const on = state === "booted" && !physical;
+  const name = physical ? physical.device?.name : current?.name;
+  const label = name ? (full ? name : name.replace(/^iPhone |^iPad /, "")) : t("simulator.pick");
+  const tone = physical ? statusView(physical.status).tone : null;
+  const dot: SimDevice["state"] | "error" = tone === "ok" ? "booted" : tone === "wait" ? "booting" : tone === "off" ? (physical?.status?.state === "paused" ? "shutdown" : "error") : state;
 
   const zoom = (
     <>
@@ -167,12 +184,21 @@ export function SimulatorBar({ full, devices, current, state, scale, light, hibe
     <div className="ade-node-drag relative z-20 flex w-full items-center gap-0.5 rounded-full pl-1.5 pr-1 cursor-grab active:cursor-grabbing
       bg-surface/92 backdrop-blur-md ring-1 ring-white/10 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.6)] ade-device-bar-in"
       style={{ height: SIM_BAR_H }}>
-      <DevicePicker devices={devices} current={current} state={state} label={label} onPick={actions.onPick} onOpen={actions.onOpenPicker} />
-      {full ? <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/12" /> : <span className="flex-1" />}
-      <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("home")} title={t("simulator.home")} aria-label={t("simulator.home")}>{ICONS.home}</button>
-      <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("lock")} title={t("simulator.lock")} aria-label={t("simulator.lock")}>{ICONS.lock}</button>
-      <button type="button" className={button} disabled={!on} onClick={actions.onRotate} title={t("simulator.rotate")} aria-label={t("simulator.rotate")}>{ICONS.rotate}</button>
-      <button type="button" className={button} disabled={!on} onClick={actions.onShot} title={t("simulator.shot")} aria-label={t("simulator.shot")}>{ICONS.shot}</button>
+      <DevicePicker devices={devices} current={current} picked={physical?.id ?? current?.udid} state={dot} label={label} onPick={actions.onPick} onOpen={actions.onOpenPicker} />
+      {physical ? (
+        <>
+          <MirrorStatusLine status={physical.status} className="ml-1.5 shrink text-[11px] text-white/70" />
+          <span className="flex-1" />
+        </>
+      ) : full ? <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/12" /> : <span className="flex-1" />}
+      {!physical && (
+        <>
+        <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("home")} title={t("simulator.home")} aria-label={t("simulator.home")}>{ICONS.home}</button>
+        <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("lock")} title={t("simulator.lock")} aria-label={t("simulator.lock")}>{ICONS.lock}</button>
+        <button type="button" className={button} disabled={!on} onClick={actions.onRotate} title={t("simulator.rotate")} aria-label={t("simulator.rotate")}>{ICONS.rotate}</button>
+        <button type="button" className={button} disabled={!on} onClick={actions.onShot} title={t("simulator.shot")} aria-label={t("simulator.shot")}>{ICONS.shot}</button>
+        </>
+      )}
       {full && (
         <>
           <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/12" />
@@ -182,13 +208,15 @@ export function SimulatorBar({ full, devices, current, state, scale, light, hibe
           <span className="flex-1" />
         </>
       )}
-      <button type="button" className={`${button} ${chatOpen ? "bg-accent-500/25 text-accent-100" : ""}`} onClick={actions.onChat}
-        title={t("simulator.chat.toggle")} aria-label={t("simulator.chat.toggle")} aria-pressed={chatOpen}>
-        {ICONS.chat}
-        {agents > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-accent-600 px-1 text-[9.5px] font-bold text-white">{agents}</span>
-        )}
-      </button>
+      {!physical && (
+        <button type="button" className={`${button} ${chatOpen ? "bg-accent-500/25 text-accent-100" : ""}`} onClick={actions.onChat}
+          title={t("simulator.chat.toggle")} aria-label={t("simulator.chat.toggle")} aria-pressed={chatOpen}>
+          {ICONS.chat}
+          {agents > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-accent-600 px-1 text-[9.5px] font-bold text-white">{agents}</span>
+          )}
+        </button>
+      )}
       <div ref={menuRef} className="relative">
         <button type="button" className={`${button} ${closeArmed ? "bg-red-500 text-white hover:bg-red-600" : ""}`} onClick={() => setMenu(!menu)}
           title={t("simulator.more")} aria-label={t("simulator.more")} aria-haspopup="menu" aria-expanded={menu}>
@@ -203,39 +231,44 @@ export function SimulatorBar({ full, devices, current, state, scale, light, hibe
                 {zoom}
               </div>
             )}
-            {!full && (
+            {physical && <p className="m-0 px-2.5 py-1.5 text-[11px] leading-snug text-white/55">{t("iphone.viewOnly")}</p>}
+            {!full && !physical && (
               <button type="button" role="menuitemcheckbox" aria-checked={light} onClick={actions.onLight}
                 className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">
                 {ICONS.light}<span className="flex-1">{t("simulator.lightShort")}</span>{light && <span aria-hidden>✓</span>}
               </button>
             )}
-            <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-white/55">{t("simulator.hibernate")}</div>
-            <div role="radiogroup" aria-label={t("simulator.hibernate")} className="mx-1.5 mb-1 flex overflow-hidden rounded-lg ring-1 ring-white/10">
-              {HIBERNATE_OPTIONS.map((min) => (
-                <button key={min} type="button" role="radio" aria-checked={hibernateMin === min} onClick={() => actions.onHibernate(min)}
-                  className={`cc-t h-7 flex-1 text-[11.5px] ${hibernateMin === min ? "bg-white/12 text-white" : "text-white/60 hover:bg-white/6"}`}>
-                  {min === 0 ? t("simulator.hibernateNever") : t("simulator.hibernateMin", { count: min })}
-                </button>
-              ))}
-            </div>
-            <button type="button" role="menuitemcheckbox" aria-checked={single} onClick={actions.onSingle}
-              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">
-              <span className="flex-1">{t("simulator.single")}</span>{single && <span aria-hidden>✓</span>}
-            </button>
-            <div className="mx-1.5 my-1 h-px bg-white/8" />
-            <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toDevice"); }}
-              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
-              {t("simulator.clipboardToDevice")}
-            </button>
-            <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toMac"); }}
-              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
-              {t("simulator.clipboardToMac")}
-            </button>
-            <div className="mx-1.5 my-1 h-px bg-white/8" />
-            <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onShutdown(); }}
-              className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
-              {t("simulator.shutdown")}
-            </button>
+            {!physical && (
+              <>
+              <div className="px-2.5 pb-1 pt-1.5 text-[11px] text-white/55">{t("simulator.hibernate")}</div>
+              <div role="radiogroup" aria-label={t("simulator.hibernate")} className="mx-1.5 mb-1 flex overflow-hidden rounded-lg ring-1 ring-white/10">
+                {HIBERNATE_OPTIONS.map((min) => (
+                  <button key={min} type="button" role="radio" aria-checked={hibernateMin === min} onClick={() => actions.onHibernate(min)}
+                    className={`cc-t h-7 flex-1 text-[11.5px] ${hibernateMin === min ? "bg-white/12 text-white" : "text-white/60 hover:bg-white/6"}`}>
+                    {min === 0 ? t("simulator.hibernateNever") : t("simulator.hibernateMin", { count: min })}
+                  </button>
+                ))}
+              </div>
+              <button type="button" role="menuitemcheckbox" aria-checked={single} onClick={actions.onSingle}
+                className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">
+                <span className="flex-1">{t("simulator.single")}</span>{single && <span aria-hidden>✓</span>}
+              </button>
+              <div className="mx-1.5 my-1 h-px bg-white/8" />
+              <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toDevice"); }}
+                className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+                {t("simulator.clipboardToDevice")}
+              </button>
+              <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onClipboard("toMac"); }}
+                className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+                {t("simulator.clipboardToMac")}
+              </button>
+              <div className="mx-1.5 my-1 h-px bg-white/8" />
+              <button type="button" role="menuitem" disabled={!on} onClick={() => { setMenu(false); actions.onShutdown(); }}
+                className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8 disabled:opacity-40">
+                {t("simulator.shutdown")}
+              </button>
+            </>
+            )}
             <div className="mx-1.5 my-1 h-px bg-white/8" />
             <button type="button" role="menuitem" onClick={actions.onClose}
               className={`cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left hover:bg-white/8 ${closeArmed ? "text-red-300" : "text-white/90"}`}>
