@@ -147,9 +147,7 @@ ADE_AGS_DATA_DIR=<pasta> ADE_IPHONE_FPS=1 env -u CARGO_TARGET_DIR bun run tauri 
 | Sessão longa com Receiver Report | 150 s sem queda (helper sozinho); 170 s sem queda dentro da ADE: 2.902 quadros, 0 perdas, 0 descartes |
 | PLI + FIR → IDR | 30–150 ms (3 de 3 pedidos) |
 
-**Imagem corrompida sob movimento (USB), em investigação.** Rolando o X, a pessoa viu blocos misturados, com um quadro limpo de vez em quando. Nessa condição, a montagem contava zero perdas, incompletos e recusas do VideoToolbox, com ~550 fragmentos FU por segundo. A gravação não mostrou PACI nem várias fatias por quadro. Reter até 16 superfícies no lugar de 3 também não resolveu.
-
-Um remontador independente extraiu os NALs RTP da gravação em Annex B. O FFmpeg 7.1 por software reproduziu os blocos misturados no quadro 214, sem relatar erro de decodificação nesse trecho. A imagem corrompida já aparece no HEVC remontado, antes da composição da janela. A análise dos cabeçalhos não encontrou referências de longo prazo nem referências ativas ausentes. Ainda falta localizar a origem da corrupção. O teste ignorado `iphone::native::replay` reproduz uma gravação local com VideoToolbox e salva PNGs para comparação. As gravações e imagens da tela ficam no scratchpad.
+**Corrupção durante rolagem rápida (USB).** A oferta padrão do AVConference incluía `VRAE:0`, que impedia o encoder de adaptar a resolução. Sob movimento rápido, o iPhone descartava quadros para se manter no limite de banda. O mosaico aparecia também ao decodificar a gravação no FFmpeg, com zero perdas de sequência. O helper remove `VRAE:0` da oferta e preserva os outros recursos. No iPhone 15 Pro Max com iOS 27.2, o CoreDevice confirmou `FLS;SW:1`, e o teste no X deixou de mostrar blocos misturados na rolagem rápida. [Medições independentes do pymobiledevice3](https://github.com/doronz88/pymobiledevice3/blob/776d601cec83b894c3ad0eeee8ab4db375a46e4a/pymobiledevice3/remote/core_device/MOTION_TEAR_FINDINGS.md).
 
 Outra descoberta: com duas sessões abertas no mesmo aparelho, só a mais recente recebe o vídeo.
 
