@@ -106,19 +106,24 @@ describe("a fileira de ícones (no cabeçalho principal)", () => {
     expect(useChatStore.getState().panel).toBeNull();
   });
 
-  it("o ⋯ abre Design, Android, Time e PR com as mesmas teclas", async () => {
+  it("o ⋯ abre Design, Android e PR com as mesmas teclas; o Time fica na fileira", async () => {
     await mountToolbar();
     await click(host.querySelector("[aria-label='chat.panel.more']"));
     const items = [...host.querySelectorAll("[role=menuitem]")];
     const wide = items.filter((e) => !e.closest("li")?.className.includes("@min-[36rem]/main:hidden"));
-    expect(wide.map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "O", "P"]);
+    expect(wide.map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "P"]);
     // Na conversa estreita, Diff, Navegador e Arquivos saem da fileira e aparecem aqui (só nela: a classe os esconde na larga).
     const compact = items.filter((e) => e.closest("li")?.className.includes("@min-[36rem]/main:hidden"));
     expect(compact.map((e) => e.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("chat.panel.open.diff"), expect.stringContaining("chat.panel.open.browser"), expect.stringContaining("chat.panel.open.files")]));
     expect(host.querySelector("[aria-label='chat.panel.open.diff']")?.className).toContain("@max-[36rem]/main:hidden");
     expect(host.querySelector("[aria-label='chat.panel.open.summary']")?.className).not.toContain("hidden");
-    await click(host.querySelector("[role=menuitem][aria-keyshortcuts='O']"));
+    await click(host.querySelector("[role=menuitem][aria-keyshortcuts='A']"));
+    expect(useChatStore.getState().panel).toBe("android");
+    // O Time: um ícone da fileira, sempre à vista.
+    expect(icon("chat.panel.open.team")?.className).not.toContain("hidden");
+    await click(icon("chat.panel.open.team"));
     expect(useChatStore.getState().panel).toBe("team");
+    expect(icon("chat.panel.open.team")!.getAttribute("aria-pressed")).toBe("true");
   });
 });
 
@@ -242,7 +247,7 @@ describe("com outro painel aberto, o Resumo é um cartão flutuante encostado no
     expect(card()!.className).toContain("top-[52px]");
     expect(card()!.closest("[role=toolbar]")).toBeNull();
     // Um pouco menor que a coluna fixa (420 px).
-    expect(card()!.style.width).toBe("340px");
+    expect(card()!.style.width).toBe("310px");
     // Clicar dentro não fecha.
     await down(card()!.querySelector("[data-testid=cartoes]")!);
     expect(card()).not.toBeNull();

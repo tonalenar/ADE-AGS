@@ -25,6 +25,8 @@ describe("os painéis da direita rolam (sem barra visível)", () => {
     // Com painel: o cartão flutuante, menor.
     expect(shell).toMatch(/\{summaryOpen && panelOpen && \(\s*<SummaryPopover width=\{SUMMARY_POPOVER_W\}/);
     expect(shell.indexOf("</header>")).toBeLessThan(shell.indexOf("data-summary-column"));
+    // Um pouco menor que antes (420 px): a coluna tem 350 px e encolhe até 280.
+    expect(shell).toMatch(/w-\[350px\] min-w-\[280px\] shrink/);
     expect(summary).not.toMatch(/SummaryDock/);
   });
 

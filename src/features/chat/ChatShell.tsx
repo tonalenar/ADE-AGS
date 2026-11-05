@@ -210,7 +210,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
           </div>
           {summaryPinned && !panelOpen && (
             <aside aria-label={t("chat.panel.open.summary")} data-summary-column=""
-              className="w-[420px] min-w-[300px] shrink flex flex-col min-h-0 border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep">
+              className="w-[350px] min-w-[280px] shrink flex flex-col min-h-0 border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep">
               <SummaryPane inCard conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
             </aside>
           )}

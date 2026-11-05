@@ -56,4 +56,32 @@ describe("a barra da prancheta", () => {
     expect(host.querySelector("[aria-label='design.panel.toggle']")).toBeNull();
     expect(host.querySelector("[aria-label='tela-cheia']")).not.toBeNull();
   });
+
+  it("no painel estreito não se encavala: só Seleção e Mão ficam, o resto vai para o menu de excesso", async () => {
+    const noop = () => undefined;
+    await act(async () => {
+      root.render(<StudioToolbar pages={[{ id: "p1", name: "Página 1 com um nome bem comprido", order: 0, artboards: [], notes: [], shapes: [] } as never]} pageId="p1"
+        onPage={noop} onAddPage={noop} onRenamePage={noop} onDeletePage={noop} onCopyPageLink={noop}
+        tool="rect" onTool={noop} scale={0.39} onZoomIn={noop} onZoomOut={noop} onFit={noop} onPreset={noop} mod="⌘" focused={null}
+        lastDraw="pencil" lastShape="rect" guides={false} onToggleGuides={noop} exportBoard={null} />);
+    });
+    // A barra é o container das container queries.
+    expect(host.querySelector("header")!.className).toContain("@container/studiobar");
+    const hidden = "@max-[36rem]/studiobar:hidden";
+    expect(host.querySelector("[aria-label='design.studio.tool.select']")!.className).not.toContain(hidden);
+    expect(host.querySelector("[aria-label='design.studio.tool.hand']")!.className).not.toContain(hidden);
+    expect(host.querySelector("[aria-label='design.studio.tool.text']")!.className).toContain(hidden);
+    expect(host.querySelector("[aria-label='design.studio.tool.comment']")!.className).toContain(hidden);
+    // O menu de excesso só aparece na barra estreita, e mostra a ferramenta ativa que saiu da barra.
+    const overflow = host.querySelector("[data-tool-overflow]") as HTMLElement;
+    expect(overflow.className).toContain("hidden @max-[36rem]/studiobar:flex");
+    const more = overflow.querySelector("button[aria-label='design.studio.moreTools']") as HTMLButtonElement;
+    expect(more.getAttribute("aria-pressed")).toBe("true");
+    await act(async () => { more.click(); });
+    const items = [...overflow.querySelectorAll("[role=menuitemradio]")].map((b) => b.textContent);
+    expect(items.some((x) => x?.includes("design.studio.tool.text"))).toBe(true);
+    expect(items.some((x) => x?.includes("design.studio.tool.rect"))).toBe(true);
+    // O seletor de página encolhe e trunca; o grupo do zoom não encolhe.
+    expect(host.querySelector("[aria-expanded][title='design.studio.pagesHint']")!.className).toContain("@max-[36rem]/studiobar:max-w-[7.5rem]");
+  });
 });

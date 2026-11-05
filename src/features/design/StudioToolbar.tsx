@@ -82,29 +82,39 @@ export function StudioToolbar(p: {
   }
   return (
     <Bar padRight={p.padRight}>
-      <div className="flex min-w-0 flex-1 items-center gap-1">
+      {/*
+        Três grupos que não se encavalam: as páginas (encolhem e truncam), as ferramentas e o zoom (não encolhem), com
+        vãos flexíveis entre eles. Antes os grupos das pontas encolhiam até zero e o conteúdo deles passava por baixo das
+        ferramentas. Com a barra estreita (< 36rem, `@container/studiobar`), só Seleção e Mão ficam à vista: o resto vai
+        para o menu de excesso (⋯), e o seletor de página encolhe.
+      */}
+      <div className="flex min-w-0 shrink items-center gap-1">
         {p.leading}
         <PagesMenu {...p} />
       </div>
+      <span aria-hidden="true" className="flex-1 min-w-1" />
       <div role="toolbar" aria-label={t("design.studio.tools")} className="flex shrink-0 items-center gap-0.5">
         {TOOLS.map(({ id, key }) => {
           const Icon = TOOL_ICON[id];
           const on = p.tool === id;
           const btn = (
             <button key={id} type="button" aria-pressed={on} onClick={() => p.onTool(id)}
-              title={`${t(`design.studio.tool.${id}`)} (${key})`} aria-label={t(`design.studio.tool.${id}`)} className={toolBtn(on)}>
+              title={`${t(`design.studio.tool.${id}`)} (${key})`} aria-label={t(`design.studio.tool.${id}`)}
+              className={`${toolBtn(on)} ${PRIMARY_TOOLS.includes(id) ? "" : SECONDARY}`}>
               <Icon />
             </button>
           );
           // Desenho e formas entram depois da Nota, antes de Comentar.
           return id === "comment" ? [
-            <ToolMenu key="draw" label={t("design.studio.drawTools")} items={DRAW_TOOLS} last={p.lastDraw} tool={p.tool} onTool={p.onTool} />,
-            <ToolMenu key="shapes" label={t("design.studio.shapes")} items={SHAPE_TOOLS} last={p.lastShape} tool={p.tool} onTool={p.onTool} />,
+            <span key="draw" className={`contents ${SECONDARY}`}><ToolMenu label={t("design.studio.drawTools")} items={DRAW_TOOLS} last={p.lastDraw} tool={p.tool} onTool={p.onTool} /></span>,
+            <span key="shapes" className={`contents ${SECONDARY}`}><ToolMenu label={t("design.studio.shapes")} items={SHAPE_TOOLS} last={p.lastShape} tool={p.tool} onTool={p.onTool} /></span>,
             btn,
           ] : btn;
         })}
+        <ToolOverflow tool={p.tool} onTool={p.onTool} />
       </div>
-      <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+      <span aria-hidden="true" className="flex-1 min-w-1" />
+      <div className="flex shrink-0 items-center justify-end gap-1">
         <ExportMenu {...p} />
         <ZoomMenu {...p} />
         {/* Sem o botão de alternar o painel lateral do estúdio: ao lado do de tela cheia ele parecia duplicado (o painel
@@ -112,6 +122,42 @@ export function StudioToolbar(p: {
         {p.trailing}
       </div>
     </Bar>
+  );
+}
+
+/** As ferramentas que ficam à vista mesmo com a barra estreita. */
+const PRIMARY_TOOLS: Tool[] = ["select", "hand"];
+/** Some da barra estreita (o menu de excesso as mostra). */
+const SECONDARY = "@max-[36rem]/studiobar:hidden";
+
+/**
+ * O menu de excesso da barra estreita (< 36rem): as ferramentas que saíram da barra (Texto, Prancheta, Nota, desenho,
+ * formas, Comentar), com a tecla de cada uma. Na barra larga ele some.
+ */
+function ToolOverflow({ tool, onTool }: { tool: Tool; onTool: (t: Tool) => void }) {
+  const { t } = useTranslation();
+  const { open, setOpen, ref } = usePopover();
+  const items: Array<{ id: Tool; key: string }> = [...TOOLS.filter((x) => !PRIMARY_TOOLS.includes(x.id)), ...DRAW_TOOLS, ...SHAPE_TOOLS];
+  const active = items.some((i) => i.id === tool);
+  return (
+    <div ref={ref} data-tool-overflow="" className="relative hidden @max-[36rem]/studiobar:flex">
+      <button type="button" aria-pressed={active} aria-expanded={open} onClick={() => setOpen(!open)} className={toolBtn(active)}
+        title={t("design.studio.moreTools")} aria-label={t("design.studio.moreTools")}>
+        {active ? (() => { const I = TOOL_ICON[tool]; return <I />; })() : <DotsIcon className="w-3.5 h-3.5" />}
+      </button>
+      {open && (
+        <div role="menu" data-studio-menu="" className={`${menuCls} right-0 min-w-48`}>
+          {items.map((i) => {
+            const I = TOOL_ICON[i.id];
+            return (
+              <button key={i.id} type="button" role="menuitemradio" aria-checked={tool === i.id} className={rowCls} onClick={() => { onTool(i.id); setOpen(false); }}>
+                <I className="w-3.5 h-3.5" /><span className="flex-1">{t(`design.studio.tool.${i.id}`)}</span><kbd className="text-[11px] text-gray-400">{i.key}</kbd>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -128,9 +174,9 @@ function PagesMenu(p: Parameters<typeof StudioToolbar>[0]) {
   };
   return (
     <div ref={ref} className="relative min-w-0">
-      <button type="button" className={`${ghostBtn} max-w-[20rem]`} aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}
+      <button type="button" className={`${ghostBtn} min-w-0 max-w-[20rem] @max-[36rem]/studiobar:max-w-[7.5rem]`} aria-expanded={open} onClick={() => (open ? close() : setOpen(true))}
         title={t("design.studio.pagesHint")}>
-        <span className="truncate">{current?.name ?? t("design.studio.pages")}</span>
+        <span className="min-w-0 truncate">{current?.name ?? t("design.studio.pages")}</span>
         {p.pages.length > 1 && (
           <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-gray-100 dark:bg-white/10 text-[11px] leading-[18px] text-gray-600 dark:text-white/60 tabular-nums">{p.pages.length}</span>
         )}
@@ -314,7 +360,7 @@ function Bar({ padRight, children }: { padRight?: boolean; children: ReactNode }
   }, []);
   return (
     <header ref={ref} data-tauri-drag-region=""
-      className="relative h-10 shrink-0 flex items-center gap-1 border-b border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep"
+      className="@container/studiobar relative h-10 shrink-0 flex items-center gap-1 border-b border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep"
       style={{ paddingLeft: 4 + ins.left, paddingRight: (padRight ? 48 : 4) + ins.right }}>
       {children}
     </header>

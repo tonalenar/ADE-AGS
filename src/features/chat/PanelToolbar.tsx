@@ -13,7 +13,7 @@ export const ENTRY_ICON: Record<PanelChoice, (p: { className?: string }) => Reac
 };
 
 const ROW_ICON: Record<string, (p: { className?: string }) => React.ReactElement> = {
-  summary: DetailsIcon, terminal: TerminalIcon, diff: DiffIcon, browser: GlobeIcon, ios: PhoneIcon, files: FolderIcon,
+  summary: DetailsIcon, terminal: TerminalIcon, diff: DiffIcon, browser: GlobeIcon, ios: PhoneIcon, files: FolderIcon, team: UsersIcon,
 };
 
 /** O ícone da fileira está "ligado" quando é a superfície à vista (o aparelho vale iOS e Android). */
@@ -38,7 +38,7 @@ export function RowIcon({ id, active, available, onChoose, className = "" }: { i
   );
 }
 
-/** O `⋯` da fileira: o que não cabe nos ícones (Design, Android, Time, PR), com as mesmas teclas. */
+/** O `⋯` da fileira: o que não cabe nos ícones (Design, Android, PR), com as mesmas teclas. */
 export function MoreMenu({ available, onChoose, active }: { available: PanelAvailability; onChoose: (id: PanelChoice) => void; active: boolean }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
@@ -159,7 +159,7 @@ export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: 
         return <RowIcon key={id} id={id} active={active} available={available} onChoose={choose}
           className={COMPACT_HIDDEN.includes(id) && !active ? "@max-[36rem]/main:hidden" : ""} />;
       })}
-      <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android" || panel === "team"} />
+      <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android"} />
     </div>
   );
 }

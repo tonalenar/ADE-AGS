@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-/** A largura do cartão do Resumo com outro painel aberto: um pouco menor que a coluna fixa (420 px), como no Claude Code. */
-export const SUMMARY_POPOVER_W = 340;
+/** A largura do cartão do Resumo com outro painel aberto: um pouco menor que a coluna fixa (350 px), como no Claude Code. */
+export const SUMMARY_POPOVER_W = 310;
 
 /** O contêiner do ícone do Resumo na fileira (`PanelToolbar`): clicar nele não é «fora» (o ícone alterna sozinho). */
 export const SUMMARY_ANCHOR_ATTR = "data-summary-anchor";

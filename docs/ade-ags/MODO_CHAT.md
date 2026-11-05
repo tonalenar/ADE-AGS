@@ -426,20 +426,25 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
 
 - **Resumo** (como no Claude Code). O ícone do Resumo liga e desliga o Resumo (`summaryPinned`, lembrado; ligado por
   padrão).
-  - **Sem outro painel:** é uma coluna fixa à direita (420 px, encolhe até 300), abaixo da barra de ícones. A barra fica
+  - **Sem outro painel:** é uma coluna fixa à direita (350 px, encolhe até 280), abaixo da barra de ícones. A barra fica
     com a largura inteira, acima dela, e nunca é coberta. Tem o fundo do tema, divisória à esquerda e as seções em
     linhas com divisórias finas (`SectionsInOneCard`), sem um cartão cada. Nunca cobre a conversa nem o composer.
   - **Outro painel** (simulador, navegador, terminal, arquivos, prancheta) substitui a coluna. Fechar o painel a traz
     de volta, se o Resumo estiver ligado.
   - **Com outro painel aberto**, o ícone abre o cartão flutuante (`summary/SummaryPopover.tsx`, `summaryOpen`), um pouco
-    menor (340 px). Ele fica logo abaixo do cabeçalho, com a borda direita encostada no painel, e é desenhado pela
+    menor (310 px). Ele fica logo abaixo do cabeçalho, com a borda direita encostada no painel, e é desenhado pela
     coluna da conversa (`<main>`), então acompanha o redimensionamento. Fecha com clique fora, com Esc (o foco volta ao
     ícone), ao trocar de conversa e ao fechar o painel. Com o painel maximizado, abrir o cartão restaura o painel antes,
     para ele não cair sobre o simulador ou o navegador, que são nativos.
 - **Prancheta em tela cheia** (`/design/:id`, `chatSpaces.isFullscreenRoute`). Ocupa a janela toda, sem a sidebar de
   Espaços, que antes aparecia por cima. Tem «Sair da tela cheia» sempre à vista no cabeçalho, e o Esc também sai. Na
   barra da prancheta, à direita, fica só o botão de tela cheia: o de alternar o painel lateral do estúdio parecia
-  duplicado e saiu, mas o painel continua no atalho ⌘\.
+  duplicado e saiu, mas o painel continua no atalho ⌘\. A barra não se encavala no painel estreito: a barra é um
+  `@container/studiobar`. Abaixo de 36rem, só Seleção e Mão ficam à vista, e o resto (Texto, Prancheta, Nota, desenho,
+  formas, Comentar) vai para o menu de excesso (⋯). O seletor de página encolhe e trunca, e o grupo do zoom não
+  encolhe.
+- **Time na fileira do cabeçalho.** O Time é um ícone da fileira, com os demais (`ROW_CHOICES`). O ⋯ fica com Design,
+  Emulador Android, Pull request e Maximizar o painel.
 - **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
   conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
   (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de
