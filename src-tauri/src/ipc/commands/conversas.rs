@@ -150,9 +150,10 @@ pub(super) fn chat_wait(app: &AppHandle, args: &Value) -> Result<Value, String> 
     }
 }
 
-pub(super) fn chat_stop(_app: &AppHandle, args: &Value) -> Result<Value, String> {
+pub(super) fn chat_stop(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let thread = thread_arg(args)?;
-    tauri::async_runtime::block_on(api::interrupt(&thread))?;
+    let db = db(app)?;
+    tauri::async_runtime::block_on(api::stop(app, &db, &thread))?;
     Ok(json!({ "stopped": true }))
 }
 

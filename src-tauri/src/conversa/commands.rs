@@ -51,8 +51,8 @@ pub fn chat_thread_status(thread_id: String) -> ThreadStatus {
 }
 
 #[tauri::command]
-pub async fn chat_thread_interrupt(thread_id: String) -> Result<(), String> {
-    api::interrupt(&thread_id).await
+pub async fn chat_thread_interrupt(app: AppHandle, db: State<'_, DbConnection>, thread_id: String) -> Result<(), String> {
+    api::stop(&app, &db, &thread_id).await
 }
 
 #[tauri::command]
