@@ -6,11 +6,18 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
 const search = vi.hoisted(() => ({ shell: "/bin/zsh" as string | null }));
 vi.mock("@/features/agents/ipc", () => ({ agentSearchPath: () => Promise.resolve({ shell: search.shell, shellOk: true, shellError: null, fromShell: [], known: [], effective: [] }) }));
+const term = vi.hoisted(() => ({ live: false, ran: [] as [string, string][], queued: [] as [string, string][] }));
+vi.mock("@/features/terminal/terminalRegistry", async (orig) => ({
+  ...(await orig<typeof import("@/features/terminal/terminalRegistry")>()),
+  runInTerminal: (tabId: string, text: string) => { if (!term.live) return false; term.ran.push([tabId, text]); return true; },
+  sendWhenReady: (tabId: string, text: string) => { term.queued.push([tabId, text]); },
+}));
 
 import { useTabsStore } from "@/features/tabs/store";
 
 import { rectInShell } from "../RightPanel";
-import { ensureShellTab, resetLoginShell } from "../shellTerminal";
+import { ensureShellTab, openChatTerminal, resetLoginShell, runInShell } from "../shellTerminal";
+import { useChatStore } from "../store";
 
 /** Um elemento com o retângulo dado (o happy-dom não faz layout). */
 function box(el: HTMLElement, left: number, top: number, width: number, height: number): HTMLElement {
@@ -80,5 +87,57 @@ describe("o shell do terminal da conversa", () => {
     search.shell = null;
     const id = await act(() => ensureShellTab("/repo"));
     expect(useTabsStore.getState().tabs.find((t) => t.id === id)!.command).toBe("bash");
+  });
+});
+
+describe("o terminal do painel pedido pelo agente da conversa (`ags tab create --agent bash`)", () => {
+  beforeEach(() => {
+    resetLoginShell();
+    search.shell = "/bin/zsh";
+    useTabsStore.setState({ tabs: [], activeTabId: "conversa" });
+    useChatStore.setState({ panel: null });
+  });
+
+  it("abre a aba Terminal do painel e devolve o shell da pasta, sem trocar a conversa aberta", async () => {
+    const first = await act(() => openChatTerminal("/repo"));
+    expect(useChatStore.getState().panel).toBe("shell");
+    expect(first.reused).toBe(false);
+    expect(useTabsStore.getState().tabs.find((t) => t.id === first.tabId)!.cwd).toBe("/repo");
+    expect(useTabsStore.getState().activeTabId).toBe("conversa");
+  });
+
+  it("é o MESMO terminal que a pessoa usa no painel: o segundo pedido o reaproveita", async () => {
+    const mine = await act(() => ensureShellTab("/repo"));
+    const agent = await act(() => openChatTerminal("/repo"));
+    expect(agent).toEqual({ tabId: mine, reused: true });
+    expect(useTabsStore.getState().tabs.filter((t) => t.agentId === "bash")).toHaveLength(1);
+  });
+});
+
+describe("o Rodar dos blocos de código vai ao terminal do painel", () => {
+  beforeEach(() => {
+    resetLoginShell();
+    search.shell = "/bin/zsh";
+    term.live = false;
+    term.ran = [];
+    term.queued = [];
+    useTabsStore.setState({ tabs: [], activeTabId: "conversa" });
+    useChatStore.setState({ panel: "diff" });
+  });
+
+  it("com o shell ainda nascendo, abre a aba Terminal e deixa o comando esperando o prompt", async () => {
+    await act(async () => { runInShell("/repo", "supabase login"); });
+    expect(useChatStore.getState().panel).toBe("shell");
+    const shell = useTabsStore.getState().tabs.find((t) => t.agentId === "bash" && t.cwd === "/repo")!;
+    expect(term.queued).toEqual([[shell.id, "supabase login"]]);
+    expect(term.ran).toEqual([]);
+  });
+
+  it("com o shell vivo, o comando vai direto para ele", async () => {
+    const id = await act(() => ensureShellTab("/repo"));
+    term.live = true;
+    await act(async () => { runInShell("/repo", "bun dev"); });
+    expect(term.ran).toEqual([[id, "bun dev"]]);
+    expect(term.queued).toEqual([]);
   });
 });
