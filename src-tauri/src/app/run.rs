@@ -362,6 +362,8 @@ pub fn run() {
             crate::conversa::chat_thread_requests,
             crate::conversa::chat_thread_status,
             crate::conversa::chat_thread_interrupt,
+            crate::conversa::chat_task_stop,
+            crate::conversa::chat_task_output,
             crate::conversa::chat_request_answer,
             crate::conversa::chat_requests_sweep,
             crate::conversa::chat_thread_retune,

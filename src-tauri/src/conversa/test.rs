@@ -387,7 +387,8 @@ mod claude {
         let mut m = Mapper::default();
         let mut line = assistant("msg_2", json!({ "type": "text", "text": "dentro do Task" }));
         line["parent_tool_use_id"] = json!("toolu_task");
-        assert!(m.feed(&line, 1).is_empty());
+        // Vai à tarefa do subagente (o painel de tarefas), nunca como item da conversa.
+        assert!(m.feed(&line, 1).iter().all(|o| matches!(o, Out::SubItem { parent, .. } if parent == "toolu_task")));
     }
 
     #[test]
