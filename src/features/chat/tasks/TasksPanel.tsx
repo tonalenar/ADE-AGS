@@ -25,13 +25,16 @@ export function TasksPanel({ conversation }: { conversation: ConversationCard | 
   const data = useConversationTasks(conversation?.tabId ?? null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [doneOpen, setDoneOpen] = useState(false);
+  // Os "▸ N tarefas" abertos, por tarefa: ficam abertos na volta do detalhe.
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleChildren = (id: string) => setExpanded((prev) => { const next = new Set(prev); if (!next.delete(id)) next.add(id); return next; });
   const [error, setError] = useState<string | null>(null);
   const now = useNow(data.running > 0);
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const lastOpened = useRef<string | null>(null);
   // Trocar de conversa volta à lista.
   const key = data.key;
-  useEffect(() => { setOpenId(null); setError(null); }, [key]);
+  useEffect(() => { setOpenId(null); setError(null); setExpanded(new Set()); }, [key]);
   // Voltar do detalhe devolve o foco à linha de onde ele saiu.
   useEffect(() => {
     if (openId !== null || !lastOpened.current) return;
@@ -77,7 +80,7 @@ export function TasksPanel({ conversation }: { conversation: ConversationCard | 
               </h3>
               <ul className="list-none m-0 p-0 flex flex-col gap-1.5">
                 {running.map((node) => (
-                  <TaskRow key={node.task.id} node={node} now={now} threadId={data.threadId} onOpen={openTask} onStop={stop} rowRefs={rowRefs.current} />
+                  <TaskRow key={node.task.id} node={node} now={now} threadId={data.threadId} onOpen={openTask} onStop={stop} rowRefs={rowRefs.current} expanded={expanded} onToggle={toggleChildren} />
                 ))}
               </ul>
             </section>
@@ -94,7 +97,7 @@ export function TasksPanel({ conversation }: { conversation: ConversationCard | 
               {doneOpen && (
                 <ul id="cc-tasks-done" className="list-none m-0 mt-1.5 p-0 flex flex-col gap-1.5">
                   {done.map((node) => (
-                    <TaskRow key={node.task.id} node={node} now={now} threadId={data.threadId} onOpen={openTask} onStop={stop} rowRefs={rowRefs.current} />
+                    <TaskRow key={node.task.id} node={node} now={now} threadId={data.threadId} onOpen={openTask} onStop={stop} rowRefs={rowRefs.current} expanded={expanded} onToggle={toggleChildren} />
                   ))}
                 </ul>
               )}
@@ -118,13 +121,13 @@ function EmptyState({ agentId, hasThread }: { agentId: string | null; hasThread:
   );
 }
 
-function TaskRow({ node, now, threadId, onOpen, onStop, rowRefs, nested = false }: {
+function TaskRow({ node, now, threadId, onOpen, onStop, rowRefs, expanded, onToggle, nested = false }: {
   node: TaskNode; now: number; threadId: string | null; onOpen: (id: string) => void; onStop: (task: BgTask) => void;
-  rowRefs: Map<string, HTMLButtonElement>; nested?: boolean;
+  rowRefs: Map<string, HTMLButtonElement>; expanded: ReadonlySet<string>; onToggle: (id: string) => void; nested?: boolean;
 }) {
   const { t } = useTranslation();
-  const [childrenOpen, setChildrenOpen] = useState(false);
   const { task, children } = node;
+  const childrenOpen = expanded.has(task.id);
   const title = task.title || t("chat.tasks.untitled");
   const isRunning = task.status === "running";
   const stop = stopLabel(task, threadId, t);
@@ -151,7 +154,7 @@ function TaskRow({ node, now, threadId, onOpen, onStop, rowRefs, nested = false 
       </div>
       {children.length > 0 && (
         <div className="pl-3">
-          <button type="button" onClick={() => setChildrenOpen(!childrenOpen)} aria-expanded={childrenOpen}
+          <button type="button" onClick={() => onToggle(task.id)} aria-expanded={childrenOpen}
             className="h-6 px-1 flex items-center gap-1 rounded-md text-chat-caption text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-500">
             <ChevronRightIcon className={`w-3 h-3 motion-safe:transition-transform ${childrenOpen ? "rotate-90" : ""}`} />
             {t("chat.tasks.children", { count: children.length })}
@@ -159,7 +162,7 @@ function TaskRow({ node, now, threadId, onOpen, onStop, rowRefs, nested = false 
           {childrenOpen && (
             <ul className="list-none m-0 mt-1 p-0 pl-2 border-l border-gray-200 dark:border-white/[0.08] flex flex-col gap-1">
               {children.map((child) => (
-                <TaskRow key={child.task.id} node={child} now={now} threadId={threadId} onOpen={onOpen} onStop={onStop} rowRefs={rowRefs} nested />
+                <TaskRow key={child.task.id} node={child} now={now} threadId={threadId} onOpen={onOpen} onStop={onStop} rowRefs={rowRefs} expanded={expanded} onToggle={onToggle} nested />
               ))}
             </ul>
           )}

@@ -119,6 +119,10 @@ describe("o painel de tarefas", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(0); });
     expect(host.textContent).toContain("PASS 12 testes");
     expect(invokeMock.calls("chat_task_output")[0]).toEqual({ threadId: "th-1", taskId: "f1" });
+    // A volta do detalhe mantém os filhos abertos e devolve o foco à linha.
+    await click(byLabel("chat.tasks.back"));
+    expect(byLabel('chat.tasks.openDetail:{"title":"Rodar testes"}')).not.toBeNull();
+    expect(document.activeElement?.getAttribute("aria-label")).toBe('chat.tasks.openDetail:{"title":"Rodar testes"}');
   });
 
   it("a lixeira tira as concluídas; o fechar devolve o painel", async () => {
