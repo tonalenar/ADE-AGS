@@ -4,6 +4,7 @@ import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GlobeIcon, Ma
 import { COMPACT_HIDDEN, entryForKey, isAvailable, keyLabel, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import { addSurface, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleSummary, toggleSummaryPinned, useChatStore } from "./store";
 import { SUMMARY_ANCHOR_ATTR } from "./summary/SummaryPopover";
+import { TasksButton } from "./tasks/TasksButton";
 import { usePopover } from "./usePopover";
 
 /** Os ícones das linhas do menu "Abrir uma superfície". */
@@ -159,6 +160,8 @@ export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: 
         return <RowIcon key={id} id={id} active={active} available={available} onChoose={choose}
           className={COMPACT_HIDDEN.includes(id) && !active ? "@max-[36rem]/main:hidden" : ""} />;
       })}
+      {/* As tarefas em segundo plano (como no Claude Code): sempre na fileira, nunca no ⋯. */}
+      <TasksButton />
       <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android"} />
     </div>
   );

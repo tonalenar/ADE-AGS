@@ -65,15 +65,16 @@ interface ChatState {
 export interface DesignOpenRequest { designId: string; artboardId?: string | null; pageId?: string | null; seq: number }
 
 /** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
-export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty">;
+export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty" | "tasks">;
 export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android"];
 
 /**
  * As abas do painel direito. O Resumo não é uma delas: sem painel ele é a coluna fixa da conversa (`summaryPinned`),
  * com painel é um cartão flutuante (`summaryOpen`, `summary/SummaryPopover.tsx`), como no Claude Code. `team`: o painel Time do time de agentes (pranchetas 15 e 16,
- * `team/TeamPanel.tsx`). `empty`: o estado vazio do T3.
+ * `team/TeamPanel.tsx`). `tasks`: as tarefas em segundo plano da conversa (`tasks/TasksPanel.tsx`; não volta sozinha ao
+ * reabrir o app). `empty`: o estado vazio do T3.
  */
-export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
+export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";

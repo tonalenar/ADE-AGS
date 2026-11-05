@@ -18,6 +18,7 @@ import { CHAT_SHELL_ATTR, hasTimeline } from "./ConversationView";
 import { isAvailable, keyLabel, PANEL_ENTRIES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import type { ConversationCard } from "./chatModel";
 import { TeamPanel } from "./team/TeamPanel";
+import { TasksPanel } from "./tasks/TasksPanel";
 import { clampPanelWidth, PANEL_W, setChatBrowser, setChatShell, setPanelWidth, togglePanelMaximized, toggleRightPanel, useChatStore } from "./store";
 
 // Design e os aparelhos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
@@ -84,6 +85,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
         {panel === "shell" && cwd && <ShellSurface cwd={cwd} />}
         {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}
         {panel === "team" && <TeamPanel conversation={conversation} cards={cards} />}
+        {panel === "tasks" && <TasksPanel conversation={conversation} />}
         {panel === "browser" && cwd && <BrowserSurface cwd={cwd} />}
         {(panel === "design" || panel === "ios" || panel === "android") && (
           <Suspense fallback={<p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.panel.loading")}</p>}>
