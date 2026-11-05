@@ -14,9 +14,6 @@ use serde_json::Value;
 /// `udid` dos simuladores): `device:<identificador do CoreDevice>`. O identificador não é o UDID.
 pub const PHYSICAL_PREFIX: &str = "device:";
 
-/// O que `ags device` e `sim act` dizem num nó que mostra um aparelho físico: por enquanto ele é só para ver.
-pub const AGENTS_NOT_YET: &str = "Esse nó mostra um iPhone ou iPad físico, que por enquanto é só para ver: os agentes ainda não o controlam.";
-
 pub fn is_physical(id: &str) -> bool {
     id.starts_with(PHYSICAL_PREFIX)
 }
@@ -143,6 +140,10 @@ pub enum HelperEvent {
     Started { transport: Transport, display: Option<(u32, u32)> },
     Error { code: String, message: String },
     Stopped,
+    /// O HID do aparelho ficou pronto (o que deu para abrir).
+    InputReady { touch: bool, buttons: bool, keyboard: bool },
+    /// Uma entrada não chegou ao aparelho.
+    InputError(String),
     Other(String),
 }
 
@@ -183,6 +184,11 @@ pub fn parse_event(body: &[u8]) -> HelperEvent {
         }
         "error" => HelperEvent::Error { code: s("code"), message: s("message") },
         "stopped" => HelperEvent::Stopped,
+        "inputReady" => {
+            let flag = |k: &str| v.get(k).and_then(Value::as_bool).unwrap_or(false);
+            HelperEvent::InputReady { touch: flag("touch"), buttons: flag("buttons"), keyboard: flag("keyboard") }
+        }
+        "inputError" => HelperEvent::InputError(s("message")),
         other => HelperEvent::Other(other.to_string()),
     }
 }
@@ -621,5 +627,189 @@ pub fn exit_reason(code: Option<i32>, signal: Option<i32>) -> String {
         (Some(c), _) => format!("O helper do espelhamento saiu com o código {c}."),
         (None, Some(s)) => format!("O helper do espelhamento caiu (sinal {s})."),
         (None, None) => "O helper do espelhamento saiu.".into(),
+    }
+}
+
+// ── Entrada: toque, botões, teclado (as linhas que o helper lê no stdin) ──
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TouchPhase {
+    Start,
+    Move,
+    End,
+}
+
+/// De que borda o dedo sai: a de baixo é a barra de início; a de cima, as centrais.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Edge {
+    None,
+    Top,
+    Bottom,
+}
+
+impl Edge {
+    fn word(self) -> &'static str {
+        match self {
+            Edge::None => "none",
+            Edge::Top => "top",
+            Edge::Bottom => "bottom",
+        }
+    }
+}
+
+fn unit(v: f64) -> f64 {
+    if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 }
+}
+
+/// Um toque em proporção da tela (0..1, origem no topo, a tela em pé). `second` = o segundo dedo (pinça).
+pub fn touch_line(phase: TouchPhase, point: (f64, f64), second: Option<(f64, f64)>, edge: Edge) -> String {
+    let word = match phase {
+        TouchPhase::Start => "start",
+        TouchPhase::Move => "move",
+        TouchPhase::End => "end",
+    };
+    let mut line = format!("touch {word} {:.4} {:.4}", unit(point.0), unit(point.1));
+    if let Some((x, y)) = second {
+        line.push_str(&format!(" {:.4} {:.4}", unit(x), unit(y)));
+    }
+    line.push(' ');
+    line.push_str(edge.word());
+    line
+}
+
+/// Os últimos 1,5% da tela contam como a borda: um arrasto que começa ali é o gesto da barra de início (embaixo)
+/// ou das centrais (em cima), como no aparelho.
+const EDGE_ZONE: f64 = 0.015;
+
+/// Um clique na tela espelhada (coordenadas da view, origem no topo): a proporção e a borda. A view mostra a tela já
+/// recortada (sem as bordas de alinhamento do vídeo), então a proporção da view é a da tela.
+pub fn view_touch(x: f64, y: f64, width: f64, height: f64) -> Option<((f64, f64), Edge)> {
+    let ratio = crate::simulator::model::touch_ratio(x, y, width, height)?;
+    let edge = if ratio.1 >= 1.0 - EDGE_ZONE {
+        Edge::Bottom
+    } else if ratio.1 <= EDGE_ZONE {
+        Edge::Top
+    } else {
+        Edge::None
+    };
+    Some((ratio, edge))
+}
+
+/// Pontos do iOS (os do `shot`) → proporção da tela.
+pub fn point_ratio(x: f64, y: f64, size: (f64, f64)) -> Result<(f64, f64), String> {
+    if size.0 <= 0.0 || size.1 <= 0.0 {
+        return Err("O tamanho da tela do aparelho ainda não é conhecido.".into());
+    }
+    crate::simulator::model::point_ratio(x, y, size)
+}
+
+/// A tela em pontos do iOS: @3x nos iPhones grandes, @2x nos pequenos (até 828 px) e no iPad. A mesma conta do
+/// frontend (`iphone/model.ts::physicalScreen`).
+pub fn display_points(display: (u32, u32), family: &str) -> (f64, f64) {
+    let scale = if family == "ipad" || display.0 <= 828 { 2.0 } else { 3.0 };
+    ((f64::from(display.0) / scale).round(), (f64::from(display.1) / scale).round())
+}
+
+/// Os botões físicos: página e uso HID. Página 0x0C (consumo): início 0x40, bloquear/lateral 0x30, volume 0xE9/0xEA,
+/// mudo 0xE2 (o botão de ação), Siri 0xCF.
+pub fn button_usage(name: &str) -> Option<(u16, u16)> {
+    let key: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+    Some(match key.as_str() {
+        "home" | "inicio" => (0x0C, 0x40),
+        "lock" | "side" | "power" | "bloquear" | "lateral" => (0x0C, 0x30),
+        "volumeup" | "volup" => (0x0C, 0xE9),
+        "volumedown" | "voldown" => (0x0C, 0xEA),
+        "mute" | "action" | "silenciar" | "mudo" => (0x0C, 0xE2),
+        "siri" => (0x0C, 0xCF),
+        _ => return None,
+    })
+}
+
+/// Apertar e soltar um botão.
+pub fn button_lines(name: &str) -> Result<[String; 2], String> {
+    let (page, code) = button_usage(name)
+        .ok_or_else(|| format!("Botão desconhecido: \"{name}\". Use home, lock, volumeUp, volumeDown, mute ou siri."))?;
+    Ok([format!("button {page} {code} down"), format!("button {page} {code} up")])
+}
+
+/// Um gesto do sistema: de onde a onde o dedo vai, a borda e quanto demora.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Gesture {
+    pub from: (f64, f64),
+    pub to: (f64, f64),
+    pub edge: Edge,
+    pub ms: u64,
+}
+
+/// Central de Controle (de cima, à direita), Central de Notificações (de cima, à esquerda), Busca (para baixo no
+/// meio da tela inicial) e início (de baixo para cima, pela barra).
+pub fn gesture(name: &str) -> Option<Gesture> {
+    let key: String = name.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_ascii_lowercase();
+    Some(match key.as_str() {
+        "controlcenter" | "centraldecontrole" => Gesture { from: (0.9, 0.005), to: (0.9, 0.45), edge: Edge::Top, ms: 350 },
+        "notificationcenter" | "notifications" | "centraldenotificacoes" => Gesture { from: (0.2, 0.005), to: (0.2, 0.6), edge: Edge::Top, ms: 350 },
+        "spotlight" | "busca" | "search" => Gesture { from: (0.5, 0.35), to: (0.5, 0.6), edge: Edge::None, ms: 300 },
+        "home" | "inicio" => Gesture { from: (0.5, 0.995), to: (0.5, 0.7), edge: Edge::Bottom, ms: 250 },
+        _ => return None,
+    })
+}
+
+/// Um deslize em `steps` passos: o dedo desce, anda e sobe, sempre com a mesma borda.
+pub fn swipe_lines(from: (f64, f64), to: (f64, f64), steps: u32, edge: Edge) -> Vec<String> {
+    let points = crate::simulator::model::swipe_points(from, to, steps);
+    let mut lines = Vec::with_capacity(points.len() + 1);
+    lines.push(touch_line(TouchPhase::Start, points[0], None, edge));
+    for p in &points[1..] {
+        lines.push(touch_line(TouchPhase::Move, *p, None, edge));
+    }
+    lines.push(touch_line(TouchPhase::End, *points.last().unwrap_or(&to), None, edge));
+    lines
+}
+
+/// Uso HID do Shift esquerdo.
+const SHIFT: u32 = 0xE1;
+
+/// Texto → teclas (teclado US; só ASCII), com Shift quando precisa.
+pub fn text_lines(text: &str) -> Result<Vec<String>, String> {
+    let mut lines = Vec::new();
+    for (usage, shift) in crate::simulator::model::text_keys(text)? {
+        if shift {
+            lines.push(format!("key {SHIFT} down"));
+        }
+        lines.push(format!("key {usage} down"));
+        lines.push(format!("key {usage} up"));
+        if shift {
+            lines.push(format!("key {SHIFT} up"));
+        }
+    }
+    Ok(lines)
+}
+
+/// Uma tecla com nome (`enter`, `esc`, `tab`, setas…).
+pub fn key_lines(name: &str) -> Result<[String; 2], String> {
+    let usage = crate::simulator::model::key_usage(name)?;
+    Ok([format!("key {usage} down"), format!("key {usage} up")])
+}
+
+/// O tamanho da foto tirada do quadro decodificado: a tela, sem as bordas de alinhamento (direita e embaixo).
+pub fn crop_size(coded: (u32, u32), display: Option<(u32, u32)>) -> (u32, u32) {
+    match display {
+        Some((w, h)) if w > 0 && h > 0 && w <= coded.0 && h <= coded.1 => (w, h),
+        _ => coded,
+    }
+}
+
+/// O que o aparelho físico não faz pelos agentes (a lista de apps, abrir URL, girar e ligar são do simulador).
+pub fn agent_unsupported(action: &str) -> bool {
+    matches!(action, "open" | "launch" | "close" | "start" | "rotate" | "clipboard" | "tree")
+}
+
+/// Um agente no celular de verdade: olhar (`shot`) passa; tocar, deslizar, tecla e botão pedem à pessoa até ela dizer
+/// "sempre neste aparelho"; digitar texto pede sempre (não se sabe em que campo o texto cai).
+pub fn agent_asks(action: &str, trusted: bool) -> bool {
+    match action {
+        "shot" => false,
+        "type" => true,
+        _ => !trusted,
     }
 }

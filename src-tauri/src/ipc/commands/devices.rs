@@ -354,8 +354,5 @@ pub(super) fn ios_target(from: &str, name: &str) -> Result<(String, String), Str
     if target.kind() != Some("ios") { return Err("Use sim act somente em um nó iOS conectado ao seu terminal.".into()); }
     target.allows("act")?;
     let udid = target.portal.udid.clone().filter(|u| !u.is_empty()).ok_or("Escolha o aparelho no nó iOS antes de iniciar.")?;
-    if crate::iphone::model::is_physical(&udid) {
-        return Err(crate::iphone::model::AGENTS_NOT_YET.into());
-    }
     Ok((target.id.clone(), udid))
 }

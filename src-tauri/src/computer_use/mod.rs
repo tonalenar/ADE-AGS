@@ -424,3 +424,9 @@ mod cover;
 pub mod visual;
 pub(crate) mod ios;
 pub(crate) mod desktop;
+
+/// PNG em tamanho cheio a partir de pixels BGRA (linhas de `width * 4`): a foto do iPhone físico (`iphone::ops`).
+#[cfg(target_os = "macos")]
+pub(crate) fn png_from_bgra(data: &mut [u8], width: usize, height: usize, out: &std::path::Path) -> Result<(), String> {
+    capture::png_from_bgra(data, width, height, out, usize::MAX)
+}

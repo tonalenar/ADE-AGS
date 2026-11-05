@@ -20,7 +20,7 @@ pub struct DeviceList {
 }
 
 #[cfg(target_os = "macos")]
-mod mac {
+pub(crate) mod mac {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
@@ -37,6 +37,8 @@ mod mac {
         sessions: HashMap<String, Session>,
         /// O IPv6 do aparelho no túnel, pela última lista (o helper o usa se o CoreDevice não disser).
         tunnels: HashMap<String, String>,
+        /// `iphone` ou `ipad`, pela última lista (para a tela em pontos).
+        families: HashMap<String, String>,
     }
 
     impl State {
@@ -66,6 +68,7 @@ mod mac {
                 if let Some(ip) = &d.tunnel_ip {
                     s.tunnels.insert(d.id.clone(), ip.clone());
                 }
+                s.families.insert(d.id.clone(), d.family.clone());
             }
         }
         Ok(list)
@@ -75,8 +78,9 @@ mod mac {
         session::unavailable()
     }
 
-    /// A tela `id` passa a mostrar `device`: abre a sessão do aparelho, se for a primeira. Devolve os quadros.
-    pub fn open(app: &AppHandle, id: &str, device: &str, identifier: &str, visible: bool) -> std::sync::Arc<super::super::native::view::Presenter> {
+    /// A tela `id` passa a mostrar `device`: abre a sessão do aparelho, se for a primeira. Devolve os quadros e por
+    /// onde mandar entrada.
+    pub fn open(app: &AppHandle, id: &str, device: &str, identifier: &str, visible: bool) -> (std::sync::Arc<super::super::native::view::Presenter>, session::InputTx) {
         let mut s = state().lock().unwrap_or_else(|e| e.into_inner());
         // A tela trocou de aparelho: o anterior pode ter ficado sem ninguém.
         if let Some((old, _)) = s.screens.insert(id.to_string(), (device.to_string(), visible)) {
@@ -91,7 +95,39 @@ mod mac {
             .entry(device.to_string())
             .or_insert_with(|| session::start(app.clone(), device.to_string(), identifier.to_string(), tunnel, any));
         session.want(any);
-        session.presenter.clone()
+        (session.presenter.clone(), session.input())
+    }
+
+    /// O id da "tela" que um agente usa enquanto age (sem ninguém olhando, o aparelho também precisa espelhar para
+    /// a foto e para o toque saber o tamanho da tela).
+    fn agent_screen(device: &str) -> String {
+        format!("agent:{device}")
+    }
+
+    /// A sessão do aparelho para um agente, já ligada e com o toque pronto (espera até `wait`). Abre uma se não
+    /// houver; `release` a solta (ela para sozinha depois de um tempo sem ninguém olhando).
+    pub fn agent(app: &AppHandle, device: &str, wait: Duration) -> Result<(session::InputTx, session::Status, std::sync::Arc<super::super::native::view::Presenter>, String), String> {
+        let identifier = model::physical_identifier(device).ok_or("Esse não é um aparelho físico do CoreDevice.")?.to_string();
+        if let Some(why) = session::unavailable() {
+            return Err(match why {
+                "xcode" => "O controle do aparelho precisa do Xcode 27 neste Mac.".into(),
+                _ => "Este app veio sem o helper do espelhamento.".into(),
+            });
+        }
+        let (presenter, input) = open(app, &agent_screen(device), device, &identifier, true);
+        let (waiter, family) = {
+            let s = state().lock().unwrap_or_else(|e| e.into_inner());
+            let session = s.sessions.get(device).ok_or("A sessão do aparelho não abriu.")?;
+            (session.waiter(), s.families.get(device).cloned().unwrap_or_else(|| "iphone".into()))
+        };
+        // Espera fora da trava do estado: as telas seguem atualizando enquanto o aparelho liga.
+        let status = waiter.wait(wait)?;
+        Ok((input, status, presenter, family))
+    }
+
+    /// O agente terminou: a "tela" dele sai de vista (a sessão para depois de um tempo, se ninguém mais olhar).
+    pub fn release(device: &str) {
+        seen(&agent_screen(device), false);
     }
 
     pub fn seen(id: &str, visible: bool) {
@@ -175,12 +211,12 @@ pub async fn iphone_mirror_attach<R: Runtime>(app: tauri::AppHandle, webview: We
     let identifier = model::physical_identifier(&device).ok_or("Esse não é um aparelho físico do CoreDevice.")?.to_string();
     #[cfg(target_os = "macos")]
     {
-        let presenter = mac::open(&app, &id, &device, &identifier, place.visible.is_some());
+        let (presenter, input) = mac::open(&app, &id, &device, &identifier, place.visible.is_some());
         let (tx, rx) = tokio::sync::oneshot::channel();
         webview
             .with_webview(move |platform| {
                 // SAFETY: `with_webview` roda na thread da interface e `inner()` é o WKWebView da janela.
-                let result = unsafe { super::native::view::attach(platform.inner(), &id, presenter, &place) };
+                let result = unsafe { super::native::view::attach(platform.inner(), &id, presenter, input, &place) };
                 let _ = tx.send(result);
             })
             .map_err(|e| e.to_string())?;
@@ -240,4 +276,17 @@ pub fn iphone_mirror_status(device: String) -> Option<serde_json::Value> {
         let _ = device;
         None
     }
+}
+
+/// A pessoa apertou um botão do aparelho na interface (início, bloquear, volume, mudo, Siri). É a pessoa: não pede
+/// confirmação. Espera o toque ficar pronto, se o espelhamento ainda estiver abrindo.
+#[tauri::command(async)]
+pub fn iphone_button(app: tauri::AppHandle, device: String, name: String) -> Result<(), String> {
+    super::ops::button(&app, &device, &name)
+}
+
+/// A pessoa pediu um gesto do sistema na interface: Central de Controle, Central de Notificações, Busca ou início.
+#[tauri::command(async)]
+pub fn iphone_gesture(app: tauri::AppHandle, device: String, name: String) -> Result<(), String> {
+    super::ops::gesture(&app, &device, &name)
 }

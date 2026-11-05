@@ -146,6 +146,8 @@ pub fn run() {
             crate::iphone::iphone_mirror_place,
             crate::iphone::iphone_mirror_detach,
             crate::iphone::iphone_mirror_status,
+            crate::iphone::iphone_button,
+            crate::iphone::iphone_gesture,
             crate::ipc::commands::simulators::simulator_tell,
             crate::real_browser::real_browser_open,
             crate::real_browser::real_browser_place,

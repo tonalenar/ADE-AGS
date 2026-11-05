@@ -2,7 +2,8 @@
 // os pacotes do vídeo à ADE. É um processo à parte de propósito: as interfaces do CoreDevice são privadas e escritas à
 // mão (`stubs/`), e uma assinatura errada derruba só este processo. A ADE reabre o helper e mostra "reconectando".
 //
-// Só VÊ a tela: não manda toque, botão, teclado nem HID, não instala, não reinicia e não muda ajustes do aparelho.
+// Além de ver, leva ao aparelho o que a ADE mandar pelo stdin (toque, botão, tecla), pelo HID do CoreDevice. Não
+// instala, não reinicia e não muda ajustes do aparelho por conta própria.
 //
 // Uso: ade-iphone-mirror stream <identificador CoreDevice> [--tunnel <IPv6 do aparelho>]
 //      ade-iphone-mirror version
@@ -10,10 +11,17 @@
 // Saída (stdout), em quadros: [tipo u8][tamanho u32 big-endian][conteúdo]
 //   tipo 1 = evento JSON (UTF-8): connecting, started, error, stopped
 //   tipo 2 = um datagrama recebido (RTP do vídeo ou RTCP), como chegou
-// Entrada (stdin), uma linha por comando: `keyframe` (pede quadro-chave), `stop`. Fim do stdin = stop.
+// Entrada (stdin), uma linha por comando, executadas em ordem (fila serial):
+//   keyframe                                  pede quadro-chave
+//   touch <start|move|end> x y [x2 y2] [edge]  toque em proporção da tela (0..1, origem no topo); edge = none|top|bottom|left|right
+//   button <page> <code> <down|up>            botão HID (página e uso)
+//   key <uso> <down|up>                       tecla (uso HID do teclado)
+//   stop                                      para (fim do stdin também)
+// Um comando de entrada que falha vira o evento `inputError`; quando o HID fica pronto, `inputReady`.
 // O stream sempre é parado no aparelho ao sair (stop, fim do stdin, SIGTERM ou stdout fechado).
 import Foundation
 import Darwin
+import CoreGraphics
 @preconcurrency import CoreDevice
 @preconcurrency import CoreDeviceProtocols
 
@@ -277,13 +285,75 @@ let sinais: [DispatchSourceSignal] = [SIGTERM, SIGINT].map { sinal in
   return fonte
 }
 
-// Comandos pelo stdin. Fim do stdin = a ADE fechou ou caiu: para.
+// ── O HID do aparelho: toque, botões e teclado ──
+
+final class Entrada: @unchecked Sendable {
+  private let trava = NSLock()
+  private var toque: (any HIDDigitizer)?
+  private var botao: (any HIDButton)?
+  private var teclado: (any HIDKeyboard)?
+
+  func definir(toque: (any HIDDigitizer)?, botao: (any HIDButton)?, teclado: (any HIDKeyboard)?) {
+    trava.withLock { self.toque = toque; self.botao = botao; self.teclado = teclado }
+  }
+
+  private func partes(_ l: String) -> [String] { l.split(separator: " ").map(String.init) }
+
+  /// Executa uma linha de entrada (na thread do stdin: uma de cada vez, na ordem). Devolve o erro, se houver.
+  func executar(_ linha: String) -> String? {
+    let p = partes(linha)
+    let (t, b, k) = trava.withLock { (toque, botao, teclado) }
+    do {
+      switch p.first {
+      case "touch":
+        guard let t else { return "O toque do aparelho ainda não está pronto." }
+        guard p.count >= 4, let x = Double(p[2]), let y = Double(p[3]) else { return "touch mal formado" }
+        let tipo: DigitizerEventType
+        switch p[1] { case "start": tipo = .start; case "move": tipo = .position; case "end": tipo = .end; default: return "fase de toque desconhecida" }
+        var segundo: CGPoint? = nil
+        var resto = Array(p.dropFirst(4))
+        if resto.count >= 2, let x2 = Double(resto[0]), let y2 = Double(resto[1]) { segundo = CGPoint(x: x2, y: y2); resto.removeFirst(2) }
+        let borda: DigitizerEdge
+        switch resto.first ?? "none" { case "top": borda = .top; case "bottom": borda = .bottom; case "left": borda = .left; case "right": borda = .right; default: borda = .none }
+        try t.send(pointOne: CGPoint(x: x, y: y), pointTwo: segundo, eventType: tipo, edge: borda, target: .mainScreen)
+        if tipo == .end { t.sendBarrier() }
+      case "button":
+        guard let b else { return "Os botões do aparelho ainda não estão prontos." }
+        guard p.count == 4, let pagina = Int(p[1]), let uso = Int(p[2]) else { return "button mal formado" }
+        let baixo = p[3] == "down"
+        try b.sendCustomButton(usagePage: pagina, usageCode: uso, state: baixo ? .down : .up)
+        if !baixo { b.sendBarrier() }
+      case "key":
+        guard let k else { return "O teclado do aparelho ainda não está pronto." }
+        guard p.count == 3, let uso = UInt16(p[1]) else { return "key mal formado" }
+        let baixo = p[2] == "down"
+        try k.send(key: HIDKeyboardUsageCode(rawValue: uso), state: baixo ? .down : .up)
+        if !baixo { k.sendBarrier() }
+      default:
+        return "comando desconhecido"
+      }
+    } catch {
+      log("HID: \(error)")
+      return "O aparelho recusou a entrada."
+    }
+    return nil
+  }
+}
+
+let entrada = Entrada()
+
+// Comandos pelo stdin, um de cada vez (a fila serial). Fim do stdin = a ADE fechou ou caiu: para.
 Thread.detachNewThread {
   while let linha = readLine() {
-    switch linha.trimmingCharacters(in: .whitespaces) {
+    let comando = linha.trimmingCharacters(in: .whitespaces)
+    switch comando {
     case "keyframe": sessao.pedirQuadroChave()
     case "stop": Task { await sessao.encerrar() }; return
-    default: break
+    case "": break
+    default:
+      if let erro = entrada.executar(comando) {
+        saida.evento(["event": "inputError", "message": erro, "command": String(comando.prefix(80))])
+      }
     }
   }
   Task { await sessao.encerrar() }
@@ -403,6 +473,23 @@ timer.schedule(deadline: .now() + 0.5, repeating: 1.0)
 timer.setEventHandler { sessao.relatorio() }
 timer.resume()
 sessao.timerRR = timer
+
+// O HID: pedido depois de o vídeo abrir (o túnel já está de pé). Sem ele, o espelho segue só para ver.
+@Sendable func implementacao<A: DeviceCapability>(_ membro: CapabilityStaticMember<A>) async throws -> Any {
+  // Dentro do genérico o tipo devolvido vem do próprio framework: a conversão abaixo é feita em tempo de execução.
+  try await aparelho.getImplementation(for: membro)
+}
+Task {
+  var pronto: [String: Any] = ["event": "inputReady"]
+  var toque: (any HIDDigitizer)? = nil, botao: (any HIDButton)? = nil, teclado: (any HIDKeyboard)? = nil
+  do { toque = try await comPrazo(10) { try await implementacao(CapabilityStaticMember<HIDDeviceCapability>.digitizer) } as? any HIDDigitizer } catch { log("sem toque: \(error)") }
+  do { botao = try await comPrazo(10) { try await implementacao(CapabilityStaticMember<HIDDeviceCapability>.button) } as? any HIDButton } catch { log("sem botões: \(error)") }
+  do { teclado = try await comPrazo(10) { try await implementacao(CapabilityStaticMember<HIDDeviceCapability>.keyboard) } as? any HIDKeyboard } catch { log("sem teclado: \(error)") }
+  entrada.definir(toque: toque, botao: botao, teclado: teclado)
+  pronto["touch"] = toque != nil; pronto["buttons"] = botao != nil; pronto["keyboard"] = teclado != nil
+  saida.evento(pronto)
+  log("HID: toque=\(toque != nil) botões=\(botao != nil) teclado=\(teclado != nil)")
+}
 
 var iniciado: [String: Any] = ["event": "started", "transport": transporte, "stream": Int(sessao.idStream ?? 0)]
 if let (w, h) = tela.valor { iniciado["display"] = ["w": w, "h": h] }

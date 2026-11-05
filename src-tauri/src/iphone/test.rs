@@ -420,3 +420,108 @@ fn a_saida_do_helper_vira_uma_frase() {
     assert!(exit_reason(None, Some(11)).contains("sinal 11"));
     assert!(exit_reason(Some(77), None).contains("77"));
 }
+
+// ── Entrada (toque, botões, teclado) ──
+
+#[test]
+fn toque_vira_linha_em_proporcao_presa_entre_0_e_1() {
+    assert_eq!(touch_line(TouchPhase::Start, (0.5, 0.25), None, Edge::None), "touch start 0.5000 0.2500 none");
+    assert_eq!(touch_line(TouchPhase::Move, (1.2, -0.1), None, Edge::Bottom), "touch move 1.0000 0.0000 bottom");
+    assert_eq!(touch_line(TouchPhase::End, (0.1, 0.2), Some((0.3, 0.4)), Edge::Top), "touch end 0.1000 0.2000 0.3000 0.4000 top");
+    assert_eq!(touch_line(TouchPhase::Move, (f64::NAN, 0.5), None, Edge::None), "touch move 0.0000 0.5000 none");
+}
+
+#[test]
+fn clique_na_tela_vira_proporcao_e_a_borda_de_baixo_vira_gesto_de_inicio() {
+    // A view mostra a tela já recortada (sem as bordas de alinhamento do vídeo): a proporção é a da view.
+    assert_eq!(view_touch(215.0, 466.0, 430.0, 932.0), Some(((0.5, 0.5), Edge::None)));
+    let (_, edge) = view_touch(215.0, 931.0, 430.0, 932.0).unwrap();
+    assert_eq!(edge, Edge::Bottom);
+    let (_, edge) = view_touch(215.0, 2.0, 430.0, 932.0).unwrap();
+    assert_eq!(edge, Edge::Top);
+    assert_eq!(view_touch(10.0, 10.0, 0.0, 932.0), None);
+}
+
+#[test]
+fn pontos_do_ios_viram_proporcao_da_tela() {
+    assert_eq!(point_ratio(215.0, 466.0, (430.0, 932.0)).unwrap(), (0.5, 0.5));
+    assert!(point_ratio(500.0, 10.0, (430.0, 932.0)).is_err());
+    assert!(point_ratio(10.0, 10.0, (0.0, 0.0)).is_err());
+    assert_eq!(display_points((1290, 2796), "iphone"), (430.0, 932.0));
+    assert_eq!(display_points((750, 1334), "iphone"), (375.0, 667.0));
+    assert_eq!(display_points((1640, 2360), "ipad"), (820.0, 1180.0));
+}
+
+#[test]
+fn botoes_tem_a_pagina_e_o_uso_hid_e_viram_descer_e_subir() {
+    assert_eq!(button_usage("home"), Some((0x0C, 0x40)));
+    assert_eq!(button_usage("lock"), Some((0x0C, 0x30)));
+    assert_eq!(button_usage("side"), Some((0x0C, 0x30)));
+    assert_eq!(button_usage("volumeUp"), Some((0x0C, 0xE9)));
+    assert_eq!(button_usage("volume-down"), Some((0x0C, 0xEA)));
+    assert_eq!(button_usage("mute"), Some((0x0C, 0xE2)));
+    assert_eq!(button_usage("siri"), Some((0x0C, 0xCF)));
+    assert_eq!(button_usage("reboot"), None);
+    assert_eq!(button_lines("home").unwrap(), ["button 12 64 down", "button 12 64 up"]);
+    assert!(button_lines("apagar tudo").is_err());
+}
+
+#[test]
+fn gestos_do_sistema_saem_da_borda_certa() {
+    let cc = gesture("controlCenter").unwrap();
+    assert!(cc.from.0 > 0.8 && cc.from.1 < 0.02 && cc.to.1 > 0.3 && cc.edge == Edge::Top);
+    let nc = gesture("notificationCenter").unwrap();
+    assert!(nc.from.0 < 0.3 && nc.from.1 < 0.02 && nc.edge == Edge::Top);
+    let sp = gesture("spotlight").unwrap();
+    assert!((sp.from.0 - 0.5).abs() < 0.01 && sp.from.1 > 0.2 && sp.to.1 > sp.from.1 && sp.edge == Edge::None);
+    let home = gesture("home").unwrap();
+    assert!(home.from.1 > 0.98 && home.to.1 < 0.9 && home.edge == Edge::Bottom);
+    assert!(gesture("desligar").is_none());
+}
+
+#[test]
+fn deslize_vira_inicio_passos_e_fim_com_a_mesma_borda() {
+    let lines = swipe_lines((0.8, 0.6), (0.2, 0.6), 4, Edge::None);
+    assert_eq!(lines.len(), 6);
+    assert_eq!(lines[0], "touch start 0.8000 0.6000 none");
+    assert_eq!(lines[1], "touch move 0.6500 0.6000 none");
+    assert_eq!(lines[4], "touch move 0.2000 0.6000 none");
+    assert_eq!(lines[5], "touch end 0.2000 0.6000 none");
+}
+
+#[test]
+fn texto_vira_teclas_com_shift_e_recusa_o_que_o_teclado_us_nao_tem() {
+    assert_eq!(text_lines("aB").unwrap(), ["key 4 down", "key 4 up", "key 225 down", "key 5 down", "key 5 up", "key 225 up"]);
+    assert!(text_lines("ç").is_err());
+    assert_eq!(key_lines("enter").unwrap(), ["key 40 down", "key 40 up"]);
+}
+
+#[test]
+fn recorte_da_foto_tira_as_bordas_do_video() {
+    assert_eq!(crop_size((1296, 2816), Some((1290, 2796))), (1290, 2796));
+    assert_eq!(crop_size((1296, 2816), None), (1296, 2816));
+    assert_eq!(crop_size((1296, 2816), Some((2000, 2796))), (1296, 2816));
+}
+
+#[test]
+fn agente_no_aparelho_fisico_pede_a_pessoa_menos_quando_ela_disse_sempre() {
+    // Olhar nunca pede.
+    assert!(!agent_asks("shot", false));
+    // Tocar, deslizar, tecla e botão: pedem até a pessoa dizer "sempre neste aparelho".
+    for action in ["tap", "swipe", "key", "button"] {
+        assert!(agent_asks(action, false), "{action}");
+        assert!(!agent_asks(action, true), "{action}");
+    }
+    // Digitar texto no celular de verdade pede sempre: não se sabe onde o texto cai.
+    assert!(agent_asks("type", true));
+    // O que o aparelho físico não faz (abrir URL, apps, girar, ligar) nem chega a perguntar: vira erro antes.
+    assert!(agent_unsupported("open") && agent_unsupported("launch") && agent_unsupported("start") && agent_unsupported("rotate"));
+    assert!(!agent_unsupported("tap") && !agent_unsupported("shot"));
+}
+
+#[test]
+fn eventos_do_hid_do_helper() {
+    assert_eq!(parse_event(br#"{"event":"inputReady","touch":true,"buttons":true,"keyboard":false}"#), HelperEvent::InputReady { touch: true, buttons: true, keyboard: false });
+    assert_eq!(parse_event(br#"{"event":"inputReady"}"#), HelperEvent::InputReady { touch: false, buttons: false, keyboard: false });
+    assert_eq!(parse_event(br#"{"event":"inputError","message":"O aparelho recusou a entrada.","command":"touch start"}"#), HelperEvent::InputError("O aparelho recusou a entrada.".into()));
+}

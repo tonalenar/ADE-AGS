@@ -9,7 +9,7 @@ use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{ChildStdin, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -38,6 +38,8 @@ pub struct Status {
     /// A tela em pixels.
     pub display: Option<Display>,
     pub error: Option<String>,
+    /// O toque do aparelho está pronto (HID do CoreDevice aberto).
+    pub input: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -47,13 +49,14 @@ pub struct Display {
 }
 
 impl Status {
-    fn of(device: &str, link: &Link) -> Status {
+    fn of(device: &str, link: &Link, input: bool) -> Status {
         Status {
             device: device.to_string(),
             state: link.state,
             transport: link.transport,
             display: link.display.map(|(w, h)| Display { w, h }),
             error: link.error.clone(),
+            input: input && link.state == LinkState::Live,
         }
     }
 }
@@ -64,13 +67,30 @@ enum Msg {
     Helper(u64, HelperMsg),
     /// O helper fechou o stdout (saiu ou vai sair).
     Closed(u64),
+    /// Linhas de entrada (toque, botão, tecla) para o helper, na ordem.
+    Input(Vec<String>),
+}
+
+/// O estado compartilhado e o aviso de mudança (quem espera o aparelho ficar pronto dorme no `Condvar`).
+type Shared = Arc<(Mutex<Status>, Condvar)>;
+
+/// Por onde a tela e os agentes mandam entrada ao aparelho.
+#[derive(Clone)]
+pub struct InputTx(Sender<Msg>);
+
+impl InputTx {
+    pub fn send(&self, lines: Vec<String>) {
+        if !lines.is_empty() {
+            let _ = self.0.send(Msg::Input(lines));
+        }
+    }
 }
 
 /// O que a thread da sessão expõe às telas.
 pub struct Session {
     tx: Sender<Msg>,
     pub presenter: Arc<Presenter>,
-    status: Arc<Mutex<Status>>,
+    status: Shared,
 }
 
 impl Session {
@@ -83,7 +103,37 @@ impl Session {
     }
 
     pub fn status(&self) -> Status {
-        self.status.lock().map(|s| s.clone()).unwrap_or_else(|e| e.into_inner().clone())
+        self.status.0.lock().map(|s| s.clone()).unwrap_or_else(|e| e.into_inner().clone())
+    }
+
+    pub fn input(&self) -> InputTx {
+        InputTx(self.tx.clone())
+    }
+
+    /// Quem espera o aparelho ficar pronto, sem segurar nada da sessão.
+    pub fn waiter(&self) -> Waiter {
+        Waiter(self.status.clone())
+    }
+}
+
+/// Espera o espelhamento ligar com o toque pronto.
+pub struct Waiter(Shared);
+
+impl Waiter {
+    /// Até `timeout`, dormindo no aviso de mudança de estado (sem polling).
+    pub fn wait(&self, timeout: Duration) -> Result<Status, String> {
+        let (lock, changed) = &*self.0;
+        let guard = lock.lock().map_err(|_| "O estado do aparelho travou.".to_string())?;
+        let (guard, result) = changed
+            .wait_timeout_while(guard, timeout, |s| !(s.state == LinkState::Live && s.input))
+            .map_err(|_| "O estado do aparelho travou.".to_string())?;
+        if result.timed_out() {
+            return Err(match &guard.error {
+                Some(e) => format!("O aparelho não ficou pronto para o toque: {e}"),
+                None => "O aparelho não ficou pronto para o toque a tempo (o espelhamento precisa estar ligado).".into(),
+            });
+        }
+        Ok(guard.clone())
     }
 }
 
@@ -113,9 +163,9 @@ pub fn unavailable() -> Option<&'static str> {
 pub fn start(app: AppHandle, device: String, identifier: String, tunnel: Option<String>, visible: bool) -> Session {
     let (tx, rx) = mpsc::channel();
     let presenter = Presenter::new();
-    let status = Arc::new(Mutex::new(Status::of(&device, &Link::default())));
+    let status: Shared = Arc::new((Mutex::new(Status::of(&device, &Link::default(), false)), Condvar::new()));
     let session = Session { tx: tx.clone(), presenter: presenter.clone(), status: status.clone() };
-    let worker = Worker { app, device, identifier, tunnel, tx, rx, presenter, status, link: Link::default(), wanted: visible, generation: 0 };
+    let worker = Worker { app, device, identifier, tunnel, tx, rx, presenter, status, link: Link::default(), wanted: visible, generation: 0, input: false };
     let _ = std::thread::Builder::new().name("ade-iphone-mirror".into()).spawn(move || worker.run());
     session
 }
@@ -128,10 +178,12 @@ struct Worker {
     tx: Sender<Msg>,
     rx: Receiver<Msg>,
     presenter: Arc<Presenter>,
-    status: Arc<Mutex<Status>>,
+    status: Shared,
     link: Link,
     wanted: bool,
     generation: u64,
+    /// O helper desta vida abriu o toque.
+    input: bool,
 }
 
 /// O helper aberto. O `std::process::Child` fica aqui até o `wait`: assim o `kill`, se preciso, nunca pega um PID
@@ -157,13 +209,14 @@ enum Ended {
 
 impl Worker {
     fn emit(&mut self) {
-        let status = Status::of(&self.device, &self.link);
-        if let Ok(mut slot) = self.status.lock() {
+        let status = Status::of(&self.device, &self.link, self.input);
+        if let Ok(mut slot) = self.status.0.lock() {
             if *slot == status {
                 return;
             }
             *slot = status.clone();
         }
+        self.status.1.notify_all();
         if matches!(status.state, LinkState::Offline | LinkState::Paused) {
             self.presenter.blank();
         }
@@ -249,11 +302,13 @@ impl Worker {
 
     /// Uma vida do helper: do spawn até cair, parar ou ninguém olhar.
     fn session(&mut self) -> Ended {
+        self.input = false;
         let mut child = match self.spawn() {
             Ok(child) => child,
             Err(ended) => return ended,
         };
         let ended = self.stream(&mut child);
+        self.input = false;
         self.finish(child);
         self.presenter.clear();
         ended
@@ -275,6 +330,8 @@ impl Worker {
         // Diagnóstico (`ADE_IPHONE_FPS=1`): o que a montagem fez no último segundo.
         let mut diag = (Instant::now(), 0u64, 0u64, 0u64, 0u64);
         let mut refreshed = Instant::now();
+        // Para o diagnóstico: quando saiu a última entrada (o primeiro quadro depois dela é a reação do aparelho).
+        let mut last_input: Option<Instant> = None;
 
         loop {
             let now = Instant::now();
@@ -322,6 +379,16 @@ impl Worker {
                     idle_since = if w { None } else { idle_since.or(Some(Instant::now())) };
                 }
                 Msg::Stop => return Ended::Stop,
+                Msg::Input(lines) => {
+                    if started && self.input {
+                        for line in &lines {
+                            send(child, line);
+                        }
+                        last_input = Some(Instant::now());
+                    } else if debug_on() {
+                        eprintln!("[iphone] entrada descartada: o toque ainda não está pronto");
+                    }
+                }
                 Msg::Helper(g, _) | Msg::Closed(g) if g != child.generation => {}
                 Msg::Closed(_) => {
                     child.closed = true;
@@ -339,6 +406,14 @@ impl Worker {
                         self.emit();
                     }
                     HelperEvent::Error { code, message } => last_error = Some((code, message)),
+                    HelperEvent::InputReady { touch, buttons, keyboard } => {
+                        if debug_on() {
+                            eprintln!("[iphone] HID: toque={touch} botões={buttons} teclado={keyboard}");
+                        }
+                        self.input = touch;
+                        self.emit();
+                    }
+                    HelperEvent::InputError(message) => eprintln!("[iphone] entrada: {message}"),
                     HelperEvent::Connecting | HelperEvent::Stopped | HelperEvent::Other(_) => {}
                 },
                 Msg::Helper(_, HelperMsg::Datagram(packet)) => {
@@ -405,6 +480,11 @@ impl Worker {
                                         // mínimo dos relógios (≈ atraso menos uma ida pela rede).
                                         let captured = ntp + f64::from(unit.ts.wrapping_sub(rtp) as i32) / RTP_CLOCK;
                                         self.presenter.note_capture(arrived, (wall_now() - captured - min_offset) * 1000.0);
+                                    }
+                                }
+                                if let Some(sent) = last_input.take() {
+                                    if debug_on() {
+                                        eprintln!("[iphone] entrada→1º quadro novo chegou em {:.0} ms (+ ~4 ms de decodificação)", now.duration_since(sent).as_secs_f64() * 1000.0);
                                     }
                                 }
                                 if let Err(e) = d.decode(&unit, arrived) {

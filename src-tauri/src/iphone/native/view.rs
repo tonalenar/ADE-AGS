@@ -2,12 +2,13 @@
 //! (`simulator::native::view`), cuja subcamada mostra a `IOSurface` do quadro decodificado. A máscara (cantos,
 //! parte à vista e buracos onde há menus do app) é a mesma do simulador.
 //!
-//! Só ver: dentro da região à vista a view fica com o clique e o rolar (para o canvas não arrastar por baixo) e
-//! não faz nada com eles. Nada vai para o aparelho.
+//! O clique e o arrasto viram toque no aparelho (em proporção da tela, que a view mostra já recortada); com a view
+//! em foco, o teclado do Mac digita nele. É a pessoa mexendo: não pede confirmação. Fora da região à vista, o clique
+//! é do webview.
 //!
 //! As views rodam na thread da interface; os quadros entram nas camadas pela fila do `Presenter`.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -20,7 +21,8 @@ use objc2_app_kit::{NSEvent, NSResponder, NSView};
 use objc2_foundation::{NSPoint, NSRect, NSSize};
 
 use super::decoder::{FrameSink, OSStatus, PixelBuffer};
-use crate::iphone::model;
+use crate::iphone::model::{self, Edge, TouchPhase};
+use crate::iphone::session::InputTx;
 use crate::simulator::model::{Place, Rect};
 use crate::simulator::native::objc::{call, class, ns_string, retain, Shared};
 use crate::simulator::native::view::{apply_region, cg_rect, transaction, AppliedRegion, CGRect};
@@ -28,6 +30,10 @@ use crate::simulator::native::view::{apply_region, cg_rect, transaction, Applied
 pub struct Ivars {
     /// A subcamada com o quadro (a camada da view guarda o fundo e a máscara).
     content: Retained<AnyObject>,
+    /// Por onde o toque e o teclado vão ao aparelho.
+    input: InputTx,
+    /// O dedo que está na tela: a borda de onde saiu (fica a mesma até soltar) e o último envio de arrasto.
+    touch: Cell<Option<(Edge, std::time::Instant)>>,
     /// Onde a view fica com o mouse, em coordenadas da view (origem no topo). Vazio = nada à vista.
     region: RefCell<Vec<Rect>>,
     applied: RefCell<Option<AppliedRegion>>,
@@ -52,21 +58,45 @@ define_class!(
             true
         }
 
-        // Só ver: o clique, o arrasto e o rolar param aqui e não vão a lugar nenhum.
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true
+        }
+
         #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, _event: &NSEvent) {}
+        fn mouse_down(&self, event: &NSEvent) {
+            if let Some(window) = self.window() {
+                window.makeFirstResponder(Some(self));
+            }
+            self.touch(event, TouchPhase::Start);
+        }
 
         #[unsafe(method(mouseDragged:))]
-        fn mouse_dragged(&self, _event: &NSEvent) {}
+        fn mouse_dragged(&self, event: &NSEvent) {
+            self.touch(event, TouchPhase::Move);
+        }
 
         #[unsafe(method(mouseUp:))]
-        fn mouse_up(&self, _event: &NSEvent) {}
+        fn mouse_up(&self, event: &NSEvent) {
+            self.touch(event, TouchPhase::End);
+        }
 
+        // O botão direito e a roda não têm equivalente no aparelho: param aqui (o canvas não arrasta por baixo).
         #[unsafe(method(rightMouseDown:))]
         fn right_mouse_down(&self, _event: &NSEvent) {}
 
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, _event: &NSEvent) {}
+
+        #[unsafe(method(keyDown:))]
+        fn key_down(&self, event: &NSEvent) {
+            self.key(event, true);
+        }
+
+        #[unsafe(method(keyUp:))]
+        fn key_up(&self, event: &NSEvent) {
+            self.key(event, false);
+        }
 
         #[unsafe(method(cursorUpdate:))]
         fn cursor_update(&self, _event: &NSEvent) {
@@ -93,7 +123,7 @@ define_class!(
 );
 
 impl MirrorView {
-    fn create(mtm: MainThreadMarker) -> Retained<Self> {
+    fn create(mtm: MainThreadMarker, input: InputTx) -> Retained<Self> {
         let gravity = ns_string("resize");
         // SAFETY: CALayer público; `layer` devolve +0 (autorelease) e a subcamada é retida nos ivars.
         let content = unsafe {
@@ -101,7 +131,7 @@ impl MirrorView {
             call!(content, sel!(setContentsGravity:), Retained::as_ptr(&gravity) as *mut AnyObject => *mut AnyObject; -> ());
             retain(content).expect("CALayer")
         };
-        let this = Self::alloc(mtm).set_ivars(Ivars { content, region: RefCell::new(Vec::new()), applied: RefCell::new(None) });
+        let this = Self::alloc(mtm).set_ivars(Ivars { content, input, touch: Cell::new(None), region: RefCell::new(Vec::new()), applied: RefCell::new(None) });
         let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
         let view: Retained<Self> = unsafe { msg_send![super(this), initWithFrame: frame] };
         // SAFETY: CALayer público. Camada nossa (layer-hosting), transparente: até o primeiro quadro (e sem conexão)
@@ -127,6 +157,61 @@ impl MirrorView {
             let _ = Retained::from_raw(area);
         }
         view
+    }
+
+    /// Clique → toque. O arrasto vai no máximo a cada 8 ms (o iOS lê a velocidade pelo intervalo; mais que isso só
+    /// enche a fila). A borda é a de onde o dedo saiu.
+    fn touch(&self, event: &NSEvent, phase: TouchPhase) {
+        const MOVE_EVERY: std::time::Duration = std::time::Duration::from_millis(8);
+        let point = self.convertPoint_fromView(event.locationInWindow(), None);
+        let bounds = self.bounds();
+        let Some((ratio, edge)) = model::view_touch(point.x, point.y, bounds.size.width, bounds.size.height) else { return };
+        let now = std::time::Instant::now();
+        let state = &self.ivars().touch;
+        let edge = match (phase, state.get()) {
+            (TouchPhase::Start, _) => edge,
+            (_, Some((held, _))) => held,
+            (_, None) => return,
+        };
+        if phase == TouchPhase::Move && state.get().is_some_and(|(_, last)| now.duration_since(last) < MOVE_EVERY) {
+            return;
+        }
+        state.set(if phase == TouchPhase::End { None } else { Some((edge, now)) });
+        self.ivars().input.send(vec![model::touch_line(phase, ratio, None, edge)]);
+    }
+
+    /// Teclas do Mac → teclado do aparelho: as com nome pelo código da tecla, o resto pelo caractere (teclado US).
+    fn key(&self, event: &NSEvent, down: bool) {
+        const SHIFT: u32 = 0xE1;
+        let state = if down { "down" } else { "up" };
+        let named = match event.keyCode() {
+            36 | 76 => Some(0x28),
+            53 => Some(0x29),
+            51 => Some(0x2a),
+            48 => Some(0x2b),
+            123 => Some(0x50),
+            124 => Some(0x4f),
+            125 => Some(0x51),
+            126 => Some(0x52),
+            _ => None,
+        };
+        let mut lines = Vec::new();
+        if let Some(usage) = named {
+            lines.push(format!("key {usage} {state}"));
+        } else if let Some(text) = event.characters() {
+            for c in text.to_string().chars() {
+                if let Some((usage, shift)) = crate::simulator::model::char_usage(c) {
+                    if shift && down {
+                        lines.push(format!("key {SHIFT} down"));
+                    }
+                    lines.push(format!("key {usage} {state}"));
+                    if shift && !down {
+                        lines.push(format!("key {SHIFT} up"));
+                    }
+                }
+            }
+        }
+        self.ivars().input.send(lines);
     }
 
     fn layer(&self) -> *mut AnyObject {
@@ -186,6 +271,16 @@ pub struct Presenter {
     stats: Mutex<Stats>,
     /// Atraso da captura no aparelho até a chegada no Mac, por quadro (estimativa pelo RTCP), para o diagnóstico.
     capture: Mutex<HashMap<u64, f64>>,
+}
+
+#[link(name = "IOSurface", kind = "framework")]
+unsafe extern "C" {
+    fn IOSurfaceLock(buffer: *const c_void, options: u32, seed: *mut u32) -> i32;
+    fn IOSurfaceUnlock(buffer: *const c_void, options: u32, seed: *mut u32) -> i32;
+    fn IOSurfaceGetBaseAddress(buffer: *const c_void) -> *const u8;
+    fn IOSurfaceGetBytesPerRow(buffer: *const c_void) -> usize;
+    fn IOSurfaceGetWidth(buffer: *const c_void) -> usize;
+    fn IOSurfaceGetHeight(buffer: *const c_void) -> usize;
 }
 
 pub fn debug_on() -> bool {
@@ -265,6 +360,42 @@ impl Presenter {
                 layers.retain(|(other, _)| *other != id);
             }
         });
+    }
+
+    /// Os pixels do último quadro mostrado (BGRA, linhas de `largura * 4`), já sem as bordas de alinhamento do vídeo:
+    /// a foto dos agentes. `None` = ainda não há quadro.
+    pub fn snapshot(&self) -> Option<(Vec<u8>, usize, usize)> {
+        const READ_ONLY: u32 = 1;
+        let held = self.held.lock().ok()?;
+        let buffer = held.back()?;
+        let surface = buffer.surface() as *const c_void;
+        if surface.is_null() {
+            return None;
+        }
+        let display = self.display.lock().ok().and_then(|d| *d);
+        // SAFETY: a superfície vive enquanto o buffer está retido em `held` (a trava fica até o fim); a memória só é
+        // lida entre Lock e Unlock e dentro de `altura * bytes_por_linha`.
+        unsafe {
+            let (w, h, row) = (IOSurfaceGetWidth(surface), IOSurfaceGetHeight(surface), IOSurfaceGetBytesPerRow(surface));
+            let (cw, ch) = model::crop_size((w as u32, h as u32), display);
+            let (cw, ch) = (cw as usize, ch as usize);
+            if cw == 0 || ch == 0 || row < w * 4 {
+                return None;
+            }
+            let mut seed = 0u32;
+            if IOSurfaceLock(surface, READ_ONLY, &mut seed) != 0 {
+                return None;
+            }
+            let base = IOSurfaceGetBaseAddress(surface);
+            let mut data = Vec::with_capacity(cw * ch * 4);
+            if !base.is_null() {
+                for y in 0..ch {
+                    data.extend_from_slice(std::slice::from_raw_parts(base.add(y * row), cw * 4));
+                }
+            }
+            IOSurfaceUnlock(surface, READ_ONLY, &mut seed);
+            (!base.is_null()).then_some((data, cw, ch))
+        }
     }
 
     /// Tira o último quadro das telas (sem conexão ou pausado): aparece o estado que o frontend desenha por baixo.
@@ -422,13 +553,13 @@ fn apply(entry: &Entry, webview: &NSView, place: &Place) {
 ///
 /// # Safety
 /// Chame na thread da interface, com `webview` = o WKWebView da janela.
-pub unsafe fn attach(webview: *mut c_void, id: &str, presenter: Arc<Presenter>, place: &Place) -> Result<(), String> {
+pub unsafe fn attach(webview: *mut c_void, id: &str, presenter: Arc<Presenter>, input: InputTx, place: &Place) -> Result<(), String> {
     let mtm = MainThreadMarker::new().ok_or("A tela do iPhone só abre na thread da interface.")?;
     let webview = unsafe { webview.cast::<NSView>().as_ref() }.ok_or("O app não tem webview.")?;
     detach(id);
     // SAFETY: thread da interface.
     let superview = unsafe { webview.superview() }.ok_or("O webview do app não está numa janela.")?;
-    let view = MirrorView::create(mtm);
+    let view = MirrorView::create(mtm, input);
     // NSWindowAbove = 1: por cima do webview.
     // SAFETY: NSView público.
     unsafe {

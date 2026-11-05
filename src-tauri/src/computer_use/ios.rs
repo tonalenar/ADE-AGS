@@ -1,4 +1,6 @@
-//! Driver do simulador. Foto e HID existentes; nenhuma alteração no caminho de quadros.
+//! Driver do iOS: o simulador (foto pela `IOSurface`, HID do simulador) e o iPhone físico (foto do espelho, HID do
+//! CoreDevice, por `iphone::ops`). A autorização e a confirmação são as mesmas nos dois: o mesmo alcance, o mesmo
+//! "sempre neste aparelho" (por id) e o mesmo `always_asks`.
 use super::*;
 use crate::{
     canvas,
@@ -15,6 +17,28 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::AppHandle;
+
+/// O mesmo passo no simulador ou no iPhone físico (`device:<id>`), pelo id.
+mod dev {
+    use super::*;
+    use crate::iphone::{model::is_physical, ops as phone};
+
+    pub fn tap(app: &AppHandle, udid: &str, x: f64, y: f64) -> Result<(), String> {
+        if is_physical(udid) { phone::tap(app, udid, x, y) } else { ops::tap(udid, x, y) }
+    }
+    pub fn type_text(app: &AppHandle, udid: &str, text: &str) -> Result<(), String> {
+        if is_physical(udid) { phone::type_text(app, udid, text) } else { ops::type_text(udid, text) }
+    }
+    pub fn home(app: &AppHandle, udid: &str) -> Result<(), String> {
+        if is_physical(udid) { phone::gesture(app, udid, "home") } else { ops::button(udid, "home") }
+    }
+    pub fn swipe(app: &AppHandle, udid: &str, from: (f64, f64), to: (f64, f64), ms: u64) -> Result<(), String> {
+        if is_physical(udid) { phone::swipe(app, udid, from, to, ms) } else { ops::swipe(udid, from, to, ms) }
+    }
+    pub fn screenshot(app: &AppHandle, udid: &str) -> Result<String, String> {
+        if is_physical(udid) { phone::screenshot(app, udid) } else { ops::screenshot(udid) }
+    }
+}
 
 fn active() -> &'static Mutex<HashSet<String>> {
     static S: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -56,6 +80,10 @@ fn trusted(db: &DbConnection, udid: &str) -> Result<bool, String> {
 }
 fn trust(db: &DbConnection, udid: &str, on: bool) -> Result<(), String> {
     mark_key(db, &format!("{TRUST_PREFIX}{udid}"), on)
+}
+/// A pessoa já disse "sempre neste aparelho" para `udid` (simulador ou físico)?
+pub(crate) fn trusted_device(db: &DbConnection, udid: &str) -> Result<bool, String> {
+    trusted(db, udid)
 }
 /// Esquece o "sempre" de todos os aparelhos. Devolve quantos estavam marcados.
 pub(crate) fn forget_trust(db: &DbConnection) -> Result<usize, String> {
@@ -216,35 +244,39 @@ struct Photo {
     thumb: Option<super::visual::Thumb>,
 }
 /// Foto pela `IOSurface` da tela, dentro do processo (~0,1 s); se não der, pelo `simctl` (~1,4 s).
-fn capture(udid: &str, deadline: Instant) -> Result<Photo, String> {
+fn capture(app: &AppHandle, udid: &str, deadline: Instant) -> Result<Photo, String> {
     if Instant::now() >= deadline {
         return Err("Prazo de captura esgotado.".into());
     }
     let dir = crate::preview::capture::capture_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("ios-act-{}.png", uuid::Uuid::new_v4().simple()));
-    match super::capture::ios_shot(udid, &path) {
-        Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame), thumb: shot.thumb }),
-        Err(error) => {
-            let _ = std::fs::remove_file(&path);
-            fallback_note("foto", &error);
+    // O iPhone físico não tem a superfície do simulador: a foto vem do último quadro do espelho.
+    if !crate::iphone::model::is_physical(udid) {
+        match super::capture::ios_shot(udid, &path) {
+            Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame), thumb: shot.thumb }),
+            Err(error) => {
+                let _ = std::fs::remove_file(&path);
+                fallback_note("foto", &error);
+            }
         }
     }
-    let tmp = PathBuf::from(ops::screenshot(udid)?);
+    let tmp = PathBuf::from(dev::screenshot(app, udid)?);
     let (path, revision) = prepare_photo(tmp, udid, "ios-act", deadline)?;
     Ok(Photo { path, revision, frame: None, thumb: None })
 }
 /// A revisão da tela agora, para conferir antes de tocar. Pela `IOSurface` é só ler e somar os pixels (sem PNG);
 /// pelo `simctl`, outra foto inteira. Uma revisão de um caminho nunca casa com a do outro: na dúvida, desatualizada.
-fn current_revision(udid: &str, deadline: Instant) -> Result<String, String> {
+fn current_revision(app: &AppHandle, udid: &str, deadline: Instant) -> Result<String, String> {
     if Instant::now() >= deadline {
         return Err("Prazo de captura esgotado.".into());
     }
-    match super::capture::ios_revision(udid) {
+    let fast = if crate::iphone::model::is_physical(udid) { Err("aparelho físico".to_string()) } else { super::capture::ios_revision(udid) };
+    match fast {
         Ok(revision) => Ok(revision),
         Err(error) => {
             fallback_note("revisão", &error);
-            let photo = capture(udid, deadline)?;
+            let photo = capture(app, udid, deadline)?;
             let _ = std::fs::remove_file(&photo.path);
             Ok(photo.revision)
         }
@@ -398,7 +430,7 @@ impl IosSurface {
             let not_before = self.acted_at.map(|t| t + AFTER_ACTION).filter(|t| *t < self.deadline);
             let quiet = if self.acted_at.is_some() { QUIET } else { QUIET_FIRST };
             let _ = super::capture::ios_quiet(&self.udid, quiet, QUIET_CAP.min(left / 4), not_before);
-            let photo = capture(&self.udid, self.deadline)?;
+            let photo = capture(&self.app, &self.udid, self.deadline)?;
             let read = ocr(&photo.path, self.deadline)?;
             if !should_settle(read.1.len(), try_no, self.deadline.saturating_duration_since(Instant::now())) {
                 self.read_ahead = Some(read);
@@ -452,6 +484,11 @@ impl Surface for IosSurface {
         if !allowed {
             return Err(Failure::OutsideScope);
         }
+        if crate::iphone::model::is_physical(&self.udid) {
+            // O celular de verdade: o espelho precisa estar ligado com o toque pronto (não se liga nada no aparelho).
+            crate::iphone::ops::ready_now(&self.app, &self.udid).map_err(|_| Failure::Operation)?;
+            return Ok(());
+        }
         if !ops::booted(&self.udid).map_err(|_| Failure::Operation)? {
             return Err(Failure::Operation);
         }
@@ -496,7 +533,7 @@ impl Surface for IosSurface {
                 fresh.path.display()
             );
             if self.ask(&question, None)? != Answer::No {
-                let current = current_revision(&self.udid, self.deadline)?;
+                let current = current_revision(&self.app, &self.udid, self.deadline)?;
                 self.authorize().map_err(|_| "Autorização expirou.")?;
                 if current == revision {
                     mark(&self.db, &self.udid, false)?;
@@ -577,7 +614,7 @@ impl Surface for IosSurface {
             return Ok(true);
         }
         let question =
-            super::desktop::confirm_question("no simulador iOS", &operation, &path.display().to_string(), point);
+            super::desktop::confirm_question(place_of(&self.udid), &operation, &path.display().to_string(), point);
         let review = super::desktop::review("ios", &operation, &path, point);
         match self.ask(&question, Some(review))? {
             Answer::Always => {
@@ -596,7 +633,7 @@ impl Surface for IosSurface {
     ) -> Result<bool, String> {
         // A tela é conferida depois de decidir e depois do eventual diálogo humano: os mesmos pixels que o Jev viu,
         // ou não toca. Pela `IOSurface` é uma leitura, não outra foto.
-        let current = current_revision(&self.udid, self.deadline)?;
+        let current = current_revision(&self.app, &self.udid, self.deadline)?;
         if current != revision {
             return Ok(false);
         }
@@ -616,7 +653,7 @@ impl Surface for IosSurface {
         match action.operation {
             Operation::Click => {
                 let (x, y) = pick.point.ok_or("Toque sem coordenada validada.")?;
-                ops::tap(&self.udid, x * self.width, y * self.height)?;
+                dev::tap(&self.app, &self.udid, x * self.width, y * self.height)?;
             }
             Operation::Type => {
                 let text = value.ok_or("Preenchimento ausente.")?;
@@ -625,10 +662,10 @@ impl Surface for IosSurface {
                 self.typed_this_run = true;
                 self.authorize()
                     .map_err(|_| "Autorização expirou antes de digitar.")?;
-                ops::type_text(&self.udid, text)?;
+                dev::type_text(&self.app, &self.udid, text)?;
             }
             Operation::Scroll => match action.target.as_deref() {
-                Some("home") => ops::button(&self.udid, "home")?,
+                Some("home") => dev::home(&self.app, &self.udid)?,
                 Some(REVEAL) => {
                     let ((x1, y1), (x2, y2)) = self
                         .frame
@@ -637,11 +674,11 @@ impl Surface for IosSurface {
                         .reveal
                         .ok_or("Rolagem sem alvo coberto.")?;
                     // Devagar, para o conteúdo parar perto de onde o dedo soltou (um traço rápido embala a lista).
-                    ops::swipe(&self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 600)?;
+                    dev::swipe(&self.app, &self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 600)?;
                 }
                 Some(target) => {
                     let ((x1, y1), (x2, y2)) = gesture_line(target).ok_or("Gesto iOS não oferecido.")?;
-                    ops::swipe(&self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 300)?;
+                    dev::swipe(&self.app, &self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 300)?;
                 }
                 None => return Err("Gesto iOS sem alvo.".into()),
             },
@@ -652,6 +689,48 @@ impl Surface for IosSurface {
         Ok(true)
     }
 }
+/// Onde a ação acontece, para a pergunta à pessoa.
+fn place_of(udid: &str) -> &'static str {
+    if crate::iphone::model::is_physical(udid) { "no iPhone físico" } else { "no simulador iOS" }
+}
+
+/// Um agente quer mexer no iPhone físico por `ags device` (fora do `sim act`). Olhar passa; tocar, deslizar, tecla e
+/// botão perguntam à pessoa até ela dizer "sempre neste aparelho" (o mesmo `computer_use.ios.trust.<id>` do `sim act`);
+/// digitar texto pergunta sempre. `photo`/`point` vão ao diálogo para a pessoa ver onde. Sem resposta = recusa.
+pub(crate) fn confirm_physical(
+    app: &AppHandle,
+    db: &DbConnection,
+    from: &str,
+    udid: &str,
+    action: &str,
+    what: &str,
+    photo: Option<&std::path::Path>,
+    point: Option<(f64, f64)>,
+) -> Result<bool, String> {
+    if !crate::iphone::model::agent_asks(action, trusted(db, udid)?) {
+        return Ok(true);
+    }
+    const SECONDS: u64 = 300;
+    let options: &[&str] = if action == "type" { &[ALLOW, DENY] } else { &[ALLOW, ALWAYS, DENY] };
+    let question = format!(
+        "Confirma esta ação no iPhone físico?\n{what}.\nÉ o aparelho de verdade: a aprovação vale só para esta ação{}.",
+        if options.contains(&ALWAYS) { " (ou para todas neste aparelho, com \"sempre\")" } else { "" }
+    );
+    let review = photo.map(|p| super::desktop::review("iphone", what, p, point));
+    let payload = super::desktop::ask_payload(&question, options, from, SECONDS, review);
+    let Ok(out) = ask_frontend_within(app, "user.ask", &payload, None, Duration::from_secs(SECONDS + 1)).and_then(unwrap_frontend_result) else {
+        return Ok(false);
+    };
+    Ok(match out["text"].as_str() {
+        Some(ALLOW) => true,
+        Some(ALWAYS) if options.contains(&ALWAYS) => {
+            trust(db, udid, true)?;
+            true
+        }
+        _ => false,
+    })
+}
+
 /// O nome do alvo `reveal` na observação. Sem palavra de risco (um "sair" aqui faria o núcleo pedir confirmação para
 /// uma rolagem): o teste `rotulo_do_reveal_nao_e_sensivel` cobra.
 pub(super) const REVEAL_LABEL: &str = "Rolar até liberar o alvo coberto pelo teclado ou pela barra";
@@ -809,20 +888,19 @@ pub(crate) fn act(
         .map_err(|_| "Estado indisponível.")?
         .insert(udid.into())
     {
-        return Err("Já há um act neste simulador. Espere ele terminar.".into());
+        return Err("Já há um act neste aparelho. Espere ele terminar.".into());
     }
     let _lease = Lease(udid.into());
     computer::ready(&db)?;
     super::capture::warm_ocr();
-    let device = ops::devices()?
-        .into_iter()
-        .find(|d| d.udid == udid)
-        .ok_or("Aparelho indisponível.")?;
-    if !device.width.is_finite()
-        || !device.height.is_finite()
-        || device.width <= 0.
-        || device.height <= 0.
-    {
+    // A tela em pontos: a do tipo do simulador, ou a do espelho do iPhone físico (que liga o espelho se preciso).
+    let (width, height) = if crate::iphone::model::is_physical(udid) {
+        crate::iphone::ops::points(app, udid)?
+    } else {
+        let device = ops::devices()?.into_iter().find(|d| d.udid == udid).ok_or("Aparelho indisponível.")?;
+        (device.width, device.height)
+    };
+    if !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0. {
         return Err("Dimensões do aparelho indisponíveis.".into());
     }
     let frame = Arc::new(Mutex::new(Frame::default()));
@@ -835,8 +913,8 @@ pub(crate) fn act(
         client_pid: caller.client_pid,
         node: node.into(),
         udid: udid.into(),
-        width: device.width,
-        height: device.height,
+        width,
+        height,
         deadline,
         frame: frame.clone(),
         fills: request.fills.values().cloned().collect(),

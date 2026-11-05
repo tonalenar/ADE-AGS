@@ -1,5 +1,6 @@
 //! O iPhone ou iPad físico ao lado do simulador: a tela do aparelho de verdade espelhada na janela, pelo cabo ou
-//! pelo Wi-Fi. Por enquanto só VER: nada de toque, botão, teclado ou HID.
+//! pelo Wi-Fi, com toque, botões e teclado pelo HID do CoreDevice (a pessoa pela tela; os agentes pelo `ags device`
+//! e pelo `sim act`, com a mesma autorização do simulador).
 //!
 //! A conversa com o aparelho (CoreDevice, privado) fica num helper à parte (`helpers/iphone-mirror`), para que
 //! uma interface errada derrube só ele. O app lê os pacotes do vídeo, monta os quadros (`model`), decodifica com
@@ -9,10 +10,11 @@
 pub mod model;
 #[cfg(test)]
 mod test;
-mod commands;
+pub(crate) mod commands;
+pub(crate) mod ops;
 #[cfg(target_os = "macos")]
-mod native;
+pub(crate) mod native;
 #[cfg(target_os = "macos")]
-mod session;
+pub(crate) mod session;
 
 pub use commands::*;
