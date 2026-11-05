@@ -13,7 +13,7 @@ describe("superfícies ao reabrir o app", () => {
   });
 
   it("Resumo, Diff, vazio ou painel fechado não abrem superfície nenhuma", () => {
-    for (const panel of ["summary", "diff", "empty", null] as const) expect(initialSurfaces(panel)).toEqual([]);
+    for (const panel of ["diff", "empty", null] as const) expect(initialSurfaces(panel)).toEqual([]);
     expect(initialSurfaces("android")).toEqual(["android"]);
     expect(initialSurfaces("browser")).toEqual(["browser"]);
   });

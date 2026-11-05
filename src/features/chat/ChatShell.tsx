@@ -24,6 +24,7 @@ import { parseUnifiedDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
 import { startChatLive } from "./liveStore";
 import { useLiveSummary } from "./liveSummary";
+import { SummaryPane } from "./summary/SummaryPane";
 import { HeaderLive } from "./LiveActivity";
 import { PermissionsInbox } from "./permissions/PermissionsInbox";
 import { TeamHeaderBadge } from "./team/TeamThreadFeed";
@@ -37,7 +38,7 @@ import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
 import { useTeamDraft } from "./team/draftStore";
-import { forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
+import { closeSummary, forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
 import { matchTeamShortcut } from "./panelMenu";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
 import { startStructured, useStructured } from "./structured/store";
@@ -91,6 +92,9 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const activeThread = active ? threads.find((th) => th.id === threadIdOf(active.tabId)) ?? null : null;
   const diffs = useFolderDiffs(cards);
   const activeCwd = active?.cwd ?? null;
+  // Trocar de conversa fecha o Resumo flutuante (ele é da conversa que estava à vista).
+  const activeKey = active?.tabId ?? null;
+  useEffect(() => { closeSummary(); }, [activeKey]);
   const runCode = useMemo(() => (activeCwd ? (command: string) => runInShell(activeCwd, command) : null), [activeCwd]);
 
   useEffect(() => startChatLive(), []);
@@ -181,7 +185,9 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             <ShellModeSwitch className="shrink-0" />
             {/* A fileira de ícones do painel, como no Claude Code: Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e ⋯. */}
             {/* O >_ alterna a gaveta do agente (TUI com timeline) ou abre a aba Terminal do painel (um shell na pasta). */}
-            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} />
+            {/* O Resumo é o cartão flutuante do ícone dele (por cima da conversa, sem mexer no painel direito). */}
+            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active}
+              summary={<SummaryPane conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />} />
             <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
             {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
             {!panelOpen && <WindowControls className="-mr-3" />}

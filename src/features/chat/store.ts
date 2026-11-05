@@ -24,6 +24,9 @@ interface ChatState {
   terminalOpen: Record<string, boolean>;
   /** O painel direito e a aba dele; `null` = fechado; `"empty"` = aberto sem nada aberto ("Abrir uma superfície"). */
   panel: RightPanelTab | null;
+  /** O Resumo aberto: um cartão flutuante ancorado no ícone, por cima da conversa (fecha com clique fora, Esc ou
+   * ao trocar de conversa). Independe do painel direito, que fica onde está. */
+  summaryOpen: boolean;
   /** A aba que estava à vista quando o painel foi fechado: reabrir volta nela. `null` = nenhuma (reabre vazio). */
   lastPanel: Exclude<RightPanelTab, "empty"> | null;
   /** Muda a cada pedido de "foque o painel" (o atalho do Time); o painel leva o foco para dentro. */
@@ -57,17 +60,21 @@ interface ChatState {
 export interface DesignOpenRequest { designId: string; artboardId?: string | null; pageId?: string | null; seq: number }
 
 /** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
-export type Surface = Exclude<RightPanelTab, "summary" | "diff" | "shell" | "empty">;
+export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty">;
 export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android"];
 
-/** `summary`: o Resumo, a superfície padrão com os cartões (`summary/SummaryPane.tsx`). `team`: o painel Time do time de agentes (pranchetas 15 e 16, `team/TeamPanel.tsx`). `empty`: o estado vazio do T3. */
-export type RightPanelTab = "summary" | "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
+/**
+ * As abas do painel direito. O Resumo não é uma delas: é um cartão flutuante ancorado no ícone (`summaryOpen`,
+ * `summary/SummaryPopover.tsx`), como no Claude Code. `team`: o painel Time do time de agentes (pranchetas 15 e 16,
+ * `team/TeamPanel.tsx`). `empty`: o estado vazio do T3.
+ */
+export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
 
 const PANEL_KEY = "ags.chat.panel";
-const PANELS: readonly string[] = ["summary", "diff", "files", "browser", "design", "ios", "android", "team"];
+const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team"];
 
 /**
  * O painel lembrado: a superfície que estava à vista, ou `"none"` (a pessoa o fechou). Sem nada
@@ -85,8 +92,9 @@ export function initialSurfaces(panel: RightPanelTab | null): Surface[] {
 export function parsePanel(raw: string | null): RightPanelTab | null {
   if (raw === "none") return null;
   // O Time só abre quando a pessoa o pede naquela hora: nunca volta sozinho ao reabrir o app.
-  if (raw === "team") return "summary";
-  return raw && PANELS.includes(raw) ? (raw as RightPanelTab) : "summary";
+  // O Resumo era uma aba lembrada; agora é um cartão flutuante que nunca abre sozinho: o painel volta fechado.
+  if (raw === "team" || raw === "summary") return null;
+  return raw && PANELS.includes(raw) ? (raw as RightPanelTab) : null;
 }
 
 /**
@@ -94,14 +102,14 @@ export function parsePanel(raw: string | null): RightPanelTab | null {
  * pessoa já tenha montado um time em rascunho; qualquer outra aba, ou o painel fechado, fica como ela deixou. Pura.
  */
 export function panelForNewConversation(panel: RightPanelTab | null, draftEmpty: boolean): RightPanelTab | null {
-  return panel === "team" && draftEmpty ? "summary" : panel;
+  return panel === "team" && draftEmpty ? null : panel;
 }
 
 function readPanel(): RightPanelTab | null {
   try {
     return parsePanel(localStorage.getItem(PANEL_KEY));
   } catch {
-    return "summary";
+    return null;
   }
 }
 
@@ -137,7 +145,7 @@ function readControl(): boolean {
 const initialPanel = readPanel();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, shell: null, thread: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, shell: null, thread: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, designOpen: null, panelWidth: readWidth(),
   queues: {},
@@ -245,7 +253,7 @@ export function setRightPanel(panel: RightPanelTab | null): void {
   });
 }
 
-/** Esquece a aba lembrada: a próxima abertura do painel (conversa nova) mostra o Resumo. */
+/** Esquece a aba lembrada: a próxima abertura do painel (conversa nova) mostra o estado vazio. */
 export function forgetLastPanel(): void {
   if (useChatStore.getState().lastPanel !== null) useChatStore.setState({ lastPanel: null });
 }
@@ -280,7 +288,17 @@ export function hostLabel(url: string | null | undefined): string | null {
 /** Abre ou fecha o painel: aberto sem nada antes, mostra o Resumo; com uma aba já aberta, volta nela. */
 export function toggleRightPanel(): void {
   const s = useChatStore.getState();
-  setRightPanel(s.panel ? null : s.lastPanel ?? "summary");
+  setRightPanel(s.panel ? null : s.lastPanel ?? "empty");
+}
+
+/** Abre ou fecha o Resumo flutuante. */
+export function toggleSummary(): void {
+  useChatStore.setState((s) => ({ summaryOpen: !s.summaryOpen }));
+}
+
+/** Fecha o Resumo flutuante (clique fora, Esc, troca de conversa). */
+export function closeSummary(): void {
+  if (useChatStore.getState().summaryOpen) useChatStore.setState({ summaryOpen: false });
 }
 
 export function togglePanelMaximized(): void {

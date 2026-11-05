@@ -12,15 +12,15 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 describe("os painéis da direita rolam (sem barra visível)", () => {
   const summary = read("../summary/SummaryPane.tsx");
 
-  it("o Resumo é o miolo que rola dentro da coluna do painel direito", () => {
+  it("o cartão do Resumo é uma coluna flex de altura limitada, e o Resumo é o miolo que rola", () => {
+    expect(read("../summary/SummaryPopover.tsx")).toMatch(/max-h-\[calc\(100vh-72px\)\] flex flex-col min-h-0/);
     expect(summary).toMatch(/<div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">/);
-    expect(read("../RightPanel.tsx")).toMatch(/\{panel === "summary" && <SummaryPane /);
   });
 
-  it("o ChatShell não desenha mais o Resumo por cima da conversa", () => {
-    const shell = read("../ChatShell.tsx");
-    expect(shell).not.toMatch(/SummaryDock|SummaryPane/);
-    expect(summary).not.toMatch(/absolute top-\[52px\] right-3/);
+  it("o Resumo não é coluna do painel nem fica fixo por cima da conversa: é o cartão do ícone", () => {
+    expect(read("../RightPanel.tsx")).not.toMatch(/SummaryPane/);
+    expect(read("../ChatShell.tsx")).toMatch(/summary=\{<SummaryPane /);
+    expect(summary).not.toMatch(/SummaryDock/);
   });
 
   it("o painel Time e o rascunho: a lista é o miolo que rola, com min-h-0 e flex-1", () => {

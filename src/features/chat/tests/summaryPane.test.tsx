@@ -63,7 +63,7 @@ beforeEach(() => {
   mocks.pullsError = false;
   mocks.filesError = false;
   mocks.commits = 0;
-  useChatStore.setState({ panel: "summary", surfaces: [] });
+  useChatStore.setState({ panel: null, surfaces: [] });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);

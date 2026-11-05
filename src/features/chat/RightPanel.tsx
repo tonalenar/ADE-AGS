@@ -18,8 +18,6 @@ import { CHAT_SHELL_ATTR, hasTimeline } from "./ConversationView";
 import { isAvailable, keyLabel, PANEL_ENTRIES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import type { ConversationCard } from "./chatModel";
 import { TeamPanel } from "./team/TeamPanel";
-import { SummaryPane } from "./summary/SummaryPane";
-import { panelColumnWidth } from "./summary/summaryLayout";
 import { clampPanelWidth, PANEL_W, setChatBrowser, setChatShell, setPanelWidth, togglePanelMaximized, toggleRightPanel, useChatStore } from "./store";
 
 // Design e os aparelhos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
@@ -59,12 +57,11 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   const winControls = DESKTOP_OS === "windows" || DESKTOP_OS === "linux";
   return (
     <aside aria-label={t("chat.panel.label")}
-      style={maximized ? undefined : { width: panelColumnWidth(panel, panelWidth) }}
+      style={maximized ? undefined : { width: panelWidth }}
       // A coluna encolhe até 280 px: numa janela de ~1000 px, sidebar, conversa (440 px no mínimo, com o cabeçalho
       // inteiro) e painel cabem sem nada passar da borda da janela (com 360 px, o terminal e o simulador eram cortados).
       className={`${maximized ? "flex-1" : "shrink"} relative min-w-[280px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
-      {/* O Resumo tem largura fixa (a dos cartões); as outras superfícies se arrastam. */}
-      {!maximized && panel !== "summary" && <ResizeHandle />}
+      {!maximized && <ResizeHandle />}
       {/* Sem faixa de cabeçalho: a fileira de ícones e o recolher moram no cabeçalho principal e cada superfície
           começa no topo da coluna. Fica só uma região de arrasto fina (não cobre os botões da superfície). */}
       <div data-tauri-drag-region aria-hidden="true" className="absolute inset-x-0 top-0 h-2 z-10" />
@@ -83,7 +80,6 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
       )}
       <div ref={contentRef} tabIndex={-1} className={`flex-1 min-h-0 flex flex-col outline-none ${winControls ? "pt-8" : ""}`}>
         {empty && <SurfaceLauncher available={available} onChoose={choose} />}
-        {panel === "summary" && <SummaryPane conversation={conversation} cwd={cwd} tabId={tabId} />}
         {panel === "diff" && <DiffView tabId={tabId} cwd={cwd} />}
         {panel === "shell" && cwd && <ShellSurface cwd={cwd} />}
         {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}

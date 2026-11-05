@@ -26,7 +26,7 @@ const click = (el: Element | null) => act(async () => { (el as HTMLElement).clic
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  useChatStore.setState({ panel: "summary", surfaces: [], terminalOpen: {}, panelMaximized: false });
+  useChatStore.setState({ panel: null, summaryOpen: false, surfaces: [], terminalOpen: {}, panelMaximized: false });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -41,16 +41,17 @@ describe("a fileira de ícones (no cabeçalho principal)", () => {
     expect(host.querySelector("[role=tab]")).toBeNull();
   });
 
-  it("o Resumo começa destacado; clicar em outro ícone troca; clicar no ativo recolhe o painel", async () => {
+  it("clicar num ícone abre a superfície; clicar no ativo recolhe o painel; o Resumo não é aba do painel", async () => {
     await mountToolbar();
-    expect(icon("chat.panel.open.summary")!.getAttribute("aria-pressed")).toBe("true");
+    expect(icon("chat.panel.open.summary")!.getAttribute("aria-pressed")).toBe("false");
     await click(icon("chat.panel.open.files"));
     expect(useChatStore.getState().panel).toBe("files");
     expect(icon("chat.panel.open.files")!.getAttribute("aria-pressed")).toBe("true");
     await click(icon("chat.panel.open.files"));
     expect(useChatStore.getState().panel).toBeNull();
     await click(icon("chat.panel.open.summary"));
-    expect(useChatStore.getState().panel).toBe("summary");
+    expect(useChatStore.getState().panel).toBeNull();
+    expect(useChatStore.getState().summaryOpen).toBe(true);
   });
 
   it("o tooltip leva o nome e a tecla; o terminal fica esmaecido sem gaveta e alterna com ela", async () => {
@@ -137,20 +138,6 @@ describe("o dock (coluna com borda) só abriga as outras superfícies", () => {
     expect(useTabsStore.getState().tabs.filter((t) => t.agentId === "bash")).toHaveLength(1);
   });
 
-  it("o Resumo é uma coluna do painel, de largura fixa e sem a alça de arrastar (empurra a conversa, nunca a cobre)", async () => {
-    useChatStore.setState({ panel: "summary", panelWidth: 720 });
-    await mountDock();
-    const aside = host.querySelector("aside") as HTMLElement;
-    expect(aside).not.toBeNull();
-    expect(aside.style.width).toBe("360px");
-    expect(aside.querySelector("[role=separator]")).toBeNull();
-    // As outras superfícies seguem a largura arrastada, com a alça.
-    useChatStore.setState({ panel: "files" });
-    await mountDock();
-    expect((host.querySelector("aside") as HTMLElement).style.width).toBe("720px");
-    expect(host.querySelector("aside [role=separator]")).not.toBeNull();
-  });
-
   it("com Arquivos à vista a coluna aparece, com borda e sem a fileira de ícones (ela está no cabeçalho)", async () => {
     useChatStore.setState({ panel: "files" });
     await mountDock();
@@ -192,5 +179,52 @@ describe("o dock (coluna com borda) só abriga as outras superfícies", () => {
     expect(restore.getAttribute("aria-pressed")).toBe("true");
     await click(restore);
     expect(useChatStore.getState().panelMaximized).toBe(false);
+  });
+});
+
+describe("o Resumo é um cartão flutuante ancorado no ícone (como no Claude Code)", () => {
+  const mountWithSummary = () => act(async () => {
+    root.render(<div><p data-testid="conversa">texto</p><PanelToolbar drawerTabId={null} terminalAvailable summary={<div data-testid="cartoes">Ambiente</div>} /></div>);
+  });
+  const card = () => host.querySelector("[role=dialog][data-summary-popover]") as HTMLElement | null;
+  const down = (el: Element) => act(async () => { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+
+  it("abre por cima, sem mexer no painel direito (o simulador continua à vista), com o foco dentro e o ícone marcado", async () => {
+    useChatStore.setState({ panel: "ios" });
+    await mountWithSummary();
+    await click(icon("chat.panel.open.summary"));
+    expect(card()?.querySelector("[data-testid=cartoes]")).not.toBeNull();
+    expect(useChatStore.getState().panel).toBe("ios");
+    expect(icon("chat.panel.open.summary")?.getAttribute("aria-pressed")).toBe("true");
+    expect(document.activeElement).toBe(card());
+    // Clicar dentro não fecha.
+    await down(card()!.querySelector("[data-testid=cartoes]")!);
+    expect(card()).not.toBeNull();
+  });
+
+  it("fecha com clique fora", async () => {
+    await mountWithSummary();
+    await click(icon("chat.panel.open.summary"));
+    await down(host.querySelector("[data-testid=conversa]")!);
+    expect(card()).toBeNull();
+    expect(useChatStore.getState().summaryOpen).toBe(false);
+  });
+
+  it("fecha com Esc e o foco volta ao ícone", async () => {
+    await mountWithSummary();
+    await click(icon("chat.panel.open.summary"));
+    await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(card()).toBeNull();
+    expect(document.activeElement).toBe(icon("chat.panel.open.summary"));
+  });
+
+  it("o ícone alterna; com o painel maximizado, ele volta ao tamanho normal (o cartão flutua sobre a conversa)", async () => {
+    useChatStore.setState({ panel: "browser", panelMaximized: true });
+    await mountWithSummary();
+    await click(icon("chat.panel.open.summary"));
+    expect(useChatStore.getState().panelMaximized).toBe(false);
+    expect(useChatStore.getState().panel).toBe("browser");
+    await click(icon("chat.panel.open.summary"));
+    expect(card()).toBeNull();
   });
 });
