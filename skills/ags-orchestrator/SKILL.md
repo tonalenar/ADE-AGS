@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.48.0
+version: 1.49.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -882,7 +882,7 @@ click, tap, scroll or typing, the app does it and checks again. Same loop on thr
 | Target | CLI | MCP tool | Who it reaches | Checks (`--expect`) |
 |---|---|---|---|---|
 | Canvas browser (portal) | `ags portal act <portal> "goal"` | `browser_act` | portals connected to you | `text:` `url:` `count:` `absent:` |
-| iOS simulator (macOS) | `ags sim act <simulator> "goal"` | `sim_act` | simulators connected to you, or opened in the chat panel with device control on | `text:` (local OCR) |
+| iOS simulator (macOS) | `ags sim act <simulator> "goal"` | `sim_act` | simulators connected to you, or opened in the chat panel with device control on | `text:` (local OCR), `visual:changed` `visual:darker` `visual:lighter` (pixels) |
 | The user's Mac screen | `ags desk act "goal"` | `desk_act` | the main display, after the person consents to **this** goal | `text:` (local OCR) |
 
 ```bash
@@ -893,7 +893,10 @@ ags desk act "Open Mail and show the inbox" --expect "text:Inbox" --timeout 300
 ```
 
 Flags (all three): `--steps 1..15` (default 8), `--timeout 10..1800` seconds (default 115), `--expect`
-(repeatable) and `--fill`. In the browser `--fill "Field label=value"` (repeatable, the label must look like
+(repeatable) and `--fill`. On iOS, `--expect visual:changed|darker|lighter` compares the screen's pixels with the
+first photo of the act. Use it when the goal only changes colors, such as switching to the dark theme: the text
+the OCR reads stays the same. `report.effects` gives each action's pixel effect (`changed`: share of the screen
+that changed; `luma`: brightness shift). An action with `changed > 0` did land, even when no text moved. In the browser `--fill "Field label=value"` (repeatable, the label must look like
 the field's); on iOS and the Mac a single `--fill "screen=value"` types into the field that is **already
 focused** (US ASCII, no Enter/Tab). Typed values never leave the machine. Enable Settings → Decisions → Jev
 (browser pilot; visual fallback for iOS and the Mac) first: nothing is turned on for you.
@@ -918,6 +921,30 @@ confirmation use `--timeout 300`; the CLI waits that long plus a margin, and the
 
 **One act at a time.** One per simulator and one on the Mac (a global lock): a second one is refused while
 the first runs. Do not start acts in parallel on the same target; on the Mac, not at all.
+
+**Covered targets on iOS.** Sometimes the control Jev picks sits under the keyboard or a floating tab bar, or is
+cut by the bottom edge. A tap there would hit a key or the bar, so `sim act` scrolls the content inside the free
+area first and looks again; the action reads `scroll` → `reveal`. If scrolling cannot free it, the act ends
+`unsure` without tapping: close the keyboard or scroll, then ask again. A tap on a keyboard key types without
+`--fill`, so it always asks the person, even with "Always on this device".
+
+**Companion skills: `jev-sim-use` and `agent-desktop`.** ADE AGS ships them pinned and checked by hash, and keeps
+them up to date with the app. While "Active in every agent" is on in the Skills panel, the app mounts them in
+every agent tab; it is on by default. When one is mounted, read its "In ADE AGS" block first. They do not replace
+the acts above:
+
+| Need | Use |
+|---|---|
+| Reach a goal on an iOS simulator | `ags sim act` / `sim_act` (Jev from the app, confirmations, privacy) |
+| Read a simulator's accessibility tree, off-screen elements, exact values | `jev-sim-use exec ui` (local, read-only) |
+| Android device, or a simulator `sim act` cannot reach, or the person named jev-sim-use | `jev-sim-use "<goal>"`, never with an act running on the same device; never set or ask for `TYPESAFE_API_KEY` |
+| Reach a goal on the Mac screen | `ags desk act` / `desk_act` |
+| Map or verify a Mac app (accessibility tree) | `agent-desktop snapshot` / `find` / `get` / `is` (read-only) |
+| Click or type with agent-desktop | only when the person asked for agent-desktop by name and `desk act` cannot do it |
+| Canvas browser | `ags portal act` / `browser_act` |
+
+With Jev on in Settings → Decisions, every `act` above uses it. Neither skill installs binaries: if
+`jev-sim-use`, `sim-use` or `agent-desktop` is missing, tell the person how to install it.
 
 **Who may call.** The app checks who you are, not your flags: a terminal tab (its `ADE_SESSION` token and a
 process that descends from that terminal) or a protocol conversation (`thread:<id>` and a process that

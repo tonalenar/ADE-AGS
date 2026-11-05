@@ -16,6 +16,9 @@ import {
 } from "neogestify-ui-components";
 
 import { useSkillsStore } from "@/features/skills/store";
+import { ChatSwitch } from "@/features/settings/SettingsSection";
+
+import { alwaysOnSkills, setSkillAlwaysOn } from "./ipc";
 
 import { applyName } from "./frontmatter";
 
@@ -46,6 +49,8 @@ export function SkillDetailPage() {
   const [savedContent, setSavedContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  /** "Ativa em todos os agentes": `null` enquanto não se sabe. */
+  const [alwaysOn, setAlwaysOn] = useState<boolean | null>(null);
 
   /** Vino de un repositorio: guardarle encima sería escribir en algo que la app pisa al
    *  reinstalar, así que acá solo se puede guardar una copia propia. */
@@ -68,6 +73,24 @@ export function SkillDetailPage() {
         registryName: detail.registryName,
       });
     });
+
+  useEffect(() => {
+    if (!id) return;
+    alwaysOnSkills()
+      .then((ids) => setAlwaysOn(ids.includes(id)))
+      .catch(() => setAlwaysOn(null));
+  }, [id]);
+
+  const toggleAlwaysOn = async (next: boolean) => {
+    if (!id) return;
+    setError("");
+    try {
+      await setSkillAlwaysOn(id, next);
+      setAlwaysOn(next);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   useEffect(() => {
     if (!id) return;
@@ -180,6 +203,14 @@ export function SkillDetailPage() {
             <Badge key={a} variant="success" size="sm">{a}</Badge>
           ))}
           <div className="flex-1" />
+          {alwaysOn !== null && (
+            <span className="flex items-center gap-1.5" title={t("skills.detail.alwaysOnHint")}>
+              <span id="skill-always-on" className="text-[10.5px] text-gray-500 dark:text-white/45">
+                {t("skills.detail.alwaysOn")}
+              </span>
+              <ChatSwitch labelId="skill-always-on" checked={alwaysOn} onChange={toggleAlwaysOn} />
+            </span>
+          )}
           {meta.license && (
             <span className="text-[10px] text-gray-400 dark:text-white/30">{meta.license}</span>
           )}

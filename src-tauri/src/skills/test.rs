@@ -14,7 +14,7 @@ use uuid::Uuid;
 use crate::database::{db_mark_window_closed, DbConnection};
 
 use super::authoring::{create_skill, fork_skill, SkillDraft};
-use super::bundled::{decide, ensure_one, Action, Provisioned, BUNDLED};
+use super::bundled::{decide, ensure_one, ensure_one_when, Action, Provisioned, BUNDLED};
 use super::files::{scan_skill_file, slug_from_source_path};
 use super::*;
 
@@ -1238,6 +1238,21 @@ fn the_provisioning_lifecycle() {
     assert_eq!(installed_rows(&db)[0].1, "3.0.0");
 }
 
+/// Com terminal aberto a atualização espera: a skill de quem já está rodando não muda por baixo dele. Na próxima
+/// abertura sem terminal, atualiza.
+#[test]
+fn com_terminal_aberto_a_atualizacao_espera_a_proxima_abertura() {
+    let source = fake_skill("1.0.0");
+    let (db, _store) = bundled_db();
+    ensure_one_when(&db, "mi-skill", &source, true).unwrap();
+    assert_eq!(installed_rows(&db)[0].1, "1.0.0", "instalar não troca nada sob ninguém: segue");
+    write_version(&source, "2.0.0");
+    ensure_one_when(&db, "mi-skill", &source, true).unwrap();
+    assert_eq!(installed_rows(&db)[0].1, "1.0.0", "com terminal aberto, espera");
+    ensure_one_when(&db, "mi-skill", &source, false).unwrap();
+    assert_eq!(installed_rows(&db)[0].1, "2.0.0");
+}
+
 /// Los archivos que la versión nueva ya no trae no deben sobrevivir en la copia global:
 /// si no, lo instalado deja de ser igual a lo que trae la app.
 #[test]
@@ -1282,8 +1297,98 @@ fn the_bundled_skill_in_the_repo_is_valid() {
             meta.description.is_some(),
             "la description es lo que lee el agente para decidir usarla"
         );
-        assert!(!meta.compatible_agents.is_empty());
+        // As de terceiros (`vendor.lock.json`) não dizem para quais agentes servem: vazio é "todos".
+        if !VENDORED.contains(name) {
+            assert!(!meta.compatible_agents.is_empty());
+        }
     }
+}
+
+const VENDORED: &[&str] = &["jev-sim-use", "agent-desktop"];
+
+/// O `SKILL.md` original a partir do embutido: o mesmo corte de `scripts/vendor-skills.ts` (`upstreamOf`).
+fn upstream_of(skill: &str) -> String {
+    const BEGIN: &str = "<!-- ADE AGS:BEGIN -->";
+    const END: &str = "<!-- ADE AGS:END -->";
+    let mut body = skill.to_string();
+    if let (Some(start), Some(end)) = (skill.find(BEGIN), skill.find(END)) {
+        let tail = &skill[end + END.len()..];
+        body = format!("{}{}", &skill[..start], tail.strip_prefix("\n\n").unwrap_or(tail));
+    }
+    body.split('\n').filter(|l| !l.trim_end().ends_with("# ade-ags")).collect::<Vec<_>>().join("\n")
+}
+
+/// As skills de terceiros que viajam com a app são as do upstream, byte a byte, na tag e no commit do lock (fora o
+/// bloco da ADE AGS e a linha da versão). Um arquivo mexido à mão, ou a versão do lock diferente da do frontmatter
+/// (que é o que dispara a atualização no usuário), quebra aqui.
+#[test]
+fn as_skills_de_terceiros_conferem_com_o_hash_do_upstream_e_a_versao_do_lock() {
+    use sha2::{Digest, Sha256};
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../skills");
+    let lock: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(root.join("vendor.lock.json")).unwrap()).unwrap();
+    let skills = lock["skills"].as_object().unwrap();
+    let mut names: Vec<&str> = skills.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    let mut want = VENDORED.to_vec();
+    want.sort_unstable();
+    assert_eq!(names, want, "o lock e a lista de terceiros andam juntos");
+    for (name, entry) in skills {
+        assert!(BUNDLED.contains(&name.as_str()), "{name} precisa estar em BUNDLED");
+        assert_eq!(entry["commit"].as_str().unwrap().len(), 40, "{name}: commit completo");
+        let version = entry["version"].as_str().unwrap();
+        for (dest, file) in entry["files"].as_object().unwrap() {
+            let raw = std::fs::read_to_string(root.join(name).join(dest)).unwrap_or_else(|_| panic!("falta {name}/{dest}"));
+            let content = if dest == "SKILL.md" { upstream_of(&raw) } else { raw.clone() };
+            let hash = format!("{:x}", Sha256::digest(content.as_bytes()));
+            assert_eq!(hash, file["sha256"].as_str().unwrap(), "{name}/{dest} não confere com {}@{}", entry["repo"], entry["tag"]);
+            if dest == "SKILL.md" {
+                let (meta, _) = scan_skill_file(&root.join(name).join(dest)).unwrap();
+                assert_eq!(meta.version.as_deref(), Some(version), "{name}: frontmatter × lock");
+                assert!(raw.contains("## In ADE AGS: read this first"), "{name}: sem o bloco da ADE AGS");
+            }
+        }
+    }
+}
+
+/// O liga/desliga do painel: ligada, a skill aparece na pasta de toda aba aberta sem anexar; desligada, sai.
+#[test]
+fn ativa_em_todos_os_agentes_monta_sem_anexar_e_desligar_tira_de_todas_as_pastas() {
+    let (db, _workspace_id, tab_id, tab_cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+    let skills = install_n_skills(&state, 2);
+    assert!(linked_slugs(&tab_cwd).is_empty());
+
+    set_skill_always_on(skills[1].id.clone(), true, state.clone()).unwrap();
+    assert_eq!(linked_slugs(&tab_cwd), vec!["skill-1"], "ligar monta na hora em toda aba aberta");
+    assert_eq!(list_always_on_skills(state.clone()).unwrap(), vec![skills[1].id.clone()]);
+    reconcile_tab_skills(tab_id.clone(), state.clone()).unwrap();
+    assert_eq!(linked_slugs(&tab_cwd), vec!["skill-1"], "a reconciliação da aba mantém");
+
+    set_skill_always_on(skills[1].id.clone(), false, state.clone()).unwrap();
+    assert!(linked_slugs(&tab_cwd).is_empty(), "desligar tira de todas as pastas");
+    assert!(set_skill_always_on("nao-existe".into(), true, state.clone()).is_err(), "só skill instalada");
+}
+
+/// As de computer use que vêm com a app nascem ligadas; desligadas pela pessoa, uma atualização não liga de novo.
+#[test]
+fn skill_de_computer_use_nasce_ligada_e_a_atualizacao_respeita_o_desligar() {
+    let (db, _store) = bundled_db();
+    let dir = std::env::temp_dir().join(format!("cc-bundled-src-{}", uuid::Uuid::new_v4())).join("jev-sim-use");
+    std::fs::create_dir_all(&dir).unwrap();
+    let write = |v: &str| std::fs::write(dir.join("SKILL.md"), format!("---\nname: jev-sim-use\ndescription: d\nversion: \"{v}\"\n---\ncorpo {v}\n")).unwrap();
+    write("0.4.2+ade.1");
+    ensure_one(&db, "jev-sim-use", &dir).unwrap();
+    let id: String = db.lock().unwrap().query_row("SELECT id FROM skills", [], |r| r.get(0)).unwrap();
+    let on = || super::always::ids(&db.lock().unwrap());
+    assert_eq!(on(), vec![id.clone()]);
+
+    super::always::set(&db.lock().unwrap(), &id, false).unwrap();
+    write("0.4.3+ade.1");
+    ensure_one(&db, "jev-sim-use", &dir).unwrap();
+    assert!(on().is_empty(), "a pessoa desligou: atualizar não religa");
+    assert_eq!(installed_rows(&db)[0].1, "0.4.3+ade.1");
 }
 
 // ── Identidad: el nombre NO identifica ───────────────────────────

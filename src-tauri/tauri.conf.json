@@ -56,7 +56,9 @@
     ],
     "resources": {
       "binaries": "binaries/",
-      "../skills/ags-orchestrator": "skills/ags-orchestrator/"
+      "../skills/ags-orchestrator": "skills/ags-orchestrator/",
+      "../skills/jev-sim-use": "skills/jev-sim-use/",
+      "../skills/agent-desktop": "skills/agent-desktop/"
     },
     "linux": {
       "deb": {
