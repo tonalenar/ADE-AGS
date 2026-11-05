@@ -7,7 +7,7 @@ import { hasBrowserMcp } from "@/features/browser/tabMcp";
 import { ScmPanel } from "@/features/scm/ScmPanel";
 import { ConnectorsSection, ContextSection } from "@/features/sidePanel/AgentSections";
 import { folderLabel, shortTokens } from "@/features/sidePanel/panelModel";
-import { Row, Section } from "@/features/sidePanel/Section";
+import { Row, Section, SectionsInOneCard } from "@/features/sidePanel/Section";
 import { PR_STATE, usePulls } from "@/features/sidePanel/SessionPanel";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -46,14 +46,19 @@ function useConversationItems(conversation: ConversationCard | null): TimelineIt
  * Limites de uso, Conectores, Saídas e Alterações. Os dados são os que o ADE já tem (git, forge, transcript, config dos
  * MCPs); o que não tem fonte fica de fora ou como "não medido", nunca inventado.
  */
-export function SummaryPane({ conversation, cwd, tabId }: { conversation: ConversationCard | null; cwd: string | null; tabId: string | null }) {
+export function SummaryPane({ conversation, cwd, tabId, inCard = false }: {
+  conversation: ConversationCard | null; cwd: string | null; tabId: string | null;
+  /** Dentro do cartão flutuante: as seções viram blocos com divisórias, sem um cartão cada (como o do Claude Code). */
+  inCard?: boolean;
+}) {
   const { t } = useTranslation();
   // A aba da conversa (TUI): tem sessão e config, e os cartões de Contexto e Conectores leem o disco. A
   // conversa por protocolo não tem aba: esses dois cartões usam o que o app recebe dos eventos.
   const tab = useTabsStore((s) => s.tabs.find((x) => x.id === conversation?.tabId) ?? null);
   if (!conversation || !cwd) return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.summary.none")}</p>;
   return (
-    <div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">
+    <SectionsInOneCard.Provider value={inCard}>
+    <div className={inCard ? "flex-1 min-h-0 cc-scroll-hidden py-1 flex flex-col" : "flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3"}>
       <EnvironmentCard conversation={conversation} cwd={cwd} />
       {tab ? <ContextSection tab={tab} flat /> : <ThreadContextCard conversation={conversation} />}
       <LimitsCard conversation={conversation} />
@@ -61,6 +66,7 @@ export function SummaryPane({ conversation, cwd, tabId }: { conversation: Conver
       <OutputsCard conversation={conversation} cwd={cwd} />
       <ChangesCard conversation={conversation} cwd={cwd} tabId={tabId} />
     </div>
+    </SectionsInOneCard.Provider>
   );
 }
 

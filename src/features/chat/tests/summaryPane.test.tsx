@@ -165,4 +165,17 @@ describe("o Resumo do painel", () => {
     expect(host.textContent).toContain("PR 259");
     expect(host.textContent).not.toContain("+5");
   });
+
+  it("no cartão flutuante, é um cartão único: as seções viram blocos com divisória fina, sem caixa própria", async () => {
+    await act(async () => { root.render(<SummaryPane inCard conversation={card} cwd={card.cwd} tabId="tab-1" />); });
+    const sections = [...host.querySelectorAll("section")];
+    expect(sections.length).toBeGreaterThan(2);
+    for (const s of sections) {
+      expect(s.className).toContain("border-t");
+      expect(s.className).not.toContain("rounded-2xl");
+    }
+    // Fora dele (onde ainda houver), cada seção segue o cartão liso.
+    await render();
+    expect(host.querySelector("section")!.className).toContain("rounded-2xl");
+  });
 });

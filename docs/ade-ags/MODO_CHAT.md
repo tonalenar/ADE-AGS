@@ -424,8 +424,12 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
 
 ## Acabamento (build local do PR 270/271)
 
-- **Resumo.** É um cartão flutuante, como o do Claude Code (`summary/SummaryPopover.tsx`, `useChatStore.summaryOpen`): ancorado
-  logo abaixo do ícone dele, alinhado à direita, com 380 px, cantos arredondados, borda e sombra. Fica POR CIMA da conversa,
+- **Resumo.** É um cartão flutuante, como o do Claude Code (`summary/SummaryPopover.tsx`, `useChatStore.summaryOpen`): logo
+  abaixo do cabeçalho, com a borda direita na borda direita da coluna da conversa (encostado no painel direito, sem
+  cobri-lo), 380 px crescendo para a esquerda. É um cartão único: as seções são blocos com divisória fina
+  (`SectionsInOneCard`), não um cartão cada. As cores são as do tema (`bg-white`/`surface-raised`), com borda e sombra.
+  Quem o desenha é a coluna da conversa (`<main>`, `relative`), então a posição acompanha o redimensionamento e o
+  painel abrindo e fechando. Fica POR CIMA da conversa,
   sem empurrar o layout nem mexer no painel direito: o simulador, o navegador e o terminal continuam no lugar. Fecha com
   clique fora, com Esc (o foco volta ao ícone) e ao trocar de conversa; ao abrir, o foco entra no cartão. Com o painel
   maximizado, abrir o Resumo restaura o painel antes, para o cartão flutuar sobre a conversa e não sobre o simulador ou o

@@ -25,6 +25,7 @@ import { scmWorkingDiff } from "./ipc";
 import { startChatLive } from "./liveStore";
 import { useLiveSummary } from "./liveSummary";
 import { SummaryPane } from "./summary/SummaryPane";
+import { SummaryPopover } from "./summary/SummaryPopover";
 import { HeaderLive } from "./LiveActivity";
 import { PermissionsInbox } from "./permissions/PermissionsInbox";
 import { TeamHeaderBadge } from "./team/TeamThreadFeed";
@@ -75,6 +76,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const composing = useChatStore((s) => s.composing);
   const panelOpen = useChatStore((s) => s.panel !== null);
   const maximized = useChatStore((s) => s.panelMaximized);
+  const summaryOpen = useChatStore((s) => s.summaryOpen);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const { ref: mainRef } = useElementWidth<HTMLElement>();
   // Arquivos do Finder soltos na coluna do chat viram anexos do composer à vista (só os caminhos).
@@ -185,9 +187,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             <ShellModeSwitch className="shrink-0" />
             {/* A fileira de ícones do painel, como no Claude Code: Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e ⋯. */}
             {/* O >_ alterna a gaveta do agente (TUI com timeline) ou abre a aba Terminal do painel (um shell na pasta). */}
-            {/* O Resumo é o cartão flutuante do ícone dele (por cima da conversa, sem mexer no painel direito). */}
-            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active}
-              summary={<SummaryPane conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />} />
+            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} />
             <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
             {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
             {!panelOpen && <WindowControls className="-mr-3" />}
@@ -204,6 +204,12 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             </AttachCwdContext.Provider>
           </div>
           <DropOverlay />
+          {/* O Resumo: cartão flutuante por cima da conversa, encostado no painel direito (borda direita da coluna). */}
+          {summaryOpen && (
+            <SummaryPopover onClose={closeSummary}>
+              <SummaryPane inCard conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
+            </SummaryPopover>
+          )}
         </main>
       )}
 

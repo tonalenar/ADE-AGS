@@ -13,9 +13,10 @@ vi.mock("../devicesIpc", () => ({ devicesShare: () => Promise.resolve() }));
 
 import { PanelToolbar } from "../PanelToolbar";
 import { RightPanel } from "../RightPanel";
-import { useChatStore } from "../store";
+import { closeSummary, useChatStore } from "../store";
 import type { ConversationCard } from "../chatModel";
 import { useTabsStore } from "@/features/tabs/store";
+import { SummaryPopover } from "../summary/SummaryPopover";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -183,9 +184,18 @@ describe("o dock (coluna com borda) só abriga as outras superfícies", () => {
 });
 
 describe("o Resumo é um cartão flutuante ancorado no ícone (como no Claude Code)", () => {
-  const mountWithSummary = () => act(async () => {
-    root.render(<div><p data-testid="conversa">texto</p><PanelToolbar drawerTabId={null} terminalAvailable summary={<div data-testid="cartoes">Ambiente</div>} /></div>);
-  });
+  // A coluna da conversa como no `ChatShell`: a fileira no cabeçalho e o cartão desenhado pela coluna (`relative`).
+  function Coluna() {
+    const open = useChatStore((s) => s.summaryOpen);
+    return (
+      <main data-testid="coluna" className="relative">
+        <p data-testid="conversa">texto</p>
+        <PanelToolbar drawerTabId={null} terminalAvailable />
+        {open && <SummaryPopover onClose={closeSummary}><div data-testid="cartoes">Ambiente</div></SummaryPopover>}
+      </main>
+    );
+  }
+  const mountWithSummary = () => act(async () => { root.render(<Coluna />); });
   const card = () => host.querySelector("[role=dialog][data-summary-popover]") as HTMLElement | null;
   const down = (el: Element) => act(async () => { el.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
 
@@ -197,6 +207,11 @@ describe("o Resumo é um cartão flutuante ancorado no ícone (como no Claude Co
     expect(useChatStore.getState().panel).toBe("ios");
     expect(icon("chat.panel.open.summary")?.getAttribute("aria-pressed")).toBe("true");
     expect(document.activeElement).toBe(card());
+    // Ancorado na coluna da conversa, à direita (encostado no painel), abaixo do cabeçalho: não dentro da fileira.
+    expect(card()!.parentElement?.getAttribute("data-testid")).toBe("coluna");
+    expect(card()!.className).toContain("right-2");
+    expect(card()!.className).toContain("top-[52px]");
+    expect(card()!.closest("[role=toolbar]")).toBeNull();
     // Clicar dentro não fecha.
     await down(card()!.querySelector("[data-testid=cartoes]")!);
     expect(card()).not.toBeNull();

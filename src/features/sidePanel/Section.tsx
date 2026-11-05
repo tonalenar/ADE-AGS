@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 import { Button } from "neogestify-ui-components";
 
 /** O fundo de um cartão do painel: opaco, porque flutua por cima de terminal e canvas. */
@@ -7,6 +7,15 @@ export const CARD = `rounded-xl border border-gray-200 dark:border-white/[0.08] 
 
 /** O cartão do painel do chat: arredondado e liso (sem sombra), como o painel do Claude Code. */
 export const FLAT_CARD = "rounded-2xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-raised";
+
+/**
+ * Dentro de um cartão único (o Resumo flutuante do chat, como o do Claude Code), as seções não são cartões: são
+ * blocos separados por uma divisória fina. Quem envolve as seções liga isto; fora dele, vale o `flat` de cada uma.
+ */
+export const SectionsInOneCard = createContext(false);
+
+/** A seção dentro do cartão único: sem caixa própria, com a divisória por cima (menos a primeira). */
+export const LIST_SECTION = "border-t first:border-t-0 border-gray-200 dark:border-white/[0.08]";
 
 const OPEN_KEY = "cc-side-panel-sections";
 
@@ -30,6 +39,7 @@ export function Section({ id, title, aside, children, defaultOpen = true, flat =
   flat?: boolean;
 }) {
   const [open, setOpen] = useState(() => loadOpen()[id] ?? defaultOpen);
+  const inOneCard = useContext(SectionsInOneCard);
   const toggle = () => {
     const next = !open;
     setOpen(next);
@@ -40,7 +50,7 @@ export function Section({ id, title, aside, children, defaultOpen = true, flat =
     }
   };
   return (
-    <section className={flat ? FLAT_CARD : CARD}>
+    <section className={inOneCard ? LIST_SECTION : flat ? FLAT_CARD : CARD}>
       <Button variant="custom" onClick={toggle} aria-expanded={open}
         className={`cc-t flex items-center gap-1.5 w-full px-3 text-left ${flat ? "h-11" : "h-9"}`}>
         <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">{title}</span>

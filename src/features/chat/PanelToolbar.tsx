@@ -1,10 +1,9 @@
-import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GlobeIcon, MaximizeIcon, MoreHorizontalIcon, PhoneIcon, PullRequestIcon, TerminalIcon, UsersIcon } from "./chatIcons";
 import { COMPACT_HIDDEN, entryForKey, isAvailable, keyLabel, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type PanelAvailability, type PanelChoice } from "./panelMenu";
-import { addSurface, closeSummary, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleSummary, useChatStore } from "./store";
-import { SummaryPopover } from "./summary/SummaryPopover";
+import { addSurface, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleSummary, useChatStore } from "./store";
+import { SUMMARY_ANCHOR_ATTR } from "./summary/SummaryPopover";
 import { usePopover } from "./usePopover";
 
 /** Os ícones das linhas do menu "Abrir uma superfície". */
@@ -129,16 +128,10 @@ export function choosePanel(id: PanelChoice, drawerTabId: string | null, termina
  * A fileira de ícones do painel (Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e o ⋯), como a do
  * Claude Code. Fica no cabeçalho principal da janela; com o painel maximizado, no cabeçalho dele.
  */
-export function PanelToolbar({ drawerTabId, terminalAvailable, summary = null }: {
-  drawerTabId: string | null;
-  terminalAvailable: boolean;
-  /** O conteúdo do Resumo (os cartões), mostrado no cartão flutuante ancorado no ícone dele. */
-  summary?: React.ReactNode;
-}) {
+export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: string | null; terminalAvailable: boolean }) {
   const { t } = useTranslation();
   const panel = useChatStore((s) => s.panel);
   const summaryOpen = useChatStore((s) => s.summaryOpen);
-  const summaryAnchor = useRef<HTMLDivElement>(null);
   const drawerOn = useChatStore((s) => (drawerTabId ? s.terminalOpen[drawerTabId] ?? false : false));
   const available: PanelAvailability = { terminal: terminalAvailable, pr: false };
   const choose = (id: PanelChoice) => choosePanel(id, drawerTabId, drawerOn);
@@ -147,11 +140,12 @@ export function PanelToolbar({ drawerTabId, terminalAvailable, summary = null }:
     <div role="toolbar" aria-label={t("chat.panel.label")} className="flex items-center gap-0.5 shrink-0" data-tauri-drag-region="false">
       {ROW_CHOICES.map((id) => {
         if (id === "summary") {
+          // O cartão do Resumo é desenhado pela coluna da conversa (`ChatShell`); aqui só o ícone, marcado enquanto ele
+          // está aberto. O atributo diz ao cartão que clicar no ícone não é «fora».
           return (
-            <div key={id} ref={summaryAnchor} className="relative">
+            <span key={id} {...{ [SUMMARY_ANCHOR_ATTR]: "" }} className="contents">
               <RowIcon id={id} active={summaryOpen} available={available} onChoose={choose} />
-              {summaryOpen && summary && <SummaryPopover anchor={summaryAnchor} onClose={closeSummary}>{summary}</SummaryPopover>}
-            </div>
+            </span>
           );
         }
         const active = id === "terminal" ? terminalActive : isRowActive(id, panel);

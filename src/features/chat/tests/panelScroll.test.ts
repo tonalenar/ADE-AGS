@@ -13,13 +13,13 @@ describe("os painéis da direita rolam (sem barra visível)", () => {
   const summary = read("../summary/SummaryPane.tsx");
 
   it("o cartão do Resumo é uma coluna flex de altura limitada, e o Resumo é o miolo que rola", () => {
-    expect(read("../summary/SummaryPopover.tsx")).toMatch(/max-h-\[calc\(100vh-72px\)\] flex flex-col min-h-0/);
-    expect(summary).toMatch(/<div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">/);
+    expect(read("../summary/SummaryPopover.tsx")).toMatch(/max-h-\[calc\(100%-64px\)\] flex flex-col min-h-0/);
+    expect(summary).toMatch(/"flex-1 min-h-0 cc-scroll-hidden py-1 flex flex-col"/);
   });
 
   it("o Resumo não é coluna do painel nem fica fixo por cima da conversa: é o cartão do ícone", () => {
     expect(read("../RightPanel.tsx")).not.toMatch(/SummaryPane/);
-    expect(read("../ChatShell.tsx")).toMatch(/summary=\{<SummaryPane /);
+    expect(read("../ChatShell.tsx")).toMatch(/<SummaryPopover onClose=\{closeSummary\}>\s*<SummaryPane inCard /);
     expect(summary).not.toMatch(/SummaryDock/);
   });
 
