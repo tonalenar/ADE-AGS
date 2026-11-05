@@ -18,6 +18,8 @@ import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
 import { openThread, reloadThreads } from "@/features/chat/structured/store";
 import { openDesignInPanel } from "@/features/chat/store";
+import { openChatTerminal } from "@/features/chat/shellTerminal";
+import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { designRoute, parseDesignOpen } from "@/features/design/openRoute";
 import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
@@ -84,6 +86,7 @@ function resolveAgent(requested: string) {
 
 async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> {
   const cwd = str(args, "cwd");
+  if (args.chatShell === true) return handleChatTerminal(cwd);
   const agentId = str(args, "agent");
   if (!cwd) throw new Error("Falta --cwd");
   if (!agentId) throw new Error("Falta --agent");
@@ -128,6 +131,17 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // `accountId` viaja de vuelta para que el orquestador pueda comprobar con qué cuenta
   // quedó la tab sin tener que consultarlo aparte.
   return { tabId, cwd, agentId: agent.id, agentLabel: agent.label, accountId: accountId ?? null };
+}
+
+/**
+ * O terminal do painel direito do chat (a aba Terminal), pedido pelo agente de uma conversa: o backend já trocou a
+ * pasta pela da conversa (`tabs.rs::chat_terminal_create`). `visible` = a casca do chat está à vista; no modo Abas o
+ * shell é uma aba comum da barra.
+ */
+async function handleChatTerminal(cwd: string | undefined): Promise<unknown> {
+  if (!cwd) throw new Error("A conversa não tem pasta para o terminal");
+  const { tabId, reused } = await openChatTerminal(cwd);
+  return { tabId, cwd, agentId: SHELL_AGENT_ID, agentLabel: "Terminal", accountId: null, inChat: true, reused, visible: chatShellOn(useUiStore.getState()) };
 }
 
 function handleCloseTab(args: Record<string, unknown>): unknown {
