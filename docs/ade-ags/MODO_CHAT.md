@@ -189,9 +189,17 @@ PATH do shell de login e a pasta do instalador do Cursor).
   (o Metro de um `npx expo start`) mantém o `cursor-agent` vivo, e o EOF nunca chega. Isso deixou uma conversa 9 h em
   «Pensando…», com a resposta só na janela e a fila presa. O processo ganha 3 s para sair e então é encerrado. O que ele
   deixou rodando não é tocado. Sem `result` e sem EOF, vale o **prazo de silêncio** (`cursor_map::quiet_after`):
+  - **10 s depois do `usage` de uma chamada do modelo que não pediu ferramenta:** o turno acaba bem. No `-p`, o
+    `cursor-agent` só manda o `result` quando os shells que ele pôs em segundo plano acabam, e um `npx expo start`
+    nunca acaba. A conversa ficava uns 3 min em «Pensando…» depois de cada resposta, quase sempre uma pergunta à
+    pessoa (a pergunta não era a causa: era o fim da resposta). Qualquer sinal nesses 10 s desfaz o fim;
   - **3 min depois da fala, sem ferramenta aberta:** o turno acaba bem, porque a resposta veio;
   - **15 min sem sinal:** o turno fecha com erro;
   - **ferramenta rodando:** sem prazo, porque um build longo é legítimo.
+
+  Um servidor que o agente deixou em segundo plano morre quando o turno fecha e o `cursor-agent` é encerrado. Para
+  um servidor que precisa ficar de pé, como o Metro, use o terminal da conversa (o `>_`).
+  As perguntas do agente à pessoa (`interaction_query`) não travam: o `cursor-agent -p` as recusa sozinho.
 - **Parar sem agente vivo** (todos os motores, `api::stop`, também `ags chat stop`): fecha no banco o turno que ficou aberto
   daquela conversa, com o fim «o agente já não estava rodando», e a janela volta a ociosa. Antes, o Parar não fazia nada.
 
