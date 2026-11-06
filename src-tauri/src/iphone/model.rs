@@ -634,6 +634,17 @@ pub fn contents_rect(coded: (u32, u32), display: Option<(u32, u32)>) -> (f64, f6
     }
 }
 
+/// Ajusta a orientação conhecida da tela quando o vídeo passa de retrato para paisagem (ou volta).
+/// `coded` inclui a pequena borda de alinhamento do encoder, então só importa qual lado é maior.
+pub fn display_for_frame(display: (u32, u32), coded: (u32, u32)) -> (u32, u32) {
+    if display.0 == 0 || display.1 == 0 || coded.0 == 0 || coded.1 == 0 {
+        return display;
+    }
+    let display_landscape = display.0 > display.1;
+    let frame_landscape = coded.0 > coded.1;
+    if display_landscape != frame_landscape { (display.1, display.0) } else { display }
+}
+
 // ── A conexão: ligado, reconectando, sem conexão ──
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -917,16 +928,16 @@ pub fn crop_size(coded: (u32, u32), display: Option<(u32, u32)>) -> (u32, u32) {
     }
 }
 
-/// O que o aparelho físico não faz pelos agentes (a lista de apps, abrir URL, girar e ligar são do simulador).
+/// O que continua indisponível no aparelho físico. O CoreDevice cobre apps, URLs, toque e entrada HID.
 pub fn agent_unsupported(action: &str) -> bool {
-    matches!(action, "open" | "launch" | "close" | "start" | "rotate" | "clipboard" | "tree")
+    matches!(action, "start" | "rotate" | "clipboard" | "tree")
 }
 
-/// Um agente no celular de verdade: olhar (`shot`) passa; tocar, deslizar, tecla e botão pedem à pessoa até ela dizer
+/// Um agente no celular de verdade: olhar (`shot`) e listar apps passam; ações pedem à pessoa até ela dizer
 /// "sempre neste aparelho"; digitar texto pede sempre (não se sabe em que campo o texto cai).
 pub fn agent_asks(action: &str, trusted: bool) -> bool {
     match action {
-        "shot" => false,
+        "shot" | "apps" => false,
         "type" => true,
         _ => !trusted,
     }

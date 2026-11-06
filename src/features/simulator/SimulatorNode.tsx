@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Position } from "@xyflow/react";
@@ -15,9 +15,10 @@ import {
   simulatorShutdown, type SimDevice, type SimOrientationEvent,
 } from "./ipc";
 import { canTouch, frameLayout, isPhysicalId, physicalScreen } from "@/features/iphone/model";
+import { iphoneMirrorConnect, iphoneMirrorDisconnect } from "@/features/iphone/ipc";
 import { DeviceFrame, screenRadiusOf } from "@/features/iphone/DeviceFrame";
 import { PhysicalMirror } from "@/features/iphone/PhysicalParts";
-import { refreshPhysical, useIphoneStore, useMirrorStatus } from "@/features/iphone/store";
+import { refreshPhysical, setMirrorDisconnected, useIphoneStore, useMirrorStatus } from "@/features/iphone/store";
 
 import { SimulatorBar } from "./SimulatorBar";
 import { SimulatorChat, type SimAgent } from "./SimulatorChat";
@@ -58,6 +59,8 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const [error, setError] = useState<string | null>(null);
   const [closeArmed, setCloseArmed] = useState(false);
   const [landscape, setLandscape] = useState(false);
+  const [physicalSearching, setPhysicalSearching] = useState(false);
+  const [physicalSessionBusy, setPhysicalSessionBusy] = useState(false);
 
   useEffect(() => {
     listenActivity();
@@ -71,6 +74,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const physicalId = isPhysicalId(portal.udid) ? portal.udid : null;
   const physical = useIphoneStore((s) => (physicalId ? s.devices.find((d) => d.id === physicalId) : undefined));
   const mirror = useMirrorStatus(physicalId);
+  const disconnected = useIphoneStore((s) => (physicalId ? s.disconnectedDevices.includes(physicalId) : false));
   const physicalLoaded = useIphoneStore((s) => s.loaded);
   useEffect(() => { if (physicalId) void refreshPhysical(); }, [physicalId]);
   const current = physicalId ? undefined : deviceByUdid(devices, portal.udid);
@@ -96,7 +100,15 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       void off.then((f) => f());
     };
   }, [portal.udid, booted]);
-  const scale = scaleOf(screen, portal.box.h);
+  const previousPhysicalLayout = useRef<{ id: string; width: number; height: number; scale: number } | null>(null);
+  const priorLayout = previousPhysicalLayout.current;
+  const physicalQuarterTurn = !!physicalId && priorLayout?.id === physicalId
+    && priorLayout.width === screen.height && priorLayout.height === screen.width;
+  const scale = physicalQuarterTurn ? priorLayout!.scale : scaleOf(screen, portal.box.h);
+  useLayoutEffect(() => {
+    if (physicalId) previousPhysicalLayout.current = { id: physicalId, width: screen.width, height: screen.height, scale };
+    else previousPhysicalLayout.current = null;
+  }, [physicalId, screen.width, screen.height, scale]);
   // A conversa com os agentes é do simulador: o aparelho físico ainda não é pilotado por eles.
   const chat = !!portal.chat && !physicalId;
   const phone = phoneOf(screen, scale);
@@ -137,6 +149,35 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     void AlertaToast(portal.name, String(e), "error", 5000);
   };
 
+  const searchPhysical = async () => {
+    setPhysicalSearching(true);
+    try {
+      await refreshPhysical(true);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setPhysicalSearching(false);
+    }
+  };
+
+  const togglePhysicalSession = async () => {
+    if (!physicalId) return;
+    setPhysicalSessionBusy(true);
+    try {
+      if (disconnected) {
+        await iphoneMirrorConnect(physicalId);
+        setMirrorDisconnected(physicalId, false);
+      } else {
+        await iphoneMirrorDisconnect(physicalId);
+        setMirrorDisconnected(physicalId, true);
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      setPhysicalSessionBusy(false);
+    }
+  };
+
   const boot = async () => {
     if (!portal.udid || booting) return;
     setBooting(true);
@@ -164,6 +205,8 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       resize(next, clampScale(next, scale), chat, { udid, name: deviceByUdid(devices, udid)?.name ?? portal.name });
     },
     onOpenPicker: () => void refreshDevices(),
+    onSearchPhysical: () => { void searchPhysical(); },
+    onTogglePhysicalSession: () => { void togglePhysicalSession(); },
     onButton: (name: "home" | "lock") => { if (portal.udid) simulatorButton(portal.udid, name).catch(fail); },
     onShot: async () => {
       if (!portal.udid) return;
@@ -232,7 +275,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
       <div className="flex h-full w-full flex-col" style={{ gap: SIM_GAP_Y }}>
         <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light}
-          physical={physicalId ? { id: physicalId, device: physical, status: mirror } : undefined}
+          physical={physicalId ? { id: physicalId, device: physical, status: mirror, disconnected, searching: physicalSearching, sessionBusy: physicalSessionBusy } : undefined}
           hibernateMin={hibernateMin} single={single}
           agents={agents.length} chatOpen={chat} closeArmed={closeArmed} actions={actions} />
         <div className="flex min-h-0 flex-1" style={{ gap: SIM_GAP_X }}>
@@ -240,7 +283,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
             // O aparelho físico: a moldura do modelo, com os botões da lateral funcionando (ver `iphone/DeviceFrame`).
             <div className="nodrag nowheel nopan flex shrink-0 items-center justify-center" style={{ width: phone.w, height: phone.h }}>
               <DeviceFrame device={physicalId} name={portal.name} layout={frameLayout(physical?.model ?? "", physical?.family ?? "iphone")}
-                screen={{ width: Math.round(phone.screenW), height: Math.round(phone.screenH) }} enabled={canTouch(mirror)}>
+                screen={{ width: Math.round(phone.screenW), height: Math.round(phone.screenH) }} enabled={!disconnected && canTouch(mirror)}>
                 <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror}
                   radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW))} onError={fail} />
               </DeviceFrame>

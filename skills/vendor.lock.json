@@ -4,12 +4,12 @@
       "repo": "Ryu0118/jev-sim-use",
       "tag": "0.4.2",
       "commit": "8aea477b3abcef71d038cc087e1182b3f2ff1f9d",
-      "version": "0.4.2+ade.1",
+      "version": "0.4.2+ade.4",
       "license": "MIT",
       "files": {
         "SKILL.md": {
           "from": "skills/jev-sim-use/SKILL.md",
-          "sha256": "2fad89ce9bef1ae07f28e861e75eeb209631fcbef06979f54aa375653317c5d1"
+          "sha256": "9e90f6ab81e768e616ef89ad820d42cdc237c9cdf94f08a90596c245d1eb98d5"
         },
         "references/sim-use.md": {
           "from": "skills/jev-sim-use/references/sim-use.md",

@@ -407,6 +407,14 @@ fn o_recorte_tira_as_bordas_de_alinhamento_da_direita_e_de_baixo() {
 }
 
 #[test]
+fn a_medida_da_tela_acompanha_a_orientacao_dos_quadros_do_iphone() {
+    assert_eq!(display_for_frame((1290, 2796), (1296, 2816)), (1290, 2796));
+    assert_eq!(display_for_frame((1290, 2796), (2816, 1296)), (2796, 1290));
+    assert_eq!(display_for_frame((2796, 1290), (1296, 2816)), (1290, 2796));
+    assert_eq!(display_for_frame((0, 0), (1296, 2816)), (0, 0));
+}
+
+#[test]
 fn sem_tela_ou_com_tela_maior_que_o_video_mostra_tudo() {
     assert_eq!(contents_rect((1296, 2816), None), (0.0, 0.0, 1.0, 1.0));
     assert_eq!(contents_rect((1296, 2816), Some((1400, 2796))), (0.0, 0.0, 1.0, 1.0));
@@ -555,14 +563,16 @@ fn agente_no_aparelho_fisico_pede_a_pessoa_menos_quando_ela_disse_sempre() {
     // Olhar nunca pede.
     assert!(!agent_asks("shot", false));
     // Tocar, deslizar, tecla e botão: pedem até a pessoa dizer "sempre neste aparelho".
-    for action in ["tap", "swipe", "key", "button"] {
+    for action in ["tap", "swipe", "key", "button", "launch", "close", "open"] {
         assert!(agent_asks(action, false), "{action}");
         assert!(!agent_asks(action, true), "{action}");
     }
+    assert!(!agent_asks("apps", false));
     // Digitar texto no celular de verdade pede sempre: não se sabe onde o texto cai.
     assert!(agent_asks("type", true));
-    // O que o aparelho físico não faz (abrir URL, apps, girar, ligar) nem chega a perguntar: vira erro antes.
-    assert!(agent_unsupported("open") && agent_unsupported("launch") && agent_unsupported("start") && agent_unsupported("rotate"));
+    // O CoreDevice agora cobre apps e URLs; ligar simulador, girar e clipboard seguem fora do iPhone físico.
+    assert!(!agent_unsupported("open") && !agent_unsupported("launch") && !agent_unsupported("close"));
+    assert!(agent_unsupported("start") && agent_unsupported("rotate") && agent_unsupported("clipboard"));
     assert!(!agent_unsupported("tap") && !agent_unsupported("shot"));
 }
 

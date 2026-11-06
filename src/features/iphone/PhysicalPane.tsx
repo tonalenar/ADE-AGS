@@ -10,10 +10,10 @@ import { AlertaToast } from "@/shared/ui/alerts";
 import { ConnectHint } from "./ConnectHint";
 import { DeviceBar } from "./DeviceBar";
 import { DeviceFrame, screenRadiusOf } from "./DeviceFrame";
-import { iphoneType } from "./ipc";
+import { iphoneMirrorConnect, iphoneMirrorDisconnect, iphoneType } from "./ipc";
 import { canTouch, fitScale, frameLayout, isReady, physicalScreen, stepZoom } from "./model";
 import { MirrorStatusLine, PhysicalMirror, TransportBadge } from "./PhysicalParts";
-import { refreshPhysical, useIphoneStore, useMirrorStatus, usePhysicalDevices } from "./store";
+import { refreshPhysical, setMirrorDisconnected, useIphoneStore, useMirrorStatus, usePhysicalDevices } from "./store";
 
 function useBoxSize() {
   const ref = useRef<HTMLDivElement>(null);
@@ -30,6 +30,16 @@ function useBoxSize() {
 
 const ibCls = "w-8 h-8 inline-flex items-center justify-center rounded-lg text-[12px] font-medium text-gray-500 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white disabled:opacity-40 disabled:pointer-events-none";
 const fieldCls = "h-8 min-w-0 px-2.5 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.04] text-chat-note text-gray-900 dark:text-white outline-none focus:border-accent-500";
+
+function SessionToggleIcon({ resume }: { resume: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="h-[16px] w-[16px]" aria-hidden="true">
+      {resume
+        ? <path d="M9 6.5v11l9-5.5-9-5.5Z" fill="currentColor" stroke="none" />
+        : <path d="M9 6.5v11M15 6.5v11" strokeWidth={2.8} />}
+    </svg>
+  );
+}
 
 /** Digitar no aparelho por um campo (o teclado do Mac também digita direto com a tela em foco). */
 function KeyboardButton({ device, name, ready }: { device: string; name: string; ready: boolean }) {
@@ -63,12 +73,13 @@ function KeyboardButton({ device, name, ready }: { device: string; name: string;
  * linha de estado; no meio, a moldura do modelo com os botões da lateral funcionando, a tela espelhada (clique e
  * arraste tocam, a rolagem com dois dedos rola, a pinça amplia; com a tela em foco, o teclado digita) e a pílula com
  * início, alternador de apps, foto e o "⋯"; à direita, teclado e zoom. O aparelho vai para os agentes como o
- * simulador: só com a chave, e cada ação deles pergunta à pessoa até ela dizer "sempre neste aparelho".
+ * simulador: só com a chave; ações que mudam o aparelho pedem confirmação até a pessoa autorizar sempre.
  */
 export function PhysicalPane({ device, picker }: { device: string; picker: ReactNode }) {
   const { t } = useTranslation();
   const devices = useIphoneStore((s) => s.devices);
   const loaded = useIphoneStore((s) => s.loaded);
+  const disconnected = useIphoneStore((s) => s.disconnectedDevices.includes(device));
   const status = useMirrorStatus(device);
   const control = useChatStore((s) => s.deviceControl);
   const current = devices.find((d) => d.id === device);
@@ -80,8 +91,38 @@ export function PhysicalPane({ device, picker }: { device: string; picker: React
   useEffect(() => { setPanelDevice("ios", device, current?.name ?? null); }, [device, current?.name]);
   const { ref, size } = useBoxSize();
   const fail = useCallback((e: unknown) => { void AlertaToast(name, String(e), "error", 5000); }, [name]);
-  const ready = canTouch(status);
+  const ready = !disconnected && canTouch(status);
   const [zoom, setZoom] = useState<number | "fit">("fit");
+  const [searching, setSearching] = useState(false);
+  const [sessionBusy, setSessionBusy] = useState(false);
+
+  const searchDevices = async () => {
+    setSearching(true);
+    try {
+      await refreshPhysical(true);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const toggleSession = async () => {
+    setSessionBusy(true);
+    try {
+      if (disconnected) {
+        await iphoneMirrorConnect(device);
+        setMirrorDisconnected(device, false);
+      } else {
+        await iphoneMirrorDisconnect(device);
+        setMirrorDisconnected(device, true);
+      }
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSessionBusy(false);
+    }
+  };
 
   const family = current?.family ?? "iphone";
   const points = physicalScreen(status?.display ?? null, family);
@@ -97,10 +138,19 @@ export function PhysicalPane({ device, picker }: { device: string; picker: React
     <div className="h-full flex flex-col">
       <div className="@container shrink-0 border-b border-gray-200 dark:border-white/[0.08]">
         <div className="h-12 flex items-center gap-2 px-3 text-chat-note whitespace-nowrap">
-          {picker}
-          {!missing && <MirrorStatusLine status={status} className="text-gray-600 dark:text-white/60" />}
-          <span className="flex-1" />
+          <div className="min-w-0 flex-1">{picker}</div>
+          {!missing && (disconnected
+            ? <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-chat-caption font-medium text-gray-600 dark:bg-white/[0.08] dark:text-white/65">{t("iphone.status.paused")}</span>
+            : <MirrorStatusLine status={status} className="max-w-[10rem] text-gray-600 dark:text-white/60" />)}
           {current && <span className="hidden @[30rem]:inline-flex"><TransportBadge transport={current.transport} tone="panel" /></span>}
+          <button type="button" className={`${ibCls} shrink-0`} title={t("iphone.search")} aria-label={t("iphone.search")} disabled={searching}
+            onClick={() => { void searchDevices(); }}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className={`h-[16px] w-[16px] ${searching ? "animate-spin" : ""}`} aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4M4 4v4h4M4 13a8 8 0 0 0 14.9 4M20 20v-4h-4" /></svg>
+          </button>
+          <button type="button" className={`${ibCls} shrink-0 ${disconnected ? "text-accent-600 dark:text-accent-400" : ""}`} title={t(disconnected ? "iphone.session.connect" : "iphone.session.disconnect")}
+            aria-label={t(disconnected ? "iphone.session.connect" : "iphone.session.disconnect")} disabled={sessionBusy} onClick={() => { void toggleSession(); }}>
+            <SessionToggleIcon resume={disconnected} />
+          </button>
         </div>
       </div>
 
@@ -111,9 +161,12 @@ export function PhysicalPane({ device, picker }: { device: string; picker: React
           ) : size.w > 0 && (
             <div className="flex min-h-full min-w-full w-max flex-col items-center justify-center gap-4 px-6 py-5">
               <DeviceFrame device={device} name={name} layout={layout} screen={screen} enabled={ready}>
-                <PhysicalMirror screenId="chat-devices-physical" device={device} known={!missing} status={status} radius={screenRadiusOf(layout, screen.width)} onError={fail} />
+                <PhysicalMirror screenId="chat-devices-physical" device={device} known={!missing} status={status} radius={screenRadiusOf(layout, screen.width)} onError={fail}
+                  pausedAction={<button type="button" className="rounded-lg bg-accent-600 px-4 py-2 text-chat-note font-semibold text-white shadow-sm transition-colors hover:bg-accent-500 disabled:cursor-wait disabled:opacity-60" disabled={sessionBusy} onClick={() => { void toggleSession(); }}>
+                    {t("iphone.session.connect")}
+                  </button>} />
               </DeviceFrame>
-              <DeviceBar device={device} name={name} status={status} ready={ready} />
+              {!disconnected && <DeviceBar device={device} name={name} status={status} ready={ready} />}
             </div>
           )}
         </div>

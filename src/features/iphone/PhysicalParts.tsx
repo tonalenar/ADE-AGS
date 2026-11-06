@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
 import { NativeScreen, type NativeScreenApi } from "@/features/simulator/SimulatorScreen";
@@ -116,7 +117,7 @@ export function MirrorStatusLine({ status, className = "" }: { status: MirrorSta
  * com o estado por baixo. A view fica transparente até o primeiro quadro e quando a conexão some, então o texto
  * daqui aparece nessas horas; ligado, o vídeo cobre tudo. Só ver: o clique na tela não vai para o aparelho.
  */
-export function PhysicalMirror({ screenId, device, known, status, radius, onError }: {
+export function PhysicalMirror({ screenId, device, known, status, radius, onError, pausedAction }: {
   screenId: string;
   device: string;
   /** O aparelho está na lista do CoreDevice agora. */
@@ -124,8 +125,18 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
   status: MirrorStatus | undefined;
   radius: number;
   onError: (message: string) => void;
+  pausedAction?: ReactNode;
 }) {
   const { t } = useTranslation();
+  const disconnected = useIphoneStore((s) => s.disconnectedDevices.includes(device));
+  if (disconnected) {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black px-6 text-center">
+        <p className="m-0 max-w-[28ch] text-[12.5px] leading-relaxed text-white/70">{t("iphone.session.paused")}</p>
+        {pausedAction}
+      </div>
+    );
+  }
   const state = status?.state ?? "connecting";
   const note = !known && state !== "live" ? t("iphone.screen.notFound") : t(`iphone.screen.${state}`);
   return (

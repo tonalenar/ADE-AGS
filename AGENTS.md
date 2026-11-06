@@ -57,7 +57,9 @@ Ele roda agentes de código em **terminais reais (PTY)**, com arquivos, diff, gi
 
 ### 2.4 Decisões já tomadas pelo usuário
 - **Não trocar o modelo do Codex** (`gpt-6.1-sol`) nos squads, nem propor a troca. O laço de raciocínio vazio se trata por detecção no app (Vigia). Interromper o agente ou fixar a versão do Codex CLI só com OK.
-- **O Jev custa cota**: bench real, sondas e testes reais do piloto só com OK e com teto.
+- **Jev em tarefas**: se estiver ativo e houver saldo, agentes podem usá-lo em tarefas do usuário sem pedir autorização a cada tarefa, quando ajudar na precisão ou no tempo; se o caminho local for melhor, sigam por ele. Bench real, sondas e testes reais do piloto ainda exigem OK e teto explícito.
+- Em tarefas com várias etapas, não envie uma atualização por tela ou ação. Se progresso for útil, dê uma linha curta; no fim, informe o resultado uma vez. As linhas de execução na interface ficam em uma linha, com o excedente truncado.
+- Para iPhone físico compartilhado com a ADE, agentes usam `ags device` ou as tools MCP `device_*`. `sim-use ios-device tap` pode dizer que aceitou um toque sem efeito em apps comuns; serve para leitura, não como canal de controle. Confirmações e confiança continuam no painel da ADE.
 - Atualização das CLIs de agentes: nunca com terminal ou missão em uso.
 
 ### 2.5 Testes
