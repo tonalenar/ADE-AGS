@@ -172,6 +172,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "pool.create" => pool_create(app, args),
         "pool.delete" => pool_delete(app, args),
         "device.list" => device_list(app, args),
+        "device.act" => super::devices::device_act(app, args),
         "device.create" => device_create(app, args),
         "sim.act" => super::sim_act::act(app, args),
         "desk.act" => super::desk_act::act(app, args),

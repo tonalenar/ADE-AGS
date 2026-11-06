@@ -1371,6 +1371,39 @@ fn ativa_em_todos_os_agentes_monta_sem_anexar_e_desligar_tira_de_todas_as_pastas
     assert!(set_skill_always_on("nao-existe".into(), true, state.clone()).is_err(), "só skill instalada");
 }
 
+#[test]
+fn skills_sempre_ativas_chegam_a_conversa_de_protocolo_sem_aba_tui() {
+    let (db, _workspace_id, _tab_id, cwd, _skills_dir) = setup();
+    let app = tauri::test::mock_app();
+    app.manage(db);
+    let state = app.state::<DbConnection>();
+    let skills = install_n_skills(&state, 2);
+    {
+        let conn = state.lock().unwrap();
+        conn.execute("UPDATE windows SET is_open = 0", []).unwrap();
+        conn.execute(
+            "INSERT INTO chat_thread (id, agent_id, cwd, title, state, created_at, updated_at)
+             VALUES ('thread-protocol', 'claude-code', ?1, 'Teste', 'active', 0, 0)",
+            [cwd.to_string_lossy().as_ref()],
+        ).unwrap();
+    }
+
+    set_skill_always_on(skills[1].id.clone(), true, state.clone()).unwrap();
+    assert_eq!(linked_slugs(&cwd), vec!["skill-1"], "a conversa ativa recebe a skill sempre ligada");
+    assert_eq!(
+        super::always::skills_for(&state.lock().unwrap(), &cwd.to_string_lossy(), "claude-code")
+            .into_iter().map(|s| s.id).collect::<Vec<_>>(),
+        vec![skills[1].id.clone()],
+    );
+
+    {
+        let conn = state.lock().unwrap();
+        conn.execute("UPDATE chat_thread SET state = 'settled' WHERE id = 'thread-protocol'", []).unwrap();
+        crate::skills::reconcile_link_dir(&conn, &cwd.to_string_lossy(), "claude-code").unwrap();
+    }
+    assert!(linked_slugs(&cwd).is_empty(), "concluir a conversa remove a skill da pasta sem outras abas ativas");
+}
+
 /// As de computer use que vêm com a app nascem ligadas; desligadas pela pessoa, uma atualização não liga de novo.
 #[test]
 fn skill_de_computer_use_nasce_ligada_e_a_atualizacao_respeita_o_desligar() {

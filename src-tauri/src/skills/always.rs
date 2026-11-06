@@ -1,4 +1,4 @@
-//! "Ativa em todos os agentes": uma skill montada em toda aba de agente aberta, sem anexar projeto a projeto.
+//! "Ativa em todos os agentes": uma skill montada em toda aba ou conversa ativa, sem anexar projeto a projeto.
 //!
 //! É o liga/desliga por skill do painel de Skills. Serve às skills de computer use que vêm com a app
 //! (`jev-sim-use`, `agent-desktop`): elas precisam estar onde o agente está quando a pessoa pede para mexer no
@@ -51,7 +51,7 @@ pub(super) fn set(conn: &rusqlite::Connection, skill_id: &str, on: bool) -> Resu
     Ok(true)
 }
 
-/// As skills ligadas para todos, se há uma aba aberta daquele agente naquela pasta.
+/// As skills ligadas para todos, se há uma aba aberta ou conversa ativa daquele agente naquela pasta.
 pub(super) fn skills_for(conn: &rusqlite::Connection, cwd: &str, agent_id: &str) -> Vec<SkillInfo> {
     let list = ids(conn);
     if list.is_empty() {
@@ -59,8 +59,10 @@ pub(super) fn skills_for(conn: &rusqlite::Connection, cwd: &str, agent_id: &str)
     }
     let open: bool = conn
         .query_row(
-            "SELECT EXISTS(SELECT 1 FROM tabs t JOIN windows w ON w.id = t.window_id AND w.is_open = 1
-              WHERE t.cwd = ?1 AND t.agent_id = ?2)",
+            "SELECT
+                EXISTS(SELECT 1 FROM tabs t JOIN windows w ON w.id = t.window_id AND w.is_open = 1
+                       WHERE t.cwd = ?1 AND t.agent_id = ?2)
+                OR EXISTS(SELECT 1 FROM chat_thread c WHERE c.cwd = ?1 AND c.agent_id = ?2 AND c.state = 'active')",
             [cwd, agent_id],
             |r| r.get(0),
         )
@@ -71,10 +73,11 @@ pub(super) fn skills_for(conn: &rusqlite::Connection, cwd: &str, agent_id: &str)
     list.iter().filter_map(|id| fetch_skill_row(conn, id).ok()).collect()
 }
 
-/// (cwd, agente) de todas as abas abertas: ligar ou desligar mexe em todas as pastas de uma vez.
+/// (cwd, agente) de todas as abas abertas e conversas ativas: ligar ou desligar mexe em todas as pastas de uma vez.
 fn open_link_dirs(conn: &rusqlite::Connection) -> Vec<(String, String)> {
     let Ok(mut stmt) = conn.prepare(
-        "SELECT DISTINCT t.cwd, t.agent_id FROM tabs t JOIN windows w ON w.id = t.window_id AND w.is_open = 1",
+        "SELECT DISTINCT t.cwd, t.agent_id FROM tabs t JOIN windows w ON w.id = t.window_id AND w.is_open = 1
+         UNION SELECT DISTINCT c.cwd, c.agent_id FROM chat_thread c WHERE c.state = 'active'",
     ) else {
         return vec![];
     };

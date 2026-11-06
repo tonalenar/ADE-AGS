@@ -364,7 +364,8 @@ struct Stats {
 pub struct Presenter {
     layers: Mutex<Vec<(String, Shared)>>,
     display: Mutex<Option<(u32, u32)>>,
-    held: Mutex<VecDeque<PixelBuffer>>,
+    held: Mutex<VecDeque<(PixelBuffer, u64)>>,
+    capture_fence: model::CaptureFence,
     failures: std::sync::atomic::AtomicU32,
     presented: std::sync::atomic::AtomicU64,
     pacing: Mutex<Pacing>,
@@ -417,6 +418,7 @@ impl Presenter {
             layers: Mutex::new(Vec::new()),
             display: Mutex::new(None),
             held: Mutex::new(VecDeque::new()),
+            capture_fence: model::CaptureFence::default(),
             failures: std::sync::atomic::AtomicU32::new(0),
             presented: std::sync::atomic::AtomicU64::new(0),
             pacing: Mutex::new(Pacing::default()),
@@ -473,6 +475,16 @@ impl Presenter {
         self.failures.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    /// Uma perda, falha de decodificação ou troca de decodificador torna a foto insegura até outro quadro-chave.
+    pub fn invalidate_capture(&self) {
+        self.capture_fence.invalidate();
+    }
+
+    /// Marca o quadro-chave que recuperou as referências do vídeo. Quadros anteriores não passam pelo fence.
+    pub fn capture_after_keyframe(&self, arrived_ns: u64) {
+        self.capture_fence.on_keyframe(arrived_ns);
+    }
+
     /// Guarda a estimativa de captura→chegada do quadro que chegou em `arrived_ns`.
     pub fn note_capture(&self, arrived_ns: u64, ms: f64) {
         if let Ok(mut map) = self.capture.lock() {
@@ -488,7 +500,7 @@ impl Presenter {
         let id = id.to_string();
         frame_queue().exec_async(move || {
             // O último quadro já aparece na tela nova, sem esperar o próximo.
-            if let Some(last) = this.held.lock().ok().and_then(|h| h.back().map(|b| (b.surface(), b.size()))) {
+            if let Some(last) = this.held.lock().ok().and_then(|h| h.back().map(|(b, _)| (b.surface(), b.size()))) {
                 let rect = model::contents_rect(last.1, this.display.lock().ok().and_then(|d| *d));
                 // SAFETY: superfície viva (o buffer está retido em `held`), camada viva (retida em `layer`).
                 unsafe { transaction(|| show(layer.ptr(), last.0, rect)) };
@@ -515,7 +527,10 @@ impl Presenter {
     pub fn snapshot(&self) -> Option<(Vec<u8>, usize, usize)> {
         const READ_ONLY: u32 = 1;
         let held = self.held.lock().ok()?;
-        let buffer = held.back()?;
+        let (buffer, arrived_ns) = held.back()?;
+        if !self.capture_fence.trusts(*arrived_ns) {
+            return None;
+        }
         let surface = buffer.surface() as *const c_void;
         if surface.is_null() {
             return None;
@@ -563,6 +578,7 @@ impl Presenter {
             if let Ok(mut held) = this.held.lock() {
                 held.clear();
             }
+            this.capture_fence.invalidate();
         });
     }
 
@@ -572,6 +588,7 @@ impl Presenter {
         if let Ok(mut pace) = self.pacing.lock() {
             *pace = Pacing::default();
         }
+        self.capture_fence.invalidate();
         let this = self.clone();
         frame_queue().exec_async(move || {
             if let Ok(mut held) = this.held.lock() {
@@ -663,11 +680,11 @@ impl FrameSink for Sink {
                 }
             }
             if let Ok(mut held) = this.held.lock() {
-                held.push_back(buffer);
+                held.push_back((buffer, arrived_ns));
                 // Só devolve ao pool a superfície que a tela não usa mais (senão o próximo quadro é escrito por cima
                 // do que a GPU ainda compõe: blocos de dois quadros misturados na rolagem).
                 // SAFETY: superfícies vivas (os buffers estão retidos aqui).
-                let in_use: Vec<bool> = held.iter().map(|b| unsafe { IOSurfaceIsInUse(b.surface() as *const c_void) }).collect();
+                let in_use: Vec<bool> = held.iter().map(|(b, _)| unsafe { IOSurfaceIsInUse(b.surface() as *const c_void) }).collect();
                 let plan = model::release_plan(&in_use, HELD_CAP);
                 for i in plan.release.iter().rev() {
                     held.remove(*i);
@@ -690,6 +707,7 @@ impl FrameSink for Sink {
 
     fn failed(&self, _status: OSStatus) {
         self.0.failures.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.0.invalidate_capture();
         self.0.count(0, true);
     }
 }

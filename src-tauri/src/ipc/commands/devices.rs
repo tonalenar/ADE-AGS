@@ -49,11 +49,20 @@ fn resolve<'a>(list: &'a [Reachable], wanted: &str) -> Result<&'a Reachable, Str
         return Ok(d);
     }
     let needle = wanted.trim().to_lowercase();
+    let stable_matches: Vec<&Reachable> = list.iter().filter(|d| d.portal.udid.as_deref().is_some_and(|id| id.eq_ignore_ascii_case(&needle))).collect();
+    match stable_matches.as_slice() {
+        [one] => return Ok(one),
+        many if !many.is_empty() => return Err(format!(
+            "O id estável '{wanted}' aparece em mais de um vínculo. Escolha pelo nome ou pelo id do nó: {}",
+            many.iter().map(|d| d.id.as_str()).collect::<Vec<_>>().join(", ")
+        )),
+        _ => {}
+    }
     let matches: Vec<&Reachable> = list.iter().filter(|d| d.portal.name.to_lowercase() == needle).collect();
     match matches.as_slice() {
         [one] => Ok(one),
         [] if list.is_empty() => Err(format!(
-            "'{wanted}' não está conectado com você. Você não tem nenhum dispositivo Android: crie um com `ags device create` ou peça ao usuário para ligar um ao seu terminal."
+            "'{wanted}' não está conectado com você. Peça à pessoa para vincular o aparelho ao seu terminal ou ao painel do chat."
         )),
         [] => Err(format!(
             "'{wanted}' não está conectado com você. Dispositivos conectados: {}",
@@ -67,9 +76,75 @@ fn resolve<'a>(list: &'a [Reachable], wanted: &str) -> Result<&'a Reachable, Str
     }
 }
 
+/// Aceita o UDID público listado ao agente ou o nome/id interno do nó alcançável.
+fn resolve_with_physical<'a>(
+    list: &'a [Reachable],
+    wanted: &str,
+    devices: &[crate::iphone::model::PhysicalDevice],
+) -> Result<&'a Reachable, String> {
+    let needle = wanted.trim();
+    let udid = needle.strip_prefix(crate::iphone::model::PHYSICAL_PREFIX).unwrap_or(needle);
+    let matches: Vec<&Reachable> = list
+        .iter()
+        .filter(|reachable| {
+            let Some(core_device_id) = reachable.portal.udid.as_deref() else { return false };
+            devices.iter().any(|device| {
+                device.id.eq_ignore_ascii_case(core_device_id)
+                    && device.udid.as_deref().is_some_and(|id| id.eq_ignore_ascii_case(udid))
+            })
+        })
+        .collect();
+    match matches.as_slice() {
+        [one] => return Ok(one),
+        many if !many.is_empty() => {
+            return Err(format!(
+                "O UDID '{wanted}' aparece em mais de um vínculo. Escolha pelo nome ou pelo id do nó: {}",
+                many.iter().map(|d| d.id.as_str()).collect::<Vec<_>>().join(", ")
+            ));
+        }
+        _ => {}
+    }
+    resolve(list, wanted)
+}
+
+fn physical_inventory(
+    reachable: &[Reachable],
+) -> (Vec<crate::iphone::model::PhysicalDevice>, Option<String>) {
+    let has_physical = reachable
+        .iter()
+        .any(|d| d.portal.udid.as_deref().is_some_and(crate::iphone::model::is_physical));
+    #[cfg(target_os = "macos")]
+    {
+        if !has_physical {
+            return (Vec::new(), None);
+        }
+        match crate::iphone::commands::mac::devices() {
+            Ok(devices) => (devices, None),
+            Err(error) => (Vec::new(), Some(crate::iphone::model::device_error_help(&error))),
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if has_physical {
+            (Vec::new(), Some("O controle de iPhone físico só funciona no macOS com o Xcode 27.".into()))
+        } else {
+            (Vec::new(), None)
+        }
+    }
+}
+
 fn describe(d: &Reachable) -> Value {
     let mut out = if d.portal.kind.as_deref() == Some("ios") {
-        json!({ "id": d.id, "name": d.portal.name, "kind": "ios", "udid": d.portal.udid })
+        let physical = d.portal.udid.as_deref().filter(|id| crate::iphone::model::is_physical(id));
+        let mut item = if let Some(core_device_id) = physical {
+            json!({ "id": core_device_id, "coreDeviceId": core_device_id, "name": d.portal.name, "kind": "ios" })
+        } else {
+            json!({ "id": d.id, "name": d.portal.name, "kind": "ios", "udid": d.portal.udid })
+        };
+        if physical.is_some() {
+            item["nodeId"] = json!(d.id);
+        }
+        item
     } else {
         json!({ "id": d.id, "name": d.portal.name, "kind": "android", "serial": d.portal.serial, "avd": d.portal.avd })
     };
@@ -79,6 +154,49 @@ fn describe(d: &Reachable) -> Value {
         out["control"] = json!(d.control);
     }
     out
+}
+
+fn describe_with_physical_state(d: &Reachable, devices: &[crate::iphone::model::PhysicalDevice]) -> Value {
+    let mut item = describe(d);
+    let Some(id) = d.portal.udid.as_deref().filter(|id| crate::iphone::model::is_physical(id)) else {
+        return item;
+    };
+    if let Some(device) = devices.iter().find(|device| device.id == id) {
+        if let Some(udid) = device.udid.as_deref() {
+            item["id"] = json!(format!("{}{udid}", crate::iphone::model::PHYSICAL_PREFIX));
+            item["udid"] = json!(udid);
+            item["coreDeviceId"] = json!(device.id);
+        }
+        item["state"] = json!(physical_state(device));
+        item["transport"] = json!(device.transport);
+        item["paired"] = json!(device.paired);
+        item["developerMode"] = json!(device.developer_mode);
+        item["tunnel"] = json!(device.tunnel);
+    } else {
+        item["state"] = json!("offline");
+        item["transport"] = json!("none");
+    }
+    item
+}
+
+fn physical_state(device: &crate::iphone::model::PhysicalDevice) -> &'static str {
+    #[cfg(target_os = "macos")]
+    if let Some(status) = crate::iphone::commands::mac::status(&device.id) {
+        use crate::iphone::model::LinkState;
+        return match status.state {
+            LinkState::Live => "connected",
+            LinkState::Connecting | LinkState::Reconnecting => "reconnecting",
+            LinkState::Offline => "offline",
+            LinkState::Paused => if device.ready() && device.tunnel { "connected" } else { "offline" },
+        };
+    }
+    if !device.ready() {
+        "offline"
+    } else if device.tunnel {
+        "connected"
+    } else {
+        "reconnecting"
+    }
 }
 
 /// Un número que puede llegar como número (flag) o como texto.
@@ -135,9 +253,11 @@ fn file_stem(name: &str) -> String {
 pub(super) fn device_list(_app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let mine = surfaces::devices(&from);
+    let (physical, iphone_unavailable) = physical_inventory(&mine);
     let online: Vec<Device> = android::devices().unwrap_or_default();
     Ok(json!({
-        "devices": mine.iter().map(describe).collect::<Vec<_>>(),
+        "devices": mine.iter().map(|d| describe_with_physical_state(d, &physical)).collect::<Vec<_>>(),
+        "iphoneUnavailable": iphone_unavailable,
         // Lo que `adb` ve ahora (el de cada nodo se elige en el canvas) y los emuladores que se pueden arrancar.
         "online": online,
         "avds": android::avds(),
@@ -180,11 +300,16 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
     }
     let from = caller(args)?;
     let mine = surfaces::devices(&from);
-    let target = resolve(&mine, &arg_str(args, "name")?)?;
+    let (physical, _) = physical_inventory(&mine);
+    let target = resolve_with_physical(&mine, &arg_str(args, "name")?, &physical)?;
     target.allows(action)?;
 
     if target.portal.kind.as_deref() == Some("ios") {
-        return super::simulators::action(_app, &from, &target.id, &target.portal, args, action, shots_dir()?);
+        let mut result = super::simulators::action(_app, &from, &target.id, &target.portal, args, action, shots_dir()?)?;
+        if target.portal.udid.as_deref().is_some_and(crate::iphone::model::is_physical) {
+            result["device"] = describe_with_physical_state(target, &physical);
+        }
+        return Ok(result);
     }
     if matches!(action, "open" | "button" | "say" | "clipboard") {
         return Err(format!("`ags device {action}` é só do simulador iOS; no Android use `key`/`launch`."));
@@ -263,6 +388,12 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
     }
 }
 
+/// Equivalente pontual para a tool MCP: mantém o parser, o alcance e as confirmações de `ags device`.
+pub(super) fn device_act(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let action = arg_str(args, "action")?;
+    device_action(app, args, &action)
+}
+
 /// Arranca el emulador del nodo (su `avd`, o el `--avd` pedido) y espera a que termine de iniciar.
 fn start(target: &Reachable, args: &Value) -> Result<Value, String> {
     let avd = arg_str_opt(args, "avd")
@@ -298,6 +429,19 @@ mod test {
         Reachable { board: Some("b".into()), id: id.into(), portal: Portal { name: name.into(), kind: Some("android".into()), ..Default::default() }, source: Source::Canvas, control: true }
     }
 
+    fn phone(node: &str, name: &str, id: &str) -> Reachable {
+        Reachable { board: Some("b".into()), id: node.into(), portal: Portal { name: name.into(), kind: Some("ios".into()), udid: Some(id.into()), ..Default::default() }, source: Source::Canvas, control: true }
+    }
+
+    fn phone_inventory(core_device_id: &str, udid: &str) -> crate::iphone::model::PhysicalDevice {
+        crate::iphone::model::PhysicalDevice {
+            id: core_device_id.into(), udid: Some(udid.into()), name: "iPhone de Ton".into(),
+            model: "iPhone".into(), os: "27.2".into(), family: "iphone".into(),
+            transport: crate::iphone::model::Transport::Usb, paired: true, developer_mode: Some(true),
+            tunnel: true, tunnel_ip: None,
+        }
+    }
+
     #[test]
     fn resuelve_por_nombre_sin_mayusculas_y_por_id() {
         let list = vec![dev("portal-1", "Pixel 8"), dev("portal-2", "Pixel 6a")];
@@ -309,7 +453,42 @@ mod test {
     fn uno_que_no_esta_conectado_lista_los_que_si_y_sin_ninguno_explica_como_crear() {
         let err = resolve(&[dev("portal-1", "Pixel 8")], "Otro").unwrap_err();
         assert!(err.contains("Pixel 8"), "{err}");
-        assert!(resolve(&[], "x").unwrap_err().contains("ags device create"));
+        assert!(resolve(&[], "x").unwrap_err().contains("vincular"));
+    }
+
+    #[test]
+    fn iphone_e_selecionado_por_id_coredevice_e_vinculos_duplicados_nao_sao_adivinhados() {
+        let core_device_id = "device:EC4D6C18-E117-53B6-8063-DB1821935BBB";
+        let one = phone("node-1", "iPhone de Ton", core_device_id);
+        assert_eq!(resolve(&[one.clone()], &core_device_id.to_lowercase()).unwrap().id, "node-1");
+        let duplicate = phone("node-2", "iPhone de Ton", core_device_id);
+        let error = resolve(&[one, duplicate], core_device_id).unwrap_err();
+        assert!(error.contains("node-1") && error.contains("node-2"), "{error}");
+    }
+
+    #[test]
+    fn iphone_tambem_e_selecionado_pelo_udid_e_duplicatas_pedem_escolha() {
+        let core_device_id = "device:EC4D6C18-E117-53B6-8063-DB1821935BBB";
+        let udid = "device:00008110-001234567890001E";
+        let one = phone("node-1", "iPhone de Ton", core_device_id);
+        let inventory = [phone_inventory(core_device_id, "00008110-001234567890001E")];
+        assert_eq!(resolve_with_physical(&[one.clone()], udid, &inventory).unwrap().id, "node-1");
+
+        let duplicate = phone("node-2", "iPhone de Ton", core_device_id);
+        let error = resolve_with_physical(&[one, duplicate], udid, &inventory).unwrap_err();
+        assert!(error.contains("node-1") && error.contains("node-2"), "{error}");
+    }
+
+    #[test]
+    fn a_lista_mostra_udid_estavel_e_preserva_o_id_do_coredevice() {
+        let core_device_id = "device:EC4D6C18-E117-53B6-8063-DB1821935BBB";
+        let reachable = phone("node-1", "iPhone de Ton", core_device_id);
+        let inventory = [phone_inventory(core_device_id, "00008110-001234567890001E")];
+        let item = describe_with_physical_state(&reachable, &inventory);
+        assert_eq!(item["id"], "device:00008110-001234567890001E");
+        assert_eq!(item["udid"], "00008110-001234567890001E");
+        assert_eq!(item["coreDeviceId"], core_device_id);
+        assert_eq!(item["nodeId"], "node-1");
     }
 
     #[test]
@@ -350,7 +529,8 @@ mod test {
 /// aparelho a cada passo: um aparelho do painel do chat sem a chave ligada é recusado já aqui, com o motivo.
 pub(super) fn ios_target(from: &str, name: &str) -> Result<(String, String), String> {
     let list = surfaces::devices(from);
-    let target = resolve(&list, name)?;
+    let (physical, _) = physical_inventory(&list);
+    let target = resolve_with_physical(&list, name, &physical)?;
     if target.kind() != Some("ios") { return Err("Use sim act somente em um nó iOS conectado ao seu terminal.".into()); }
     target.allows("act")?;
     let udid = target.portal.udid.clone().filter(|u| !u.is_empty()).ok_or("Escolha o aparelho no nó iOS antes de iniciar.")?;

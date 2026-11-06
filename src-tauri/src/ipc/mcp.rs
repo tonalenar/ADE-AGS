@@ -107,8 +107,10 @@ browser_press using those refs (or give a whole multi-step goal to browser_act, 
 to test responsive layouts. There are no screenshots in these tools: read the page through snapshots; when you need \
 an image of a page, `ags portal screenshot <portal>` saves a PNG and returns its path. Never launch your own browser \
 window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas.\n\
-Computer use: browser_act (canvas browser), sim_act (an iOS simulator connected to you) and desk_act (the Mac screen; \
-the person consents at the start of every act) let Jev drive a whole goal. Pass expects so success is checked, read \
+Computer use: browser_act (canvas browser), sim_act (a reachable iOS simulator or physical iPhone/iPad) and desk_act (the Mac screen; \
+the person consents at the start of every act) let Jev drive a whole goal. device_list shows reachable devices and stable phone ids; \
+device_shot takes a local screenshot; device_action performs one authorized tap, swipe, key, button or type. Never guess between phones. \
+Pass expects so success is checked, read \
 report.status (done / unverified / blocked / unsure / stuck / limit): a call that returns is not a success by itself, \
 and a blocked act must not be retried unchanged. timeout includes the person answering a confirmation: use 300 when \
 one is likely. One act at a time per device.\n\
@@ -161,6 +163,7 @@ pub(crate) fn tool_names() -> Vec<&'static str> {
     names.extend(ORCHESTRATION_TOOLS.iter().map(|t| t.name));
     names.extend(GIT_TOOLS.iter().map(|t| t.name));
     names.extend(COMPUTER_USE_TOOLS.iter().map(|t| t.name));
+    names.extend(DEVICE_TOOLS.iter().map(|t| t.name));
     names.push(ASK_TOOL);
     names.push(TOOL_NAME);
     names
@@ -605,6 +608,19 @@ const COMPUTER_USE_TOOLS: &[ComputerUseTool] = &[
     ComputerUseTool { name: "desk_act", dispatch: "desk.act" },
 ];
 
+/// As ações pontuais de `ags device`, com a mesma autorização e o mesmo alcance.
+struct DeviceTool {
+    name: &'static str,
+    dispatch: &'static str,
+    read_only: bool,
+}
+
+const DEVICE_TOOLS: &[DeviceTool] = &[
+    DeviceTool { name: "device_list", dispatch: "device.list", read_only: true },
+    DeviceTool { name: "device_shot", dispatch: "device.shot", read_only: true },
+    DeviceTool { name: "device_action", dispatch: "device.act", read_only: false },
+];
+
 /// O que um relatório de `act` quer dizer, igual para as duas tools (e para o `browser_act`).
 const ACT_REPORT: &str = "Returns `text` and `report`. Read `report.status`, not just the absence of an error: done = the expects matched on screen; unverified = Jev says done but nothing checked it (pass expects); blocked = a guard, the person or the surface stopped it (do NOT retry the same call: read `report.reason`, fix the cause or ask the person); unsure / stuck = Jev could not pick a safe next step (rephrase the goal with every choice spelled out, or do that step yourself); limit = steps or timeout ran out (raise steps/timeout, or split the goal). Only one act runs at a time per device (and one on the Mac).";
 
@@ -627,9 +643,9 @@ fn computer_use_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": "sim_act",
-            "description": format!("Reach a goal on an iOS simulator that the user connected to you on the ADE canvas (or opened in the chat panel with device control on): Jev looks at the screen and taps, scrolls or types while this tool does it, the same as `ags sim act`. Use `ags device list` to see which simulators you reach. Needs Settings → Decisions → Jev with the browser pilot and the visual fallback turned on. Risky taps and typing ask the person first. {ACT_REPORT}"),
+            "description": format!("Reach a goal on an iOS simulator or a physical iPhone/iPad that the user connected to you on the ADE canvas (or shared in the chat panel): Jev looks at the screen and taps, scrolls or types while this tool does it, the same as `ags sim act`. Use `device_list` to see reachable devices and their stable UDID ids. Physical-device actions use the same per-device confirmation and trust rules as `ags device`; typing always asks. Needs Settings → Decisions → Jev with the browser pilot and the visual fallback turned on. {ACT_REPORT}"),
             "inputSchema": { "type": "object", "properties": {
-                "name": { "type": "string", "description": "The simulator node's name or id, as `ags device list` shows it." },
+                "name": { "type": "string", "description": "The reachable iOS device's name or id, as `device_list` shows it. For a physical iPhone/iPad, use its stable UDID id." },
                 "goal": goal.clone(),
                 "fill": fill.clone(),
                 "expects": sim_expects,
@@ -647,6 +663,42 @@ fn computer_use_schemas() -> Vec<Value> {
                 "steps": steps,
                 "timeout": timeout,
             }, "required": ["goal"] },
+        }),
+    ]
+}
+
+fn device_schemas() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "device_list",
+            "description": "List the Android and iOS devices this conversation can reach. Physical iPhones/iPads include a stable UDID as `id`, the CoreDevice id used internally, connection state and USB/Wi-Fi transport. Device actions accept this id. If several phones are listed, choose by id or ask the user; never guess.",
+            "inputSchema": { "type": "object", "properties": {}, "required": [] },
+        }),
+        json!({
+            "name": "device_shot",
+            "description": "Take a screenshot of a reachable device, the same as `ags device shot`. On a physical iPhone the app uses a trusted mirror frame, or falls back to a fresh devicectl capture if the frame is missing or invalid. Returns the private local PNG path; the image is not uploaded.",
+            "inputSchema": { "type": "object", "properties": {
+                "name": { "type": "string", "description": "The device name or stable id from `device_list`." }
+            }, "required": ["name"] },
+        }),
+        json!({
+            "name": "device_action",
+            "description": "Perform one `ags device` action on a reachable device. On physical iPhones, tap/swipe/key/button ask for confirmation until trusted for that phone, and type always asks; no answer means no action. Use `device_shot` first for coordinate-based taps. The iPhone physical path rejects unsupported operations before acting.",
+            "inputSchema": { "type": "object", "properties": {
+                "name": { "type": "string", "description": "The device name or stable id from `device_list`." },
+                "action": { "type": "string", "enum": ["tap", "swipe", "type", "key", "button"], "description": "The one-step device action." },
+                "x": { "type": "number", "description": "Tap x in iOS points." },
+                "y": { "type": "number", "description": "Tap y in iOS points." },
+                "x1": { "type": "number", "description": "Swipe start x in iOS points." },
+                "y1": { "type": "number", "description": "Swipe start y in iOS points." },
+                "x2": { "type": "number", "description": "Swipe end x in iOS points." },
+                "y2": { "type": "number", "description": "Swipe end y in iOS points." },
+                "dir": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "A named swipe direction; alternatively provide x1, y1, x2, y2." },
+                "ms": { "type": "integer", "description": "Swipe duration in milliseconds (default 300)." },
+                "text": { "type": "string", "description": "Text for the focused field; the phone asks every time." },
+                "key": { "type": "string", "description": "A supported keyboard key." },
+                "button": { "type": "string", "description": "A supported physical button or iOS system gesture." }
+            }, "required": ["name", "action"] },
         }),
     ]
 }
@@ -707,6 +759,25 @@ where
             json!({ "content": [{ "type": "text", "text": body.to_string() }] })
         }
         Err(e) => tool_error(&e),
+    }
+}
+
+fn device<F>(context: &McpContext, tool: &DeviceTool, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    if matches!(context, McpContext::Task(_)) {
+        return tool_error("O controle pontual de dispositivos não está disponível para tarefas da frota: só para abas e conversas do ADE AGS.");
+    }
+    let args = computer_use_args(
+        context,
+        arguments,
+        std::env::var("ADE_TAB_ID").ok(),
+        std::env::var(crate::terminal::SESSION_ENV).ok(),
+    );
+    match send(tool.dispatch, args) {
+        Ok(data) => json!({ "content": [{ "type": "text", "text": data.to_string() }] }),
+        Err(error) => tool_error(&error),
     }
 }
 
@@ -1119,6 +1190,8 @@ where
         browser(context, tool, args, send)
     } else if let Some(tool) = COMPUTER_USE_TOOLS.iter().find(|t| t.name == name) {
         computer_use(context, tool, args, send)
+    } else if let Some(tool) = DEVICE_TOOLS.iter().find(|t| t.name == name) {
+        device(context, tool, args, send)
     } else if let Some(tool) = ORCHESTRATION_TOOLS.iter().find(|t| t.name == name) {
         orchestrate(context, tool, args, send)
     } else if let Some(tool) = GIT_TOOLS.iter().find(|t| t.name == name) {
@@ -1385,6 +1458,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         tools.extend(design_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         // Como o navegador, o computer use vale para todo papel (QA testa no simulador).
         tools.extend(computer_use_schemas());
+        tools.extend(device_schemas());
     }
     tools.push(ask_schema());
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
@@ -1426,7 +1500,7 @@ const BROWSER_READ_ONLY: &[&str] = &[
 /// Las que pueden romper algo que no vuelve solo: correr código arbitrario en la página
 /// del usuario (puede borrar sus datos por la API de su app) y parar el trabajo de un
 /// agente.
-const DESTRUCTIVE: &[&str] = &["browser_eval", "task_cancel"];
+const DESTRUCTIVE: &[&str] = &["browser_eval", "task_cancel", "device_action"];
 
 /// Si es una de las tools de orquestación (de cualquier poder).
 pub(crate) fn is_orchestration_tool(name: &str) -> bool {
@@ -1443,6 +1517,7 @@ pub(crate) fn is_read_only(name: &str) -> bool {
         || name == TOOL_NAME
         || CHAT_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || DESIGN_TOOLS.iter().any(|t| t.name == name && t.read_only)
+        || DEVICE_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || TEAM_READ_ONLY.contains(&name)
 }
 
@@ -1488,6 +1563,7 @@ pub fn auto_approved(name: &str) -> bool {
         })
         || name == ASK_TOOL
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
+        || DEVICE_TOOLS.iter().any(|t| t.name == name && t.read_only)
         // O simulador é como o navegador do canvas: a corda é a autorização. A tela do Mac, não:
         // a TUI pede aprovação, além do consentimento que o app pede no início de cada act.
         || name == "sim_act"

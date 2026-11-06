@@ -1,4 +1,4 @@
-# Computer use: núcleo comum e simulador iOS
+# Computer use: núcleo comum, simulador iOS e iPhone físico
 
 ## Uso
 
@@ -112,12 +112,12 @@ Mesmo núcleo do iOS (`computer_use::run`), com `computer_use/desktop.rs`: foto 
 A implementação iOS (`computer_use/ios.rs`) faz:
 
 1. Revalidação de alcance no canvas, UDID, aparelho ligado e prazo.
-2. Foto dentro do processo (`computer_use/capture.rs`): os pixels saem da `IOSurface` da tela, a mesma que o painel mostra, e viram um PNG de no máximo 1.200 pixels no lado maior pelo CoreGraphics/ImageIO, na pasta de capturas permitida pelo app. A cópia só vale se o seed da superfície for o mesmo antes e depois (nunca meio quadro). Com o aparelho girado, num formato de tela diferente de BGRA ou se a leitura falhar, a foto volta ao `simctl io screenshot` + `sips`.
+2. Foto dentro do processo: no simulador, os pixels saem da `IOSurface` da tela, a mesma que o painel mostra, e viram um PNG de no máximo 1.200 pixels no lado maior pelo CoreGraphics/ImageIO, na pasta de capturas permitida pelo app. A cópia só vale se o seed da superfície for o mesmo antes e depois (nunca meio quadro). Com o aparelho girado, num formato de tela diferente de BGRA ou se a leitura falhar, a foto volta ao `simctl io screenshot` + `sips`. No iPhone físico, a origem é um quadro do espelho validado pela fence de captura (depois do IRAP/IDR de recuperação, sem anomalia desde então), reduzido diretamente de BGRA a PNG; se não houver quadro seguro, `devicectl device capture screenshot` fornece uma foto independente. A origem (`espelho` ou `devicectl`) e o tempo total são registrados no log, sem pixels.
 3. OCR local pelo Vision do macOS (`VNRecognizeTextRequest`) dentro do processo, no Apple Silicon, com o mesmo JSON do `ios_ocr.swift` (teste com imagem fixa, `computer_use/fixtures/ocr-ajustes.png`). A primeira leitura de um executável novo leva 44-70 s, então ela é feita numa imagem fixa numa thread à parte, ao começar o primeiro `act`; até ela voltar, e no Intel, o OCR segue pelo Swift do Xcode (`swift -e`). Nenhuma consulta externa. A API usada é [VNRecognizeTextRequest](https://developer.apple.com/documentation/vision/recognizing-text-in-images).
 4. Aplicação das guardas locais antes do provedor e verificação das expectativas.
 5. Uma consulta de imagem com escolhas fechadas: clicar, digitar quando há fill local, rolar em cada direção, concluir ou parar; perguntas separadas de caixa, conclusão e risco.
 6. Confirmação humana quando necessária na UI existente (`user.ask`).
-7. Conferência da tela antes do HID, inclusive após o diálogo. Na foto nativa, a revisão é o SHA-256 dos pixels crus da `IOSurface` (com dimensões e UDID, prefixo `px:`); conferir é ler e somar de novo os pixels (~40 ms), sem outra foto. No caminho do `simctl`, a revisão é o hash dos dados de imagem do PNG, ignorando metadados, e conferir é outra foto. As duas revisões nunca casam entre si: se a observação veio de um caminho e a conferência do outro, a tela conta como mudada. Mudança invalida a decisão sem tocar.
+7. Conferência da tela antes do HID, inclusive após o diálogo. Na foto nativa do simulador, a revisão é o SHA-256 dos pixels crus da `IOSurface` (com dimensões e UDID, prefixo `px:`); conferir é ler e somar de novo os pixels (~40 ms), sem outra foto. No caminho do `simctl` ou de um iPhone físico, a revisão é o hash dos dados de imagem do PNG, ignorando metadados, e conferir é outra foto. As revisões dos diferentes caminhos nunca casam: se a observação veio de um caminho e a conferência do outro, a tela conta como mudada. Mudança invalida a decisão sem tocar.
 8. Toque em coordenadas normalizadas convertido para pontos do iOS, `type_text` ou `swipe` existentes. A foto seguinte verifica o resultado. Foto e dimensão incompatíveis com o HID são recusadas; rotação ainda não é suportada.
 
 **Texto do OCR como opção.** As linhas que o OCR local leu na foto vão ao Jev como a pergunta `rotulo`: até 60 textos, sem repetição e só com letra ou número. O valor de `--fill` nunca vai, porque uma foto que o contenha já é bloqueada antes. No clique, se o Jev escolher um texto com probabilidade de pelo menos 0,5, o toque cai no centro da caixa do OCR; a caixa desenhada pelo provedor só vale sem texto confiável (um ícone, por exemplo), e aí com o piso de 0,6, o mesmo calibrado no piloto do navegador (`MIN_BOX_CONFIDENCE`, `docs/ade-ags/bench/calibracao-limites.md`). Abaixo do piso, ou com a caixa fora da foto, não é falha: o laço devolve `unsure` com a dica de descrever o ícone pela posição. Até 2026-11-04 o piso era 0,85 e a caixa fraca virava erro, então todo toque num ícone sem texto (as abas da barra de um app) saía como "A superfície ou o provedor falhou". O log guarda agora a confiança da caixa (coluna `confidence`) e o motivo de cada recusa (`falha_visual:http`, `:json`, `:operacao`, `:caixa`). Com "Sempre neste aparelho", tocar num controle sem texto continua pedindo confirmação quando o Jev não o deu como claramente seguro. O motivo foi medido: tocar na aba "Plano" de um app saiu como `scroll_up` com 0,28 quando o Jev só tinha a foto, e o piloto recusou a ação.
@@ -189,6 +189,7 @@ Elas vêm com o app e nascem ligadas para todos os agentes, mas não substituem 
 |---|---|
 | Navegador interno do canvas | `jevPilot.ts` / `ags portal act` preservados |
 | Simulador iOS | Driver visual + HID e `ags sim act` conectados; AX ainda pendente |
+| iPhone/iPad físico | `ags device` e `sim act`; MCP `device_list` / `device_shot` / `device_action`; foto confiável do espelho com fallback independente via `devicectl`; E2E Jev e tempos completos ainda dependem da validação supervisionada desta entrega |
 | `real_browser` / `RealBrowserView` | WebView2 filho do Portal no Windows; não é navegador externo do Mac; preservado |
 | `desktop_apps` | Gemini Desktop Windows; driver macOS AXUIElement + ScreenCaptureKit ainda pendente |
 | Tela do Mac (`desk act`) | Driver visual (foto + OCR + CGEvent) com consentimento por objetivo; sem árvore AX ainda |
@@ -196,7 +197,7 @@ Elas vêm com o app e nascem ligadas para todos os agentes, mas não substituem 
 
 ## Validação e limites
 
-Testes do núcleo, do parser CLI/IPC, da leitura de decisões visuais e das guardas de revisão/privacidade usam somente mocks. O OCR é compilado com `swiftc -typecheck` e testado localmente sobre uma imagem sintética, sem aparelho ou serviço remoto. Nenhuma consulta real ao Jev, inicialização de simulador do usuário, instalação do app, commit ou push faz parte da validação.
+Testes do núcleo, do parser CLI/IPC, da leitura de decisões visuais e das guardas de revisão/privacidade usam mocks. O OCR é compilado com `swiftc -typecheck` e testado localmente sobre uma imagem sintética, sem aparelho ou serviço remoto. O E2E com iPhone usa instância de desenvolvimento e só ocorre com autorização explícita e teto de cota; o estado desta entrega deve ser registrado abaixo, sem inferir sucesso a partir de testes simulados.
 
 A integração nativa completa (latência, mudanças de foco, teclado, coordenadas e confirmação na UI com um aparelho rodando) ainda exige validação manual isolada. O percurso pago com Jev requer autorização explícita e teto. Não há medição de desempenho nem promessa de taxa de acerto nesta entrega.
 
@@ -208,5 +209,11 @@ A integração nativa completa (latência, mudanças de foco, teclado, coordenad
 - Lint de testes: aprovado, nenhuma violação nova (40 antigas no baseline). Typecheck aprovado; nenhum arquivo de frontend foi alterado.
 - A última suíte completa anterior à extração final de helper/teste terminou com `ags test affected`: `passed: true`, Rust 1.870 aprovados / 16 ignorados e CLI 48 aprovados; Babel, TypeScript e frontend verdes. O schema macOS gerado pelo build disparou o plano completo e foi removido da entrega. Após a orientação de encerrar a rodada, só os testes filtrados foram executados; não se repetiu a suíte completa.
 - Clippy anterior à extração final: exit 0, com warnings no repositório; não repetido nesta rodada. `git diff --check` aprovado.
+
+### Inspiração e limites do iPhone físico
+
+O projeto [PhoneUse Local](https://github.com/phoneuse-official/phoneuse) (MIT) serviu como referência de produto para três ideias: conferir visualmente a mudança após agir (já coberta por `--expect visual:changed`), localizar rótulos lidos por OCR (já usados como alvos de iOS) e deixar claro quando o resultado foi apenas relatado ou precisa de revisão (`done`/`unverified`). O ADE não incorpora PhoneUse nem copia seu código. Uma árvore de acessibilidade nativa no iPhone exigiria WebDriverAgent assinado no Xcode; essa opção fica registrada para outro trabalho.
+
+**E2E supervisionado desta branch (05/11/2026): não executado.** A janela que já estava aberta tinha terminais/missões ativos e o painel iOS mostrava "Sem conexão"; o inventário CoreDevice reportou um aparelho pareado, Modo de Desenvolvedor ligado e túnel `unavailable`, sem helper de espelhamento ativo. Não houve decisão Jev nem entrada física. Confirmação visual, recusa/ausência de resposta, `type`, confiança persistente/revogação e fluxo completo continuam sem prova nativa nesta entrega. O tempo de uma ação completa no iPhone e no simulador não foi medido porque o aparelho não estava acessível pelo túnel.
 
 Escolha expectativas exclusivas do destino e adapte o texto ao idioma real. Um texto já visível no ponto de partida pode satisfazer a expectativa sem precisar executar o objetivo. Sem expectativa adequada, a conclusão do modelo permanece não verificada.

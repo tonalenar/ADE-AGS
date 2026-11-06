@@ -110,8 +110,8 @@ pub(crate) mod mac {
         let identifier = model::physical_identifier(device).ok_or("Esse não é um aparelho físico do CoreDevice.")?.to_string();
         if let Some(why) = session::unavailable() {
             return Err(match why {
-                "xcode" => "O controle do aparelho precisa do Xcode 27 neste Mac.".into(),
-                _ => "Este app veio sem o helper do espelhamento.".into(),
+                "xcode" => "Instale ou selecione o Xcode 27 neste Mac e tente de novo.".into(),
+                _ => "O helper do espelhamento não está disponível. Recompile a ADE com `bun run build:iphone-mirror` e tente de novo.".into(),
             });
         }
         let (presenter, input) = open(app, &agent_screen(device), device, &identifier, true);

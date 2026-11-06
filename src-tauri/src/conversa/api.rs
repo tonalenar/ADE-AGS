@@ -139,8 +139,12 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
     let row = {
         let conn = db.lock().map_err(db_err)?;
         let tuning = Tuning { model: input.model, effort: input.effort, access: input.access };
-        store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, account_id.as_deref(), crate::util::now_ts_ms())
-            .map_err(db_err)?
+        let row = store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, account_id.as_deref(), crate::util::now_ts_ms())
+            .map_err(db_err)?;
+        if let Err(error) = crate::skills::reconcile_link_dir(&conn, &row.cwd, &row.agent_id) {
+            eprintln!("[skills] não consegui preparar as skills sempre ativas para a conversa {}: {error}", row.id);
+        }
+        row
     };
     if let Some(pool) = pool_id {
         super::pool::bind(db, &id, Some(&pool))?;
@@ -488,7 +492,11 @@ pub fn rename(db: &DbConnection, thread_id: &str, title: &str) -> Result<(), Str
 pub fn settle(db: &DbConnection, thread_id: &str, settled: bool) -> Result<(), String> {
     {
         let conn = db.lock().map_err(db_err)?;
+        let row = store::thread(&conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
         store::set_state(&conn, thread_id, if settled { "settled" } else { "active" }, crate::util::now_ts_ms()).map_err(db_err)?;
+        if let Err(error) = crate::skills::reconcile_link_dir(&conn, &row.cwd, &row.agent_id) {
+            eprintln!("[skills] não consegui atualizar as skills da conversa {}: {error}", row.id);
+        }
     }
     if settled {
         close(thread_id);

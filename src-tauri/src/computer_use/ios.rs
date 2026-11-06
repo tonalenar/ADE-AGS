@@ -3,7 +3,6 @@
 //! "sempre neste aparelho" (por id) e o mesmo `always_asks`.
 use super::*;
 use crate::{
-    canvas,
     database::DbConnection,
     decisions::vision::computer,
     ipc::bridge::{ask_frontend_within, unwrap_frontend_result},
@@ -251,14 +250,33 @@ fn capture(app: &AppHandle, udid: &str, deadline: Instant) -> Result<Photo, Stri
     let dir = crate::preview::capture::capture_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("ios-act-{}.png", uuid::Uuid::new_v4().simple()));
-    // O iPhone físico não tem a superfície do simulador: a foto vem do último quadro do espelho.
-    if !crate::iphone::model::is_physical(udid) {
-        match super::capture::ios_shot(udid, &path) {
-            Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame), thumb: shot.thumb }),
-            Err(error) => {
-                let _ = std::fs::remove_file(&path);
-                fallback_note("foto", &error);
+    // O quadro físico só vale se passou pelo último IDR confiável. O caminho do espelho já grava o PNG reduzido
+    // diretamente dos pixels; se não houver quadro seguro, devicectl captura uma foto independente.
+    if crate::iphone::model::is_physical(udid) {
+        let shot = crate::iphone::ops::screenshot_for_computer_use(app, udid, &path)?;
+        let (source, elapsed_ms) = match shot.source {
+            crate::iphone::ops::ScreenshotSource::MirrorFrame => ("espelho", shot.elapsed.as_millis()),
+            crate::iphone::ops::ScreenshotSource::DeviceCtl => ("devicectl", shot.elapsed.as_millis()),
+        };
+        eprintln!("[computer_use] foto do iPhone: fonte={source} duração={elapsed_ms} ms");
+        return match shot.source {
+            crate::iphone::ops::ScreenshotSource::MirrorFrame => {
+                let revision = std::fs::read(&shot.path)
+                    .map_err(|_| "Foto indisponível.".to_string())
+                    .and_then(|bytes| image_revision(&bytes))?;
+                Ok(Photo { path: shot.path, revision: format!("{udid}:{revision}"), frame: None, thumb: None })
             }
+            crate::iphone::ops::ScreenshotSource::DeviceCtl => {
+                let (path, revision) = prepare_photo(shot.path, udid, "ios-act", deadline)?;
+                Ok(Photo { path, revision, frame: None, thumb: None })
+            }
+        };
+    }
+    match super::capture::ios_shot(udid, &path) {
+        Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame), thumb: shot.thumb }),
+        Err(error) => {
+            let _ = std::fs::remove_file(&path);
+            fallback_note("foto", &error);
         }
     }
     let tmp = PathBuf::from(dev::screenshot(app, udid)?);

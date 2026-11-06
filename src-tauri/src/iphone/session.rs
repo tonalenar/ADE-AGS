@@ -131,7 +131,7 @@ impl Waiter {
             .map_err(|_| "O estado do aparelho travou.".to_string())?;
         if result.timed_out() {
             return Err(match &guard.error {
-                Some(e) => format!("O aparelho não ficou pronto para o toque: {e}"),
+                Some(e) => format!("O aparelho não ficou pronto para o toque: {}", model::device_error_help(e)),
                 None => "O aparelho não ficou pronto para o toque a tempo (o espelhamento precisa estar ligado).".into(),
             });
         }
@@ -319,6 +319,8 @@ impl Worker {
 
     fn stream(&mut self, child: &mut Child) -> Ended {
         let born = Instant::now();
+        // Não fotografar quadros retidos de uma conexão anterior enquanto o novo vídeo ainda não se recuperou.
+        self.presenter.invalidate_capture();
         let mut started = false;
         let mut last_packet = Instant::now();
         let mut idle_since: Option<Instant> = if self.wanted { None } else { Some(Instant::now()) };
@@ -452,12 +454,14 @@ impl Worker {
                     let pushed = depacketizer.push(&packet);
                     if pushed.gap {
                         gate.on_gap(ms(now));
+                        self.presenter.invalidate_capture();
                         diag.2 += 1;
                     }
                     if depacketizer.dropped != dropped_before {
                         // Um quadro saiu incompleto sem salto de sequência: os seguintes dependem dele. Mesmo caminho
                         // da perda: segura o último quadro bom e pede um quadro-chave.
                         gate.on_gap(ms(now));
+                        self.presenter.invalidate_capture();
                     }
                     if debug_on() {
                         if let Some(u) = &pushed.unit {
@@ -477,12 +481,14 @@ impl Worker {
                         // O decodificador recusou um quadro: as referências ficaram ruins até o próximo quadro-chave.
                         failures = failed;
                         gate.on_gap(ms(now));
+                        self.presenter.invalidate_capture();
                     }
                     if let Some(unit) = pushed.unit {
                         if let Some(params) = &unit.params {
                             if decoder.as_ref().is_none_or(|d| d.params() != params) {
                                 // O antigo sai antes: espera os quadros dele e solta a sessão do VideoToolbox.
                                 drop(decoder.take());
+                                self.presenter.invalidate_capture();
                                 if debug_on() {
                                     eprintln!("[iphone] decodificador novo (VPS {} B, SPS {} B, PPS {} B)", params.vps.len(), params.sps.len(), params.pps.len());
                                 }
@@ -500,6 +506,11 @@ impl Worker {
                             diag.4 += 1;
                         }
                         if action == GateAction::Decode {
+                            if unit.irap {
+                                // Quadros anteriores ao IDR não voltam a ser confiáveis, mesmo se o decodificador
+                                // ainda estiver entregando uma saída atrasada.
+                                self.presenter.capture_after_keyframe(arrived);
+                            }
                             if let Some(d) = decoder.as_mut() {
                                 if debug_on() {
                                     if let Some((ntp, rtp)) = sender_report {
@@ -518,6 +529,7 @@ impl Worker {
                                 if let Err(e) = d.decode(&unit, arrived) {
                                     eprintln!("[iphone] {e}");
                                     gate.on_gap(ms(now));
+                                    self.presenter.invalidate_capture();
                                 }
                             }
                         }
