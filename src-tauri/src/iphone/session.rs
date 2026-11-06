@@ -514,6 +514,7 @@ impl Worker {
                                         eprintln!("[iphone] entrada→1º quadro novo chegou em {:.0} ms (+ ~4 ms de decodificação)", now.duration_since(sent).as_secs_f64() * 1000.0);
                                     }
                                 }
+                                self.presenter.note_rtp(arrived, unit.ts);
                                 if let Err(e) = d.decode(&unit, arrived) {
                                     eprintln!("[iphone] {e}");
                                     gate.on_gap(ms(now));

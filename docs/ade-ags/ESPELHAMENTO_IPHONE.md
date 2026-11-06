@@ -86,6 +86,7 @@ O stream sempre é parado no aparelho: no `stop` da ADE, quando a última tela f
 `AdeDeviceMirrorView` (`iphone/native/view.rs`) é a irmã da `AdeSimulatorScreenView`: uma `NSView` com camada própria por cima do webview, que o frontend posiciona com a mesma medição (`NativeScreen`, em `simulator/SimulatorScreen.tsx`: retângulo, parte à vista e buracos de menus). A máscara (cantos, recorte, buracos) é a mesma função do simulador (`simulator::native::view::apply_region`).
 
 - Os quadros entram na camada por uma fila serial própria (`ade.iphone.frames`, QoS `userInteractive`), numa `CATransaction` explícita, e os 3 últimos `CVPixelBuffer` ficam retidos para o pool do VideoToolbox não escrever por cima do que a GPU compõe.
+- A fila acompanha o relógio RTP de 24 kHz, limita a espera adicional a 16,7 ms e recupera 50 µs por quadro para esvaziar a folga gradualmente quando a chegada varia. Quadros fora de ordem e pendências de uma sessão encerrada são descartados.
 - A camada é transparente até o primeiro quadro e quando a conexão some: aí aparece o estado que o frontend desenha por baixo ("Abrindo a tela do aparelho…", "Sem conexão…").
 - **Toque:** dentro da região à vista, o clique e o arrasto viram toque em proporção da tela (a view mostra a tela já recortada, sem as bordas de alinhamento do vídeo, então a proporção da view é a da tela: `model::view_touch`). O arrasto sai no máximo a cada 8 ms. Um arrasto que começa nos últimos 1,5% de baixo leva a borda `bottom` do início ao fim (a barra de início); nos de cima, `top` (as centrais).
 - **Teclado:** com a view em foco, as teclas com nome pelo código da tecla e o resto pelo caractere (teclado US, o mesmo mapa do simulador).
@@ -155,7 +156,7 @@ Outra descoberta: com duas sessões abertas no mesmo aparelho, só a mais recent
 
 **Toque:** a pessoa confirmou que clique e arrasto chegam ao aparelho. O log ("entrada→1º quadro novo", com `ADE_IPHONE_FPS=1`) mostrou de 3 a 33 ms até o primeiro quadro novo chegar, mais ~4 ms de decodificação. É um teto otimista: um quadro que já vinha chegando também conta.
 
-**USB não foi medido** (o aparelho estava só no Wi-Fi). O túnel do Wi-Fi caiu várias vezes na sondagem e no teste (`tunnelState: connecting` com o aparelho bloqueado): a sessão mostrou "Reconectando…" e voltou sozinha quando o túnel voltou.
+**Validação visual por USB (05/11/2026).** Na gravação de tela de 37 s, a rolagem rápida no X ficou sem mosaico perceptível. O contador mostrou 30 fps enquanto um vídeo do TikTok tocava e 42–60 fps depois, no X. Isso registra o comportamento observado, sem medir latência ou banda USB. O túnel do Wi-Fi caiu várias vezes na sondagem e no teste (`tunnelState: connecting` com o aparelho bloqueado): a sessão mostrou "Reconectando…" e voltou sozinha quando o túnel voltou.
 
 ## Desenvolver
 
