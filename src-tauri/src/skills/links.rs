@@ -107,11 +107,17 @@ pub(super) fn desired_skills_for_link_dir(
                 OR (ps.scope = 'workspace' AND (ps.cwd = '' OR ps.cwd = ?1)))"
     );
     let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
-    let rows = stmt
+    let mut rows: Vec<SkillInfo> = stmt
         .query_map([cwd, agent_id], row_to_skill_info)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
+    // As ligadas para todos os agentes ("Ativa em todos os agentes" no painel), sem repetir as já anexadas.
+    for skill in super::always::skills_for(conn, cwd, agent_id) {
+        if !rows.iter().any(|s| s.id == skill.id) {
+            rows.push(skill);
+        }
+    }
     Ok(rows)
 }
 

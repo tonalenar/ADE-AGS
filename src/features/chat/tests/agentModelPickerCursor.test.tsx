@@ -50,3 +50,18 @@ describe("o Cursor no seletor de modelo", () => {
     expect(host.textContent).toContain("chat.picker.cursorEffort");
   });
 });
+
+describe("a conta da conversa aberta", () => {
+  it("fica dentro do seletor de agente/modelo, no rodapé do popover, e não solta ao lado dele", async () => {
+    const slot = <div data-testid="conta">conta principal</div>;
+    await act(async () => { root.render(<AgentModelPicker agents={AGENTS} showAccount={false} accountSlot={slot} value={{ agentId: "cursor", model: null, effort: null, account: null }} onChange={() => undefined} />); });
+    // Fechado: a conta não aparece na linha do composer.
+    expect(host.querySelector("[data-testid=conta]")).toBeNull();
+    await act(async () => { (host.querySelector("button[aria-haspopup=dialog]") as HTMLElement).click(); });
+    const conta = host.querySelector("[data-testid=conta]");
+    expect(conta).not.toBeNull();
+    // Dentro do mesmo popover dos modelos.
+    expect(conta!.closest("[role=dialog]")).not.toBeNull();
+    expect(conta!.closest("[role=dialog]")!.querySelector("[role=option]")).not.toBeNull();
+  });
+});

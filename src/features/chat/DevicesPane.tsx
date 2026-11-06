@@ -2,15 +2,22 @@ import { observeForegroundApp } from "./foregroundApp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 import { toDevicePoint } from "@/features/canvas/DeviceNode";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { DEFAULT_SCREEN } from "@/features/simulator/geometry";
-import { simulatorBoot, simulatorButton, simulatorOpenUrl, simulatorPriority, simulatorScreenshot, simulatorShutdown, type SimDevice } from "@/features/simulator/ipc";
+import {
+  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOpenUrl, simulatorPriority, simulatorScreenshot, simulatorShutdown,
+  type SimDevice, type SimOrientationEvent,
+} from "@/features/simulator/ipc";
 import { useSimulatorPrefs } from "@/features/simulator/prefs";
 import { SimulatorScreen } from "@/features/simulator/SimulatorScreen";
 import { refreshDevices, setDeviceState, useSimulatorStore } from "@/features/simulator/store";
 import { ChatSwitch } from "@/features/settings/SettingsSection";
+import { PhysicalPane } from "@/features/iphone/PhysicalPane";
+import { PhysicalSection } from "@/features/iphone/PhysicalParts";
+import { setPanelPick, useIphoneStore, watchPhysical } from "@/features/iphone/store";
 
 import {
   BackTriangleIcon, CameraIcon, CheckIcon, ChevronDownIcon, CircleIcon, ContrastIcon, FaceIdIcon, HomeIcon, KeyboardIcon,
@@ -151,7 +158,16 @@ function sendShotToChat(path: string, t: (k: string) => string) {
 // iOS (prancheta 9)
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
+/** O iOS do painel: o iPhone ou iPad físico escolhido (só ver, `iphone/PhysicalPane`) ou o simulador. */
 export function IosPane() {
+  const physical = useIphoneStore((s) => s.panelPick);
+  const devices = useSimulatorStore((s) => s.devices);
+  const loaded = useSimulatorStore((s) => s.loaded);
+  if (!physical) return <SimulatorPane />;
+  return <PhysicalPane device={physical} picker={<IosPicker devices={devices} current={null} loaded={loaded} physical={physical} />} />;
+}
+
+function SimulatorPane() {
   const { t } = useTranslation();
   const devices = useSimulatorStore((s) => s.devices);
   const loaded = useSimulatorStore((s) => s.loaded);
@@ -183,7 +199,11 @@ export function IosPane() {
     const stop = observeForegroundApp(window, () => simulatorForegroundApp(udid), setBundle);
     simulatorAppearance(udid).then((a) => alive && setDark(a === "dark")).catch(() => undefined);
     simulatorOrientation(udid).then((o) => alive && setLandscape(o.startsWith("landscape"))).catch(() => undefined);
-    return () => { alive = false; stop(); };
+    // Giros feitos no canvas ou por `ags device rotate` também deitam a moldura aqui.
+    const off = listen<SimOrientationEvent>(SIMULATOR_ORIENTATION_EVENT, (e) => {
+      if (alive && e.payload.udid === udid) setLandscape(e.payload.orientation.startsWith("landscape"));
+    });
+    return () => { alive = false; stop(); void off.then((f) => f()); };
   }, [booted, udid, appRevision]);
 
   const boot = async () => {
@@ -281,10 +301,13 @@ export function IosPane() {
   );
 }
 
-/** O seletor do iOS: "iPhone 18 Pro · iOS 26 simulador ▾", com a lista dos aparelhos do Xcode. */
-function IosPicker({ devices, current, loaded }: { devices: SimDevice[]; current: SimDevice | null; loaded: boolean }) {
+/** O seletor do iOS: "iPhone 18 Pro · iOS 26 simulador ▾", com os aparelhos físicos (CoreDevice) e os do Xcode.
+ *  `physical` = o aparelho físico escolhido, quando é ele que o painel mostra. */
+function IosPicker({ devices, current, loaded, physical }: { devices: SimDevice[]; current: SimDevice | null; loaded: boolean; physical?: string }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
+  const real = useIphoneStore((s) => (physical ? s.devices.find((d) => d.id === physical) : undefined));
+  useEffect(() => (open ? watchPhysical() : undefined), [open]);
   const groups: [string, SimDevice[]][] = [
     [t("simulator.group.iphone"), devices.filter((d) => d.family === "iphone")],
     [t("simulator.group.ipad"), devices.filter((d) => d.family === "ipad")],
@@ -294,18 +317,22 @@ function IosPicker({ devices, current, loaded }: { devices: SimDevice[]; current
       <button type="button" onClick={() => { if (!open) void refreshDevices(); setOpen(!open); }} aria-haspopup="listbox" aria-expanded={open} aria-label={t("simulator.pick")}
         className={`inline-flex max-w-full items-center gap-2 h-[30px] px-2.5 rounded-lg border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white ${ctlCls}`}>
         <PhoneIcon className="w-3.5 h-3.5 shrink-0" />
-        <span className="truncate">{current ? iosLabel(current.name, current.runtime) : loaded ? t("chat.devices.noIos") : t("chat.panel.loading")}</span>
-        <span className="hidden @[30rem]:inline shrink-0 text-gray-500 dark:text-white/50">{t("chat.devices.simulator")}</span>
+        <span className="truncate">{physical ? (real?.name ?? t("simulator.pick"))
+          : current ? iosLabel(current.name, current.runtime) : loaded ? t("chat.devices.noIos") : t("chat.panel.loading")}</span>
+        <span className="hidden @[30rem]:inline shrink-0 text-gray-500 dark:text-white/50">{physical ? t("iphone.physical") : t("chat.devices.simulator")}</span>
         <ChevronDownIcon className="w-3 h-3 shrink-0" />
       </button>
       {open && (
-        <div role="listbox" aria-label={t("simulator.pick")} className={`${popCls} left-0 top-full mt-1 w-72 max-h-[420px] overflow-y-auto`}>
+        <div role="listbox" aria-label={t("simulator.pick")} className={`${popCls} left-0 top-full mt-1 w-80 max-h-[520px] overflow-y-auto`}>
+          <PhysicalSection tone="panel" current={physical} onPick={(d) => { setPanelPick(d.id); setOpen(false); }} />
+          <div className="my-1 h-px bg-gray-200 dark:bg-white/[0.08]" />
+          <PopTitle>{t("iphone.section.simulators")}</PopTitle>
           {groups.filter(([, list]) => list.length > 0).map(([title, list]) => (
             <div key={title}>
               <PopTitle>{title}</PopTitle>
               {list.map((d) => (
                 <button key={d.udid} type="button" role="option" aria-selected={d.udid === current?.udid}
-                  onClick={() => { setPanelDevice("ios", d.udid, d.name); setOpen(false); }} className={itemCls}>
+                  onClick={() => { setPanelPick(null); setPanelDevice("ios", d.udid, d.name); setOpen(false); }} className={itemCls}>
                   <span className="w-4 shrink-0">{d.udid === current?.udid && <CheckIcon className="w-3.5 h-3.5" />}</span>
                   <span className="truncate">{d.name}</span>
                   {d.state === "booted" && <span className={`text-[11px] ${okCls}`}>● {t("chat.devices.on")}</span>}
@@ -399,6 +426,8 @@ function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevic
           <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t("chat.devices.openUrl")} aria-label={t("chat.devices.openUrl")} className={`${fieldCls} flex-1`} />
         </form>
       )}
+      {booted && <button type="button" onClick={() => { simulatorClipboard(device.udid, "toDevice").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToDevice")}</button>}
+      {booted && <button type="button" onClick={() => { simulatorClipboard(device.udid, "toMac").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToMac")}</button>}
       <button type="button" onClick={toggleLight} className={itemCls} title={t("simulator.light")}>
         <span className="w-4 shrink-0">{light && <CheckIcon className="w-3.5 h-3.5" />}</span>{t("simulator.lightShort")}
       </button>

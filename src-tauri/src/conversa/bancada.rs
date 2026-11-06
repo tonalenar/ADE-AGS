@@ -609,7 +609,8 @@ impl Motor {
                 ClaudeOut::Session(id) => self.abriu(&id),
                 ClaudeOut::Item(item) => self.out.guardar(*item),
                 ClaudeOut::Delta { item_id, delta, .. } => self.out.deltas.push((item_id, delta)),
-                ClaudeOut::Mode(_) => {}
+                // As tarefas e o que o subagente faz só vão à janela: a bancada compara a timeline e o turno.
+                ClaudeOut::Mode(_) | ClaudeOut::Task(_) | ClaudeOut::SubItem { .. } => {}
                 ClaudeOut::Done(result) => {
                     // O resultado antes do `init` é a abertura que falhou (o `--resume` de uma sessão que não existe).
                     if self.out.abertura.is_none() {

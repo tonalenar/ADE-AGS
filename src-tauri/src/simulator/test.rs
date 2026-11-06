@@ -145,9 +145,13 @@ fn o_modo_leve_desliga_cada_servico_uma_vez_e_o_caminho_e_seguro() {
         assert!(seen.insert(*label), "rótulo repetido: {label}");
         assert!(label.starts_with("com.apple."), "{label}");
     }
-    assert_eq!(slim::LABELS.len(), 143);
-    // Os que ficam ligados de propósito (sem eles o iOS fica tentando subir de novo, ou quebra quem testa app).
-    for keep in ["com.apple.assistantd", "com.apple.gamed", "com.apple.sharingd", "com.apple.apsd", "com.apple.storekitd"] {
+    assert_eq!(slim::LABELS.len(), 157);
+    // Os que ficam ligados de propósito (sem eles o iOS fica tentando subir de novo, ou quebra quem testa app):
+    // push, compras e App Store, e o Safari com push de site e universal links.
+    for keep in [
+        "com.apple.assistantd", "com.apple.gamed", "com.apple.sharingd", "com.apple.apsd", "com.apple.storekitd",
+        "com.apple.appstored", "com.apple.itunesstored", "com.apple.webkit.webpushd", "com.apple.swcd", "com.apple.Safari.History",
+    ] {
         assert!(!seen.contains(keep), "{keep} não pode sair");
     }
     let (file, original) = slim::paths("B3DECAAB-8989-4EF2-B77D-C045E026E198").unwrap();

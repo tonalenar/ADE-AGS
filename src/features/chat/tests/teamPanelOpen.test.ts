@@ -4,18 +4,18 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { panelForNewConversation, parsePanel, setRightPanel, useChatStore } from "../store";
 
 describe("o painel Time só abre quando a pessoa pede", () => {
-  beforeEach(() => useChatStore.setState({ panel: "summary", surfaces: [], lastPanel: null }));
+  beforeEach(() => useChatStore.setState({ panel: null, surfaces: [], lastPanel: null }));
 
-  it("o painel lembrado nunca é o Time: reabrir o app volta ao Resumo (as outras abas voltam como estavam)", () => {
-    expect(parsePanel("team")).toBe("summary");
+  it("o painel lembrado nunca é o Time: reabrir o app volta com o painel fechado (as outras abas voltam como estavam)", () => {
+    expect(parsePanel("team")).toBeNull();
     expect(parsePanel("ios")).toBe("ios");
     expect(parsePanel("files")).toBe("files");
     expect(parsePanel("none")).toBeNull();
-    expect(parsePanel(null)).toBe("summary");
+    expect(parsePanel(null)).toBeNull();
   });
 
-  it("uma conversa nova não herda o Time: com o rascunho vazio vai para o Resumo", () => {
-    expect(panelForNewConversation("team", true)).toBe("summary");
+  it("uma conversa nova não herda o Time: com o rascunho vazio o painel fecha", () => {
+    expect(panelForNewConversation("team", true)).toBeNull();
   });
 
   it("um time em rascunho que a pessoa montou mantém o painel Time à vista", () => {
@@ -23,7 +23,7 @@ describe("o painel Time só abre quando a pessoa pede", () => {
   });
 
   it("qualquer outra aba (simulador, arquivos, navegador…) e o painel fechado ficam como a pessoa deixou", () => {
-    for (const panel of ["summary", "diff", "files", "browser", "design", "ios", "android", "empty"] as const) expect(panelForNewConversation(panel, true)).toBe(panel);
+    for (const panel of ["diff", "files", "browser", "design", "ios", "android", "empty"] as const) expect(panelForNewConversation(panel, true)).toBe(panel);
     expect(panelForNewConversation(null, true)).toBeNull();
   });
 

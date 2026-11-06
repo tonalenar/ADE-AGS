@@ -10,7 +10,8 @@ import { ArrowUpIcon, PaperclipIcon, StopIcon } from "./chatIcons";
 import { withQuotes } from "./quotes/quoteModel";
 import { QuoteCards } from "./quotes/QuoteCards";
 import { clearQuotesFor, removeQuoteFor, useQuotes } from "./quotes/quoteStore";
-import { useChatStore } from "./store";
+import { QueueList } from "./QueueList";
+import { useChatStore, type QueuedMessage } from "./store";
 
 /** O caminho do arquivo relativo à pasta da conversa (com `/`), ou o absoluto se for de fora. Pura. */
 export function mentionFor(cwd: string | null, path: string): string {
@@ -37,14 +38,14 @@ export interface ComposerAddonContext {
  * A caixa do composer da prancheta (a do T3 Code): cartão de vidro com cantos de 16 px, o texto em
  * cima e, embaixo, anexar à esquerda, os controles e o botão redondo de 32 px à direita. Enter
  * envia na hora; Shift+Enter quebra a linha; ⌘⏎ (Ctrl+Enter fora do macOS) põe na fila quando há
- * `onQueue` (prancheta 13), e a fila aparece embaixo ("Fila: 1 mensagem"). Com o agente
+ * `onQueue` (prancheta 13), e a fila aparece acima da caixa (`QueueList`), com editar e tirar. Com o agente
  * trabalhando e a caixa vazia, o botão vira Parar.
  *
  * Anexos como no Claude Code: Cmd/Ctrl+V cola a imagem do clipboard, soltar arquivos na coluna do chat e
  * o clipe os põem numa fileira de miniaturas acima do texto; o bloco (miniaturas + texto) cresce até 40%
  * da janela e depois rola por dentro, sem barra, com o enviar sempre à vista. Enviar só com anexos vale.
  */
-export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onStop, onQueue, queued = 0, cwd = null, disabled = false, autoFocus = false, quoteKey = null }: {
+export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onStop, onQueue, queue: waiting = [], onUnqueue, cwd = null, disabled = false, autoFocus = false, quoteKey = null }: {
   placeholder: string;
   /** Logo depois do anexar, à esquerda (o segmentado "Time | Só o orquestrador", prancheta 15). */
   leading?: React.ReactNode;
@@ -58,8 +59,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   onStop?: (() => void) | null;
   /** ⌘⏎: põe a mensagem na fila da conversa (sai quando o turno acabar). */
   onQueue?: ((text: string, attachments: Attachment[]) => void) | null;
-  /** Quantas mensagens esperam na fila. */
-  queued?: number;
+  /** As mensagens esperando a vez (aparecem acima da caixa, com editar e tirar). */
+  queue?: QueuedMessage[];
+  /** Tira a mensagem da fila e devolve o texto dela (`null` = já saiu). */
+  onUnqueue?: ((id: string) => string | null) | null;
   /** A pasta da conversa, para o anexo virar um caminho relativo. */
   cwd?: string | null;
   disabled?: boolean;
@@ -169,7 +172,16 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     ref.current?.focus();
   };
 
+  // Editar uma mensagem da fila: ela sai da fila e volta para a caixa (depois do que já estiver escrito).
+  const editQueued = (id: string) => {
+    const back = onUnqueue?.(id);
+    if (!back) return;
+    apply(text.trim() ? `${text.replace(/\s+$/, "")}\n${back}` : back, (text.trim() ? text.replace(/\s+$/, "").length + 1 : 0) + back.length);
+  };
+
   return (
+    <>
+    {onUnqueue && <QueueList items={waiting} onEdit={editQueued} onRemove={(id) => { onUnqueue(id); }} />}
     <form
       onSubmit={(e) => { e.preventDefault(); void submit(); }}
       className="w-full rounded-[20px] border border-black/[0.10] dark:border-white/[0.10]
@@ -204,23 +216,21 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       </label>
       </div>
       {/*
-        A linha de baixo QUEBRA quando falta espaço (a coluna fica estreita com o painel direito aberto): o
-        grupo da esquerda (anexar, "Time | Só o orquestrador", fila) e o da direita (controles e enviar)
-        viram duas linhas, nunca estouram o cartão. O enviar é sempre o último do grupo da direita, no canto.
+        A linha de baixo fica numa linha só: o grupo da esquerda (anexar, "Time | Só o orquestrador") não encolhe, e
+        o da direita encolhe por dentro (o nome do modelo trunca; com a coluna estreita, os rótulos viram ícones com
+        tooltip, ver `ComposerColumn`). Só numa coluna muito estreita (< 28rem) ela volta a quebrar, para nada passar
+        da borda do cartão. O enviar é sempre o último, no canto.
       */}
-      <div data-composer-row className="flex flex-wrap items-center justify-between gap-x-1 gap-y-1 px-3 pb-2.5">
-        <div data-composer-left className="flex min-w-0 max-w-full items-center gap-0.5">
+      <div data-composer-row className="flex flex-nowrap @max-[28rem]/composer:flex-wrap items-center gap-x-1 gap-y-1 px-3 pb-2.5">
+        <div data-composer-left className="flex shrink-0 items-center gap-0.5">
         <button type="button" onClick={() => { void attach(); }} aria-label={t("chat.composer.attach")} title={t("chat.composer.attach")}
           className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
           <PaperclipIcon className="w-4 h-4" />
         </button>
         {leading}
-        {queued > 0 && (
-          <span role="status" className="pl-2 text-chat-caption whitespace-nowrap text-gray-500 dark:text-white/45">{t("chat.composer.queued", { count: queued })}</span>
-        )}
         </div>
-        <div data-composer-right className="ml-auto flex min-w-0 max-w-full items-center gap-0.5">
-        <div data-composer-controls className="flex min-w-0 flex-wrap items-center justify-end gap-x-0.5 gap-y-1">{controls}</div>
+        <div data-composer-right className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-0.5">
+        <div data-composer-controls className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">{controls}</div>
         {stopping ? (
           <button type="button" onClick={() => onStop?.()} aria-label={t("chat.composer.stop")} title={t("chat.composer.stop")}
             className="ml-1 w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-red-600/90 text-white hover:bg-red-600">
@@ -236,5 +246,6 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         </div>
       </div>
     </form>
+    </>
   );
 }

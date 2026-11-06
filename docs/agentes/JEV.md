@@ -89,16 +89,19 @@ Todos nascem **desligados**.
   - `blind_rate`;
   - provedor A × B e cada um contra o humano;
   - exportação em CSV.
+- **Concordância só onde há heurística.** `browser_step` e `browser_vision` decidem sem regra local: a coluna `heuristic` guarda metadados (`foto_enviada=true superficie=ios rotulos=23`), e comparar isso com a decisão daria sempre "discorda". O resumo (`shadowSummary`, `NO_HEURISTIC` em `decisionsModel.ts`) e o cartão do ponto deixam esses dois fora da concordância; erros e latência continuam contando. Antes, com o computer use em uso, o resumo mostrava 1% (2 de 199): numa cópia do banco em 2026-11-05, havia 203 linhas visuais e 4 do `delivery_gate`, com 2 iguais.
+- **`decisions.timeout_ms` (800) não vale para tudo.** Ele é o prazo dos pontos que ajudam (uma tentativa). O piloto usa o adaptativo (3×p95 + 400 ms, no mínimo 3 s sem amostras, teto 12 s). A visão usa no mínimo 8 s (`vision.rs`, `send`). Na mesma cópia do banco, não houve nenhum timeout: a visão chegou a 3,8 s e o `delivery_gate` ficou em no máximo 491 ms. Os 8 erros (4%) foram todos `falha_visual` antes do PR 290, a caixa com piso 0,85 que hoje é `unsure`.
 - **Scorecard da limpeza**: apagar pelo diálogo vira uma rejeição humana, o que mede o recall e os falsos alarmes do Jev.
 - **Promover** um ponto de sombra para ativo exige concordância ≥ 90%, p95 aceitável e revisão das discordâncias (`docs/decisoes/LAYA_LOCAL.md`). Ainda não há interruptor para isso.
 
 ## Quem pode chamar o piloto e o computer use
 - Terminal de aba: token `ADE_SESSION` + PID descendente. Conversa por protocolo: `thread:<id>` + PID do cliente descendente do processo do motor (`chat_team::env::register_process`, chamado em cada `spawn`; **motor novo de conversa precisa registrar**; a conversa também recebe `ADE_SESSION`, emitido em `thread_env`). O que cada ator alcança (portais do canvas e aparelhos do painel do chat) vem de `surfaces::reach`, para listar e autorizar. Tudo em `terminal::authorize_actor`; `memory.*`/`swarm.*` seguem só em `authorize`. Tabela completa em [COMPUTER_USE_SUPERFICIES.md](../ade-ags/COMPUTER_USE_SUPERFICIES.md#quem-pode-chamar).
+- Pelo MCP: `browser_act`, `sim_act` e `desk_act` chamam o mesmo caminho da CLI e a mesma autorização (`ipc/mcp.rs`, `COMPUTER_USE_TOOLS`). O agente lê `report.status` (`done`/`unverified`/`blocked`/`unsure`/`stuck`/`limit`); exit 0 não é sucesso e `blocked` não se repete igual (skill, seção "Computer use with Jev").
 - `ags desk act` comanda a tela do Mac: consentimento da pessoa a cada objetivo, confirmação por ação sensível, auditoria `approval_audit` (`computer_use:*`). Risco alto nunca é automático e o Jev só eleva risco.
 
 ## Piloto do navegador (`ags portal act` / MCP `browser_act`)
-- **Comando**: `ags portal act <portal> "objetivo" [--fill campo=valor]… [--expect text:|url:|count:|absent:…]… [--steps 8]`.
-  - Timeout de 115 s.
+- **Comando**: `ags portal act <portal> "objetivo" [--fill campo=valor]… [--expect text:|url:|count:|absent:…]… [--steps 8] [--timeout 115]`.
+  - Prazo padrão de 115 s, faixa 10–1.800 (`--timeout`; no MCP, `timeout`). É o mesmo de `sim act`/`desk act` e inclui o tempo de a pessoa confirmar.
   - Um `--expect` malformado é recusado antes de agir.
 - **Laço** (`src/features/browser/jevPilot.ts`):
   1. Preconecta e lê o histórico do portal (`portalLedger.ts`).

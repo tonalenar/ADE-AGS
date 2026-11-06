@@ -46,12 +46,19 @@ TABS
              [--pre-preset <nome>]            · força que seja um item salvo, não um comando
              [--initprompt \"...\"]             · prompt inicial, enviado com Enter
              [--window <label>]                 quando a TUI terminou de iniciar
+  tab create --agent bash [--initprompt \"...\"]  De uma conversa do chat (ADE_TAB_ID=thread:<id>): abre o
+                                              terminal do painel direito do chat, na pasta da conversa, e
+                                              devolve o id dele. É o shell que a pessoa vê e digita: use-o
+                                              para comando interativo (login, código, pergunta, assistente)
+             [--in-chat]                      · o mesmo de qualquer conversa ou aba do chat (sem --agent)
+             [--new-tab]                      · uma aba comum, fora do painel
   tab close <id>                              Fecha uma tab
   tab output <id> [--lines 40]                O que é NOVO desde a leitura anterior,
              [--full] [--raw]                 comprimido (erros, avisos, final)
   tab send <id> \"...\" [--no-enter]            Escreve no terminal dela (+ Enter) —
                                               assim a conversa segue com
                                               uma tab que já está aberta
+                                              (num shell vai a linha crua, uma vez só)
 
 AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peers                                       Quem está conectado a você
@@ -142,6 +149,8 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   Só no iOS (coordenadas em pontos do iOS, as do `shot`):
   device open <dispositivo> <url>             Abre a URL no Safari do aparelho (localhost funciona)
   device button <dispositivo> home|lock|side|siri   Aperta um botão físico
+  device rotate <dispositivo> [left|right]    Gira o aparelho um quarto de volta (padrão left; no Android alterna retrato/paisagem)
+  device clipboard <dispositivo> [\"texto\"]   Sem texto, mostra o que o iPhone copiou; com texto, põe na área de transferência dele
   device say <dispositivo> \"mensagem\"         Responde na conversa do simulador (a pessoa e os outros agentes veem)
   Aparelhos do painel do modo chat (id chat:<udid|serial>) também aparecem em `devices`, para qualquer aba;
   sem a chave \"Permitir que agentes controlem dispositivos\" da pessoa, só shot e tree
@@ -161,18 +170,25 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal screenshot|console|layout <portal>   Foto, console e medidas
                                               (sem eval, upload nem cookies: isso é do usuário)
   portal reset <portal>                       Zera o site aberto no portal (cookies, storage) e o histórico dos act: recarregue depois
-  portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8]
+  portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8] [--timeout 115]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
                                               Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
+                                              --expect text:|url:|count:|absent: confere o fim por código; sem ele o máximo é «não verificado»
 
 SIMULADOR IOS — nó conectado ao seu terminal; Jev e reserva visual habilitados
-  sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
+  sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho|visual:changed|darker|lighter]... [--steps 8] [--timeout 115]
                                               Foto + HID; confirmação de ações sensíveis na UI; --fill só no campo já focado
+                                              visual: confere os pixels contra a 1ª foto (tema que só troca a paleta); report.effects por ação
+                                              Alvo sob o teclado ou a barra: rola antes (scroll → reveal); tecla sempre pergunta à pessoa
+                                              Um act por aparelho. Exit 0 só diz que veio o relatório: leia report.status
+                                              (done · unverified · blocked · unsure · stuck · limit; blocked não se repete igual)
+                                              --timeout inclui a pessoa responder a confirmação: com confirmação, use 300
 
 COMPUTER USE DO MAC — você comanda a tela do usuário; Jev e reserva visual habilitados; a pessoa autoriza cada objetivo
   desk act \"objetivo\" [--fill screen=valor] [--expect text:trecho]... [--steps 8] [--timeout 115]
                                               Foto da tela + OCR local + cliques/rolagem; a pessoa responde um diálogo ANTES de qualquer foto
                                               e confirma cada ação sensível; --fill só no campo já focado. Funciona em terminal e em conversa
+                                              Um act por vez no Mac. Como a pessoa sempre responde, use --timeout 300
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
@@ -420,6 +436,8 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
     design_page_rename, design_page_delete, design_artboard_add, design_artboard_update,
     design_artboard_duplicate, design_artboard_delete, design_comment_add, design_comment_resolve,
     design_note_add
+  Computer use: sim_act, desk_act
+  Dispositivos: device_list, device_shot, device_action
   Perguntas à pessoa: ask_user
   Permissão: approve_tool_use
 ";
@@ -830,9 +848,16 @@ impl CliError {
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 /// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
-fn with_caller(command: &str, mut parsed: Value) -> Value {
+/// Os comandos que levam quem chama (`from`). O `tab create` o leva para achar o terminal do painel da
+/// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); o resto do grupo `tab` já diz o destino
+/// pelo id da aba. Pura.
+fn takes_caller(command: &str) -> bool {
     const GROUPS: [&str; 17] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events."];
-    if !GROUPS.iter().any(|g| command.starts_with(g)) {
+    command == "tab.create" || GROUPS.iter().any(|g| command.starts_with(g))
+}
+
+fn with_caller(command: &str, mut parsed: Value) -> Value {
+    if !takes_caller(command) {
         return parsed;
     }
     caller_from(
@@ -1069,6 +1094,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "device.launch" | "device.close" => &["name", "package"],
         "device.open" => &["name", "url"],
         "device.button" => &["name", "button"],
+        "device.rotate" => &["name", "dir"],
+        "device.clipboard" => &["name", "text"],
         "device.say" => &["name", "text"],
         "device.tap" | "device.swipe" => &["name"],
         "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
@@ -1315,6 +1342,10 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let asked = args.pointer("/request/timeout_s").and_then(Value::as_u64).unwrap_or(120).clamp(10, 600);
             Duration::from_secs(asked + 60)
         }
+        // `act` encadeia passos e pode esperar a pessoa confirmar: o prazo pedido (padrão 115 s), mais margem.
+        "browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("act") => {
+            Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.pointer("/request/timeout")) + 30)
+        }
         "browser.run" => Duration::from_secs(ade_ags_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
         // Esperar a que terminen workers: lo que pidió el agente, más margen.
         "run.await" => {
@@ -1335,11 +1366,13 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         }
         "chat.new" | "chat.send" | "chat.stop" => Duration::from_secs(150),
         "fix.list" | "fix.decide" => Duration::from_secs(60),
+        // O `portal act` espera o prazo pedido (padrão 115 s, o backend corta nele), mais margem.
+        "portal.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 30),
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
         // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).
         "device.start" => Duration::from_secs(150),
-        "sim.act" | "desk.act" => Duration::from_secs(args.get("timeout").and_then(|v| v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse().ok()))).unwrap_or(115).clamp(10, 1800) + 75),
+        "sim.act" | "desk.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 75),
         c if c.starts_with("device.") => Duration::from_secs(60),
         // `routine run` espera a que el agente de destino se calle (hasta 60 s).
         "routine.run" => Duration::from_secs(120),
@@ -1434,7 +1467,14 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     let request = Request { token: handshake.token.clone(), command: command.to_string(), args };
     let payload = serde_json::to_string(&request).map_err(|e| CliError::new(e.to_string(), EXIT_USAGE))?;
     let line = ade_ags_lib::ipc::exchange(&handshake, &payload, timeout).map_err(|e| {
-        if e.retryable { CliError::not_yet(e.message) } else { CliError::new(e.message, EXIT_NO_APP) }
+        // Negado pelo sandbox: o app está aberto, então não é exit 3 ("abra o app").
+        if e.denied {
+            CliError::new(e.message, EXIT_COMMAND_FAILED)
+        } else if e.retryable {
+            CliError::not_yet(e.message)
+        } else {
+            CliError::new(e.message, EXIT_NO_APP)
+        }
     })?;
 
     serde_json::from_str(&line).map_err(|e| CliError::new(format!("Resposta ilegível do app: {e}"), EXIT_NO_APP))

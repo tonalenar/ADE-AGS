@@ -22,7 +22,6 @@ use tauri::AppHandle;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::{mpsc, oneshot};
 
-use crate::canal::event::clip;
 use crate::canal::timeline::{Item, ItemKind};
 use crate::database::DbConnection;
 
@@ -447,6 +446,10 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
                 }
             }
         }
+        // As tarefas em segundo plano e o que um subagente faz vão só à janela (o painel de tarefas): não abrem turno,
+        // porque o aviso de fim de um shell chega entre turnos, e não entram no banco da timeline.
+        Out::Task(task) => emit(app, thread_id, "task", json!({ "task": task })),
+        Out::SubItem { parent, item } => emit(app, thread_id, "taskItem", json!({ "parentToolUseId": parent, "item": item })),
         Out::Done(result) => {
             let Some(turn) = session.turn() else { return };
             session.set_turn(None);
@@ -537,7 +540,7 @@ fn resolve_rpc(app: &AppHandle, db: &DbConnection, session: &Session, request_id
 pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, images: Vec<Value>) -> Result<(), String> {
     session.send(&claude_map::user_message_with(text, images))?;
     let turn = begin_turn(app, db, session);
-    let item = Item { text: Some(clip(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
+    let item = Item { text: Some(super::handoff::clip_user(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
     save_items(app, db, &session.thread_id, Some(&turn), vec![item]);
     Ok(())
 }

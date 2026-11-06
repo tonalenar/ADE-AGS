@@ -457,7 +457,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(!task.iter().any(|name| name.starts_with("chat_")));
     // Os designs (`design_*`) também: abrir a tela de Design é coisa de aba.
     assert!(!task.iter().any(|name| name.starts_with("design_")));
-    let tab_without_chat: Vec<_> = tab.iter().filter(|name| !name.starts_with("chat_") && !name.starts_with("design_")).cloned().collect();
+    let tab_without_chat: Vec<_> = tab.iter().filter(|name| !name.starts_with("chat_") && !name.starts_with("design_") && !name.starts_with("device_") && *name != "sim_act" && *name != "desk_act").cloned().collect();
     assert_eq!(task_without_memory, tab_without_chat);
 
     // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece,
@@ -487,7 +487,14 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     // + chat: as do modo chat, que se oferecem nas abas e não se aprovam sozinhas.
     // + design: as da tela de Design, idem.
     let design = tab.iter().filter(|name| name.starts_with("design_")).count();
-    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1 + chat.len() + design, offered.len());
+    // + computer use: `sim_act` e `desk_act`, só das abas e conversas (uma tarefa da frota não tem quem a identifique).
+    let computer_use: Vec<_> = tab.iter().filter(|name| *name == "sim_act" || *name == "desk_act").collect();
+    assert_eq!(computer_use.len(), 2);
+    assert!(!task.iter().any(|name| name == "sim_act" || name == "desk_act"));
+    let devices: Vec<_> = tab.iter().filter(|name| name.starts_with("device_")).collect();
+    assert_eq!(devices.len(), 3);
+    assert!(!task.iter().any(|name| name.starts_with("device_")));
+    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1 + chat.len() + design + computer_use.len() + devices.len(), offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -560,7 +567,7 @@ fn la_config_de_opencode_lleva_el_servidor_y_pide_permiso_para_lo_que_escribe() 
     }
     // Lo que se aprueba solo en Claude Code tampoco pregunta acá; y nada fuera de nuestras
     // tools (la regla global del usuario no se toca).
-    for free in ["ags_browser_click", "ags_git_pr_list", "ags_ask_user", "ags_fact_add"] {
+    for free in ["ags_browser_click", "ags_git_pr_list", "ags_ask_user", "ags_fact_add", "ags_device_list", "ags_device_shot"] {
         assert!(!permission.contains_key(free), "{free}");
     }
     assert!(permission.keys().all(|k| k.starts_with("ags_")));
@@ -605,6 +612,10 @@ fn cada_tool_declara_si_lee_escribe_o_destruye() {
     assert_eq!(find("git_push")["destructiveHint"], false);
     assert_eq!(find("task_cancel")["destructiveHint"], true);
     assert_eq!(find("browser_eval")["destructiveHint"], true);
+    assert_eq!(find("device_list")["readOnlyHint"], true);
+    assert_eq!(find("device_shot")["readOnlyHint"], true);
+    assert_eq!(find("device_action")["readOnlyHint"], false);
+    assert_eq!(find("device_action")["destructiveHint"], true);
     assert_eq!(find("git_push")["openWorldHint"], true);
     assert_eq!(find("fact_add")["openWorldHint"], false);
 }
@@ -689,6 +700,120 @@ fn browser_act_viaja_como_browser_run_com_o_objetivo_e_os_valores() {
         sent[0].1["request"],
         json!({ "op": "act", "goal": "fazer login e abrir o carrinho", "fills": ["Username=ana"], "steps": 6 })
     );
+}
+
+#[test]
+fn browser_act_aceita_timeout_e_o_prazo_e_o_mesmo_do_portal_act() {
+    let (_, sent) = mcp_session(
+        &McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None },
+        &[call(3, "browser_act", json!({ "goal": "abrir o carrinho", "timeout": 300 }))],
+        |_, _| Ok(json!({ "text": "ok" })),
+    );
+    assert_eq!(sent[0].1["request"]["timeout"], 300);
+    // O mesmo padrão e a mesma faixa para a CLI (`portal act`, `sim act`, `desk act`) e o MCP.
+    assert_eq!(super::mcp::act_timeout_secs(None), 115);
+    assert_eq!(super::mcp::act_timeout_secs(Some(&json!(300))), 300);
+    assert_eq!(super::mcp::act_timeout_secs(Some(&json!("300"))), 300);
+    assert_eq!(super::mcp::act_timeout_secs(Some(&json!(5))), 10);
+    assert_eq!(super::mcp::act_timeout_secs(Some(&json!(99_999))), 1800);
+    let (list, _) = mcp_session(
+        &McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None },
+        &[json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })],
+        |_, _| Ok(json!({})),
+    );
+    let act = list[0]["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "browser_act").unwrap().clone();
+    assert!(act["inputSchema"]["properties"]["timeout"].is_object());
+    // A CLI espera o `act` do navegador pelo prazo pedido, não pelos 60 s das outras operações.
+    let src = include_str!("../bin/cli.rs");
+    assert!(src.contains(r#""browser.run" if args.pointer("/request/op").and_then(Value::as_str) == Some("act")"#));
+    assert!(src.contains(r#""portal.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs"#));
+}
+
+/// `sim_act`/`desk_act` são o `sim.act`/`desk.act` da CLI: os mesmos argumentos e a identidade que o
+/// processo herdou (nunca a que o modelo mandou), para o backend conferir com `authorize_actor`.
+#[test]
+fn sim_act_e_desk_act_viajam_como_o_comando_da_cli_com_a_identidade_do_processo() {
+    let ctx = McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-1".into()), mission: None, role: None };
+    let args = super::mcp::computer_use_args(
+        &ctx,
+        json!({ "name": "iPhone", "goal": "abrir Ajustes", "expects": ["text:Geral"], "steps": 4.0, "timeout": 300, "from": "tab-forjada", "session": "forjado" }),
+        Some("tab-1".into()),
+        Some("tok".into()),
+    );
+    assert_eq!(args, json!({ "name": "iPhone", "goal": "abrir Ajustes", "expect": ["text:Geral"], "steps": 4, "timeout": 300, "from": "tab-1", "session": "tok" }));
+    // Conversa por protocolo: sem `--tab`, a identidade é o `thread:<id>` do ambiente.
+    let conversa = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let args = super::mcp::computer_use_args(&conversa, json!({ "goal": "x", "from": "outra" }), Some("thread:abc".into()), None);
+    assert_eq!(args, json!({ "goal": "x", "from": "thread:abc" }));
+    // Sem nada no ambiente, vale a aba do `--tab`; sem aba, nenhuma identidade (o backend recusa).
+    assert_eq!(super::mcp::computer_use_args(&ctx, json!({ "goal": "x" }), None, None)["from"], "tab-1");
+    assert!(super::mcp::computer_use_args(&conversa, json!({ "goal": "x" }), None, None).get("from").is_none());
+
+    // O servidor manda o comando da CLI e devolve o status na frente.
+    let (responses, sent) = mcp_session(
+        &ctx,
+        &[call(4, "sim_act", json!({ "name": "iPhone", "goal": "abrir Ajustes" })), call(5, "desk_act", json!({ "goal": "abrir o Mail" }))],
+        |command, _| Ok(json!({ "text": format!("{command} ok"), "report": { "status": "blocked", "reason": "A pessoa não confirmou" } })),
+    );
+    let commands: Vec<&str> = sent.iter().map(|(c, _)| c.as_str()).collect();
+    assert!(commands.contains(&"sim.act") && commands.contains(&"desk.act"), "{commands:?}");
+    for r in &responses {
+        let body: serde_json::Value = serde_json::from_str(r["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(body["status"], "blocked");
+    }
+    // Uma tarefa da frota não tem as tools nem consegue chamá-las.
+    let (responses, sent) = mcp_session(&McpContext::Task("t1".into()), &[call(6, "sim_act", json!({ "name": "iPhone", "goal": "x" }))], |_, _| Ok(json!({})));
+    assert!(sent.is_empty());
+    assert_eq!(responses[0]["result"]["isError"], true);
+    // O simulador se aprova sozinho, como o navegador; a tela do Mac, não.
+    assert!(super::mcp::auto_approved("sim_act"));
+    assert!(!super::mcp::auto_approved("desk_act"));
+    assert!(super::mcp::auto_approved("device_list"));
+    assert!(super::mcp::auto_approved("device_shot"));
+    assert!(!super::mcp::auto_approved("device_action"));
+}
+
+#[test]
+fn tools_mcp_device_usam_o_despachador_agente_e_nao_pulam_o_escopo() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    assert!(dispatch.contains("\"device.list\" => device_list(app, args)"));
+    assert!(dispatch.contains("\"device.shot\" => device_action(app, args, \"shot\")"));
+    assert!(dispatch.contains("\"device.act\" => super::devices::device_act(app, args)"));
+    let ctx = McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-1".into()), mission: None, role: None };
+    let calls = [
+        call(1, "device_list", json!({})),
+        call(2, "device_shot", json!({ "name": "device:coredevice-id" })),
+        call(3, "device_action", json!({ "name": "device:coredevice-id", "action": "tap", "x": 20, "y": 30, "from": "forjado" })),
+    ];
+    let (responses, sent) = mcp_session(&ctx, &calls, |command, args| Ok(json!({ "command": command, "args": args })));
+    let mut commands: Vec<&str> = sent.iter().map(|(command, _)| command.as_str()).collect();
+    commands.sort_unstable();
+    assert_eq!(commands, ["device.act", "device.list", "device.shot"]);
+    assert!(sent.iter().all(|(_, args)| args["from"] == "tab-1"));
+    let device_act = sent.iter().find(|(command, _)| command == "device.act").unwrap();
+    assert_eq!(device_act.1["action"], "tap");
+    assert!(device_act.1.get("from").unwrap() != "forjado");
+    assert!(responses.iter().all(|response| response["result"]["content"][0]["text"].is_string()));
+
+    let (responses, sent) = mcp_session(
+        &McpContext::Task("t1".into()),
+        &[call(4, "device_action", json!({ "name": "iPhone", "action": "tap", "x": 1, "y": 1 }))],
+        |_, _| Ok(json!({})),
+    );
+    assert!(sent.is_empty());
+    assert_eq!(responses[0]["result"]["isError"], true);
+}
+
+/// Todo comando que uma tool de computer use manda existe no despachador.
+#[test]
+fn as_tools_de_computer_use_chamam_comandos_que_o_despachador_atende() {
+    let dispatched = dispatched_commands();
+    let table = include_str!("mcp.rs").split("const COMPUTER_USE_TOOLS").nth(1).unwrap().split("];").next().unwrap();
+    let commands: Vec<&str> = table.split("dispatch: \"").skip(1).filter_map(|r| r.split('"').next()).collect();
+    assert_eq!(commands, ["sim.act", "desk.act"]);
+    for command in commands {
+        assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
+    }
 }
 
 #[test]
@@ -1218,4 +1343,45 @@ fn a_cli_documenta_e_identifica_os_contratos_novos() {
     for needle in ["noProgress", "active_cap", "`blocked` needs", "status: \"pending\"", "~/.ags/spill/", "BEGIN GENERATED: cli-commands", "BEGIN GENERATED: mcp-tools"] {
         assert!(skill.contains(needle), "a skill não menciona {needle}");
     }
+}
+
+#[test]
+fn device_rotate_tem_rota_acao_e_o_mesmo_giro_do_canvas() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    let devices = include_str!("commands/devices.rs");
+    let ios = include_str!("commands/simulators.rs");
+    assert!(dispatch.contains("\"device.rotate\" => device_action(app, args, \"rotate\")"));
+    assert!(devices.contains("\"rotate\", ") || devices.contains("\"rotate\"]"));
+    // O agente gira pelo mesmo caminho da barra e do painel: endireita as telas e avisa o frontend.
+    assert!(ios.contains("crate::simulator::rotate_device(app, &udid, &dir)"));
+    assert!(include_str!("../simulator/commands.rs").contains("app.emit(\"simulator-orientation\""));
+}
+
+#[test]
+fn device_clipboard_le_e_escreve_pelo_devicectl() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    let ios = include_str!("commands/simulators.rs");
+    let ops = include_str!("../simulator/mod.rs");
+    assert!(dispatch.contains("\"device.clipboard\" => device_action(app, args, \"clipboard\")"));
+    assert!(ios.contains("ops::set_clipboard_text(&udid, &text)") && ios.contains("ops::clipboard_text(&udid)"));
+    // O caminho público do Xcode 27 (CoreDevice), não o SimPasteboard, que no iOS 27.2 já não substitui o conteúdo.
+    assert!(ops.contains("[\"devicectl\", \"device\", \"pasteboard\"]"));
+}
+
+#[test]
+fn o_terminal_do_chat_tem_quem_o_atenda_nos_dois_lados() {
+    // O backend pede ao front o shell do painel (`chatShell`), e o front o abre pelo mesmo caminho da aba Terminal.
+    let tabs = include_str!("commands/tabs.rs");
+    assert!(tabs.contains("\"chatShell\": true"), "o backend não pede o terminal do chat");
+    let bridge = include_str!("../../../src/features/orchestrator/cliBridge.ts");
+    assert!(bridge.contains("args.chatShell === true"), "o frontend não atende o terminal do chat");
+    assert!(bridge.contains("openChatTerminal("), "o frontend não usa o shell do painel");
+    // A CLI documenta as flags novas e leva quem chama no `tab create`.
+    let cli = include_str!("../bin/cli.rs");
+    assert!(cli.contains("--in-chat") && cli.contains("--new-tab"), "o USAGE não mostra --in-chat/--new-tab");
+    assert!(cli.contains("command == \"tab.create\""), "a CLI não manda quem chama no tab create");
+    // A skill ensina o caminho, e o que fazer quando ele falha.
+    let skill = include_str!("../../../skills/ags-orchestrator/SKILL.md");
+    assert!(skill.contains("### Interactive commands from a chat conversation"), "a skill não ensina o terminal do chat");
+    assert!(skill.contains("--in-chat"), "a skill não mostra --in-chat");
 }

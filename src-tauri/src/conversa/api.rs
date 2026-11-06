@@ -139,8 +139,12 @@ pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> 
     let row = {
         let conn = db.lock().map_err(db_err)?;
         let tuning = Tuning { model: input.model, effort: input.effort, access: input.access };
-        store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, account_id.as_deref(), crate::util::now_ts_ms())
-            .map_err(db_err)?
+        let row = store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, account_id.as_deref(), crate::util::now_ts_ms())
+            .map_err(db_err)?;
+        if let Err(error) = crate::skills::reconcile_link_dir(&conn, &row.cwd, &row.agent_id) {
+            eprintln!("[skills] não consegui preparar as skills sempre ativas para a conversa {}: {error}", row.id);
+        }
+        row
     };
     if let Some(pool) = pool_id {
         super::pool::bind(db, &id, Some(&pool))?;
@@ -324,6 +328,30 @@ pub fn status(thread_id: &str) -> ThreadStatus {
     }
 }
 
+/// O Parar da pessoa: para o turno do agente vivo; sem agente vivo, fecha o turno que ficou aberto no banco (um
+/// agente que morreu sem fechar o turno deixaria a tela em «Pensando…» e a fila presa para sempre).
+pub async fn stop(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<(), String> {
+    if live_turn(thread_id).is_some() {
+        return interrupt(thread_id).await;
+    }
+    let now = crate::util::now_ts_ms();
+    // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
+    let ends: Vec<Item> = {
+        let conn = db.lock().map_err(db_err)?;
+        let closed = store::close_orphan_runs(&conn, Some(thread_id), now, STOPPED_ORPHAN).map_err(db_err)?;
+        let ids: Vec<String> = closed.iter().map(|(_, run)| format!("end:{run}")).collect();
+        if ids.is_empty() { Vec::new() } else { store::items(&conn, thread_id).map_err(db_err)?.into_iter().filter(|i| ids.contains(&i.id)).collect() }
+    };
+    for end in ends {
+        super::events::emit(app, thread_id, "item", json!({ "item": end }));
+    }
+    super::events::emit(app, thread_id, "phase", json!({ "phase": "idle" }));
+    Ok(())
+}
+
+/// O fim do turno que o Parar fechou sem agente vivo.
+pub const STOPPED_ORPHAN: &str = "O turno foi parado: o agente já não estava rodando.";
+
 /// Para o turno em andamento.
 pub async fn interrupt(thread_id: &str) -> Result<(), String> {
     if let Some(session) = claude::get(thread_id) {
@@ -344,6 +372,38 @@ pub async fn interrupt(thread_id: &str) -> Result<(), String> {
     let (Some(remote), Some(turn)) = (session.remote(), session.turn()) else { return Ok(()) };
     session.request("turn/interrupt", json!({ "threadId": remote, "turnId": turn })).await.map(|_| ())
 }
+
+/// O motivo de não parar uma tarefa só: o motor não tem como (só o Claude Code tem `stop_task`).
+pub const NO_TASK_STOP: &str = "Este agente não para uma tarefa só; o Parar do composer para o turno inteiro.";
+
+/// Para UMA tarefa em segundo plano da conversa (um shell ou um subagente), sem mexer no turno nem nas
+/// outras: o `control_request` `stop_task` do Claude Code. O fim chega pelo evento `task`
+/// (`task_notification` com `stopped`). Nos outros motores, recusa com o motivo.
+pub async fn stop_task(db: &DbConnection, thread_id: &str, task_id: &str) -> Result<(), String> {
+    let session = claude_task_session(db, thread_id, task_id)?;
+    session.control("stop_task", json!({ "task_id": task_id })).await.map(|_| ())
+}
+
+/// O fim da saída de um shell em segundo plano (os últimos 8 KiB, `get_task_output` do Claude Code):
+/// `{output, total_bytes, truncated}`. Só leitura, sem turno de modelo.
+pub async fn task_output(db: &DbConnection, thread_id: &str, task_id: &str) -> Result<Value, String> {
+    let session = claude_task_session(db, thread_id, task_id)?;
+    session.control("get_task_output", json!({ "task_id": task_id })).await
+}
+
+/// A sessão viva do Claude que tem a tarefa; o motivo, se não há como falar com ela.
+fn claude_task_session(db: &DbConnection, thread_id: &str, task_id: &str) -> Result<Arc<claude::Session>, String> {
+    if task_id.trim().is_empty() {
+        return Err("Tarefa inválida".into());
+    }
+    if Engine::of(&thread(db, thread_id)?.agent_id) != Some(Engine::Claude) {
+        return Err(NO_TASK_STOP.into());
+    }
+    claude::get(thread_id).ok_or_else(|| TASK_PROCESS_CLOSED.to_string())
+}
+
+/// O processo do Claude fechou: as tarefas dele já pararam junto.
+pub const TASK_PROCESS_CLOSED: &str = "O processo do Claude desta conversa já fechou; as tarefas dele pararam junto.";
 
 /// Responde a um pedido do agente: `allow`, `allowSession` ou `deny` numa aprovação; o texto da
 /// resposta numa pergunta. `false` se o pedido já não estava pendente.
@@ -432,7 +492,11 @@ pub fn rename(db: &DbConnection, thread_id: &str, title: &str) -> Result<(), Str
 pub fn settle(db: &DbConnection, thread_id: &str, settled: bool) -> Result<(), String> {
     {
         let conn = db.lock().map_err(db_err)?;
+        let row = store::thread(&conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
         store::set_state(&conn, thread_id, if settled { "settled" } else { "active" }, crate::util::now_ts_ms()).map_err(db_err)?;
+        if let Err(error) = crate::skills::reconcile_link_dir(&conn, &row.cwd, &row.agent_id) {
+            eprintln!("[skills] não consegui atualizar as skills da conversa {}: {error}", row.id);
+        }
     }
     if settled {
         close(thread_id);

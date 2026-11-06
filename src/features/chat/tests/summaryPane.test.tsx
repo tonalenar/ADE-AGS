@@ -63,7 +63,7 @@ beforeEach(() => {
   mocks.pullsError = false;
   mocks.filesError = false;
   mocks.commits = 0;
-  useChatStore.setState({ panel: "summary", surfaces: [] });
+  useChatStore.setState({ panel: null, surfaces: [] });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -164,5 +164,18 @@ describe("o Resumo do painel", () => {
     await render();
     expect(host.textContent).toContain("PR 259");
     expect(host.textContent).not.toContain("+5");
+  });
+
+  it("no cartão flutuante, é um cartão único: as seções viram blocos com divisória fina, sem caixa própria", async () => {
+    await act(async () => { root.render(<SummaryPane inCard conversation={card} cwd={card.cwd} tabId="tab-1" />); });
+    const sections = [...host.querySelectorAll("section")];
+    expect(sections.length).toBeGreaterThan(2);
+    for (const s of sections) {
+      expect(s.className).toContain("border-t");
+      expect(s.className).not.toContain("rounded-2xl");
+    }
+    // Fora dele (onde ainda houver), cada seção segue o cartão liso.
+    await render();
+    expect(host.querySelector("section")!.className).toContain("rounded-2xl");
   });
 });

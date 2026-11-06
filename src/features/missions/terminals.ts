@@ -5,7 +5,7 @@ import i18n from "i18next";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { MESSAGE_RULES } from "@/features/canvas/agentRole";
-import { BROWSER_HINT } from "@/features/canvas/portalNotice";
+import { BROWSER_HINT, computerUseHint } from "@/features/canvas/portalNotice";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
@@ -270,6 +270,7 @@ export function leadBriefing(
     '- `ags peer check <nome>` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
     `- ${BROWSER_HINT}`,
+    ...(computerUseHint() ? [`- ${computerUseHint()}`] : []),
     ...(hasVigia ? [`- O "${VIGIA_NAME}" (um agente barato, que não implementa nada) observa a equipe em segundo plano: quando alguém fica parado, te manda \`[Vigia] ...\` e registra no chat o que travou e o que fez para destravar. Aja sobre os avisos dele na hora: ninguém pode ficar parado.`] : []),
     "",
     "MENOS CONVERSA, MAIS REGISTRO:",
@@ -367,6 +368,7 @@ export function memberBriefing(
     "- Correções da sua entrega têm teto (padrão 2). Se a devolução disser que é a ÚLTIMA rodada: `gh pr checks` verde, ou `ags test run rust`, `ags test run tsc` e `ags test run frontend` (não rode cargo/vitest/tsc crus). Sem isso a entrega não fecha.",
     "- Se depender de outro integrante, fale direto com ele (`ags peer tell \"<nome>\" ...`; `ask` só se a resposta bloquear o próximo passo) em vez de esperar o Orquestrador repassar.",
     `- ${BROWSER_HINT}`,
+    ...(computerUseHint() ? [`- ${computerUseHint()}`] : []),
     "",
     ...(deliverToQa ? [`Ao concluir uma entrega, mande-a DIRETO ao QA por \`ags peer tell "${deliverToQa}" --file <arquivo>\` (branch, commit, o que mudou e como testar), sem esperar o orquestrador repassar.`] : []),
     "Ao concluir, faça a entrega final ESTRUTURADA ao orquestrador: escreva um JSON (Handoff v1) num arquivo fora do repositório e rode `ags peer deliver --file <arquivo>`. Campos: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; caminhos relativos. Opcional (v1.1): status continue (exige next_steps), complete (exige evidence ou teste passed) ou blocked (exige blockers concretos). Se o JSON não passar, o comando mostra um modelo. Ele recebe uma linha com o resumo e o id; o detalhe fica guardado.",

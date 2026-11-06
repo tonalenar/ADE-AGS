@@ -1209,7 +1209,6 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
       tool={tool} onTool={(next) => { if (tool === "pen") finishPen(); chooseTool(nextTool(tool, next)); }}
       scale={cam.scale} onZoomIn={() => zoomStep(1)} onZoomOut={() => zoomStep(-1)} onFit={() => { setFollowing(false); fitAll(); }} onPreset={zoomPreset}
       lastDraw={lastDraw} lastShape={lastShape} guides={guides} onToggleGuides={() => setGuides((g) => !g)}
-      panelOpen={panelOpen} onTogglePanel={() => setPanelOpen((o) => !o)}
       exportBoard={single ? exportFor(single) : null}
       focused={focusedBoard ? { title: focusedBoard.title, fit: focused!.fit, onFit: (fit) => setFocused((f) => (f ? { ...f, fit } : f)), onBack: exitFocus } : null}
     />

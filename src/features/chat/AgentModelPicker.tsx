@@ -109,13 +109,19 @@ interface Row {
  * O seletor da prancheta 3 (o do T3 Code): popover de 360×346 com o trilho de agentes (e os
  * favoritos) à esquerda e a lista de modelos com busca à direita; a conta no rodapé (do ADE).
  */
-export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, disabled = false, placement = "above" }: {
+export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, accountSlot = null, disabled = false, placement = "above" }: {
   agents: AgentInfo[];
   value: AgentModelValue;
   onChange: (next: AgentModelValue) => void;
   shortcutHint?: string;
   /** Numa conversa aberta a conta não muda (a sessão mora na pasta da conta). */
   showAccount?: boolean;
+  /**
+   * A conta de uma conversa aberta, no rodapé do mesmo popover (no lugar do seletor de conta da conversa nova): a
+   * troca tem regras próprias (só entre turnos, com confirmação), por isso vem pronta de quem chama. Antes era um
+   * seletor solto no composer, entre o modelo e o esforço.
+   */
+  accountSlot?: React.ReactNode;
   disabled?: boolean;
   /** Para onde o popover abre: em cima (o composer, no pé da tela) ou embaixo (uma linha das Configurações). */
   placement?: "above" | "below";
@@ -254,6 +260,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
               )}
               {!roster && tab !== "fav" && <p className="px-2 py-3 text-chat-note text-gray-400 dark:text-white/40">{t("chat.picker.loading")}</p>}
             </div>
+            {!showAccount && accountSlot}
             {showAccount && <div className="flex items-center gap-2 h-9 shrink-0 px-3 border-t border-gray-200 dark:border-white/[0.08] text-chat-caption text-gray-500 dark:text-white/45">
               <span className="flex-1">{t("chat.picker.account")}</span>
               {tabAgent && (

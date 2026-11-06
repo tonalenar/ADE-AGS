@@ -24,6 +24,14 @@ interface ChatState {
   terminalOpen: Record<string, boolean>;
   /** O painel direito e a aba dele; `null` = fechado; `"empty"` = aberto sem nada aberto ("Abrir uma superfície"). */
   panel: RightPanelTab | null;
+  /**
+   * O Resumo ligado (o ícone dele marcado; lembrado): sem outro painel aberto, ele é a coluna fixa à direita da conversa,
+   * abaixo da barra de ícones, como no Claude Code. Abrir outro painel a substitui; fechar o painel a traz de volta.
+   */
+  summaryPinned: boolean;
+  /** Com outro painel aberto: o Resumo como cartão flutuante encostado no painel (fecha com clique fora, Esc, ao
+   * trocar de conversa ou ao fechar o painel). */
+  summaryOpen: boolean;
   /** A aba que estava à vista quando o painel foi fechado: reabrir volta nela. `null` = nenhuma (reabre vazio). */
   lastPanel: Exclude<RightPanelTab, "empty"> | null;
   /** Muda a cada pedido de "foque o painel" (o atalho do Time); o painel leva o foco para dentro. */
@@ -32,6 +40,8 @@ interface ChatState {
   panelMaximized: boolean;
   /** O navegador da aba Navegador e onde desenhá-lo (como o terminal: por slot, sem remontar). */
   browser: { viewId: string; rect: Rect } | null;
+  /** O terminal da aba Terminal do painel (uma aba de shell na pasta da conversa) e onde desenhá-lo, como o navegador. */
+  shell: { tabId: string; rect: Rect } | null;
   /** A conversa por protocolo aberta (ver `structured/`); `null` = a da aba ativa. */
   thread: string | null;
   /** As superfícies abertas no painel direito, além do Diff, na ordem em que foram abertas (prancheta 8). */
@@ -48,34 +58,49 @@ interface ChatState {
   /** O design pedido para a aba Design (`ags design open`); `seq` muda a cada pedido. */
   designOpen: DesignOpenRequest | null;
   /** As mensagens na fila de cada conversa (⌘⏎ com o agente trabalhando), na ordem. */
-  queues: Record<string, string[]>;
+  queues: Record<string, QueuedMessage[]>;
 }
 
 /** Um pedido de abrir um design no painel: o design e, se vier, a prancheta e a página. */
 export interface DesignOpenRequest { designId: string; artboardId?: string | null; pageId?: string | null; seq: number }
 
 /** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
-export type Surface = Exclude<RightPanelTab, "summary" | "diff" | "empty">;
+export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty" | "tasks">;
 export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android"];
 
-/** `summary`: o Resumo, a superfície padrão com os cartões (`summary/SummaryPane.tsx`). `team`: o painel Time do time de agentes (pranchetas 15 e 16, `team/TeamPanel.tsx`). `empty`: o estado vazio do T3. */
-export type RightPanelTab = "summary" | "diff" | "files" | "browser" | "design" | "ios" | "android" | "team" | "empty";
+/**
+ * As abas do painel direito. O Resumo não é uma delas: sem painel ele é a coluna fixa da conversa (`summaryPinned`),
+ * com painel é um cartão flutuante (`summaryOpen`, `summary/SummaryPopover.tsx`), como no Claude Code. `team`: o painel Time do time de agentes (pranchetas 15 e 16,
+ * `team/TeamPanel.tsx`). `tasks`: as tarefas em segundo plano da conversa (`tasks/TasksPanel.tsx`; não volta sozinha ao
+ * reabrir o app). `empty`: o estado vazio do T3.
+ */
+export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
 
 const PANEL_KEY = "ags.chat.panel";
-const PANELS: readonly string[] = ["summary", "diff", "files", "browser", "design", "ios", "android", "team"];
+const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team"];
 
 /**
  * O painel lembrado: a superfície que estava à vista, ou `"none"` (a pessoa o fechou). Sem nada
  * guardado, ou com lixo, abre no Resumo (o padrão). Pura.
  */
+/**
+ * As superfícies abertas quando o app reabre: a aba salva volta à vista, e se ela é uma superfície (o iPhone, o
+ * Android, o navegador…) tem de voltar aberta também. Sem isso o painel mostrava o iPhone, mas o compartilhamento
+ * com os agentes (`sharedDevices`) saía vazio e `ags sim act` dizia "não está conectado com você". Pura.
+ */
+export function initialSurfaces(panel: RightPanelTab | null): Surface[] {
+  return panel && (SURFACES as RightPanelTab[]).includes(panel) ? [panel as Surface] : [];
+}
+
 export function parsePanel(raw: string | null): RightPanelTab | null {
   if (raw === "none") return null;
   // O Time só abre quando a pessoa o pede naquela hora: nunca volta sozinho ao reabrir o app.
-  if (raw === "team") return "summary";
-  return raw && PANELS.includes(raw) ? (raw as RightPanelTab) : "summary";
+  // O Resumo era uma aba lembrada; agora é um cartão flutuante que nunca abre sozinho: o painel volta fechado.
+  if (raw === "team" || raw === "summary") return null;
+  return raw && PANELS.includes(raw) ? (raw as RightPanelTab) : null;
 }
 
 /**
@@ -83,14 +108,14 @@ export function parsePanel(raw: string | null): RightPanelTab | null {
  * pessoa já tenha montado um time em rascunho; qualquer outra aba, ou o painel fechado, fica como ela deixou. Pura.
  */
 export function panelForNewConversation(panel: RightPanelTab | null, draftEmpty: boolean): RightPanelTab | null {
-  return panel === "team" && draftEmpty ? "summary" : panel;
+  return panel === "team" && draftEmpty ? null : panel;
 }
 
 function readPanel(): RightPanelTab | null {
   try {
     return parsePanel(localStorage.getItem(PANEL_KEY));
   } catch {
-    return "summary";
+    return null;
   }
 }
 
@@ -115,6 +140,17 @@ function readWidth(): number {
   }
 }
 
+const SUMMARY_KEY = "ags.chat.summaryPinned";
+
+/** O Resumo ligado, lembrado entre aberturas; ligado por padrão (como no Claude Code). */
+function readSummaryPinned(): boolean {
+  try {
+    return localStorage.getItem(SUMMARY_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
 function readControl(): boolean {
   try {
     return localStorage.getItem(CONTROL_KEY) !== "off";
@@ -123,17 +159,39 @@ function readControl(): boolean {
   }
 }
 
+const initialPanel = readPanel();
+
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: readPanel(), lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, thread: null, surfaces: [],
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, shell: null, thread: null,
+  surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, designOpen: null, panelWidth: readWidth(),
   queues: {},
 }));
 
-/** Põe uma mensagem no fim da fila da conversa. */
-export function enqueueMessage(key: string, text: string): void {
+/**
+ * Uma mensagem esperando a vez no composer. `now` = a pessoa pediu «enviar agora» num motor que não aceita entrada no
+ * meio do turno: ela vai na frente, assim que o turno parar.
+ */
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  now?: boolean;
+}
+
+let queueSeq = 0;
+
+/** Põe uma mensagem na fila da conversa: no fim, ou na frente (`now`, o «enviar agora» que para o turno). */
+export function enqueueMessage(key: string, text: string, now = false): void {
   const clean = text.trim();
   if (!clean) return;
-  useChatStore.setState((s) => ({ queues: { ...s.queues, [key]: [...(s.queues[key] ?? []), clean] } }));
+  queueSeq += 1;
+  const item: QueuedMessage = now ? { id: `q${queueSeq}`, text: clean, now } : { id: `q${queueSeq}`, text: clean };
+  useChatStore.setState((s) => {
+    const list = s.queues[key] ?? [];
+    // As de «agora» saem antes das outras, na ordem em que vieram.
+    const at = now ? list.filter((m) => m.now).length : list.length;
+    return { queues: { ...s.queues, [key]: [...list.slice(0, at), item, ...list.slice(at)] } };
+  });
 }
 
 /** Tira a primeira mensagem da fila (a que vai sair agora). */
@@ -141,13 +199,26 @@ export function dequeueMessage(key: string): string | null {
   const list = useChatStore.getState().queues[key] ?? [];
   if (list.length === 0) return null;
   const [first, ...rest] = list;
+  setQueue(key, rest);
+  return first!.text;
+}
+
+/** Tira da fila a mensagem `id` e devolve o texto dela (para editar no composer), ou `null` se já saiu. */
+export function unqueueMessage(key: string, id: string): string | null {
+  const list = useChatStore.getState().queues[key] ?? [];
+  const found = list.find((m) => m.id === id);
+  if (!found) return null;
+  setQueue(key, list.filter((m) => m.id !== id));
+  return found.text;
+}
+
+function setQueue(key: string, list: QueuedMessage[]): void {
   useChatStore.setState((s) => {
     const queues = { ...s.queues };
-    if (rest.length > 0) queues[key] = rest;
+    if (list.length > 0) queues[key] = list;
     else delete queues[key];
     return { queues };
   });
-  return first!;
 }
 
 /** Esvazia a fila de uma conversa. */
@@ -166,6 +237,13 @@ const sameRect = (a: Rect | null, b: Rect | null) =>
 export function setChatSlot(slot: Rect | null): void {
   if (sameRect(useChatStore.getState().slot, slot)) return;
   useChatStore.setState({ slot });
+}
+
+/** Publica o espaço do terminal da aba Terminal do painel (como `setChatSlot`, só muda com o retângulo). */
+export function setChatShell(shell: { tabId: string; rect: Rect } | null): void {
+  const now = useChatStore.getState().shell;
+  if (now === shell || (now && shell && now.tabId === shell.tabId && sameRect(now.rect, shell.rect))) return;
+  useChatStore.setState({ shell });
 }
 
 /** Abre a tela "Nova conversa" já com essa pasta escolhida (o "+" do cabeçalho de um projeto). */
@@ -188,11 +266,12 @@ export function setRightPanel(panel: RightPanelTab | null): void {
     if (panel) return { panel };
     // Ao fechar, lembra a aba à vista (o vazio não conta); fechar de novo, já fechado, não apaga a lembrança.
     const last = s.panel && s.panel !== "empty" ? s.panel : s.lastPanel;
-    return { panel: null, panelMaximized: false, lastPanel: last };
+    // O cartão flutuante do Resumo só existe com painel; sem ele, volta a coluna (se o Resumo estiver ligado).
+    return { panel: null, panelMaximized: false, lastPanel: last, summaryOpen: false };
   });
 }
 
-/** Esquece a aba lembrada: a próxima abertura do painel (conversa nova) mostra o Resumo. */
+/** Esquece a aba lembrada: a próxima abertura do painel (conversa nova) mostra o estado vazio. */
 export function forgetLastPanel(): void {
   if (useChatStore.getState().lastPanel !== null) useChatStore.setState({ lastPanel: null });
 }
@@ -227,7 +306,28 @@ export function hostLabel(url: string | null | undefined): string | null {
 /** Abre ou fecha o painel: aberto sem nada antes, mostra o Resumo; com uma aba já aberta, volta nela. */
 export function toggleRightPanel(): void {
   const s = useChatStore.getState();
-  setRightPanel(s.panel ? null : s.lastPanel ?? "summary");
+  setRightPanel(s.panel ? null : s.lastPanel ?? "empty");
+}
+
+/** Abre ou fecha o Resumo flutuante (com outro painel aberto). */
+export function toggleSummary(): void {
+  useChatStore.setState((s) => ({ summaryOpen: !s.summaryOpen }));
+}
+
+/** Liga ou desliga o Resumo (a coluna fixa, sem painel aberto). Lembrado. */
+export function toggleSummaryPinned(): void {
+  const next = !useChatStore.getState().summaryPinned;
+  useChatStore.setState({ summaryPinned: next, summaryOpen: false });
+  try {
+    localStorage.setItem(SUMMARY_KEY, next ? "on" : "off");
+  } catch {
+    /* sem lembrar, vale nesta sessão */
+  }
+}
+
+/** Fecha o Resumo flutuante (clique fora, Esc, troca de conversa). */
+export function closeSummary(): void {
+  if (useChatStore.getState().summaryOpen) useChatStore.setState({ summaryOpen: false });
 }
 
 export function togglePanelMaximized(): void {
@@ -256,6 +356,8 @@ export function setDeviceControl(on: boolean): void {
     /* sem armazenamento: vale só nesta sessão */
   }
   useChatStore.setState({ deviceControl: on });
+  // Desligar é revogar: o "sempre" que a pessoa deu ao JEV deixa de valer.
+  if (!on) void import("./devicesIpc").then((m) => m.computerUseForget()).catch(() => undefined);
 }
 
 /** Põe um texto no composer da conversa aberta (a captura de um aparelho, como `@caminho`). */

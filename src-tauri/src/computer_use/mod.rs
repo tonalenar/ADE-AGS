@@ -45,6 +45,8 @@ pub struct Observation {
     pub targets: Vec<Target>,
     /// O driver só marca true após remover valores de campos e conferir conteúdo sensível.
     pub safe_for_provider: bool,
+    /// A grade de brilho da foto (`visual::Thumb`), quando o driver tem os pixels. Fica local: nunca vai ao provedor.
+    pub pixels: Option<visual::Thumb>,
 }
 
 #[derive(Clone, Debug)]
@@ -53,6 +55,8 @@ pub struct Request {
     /// Os valores ficam somente aqui e na chamada local ao driver.
     pub fills: BTreeMap<String, String>,
     pub expect: Vec<String>,
+    /// Expectativas por pixels (`--expect visual:…`), comparadas com a primeira foto do `act`.
+    pub visual: Vec<visual::Visual>,
     pub steps: usize,
 }
 
@@ -90,6 +94,9 @@ pub struct Report {
     pub reason: String,
     pub observations: usize,
     pub queries: usize,
+    /// O efeito de cada ação nos pixels (fração das células que mudou e variação do brilho), na ordem de `actions`.
+    /// `None` sem os pixels das duas fotos. Um toque que só trocou a paleta aparece aqui mesmo com o texto igual.
+    pub effects: Vec<Option<visual::Effect>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -206,13 +213,20 @@ fn valid(observation: &Observation) -> bool {
         })
 }
 
-fn verified(request: &Request, observation: &Observation) -> bool {
-    !request.expect.is_empty()
+fn verified(request: &Request, observation: &Observation, first: Option<&visual::Thumb>) -> bool {
+    (!request.expect.is_empty() || !request.visual.is_empty())
         && request
             .expect
             .iter()
             .all(|text| observation.text.contains(text))
+        && request
+            .visual
+            .iter()
+            .all(|want| visual::satisfied(*want, first, observation.pixels.as_ref()))
 }
+
+/// O alvo que o driver usa para rolar o conteúdo até tirar o alvo de baixo do teclado ou da barra (`cover`).
+pub(crate) const REVEAL: &str = "reveal";
 
 /// Mesmo orçamento do piloto do navegador. Sem retries de mutação nem esperas de relógio:
 /// cada driver observa o estado após a ação e implementa a própria espera baseada em eventos.
@@ -223,6 +237,7 @@ pub fn run(request: &Request, surface: &mut impl Surface, decider: &mut impl Dec
         reason: String::new(),
         observations: 0,
         queries: 0,
+        effects: vec![],
     };
     let result = run_inner(request, surface, decider, &mut report);
     match result {
@@ -266,11 +281,21 @@ fn run_inner(
     }
     surface.authorize()?;
     let mut previous = Vec::new();
+    let mut first: Option<visual::Thumb> = None;
+    let mut last: Option<visual::Thumb> = None;
     // Há sempre uma leitura final, mesmo quando a última ação esgota o orçamento.
     for turn in 0..=request.steps {
         surface.authorize()?;
         let observation = surface.observe()?;
         report.observations += 1;
+        if report.effects.len() < report.actions.len() {
+            let effect = last.as_ref().zip(observation.pixels.as_ref()).and_then(|(a, b)| visual::effect(a, b));
+            report.effects.resize(report.actions.len(), effect);
+        }
+        if first.is_none() {
+            first = observation.pixels.clone();
+        }
+        last = observation.pixels.clone();
         // A observação pode esperar captura/OCR ou uma confirmação de privacidade.
         surface.authorize()?;
         if !valid(&observation) {
@@ -279,7 +304,7 @@ fn run_inner(
                 "Observação inválida ou sensível; não consultei o provedor.",
             ));
         }
-        if verified(request, &observation) {
+        if verified(request, &observation, first.as_ref()) {
             return Ok((
                 Status::Done,
                 "FEITO (verificado pelas expectativas na observação atual).",
@@ -306,7 +331,10 @@ fn run_inner(
         report.queries += 1;
         let decision = decider.decide(&provider_goal, &observation, &report.actions)?;
         if !decision.probability.is_finite() || !(0.4..=1.0).contains(&decision.probability) {
-            return Ok((Status::Unsure, "Sem probabilidade suficiente para agir."));
+            return Ok((
+                Status::Unsure,
+                "Sem certeza suficiente para agir; nada foi feito. Se o alvo é um ícone sem texto, descreva-o pela posição (ex.: \"o 4º ícone da barra inferior\") ou use `ags device tap` com coordenadas de `ags device shot`.",
+            ));
         }
         let action = decision.action;
         match action.operation {
@@ -314,7 +342,7 @@ fn run_inner(
                 let confident = decision
                     .goal_done
                     .is_some_and(|p| p.is_finite() && (0.75..=1.0).contains(&p));
-                return Ok(if confident && request.expect.is_empty() {
+                return Ok(if confident && request.expect.is_empty() && request.visual.is_empty() {
                     (
                         Status::Unverified,
                         "FEITO (não verificado): o Jev concluiu, sem prova independente.",
@@ -346,6 +374,12 @@ fn run_inner(
         }
         let signature = (observation.revision.clone(), action.clone());
         if previous.contains(&signature) {
+            if action.target.as_deref() == Some(REVEAL) {
+                return Ok((
+                    Status::Unsure,
+                    "O alvo continua sob o teclado ou a barra e rolar não o liberou; nada foi tocado. Feche o teclado ou role a tela e peça de novo.",
+                ));
+            }
             return Ok((
                 Status::Stuck,
                 "A mesma ação na mesma tela não será repetida.",
@@ -368,7 +402,7 @@ fn run_inner(
             })
             || action.operation == Operation::Key;
         if sensitive && !surface.confirm(&observation.revision, &action)? {
-            return Ok((Status::Blocked, "A pessoa não confirmou a ação na UI."));
+            return Ok((Status::Blocked, "A pessoa não confirmou a ação na UI (recusou, fechou ou o prazo do act venceu); nada foi feito. Peça de novo com --timeout maior ou espere a pessoa."));
         }
         // Checa a autorização de novo: o canvas pode mudar enquanto o diálogo está aberto.
         surface.authorize()?;
@@ -385,5 +419,22 @@ fn run_inner(
 #[cfg(test)]
 mod test;
 
+mod capture;
+mod cover;
+pub mod visual;
 pub(crate) mod ios;
 pub(crate) mod desktop;
+
+pub(crate) const MAX_CAPTURE_SIDE: usize = 1200;
+
+/// PNG em tamanho cheio a partir de pixels BGRA (linhas de `width * 4`): a foto do iPhone físico (`iphone::ops`).
+#[cfg(target_os = "macos")]
+pub(crate) fn png_from_bgra(data: &mut [u8], width: usize, height: usize, out: &std::path::Path) -> Result<(), String> {
+    capture::png_from_bgra(data, width, height, out, usize::MAX)
+}
+
+/// PNG reduzido diretamente dos pixels BGRA para o computer use, sem gravar primeiro um PNG cheio.
+#[cfg(target_os = "macos")]
+pub(crate) fn png_from_bgra_max(data: &mut [u8], width: usize, height: usize, out: &std::path::Path, max: usize) -> Result<(), String> {
+    capture::png_from_bgra(data, width, height, out, max)
+}

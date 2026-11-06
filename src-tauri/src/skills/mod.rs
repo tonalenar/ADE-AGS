@@ -12,7 +12,9 @@
 //! - [`links`] — los symlinks: qué skill va montada en qué tab.
 //! - [`sessions`] — recuperar las skills de una sesión archivada.
 //! - [`bundled`] — las que viajan con la app y se instalan solas.
+//! - [`always`] — "Ativa em todos os agentes": o liga/desliga por skill do painel.
 
+mod always;
 mod authoring;
 mod bundled;
 mod files;
@@ -27,6 +29,7 @@ mod types;
 #[cfg(test)]
 mod test;
 
+pub use always::*;
 pub use authoring::*;
 pub use bundled::{ensure_bundled_skills, migrate_legacy_skill};
 pub(crate) use frontmatter::{rename_in_content, scan_frontmatter_for_marketplace};

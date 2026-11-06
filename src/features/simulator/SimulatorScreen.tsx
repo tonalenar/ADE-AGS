@@ -28,6 +28,16 @@ function samePlace(a: SimPlace | null, b: SimPlace): boolean {
   return true;
 }
 
+/** Quem mostra a tela nativa: o simulador (`simulator_*`) ou o iPhone físico (`iphone_mirror_*`). Um objeto fixo
+ *  do módulo (não recriado a cada render). */
+export interface NativeScreenApi {
+  attach: (id: string, target: string, place: SimPlace) => Promise<void>;
+  place: (id: string, place: SimPlace) => Promise<void>;
+  detach: (id: string) => Promise<void>;
+}
+
+const SIMULATOR_API: NativeScreenApi = { attach: simulatorAttach, place: simulatorPlace, detach: simulatorDetach };
+
 /**
  * O lugar da tela do aparelho. A tela é uma NSView nativa por cima do webview (ver `simulator::native::view`),
  * que mostra a `IOSurface` do simulador sem copiar quadros: este elemento só reserva o espaço e, a cada quadro,
@@ -41,6 +51,18 @@ export function SimulatorScreen({ screenId, udid, radius, onError }: {
   screenId: string;
   udid: string;
   /** Raio dos cantos da tela em px de layout (o zoom do canvas é aplicado aqui). */
+  radius: number;
+  onError: (message: string) => void;
+}) {
+  return <NativeScreen api={SIMULATOR_API} screenId={screenId} target={udid} radius={radius} onError={onError} />;
+}
+
+/** A medição de `SimulatorScreen`, para qualquer tela nativa (o iPhone físico usa a mesma). */
+export function NativeScreen({ api, screenId, target, radius, onError }: {
+  api: NativeScreenApi;
+  screenId: string;
+  /** O aparelho: o UDID do simulador ou o id do aparelho físico. */
+  target: string;
   radius: number;
   onError: (message: string) => void;
 }) {
@@ -93,16 +115,16 @@ export function SimulatorScreen({ screenId, udid, radius, onError }: {
         const place = measure();
         if (!samePlace(sent, place)) {
           sent = place;
-          simulatorPlace(screenId, place).catch(() => undefined);
+          api.place(screenId, place).catch(() => undefined);
         }
       }
       frame = requestAnimationFrame(tick);
     };
 
     sent = measure();
-    simulatorAttach(screenId, udid, sent)
+    api.attach(screenId, target, sent)
       .then(() => {
-        if (closed) simulatorDetach(screenId).catch(() => undefined);
+        if (closed) api.detach(screenId).catch(() => undefined);
         attached = true;
       })
       .catch((e) => latest.current.onError(String(e)));
@@ -113,9 +135,9 @@ export function SimulatorScreen({ screenId, udid, radius, onError }: {
       observer.disconnect();
       window.removeEventListener("resize", markDirty);
       cancelAnimationFrame(frame);
-      simulatorDetach(screenId).catch(() => undefined);
+      api.detach(screenId).catch(() => undefined);
     };
-  }, [screenId, udid]);
+  }, [api, screenId, target]);
 
   return <div ref={box} data-simulator-screen className="absolute inset-0" />;
 }

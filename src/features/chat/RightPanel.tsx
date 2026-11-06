@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { FilesView } from "@/features/explorer/FilesView";
 import { DESKTOP_OS } from "@/app/platform";
 import { WindowControls } from "@/app/WindowLights";
+import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
@@ -12,11 +13,13 @@ import { choosePanel, ENTRY_ICON, onEntryKey, PanelToolbar } from "./PanelToolba
 import { devicesShare } from "./devicesIpc";
 import { sharedDevices } from "./devicesModel";
 import { useWorkingDiff } from "./useWorkingDiff";
+import { ensureShellTab } from "./shellTerminal";
 import { CHAT_SHELL_ATTR, hasTimeline } from "./ConversationView";
 import { isAvailable, keyLabel, PANEL_ENTRIES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import type { ConversationCard } from "./chatModel";
 import { TeamPanel } from "./team/TeamPanel";
-import { clampPanelWidth, PANEL_W, setChatBrowser, setPanelWidth, togglePanelMaximized, toggleRightPanel, useChatStore } from "./store";
+import { TasksPanel } from "./tasks/TasksPanel";
+import { clampPanelWidth, PANEL_W, setChatBrowser, setChatShell, setPanelWidth, togglePanelMaximized, toggleRightPanel, useChatStore } from "./store";
 
 // Design e os aparelhos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
 const DesignPane = lazy(() => import("./DesignPane").then((m) => ({ default: m.DesignPane })));
@@ -42,12 +45,13 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   useShareDevices();
   // O atalho do Time (e quem mais pedir) leva o foco para dentro do painel.
   useEffect(() => { if (panelFocus > 0) contentRef.current?.focus(); }, [panelFocus]);
-  const terminalOn = useChatStore((s) => (tabId ? s.terminalOpen[tabId] ?? false : false));
-  // O Resumo não é coluna: flutua ao lado da conversa (`ChatShell`). Aqui só moram as outras superfícies.
-  if (!panel || panel === "summary") return null;
-  // O terminal é a gaveta da conversa (só as que têm timeline); o PR ainda não tem aba no painel (esmaecido).
-  const available: PanelAvailability = { terminal: !!tabId && !!conversation && hasTimeline(conversation.agentId), pr: false };
-  const choose = (id: PanelChoice) => choosePanel(id, tabId, terminalOn);
+  // A gaveta do agente: só a conversa de TUI com timeline. As outras abrem a aba Terminal (um shell na pasta).
+  const drawerTabId = tabId && conversation && hasTimeline(conversation.agentId) ? tabId : null;
+  const drawerOn = useChatStore((s) => (drawerTabId ? s.terminalOpen[drawerTabId] ?? false : false));
+  if (!panel) return null;
+  // O PR ainda não tem aba no painel (esmaecido).
+  const available: PanelAvailability = { terminal: !!conversation && !!cwd, pr: false };
+  const choose = (id: PanelChoice) => choosePanel(id, drawerTabId, drawerOn);
   const empty = panel === "empty";
   const headBtn = "w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10";
   // Windows e Linux: os botões da janela moram no canto direito; o conteúdo cede a altura deles. No macOS não há nada a ceder.
@@ -55,7 +59,9 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   return (
     <aside aria-label={t("chat.panel.label")}
       style={maximized ? undefined : { width: panelWidth }}
-      className={`${maximized ? "flex-1" : "shrink"} relative min-w-[360px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
+      // A coluna encolhe até 280 px: numa janela de ~1000 px, sidebar, conversa (440 px no mínimo, com o cabeçalho
+      // inteiro) e painel cabem sem nada passar da borda da janela (com 360 px, o terminal e o simulador eram cortados).
+      className={`${maximized ? "flex-1" : "shrink"} relative min-w-[280px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
       {!maximized && <ResizeHandle />}
       {/* Sem faixa de cabeçalho: a fileira de ícones e o recolher moram no cabeçalho principal e cada superfície
           começa no topo da coluna. Fica só uma região de arrasto fina (não cobre os botões da superfície). */}
@@ -64,7 +70,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
       {/* Maximizado, o cabeçalho principal some: a fileira, o restaurar e o recolher vêm para uma barra flutuante discreta. */}
       {maximized && (
         <div className={`absolute right-3 z-20 flex items-center gap-1 rounded-lg bg-white/95 dark:bg-surface-deep/95 p-0.5 shadow-[0_0_0_1px_rgba(24,24,27,0.08),0_8px_24px_-12px_rgba(0,0,0,0.4)] ${winControls ? "top-9" : "top-2"}`}>
-          <PanelToolbar tabId={tabId} terminalAvailable={available.terminal} />
+          <PanelToolbar drawerTabId={drawerTabId} terminalAvailable={available.terminal} />
           <button type="button" onClick={togglePanelMaximized} aria-pressed aria-label={t("chat.panel.maximize")} title={t("chat.panel.maximize")} className={`${headBtn} bg-gray-100 dark:bg-white/10`}>
             <MaximizeIcon className="w-[15px] h-[15px]" />
           </button>
@@ -76,8 +82,10 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
       <div ref={contentRef} tabIndex={-1} className={`flex-1 min-h-0 flex flex-col outline-none ${winControls ? "pt-8" : ""}`}>
         {empty && <SurfaceLauncher available={available} onChoose={choose} />}
         {panel === "diff" && <DiffView tabId={tabId} cwd={cwd} />}
+        {panel === "shell" && cwd && <ShellSurface cwd={cwd} />}
         {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}
         {panel === "team" && <TeamPanel conversation={conversation} cards={cards} />}
+        {panel === "tasks" && <TasksPanel conversation={conversation} />}
         {panel === "browser" && cwd && <BrowserSurface cwd={cwd} />}
         {(panel === "design" || panel === "ios" || panel === "android") && (
           <Suspense fallback={<p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.panel.loading")}</p>}>
@@ -241,6 +249,69 @@ function SurfaceLauncher({ available, onChoose }: { available: PanelAvailability
 }
 
 /**
+ * A aba Terminal: um shell de verdade (PTY) na pasta da conversa, o mesmo que o «Rodar» dos blocos de código usa. Como
+ * o navegador, ele não é montado aqui: esta tela reserva o espaço e publica (`setChatShell`), e o `TerminalPanel`
+ * desenha a aba de shell por cima. Fechar o painel ou trocar de conversa esconde o shell, sem matá-lo.
+ */
+/**
+ * O retângulo de um slot do painel relativo à casca do chat (`[data-chat-shell]`), que é onde o `TerminalPanel` e o
+ * `ViewTabsHost` desenham. A base é procurada a partir do PAI do slot: um slot que carregasse o mesmo atributo seria a
+ * própria base, e o retângulo sairia em (0, 0) — o terminal da conversa aparecia no canto de cima, por cima da sidebar.
+ * `null` sem casca ou sem tamanho ainda. Pura (só lê o DOM).
+ */
+export function rectInShell(el: Element | null): { left: number; top: number; width: number; height: number } | null {
+  const base = el?.parentElement?.closest(`[${CHAT_SHELL_ATTR}]`) ?? null;
+  if (!el || !base) return null;
+  const r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  const b = base.getBoundingClientRect();
+  return { left: Math.round(r.left - b.left), top: Math.round(r.top - b.top), width: Math.round(r.width), height: Math.round(r.height) };
+}
+
+function ShellSurface({ cwd }: { cwd: string }) {
+  const { t } = useTranslation();
+  const slotRef = useRef<HTMLDivElement>(null);
+  const [tabId, setTabId] = useState<string | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void ensureShellTab(cwd).then((id) => { if (alive) setTabId(id); });
+    return () => { alive = false; };
+  }, [cwd]);
+  // A aba pode ser fechada no modo Abas: some do slot (e o próximo clique no >_ abre outra).
+  const alive = useTabsStore((s) => (tabId ? s.tabs.some((tab) => tab.id === tabId) : false));
+
+  const measure = useCallback(() => {
+    const rect = rectInShell(slotRef.current);
+    if (!rect || !tabId || !alive) return setChatShell(null);
+    setChatShell({ tabId, rect });
+  }, [tabId, alive]);
+
+  useLayoutEffect(() => measure());
+  useEffect(() => {
+    const el = slotRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(() => measure());
+    observer.observe(el);
+    const base = el.closest(`[${CHAT_SHELL_ATTR}]`);
+    if (base) observer.observe(base);
+    return () => observer.disconnect();
+  }, [measure]);
+  useEffect(() => () => setChatShell(null), []);
+
+  return (
+    <section aria-label={t("chat.shell.label")} className="flex-1 min-h-0 flex flex-col">
+      <div className="flex items-center gap-2 h-9 px-3.5 shrink-0 border-b border-gray-200 dark:border-white/[0.08] text-chat-note text-gray-500 dark:text-white/45">
+        <span className="font-medium text-gray-800 dark:text-white/80">{t("chat.shell.title")}</span>
+        <span className="flex-1 min-w-0 truncate font-mono text-chat-caption" title={cwd}>{cwd}</span>
+      </div>
+      <div className="flex-1 min-h-0 p-2 bg-white dark:bg-black">
+        <div ref={slotRef} data-chat-shell-slot={tabId ?? ""} className="h-full" />
+      </div>
+    </section>
+  );
+}
+
+/**
  * A aba Navegador: o navegador do ADE (o mesmo das abas e do canvas) para a pasta da conversa. Como o
  * terminal, ele não é montado aqui: esta tela reserva o espaço e publica, e o `ViewTabsHost` o
  * desenha por cima. Reaproveita o navegador que a pasta já tiver; senão abre um.
@@ -257,12 +328,9 @@ function BrowserSurface({ cwd }: { cwd: string }) {
   }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- um navegador por pasta, criado uma vez
 
   const measure = useCallback(() => {
-    const el = slotRef.current;
-    const base = el?.closest(`[${CHAT_SHELL_ATTR}]`);
-    if (!el || !base || !viewId) return setChatBrowser(null);
-    const r = el.getBoundingClientRect();
-    const b = base.getBoundingClientRect();
-    setChatBrowser({ viewId, rect: { left: Math.round(r.left - b.left), top: Math.round(r.top - b.top), width: Math.round(r.width), height: Math.round(r.height) } });
+    const rect = rectInShell(slotRef.current);
+    if (!rect || !viewId) return setChatBrowser(null);
+    setChatBrowser({ viewId, rect });
   }, [viewId]);
 
   useLayoutEffect(() => measure());

@@ -40,9 +40,10 @@ describe("o atalho do painel Time", () => {
 });
 
 describe("a fileira de ícones do painel", () => {
-  it("tem Resumo, Terminal, Diff, Navegador, Aparelho e Arquivos; o resto vai para o ⋯", () => {
-    expect(ROW_CHOICES).toEqual(["summary", "terminal", "diff", "browser", "ios", "files"]);
-    expect(MORE_ENTRIES.map((e) => e.id)).toEqual(["design", "android", "team", "pr"]);
+  it("tem Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e Time; o resto vai para o ⋯", () => {
+    // O Time fica à mostra com os demais (antes ficava escondido no ⋯).
+    expect(ROW_CHOICES).toEqual(["summary", "terminal", "diff", "browser", "ios", "files", "team"]);
+    expect(MORE_ENTRIES.map((e) => e.id)).toEqual(["design", "android", "pr"]);
   });
   it("nada some: fileira e ⋯ juntos são todas as linhas do menu, sem repetir", () => {
     const all = [...ROW_CHOICES, ...MORE_ENTRIES.map((e) => e.id)].sort();

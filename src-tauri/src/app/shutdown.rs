@@ -28,6 +28,8 @@ pub(crate) fn shutdown_once() {
             &mut || crate::ipc::cleanup(),
             &mut || crate::terminal::kill_all_sessions(),
             &mut || crate::sim_host::stop(),
+            // Os helpers do espelhamento param o stream no aparelho sozinhos quando o stdin deles fecha.
+            &mut || crate::iphone::stop_all(),
         ],
     );
 }

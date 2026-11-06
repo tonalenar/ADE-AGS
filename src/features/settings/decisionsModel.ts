@@ -184,14 +184,23 @@ export interface ShadowSummary {
   sample: number;
 }
 
+/**
+ * Pontos sem heurística local: o piloto e a visão decidem sozinhos, e a coluna `heuristic` do log guarda outra coisa
+ * (`foto_enviada=true superficie=ios rotulos=23`). Comparar isso com a decisão dá sempre "discorda": com o computer use
+ * em uso, a concordância do cartão caía para 1% sem nada errado no Jev.
+ */
+export const NO_HEURISTIC = new Set(["browser_step", "browser_vision"]);
+
 /** O resumo do relatório do modo sombra (o cartão da direita no chat). Pura. */
-export function shadowSummary(points: { total: number; compared: number; agreementRate: number; p50Ms: number | null; p95Ms: number | null; errorRate: number }[]): ShadowSummary {
-  const sample = points.reduce((n, p) => n + p.compared, 0);
+export function shadowSummary(points: { point?: string; total: number; compared: number; agreementRate: number; p50Ms: number | null; p95Ms: number | null; errorRate: number }[]): ShadowSummary {
+  // Erros e latência valem para todos; a concordância só onde há uma regra local com que concordar.
+  const comparable = points.filter((p) => !NO_HEURISTIC.has(p.point ?? ""));
+  const sample = comparable.reduce((n, p) => n + p.compared, 0);
   const total = points.reduce((n, p) => n + p.total, 0);
   const worst = (pick: (p: (typeof points)[number]) => number | null) =>
     points.reduce<number | null>((max, p) => { const v = pick(p); return v === null ? max : max === null ? v : Math.max(max, v); }, null);
   return {
-    agreement: sample > 0 ? points.reduce((n, p) => n + p.agreementRate * p.compared, 0) / sample : null,
+    agreement: sample > 0 ? comparable.reduce((n, p) => n + p.agreementRate * p.compared, 0) / sample : null,
     p50Ms: worst((p) => p.p50Ms),
     p95Ms: worst((p) => p.p95Ms),
     errorRate: total > 0 ? points.reduce((n, p) => n + p.errorRate * p.total, 0) / total : null,

@@ -39,6 +39,7 @@ pub mod permission;
 pub mod pool;
 pub mod resume;
 pub mod store;
+pub mod tarefas;
 pub mod troca;
 pub mod turn;
 pub mod worktree;
@@ -54,6 +55,8 @@ mod pool_test;
 mod replay_protocolo;
 #[cfg(test)]
 mod troca_test;
+#[cfg(test)]
+mod tarefas_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]

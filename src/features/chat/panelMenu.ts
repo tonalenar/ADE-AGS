@@ -37,10 +37,17 @@ export const PANEL_ENTRIES: PanelEntry[] = [
  * A fileira de ícones da barra do painel (como o painel do Claude Code): Resumo, Terminal, Diff,
  * Navegador, Aparelho (o simulador iOS) e Arquivos. O resto (Design, Android, Time, PR) fica no `⋯`.
  */
-export const ROW_CHOICES: PanelChoice[] = ["summary", "terminal", "diff", "browser", "ios", "files"];
+/** Os ícones da fileira do cabeçalho. O Time fica à mostra com os demais (antes ficava escondido no ⋯). */
+export const ROW_CHOICES: PanelChoice[] = ["summary", "terminal", "diff", "browser", "ios", "files", "team"];
 
 /** As linhas que sobram para o menu `⋯`, na ordem de `PANEL_ENTRIES`. */
 export const MORE_ENTRIES: PanelEntry[] = PANEL_ENTRIES.filter((e) => !ROW_CHOICES.includes(e.id));
+
+/**
+ * Os ícones da fileira que vão para o ⋯ quando a conversa fica estreita (um painel aberto numa janela de ~1000 px):
+ * sem isso o cabeçalho cortava o último ícone, o de fechar o painel. O que está à vista nunca sai da fileira.
+ */
+export const COMPACT_HIDDEN: PanelChoice[] = ["diff", "browser", "files"];
 
 /** O que está disponível agora: o terminal precisa de uma conversa com gaveta; o PR ainda não tem aba no painel. */
 export interface PanelAvailability {

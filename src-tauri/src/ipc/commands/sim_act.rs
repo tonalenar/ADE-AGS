@@ -53,8 +53,14 @@ pub(super) fn parse(args: &Value) -> Result<(Request, Duration), String> {
         }
     }
     let mut expect = vec![];
+    let mut visual = vec![];
     for value in list(args, "expect")? {
-        let text=value.strip_prefix("text:").filter(|s|!s.trim().is_empty()).ok_or("O iOS visual aceita --expect text:trecho (OCR local); url/count/absent exigem acessibilidade.")?;
+        // `visual:` compara os pixels com a primeira foto do act: o tema que só troca a paleta não muda o texto.
+        if value.starts_with("visual:") {
+            visual.push(computer_use::visual::Visual::parse(&value).ok_or("--expect visual: aceita changed, darker ou lighter.")?);
+            continue;
+        }
+        let text=value.strip_prefix("text:").filter(|s|!s.trim().is_empty()).ok_or("O iOS visual aceita --expect text:trecho (OCR local) ou visual:changed|darker|lighter (pixels); url/count/absent exigem acessibilidade.")?;
         expect.push(text.into());
     }
     Ok((
@@ -62,6 +68,7 @@ pub(super) fn parse(args: &Value) -> Result<(Request, Duration), String> {
             goal,
             fills,
             expect,
+            visual,
             steps: steps as usize,
         },
         Duration::from_secs(seconds),
@@ -115,6 +122,14 @@ mod test {
         assert_eq!(q.expect, ["Resultado", "Busca"]);
         assert_eq!(q.steps, 3);
         assert_eq!(t.as_secs(), 60);
+    }
+    #[test]
+    fn expectativa_por_pixels_entra_separada_do_texto_e_nome_desconhecido_e_recusado() {
+        use computer_use::visual::Visual;
+        let (q, _) = parse(&json!({"goal":"tema escuro","expect":["visual:darker","text:Escuro","visual:changed"]})).unwrap();
+        assert_eq!(q.expect, ["Escuro"]);
+        assert_eq!(q.visual, [Visual::Darker, Visual::Changed]);
+        assert!(parse(&json!({"goal":"x","expect":"visual:azul"})).is_err());
     }
     #[test]
     fn rejeita_uso_invalido_antes_de_observar() {

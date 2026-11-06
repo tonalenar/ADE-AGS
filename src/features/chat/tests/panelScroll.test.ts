@@ -12,15 +12,22 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf
 describe("os painéis da direita rolam (sem barra visível)", () => {
   const summary = read("../summary/SummaryPane.tsx");
 
-  it("o dock do Resumo é uma coluna flex de altura fixa pelas bordas, e o Resumo ocupa o resto", () => {
-    expect(summary).toMatch(/absolute top-\[52px\] right-3 z-20 flex flex-col min-h-0/);
-    expect(summary).toMatch(/<div className="flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3">/);
+  it("o cartão do Resumo é uma coluna flex de altura limitada, e o Resumo é o miolo que rola", () => {
+    expect(read("../summary/SummaryPopover.tsx")).toMatch(/max-h-\[calc\(100%-64px\)\] flex flex-col min-h-0/);
+    expect(summary).toMatch(/"flex-1 min-h-0 cc-scroll-hidden py-1 flex flex-col"/);
   });
 
-  it("o ChatShell usa o dock (e não um div solto sem flex)", () => {
+  it("o Resumo não é coluna do painel nem fica fixo por cima da conversa: é o cartão do ícone", () => {
+    expect(read("../RightPanel.tsx")).not.toMatch(/SummaryPane/);
     const shell = read("../ChatShell.tsx");
-    expect(shell).toMatch(/<SummaryDock overlay=\{summarySpot === "overlay"\}>/);
-    expect(shell).not.toMatch(/absolute top-\[52px\] bottom-0 right-3 z-10" style/);
+    // Sem painel: a coluna fixa abaixo do cabeçalho (o cabeçalho fica com a largura inteira, acima dela).
+    expect(shell).toMatch(/\{summaryPinned && !panelOpen && \(\s*<aside aria-label=\{t\("chat.panel.open.summary"\)\} data-summary-column/);
+    // Com painel: o cartão flutuante, menor.
+    expect(shell).toMatch(/\{summaryOpen && panelOpen && \(\s*<SummaryPopover width=\{SUMMARY_POPOVER_W\}/);
+    expect(shell.indexOf("</header>")).toBeLessThan(shell.indexOf("data-summary-column"));
+    // Um pouco menor que antes (420 px): a coluna tem 350 px e encolhe até 280.
+    expect(shell).toMatch(/w-\[350px\] min-w-\[280px\] shrink/);
+    expect(summary).not.toMatch(/SummaryDock/);
   });
 
   it("o painel Time e o rascunho: a lista é o miolo que rola, com min-h-0 e flex-1", () => {

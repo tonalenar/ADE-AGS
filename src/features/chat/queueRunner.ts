@@ -4,7 +4,8 @@ import { useChatLive } from "./liveStore";
 import { usePermissions } from "./permissions/permissionsStore";
 import { dequeueMessage, enqueueMessage, useChatStore } from "./store";
 import { threadIdOf } from "./structured/model";
-import { sendToThread, useStructured } from "./structured/store";
+import { interruptThread, sendToThread, useStructured } from "./structured/store";
+import type { MidTurn } from "./chatModel";
 
 /**
  * A fila do composer (prancheta 13): ⌘⏎ com o agente trabalhando guarda a mensagem; quando o turno
@@ -36,6 +37,24 @@ export function queueOrSend(key: string, text: string): void {
   const { working, waiting } = stateOf(key);
   if (working || waiting) enqueueMessage(key, text);
   else send(key, text);
+}
+
+/**
+ * ⏎ com o agente trabalhando numa conversa por protocolo («enviar agora»). `steer` entrega já, no turno em andamento;
+ * `interrupt` (o motor não aceita entrada no meio do turno) põe a mensagem na frente da fila e para o turno: ela sai
+ * assim que o turno parar, como o próximo, na mesma sessão. Antes, no Cursor e no Antigravity ela esperava atrás de um
+ * turno que podia não acabar, e o Parar a descartava. Devolve o que fez.
+ */
+export function sendNow(key: string, text: string, midTurn: MidTurn, deliver: () => void): "sent" | "interrupting" {
+  const threadId = threadIdOf(key);
+  const { working } = stateOf(key);
+  if (!threadId || !working || midTurn === "steer") {
+    deliver();
+    return "sent";
+  }
+  enqueueMessage(key, text, true);
+  interruptThread(threadId);
+  return "interrupting";
 }
 
 let started = false;

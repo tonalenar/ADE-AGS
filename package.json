@@ -1,7 +1,7 @@
 {
   "name": "ade-ags",
   "private": true,
-  "version": "1.12.0",
+  "version": "1.13.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -18,7 +18,8 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "app:build": "bun scripts/build.mjs",
-    "stage-cli": "bun scripts/stage-cli.mjs",
+    "stage-cli": "bun scripts/stage-cli.mjs && bun scripts/build-iphone-mirror.mjs",
+    "build:iphone-mirror": "bun scripts/build-iphone-mirror.mjs",
     "release": "bun scripts/release.mjs"
   },
   "dependencies": {

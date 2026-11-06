@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use tauri::{AppHandle, Runtime, Webview};
+use tauri::{AppHandle, Emitter, Runtime, Webview};
 
 use super::lifecycle;
 
@@ -151,16 +151,32 @@ pub fn simulator_relaunch(udid: String, bundle: String) -> Result<(), String> {
 /// `landscapeLeft`, `portraitUpsideDown`, `landscapeRight`).
 #[tauri::command(async)]
 pub fn simulator_rotate(app: AppHandle, udid: String, direction: String) -> Result<String, String> {
-    let orientation = ops::rotate(&udid, &direction)?;
-    // As telas abertas desse aparelho se põem em pé na orientação nova (as views são da thread da interface).
+    rotate_device(&app, &udid, &direction)
+}
+
+/// Gira o aparelho e avisa quem mostra a tela dele. Usado pela barra do canvas, pelo painel do chat e pelo
+/// `ags device rotate`: as telas abertas se põem em pé na orientação nova (as views são da thread da
+/// interface) e o evento `simulator-orientation` deita a moldura em todas as telas que mostram o aparelho.
+pub(crate) fn rotate_device(app: &AppHandle, udid: &str, direction: &str) -> Result<String, String> {
+    let orientation = ops::rotate(udid, direction)?;
     #[cfg(target_os = "macos")]
     {
-        let target = udid.clone();
+        let target = udid.to_string();
         let _ = app.run_on_main_thread(move || super::native::view::reorient(&target));
     }
-    #[cfg(not(target_os = "macos"))]
-    let _ = app;
+    let _ = app.emit("simulator-orientation", serde_json::json!({ "udid": udid, "orientation": orientation }));
     Ok(orientation)
+}
+
+/// Área de transferência entre o Mac e o aparelho: `toDevice` leva o que o Mac copiou; `toMac` traz o que o
+/// aparelho copiou. Pelo `devicectl` (CoreDevice), com todos os tipos.
+#[tauri::command(async)]
+pub fn simulator_clipboard(udid: String, direction: String) -> Result<(), String> {
+    match direction.as_str() {
+        "toDevice" => ops::clipboard_to_device(&udid),
+        "toMac" => ops::clipboard_to_mac(&udid),
+        other => Err(format!("Direção da área de transferência desconhecida: '{other}' (use toDevice ou toMac).")),
+    }
 }
 
 /// A última orientação que a ADE mandou ao aparelho (`portrait`, `landscapeLeft`…): a tela que abre

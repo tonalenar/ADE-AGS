@@ -20,6 +20,19 @@ describe("shadowSummary (cartão do modo sombra)", () => {
     expect(s.errorRate).toBeCloseTo(0.125);
     expect([s.p50Ms, s.p95Ms, s.sample]).toEqual([120, 200, 40]);
   });
+
+  it("pontos sem heurística local (piloto e visão) ficam fora da concordância, mas contam erros e latência", () => {
+    // O painel do usuário em 2026-11-05: 203 consultas visuais do computer use (sem heurística, nunca "concordam")
+    // e 4 do delivery_gate, 2 iguais. Antes o cartão mostrava 1% de concordância em 199 amostras.
+    const s = shadowSummary([
+      point({ point: "browser_vision", total: 203, compared: 195, agreementRate: 0, errorRate: 8 / 203, p50Ms: 576, p95Ms: 1469 }),
+      point({ point: "delivery_gate", total: 4, compared: 4, agreementRate: 0.5, errorRate: 0, p50Ms: 332, p95Ms: 491 }),
+    ]);
+    expect(s.agreement).toBeCloseTo(0.5);
+    expect(s.sample).toBe(4);
+    expect(s.errorRate).toBeCloseTo(8 / 207);
+    expect([s.p50Ms, s.p95Ms]).toEqual([576, 1469]);
+  });
 });
 
 describe("POINT_MODE", () => {
