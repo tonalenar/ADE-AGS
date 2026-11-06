@@ -26,16 +26,66 @@ use super::server::{self, MAX_CONNECTIONS};
 pub struct ExchangeError {
     pub message: String,
     pub retryable: bool,
+    /// O SO recusou a conexão (`EPERM`/`EACCES`): o app está de pé, quem bloqueia é o sandbox do
+    /// agente. Não é "app fechado" (exit 3) nem se resolve esperando.
+    pub denied: bool,
 }
 
 impl ExchangeError {
     fn unreachable(message: impl Into<String>) -> Self {
-        ExchangeError { message: message.into(), retryable: true }
+        ExchangeError { message: message.into(), retryable: true, denied: false }
     }
 
     fn gone(message: impl Into<String>) -> Self {
-        ExchangeError { message: message.into(), retryable: false }
+        ExchangeError { message: message.into(), retryable: false, denied: false }
     }
+
+    fn denied(message: impl Into<String>) -> Self {
+        ExchangeError { message: message.into(), retryable: false, denied: true }
+    }
+}
+
+/// O sandbox em que a CLI parece estar, pelas variáveis que cada agente põe no shell dele:
+/// o Codex põe `CODEX_SANDBOX` (`seatbelt` no macOS) e o Gemini CLI põe `SANDBOX`
+/// (`sandbox-exec` no macOS, ou o nome do contêiner). Só serve para a mensagem: não autoriza nada.
+pub fn sandbox_hint(var: impl Fn(&str) -> Option<String>) -> Option<&'static str> {
+    if var("CODEX_SANDBOX").is_some_and(|v| !v.is_empty()) {
+        Some("codex")
+    } else if var("SANDBOX").is_some_and(|v| !v.is_empty()) {
+        Some("gemini")
+    } else {
+        None
+    }
+}
+
+/// O erro de conectar ao canal com PID. Pura, para testar sem socket nem sandbox.
+///
+/// Permissão negada não é o app fechado: é o sandbox do agente (o do Codex em `workspace-write`
+/// devolve `Operation not permitted (os error 1)` ao conectar num socket Unix fora das pastas
+/// liberadas). Reiniciar o app não resolve e mata os terminais da pessoa, então a mensagem diz o
+/// que fazer em cada agente. O resto continua sendo "o app pode ter fechado".
+pub(crate) fn credential_connect_error(endpoint: &str, error: &std::io::Error, sandbox: Option<&str>) -> ExchangeError {
+    if error.kind() != std::io::ErrorKind::PermissionDenied {
+        return ExchangeError::unreachable(format!(
+            "Não foi possível conectar ao socket de credencial {endpoint} ({error}). O app pode ter fechado: peça à pessoa para abri-lo."
+        ));
+    }
+    let dir = std::path::Path::new(endpoint).parent().map(|d| d.display().to_string()).unwrap_or_else(|| endpoint.to_string());
+    let what = match sandbox {
+        Some("codex") => "Você está no sandbox do Codex. Rode este mesmo comando `ags` de novo pedindo escalonamento \
+(sandbox_permissions: \"require_escalated\", justificativa: \"falar com o ADE AGS pelo socket local\"); a pessoa aprova na conversa ou no terminal. \
+Para não pedir a cada vez, ela pode aprovar \"para a sessão\". Não use danger-full-access por isso."
+            .to_string(),
+        Some("gemini") => "Você está no sandbox do Gemini CLI. O perfil do macOS precisa permitir rede (permissive-open, o padrão) \
+ou a pessoa abre o Gemini sem --sandbox; num contêiner (docker/podman) o socket do app não existe.".to_string(),
+        _ => format!(
+            "Algum sandbox do agente bloqueou o socket. Libere só a pasta {dir} para conexões AF_UNIX \
+(Claude Code: sandbox.network.allowUnixSockets; Codex: pedir escalonamento ao rodar `ags`) ou rode o `ags` fora do sandbox, com aprovação da pessoa."
+        ),
+    };
+    ExchangeError::denied(format!(
+        "O sandbox do agente bloqueou o socket do ADE AGS ({endpoint}: {error}). O app está aberto: não o reinicie (isso fecha os terminais da pessoa). {what}"
+    ))
 }
 
 std::thread_local! {
@@ -97,11 +147,8 @@ fn exchange_tcp(handshake: &Handshake, payload: &str, timeout: Duration) -> Resu
 #[cfg(unix)]
 fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Result<String, ExchangeError> {
     use std::os::unix::net::UnixStream;
-    let stream = UnixStream::connect(endpoint).map_err(|e| {
-        ExchangeError::unreachable(format!(
-            "Não foi possível conectar ao socket de credencial {endpoint} ({e}). Reinicie o app."
-        ))
-    })?;
+    let stream = UnixStream::connect(endpoint)
+        .map_err(|e| credential_connect_error(endpoint, &e, sandbox_hint(|k| std::env::var(k).ok())))?;
     let _ = stream.set_read_timeout(Some(timeout));
     let _ = stream.set_write_timeout(Some(timeout));
     write_and_read(stream, payload)
@@ -363,6 +410,36 @@ pub(crate) fn peer_pid(_stream: &std::os::unix::net::UnixStream) -> Result<u32, 
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn socket_negado_pelo_sandbox_diz_o_que_fazer_e_nao_manda_reiniciar_o_app() {
+        let endpoint = "/Users/x/.ags/ipc/42.sock";
+        let eperm = Error::from_raw_os_error(1);
+        assert_eq!(eperm.kind(), ErrorKind::PermissionDenied);
+        let codex = super::credential_connect_error(endpoint, &eperm, Some("codex"));
+        assert!(codex.denied && !codex.retryable);
+        assert!(codex.message.contains("require_escalated"), "{}", codex.message);
+        assert!(codex.message.contains("não o reinicie"));
+        let gemini = super::credential_connect_error(endpoint, &eperm, Some("gemini"));
+        assert!(gemini.message.contains("Gemini") && gemini.denied);
+        let other = super::credential_connect_error(endpoint, &Error::from(ErrorKind::PermissionDenied), None);
+        assert!(other.message.contains("/Users/x/.ags/ipc") && other.message.contains("allowUnixSockets"));
+        // App fechado continua reintentável e não fala de sandbox.
+        let gone = super::credential_connect_error(endpoint, &Error::from(ErrorKind::ConnectionRefused), Some("codex"));
+        assert!(gone.retryable && !gone.denied && !gone.message.contains("sandbox"));
+        assert!(!gone.message.contains("Reinicie o app"));
+    }
+
+    #[test]
+    fn o_sandbox_vem_das_variaveis_que_cada_agente_poe_no_shell() {
+        let env = |pairs: &'static [(&'static str, &'static str)]| move |k: &str| pairs.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        assert_eq!(super::sandbox_hint(env(&[("CODEX_SANDBOX", "seatbelt")])), Some("codex"));
+        assert_eq!(super::sandbox_hint(env(&[("SANDBOX", "sandbox-exec")])), Some("gemini"));
+        assert_eq!(super::sandbox_hint(env(&[("CODEX_SANDBOX", "")])), None);
+        assert_eq!(super::sandbox_hint(env(&[])), None);
+    }
+
     #[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
     #[test]
     fn the_credential_socket_reports_this_process() {

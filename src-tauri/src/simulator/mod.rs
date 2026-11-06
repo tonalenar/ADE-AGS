@@ -56,6 +56,41 @@ pub mod ops {
         }
     }
 
+    /// `xcrun devicectl device pasteboard <args…> --device <udid>`: a área de transferência do aparelho pelo
+    /// CoreDevice, o caminho público que o Xcode 27 usa (leva texto, imagem e os outros tipos). `input` vai pelo stdin.
+    fn pasteboard(udid: &str, args: &[&str], input: Option<Vec<u8>>) -> Result<String, String> {
+        use std::time::Duration;
+        let mut cmd = crate::util::spawn::hidden_command("xcrun");
+        cmd.args(["devicectl", "device", "pasteboard"]).args(args).args(["--device", udid, "--quiet"]);
+        let out = crate::util::spawn::output_with_input(&mut cmd, input, Duration::from_secs(20))
+            .map_err(|e| format!("devicectl: {e}"))?;
+        if out.status.success() {
+            Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+        } else {
+            Err(format!("devicectl pasteboard {}: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim()))
+        }
+    }
+
+    /// O que o Mac copiou vai para o aparelho (todos os tipos: texto, imagem, link).
+    pub fn clipboard_to_device(udid: &str) -> Result<(), String> {
+        pasteboard(udid, &["transfer", "to"], None).map(|_| ())
+    }
+
+    /// O que o aparelho copiou vem para o Mac.
+    pub fn clipboard_to_mac(udid: &str) -> Result<(), String> {
+        pasteboard(udid, &["transfer", "from"], None).map(|_| ())
+    }
+
+    /// O texto que o aparelho tem copiado (para o agente conferir um "Copiar link", por exemplo).
+    pub fn clipboard_text(udid: &str) -> Result<String, String> {
+        pasteboard(udid, &["paste"], None)
+    }
+
+    /// Põe `text` na área de transferência do aparelho, como texto.
+    pub fn set_clipboard_text(udid: &str, text: &str) -> Result<(), String> {
+        pasteboard(udid, &["copy"], Some(text.as_bytes().to_vec())).map(|_| ())
+    }
+
     pub fn open_url(udid: &str, url: &str) -> Result<(), String> {
         let url = super::model::normalize_url(url)?;
         simctl(&["openurl", udid, &url]).map(|_| ())

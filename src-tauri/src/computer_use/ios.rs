@@ -1,13 +1,13 @@
-//! Driver do simulador. Foto e HID existentes; nenhuma alteração no caminho de quadros.
+//! Driver do iOS: o simulador (foto pela `IOSurface`, HID do simulador) e o iPhone físico (foto do espelho, HID do
+//! CoreDevice, por `iphone::ops`). A autorização e a confirmação são as mesmas nos dois: o mesmo alcance, o mesmo
+//! "sempre neste aparelho" (por id) e o mesmo `always_asks`.
 use super::*;
 use crate::{
-    canvas,
     database::DbConnection,
     decisions::vision::computer,
     ipc::bridge::{ask_frontend_within, unwrap_frontend_result},
     simulator::ops,
 };
-use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
@@ -16,6 +16,28 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::AppHandle;
+
+/// O mesmo passo no simulador ou no iPhone físico (`device:<id>`), pelo id.
+mod dev {
+    use super::*;
+    use crate::iphone::{model::is_physical, ops as phone};
+
+    pub fn tap(app: &AppHandle, udid: &str, x: f64, y: f64) -> Result<(), String> {
+        if is_physical(udid) { phone::tap(app, udid, x, y) } else { ops::tap(udid, x, y) }
+    }
+    pub fn type_text(app: &AppHandle, udid: &str, text: &str) -> Result<(), String> {
+        if is_physical(udid) { phone::type_text(app, udid, text) } else { ops::type_text(udid, text) }
+    }
+    pub fn home(app: &AppHandle, udid: &str) -> Result<(), String> {
+        if is_physical(udid) { phone::gesture(app, udid, "home") } else { ops::button(udid, "home") }
+    }
+    pub fn swipe(app: &AppHandle, udid: &str, from: (f64, f64), to: (f64, f64), ms: u64) -> Result<(), String> {
+        if is_physical(udid) { phone::swipe(app, udid, from, to, ms) } else { ops::swipe(udid, from, to, ms) }
+    }
+    pub fn screenshot(app: &AppHandle, udid: &str) -> Result<String, String> {
+        if is_physical(udid) { phone::screenshot(app, udid) } else { ops::screenshot(udid) }
+    }
+}
 
 fn active() -> &'static Mutex<HashSet<String>> {
     static S: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -40,6 +62,44 @@ pub(super) fn marked_key(db: &DbConnection, key: &str) -> Result<bool, String> {
         .map_err(|_| "Estado de privacidade indisponível.")?;
     Ok(value.as_deref() == Some("1"))
 }
+pub(super) const ALLOW: &str = "Autorizar esta ação";
+pub(super) const ALWAYS: &str = "Autorizar sempre neste aparelho";
+pub(super) const DENY: &str = "Recusar";
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Answer {
+    Once,
+    Always,
+    No,
+}
+/// "Sempre neste aparelho", gravado no banco: vale entre sessões até a pessoa desligar a chave
+/// "Permitir que agentes controlem dispositivos" (`computer_use_forget`).
+const TRUST_PREFIX: &str = "computer_use.ios.trust.";
+fn trusted(db: &DbConnection, udid: &str) -> Result<bool, String> {
+    marked_key(db, &format!("{TRUST_PREFIX}{udid}"))
+}
+fn trust(db: &DbConnection, udid: &str, on: bool) -> Result<(), String> {
+    mark_key(db, &format!("{TRUST_PREFIX}{udid}"), on)
+}
+/// A pessoa já disse "sempre neste aparelho" para `udid` (simulador ou físico)?
+pub(crate) fn trusted_device(db: &DbConnection, udid: &str) -> Result<bool, String> {
+    trusted(db, udid)
+}
+/// Esquece o "sempre" de todos os aparelhos. Devolve quantos estavam marcados.
+pub(crate) fn forget_trust(db: &DbConnection) -> Result<usize, String> {
+    let conn = db.lock().map_err(|_| "Estado indisponível.")?;
+    conn.execute("DELETE FROM settings WHERE key LIKE ?1", [format!("{TRUST_PREFIX}%")])
+        .map_err(|_| "Não consegui esquecer as autorizações.".to_string())
+}
+/// O que pergunta mesmo com "sempre": tocar num controle de pagar, apagar, senha, sair, enviar…, e tocar
+/// num controle SEM texto (um ícone) que o próprio Jev não deu como claramente seguro (`jev_unsure`): sem
+/// rótulo, o julgamento dele é a única pista de que o ícone não é uma lixeira.
+pub(super) fn always_asks(action: &Action, label: Option<&str>, jev_unsure: bool) -> bool {
+    action.operation == Operation::Click
+        && match label {
+            Some(label) => sensitive_label(label),
+            None => jev_unsure,
+        }
+}
 fn mark(db: &DbConnection, udid: &str, private: bool) -> Result<(), String> {
     mark_key(db, &format!("computer_use.ios.private.{udid}"), private)
 }
@@ -63,6 +123,20 @@ pub(super) struct Label {
     pub top: f64,
     pub bottom: f64,
 }
+/// O texto do controle sob o ponto, com a mesma folga de `named_point`.
+pub(super) fn label_at(point: Option<(f64, f64)>, labels: &[Label]) -> Option<&str> {
+    let (x, y) = point?;
+    labels
+        .iter()
+        .find(|l| {
+            !l.text.trim().is_empty()
+                && x >= l.left - 0.02
+                && x <= l.right + 0.02
+                && y >= l.top - 0.02
+                && y <= l.bottom + 0.02
+        })
+        .map(|l| l.text.as_str())
+}
 pub(super) fn named_point(point: Option<(f64, f64)>, labels: &[Label]) -> bool {
     point.is_some_and(|(x, y)| {
         labels.iter().any(|l| {
@@ -80,6 +154,8 @@ pub(super) struct Frame {
     pub path: PathBuf,
     pub revision: String,
     pub pick: Option<computer::Pick>,
+    /// O traço que tira o alvo de baixo do teclado ou da barra, quando o toque escolhido cairia coberto (`cover`).
+    pub reveal: Option<((f64, f64), (f64, f64))>,
 }
 impl Drop for Frame {
     fn drop(&mut self) {
@@ -158,12 +234,79 @@ pub(super) fn image_revision(bytes: &[u8]) -> Result<String, String> {
     }
     Ok(format!("{:x}", hash.finalize()))
 }
-fn capture(udid: &str, deadline: Instant) -> Result<(PathBuf, String), String> {
+/// Uma foto do simulador. `frame` (id da superfície, seed) só existe na foto nativa.
+struct Photo {
+    path: PathBuf,
+    revision: String,
+    frame: Option<(u32, u32)>,
+    /// Só na foto nativa: a grade de brilho (`visual`). Pelo `simctl` não há pixels crus.
+    thumb: Option<super::visual::Thumb>,
+}
+/// Foto pela `IOSurface` da tela, dentro do processo (~0,1 s); se não der, pelo `simctl` (~1,4 s).
+fn capture(app: &AppHandle, udid: &str, deadline: Instant) -> Result<Photo, String> {
     if Instant::now() >= deadline {
         return Err("Prazo de captura esgotado.".into());
     }
-    let tmp = PathBuf::from(ops::screenshot(udid)?);
-    prepare_photo(tmp, udid, "ios-act", deadline)
+    let dir = crate::preview::capture::capture_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let path = dir.join(format!("ios-act-{}.png", uuid::Uuid::new_v4().simple()));
+    // O quadro físico só vale se passou pelo último IDR confiável. O caminho do espelho já grava o PNG reduzido
+    // diretamente dos pixels; se não houver quadro seguro, devicectl captura uma foto independente.
+    if crate::iphone::model::is_physical(udid) {
+        let shot = crate::iphone::ops::screenshot_for_computer_use(app, udid, &path)?;
+        let (source, elapsed_ms) = match shot.source {
+            crate::iphone::ops::ScreenshotSource::MirrorFrame => ("espelho", shot.elapsed.as_millis()),
+            crate::iphone::ops::ScreenshotSource::DeviceCtl => ("devicectl", shot.elapsed.as_millis()),
+        };
+        eprintln!("[computer_use] foto do iPhone: fonte={source} duração={elapsed_ms} ms");
+        return match shot.source {
+            crate::iphone::ops::ScreenshotSource::MirrorFrame => {
+                let revision = std::fs::read(&shot.path)
+                    .map_err(|_| "Foto indisponível.".to_string())
+                    .and_then(|bytes| image_revision(&bytes))?;
+                Ok(Photo { path: shot.path, revision: format!("{udid}:{revision}"), frame: None, thumb: None })
+            }
+            crate::iphone::ops::ScreenshotSource::DeviceCtl => {
+                let (path, revision) = prepare_photo(shot.path, udid, "ios-act", deadline)?;
+                Ok(Photo { path, revision, frame: None, thumb: None })
+            }
+        };
+    }
+    match super::capture::ios_shot(udid, &path) {
+        Ok(shot) => return Ok(Photo { path: shot.path, revision: shot.revision, frame: Some(shot.frame), thumb: shot.thumb }),
+        Err(error) => {
+            let _ = std::fs::remove_file(&path);
+            fallback_note("foto", &error);
+        }
+    }
+    let tmp = PathBuf::from(dev::screenshot(app, udid)?);
+    let (path, revision) = prepare_photo(tmp, udid, "ios-act", deadline)?;
+    Ok(Photo { path, revision, frame: None, thumb: None })
+}
+/// A revisão da tela agora, para conferir antes de tocar. Pela `IOSurface` é só ler e somar os pixels (sem PNG);
+/// pelo `simctl`, outra foto inteira. Uma revisão de um caminho nunca casa com a do outro: na dúvida, desatualizada.
+fn current_revision(app: &AppHandle, udid: &str, deadline: Instant) -> Result<String, String> {
+    if Instant::now() >= deadline {
+        return Err("Prazo de captura esgotado.".into());
+    }
+    let fast = if crate::iphone::model::is_physical(udid) { Err("aparelho físico".to_string()) } else { super::capture::ios_revision(udid) };
+    match fast {
+        Ok(revision) => Ok(revision),
+        Err(error) => {
+            fallback_note("revisão", &error);
+            let photo = capture(app, udid, deadline)?;
+            let _ = std::fs::remove_file(&photo.path);
+            Ok(photo.revision)
+        }
+    }
+}
+/// Uma vez por processo e por caso, no log: por que o caminho rápido não serviu (sem dados da tela).
+pub(super) fn fallback_note(what: &str, error: &str) {
+    static SEEN: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    let key = format!("{what}: {error}");
+    if SEEN.get_or_init(Default::default).lock().is_ok_and(|mut s| s.insert(key.clone())) {
+        eprintln!("[computer_use] {key}; usando o caminho antigo.");
+    }
 }
 /// Reduz a foto a 1.200 px, na pasta de capturas permitida, e calcula a revisão. Apaga `tmp`.
 pub(super) fn prepare_photo(tmp: PathBuf, id: &str, prefix: &str, deadline: Instant) -> Result<(PathBuf, String), String> {
@@ -174,23 +317,25 @@ pub(super) fn prepare_photo(tmp: PathBuf, id: &str, prefix: &str, deadline: Inst
     let dir = crate::preview::capture::capture_dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(format!("{prefix}-{}.png", uuid::Uuid::new_v4().simple()));
-    let mut cmd = crate::util::spawn::hidden_command("/usr/bin/sips");
-    cmd.args(["-Z", "1200"]).arg(&tmp).arg("--out").arg(&path);
-    let result = crate::util::spawn::output(
-        &mut cmd,
-        deadline
-            .saturating_duration_since(Instant::now())
-            .min(Duration::from_secs(15)),
-    );
-    let _ = std::fs::remove_file(tmp);
-    let out = match result {
-        Ok(out) => out,
-        Err(_) => {
+    // Dentro do processo (ImageIO); o `sips` fica de reserva.
+    let reduced = match super::capture::downscale(&tmp, &path, super::capture::MAX_SIDE) {
+        Ok(()) => true,
+        Err(error) => {
             let _ = std::fs::remove_file(&path);
-            return Err("Não consegui preparar a foto.".into());
+            fallback_note("redução", &error);
+            let mut cmd = crate::util::spawn::hidden_command("/usr/bin/sips");
+            cmd.args(["-Z", "1200"]).arg(&tmp).arg("--out").arg(&path);
+            crate::util::spawn::output(
+                &mut cmd,
+                deadline
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_secs(15)),
+            )
+            .is_ok_and(|out| out.status.success())
         }
     };
-    if !out.status.success() {
+    let _ = std::fs::remove_file(tmp);
+    if !reduced {
         let _ = std::fs::remove_file(path);
         return Err("Não consegui preparar a foto.".into());
     }
@@ -209,6 +354,26 @@ pub(super) fn ocr(path: &std::path::Path, deadline: Instant) -> Result<(String, 
     if Instant::now() >= deadline {
         return Err("Prazo do OCR local esgotado.".into());
     }
+    // O Vision dentro do processo (~0,1 s); o `swift -e` (~0,5 s, compila o script a cada vez) fica de reserva.
+    let lines = match super::capture::ocr(path) {
+        Ok(lines) => lines,
+        Err(error) => {
+            fallback_note("OCR", &error);
+            swift_ocr(path, deadline)?
+        }
+    };
+    let text = lines
+        .iter()
+        .map(|l| l.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if text.len() > 24_000 {
+        return Err("Texto da foto excedeu o limite local.".into());
+    }
+    Ok((text, lines))
+}
+/// O OCR antigo, pelo Swift do Xcode: o mesmo Vision num processo à parte.
+pub(super) fn swift_ocr(path: &std::path::Path, deadline: Instant) -> Result<Vec<Label>, String> {
     let mut cmd = crate::util::spawn::hidden_command("/usr/bin/swift");
     cmd.arg("-e").arg(include_str!("ios_ocr.swift")).arg(path);
     let out = crate::util::spawn::output(
@@ -221,17 +386,7 @@ pub(super) fn ocr(path: &std::path::Path, deadline: Instant) -> Result<(String, 
     if !out.status.success() {
         return Err("OCR local falhou; não enviei a foto.".into());
     }
-    let lines: Vec<Label> =
-        serde_json::from_slice(&out.stdout).map_err(|_| "OCR local inválido.")?;
-    let text = lines
-        .iter()
-        .map(|l| l.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if text.len() > 24_000 {
-        return Err("Texto da foto excedeu o limite local.".into());
-    }
-    Ok((text, lines))
+    serde_json::from_slice(&out.stdout).map_err(|_| "OCR local inválido.".into())
 }
 struct IosSurface {
     db: DbConnection,
@@ -248,19 +403,92 @@ struct IosSurface {
     frame: Arc<Mutex<Frame>>,
     fills: Vec<String>,
     expect: Vec<String>,
+    /// O OCR da foto que `settled` já leu, para a observação não ler de novo.
+    read_ahead: Option<(String, Vec<Label>)>,
+    /// Quando a última ação foi mandada ao HID: a foto seguinte espera `AFTER_ACTION` a partir daí.
+    acted_at: Option<Instant>,
+    /// A grade de brilho da última foto assentada, para a observação.
+    thumb: Option<super::visual::Thumb>,
 }
+/// Menos que isto de linhas de texto é tela ainda carregando (um app abrindo, uma transição).
+const MIN_LABELS: usize = 2;
+/// Quantas vezes esperar a tela assentar antes de mostrar o que houver ao decisor, e quanto esperar no máximo por
+/// um quadro novo (ou, sem foto nativa, quanto esperar sem saber).
+const SETTLE_TRIES: usize = 6;
+const SETTLE_WAIT: Duration = Duration::from_millis(800);
+/// Tela parada: nenhum quadro novo por este tempo. Uma transição do iOS dura ~350 ms e manda quadros seguidos.
+const QUIET: Duration = Duration::from_millis(300);
+/// O teto da espera por tela parada: um vídeo ou um indicador girando nunca param.
+const QUIET_CAP: Duration = Duration::from_millis(2_500);
+/// Na primeira foto do `act` não houve ação nossa: basta conferir que nada está animando agora.
+const QUIET_FIRST: Duration = Duration::from_millis(100);
+/// O mínimo entre uma ação e a foto seguinte, mesmo com a tela parada: um app pode levar centenas de ms para começar
+/// a reagir (rede, abrir), e uma foto antes disso mostraria a tela velha, que o Jev mandaria tocar de novo. Antes o
+/// `simctl` levava ~1,4 s e fazia essa espera sem querer.
+const AFTER_ACTION: Duration = Duration::from_millis(600);
+
+/// Esperar outra foto: só com a tela quase sem texto, tentativas sobrando e prazo para mais uma espera.
+pub(super) fn should_settle(labels: usize, try_no: usize, time_left: Duration) -> bool {
+    labels < MIN_LABELS && try_no + 1 < SETTLE_TRIES && time_left > SETTLE_WAIT * 4
+}
+
 impl IosSurface {
-    fn ask(&self, question: &str) -> Result<bool, String> {
+    /// A foto de uma tela já assentada: logo depois de abrir um app o iOS ainda está desenhando e o OCR lê só o
+    /// relógio. Uma foto assim faria o decisor gastar uma consulta para responder "não sei". O OCR feito aqui é
+    /// reaproveitado pela observação.
+    ///
+    /// Com a foto nativa, a espera segue os quadros: fotografa quando a tela fica `QUIET` sem quadro novo, e uma
+    /// tela quase sem texto espera o próximo quadro (até `SETTLE_WAIT`) em vez de uma pausa fixa. Sem ela, a
+    /// pausa fixa de antes.
+    fn settled(&mut self) -> Result<(PathBuf, String), String> {
+        let mut try_no = 0;
+        loop {
+            let left = self.deadline.saturating_duration_since(Instant::now());
+            // Sem foto nativa a espera não tem como ver quadros e só segue; a captura escolhe o caminho.
+            let not_before = self.acted_at.map(|t| t + AFTER_ACTION).filter(|t| *t < self.deadline);
+            let quiet = if self.acted_at.is_some() { QUIET } else { QUIET_FIRST };
+            let _ = super::capture::ios_quiet(&self.udid, quiet, QUIET_CAP.min(left / 4), not_before);
+            let photo = capture(&self.app, &self.udid, self.deadline)?;
+            let read = ocr(&photo.path, self.deadline)?;
+            if !should_settle(read.1.len(), try_no, self.deadline.saturating_duration_since(Instant::now())) {
+                self.read_ahead = Some(read);
+                self.thumb = photo.thumb;
+                return Ok((photo.path, photo.revision));
+            }
+            try_no += 1;
+            let _ = std::fs::remove_file(&photo.path);
+            match photo.frame {
+                Some(frame) => {
+                    let _ = super::capture::ios_changed(&self.udid, frame, SETTLE_WAIT);
+                }
+                None => std::thread::sleep(SETTLE_WAIT),
+            }
+        }
+    }
+
+    /// A confirmação por ação oferece "sempre neste aparelho"; a de privacidade (`review` = None), não.
+    fn ask(&self, question: &str, review: Option<serde_json::Value>) -> Result<Answer, String> {
         let seconds = self
             .deadline
             .saturating_duration_since(Instant::now())
             .as_secs()
             .min(1800);
         if seconds == 0 {
-            return Ok(false);
+            return Ok(Answer::No);
         }
-        let out=ask_frontend_within(&self.app,"user.ask",&json!({"question":question,"options":["Autorizar esta ação","Recusar"],"tabId":self.from,"timeout_s":seconds}),None,Duration::from_secs(seconds+1)).and_then(unwrap_frontend_result)?;
-        Ok(out["text"] == "Autorizar esta ação")
+        let options: &[&str] = if review.is_some() { &[ALLOW, ALWAYS, DENY] } else { &[ALLOW, DENY] };
+        let payload = super::desktop::ask_payload(question, options, &self.from, seconds, review);
+        // Sem resposta (fechou, prazo, tela indisponível) é recusa, não falha da superfície: nada foi feito.
+        let Ok(out) = ask_frontend_within(&self.app, "user.ask", &payload, None, Duration::from_secs(seconds + 1))
+            .and_then(unwrap_frontend_result)
+        else {
+            return Ok(Answer::No);
+        };
+        Ok(match out["text"].as_str() {
+            Some(ALLOW) => Answer::Once,
+            Some(ALWAYS) if options.contains(&ALWAYS) => Answer::Always,
+            _ => Answer::No,
+        })
     }
 }
 impl Surface for IosSurface {
@@ -274,6 +502,11 @@ impl Surface for IosSurface {
         if !allowed {
             return Err(Failure::OutsideScope);
         }
+        if crate::iphone::model::is_physical(&self.udid) {
+            // O celular de verdade: o espelho precisa estar ligado com o toque pronto (não se liga nada no aparelho).
+            crate::iphone::ops::ready_now(&self.app, &self.udid).map_err(|_| Failure::Operation)?;
+            return Ok(());
+        }
         if !ops::booted(&self.udid).map_err(|_| Failure::Operation)? {
             return Err(Failure::Operation);
         }
@@ -281,12 +514,13 @@ impl Surface for IosSurface {
         Ok(())
     }
     fn observe(&mut self) -> Result<Observation, String> {
-        let (path, revision) = capture(&self.udid, self.deadline)?;
+        let (path, revision) = self.settled()?;
         let mut fresh = Frame {
             labels: vec![],
             path,
             revision: revision.clone(),
             pick: None,
+            reveal: None,
         };
         self.authorize()
             .map_err(|_| "Autorização ou prazo expirou durante a captura.")?;
@@ -301,7 +535,10 @@ impl Surface for IosSurface {
                 "Orientação da foto não confere com o HID; rotação ainda não é suportada.".into(),
             );
         }
-        let (text, labels) = ocr(&fresh.path, self.deadline)?;
+        let (text, labels) = match self.read_ahead.take() {
+            Some(read) => read,
+            None => ocr(&fresh.path, self.deadline)?,
+        };
         fresh.labels = labels;
         let mut local_only = marked(&self.db, &self.udid)?;
         let ordinary =
@@ -313,9 +550,8 @@ impl Surface for IosSurface {
                 "Privacidade do simulador: um act anterior digitou dados locais. Limpe TODOS os dados escritos por --fill antes de continuar. Confirma que nenhum desses valores está visível nesta foto atual?\nFoto local: {}\nSe algum valor ainda aparece, recuse. Esta confirmação não autoriza fotos de senha detectada.",
                 fresh.path.display()
             );
-            if self.ask(&question)? {
-                let (check, current) = capture(&self.udid, self.deadline)?;
-                let _ = std::fs::remove_file(check);
+            if self.ask(&question, None)? != Answer::No {
+                let current = current_revision(&self.app, &self.udid, self.deadline)?;
                 self.authorize().map_err(|_| "Autorização expirou.")?;
                 if current == revision {
                     mark(&self.db, &self.udid, false)?;
@@ -329,6 +565,7 @@ impl Surface for IosSurface {
             revision,
             text,
             safe_for_provider: safe,
+            pixels: self.thumb.take(),
             targets: vec![
                 Target {
                     id: "screen".into(),
@@ -348,6 +585,30 @@ impl Surface for IosSurface {
                     operations: vec![Operation::Scroll],
                     risk: Risk::Ordinary,
                 },
+                Target {
+                    id: "swipe_left".into(),
+                    label: "Deslizar para a esquerda".into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
+                Target {
+                    id: "swipe_right".into(),
+                    label: "Deslizar para a direita".into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
+                Target {
+                    id: "home".into(),
+                    label: "Ir para a tela inicial".into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
+                Target {
+                    id: REVEAL.into(),
+                    label: REVEAL_LABEL.into(),
+                    operations: vec![Operation::Scroll],
+                    risk: Risk::Ordinary,
+                },
             ],
         })
     }
@@ -357,33 +618,30 @@ impl Surface for IosSurface {
             return Ok(false);
         }
         let point = frame.pick.as_ref().and_then(|p| p.point);
-        let label = point
-            .and_then(|(x, y)| {
-                frame.labels.iter().find(|l| {
-                    x >= l.left - 0.02
-                        && x <= l.right + 0.02
-                        && y >= l.top - 0.02
-                        && y <= l.bottom + 0.02
-                })
-            })
-            .map(|l| l.text.chars().take(200).collect::<String>())
-            .unwrap_or_else(|| "controle sem rótulo reconhecido".into());
-        let operation = match action.operation {
-            Operation::Click => format!("Tocar em «{label}»"),
-            Operation::Type => format!(
-                "Digitar {} caracteres locais no campo já focado",
-                self.fills.first().map_or(0, |v| v.chars().count())
-            ),
-            Operation::Scroll => "Rolar a tela".into(),
-            _ => "Executar ação".into(),
-        };
-        let question = format!(
-            "Confirma esta ação no simulador iOS?\n{operation}.\nO efeito foi classificado como sensível ou incerto.\nFoto local para revisão: {}\nPonto na foto (proporção): {:?}. A aprovação vale só para esta ação nesta tela.",
-            frame.path.display(),
-            point
-        );
+        let jev_unsure = frame.pick.as_ref().is_none_or(|p| p.confirm);
+        // Tocar numa tecla digita sem --fill: nem o "sempre neste aparelho" dispensa a pessoa.
+        let key = super::cover::keyboard_key(point, &frame.labels);
+        let named = label_at(point, &frame.labels).map(|t| t.chars().take(200).collect::<String>());
+        let label = named.clone().unwrap_or_else(|| "controle sem rótulo reconhecido".into());
+        let typed = self.fills.first().map_or(0, |v| v.chars().count());
+        let operation = super::desktop::describe(action, &label, typed, "Tocar");
+        let path = frame.path.clone();
         drop(frame);
-        self.ask(&question)
+        // A pessoa já disse "sempre" para este aparelho: só o que é de fato perigoso volta a perguntar.
+        if !key && !always_asks(action, named.as_deref(), jev_unsure) && trusted(&self.db, &self.udid)? {
+            return Ok(true);
+        }
+        let question =
+            super::desktop::confirm_question(place_of(&self.udid), &operation, &path.display().to_string(), point);
+        let review = super::desktop::review("ios", &operation, &path, point);
+        match self.ask(&question, Some(review))? {
+            Answer::Always => {
+                trust(&self.db, &self.udid, true)?;
+                Ok(true)
+            }
+            Answer::Once => Ok(true),
+            Answer::No => Ok(false),
+        }
     }
     fn execute(
         &mut self,
@@ -391,9 +649,9 @@ impl Surface for IosSurface {
         action: &Action,
         value: Option<&str>,
     ) -> Result<bool, String> {
-        // A foto é conferida depois de decidir e depois do eventual diálogo humano.
-        let (path, current) = capture(&self.udid, self.deadline)?;
-        let _ = std::fs::remove_file(path);
+        // A tela é conferida depois de decidir e depois do eventual diálogo humano: os mesmos pixels que o Jev viu,
+        // ou não toca. Pela `IOSurface` é uma leitura, não outra foto.
+        let current = current_revision(&self.app, &self.udid, self.deadline)?;
         if current != revision {
             return Ok(false);
         }
@@ -408,10 +666,12 @@ impl Surface for IosSurface {
             .ok_or("Ação sem decisão visual.")?
             .clone();
         drop(frame);
+        // Antes do HID: mesmo se ele falhar depois de agir, a foto seguinte espera o mínimo.
+        self.acted_at = Some(Instant::now());
         match action.operation {
             Operation::Click => {
                 let (x, y) = pick.point.ok_or("Toque sem coordenada validada.")?;
-                ops::tap(&self.udid, x * self.width, y * self.height)?;
+                dev::tap(&self.app, &self.udid, x * self.width, y * self.height)?;
             }
             Operation::Type => {
                 let text = value.ok_or("Preenchimento ausente.")?;
@@ -420,40 +680,120 @@ impl Surface for IosSurface {
                 self.typed_this_run = true;
                 self.authorize()
                     .map_err(|_| "Autorização expirou antes de digitar.")?;
-                ops::type_text(&self.udid, text)?;
+                dev::type_text(&self.app, &self.udid, text)?;
             }
-            Operation::Scroll => {
-                let (a, b) = if action.target.as_deref() == Some("scroll_up") {
-                    (0.75, 0.25)
-                } else {
-                    (0.25, 0.75)
-                };
-                ops::swipe(
-                    &self.udid,
-                    (self.width / 2., self.height * a),
-                    (self.width / 2., self.height * b),
-                    300,
-                )?;
-            }
+            Operation::Scroll => match action.target.as_deref() {
+                Some("home") => dev::home(&self.app, &self.udid)?,
+                Some(REVEAL) => {
+                    let ((x1, y1), (x2, y2)) = self
+                        .frame
+                        .lock()
+                        .map_err(|_| "Foto indisponível.")?
+                        .reveal
+                        .ok_or("Rolagem sem alvo coberto.")?;
+                    // Devagar, para o conteúdo parar perto de onde o dedo soltou (um traço rápido embala a lista).
+                    dev::swipe(&self.app, &self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 600)?;
+                }
+                Some(target) => {
+                    let ((x1, y1), (x2, y2)) = gesture_line(target).ok_or("Gesto iOS não oferecido.")?;
+                    dev::swipe(&self.app, &self.udid, (self.width * x1, self.height * y1), (self.width * x2, self.height * y2), 300)?;
+                }
+                None => return Err("Gesto iOS sem alvo.".into()),
+            },
             _ => return Err("Operação iOS não oferecida.".into()),
         }
+        // E de novo ao terminar: o gesto leva 300 ms, e o mínimo conta a partir do dedo solto.
+        self.acted_at = Some(Instant::now());
         Ok(true)
     }
 }
+/// Onde a ação acontece, para a pergunta à pessoa.
+fn place_of(udid: &str) -> &'static str {
+    if crate::iphone::model::is_physical(udid) { "no iPhone físico" } else { "no simulador iOS" }
+}
+
+/// Um agente quer mexer no iPhone físico por `ags device` (fora do `sim act`). Olhar passa; tocar, deslizar, tecla e
+/// botão perguntam à pessoa até ela dizer "sempre neste aparelho" (o mesmo `computer_use.ios.trust.<id>` do `sim act`);
+/// digitar texto pergunta sempre. `photo`/`point` vão ao diálogo para a pessoa ver onde. Sem resposta = recusa.
+pub(crate) fn confirm_physical(
+    app: &AppHandle,
+    db: &DbConnection,
+    from: &str,
+    udid: &str,
+    action: &str,
+    what: &str,
+    photo: Option<&std::path::Path>,
+    point: Option<(f64, f64)>,
+) -> Result<bool, String> {
+    if !crate::iphone::model::agent_asks(action, trusted(db, udid)?) {
+        return Ok(true);
+    }
+    const SECONDS: u64 = 300;
+    let options: &[&str] = if action == "type" { &[ALLOW, DENY] } else { &[ALLOW, ALWAYS, DENY] };
+    let question = format!(
+        "Confirma esta ação no iPhone físico?\n{what}.\nÉ o aparelho de verdade: a aprovação vale só para esta ação{}.",
+        if options.contains(&ALWAYS) { " (ou para todas neste aparelho, com \"sempre\")" } else { "" }
+    );
+    let review = photo.map(|p| super::desktop::review("iphone", what, p, point));
+    let payload = super::desktop::ask_payload(&question, options, from, SECONDS, review);
+    let Ok(out) = ask_frontend_within(app, "user.ask", &payload, None, Duration::from_secs(SECONDS + 1)).and_then(unwrap_frontend_result) else {
+        return Ok(false);
+    };
+    Ok(match out["text"].as_str() {
+        Some(ALLOW) => true,
+        Some(ALWAYS) if options.contains(&ALWAYS) => {
+            trust(db, udid, true)?;
+            true
+        }
+        _ => false,
+    })
+}
+
+/// O nome do alvo `reveal` na observação. Sem palavra de risco (um "sair" aqui faria o núcleo pedir confirmação para
+/// uma rolagem): o teste `rotulo_do_reveal_nao_e_sensivel` cobra.
+pub(super) const REVEAL_LABEL: &str = "Rolar até liberar o alvo coberto pelo teclado ou pela barra";
+/// O traço do dedo de cada gesto, em proporção da tela: rolar na vertical pelo meio; deslizar na horizontal na
+/// altura do meio, longe das bordas (a borda esquerda vira "voltar" e a de baixo, a barra de início).
+pub(super) fn gesture_line(target: &str) -> Option<((f64, f64), (f64, f64))> {
+    Some(match target {
+        "scroll_up" => ((0.5, 0.75), (0.5, 0.25)),
+        "scroll_down" => ((0.5, 0.25), (0.5, 0.75)),
+        "swipe_left" => ((0.8, 0.5), (0.2, 0.5)),
+        "swipe_right" => ((0.2, 0.5), (0.8, 0.5)),
+        _ => return None,
+    })
+}
+
 pub(super) fn decision_for(pick: &computer::Pick, text: &str, labels: &[Label]) -> Result<Decision, String> {
     let (operation, target) = match pick.operation.as_str() {
         "click" => (Operation::Click, Some("screen".into())),
         "type" => (Operation::Type, Some("screen".into())),
-        "scroll_up" | "scroll_down" => (Operation::Scroll, Some(pick.operation.clone())),
+        // Os gestos são da família do rolar: movimento comum, sem efeito sensível, cada um com seu alvo.
+        "scroll_up" | "scroll_down" | "swipe_left" | "swipe_right" | "home" => (Operation::Scroll, Some(pick.operation.clone())),
+        // Nosso, não do Jev: o toque escolhido cairia sob o teclado ou a barra, então primeiro rola (`cover`).
+        "reveal" => (Operation::Scroll, Some(REVEAL.into())),
         "done" => (Operation::Done, None),
         "stuck" => (Operation::Stuck, None),
         _ => return Err("Operação não oferecida.".into()),
     };
     let unnamed_click = operation == Operation::Click && !named_point(pick.point, labels);
+    // O risco é do controle tocado, não da tela inteira: um "Sair" no canto da tela não torna
+    // sensível rolar nem tocar em «Geral». Sem rótulos (teste, OCR vazio), vale o texto todo.
+    let touched = if labels.is_empty() {
+        sensitive_label(text)
+    } else {
+        operation == Operation::Click && label_at(pick.point, labels).is_some_and(sensitive_label)
+    };
+    if operation == Operation::Scroll && pick.operation == "reveal" {
+        // Rolar o conteúdo dentro da área livre: movimento comum, sem efeito sensível.
+        return Ok(Decision { requires_confirmation: false, action: Action { operation, target }, probability: pick.probability, goal_done: pick.goal_done });
+    }
+    let key = operation == Operation::Click && super::cover::keyboard_key(pick.point, labels);
     Ok(Decision {
         requires_confirmation: pick.confirm
-            || sensitive_label(text)
+            || touched
             || unnamed_click
+            || key
             || operation == Operation::Type,
         action: Action { operation, target },
         probability: pick.probability,
@@ -466,6 +806,10 @@ pub(super) struct VisualDecider {
     pub frame: Arc<Mutex<Frame>>,
     pub allow_type: bool,
     pub surface: &'static str,
+    /// Deslizar para os lados e ir para a tela inicial (só no iOS).
+    pub gestures: bool,
+    /// Rolar antes de tocar quando o alvo está sob o teclado ou a barra flutuante (só no iOS).
+    pub reveal: bool,
 }
 impl Decider for VisualDecider {
     fn decide(
@@ -474,12 +818,20 @@ impl Decider for VisualDecider {
         obs: &Observation,
         actions: &[Action],
     ) -> Result<Decision, String> {
-        let path = {
+        let (path, labels) = {
             let f = self.frame.lock().map_err(|_| "Foto indisponível.")?;
             if f.revision != obs.revision {
                 return Err("Foto desatualizada.".into());
             }
-            f.path.to_string_lossy().into_owned()
+            let labels: Vec<computer::TextBox> = f
+                .labels
+                .iter()
+                .map(|l| computer::TextBox {
+                    text: l.text.clone(),
+                    rect: crate::decisions::vision::Rect { left: l.left, right: l.right, top: l.top, bottom: l.bottom },
+                })
+                .collect();
+            (f.path.to_string_lossy().into_owned(), labels)
         };
         let recent = serde_json::to_string(actions).map_err(|_| "Histórico inválido.")?;
         let pick = computer::pick(
@@ -490,8 +842,14 @@ impl Decider for VisualDecider {
                 path: &path,
                 allow_type: self.allow_type,
                 surface: self.surface,
+                labels: &labels,
+                gestures: self.gestures,
             },
         )?;
+        let (pick, line) = {
+            let f = self.frame.lock().map_err(|_| "Foto indisponível.")?;
+            if self.reveal { uncover(pick, &f.labels) } else { (pick, None) }
+        };
         let decision = {
             let f = self.frame.lock().map_err(|_| "Foto indisponível.")?;
             decision_for(&pick, &obs.text, &f.labels)?
@@ -501,7 +859,26 @@ impl Decider for VisualDecider {
             return Err("Foto desatualizada.".into());
         }
         f.pick = Some(pick);
+        f.reveal = line;
         Ok(decision)
+    }
+}
+
+/// Um toque que cairia sob o teclado, a barra flutuante ou cortado na borda vira "rolar até liberar": o próximo
+/// passo olha de novo e o Jev escolhe o alvo já visível. Sem espaço livre para rolar, é incerteza (nada é tocado).
+pub(super) fn uncover(mut pick: computer::Pick, labels: &[Label]) -> (computer::Pick, Option<((f64, f64), (f64, f64))>) {
+    let Some(point) = pick.point.filter(|_| pick.operation == "click") else { return (pick, None) };
+    let Some(zone) = super::cover::covered(point, pick.label, labels) else { return (pick, None) };
+    match super::cover::reveal_line(point.1, zone) {
+        Some(line) => {
+            pick.operation = "reveal".into();
+            pick.point = None;
+            (pick, Some(line))
+        }
+        None => {
+            pick.probability = 0.0;
+            (pick, None)
+        }
     }
 }
 
@@ -529,19 +906,19 @@ pub(crate) fn act(
         .map_err(|_| "Estado indisponível.")?
         .insert(udid.into())
     {
-        return Err("Já há um act neste simulador. Espere ele terminar.".into());
+        return Err("Já há um act neste aparelho. Espere ele terminar.".into());
     }
     let _lease = Lease(udid.into());
     computer::ready(&db)?;
-    let device = ops::devices()?
-        .into_iter()
-        .find(|d| d.udid == udid)
-        .ok_or("Aparelho indisponível.")?;
-    if !device.width.is_finite()
-        || !device.height.is_finite()
-        || device.width <= 0.
-        || device.height <= 0.
-    {
+    super::capture::warm_ocr();
+    // A tela em pontos: a do tipo do simulador, ou a do espelho do iPhone físico (que liga o espelho se preciso).
+    let (width, height) = if crate::iphone::model::is_physical(udid) {
+        crate::iphone::ops::points(app, udid)?
+    } else {
+        let device = ops::devices()?.into_iter().find(|d| d.udid == udid).ok_or("Aparelho indisponível.")?;
+        (device.width, device.height)
+    };
+    if !width.is_finite() || !height.is_finite() || width <= 0. || height <= 0. {
         return Err("Dimensões do aparelho indisponíveis.".into());
     }
     let frame = Arc::new(Mutex::new(Frame::default()));
@@ -554,18 +931,23 @@ pub(crate) fn act(
         client_pid: caller.client_pid,
         node: node.into(),
         udid: udid.into(),
-        width: device.width,
-        height: device.height,
+        width,
+        height,
         deadline,
         frame: frame.clone(),
         fills: request.fills.values().cloned().collect(),
         expect: request.expect.clone(),
+        read_ahead: None,
+        acted_at: None,
+        thumb: None,
     };
     let mut decider = VisualDecider {
         db,
         frame,
         allow_type: request.fills.contains_key("screen"),
         surface: "iOS",
+        gestures: true,
+        reveal: true,
     };
     Ok(run(request, &mut surface, &mut decider))
 }
@@ -676,6 +1058,7 @@ mod flow_test {
                 }
                 .into(),
                 safe_for_provider: true,
+                pixels: None,
                 targets: vec![Target {
                     id: "screen".into(),
                     label: "Controle na foto".into(),
@@ -715,10 +1098,121 @@ mod flow_test {
             let pick = computer::parse(
                 r#"{"answers":{"operacao":{"choice":"click","probabilities":{"click":0.98}},"alvo":{"box":{"left":0.2,"right":0.4,"top":0.1,"bottom":0.3},"confidence":0.95},"concluido":{"choice":"no","probabilities":{"no":0.99}},"sensivel":{"choice":"yes","probabilities":{"yes":0.99}}}}"#,
                 false,
+                true,
+                &[],
             )?;
             *self.point.lock().unwrap() = pick.point;
             decision_for(&pick, &obs.text, &[])
         }
+    }
+    #[test]
+    fn tela_quase_sem_texto_espera_assentar_sem_passar_do_prazo_nem_das_tentativas() {
+        let folga = Duration::from_secs(30);
+        assert!(should_settle(1, 0, folga), "só o relógio: app ainda abrindo");
+        assert!(should_settle(0, 1, folga));
+        assert!(!should_settle(1, SETTLE_TRIES - 1, folga), "na última tentativa mostra o que houver");
+        assert!(!should_settle(MIN_LABELS, 0, folga), "tela com texto segue na hora");
+        assert!(!should_settle(0, 0, SETTLE_WAIT), "sem prazo, não espera");
+    }
+    #[test]
+    fn sempre_neste_aparelho_fica_no_banco_e_esquecer_apaga_tudo() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);").unwrap();
+        let db: DbConnection = Arc::new(Mutex::new(conn));
+        assert!(!trusted(&db, "A").unwrap());
+        trust(&db, "A", true).unwrap();
+        trust(&db, "B", true).unwrap();
+        assert!(trusted(&db, "A").unwrap() && !trusted(&db, "C").unwrap());
+        assert_eq!(forget_trust(&db).unwrap(), 2);
+        assert!(!trusted(&db, "A").unwrap() && !trusted(&db, "B").unwrap());
+        // A marca de privacidade de fills não é uma confiança e não some junto.
+        mark(&db, "A", true).unwrap();
+        forget_trust(&db).unwrap();
+        assert!(marked(&db, "A").unwrap());
+    }
+    #[test]
+    fn sempre_nao_cobre_tocar_em_pagar_apagar_ou_sair() {
+        let click = Action { operation: Operation::Click, target: Some("screen".into()) };
+        let scroll = Action { operation: Operation::Scroll, target: Some("scroll_up".into()) };
+        assert!(always_asks(&click, Some("Excluir conta"), false));
+        assert!(always_asks(&click, Some("Sair"), false));
+        assert!(!always_asks(&click, Some("Continuar como Eriston"), true));
+        assert!(!always_asks(&scroll, Some("Sair"), true));
+        // Ícone sem texto: segue o julgamento do Jev.
+        assert!(always_asks(&click, None, true));
+        assert!(!always_asks(&click, None, false));
+        assert!(!always_asks(&scroll, None, true));
+    }
+    #[test]
+    fn risco_vem_do_controle_tocado_nao_de_uma_palavra_em_outro_canto_da_tela() {
+        let label = |text: &str, top: f64| Label { text: text.into(), left: 0.1, right: 0.9, top, bottom: top + 0.05 };
+        let labels = vec![label("Geral", 0.2), label("Sair", 0.8)];
+        let pick = |op: &str, point| computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point, confirm: false, box_confidence: None, label: None };
+        let text = "Geral\nSair";
+        assert!(!decision_for(&pick("click", Some((0.5, 0.22))), text, &labels).unwrap().requires_confirmation, "tocar em «Geral»");
+        assert!(!decision_for(&pick("scroll_up", None), text, &labels).unwrap().requires_confirmation, "rolar não é sair");
+        assert!(decision_for(&pick("click", Some((0.5, 0.82))), text, &labels).unwrap().requires_confirmation, "tocar em «Sair»");
+        // O julgamento do Jev continua valendo, e sem rótulos o texto todo segue conservador.
+        let mut jev = pick("scroll_up", None);
+        jev.confirm = true;
+        assert!(decision_for(&jev, text, &labels).unwrap().requires_confirmation);
+        assert!(decision_for(&pick("scroll_up", None), text, &[]).unwrap().requires_confirmation);
+    }
+    fn lbl(text: &str, left: f64, top: f64, right: f64, bottom: f64) -> Label {
+        Label { text: text.into(), left, right, top, bottom }
+    }
+    #[test]
+    fn toque_no_checkbox_sob_a_barra_vira_rolar_ate_liberar_sem_confirmacao() {
+        // Nutriton, iPhone 17e: o checkbox em y=756 e a barra flutuante em y=757 (de 852 pontos).
+        let labels = vec![
+            lbl("Meta diária", 0.05, 0.30, 0.30, 0.32),
+            lbl("Beber 2 copos antes do almoço", 0.15, 0.875, 0.70, 0.898),
+            lbl("Hoje", 0.08, 0.93, 0.18, 0.95),
+            lbl("Plano", 0.30, 0.93, 0.42, 0.95),
+            lbl("Água", 0.55, 0.93, 0.66, 0.95),
+            lbl("Perfil", 0.80, 0.93, 0.92, 0.95),
+        ];
+        let click = computer::Pick { operation: "click".into(), probability: 0.9, goal_done: None, point: Some((0.42, 0.887)), confirm: false, box_confidence: None, label: Some(1) };
+        let (pick, line) = uncover(click, &labels);
+        assert_eq!(pick.operation, "reveal");
+        let ((_, from), (_, to)) = line.expect("traço para subir o conteúdo");
+        assert!(from < 0.88 && to < from, "começa acima da barra e sobe");
+        let d = decision_for(&pick, "", &labels).unwrap();
+        assert_eq!(d.action, Action { operation: Operation::Scroll, target: Some(REVEAL.into()) });
+        assert!(!d.requires_confirmation);
+        // A aba da própria barra continua um toque normal.
+        let tab = computer::Pick { operation: "click".into(), probability: 0.9, goal_done: None, point: Some((0.36, 0.94)), confirm: false, box_confidence: None, label: Some(3) };
+        assert_eq!(uncover(tab, &labels).0.operation, "click");
+    }
+    #[test]
+    fn rotulo_do_reveal_nao_e_sensivel() {
+        assert!(!sensitive_label(REVEAL_LABEL), "uma rolagem nunca pode parecer ação de risco");
+    }
+    #[test]
+    fn tocar_numa_tecla_digita_sem_fill_e_sempre_pede_a_pessoa() {
+        let mut labels = vec![lbl("Quantidade", 0.05, 0.30, 0.30, 0.32)];
+        for (i, k) in ["1", "2", "ABC", "3", "DEF", "4", "GHI"].iter().enumerate() {
+            let x = 0.1 + (i % 3) as f64 * 0.3;
+            let y = 0.66 + (i / 3) as f64 * 0.06;
+            labels.push(lbl(k, x, y, x + 0.04, y + 0.02));
+        }
+        let key = computer::Pick { operation: "click".into(), probability: 0.95, goal_done: None, point: Some((0.12, 0.67)), confirm: false, box_confidence: None, label: Some(1) };
+        let (key, line) = uncover(key, &labels);
+        assert_eq!((key.operation.as_str(), line), ("click", None), "uma tecla não é coberta: é o teclado");
+        assert!(decision_for(&key, "", &labels).unwrap().requires_confirmation);
+    }
+    #[test]
+    fn gestos_viram_rolar_com_alvo_proprio_sem_confirmacao_e_com_traco_longe_das_bordas() {
+        for op in ["swipe_left", "swipe_right", "home", "scroll_up"] {
+            let pick = computer::Pick { operation: op.into(), probability: 0.9, goal_done: None, point: None, confirm: false, box_confidence: None, label: None };
+            let d = decision_for(&pick, "Início", &[]).unwrap();
+            assert_eq!(d.action, Action { operation: Operation::Scroll, target: Some(op.into()) });
+            assert!(!d.requires_confirmation, "{op}");
+        }
+        let ((x1, y1), (x2, y2)) = gesture_line("swipe_left").unwrap();
+        assert!(x1 > x2 && y1 == y2 && x2 >= 0.1 && x1 <= 0.9);
+        assert!(gesture_line("swipe_right").is_some_and(|((a, _), (b, _))| a < b));
+        assert!(gesture_line("home").is_none(), "o início é o botão, não um traço");
     }
     #[test]
     fn foto_jev_tipado_confirmacao_hid_e_verificacao_fecham_o_percurso_simulado() {
@@ -740,6 +1234,7 @@ mod flow_test {
                 goal: "abrir painel".into(),
                 fills: Default::default(),
                 expect: vec!["PAINEL ABERTO".into()],
+                visual: vec![],
                 steps: 1,
             };
             let report = run(&request, &mut surface, &mut MockJev { point });
@@ -750,3 +1245,4 @@ mod flow_test {
         }
     }
 }
+

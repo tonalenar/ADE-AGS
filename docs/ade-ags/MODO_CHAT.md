@@ -27,6 +27,37 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
   - O laço do canal avisa `cc-conversation-grew` quando o arquivo cresce, e a janela relê.
 - **Desenho (prancheta 2):** cada turno tem a bolha da pessoa e o fold "Trabalhou por …" com as ferramentas e falas intermediárias. A resposta final e o cartão "N arquivos alterados" (com "Abrir diff") ficam fora do fold. Enquanto o agente trabalha, aparece "Trabalhando há …".
 - **O terminal do agente** fica numa gaveta de 280 px (botão no cabeçalho), posicionada por slot e sem remontar. Agentes sem transcript continuam com o terminal como corpo da conversa.
+- **O terminal da conversa** (o >_ do cabeçalho, tecla T do painel): na conversa de TUI com timeline, o >_ alterna a
+  gaveta do agente. Nas outras (por protocolo, ou TUI que já é o corpo), abre a aba **Terminal** do painel direito: um
+  shell de verdade (PTY) na pasta da conversa (`RightPanel.tsx::ShellSurface`, `shellTerminal.ts`).
+  - O shell é o de login da pessoa (`"$SHELL" -l`, lido de `agentSearchPath`; o zsh no macOS), numa aba de shell da
+    pasta. O agente de shell do app roda `bash`, e no macOS isso abria o bash 3.2 com o aviso do zsh. A aba com esse
+    shell é reaproveitada, como o navegador da pasta; dois pedidos seguidos dão uma aba só. Criá-la não troca a conversa
+    aberta, e ela aparece no modo Abas.
+  - O retângulo do slot é medido em relação à casca do chat a partir do PAI do slot (`rectInShell`): o slot carregava o
+    mesmo atributo da casca (`data-chat-shell`) e o terminal aparecia no canto de cima da janela, por cima da sidebar.
+  - Como o navegador, ela não é montada no painel: o painel publica o slot (`useChatStore.shell`), e
+    `placementsFrom`/`chatPlacements` a posiciona. Fechar o painel ou trocar de conversa só a esconde.
+  - **O agente da conversa usa o mesmo terminal** para comando interativo (login, código de verificação, pergunta,
+    assistente `npx`): `ags tab create --agent bash --initprompt "supabase login"` chamado de uma conversa
+    (`ADE_TAB_ID=thread:<id>`), ou `--in-chat` de qualquer conversa ou aba do chat. A CLI manda quem chama (`from`) no
+    `tab.create`; o backend (`ipc/commands/tabs.rs::chat_terminal_target`) troca a pasta pela da conversa (a do
+    registro da conversa, ou a da aba) e pede ao front `tab.create` com `chatShell`; o `cliBridge` abre a aba Terminal
+    do painel (`shellTerminal.ts::openChatTerminal`) e devolve o id do shell (`reused`, `visible`). Depois,
+    `ags tab send`/`tab output` nesse id. A pessoa digita no mesmo PTY, e o agente vê com `tab output`. `--new-tab`
+    volta à aba comum. Não há tool MCP: as de aba não são expostas por MCP.
+  - Num shell (`bash`, inclusive este), `tab send` e o primeiro comando vão como linha crua, uma vez só
+    (`tabs.rs::submit_style`): sem as novas tentativas das TUIs, que digitavam de novo um código num prompt sem eco,
+    e sem a ficha do ponto de restauração, que guardaria o texto (pode ser um código) no banco.
+  - Sem como abrir o terminal (sandbox, app fechado, erro), a skill manda o agente pôr o comando num bloco ```bash, um
+    por bloco, para a pessoa usar o **Rodar** ou colar no terminal ao lado; nunca rodar o interativo no shell
+    escondido do agente.
+- **Blocos de código** (`timeline/CodeBlockFrame.tsx`, `codeRun.ts`): cada bloco ganha **Copiar** (o código, sem o
+  fim de linha). Bloco de shell (`bash`, `sh`, `shell`, `zsh`, `console`…) ganha também **Rodar**, que abre o terminal
+  da conversa e manda o comando com um Enter (`terminalRegistry.runInTerminal`, sem as novas tentativas de Enter das
+  TUIs). Num bloco `console`, vão só as linhas `$ …`, sem o prompt. Nada roda sem o clique. Fora da conversa aberta (sem
+  `RunCodeContext`), o bloco só copia. O `Markdown` compartilhado recebe a moldura por `renderCodeBlock`.
+- **Copiar a mensagem** já existia: ao passar o mouse, sob cada fala e cada balão (`MessageActions`), leva o Markdown.
 - **Aprovações:**
   - O detector do canvas (`terminalPrompts.ts`) lê o diálogo da TUI.
   - O composer mostra Recusar / Sempre nesta sessão / Aprovar e manda a tecla da opção (`answerTerminalPrompt`).
@@ -172,6 +203,23 @@ PATH do shell de login e a pasta do instalador do Cursor).
 - **Modelo e esforço.** O modelo é o id da variante de `cursor-agent --list-models`; o esforço faz parte dele (`…-high`), por
   isso o controle de esforço fica escondido. Sem conta por conversa (login único do `cursor-agent login`) e sem ai-memory.
 - **Limites.** O fluxo não traz tokens nem cota: o cartão de Limites mostra «não medido · sem fonte de cota».
+- **Fim do turno.** O turno fecha no `result`, sem esperar o processo sair: um servidor que o agente deixou em segundo plano
+  (o Metro de um `npx expo start`) mantém o `cursor-agent` vivo, e o EOF nunca chega. Isso deixou uma conversa 9 h em
+  «Pensando…», com a resposta só na janela e a fila presa. O processo ganha 3 s para sair e então é encerrado. O que ele
+  deixou rodando não é tocado. Sem `result` e sem EOF, vale o **prazo de silêncio** (`cursor_map::quiet_after`):
+  - **10 s depois do `usage` de uma chamada do modelo que não pediu ferramenta:** o turno acaba bem. No `-p`, o
+    `cursor-agent` só manda o `result` quando os shells que ele pôs em segundo plano acabam, e um `npx expo start`
+    nunca acaba. A conversa ficava uns 3 min em «Pensando…» depois de cada resposta, quase sempre uma pergunta à
+    pessoa (a pergunta não era a causa: era o fim da resposta). Qualquer sinal nesses 10 s desfaz o fim;
+  - **3 min depois da fala, sem ferramenta aberta:** o turno acaba bem, porque a resposta veio;
+  - **15 min sem sinal:** o turno fecha com erro;
+  - **ferramenta rodando:** sem prazo, porque um build longo é legítimo.
+
+  Um servidor que o agente deixou em segundo plano morre quando o turno fecha e o `cursor-agent` é encerrado. Para
+  um servidor que precisa ficar de pé, como o Metro, use o terminal da conversa (o `>_`).
+  As perguntas do agente à pessoa (`interaction_query`) não travam: o `cursor-agent -p` as recusa sozinho.
+- **Parar sem agente vivo** (todos os motores, `api::stop`, também `ags chat stop`): fecha no banco o turno que ficou aberto
+  daquela conversa, com o fim «o agente já não estava rodando», e a janela volta a ociosa. Antes, o Parar não fazia nada.
 
 ### Antigravity por protocolo (`agy --print` em stream-json)
 
@@ -198,11 +246,16 @@ Com o Antigravity, a conversa nova roda `agy --print <mensagem> --output-format 
 
 ## Agente trabalhando e permissões (pranchetas 13 e 14)
 
-- **Linha viva** acima do composer (`LiveActivity.tsx`, lógica pura em `activityModel.ts`): três pontos de 5 px (pulso de 1,2 s; parados com `prefers-reduced-motion`), a atividade ("Rodando testes", "Editando frameBridge.ts", "Pensando…"), o tempo e os tokens do turno e "Ver o que está fazendo" (os dois últimos comandos e o raciocínio mais recente). `role="status"`; o tempo fica fora do anúncio.
+- **Linha viva** acima do composer (`LiveActivity.tsx`, lógica pura em `activityModel.ts`): três pontos de 5 px (pulso de 1,2 s; parados com `prefers-reduced-motion`), «Trabalhando…», o tempo e os tokens do turno e "Ver o que está fazendo" (os dois últimos comandos e o raciocínio mais recente). Não repete o comando nem o «Pensando…»: os dois já estão na timeline logo acima (o comando cortado no meio e as duas linhas empilhadas confundiam). A sidebar continua com a atividade ("Rodando testes"). `role="status"`; o tempo fica fora do anúncio.
   - **De onde vem:** os itens da conversa. A timeline ganhou os itens `reasoning` (o `thinking` do Claude, o `agent_reasoning`/resumo do Codex) e `usage` (os tokens de cada chamada: no Claude, entrada + cache + saída por mensagem; no Codex, o `token_count` do transcript ou o `thread/tokenUsage/updated` do app-server, com a base do turno em `codex_map::TurnTokens`), e o campo `plan` nas ferramentas `todo` (TodoWrite, `update_plan`, `turn/plan/updated`). Nada disso aparece no fio; `ags chat show` não lista os `usage`.
   - **Sidebar e cabeçalho:** a TUI usa o estado do canal (`turnStartedAt` e a ferramenta pendente, em `liveStore.turn`), sem ler a timeline de cada aba; a conversa por protocolo, os itens que chegam pelo evento.
 - **Plano do turno** (`PlanCard`): "Plano · 2 de 4", o passo atual em destaque e os concluídos riscados, logo abaixo da mensagem do turno em aberto.
-- **Fila:** ⏎ envia na hora; ⌘⏎ (Ctrl+⏎ fora do macOS) põe na fila com o agente trabalhando, e o `queueRunner` manda a próxima quando o turno acaba (TUI: quando o canal diz ociosa), uma por turno; um pedido esperando a pessoa segura a fila. O composer mostra "Fila: N".
+- **Enviar agora e fila:** com o agente trabalhando, a dica do composer diz o que o ⏎ faz naquele motor (`PROTOCOL_AGENTS.midTurn`, `chatModel.ts`):
+  - **Codex e Claude (`steer`):** «⏎ manda agora, no meio do turno». O Codex recebe `turn/steer`; o Claude lê a mensagem do stdin no meio do turno ou logo depois dele. Nada para;
+  - **Cursor, Antigravity e OpenCode (`interrupt`):** «⏎ para o turno e manda». Esses motores não aceitam entrada no meio do turno: antes, a mensagem esperava numa fila do backend, atrás de um turno que podia não acabar (o Cursor com o Metro em segundo plano), e o Parar a descartava. Agora `queueRunner.sendNow` a põe na frente da fila do composer, para o turno, e ela sai assim que ele parar, como o próximo turno da mesma sessão (o que já foi feito fica);
+  - **⌘⏎ (Ctrl+⏎ fora do macOS)** põe na fila, e o `queueRunner` manda a próxima quando o turno acaba (TUI: quando o canal diz ociosa), uma por turno; um pedido esperando a pessoa segura a fila.
+  - As mensagens esperando aparecem acima da caixa (`QueueList`): «Na fila» ou «Vai assim que o turno parar», com o texto, **Editar** (sai da fila e volta para a caixa) e **Tirar**. Na TUI, o ⏎ vai ao terminal do agente, que decide sozinho.
+- **Composer em coluna estreita** (o painel do simulador aberto): a coluna do composer é o container `composer` (`ComposerColumn`). A linha de baixo não quebra: o nome do modelo trunca só quando falta espaço; abaixo de 30rem, «Construir»/«Plano» fica só com o ícone; abaixo de 28rem, a pasta («Checkout atual») e o acesso também (o rótulo vai no tooltip e no leitor de tela), e só aí a linha volta a quebrar, para nada passar da borda do cartão.
 - **Permissões, um store só** (`permissions/`): as aprovações das conversas por protocolo (`chat_request`), os diálogos das TUIs (`terminalPrompts`, lidos de todas as abas de agente pelo `PermissionsManager`) e as aprovações da frota (`runs`) viram o mesmo `PendingAsk` (`askSources.ts`), com agente, conversa, tipo (comando, edição, rede), detalhe, pasta, risco e o que mexe. Responder usa o caminho de cada fonte (`chat_request_answer`, `answerTerminalPrompt`, `decideApproval`).
   - **Risco** (`riskOf`, puro): leitura é baixo; instalar e o resto é médio; `git push`, `rm -r`, `sudo`, publicar, `--force` são altos. Edição dentro da pasta é baixo; fora ou em arquivo sensível, médio; sensível fora, alto.
   - **Cartão no fio:** Negar (N), Responder… (nega e manda o texto ao agente), "Sempre permitir <padrão>" e Permitir (⏎). Substitui os botões de aprovação do composer; perguntas e a saída do Plano seguem no composer.
@@ -357,8 +410,8 @@ depois disso a miniatura mostra "indisponível" (o caminho continua na mensagem)
 - **Perguntas.** O cartão «O agente fez uma pergunta» de uma conversa por protocolo responde ao clique enquanto a
   pergunta espera (as opções são botões); respondida, vira registro. Listas em texto do agente nunca viram botão.
   Em abas com TUI o cartão continua levando ao terminal.
-- **Rolagem.** O Resumo solto fica num dock de altura fixa em coluna flex (`SummaryDock`); sem isso o miolo crescia
-  com o conteúdo e a roda não rolava.
+- **Rolagem.** O Resumo é o miolo (`flex-1 min-h-0`) do cartão flutuante, que é uma coluna flex de altura limitada;
+  sem isso o miolo crescia com o conteúdo e a roda não rolava.
 - **Composer.** A altura segue o texto e também a largura da caixa (`ResizeObserver`): abrir o painel direito
   refaz a altura sem digitar.
 
@@ -393,8 +446,39 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
 
 ## Acabamento (build local do PR 270/271)
 
-- **Resumo.** Sem lugar ao lado da conversa (janela estreita), o Resumo passa a flutuar POR CIMA dela (`summaryPlacement`:
-  `beside` / `overlay` / `none`). Antes sumia: o botão «Resumo (R)» ficava marcado sem painel e ligar/desligar não trazia nada.
+- **Resumo** (como no Claude Code). O ícone do Resumo liga e desliga o Resumo (`summaryPinned`, lembrado; ligado por
+  padrão).
+  - **Sem outro painel:** é uma coluna fixa à direita (350 px, encolhe até 280), abaixo da barra de ícones. A barra fica
+    com a largura inteira, acima dela, e nunca é coberta. Tem o fundo do tema, divisória à esquerda e as seções em
+    linhas com divisórias finas (`SectionsInOneCard`), sem um cartão cada. Nunca cobre a conversa nem o composer.
+  - **Outro painel** (simulador, navegador, terminal, arquivos, prancheta) substitui a coluna. Fechar o painel a traz
+    de volta, se o Resumo estiver ligado.
+  - **Com outro painel aberto**, o ícone abre o cartão flutuante (`summary/SummaryPopover.tsx`, `summaryOpen`), um pouco
+    menor (310 px). Ele fica logo abaixo do cabeçalho, com a borda direita encostada no painel, e é desenhado pela
+    coluna da conversa (`<main>`), então acompanha o redimensionamento. Fecha com clique fora, com Esc (o foco volta ao
+    ícone), ao trocar de conversa e ao fechar o painel. Com o painel maximizado, abrir o cartão restaura o painel antes,
+    para ele não cair sobre o simulador ou o navegador, que são nativos.
+- **Prancheta em tela cheia** (`/design/:id`, `chatSpaces.isFullscreenRoute`). Ocupa a janela toda, sem a sidebar de
+  Espaços, que antes aparecia por cima. Tem «Sair da tela cheia» sempre à vista no cabeçalho, e o Esc também sai. Na
+  barra da prancheta, à direita, fica só o botão de tela cheia: o de alternar o painel lateral do estúdio parecia
+  duplicado e saiu, mas o painel continua no atalho ⌘\. A barra não se encavala no painel estreito: a barra é um
+  `@container/studiobar`. Abaixo de 36rem, só Seleção e Mão ficam à vista, e o resto (Texto, Prancheta, Nota, desenho,
+  formas, Comentar) vai para o menu de excesso (⋯). O seletor de página encolhe e trunca, e o grupo do zoom não
+  encolhe.
+- **Time na fileira do cabeçalho.** O Time é um ícone da fileira, com os demais (`ROW_CHOICES`). O ⋯ fica com Design,
+  Emulador Android, Pull request e Maximizar o painel.
+- **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
+  conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
+  (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de
+  fechar o painel.
+- **A fala depois de trocar de agente.** A primeira mensagem depois da troca leva o resumo da conversa anterior na frente
+  (até ~64 KB). A gravação cortava em 20 000 caracteres pelo fim: perdia a marca de fim do resumo e a fala da pessoa. A
+  tela escondia o item, e o balão otimista ficava «Na fila» no fim da timeline até sumir. Agora `handoff::clip_user`
+  encolhe o resumo e preserva a marca e a fala; o agente sempre recebeu o texto inteiro. A tela também tira da fala o
+  aviso `[Aviso do ADE AGS, não da pessoa] TOOL_OUTCOME_UNKNOWN…`, que já aparece como aviso próprio
+  (`userMessage.ts`). Antes, ele colava na fala e impedia o balão de achar o eco.
+- **Conta da conversa.** Fica dentro do seletor de agente/modelo, no rodapé do popover (`AgentModelPicker.accountSlot`,
+  `ThreadAccountMenu`), e não como um seletor solto no composer entre o modelo e o esforço.
 - **Ações sob a mensagem.** Hora relativa («há 24 minutos») e botões só ao passar o mouse ou focar (`MessageActions`): copiar
   (texto limpo, sem anexos nem envelope) na pessoa e no agente; «editar e reenviar» na pessoa devolve o texto ao campo
   (não cancela nada). Ficam para depois: bifurcar a conversa daquele ponto (o `handoff.rs` já serve de base), fixar e ler em voz alta.
@@ -407,6 +491,43 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   times, com uma chave que o usuário cadastre no keyring do ADE.
 - **Trocar de agente e aprovação.** O Antigravity e o Cursor por `-p` não têm tela de aprovação: em Supervisionado ele NEGA o que pediria
   aprovação. A confirmação da troca e o aviso do fio dizem isso (`noApproval`); para liberar, mude o acesso.
+
+## Tarefas em segundo plano (como no Claude Code)
+
+O painel lista os subagentes e os comandos que o agente deixa rodando na conversa por protocolo, em árvore.
+
+- **Entrada:** o botão da fileira do cabeçalho (`tasks/TasksButton.tsx`), sempre à vista e nunca no ⋯. Mostra um selo
+  com quantas rodam e fica destacado por 4 s quando uma começa. O painel nunca abre sozinho.
+- **Painel:** é a aba `tasks` do painel direito (`tasks/TasksPanel.tsx`) e segue as regras do Resumo. Abrir substitui a
+  coluna fixa do Resumo; fechar a traz de volta. Com o painel aberto, o Resumo vira o cartão flutuante. Não volta aberto ao
+  reabrir o app.
+  - O cabeçalho tem três botões: limpar as concluídas, expandir sobre a conversa (o maximizar do painel) e fechar.
+  - **Em execução N:** cada linha tem o tempo correndo e o parar. Os filhos ficam debaixo do pai, no "▸ N tarefas".
+  - **Concluído N:** começa recolhido. Mostra o status (concluída, falhou, parada, interrompida) e a duração.
+- **Detalhe** (o chevron): o pedido, a saída do shell ou o que o subagente fez, e o resultado. A seta volta à lista (Esc
+  também) e devolve o foco à linha.
+
+### O que cada motor expõe
+
+| Motor | De onde vêm as tarefas | Parar uma tarefa só |
+|---|---|---|
+| Claude Code (`claude -p`, 2.1.318) | linhas `system` `task_started` (com `parent_task_id`, `tool_use_id`, `task_type` `local_bash`/`local_agent`), `task_progress`, `task_updated`, `task_notification` e `background_tasks_changed`; o que o subagente faz vem nas linhas com `parent_tool_use_id` (`taskItem`) | `control_request` `stop_task` (`chat_task_stop`). A saída do shell vem do `get_task_output`, que lê os últimos 8 KiB sem turno de modelo (`chat_task_output`) |
+| Codex (`app-server` 0.166) | itens `collabAgentToolCall` (`spawnAgent` e os `agentsStates`) e `subAgentActivity` | não tem: o `turn/interrupt` pediria o turno da thread do subagente, que o app não acompanha. O botão fica desligado, com o motivo |
+| OpenCode, Cursor, Antigravity | a ferramenta `task` da timeline, que já está no banco | não tem. O botão fica desligado; o Parar do composer para o turno inteiro |
+| Conversa de TUI | — (o próprio `/tasks` da TUI) | — |
+
+- O backend fica em `conversa/tarefas.rs`, que é puro. O `claude_map` entrega `Out::Task` e `Out::SubItem`; o `codex.rs`
+  emite os eventos dos itens. Nada disso abre turno nem vai à tabela `chat_item`.
+- O app nunca para a conversa inteira por este botão e nunca encerra processo por nome.
+- **Guardar:** a store (`tasks/tasksStore.ts`) separa as tarefas por conversa (`thread:<id>`). Ela grava na tabela
+  `settings` (`chat.tasks`), sem tabela nova e sem migração.
+  - Ao reabrir o app, o que rodava volta como "interrompida", porque o processo do agente morre com o app.
+  - O que o subagente fez fica só na memória.
+- **Conferido ao vivo** no Claude Code 2.1.318, com duas conversas mínimas com o haiku:
+  - os eventos chegam como descrito;
+  - `get_task_output` lê a saída no meio e no fim;
+  - `stop_task` mata só aquele shell (`task_updated` `killed` e depois `task_notification` `stopped`).
+- **Não conferido ao vivo:** o Codex (só os tipos gerados) e um subagente aninhado de verdade (`parent_task_id`).
 
 ## Como não derruba terminais
 

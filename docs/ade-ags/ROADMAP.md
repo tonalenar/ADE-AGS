@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## iPhone e iPad físicos ao lado do simulador
+
+O seletor do nó iOS e do painel iOS do chat ganhou "Aparelhos" (os físicos do CoreDevice, com USB ou Wi-Fi, modelo e iOS) acima de "Simuladores". O aparelho escolhido aparece ao vivo na mesma moldura do simulador, com a linha de estado (ligado, reconectando, sem conexão) e reconexão sozinha quando o túnel cai. Sem aparelho pronto, um estado vazio animado ensina a ligar pelo cabo ou Wi-Fi, tocar em "Confiar" e ligar o Modo de Desenvolvedor. A conversa com o CoreDevice fica num helper Swift à parte (`ade-iphone-mirror`); o app decodifica o HEVC com o VideoToolbox e mostra a `IOSurface` numa camada nativa, como no simulador. Medido no Wi-Fi: ~60 quadros/s, chegada→quadro p50 ~3 ms. **Controle:** clique e arrasto tocam o aparelho e o teclado digita, pelo HID do CoreDevice; `ags device list` dá id estável, estado e transporte; `ags device` e `sim act` mantêm o alcance e a confirmação por aparelho (`type` pergunta sempre). MCP inclui `device_list`, `device_shot` e `device_action` pelo mesmo despachador. Skills globais agora chegam também às conversas ativas por protocolo; `ags-orchestrator` continua seletiva, não sempre ativa. A foto do agente só usa quadro posterior ao IDR de recuperação sem anomalias, senão `devicectl` captura independentemente; origem e duração ficam no log. O helper permite adaptação de resolução no HEVC para evitar o mosaico durante rolagem rápida. A camada nativa acompanha os timestamps RTP e suaviza a cadência dos quadros. O painel e o canvas mostram os FPS medidos. Como funciona, mapa das APIs e medições: [ESPELHAMENTO_IPHONE.md](./ESPELHAMENTO_IPHONE.md).
+
 ## Modo chat (estilo T3 Code), experimental
 
 Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações → Modo chat. `Chat | Abas | Canvas` e Ctrl+Shift+L alternam. Detalhes em [MODO_CHAT.md](./MODO_CHAT.md).
@@ -8,6 +12,8 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 - **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.34.0).
+- **Tarefas em segundo plano:** o painel do Claude Code no chat. Mostra os subagentes e os shells em árvore, com o tempo correndo, o parar de cada tarefa (o `stop_task` do Claude), "Concluído" recolhido e o detalhe com a saída ou o que o subagente fez. O Codex entra pelos `collabAgentToolCall`; OpenCode, Cursor e Antigravity, pela ferramenta `task` da timeline, sem parar. Ver [MODO_CHAT.md](./MODO_CHAT.md#tarefas-em-segundo-plano-como-no-claude-code).
+- **Terminal do chat para o agente:** de uma conversa, `ags tab create --agent bash --initprompt "…"` (ou `--in-chat`) roda o comando no terminal do painel direito, o mesmo em que a pessoa digita; `tab send`/`tab output` seguem nele. Sem terminal, o comando vai num bloco ```bash para o **Rodar**. Skill 1.50.0. Ver [MODO_CHAT.md](./MODO_CHAT.md).
 - **Time único (E2, backend):** `chat_team` ganha `origin` (`chat`/`canvas`/`mission`), `board_key` e `mission_id`; `chat_team_promote` (coroa do canvas vira time, só linhas), `chat_team_unlead` (coroa tirada mantém o time), `chat_team_lead` e `chat_team_rebind`. `ags team list` mostra a origem (skill 1.46.0). O espelho no front é a E3; a missão é a E5. Ver [MODO_CHAT.md](./MODO_CHAT.md).
 - **A conversa segue o modo:** seleção única (`selectedRef`/`selectConversation`) em Chat, Abas e Canvas; `Board.threads` e o cartão da conversa por protocolo no canvas; `ProtocolPane` nas Abas para qualquer conversa. Ver [MODO_CHAT.md](./MODO_CHAT.md).
 - **Time único (E3, espelho canvas → chat):** `promotePlan` promove a coroa de um canvas de pasta ou `#c:` a time do chat quando a pessoa coroa ou liga algo (nunca no boot, nunca `#m:`, nunca lança processo); tirar a coroa tira só o papel de orquestrador (`chat_team_unlead`); o invariante de um time só conta também a missão. O nó de conversa por protocolo no canvas ficou de fora. Ver [MODO_CHAT.md](./MODO_CHAT.md).
@@ -33,7 +39,19 @@ Backend com detecção de versão, status e leitura de bastões/páginas por sub
 
 ## Computer use em múltiplas superfícies — iOS
 
-Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. `ags desk act` (tela do Mac, com consentimento por objetivo) e o reconhecimento de conversas por protocolo em `sim act`/`desk act` entraram em seguida; árvore AX e navegador externo continuam pendentes. A integração iOS foi validada com decisões simuladas; ainda falta validação nativa ponta a ponta com Jev autorizado. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFICIES.md).
+Núcleo Rust injetável e `ags sim act`: foto + OCR local + decisões visuais tipadas + HID do simulador e do iPhone físico, revisão antes de agir, confirmação humana na UI e guardas de privacidade dos preenchimentos. `ags desk act` (tela do Mac, com consentimento por objetivo) e o reconhecimento de conversas por protocolo em `sim act`/`desk act` entraram em seguida; árvore AX e navegador externo continuam pendentes. MCP tem tools equivalentes ao `ags device`, com mesmas guardas e escopo. A captura física rejeita quadros após anomalia e usa `devicectl` como reserva, registrando fonte e duração. Skills sempre ativas chegam a chats ativos sem aba TUI, enquanto `ags-orchestrator` segue seletiva. **Pendente nesta entrega:** E2E supervisionado com Jev no iPhone real e comparação medida do tempo completo iPhone × simulador; não contar mocks como validação nativa. Contrato e auditoria em [COMPUTER_USE_SUPERFICIES.md](./COMPUTER_USE_SUPERFACES.md).
+
+## Skills de computer use embutidas e o simulador mais firme
+
+`jev-sim-use` (0.4.2) e `agent-desktop` (v1.2.0) vêm com o app, fixadas por tag, commit e SHA-256, e se atualizam com ele. Nascem ligadas para todos os agentes pela chave nova "Ativa em todos os agentes" do painel de Skills. Elas complementam o `act` nativo: leem a árvore de acessibilidade e cobrem o Android; a ação continua no `act`, com confirmação e privacidade. Detalhe em [SKILLS_TERCEIROS.md](./SKILLS_TERCEIROS.md).
+
+No `sim act`:
+- um alvo sob o teclado, sob a barra flutuante ou cortado na borda leva primeiro uma rolagem (`reveal`);
+- tocar numa tecla sempre pede a pessoa;
+- `--expect visual:changed|darker|lighter` confere pelos pixels (o tema que só troca a paleta);
+- `report.effects` mostra o efeito de cada ação.
+
+No painel Decisões, a concordância deixou de contar os pontos sem heurística, que derrubavam o número para 1%.
 
 ## CLIs fora do PATH e instalação pela ADE
 

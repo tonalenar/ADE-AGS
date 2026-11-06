@@ -88,6 +88,12 @@ export const syncWorkspaceSkills = (workspaceId: string) =>
 export const reconcileTabSkills = (tabId: string) =>
   invoke<void>("reconcile_tab_skills", { tabId });
 
+/** "Ativa em todos os agentes": ids das skills montadas em toda aba de agente aberta, sem anexar. */
+export const alwaysOnSkills = () => invoke<string[]>("list_always_on_skills");
+
+export const setSkillAlwaysOn = (skillId: string, on: boolean) =>
+  invoke<void>("set_skill_always_on", { skillId, on });
+
 export const skillsDir = () => invoke<string>("get_skills_dir");
 
 export const setSkillsDir = (path: string) => invoke<void>("set_skills_dir", { path });

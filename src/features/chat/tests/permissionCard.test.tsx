@@ -103,7 +103,9 @@ describe("linha viva", () => {
     await render(<ActivityLine live={live} startedAt={null} />);
     const status = host.querySelector('[role="status"]')!;
     expect(status.getAttribute("aria-live")).toBe("polite");
-    expect(status.textContent).toContain("chat.live.build:bun x tauri build --debug");
+    // O comando já está na timeline: a linha diz só «Trabalhando…» e o tempo.
+    expect(status.textContent).toContain("chat.timeline.working");
+    expect(status.textContent).not.toContain("bun x tauri build");
     expect(status.textContent).toContain("52 s");
     const toggle = button("chat.live.show");
     expect(toggle.getAttribute("aria-expanded")).toBe("false");

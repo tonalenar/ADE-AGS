@@ -28,9 +28,9 @@ describe("painel direito: as superfícies (prancheta 8)", () => {
 describe("painel direito: abrir sem superfície", () => {
   beforeEach(() => useChatStore.setState({ panel: null, lastPanel: null, panelFocus: 0, surfaces: [] }));
 
-  it("a primeira abertura mostra o Resumo (a superfície padrão); uma superfície aberta a troca", () => {
+  it("a primeira abertura mostra o estado vazio (o Resumo é um cartão flutuante, não uma aba); uma superfície o troca", () => {
     toggleRightPanel();
-    expect(useChatStore.getState().panel).toBe("summary");
+    expect(useChatStore.getState().panel).toBe("empty");
     addSurface("browser");
     expect(useChatStore.getState().panel).toBe("browser");
   });
@@ -46,10 +46,10 @@ describe("painel direito: abrir sem superfície", () => {
     expect(useChatStore.getState().lastPanel).toBe("files");
     forgetLastPanel();
     toggleRightPanel();
-    expect(useChatStore.getState().panel).toBe("summary");
+    expect(useChatStore.getState().panel).toBe("empty");
     toggleRightPanel();
-    // Fechar o Resumo o lembra (reabrir volta nele, que já é o padrão).
-    expect(useChatStore.getState().lastPanel).toBe("summary");
+    // O vazio não é lembrado.
+    expect(useChatStore.getState().lastPanel).toBeNull();
   });
 
   it("o atalho do Time abre a aba e pede o foco", () => {
@@ -80,10 +80,12 @@ describe("largura do painel direito (arrastando a borda)", () => {
 });
 
 describe("o painel lembrado", () => {
-  it("abre no Resumo sem nada guardado ou com lixo; 'none' é o painel que a pessoa fechou", () => {
-    expect(parsePanel(null)).toBe("summary");
-    expect(parsePanel("lixo")).toBe("summary");
-    expect(parsePanel("empty")).toBe("summary");
+  it("abre fechado sem nada guardado, com lixo ou com o Resumo antigo; 'none' é o painel que a pessoa fechou", () => {
+    expect(parsePanel(null)).toBeNull();
+    expect(parsePanel("lixo")).toBeNull();
+    expect(parsePanel("empty")).toBeNull();
+    // O Resumo era uma aba lembrada; agora é um cartão flutuante que nunca abre sozinho.
+    expect(parsePanel("summary")).toBeNull();
     expect(parsePanel("none")).toBeNull();
     expect(parsePanel("diff")).toBe("diff");
   });
@@ -92,7 +94,7 @@ describe("o painel lembrado", () => {
     expect(localStorage.getItem("ags.chat.panel")).toBe("diff");
     setRightPanel(null);
     expect(localStorage.getItem("ags.chat.panel")).toBe("none");
-    setRightPanel("summary");
-    expect(localStorage.getItem("ags.chat.panel")).toBe("summary");
+    setRightPanel("files");
+    expect(localStorage.getItem("ags.chat.panel")).toBe("files");
   });
 });

@@ -387,7 +387,8 @@ mod claude {
         let mut m = Mapper::default();
         let mut line = assistant("msg_2", json!({ "type": "text", "text": "dentro do Task" }));
         line["parent_tool_use_id"] = json!("toolu_task");
-        assert!(m.feed(&line, 1).is_empty());
+        // Vai à tarefa do subagente (o painel de tarefas), nunca como item da conversa.
+        assert!(m.feed(&line, 1).iter().all(|o| matches!(o, Out::SubItem { parent, .. } if parent == "toolu_task")));
     }
 
     #[test]
@@ -559,6 +560,25 @@ fn no_arranque_o_turno_e_os_pedidos_orfaos_expiram_sem_apagar_nada() {
     // Rodar de novo não acha mais nada.
     let again = store::sweep_orphans(&conn, 200).unwrap();
     assert_eq!((again.runs, again.requests), (0, 0));
+}
+
+#[test]
+fn o_parar_sem_agente_vivo_fecha_so_o_turno_aberto_daquela_conversa() {
+    // A conversa presa em «Pensando…»: o turno ficou `inProgress` e não há agente para parar.
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    thread(&conn, "t2");
+    store::upsert_run(&conn, "t1", "r1", "inProgress", Some(3), None, None).unwrap();
+    store::upsert_item(&conn, "t1", Some("r1"), &user_item("u1")).unwrap();
+    store::upsert_run(&conn, "t2", "r2", "inProgress", Some(3), None, None).unwrap();
+
+    let closed = store::close_orphan_runs(&conn, Some("t1"), 50, super::api::STOPPED_ORPHAN).unwrap();
+    assert_eq!(closed, [("t1".to_string(), "r1".to_string())]);
+    assert_eq!(store::run_status(&conn, "t1", "r1").unwrap().as_deref(), Some("interrupted"));
+    assert_eq!(store::run_status(&conn, "t2", "r2").unwrap().as_deref(), Some("inProgress"), "a outra conversa não é tocada");
+    let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("turnEnd do Parar");
+    assert_eq!(end.text.as_deref(), Some(super::api::STOPPED_ORPHAN));
+    assert!(store::close_orphan_runs(&conn, Some("t1"), 60, "x").unwrap().is_empty(), "idempotente");
 }
 
 // ── Etapa 2: o envio a uma conversa (trava, modo, classe do erro) ────────

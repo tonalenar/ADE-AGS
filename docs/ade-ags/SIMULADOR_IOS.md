@@ -16,6 +16,7 @@ As APIs foram mapeadas com o REA (`inspect_macho` e `inspect_native_dispatch_met
 | Toque, botões e teclado | o `dtuhidd` por XPC: `-[SimDevice lookup:error:]` com `com.apple.coredevice.feature.remote.hid.digitizer`, `xpc_endpoint_create_mach_port_4sim`, `xpc_connection_enable_sim2host_4sim`; eventos `IndigoDigitizerEvent`, `IndigoButtonEvent`, `IndigoKeyboardButtonEvent` | `simulator/native/dtu.rs` |
 | Toque, botões e teclado (reserva) | `SimDeviceLegacyHIDClient` (`initWithDevice:error:`, `sendWithMessage:freeWhenDone:completionQueue:completion:`) com as mensagens Indigo `IndigoHIDMessageForMouseNSEvent`, `…ForButton` e `…ForKeyboardArbitrary` | `simulator/native/hid.rs`, `kit.rs` |
 | Abrir URL, abrir e fechar app, foto | `xcrun simctl openurl / launch / terminate / io screenshot` (públicos) | `simulator/mod.rs` (`ops`) |
+| Foto do computer use | `framebufferSurface` da tela LCD; `IOSurfaceLock` só leitura, cópia BGRA conferida pelo seed; PNG pelo CoreGraphics/ImageIO; `simctl io screenshot` de reserva | `simulator/native/screen.rs` (`Surface`), `computer_use/capture.rs` |
 
 ### Detalhes que importam
 
@@ -65,7 +66,7 @@ O que **não** funciona: a opção de boot `disabled_jobs`. Nem o `simctl boot -
 
 O que funciona (`simulator/slim.rs`, descoberto pela ferramenta simslim): o `launchd_sim` lê, quando sobe, a lista de serviços desligados de `/private/var/tmp/com.apple.CoreSimulator.SimDevice.<UDID>/disabled.plist` (rótulo → `true`). No modo leve, com o aparelho desligado, a ADE:
 1. guarda o original (`disabled.ade-original.plist`);
-2. acrescenta 143 rótulos;
+2. acrescenta 157 rótulos;
 3. liga o aparelho;
 4. espera a tela e os primeiros serviços do `launchd_sim`;
 5. devolve o original.
@@ -81,6 +82,8 @@ Medido no iPhone 17 (iOS 27.0), ligado pelo `simctl boot`. A CPU e os processos 
 | CPU do iOS, 120 s | 495% | 1% |
 | Memória comprimida no Mac, 120 s | 7,0 GB | 0,5 GB |
 | Soma do `phys_footprint` | ~20 GB | ~11,8 GB |
+
+Os 14 rótulos de Wallet, mídia e tarefas de fundo do Safari vieram do catálogo do NeoSimulator, que também vem do simslim. Medido no iPhone 17 (iOS 27.1), pelo `simctl boot`, aos 120 s, em duas rodadas alternadas: 125 → 91 e 90 → 82 processos do iOS, com CPU de 0-1% nos dois casos. O Safari e os Ajustes abriram em todas as rodadas. As categorias "Loja" e "Web" do NeoSimulator ficam de fora: tirariam push, compras, App Store, universal links e push de sites.
 
 Com o original devolvido logo depois do boot: 93 processos e 1% de CPU aos 45 s e aos 120 s, e o arquivo igual ao original antes e depois de desligar.
 
@@ -125,6 +128,7 @@ O que foi tentado para o iOS do simulador desenhar mais liso:
 | Alavanca | Resultado |
 |---|---|
 | Aparelho sem ProMotion (iPhone 17e) no lugar do Pro Max | um pouco melhor na rolagem (com o dedo, 19% contra 27% dos vsyncs sem quadro novo; na inércia, 6% contra 19%); a parada de ~300 ms na troca de página fica. As rajadas abaixo de 8 ms também aparecem no 17e: não é o iOS tentando 120 Hz |
+| Zoom da Tela (canvas menor, como o NeoSimulator faz) | não ajuda. O modo "Zoomed" do iPhone 17 pede um canvas de 960×2079 em vez de 1206×2622 (`DBSDisplayZoomConfigurationController` e `SFBDisplaySetCanvasSize`), mas a `IOSurface` continua com 1206×2622. Com um site animado no Safari, a CPU do iOS ficou em 66% e 57% com zoom, contra 47% e 56% sem zoom: está dentro do ruído. Além disso, o zoom aumenta a interface, e quem testa o app passaria a ver outra tela. O reinício do SpringBoard que o modo pede (`FBSSystemService`) exige um entitlement que o simulador recusa em assinatura ad-hoc |
 | Escala menor na tela da ADE | não muda nada no iOS: ele desenha sempre na resolução do aparelho, e a camada só redimensiona |
 | GPU | o Mac M2 tem uma GPU só; não há o que escolher |
 | Prioridade acima da normal | sem root, não dá: `setpriority(PRIO_DARWIN_ROLE)` em processo do iOS devolve `ENOTSUP`. O `launchd_sim` já dá papel de foco ao SpringBoard e ao app à frente |
@@ -148,6 +152,41 @@ O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém u
 - **Fora de vista:** o nó para de ouvir os quadros (`unregisterScreenCallbacks`) e esconde a view.
 - **Desligar** fica no menu "⋯"; fechar a ADE desliga tudo (sem `persist`).
 
+## Computer use: velocidade (medido)
+
+O `ags sim act` fotografa, lê e confere a tela a cada passo (ver [COMPUTER_USE_SUPERFICIES.md](COMPUTER_USE_SUPERFICIES.md#laço-e-integração)). Antes, cada passo chamava o `simctl` duas vezes (observar e conferir antes do HID), o `sips` duas vezes e o `swift -e` uma. Agora tudo roda dentro do processo, pela `IOSurface` que o painel já mostra:
+
+- **foto**: os pixels da superfície (cópia em ~1 ms, refeita se o seed mudou no meio), PNG reduzido pelo ImageIO;
+- **revisão**: SHA-256 dos pixels crus; conferir antes de tocar é só ler e somar de novo, sem PNG;
+- **OCR**: o Vision (`VNRecognizeTextRequest`) em processo, aquecido numa thread no primeiro `act`;
+- **tela assentada**: pelos quadros (seed), não por pausas fixas.
+
+O caminho antigo fica de reserva: aparelho girado, outro formato de tela, Intel (só o OCR) ou falha.
+
+Medido em 2026-11-04 no iPhone 17e (iOS 27.0), num Mac M2, com a tela parada, só lendo (sem tocar nem abrir nada), mediana de 8, em release:
+
+```sh
+BENCH_UDID=<udid> cargo test --release --lib computer_use::capture::test::bancada -- --ignored --nocapture
+```
+
+| Etapa | Antes | Agora |
+|---|---|---|
+| Foto | `simctl io screenshot` 1.423 ms | `IOSurface` + PNG 72 ms (tela 6 ms, cópia 0,7 ms, hash 33 ms, PNG ~32 ms) |
+| Redução a 1.200 px | `sips` 89 ms | dentro da foto (o ImageIO sozinho num PNG em disco: 45 ms) |
+| OCR | `swift -e` 507 ms | Vision em processo 137 ms (máx. 268) |
+| Conferência antes do HID | outra foto + `sips`, ~1,5 s | releitura dos pixels 40 ms |
+| Espera da tela | 0,8 s fixos por tentativa, só com tela sem texto | 0,1 s sem quadro (1ª foto), 0,3 s sem quadro e ≥ 0,6 s após a ação |
+| **Passo sem o Jev** (espera + foto + OCR + conferência) | **3.519 ms** | **340 ms** na 1ª foto; ~0,7-0,9 s depois de uma ação, por causa do mínimo de 0,6 s |
+
+Com o Jev (~0,5 s, medido no `decision_shadow_log`, não refeito aqui: custa cota), o passo cai de ~4-5 s para ~0,9 s no primeiro e ~1,3-1,5 s nos seguintes (soma das etapas medidas; o percurso completo com o Jev real não foi medido).
+
+Achados:
+
+- **A primeira leitura do Vision num executável novo levou 70 s** (binário de teste recém-compilado; o mesmo binário de novo: 95-250 ms). É o mesmo custo visto com o `swiftc`. Num app recém-atualizado seria o primeiro `act` parado, então o OCR em processo só entra depois de uma leitura de aquecimento numa imagem fixa; até lá, o `swift -e`.
+- **O hash pesa metade da foto** (33 ms para 11,8 MB). Ele é o que garante "nunca tocar numa tela diferente da que o Jev viu", então ficou inteiro: comparar só o seed não basta, porque uma troca de superfície ou uma escrita fora do ritmo dos quadros passaria.
+- O `simctl` levava 1,4 s e, sem querer, dava tempo à tela de reagir ao toque. O mínimo de 0,6 s depois da ação substitui essa espera de propósito; com ela mais curta, a foto pode mostrar a tela antiga e o Jev mandaria tocar de novo.
+- A foto nativa sai igual à do `simctl` (mesma tela, de pé, sem máscara), com 554 × 1.200 como o `sips`.
+
 ## No canvas
 
 - **Ferramenta da barra do canvas:** "iPhone / iPad (Simulador iOS)". O nó é um `CanvasPortal` com `kind: "ios"`, `udid` e `chat`.
@@ -162,12 +201,19 @@ O ciclo de vida (`simulator/lifecycle.rs`) faz o iOS só gastar quando alguém u
 
 `ags device …` aceita nós iOS. Veja a skill `ags-orchestrator`, seção "iOS simulators on the canvas".
 
+**Área de transferência:** no "⋯" da barra do nó e do painel do chat, "Colar no aparelho o que o Mac copiou" e "Trazer para o Mac o que o aparelho copiou". Os agentes leem o que o aparelho copiou com `ags device clipboard <aparelho>` e põem texto nele com `ags device clipboard <aparelho> "texto"`. Tudo vai pelo `xcrun devicectl device pasteboard` (CoreDevice), que leva texto, imagem e os outros tipos. O `simctl pbcopy` (SimPasteboard) ainda lê, mas, segundo o NeoSimulator, no iOS 27.2 já não substitui o conteúdo do aparelho.
+
+**Girar:** o botão ↻ da barra do nó, o do painel do chat e `ags device rotate <aparelho> [left|right]` giram um quarto de volta pelo mesmo caminho (`simulator::rotate_device`): um `GSEvent` de orientação para a `PurpleWorkspacePort` (`native/purple.rs`). Depois do giro, as telas abertas se endireitam e o evento `simulator-orientation` deita a moldura em todas as telas que mostram o aparelho, mantendo a escala. No Android, `ags device rotate` alterna retrato e paisagem.
+
 As coordenadas são **pontos do iOS**. `open`, `button` e `say` só existem no iOS.
+
+## Aparelho físico
+
+O mesmo seletor também lista iPhones e iPads de verdade, com toque, botões e teclado pelo HID do CoreDevice. Ver [ESPELHAMENTO_IPHONE.md](ESPELHAMENTO_IPHONE.md).
 
 ## Ainda não
 
 - `tree` e `tap --text`: a acessibilidade do iOS existe no SimulatorKit (`AXPTranslator`), mas ainda não foi ligada.
-- Girar o aparelho.
 - Aviso automático de crash na conversa.
 - A aba "Simulador" e o botão "Abrir no simulador" do navegador.
 - Reconectar sozinho quando o `CoreSimulatorService` reinicia (hoje a tela some até a ADE reabrir).

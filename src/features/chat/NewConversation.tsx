@@ -215,16 +215,17 @@ export function ContextStrip({ branch, workspace, worktree = false, children }: 
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-wrap items-center gap-0.5 px-3 pt-1.5 text-chat-note text-gray-500 dark:text-white/45">
+    <div className="flex flex-nowrap items-center gap-0.5 px-3 pt-1.5 text-chat-note text-gray-500 dark:text-white/45">
       {workspace ?? (
-        <span className="flex items-center gap-1.5 h-7 px-1.5 whitespace-nowrap">
+        <span title={worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")} className="flex shrink-0 items-center gap-1.5 h-7 px-1.5 whitespace-nowrap">
           {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
-          {worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")}
+          {/* Coluna estreita (`ComposerColumn`): só o ícone, numa linha com o branch e o acesso. */}
+          <span className="@max-[28rem]/composer:sr-only">{worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")}</span>
         </span>
       )}
-      {branch && <span className="flex min-w-0 max-w-full items-center gap-1.5 h-7 px-1.5 font-mono text-[11.5px]" title={branch}><BranchIcon className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{branch}</span></span>}
+      {branch && <span className="flex min-w-0 items-center gap-1.5 h-7 px-1.5 font-mono text-[11.5px]" title={branch}><BranchIcon className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{branch}</span></span>}
       <span className="flex-1" />
-      {children}
+      <span className="flex shrink-0 items-center">{children}</span>
     </div>
   );
 }

@@ -547,7 +547,7 @@ fn criar_e_trocar_com_os_agentes_novos() {
 /// nomes das ferramentas que a doc não mostra são tratados de forma tolerante, e isso fica dito em `cursor_map`.
 mod cursor {
     use super::*;
-    use crate::conversa::cursor_map::{access_flags, error_from_stderr, launch_args, Mapper, Out};
+    use crate::conversa::cursor_map::{access_flags, error_from_stderr, launch_args, read_turn, Mapper, Out, Read, Source, QUIET_AFTER_FINAL, QUIET_AFTER_SPEECH, QUIET_MAX};
 
     fn items(outs: &[Out]) -> Vec<&Item> {
         outs.iter().filter_map(|o| if let Out::Item(i) = o { Some(&**i) } else { None }).collect()
@@ -729,6 +729,145 @@ mod cursor {
         assert_eq!(said.len(), 1);
         assert_eq!(said[0].text.as_deref(), Some("quase"));
         assert!(mapper.finish(Some(101)).is_empty(), "não fecha duas vezes");
+    }
+
+    /// A fonte de linhas dos testes: entrega a lista e depois, se `closed`, o EOF. Sem EOF, uma espera com prazo
+    /// vence (`Quiet`); uma espera sem prazo é a conversa presa para sempre, e o teste falha.
+    struct Fake {
+        lines: std::collections::VecDeque<String>,
+        closed: bool,
+        waits: Vec<Option<std::time::Duration>>,
+    }
+    impl Fake {
+        fn open(lines: &[Value]) -> Fake {
+            Fake { lines: lines.iter().map(|l| l.to_string()).collect(), closed: false, waits: Vec::new() }
+        }
+    }
+    impl Source for Fake {
+        async fn next(&mut self, quiet: Option<std::time::Duration>) -> Read {
+            if let Some(line) = self.lines.pop_front() {
+                return Read::Line(line);
+            }
+            self.waits.push(quiet);
+            if self.closed {
+                return Read::Eof;
+            }
+            assert!(quiet.is_some(), "o turno ficaria em «Pensando…» para sempre: espera sem prazo, sem result e sem EOF");
+            Read::Quiet
+        }
+    }
+    fn run(mapper: &mut Mapper, fake: &mut Fake) -> (Option<crate::conversa::claude_map::TurnResult>, Vec<Out>) {
+        let mut outs = Vec::new();
+        let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
+        let done = rt.block_on(read_turn(mapper, fake, |o| outs.extend(o), || 100));
+        (done, outs)
+    }
+    fn shell(sub: &str) -> Value {
+        json!({ "type": "tool_call", "subtype": sub, "call_id": "sh1", "session_id": SID,
+            "tool_call": { "shellToolCall": { "args": { "command": "npx expo start --port 8081" }, "result": { "success": { "stdout": "", "exitCode": 0 } } } } })
+    }
+
+    #[test]
+    fn o_result_fecha_o_turno_mesmo_com_o_processo_vivo_segurando_o_stdout() {
+        // Visto no app: um servidor em segundo plano mantém o `cursor-agent` vivo, e o EOF não chega.
+        let mut mapper = Mapper::new("t1");
+        let mut fake = Fake::open(&[init(), delta("Pronto.", 1), result_ok("Pronto.")]);
+        let (done, outs) = run(&mut mapper, &mut fake);
+        let done = done.expect("o result encerra o turno");
+        assert!(done.error.is_none() && !done.interrupted);
+        assert_eq!(items(&outs).iter().filter(|i| i.kind == ItemKind::Assistant).count(), 1);
+        assert!(fake.waits.is_empty(), "não espera mais nada depois do result: {:?}", fake.waits);
+    }
+
+    #[test]
+    fn fala_final_sem_result_e_sem_eof_fecha_o_turno_pelo_silencio() {
+        // A conversa presa 9 h em «Pensando…»: o agente subiu o Metro, falou a resposta final e o `cursor-agent`
+        // nunca mandou o `result` nem saiu.
+        let mut mapper = Mapper::new("t1");
+        let mut fake = Fake::open(&[init(), shell("started"), shell("completed"), delta("Quer que eu registre o resultado?", 1)]);
+        let (done, outs) = run(&mut mapper, &mut fake);
+        let done = done.expect("o silêncio depois da fala encerra o turno");
+        assert!(done.error.is_none() && !done.interrupted, "a resposta veio: o turno acabou bem ({done:?})");
+        let said: Vec<&Item> = items(&outs).into_iter().filter(|i| i.kind == ItemKind::Assistant).collect();
+        assert_eq!(said.len(), 1, "a fala final é gravada, não fica só na janela");
+        assert_eq!(said[0].text.as_deref(), Some("Quer que eu registre o resultado?"));
+        assert_eq!(fake.waits, [Some(QUIET_AFTER_SPEECH)]);
+    }
+
+    #[test]
+    fn silencio_sem_fala_fecha_com_erro_e_ferramenta_rodando_nao_tem_prazo() {
+        let mut mapper = Mapper::new("t1");
+        let mut fake = Fake::open(&[init(), shell("started"), shell("completed")]);
+        let (done, _) = run(&mut mapper, &mut fake);
+        let error = done.and_then(|d| d.error).expect("sem fala, o silêncio longo é erro");
+        assert!(error.contains("sem dar sinal"), "{error}");
+        assert_eq!(fake.waits, [Some(QUIET_MAX)]);
+        // Uma ferramenta em andamento (um build longo) não tem prazo: o processo termina e o EOF fecha o turno.
+        let mut mapper = Mapper::new("t2");
+        let mut fake = Fake::open(&[init(), shell("started")]);
+        fake.closed = true;
+        let _ = run(&mut mapper, &mut fake);
+        assert_eq!(fake.waits, [None]);
+    }
+
+    /// O fim de uma chamada do modelo (`--stream-partial-output`): o texto inteiro dela, com `model_call_id`, e o uso.
+    fn call_end(text: &str, call: &str) -> [Value; 2] {
+        [
+            json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": text }] }, "session_id": SID, "model_call_id": call, "timestamp_ms": 9 }),
+            json!({ "type": "usage", "subtype": "model_call", "model_call_id": call, "usage": { "inputTokens": 10, "outputTokens": 5 }, "session_id": SID, "timestamp_ms": 9 }),
+        ]
+    }
+    fn shell_in(sub: &str, call: &str) -> Value {
+        let mut line = shell(sub);
+        line["model_call_id"] = json!(call);
+        line
+    }
+
+    #[test]
+    fn a_ultima_chamada_do_modelo_fecha_o_turno_em_segundos_com_shell_em_segundo_plano() {
+        // A conversa do Ton presa em «Pensando…» a cada pergunta: o agente subiu o Metro (`npx expo start`, que o
+        // Cursor manda para segundo plano), respondeu com uma pergunta, e o `cursor-agent -p` ficou esperando o shell
+        // acabar antes do `result`. O fim da chamada sem ferramenta é o fim do turno: espera segundos, não minutos.
+        let mut mapper = Mapper::new("t1");
+        let pergunta = "Vale registrar isso no `docs/`?";
+        let mut lines = vec![init(), delta("Vou subir o Metro.", 1)];
+        lines.extend(call_end("Vou subir o Metro.", "m1").into_iter().take(1));
+        lines.extend([shell_in("started", "m1"), shell_in("completed", "m1")]);
+        lines.extend(call_end("Vou subir o Metro.", "m1").into_iter().skip(1));
+        lines.push(delta(pergunta, 2));
+        lines.extend(call_end(pergunta, "m2"));
+        let mut fake = Fake::open(&lines);
+        let (done, outs) = run(&mut mapper, &mut fake);
+        let done = done.expect("o fim da última chamada encerra o turno");
+        assert!(done.error.is_none() && !done.interrupted, "a resposta veio: o turno acabou bem ({done:?})");
+        assert_eq!(fake.waits, [Some(QUIET_AFTER_FINAL)], "espera só a folga do result, não {QUIET_AFTER_SPEECH:?}");
+        assert!(QUIET_AFTER_FINAL <= std::time::Duration::from_secs(15));
+        let said: Vec<&Item> = items(&outs).into_iter().filter(|i| i.kind == ItemKind::Assistant).collect();
+        assert_eq!(said.iter().map(|i| i.text.as_deref().unwrap_or("")).collect::<Vec<_>>(), ["Vou subir o Metro.", pergunta]);
+    }
+
+    #[test]
+    fn a_chamada_que_pediu_ferramenta_nao_fecha_o_turno_e_qualquer_sinal_depois_cancela() {
+        // A rodada de ferramenta: o modelo volta depois do resultado, e o turno continua.
+        let mut mapper = Mapper::new("t1");
+        let mut lines = vec![init(), delta("Vou rodar.", 1), shell_in("started", "m1"), shell_in("completed", "m1")];
+        lines.extend(call_end("Vou rodar.", "m1"));
+        feed_all(&mut mapper, &lines);
+        assert_eq!(mapper.quiet_after(), Some(QUIET_MAX), "a chamada pediu ferramenta: não é o fim");
+        // O uso chega com a ferramenta ainda rodando: sem prazo.
+        let mut mapper = Mapper::new("t2");
+        let mut lines = vec![init(), shell_in("started", "m1")];
+        lines.extend(call_end("", "m1"));
+        feed_all(&mut mapper, &lines);
+        assert_eq!(mapper.quiet_after(), None);
+        // Depois do fim, qualquer sinal (um shell que acabou e acorda o modelo de novo) desfaz o fim.
+        let mut mapper = Mapper::new("t3");
+        let mut lines = vec![init(), delta("Pronto?", 1)];
+        lines.extend(call_end("Pronto?", "m1"));
+        feed_all(&mut mapper, &lines);
+        assert_eq!(mapper.quiet_after(), Some(QUIET_AFTER_FINAL));
+        mapper.feed(&json!({ "type": "system", "subtype": "task_notification", "task_id": "k", "status": "completed", "session_id": SID }), 100);
+        assert_ne!(mapper.quiet_after(), Some(QUIET_AFTER_FINAL));
     }
 
     #[test]

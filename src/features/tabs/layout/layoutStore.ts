@@ -381,14 +381,22 @@ export const CHAT_GROUP = "chat";
  * reservou; sem espaço (a tela de conversa nova, por exemplo) nenhum. Arquivos, diffs e navegadores
  * ficam montados e escondidos: voltar às abas não perde nada.
  */
-export function chatPlacements(slot: Rect | null, activeTabId: string | null, browser: { viewId: string; rect: Rect } | null = null): Placements {
+export function chatPlacements(
+  slot: Rect | null,
+  activeTabId: string | null,
+  browser: { viewId: string; rect: Rect } | null = null,
+  shell: { tabId: string; rect: Rect } | null = null,
+): Placements {
   const visible = new Map<string, Placement>();
   const terminal = slot && activeTabId ? agentKey(activeTabId) : null;
   if (terminal) visible.set(terminal, { groupId: CHAT_GROUP, rect: slot });
+  // O terminal da aba Terminal do painel direito: uma aba de shell na pasta da conversa, desenhada no slot dela.
+  const own = shell && agentKey(shell.tabId) !== terminal ? agentKey(shell.tabId) : null;
+  if (shell && own) visible.set(own, { groupId: CHAT_GROUP, rect: shell.rect });
   // O navegador da aba Navegador do painel direito. O teclado vai ao terminal se a gaveta dele está aberta.
   const page = browser ? viewKey(browser.viewId) : null;
   if (browser && page) visible.set(page, { groupId: CHAT_GROUP, rect: browser.rect });
-  return { visible, focusedItem: terminal ?? page };
+  return { visible, focusedItem: terminal ?? own ?? page };
 }
 
 interface PlacementInput {
@@ -400,14 +408,14 @@ interface PlacementInput {
   liveRects: Record<string, Rect>;
   grid: string[] | null;
   /** A casca do chat na tela, com o espaço do terminal da conversa e o do navegador. Ausente = workspace. */
-  chat?: { slot: Rect | null; browser?: { viewId: string; rect: Rect } | null } | null;
+  chat?: { slot: Rect | null; browser?: { viewId: string; rect: Rect } | null; shell?: { tabId: string; rect: Rect } | null } | null;
 }
 
 /** La misma cuenta que `usePlacements`, sin hooks: el guardado periódico la lee del store. */
 export function placementsFrom(input: PlacementInput): Placements {
   const { layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat } = input;
   // A casca do chat passa na frente do modo da pasta: as abas e o canvas estão escondidos.
-  if (chat) return chatPlacements(chat.slot, activeTabId, chat.browser ?? null);
+  if (chat) return chatPlacements(chat.slot, activeTabId, chat.browser ?? null, chat.shell ?? null);
   if (mode === "canvas") return canvasPlacements(liveRects, activeTabId, activeViewId);
   if (grid) {
     const visible = new Map<string, Placement>();
@@ -450,7 +458,8 @@ export function usePlacements(): Placements {
   const chatOn = useUiStore(chatShellOn);
   const chatSlot = useChatStore((s) => s.slot);
   const chatBrowser = useChatStore((s) => s.browser);
-  return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat: chatOn ? { slot: chatSlot, browser: chatBrowser } : null });
+  const chatShell = useChatStore((s) => s.shell);
+  return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat: chatOn ? { slot: chatSlot, browser: chatBrowser, shell: chatShell } : null });
 }
 
 /** Lo que está en pantalla ahora, leído de los stores (sin suscribir un componente). */
@@ -470,7 +479,8 @@ export function currentPlacements(): Placements {
   const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
   const team = teamGridRefs(selectConversations({ tabs, threads: useStructured.getState().threads, teams: useTeamIndex.getState().teams, boards: canvas.boards }), activeTabId);
   const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), team, mode, tabIds });
-  const chat = chatShellOn(useUiStore.getState()) ? { slot: useChatStore.getState().slot, browser: useChatStore.getState().browser } : null;
+  const { slot, browser, shell } = useChatStore.getState();
+  const chat = chatShellOn(useUiStore.getState()) ? { slot, browser, shell } : null;
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects: canvas.liveRects, grid, chat });
 }
 

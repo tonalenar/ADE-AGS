@@ -46,24 +46,27 @@ export function ThreadAccountMenu({ threadId, agentId, accountId, disabled = fal
     setError(await switchThreadAccount(threadId, target === "" ? null : target));
   };
 
+  // No rodapé do seletor de agente/modelo: «Conta» à esquerda, o seletor à direita; a confirmação e o erro descem
+  // para a linha de baixo.
   return (
-    <div className="flex items-center gap-1.5">
+    <div data-thread-account className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 min-h-9 shrink-0 px-3 py-1.5 border-t border-gray-200 dark:border-white/[0.08] text-chat-caption text-gray-500 dark:text-white/45">
+      <span className="flex-1">{t("chat.account.label")}</span>
       <PopupSelect value={accountId ?? ""} disabled={disabled} aria-label={t("chat.account.label")} title={t("chat.account.label")}
         onChange={(e) => { setError(null); setAsking(e.target.value === (accountId ?? "") ? null : e.target.value); }}
-        className="max-w-40 text-chat-caption">
+        className="max-w-44 text-chat-caption">
         {accounts.map((a) => (
           <option key={a.value} value={a.value}>{t("chat.account.option", { name: nameOf(a.value), state: t(`chat.account.state.${a.state}`) })}</option>
         ))}
       </PopupSelect>
       {current?.state === "exhausted" && <span className="text-chat-caption text-red-600 dark:text-red-400">{t("chat.account.state.exhausted")}</span>}
       {asking !== null && (
-        <span role="alertdialog" className="flex items-center gap-1.5 text-chat-caption text-gray-600 dark:text-white/60">
+        <span role="alertdialog" className="w-full flex flex-wrap items-center justify-end gap-1.5 text-chat-caption text-gray-600 dark:text-white/60">
           {t("chat.account.confirm", { name: nameOf(asking) })}
           <button type="button" onClick={() => void confirm()} className="h-6 px-2 rounded-md border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/[0.06]">{t("chat.account.confirmYes")}</button>
           <button type="button" onClick={() => setAsking(null)} className="h-6 px-2 rounded-md border border-gray-200 dark:border-white/10 hover:bg-gray-100 dark:hover:bg-white/[0.06]">{t("chat.account.confirmNo")}</button>
         </span>
       )}
-      {error && <span role="alert" className="text-chat-caption text-red-600 dark:text-red-400 break-words">{error}</span>}
+      {error && <span role="alert" className="w-full text-chat-caption text-red-600 dark:text-red-400 break-words">{error}</span>}
     </div>
   );
 }

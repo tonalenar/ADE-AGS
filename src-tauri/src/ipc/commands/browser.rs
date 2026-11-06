@@ -63,6 +63,10 @@ fn window_with_tab(app: &AppHandle, tab_id: &str) -> Result<Option<String>, Stri
 /// Cuánto puede tardar este pedido. Casi todos son de segundos; `pick` espera a que una
 /// persona señale algo en la página, así que vale lo que el agente haya pedido esperar.
 fn browser_timeout(request: &Value) -> u64 {
+    // O `act` encadeia passos: o mesmo prazo do `ags portal act` (115 s), ou o que o agente pediu.
+    if request.get("op").and_then(Value::as_str) == Some("act") {
+        return crate::ipc::mcp::act_timeout_secs(request.get("timeout"));
+    }
     if request.get("op").and_then(Value::as_str) != Some("pick") {
         return BROWSER_TIMEOUT_SECS;
     }

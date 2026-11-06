@@ -499,6 +499,10 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
             let at = params.get("startedAtMs").or_else(|| params.get("completedAtMs")).and_then(Value::as_i64);
             let item = params.get("item").unwrap_or(&Value::Null);
             save_items(app, db, thread_id, turn_id, codex_map::items_of(item, at));
+            // Os agentes que o Codex cria (e o estado deles) vão ao painel de tarefas, só na janela.
+            for task in super::tarefas::codex_tasks(item, at.unwrap_or_else(crate::util::now_ts_ms)) {
+                emit(app, thread_id, "task", json!({ "task": task }));
+            }
         }
         "turn/plan/updated" => {
             save_items(app, db, thread_id, turn_id, codex_map::plan_item(params, Some(crate::util::now_ts_ms())).into_iter().collect());

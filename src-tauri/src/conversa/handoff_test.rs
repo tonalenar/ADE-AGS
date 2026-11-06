@@ -177,3 +177,38 @@ fn o_orcamento_padrao_e_o_teto_do_t3_e_o_corte_diz_quantas_e_onde_ler() {
     assert!(out.contains(&format!("({} falas mais antigas ficaram de fora", 400 - kept)), "registra exatamente o que ficou de fora ({kept} ficaram): {}", &out[..600]);
     assert!(out.contains("ags chat show th-42 --last"), "diz como ler o que ficou de fora");
 }
+
+/// A primeira fala depois de trocar de agente, como o motor a grava (o `userMessage` do Codex; o Claude e os outros
+/// gravam com a mesma regra): o resumo da conversa anterior na frente, maior que o teto de gravação.
+#[test]
+fn a_fala_depois_da_troca_com_resumo_grande_e_gravada_inteira_com_a_marca() {
+    // A conversa do Ton (Cursor -> Claude Code): um resumo de dezenas de KB, e a fala dele depois.
+    let items: Vec<Item> = (0..400).map(|i| agent(&format!("a{i}"), i, &format!("Fala longa do agente número {i}: {}", "x".repeat(150)))).collect();
+    let summary = resumo(input(&items, Strategy::Full, DEFAULT_BUDGET));
+    assert!(summary.chars().count() > 20_000, "o resumo precisa passar do teto de gravação: {}", summary.chars().count());
+    let said = "Chat, quando eu clicar para digitar a quantidade de água manualmente, a garrafa muda de tamanho";
+    let framed = format!("{summary}\n\n{said}");
+    let line = serde_json::json!({ "id": "u9", "type": "userMessage", "content": [{ "type": "text", "text": framed }] });
+    let saved = super::codex_map::items_of(&line, Some(1));
+    let text = saved[0].text.as_deref().unwrap();
+    // Antes: os 20 000 primeiros caracteres do resumo, sem a marca e sem a fala; a tela escondia o item e o balão
+    // otimista ficava «Na fila» até sumir.
+    assert!(text.ends_with(said), "a fala da pessoa some da gravação: …{}", &text[text.len().saturating_sub(120)..]);
+    assert!(text.contains(END_MARK));
+    assert!(text.starts_with("[ADE AGS] Contexto da conversa anterior"));
+    assert!(text.chars().count() <= 20_000);
+    // E sem linha em branco antes da marca (a tela corta a injeção na primeira linha em branco).
+    let head = &text[..text.find("\n\n").unwrap()];
+    assert!(head.trim_end().ends_with(END_MARK), "{}", &head[head.len().saturating_sub(80)..]);
+}
+
+#[test]
+fn o_corte_da_fala_sem_resumo_e_o_de_sempre_e_sem_lugar_fica_so_a_fala() {
+    use super::handoff::clip_user;
+    assert_eq!(clip_user("oi", 10), "oi");
+    assert_eq!(clip_user(&"a".repeat(30), 10).chars().count(), 10);
+    let long_said = "b".repeat(50);
+    let framed = format!("[ADE AGS] Contexto {}\n{END_MARK}\n\n{long_said}", "c".repeat(100));
+    // A fala sozinha já passa do teto: fica só ela, cortada.
+    assert!(clip_user(&framed, 40).starts_with("bbbb"));
+}

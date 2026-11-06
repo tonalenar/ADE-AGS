@@ -75,3 +75,105 @@ impl Screen {
         (self.pixels.0 / self.scale, self.pixels.1 / self.scale)
     }
 }
+
+#[link(name = "IOSurface", kind = "framework")]
+unsafe extern "C" {
+    fn IOSurfaceLock(buffer: *const std::ffi::c_void, options: u32, seed: *mut u32) -> i32;
+    fn IOSurfaceUnlock(buffer: *const std::ffi::c_void, options: u32, seed: *mut u32) -> i32;
+    fn IOSurfaceGetBaseAddress(buffer: *const std::ffi::c_void) -> *const u8;
+    fn IOSurfaceGetBytesPerRow(buffer: *const std::ffi::c_void) -> usize;
+    fn IOSurfaceGetWidth(buffer: *const std::ffi::c_void) -> usize;
+    fn IOSurfaceGetHeight(buffer: *const std::ffi::c_void) -> usize;
+    fn IOSurfaceGetPixelFormat(buffer: *const std::ffi::c_void) -> u32;
+    fn IOSurfaceGetSeed(buffer: *const std::ffi::c_void) -> u32;
+    fn IOSurfaceGetID(buffer: *const std::ffi::c_void) -> u32;
+}
+
+/// `kIOSurfaceLockReadOnly`: ler sem marcar a superfície como escrita (o seed não anda por nossa causa).
+const LOCK_READ_ONLY: u32 = 1;
+/// `'BGRA'`: 8 bits por canal, azul primeiro na memória. O único formato que `Pixels` entende.
+pub const BGRA: u32 = 0x4247_5241;
+
+/// A superfície que o iOS desenha agora, retida. O seed dela anda a cada quadro que o iOS escreve.
+pub struct Surface(Shared);
+
+/// Uma cópia coerente dos pixels: o seed foi o mesmo antes e depois da cópia, então não pegou meio quadro.
+pub struct Pixels {
+    pub width: usize,
+    pub height: usize,
+    /// Linhas de `width * 4` bytes, BGRA, sem o enchimento do fim de linha da superfície.
+    pub data: Vec<u8>,
+    pub seed: u32,
+    /// O id da `IOSurface` no sistema: outro id é outra superfície (o iOS troca ao girar ou mudar de modo).
+    pub surface: u32,
+}
+
+impl Screen {
+    /// A superfície atual da tela (ida e volta XPC ao serviço do CoreSimulator, ~ms). Nunca guarde por muito
+    /// tempo: ao girar, o iOS passa a desenhar em outra e a antiga para de mudar.
+    pub fn surface(&self) -> Option<Surface> {
+        // SAFETY: `framebufferSurface` é do protocolo SimDisplayIOSurfaceRenderable, que a tela implementa (o
+        // mesmo que `view.rs` usa); o retorno é +0 e é retido aqui.
+        unsafe {
+            let s = call!(self.obj.ptr(), sel!(framebufferSurface); -> *mut AnyObject);
+            let s = if s.is_null() { call!(self.obj.ptr(), sel!(maskedFramebufferSurface); -> *mut AnyObject) } else { s };
+            retain(s).map(|s| Surface(Shared(s)))
+        }
+    }
+}
+
+impl Surface {
+    fn raw(&self) -> *const std::ffi::c_void {
+        self.0.ptr() as *const std::ffi::c_void
+    }
+
+    /// Anda a cada quadro escrito. Leitura local, sem XPC.
+    pub fn seed(&self) -> u32 {
+        // SAFETY: IOSurface retida.
+        unsafe { IOSurfaceGetSeed(self.raw()) }
+    }
+
+    pub fn id(&self) -> u32 {
+        // SAFETY: idem.
+        unsafe { IOSurfaceGetID(self.raw()) }
+    }
+
+    /// Copia os pixels. Se o iOS escreveu durante a cópia (o seed mudou), tenta de novo; depois de 4 vezes
+    /// desiste, para nunca devolver uma mistura de dois quadros.
+    pub fn pixels(&self) -> Result<Pixels, String> {
+        let raw = self.raw();
+        // SAFETY: IOSurface retida; a memória só é lida entre Lock e Unlock, dentro de `height * bytes_per_row`.
+        unsafe {
+            let format = IOSurfaceGetPixelFormat(raw);
+            if format != BGRA {
+                return Err(format!("Formato de tela {format:#x} não suportado."));
+            }
+            let (width, height, row) = (IOSurfaceGetWidth(raw), IOSurfaceGetHeight(raw), IOSurfaceGetBytesPerRow(raw));
+            if width == 0 || height == 0 || row < width * 4 {
+                return Err("Tela sem pixels.".into());
+            }
+            for _ in 0..4 {
+                let mut before = 0u32;
+                if IOSurfaceLock(raw, LOCK_READ_ONLY, &mut before) != 0 {
+                    return Err("Não consegui ler a tela.".into());
+                }
+                let base = IOSurfaceGetBaseAddress(raw);
+                let mut data = Vec::with_capacity(width * height * 4);
+                if !base.is_null() {
+                    for y in 0..height {
+                        data.extend_from_slice(std::slice::from_raw_parts(base.add(y * row), width * 4));
+                    }
+                }
+                let mut after = 0u32;
+                IOSurfaceUnlock(raw, LOCK_READ_ONLY, &mut after);
+                if base.is_null() {
+                    return Err("A tela não está na memória.".into());
+                }
+                if before == after && IOSurfaceGetSeed(raw) == before {
+                    return Ok(Pixels { width, height, data, seed: before, surface: IOSurfaceGetID(raw) });
+                }
+            }
+            Err("A tela não parou de mudar durante a leitura.".into())
+        }
+    }
+}

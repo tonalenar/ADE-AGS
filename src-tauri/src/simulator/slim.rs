@@ -64,6 +64,12 @@ pub const LABELS: &[&str] = &[
     "com.apple.ap.adprivacyd", "com.apple.ap.promotedcontentd", "com.apple.diagnosticextensionsd", "com.apple.feedbackd",
     "com.apple.rtcreportingd", "com.apple.securityuploadd", "com.apple.geoanalyticsd", "com.apple.triald", "com.apple.followupd",
     "com.apple.purplebuddy.budd", "com.apple.devicecheckd",
+    // Wallet, mídia da Apple e as tarefas de fundo do Safari (do catálogo do NeoSimulator, que vem do simslim).
+    // O Safari, o push dos sites (`webpushd`) e os universal links (`swcd`) continuam ligados.
+    "com.apple.passd", "com.apple.financed", "com.apple.merchantd", "com.apple.musicd", "com.apple.videosubscriptionsd",
+    "com.apple.assetsubscriptiond", "com.apple.itunescloudd", "com.apple.SafariBookmarksSyncAgent", "com.apple.Safari.passwordbreachd",
+    "com.apple.Safari.SafeBrowsing.Service", "com.apple.safarifetcherd", "com.apple.WebBookmarks.webbookmarksd",
+    "com.apple.webkit.adattributiond", "com.apple.webprivacyd",
     // O resto.
     "com.apple.coreidvd", "com.apple.businessservicesd", "com.apple.deviceaccessd", "com.apple.replicatord", "com.apple.linkd",
     "com.apple.ind", "com.apple.storagedatad", "com.apple.StatusKitAgent", "com.apple.countryd", "com.apple.mobileassetd",

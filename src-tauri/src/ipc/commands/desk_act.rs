@@ -10,6 +10,10 @@ use tauri::AppHandle;
 pub(super) fn act(app: &AppHandle, args: &Value) -> Result<Value, String> {
     // Parser e identidade vêm antes de qualquer captura, consulta paga ou pergunta à pessoa.
     let (request, timeout) = super::sim_act::parse(args)?;
+    // A tela do Mac ainda não guarda a grade de pixels: uma expectativa visual nunca se cumpriria.
+    if !request.visual.is_empty() {
+        return Err("--expect visual: só vale no simulador iOS por enquanto; no Mac use text:.".into());
+    }
     let session = arg_str_opt(args, "session").filter(|s| !s.trim().is_empty());
     let client_pid = crate::ipc::current_client_pid();
     let from = crate::terminal::authorize_actor(

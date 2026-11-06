@@ -24,8 +24,10 @@ export function AccessMenu({ value, available, onChange, placement = "above" }: 
   const { open, setOpen, ref } = usePopover();
   const Icon = ICON[value];
   const trigger = (
-    <span className="flex items-center gap-1.5">
-      <Icon className="w-3.5 h-3.5" />{t(`chat.access.${value}`)}
+    <span title={t(`chat.access.${value}`)} className="flex items-center gap-1.5">
+      <Icon className="w-3.5 h-3.5 shrink-0" />
+      {/* Na coluna estreita do composer, só o ícone (o nome vai no tooltip e no leitor de tela). */}
+      <span className="@max-[28rem]/composer:sr-only">{t(`chat.access.${value}`)}</span>
     </span>
   );
   if (!onChange) {

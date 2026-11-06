@@ -1,5 +1,6 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { listen } from "@tauri-apps/api/event";
 import { Position } from "@xyflow/react";
 
 import { CordPort } from "@/features/canvas/cords";
@@ -8,8 +9,16 @@ import { canvasActions, useActiveBoardKey, useCanvasStore } from "@/features/can
 import { useTabsStore } from "@/features/tabs/store";
 import { AlertaToast } from "@/shared/ui/alerts";
 
-import { clampScale, DEFAULT_SCREEN, nodeSize, phoneOf, scaleOf, SIM_GAP_X, SIM_GAP_Y, stepScale, type SimScreen } from "./geometry";
-import { simulatorBoot, simulatorButton, simulatorPriority, simulatorScreenshot, simulatorShutdown, type SimDevice } from "./ipc";
+import { clampScale, DEFAULT_SCREEN, isLandscape, nodeSize, orientedScreen, phoneOf, scaleOf, SIM_GAP_X, SIM_GAP_Y, stepScale, type SimScreen } from "./geometry";
+import {
+  SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
+  simulatorShutdown, type SimDevice, type SimOrientationEvent,
+} from "./ipc";
+import { canTouch, frameLayout, isPhysicalId, physicalScreen } from "@/features/iphone/model";
+import { DeviceFrame, screenRadiusOf } from "@/features/iphone/DeviceFrame";
+import { PhysicalMirror } from "@/features/iphone/PhysicalParts";
+import { refreshPhysical, useIphoneStore, useMirrorStatus } from "@/features/iphone/store";
+
 import { SimulatorBar } from "./SimulatorBar";
 import { SimulatorChat, type SimAgent } from "./SimulatorChat";
 import { SimulatorScreen } from "./SimulatorScreen";
@@ -48,6 +57,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const [booting, setBooting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [closeArmed, setCloseArmed] = useState(false);
+  const [landscape, setLandscape] = useState(false);
 
   useEffect(() => {
     listenActivity();
@@ -57,13 +67,40 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
     }
   }, [loaded]);
 
-  const current = deviceByUdid(devices, portal.udid);
-  const screen = screenOf(current);
+  // O nó pode mostrar um iPhone ou iPad físico (`device:<id>`): só ver, sem os controles do simulador.
+  const physicalId = isPhysicalId(portal.udid) ? portal.udid : null;
+  const physical = useIphoneStore((s) => (physicalId ? s.devices.find((d) => d.id === physicalId) : undefined));
+  const mirror = useMirrorStatus(physicalId);
+  const physicalLoaded = useIphoneStore((s) => s.loaded);
+  useEffect(() => { if (physicalId) void refreshPhysical(); }, [physicalId]);
+  const current = physicalId ? undefined : deviceByUdid(devices, portal.udid);
+  const booted = current?.state === "booted";
+  // A moldura deita com o iOS: a orientação vem do backend ao ligar e a cada giro (de qualquer tela ou agente).
+  const screen = physicalId
+    ? physicalScreen(mirror?.display ?? null, physical?.family ?? "iphone")
+    : orientedScreen(screenOf(current), landscape && booted);
+
+  useEffect(() => {
+    const udid = portal.udid;
+    if (!udid || !booted) {
+      setLandscape(false);
+      return;
+    }
+    let alive = true;
+    simulatorOrientation(udid).then((o) => alive && turnRef.current(isLandscape(o))).catch(() => undefined);
+    const off = listen<SimOrientationEvent>(SIMULATOR_ORIENTATION_EVENT, (e) => {
+      if (alive && e.payload.udid === udid) turnRef.current(isLandscape(e.payload.orientation));
+    });
+    return () => {
+      alive = false;
+      void off.then((f) => f());
+    };
+  }, [portal.udid, booted]);
   const scale = scaleOf(screen, portal.box.h);
-  const chat = !!portal.chat;
+  // A conversa com os agentes é do simulador: o aparelho físico ainda não é pilotado por eles.
+  const chat = !!portal.chat && !physicalId;
   const phone = phoneOf(screen, scale);
   const state: SimDevice["state"] | "error" = error ? "error" : booting ? "booting" : current?.state ?? "shutdown";
-  const booted = current?.state === "booted";
 
   const agents: SimAgent[] = useMemo(() => agentsKey.split("\n").filter(Boolean).map((row) => {
     const [tabId, name, agentId] = row.split("\t");
@@ -84,6 +121,16 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       canvasActions.moveNode(key, id, { ...portal.box, w: size.w, h: size.h });
     }
   }, [key, id, screen.width, screen.height, scale, chat]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Deitar ou levantar a moldura mantém a escala: o box troca de largura e altura na mesma passada (sem isso,
+  // a escala relida do box antigo pularia). Pela ref, o ouvinte do evento usa sempre a versão atual.
+  const turn = (next: boolean) => {
+    if (next === landscape) return;
+    resize(orientedScreen(screenOf(current), next && booted), scale, chat);
+    setLandscape(next);
+  };
+  const turnRef = useRef(turn);
+  turnRef.current = turn;
 
   const fail = (e: unknown) => {
     setError(String(e));
@@ -107,6 +154,12 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const actions = {
     onPick: (udid: string) => {
       setError(null);
+      if (isPhysicalId(udid)) {
+        const device = useIphoneStore.getState().devices.find((d) => d.id === udid);
+        const next = physicalScreen(useIphoneStore.getState().statuses[udid]?.display ?? null, device?.family ?? "iphone");
+        resize(next, clampScale(next, scale), false, { udid, name: device?.name ?? portal.name, chat: false });
+        return;
+      }
       const next = screenOf(deviceByUdid(devices, udid));
       resize(next, clampScale(next, scale), chat, { udid, name: deviceByUdid(devices, udid)?.name ?? portal.name });
     },
@@ -121,6 +174,9 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
         fail(e);
       }
     },
+    onRotate: () => {
+      if (portal.udid) simulatorRotate(portal.udid, landscape ? "right" : "left").then((o) => turnRef.current(isLandscape(o))).catch(fail);
+    },
     onChat: () => resize(screen, scale, !chat, { chat: !chat }),
     onScale: (direction: 1 | -1) => resize(screen, stepScale(screen, scale, direction), chat),
     onLight: async () => {
@@ -133,6 +189,15 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       try {
         const count = await simulatorPriority(portal.udid, next);
         void AlertaToast(portal.name, t(next ? "simulator.lightOn" : "simulator.lightOff", { count }), "success", 3500);
+      } catch (e) {
+        fail(e);
+      }
+    },
+    onClipboard: async (direction: "toDevice" | "toMac") => {
+      if (!portal.udid) return;
+      try {
+        await simulatorClipboard(portal.udid, direction);
+        void AlertaToast(portal.name, t(direction === "toDevice" ? "simulator.clipboardSentToDevice" : "simulator.clipboardSentToMac"), "success", 3000);
       } catch (e) {
         fail(e);
       }
@@ -167,9 +232,20 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
       <div className="flex h-full w-full flex-col" style={{ gap: SIM_GAP_Y }}>
         <SimulatorBar full={chat} devices={devices} current={current} state={state} scale={scale} light={light}
+          physical={physicalId ? { id: physicalId, device: physical, status: mirror } : undefined}
           hibernateMin={hibernateMin} single={single}
           agents={agents.length} chatOpen={chat} closeArmed={closeArmed} actions={actions} />
         <div className="flex min-h-0 flex-1" style={{ gap: SIM_GAP_X }}>
+          {physicalId ? (
+            // O aparelho físico: a moldura do modelo, com os botões da lateral funcionando (ver `iphone/DeviceFrame`).
+            <div className="nodrag nowheel nopan flex shrink-0 items-center justify-center" style={{ width: phone.w, height: phone.h }}>
+              <DeviceFrame device={physicalId} name={portal.name} layout={frameLayout(physical?.model ?? "", physical?.family ?? "iphone")}
+                screen={{ width: Math.round(phone.screenW), height: Math.round(phone.screenH) }} enabled={canTouch(mirror)}>
+                <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror}
+                  radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW))} onError={fail} />
+              </DeviceFrame>
+            </div>
+          ) : (
           <div className="relative shrink-0 bg-gradient-to-br from-surface-overlay via-surface to-surface-raised"
             style={{
               width: phone.w, height: phone.h, borderRadius: phone.outerRadius, padding: phone.bezel,
@@ -200,6 +276,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
               )}
             </div>
           </div>
+          )}
           {chat && key && (
             <SimulatorChat boardKey={key} node={id} name={portal.name} udid={portal.udid} booted={booted} agents={agents}
               onClose={() => resize(screen, scale, false, { chat: false })} />

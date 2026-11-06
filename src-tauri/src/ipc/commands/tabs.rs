@@ -112,6 +112,9 @@ pub(super) fn wait_for_pty(app: &AppHandle, tab_id: &str, window: Option<&str>) 
 ///    aparece el PTY no funciona: los agentes tardan en levantar y descartan lo que llega
 ///    mientras tanto. Ver `wait_until_ready`.
 pub(super) fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    if let Some(target) = chat_terminal_target(args)? {
+        return chat_terminal_create(app, args, &target);
+    }
     let window = arg_str_opt(args, "window");
     let prompt = init_prompt(args);
 
@@ -162,6 +165,129 @@ pub(super) fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String>
     // que poder enterarse de que quizá la TUI no estaba escuchando todavía.
     out["promptWaitedForReady"] = json!(ready);
     Ok(out)
+}
+
+/// De quem é o terminal do painel do chat que um `tab create` pede: da conversa por protocolo
+/// (`thread:<id>`) ou da aba (uma conversa de TUI no chat) que chama.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ChatTerminal {
+    Thread(String),
+    Tab(String),
+}
+
+/// O `tab create` vai para o terminal do painel do chat de quem chama? Sim quando uma conversa do chat
+/// (`from = thread:<id>`) pede um shell (`--agent bash`), ou com `--in-chat` (de uma conversa ou de uma aba;
+/// o agente fica implícito). `--new-tab` volta à aba comum. `None` = uma aba comum, como sempre. Pura.
+pub(crate) fn chat_terminal_target(args: &Value) -> Result<Option<ChatTerminal>, String> {
+    let flag = |key: &str| args.get(key).and_then(Value::as_bool).unwrap_or(false);
+    let in_chat = flag("inChat");
+    let new_tab = flag("newTab");
+    let agent = arg_str_opt(args, "agent");
+    let from = arg_str_opt(args, "from").map(|f| f.trim().to_string()).filter(|f| !f.is_empty());
+    let shell = agent.as_deref().is_none_or(|a| a == crate::agents::SHELL_AGENT_ID);
+    if in_chat {
+        if new_tab {
+            return Err("Use --in-chat ou --new-tab, não os dois".into());
+        }
+        if !shell {
+            return Err("--in-chat só abre o terminal do chat: use --agent bash (ou omita o --agent)".into());
+        }
+        let Some(from) = from else {
+            return Err("--in-chat precisa ser chamado de dentro de uma conversa do chat (ADE_TAB_ID não veio)".into());
+        };
+        if from.starts_with(crate::chat_team::model::THREAD_PREFIX) {
+            let id = crate::chat_team::model::thread_id_of(&from)
+                .ok_or("--in-chat: o ADE_TAB_ID desta conversa está vazio")?;
+            return Ok(Some(ChatTerminal::Thread(id.to_string())));
+        }
+        return Ok(Some(ChatTerminal::Tab(from)));
+    }
+    if new_tab || agent.is_none() || !shell {
+        return Ok(None);
+    }
+    Ok(from.as_deref().and_then(crate::chat_team::model::thread_id_of).map(|id| ChatTerminal::Thread(id.to_string())))
+}
+
+/// A pasta da conversa dona do terminal: a do registro da conversa, ou a da aba.
+fn chat_terminal_cwd(app: &AppHandle, target: &ChatTerminal) -> Result<String, String> {
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    match target {
+        ChatTerminal::Thread(id) => crate::conversa::store::thread(&conn, id)
+            .map_err(|e| e.to_string())?
+            .map(|row| row.cwd)
+            .ok_or_else(|| format!("A conversa {id} não existe")),
+        ChatTerminal::Tab(id) => {
+            use rusqlite::OptionalExtension;
+            conn.query_row("SELECT cwd FROM tabs WHERE id = ?1", [id], |r| r.get::<_, String>(0))
+                .optional()
+                .map_err(|e| e.to_string())?
+                .or_else(|| crate::terminal::pty_for_tab(id.clone()).and_then(crate::terminal::tab_and_cwd_of).map(|(_, cwd)| cwd))
+                .ok_or_else(|| format!("A aba {id} não existe"))
+        }
+    }
+}
+
+/// O terminal do painel direito do chat: o shell da pasta da conversa (o mesmo da aba Terminal do painel, que a
+/// pessoa também usa), aberto se estiver fechado. O primeiro comando vai como linha de shell, sem passar pelo
+/// envio das TUIs.
+fn chat_terminal_create(app: &AppHandle, args: &Value, target: &ChatTerminal) -> Result<Value, String> {
+    let cwd = chat_terminal_cwd(app, target)?;
+    let created = bridge_call(app, "tab.create", &json!({ "cwd": cwd, "chatShell": true }))?;
+    let tab_id = created
+        .get("tabId")
+        .and_then(|v| v.as_str())
+        .ok_or("O terminal do chat abriu, mas não devolveu o id dele")?
+        .to_string();
+    chat_shells().lock().unwrap_or_else(|e| e.into_inner()).insert(tab_id.clone());
+    let Some(command) = init_prompt(args) else { return Ok(created) };
+    let pty_id = wait_for_pty(app, &tab_id, None)?;
+    let ready = wait_until_ready(pty_id);
+    submit_line(pty_id, &command)?;
+    let mut out = created;
+    out["promptSent"] = json!(true);
+    out["promptWaitedForReady"] = json!(ready);
+    Ok(out)
+}
+
+/// Como o texto vai para o terminal com o Enter.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SubmitStyle {
+    /// Um shell: a linha crua e o Enter. Nada de reescrever o que não ecoou (um prompt de senha ou de código
+    /// não ecoa) nem de guardar o texto na ficha do ponto de restauração (pode ser um código ou um token).
+    Line,
+    /// Uma TUI de agente: `submit_prompt`, com a verificação de que o texto chegou e foi enviado.
+    Prompt,
+}
+
+/// Pura: o shell (`bash`, inclusive o terminal do chat) recebe a linha crua; o resto, o envio de TUI.
+pub(crate) fn submit_style(agent_id: Option<&str>) -> SubmitStyle {
+    if agent_id == Some(crate::agents::SHELL_AGENT_ID) { SubmitStyle::Line } else { SubmitStyle::Prompt }
+}
+
+/// Uma linha de shell: o texto e o Enter, uma vez só.
+fn submit_line(pty_id: u32, text: &str) -> Result<(), String> {
+    crate::terminal::write_to_pty(pty_id, text)?;
+    crate::terminal::write_to_pty(pty_id, "\r")
+}
+
+/// Os terminais do chat que este processo já entregou a um agente. A aba nova só chega ao banco depois do debounce
+/// da gravação; um `tab send` logo em seguida ainda a reconhece como shell.
+fn chat_shells() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    SET.get_or_init(Default::default)
+}
+
+/// O agente da aba: `bash` para um terminal do chat já entregue; senão, lido do banco (`None` = a aba ainda não
+/// foi gravada ou não existe).
+fn tab_agent(app: &AppHandle, tab_id: &str) -> Option<String> {
+    use rusqlite::OptionalExtension;
+    if chat_shells().lock().unwrap_or_else(|e| e.into_inner()).contains(tab_id) {
+        return Some(crate::agents::SHELL_AGENT_ID.to_string());
+    }
+    let db = db(app).ok()?;
+    let conn = db.lock().ok()?;
+    conn.query_row("SELECT agent_id FROM tabs WHERE id = ?1", [tab_id], |r| r.get::<_, String>(0)).optional().ok().flatten()
 }
 
 /// `--initprompt` y `--init-prompt` llegan como claves distintas (el parser de la CLI
@@ -629,7 +755,10 @@ pub(super) fn tab_send(app: &AppHandle, args: &Value) -> Result<Value, String> {
     if args.get("noEnter").and_then(|v| v.as_bool()).unwrap_or(false) {
         crate::terminal::write_to_pty(pty_id, &text)?;
     } else {
-        submit_prompt(pty_id, &text)?;
+        match submit_style(tab_agent(app, &tab_id).as_deref()) {
+            SubmitStyle::Line => submit_line(pty_id, &text)?,
+            SubmitStyle::Prompt => submit_prompt(pty_id, &text)?,
+        }
         let _ = app.emit("cc-peer-message", json!({ "kind": "ask",
             "fromTabId": arg_str_opt(args, "from").unwrap_or_default(), "toTabId": tab_id,
             "atMs": crate::util::now_ts_ms() }));

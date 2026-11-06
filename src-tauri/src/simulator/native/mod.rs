@@ -73,6 +73,15 @@ pub fn connect(udid: &str) -> Result<(screen::Screen, Arc<hid::Hid>), String> {
     Ok((screen, hid))
 }
 
+/// A tela de um aparelho já ligado, sem esperar nem abrir o HID: para fotografar pela `IOSurface`.
+pub fn screen(udid: &str) -> Result<screen::Screen, String> {
+    let dev = device::find(udid)?;
+    if device::state(&dev) != model::STATE_BOOTED {
+        return Err("O aparelho está desligado. Ligue-o primeiro.".into());
+    }
+    screen::lcd(&dev, Duration::ZERO)
+}
+
 /// Um toque em (x, y) pontos do iOS: desce e sobe.
 pub fn tap(udid: &str, x: f64, y: f64) -> Result<(), String> {
     let (screen, hid) = connect(udid)?;

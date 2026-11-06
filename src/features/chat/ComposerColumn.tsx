@@ -40,11 +40,15 @@ export function useElementWidth<T extends HTMLElement>() {
   return { ref, width };
 }
 
-/** A coluna do composer (e do pedido de permissão logo acima): a largura da conversa e a margem pela coluna. */
+/**
+ * A coluna do composer (e do pedido de permissão logo acima): a largura da conversa e a margem pela coluna. É o
+ * container `composer` das container queries: com a coluna estreita (o painel do simulador aberto), o nome do modelo
+ * trunca (o flex encolhe só o que falta) e «Construir», a pasta e o acesso ficam só com o ícone (o rótulo vai no tooltip), em vez de a linha quebrar.
+ */
 export function ComposerColumn({ children }: { children: React.ReactNode }) {
   const width = useChatWidthClass();
   const { ref, style } = useColumnGutter<HTMLDivElement>();
-  return <div ref={ref} style={style} className={`w-full ${width} mx-auto pb-4`}>{children}</div>;
+  return <div ref={ref} style={style} className={`@container/composer w-full ${width} mx-auto pb-4`}>{children}</div>;
 }
 
 /** A altura de um elemento (caixa inteira), acompanhada por `ResizeObserver`; `0` até a primeira medida. */

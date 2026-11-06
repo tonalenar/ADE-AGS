@@ -17,13 +17,15 @@ import { MissionsSection } from "@/features/missions/MissionsSection";
 import { ChatSidebar, IconButton, ProjectBadge, type FolderDiff } from "./ChatSidebar";
 import { ChatPage } from "./ChatPage";
 import { SettingsSidebar, SpacesSidebar } from "./ChatPageSidebar";
-import { isSettingsRoute } from "./chatSpaces";
+import { isFullscreenRoute, isSettingsRoute } from "./chatSpaces";
 import { useElementWidth } from "./ComposerColumn";
 import { CHAT_SHELL_ATTR, ConversationView, hasTimeline } from "./ConversationView";
 import { parseUnifiedDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
 import { startChatLive } from "./liveStore";
 import { useLiveSummary } from "./liveSummary";
+import { SummaryPane } from "./summary/SummaryPane";
+import { SUMMARY_POPOVER_W, SummaryPopover } from "./summary/SummaryPopover";
 import { HeaderLive } from "./LiveActivity";
 import { PermissionsInbox } from "./permissions/PermissionsInbox";
 import { TeamHeaderBadge } from "./team/TeamThreadFeed";
@@ -32,12 +34,12 @@ import { setInboxOpen, usePermissions } from "./permissions/permissionsStore";
 import { startQueueRunner } from "./queueRunner";
 import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
+import { runInShell } from "./shellTerminal";
+import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
-import { SummaryDock, SummaryPane } from "./summary/SummaryPane";
 import { useTeamDraft } from "./team/draftStore";
-import { chatInset, summaryPlacement } from "./summary/summaryLayout";
-import { forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
+import { closeSummary, forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
 import { matchTeamShortcut } from "./panelMenu";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
 import { startStructured, useStructured } from "./structured/store";
@@ -73,14 +75,15 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const composing = useChatStore((s) => s.composing);
   const panelOpen = useChatStore((s) => s.panel !== null);
-  const panelTab = useChatStore((s) => s.panel);
   const maximized = useChatStore((s) => s.panelMaximized);
+  const summaryOpen = useChatStore((s) => s.summaryOpen);
+  const summaryPinned = useChatStore((s) => s.summaryPinned);
+  // A prancheta em tela cheia (`/design/:id`) ocupa a janela toda: sem a sidebar, com «Sair da tela cheia».
+  const fullPage = isFullscreenRoute(pathname);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const { ref: mainRef, width: mainWidth } = useElementWidth<HTMLElement>();
+  const { ref: mainRef } = useElementWidth<HTMLElement>();
   // Arquivos do Finder soltos na coluna do chat viram anexos do composer à vista (só os caminhos).
   useChatFileDrop(mainRef);
-  const inset = chatInset(panelTab, mainWidth);
-  const summarySpot = summaryPlacement(panelTab, mainWidth);
   const [folder, setFolder] = useState<string | null>(null);
   // O "+" de um projeto na barra pede a tela de conversa nova já nessa pasta: a casca lê o pedido uma vez.
   const composeFolder = useChatStore((s) => s.composeFolder);
@@ -93,6 +96,11 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const active = composing ? null : threadCard ?? cards.find((c) => c.tabId === activeTabId) ?? null;
   const activeThread = active ? threads.find((th) => th.id === threadIdOf(active.tabId)) ?? null : null;
   const diffs = useFolderDiffs(cards);
+  const activeCwd = active?.cwd ?? null;
+  // Trocar de conversa fecha o Resumo flutuante (ele é da conversa que estava à vista).
+  const activeKey = active?.tabId ?? null;
+  useEffect(() => { closeSummary(); }, [activeKey]);
+  const runCode = useMemo(() => (activeCwd ? (command: string) => runInShell(activeCwd, command) : null), [activeCwd]);
 
   useEffect(() => startChatLive(), []);
   useEffect(() => startStructured(), []);
@@ -147,7 +155,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   return (
     <div {...{ [CHAT_SHELL_ATTR]: "" }}
       className="cc-chat-type absolute inset-0 flex bg-white dark:bg-surface-deep text-gray-900 dark:text-white">
-      {sidebarOpen && page && (isSettingsRoute(pathname)
+      {sidebarOpen && page && !fullPage && (isSettingsRoute(pathname)
         ? <SettingsSidebar onBack={closePage} />
         : <SpacesSidebar activeCount={cards.length} onBack={closePage} />)}
       {sidebarOpen && !page && (
@@ -159,11 +167,11 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
       )}
 
       {page && (
-        <ChatPage onClose={closePage} sidebarOpen={sidebarOpen} onExpandSidebar={() => setSidebarOpen(true)}>{page}</ChatPage>
+        <ChatPage onClose={closePage} sidebarOpen={sidebarOpen && !fullPage} fullscreen={fullPage} onExpandSidebar={() => setSidebarOpen(true)}>{page}</ChatPage>
       )}
 
       {!page && !(panelOpen && maximized) && (
-        <main ref={mainRef} className="relative flex-1 min-w-[440px] flex flex-col">
+        <main ref={mainRef} className="@container/main relative flex-1 min-w-[440px] flex flex-col">
           <header data-tauri-drag-region className="h-[52px] shrink-0 flex items-center gap-3 pl-5 pr-3 text-chat-ui select-none">
             {!sidebarOpen && (
               <>
@@ -181,24 +189,38 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             {/* O seletor fica aqui (não cabe no cabeçalho da barra lateral) e nunca encolhe: o breadcrumb é que cede. */}
             <ShellModeSwitch className="shrink-0" />
             {/* A fileira de ícones do painel, como no Claude Code: Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e ⋯. */}
-            <PanelToolbar tabId={activeThread ? null : active?.tabId ?? null} terminalAvailable={!!active && !activeThread && hasTimeline(active.agentId)} />
+            {/* O >_ alterna a gaveta do agente (TUI com timeline) ou abre a aba Terminal do painel (um shell na pasta). */}
+            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} />
             <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
             {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
             {!panelOpen && <WindowControls className="-mr-3" />}
           </header>
 
-          {/* A conversa cede o lado direito ao Resumo (solto, sem coluna); sem lugar, o Resumo some. */}
-          <div className="flex-1 min-h-0 flex flex-col" style={{ paddingRight: inset }}>
+          {/* Abaixo do cabeçalho (que fica com a largura inteira): a conversa e, sem outro painel, a coluna fixa do Resumo
+              (como no Claude Code). A conversa é sempre o primeiro filho, então ligar o Resumo não a remonta. */}
+          <div className="flex-1 min-h-0 flex">
+          <div className="flex-1 min-w-[320px] min-h-0 flex flex-col">
             <AttachCwdContext.Provider value={active?.cwd ?? null}>
+              {/* O «Rodar» dos blocos de código vai ao terminal da pasta da conversa aberta. */}
+              <RunCodeContext.Provider value={runCode}>
               {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} cards={cards} />
                 : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
+              </RunCodeContext.Provider>
             </AttachCwdContext.Provider>
           </div>
+          {summaryPinned && !panelOpen && (
+            <aside aria-label={t("chat.panel.open.summary")} data-summary-column=""
+              className="w-[350px] min-w-[280px] shrink flex flex-col min-h-0 border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep">
+              <SummaryPane inCard conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
+            </aside>
+          )}
+          </div>
           <DropOverlay />
-          {summarySpot !== "none" && (
-            <SummaryDock overlay={summarySpot === "overlay"}>
-              <SummaryPane conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
-            </SummaryDock>
+          {/* Com outro painel aberto, o Resumo é o cartão flutuante, um pouco menor, encostado no painel. */}
+          {summaryOpen && panelOpen && (
+            <SummaryPopover width={SUMMARY_POPOVER_W} onClose={closeSummary}>
+              <SummaryPane inCard conversation={active} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} tabId={activeThread ? null : active?.tabId ?? null} />
+            </SummaryPopover>
           )}
         </main>
       )}

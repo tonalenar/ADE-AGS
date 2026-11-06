@@ -10,7 +10,12 @@
 //!   e `tool_call.<nome>ToolCall.{args,result}`) e `result` (`subtype`, `is_error`, `duration_ms`, `result`);
 //! - com `--stream-partial-output` os pedaços da fala são os `assistant` COM `timestamp_ms` e SEM `model_call_id`; os
 //!   outros (o texto repetido ao fechar o bloco e o final sem carimbo) são duplicatas e são ignorados;
-//! - um processo por turno, continuando com `--resume <session_id>`; não há uso de tokens nem cota no fluxo;
+//! - cada chamada do modelo acaba num `usage` (`subtype: model_call`, com `model_call_id`); o da chamada que não pediu
+//!   ferramenta é o fim da resposta. No `-p`, o `result` só vem depois que os shells postos em segundo plano acabam
+//!   (lido no `cursor-agent` 2026.11.05: o laço de `backgroundWorkRegistry` antes do `result`), então o turno fecha
+//!   no `usage` final mais [`QUIET_AFTER_FINAL`], sem esperar o `result`;
+//! - as perguntas do agente à pessoa (`interaction_query`) são recusadas sozinhas no `-p` e não travam o turno;
+//! - um processo por turno, continuando com `--resume <session_id>`; não há cota no fluxo;
 //! - sem `--force`, o que mudaria arquivos ou rodaria comandos não é aplicado (vira uma ação recusada).
 
 use std::collections::HashMap;
@@ -28,6 +33,17 @@ use super::store::ThreadRow;
 
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;
+
+/// Silêncio depois da fala, sem ferramenta aberta, que fecha o turno. O `cursor-agent` pode nunca mandar o `result`
+/// nem sair (um servidor que o agente deixou em segundo plano o mantém vivo); a resposta já veio, então o turno
+/// acabou. Folga para o modelo montar uma ferramenta grande depois de falar.
+pub const QUIET_AFTER_SPEECH: std::time::Duration = std::time::Duration::from_secs(3 * 60);
+/// Folga pelo `result` depois do fim de uma chamada do modelo que não pediu ferramenta (o `usage` dela). No `-p`, o
+/// `cursor-agent` só manda o `result` quando os shells que ele pôs em segundo plano acabam (um `npx expo start` nunca
+/// acaba); a resposta já veio inteira, então o turno acabou. Sem shell pendente, o `result` vem em milissegundos.
+pub const QUIET_AFTER_FINAL: std::time::Duration = std::time::Duration::from_secs(10);
+/// Silêncio sem fala e sem ferramenta aberta que fecha o turno com erro. Ferramenta rodando não tem prazo.
+pub const QUIET_MAX: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 const DENIED: &str = "Negado: o modo de execução do chat não aprova esta ação sem alguém para aprovar. Troque o acesso para liberar.";
 
@@ -80,11 +96,15 @@ pub struct Mapper {
     tools: HashMap<String, Item>,
     session: bool,
     spoke: bool,
+    /// Houve `tool_call` desde o último `usage`: a chamada do modelo em curso pediu ferramenta.
+    tool_in_call: bool,
+    /// O último sinal foi o `usage` de uma chamada que não pediu ferramenta: a resposta acabou.
+    call_ended: bool,
 }
 
 impl Mapper {
     pub fn new(turn: &str) -> Mapper {
-        Mapper { turn: turn.to_string(), seq: 0, said: None, thought: None, tools: HashMap::new(), session: false, spoke: false }
+        Mapper { turn: turn.to_string(), seq: 0, said: None, thought: None, tools: HashMap::new(), session: false, spoke: false, tool_in_call: false, call_ended: false }
     }
 
     fn next_id(&mut self, prefix: &str) -> String {
@@ -102,7 +122,16 @@ impl Mapper {
             self.session = true;
             out.push(Out::Session(id.to_string()));
         }
-        match str_of(line, "type").unwrap_or("") {
+        let kind = str_of(line, "type").unwrap_or("");
+        // Qualquer sinal depois do fim desfaz o fim: um shell em segundo plano que acabou acorda o modelo de novo
+        // (`system`/`task_notification` e uma chamada nova).
+        self.call_ended = kind == "usage" && str_of(line, "subtype") == Some("model_call") && !self.tool_in_call;
+        match kind {
+            "usage" => self.tool_in_call = false,
+            "tool_call" => self.tool_in_call = true,
+            _ => {}
+        }
+        match kind {
             "assistant" => self.assistant(line, &mut out),
             "thinking" => self.thinking(line, at, &mut out),
             "tool_call" => self.tool_call(line, at, &mut out),
@@ -117,6 +146,35 @@ impl Mapper {
         let mut out = Vec::new();
         self.flush_thought(now, &mut out);
         self.flush_said(now, &mut out);
+        out
+    }
+
+    /// O prazo de silêncio da próxima espera: nenhum com ferramenta rodando (um build longo é legítimo);
+    /// [`QUIET_AFTER_FINAL`] logo depois do fim de uma chamada sem ferramenta; [`QUIET_AFTER_SPEECH`] com a fala
+    /// aberta (a resposta veio e nada mais começou); [`QUIET_MAX`] no resto.
+    pub fn quiet_after(&self) -> Option<std::time::Duration> {
+        if self.tools.values().any(|t| t.status == Some(ToolStatus::Running)) {
+            return None;
+        }
+        Some(if self.call_ended {
+            QUIET_AFTER_FINAL
+        } else if self.said.is_some() {
+            QUIET_AFTER_SPEECH
+        } else {
+            QUIET_MAX
+        })
+    }
+
+    /// O silêncio venceu: fecha o que ficou aberto e encerra o turno. Depois da fala, o turno acabou bem (a resposta
+    /// veio); sem ela, é erro, dito em minutos.
+    pub fn quiet_end(&mut self, waited: std::time::Duration, now: Option<i64>) -> Vec<Out> {
+        let answered = self.said.is_some() || self.call_ended;
+        let mut out = self.finish(now);
+        let error = (!answered).then(|| {
+            let minutes = waited.as_secs().div_ceil(60).max(1);
+            format!("O Cursor ficou {minutes} min sem dar sinal e o turno foi fechado. A conversa continua: mande outra mensagem.")
+        });
+        out.push(Out::Done(TurnResult { interrupted: false, error, duration_ms: None }));
         out
     }
 
@@ -273,6 +331,55 @@ fn outcome(result: Option<&Value>) -> (ToolStatus, Option<String>) {
         return (ToolStatus::Error, text(&["stderr", "stdout", "output"]));
     }
     (ToolStatus::Done, text(&["content", "stdout", "output", "text", "result"]))
+}
+
+/// O que a fonte de linhas do turno devolve: uma linha, o fim do fluxo (EOF) ou o silêncio vencido.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Read {
+    Line(String),
+    Eof,
+    Quiet,
+}
+
+/// De onde vêm as linhas do turno: o stdout do `cursor-agent` no app, uma lista nos testes. `quiet` é o prazo de
+/// silêncio desta espera (`None` = sem prazo); vencido, a fonte devolve [`Read::Quiet`].
+pub trait Source {
+    fn next(&mut self, quiet: Option<std::time::Duration>) -> impl std::future::Future<Output = Read> + Send;
+}
+
+/// Lê o turno inteiro e devolve o `result`, se veio. `apply` recebe o que cada linha virou.
+pub async fn read_turn<S: Source>(mapper: &mut Mapper, source: &mut S, mut apply: impl FnMut(Vec<Out>), now: impl Fn() -> i64) -> Option<TurnResult> {
+    let mut done = None;
+    // Para no `result`: o processo pode seguir vivo depois dele (e o EOF nunca chegar). Sem `result`, para no EOF
+    // ou no silêncio vencido (`Mapper::quiet_after`).
+    while done.is_none() {
+        let quiet = mapper.quiet_after();
+        match source.next(quiet).await {
+            Read::Line(line) => {
+                let Ok(value) = serde_json::from_str::<Value>(&line) else { continue };
+                let mut outs = mapper.feed(&value, now());
+                if let Some(pos) = outs.iter().position(|o| matches!(o, Out::Done(_)))
+                    && let Out::Done(result) = outs.remove(pos)
+                {
+                    done = Some(result);
+                }
+                apply(outs);
+            }
+            Read::Eof => break,
+            Read::Quiet => {
+                let mut outs = mapper.quiet_end(quiet.unwrap_or_default(), Some(now()));
+                if let Some(pos) = outs.iter().position(|o| matches!(o, Out::Done(_)))
+                    && let Out::Done(result) = outs.remove(pos)
+                {
+                    done = Some(result);
+                }
+                apply(outs);
+                return done;
+            }
+        }
+    }
+    apply(mapper.finish(Some(now())));
+    done
 }
 
 /// O erro de um turno que acabou sem `result`: a última linha com texto do stderr. Pura.

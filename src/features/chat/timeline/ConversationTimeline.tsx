@@ -11,6 +11,7 @@ import { useChatWidthClass } from "../chatLook";
 import { PlanCard } from "../LiveActivity";
 import { setRightPanel } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
+import { renderChatCodeBlock } from "./CodeBlockFrame";
 import { parsePeerEnvelope, senderAgent } from "./peerEnvelope";
 import { speakerHeaders } from "./speakers";
 import type { PendingSend } from "./pending";
@@ -127,18 +128,29 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  // A pessoa está no fim e quer seguir o que chega. Só a rolagem dela muda isso (ver `onScroll`).
   const stick = useRef(true);
+  // A rolagem suave que esta tela mandou ainda não foi interrompida pela pessoa (ver `onScroll`).
+  const following = useRef(false);
+  const lastTop = useRef(0);
   const lastTurns = useRef(0);
   const lastPending = useRef(0);
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || !stick.current) return;
-    // Mensagem nova no fim: rola suave; texto que só cresce: acompanha sem animar.
+    if (!el) return;
+    // Conta o que já foi visto mesmo quando a pessoa está lendo lá em cima: ao voltar ao fim, só o que chegou depois é novo.
     const grew = turns.length > lastTurns.current || pending.length > lastPending.current;
     lastTurns.current = turns.length;
     lastPending.current = pending.length;
-    if (grew && loaded && !prefersReducedMotion() && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    else el.scrollTop = el.scrollHeight;
+    if (!stick.current) return;
+    // Mensagem nova no fim: rola suave; texto que só cresce: acompanha sem animar.
+    if (grew && loaded && !prefersReducedMotion() && typeof el.scrollTo === "function") {
+      following.current = true;
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      following.current = false;
+      el.scrollTop = el.scrollHeight;
+    }
   }, [turns.length, pending.length, working, items, loaded]);
   // O texto que aparece aos poucos cresce sem redesenhar a lista: a rolagem acompanha o tamanho,
   // se a pessoa estava no fim.
@@ -146,7 +158,11 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
     const el = scrollRef.current;
     const content = contentRef.current;
     if (!el || !content || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight; });
+    const observer = new ResizeObserver(() => {
+      if (!stick.current) return;
+      following.current = false;
+      el.scrollTop = el.scrollHeight;
+    });
     observer.observe(content);
     return () => observer.disconnect();
   }, []);
@@ -155,7 +171,15 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
     <div ref={scrollRef} className="flex-1 min-h-0 cc-scroll-hidden"
       onScroll={(e) => {
         const el = e.currentTarget;
-        stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+        const top = el.scrollTop;
+        const moved = top - lastTop.current;
+        lastTop.current = top;
+        // Enquanto a rolagem suave da própria tela desce, os eventos dela não decidem nada: com um texto alto chegando,
+        // a distância do fim passa de STICK_PX no meio da animação (e ao chegar), e o fio deixava de seguir o que chega.
+        if (following.current && moved >= 0) return;
+        // Rolar para cima (a pessoa lendo) solta o fio; voltar ao fim, de novo.
+        following.current = false;
+        stick.current = el.scrollHeight - top - el.clientHeight < STICK_PX;
       }}>
       <RevealContext.Provider value={reveal}>
       <AnswerContext.Provider value={onAnswer ?? null}>
@@ -252,7 +276,7 @@ function UserMessage({ item }: { item: TimelineItem }) {
   if (!peer) return <PersonBubble text={text} at={item.at} />;
   return (
     <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body}>
-      <Markdown content={peer.body} tone="chat" />
+      <Markdown content={peer.body} tone="chat" renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
@@ -268,7 +292,7 @@ function AgentText({ item }: { item: TimelineItem }) {
   const [entering] = useState(() => reveal.entering(item.id));
   return (
     <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""}>
-      <Markdown content={text} tone="chat" />
+      <Markdown content={text} tone="chat" renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
