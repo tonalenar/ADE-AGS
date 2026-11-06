@@ -437,6 +437,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
     design_artboard_duplicate, design_artboard_delete, design_comment_add, design_comment_resolve,
     design_note_add
   Computer use: sim_act, desk_act
+  Dispositivos: device_list, device_shot, device_action
   Perguntas à pessoa: ask_user
   Permissão: approve_tool_use
 ";

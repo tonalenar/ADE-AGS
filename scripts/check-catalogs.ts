@@ -57,6 +57,7 @@ export function mcpTools(mcp: string, git: string): ToolFamily[] {
     { family: "Chat-mode conversations", pt: "Conversas do modo chat", who: "interactive sessions (`--cwd`)", tools: names(rustBlock(mcp, "CHAT_TOOLS"), field) },
     { family: "Designs", pt: "Pranchetas", who: "interactive sessions (`--cwd`)", tools: names(rustBlock(mcp, "DESIGN_TOOLS"), field) },
     { family: "Computer use", pt: "Computer use", who: "interactive sessions (`--cwd`); the app checks the caller's tab or conversation", tools: names(rustBlock(mcp, "COMPUTER_USE_TOOLS"), field) },
+    { family: "Devices", pt: "Dispositivos", who: "interactive sessions (`--cwd`); caller reach is checked and fleet tasks are refused", tools: names(rustBlock(mcp, "DEVICE_TOOLS"), field) },
     { family: "Questions to the person", pt: "Perguntas à pessoa", who: "every session (team members get `refused`, see above)", tools: [ask] },
     { family: "Permission", pt: "Permissão", who: "fleet tasks only (`--task`)", tools: [approve] },
   ].filter((f) => f.tools.length > 0);

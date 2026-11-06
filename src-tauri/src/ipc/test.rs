@@ -457,7 +457,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(!task.iter().any(|name| name.starts_with("chat_")));
     // Os designs (`design_*`) também: abrir a tela de Design é coisa de aba.
     assert!(!task.iter().any(|name| name.starts_with("design_")));
-    let tab_without_chat: Vec<_> = tab.iter().filter(|name| !name.starts_with("chat_") && !name.starts_with("design_") && *name != "sim_act" && *name != "desk_act").cloned().collect();
+    let tab_without_chat: Vec<_> = tab.iter().filter(|name| !name.starts_with("chat_") && !name.starts_with("design_") && !name.starts_with("device_") && *name != "sim_act" && *name != "desk_act").cloned().collect();
     assert_eq!(task_without_memory, tab_without_chat);
 
     // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece,
@@ -491,7 +491,10 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let computer_use: Vec<_> = tab.iter().filter(|name| *name == "sim_act" || *name == "desk_act").collect();
     assert_eq!(computer_use.len(), 2);
     assert!(!task.iter().any(|name| name == "sim_act" || name == "desk_act"));
-    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1 + chat.len() + design + computer_use.len(), offered.len());
+    let devices: Vec<_> = tab.iter().filter(|name| name.starts_with("device_")).collect();
+    assert_eq!(devices.len(), 3);
+    assert!(!task.iter().any(|name| name.starts_with("device_")));
+    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1 + chat.len() + design + computer_use.len() + devices.len(), offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -564,7 +567,7 @@ fn la_config_de_opencode_lleva_el_servidor_y_pide_permiso_para_lo_que_escribe() 
     }
     // Lo que se aprueba solo en Claude Code tampoco pregunta acá; y nada fuera de nuestras
     // tools (la regla global del usuario no se toca).
-    for free in ["ags_browser_click", "ags_git_pr_list", "ags_ask_user", "ags_fact_add"] {
+    for free in ["ags_browser_click", "ags_git_pr_list", "ags_ask_user", "ags_fact_add", "ags_device_list", "ags_device_shot"] {
         assert!(!permission.contains_key(free), "{free}");
     }
     assert!(permission.keys().all(|k| k.starts_with("ags_")));
@@ -609,6 +612,10 @@ fn cada_tool_declara_si_lee_escribe_o_destruye() {
     assert_eq!(find("git_push")["destructiveHint"], false);
     assert_eq!(find("task_cancel")["destructiveHint"], true);
     assert_eq!(find("browser_eval")["destructiveHint"], true);
+    assert_eq!(find("device_list")["readOnlyHint"], true);
+    assert_eq!(find("device_shot")["readOnlyHint"], true);
+    assert_eq!(find("device_action")["readOnlyHint"], false);
+    assert_eq!(find("device_action")["destructiveHint"], true);
     assert_eq!(find("git_push")["openWorldHint"], true);
     assert_eq!(find("fact_add")["openWorldHint"], false);
 }
@@ -761,13 +768,48 @@ fn sim_act_e_desk_act_viajam_como_o_comando_da_cli_com_a_identidade_do_processo(
     // O simulador se aprova sozinho, como o navegador; a tela do Mac, não.
     assert!(super::mcp::auto_approved("sim_act"));
     assert!(!super::mcp::auto_approved("desk_act"));
+    assert!(super::mcp::auto_approved("device_list"));
+    assert!(super::mcp::auto_approved("device_shot"));
+    assert!(!super::mcp::auto_approved("device_action"));
+}
+
+#[test]
+fn tools_mcp_device_usam_o_despachador_agente_e_nao_pulam_o_escopo() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    assert!(dispatch.contains("\"device.list\" => device_list(app, args)"));
+    assert!(dispatch.contains("\"device.shot\" => device_action(app, args, \"shot\")"));
+    assert!(dispatch.contains("\"device.act\" => super::devices::device_act(app, args)"));
+    let ctx = McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-1".into()), mission: None, role: None };
+    let calls = [
+        call(1, "device_list", json!({})),
+        call(2, "device_shot", json!({ "name": "device:coredevice-id" })),
+        call(3, "device_action", json!({ "name": "device:coredevice-id", "action": "tap", "x": 20, "y": 30, "from": "forjado" })),
+    ];
+    let (responses, sent) = mcp_session(&ctx, &calls, |command, args| Ok(json!({ "command": command, "args": args })));
+    let mut commands: Vec<&str> = sent.iter().map(|(command, _)| command.as_str()).collect();
+    commands.sort_unstable();
+    assert_eq!(commands, ["device.act", "device.list", "device.shot"]);
+    assert!(sent.iter().all(|(_, args)| args["from"] == "tab-1"));
+    let device_act = sent.iter().find(|(command, _)| command == "device.act").unwrap();
+    assert_eq!(device_act.1["action"], "tap");
+    assert!(device_act.1.get("from").unwrap() != "forjado");
+    assert!(responses.iter().all(|response| response["result"]["content"][0]["text"].is_string()));
+
+    let (responses, sent) = mcp_session(
+        &McpContext::Task("t1".into()),
+        &[call(4, "device_action", json!({ "name": "iPhone", "action": "tap", "x": 1, "y": 1 }))],
+        |_, _| Ok(json!({})),
+    );
+    assert!(sent.is_empty());
+    assert_eq!(responses[0]["result"]["isError"], true);
 }
 
 /// Todo comando que uma tool de computer use manda existe no despachador.
 #[test]
 fn as_tools_de_computer_use_chamam_comandos_que_o_despachador_atende() {
     let dispatched = dispatched_commands();
-    let commands: Vec<&str> = include_str!("mcp.rs").split("dispatch: \"").skip(1).filter_map(|r| r.split('"').next()).collect();
+    let table = include_str!("mcp.rs").split("const COMPUTER_USE_TOOLS").nth(1).unwrap().split("];").next().unwrap();
+    let commands: Vec<&str> = table.split("dispatch: \"").skip(1).filter_map(|r| r.split('"').next()).collect();
     assert_eq!(commands, ["sim.act", "desk.act"]);
     for command in commands {
         assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");

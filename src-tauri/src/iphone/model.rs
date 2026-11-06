@@ -5,6 +5,7 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 
 use std::io::{self, Read};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -23,6 +24,35 @@ pub fn physical_identifier(id: &str) -> Option<&str> {
     let rest = id.strip_prefix(PHYSICAL_PREFIX)?;
     let ok = rest.len() == 36 && rest.chars().enumerate().all(|(i, c)| if matches!(i, 8 | 13 | 18 | 23) { c == '-' } else { c.is_ascii_hexdigit() });
     ok.then_some(rest)
+}
+
+/// Traduz erros comuns do CoreDevice para o próximo passo prático, sem esconder mensagens desconhecidas.
+pub fn device_error_help(raw: &str) -> String {
+    let lower = raw.to_lowercase();
+    if lower.contains("developer mode") || lower.contains("developermode") || lower.contains("modo de desenvolvedor") {
+        return "Ative o Modo de Desenvolvedor em Ajustes → Privacidade e Segurança no iPhone e reinicie o aparelho.".into();
+    }
+    if lower.contains("locked") || lower.contains("lock state") || lower.contains("passcode") || lower.contains("bloqueado") {
+        return "Desbloqueie o iPhone e tente de novo; o CoreDevice não consegue capturar ou controlar a tela bloqueada.".into();
+    }
+    if lower.contains("pair") || lower.contains("trust") || lower.contains("unpaired") || lower.contains("confiar neste computador") {
+        return "Desbloqueie o iPhone, confirme “Confiar neste computador” e tente de novo.".into();
+    }
+    if lower.contains("tunnel") || lower.contains("túnel") || lower.contains("connection") || lower.contains("conect") {
+        return "A conexão do CoreDevice caiu. A ADE está aguardando a reconexão; deixe o iPhone desbloqueado e reconecte o USB ou aguarde o Wi‑Fi voltar.".into();
+    }
+    if lower.contains("xcode")
+        || lower.contains("developer directory")
+        || lower.contains("active developer path")
+        || lower.contains("unable to find utility")
+        || lower.contains("xcrun: error")
+    {
+        return "Instale ou selecione o Xcode 27 neste Mac e tente de novo.".into();
+    }
+    if lower.contains("helper") || lower.contains("iphone-mirror") {
+        return "O helper do espelhamento não está disponível. Reinstale ou recompile a ADE com `bun run build:iphone-mirror`.".into();
+    }
+    if raw.trim().is_empty() { "O CoreDevice não informou o motivo.".into() } else { raw.trim().to_string() }
 }
 
 /// Como o aparelho fala com o Mac agora.
@@ -49,8 +79,10 @@ impl Transport {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PhysicalDevice {
-    /// `device:<identificador do CoreDevice>`.
+    /// `device:<identificador do CoreDevice>`, usado internamente para abrir o helper.
     pub id: String,
+    /// UDID público estável, quando o `devicectl` o informa.
+    pub udid: Option<String>,
     pub name: String,
     /// `iPhone 15 Pro Max`.
     pub model: String,
@@ -97,6 +129,7 @@ pub fn parse_devicectl(json: &str) -> Result<Vec<PhysicalDevice>, String> {
             if identifier.is_empty() {
                 return None;
             }
+            let udid = text(d, "/hardwareProperties/udid");
             let model = text(d, "/hardwareProperties/marketingName");
             let name = text(d, "/deviceProperties/name");
             let developer_mode = match text(d, "/deviceProperties/developerModeStatus").as_str() {
@@ -107,6 +140,7 @@ pub fn parse_devicectl(json: &str) -> Result<Vec<PhysicalDevice>, String> {
             let tunnel_ip = Some(text(d, "/connectionProperties/tunnelIPAddress")).filter(|s| !s.is_empty());
             Some(PhysicalDevice {
                 id: format!("{PHYSICAL_PREFIX}{identifier}"),
+                udid: (!udid.is_empty()).then_some(udid),
                 name: if name.is_empty() { model.clone() } else { name },
                 model,
                 os: text(d, "/deviceProperties/osVersionNumber"),
@@ -543,6 +577,32 @@ impl KeyframeGate {
 
     pub fn waiting(&self) -> bool {
         self.waiting_since.is_some()
+    }
+}
+
+/// Impede que um quadro dependente de referências perdidas seja usado como foto de agente. O limite é o horário
+/// monotônico do IDR que recuperou o vídeo; quadros anteriores continuam recusados mesmo se o VideoToolbox os
+/// entregar atrasados. `u64::MAX` representa que ainda não há quadro seguro.
+pub struct CaptureFence(AtomicU64);
+
+impl Default for CaptureFence {
+    fn default() -> Self {
+        Self(AtomicU64::new(u64::MAX))
+    }
+}
+
+impl CaptureFence {
+    pub fn invalidate(&self) {
+        self.0.store(u64::MAX, Ordering::Release);
+    }
+
+    pub fn on_keyframe(&self, arrived_ns: u64) {
+        self.0.store(arrived_ns, Ordering::Release);
+    }
+
+    pub fn trusts(&self, frame_ns: u64) -> bool {
+        let boundary = self.0.load(Ordering::Acquire);
+        boundary != u64::MAX && frame_ns >= boundary
     }
 }
 

@@ -122,13 +122,16 @@ O helper lê uma linha por comando no stdin (`touch start|move|end x y [x2 y2] e
 
 ## Agentes
 
-O aparelho físico entra pelo mesmo alcance do simulador (`surfaces`): corda no canvas, ou o painel do chat com a chave "Permitir que agentes controlem dispositivos". Por ser o celular de verdade, há uma camada a mais:
+O aparelho físico entra pelo mesmo alcance do simulador (`surfaces`): corda no canvas, ou o painel do chat com a chave "Permitir que agentes controlem dispositivos". `ags device list` devolve o id estável `device:<UDID>`, o `coreDeviceId` usado internamente pelo helper, o estado (`connected`, `reconnecting`, `offline`) e o transporte (`usb`, `wifi`, `none`); o agente só vê aparelhos ligados ao próprio ator. Esse id também é aceito por `ags device` e `sim act`. Resolver um UDID compartilhado por mais de um vínculo pede o id do nó, sem adivinhar. Por ser o celular de verdade, há uma camada a mais:
 
 - **`ags device`** (`ipc::commands::simulators::physical`): `shot` passa; `tap`, `swipe`, `key` e `button` perguntam à pessoa no app, com a foto atual e o ponto, até ela responder "Autorizar sempre neste aparelho" (`computer_use.ios.trust.device:<id>`, a mesma chave do `sim act`, apagada quando a pessoa desliga a chave do painel); `type` pergunta **sempre** (não se sabe em que campo o texto cai). Sem resposta = recusa (`computer_use::ios::confirm_physical`, regra pura em `iphone::model::agent_asks`, testada).
-- **`sim act`** (`computer_use::ios`): o mesmo laço do simulador, com a foto do último quadro do espelho (`Presenter::snapshot`, recortada; sem quadro, `devicectl device capture screenshot`) e o HID do aparelho (`iphone::ops`). A confirmação é a do simulador, sem atalho: o "sempre" por aparelho e o `always_asks` (rótulos sensíveis, ícones sem rótulo, teclas).
+- **MCP**: `device_list` (somente leitura), `device_shot` (somente leitura) e `device_action` (uma ação por chamada) usam o mesmo alcance, despachador e confirmação da CLI; contextos de tarefas da frota são recusados. `sim_act` também aceita um iPhone físico ligado ao agente.
+- **`sim act`** (`computer_use::ios`): o mesmo laço do simulador, com um quadro do espelho somente se ele vier depois do IRAP/IDR que recuperou a sessão e se não houve anomalia desde então. Perda, quadro incompleto ou falha de decodificação invalida o quadro para agentes até outro quadro-chave. Se a sessão silenciosa não abrir ou não houver quadro seguro, usa `xcrun devicectl device capture screenshot`. O PNG do espelho já sai reduzido, evitando uma segunda recodificação. O log registra `fonte=espelho|devicectl` e `duração=N ms`, sem gravar pixels. O HID do aparelho continua em `iphone::ops`; a confirmação conserva o "sempre" por aparelho e `always_asks` (rótulos sensíveis, ícones sem rótulo, teclas).
 - Não existem no aparelho físico: `start`, `open`, `launch`, `close`, `rotate`, `clipboard`, `tree` e `tap --text` (erro antes de qualquer pergunta).
 - Sem ninguém olhando, a primeira ação de um agente liga o espelho (uma "tela" `agent:<id>`, que sai de vista no fim da ação) e espera o toque ficar pronto por até 20 s; a sessão para sozinha 15 s depois.
 - Os cliques da pessoa no espelho, a barra, o "⋯" e os botões da moldura não perguntam nada: é a pessoa.
+
+O teste da conversa por protocolo confirma que as skills que a pessoa deixou em "Ativa em todos os agentes" também chegam a uma conversa ativa sem aba TUI. `ags-orchestrator` continua fora do conjunto padrão sempre ativo: a pessoa liga essa skill só nos agentes/projetos em que deseja um orquestrador.
 
 ## Medições
 
@@ -147,6 +150,8 @@ ADE_AGS_DATA_DIR=<pasta> ADE_IPHONE_FPS=1 env -u CARGO_TARGET_DIR bun run tauri 
 | Abrir (spawn → `started`) | ~1–3 s com o túnel de pé; até 8 s quando o túnel do Wi-Fi está se refazendo |
 | Sessão longa com Receiver Report | 150 s sem queda (helper sozinho); 170 s sem queda dentro da ADE: 2.902 quadros, 0 perdas, 0 descartes |
 | PLI + FIR → IDR | 30–150 ms (3 de 3 pedidos) |
+| Foto do computer use em quadro íntegro | PNG reduzido diretamente de BGRA; origem e duração no log |
+| Foto sem quadro confiável | reserva via `devicectl`; duração a medir no E2E desta entrega |
 
 O painel e a barra do canvas mostram a taxa medida a cada segundo. A contagem usa os quadros entregues à camada nativa, uma vez por aparelho, mesmo quando mais de uma tela mostra o vídeo. A taxa real varia com os quadros enviados pelo iPhone.
 
@@ -157,6 +162,12 @@ Outra descoberta: com duas sessões abertas no mesmo aparelho, só a mais recent
 **Toque:** a pessoa confirmou que clique e arrasto chegam ao aparelho. O log ("entrada→1º quadro novo", com `ADE_IPHONE_FPS=1`) mostrou de 3 a 33 ms até o primeiro quadro novo chegar, mais ~4 ms de decodificação. É um teto otimista: um quadro que já vinha chegando também conta.
 
 **Validação visual por USB (05/11/2026).** Na gravação de tela de 37 s, a rolagem rápida no X ficou sem mosaico perceptível. O contador mostrou 30 fps enquanto um vídeo do TikTok tocava e 42–60 fps depois, no X. Isso registra o comportamento observado, sem medir latência ou banda USB. O túnel do Wi-Fi caiu várias vezes na sondagem e no teste (`tunnelState: connecting` com o aparelho bloqueado): a sessão mostrou "Reconectando…" e voltou sozinha quando o túnel voltou.
+
+**Captura confiável para agentes.** O presenter retém o timestamp monotônico de cada buffer. A fence invalida a foto em lacuna RTP, unidade incompleta, falha do decodificador, troca do decodificador ou sessão nova; só um quadro emitido a partir do IRAP/IDR de recuperação pode voltar a ser usado. Se não houver um quadro aprovado, o computer use e `ags device shot` pedem uma captura independente ao `devicectl`. O tempo inclui abertura silenciosa da sessão e da captura de reserva; meça no log da execução antes de comparar.
+
+**E2E supervisionado desta branch (05/11/2026).** Não executado: a janela ADE já aberta tinha terminais/missões do usuário e o painel mostrava "Sem conexão", então não a usei nem iniciei uma segunda sessão do espelho. A leitura do CoreDevice encontrou um aparelho físico pareado, com Modo de Desenvolvedor ligado, mas túnel `unavailable`; nenhum helper `ade-iphone-mirror` estava rodando. Não houve chamada Jev nem entrada no aparelho. A foto, as confirmações, a recusa sem resposta, `type`, a autorização persistente e sua revogação ainda precisam do teste supervisionado. O tempo completo (foto + Jev + confirmação/toque + verificação) e a comparação com o simulador **não foram medidos**.
+
+**Inspiração de fluxo.** O projeto [PhoneUse Local](https://github.com/phoneuse-official/phoneuse) (MIT) motivou conferir o efeito visual após a entrada, usar rótulos de OCR para escolher alvos e encerrar tarefas como "relatado" ou "precisa de revisão". A ADE reaproveita seus próprios `--expect visual:changed`, OCR Vision e estados `done`/`unverified`; nenhum código do PhoneUse foi copiado e a plataforma não é embutida. A árvore nativa de acessibilidade do iPhone exigiria WebDriverAgent assinado e fica fora deste trabalho.
 
 ## Desenvolver
 

@@ -425,8 +425,16 @@ pub mod visual;
 pub(crate) mod ios;
 pub(crate) mod desktop;
 
+pub(crate) const MAX_CAPTURE_SIDE: usize = 1200;
+
 /// PNG em tamanho cheio a partir de pixels BGRA (linhas de `width * 4`): a foto do iPhone físico (`iphone::ops`).
 #[cfg(target_os = "macos")]
 pub(crate) fn png_from_bgra(data: &mut [u8], width: usize, height: usize, out: &std::path::Path) -> Result<(), String> {
     capture::png_from_bgra(data, width, height, out, usize::MAX)
+}
+
+/// PNG reduzido diretamente dos pixels BGRA para o computer use, sem gravar primeiro um PNG cheio.
+#[cfg(target_os = "macos")]
+pub(crate) fn png_from_bgra_max(data: &mut [u8], width: usize, height: usize, out: &std::path::Path, max: usize) -> Result<(), String> {
+    capture::png_from_bgra(data, width, height, out, max)
 }

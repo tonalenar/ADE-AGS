@@ -12,7 +12,7 @@ const DEVICECTL: &str = r#"{"result":{"devices":[
   {"identifier":"EC4D6C18-E117-53B6-8063-DB1821935BBB",
    "connectionProperties":{"pairingState":"paired","transportType":"localNetwork","tunnelIPAddress":"fdd6:f9d1:22d8::1","tunnelState":"connected"},
    "deviceProperties":{"name":"iPhone de Ton","osVersionNumber":"27.2","developerModeStatus":"enabled"},
-   "hardwareProperties":{"deviceType":"iPhone","marketingName":"iPhone 15 Pro Max","platform":"iOS","reality":"physical","serialNumber":"X"}},
+   "hardwareProperties":{"deviceType":"iPhone","marketingName":"iPhone 15 Pro Max","platform":"iOS","reality":"physical","serialNumber":"X","udid":"00008110-001234567890001E"}},
   {"identifier":"11111111-2222-3333-4444-555555555555",
    "connectionProperties":{"pairingState":"paired","transportType":"wired","tunnelState":"disconnected"},
    "deviceProperties":{"name":"iPad da sala","osVersionNumber":"26.4","developerModeStatus":"disabled"},
@@ -35,6 +35,7 @@ fn a_lista_so_traz_iphones_e_ipads_fisicos_com_o_transporte() {
     let ton = &list[0];
     assert_eq!((ton.name.as_str(), ton.model.as_str(), ton.os.as_str(), ton.family.as_str()), ("iPhone de Ton", "iPhone 15 Pro Max", "27.2", "iphone"));
     assert_eq!(ton.transport, Transport::Wifi);
+    assert_eq!(ton.udid.as_deref(), Some("00008110-001234567890001E"));
     assert!(ton.tunnel && ton.paired && ton.ready());
     assert_eq!(ton.tunnel_ip.as_deref(), Some("fdd6:f9d1:22d8::1"));
 }
@@ -64,6 +65,18 @@ fn json_estranho_do_devicectl_vira_erro() {
     assert!(parse_devicectl("não é json").is_err());
     assert!(parse_devicectl(r#"{"result":{}}"#).is_err());
     assert_eq!(parse_devicectl(r#"{"result":{"devices":[]}}"#).unwrap(), vec![]);
+}
+
+#[test]
+fn erros_do_coredevice_dizem_o_que_fazer_em_portugues() {
+    assert!(device_error_help("Developer Mode is disabled").contains("Modo de Desenvolvedor"));
+    assert!(device_error_help("device is locked").contains("Desbloqueie"));
+    assert!(device_error_help("pairing is missing").contains("Confiar neste computador"));
+    assert!(device_error_help("CoreDevice tunnel disconnected").contains("reconexão"));
+    assert!(device_error_help("Xcode developer directory missing").contains("Xcode 27"));
+    assert!(device_error_help("xcrun: error: invalid active developer path").contains("Xcode 27"));
+    assert!(device_error_help("iphone-mirror helper missing").contains("helper do espelhamento"));
+    assert_eq!(device_error_help("erro desconhecido"), "erro desconhecido");
 }
 
 #[test]
@@ -345,6 +358,23 @@ fn perda_seguida_nao_reinicia_o_relogio_da_espera() {
     g.on_gap(100);
     g.on_gap(2000);
     assert!(g.gave_up(2600));
+}
+
+#[test]
+fn foto_do_espelho_so_e_confiavel_depois_do_quadro_chave_que_recupera_a_sessao() {
+    let fence = CaptureFence::default();
+    assert!(!fence.trusts(10), "não há quadro confiável antes do primeiro IDR");
+
+    fence.on_keyframe(20);
+    assert!(!fence.trusts(19), "um quadro antigo não pode voltar a ser confiável");
+    assert!(fence.trusts(20));
+    assert!(fence.trusts(21));
+
+    fence.invalidate();
+    assert!(!fence.trusts(21), "perda ou falha invalida os quadros até o próximo IDR");
+    fence.on_keyframe(45);
+    assert!(!fence.trusts(44));
+    assert!(fence.trusts(45));
 }
 
 // ── Recorte ──

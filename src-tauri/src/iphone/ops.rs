@@ -16,6 +16,19 @@ use super::model::{self, Edge, TouchPhase};
 /// Quanto esperar o aparelho ficar pronto para o toque (abrir o túnel e o vídeo leva de 1 a 8 s no Wi-Fi).
 pub const READY_WAIT: Duration = Duration::from_secs(20);
 
+/// De onde veio a foto do computer use no iPhone físico.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ScreenshotSource {
+    MirrorFrame,
+    DeviceCtl,
+}
+
+pub(crate) struct ComputerUseScreenshot {
+    pub path: std::path::PathBuf,
+    pub source: ScreenshotSource,
+    pub elapsed: Duration,
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use super::*;
@@ -136,24 +149,60 @@ mod mac {
     /// A foto da tela num PNG temporário: o último quadro do espelho (sem as bordas do vídeo); sem quadro, a do
     /// `devicectl` (pública, ~1 s).
     pub fn screenshot(app: &AppHandle, device: &str) -> Result<String, String> {
+        let started = std::time::Instant::now();
         let dir = std::env::temp_dir().join("ade-iphone");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let path = dir.join(format!("shot-{}.png", crate::util::now_ts_ms()));
         if let Ok(r) = ready(app, device) {
             if let Some((mut data, w, h)) = r.presenter.snapshot() {
                 if crate::computer_use::png_from_bgra(&mut data, w, h, &path).is_ok() {
+                    eprintln!("[iphone] foto do agente: fonte=espelho duração={} ms", started.elapsed().as_millis());
                     return Ok(path.to_string_lossy().into_owned());
                 }
             }
         }
         let identifier = model::physical_identifier(device).ok_or("Esse não é um aparelho físico do CoreDevice.")?;
-        let mut cmd = crate::util::spawn::hidden_command("xcrun");
-        cmd.args(["devicectl", "device", "capture", "screenshot", "--device", identifier, "--quiet", "--destination"]).arg(&path);
-        let out = crate::util::spawn::output(&mut cmd, Duration::from_secs(40)).map_err(|e| format!("devicectl: {e}"))?;
-        if !out.status.success() || !path.is_file() {
-            return Err(format!("Não deu para fotografar o aparelho: {}", String::from_utf8_lossy(&out.stderr).trim()));
-        }
+        capture_devicectl(identifier, &path)?;
+        eprintln!("[iphone] foto do agente: fonte=devicectl duração={} ms", started.elapsed().as_millis());
         Ok(path.to_string_lossy().into_owned())
+    }
+
+    /// Foto do iPhone para o computer use. Abre uma sessão silenciosa quando necessário, mas só usa o quadro se
+    /// ele estiver depois do último IDR confiável; em qualquer outro caso, captura diretamente com devicectl.
+    pub fn screenshot_for_computer_use(app: &AppHandle, device: &str, out: &std::path::Path) -> Result<ComputerUseScreenshot, String> {
+        let started = std::time::Instant::now();
+        let parent = out.parent().ok_or("Pasta da captura indisponível.")?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("Pasta da captura indisponível: {e}"))?;
+        let mirror_reason = match ready(app, device) {
+            Ok(r) => match r.presenter.snapshot() {
+                Some((mut data, w, h)) => match crate::computer_use::png_from_bgra_max(
+                    &mut data, w, h, out, crate::computer_use::MAX_CAPTURE_SIDE,
+                ) {
+                    Ok(()) => return Ok(ComputerUseScreenshot { path: out.to_path_buf(), source: ScreenshotSource::MirrorFrame, elapsed: started.elapsed() }),
+                    Err(e) => format!("não foi possível preparar o quadro do espelho: {e}"),
+                },
+                None => "o quadro do espelho está ausente ou foi invalidado até o próximo quadro-chave".into(),
+            },
+            Err(e) => e,
+        };
+
+        let identifier = model::physical_identifier(device).ok_or("Esse não é um aparelho físico do CoreDevice.")?;
+        if let Err(e) = capture_devicectl(identifier, out) {
+            let _ = std::fs::remove_file(out);
+            return Err(format!("A foto do espelho não estava segura ({mirror_reason}) e o devicectl também não conseguiu fotografar: {e}"));
+        }
+        Ok(ComputerUseScreenshot { path: out.to_path_buf(), source: ScreenshotSource::DeviceCtl, elapsed: started.elapsed() })
+    }
+
+    fn capture_devicectl(identifier: &str, path: &std::path::Path) -> Result<(), String> {
+        let mut cmd = crate::util::spawn::hidden_command("xcrun");
+        cmd.args(["devicectl", "device", "capture", "screenshot", "--device", identifier, "--quiet", "--destination"]).arg(path);
+        let out = crate::util::spawn::output(&mut cmd, Duration::from_secs(40))
+            .map_err(|e| format!("devicectl: {}", model::device_error_help(&e.to_string())))?;
+        if !out.status.success() || !path.is_file() {
+            return Err(format!("Não deu para fotografar o iPhone: {}", model::device_error_help(&String::from_utf8_lossy(&out.stderr))));
+        }
+        Ok(())
     }
 }
 
@@ -174,6 +223,7 @@ mod none {
     pub fn gesture(_: &AppHandle, _: &str, _: &str) -> Result<(), String> { Err(NO.into()) }
     pub fn button_state(_: &AppHandle, _: &str, _: &str, _: bool) -> Result<(), String> { Err(NO.into()) }
     pub fn screenshot(_: &AppHandle, _: &str) -> Result<String, String> { Err(NO.into()) }
+    pub fn screenshot_for_computer_use(_: &AppHandle, _: &str, _: &std::path::Path) -> Result<ComputerUseScreenshot, String> { Err(NO.into()) }
 }
 
 #[cfg(not(target_os = "macos"))]
