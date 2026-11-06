@@ -450,6 +450,10 @@ do {
 } catch {
   erro("start", "O aparelho não abriu o espelhamento.", detalhe: error, sai: 6)
 }
+if let recursos = campo(resposta.connection.streamConfig, "TxCodecFeatureListString") as? String {
+  let taxa = campo(resposta.connection.streamConfig, "Framerate").map { String(describing: $0) } ?? "?"
+  log("Vídeo negociado: \(taxa) fps · \(recursos)")
+}
 // O id que o stop aceita é o RemoteSSRC (o SSRC do lado do Mac); o LocalSSRC é o do vídeo do aparelho.
 if let id = campo(resposta.connection.streamConfig, "RemoteSSRC") as? UInt32 { sessao.idStream = id; sessao.ssrcNosso = id }
 if let s = campo(resposta.connection.streamConfig, "LocalSSRC") as? UInt32 { sessao.ssrcAparelho = s }

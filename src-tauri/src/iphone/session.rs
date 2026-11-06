@@ -40,6 +40,7 @@ pub struct Status {
     pub error: Option<String>,
     /// O toque do aparelho está pronto (HID do CoreDevice aberto).
     pub input: bool,
+    pub fps: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -49,7 +50,7 @@ pub struct Display {
 }
 
 impl Status {
-    fn of(device: &str, link: &Link, input: bool) -> Status {
+    fn of(device: &str, link: &Link, input: bool, fps: Option<u32>) -> Status {
         Status {
             device: device.to_string(),
             state: link.state,
@@ -57,6 +58,7 @@ impl Status {
             display: link.display.map(|(w, h)| Display { w, h }),
             error: link.error.clone(),
             input: input && link.state == LinkState::Live,
+            fps: fps.filter(|_| link.state == LinkState::Live),
         }
     }
 }
@@ -163,9 +165,9 @@ pub fn unavailable() -> Option<&'static str> {
 pub fn start(app: AppHandle, device: String, identifier: String, tunnel: Option<String>, visible: bool) -> Session {
     let (tx, rx) = mpsc::channel();
     let presenter = Presenter::new();
-    let status: Shared = Arc::new((Mutex::new(Status::of(&device, &Link::default(), false)), Condvar::new()));
+    let status: Shared = Arc::new((Mutex::new(Status::of(&device, &Link::default(), false, None)), Condvar::new()));
     let session = Session { tx: tx.clone(), presenter: presenter.clone(), status: status.clone() };
-    let worker = Worker { app, device, identifier, tunnel, tx, rx, presenter, status, link: Link::default(), wanted: visible, generation: 0, input: false };
+    let worker = Worker { app, device, identifier, tunnel, tx, rx, presenter, status, link: Link::default(), wanted: visible, generation: 0, input: false, fps: None };
     let _ = std::thread::Builder::new().name("ade-iphone-mirror".into()).spawn(move || worker.run());
     session
 }
@@ -184,6 +186,7 @@ struct Worker {
     generation: u64,
     /// O helper desta vida abriu o toque.
     input: bool,
+    fps: Option<u32>,
 }
 
 /// O helper aberto. O `std::process::Child` fica aqui até o `wait`: assim o `kill`, se preciso, nunca pega um PID
@@ -209,7 +212,7 @@ enum Ended {
 
 impl Worker {
     fn emit(&mut self) {
-        let status = Status::of(&self.device, &self.link, self.input);
+        let status = Status::of(&self.device, &self.link, self.input, self.fps);
         if let Ok(mut slot) = self.status.0.lock() {
             if *slot == status {
                 return;
@@ -333,8 +336,23 @@ impl Worker {
         // Para o diagnóstico: quando saiu a última entrada (o primeiro quadro depois dela é a reação do aparelho).
         let mut last_input: Option<Instant> = None;
 
+        let interval = Duration::from_secs(1);
+        let mut sampled_at = Instant::now();
+        let mut presented = self.presenter.presented();
+        self.fps = None;
+
         loop {
             let now = Instant::now();
+            let elapsed = now.duration_since(sampled_at);
+            if elapsed >= interval {
+                let current = self.presenter.presented();
+                if started {
+                    self.fps = Some((current.saturating_sub(presented) as f64 / elapsed.as_secs_f64()).round() as u32);
+                    self.emit();
+                }
+                presented = current;
+                sampled_at = now;
+            }
             let ms = |i: Instant| i.saturating_duration_since(born).as_millis() as u64;
             let mut deadline = if started { last_packet + model::STALL_AFTER } else { born + model::START_TIMEOUT };
             if let Some(since) = idle_since {
@@ -344,7 +362,7 @@ impl Worker {
                 deadline = deadline.min(now + model::KEYFRAME_RESEND);
             }
             if started {
-                deadline = deadline.min(refreshed + model::KEYFRAME_REFRESH);
+                deadline = deadline.min(refreshed + model::KEYFRAME_REFRESH).min(sampled_at + interval);
             }
             let msg = match self.rx.recv_timeout(deadline.saturating_duration_since(now)) {
                 Ok(msg) => msg,
@@ -496,6 +514,7 @@ impl Worker {
                                         eprintln!("[iphone] entrada→1º quadro novo chegou em {:.0} ms (+ ~4 ms de decodificação)", now.duration_since(sent).as_secs_f64() * 1000.0);
                                     }
                                 }
+                                self.presenter.note_rtp(arrived, unit.ts);
                                 if let Err(e) = d.decode(&unit, arrived) {
                                     eprintln!("[iphone] {e}");
                                     gate.on_gap(ms(now));

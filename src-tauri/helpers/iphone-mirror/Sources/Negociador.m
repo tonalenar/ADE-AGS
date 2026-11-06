@@ -1,6 +1,7 @@
 #import "Negociador.h"
 #import <dlfcn.h>
 #import <objc/message.h>
+#import <objc/runtime.h>
 
 static void *avconference(void) {
   static void *handle;
@@ -11,8 +12,39 @@ static void *avconference(void) {
   return handle;
 }
 
+// Sem VRAE:0, o encoder pode adaptar a resolução em vez de descartar quadros sob carga.
+static NSDictionary *(*featureListOriginal)(id, SEL);
+
+static NSDictionary *featureListAdaptavel(id settings, SEL seletor) {
+  NSDictionary *original = featureListOriginal(settings, seletor);
+  NSMutableDictionary *ajustada = [original mutableCopy];
+  for (id chave in original) {
+    NSString *valor = original[chave];
+    if (![valor isKindOfClass:[NSString class]]) continue;
+    NSMutableArray *tokens = [[valor componentsSeparatedByString:@";"] mutableCopy];
+    [tokens removeObject:@"VRAE:0"];
+    ajustada[chave] = [tokens componentsJoinedByString:@";"];
+  }
+  return ajustada;
+}
+
+static BOOL habilitarAdaptacao(void) {
+  static BOOL habilitada;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    Class settings = NSClassFromString(@"AVCMediaStreamNegotiatorSettingsCoreDeviceScreenSharing");
+    SEL seletor = NSSelectorFromString(@"featureListString");
+    Method metodo = class_getInstanceMethod(settings, seletor);
+    if (!metodo) return;
+    featureListOriginal = (NSDictionary *(*)(id, SEL))method_getImplementation(metodo);
+    class_replaceMethod(settings, seletor, (IMP)featureListAdaptavel, method_getTypeEncoding(metodo));
+    habilitada = YES;
+  });
+  return habilitada;
+}
+
 id AdeNegociadorCriar(NSInteger modo, NSDictionary *opcoes, NSError **erro) {
-  if (!avconference()) return nil;
+  if (!avconference() || !habilitarAdaptacao()) return nil;
   Class classe = NSClassFromString(@"AVCMediaStreamNegotiator");
   SEL init = NSSelectorFromString(@"initWithMode:options:error:");
   if (!classe || ![classe instancesRespondToSelector:init]) return nil;

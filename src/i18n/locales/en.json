@@ -3589,6 +3589,7 @@
   "simulator.hibernateNever": "Never",
   "simulator.hibernateMin": "{{count}} min",
   "simulator.single": "One device on at a time",
+  "iphone.status.fps": "{{count}} fps",
   "iphone.section.devices": "Devices",
   "iphone.section.simulators": "Simulators",
   "iphone.physical": "device",

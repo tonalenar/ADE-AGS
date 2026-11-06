@@ -13,7 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use std::ffi::c_void;
 use std::sync::{Arc, Mutex, OnceLock};
 
-use dispatch2::{DispatchQoS, DispatchQueue, DispatchQueueAttr, DispatchRetained};
+use dispatch2::{DispatchQoS, DispatchQueue, DispatchQueueAttr, DispatchRetained, DispatchTime};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObject};
 use objc2::{define_class, msg_send, sel, DefinedClass, MainThreadMarker, MainThreadOnly};
@@ -366,9 +366,19 @@ pub struct Presenter {
     display: Mutex<Option<(u32, u32)>>,
     held: Mutex<VecDeque<PixelBuffer>>,
     failures: std::sync::atomic::AtomicU32,
+    presented: std::sync::atomic::AtomicU64,
+    pacing: Mutex<Pacing>,
+    generation: std::sync::atomic::AtomicU64,
+    last_shown: std::sync::atomic::AtomicU64,
     stats: Mutex<Stats>,
     /// Atraso da captura no aparelho até a chegada no Mac, por quadro (estimativa pelo RTCP), para o diagnóstico.
     capture: Mutex<HashMap<u64, f64>>,
+}
+
+#[derive(Default)]
+struct Pacing {
+    timestamps: HashMap<u64, u32>,
+    last: Option<(u32, u64, u64)>,
 }
 
 #[link(name = "IOSurface", kind = "framework")]
@@ -408,6 +418,10 @@ impl Presenter {
             display: Mutex::new(None),
             held: Mutex::new(VecDeque::new()),
             failures: std::sync::atomic::AtomicU32::new(0),
+            presented: std::sync::atomic::AtomicU64::new(0),
+            pacing: Mutex::new(Pacing::default()),
+            generation: std::sync::atomic::AtomicU64::new(0),
+            last_shown: std::sync::atomic::AtomicU64::new(0),
             stats: Mutex::new(Stats::default()),
             capture: Mutex::new(HashMap::new()),
         })
@@ -417,6 +431,41 @@ impl Presenter {
         if let (Some(d), Ok(mut slot)) = (display, self.display.lock()) {
             *slot = Some(d);
         }
+    }
+
+    pub fn note_rtp(&self, arrived: u64, timestamp: u32) {
+        if let Ok(mut pace) = self.pacing.lock() {
+            if pace.timestamps.len() >= 256 {
+                pace.timestamps.clear();
+            }
+            pace.timestamps.insert(arrived, timestamp);
+        }
+    }
+
+    fn delay(&self, arrived: u64, now: u64) -> std::time::Duration {
+        const FRAME_NS: u64 = 16_666_667;
+        // Recupera 50 µs por quadro para reduzir o atraso sem perder o ritmo RTP.
+        const RECOVERY_PER_FRAME_NS: u64 = 50_000;
+        let Ok(mut pace) = self.pacing.lock() else { return std::time::Duration::ZERO };
+        let Some(timestamp) = pace.timestamps.remove(&arrived) else { return std::time::Duration::ZERO };
+        let target = match pace.last {
+            Some((previous, old_arrival, deadline)) if arrived > old_arrival => {
+                let ticks = timestamp.wrapping_sub(previous);
+                if ticks > 0 && ticks < 24_000 {
+                    let next = deadline + u64::from(ticks) * 1_000_000_000 / 24_000;
+                    next.saturating_sub(RECOVERY_PER_FRAME_NS).clamp(now, now + FRAME_NS)
+                } else {
+                    now
+                }
+            }
+            _ => now,
+        };
+        pace.last = Some((timestamp, arrived, target));
+        std::time::Duration::from_nanos(target - now)
+    }
+
+    pub fn presented(&self) -> u64 {
+        self.presented.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Quantos quadros o decodificador recusou até agora.
@@ -519,6 +568,10 @@ impl Presenter {
 
     /// Solta os quadros guardados (a sessão acabou).
     pub fn clear(self: &Arc<Self>) {
+        self.generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(mut pace) = self.pacing.lock() {
+            *pace = Pacing::default();
+        }
         let this = self.clone();
         frame_queue().exec_async(move || {
             if let Ok(mut held) = this.held.lock() {
@@ -581,8 +634,16 @@ pub struct Sink(pub Arc<Presenter>);
 impl FrameSink for Sink {
     fn frame(&self, buffer: PixelBuffer, arrived_ns: u64) {
         self.0.count(arrived_ns, false);
+        use std::sync::atomic::Ordering::Relaxed;
+        let delay = self.0.delay(arrived_ns, now_ns());
         let this = self.0.clone();
-        frame_queue().exec_async(move || {
+        let generation = this.generation.load(Relaxed);
+        let present = move || {
+            if generation != this.generation.load(Relaxed)
+                || arrived_ns <= this.last_shown.load(Relaxed) {
+                return;
+            }
+            this.last_shown.store(arrived_ns, Relaxed);
             let surface = buffer.surface();
             if surface.is_null() {
                 return;
@@ -597,6 +658,9 @@ impl FrameSink for Sink {
                         }
                     })
                 };
+                if !layers.is_empty() {
+                    this.presented.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
             if let Ok(mut held) = this.held.lock() {
                 held.push_back(buffer);
@@ -616,7 +680,12 @@ impl FrameSink for Sink {
                     }
                 }
             }
-        });
+        };
+        if delay.is_zero() {
+            frame_queue().exec_async(present);
+        } else if let Ok(when) = DispatchTime::try_from(delay) {
+            let _ = frame_queue().after(when, present);
+        }
     }
 
     fn failed(&self, _status: OSStatus) {
