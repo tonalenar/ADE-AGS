@@ -28,7 +28,7 @@ function Item({ toast, level }: { toast: BotToast; level: number }) {
         <button
           type="button"
           aria-label={t("btn.close")}
-          onClick={() => dismiss(toast.id)}
+          onClick={() => { dismiss(toast.id); toast.onDismiss?.(); }}
           className="absolute top-1 right-1.5 text-[13px] leading-none text-gray-400 hover:text-gray-700 dark:hover:text-white"
         >
           ×
@@ -57,7 +57,7 @@ function Item({ toast, level }: { toast: BotToast; level: number }) {
         {toast.actionLabel && toast.onAction && (
           <button
             type="button"
-            onClick={() => { toast.onAction?.(); dismiss(toast.id); }}
+            onClick={() => { toast.onAction?.(); if (!toast.keepOpenOnAction) dismiss(toast.id); }}
             className="cc-t mt-1.5 h-6 px-2.5 rounded-md text-[11px] font-medium bg-accent-500/15 text-accent-700 dark:text-accent-300 hover:bg-accent-500/25"
           >
             {toast.actionLabel}
@@ -74,7 +74,7 @@ export function BotToastHost() {
   const pet = usePetStatus();
   if (toasts.length === 0) return null;
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[70] flex flex-col gap-2">
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[70] flex max-h-[calc(100vh-2rem)] flex-col gap-2 overflow-y-auto cc-scroll">
       {toasts.map((toast) => <Item key={toast.id} toast={toast} level={pet.level} />)}
     </div>
   );

@@ -24,6 +24,7 @@
   - TCP em `127.0.0.1`, numa porta aleatória, segue de pé para provar que o app está vivo e para CLIs antigas; não tem PID, então memória, swarm e computer use fecham por ele.
   - O handshake fica em `~/.ags/ipc.json` (global) e em `~/.ags/ipc/<pid>.json`. Os filhos herdam `AGS_HANDSHAKE`.
 - **Sandbox do agente**: um sandbox que bloqueia AF_UNIX (o `workspace-write` do Codex, o seatbelt fechado do Gemini, o sandbox do Bash do Claude Code) faz todo `ags` falhar com `Operation not permitted`. A CLI devolve exit 1 com o que fazer em cada agente e **nunca** manda reiniciar o app (`credential_connect_error`). Opções e medições em [`COMPUTER_USE_SUPERFICIES.md`](../ade-ags/COMPUTER_USE_SUPERFICIES.md#sandbox-dos-agentes).
+- **iPhone físico compartilhado com a ADE**: use `ags device list`/`shot`/ações ou MCP `device_list`/`device_shot`/`device_action`. `sim-use ios-device tap` pode aceitar e ignorar toques em apps comuns; não o trate como canal de controle. A confirmação e a confiança do aparelho são aplicadas pela ADE e não devem ser contornadas.
 - Limites: 256 conexões e 8 MB por request. O token é comparado em tempo constante.
 - `memory.*` e `swarm.*` exigem `ADE_SESSION` e que o processo seja descendente do PTY da aba (`terminal/session.rs::authorize`).
 - `memory.compact` e `workspace.restore` são negados a agentes (`AGENT_MAINTENANCE_DENIED`): só pela UI.
@@ -56,6 +57,8 @@ Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira
 - Papéis de somente leitura recebem só a power `Read` (`powers_for_role`; `docs/ade-ags/MCP_MISSION_SCOPE.md`).
 - Resposta grande (acima de ~6.000 tokens) de uma tool, ou de `tab output`/`tab screen`/`peer check`/`peer pending`/`chat show`/`chat wait`/`recall get` na CLI, vai inteira para `~/.ags/spill/<aba ou tarefa>/<aleatório>.txt` (pasta 0700, arquivo 0600, nunca dentro de um repositório, apagado após 30 dias); o agente recebe cabeça, cauda e o caminho (`ipc/spill.rs`). Na CLI, `--no-spill` devolve tudo.
 - `browser_act`, `sim_act` e `desk_act` são o `portal act`/`sim act`/`desk act` da CLI, com o mesmo prazo (`timeout`, padrão 115 s, faixa 10–1.800, `ipc::mcp::act_timeout_secs`). `sim_act`/`desk_act` repassam a identidade herdada pelo processo do MCP (`ADE_TAB_ID`, `ADE_SESSION` ou o `--tab`) e o backend confere com `authorize_actor`; o `from`/`session` mandado pelo modelo é descartado. Não existem para tarefas da frota. `sim_act` se aprova sozinha (como o navegador); `desk_act` pede aprovação na TUI.
+- `sim_act` faz OCR local, consulta o Jev em texto e usa os centros das caixas OCR; a foto só sai da máquina quando a decisão pede o fallback visual para ícones sem rótulo ou texto ambíguo. Cliques escolhidos só pelo texto pedem confirmação até a confiança persistente do aparelho; controles sensíveis e digitação sempre pedem.
+- Para navegar por várias telas do iPhone, passe o objetivo inteiro em uma chamada `sim_act` com passos suficientes. Não envie uma atualização ao usuário a cada tela; informe o resultado verificado ao final, a menos que ele peça progresso ou que uma confirmação/bloqueio exija resposta.
 - `ask_user` tem prazo (padrão 600 s): ao vencer devolve `status: "pending"`, nunca aprovação, e a resposta tardia chega à aba como mensagem. Integrante de time recebe `refused` (`ask_lead`) e leva a dúvida ao orquestrador.
 
 ### Tools (região gerada)

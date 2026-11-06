@@ -122,7 +122,7 @@ fn o_que_ja_e_portal_do_canvas_nao_aparece_de_novo_pelo_painel() {
 fn sem_a_chave_da_pessoa_o_agente_so_ve() {
     let chat = |control| Reach { board: None, id: "chat:x".into(), portal: Portal::default(), source: Source::ChatPanel, control };
     assert!(chat(false).allows("shot").is_ok() && chat(false).allows("tree").is_ok());
-    for action in ["tap", "swipe", "type", "key", "launch", "close", "start", "open", "button", "say", "act"] {
+    for action in ["tap", "swipe", "type", "key", "launch", "close", "start", "open", "button", "say", "act", "apps"] {
         let err = chat(false).allows(action).unwrap_err();
         assert!(err.contains("painel do chat") && err.contains("shot"), "{action}: {err}");
         assert!(chat(true).allows(action).is_ok(), "{action} com controle");

@@ -350,6 +350,9 @@ impl Worker {
                 let current = self.presenter.presented();
                 if started {
                     self.fps = Some((current.saturating_sub(presented) as f64 / elapsed.as_secs_f64()).round() as u32);
+                    if let Some(display) = self.presenter.display() {
+                        self.link.display = Some(display);
+                    }
                     self.emit();
                 }
                 presented = current;

@@ -435,6 +435,19 @@ impl Presenter {
         }
     }
 
+    /// Reorienta a medida inicial da tela conforme o tamanho dos quadros que chegam do aparelho.
+    pub fn observe_frame_size(&self, coded: (u32, u32)) {
+        if let Ok(mut slot) = self.display.lock() {
+            if let Some(display) = *slot {
+                *slot = Some(model::display_for_frame(display, coded));
+            }
+        }
+    }
+
+    pub fn display(&self) -> Option<(u32, u32)> {
+        self.display.lock().ok().and_then(|display| *display)
+    }
+
     pub fn note_rtp(&self, arrived: u64, timestamp: u32) {
         if let Ok(mut pace) = self.pacing.lock() {
             if pace.timestamps.len() >= 256 {
@@ -651,6 +664,7 @@ pub struct Sink(pub Arc<Presenter>);
 impl FrameSink for Sink {
     fn frame(&self, buffer: PixelBuffer, arrived_ns: u64) {
         self.0.count(arrived_ns, false);
+        self.0.observe_frame_size(buffer.size());
         use std::sync::atomic::Ordering::Relaxed;
         let delay = self.0.delay(arrived_ns, now_ns());
         let this = self.0.clone();

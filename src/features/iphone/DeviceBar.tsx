@@ -34,7 +34,8 @@ const DOT: Record<"ok" | "wait" | "off", string> = {
 
 /**
  * A pílula embaixo do aparelho: o estado ao vivo, início, alternador de apps, foto (salva e oferece copiar), gravação
- * (ainda não), girar (só no simulador) e o "⋯" com Sistema e Botões. É a pessoa mexendo: não pede confirmação.
+ * (ainda não), orientação (acompanha o giro físico do aparelho) e o "⋯" com Sistema e Botões. É a pessoa mexendo:
+ * não pede confirmação.
  */
 export function DeviceBar({ device, name, status, ready }: { device: string; name: string; status: MirrorStatus | undefined; ready: boolean }) {
   const { t } = useTranslation();
@@ -69,7 +70,8 @@ export function DeviceBar({ device, name, status, ready }: { device: string; nam
         <button type="button" className={btn} disabled={view.tone !== "ok"} title={t("iphone.bar.shot")} aria-label={t("iphone.bar.shot")}
           onClick={takeShot}>{ICON.shot}</button>
         <button type="button" className={btn} disabled title={t("iphone.bar.recordLater")} aria-label={t("iphone.bar.recordLater")}>{ICON.record}</button>
-        <button type="button" className={btn} disabled title={t("iphone.bar.rotateSim")} aria-label={t("iphone.bar.rotateSim")}>{ICON.rotate}</button>
+        <button type="button" className={btn} title={t("iphone.bar.rotateHint")} aria-label={t("iphone.bar.rotateHint")}
+          onClick={() => { void AlertaToast(name, t("iphone.bar.rotateHint"), "info", 6000); }}>{ICON.rotate}</button>
         <div ref={ref} className="relative">
           <button type="button" className={`${btn} ${open ? "bg-gray-200 dark:bg-white/10" : ""}`} title={t("chat.devices.more")} aria-label={t("chat.devices.more")}
             aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>{ICON.more}</button>

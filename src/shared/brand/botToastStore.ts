@@ -10,9 +10,13 @@ export interface BotToast {
   /** Texto del botón de acción; sin él, el aviso no tiene botón. */
   actionLabel?: string;
   onAction?: () => void;
+  /** Avisa quando a pessoa fecha manualmente no X. */
+  onDismiss?: () => void;
+  /** Mantém o aviso após a ação, para que só o X o feche. */
+  keepOpenOnAction?: boolean;
   /** Cuánto dura en pantalla, en milisegundos. */
   ms: number;
-  /** Se queda hasta que alguien lo cierre o lo reemplace (un trabajo en curso). Ignora `ms`. */
+  /** Fica até alguém fechar manualmente. Ignora `ms` e não cede lugar a avisos novos. */
   sticky?: boolean;
   /** Barra de progreso: 0–100, o `null` si no se sabe cuánto falta. Sin el campo, no hay barra. */
   progress?: number | null;
@@ -20,7 +24,7 @@ export interface BotToast {
 
 export type BotToastInput = Omit<BotToast, "id" | "ms" | "tone"> & { tone?: BotToastTone; ms?: number };
 
-/** Cuántos avisos se ven a la vez: el más viejo cede su lugar al nuevo. */
+/** Cuántos avisos temporales se conservan; los persistentes no se eliminan al agregar otros. */
 export const MAX_BOT_TOASTS = 3;
 export const DEFAULT_BOT_TOAST_MS = 8000;
 
@@ -39,7 +43,11 @@ export const useBotToastStore = create<BotToastState>((set) => ({
   push(input) {
     const id = nextId++;
     const toast: BotToast = { ...input, id, tone: input.tone ?? "info", ms: input.ms ?? DEFAULT_BOT_TOAST_MS };
-    set((state) => ({ toasts: [...state.toasts, toast].slice(-MAX_BOT_TOASTS) }));
+    set((state) => {
+      const next = [...state.toasts, toast];
+      const keptTransient = new Set(next.filter((item) => !item.sticky).slice(-MAX_BOT_TOASTS).map((item) => item.id));
+      return { toasts: next.filter((item) => item.sticky || keptTransient.has(item.id)) };
+    });
     return id;
   },
   dismiss: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),

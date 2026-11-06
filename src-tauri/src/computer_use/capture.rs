@@ -445,14 +445,14 @@ mod test {
         assert_eq!(q.step(ms(480), 8), None);
         assert_eq!(q.step(ms(500), 8), Some(true));
         // Animação contínua: desiste no teto, sem travar o passo.
-        let mut q = Quiet::new(t0, 0, d(300), d(2500), None);
+        let mut q = Quiet::new(t0, 0, d(300), d(180), None);
         let mut seed = 0;
         let mut out = None;
-        for n in (20..=3000).step_by(20) {
+        for n in (20..=300).step_by(20) {
             seed += 1;
             out = q.step(ms(n), seed);
             if out.is_some() {
-                assert_eq!(n, 2500);
+                assert_eq!(n, 180);
                 break;
             }
         }

@@ -29,7 +29,7 @@ Crate `ade-ags` (edition 2024), lib `ade_ags_lib`. O `src/main.rs` chama `ade_ag
 | `canvas/`, `chat.rs`, `routines.rs`, `floors*.rs`, `design.rs` | canvas (as conexões funcionam como permissões), chat do usuário, rotinas, andares, pranchetas |
 | `preview/` | proxy local do navegador (seletor, rede, mocks, capturas) |
 | `sim_host/` | no macOS, impede o Expo de abrir o Device Hub. A tela do simulador continua em `simulator/` |
-| `iphone/` | iPhone e iPad físicos (só ver): lista pelo `devicectl`, sessão por aparelho com o helper Swift `ade-iphone-mirror` (`helpers/iphone-mirror`, CoreDevice privado fora do processo do app), HEVC pelo VideoToolbox e a tela nativa. Ver `docs/ade-ags/ESPELHAMENTO_IPHONE.md` |
+| `iphone/` | iPhone e iPad físicos: lista pelo `devicectl`, espelhamento via helper Swift `ade-iphone-mirror` (`helpers/iphone-mirror`, CoreDevice privado fora do processo do app) e controle por toque, botões e teclado pelo HID do CoreDevice. Ver `docs/ade-ags/ESPELHAMENTO_IPHONE.md` |
 | `forge/`, `scm/`, `explorer/` | GitHub/GitLab/Gitea (token no keyring), git local, árvore e busca |
 | `session/`, `usage/` | descobrir sessões das TUIs; uso, limites, budget, preços |
 | `skills/`, `marketplace/`, `sync/`, `graphify/` | skills (symlink/junction), registries, sync por git |
