@@ -84,7 +84,7 @@ pub struct PhysicalDevice {
     /// UDID público estável, quando o `devicectl` o informa.
     pub udid: Option<String>,
     pub name: String,
-    /// `iPhone 15 Pro Max`.
+    /// Nome amigável, quando o CoreDevice informa; senão, o `productType` (por exemplo, `iPhone16,2`).
     pub model: String,
     /// `27.2`.
     pub os: String,
@@ -117,7 +117,12 @@ pub fn parse_devicectl(json: &str) -> Result<Vec<PhysicalDevice>, String> {
     let mut out: Vec<PhysicalDevice> = list
         .iter()
         .filter_map(|d| {
-            if text(d, "/hardwareProperties/reality") != "physical" || text(d, "/hardwareProperties/platform") != "iOS" {
+            let transport = Transport::parse(&text(d, "/connectionProperties/transportType"));
+            let reality = text(d, "/hardwareProperties/reality");
+            // Xcode 27.2 omite `reality` de alguns aparelhos físicos no JSON (incluindo iPhones USB pareados).
+            // `sameMachine` identifica os simuladores; um transporte USB/rede sem `reality` é físico.
+            let physical = reality == "physical" || (reality.is_empty() && transport != Transport::None);
+            if !physical || text(d, "/hardwareProperties/platform") != "iOS" {
                 return None;
             }
             let family = match text(d, "/hardwareProperties/deviceType").as_str() {
@@ -130,7 +135,13 @@ pub fn parse_devicectl(json: &str) -> Result<Vec<PhysicalDevice>, String> {
                 return None;
             }
             let udid = text(d, "/hardwareProperties/udid");
-            let model = text(d, "/hardwareProperties/marketingName");
+            let marketing_name = text(d, "/hardwareProperties/marketingName");
+            let model = if marketing_name.is_empty() {
+                let product_type = text(d, "/hardwareProperties/productType");
+                if product_type.is_empty() { text(d, "/hardwareProperties/deviceType") } else { product_type }
+            } else {
+                marketing_name
+            };
             let name = text(d, "/deviceProperties/name");
             let developer_mode = match text(d, "/deviceProperties/developerModeStatus").as_str() {
                 "enabled" => Some(true),
@@ -145,7 +156,7 @@ pub fn parse_devicectl(json: &str) -> Result<Vec<PhysicalDevice>, String> {
                 model,
                 os: text(d, "/deviceProperties/osVersionNumber"),
                 family: family.into(),
-                transport: Transport::parse(&text(d, "/connectionProperties/transportType")),
+                transport,
                 paired: text(d, "/connectionProperties/pairingState") == "paired",
                 developer_mode,
                 tunnel: text(d, "/connectionProperties/tunnelState") == "connected",

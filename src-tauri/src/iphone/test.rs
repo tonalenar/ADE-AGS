@@ -68,6 +68,23 @@ fn json_estranho_do_devicectl_vira_erro() {
 }
 
 #[test]
+fn reconhece_aparelho_usb_quando_xcode_omite_reality_e_marketing_name() {
+    let json = r#"{"result":{"devices":[
+      {"identifier":"12121212-3434-5656-7878-909090909090",
+       "connectionProperties":{"pairingState":"paired","transportType":"wired","tunnelState":"disconnected"},
+       "deviceProperties":{"name":"iPhone de tonz1n","osVersionNumber":"27.2"},
+       "hardwareProperties":{"deviceType":"iPhone","platform":"iOS","productType":"iPhone16,2"}}
+    ]}}"#;
+
+    let devices = parse_devicectl(json).unwrap();
+    assert_eq!(devices.len(), 1);
+    assert_eq!(devices[0].name, "iPhone de tonz1n");
+    assert_eq!(devices[0].model, "iPhone16,2");
+    assert_eq!(devices[0].transport, Transport::Usb);
+    assert!(devices[0].ready());
+}
+
+#[test]
 fn erros_do_coredevice_dizem_o_que_fazer_em_portugues() {
     assert!(device_error_help("Developer Mode is disabled").contains("Modo de Desenvolvedor"));
     assert!(device_error_help("device is locked").contains("Desbloqueie"));
