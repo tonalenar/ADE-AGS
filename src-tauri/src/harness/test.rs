@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 
 use crate::conversa::api::{Engine, MidTurnBehavior};
 
-use super::{matrix, Capability, Claim, Proof, Scope, Support, Surface};
+use super::capability::{Capability, Claim, Proof, Scope, Support, Surface};
+use super::matrix::{find, matrix};
 
 const DOC: &str = include_str!("../../../docs/ade-ags/HARNESS_CONTRATO.md");
 
@@ -137,7 +138,7 @@ fn as_citacoes_apontam_para_arquivos_e_linhas_que_existem() {
 
 #[test]
 fn o_steer_do_claude_fica_unknown_ate_haver_captura_real() {
-    let claude = super::find(Surface::Chat, "claude-code").expect("coluna do Claude");
+    let claude = find(Surface::Chat, "claude-code").expect("coluna do Claude");
     let steer = claude.claim(Capability::Steer);
     assert_eq!(steer.support, Support::Unknown);
     assert!(steer.missing.contains("captura real"));
@@ -180,7 +181,7 @@ fn a_contagem_do_doc_concorda_com_a_matriz() {
         else {
             continue;
         };
-        let column = super::find(surface, provider).unwrap_or_else(|| panic!("o doc lista {provider}, que não está na matriz"));
+        let column = find(surface, provider).unwrap_or_else(|| panic!("o doc lista {provider}, que não está na matriz"));
         let counts = column.counts();
         assert_eq!(
             (counts.supported.to_string(), counts.unknown.to_string(), counts.unsupported.to_string()),

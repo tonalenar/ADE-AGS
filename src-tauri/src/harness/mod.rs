@@ -10,6 +10,3 @@ pub mod matrix;
 
 #[cfg(test)]
 mod test;
-
-pub use capability::{Capability, Claim, Proof, Scope, Support, Surface};
-pub use matrix::{find, matrix};
