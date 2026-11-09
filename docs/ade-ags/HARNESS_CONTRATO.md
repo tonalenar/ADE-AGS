@@ -1,0 +1,690 @@
+# Contrato do harness comum de execução (Fase 0)
+
+Este documento fecha o contrato da Fase 0 do harness comum. Ele não muda comportamento e não grava nada no banco.
+
+| Item | Valor |
+|---|---|
+| Base | `47cf0919` (`chore(harness): registrar estado do worktree t3-fusion como base local`) |
+| Data | 09/11/2026 |
+| Código que acompanha | `src-tauri/src/harness/` (tipos do descritor e a tabela estática da matriz, com testes) |
+| Plano de origem | auditoria T3 × ADE (anexo externo, fora do repositório: planos não entram no git, ver `AGENTS.md` §6.3) |
+| Fontes de apoio | quatro inventários de colegas, lidos como **dado a conferir**, não como verdade (§1.6 lista o que foi corrigido) |
+
+## 0. Como ler
+
+**Vocabulário.** A palavra "run" tem três donos no código. Use sempre o nome completo.
+
+| Termo | O que é | Onde vive |
+|---|---|---|
+| turno (`chat_run`) | uma volta do usuário numa conversa estruturada | `chat_run(thread_id, id)`; o id **não** é único entre conversas (`conversa/store.rs:34-41`) |
+| run da Frota (`runs`) | um plano de tarefas headless | `runs.id` (`database/schema.rs:435`) |
+| `HarnessRun` | a identidade ADE de um turno que orquestra trabalho; **nasce neste contrato** | `harness_run` (proposto, §2) |
+
+O campo `runId` do nó de turno em `runs/harness.rs:202` guarda o id do `chat_run`, não o de `runs`. Esse nome é ambíguo e muda na Fase 1 (§7).
+
+**O que o estado da matriz significa.** O estado descreve o adapter **do ADE**, não o provider.
+- `Supported`: há caminho de código ponta a ponta. A força da prova vem à parte (`Proof`: `Code`, `Test`, `Fixture`).
+- `Unsupported`: o ADE não tem caminho ou o recusa de forma explícita. A UI e o MCP não devem oferecer. Não prova que o provider não tenha o recurso.
+- `Unknown`: o caminho existe, mas o efeito não tem resposta nem evento observável, ou depende de algo que o repositório não prova. Não se promete. A célula diz o que falta provar.
+
+**Nenhuma célula tem captura real.** Não existe transcript gravado de nenhum provider no repositório. As três fixtures de protocolo (`conversa/fixtures/protocolo/`) têm `origin.kind: synthesized`. Por isso `Supported` aqui significa "o ADE tem código e, às vezes, teste do mapeador", nunca "provado contra o provider real". Um teste (`nenhuma_celula_alega_captura_real_enquanto_nao_houver_uma`) impede a tabela de afirmar o contrário.
+
+**Pendência do fingerprint (não resolvida aqui).** No commit base, `node scripts/fingerprint.mjs` falha: `schema-sqlite` mudou (`database/schema.rs`, sha256 `96507e01a45b…`) e não tem registro de reconhecimento. As mudanças são aditivas, mas o reconhecimento exige revisão e fica para a fase que tocar o schema (ou para o usuário). Esta tarefa **não** reconheceu nada e **não** tocou `database/schema.rs` nem `ipc/protocol.rs`. O CI vai continuar vermelho nesse passo até alguém registrar (ver §8).
+
+## 1. Matriz capability × provider/superfície
+
+### 1.1 As 18 capabilities
+
+| Capability | Pergunta que a célula responde | O que **não** conta |
+|---|---|---|
+| `start` | O ADE inicia uma execução (processo ou sessão)? | abrir a janela da conversa |
+| `send` | O ADE manda mensagem a uma execução que já existe? | confirmação de entrega: ela não é ack do agente |
+| `steer` | A mensagem entra **no turno em curso**, sem parar e sem ir para depois, com efeito provado? | escrever no stdin sem observar o desfecho |
+| `interrupt` | O ADE pede a parada do turno? | matar o processo e chamar de "parada graciosa" (vai na observação) |
+| `turn_completion` | O adapter recebe sinal de fim de turno (protocolo ou código de saída)? | silêncio de tela |
+| `tool_events` | Há eventos de início e de fim de ferramenta? | só o início |
+| `question` | O agente pergunta e o ADE devolve a resposta ao agente? | detectar `?` na tela |
+| `approval` | A pessoa ou a política decide e o ADE devolve ao provider? | detectar pedido na tela |
+| `child_spawn` | O harness vê nascer um filho **nativo** do provider (id próprio e pai)? | criar filho pelo ADE (ver §1.5) |
+| `child_result` | O resultado do filho nativo chega ao ADE e pode ser gravado? | resumo que só vai à janela |
+| `child_stop` | Dá para parar um filho nativo sem parar o pai? | parar o turno inteiro |
+| `resume` | A sessão nativa volta depois de reiniciar o app? | abrir sessão nova com aviso |
+| `compact` | O ADE pede compactação e o protocolo responde? | configurar uma janela de auto-compact |
+| `goal` | Há objetivo persistente nativo? | texto `/goal` sem evento de volta |
+| `checkpoint` | Há foto do estado da execução? | foto da conversa (nenhuma superfície tem) |
+| `rollback` | Dá para voltar ao estado de uma foto? | reverter a conversa do provider (nenhuma superfície faz) |
+| `usage` | Há uso de tokens, custo ou limite por sessão? | medidor por conta |
+| `event_source` | Há fonte contínua de eventos que o ADE lê? | qualidade da fonte (vai na observação) |
+
+**Escopo** (`instance`, `session`, `model`): onde o estado é decidido. A tabela estática traz o valor padrão por instância. O valor por sessão e por modelo é resolvido na execução (Fase 3). O caso mais claro é o ACP local: a retomada só existe se o agente anunciar `resume` ou `loadSession` no `initialize` (`conversa/opencode.rs:283-287`), então a coluna `local-acp` marca `Unknown` até o descritor de sessão ler `agentCapabilities`.
+
+### 1.2 A matriz
+
+`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 18 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
+
+**Conversa estruturada (`conversa/`)**
+
+| Capability | claude-code | codex | opencode | antigravity | cursor | local-acp |
+|---|---|---|---|---|---|---|
+| `start` | S | S | S | S | S | S |
+| `send` | S | S | S | S | S | S |
+| `steer` | ? | S | U | U | U | U |
+| `interrupt` | S | S | S | S | S | S |
+| `turn_completion` | S | S | S | S | S | S |
+| `tool_events` | S | S | S | S | S | S |
+| `question` | S | S | U | U | U | U |
+| `approval` | S | S | S | U | U | ? |
+| `child_spawn` | S | S | U | U | U | U |
+| `child_result` | U | U | U | U | U | U |
+| `child_stop` | S | U | U | U | U | U |
+| `resume` | S | S | ? | S | S | ? |
+| `compact` | ? | S | U | U | U | U |
+| `goal` | ? | S | U | U | U | U |
+| `checkpoint` | U | U | U | U | U | U |
+| `rollback` | U | U | U | U | U | U |
+| `usage` | S | S | S | S | U | ? |
+| `event_source` | S | S | S | S | S | S |
+| `ags_mcp` (extra) | S | S | S | S | U | ? |
+
+**Frota headless (`runs/`)**
+
+| Capability | claude-code | gemini-cli | codex | opencode | kimi-code | hermes | antigravity | cursor |
+|---|---|---|---|---|---|---|---|---|
+| `start` | S | S | S | S | S | U | S | U |
+| `send` | U | U | U | U | U | U | U | U |
+| `steer` | U | U | U | U | U | U | U | U |
+| `interrupt` | S | S | S | S | S | U | S | U |
+| `turn_completion` | S | S | S | S | S | U | S | U |
+| `tool_events` | S | S | S | S | S | U | S | U |
+| `question` | S | U | S | S | U | U | ? | U |
+| `approval` | S | U | U | U | U | U | ? | U |
+| `child_spawn` | U | U | U | U | U | U | U | U |
+| `child_result` | U | U | U | U | U | U | U | U |
+| `child_stop` | U | U | U | U | U | U | U | U |
+| `resume` | U | U | U | U | U | U | U | U |
+| `compact` | U | U | U | U | U | U | U | U |
+| `goal` | U | U | U | U | U | U | U | U |
+| `checkpoint` | S | S | S | S | S | U | S | U |
+| `rollback` | S | S | S | S | S | U | S | U |
+| `usage` | S | S | S | S | U | U | S | U |
+| `event_source` | S | S | S | S | S | U | S | U |
+| `ags_mcp` (extra) | S | U | S | S | U | U | ? | U |
+
+**TUI em PTY**
+
+| Capability | claude-code | gemini-cli | codex | opencode | kimi-code | hermes | antigravity | cursor |
+|---|---|---|---|---|---|---|---|---|
+| `start` | S | S | S | S | S | S | S | S |
+| `send` | S | S | S | S | S | S | S | S |
+| `steer` | ? | ? | ? | ? | ? | ? | ? | ? |
+| `interrupt` | U | U | U | U | U | U | U | U |
+| `turn_completion` | S | ? | S | ? | ? | ? | ? | ? |
+| `tool_events` | S | U | S | U | U | U | U | U |
+| `question` | S | ? | S | S | ? | S | ? | ? |
+| `approval` | U | U | U | U | U | U | U | U |
+| `child_spawn` | ? | U | ? | U | U | U | U | U |
+| `child_result` | ? | U | ? | U | U | U | U | U |
+| `child_stop` | ? | U | ? | U | U | U | U | U |
+| `resume` | S | S | S | S | ? | S | U | U |
+| `compact` | S | U | U | U | U | U | U | U |
+| `goal` | U | U | U | U | U | U | U | U |
+| `checkpoint` | S | S | S | S | S | S | S | S |
+| `rollback` | S | S | S | S | S | S | S | S |
+| `usage` | S | U | S | S | U | U | ? | U |
+| `event_source` | S | S | S | S | S | S | S | S |
+| `ags_mcp` (extra) | S | U | S | S | U | ? | U | U |
+
+### 1.3 Contagem
+
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396 células**: **163 `Supported`, 35 `Unknown`, 198 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 396): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
+
+<!-- contagem-matriz:inicio -->
+| Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
+|---|---|---|---|---|---|
+| Chat | claude-code | 12 | 3 | 3 | Supported |
+| Chat | codex | 14 | 0 | 4 | Supported |
+| Chat | opencode | 8 | 1 | 9 | Supported |
+| Chat | antigravity | 8 | 0 | 10 | Supported |
+| Chat | cursor | 7 | 0 | 11 | Unsupported |
+| Chat | local-acp | 6 | 3 | 9 | Unknown |
+| Fleet | claude-code | 10 | 0 | 8 | Supported |
+| Fleet | gemini-cli | 8 | 0 | 10 | Unsupported |
+| Fleet | codex | 9 | 0 | 9 | Supported |
+| Fleet | opencode | 9 | 0 | 9 | Supported |
+| Fleet | kimi-code | 7 | 0 | 11 | Unsupported |
+| Fleet | hermes | 0 | 0 | 18 | Unsupported |
+| Fleet | antigravity | 8 | 2 | 8 | Unknown |
+| Fleet | cursor | 0 | 0 | 18 | Unsupported |
+| Tui | claude-code | 11 | 4 | 3 | Supported |
+| Tui | gemini-cli | 6 | 3 | 9 | Unsupported |
+| Tui | codex | 10 | 4 | 4 | Supported |
+| Tui | opencode | 8 | 2 | 8 | Supported |
+| Tui | kimi-code | 5 | 4 | 9 | Unsupported |
+| Tui | hermes | 7 | 2 | 9 | Unknown |
+| Tui | antigravity | 5 | 4 | 9 | Unsupported |
+| Tui | cursor | 5 | 3 | 10 | Unsupported |
+| **Total** | 22 colunas × 18 = 396 células | 163 | 35 | 198 | |
+<!-- contagem-matriz:fim -->
+
+Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
+
+### 1.4 O que falta provar (`Unknown`)
+
+Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão agrupadas.
+
+| Onde | Capability | O que falta provar |
+|---|---|---|
+| chat/claude-code | `steer` | captura real do `claude -p` com linha `user` escrita com o turno aberto, mostrando se ela entra no mesmo turno ou só no `result` seguinte |
+| chat/claude-code | `compact` | captura real recebendo `/compact` como linha `user` e o evento que marca a conclusão |
+| chat/claude-code | `goal` | evento do Claude com o status do objetivo e prova de que `/goal` como linha `user` é executado |
+| chat/opencode | `resume` | fixture real de `opencode acp` com resposta a `session/resume` e `session/load` |
+| chat/local-acp | `approval`, `usage`, `ags_mcp` | captura de um agente ACP local real (pedido de permissão, resposta do `session/prompt`, ferramentas `ags`) |
+| chat/local-acp | `resume` | o descritor de sessão ler `agentCapabilities` do `initialize` |
+| fleet/antigravity | `question`, `approval`, `ags_mcp` | perfil gerado para uma tarefa real (ferramentas `ags`) e um pedido `request-review` sem terminal |
+| tui/* (8 CLIs) | `steer` | teste manual em instância isolada, **com OK do usuário**: a TUI enfileira ou interrompe o texto digitado no meio do turno? |
+| tui/gemini-cli, opencode, kimi-code, hermes, antigravity, cursor | `turn_completion` | algum marcador de fim de turno no transcript ou no protocolo; hoje só há silêncio de 3 a 5 s |
+| tui/gemini-cli, kimi-code, antigravity, cursor | `question` | taxa de falso positivo do regex de tela, medida em capturas reais |
+| tui/claude-code, codex | `child_spawn`, `child_result`, `child_stop` | verificar se `canal/claude.rs` e `canal/codex.rs` expõem subagente do transcript como evento de filho |
+| tui/kimi-code | `resume` | a flag de retomada do Kimi e se ele informa o id da sessão |
+| tui/antigravity | `usage` | uma fonte de uso por sessão (hoje há medidor por conta) |
+| tui/hermes | `ags_mcp` | listar as ferramentas `ags` numa sessão Hermes real |
+
+### 1.5 Duas leituras que a matriz exige
+
+**Filho nativo × filho do ADE.** Os inventários misturavam duas rotas sob o mesmo nome. Este contrato separa:
+- `child_*` (entre as 18) vale para o filho **nativo do provider**: subagente que o próprio modelo cria. O ADE só o observa.
+- O filho **do ADE** (conversa filha por `chat_new`, tarefa da Frota por `delegate_task`/`run_plan`) é criado, acompanhado e parado por serviços do ADE, para qualquer provider. Do provider só se exige uma coisa: o agente consegue chamar as ferramentas `ags`? Isso é a linha `ags_mcp`.
+
+| Nó do ADE | Criar | Resultado | Parar |
+|---|---|---|---|
+| conversa filha (`child_chat`) | `chat_new` com `client_request_id` (`ipc/commands/conversas.rs:225-268`, recibo em `conversa/api.rs:339-384`) | `chat_wait`/`chat_show` (`conversas.rs:357-388`); aviso do time com o último parágrafo (`chat_team/watch.rs:467-486`) | `chat_stop`: interrompe o turno da filha (`conversa/api.rs:1039-1080`) |
+| tarefa da Frota (`fleet_task`) | `delegate_task`, `run_plan`, `task_add` (`runs/orchestration.rs`) | `run.result`, `await_run` (`runs/orchestration.rs:971-1027`, `:1071-1181`) | `cancel_task`: subárvore dentro do run; nunca o lead, nunca filhos de chat (`runs/orchestration.rs:1278-1330`) |
+
+Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta ou aviso. A entrega durável é da Fase 4.
+
+**Escopo das superfícies.** `checkpoint` e `rollback` valem **só para arquivos** na Frota (ref oculta, `runs/checkpoints.rs:113-151`) e nas abas de TUI (`tab_checkpoints/`). Nenhuma superfície volta a conversa do provider. Na conversa estruturada as duas são `Unsupported`.
+
+### 1.6 Divergências que este contrato corrigiu nos inventários
+
+| # | Inventário | Afirmação | O que o código mostra | Efeito na matriz |
+|---|---|---|---|---|
+| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:201`, `opencode.rs:231`. Cursor e Antigravity **não** usam (`cursor.rs:326-336`, `agy.rs:312-322`) | Inventário errado no ponto. A observação de `resume` em cursor e agy diz que a sessão perdida não é classificada |
+| D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7; nenhuma célula depende disso |
+| D3 | UI `chatModel.ts:74-80` × inventário | A UI anuncia `midTurn: steer` para o Claude; o inventário diz `unknown` | O Claude só escreve a linha `user` no stdin com o turno aberto (`claude.rs:570-578`) e não observa o desfecho. O comentário da própria UI admite "ou logo depois" (`chatModel.ts:66-67`) | `chat/claude-code` `steer` = `Unknown`; decisão em §1.8 |
+| D4 | `claude-codex` §2.1 #9-#11, §2.2 #9-#11 | `child_spawn`/`child_result` `supported` pela rota do ADE (`chat_new`, `chat_wait`) e `child_stop` pela rota nativa (`stop_task`) | Duas rotas misturadas na mesma capability | Separadas (§1.5). Claude: `child_spawn` fica `S` (nativo observado: `tarefas.rs:1-20`), `child_result` vira `U` (o resumo só vai à janela; o log só guarda id, título e status, `execution_log.rs:228-230`), `child_stop` fica `S`. Codex: `child_spawn` `S`, `child_result` `U`, `child_stop` `U` |
+| D5 | `antigravity-t3` §1.1 | `child_spawn` e `child_result` = `unknown` | O adapter só mapeia o **nome** da ferramenta para um cartão `Task` (`agy_map.rs:331-334`), igual ao Cursor (`cursor_map.rs:298-300`), que o inventário do Cursor marcou `unsupported`. O inventário do agy afirma que o CLI tem subagente nativo sem citar prova | `Unsupported` nos dois, pela mesma regra (sem caminho no ADE). Não prova que o agy não tenha subagente |
+| D6 | `tui-acp-frota` §3 e §4 | `child_*` `supported` na Frota e na TUI | Era a rota do ADE por MCP (`supports_orchestration`), não evento de filho do provider. Os adapters da Frota não emitem evento de filho (`runs/supervisor.rs:444-481`); a TUI só lê transcript de Claude e Codex (`canal/mod.rs:36-39`) | Frota e TUI: `child_*` = `U`, exceto TUI Claude e Codex = `?`. A rota do ADE vai para `ags_mcp` |
+| D7 | `tui-acp-frota` §3 | Frota Antigravity `child_spawn` = `S` | Depende do mesmo MCP que o próprio inventário marca como não verificado para `ask_user` (`runs/supervisor.rs:270-276`) | `ags_mcp` do Antigravity na Frota = `Unknown` |
+| D8 | `tui-acp-frota` §5.2 | O boot da Frota leva `ready`/`running` a `failed` | Também leva `pending` a `cancelled` com o texto "o app foi fechado antes de chegar a vez dela de rodar" (`runs/store.rs:1304-1316`) | Entra na tabela de estados (§3.2) |
+| D9 | `tui-acp-frota` §5.1 | "98 pontos" de inferência por nome | Não reproduzível por comando: contou blocos de linhas e excluiu parte do registro | Substituído pela contagem reproduzível de §6.1 |
+| D10 | `tui-acp-frota` §3 (nota) × `adapter.rs` | (confirmado) o flag `Capabilities.mcp` do Antigravity é `true` | Confirmado: `adapter.rs:55` faz `has_task_mcp` seguir `supports_orchestration`, e o registro tem `McpStyle::None` (`registry.rs:384`). O flag contradiz a fonte | Anotado em `ags_mcp` de `tui/antigravity` |
+
+Conferido e **mantido** dos inventários: `Engine::of(...) != Some(Engine::Claude)` decide `NO_TASK_STOP` por nome (`api.rs:1105`); o Codex não chama `pool::after_turn` no `turn/completed` (`codex.rs:484-501`, já documentado em `BANCADA_MOTORES.md:113`); `unreachable!` em `api.rs:828`, `:953` e `:989`; só a primeira pergunta de um formulário recebe resposta.
+
+### 1.7 `mark_unknown_outcomes` por motor (resolve D2)
+
+A função marca como "desfecho desconhecido" as ferramentas `Running` de um turno (`conversa/turn.rs:71-100`). Quem a chama:
+- `turn::record_end`, quando `result.interrupted || result.error.is_some()` (`turn.rs:56-59`);
+- `close_orphan_runs`, no boot, só para turnos ainda `inProgress` (`conversa/store.rs:1030`).
+
+| Motor | Fim pelo protocolo | Queda do processo com turno aberto | Boot |
+|---|---|---|---|
+| Claude | `finish_turn` próprio (`claude.rs:434-445`): **não** chama `record_end`. Nunca marca, nem com interrupção ou erro | `closed()` → `finish_turn` (`claude.rs:362`): **nunca marca** | marca |
+| Codex | `turn/completed` (`codex.rs:484-501`): **não passa por `turn::finish`**. Nunca marca, em nenhum `status`. Também não roda `pool::after_turn` | `closed()` → `turn::finish` (`codex.rs:394`): marca (queda é erro; fechar de propósito é interrupção) | marca |
+| OpenCode | `turn::finish` (`opencode.rs:814`): marca se interrompido ou com erro | `turn::finish` (`opencode.rs:589`): marca | marca |
+| Antigravity | `turn::finish` (`agy.rs:213`): idem | idem (EOF sem `result` vira erro) | marca |
+| Cursor | `turn::finish` (`cursor.rs:225`): idem | idem | marca |
+
+Lacunas reais, em ordem de risco:
+1. **Claude, qualquer caminho vivo**, e **Codex no fim pelo protocolo**: a ferramenta fica `Running` e o aviso `toolOutcomeUnknown` nunca é gravado. O boot não repara depois, porque o turno já saiu de `inProgress`.
+2. **Todos os motores**: turno que acaba **sem erro** e com ferramenta sem resultado deixa a ferramenta `Running` para sempre (`turn.rs:56-59` só age em erro ou interrupção). Não se sabe se é desejável: é falta de decisão, não bug provado.
+3. Não há teste nomeado por motor para os caminhos 1 e 2. A fixture proposta em §5 (`*-tool-sem-resultado`) mais um teste de banco por caminho fecham isso.
+
+### 1.8 Conflito do `steer` do Claude: decisão
+
+- **A matriz marca `Unknown`.** `SteerActive` sempre entra (`api.rs:571`), o ADE escreve a linha e abre o turno na hora (`claude.rs:572-578`), e nada confirma se ela entrou no turno corrente ou ficou na fila do CLI.
+- **A declaração `MidTurnBehavior::Steer` (`api.rs:88`) e a cópia `PROTOCOL_AGENTS` (`chatModel.ts:76`) ficam como estão.** Esta tarefa não muda comportamento nem UI. O contrato apenas proíbe derivar uma **promessa** de `steer` para o Claude a partir delas.
+- Um teste (`o_steer_do_claude_fica_unknown_ate_haver_captura_real`) fixa a decisão. Outro (`a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor`) amarra a tabela a `Engine::capabilities()`: `mid_turn = Steer` exige `steer != Unsupported`; `Interrupt` exige `Unsupported`; o mesmo para `compact` e `goal`.
+- Quando houver captura real, a célula vira `Supported` ou `Unsupported`. Se `Unsupported`, o «enviar agora» do Claude passa a interromper e reenviar, como o OpenCode. A cópia da tela é decisão de produto (§8).
+
+## 2. Modelo de identidade
+
+### 2.1 O que existe hoje
+
+| Identidade | Quem gera | Onde fica | Observação |
+|---|---|---|---|
+| conversa | ADE, uuid (`conversa/api.rs:311`) | `chat_thread.id` | chave de tudo |
+| turno | ADE (Claude, agy, cursor) ou provider (Codex) | `chat_run(thread_id, id)` | **chave composta**: o id não é único entre conversas |
+| sessão nativa | provider | `chat_thread.remote_id`; histórico por agente em `chat_thread_native` (`conversa/troca.rs:26-35`) | Claude `session_id`, Codex `thread.id`, agy `conversation_id`, Cursor `session_id`, ACP `sessionId` |
+| run da Frota | ADE | `runs.id`; origem em `runs.source_thread_id` (`schema.rs:1359-1365`) | liga à **conversa**, não ao turno |
+| tarefa / tentativa | ADE | `tasks.id` (pai em `tasks.parent_id`), `run_attempts.id` | `session_id` do provider em `tasks`/`run_attempts` |
+| conversa filha | ADE | `chat_thread.parent_ref = thread:<pai>` e `parent_turn_id` | o turno que a originou é o ativo no instante da criação (`conversa/store.rs:284-352`) |
+| recibos | ADE | `chat_child_receipts` (`conversa/store.rs:180`) e `run_delegation_receipts` (`database/schema.rs:1371`) | já existem; o trabalho futuro é **unificar**, não criar |
+| nó da árvore | só em memória | `thread:<id>`, `turn:<thread>:<turn>`, `run:<id>`, `task:<id>`, `attempt:<id>` (`runs/harness.rs`) | projeção de leitura; não há linha |
+| evento semântico | fila assíncrona | `harness_execution_events` (`runs/execution_log.rs:249-270`), única por `(thread_id, dedupe_key)` | guarda `parent_node_id` como texto |
+
+### 2.2 Entidades
+
+**`HarnessRun`.** A identidade ADE de um turno que orquestra trabalho. Um turno do usuário é um `HarnessRun` (invariante 2 do plano). Fim de subagente, de ferramenta ou de filho nunca fecha o run.
+
+| Campo | Papel |
+|---|---|
+| `id` | uuid ADE, estável |
+| `thread_id`, `turn_id` | o turno raiz, em par (`chat_run`); único por par |
+| (Fase 3+) `end_source`, `end_reason`, `outcome_unknown`, `ended_at` | como e por que o root acabou |
+
+**`ExecutionNode`.** Uma unidade de trabalho dentro de um run.
+
+| Campo | Papel |
+|---|---|
+| `id` | uuid ADE, estável; é a identidade de comando e de lineage |
+| `run_id`, `parent_id` | relação durável; `parent_id` é nulo só no root |
+| `kind` | Fase 1: `root_agent`, `child_chat`, `fleet_run`, `fleet_task`. Reservados: `fleet_attempt`, `tool_call`, `approval`, `question`, `native_subagent` |
+| `source_kind`, `source_ref` | o registro nativo que o nó representa (`chat_run` `<thread>/<turn>`, `chat_thread`, `fleet_run`, `fleet_task`); único por par |
+| `legacy_ref` | o id textual de hoje (`turn:…`, `thread:…`, `run:…`, `task:…`); liga eventos e UI antigos |
+| (Fase 3+) `status`, `end_reason`, `outcome_unknown`, `provider_session_id`, tempos | estado e sessão |
+
+**`ProviderSessionRef`** (Fase 3 e 4, fora da fatia da Fase 1). A referência durável à sessão nativa do provider: `provider_id`, `native_kind` (`claude_session`, `codex_thread`, `acp_session`, `agy_conversation`, `cursor_session`, `fleet_session`), `native_id`, `account_id`, estado (`attached`, `resumable`, `lost`) e a evidência de retomada. Não nasce do zero: unifica `chat_thread.remote_id`, `chat_thread_native` e `tasks.session_id`/`run_attempts.session_id`, que continuam sendo a fonte operacional até a migração.
+
+**`ContextTransfer`** (Fase 4). A relação "contexto sai de A e vai para B": `source`, `target` (nó ou conversa), `kind` (`child_brief`, `provider_switch`, `fork`, `merge_back`), `strategy`, estado (`planned`, `materialized`, `consumed`) e `untrusted = 1` sempre. O **payload** (`ContextHandoff`) continua onde está hoje (`conversa/handoff.rs`, `conversa/troca.rs`, o contexto explícito do `chat_new`): a transferência guarda só tamanho, hash e referência, nunca uma cópia do transcript.
+
+### 2.3 Regras de identidade
+
+1. **IDs ADE são a identidade; ids de provider são referência.** Nenhum id de provider vira chave de nó.
+2. Todo nó novo recebe um uuid ADE no instante em que o ADE aceita o comando (não quando o provider responde).
+3. `source_kind + source_ref` é único: um registro nativo pertence a **no máximo um** nó, logo a no máximo um run.
+4. O id composto do turno (`thread_id/turn_id`) nunca é usado sem a conversa: `chat_run.id` colide entre conversas.
+5. O `legacy_ref` fica para sempre. Eventos e telas antigos continuam achando o nó por ele.
+
+### 2.4 Relações pai e filho
+
+| Filho | Pai | De onde vem a relação |
+|---|---|---|
+| conversa filha | nó raiz do turno **pai** que a originou | `parent_ref` + `parent_turn_id` (já gravados). Sem `parent_turn_id` (criada com o pai ocioso, ou por aba TUI), **não há run** e a conversa só aparece na projeção antiga |
+| run da Frota | nó raiz do turno que a originou | hoje só `runs.source_thread_id`; a Fase 1 grava o nó **na mesma transação** que cria o run (`runs/orchestration.rs`, perto de `set_run_source_thread`) |
+| tarefa da Frota | nó do run da Frota, ou da tarefa pai (`tasks.parent_id`) | `tasks.run_id`, `tasks.parent_id` |
+| tentativa | nó da tarefa | `run_attempts.task_id` (projetada na Fase 1; vira nó depois) |
+| ferramenta, aprovação, pergunta, subagente nativo | nó que os emitiu | Fase 3, quando o adapter expõe |
+
+### 2.5 Como chat e Frota mapeiam sem cruzar id nem cwd
+
+| Domínio nativo | Nó | Chave de ligação |
+|---|---|---|
+| `chat_thread` raiz + `chat_run` | `HarnessRun` + nó `root_agent` | `(thread_id, turn_id)` |
+| `chat_thread` filha | `child_chat` | `chat_thread.id` (`source_ref`) |
+| `runs` com `source_thread_id` | `fleet_run` | `runs.id` |
+| `tasks` | `fleet_task` | `tasks.id` |
+| `run_attempts` | `fleet_attempt` (depois) | `run_attempts.id` |
+
+Regras de não cruzamento (cada uma vira teste na Fase 1):
+- **A relação é sempre por id gravado, nunca por `cwd`.** A projeção atual já não junta por pasta (`runs/harness.rs:96-292`); o contrato fixa isso. Duas conversas na mesma pasta e dois runs na mesma pasta não se misturam.
+- **O `cwd` fica como atributo do registro nativo.** A tarefa da Frota tem pasta e worktree próprios (`tasks.cwd`); a conversa filha tem o dela. O nó não copia `cwd`.
+- **Um run da Frota sem `source_thread_id`** (CLI ou MCP fora de conversa) **não** vira nó na Fase 1. Continua visível só pela Frota.
+- **Um run da Frota criado sem turno ativo** na conversa (por exemplo, depois do fim do turno) também não vira nó: não há turno para pendurar.
+
+### 2.6 O que adotar do T3
+
+Fonte: inventário `antigravity-t3.md`, que cita o `main` móvel de `pingdotgg/t3code`. **Não foi revalidado nesta tarefa** (sem acesso de rede). O README de `orchestration-v2` diz que o desenho ignora migração e compatibilidade. O ADE **não pode**: migração só aditiva (`AGENTS.md` §2.3).
+
+| Conceito do T3 | Decisão | Por quê |
+|---|---|---|
+| `AppThread → Run → ExecutionNode` | **Adotar** como `chat_thread → HarnessRun → ExecutionNode` | É o que o plano já pede; só os nomes mudam |
+| `ProviderSession` (processo vivo) separado de `ProviderThread` (conversa nativa) | **Adotar a separação no vocabulário; persistir só a conversa nativa** (`ProviderSessionRef`). O processo fica como **instância** (escopo `instance`), só em memória | No ADE o processo não sobrevive ao app: os da Frota são filhos do app (`runs/store.rs:1249-1252`) e os de conversa morrem com ele (`opencode.rs:494`, `kill_on_drop`). Persistir um "runtime recuperável" prometeria o que não existe |
+| `ContextTransfer` (relação, barata, preguiçosa) separado de `ContextHandoff` (payload materializado) | **Adotar** | O ADE já tem três materializações sem registro comum: resumo de troca de agente (`handoff.rs`/`troca.rs`), contexto do `chat_new` e entrega da Frota. A relação com política e consumo rastreável falta; o payload já existe e não deve ser copiado |
+| Outbox durável de efeitos | **Não é pré-requisito.** O T3 a trata como "Tracked Follow-Up", fora da primeira fatia | Mesma conclusão: a Fase 1 não precisa de outbox. A Fase 2 usa evento transacional e receipt; o worker com lease só entra quando a Fase 5 provar a necessidade |
+| Receipts idempotentes | **Reaproveitar o que há** (`chat_child_receipts`, `run_delegation_receipts`) e unificar na Fase 2 | Os dois já têm `caller_key + request_id + request_hash`, mesma forma de chave |
+| Estados de nó (`pending`, `running`, `waiting`; `completed`, `interrupted`, `failed`, `cancelled`, `rolled_back`) | **Adotar com acréscimos** (§3) | O ADE tem `skipped` e `handed_off` na Frota. `rolled_back` fica reservado: nenhuma capability de conversa o sustenta |
+| Só o nó raiz conclui o run | **Adotar** | É a invariante 2 do plano (§3.3) |
+
+## 3. Máquina de estados
+
+### 3.1 Vocabulário do nó
+
+| Tipo | Estados |
+|---|---|
+| **Não terminais** | `pending`, `running`, `waiting` |
+| **Terminais** | `completed`, `failed`, `cancelled`, `interrupted`, `skipped`, `handed_off` |
+| Reservado (não usar ainda) | `rolled_back` |
+
+Atributos que **acompanham** um terminal (não são estados):
+- `end_reason`: `adapter_final`, `adapter_quiet_final`, `process_drop`, `user_stop`, `app_closed`, `scheduler_cancel`, `dependency_failed`, `unmapped_native_status`;
+- `outcome_unknown` (booleano): o ADE não consegue provar o efeito de uma ferramenta ou de um envio.
+
+Diferenças de significado:
+- `interrupted`: parada sem erro do agente (a pessoa parou, o app fechou, o processo foi fechado de propósito, reconciliação no boot).
+- `cancelled`: o scheduler ou a pessoa cancelou uma tarefa ou subárvore da Frota.
+- `failed`: erro do agente ou do processo.
+- `skipped` e `handed_off` só existem na Frota (`runs/types.rs:113-131`).
+
+### 3.2 Mapa do estado nativo para o nó
+
+| Nativo | Nó | Observação |
+|---|---|---|
+| `chat_run.inProgress` | `running` | `waiting` se houver `chat_request.pending` do nó |
+| `chat_run.completed` | `completed` | |
+| `chat_run.failed` | `failed` | |
+| `chat_run.interrupted` | `interrupted` | |
+| `chat_run.status` com outro texto (o Codex grava o `turn.status` como veio, `codex.rs:491`) | `interrupted`, `end_reason = unmapped_native_status`, `outcome_unknown` | nunca promover um valor desconhecido a terminal conhecido |
+| `tasks.pending`, `ready` | `pending` | |
+| `tasks.running` | `running` | |
+| `tasks.done` | `completed` | |
+| `tasks.failed` com `error = SWEPT_RUNNING_ERROR` | `interrupted`, `end_reason = app_closed` | já é assim na projeção (`runs/harness.rs:243-245`) |
+| `tasks.failed` (outro erro) | `failed` | |
+| `tasks.cancelled` | `cancelled` | no boot, `pending` vira `cancelled` com texto próprio (`runs/store.rs:1304-1316`) |
+| `tasks.handed_off` | `handed_off` | a pessoa assumiu numa aba |
+| `tasks.skipped` | `skipped`, `end_reason = dependency_failed` | |
+| `runs.running` | `running` | `runs.status` é derivado das tarefas por `refresh_run` (`runs/store.rs:772-800`) |
+| `runs.done`, `failed`, `cancelled` | `completed`, `failed`, `cancelled` | **cuidado:** um run só com `handed_off` (sem `failed` nem `skipped`) cai em `cancelled`. O contrato não corrige; só registra |
+| `run_attempts.*` | igual ao da tarefa | mesmo vocabulário |
+| conversa filha | o nó vale o estado do **último turno** da filha; sem turno, `pending` | `chat_thread.state` (`active`/`settled`) não é estado de execução |
+
+### 3.3 Regras
+
+1. **Só o root encerra o run.** O run é terminal se, e só se, o nó raiz é terminal. Filho, ferramenta, aprovação ou pergunta terminando (ou falhando) nunca fecha o run.
+2. **O root só vira terminal por uma destas quatro causas:**
+   - evento final do adapter do root (`result`, `turn/completed`, resposta do `session/prompt`, `result` do agy ou do cursor);
+   - queda do processo com turno aberto (`turn::dropped`, `turn.rs:201-211`);
+   - Parar da pessoa;
+   - reconciliação no boot, **marcada** com `end_reason = app_closed`.
+3. **O que NÃO é terminal** (e o harness não pode tratar como fim):
+   - processo ocioso ou `phase: idle` com turno ainda aberto;
+   - silêncio de tela, em qualquer TUI;
+   - o aviso `turnTimeout` do chat_team, que só avisa (`conversa/turn.rs:181-191`);
+   - fim de ferramenta, de subagente ou de filho;
+   - pedido de aprovação ou de pergunta pendente.
+4. **Cursor é exceção declarada.** O adapter fecha o turno por silêncio depois da última chamada do modelo (10 s), depois de fala (3 min) ou por silêncio duro (15 min, com erro) (`cursor_map.rs:40-46`). Isso é um **final definido pelo adapter**: vale como `adapter_quiet_final`, nunca como regra para outros motores. Não há captura real que o confirme.
+5. **Turno sem sinal de fim e processo vivo fica `running`.** Não há prazo de turno em nenhum motor de conversa. O harness não inventa um fim.
+6. **`waiting`.** Um nó está `waiting` enquanto tiver pedido de pergunta ou aprovação pendente que ele possui. O pai continua `running` e **enxerga o bloqueio**: a projeção sinaliza "precisa da pessoa" em quem tem descendente `waiting`. Quem decide é a pessoa, nunca o pai.
+7. **Filho termina antes do pai:** permitido e esperado. O resultado do filho chega ao pai como dado não confiável, e o pai não falha por causa dele.
+8. **Pai termina antes do filho:** permitido hoje para a Frota (o run da Frota sobrevive ao turno que o criou). O contrato distingue:
+   - run **terminal**: o root acabou;
+   - run **assentado**: todos os nós são terminais.
+   A UI mostra "run concluído, N filhos ainda ativos". Isso confirma o comportamento atual; ver §8.
+9. **Cancelamento.** Cancelar o root é parar o turno dele. Descendentes só são cancelados por ordem do pai ou da pessoa, com escopo verificado (Fase 4). Parar uma conversa filha interrompe o turno dela; cancelar na Frota age na subárvore do run, nunca no lead nem em filhos de chat (`runs/orchestration.rs:1278-1330`). Nunca se encerra o PTY original de uma sessão conectada.
+
+### 3.4 Reinício do app
+
+O que já acontece (e o contrato mantém):
+- **Conversa** (`conversa/store.rs::sweep_orphans`, chamado em `database/connection.rs:159`): turno `inProgress` vira `interrupted`; ferramentas sem resultado ganham `TOOL_OUTCOME_UNKNOWN`; pedidos `pending` viram `expired`; tudo numa transação. Nunca reenvia nada.
+- **Frota** (`runs/store.rs::sweep_orphans`, chamado em `app/housekeeping.rs:51`): `ready` e `running` viram `failed` com `SWEPT_RUNNING_ERROR`; `pending` vira `cancelled`; o status do run é recalculado. Não relança.
+- As duas varreduras só rodam se `ipc::other_instance_alive()` for falso. Isso é uma checagem, não um lock: a serialização entre instâncias é da Fase 5 e **não está provada**.
+
+O que o contrato acrescenta (Fases 3 e 5, não agora):
+- Todo nó não terminal vira `interrupted` com `end_reason = app_closed` **na mesma transação** da varredura nativa. A reconciliação fica explícita: `end_source = reconciliation`.
+- `outcome_unknown = 1` quando havia ferramenta `Running`, ou envio em `submitting`/`unknown` (`chat_child_receipts.delivery_state`).
+- Nó `waiting` vira `interrupted`: o processo que esperava a resposta morreu e o pedido expirou. Não se retoma uma aprovação.
+- **"Retomar" nunca altera o histórico.** Cria uma nova attempt correlacionada ao nó antigo, escolhida pela pessoa. Só existe onde a capability `resume` for `Supported` e provada.
+
+## 4. Plano de migração aditiva
+
+### 4.1 Princípios
+
+- **Só `CREATE TABLE IF NOT EXISTS` e `ALTER TABLE … ADD COLUMN` protegido por `has_column`.** Nada é apagado, renomeado ou reinterpretado. O que não migra vira `_legacy_*` (`docs/agentes/BACKEND.md`).
+- **Sem `CHECK` de enumeração** nas tabelas novas. O SQLite não altera `CHECK`: um `kind IN (…)` fixo obrigaria reconstruir a tabela quando surgir um tipo de nó. Os valores são validados em Rust.
+- **O estado nativo continua sendo a fonte de verdade** até cada coluna de estado nova ser provada igual a ele. Em divergência, o nativo vence.
+- **Schedulers e bancos atuais ficam como estão:** o scheduler da Frota (`runs/`), as tabelas `chat_*`, `runs`, `tasks`, `run_attempts` e os dois recibos. O harness lê, relaciona e, só depois, escreve estado.
+- **As tabelas novas nascem num `migrate()` de módulo**, como `harness_execution_events` (`runs/execution_log.rs:247`), chamado de `conversa::store::migrate`. Assim `database/schema.rs` e `ipc/protocol.rs` não mudam. Esses `migrate()` próprios ficam **fora** do alvo do fingerprint (`docs/decisoes/FINGERPRINT.md`), por isso a mudança não pede registro novo.
+- Apagar uma conversa apaga em cascata só as linhas `harness_*` dela (mesmo padrão de `chat_item`). As linhas da Frota (`runs`, `tasks`) não são tocadas.
+
+### 4.2 DDL proposto (Fase 1)
+
+Texto de proposta, **não aplicado**.
+
+```sql
+CREATE TABLE IF NOT EXISTS harness_run (
+    id          TEXT PRIMARY KEY,                -- uuid ADE
+    thread_id   TEXT NOT NULL REFERENCES chat_thread(id) ON DELETE CASCADE,
+    turn_id     TEXT NOT NULL,                   -- chat_run.id do turno raiz
+    created_at  INTEGER NOT NULL,
+    UNIQUE (thread_id, turn_id)
+);
+
+CREATE TABLE IF NOT EXISTS harness_node (
+    id          TEXT PRIMARY KEY,                -- uuid ADE
+    run_id      TEXT NOT NULL REFERENCES harness_run(id) ON DELETE CASCADE,
+    parent_id   TEXT REFERENCES harness_node(id) ON DELETE CASCADE,  -- nulo só no root
+    kind        TEXT NOT NULL,                   -- root_agent | child_chat | fleet_run | fleet_task (validado em Rust)
+    source_kind TEXT NOT NULL,                   -- chat_run | chat_thread | fleet_run | fleet_task
+    source_ref  TEXT NOT NULL,                   -- chat_run: '<thread_id>/<turn_id>'; os demais: o id nativo
+    legacy_ref  TEXT NOT NULL,                   -- 'turn:<t>:<r>' | 'thread:<id>' | 'run:<id>' | 'task:<id>'
+    created_at  INTEGER NOT NULL,
+    UNIQUE (source_kind, source_ref),
+    UNIQUE (legacy_ref)
+);
+CREATE INDEX IF NOT EXISTS idx_harness_node_run ON harness_node(run_id, parent_id);
+```
+
+Sem coluna de estado na Fase 1: o estado do nó é **derivado** do registro nativo pelo par `source_kind/source_ref`, então não há escrita dupla para divergir.
+
+Acréscimos previstos para as fases seguintes, **todos `ADD COLUMN`**:
+
+| Fase | Tabela | Colunas |
+|---|---|---|
+| 2 | `harness_execution_events` | `node_id TEXT`, `harness_run_id TEXT` (o `run_id` existente é o da Frota: não reaproveitar) |
+| 3 | `harness_node` | `status`, `end_reason`, `outcome_unknown INTEGER NOT NULL DEFAULT 0`, `started_at`, `ended_at`, `provider_session_id` |
+| 3 | `harness_run` | `end_source`, `end_reason`, `outcome_unknown`, `ended_at` |
+| 2 | nova `harness_command_receipt` | `kind`, `caller_key`, `request_id`, `request_hash`, `node_id`, `state`, `event_sequence`; chave `(kind, caller_key, request_id)`. Os dois recibos antigos ficam e são lidos |
+| 4 | nova `harness_provider_session` | as colunas de `ProviderSessionRef` (§2.2) |
+| 4 | nova `harness_context_transfer` | as colunas de `ContextTransfer` (§2.2) |
+
+### 4.3 Compatibilidade com dados e eventos antigos
+
+- **Nenhuma linha antiga é reescrita.** `chat_thread`, `chat_run`, `runs`, `tasks`, `run_attempts` e os recibos seguem iguais.
+- **Sem backfill obrigatório.** Run antigo da Frota e conversa filha antiga não ganham `harness_run`. A projeção antiga (`runs/harness.rs`) continua montando a árvore para eles. A árvore final é a união: nós com linha em `harness_node` usam o `id` estável; os demais continuam com o id textual.
+- **Evento antigo sem nó** continua legível: `harness_execution_events` já tem `parent_node_id` em texto e a migração antiga o preencheu (`execution_log.rs:284-296`). A leitura resolve esse texto pelo `legacy_ref`. `node_id` novo fica `NULL` nesses eventos e nunca é preenchido retroativamente à força.
+- **Backfill opcional e posterior**, idempotente, por `INSERT … WHERE NOT EXISTS`, só quando houver um ganho claro. Não faz parte da Fase 1.
+- **Banco de versão futura:** `PRAGMA user_version` não sobe. As tabelas novas não dependem de versão (`BACKEND.md`: acréscimos aditivos sem subir `user_version`).
+
+### 4.4 Ordem de adoção
+
+| Fase do plano | O que entra | O que continua como está |
+|---|---|---|
+| 0 (este PR) | contrato, matriz e tipos; **nada no banco** | tudo |
+| 1 | `harness_run`, `harness_node`, dois pontos de gravação, projeção unida (§7) | estado derivado do nativo; scheduler e adapters intactos |
+| 2 | `node_id` nos eventos; `harness_command_receipt` unificando os recibos; evento gravado na transação do comando; erro de gravação deixa de ir só a `stderr` | os dois recibos antigos, lidos e nunca apagados; sem outbox |
+| 3 | colunas de estado em `harness_node`; adapters gravam estado do root nos pontos de fim (§1.7 lista os pontos); nós de ferramenta, aprovação, pergunta e subagente nativo; descritor lido pela UI e pelo MCP | o nativo vence em divergência; `finish_turn` do Claude e `turn/completed` do Codex passam a chamar `record_end` |
+| 4 | `connected_session`, `ProviderSessionRef`, `ContextTransfer`, entrega durável do resultado ao pai | `chat_thread_native` e `remote_id` seguem como fonte operacional |
+| 5 | reconciliação por nó no boot; serialização entre instâncias; worker com lease **se** a prova pedir | as duas varreduras nativas |
+
+### 4.5 Receipts: unificar, não criar
+
+| | `chat_child_receipts` | `run_delegation_receipts` |
+|---|---|---|
+| Chave | `(caller_key, request_id)` | `(caller_key, request_id)` |
+| Identidade do conteúdo | `request_hash` | `request_hash` |
+| Alvo | `thread_id` | `run_id` + `task_keys_json` |
+| Estado | `delivery_state`: `prepared`, `submitting`, `accepted`, `retryable`, `unknown` | nenhum (existe ou não) |
+| Onde grava | transação `Immediate` de `create_inner` (`conversa/api.rs:339-384`) | transação `Immediate` da delegação (`runs/orchestration.rs:758-870`) |
+
+A Fase 2 adiciona `harness_command_receipt` com `kind`. Leitura passa pela nova tabela e cai nas antigas; escrita é dupla até a nova ser provada. Mesmo `client_request_id` com conteúdo diferente continua falhando fechado.
+
+## 5. Provas de replay por adapter
+
+### 5.1 O que existe
+
+- Três fixtures de protocolo, todas `synthesized`: `claude-ferramenta-aprovacao-e-cota`, `codex-comando-falha-e-queda`, `acp-pedido-e-max-tokens`. Cinco roteiros (cota, retomada, JSON quebrado, stall) para os mesmos três protocolos.
+- Nenhum transcript gravado. O modo `record` existe (`replay_protocolo.rs`) e nunca foi usado.
+- A bancada toca **só a leitura** (o que o provider escreve). As linhas `in` (o que o ADE escreve) são ignoradas (`replay_protocolo.rs:198-210`). Nada prova o que o ADE manda.
+- O que o replay **não** vê: o banco. `mark_unknown_outcomes`, `sweep_orphans` e o estado do turno em `chat_run` não aparecem no snapshot. Eles pedem teste de banco (`test_db()`), como `conversa/test.rs:565-597`.
+
+### 5.2 Bloqueios da bancada (conferidos no código)
+
+| # | Bloqueio | Onde | Efeito |
+|---|---|---|---|
+| B1 | `Protocolo` tem **3 variantes** (`claude-stream`, `codex-app-server`, `acp`) | `bancada.rs:42-52`, `replay_protocolo.rs:141` | Antigravity e Cursor não têm replay |
+| B2 | O snapshot não tem evento de filho, uso nem pedido pendente no fim | `replay_protocolo.rs:213-227` | "filho termina antes do pai" e "uso do turno" não são afirmáveis |
+| B3 | O `Motor` da bancada **descarta** `Task` e `SubItem` | `bancada.rs:611-614` | idem; os eventos de filho do Claude somem |
+| B4 | O oráculo não afirma o tipo do item nem "pedido ainda pendente" | `bancada.rs:725-748` (`Espera`) | não dá para provar `usage` nem pedido que sobra |
+| B5 | O guard recusa `ToolKind::Other` | `replay_protocolo.rs:233-241`, `bancada.rs:486-489` | ferramenta fora da lista no Cursor derrubaria a fixture |
+| B6 | O Cursor fecha o turno por **prazo** (`quiet_after`), que o `Motor` da bancada não modela | `cursor_map.rs:155-165`, `:350-383` | copiar a regra à mão duplicaria o fim de turno |
+
+### 5.3 Provas por adapter e prioridade
+
+Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito das Fases 2 e 3); **P1** cobre falha comum; **P2** completa. A coluna "como" diz se é fixture de bancada ou teste de banco.
+
+| Cenário | Claude | Codex | OpenCode (ACP) | Antigravity | Cursor | Como |
+|---|---|---|---|---|---|---|
+| **P0** ferramenta sem resultado ao fim | fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` | fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` | fixture `acp-tool-sem-resultado` | `requer captura real` | `requer captura real` | fixa a lacuna de §1.7 como comportamento atual |
+| **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | `requer captura real` | `requer captura real` | bancada |
+| **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste de banco; sem reabertura classificada | idem | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
+| **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
+| **P1** interrupção | fixture `claude-interrompido` | fixture `codex-interrompido` | fixture `acp-interrompido` | `requer captura real` | `requer captura real` | bancada |
+| **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
+| **P1** frames fora de ordem | fixture `claude-fora-de-ordem` (o `tool_result` antes do `tool_use` é descartado hoje, `claude_map.rs:287-289`) | fixture `codex-fora-de-ordem` | fixture `acp-fora-de-ordem` | `requer captura real` | `requer captura real` | bancada; o oráculo documenta o comportamento atual |
+| **P2** turno feliz | fixture de base | fixture de base | fixture de base | `requer captura real` | `requer captura real` | bancada |
+| **P2** filho termina antes do pai | bloqueado por B2 e B3 | bloqueado por B2 e B3 | sem frame de filho (o ACP só tem o cartão `think`) | `requer captura real` | `requer captura real` | só depois de ampliar snapshot e `Motor` |
+
+Contagem da grade (9 cenários × 5 motores = 45 células): **1 com fixture exata** (queda no Codex), **3 parciais** (pedido em Claude, Codex e ACP), **41 sem fixture**. O número vem do inventário `cursor-replay` e foi conferido contra a lista de arquivos de `fixtures/protocolo/` e `fixtures/roteiros/`.
+
+### 5.4 O que exige captura real (nunca sintetizar)
+
+- **Cursor e Antigravity inteiros.** O mapeador do Cursor diz que nenhum turno real foi feito e que os testes usam as linhas de exemplo da doc (`cursor_map.rs:5-8`). O do agy tem os campos de ferramenta "do changelog e do parser das tarefas" (`test_motores.rs:1-6`). Uma fixture `synthesized` dos dois teria oráculo escrito da intenção e deve ficar marcada como pendente de captura, nunca como `recorded`.
+- **O que o ADE escreve ao provider** (`steer`, `/compact`, `/goal`, `turn/steer`, `turn/interrupt`): a bancada não lê stdin.
+- **Resposta do OpenCode a `session/resume` e `session/load`.**
+- Capturas gastam a conta e a cota da pessoa e **exigem OK explícito e teto** (§8).
+
+### 5.5 Infraestrutura antes de qualquer fixture nova
+
+Ordem, de menor a maior risco:
+1. Estender `Espera` e o snapshot com `filhos`, tipo do item e `pedidosPendentes` (B2 e B4).
+2. O `Motor` guardar `Out::Task` e `Out::SubItem` (B3).
+3. `Protocolo::AgyStream` (laço simples, sem prazo).
+4. `Protocolo::CursorStream`, reaproveitando o `read_turn` e o `Fake: Source` de `test_motores.rs`, devolvendo silêncio quando o próximo `atMs` passa de `quiet_after` (B6). Sem relógio real.
+5. Uma lista de ferramentas aceitas por protocolo no guard, sem afrouxar o dos outros três (B5).
+
+## 6. Inferência de capability por nome
+
+### 6.1 Contagem reproduzível
+
+Comando (linhas brutas, sem arquivos de teste dedicados):
+
+```bash
+grep -rn --include='*.rs' -E '"claude-code"|"codex"|"opencode"|"antigravity"|"cursor"|"gemini-cli"|"kimi-code"|"hermes"|Engine::(Claude|Codex|OpenCode|Antigravity|Cursor)\b' src-tauri/src | grep -v -E '_test|/test|test_|tests\.rs'
+grep -rn --include='*.ts' --include='*.tsx' -E "['\"](codex|claude-code|claude|opencode|antigravity|cursor|gemini-cli|kimi-code|hermes)['\"]" src | grep -v -E '\.test\.|/tests/|__tests__|test/'
+```
+
+| Linguagem | Linhas | Arquivos | Capability ou comportamento do harness (migrar) | Registro, adaptador ou apresentação (permitido) | Contas, uso e limites | Padrão de produto, catálogo, fixture |
+|---|---|---|---|---|---|---|
+| Rust | 284 | 57 | 149 em 26 arquivos | 54 em 10 | 40 em 9 | 41 em 12 |
+| TS/TSX | 182 | 55 | 88 em 36 arquivos | 43 em 6 | 51 em 13 | 0 |
+
+Ressalvas: a contagem é bruta. Inclui testes inline dentro de arquivos de produção (`runs/oneshot.rs`, `runs/plan.rs`, `ipc/commands/pool.rs`) e falsos positivos de paginação (`"cursor"` em `ipc/mcp.rs:1011` e `:1044`, `runs/orchestration.rs:234`, `runs/model_discovery.rs:731`). A classificação por arquivo é por leitura do papel do arquivo, não linha a linha. O número "98" do inventário `tui-acp-frota` não é reprodutível e não deve ser citado.
+
+### 6.2 Fonte única proposta
+
+- **Uma só fonte:** `harness::matrix` (esta Fase 0) para o que cada provider promete, e o registro de agentes (`agents/registry.rs`) para o que ele **é** (comando, MCP, retomada, sessões). O descritor não duplica o registro: aponta para ele.
+- **Quem consome:** `Engine::capabilities()` (`conversa/api.rs:74-121`) passa a ser **derivado** do descritor; `PROTOCOL_AGENTS` (`chatModel.ts:74-80`) passa a ser **lido** do backend (via `ags chat providers` e um comando Tauri), não copiado.
+- **Regra de saída (Fase 3):** nenhuma comparação `agent_id == "<nome>"` decide capability fora do adapter e do registro. Um teste de lint com baseline (mesma ideia do `check:test-lint`) falha quando o número de ocorrências do grupo "migrar" cresce.
+- A fonte inclui o escopo por **sessão**: o ACP local lê `agentCapabilities`; o Claude só marca `steer` quando houver captura.
+
+### 6.3 Lista por arquivo (grupo "migrar")
+
+**Rust** (linhas brutas): `conversa/api.rs` 31, `database/queries/session_search.rs` 13, `ipc/commands/conversas.rs` 12, `runs/roster.rs` 12, `runs/oneshot.rs` 8, `runs/plan.rs` 7, `canal/mod.rs` 6, `chat_team/permission.rs` 5, `ai_memory/tabs.rs` 5, `ipc/transport.rs` 5, `ipc/commands/canal.rs` 5, `ipc/mcp.rs` 5, `ipc/commands/peers.rs` 4, `runs/orchestration.rs` 4, `runs/supervisor.rs` 4, `session/panel.rs` 4, `runs/fixrounds.rs` 3, `runs/routing.rs` 3, `runs/mod.rs` 3, `session/title.rs` 3, `canal/timeline.rs` 2, `conversa/troca.rs` 1, `terminal/pty_manager.rs` 1, `chat_team/watch_db.rs` 1, `squads/store.rs` 1, `runs/quota.rs` 1.
+
+**TS/TSX:** `chat/AgentModelPicker.tsx` 11, `chat/NewConversation.tsx` 7, `missions/vigia.ts` 7, `chat/structured/StructuredConversationView.tsx` 6, `chat/chatModel.ts` 5, `chat/ComposerAssistMenu.tsx` 5, `missions/modelFlags.ts` 5, `chat/ClaudeAutoCompactSetting.tsx` 3, `runs/RoutingSection.tsx` 3, e 27 arquivos com 1 ou 2 ocorrências (`chat/tasks/useConversationTasks.ts`, `chat/team/teamModel.ts`, `chat/structured/switchModel.ts`, `chat/ChatSidebar.tsx`, `chat/ConversationView.tsx`, `canvas/tabTuning.ts`, `canvas/RoleEditDialog.tsx`, `squads/*`, `terminal/Terminal.tsx`, `tabs/continuity.ts`, `palette/CommandPalette.tsx` e outros).
+
+Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
+
+| Capability afetada | Onde |
+|---|---|
+| `child_stop` | `conversa/api.rs:1105` |
+| `compact`, `goal` | `conversa/api.rs:797`, `:913`, `:920-921` (textos); `ComposerAssistMenu.tsx:301-304`, `StructuredConversationView.tsx:156-197` |
+| `steer` | `chatModel.ts:74-85` |
+| `approval` | `conversa/troca.rs:114`, `chat/structured/switchModel.ts:19-21` |
+| `usage` | `chat_team/watch_db.rs:257`, `chat/summary/LimitsCard.tsx:27-33` |
+| `resume` | `conversa/codex.rs:184`, `opencode.rs:194`, `tabs/continuity.ts:24` |
+| `ags_mcp` | `ipc/mcp.rs:2905`, `:2922`; `agents/adapter.rs:55`, `:93` (o flag que contradiz o registro) |
+| contrato duplicado | `ipc/commands/conversas.rs:78-124`, `conversa/api.rs:124-139` (`supports_access` deixa o ACP local aceitar cinco modos; a abertura só aceita `ask`, `opencode.rs:211-213`) |
+
+### 6.4 Ordem de migração (não é desta tarefa)
+
+1. Expor o descritor de leitura no backend (comando Tauri e `ags chat providers`), sem mudar nenhuma regra.
+2. Trocar `PROTOCOL_AGENTS` por leitura do backend; manter um teste que compara as duas fontes até remover a cópia.
+3. Migrar os pontos que decidem capability de **conversa** (`api.rs`, `troca.rs`, `switchModel.ts`, `ComposerAssistMenu.tsx`, `StructuredConversationView.tsx`, `teamModel.ts`, `watch_db.rs`).
+4. Migrar Frota e orquestração (`supervisor.rs`, `mcp.rs`, `oneshot.rs`, `plan.rs`, `roster.rs`).
+5. Contas, uso e limites, pelo registro (não pelo descritor de execução).
+6. Ligar o teste de lint com baseline e baixá-lo a cada passo.
+7. Trocar os `unreachable!` (`api.rs:828`, `:953`, `:989`) por erro de capability, para uma flag ligada sem implementação não derrubar o processo.
+
+## 7. Fatia vertical da Fase 1
+
+**Objetivo:** um turno **T** de uma conversa raiz **R** que cria **um filho de chat** e **um filho da Frota**; os dois ficam gravados, projetados e mostrados na árvore como filhos do mesmo run, sem cruzar id nem `cwd`.
+
+### 7.1 O que a fatia grava
+
+| Momento | Gravação | Onde |
+|---|---|---|
+| R cria a conversa filha C durante T (`chat_new`, ou conversa lateral) | `harness_run` do par `(R, T)` se não existir; nó `root_agent` do turno; nó `child_chat` de C com pai no root | no `insert_thread_with_context` (`conversa/store.rs:~340-352`), **na mesma transação** da criação, quando `parent_turn_id` existe |
+| R delega ao menos uma tarefa à Frota durante T (`delegate_task`, `run_plan`) | o mesmo `harness_run` (idempotente); nó `fleet_run`, pai no root; nó `fleet_task` por tarefa | na transação de `runs/orchestration.rs:~754-870`, junto de `set_run_source_thread` e do recibo |
+
+O run nasce **de forma preguiçosa**, no primeiro filho. Assim a Fase 1 não mexe nos cinco adapters de conversa. Turnos sem delegação não ganham linha.
+
+### 7.2 O que a fatia projeta e mostra
+
+- `runs/harness.rs::thread_execution_graph` une os nós antigos (derivados) com `harness_node`. Nós com linha ganham o `id` estável; o `id` textual atual continua.
+- Mudança visível: o **run da Frota passa a aparecer sob o turno que o criou**, e não sob a conversa. A conversa filha já aparece sob o turno pai (`runs/harness.rs`, `parent_turn_id`).
+- Campos novos **opcionais** no grafo: `nodeId`, `harnessRunId`. O `runId` ambíguo do nó de turno ganha um nome claro (`chatRunId`), mantendo `runId` por compatibilidade até a UI migrar.
+- `HarnessRunFeed.tsx` já monta a árvore por `parentId`; a mudança é só de tipos (`src/features/runs/types.ts`).
+
+### 7.3 Arquivos a tocar
+
+| Arquivo | Mudança |
+|---|---|
+| `src-tauri/src/harness/` (novos: `identity.rs`, `store.rs`, `state.rs`) | tipos, `migrate()`, `ensure_run`, `link_child_chat`, `link_fleet_run`, `link_fleet_task`, mapa puro de estado (§3.2), com testes |
+| `src-tauri/src/conversa/store.rs` | uma chamada a `harness::store::migrate`; uma chamada de ligação no `insert_thread_with_context` |
+| `src-tauri/src/runs/orchestration.rs` | chamadas de ligação na transação da delegação |
+| `src-tauri/src/runs/harness.rs` | união com `harness_node`; campos novos |
+| `src/features/runs/types.ts` | campos opcionais |
+| `src/features/chat/structured/HarnessRunFeed.tsx` | só se o teste visual pedir ajuste |
+| `docs/ade-ags/HARNESS_CONTRATO.md`, `ROADMAP.md` | marcar a Fase 1 |
+
+Nada de `database/schema.rs` nem `ipc/protocol.rs`.
+
+### 7.4 Testes da fatia (prova de lógica: teste primeiro)
+
+1. `migrate` roda duas vezes sem erro e sem perder linhas.
+2. Conversa filha com turno pai ativo gera `harness_run`, root e `child_chat`; repetir a criação não duplica.
+3. Delegação à Frota com turno ativo gera `fleet_run` e `fleet_task` sob o mesmo run.
+4. **Mesma pasta, duas conversas:** o run da Frota da conversa B não aparece na árvore da conversa A.
+5. Conversa filha sem `parent_turn_id` e run da Frota sem turno ativo **não** geram nó e continuam na projeção antiga.
+6. Filho terminal (falha de tarefa, conversa filha interrompida) **não muda** o status do turno raiz na projeção.
+7. Depois das duas varreduras de boot, o turno aparece `interrupted` e a tarefa que rodava aparece `interrupted`; nenhuma linha some.
+8. Apagar a conversa remove só as linhas `harness_*`; `runs` e `tasks` ficam.
+9. Os testes existentes de `thread_execution_graph` continuam passando sem alteração.
+10. Visual (instância isolada, captura antes e depois): o run da Frota sob o turno. Não medido ainda.
+
+### 7.5 O que fica de fora (e não se promete)
+
+- **Estado terminal gravado** pelo harness (Fase 3). A Fase 1 deriva do nativo.
+- Tentativas como nós (continuam projetadas), ferramenta, aprovação, pergunta e subagente nativo como nós.
+- `node_id` nos eventos, recibos unificados, evento transacional (Fase 2).
+- `ProviderSessionRef`, `ContextTransfer`, `connected_session` (Fases 3 e 4).
+- **Recuperação:** nenhuma. Depois do reinício a árvore mostra o que as duas varreduras já produzem hoje (interrompido e `failed`/`cancelled`). Não há replay de evento, cursor, retomada de sessão nem relançamento.
+- Leitura do descritor pela UI, IPC ou MCP; correção da lacuna de §1.7; migração dos 149 pontos por nome.
+- Run da Frota fora de conversa, sessões de TUI e filhos criados com o pai ocioso.
+
+## 8. Decisões em aberto para o usuário
+
+Só o que é decisão de produto ou de autorização.
+
+1. **Texto do «enviar agora» no Claude.** Enquanto o `steer` é `Unknown`, a tela promete "entra no turno em andamento". Manter a promessa, ou trocar para uma frase neutra ("vai para o Claude agora; ele a lê no meio ou logo depois do turno")? O comportamento não muda; muda a cópia nos três catálogos.
+2. **Capturas reais.** Provar `Unknown` e criar fixtures `recorded` gasta conta e cota. Autoriza capturas? De quais providers (Claude, Codex, OpenCode, Antigravity, Cursor) e com que teto de turnos? Sem isso, Antigravity e Cursor ficam sem replay.
+3. **Reconhecimento do fingerprint do schema.** O `schema-sqlite` está sem registro no commit base. Quem reconhece (o usuário, ou a fase que tocar o schema) e com qual motivo? Enquanto isso o passo de fingerprint do CI falha.
+4. **O filho da Frota sobrevive ao turno do pai.** É o comportamento de hoje, e o contrato o mantém: "run concluído, N filhos ainda ativos". Confirma, ou o turno do pai deve esperar os filhos da Frota?
+
+## 9. O que foi e o que não foi verificado
+
+**Verificado**
+- `cd src-tauri && cargo test --lib harness`: 14 testes do módulo novo passam. Eles conferem: 22 colunas esperadas; 18 capabilities em ordem por coluna; todo `Supported` com evidência e prova; todo `Unknown` com o que falta provar; todo `Unsupported` com motivo; **cada citação `arquivo:linha` aponta para arquivo e linhas que existem**; a tabela concorda com `Engine::capabilities()`; o doc concorda com a tabela.
+- `bun run check:test-lint`.
+- Leitura direta do código para D1, D2, D3, D4, D8 e D10, e para as lacunas de §1.7.
+
+**Não verificado**
+- **Existir a linha não prova que ela diz o que a célula afirma.** O teste confere só arquivo e intervalo. O conteúdo de uma amostra de cerca de 25 citações foi lido; o resto vem dos inventários.
+- Nenhum provider real foi executado. Nenhuma célula tem captura real.
+- O T3 (`main` móvel) não foi relido: §2.6 repete o que o inventário `antigravity-t3.md` cita.
+- Sem medição de desempenho: o custo de `thread_execution_graph` (que carrega todas as conversas, `runs/harness.rs:100`) e de árvores profundas está **não medido**.
+- A suíte completa e o `cargo test --lib --bin ags` não foram rodados. `bun run check:fingerprint` continua falhando, como no commit base.
+- Nenhum teste visual, build, instalação, push ou PR.
+
+**Defeito do commit base encontrado e corrigido à parte:** `cargo test --lib` não compilava (três chamadas de `switch_team_member` em `conversa/troca_test.rs` com a assinatura antiga). O ajuste (`None, None`) está num commit separado e não muda comportamento de produção.
