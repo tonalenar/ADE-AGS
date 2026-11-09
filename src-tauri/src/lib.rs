@@ -63,6 +63,8 @@ mod tab_checkpoints;
 mod terminal;
 mod screen_recording;
 mod voice_input;
+#[cfg_attr(not(test), allow(dead_code, reason = "contrato da Fase 0 do harness: ainda não ligado à UI, ao IPC nem ao MCP"))]
+mod harness;
 pub mod testspeed;
 pub use terminal::SESSION_ENV;
 mod updates;
