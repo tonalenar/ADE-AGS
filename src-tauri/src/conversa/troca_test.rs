@@ -122,17 +122,17 @@ fn no_time_o_integrante_e_o_orquestrador_trocam_de_agente_com_o_nome_certo() {
     conn.execute("INSERT INTO chat_team (id, orchestrator, agent_id, label, cwd, title, created_at, updated_at) VALUES ('tm2', 'thread:outra', 'codex', 'Codex', '/repo', '', 1, 1)", []).unwrap();
     conn.execute("INSERT INTO chat_team_member (team_id, member, agent_id, label, role, policy, created_at, updated_at) VALUES ('tm2', 'thread:t1b', 'claude-code', 'Claude Code · Revisor', 'reviewer', 'ask', 1, 1)", []).unwrap();
     // orquestrador
-    let teams = switch_team_member(&conn, "thread:t1", "claude-code", "codex", 5).unwrap();
+    let teams = switch_team_member(&conn, "thread:t1", "claude-code", "codex", None, None, 5).unwrap();
     assert_eq!(teams, vec!["tm".to_string()]);
     let (agent, label): (String, String) = conn.query_row("SELECT agent_id, label FROM chat_team WHERE id = 'tm'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
     assert_eq!((agent.as_str(), label.as_str()), ("codex", "Codex"));
     // integrante: o rótulo "Agente · Papel" troca só a parte do agente
-    let teams = switch_team_member(&conn, "thread:t1b", "claude-code", "codex", 6).unwrap();
+    let teams = switch_team_member(&conn, "thread:t1b", "claude-code", "codex", None, None, 6).unwrap();
     assert_eq!(teams, vec!["tm2".to_string()]);
     let (agent, label): (String, String) = conn.query_row("SELECT agent_id, label FROM chat_team_member WHERE member = 'thread:t1b'", [], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
     assert_eq!((agent.as_str(), label.as_str()), ("codex", "Codex · Revisor"));
     // fora de um time, não há o que atualizar
-    assert!(switch_team_member(&conn, "thread:solta", "claude-code", "codex", 7).unwrap().is_empty());
+    assert!(switch_team_member(&conn, "thread:solta", "claude-code", "codex", None, None, 7).unwrap().is_empty());
 }
 
 #[test]
