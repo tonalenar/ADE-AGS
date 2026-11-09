@@ -49,6 +49,8 @@ O fake **não é um binário**: os motores (`claude.rs`, `codex.rs`, `opencode.r
 | `interrompido` | — | `terminal_reason: aborted_by_user` | `interrupted` | `stopReason: cancelled` |
 | `fim` | — | `result` sem erro | `completed` | `end_turn` |
 
+`agy-stream` não entra nesta tabela. O roteiro sintetizado recusa esse protocolo: o replay lê um transcript pelo laço do `agy.rs` (uma linha JSON por vez, sem prazo de silêncio). Os frames de verdade vêm da captura, não daqui.
+
 Um silêncio maior que `PRAZO_PEDIDO_MS` (60 s) **antes** da sessão abrir vira o "não respondeu" do motor, que a retomada trata como prazo. Silêncio no meio do turno só fica medido em `silencio_max_ms`, porque os motores não têm prazo de turno: quem trata o agente parado é o Vigia.
 
 ### Roteiros em fixture

@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 use crate::canal::timeline::{Item, ItemKind, ToolKind};
 use crate::runs::failure::{classify, FailureKind};
 
+use super::agy_map::{self, Out as AgyOut};
 use super::claude_map::{self, Out as ClaudeOut, TurnResult};
 use super::codex_map;
 use super::opencode_map::{self, Out as AcpOut};
@@ -49,6 +50,9 @@ pub enum Protocolo {
     /// Agent Client Protocol (`opencode acp`).
     #[serde(rename = "acp")]
     Acp,
+    /// `agy --print --output-format stream-json`. Laço simples, sem prazo de silêncio.
+    #[serde(rename = "agy-stream")]
+    AgyStream,
 }
 
 impl Protocolo {
@@ -57,6 +61,7 @@ impl Protocolo {
             Protocolo::ClaudeStream => "Claude",
             Protocolo::CodexAppServer => "Codex",
             Protocolo::Acp => "OpenCode",
+            Protocolo::AgyStream => "Antigravity",
         }
     }
 
@@ -66,6 +71,7 @@ impl Protocolo {
             Protocolo::ClaudeStream => "initialize",
             Protocolo::CodexAppServer => "thread/resume",
             Protocolo::Acp => "session/resume",
+            Protocolo::AgyStream => "init",
         }
     }
 }
@@ -390,6 +396,8 @@ impl Fake {
             (Passo::Fim, ClaudeStream) => self.linha(json!({ "type": "result", "subtype": "success", "is_error": false, "result": "pronto", "duration_ms": self.relogio })),
             (Passo::Fim, CodexAppServer) => self.fim_codex("completed", None),
             (Passo::Fim, Acp) => self.linha(json!({ "jsonrpc": "2.0", "id": ACP_PROMPT, "result": { "stopReason": "end_turn", "usage": { "totalTokens": 42 } } })),
+            // O replay lê um transcript. Sintetizar o fluxo aqui afirmaria um formato que a captura real ainda não confirmou.
+            (_, AgyStream) => return Err("o roteiro sintetizado não cobre o Antigravity: use um transcript no replay".into()),
         }
         Ok(())
     }
@@ -536,7 +544,7 @@ impl Resultado {
 
 /// Roda as saídas pelo que o motor do protocolo faz com elas.
 pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
-    let mut motor = Motor { protocolo, out: Resultado::default(), claude: claude_map::Mapper::default(), acp: opencode_map::Mapper::new("bancada"), turno: false };
+    let mut motor = Motor { protocolo, out: Resultado::default(), claude: claude_map::Mapper::default(), acp: opencode_map::Mapper::new("bancada"), agy: agy_map::Mapper::new("bancada"), turno: false };
     let mut ultimo = 0u64;
     for saida in saidas {
         let silencio = saida.at_ms.saturating_sub(ultimo);
@@ -544,7 +552,8 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
         ultimo = saida.at_ms;
         motor.out.relogio_ms = saida.at_ms;
         // Abrindo, o silêncio maior que o prazo do pedido é o "não respondeu" do motor.
-        if motor.out.abertura.is_none() && silencio > PRAZO_PEDIDO_MS {
+        // O Antigravity não tem esse prazo: o processo é o turno e o laço só lê a próxima linha.
+        if protocolo != Protocolo::AgyStream && motor.out.abertura.is_none() && silencio > PRAZO_PEDIDO_MS {
             motor.out.abertura = Some(Err(format!("O {} não respondeu a {}", protocolo.nome(), protocolo.pedido_de_abertura())));
             return motor.out;
         }
@@ -586,6 +595,7 @@ struct Motor {
     out: Resultado,
     claude: claude_map::Mapper,
     acp: opencode_map::Mapper,
+    agy: agy_map::Mapper,
     /// Há um turno aberto (que o processo caindo fecharia como erro).
     turno: bool,
 }
@@ -631,6 +641,7 @@ impl Motor {
             Protocolo::ClaudeStream => self.claude(msg, now),
             Protocolo::CodexAppServer => self.codex(msg, now),
             Protocolo::Acp => self.acp(msg, now),
+            Protocolo::AgyStream => self.agy(msg, now),
         }
     }
 
@@ -781,6 +792,18 @@ impl Motor {
         for pedido in &mut self.out.pedidos {
             if pedido.id == id {
                 pedido.pendente = false;
+            }
+        }
+    }
+
+    /// `agy.rs`: o laço lê cada linha e aplica o mapeador. Sem prazo.
+    fn agy(&mut self, msg: Value, now: i64) {
+        for out in self.agy.feed(&msg, now) {
+            match out {
+                AgyOut::Item(item) => self.out.guardar(*item),
+                AgyOut::Delta { item_id, delta, .. } => self.out.deltas.push((item_id, delta)),
+                AgyOut::Session(id) => self.abriu(&id),
+                AgyOut::Done(result) => self.terminou(result),
             }
         }
     }

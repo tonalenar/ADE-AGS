@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::bancada::{abrir, conferir, rodar, simular, tocar, Espera, Evento, Passo, Protocolo, Roteiro, Saida};
+use super::bancada::{abrir, conferir, rodar, simular, tocar, Espera, Evento, Passo, Protocolo, Roteiro, Saida, PRAZO_PEDIDO_MS};
 use super::pool::{decide, move_account, reset_at, Decision, Input, Mode};
 use super::resume::{open_resuming, Opened, ResumeFailure, RETRY_PAUSES};
 use crate::runs::failure::FailureKind;
@@ -284,6 +284,25 @@ fn o_motor_guarda_a_tarefa_e_o_item_do_subagente() {
     assert!(snap["itens"].as_array().unwrap().iter().all(|i| i["text"] != "ok"));
 }
 
+/// B1, parte do Antigravity: o leitor percorre o fluxo sem o prazo de abertura dos outros motores.
+/// As duas linhas são o mínimo que o mapeador já aceita nos testes dele. Não descrevem um turno real.
+#[test]
+fn o_agy_le_o_fluxo_sem_prazo_de_silencio() {
+    let init = json!({ "event": "init", "conversation_id": "cv-leitura" });
+    let result = json!({ "event": "result", "result": { "status": "SUCCESS", "response": "lido", "conversation_id": "cv-leitura" } });
+    let saidas = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: PRAZO_PEDIDO_MS + 5_000, evento: Evento::Linha(result.to_string()) },
+    ];
+    let r = rodar(Protocolo::AgyStream, &saidas);
+    assert_eq!(r.sessao(), Some("cv-leitura"));
+    assert_eq!(r.texto(), "lido");
+    assert!(r.fim.as_ref().is_some_and(|f| f.error.is_none() && !f.interrupted), "{:?}", r.fim);
+    assert!(r.silencio_max_ms > PRAZO_PEDIDO_MS, "o buraco de tempo não fecha o turno");
+    assert!(tocar(&Roteiro::new(Protocolo::AgyStream, vec![Passo::Sessao { id: "x".into() }])).is_err(), "o roteiro não sintetiza este protocolo");
+    assert_eq!(serde_json::from_value::<Protocolo>(json!("agy-stream")).unwrap(), Protocolo::AgyStream);
+}
+
 // ── A retomada (`resume.rs`) com sessões abertas pela bancada ─────────────────
 
 /// `open_resuming` com cada tentativa de retomada tocando o roteiro seguinte; a sessão nova é outro roteiro.
@@ -355,6 +374,7 @@ mod retomada {
                 Protocolo::ClaudeStream => "Claude",
                 Protocolo::CodexAppServer => "Codex",
                 Protocolo::Acp => "OpenCode",
+                Protocolo::AgyStream => "Antigravity",
             }).as_str()), "{protocolo:?}");
             assert_eq!((novas, pausas), (1, RETRY_PAUSES.to_vec()), "{protocolo:?}");
         }
