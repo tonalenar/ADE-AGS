@@ -6,7 +6,7 @@ Este documento fecha o contrato da Fase 0 do harness comum. Ele não muda compor
 |---|---|
 | Base | `47cf0919` (`chore(harness): registrar estado do worktree t3-fusion como base local`) |
 | Data | 09/11/2026 |
-| Código que acompanha | `src-tauri/src/harness/` (tipos do descritor e a tabela estática da matriz, com testes) |
+| Código que acompanha | `src-tauri/src/harness/` (Fase 0: tipos do descritor e a tabela estática da matriz; Fase 1: `identity.rs`, `store.rs`, `state.rs`), com testes |
 | Plano de origem | auditoria T3 × ADE (anexo externo, fora do repositório: planos não entram no git, ver `AGENTS.md` §6.3) |
 | Fontes de apoio | quatro inventários de colegas, lidos como **dado a conferir**, não como verdade (§1.6 lista o que foi corrigido) |
 
@@ -18,9 +18,9 @@ Este documento fecha o contrato da Fase 0 do harness comum. Ele não muda compor
 |---|---|---|
 | turno (`chat_run`) | uma volta do usuário numa conversa estruturada | `chat_run(thread_id, id)`; o id **não** é único entre conversas (`conversa/store.rs:34-41`) |
 | run da Frota (`runs`) | um plano de tarefas headless | `runs.id` (`database/schema.rs:435`) |
-| `HarnessRun` | a identidade ADE de um turno que orquestra trabalho; **nasce neste contrato** | `harness_run` (proposto, §2) |
+| `HarnessRun` | a identidade ADE de um turno que orquestra trabalho; **nasce na Fase 1** | `harness_run` (§2, §4.2; gravada desde a Fase 1) |
 
-O campo `runId` do nó de turno em `runs/harness.rs:202` guarda o id do `chat_run`, não o de `runs`. Esse nome é ambíguo e muda na Fase 1 (§7).
+O campo `runId` do nó de turno em `runs/harness.rs` guarda o id do `chat_run`, não o de `runs`. Esse nome é ambíguo: a Fase 1 acrescentou `chatRunId` com o mesmo valor e manteve `runId` por compatibilidade até a UI migrar (§7.2).
 
 **O que o estado da matriz significa.** O estado descreve o adapter **do ADE**, não o provider.
 - `Supported`: há caminho de código ponta a ponta. A força da prova vem à parte (`Proof`: `Code`, `Test`, `Fixture`).
@@ -260,7 +260,7 @@ Lacunas reais, em ordem de risco:
 | tarefa / tentativa | ADE | `tasks.id` (pai em `tasks.parent_id`), `run_attempts.id` | `session_id` do provider em `tasks`/`run_attempts` |
 | conversa filha | ADE | `chat_thread.parent_ref = thread:<pai>` e `parent_turn_id` | o turno que a originou é o ativo no instante da criação (`conversa/store.rs:284-352`) |
 | recibos | ADE | `chat_child_receipts` (`conversa/store.rs:180`) e `run_delegation_receipts` (`database/schema.rs:1371`) | já existem; o trabalho futuro é **unificar**, não criar |
-| nó da árvore | só em memória | `thread:<id>`, `turn:<thread>:<turn>`, `run:<id>`, `task:<id>`, `attempt:<id>` (`runs/harness.rs`) | projeção de leitura; não há linha |
+| nó da árvore | projeção em memória; **desde a Fase 1, linha só para o que originou filho** (`harness_node`) | `thread:<id>`, `turn:<thread>:<turn>`, `run:<id>`, `task:<id>`, `attempt:<id>` (`runs/harness.rs`) | a projeção parte sempre do registro nativo; a linha só dá o id estável |
 | evento semântico | fila assíncrona | `harness_execution_events` (`runs/execution_log.rs:249-270`), única por `(thread_id, dedupe_key)` | guarda `parent_node_id` como texto |
 
 ### 2.2 Entidades
@@ -278,7 +278,7 @@ Lacunas reais, em ordem de risco:
 | Campo | Papel |
 |---|---|
 | `id` | uuid ADE, estável; é a identidade de comando e de lineage |
-| `run_id`, `parent_id` | relação durável; `parent_id` é nulo só no root |
+| `run_id`, `parent_id` | relação durável; `parent_id` é nulo só no root **do run**. A raiz do run de uma conversa filha também tem `parent_id` nulo: o elo "esta conversa é filha de tal nó" fica em `child_chat` do run do pai, e a projeção o reconstrói por `parent_ref`/`parent_turn_id` |
 | `kind` | Fase 1: `root_agent`, `child_chat`, `fleet_run`, `fleet_task`. Reservados: `fleet_attempt`, `tool_call`, `approval`, `question`, `native_subagent` |
 | `source_kind`, `source_ref` | o registro nativo que o nó representa (`chat_run` `<thread>/<turn>`, `chat_thread`, `fleet_run`, `fleet_task`); único por par |
 | `legacy_ref` | o id textual de hoje (`turn:…`, `thread:…`, `run:…`, `task:…`); liga eventos e UI antigos |
@@ -301,7 +301,7 @@ Lacunas reais, em ordem de risco:
 | Filho | Pai | De onde vem a relação |
 |---|---|---|
 | conversa filha | nó raiz do turno **pai** que a originou | `parent_ref` + `parent_turn_id` (já gravados). Sem `parent_turn_id` (criada com o pai ocioso, ou por aba TUI), **não há run** e a conversa só aparece na projeção antiga |
-| run da Frota | nó raiz do turno que a originou | hoje só `runs.source_thread_id`; a Fase 1 grava o nó **na mesma transação** que cria o run (`runs/orchestration.rs`, perto de `set_run_source_thread`) |
+| run da Frota | nó raiz do turno que a originou | `runs.source_thread_id` (liga à conversa) e, desde a Fase 1, o nó `fleet_run`, gravado **na mesma transação** que cria o run (`runs/orchestration.rs`, depois de `set_run_source_thread`). O turno é o `inProgress` único lido dentro dessa transação por `conversa::store::active_turn_id` |
 | tarefa da Frota | nó do run da Frota, ou da tarefa pai (`tasks.parent_id`) | `tasks.run_id`, `tasks.parent_id` |
 | tentativa | nó da tarefa | `run_attempts.task_id` (projetada na Fase 1; vira nó depois) |
 | ferramenta, aprovação, pergunta, subagente nativo | nó que os emitiu | Fase 3, quando o adapter expõe |
@@ -424,11 +424,12 @@ O que o contrato acrescenta (Fases 3 e 5, não agora):
 - **O estado nativo continua sendo a fonte de verdade** até cada coluna de estado nova ser provada igual a ele. Em divergência, o nativo vence.
 - **Schedulers e bancos atuais ficam como estão:** o scheduler da Frota (`runs/`), as tabelas `chat_*`, `runs`, `tasks`, `run_attempts` e os dois recibos. O harness lê, relaciona e, só depois, escreve estado.
 - **As tabelas novas nascem num `migrate()` de módulo**, como `harness_execution_events` (`runs/execution_log.rs:247`), chamado de `conversa::store::migrate`. Assim `database/schema.rs` e `ipc/protocol.rs` não mudam. Esses `migrate()` próprios ficam **fora** do alvo do fingerprint (`docs/decisoes/FINGERPRINT.md`), por isso a mudança não pede registro novo.
-- Apagar uma conversa apaga em cascata só as linhas `harness_*` dela (mesmo padrão de `chat_item`). As linhas da Frota (`runs`, `tasks`) não são tocadas.
+- Apagar uma conversa apaga em cascata só as linhas `harness_*` dela (mesmo padrão de `chat_item`). As linhas da Frota (`runs`, `tasks`) não são tocadas (`runs.source_thread_id` vira `NULL`: `ON DELETE SET NULL`).
+- O CASCADE de `harness_run.thread_id` só cobre apagar a **raiz** do run. Um nó cuja origem é outra linha (`child_chat` → `chat_thread`; `fleet_run` → `runs`; `fleet_task` → `tasks`) guarda a origem como texto, sem FK. Por isso a migração cria **gatilhos `AFTER DELETE`** nessas três tabelas que removem o nó na mesma operação, inclusive nas deleções por CASCADE (conferido por teste). Hoje só `conversa::store::delete_side_chat` apaga `chat_thread`, e nada apaga `runs`/`tasks` além do CASCADE do workspace; os gatilhos cobrem rotas futuras sem depender de cada chamador. A projeção, de qualquer forma, parte do registro nativo e nunca mostra nó sem origem.
 
 ### 4.2 DDL proposto (Fase 1)
 
-Texto de proposta, **não aplicado**.
+Aplicado na Fase 1 por `harness::store::migrate`, chamado no fim de `conversa::store::migrate` (depois de `chat_thread` e, no schema real, de `runs` e `tasks`). Além das duas tabelas, o `migrate` cria três gatilhos de limpeza (§4.1); eles não fazem parte do texto abaixo.
 
 ```sql
 CREATE TABLE IF NOT EXISTS harness_run (
@@ -614,8 +615,8 @@ Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
 
 | Momento | Gravação | Onde |
 |---|---|---|
-| R cria a conversa filha C durante T (`chat_new`, ou conversa lateral) | `harness_run` do par `(R, T)` se não existir; nó `root_agent` do turno; nó `child_chat` de C com pai no root | no `insert_thread_with_context` (`conversa/store.rs:~340-352`), **na mesma transação** da criação, quando `parent_turn_id` existe |
-| R delega ao menos uma tarefa à Frota durante T (`delegate_task`, `run_plan`) | o mesmo `harness_run` (idempotente); nó `fleet_run`, pai no root; nó `fleet_task` por tarefa | na transação de `runs/orchestration.rs:~754-870`, junto de `set_run_source_thread` e do recibo |
+| R cria a conversa filha C durante T (`chat_new`, ou conversa lateral) | `harness_run` do par `(R, T)` se não existir; nó `root_agent` do turno; nó `child_chat` de C com pai no root | no `insert_thread_with_context` (`conversa/store.rs`), quando `parent_turn_id` existe. **Atomicidade:** esse INSERT não abre transação (o chamador pode estar numa, como `create_inner` com recibo, ou não). A função envolve o INSERT e a ligação num `SAVEPOINT` e, se o chamador não tem transação, abre antes uma `Immediate` (como `create_run_with_memory_snapshot`). Escolha: **se a ligação falha, a conversa não é criada** e o erro sobe, em vez de criar a conversa sem o nó. Justificativa: um nó ausente não se repara depois (não há backfill) e o turno ficaria sem o filho na árvore; falhar a criação é visível e repetível pelo `client_request_id`. Sem I/O dentro do savepoint |
+| R delega ao menos uma tarefa à Frota durante T (`delegate_task`, `run_plan`) | o mesmo `harness_run` (idempotente); nó `fleet_run`, pai no root; nó `fleet_task` por tarefa | na transação de `runs/orchestration.rs` (`plan_tasks`), depois de `set_run_source_thread`. O turno é o `inProgress` único da conversa, lido **dentro** dessa transação (`tx`) por `conversa::store::active_turn_id`, a mesma função que decide `parent_turn_id` do filho de chat (zero ou mais de um `inProgress` não liga nada). O retry pelo recibo volta antes dessa parte e não cria nem duplica nó. Run já existente (`add_task` ou tarefa de integrante) só ganha nó de tarefa se o run já tem nó; tarefa nunca cria run, e um run sem nó nunca é ligado depois |
 
 O run nasce **de forma preguiçosa**, no primeiro filho. Assim a Fase 1 não mexe nos cinco adapters de conversa. Turnos sem delegação não ganham linha.
 
@@ -623,22 +624,23 @@ O run nasce **de forma preguiçosa**, no primeiro filho. Assim a Fase 1 não mex
 
 - `runs/harness.rs::thread_execution_graph` une os nós antigos (derivados) com `harness_node`. Nós com linha ganham o `id` estável; o `id` textual atual continua.
 - Mudança visível: o **run da Frota passa a aparecer sob o turno que o criou**, e não sob a conversa. A conversa filha já aparece sob o turno pai (`runs/harness.rs`, `parent_turn_id`).
-- Campos novos **opcionais** no grafo: `nodeId`, `harnessRunId`. O `runId` ambíguo do nó de turno ganha um nome claro (`chatRunId`), mantendo `runId` por compatibilidade até a UI migrar.
+- Campos novos **opcionais** no grafo: `nodeId`, `harnessRunId` e `chatRunId` (só no nó de turno, com o mesmo valor de `runId`, que fica por compatibilidade até a UI migrar). Sem linha em `harness_node`, os três vêm `null`.
+- O run ligado desce um nível na `depth` (e as tarefas com ele): o run sai de "filho da conversa" para "filho do turno". O pai só vale se o turno é da mesma conversa e está na árvore; senão o run fica sob a conversa, como antes.
 - `HarnessRunFeed.tsx` já monta a árvore por `parentId`; a mudança é só de tipos (`src/features/runs/types.ts`).
 
 ### 7.3 Arquivos a tocar
 
 | Arquivo | Mudança |
 |---|---|
-| `src-tauri/src/harness/` (novos: `identity.rs`, `store.rs`, `state.rs`) | tipos, `migrate()`, `ensure_run`, `link_child_chat`, `link_fleet_run`, `link_fleet_task`, mapa puro de estado (§3.2), com testes |
-| `src-tauri/src/conversa/store.rs` | uma chamada a `harness::store::migrate`; uma chamada de ligação no `insert_thread_with_context` |
-| `src-tauri/src/runs/orchestration.rs` | chamadas de ligação na transação da delegação |
+| `src-tauri/src/harness/` (novos: `identity.rs`, `store.rs`, `state.rs`) | tipos, `migrate()` (tabelas e gatilhos), `ensure_run`, `link_child_chat`, `link_fleet_run`, `link_fleet_task`, `nodes_for_threads`, mapa puro de estado (§3.2; ainda sem leitor, a projeção devolve o texto nativo), com testes |
+| `src-tauri/src/conversa/store.rs` | uma chamada a `harness::store::migrate`; `active_turn_id` extraída de `active_parent_turn_id`; ligação do filho no `insert_thread_with_context`, em savepoint |
+| `src-tauri/src/runs/orchestration.rs` | ligação do run e das tarefas na transação da delegação |
 | `src-tauri/src/runs/harness.rs` | união com `harness_node`; campos novos |
 | `src/features/runs/types.ts` | campos opcionais |
 | `src/features/chat/structured/HarnessRunFeed.tsx` | só se o teste visual pedir ajuste |
 | `docs/ade-ags/HARNESS_CONTRATO.md`, `ROADMAP.md` | marcar a Fase 1 |
 
-Nada de `database/schema.rs` nem `ipc/protocol.rs`.
+Nada de `database/schema.rs` nem `ipc/protocol.rs`. Os testes da Fase 1 ficam nos `test.rs` dos três módulos (`harness/test.rs`, `conversa/test.rs`, `runs/test.rs`), em submódulos `fase1`/`harness_fase1`, para o filtro `cargo test --lib harness` pegá-los.
 
 ### 7.4 Testes da fatia (prova de lógica: teste primeiro)
 
@@ -650,7 +652,7 @@ Nada de `database/schema.rs` nem `ipc/protocol.rs`.
 6. Filho terminal (falha de tarefa, conversa filha interrompida) **não muda** o status do turno raiz na projeção.
 7. Depois das duas varreduras de boot, o turno aparece `interrupted` e a tarefa que rodava aparece `interrupted`; nenhuma linha some.
 8. Apagar a conversa remove só as linhas `harness_*`; `runs` e `tasks` ficam.
-9. Os testes existentes de `thread_execution_graph` continuam passando sem alteração.
+9. A projeção sem nenhuma linha de harness mantém ids, pais e profundidade de antes. **Não havia teste de `thread_execution_graph` no commit base**, então este teste (`a_projecao_antiga_sem_linhas_de_harness_mantem_ids_pais_e_profundidade`) fixa a forma antiga; ele não foi rodado contra o código anterior à Fase 1.
 10. Visual (instância isolada, captura antes e depois): o run da Frota sob o turno. Não medido ainda.
 
 ### 7.5 O que fica de fora (e não se promete)
@@ -688,3 +690,16 @@ Só o que é decisão de produto ou de autorização.
 - Nenhum teste visual, build, instalação, push ou PR.
 
 **Defeito do commit base encontrado e corrigido à parte:** `cargo test --lib` não compilava (três chamadas de `switch_team_member` em `conversa/troca_test.rs` com a assinatura antiga). O ajuste (`None, None`) está num commit separado e não muda comportamento de produção.
+
+## 10. Fase 1: o que foi e o que não foi verificado
+
+**Verificado** (`cargo test --lib harness`: 37 testes, 23 novos da Fase 1; a suíte completa e as demais verificações estão no relatório da tarefa)
+- Testes 1 a 9 de §7.4, mais: atomicidade (falha da ligação não cria a conversa, na transação própria e na do chamador; desfazer a transação do chamador desfaz conversa e nó), retry pelo recibo sem nó novo, nó órfão (apagar conversa lateral filha, a tarefa ou o run da Frota, e o CASCADE do workspace).
+- Mutação feita à mão: sem a ligação do run da Frota e sem o `ROLLBACK TO`, sete testes falham.
+- `bunx tsc --noEmit` e `bun run check:test-lint` (sem violação nova). `bun run check:fingerprint` continua falhando só por `schema-sqlite` (sha `96507e01a45b…`, o mesmo do commit base): `database/schema.rs` não foi tocado.
+
+**Não verificado**
+- Teste 10 (visual): nenhuma captura, sem build nem instância isolada. `HarnessRunFeed.tsx` não foi alterado e não se sabe se o run sob o turno aparece como esperado.
+- Que o turno é lido *dentro* da transação é garantido pela construção (a chamada usa `tx`), não por um teste de concorrência.
+- Desempenho: `thread_execution_graph` ganhou uma consulta a `harness_node` por lote de 400 conversas; **não medido**.
+- Com o harness quebrado (tabela ausente, por exemplo), criar conversa filha e delegar à Frota passam a falhar: é a escolha de §7.1, sem teste de migração parcial.
