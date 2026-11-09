@@ -77,6 +77,9 @@ As chaves do `espera` (as mesmas dos `checks` do oráculo do replay) são estas.
 | `sessao` | o id aberto (aceita `{{session:N}}`) |
 | `pedidos` | os tipos, em ordem (`command`, `fileChange`, `question`) |
 | `ferramentas` | `Nome:status`, em ordem (`Bash:done`, `Edit:error`) |
+| `tipos` | o tipo de cada item da timeline, em ordem (`assistant`, `tool`, `usage`) |
+| `filhos` | eventos de filho, em ordem: `task:<id>:<op>` ou `subitem:<pai>:<tipo do item>` |
+| `pedidosPendentes` | os tipos dos pedidos que ainda estavam sem resposta nem cancelamento no fim da leitura |
 | `textoContem` | trecho da fala do agente |
 | `ignoradas` | quantas linhas não eram JSON |
 | `silencioMinMs` | o maior silêncio foi pelo menos isto |
@@ -143,7 +146,7 @@ O v1 ([REPLAY_TESTES.md](./REPLAY_TESTES.md)) toca bytes de PTY nos detectores d
 |---|---|
 | `transcript[]` | em ordem de `atMs`. Cada entrada tem exatamente um destes: `out` (linha do agente), `raw` (linha que não é JSON), `in` (o que o app mandou; só documenta, o motor não lê) ou `close` (o processo fechou) |
 | placeholders | `{{session:N}}` (uuid com o N dentro), `{{cwd}}`, `{{home}}`. Outro tipo é erro |
-| `expected` | o snapshot: sessão, itens, deltas, pedidos, fim, queda, avisos, linhas puladas. Gravado com os placeholders de volta no lugar |
+| `expected` | o snapshot: sessão, itens, `tipos`, deltas, pedidos, `pedidosPendentes`, `filhos`, fim, queda, avisos, linhas puladas. Gravado com os placeholders de volta no lugar |
 
 ### Modos (`ADE_REPLAY_MODE`)
 

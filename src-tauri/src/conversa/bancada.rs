@@ -13,10 +13,10 @@
 //! Sem processo, sem rede, sem cota e sem relógio de verdade: um silêncio de 61 s custa um número somado.
 //! O que a bancada não reproduz: o processo de verdade (pipes, `kill`), a escrita no stdin e as filas de envio.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::canal::timeline::{Item, ToolKind};
+use crate::canal::timeline::{Item, ItemKind, ToolKind};
 use crate::runs::failure::{classify, FailureKind};
 
 use super::claude_map::{self, Out as ClaudeOut, TurnResult};
@@ -408,8 +408,29 @@ fn pedacos_de(texto: &str, n: usize) -> Vec<String> {
 /// Um pedido do agente à pessoa (aprovação ou pergunta), como o chat mostraria.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pedido {
+    /// O id do protocolo (`request_id` do Claude, o `id` JSON-RPC do Codex e do ACP). Não entra no snapshot.
+    pub id: String,
     pub kind: String,
     pub title: String,
+    /// Ainda sem resposta nem cancelamento quando a leitura parou. O `in` do transcript (a resposta da pessoa)
+    /// não é lido: o pedido só sai da lista se o próprio agente desistir (`control_cancel_request`,
+    /// `serverRequest/resolved`).
+    pub pendente: bool,
+}
+
+/// Evento de filho que o motor via e a timeline da conversa não guarda: a tarefa (`task`) ou o que o
+/// subagente fez dentro dela (`subitem`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Filho {
+    /// `task` ou `subitem`.
+    pub tipo: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<Item>,
 }
 
 /// O que o motor de bancada viu.
@@ -424,6 +445,8 @@ pub struct Resultado {
     /// Os pedaços de texto que iriam só para a janela: `(item, pedaço)`.
     pub deltas: Vec<(String, String)>,
     pub pedidos: Vec<Pedido>,
+    /// Tarefas e itens de subagente, na ordem em que chegaram. A timeline (`itens`) não os inclui.
+    pub filhos: Vec<Filho>,
     /// O fim do turno, se houve.
     pub fim: Option<TurnResult>,
     /// O turno acabou porque o processo caiu.
@@ -486,6 +509,21 @@ impl Resultado {
     /// As ferramentas que o mapeador não reconheceu (`ToolKind::Other`): o guard das fixtures recusa.
     pub fn ferramentas_desconhecidas(&self) -> Vec<String> {
         self.itens.iter().filter(|i| i.tool == Some(ToolKind::Other)).map(|i| i.name.clone().unwrap_or_default()).collect()
+    }
+
+    /// O tipo de cada item da timeline, na ordem, como o JSON do snapshot (`assistant`, `tool`, `usage`…).
+    pub fn tipos(&self) -> Vec<String> {
+        self.itens.iter().map(|i| tipo_item(i.kind)).collect()
+    }
+
+    /// Os pedidos que ainda estavam pendentes quando a leitura parou.
+    pub fn pedidos_pendentes(&self) -> Vec<&Pedido> {
+        self.pedidos.iter().filter(|p| p.pendente).collect()
+    }
+
+    /// Os filhos numa linha que a [`Espera`] confere: `task:<id>:<op>` ou `subitem:<pai>:<tipo do item>`.
+    pub fn filhos_compactos(&self) -> Vec<String> {
+        self.filhos.iter().map(Filho::compacto).collect()
     }
 
     fn guardar(&mut self, item: Item) {
@@ -598,11 +636,22 @@ impl Motor {
 
     /// `claude.rs`: `dispatch` + `on_out`.
     fn claude(&mut self, msg: Value, now: i64) {
-        if msg.get("type").and_then(Value::as_str) == Some("control_request") {
-            if let Some(ask) = msg.get("request").and_then(claude_map::ask_of) {
-                self.out.pedidos.push(Pedido { kind: ask.kind.to_string(), title: ask.title });
+        match msg.get("type").and_then(Value::as_str) {
+            Some("control_request") => {
+                if let Some(ask) = msg.get("request").and_then(claude_map::ask_of) {
+                    let id = msg.get("request_id").and_then(Value::as_str).unwrap_or("").to_string();
+                    self.pedir(id, ask.kind, ask.title);
+                }
+                return;
             }
-            return;
+            // O Claude desistiu do pedido: sai dos pendentes e continua na lista do que foi pedido.
+            Some("control_cancel_request") => {
+                if let Some(id) = msg.get("request_id").and_then(Value::as_str) {
+                    self.resolver(id);
+                }
+                return;
+            }
+            _ => {}
         }
         for out in self.claude.feed(&msg, now) {
             match out {
@@ -636,9 +685,9 @@ impl Motor {
                 },
             },
             (None, _) => {}
-            (Some(method), Some(_)) => {
+            (Some(method), Some(id)) => {
                 if let Some(ask) = codex_map::ask_of(method, &params) {
-                    self.out.pedidos.push(Pedido { kind: ask.kind.to_string(), title: ask.title });
+                    self.pedir(id_de(id), ask.kind, ask.title);
                 }
             }
             (Some(method), None) => match method {
@@ -664,6 +713,12 @@ impl Motor {
                 }
                 "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {
                     self.out.avisos.push(params.pointer("/error/message").and_then(Value::as_str).unwrap_or("erro do Codex").to_string());
+                }
+                // Resolvido do lado do Codex: o pendente some, como o `serverRequest/resolved` do motor.
+                "serverRequest/resolved" => {
+                    if let Some(id) = params.get("requestId").and_then(id_de_opt) {
+                        self.resolver(&id);
+                    }
                 }
                 _ => {}
             },
@@ -698,9 +753,9 @@ impl Motor {
                 self.terminou(fim);
             }
             (None, _) => {}
-            (Some("session/request_permission"), Some(_)) => {
+            (Some("session/request_permission"), Some(id)) => {
                 if let Some(ask) = msg.get("params").and_then(opencode_map::ask_of) {
-                    self.out.pedidos.push(Pedido { kind: ask.kind.to_string(), title: ask.title });
+                    self.pedir(id.to_string(), ask.kind, ask.title);
                 }
             }
             (Some("session/update"), None) => {
@@ -710,6 +765,21 @@ impl Motor {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn pedir(&mut self, id: String, kind: &str, title: String) {
+        self.out.pedidos.push(Pedido { id, kind: kind.to_string(), title, pendente: true });
+    }
+
+    fn resolver(&mut self, id: &str) {
+        if id.is_empty() {
+            return;
+        }
+        for pedido in &mut self.out.pedidos {
+            if pedido.id == id {
+                pedido.pendente = false;
+            }
         }
     }
 
@@ -741,6 +811,12 @@ pub struct Espera {
     pub pedidos: Option<Vec<String>>,
     /// As ferramentas, em ordem, como `Nome:status`.
     pub ferramentas: Option<Vec<String>>,
+    /// O tipo de cada item da timeline, em ordem (`assistant`, `tool`, `usage`…).
+    pub tipos: Option<Vec<String>>,
+    /// Os filhos, em ordem: `task:<id>:<op>` ou `subitem:<pai>:<tipo do item>`.
+    pub filhos: Option<Vec<String>>,
+    /// Os tipos dos pedidos que ainda estavam pendentes no fim da leitura, em ordem.
+    pub pedidos_pendentes: Option<Vec<String>>,
     pub texto_contem: Option<String>,
     pub ignoradas: Option<usize>,
     pub silencio_min_ms: Option<u64>,
@@ -800,6 +876,15 @@ pub fn conferir(espera: &Espera, r: &Resultado, protocolo: Protocolo, expand: &d
     if let Some(ferramentas) = &espera.ferramentas {
         igual("ferramentas", ferramentas.join(","), r.ferramentas().join(","));
     }
+    if let Some(tipos) = &espera.tipos {
+        igual("tipos", tipos.join(","), r.tipos().join(","));
+    }
+    if let Some(filhos) = &espera.filhos {
+        igual("filhos", filhos.join(","), r.filhos_compactos().join(","));
+    }
+    if let Some(pendentes) = &espera.pedidos_pendentes {
+        igual("pedidosPendentes", pendentes.join(","), r.pedidos_pendentes().iter().map(|p| p.kind.clone()).collect::<Vec<_>>().join(","));
+    }
     if let Some(parte) = &espera.texto_contem {
         let texto = r.texto();
         if !texto.contains(&expand(parte)) {
@@ -815,4 +900,34 @@ pub fn conferir(espera: &Espera, r: &Resultado, protocolo: Protocolo, expand: &d
         igual("silencioMinMs", format!(">= {ms}"), r.silencio_max_ms.to_string());
     }
     erros
+}
+
+impl Filho {
+    fn compacto(&self) -> String {
+        match self.tipo.as_str() {
+            "task" => {
+                let id = self.task.as_ref().and_then(|t| t.get("taskId")).and_then(Value::as_str).unwrap_or("");
+                let op = self.task.as_ref().and_then(|t| t.get("op")).and_then(Value::as_str).unwrap_or("");
+                format!("task:{id}:{op}")
+            }
+            "subitem" => {
+                let tipo = self.item.as_ref().map(|i| tipo_item(i.kind)).unwrap_or_default();
+                format!("subitem:{}:{tipo}", self.parent.as_deref().unwrap_or(""))
+            }
+            outro => outro.to_string(),
+        }
+    }
+}
+
+/// O nome do tipo do item, o mesmo do JSON (`assistant`, `usage`, `turnEnd`…).
+fn tipo_item(kind: ItemKind) -> String {
+    serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
+}
+
+fn id_de(v: &Value) -> String {
+    id_de_opt(v).unwrap_or_default()
+}
+
+fn id_de_opt(v: &Value) -> Option<String> {
+    v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|n| n.to_string())).or_else(|| v.as_i64().map(|n| n.to_string()))
 }

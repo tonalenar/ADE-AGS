@@ -6,9 +6,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
-use super::bancada::{abrir, conferir, simular, tocar, Espera, Passo, Protocolo, Roteiro};
+use super::bancada::{abrir, conferir, rodar, simular, tocar, Espera, Evento, Passo, Protocolo, Roteiro, Saida};
 use super::pool::{decide, move_account, reset_at, Decision, Input, Mode};
 use super::resume::{open_resuming, Opened, ResumeFailure, RETRY_PAUSES};
 use crate::runs::failure::FailureKind;
@@ -207,6 +207,53 @@ fn os_roteiros_das_fixtures_cumprem_o_que_prometem() {
 fn uma_chave_errada_na_espera_nao_passa_calada() {
     assert!(serde_json::from_value::<Espera>(json!({ "fim": "ok", "clase": "rate_limited" })).is_err());
     assert!(serde_json::from_value::<Passo>(json!({ "passo": "stall", "segundos": 3 })).is_err());
+}
+
+/// B2 e B4: o snapshot e a espera passam a afirmar o tipo do item, o pedido que sobrou e (ainda vazio
+/// neste passo) o filho. O cancelamento do próprio agente tira o pedido dos pendentes sem apagá-lo da lista.
+#[test]
+fn o_snapshot_afirma_o_tipo_do_item_e_o_pedido_que_sobra() {
+    let uso = json!({ "type": "assistant", "message": { "id": "msg_1", "role": "assistant",
+        "usage": { "input_tokens": 4, "output_tokens": 6 },
+        "content": [{ "type": "text", "text": "Vou pedir." }] } });
+    let pedido = json!({ "type": "control_request", "request_id": "req_1", "request": {
+        "subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "toolu_2", "input": { "command": "cargo test" },
+    } });
+    let linhas = |extra: Vec<Value>| {
+        let mut eventos = vec![
+            json!({ "type": "system", "subtype": "init", "session_id": "s1" }),
+            uso.clone(),
+            pedido.clone(),
+        ];
+        eventos.extend(extra);
+        let saidas: Vec<Saida> = eventos.into_iter().enumerate().map(|(i, v)| Saida { at_ms: i as u64 * 10, evento: Evento::Linha(v.to_string()) }).collect();
+        rodar(Protocolo::ClaudeStream, &saidas)
+    };
+    let aberto = linhas(vec![]);
+    let espera = Espera {
+        tipos: Some(vec!["usage".into(), "assistant".into()]),
+        filhos: Some(vec![]),
+        pedidos_pendentes: Some(vec!["command".into()]),
+        pedidos: Some(vec!["command".into()]),
+        ..Espera::default()
+    };
+    let falhas = conferir(&espera, &aberto, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.is_empty(), "{falhas:?}");
+    let snap = super::replay_protocolo::snapshot(&aberto);
+    assert_eq!(snap["tipos"], json!(["usage", "assistant"]));
+    assert_eq!(snap["filhos"], json!([]));
+    assert_eq!(snap["pedidosPendentes"], json!([{ "kind": "command", "title": "cargo test" }]));
+    assert_eq!(snap["pedidos"], snap["pedidosPendentes"], "sem cancelamento, o pedido ainda está pendente");
+
+    let cancelado = linhas(vec![json!({ "type": "control_cancel_request", "request_id": "req_1" })]);
+    let espera_cancelado = Espera { pedidos: Some(vec!["command".into()]), pedidos_pendentes: Some(vec![]), ..Espera::default() };
+    let falhas = conferir(&espera_cancelado, &cancelado, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.is_empty(), "{falhas:?}");
+    assert!(super::replay_protocolo::snapshot(&cancelado)["pedidosPendentes"].as_array().unwrap().is_empty());
+
+    let errado = Espera { pedidos_pendentes: Some(vec![]), ..espera };
+    let falhas = conferir(&errado, &aberto, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.iter().any(|e| e.contains("pedidosPendentes")), "{falhas:?}");
 }
 
 // ── A retomada (`resume.rs`) com sessões abertas pela bancada ─────────────────
