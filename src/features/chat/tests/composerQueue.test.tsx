@@ -18,7 +18,7 @@ vi.mock("../liveStore", () => ({ useChatLive: create(() => ({ phase: {}, questio
 vi.mock("../permissions/permissionsStore", () => ({ usePermissions: create(() => ({ tui: [] })) }));
 
 import { ChatComposer } from "../ChatComposer";
-import { midTurnOf, PROTOCOL_AGENTS } from "../chatModel";
+import { midTurnOf, PROTOCOL_AGENTS, queueHintKey } from "../chatModel";
 import { DEFAULT_CHAT_PREFS, saveChatPrefs } from "../chatPrefs";
 import { sendNow, startQueueRunner } from "../queueRunner";
 import { dequeueMessage, enqueueMessage, unqueueMessage, updateQueuedMessage, useChatStore } from "../store";
@@ -48,6 +48,15 @@ describe("o «enviar agora» de cada motor", () => {
     // Todo motor por protocolo diz o que faz; um desconhecido não promete entrar no turno.
     expect(Object.values(PROTOCOL_AGENTS).every((e) => e.midTurn === "steer" || e.midTurn === "interrupt")).toBe(true);
     expect(midTurnOf("outro")).toBe("interrupt");
+  });
+
+  it("Claude usa a chave de aviso neutro no composer; Codex usa a de steer", () => {
+    expect(queueHintKey("claude-code", "steer")).toBe("chat.composer.queueHintClaude");
+    expect(queueHintKey("claude-code", "queue")).toBe("chat.composer.queueHintClaudeQueue");
+    expect(queueHintKey("codex", "steer")).toBe("chat.composer.queueHintSteer");
+    expect(queueHintKey("codex", "queue")).toBe("chat.composer.queueHintSteerQueue");
+    expect(queueHintKey("cursor", "steer")).toBe("chat.composer.queueHintInterrupt");
+    expect(queueHintKey("cursor", "queue")).toBe("chat.composer.queueHintInterruptQueue");
   });
 
   it("no motor que entra no turno, a mensagem vai na hora, sem fila nem parar", () => {

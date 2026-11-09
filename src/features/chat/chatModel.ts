@@ -86,6 +86,24 @@ export function midTurnOf(agentId: string): MidTurn {
 }
 
 /**
+ * A chave de i18n do aviso do composer ao enviar com o agente trabalhando.
+ * O Codex promete steer ("no meio do turno"); Claude (`claude-code`) usa a frase neutra ("vai para o Claude agora;
+ * ele a lê no meio ou logo depois do turno"), pois a capability `steer` do Claude é Unknown no contrato do harness;
+ * os demais (Cursor, Antigravity, OpenCode) interrompem o turno. Pura.
+ */
+export function queueHintKey(agentId: string, followUpBehavior: "steer" | "queue" | "send" = "steer"): string {
+  const queued = followUpBehavior === "queue";
+  if (agentId === "claude-code") {
+    return queued ? "chat.composer.queueHintClaudeQueue" : "chat.composer.queueHintClaude";
+  }
+  const midTurn = midTurnOf(agentId);
+  if (midTurn === "steer") {
+    return queued ? "chat.composer.queueHintSteerQueue" : "chat.composer.queueHintSteer";
+  }
+  return queued ? "chat.composer.queueHintInterruptQueue" : "chat.composer.queueHintInterrupt";
+}
+
+/**
  * Os modos que este agente aceita. Supervisionado sempre (é não passar nada). Com `protocol`
  * (a conversa vai por protocolo), os do motor do agente. Pura.
  */

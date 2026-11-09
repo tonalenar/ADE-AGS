@@ -4812,6 +4812,8 @@
   "chat.composer.queueHintInterrupt": "⏎ para o turno e manda · {{key}} põe na fila",
   "chat.composer.queueHintSteerQueue": "⏎ põe na fila · {{key}} manda agora, no meio do turno",
   "chat.composer.queueHintInterruptQueue": "⏎ põe na fila · {{key}} para o turno e manda",
+  "chat.composer.queueHintClaude": "⏎ vai para o Claude agora; ele a lê no meio ou logo depois do turno · {{key}} põe na fila",
+  "chat.composer.queueHintClaudeQueue": "⏎ põe na fila · {{key}} vai para o Claude agora; ele a lê no meio ou logo depois do turno",
   "chat.composer.queueAction": "Pôr na fila",
   "chat.queue.label": "Mensagens na fila",
   "chat.queue.queued": "Na fila",

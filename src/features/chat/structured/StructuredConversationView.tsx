@@ -7,7 +7,7 @@ import { turnLive } from "../activityModel";
 import { AgentModelPicker } from "../AgentModelPicker";
 import { ThreadAccountMenu } from "./ThreadAccountMenu";
 import { BotIcon } from "../chatIcons";
-import { accessModesFor, extractSlashCommand, midTurnOf, planSupported, type ConversationCard } from "../chatModel";
+import { accessModesFor, extractSlashCommand, midTurnOf, planSupported, queueHintKey, type ConversationCard } from "../chatModel";
 import { messageFor } from "../attachments/send";
 import { ChatComposer } from "../ChatComposer";
 import { newConversationLocal } from "../chatActions";
@@ -168,9 +168,9 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd} quoteKey={card.tabId} quoteThreadId={thread.id} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
           turnActive={working} forceSend={!!request}
-          placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working ? t(midTurn === "steer"
-            ? followUpBehavior === "queue" ? "chat.composer.queueHintSteerQueue" : "chat.composer.queueHintSteer"
-            : followUpBehavior === "queue" ? "chat.composer.queueHintInterruptQueue" : "chat.composer.queueHintInterrupt", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
+          placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working
+            ? t(queueHintKey(thread.agentId, followUpBehavior), { key: QUEUE_KEY })
+            : team?.placeholder ?? t("chat.composer.reply")}
           onSubmit={async (text, attachments) => {
             if (question) { answer(text); return; }
             const planCommand = extractSlashCommand(text, "plan");

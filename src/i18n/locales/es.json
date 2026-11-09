@@ -4812,6 +4812,8 @@
   "chat.composer.queueHintInterrupt": "⏎ detiene el turno y envía · {{key}} lo pone en la cola",
   "chat.composer.queueHintSteerQueue": "⏎ lo pone en la cola · {{key}} envía ahora, en medio del turno",
   "chat.composer.queueHintInterruptQueue": "⏎ lo pone en la cola · {{key}} detiene el turno y envía",
+  "chat.composer.queueHintClaude": "⏎ va para Claude ahora; lo lee en medio o justo después del turno · {{key}} lo pone en la cola",
+  "chat.composer.queueHintClaudeQueue": "⏎ lo pone en la cola · {{key}} va para Claude ahora; lo lee en medio o justo después del turno",
   "chat.composer.queueAction": "Poner en la cola",
   "chat.queue.label": "Mensajes en la cola",
   "chat.queue.queued": "En la cola",
