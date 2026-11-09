@@ -4815,3 +4815,342 @@ fn sin_remoto_no_hay_base_y_la_mision_usa_el_commit_actual() {
     let head = worktrees::head_commit(&repo.0).unwrap();
     assert_eq!(head.len(), 40, "un sha, no la palabra HEAD");
 }
+
+// ── Fase 1 do harness: run da Frota e tarefas sob o turno que os criou ─────────────────────
+
+mod harness_fase1 {
+    use std::path::PathBuf;
+
+    use serde_json::json;
+
+    use super::super::harness::{HarnessExecutionGraph, HarnessExecutionNode, thread_execution_graph};
+    use super::super::orchestration::plan_tasks;
+    use super::{db_compartida, roster_de_prueba};
+    use crate::conversa::store::{self as chat, Tuning};
+    use crate::database::DbConnection;
+
+    struct Mundo {
+        db: DbConnection,
+        cwd: String,
+        dir: PathBuf,
+    }
+
+    impl Drop for Mundo {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.dir).ok();
+        }
+    }
+
+    /// Conversas na MESMA pasta, cada uma com o turno `t1` em curso.
+    fn mundo(threads: &[&str]) -> Mundo {
+        let dir = std::env::temp_dir().join(format!("ags-harness-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = dir.to_string_lossy().into_owned();
+        let db = db_compartida();
+        {
+            let conn = db.lock().unwrap();
+            conn.execute("INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1', 'W', 0, 0)", []).unwrap();
+            for id in threads {
+                chat::insert_thread_with_context(
+                    &conn, id, "claude-code", &cwd, "T", &Tuning { model: None, effort: None, access: "ask".into() },
+                    None, None, Some("w1"), 1,
+                )
+                .unwrap();
+                chat::upsert_run(&conn, id, "t1", "inProgress", Some(1), None, None).unwrap();
+            }
+        }
+        Mundo { db, cwd, dir }
+    }
+
+    fn child(world: &Mundo, id: &str, parent: &str) {
+        let conn = world.db.lock().unwrap();
+        chat::insert_thread_with_context(
+            &conn, id, "claude-code", &world.cwd, "filha", &Tuning { model: None, effort: None, access: "ask".into() },
+            None, Some(&format!("thread:{parent}")), Some("w1"), 2,
+        )
+        .unwrap();
+    }
+
+    /// A conversa `thread` delega à Frota (`run_plan` com as `keys` dadas), como o MCP faz.
+    fn delegar(world: &Mundo, thread: &str, keys: &[&str], request: Option<&str>) -> Result<(String, Vec<String>), String> {
+        let tasks: Vec<_> = keys
+            .iter()
+            .map(|key| json!({ "key": key, "title": key, "prompt": "faça", "agent": "claude-code", "model": "haiku", "isolate": false }))
+            .collect();
+        let mut args = json!({ "objective": format!("obj-{thread}"), "tasks": tasks });
+        if let Some(request) = request {
+            args["client_request_id"] = json!(request);
+        }
+        let payload = json!({ "cwd": world.cwd, "tabId": format!("thread:{thread}"), "args": args });
+        plan_tasks(&world.db, &payload, true, |_| Ok(roster_de_prueba()))
+    }
+
+    fn count(world: &Mundo, table: &str) -> i64 {
+        world.db.lock().unwrap().query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0)).unwrap()
+    }
+
+    fn graph(world: &Mundo, thread: &str) -> HarnessExecutionGraph {
+        thread_execution_graph(&world.db.lock().unwrap(), thread).unwrap()
+    }
+
+    fn node<'a>(graph: &'a HarnessExecutionGraph, id: &str) -> &'a HarnessExecutionNode {
+        graph.nodes.iter().find(|node| node.id == id).unwrap_or_else(|| panic!("falta o nó {id}"))
+    }
+
+    fn has(graph: &HarnessExecutionGraph, id: &str) -> bool {
+        graph.nodes.iter().any(|node| node.id == id)
+    }
+
+    /// Teste 3: filho de chat e filho da Frota do mesmo turno ficam no mesmo `harness_run`.
+    #[test]
+    fn a_delegacao_com_turno_ativo_gera_fleet_run_e_tarefas_sob_o_mesmo_run() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        let (run_id, _) = delegar(&world, "raiz", &["a", "b"], None).unwrap();
+        // root + child_chat + fleet_run + 2 fleet_task, num único run do harness.
+        assert_eq!((count(&world, "harness_run"), count(&world, "harness_node")), (1, 5));
+        let (run_node, run_parent_kind): (String, String) = world
+            .db.lock().unwrap()
+            .query_row(
+                "SELECT n.id, p.kind FROM harness_node n JOIN harness_node p ON p.id = n.parent_id WHERE n.legacy_ref = ?1",
+                [format!("run:{run_id}")],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(run_parent_kind, "root_agent");
+        let task_parents: i64 = world
+            .db.lock().unwrap()
+            .query_row("SELECT COUNT(*) FROM harness_node WHERE kind = 'fleet_task' AND parent_id = ?1", [&run_node], |row| row.get(0))
+            .unwrap();
+        assert_eq!(task_parents, 2);
+
+        let graph = graph(&world, "raiz");
+        let run_view = node(&graph, &format!("run:{run_id}"));
+        assert_eq!(run_view.parent_id.as_deref(), Some("turn:raiz:t1"), "o run passa a aparecer sob o turno");
+        assert_eq!(run_view.node_id.as_deref(), Some(run_node.as_str()));
+        let harness_run = run_view.harness_run_id.clone().expect("o run ligado traz o harness_run");
+        let turn = node(&graph, "turn:raiz:t1");
+        assert_eq!((turn.harness_run_id.as_ref(), turn.chat_run_id.as_deref()), (Some(&harness_run), Some("t1")));
+        assert_eq!(node(&graph, "thread:filha").harness_run_id.as_ref(), Some(&harness_run));
+        let tasks: Vec<_> = graph.nodes.iter().filter(|node| node.kind == "fleetTask").collect();
+        assert_eq!(tasks.len(), 2);
+        assert!(tasks.iter().all(|task| task.harness_run_id.as_ref() == Some(&harness_run) && task.node_id.is_some()));
+        assert!(tasks.iter().all(|task| task.parent_id.as_deref() == Some(format!("run:{run_id}").as_str())));
+        // O run fica um nível abaixo do turno. A tarefa de topo mantém a distância de antes ao run
+        // (`tasks.depth` nativo já vale 1 nela): o deslocamento é o mesmo para o run e para as tarefas.
+        assert_eq!(run_view.depth, turn.depth + 1);
+        assert!(tasks.iter().all(|task| task.depth == run_view.depth + 2));
+        // Pai antes de filho.
+        let position = |id: &str| graph.nodes.iter().position(|node| node.id == id).unwrap();
+        assert!(position("turn:raiz:t1") < position(&format!("run:{run_id}")));
+        assert!(tasks.iter().all(|task| position(&format!("run:{run_id}")) < position(&task.id)));
+    }
+
+    /// Ajuste 3: o retry idempotente pelo recibo devolve o mesmo run e não cria nó novo, mesmo que o
+    /// turno já tenha acabado e o do retry nem fosse ligar.
+    #[test]
+    fn o_retry_pelo_recibo_nao_duplica_nem_cria_no() {
+        let world = mundo(&["raiz"]);
+        let first = delegar(&world, "raiz", &["a"], Some("req-1")).unwrap();
+        let nodes = count(&world, "harness_node");
+        assert_eq!(nodes, 3, "root, run e tarefa");
+        assert_eq!(delegar(&world, "raiz", &["a"], Some("req-1")).unwrap(), first);
+        assert_eq!((count(&world, "runs"), count(&world, "tasks"), count(&world, "harness_node")), (1, 1, nodes));
+        // O turno acaba e o recibo volta o mesmo: nada de nó novo, nem de erro.
+        chat::upsert_run(&world.db.lock().unwrap(), "raiz", "t1", "completed", Some(1), Some(2), Some(1)).unwrap();
+        assert_eq!(delegar(&world, "raiz", &["a"], Some("req-1")).unwrap(), first);
+        assert_eq!((count(&world, "harness_run"), count(&world, "harness_node")), (1, nodes));
+        // O mesmo id com outro conteúdo continua falhando fechado.
+        assert!(delegar(&world, "raiz", &["a", "b"], Some("req-1")).is_err());
+        assert_eq!(count(&world, "harness_node"), nodes);
+    }
+
+    /// Teste 5 (Frota): sem turno inequívoco o run não vira nó e fica na projeção antiga, sob a conversa.
+    #[test]
+    fn run_da_frota_sem_turno_ativo_inequivoco_nao_gera_no_e_segue_na_projecao_antiga() {
+        let world = mundo(&["raiz"]);
+        chat::upsert_run(&world.db.lock().unwrap(), "raiz", "t1", "completed", Some(1), Some(2), Some(1)).unwrap();
+        let (idle_run, _) = delegar(&world, "raiz", &["a"], None).unwrap();
+        {
+            let conn = world.db.lock().unwrap();
+            chat::upsert_run(&conn, "raiz", "t2", "inProgress", Some(3), None, None).unwrap();
+            chat::upsert_run(&conn, "raiz", "t3", "inProgress", Some(4), None, None).unwrap();
+        }
+        let (ambiguous_run, _) = delegar(&world, "raiz", &["b"], None).unwrap();
+        assert_eq!((count(&world, "harness_run"), count(&world, "harness_node")), (0, 0));
+        let graph = graph(&world, "raiz");
+        for run in [idle_run, ambiguous_run] {
+            let view = node(&graph, &format!("run:{run}"));
+            assert_eq!(view.parent_id.as_deref(), Some("thread:raiz"));
+            assert!(view.node_id.is_none() && view.harness_run_id.is_none());
+        }
+    }
+
+    /// Teste 5 (fora de conversa): um run sem `source_thread_id` não vira nó.
+    #[test]
+    fn run_da_frota_fora_de_conversa_nao_gera_no() {
+        let world = mundo(&["raiz"]);
+        world
+            .db.lock().unwrap()
+            .execute_batch(&format!(
+                "INSERT INTO windows (id, label, workspace_id, is_open, last_active) VALUES ('v1', 'main', 'w1', 1, 0);
+                 INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+                 VALUES ('tab1', 'v1', 'claude-code', 'C', 'claude', '{}', 0, 0, 0);",
+                world.cwd
+            ))
+            .unwrap();
+        let payload = json!({ "cwd": world.cwd, "tabId": "tab1", "args": { "objective": "o", "tasks": [
+            { "key": "a", "title": "a", "prompt": "p", "agent": "claude-code", "model": "haiku", "isolate": false }
+        ]}});
+        plan_tasks(&world.db, &payload, true, |_| Ok(roster_de_prueba())).unwrap();
+        assert_eq!(count(&world, "runs"), 1);
+        assert_eq!((count(&world, "harness_run"), count(&world, "harness_node")), (0, 0));
+    }
+
+    /// Acrescentar tarefa a um run que já tem nó liga a tarefa; a um run sem nó, não.
+    #[test]
+    fn tarefa_nova_so_entra_num_run_que_ja_foi_ligado() {
+        let world = mundo(&["raiz"]);
+        let (run_id, _) = delegar(&world, "raiz", &["a"], None).unwrap();
+        let add = |key: &str, run: &str| {
+            let payload = json!({ "cwd": world.cwd, "tabId": "thread:raiz", "args": {
+                "run_id": run, "key": key, "title": key, "prompt": "p", "agent": "claude-code", "model": "haiku", "isolate": false } });
+            plan_tasks(&world.db, &payload, false, |_| Ok(roster_de_prueba())).unwrap()
+        };
+        add("b", &run_id);
+        assert_eq!(count(&world, "harness_node"), 4, "root, run e as duas tarefas");
+
+        // Um run da mesma conversa sem nó (criado quando não havia turno em curso).
+        let semno = {
+            let conn = world.db.lock().unwrap();
+            let run = super::store::create_run(&conn, "w1", "antigo", &world.cwd).unwrap();
+            super::store::set_run_source_thread(&conn, &run.id, "raiz").unwrap();
+            run.id
+        };
+        add("c", &semno);
+        assert_eq!(count(&world, "harness_node"), 4, "sem nó para o run, a tarefa não cria nada");
+        assert_eq!(count(&world, "tasks"), 3);
+    }
+
+    /// Teste 4: duas conversas na MESMA pasta; o run da Frota de uma não aparece na árvore da outra.
+    #[test]
+    fn mesma_pasta_duas_conversas_nao_misturam_os_runs() {
+        let world = mundo(&["a", "b"]);
+        let (run_b, _) = delegar(&world, "b", &["x"], None).unwrap();
+        let graph_a = graph(&world, "a");
+        let graph_b = graph(&world, "b");
+        assert!(!has(&graph_a, &format!("run:{run_b}")), "o run de B não está na árvore de A");
+        assert!(graph_a.nodes.iter().all(|node| node.kind != "fleetRun" && node.kind != "fleetTask"));
+        assert!(has(&graph_b, &format!("run:{run_b}")));
+        assert_eq!(node(&graph_b, &format!("run:{run_b}")).parent_id.as_deref(), Some("turn:b:t1"));
+        // O mesmo `turn_id` (t1) nas duas conversas segue sendo duas identidades.
+        assert!(has(&graph_a, "turn:a:t1") && has(&graph_b, "turn:b:t1") && !has(&graph_b, "turn:a:t1"));
+        // Agora A também delega: cada árvore tem só o seu.
+        let (run_a, _) = delegar(&world, "a", &["y"], None).unwrap();
+        let graph_a = graph(&world, "a");
+        let graph_b = graph(&world, "b");
+        assert!(has(&graph_a, &format!("run:{run_a}")) && !has(&graph_a, &format!("run:{run_b}")));
+        assert!(has(&graph_b, &format!("run:{run_b}")) && !has(&graph_b, &format!("run:{run_a}")));
+        assert_eq!(count(&world, "harness_run"), 2);
+        let runs_per_thread: Vec<(String, String)> = {
+            let conn = world.db.lock().unwrap();
+            let mut statement = conn.prepare("SELECT thread_id, turn_id FROM harness_run ORDER BY thread_id").unwrap();
+            statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?))).unwrap().collect::<Result<_, _>>().unwrap()
+        };
+        assert_eq!(runs_per_thread, [("a".into(), "t1".into()), ("b".into(), "t1".into())]);
+    }
+
+    /// Teste 6: filho terminal não muda o status do turno raiz na projeção.
+    #[test]
+    fn filho_terminal_nao_muda_o_status_do_turno_raiz() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        delegar(&world, "raiz", &["a"], None).unwrap();
+        {
+            let conn = world.db.lock().unwrap();
+            conn.execute("UPDATE tasks SET status = 'failed', error = 'quebrou', ended_at = 9", []).unwrap();
+            conn.execute("UPDATE runs SET status = 'failed', ended_at = 9", []).unwrap();
+            chat::upsert_run(&conn, "filha", "ft1", "interrupted", Some(2), Some(3), Some(1)).unwrap();
+        }
+        let graph = graph(&world, "raiz");
+        assert_eq!(node(&graph, "turn:raiz:t1").status, "inProgress", "só o root encerra o run");
+        assert_eq!(graph.nodes.iter().find(|node| node.kind == "fleetTask").unwrap().status, "failed");
+        assert_eq!(node(&graph, "turn:filha:ft1").status, "interrupted");
+    }
+
+    /// Teste 7: depois das duas varreduras de boot, o turno e a tarefa que rodava aparecem
+    /// `interrupted`, a que esperava aparece cancelada, e nenhuma linha some.
+    #[test]
+    fn depois_das_varreduras_de_boot_o_turno_e_a_tarefa_aparecem_interrompidos_e_nenhuma_linha_some() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        delegar(&world, "raiz", &["roda", "espera"], None).unwrap();
+        world
+            .db.lock().unwrap()
+            .execute("UPDATE tasks SET status = 'running', started_at = 5 WHERE plan_key = 'roda'", [])
+            .unwrap();
+        let before = (count(&world, "harness_run"), count(&world, "harness_node"), count(&world, "tasks"), count(&world, "chat_run"));
+        chat::sweep_orphans(&world.db.lock().unwrap(), 100).unwrap();
+        super::store::sweep_orphans(&world.db).unwrap();
+        let after = (count(&world, "harness_run"), count(&world, "harness_node"), count(&world, "tasks"), count(&world, "chat_run"));
+        assert_eq!(after, before, "nenhuma linha some");
+        let graph = graph(&world, "raiz");
+        assert_eq!(node(&graph, "turn:raiz:t1").status, "interrupted");
+        let status_of = |key: &str| graph.nodes.iter().find(|node| node.plan_key.as_deref() == Some(key)).unwrap().status.clone();
+        assert_eq!(status_of("roda"), "interrupted");
+        assert_eq!(status_of("espera"), "cancelled");
+        // Os ids estáveis sobrevivem ao reinício.
+        assert!(graph.nodes.iter().filter(|node| node.kind == "fleetTask").all(|node| node.node_id.is_some()));
+    }
+
+    /// Ajuste 2: apagar a conversa lateral filha não deixa nó fantasma nem estoura a projeção.
+    #[test]
+    fn apagar_a_conversa_lateral_filha_nao_deixa_no_fantasma_na_projecao() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        child(&world, "outra", "raiz");
+        let (run_id, _) = delegar(&world, "raiz", &["a"], None).unwrap();
+        assert!(has(&graph(&world, "raiz"), "thread:filha"));
+        assert!(chat::delete_side_chat(&world.db.lock().unwrap(), "filha").unwrap());
+        let graph = graph(&world, "raiz");
+        assert!(!has(&graph, "thread:filha"));
+        assert!(has(&graph, "thread:outra") && has(&graph, &format!("run:{run_id}")));
+        assert!(graph.nodes.iter().all(|node| node.node_id.is_none() || node.id != "thread:filha"));
+        assert_eq!(count(&world, "harness_node"), 4, "root, `outra`, run e tarefa");
+    }
+
+    /// Teste 9: a projeção antiga, sem nenhuma linha de harness, tem a mesma forma de antes.
+    #[test]
+    fn a_projecao_antiga_sem_linhas_de_harness_mantem_ids_pais_e_profundidade() {
+        let world = mundo(&["raiz"]);
+        // Conversa filha com o pai ocioso (sem `parent_turn_id`) e outra durante o turno, mas com o
+        // harness limpo à mão: simula dados anteriores à Fase 1.
+        child(&world, "filha", "raiz");
+        {
+            let conn = world.db.lock().unwrap();
+            conn.execute_batch("DELETE FROM harness_node; DELETE FROM harness_run;").unwrap();
+            chat::upsert_run(&conn, "raiz", "t1", "completed", Some(1), Some(2), Some(1)).unwrap();
+            chat::insert_thread_with_context(
+                &conn, "ociosa", "claude-code", &world.cwd, "ociosa", &Tuning { model: None, effort: None, access: "ask".into() },
+                None, Some("thread:raiz"), Some("w1"), 3,
+            )
+            .unwrap();
+        }
+        let graph = graph(&world, "raiz");
+        let shape: Vec<(&str, Option<&str>, i64)> =
+            graph.nodes.iter().map(|node| (node.id.as_str(), node.parent_id.as_deref(), node.depth)).collect();
+        assert_eq!(
+            shape,
+            [
+                ("thread:raiz", None, 0),
+                ("turn:raiz:t1", Some("thread:raiz"), 1),
+                // As filhas vêm da mais recente para a mais antiga (`updated_at`).
+                ("thread:ociosa", Some("thread:raiz"), 1),
+                ("thread:filha", Some("turn:raiz:t1"), 2),
+            ]
+        );
+        assert!(graph.nodes.iter().all(|node| node.node_id.is_none() && node.harness_run_id.is_none()));
+        assert_eq!(node(&graph, "turn:raiz:t1").chat_run_id.as_deref(), Some("t1"));
+        assert_eq!(node(&graph, "turn:raiz:t1").run_id.as_deref(), Some("t1"), "runId segue por compatibilidade");
+    }
+}

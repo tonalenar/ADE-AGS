@@ -788,10 +788,20 @@ pub(crate) fn plan_tasks(
                 budget,
             )?,
         };
+        let linked_at = crate::util::now_ts_ms();
         if existing_run.is_none()
             && let Some(thread_id) = caller.source_thread_id.as_deref()
         {
             store::set_run_source_thread(&tx, &run.id, thread_id)?;
+            // O turno que originou o run é o ativo da conversa AGORA, lido dentro desta transação e
+            // pela mesma regra do filho de chat (um único `inProgress`). Sem turno inequívoco o run
+            // fica só na projeção antiga. O retry pelo recibo já voltou acima, sem passar daqui.
+            if let Some(turn_id) = crate::conversa::store::active_turn_id(&tx, thread_id)
+                .map_err(|error| error.to_string())?
+            {
+                crate::harness::store::link_fleet_run(&tx, thread_id, &turn_id, &run.id, linked_at)
+                    .map_err(|error| error.to_string())?;
+            }
         }
 
         let mut ids: HashMap<String, String> = HashMap::new();
@@ -841,6 +851,15 @@ pub(crate) fn plan_tasks(
                 },
             )?;
             super::pool_failover::record_task_pool(&tx, &created.id, assignment.pool_origin.as_ref())?;
+            // Só entra num run que já tem nó: tarefa nunca cria run (contrato §2.5).
+            crate::harness::store::link_fleet_task(
+                &tx,
+                &run.id,
+                &created.id,
+                caller.task.as_ref().map(|parent| parent.id.as_str()),
+                linked_at,
+            )
+            .map_err(|error| error.to_string())?;
             ids.insert(t.key.clone(), created.id);
         }
         for t in &order {

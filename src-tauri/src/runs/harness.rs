@@ -9,6 +9,7 @@ use rusqlite::{Connection, params_from_iter};
 use serde::Serialize;
 
 use crate::conversa::store as chat;
+use crate::harness::store as harness_store;
 use super::execution_log::{self, HarnessEvent};
 
 #[derive(Clone, Debug, Serialize)]
@@ -31,6 +32,14 @@ pub struct HarnessExecutionNode {
     pub created_at: i64,
     pub started_at: Option<i64>,
     pub ended_at: Option<i64>,
+    /// Id estável do nó em `harness_node`, quando o turno já originou filhos. O `id` textual acima
+    /// continua sendo a chave de UI e de eventos (é o `legacy_ref`).
+    pub node_id: Option<String>,
+    /// O `harness_run` a que o nó pertence.
+    pub harness_run_id: Option<String>,
+    /// Só no nó de turno: o id do `chat_run`. É o mesmo valor de `run_id` nesse nó, que guarda o
+    /// turno e não o run da Frota; o nome claro vem aqui e `run_id` fica por compatibilidade.
+    pub chat_run_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -158,6 +167,21 @@ pub fn thread_execution_graph(
         .collect::<Vec<_>>();
     let attempts_by_task = load_fleet_attempts(conn, &task_ids)?;
     let events = execution_log::list_for_threads(conn, &thread_ids, 250)?;
+    // Nós com linha (`harness_node`): ganham o id estável e, no run da Frota, o pai durável. Quem não
+    // tem linha (run sem turno ativo, conversa filha com o pai ocioso, dados anteriores à Fase 1)
+    // segue só pela derivação acima. Nó cujo registro nativo sumiu nunca aparece: a árvore parte
+    // sempre do registro nativo, e o `legacy_ref` só decora o que já existe.
+    let links: HashMap<String, harness_store::NodeLink> =
+        harness_store::nodes_for_threads(conn, &thread_ids)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .map(|link| (link.legacy_ref.clone(), link))
+            .collect();
+    let turn_node_ids: HashSet<String> = turns_by_thread
+        .values()
+        .flatten()
+        .map(|turn| format!("turn:{}:{}", turn.thread_id, turn.id))
+        .collect();
 
     let mut nodes = Vec::new();
     for (thread, parent_thread_id, depth) in &lineage {
@@ -185,6 +209,9 @@ pub fn thread_execution_graph(
             model: thread.model.clone(),
             plan_key: None,
                 attempt: None,
+                node_id: None,
+                harness_run_id: None,
+                chat_run_id: None,
             created_at: thread.created_at,
             started_at: None,
             ended_at: (thread.state == "settled").then_some(thread.updated_at),
@@ -204,6 +231,9 @@ pub fn thread_execution_graph(
                 model: thread.model.clone(),
                 plan_key: None,
                 attempt: None,
+                node_id: None,
+                harness_run_id: None,
+                chat_run_id: Some(turn.id.clone()),
                 created_at: turn.started_at.unwrap_or(thread.created_at),
                 started_at: turn.started_at,
                 ended_at: turn.ended_at,
@@ -212,11 +242,21 @@ pub fn thread_execution_graph(
 
         for run in runs_by_thread.get(&thread.id).into_iter().flatten() {
             let run_node_id = format!("run:{}", run.id);
+            // Run ligado a um turno desta mesma conversa aparece sob ele; os demais, sob a conversa.
+            let turn_parent = links
+                .get(&run_node_id)
+                .and_then(|link| link.parent_legacy_ref.as_deref())
+                .filter(|parent| {
+                    parent.starts_with(&format!("turn:{}:", thread.id))
+                        && turn_node_ids.contains(*parent)
+                })
+                .map(str::to_string);
+            let under_turn = i64::from(turn_parent.is_some());
             nodes.push(HarnessExecutionNode {
                 id: run_node_id.clone(),
-                parent_id: Some(thread_node_id.clone()),
+                parent_id: Some(turn_parent.unwrap_or_else(|| thread_node_id.clone())),
                 kind: "fleetRun".into(),
-                depth: depth + 1,
+                depth: depth + 1 + under_turn,
                 title: run.title.clone(),
                 status: run.status.clone(),
                 thread_id: Some(thread.id.clone()),
@@ -225,6 +265,9 @@ pub fn thread_execution_graph(
                 model: None,
                 plan_key: None,
                 attempt: None,
+                node_id: None,
+                harness_run_id: None,
+                chat_run_id: None,
                 created_at: run.created_at,
                 started_at: Some(run.created_at),
                 ended_at: run.ended_at,
@@ -238,7 +281,7 @@ pub fn thread_execution_graph(
                         .map(|id| format!("task:{id}"))
                         .or_else(|| Some(run_node_id.clone())),
                     kind: "fleetTask".into(),
-                    depth: depth + 2 + task.depth,
+                    depth: depth + 2 + under_turn + task.depth,
                     title: task.title.clone(),
                     status: if task.error.as_deref() == Some(super::store::SWEPT_RUNNING_ERROR) {
                         "interrupted".into()
@@ -251,6 +294,9 @@ pub fn thread_execution_graph(
                     model: task.model.clone(),
                     plan_key: task.plan_key.clone(),
                     attempt: None,
+                    node_id: None,
+                    harness_run_id: None,
+                    chat_run_id: None,
                     created_at: task.created_at,
                     started_at: task.started_at,
                     ended_at: task.ended_at,
@@ -260,7 +306,7 @@ pub fn thread_execution_graph(
                         id: format!("attempt:{}", attempt.id),
                         parent_id: Some(format!("task:{}", attempt.task_id)),
                         kind: "fleetAttempt".into(),
-                        depth: depth + 3 + task.depth,
+                        depth: depth + 3 + under_turn + task.depth,
                         title: attempt.attempt.to_string(),
                         status: if attempt.error.as_deref()
                             == Some(super::store::SWEPT_RUNNING_ERROR)
@@ -275,12 +321,22 @@ pub fn thread_execution_graph(
                         model: attempt.model.clone(),
                         plan_key: None,
                         attempt: Some(attempt.attempt),
+                        node_id: None,
+                        harness_run_id: None,
+                        chat_run_id: None,
                         created_at: attempt.started_at,
                         started_at: Some(attempt.started_at),
                         ended_at: attempt.ended_at,
                     });
                 }
             }
+        }
+    }
+
+    for node in &mut nodes {
+        if let Some(link) = links.get(&node.id) {
+            node.node_id = Some(link.node_id.clone());
+            node.harness_run_id = Some(link.harness_run_id.clone());
         }
     }
 
