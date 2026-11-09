@@ -174,10 +174,9 @@ pub(super) fn claude_key_env(key: &str, base_url: Option<&str>) -> HashMap<Strin
     }
 }
 
-/// Variables de entorno con las que hay que lanzar un proceso para que use esta cuenta.
+/// Variables que el backend inyecta al lanzar un proceso con esta cuenta.
 ///
-/// Es lo único que necesita saber quien abre una tab (o la terminal de login): un mapa que
-/// se pasa tal cual a `pty_create`.
+/// El mapa nunca se devuelve al WebView: allí viaja solo `account_id` por `pty_create`.
 pub fn env_for_account(db: &DbConnection, account_id: &str) -> Option<HashMap<String, String>> {
     let (agent_id, dir, kind, base_url): (String, String, String, Option<String>) = {
         let conn = db.lock().ok()?;
@@ -188,17 +187,61 @@ pub fn env_for_account(db: &DbConnection, account_id: &str) -> Option<HashMap<St
         )
         .ok()?
     };
+    account_env_from_row(account_id, &agent_id, &dir, &kind, base_url.as_deref())
+}
+
+fn account_env_from_row(
+    account_id: &str,
+    agent_id: &str,
+    dir: &str,
+    kind: &str,
+    base_url: Option<&str>,
+) -> Option<HashMap<String, String>> {
     // La variable sale del provider. Sin perfil (Gemini, Kimi, una TUI desconocida) no hay
     // mapa: no se hereda el de otra.
-    let mut env = crate::agents::adapter_for(&agent_id)?.account_env(&dir)?;
+    let mut env = crate::agents::adapter_for(agent_id)?.account_env(dir)?;
     // El llavero se lee FUERA del lock de la base: puede tardar (D-Bus, Keychain).
-    if AccountKind::parse(&kind) == AccountKind::ApiKey && agent_id == "claude-code" {
+    if AccountKind::parse(kind) == AccountKind::ApiKey && agent_id == "claude-code" {
         // Sin la key (borrada del llavero por fuera) la cuenta no se lanza: arrancaría con
         // el perfil vacío y pediría login, que no es lo que el usuario eligió.
         let key = super::secrets::load(account_id)?;
-        env.extend(claude_key_env(&key, base_url.as_deref()));
+        env.extend(claude_key_env(&key, base_url));
     }
     Some(env)
+}
+
+/// Resolve o ambiente de uma conta para o provedor declarado no lançamento do PTY.
+/// A leitura do keyring ocorre depois de liberar o lock do banco. Erros não incluem valores
+/// do ambiente, para que a resposta do IPC possa ser mostrada com segurança no terminal.
+pub fn env_for_account_for_agent(
+    db: &DbConnection,
+    account_id: &str,
+    expected_agent_id: &str,
+) -> Result<HashMap<String, String>, String> {
+    let (agent_id, dir, kind, base_url): (String, String, String, Option<String>) = {
+        let conn = db
+            .lock()
+            .map_err(|_| "Não foi possível acessar as contas locais.".to_string())?;
+        conn.query_row(
+            "SELECT agent_id, dir, kind, base_url FROM agent_accounts WHERE id = ?1",
+            [account_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .map_err(|_| "A conta selecionada não existe mais.".to_string())?
+    };
+    if agent_id != expected_agent_id {
+        return Err("A conta selecionada não pertence ao provedor desta aba.".into());
+    }
+    account_env_from_row(account_id, &agent_id, &dir, &kind, base_url.as_deref())
+        .ok_or_else(|| {
+            "O perfil ou a credencial desta conta não está disponível no sistema.".to_string()
+        })
+}
+
+/// Agente dono da conta, sem carregar as credenciais do chaveiro.
+pub fn agent_id_for_account(db: &DbConnection, account_id: &str) -> Option<String> {
+    let conn = db.lock().ok()?;
+    conn.query_row("SELECT agent_id FROM agent_accounts WHERE id = ?1", [account_id], |row| row.get(0)).ok()
 }
 
 /// Directorio de perfil de una cuenta. Es la raíz donde la TUI guarda TODO lo suyo —

@@ -146,6 +146,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.disconnect" => peer_disconnect(app, args),
         "peer.role" => peer_role(app, args),
         "team.list" => super::team::team_list(app, args),
+        "team.candidates" => super::team::team_candidates(app, args),
         "team.create" => super::team::team_create(app, args),
         "team.link" => super::team::team_link(app, args),
         "team.unlink" => super::team::team_unlink(app, args),
@@ -231,6 +232,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         // Chat con el usuario (ver `chat`).
         // As conversas por protocolo do modo chat (ver `conversas`).
         "chat.list" => super::conversas::chat_list(app, args),
+        "chat.providers" => super::conversas::chat_providers(app, args),
+        "chat.compact" => super::conversas::chat_compact(app, args),
+        "chat.goal" => super::conversas::chat_goal(app, args),
         "chat.new" => super::conversas::chat_new(app, args),
         "chat.send" => super::conversas::chat_send(app, args),
         "chat.show" => super::conversas::chat_show(app, args),
@@ -269,6 +273,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.approve" => run_approve(app, args),
         "browser.run" => browser_run(app, args),
         "user.ask" => user_ask(app, args),
+        "secret.request" => super::agent_secrets::request(app, args),
+        "secret.consume" => super::agent_secrets::consume(args),
+        "secret.revoke" => super::agent_secrets::revoke(args),
         "forge.run" => crate::forge::tools::run(app, args),
         "mcp.cancel" => {
             if let Some(id) = args.get("callId").and_then(Value::as_str) {
@@ -279,6 +286,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.roster" => run_orchestrate(app, "run.roster", args),
         "run.plan" => run_orchestrate(app, "run.plan", args),
         "run.addTask" => run_orchestrate(app, "run.addTask", args),
+        "run.delegateTask" => run_orchestrate(app, "run.delegateTask", args),
         "run.status" => run_orchestrate(app, "run.status", args),
         "run.result" => run_orchestrate(app, "run.result", args),
         "run.await" => run_orchestrate(app, "run.await", args),
@@ -296,6 +304,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "memory.promoteFact" => run_orchestrate(app, "memory.promoteFact", args),
         "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),
         "run.rerouteTask" => run_orchestrate(app, "run.rerouteTask", args),
+        "run.harnessGraph" => run_orchestrate(app, "run.harnessGraph", args),
         "fix.list" => crate::runs::fixrounds::cli(app, "fix.list", args),
         "fix.decide" => crate::runs::fixrounds::cli(app, "fix.decide", args),
         "app.status" => app_status(app),

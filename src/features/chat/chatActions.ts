@@ -1,3 +1,5 @@
+import { chatShellOn, useUiStore } from "@/app/uiStore";
+import { homeDir } from "@tauri-apps/api/path";
 import { resolveAccountChoice } from "@/features/accounts/pools";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
@@ -5,10 +7,13 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
 import type { AgentInfo } from "@/features/tabs/types";
-import { pasteIntoTab, sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { pasteIntoTab, sendKeysToTab, sendWhenReady } from "@/features/terminal/terminalRegistry";
 
 import { chatCommand, conversationTitle, retuneConversation, type LaunchChoice } from "./chatModel";
+import { useChatLive } from "./liveStore";
 import { composeIn, setComposing, useChatStore } from "./store";
+import { interruptThread, useStructured } from "./structured/store";
+import { assertProjectChatAgentEnabled } from "./projectChatPolicy";
 
 export interface StartConversation extends LaunchChoice {
   cwd: string;
@@ -28,6 +33,7 @@ export interface StartConversation extends LaunchChoice {
  * do workspace entram antes de o agente subir, e a conta de um pool é decidida agora.
  */
 export async function startConversation(input: StartConversation): Promise<string> {
+  await assertProjectChatAgentEnabled(input.cwd, input.agent.id);
   const accountId = await resolveAccountChoice(input.agent.id, input.account);
   const command = chatCommand(input.agent.id, input.agent.command, input);
   const title = input.title ?? conversationTitle(input.prompt) ?? undefined;
@@ -38,6 +44,7 @@ export async function startConversation(input: StartConversation): Promise<strin
     title,
     titleIsCustom: title !== undefined,
     accountId,
+    activate: !input.background,
   });
   registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, tabs.workspaceId, []));
   if (input.prompt.trim()) sendWhenReady(tabId, input.prompt.trim());
@@ -62,9 +69,49 @@ export function newConversation(): void {
   setComposing(true);
 }
 
+/** Abre um rascunho no projeto da conversa ou aba que está em foco. */
+export function newConversationLocal(): void {
+  const chat = useChatStore.getState();
+  const inChatShell = chatShellOn(useUiStore.getState());
+  const threadCwd = inChatShell && !chat.composing && chat.thread
+    ? useStructured.getState().threads.find((thread) => thread.id === chat.thread)?.cwd
+    : undefined;
+  const tabs = useTabsStore.getState();
+  const activeTab = tabs.tabs.find((tab) => tab.id === tabs.activeTabId);
+  const cwd = threadCwd ?? activeTab?.cwd;
+  if (cwd) newConversationIn(cwd);
+  else newConversation();
+}
+
 /** Abre a tela de conversa nova já no projeto `cwd` (o "+" do cabeçalho do grupo na barra). */
 export function newConversationIn(cwd: string): void {
   composeIn(cwd);
+}
+
+/** Abre um rascunho na pasta pessoal, sem associá-lo a um projeto já cadastrado. */
+export function newConversationWithoutProject(): void {
+  void homeDir().then(newConversationIn).catch(console.error);
+}
+
+/** Interrompe somente o turno da conversa focada, sem tocar no terminal quando há um pedido pendente. */
+export function stopFocusedConversation(): boolean {
+  const chat = useChatStore.getState();
+  const inChatShell = chatShellOn(useUiStore.getState());
+  if (inChatShell && chat.composing) return false;
+
+  const threadId = inChatShell ? chat.thread : null;
+  if (threadId) {
+    const live = useStructured.getState().live[threadId];
+    if (live?.phase !== "working" || live.requests.length > 0) return false;
+    interruptThread(threadId);
+    return true;
+  }
+
+  const tabId = useTabsStore.getState().activeTabId;
+  if (!tabId) return false;
+  const live = useChatLive.getState();
+  if (live.phase[tabId] !== "working" || live.question[tabId] || live.awaiting[tabId]) return false;
+  return sendKeysToTab(tabId, "\u001b");
 }
 
 /**

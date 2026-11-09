@@ -1,62 +1,32 @@
-# Portal com Chrome real
+# Navegador nativo do Portal (WebView2)
 
-O Portal (o navegador do canvas) tem dois modos. O de sempre passa a página pelo proxy local (`src-tauri/src/preview`). O **Chrome real** mostra um Chrome de verdade, com um perfil só do app. Liga-se pelo globo na barra do Portal, e a escolha fica salva no canvas (`Portal.realChrome`).
+O Portal usa dois caminhos. O modo de desenvolvimento passa a página pelo proxy local (`src-tauri/src/preview`), com inspeção e mocks. No Windows, o modo nativo exibe um WebView2 filho sobre o Portal, sem abrir nem reutilizar o Chrome do sistema. Em macOS e Linux, links externos continuam pelo proxy porque o WebView2 nativo não está disponível.
 
-Serve para os sites que recusam navegador embutido, como a conta Google, e para os que estranham as páginas reescritas pelo proxy.
+## Sessão e perfis
+
+- **Padrão compartilhado:** o id `default` continua usando `<dados da ADE>/portal-webview`, preservando os dados existentes e compartilhando essa sessão entre vistas que escolherem esse perfil.
+- **Agentes e conversas:** cada proprietário recebe um id estável derivado do tipo e do id da conversa/agente. Os ids não expõem o caminho de origem. Perfis diferentes ficam em `<dados da ADE>/portal-webview/profiles/<id>`.
+- **Perfis vazios:** o seletor na barra do modo nativo permite criar, renomear e excluir um perfil isolado. Renomear preserva o id, a pasta e a sessão. O nome e o id ficam no `localStorage` da janela ADE; cookies e dados dos sites ficam no diretório próprio do WebView2. Criar um perfil não copia dados de outro navegador. Excluir exige confirmação e limpa os dados locais do perfil; perfis associados a abas abertas ou restauráveis ficam protegidos até serem trocados para outra sessão.
+- **Troca:** escolher outro perfil fecha o WebView2 daquela vista e abre a mesma URL na nova sessão. Os demais Portais continuam abertos.
+- **Limites atuais:** ainda não há importação de cookies/sessões. A lista de perfis nomeados é local à janela; o diretório é persistente da ADE. Copiar cookies ao WebView2 deixaria credenciais persistidas fora do chaveiro, então a integração aguarda um desenho compatível com a regra de segredos da ADE.
 
 ## Como funciona
 
-| Peça | Onde | O que faz |
-|---|---|---|
-| Chrome controlado | `real_browser/mod.rs` (`ensure_browser`) | `--remote-debugging-port=0`, perfil `<dados>/real-browser-profile`. Janela fora da tela. |
-| Uma janela por Portal | `real_browser_open` (`Target.createTarget` com `newWindow`) | O Chrome só desenha a aba ativa de cada janela. Com várias abas numa janela, os outros Portais congelavam. |
-| Tela | `Page.startScreencast` → último quadro guardado no Rust → protocolo `agsframe` → `<img>` do `RealBrowserView` | JPEG na resolução da tela (`deviceScaleFactor` = zoom × `devicePixelRatio`). Fica só o último quadro, sem fila; o evento `real-browser-frame` só avisa que há um novo, e o Portal busca o mais recente quando acaba de desenhar o atual. |
-| Mouse e teclado da pessoa | `RealBrowserView` → `real_browser_send` (`Input.*`) | Só `Input.*`, `Page.navigate`, `Page.reload` e o tamanho; nada que leia cookie ou rode script. |
-| Zoom | `pageMetrics` (`realBrowser.ts`) | Como o do Chrome: menos px CSS, mais densidade. |
-| Nitidez | `MIN_RENDER_DENSITY` (`realBrowser.ts`) + JPEG 85 | O Chrome desenha a página a no mínimo 2× e o quadro (limitado ao tamanho da janela dele) é reduzido por ele com bom filtro. Medido numa página de texto pequeno, contra o Chrome nativo na mesma escala (variância do laplaciano): 0,36 com a densidade da tela (1,25) → 0,65 a 2×; de 2 a 4 não muda. Fluidez rolando a MDN: 47 a 68 quadros/s. |
-| Barra de rolagem | `--enable-features=OverlayScrollbar` | Fina, sem setas, sem reservar largura. Medido no Chrome 155: `FluentOverlayScrollbar` sozinha não muda nada. |
-| Fora da barra de tarefas | `real_browser/win.rs` | `WS_EX_TOOLWINDOW` em cada janela nova (`SetWinEventHook`). |
-| Fim junto com o app | `terminal::containment::ProcessGroup` | Job Object com `KILL_ON_JOB_CLOSE`: não sobra Chrome órfão segurando o perfil, nem num fechamento à força. |
+`src-tauri/src/real_browser/mod.rs` valida o id do perfil e escolhe sua pasta. A remoção aceita apenas IDs no formato `profile-<UUID>`, bloqueia perfis ainda usados por Portais, solta o ambiente WebView2 cacheado na thread da interface e só então remove o diretório. Se o sistema ainda mantiver arquivos bloqueados, a operação falha e o perfil continua na lista para nova tentativa. `src-tauri/src/real_browser/native.rs` cria o ambiente WebView2 para essa pasta e mantém um ambiente por perfil. Cada Portal tem sua própria janela filha e `ICoreWebView2`; retângulo, zoom, recorte visível e áreas cobertas vêm de `RealBrowserView`.
 
-A conexão CDP fica no Rust. O Chrome não é aberto com `--remote-allow-origins`, então nenhuma página fala com a porta de depuração.
+O controle do agente usa a API CDP do WebView2 dentro do processo, sem porta de depuração aberta. A ADE instala o piloto antes dos scripts dos sites, encaminha ordens e eventos pela binding `Runtime.addBinding`, e captura a página com `Page.captureScreenshot`. Os cliques, digitação e teclas pedidos pelo piloto chegam ao WebView2 via `Input.*`. O painel e o agente usam o mesmo `BrowserTab`/`viewId`; não há uma página headless paralela.
 
-## Login (Google e afins)
+## Segurança e dados
 
-A porta 0 faz o Chrome se declarar automatizado: `navigator.webdriver` (ver [MDN](https://developer.mozilla.org/en-US/docs/Web/API/Navigator/webdriver)). Por isso o Google recusa o login nesse Chrome ("esse navegador pode não ser seguro"). A tentativa ainda marca o perfil, que passa a ser recusado até num Chrome comum (medido).
+- O perfil pessoal do Chrome, Edge ou Safari não é aberto, lido ou copiado.
+- Cookies, armazenamento local e credenciais do site ficam nos diretórios do WebView2, fora do banco, dos logs e das mensagens dos agentes.
+- O id enviado ao backend aceita apenas letras ASCII, números, hífen e sublinhado, com limite de tamanho; ele não pode incluir segmentos de caminho.
+- A importação de sessões continua bloqueada até que o armazenamento de credenciais do fluxo respeite a regra de usar somente o chaveiro do SO.
 
-O app **não esconde** a automação: não usa porta fixa nem `--disable-blink-features=AutomationControlled`. O login segue o que o Google pede ([2020](https://developers.googleblog.com/2020/08/guidance-for-our-effort-to-block-less-secure-browser-and-apps.html)): a senha é digitada num navegador completo, que mostra o endereço, sem passar pelo app.
+## Referências internas
 
-1. Numa página de login do Google (`isGoogleSignIn`), o Portal mostra um aviso no lugar da página: lá não se digita.
-2. **Entrar numa conta** (o boneco na barra) fecha o Chrome controlado. Em seguida abre o mesmo perfil num **Chrome comum**, sem porta de depuração e sem nenhuma flag a mais.
-3. A janela desse Chrome fica **em cima do Portal**, como janela *com dono* (o app é o dono). É a relação entre processos que o Windows suporta ([Raymond Chen](https://devblogs.microsoft.com/oldnewthing/20130412-00/?p=4683)); `SetParent` não é usado.
-   - Fica sempre acima do app, minimiza junto e não tem botão na barra de tarefas.
-   - Acompanha o Portal a cada quadro e quando a janela do app se move.
-   - Some quando o Portal sai de vista.
-   - A barra do Portal some; vale a do Chrome.
-4. **Terminei o login** fecha a janela como o X dela (o Chrome grava a sessão). Fechar a janela tem o mesmo efeito: o perfil roda com `background_mode` desligado.
-5. O Portal reabre o perfil já com a conta.
-
-## Agentes e Jev
-
-O piloto (`page/runtime.ts` + `picker.ts`, o mesmo script que o proxy injeta) roda no Chrome real assim:
-- **Injeção:** `Page.addScriptToEvaluateOnNewDocument`, antes dos scripts da página.
-- **Ponte:** `real_browser::BRIDGE` repassa as mensagens do piloto ao app por `Runtime.addBinding`. A função do binding sai do `window` antes de a página rodar.
-- **Ordens do app:** chegam por `real_browser_post` (`Runtime.evaluate` → `postMessage`).
-
-`snapshot`, `navigate`, `history`, `screenshot` (`Page.captureScreenshot`) e `act` funcionam sem mudar o laço do Jev.
-
-**Cliques e teclas de verdade.** O piloto continua achando o elemento e o ponto livre (`aim`), e pede o toque (`input:request`). O Rust executa por `Input.dispatchMouseEvent`, `Input.dispatchKeyEvent` ou `Input.insertText` e responde `input:done`. Os eventos chegam ao site com `isTrusted`. Fora do Chrome real, ou sem resposta em 5 s, ficam os eventos sintéticos de sempre.
-
-Medido em `httpbin.org/forms/post`:
-- `act` preencheu o telefone (`--fill`), marcou "Large" e "Onion" e concluiu em 1,4 s.
-- `click`, `input` e `keydown` chegaram com `isTrusted=true`.
-
-## Limites conhecidos
-
-- Fluidez: num site pesado o screencast do próprio Chrome é o limite. Medido rolando o painel do Play Console, sem nada do app no meio: 8 a 12 quadros/s, e uma página comum (MDN) passa de 45. Mudar qualidade, densidade ou `maxWidth` não alterou isso. No Portal, os quadros recebidos e os mostrados batem.
-- O piloto não troca `XMLHttpRequest.open`/`setRequestHeader` nem o cookie/storage do site no Chrome real: isso é do proxy, e quebrava sites de verdade (o Play Console). Por isso o painel de rede não registra XHR nesse modo.
-
-- Só Windows tem o encaixe da janela de login e a saída da barra de tarefas. Nos outros sistemas, a janela de login abre como janela comum (`win` vazio).
-- O modo celular (resolução emulada, toque) ainda não vale no Chrome real: a página ocupa o Portal.
-- Sites com verificação anti-robô (Cloudflare) podem pedir confirmação no Chrome controlado, porque ele se declara automatizado.
-- O "Escolha" e o "Anotar" do Portal (selector e anotação) não foram testados no Chrome real.
+- [BrowserTab](../../src/features/browser/BrowserTab.tsx)
+- [Gerenciamento de perfil](../../src/features/browser/profiles.ts)
+- [Comandos do Portal](../../src-tauri/src/real_browser/mod.rs)
+- [WebView2 nativo](../../src-tauri/src/real_browser/native.rs)
+- [Plano de paridade do navegador T3](./T3_CODE_INTEGRACAO.md#plano-do-navegador-inspirado-no-t3-code)

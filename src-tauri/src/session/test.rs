@@ -12,19 +12,18 @@ use super::title::*;
 // ── Export a markdown ───────────────────────────────────────────
 
 
-/// Muestra recortada de `opencode export` real (v1.18.4): la conversación vive en
-/// `messages[].parts[]`, y solo las partes `text` son conversación — `step-start`,
-/// `reasoning`, `tool` y `patch` son pasos internos que no van al markdown.
+/// Fixture reduzida do formato `opencode export`: a conversa fica em `messages[].parts[]`;
+/// só as partes `text` são conversa. Os IDs abaixo permitem testar a estrutura de mensagem.
 const OPENCODE_EXPORT: &str = r#"{
-  "info": { "id": "ses_1", "title": "Refactor del parser" },
+  "info": { "id": "ses_1", "title": "Refactor del parser", "directory": "/tmp/proyecto" },
   "messages": [
-    { "info": { "role": "user" },
+    { "info": { "id": "msg_1", "role": "user" },
       "parts": [ { "type": "text", "text": "arregla el parser" },
                  { "type": "file", "filename": "a.rs" } ] },
-    { "info": { "role": "assistant" },
+    { "info": { "id": "msg_2", "role": "assistant" },
       "parts": [ { "type": "step-start" }, { "type": "reasoning", "text": "pensando" },
                  { "type": "tool", "tool": "edit" }, { "type": "step-finish" } ] },
-    { "info": { "role": "assistant" },
+    { "info": { "id": "msg_3", "role": "assistant" },
       "parts": [ { "type": "text", "text": "Listo, cambié el lexer." },
                  { "type": "patch" } ] }
   ]

@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 
 use crate::canal::event::{clip, first_line, parse_ts_ms};
-use crate::canal::timeline::{claude_tokens, claude_tool, result_text, Item, ItemKind, ToolKind, ToolStatus};
+use crate::canal::timeline::{claude_context_tokens, claude_tokens, claude_tool, result_text, Item, ItemKind, ToolKind, ToolStatus, UsageBreakdown};
 
 use super::codex_map::{Ask, DeltaKind};
 use super::store::ThreadRow;
@@ -71,6 +71,15 @@ pub enum Start<'a> {
 
 /// Os argumentos do `claude` de uma conversa. Pura.
 pub fn launch_args(row: &ThreadRow, start: Start<'_>) -> Vec<String> {
+    launch_args_with_auto_compact(row, start, None)
+}
+
+/// Argv do Claude com limite opcional por sessão, sem editar arquivos de configuração do usuário.
+pub fn launch_args_with_auto_compact(
+    row: &ThreadRow,
+    start: Start<'_>,
+    auto_compact_window: Option<u32>,
+) -> Vec<String> {
     let mut args: Vec<String> = [
         "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         // Os pedidos de permissão vêm pelo próprio stdio (`can_use_tool`), não por uma tool MCP.
@@ -79,6 +88,12 @@ pub fn launch_args(row: &ThreadRow, start: Start<'_>) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec();
+    if let Some(window) = auto_compact_window.filter(|n| (100_000..=1_000_000).contains(n)) {
+        args.extend([
+            "--settings".into(),
+            json!({ "autoCompactWindow": window }).to_string(),
+        ]);
+    }
     match start {
         Start::New(id) => args.extend(["--session-id".into(), id.into()]),
         Start::Resume(id) => args.extend(["--resume".into(), id.into()]),
@@ -219,8 +234,12 @@ impl Mapper {
         let blocks = line.pointer("/message/content").and_then(Value::as_array).cloned().unwrap_or_default();
         let mut out = Vec::new();
         // Os tokens da mensagem: cada linha repete o `usage`, e o item (mesmo id) fica com o último.
-        if let Some(tokens) = claude_tokens(line.pointer("/message/usage")).filter(|_| !message_id.is_empty()) {
-            out.push(Out::Item(Box::new(Item::usage(format!("usage:{message_id}"), at, tokens))));
+        let usage = line.pointer("/message/usage");
+        if let Some(tokens) = claude_tokens(usage).filter(|_| !message_id.is_empty()) {
+            let mut item = Item::usage(format!("usage:{message_id}"), at, tokens);
+            item.context_tokens = claude_context_tokens(usage);
+            item.usage_breakdown = UsageBreakdown::from_claude(usage);
+            out.push(Out::Item(Box::new(item)));
         }
         for block in &blocks {
             let seen = self.blocks.entry(message_id.clone()).or_insert(0);

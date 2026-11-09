@@ -34,6 +34,7 @@ use crate::ai_memory::tabs::TabInjection;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 /// Linhas finais do stderr guardadas para explicar um processo que fechou no meio do turno.
 const STDERR_TAIL: usize = 20;
+const AUTO_COMPACT_WINDOWS_SETTING: &str = "chat.claude_auto_compact_windows";
 
 type Reply = oneshot::Sender<Result<Value, String>>;
 
@@ -50,6 +51,8 @@ pub struct Session {
     turn: Mutex<Option<String>>,
     /// Fecha o processo quando o turno acabar (modelo ou esforço trocados no meio do turno).
     stale: AtomicBool,
+    /// Marca as chamadas de uso que fazem parte de uma compactação automática iniciada pela ADE.
+    auto_compacting: AtomicBool,
     mapper: Mutex<Mapper>,
     /// Os `can_use_tool` esperando a pessoa, pelo `request_id` do Claude.
     asks: Mutex<HashMap<String, Pending>>,
@@ -227,7 +230,17 @@ async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: O
 fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>) -> Result<Arc<Session>, String> {
     let name = crate::agents::agent_command("claude-code").unwrap_or("claude");
     let program = crate::util::find_program(name).ok_or("Não achei o Claude Code (claude) no PATH")?;
-    let mut args = claude_map::launch_args(row, start);
+    let auto_compact_window = auto_compact_window(db, row);
+    let mut args = claude_map::launch_args_with_auto_compact(row, start, auto_compact_window);
+    let mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "claude-code");
+    if let Some(mcp) = mcp.as_ref() {
+        if let Some(config) = mcp.tab.config_path.as_deref() {
+            args.extend(["--mcp-config".into(), config.into()]);
+        }
+        if !mcp.tab.allowed_tools.is_empty() {
+            args.extend(["--allowedTools".into(), mcp.tab.allowed_tools.join(",")]);
+        }
+    }
     // O ai-memory entra por processo, como nas abas: hooks e MCP só no nascimento (a troca de modelo ou de acesso, e a
     // retomada, abrem outro processo e passam por aqui de novo). Falhar aqui nunca impede a conversa de abrir.
     let memory = memoria::for_thread(db, row, &program, &args, env.as_ref());
@@ -240,6 +253,9 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         .stderr(Stdio::piped());
     if let Some(env) = env {
         cmd.envs(env);
+    }
+    if let Some(mcp) = mcp.as_ref() {
+        cmd.envs(mcp.tab.env.iter().map(|(k, v)| (k, v)));
     }
     cmd.envs(memory.env.iter().map(|(k, v)| (k, v)));
     // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
@@ -263,6 +279,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         remote: Mutex::new(None),
         turn: Mutex::new(None),
         stale: AtomicBool::new(false),
+        auto_compacting: AtomicBool::new(false),
         mapper: Mutex::new(Mapper::default()),
         asks: Mutex::new(HashMap::new()),
         stderr: Mutex::new(VecDeque::new()),
@@ -287,6 +304,15 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     }
     tauri::async_runtime::spawn(read_loop(app.clone(), db.clone(), session.clone(), stdout));
     Ok(session)
+}
+
+/// Limite guardado por perfil de Claude: `system:claude-code` ou o id da conta ADE.
+/// O mapa contém apenas números, nunca credenciais nem configuração global da TUI.
+pub(super) fn auto_compact_window(db: &DbConnection, row: &store::ThreadRow) -> Option<u32> {
+    let key = row.account_id.as_deref().unwrap_or("system:claude-code");
+    let raw = crate::database::get_setting(db, AUTO_COMPACT_WINDOWS_SETTING).ok()??;
+    let settings: HashMap<String, u32> = serde_json::from_str(&raw).ok()?;
+    settings.get(key).copied().filter(|n| (100_000..=1_000_000).contains(n))
 }
 
 async fn write_loop(mut rx: mpsc::UnboundedReceiver<String>, mut stdin: tokio::process::ChildStdin) {
@@ -330,6 +356,7 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     }
     if let Some(turn) = session.turn() {
         session.set_turn(None);
+        session.auto_compacting.store(false, Ordering::SeqCst);
         let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
         let (result, message) = turn::dropped(killed, tail.as_deref(), "Claude");
         finish_turn(app, db, thread_id, &turn, &result);
@@ -421,8 +448,12 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
     let thread_id = session.thread_id.as_str();
     match out {
         Out::Item(item) => {
+            let mut item = *item;
+            if item.kind == ItemKind::Usage && session.auto_compacting.load(Ordering::SeqCst) {
+                item.auto_compact_attempted = Some(true);
+            }
             let turn = begin_turn(app, db, session);
-            save_items(app, db, thread_id, Some(&turn), vec![*item]);
+            save_items(app, db, thread_id, Some(&turn), vec![item]);
         }
         // O texto chegando vai só à janela: o banco grava o item completo (a linha `assistant`).
         Out::Delta { item_id, delta, kind } => {
@@ -453,6 +484,7 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
         Out::Done(result) => {
             let Some(turn) = session.turn() else { return };
             session.set_turn(None);
+            session.auto_compacting.store(false, Ordering::SeqCst);
             if let Ok(mut asks) = session.asks.lock() {
                 asks.clear();
             }
@@ -542,6 +574,16 @@ pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tex
     let turn = begin_turn(app, db, session);
     let item = Item { text: Some(super::handoff::clip_user(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
     save_items(app, db, &session.thread_id, Some(&turn), vec![item]);
+    Ok(())
+}
+
+/// Envia o `/compact` da automação local e marca o uso resultante para não repeti-lo ao reabrir.
+pub fn send_auto_compact(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) -> Result<(), String> {
+    session.auto_compacting.store(true, Ordering::SeqCst);
+    if let Err(error) = send_user(app, db, session, "/compact", Vec::new()) {
+        session.auto_compacting.store(false, Ordering::SeqCst);
+        return Err(error);
+    }
     Ok(())
 }
 

@@ -7,10 +7,18 @@ import { create } from "zustand";
 
 import { compareList, compareStatus } from "./ipc";
 import type { Comparison, EntryStatus } from "./types";
+import type { PickDraft } from "./types";
+import type { Attachment } from "@/features/chat/attachments/attachModel";
+
+interface CompareDialogSeed {
+  prompt?: string;
+  picks?: PickDraft[];
+  attachments?: Attachment[];
+}
 
 interface CompareState {
   /** O diálogo "Comparar modelos", com a pasta sugerida. */
-  dialog: { cwd: string } | null;
+  dialog: { cwd: string; prompt?: string; picks?: PickDraft[]; attachments?: Attachment[] } | null;
   comparisons: Comparison[];
   loaded: boolean;
   /** O que cada agente mudou, por comparação e `pick`. */
@@ -23,8 +31,8 @@ interface CompareState {
 
 export const useCompareStore = create<CompareState>(() => ({ dialog: null, comparisons: [], loaded: false, statuses: {}, pending: {}, diff: null }));
 
-export function openCompareDialog(cwd = ""): void {
-  useCompareStore.setState({ dialog: { cwd } });
+export function openCompareDialog(cwd = "", seed: CompareDialogSeed = {}): void {
+  useCompareStore.setState({ dialog: { cwd, ...seed } });
 }
 
 export function closeCompareDialog(): void {

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { AddIcon, ArrowLeftIcon, Badge, Button, EmptyState, Skeleton, Tooltip } from "neogestify-ui-components";
 
 import { ExternalIcon, RefreshIcon, TagIcon } from "@/app/icons";
 import { Markdown } from "@/shared/ui/Markdown";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
 import { CreateReleaseDialog } from "./CreateReleaseDialog";
@@ -57,7 +57,7 @@ export function ReleasesView({ cwd, target }: { cwd: string; target: RepoTarget 
             {t("forge.page.releases")}
           </Button>
           <div className="flex-1" />
-          <Button size="sm" variant="outline" onClick={() => openUrl(open.webUrl).catch(console.error)} className="flex items-center gap-1.5">
+          <Button size="sm" variant="outline" onClick={() => openExternalUrl(open.webUrl).catch(console.error)} className="flex items-center gap-1.5">
             <ExternalIcon className="w-3 h-3" />
             {t("forge.openWeb")}
           </Button>

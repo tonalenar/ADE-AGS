@@ -23,6 +23,11 @@ ags — controla o app ADE AGS pelo terminal
 USO
   ags <grupo> <ação> [valor] [--flag valor ...]
 
+SEGREDOS TEMPORÁRIOS (conversas interativas)
+  secret request --label \"R2\" [--description \"...\"]   Pede o valor em campo protegido e guarda no cofre por até 24 h
+  secret revoke <id>                              Remove um segredo desta conversa
+  secret run <id> -- <programa> [args...]         Envia-o só pelo stdin; a saída do programa é descartada
+
 TESTES LOCAIS (no worktree atual, sem precisar do app)
   test affected [--dry-run] [--force]          Testes afetados desde a base do worktree + alterações locais
                                              Base: branch.<nome>.agsbase; senão origin/dev, gh/dev, dev, origin/master, master
@@ -113,6 +118,7 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
 
 TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por protocolo); as cordas do canvas autorizam
   team list                                   O seu time: origem (chat, canvas ou mission), orquestrador, integrantes, papel, política, branch e estado
+  team candidates                             Sessões abertas da sua pasta que o orquestrador pode ligar ao time
   team create [--title \"...\"]                 Faz do seu canvas um time (só quem a pessoa coroou); quem já está
                                               ligado a você entra junto, supervisionado
   Só o orquestrador do time:
@@ -255,6 +261,7 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
   chat list [--all]                           Conversas ativas (--all: também as concluídas)
   chat new \"...\" [--cwd <pasta>]              Abre uma conversa e manda a mensagem (pasta: a atual)
            [--agent codex|claude-code|opencode|antigravity|cursor] [--model ...] [--effort ...] [--title ...] [--account <id>]
+           [--client-request-id <id>]          Permite repetir a criação sem duplicar a conversa ou o primeiro envio
            [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
                                               plan: todos menos o Codex (planeja antes de editar);
                                               antigravity e cursor: sem aprovação (o que pediria é negado);
@@ -421,17 +428,17 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
     browser_wait, browser_history, browser_resize, browser_layout, browser_console, browser_network,
     browser_storage, browser_cookies, browser_performance, browser_eval
   Orquestração da frota: gemini_desktop_status, gemini_desktop_consult, gemini_desktop_result,
-    agent_roster, run_plan, task_add, task_handoff, task_status, task_result, run_await, fact_add,
-    facts_read, fact_read, task_reroute, task_cancel
+    agent_roster, run_plan, task_add, delegate_task, task_handoff, task_status, task_result,
+    run_await, fact_add, facts_read, fact_read, task_reroute, task_cancel
   Memória da frota: memory_list, memory_get, memory_search, memory_open, memory_propose,
     memory_update, memory_delete, memory_promote_fact
   Conta de git: git_account, git_repos, git_pr_list, git_pr_view, git_checks, git_pr_files,
     git_issue_list, git_issue_view, git_fetch, git_pull, git_push, git_pr_create, git_issue_create,
     git_tag, git_release_list, git_release_create, git_comment
-  Pares e time: peer_tell, peer_deliver, peer_handoff, peer_receipt, team_list, team_create,
-    team_link, team_unlink, team_role
-  Conversas do modo chat: chat_list, chat_new, chat_send, chat_wait, chat_show, chat_stop,
-    chat_pending
+  Pares e time: peer_ask, peer_tell, peer_deliver, peer_handoff, peer_receipt, team_list,
+    team_candidates, team_create, team_link, team_unlink, team_role
+  Conversas do modo chat: chat_list, chat_providers, harness_graph, chat_compact, chat_goal,
+    chat_new, delegate_agent, chat_send, chat_wait, chat_show, chat_stop, chat_pending
   Pranchetas: design_list, design_get, design_view, design_create, design_open, design_page_add,
     design_page_rename, design_page_delete, design_artboard_add, design_artboard_update,
     design_artboard_duplicate, design_artboard_delete, design_comment_add, design_comment_resolve,
@@ -439,6 +446,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
   Computer use: sim_act, desk_act
   Dispositivos: device_list, device_shot, device_action
   Perguntas à pessoa: ask_user
+  Segredos temporários: secret_request, secret_run, secret_revoke
   Permissão: approve_tool_use
 ";
 // END GENERATED: mcp-tools-help
@@ -502,10 +510,22 @@ pub(crate) fn main() -> ExitCode {
     if args[0] == "mcp" {
         return run_mcp(&args[1..]);
     }
+    if args[0] == "secret" && args.get(1).is_some_and(|action| action == "run") {
+        return run_secret(&args[2..]);
+    }
 
     // `ags skills` / `ags agents`: listar es lo único que se hace con ellos, y exigir
     // `skill list` para eso era ceremonia sin ganancia.
-    let (command, flag_args) = if args[0] == "design" {
+    let (command, flag_args) = if args[0] == "secret" {
+        match args.get(1).map(String::as_str) {
+            Some("request") => ("secret.request".to_string(), &args[2..]),
+            Some("revoke") => ("secret.revoke".to_string(), &args[2..]),
+            Some("run") => unreachable!("secret run é tratado antes do parser comum"),
+            Some(action) if action.starts_with("--") => ("secret.request".to_string(), &args[1..]),
+            Some(other) => { eprintln!("Ação de segredo desconhecida: {other}"); return ExitCode::from(EXIT_USAGE); }
+            None => ("secret.request".to_string(), &args[1..]),
+        }
+    } else if args[0] == "design" {
         match design_command(&args) {
             Ok(v) => v,
             Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
@@ -846,13 +866,13 @@ impl CliError {
     }
 }
 
-/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Agrega la identidad del llamador de `ADE_TAB_ID` a los comandos que la necesitan.
 /// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
 /// Os comandos que levam quem chama (`from`). O `tab create` o leva para achar o terminal do painel da
-/// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); o resto do grupo `tab` já diz o destino
-/// pelo id da aba. Pura.
+/// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); comandos `run.*` recebem `tabId`,
+/// que preserva o escopo da conversa ao criar ou consultar tarefas da Frota. Pura.
 fn takes_caller(command: &str) -> bool {
-    const GROUPS: [&str; 17] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events."];
+    const GROUPS: [&str; 19] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events.", "secret.", "run."];
     command == "tab.create" || GROUPS.iter().any(|g| command.starts_with(g))
 }
 
@@ -870,7 +890,19 @@ fn with_caller(command: &str, mut parsed: Value) -> Value {
 }
 
 fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: Option<String>) {
-    if command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") || command.starts_with("desk.") {
+    // A identidade de conversa esperada por `runs::orchestration::caller` chama-se `tabId`,
+    // não `from`. Remova qualquer valor passado pelo agente e use o que o ADE injetou no PTY.
+    if command.starts_with("run.") {
+        if let Some(map) = parsed.as_object_mut() {
+            map.remove("tabId");
+            map.remove("from");
+            if let Some(tab) = tab.filter(|value| !value.is_empty()) {
+                map.insert("tabId".into(), Value::String(tab));
+            }
+        }
+        return;
+    }
+    if command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") || command.starts_with("desk.") || command.starts_with("secret.") {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");
@@ -963,6 +995,15 @@ fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
 /// valor suelto, es mejor exigir el flag que adivinar mal.
 /// Valida o uso antes do IPC, inclusive argumentos passados por --json-args.
 fn validate_usage(command: &str, args: &Value) -> Result<(), String> {
+    if command == "secret.consume" {
+        return Err("O segredo só pode ser entregue por `ags secret run <id> -- <programa>`".into());
+    }
+    if command == "secret.request" && args.get("label").and_then(Value::as_str).is_none_or(|label| label.trim().is_empty()) {
+        return Err("Uso: ags secret request --label \"nome do segredo\" [--description \"uso esperado\"]".into());
+    }
+    if command == "secret.revoke" && args.get("secretId").and_then(Value::as_str).is_none_or(|id| id.trim().is_empty()) {
+        return Err("Uso: ags secret revoke <id>".into());
+    }
     if command == "peer.check" && args.get("to").and_then(Value::as_str).is_none_or(|to| to.trim().is_empty()) {
         return Err("Uso: ags peer check <nome> [--lines 60]".into());
     }
@@ -994,6 +1035,7 @@ fn run_defaults(mut args: Value, shell_cwd: &std::path::Path) -> Result<Value, S
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
         "gemini.result" => &["id"],
+        "secret.revoke" => &["secretId"],
         "test.run" => &["suite"],
         "design.create" => &["title"],
         "design.get" | "design.delete" | "design.archive" | "design.approve.all" => &["designId"],
@@ -1035,7 +1077,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "team.link" | "team.unlink" => &["to"],
         "team.role" => &["to", "role"],
         "team.create" => &["title"],
-        "team.list" => &[],
+        "team.list" | "team.candidates" => &[],
         "ci.watch" => &["pr"],
         // `ags peer deliver --file entrega.json` (ao orquestrador) ou `ags peer deliver QA --file ...`.
         "peer.deliver" => &["to", "text"],
@@ -1054,7 +1096,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags chat new "..."`, `ags chat send <id> "..."`, `ags chat wait <id>`.
         "chat.new" => &["text"],
         "chat.send" => &["thread", "text"],
-        "chat.show" | "chat.wait" | "chat.stop" | "chat.pending" | "chat.open" | "chat.settle" => &["thread"],
+        "chat.show" | "chat.wait" | "chat.stop" | "chat.pending" | "chat.open" | "chat.settle"
+        | "chat.compact" | "chat.goal" => &["thread"],
         "recall.get" => &["thread"],
         "memory.search" => &["query"],
         "memory.open" => &["path"],
@@ -1364,7 +1407,7 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(1, 3600);
             Duration::from_secs(requested + 15)
         }
-        "chat.new" | "chat.send" | "chat.stop" => Duration::from_secs(150),
+        "chat.new" | "chat.send" | "chat.stop" | "chat.compact" | "chat.goal" => Duration::from_secs(150),
         "fix.list" | "fix.decide" => Duration::from_secs(60),
         // O `portal act` espera o prazo pedido (padrão 115 s, o backend corta nele), mais margem.
         "portal.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 30),
@@ -1380,6 +1423,15 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         "peer.recruit" => Duration::from_secs(120),
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
+        "run.delegateTask" => {
+            let mode = args.pointer("/args/mode").and_then(Value::as_str).unwrap_or("async");
+            if mode == "wait" {
+                let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
+                Duration::from_secs(requested + 30)
+            } else {
+                Duration::from_secs(120)
+            }
+        }
         "run.approve" => {
             let requested = args
                 .get("timeout")
@@ -1421,6 +1473,63 @@ fn to_camel_case(flag: &str) -> String {
 /// Solo para `ags mcp`. Una persona que escribe `ags tab list` con la app cerrada tiene
 /// que enterarse en el momento, no diez segundos después.
 const MCP_WAIT_FOR_APP: Duration = Duration::from_secs(15);
+
+/// Entrega um segredo ao stdin de um único programa sem imprimi-lo, registrá-lo ou capturar saída.
+fn run_secret(args: &[String]) -> ExitCode {
+    if args.len() < 3 || args[1] != "--" || args[0].trim().is_empty() || args[2].trim().is_empty() {
+        eprintln!("Uso: ags secret run <id> -- <programa> [argumentos...]");
+        return ExitCode::from(EXIT_USAGE);
+    }
+    let request = with_caller("secret.consume", json!({ "secretId": args[0] }));
+    let response = match send("secret.consume", request) {
+        Ok(response) => response,
+        Err(error) => {
+            println!("{}", json!({ "error": error.message }));
+            return ExitCode::from(error.code);
+        }
+    };
+    if !response.ok {
+        println!("{}", json!({ "error": response.error.unwrap_or_else(|| "O app recusou o pedido".into()) }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    }
+    let Some(mut data) = response.data else {
+        println!("{}", json!({ "error": "O cofre não retornou o segredo" }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    };
+    let Some(value) = data.as_object_mut().and_then(|object| object.remove("secret")) else {
+        println!("{}", json!({ "error": "O cofre não retornou o segredo" }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    };
+    let serde_json::Value::String(secret) = value else {
+        println!("{}", json!({ "error": "O cofre retornou um valor inválido" }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    };
+    let Ok(cwd) = std::env::current_dir() else {
+        println!("{}", json!({ "error": "Não foi possível ler a pasta atual" }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    };
+    let mut command = ade_ags_lib::util::spawn::hidden_command(&args[2]);
+    command.args(&args[3..]).current_dir(cwd);
+    match ade_ags_lib::util::spawn::run_with_secret_input(
+        &mut command,
+        secret.into_bytes(),
+        Duration::from_secs(5 * 60),
+    ) {
+        Ok((status, elapsed)) => {
+            let code = status.code().unwrap_or(-1);
+            println!("{}", json!({
+                "exitCode": code,
+                "durationMs": elapsed.as_millis(),
+                "output": "stdout e stderr foram descartados; o segredo foi enviado apenas pelo stdin"
+            }));
+            ExitCode::from(if status.success() { EXIT_OK } else { EXIT_COMMAND_FAILED })
+        }
+        Err(_) => {
+            println!("{}", json!({ "error": "O programa não pôde ser iniciado ou excedeu 5 minutos; a entrada temporária foi descartada" }));
+            ExitCode::from(EXIT_COMMAND_FAILED)
+        }
+    }
+}
 
 /// Como `send`, pero esperando a que la app aparezca en vez de fallar en el primer intento.
 fn send_waiting(command: &str, args: Value) -> Result<Response, CliError> {
@@ -1542,6 +1651,7 @@ fn run_mcp(args: &[String]) -> ExitCode {
         stdin.lock(),
         std::io::stdout(),
         |command, payload| {
+            let payload = if command.starts_with("secret.") { with_caller(command, payload) } else { payload };
             let response = send_waiting(command, payload).map_err(|e| e.message)?;
             if response.ok {
                 Ok(response.data.unwrap_or(Value::Null))

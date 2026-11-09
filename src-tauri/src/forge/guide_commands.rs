@@ -153,6 +153,181 @@ pub async fn forge_pull_files(app: AppHandle, cwd: String, number: u64) -> Resul
     api.pull_files(&t.path, number).await
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullCodeFile {
+    pub path: String,
+    pub old_path: Option<String>,
+    pub status: String,
+    pub additions: u64,
+    pub deletions: u64,
+    pub patch: Option<String>,
+    pub patch_limited: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullCode {
+    pub head_sha: String,
+    pub base_sha: Option<String>,
+    pub start_sha: Option<String>,
+    pub provider: super::provider::ForgeKind,
+    pub files: Vec<PullCodeFile>,
+}
+
+/// Lista os arquivos e fixa o commit que a aba Código vai mostrar.
+#[tauri::command]
+pub async fn forge_pull_code(app: AppHandle, cwd: String, number: u64) -> Result<PullCode, ForgeError> {
+    const MAX_PATCH_PER_FILE: usize = 512 * 1024;
+    const MAX_PATCH_TOTAL: usize = 4 * 1024 * 1024;
+    let (target, api) = repo_api(&app, &cwd).await?;
+    for _ in 0..2 {
+        let refs = api.pull_review_refs(&target.path, number).await?;
+        let files = api.pull_files(&target.path, number).await?;
+        if api.pull_review_refs(&target.path, number).await? == refs {
+            let mut patch_bytes = 0usize;
+            let files = files
+                .into_iter()
+                .map(|file| {
+                    let mut patch = file.patch;
+                    let size = patch.as_ref().map_or(0, String::len);
+                    let patch_limited = size > MAX_PATCH_PER_FILE || patch_bytes.saturating_add(size) > MAX_PATCH_TOTAL;
+                    if patch_limited {
+                        patch = None;
+                    } else {
+                        patch_bytes = patch_bytes.saturating_add(size);
+                    }
+                    PullCodeFile {
+                        path: file.path,
+                        old_path: file.old_path,
+                        status: file.status,
+                        additions: file.additions,
+                        deletions: file.deletions,
+                        patch,
+                        patch_limited,
+                    }
+                })
+                .collect();
+            return Ok(PullCode {
+                head_sha: refs.head_sha,
+                base_sha: refs.base_sha,
+                start_sha: refs.start_sha,
+                provider: api.kind(),
+                files,
+            });
+        }
+    }
+    Err(ForgeError::Api("O PR mudou enquanto os arquivos eram carregados. Abra a aba Código novamente.".into()))
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullFileContent {
+    pub path: String,
+    pub content: Option<String>,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullFileContents {
+    pub files: Vec<PullFileContent>,
+    pub truncated: bool,
+    pub head_sha: String,
+}
+
+/// Lê os arquivos alterados no snapshot do PR. O cliente envia somente caminhos; o backend
+/// confirma cada um contra a lista atual do PR e limita quantidade, concorrência e bytes.
+#[tauri::command]
+pub async fn forge_pull_file_contents(
+    app: AppHandle,
+    cwd: String,
+    number: u64,
+    head_sha: String,
+    paths: Vec<String>,
+) -> Result<PullFileContents, ForgeError> {
+    const MAX_FILES: usize = 300;
+    const MAX_TOTAL_BYTES: usize = 8 * 1024 * 1024;
+    const CONCURRENCY: usize = 6;
+
+    if paths.is_empty() || paths.len() > MAX_FILES {
+        return Err(ForgeError::Api(format!("Informe entre 1 e {MAX_FILES} arquivos do PR")));
+    }
+    let mut seen = HashSet::new();
+    let paths = paths.into_iter().filter(|path| seen.insert(path.clone())).collect::<Vec<_>>();
+    let (target, api) = repo_api(&app, &cwd).await?;
+    let current_head = api.pull_head_sha(&target.path, number).await?;
+    if current_head != head_sha {
+        return Err(ForgeError::Api("PR_HEAD_CHANGED: o PR recebeu novos commits; atualize a aba Código para buscar no mesmo snapshot".into()));
+    }
+    let changed = api.pull_files(&target.path, number).await?;
+    let allowed = changed
+        .iter()
+        .filter(|file| file.status != "removed")
+        .map(|file| file.path.as_str())
+        .collect::<HashSet<_>>();
+    if let Some(path) = paths.iter().find(|path| !allowed.contains(path.as_str())) {
+        return Err(ForgeError::Api(format!("O arquivo {path} não pertence aos arquivos atuais deste PR")));
+    }
+
+    let mut files = Vec::with_capacity(paths.len());
+    let mut total_bytes = 0usize;
+    let mut truncated = false;
+    for chunk in paths.chunks(CONCURRENCY) {
+        if total_bytes >= MAX_TOTAL_BYTES {
+            truncated = true;
+            files.extend(chunk.iter().map(|path| PullFileContent {
+                path: path.clone(),
+                content: None,
+                error: Some("Limite total de 8 MiB atingido".into()),
+            }));
+            continue;
+        }
+
+        let mut tasks = tokio::task::JoinSet::new();
+        for path in chunk {
+            let api = api.clone();
+            let repo = target.path.clone();
+            let sha = head_sha.clone();
+            let path = path.clone();
+            tasks.spawn(async move {
+                let result = api.pull_file_content(&repo, &sha, &path).await;
+                (path, result)
+            });
+        }
+        let mut batch = Vec::with_capacity(chunk.len());
+        while let Some(result) = tasks.join_next().await {
+            let (path, result) = result.map_err(|error| ForgeError::Api(format!("Falha ao ler arquivo do PR: {error}")))?;
+            batch.push((path, result));
+        }
+        // A ordem da resposta corresponde à lista do PR, não à ordem de término da rede.
+        batch.sort_by_key(|(path, _)| paths.iter().position(|requested| requested == path).unwrap_or(usize::MAX));
+        for (path, result) in batch {
+            match result {
+                Ok(content) if total_bytes.saturating_add(content.len()) <= MAX_TOTAL_BYTES => {
+                    total_bytes += content.len();
+                    files.push(PullFileContent { path, content: Some(content), error: None });
+                }
+                Ok(_) => {
+                    truncated = true;
+                    files.push(PullFileContent {
+                        path,
+                        content: None,
+                        error: Some("Limite total de 8 MiB atingido".into()),
+                    });
+                }
+                Err(error) => {
+                    if error.to_string().contains("limite") {
+                        truncated = true;
+                    }
+                    files.push(PullFileContent { path, content: None, error: Some(error.to_string()) });
+                }
+            }
+        }
+    }
+    Ok(PullFileContents { head_sha, files, truncated })
+}
+
 /// O que as tentativas deram: o guia (ou os erros), a última resposta crua, o custo somado e
 /// quantas foram.
 type Attempts = (Result<super::guide::ReviewGuide, Vec<String>>, String, Option<f64>, u32);

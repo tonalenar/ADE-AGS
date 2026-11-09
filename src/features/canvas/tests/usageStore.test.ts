@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const discover = vi.fn();
 const agy = vi.fn();
 vi.mock("@/features/accounts/ipc", () => ({
-  accountEnv: vi.fn(),
   codexAccountUsage: vi.fn(),
   discoverAntigravityAccount: (id: string) => discover(id),
   antigravityCliUsage: (force: boolean) => agy(force),

@@ -82,6 +82,40 @@ fn adb_text(serial: Option<&str>, args: &[&str], limit: Duration) -> Result<Stri
     adb(serial, args, limit).map(|b| String::from_utf8_lossy(&b).to_string())
 }
 
+/// O shell remoto da gravação fica vivo enquanto `screenrecord` escreve o MP4 no aparelho.
+pub(crate) fn screen_record_command(serial: &str, script: &str) -> Result<std::process::Command, String> {
+    let mut command = crate::util::spawn::hidden_command(adb_path()?);
+    command.args(["-s", serial, "shell", "sh", "-c", script]);
+    Ok(command)
+}
+
+/// Encerra apenas o `screenrecord` identificado pelo arquivo de PID desta gravação.
+pub(crate) fn stop_screen_record(serial: &str, remote_video: &str, pid_file: &str) -> Result<(), String> {
+    let pid = adb_text(Some(serial), &["shell", "cat", pid_file], FAST)?;
+    let pid = pid.trim();
+    if pid.is_empty() || !pid.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err("O processo de gravação do Android não informou um PID válido.".into());
+    }
+    let proc_path = format!("/proc/{pid}/cmdline");
+    let process = adb_text(Some(serial), &["shell", "cat", &proc_path], FAST).unwrap_or_default();
+    if !process.contains("screenrecord") || !process.contains(remote_video) {
+        return Ok(());
+    }
+    adb(Some(serial), &["shell", "kill", "-INT", pid], FAST).map(|_| ())
+}
+
+/// Traz o MP4 finalizado ao Mac e apaga somente os arquivos temporários desta gravação no aparelho.
+pub(crate) fn pull_screen_record(serial: &str, remote_video: &str, pid_file: &str, local_path: &std::path::Path) -> Result<(), String> {
+    let mut command = crate::util::spawn::hidden_command(adb_path()?);
+    command.args(["-s", serial, "pull", remote_video]).arg(crate::util::external_path(local_path));
+    let out = output_with_timeout(&mut command, Duration::from_secs(45)).map_err(|e| format!("adb: {e}"))?;
+    if !out.status.success() {
+        return Err(format!("Não consegui copiar o vídeo do Android: {}", String::from_utf8_lossy(&out.stderr).trim()));
+    }
+    let _ = adb(Some(serial), &["shell", "rm", "-f", remote_video, pid_file], FAST);
+    Ok(())
+}
+
 // ── Dispositivos ────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, PartialEq)]

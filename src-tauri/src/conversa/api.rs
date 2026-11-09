@@ -5,16 +5,17 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
+use rusqlite::TransactionBehavior;
 use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
-use crate::canal::timeline::Item;
+use crate::canal::timeline::{Item, ItemKind};
 use crate::database::DbConnection;
 
 use super::codex::RequestFailure;
 use super::envio::{SendError, SendMode};
-use super::store::{self, RequestRow, ThreadRow, Tuning};
+use super::store::{self, MessageSearchHit, RequestRow, ThreadRow, Tuning};
 use super::{agy, claude, codex, codex_map, cursor, opencode};
 
 /// Quem fala com o agente de uma conversa por protocolo.
@@ -32,7 +33,99 @@ pub enum Engine {
     Cursor,
 }
 
+/// Capacidades observáveis do runtime de conversa. A camada de orquestração consulta este
+/// contrato em vez de inferir suporte pelo nome do agente.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EngineCapabilities {
+    /// Modos que este runtime realmente aceita no ADE.
+    pub access_modes: &'static [&'static str],
+    pub plan: bool,
+    /// Se uma nova mensagem pode entrar no turno vivo sem encerrar o turno.
+    pub mid_turn: MidTurnBehavior,
+    pub context_compaction: bool,
+    pub automatic_compaction: bool,
+    pub persistent_goal: bool,
+    pub goal_pause_resume: bool,
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MidTurnBehavior {
+    Steer,
+    Interrupt,
+}
+
 impl Engine {
+    /// Protocolo usado pelo runtime da conversa. É informativo: cada adapter continua
+    /// preservando seu processo e seu formato nativo.
+    pub const fn protocol(self) -> &'static str {
+        match self {
+            Engine::Codex => "codex-app-server",
+            Engine::Claude => "claude-stream-json",
+            Engine::OpenCode => "agent-client-protocol",
+            Engine::Antigravity => "antigravity-stream-json",
+            Engine::Cursor => "cursor-stream-json",
+        }
+    }
+
+    /// Capacidades descritas só quando já há implementação no runtime atual. Isso não torna
+    /// providers diferentes iguais por baixo: cada adapter continua usando o protocolo nativo.
+    pub const fn capabilities(self) -> EngineCapabilities {
+        match self {
+            Engine::Codex => EngineCapabilities {
+                access_modes: &["ask", "safe", "full"],
+                plan: false,
+                mid_turn: MidTurnBehavior::Steer,
+                context_compaction: true,
+                automatic_compaction: false,
+                persistent_goal: true,
+                goal_pause_resume: true,
+            },
+            Engine::Claude => EngineCapabilities {
+                access_modes: &["ask", "edits", "safe", "full", "plan"],
+                plan: true,
+                mid_turn: MidTurnBehavior::Steer,
+                context_compaction: true,
+                automatic_compaction: true,
+                persistent_goal: true,
+                goal_pause_resume: false,
+            },
+            Engine::OpenCode => EngineCapabilities {
+                access_modes: &["ask", "edits", "safe", "full", "plan"],
+                plan: true,
+                mid_turn: MidTurnBehavior::Interrupt,
+                context_compaction: false,
+                automatic_compaction: false,
+                persistent_goal: false,
+                goal_pause_resume: false,
+            },
+            Engine::Antigravity => EngineCapabilities {
+                access_modes: &["ask", "edits", "safe", "full", "plan"],
+                plan: true,
+                mid_turn: MidTurnBehavior::Interrupt,
+                context_compaction: false,
+                automatic_compaction: false,
+                persistent_goal: false,
+                goal_pause_resume: false,
+            },
+            Engine::Cursor => EngineCapabilities {
+                access_modes: &["ask", "full", "plan"],
+                plan: true,
+                mid_turn: MidTurnBehavior::Interrupt,
+                context_compaction: false,
+                automatic_compaction: false,
+                persistent_goal: false,
+                goal_pause_resume: false,
+            },
+        }
+    }
+
+    pub fn supports_access(self, access: &str) -> bool {
+        let capabilities = self.capabilities();
+        (access != "plan" || capabilities.plan) && capabilities.access_modes.contains(&access)
+    }
+
     pub fn of(agent_id: &str) -> Option<Engine> {
         match agent_id {
             "codex" => Some(Engine::Codex),
@@ -40,6 +133,7 @@ impl Engine {
             "opencode" => Some(Engine::OpenCode),
             "antigravity" => Some(Engine::Antigravity),
             "cursor" => Some(Engine::Cursor),
+            id if crate::local_acp::is_local_acp_id(id) => Some(Engine::OpenCode),
             _ => None,
         }
     }
@@ -48,10 +142,7 @@ impl Engine {
     /// `plan`), do Antigravity (`--mode plan`) e do Cursor (`--mode plan`); o Codex não tem. O Cursor só tem
     /// Supervisionado, Plano e Acesso total: Aceitar edições e Auto não têm flag documentada.
     pub fn accepts(self, access: &str) -> bool {
-        if self == Engine::Cursor {
-            return matches!(access, "ask" | "plan" | "full");
-        }
-        matches!(access, "ask" | "edits" | "safe" | "full") || (self != Engine::Codex && access == "plan")
+        self.supports_access(access)
     }
 }
 
@@ -111,53 +202,339 @@ pub fn thread(db: &DbConnection, thread_id: &str) -> Result<ThreadRow, String> {
 pub struct NewThread {
     pub agent_id: String,
     pub cwd: String,
+    pub workspace_id: Option<String>,
     pub title: String,
     pub model: Option<String>,
     pub effort: Option<String>,
     pub access: String,
     pub account_id: Option<String>,
+    pub parent_ref: Option<String>,
 }
 
 pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> {
+    create_inner(db, input, None).map(|outcome| outcome.thread)
+}
+
+/// Identidade estável de um pedido de conversa filha feito pelo harness.
+#[derive(Clone, Debug)]
+pub struct ChildRequestIdentity {
+    pub caller_key: String,
+    pub request_id: String,
+    pub request_hash: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct ChildThreadOutcome {
+    pub thread: ThreadRow,
+    pub reused: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChildDeliveryClaim {
+    Claimed { thread_id: String },
+    AlreadyClaimed { thread_id: String, state: String },
+}
+
+/// Cria a conversa e o recibo na mesma transação. Repetições do mesmo pedido retornam a thread
+/// já criada; o prompt inicial é reclamado separadamente antes do I/O com o provider.
+pub fn create_child(
+    db: &DbConnection,
+    input: NewThread,
+    identity: &ChildRequestIdentity,
+) -> Result<ChildThreadOutcome, String> {
+    create_inner(db, input, Some(identity))
+}
+
+fn existing_child_outcome(
+    conn: &rusqlite::Connection,
+    identity: &ChildRequestIdentity,
+) -> Result<Option<ChildThreadOutcome>, String> {
+    let Some(receipt) = store::child_chat_receipt(conn, &identity.caller_key, &identity.request_id)
+        .map_err(db_err)?
+    else {
+        return Ok(None);
+    };
+    if receipt.request_hash != identity.request_hash {
+        return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
+    }
+    let thread = store::thread(conn, &receipt.thread_id)
+        .map_err(db_err)?
+        .ok_or_else(|| {
+            "a conversa criada por este client_request_id foi removida; use um ID novo".to_string()
+        })?;
+    Ok(Some(ChildThreadOutcome {
+        thread,
+        reused: true,
+    }))
+}
+
+fn create_inner(
+    db: &DbConnection,
+    input: NewThread,
+    identity: Option<&ChildRequestIdentity>,
+) -> Result<ChildThreadOutcome, String> {
+    if let Some(identity) = identity {
+        let conn = db.lock().map_err(db_err)?;
+        if let Some(outcome) = existing_child_outcome(&conn, identity)? {
+            return Ok(outcome);
+        }
+    }
     if !structured_agent(&input.agent_id) {
-        return Err(format!("{} ainda não conversa por protocolo", input.agent_id));
+        return Err(format!(
+            "{} ainda não conversa por protocolo",
+            input.agent_id
+        ));
     }
     let engine = engine_for(&input.agent_id)?;
+    if crate::local_acp::is_local_acp_id(&input.agent_id) {
+        if !crate::local_acp::contains(db, &input.agent_id)? {
+            return Err("Este agente ACP local não está mais cadastrado".into());
+        }
+        if input.access != "ask"
+            || input.model.is_some()
+            || input.effort.is_some()
+            || input.account_id.is_some()
+        {
+            return Err(
+                "Agentes ACP locais iniciam em Supervisionado, sem conta, modelo ou esforço da ADE"
+                    .into(),
+            );
+        }
+    }
     if !engine.accepts(&input.access) {
         return Err(access_error(engine, &input.access));
+    }
+    {
+        let conn = db.lock().map_err(db_err)?;
+        crate::project_chat_policy::ensure_agent_enabled(&conn, &input.cwd, &input.agent_id)?;
     }
     let id = uuid::Uuid::new_v4().to_string();
     // `pool:<nome>` no lugar da conta: o pool escolhe a conta agora e a conversa fica ligada a ele (o pool de
     // contas do chat só troca com o pool escolhido pela pessoa).
-    let (account_id, pool_id) = match input.account_id.as_deref().and_then(crate::accounts::pools::pool_ref) {
+    let (account_id, pool_id) = match input
+        .account_id
+        .as_deref()
+        .and_then(crate::accounts::pools::pool_ref)
+    {
         Some(name) => {
             let (account, pool) = super::pool::resolve_at_create(db, &input.agent_id, name)?;
             (account, Some(pool))
         }
         None => (input.account_id.clone(), None),
     };
-    let row = {
-        let conn = db.lock().map_err(db_err)?;
-        let tuning = Tuning { model: input.model, effort: input.effort, access: input.access };
-        let row = store::insert_thread(&conn, &id, &input.agent_id, &input.cwd, &input.title, &tuning, account_id.as_deref(), crate::util::now_ts_ms())
-            .map_err(db_err)?;
-        if let Err(error) = crate::skills::reconcile_link_dir(&conn, &row.cwd, &row.agent_id) {
-            eprintln!("[skills] não consegui preparar as skills sempre ativas para a conversa {}: {error}", row.id);
+    let (row, created) = {
+        let mut conn = db.lock().map_err(db_err)?;
+        crate::project_chat_policy::ensure_agent_enabled(&conn, &input.cwd, &input.agent_id)?;
+        let tuning = Tuning {
+            model: input.model,
+            effort: input.effort,
+            access: input.access,
+        };
+        if let Some(parent_ref) = input.parent_ref.as_deref() {
+            if parent_ref.trim().is_empty() || parent_ref.len() > 512 {
+                return Err("Referência da conversa de origem inválida".into());
+            }
         }
-        row
+
+        if let Some(identity) = identity {
+            let tx = conn
+                .transaction_with_behavior(TransactionBehavior::Immediate)
+                .map_err(db_err)?;
+            if let Some(outcome) = existing_child_outcome(&tx, identity)? {
+                tx.commit().map_err(db_err)?;
+                (outcome.thread, false)
+            } else {
+                let inherited_workspace = input
+                    .parent_ref
+                    .as_deref()
+                    .and_then(|parent| parent.strip_prefix("thread:"))
+                    .and_then(|parent| store::thread_workspace_id(&tx, parent).ok().flatten());
+                let workspace_id = input
+                    .workspace_id
+                    .clone()
+                    .or(inherited_workspace)
+                    .or_else(|| crate::runs::store::workspace_of_folder(&tx, &input.cwd));
+                validate_workspace(&tx, workspace_id.as_deref())?;
+                let now = crate::util::now_ts_ms();
+                let row = store::insert_thread_with_context(
+                    &tx,
+                    &id,
+                    &input.agent_id,
+                    &input.cwd,
+                    &input.title,
+                    &tuning,
+                    account_id.as_deref(),
+                    input.parent_ref.as_deref(),
+                    workspace_id.as_deref(),
+                    now,
+                )
+                .map_err(db_err)?;
+                store::save_child_chat_receipt(
+                    &tx,
+                    &identity.caller_key,
+                    &identity.request_id,
+                    &identity.request_hash,
+                    &row.id,
+                    "prepared",
+                    now,
+                )
+                .map_err(db_err)?;
+                tx.commit().map_err(db_err)?;
+                (row, true)
+            }
+        } else {
+            let inherited_workspace = input
+                .parent_ref
+                .as_deref()
+                .and_then(|parent| parent.strip_prefix("thread:"))
+                .and_then(|parent| store::thread_workspace_id(&conn, parent).ok().flatten());
+            let workspace_id = input
+                .workspace_id
+                .clone()
+                .or(inherited_workspace)
+                .or_else(|| crate::runs::store::workspace_of_folder(&conn, &input.cwd));
+            validate_workspace(&conn, workspace_id.as_deref())?;
+            let now = crate::util::now_ts_ms();
+            let row = store::insert_thread_with_context(
+                &conn,
+                &id,
+                &input.agent_id,
+                &input.cwd,
+                &input.title,
+                &tuning,
+                account_id.as_deref(),
+                input.parent_ref.as_deref(),
+                workspace_id.as_deref(),
+                now,
+            )
+            .map_err(db_err)?;
+            (row, true)
+        }
     };
-    if let Some(pool) = pool_id {
+    if created {
+        let conn = db.lock().map_err(db_err)?;
+        if let Err(error) = crate::skills::reconcile_link_dir(&conn, &row.cwd, &row.agent_id) {
+            eprintln!(
+                "[skills] não consegui preparar as skills sempre ativas para a conversa {}: {error}",
+                row.id
+            );
+        }
+    }
+    if created && let Some(pool) = pool_id {
         super::pool::bind(db, &id, Some(&pool))?;
     }
-    Ok(row)
+    Ok(ChildThreadOutcome {
+        thread: row,
+        reused: !created,
+    })
+}
+
+fn validate_workspace(conn: &rusqlite::Connection, workspace_id: Option<&str>) -> Result<(), String> {
+    if let Some(workspace_id) = workspace_id {
+        let exists: bool = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM workspaces WHERE id = ?1 AND deleted_at IS NULL)",
+                [workspace_id],
+                |row| row.get(0),
+            )
+            .map_err(db_err)?;
+        if !exists {
+            return Err("O workspace desta conversa não existe mais".into());
+        }
+    }
+    Ok(())
+}
+
+/// Reclama o primeiro envio uma única vez. Um estado `submitting` persistido após reinício é
+/// tratado como incerto: a ADE não repete o prompt sem confirmação do provider.
+pub fn claim_child_delivery(
+    db: &DbConnection,
+    identity: &ChildRequestIdentity,
+) -> Result<ChildDeliveryClaim, String> {
+    let mut conn = db.lock().map_err(db_err)?;
+    let tx = conn
+        .transaction_with_behavior(TransactionBehavior::Immediate)
+        .map_err(db_err)?;
+    let receipt = store::child_chat_receipt(&tx, &identity.caller_key, &identity.request_id)
+        .map_err(db_err)?
+        .ok_or_else(|| "o recibo da conversa filha não foi encontrado".to_string())?;
+    if receipt.request_hash != identity.request_hash {
+        return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
+    }
+    let claimable = matches!(receipt.delivery_state.as_str(), "prepared" | "retryable");
+    if claimable {
+        let changed = store::transition_child_chat_receipt(
+            &tx,
+            &identity.caller_key,
+            &identity.request_id,
+            &[receipt.delivery_state.as_str()],
+            "submitting",
+            crate::util::now_ts_ms(),
+        )
+        .map_err(db_err)?;
+        if changed {
+            tx.commit().map_err(db_err)?;
+            return Ok(ChildDeliveryClaim::Claimed { thread_id: receipt.thread_id });
+        }
+    }
+    tx.commit().map_err(db_err)?;
+    Ok(ChildDeliveryClaim::AlreadyClaimed {
+        thread_id: receipt.thread_id,
+        state: receipt.delivery_state,
+    })
+}
+
+pub fn finish_child_delivery(
+    db: &DbConnection,
+    identity: &ChildRequestIdentity,
+    state: &str,
+) -> Result<(), String> {
+    if !matches!(state, "accepted" | "retryable" | "unknown") {
+        return Err("estado final do primeiro envio inválido".into());
+    }
+    let conn = db.lock().map_err(db_err)?;
+    let changed = store::transition_child_chat_receipt(
+        &conn,
+        &identity.caller_key,
+        &identity.request_id,
+        &["submitting"],
+        state,
+        crate::util::now_ts_ms(),
+    )
+    .map_err(db_err)?;
+    if !changed {
+        return Err("o estado do primeiro envio mudou antes de ser salvo".into());
+    }
+    Ok(())
+}
+
+/// Apaga somente uma conversa lateral ociosa; conversas normais e turnos em execução ficam protegidos.
+pub async fn delete_side_chat(db: &DbConnection, thread_id: &str) -> Result<(), String> {
+    // Serializa remoção e envio: uma mensagem que chegou primeiro termina antes da checagem; uma que
+    // chegar depois encontra a conversa já removida, sem iniciar processo órfão.
+    let gate = send_gate(thread_id);
+    let _held = gate.lock().await;
+    let row = thread(db, thread_id)?;
+    if !row.is_side_chat {
+        return Err("Só conversas laterais podem ser removidas por esta ação".into());
+    }
+    if status(thread_id).working {
+        return Err("Pare a conversa lateral antes de removê-la".into());
+    }
+    if !requests(db, thread_id)?.is_empty() {
+        return Err("Resolva os pedidos pendentes antes de remover a conversa lateral".into());
+    }
+    close(thread_id);
+    let conn = db.lock().map_err(db_err)?;
+    if !store::delete_side_chat(&conn, thread_id).map_err(db_err)? {
+        return Err(format!("Conversa lateral {thread_id} não encontrada"));
+    }
+    Ok(())
 }
 
 fn access_error(engine: Engine, access: &str) -> String {
-    match engine {
-        Engine::Claude | Engine::OpenCode | Engine::Antigravity => format!("Acesso inválido: {access} (ask, edits, safe, full ou plan)"),
-        Engine::Cursor => format!("Acesso inválido: {access} (ask, full ou plan)"),
-        Engine::Codex => format!("Acesso inválido: {access} (ask, edits, safe ou full)"),
-    }
+    let supported = engine.capabilities().access_modes.join(", ");
+    format!("Acesso inválido: {access} ({supported})")
 }
 
 /// Avisa a tela que a lista mudou (uma conversa criada fora dela, pela CLI).
@@ -227,8 +604,25 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
 async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
     let gate = send_gate(thread_id);
     let _held = gate.lock().await;
-    let row = thread(db, thread_id).map_err(SendError::NotSent)?;
+    let row = {
+        let conn = db.lock().map_err(|error| SendError::NotSent(db_err(error)))?;
+        let row = store::thread(&conn, thread_id)
+            .map_err(|error| SendError::NotSent(db_err(error)))?
+            .ok_or_else(|| SendError::NotSent(format!("Conversa {thread_id} não encontrada")))?;
+        crate::project_chat_policy::ensure_agent_enabled(&conn, &row.cwd, &row.agent_id)
+            .map_err(SendError::NotSent)?;
+        row
+    };
     let engine = engine_of(&row).map_err(SendError::NotSent)?;
+    if crate::local_acp::is_local_acp_id(&row.agent_id) {
+        let exists = crate::local_acp::contains(db, &row.agent_id).map_err(SendError::NotSent)?;
+        if !exists {
+            return Err(SendError::NotSent("O agente ACP local não está mais cadastrado".into()));
+        }
+        if row.access != "ask" || row.account_id.is_some() {
+            return Err(SendError::NotSent("A conversa ACP local aceita somente Supervisionado e não usa conta da ADE".into()));
+        }
+    }
     if !admits(mode, status(thread_id).working) {
         return Err(SendError::Busy);
     }
@@ -307,9 +701,321 @@ pub fn items(db: &DbConnection, thread_id: &str) -> Result<Vec<Item>, String> {
     store::items(&conn, thread_id).map_err(db_err)
 }
 
+/// Busca prefixos de palavras nas falas locais. A entrada vira termos FTS entre aspas para não
+/// permitir que operadores digitados alterem a consulta.
+pub fn search_messages(db: &DbConnection, query: &str, limit: usize) -> Result<Vec<MessageSearchHit>, String> {
+    let query: String = query.trim().chars().take(160).collect();
+    if query.chars().count() < 2 {
+        return Ok(Vec::new());
+    }
+    let fts = query.split_whitespace()
+        .filter(|term| term.chars().any(char::is_alphanumeric))
+        .map(|term| format!("\"{}\"*", term.replace('\"', "\"\"")))
+        .collect::<Vec<_>>().join(" AND ");
+    if fts.is_empty() {
+        return Ok(Vec::new());
+    }
+    let conn = db.lock().map_err(db_err)?;
+    store::search_messages(&conn, &fts, &query, limit).map_err(db_err)
+}
+
 pub fn requests(db: &DbConnection, thread_id: &str) -> Result<Vec<RequestRow>, String> {
     let conn = db.lock().map_err(db_err)?;
     store::pending_requests(&conn, thread_id).map_err(db_err)
+}
+
+/// Esquece o contexto do provedor sem apagar o histórico local da ADE. A próxima mensagem abre uma sessão nova.
+pub async fn clear_context(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+) -> Result<(), String> {
+    let gate = send_gate(thread_id);
+    let _held = gate.lock().await;
+    if status(thread_id).working {
+        return Err("Espere o turno terminar antes de limpar o contexto".into());
+    }
+
+    let mut conn = db.lock().map_err(db_err)?;
+    store::thread(&conn, thread_id)
+        .map_err(db_err)?
+        .ok_or_else(|| format!("Conversa {thread_id} não encontrada"))?;
+    if !store::pending_requests(&conn, thread_id)
+        .map_err(db_err)?
+        .is_empty()
+    {
+        return Err("Resolva os pedidos pendentes antes de limpar o contexto".into());
+    }
+
+    // ID remoto e objetivo descrevem o estado da sessão do provedor. Atualize-os juntos; a timeline ADE é preservada.
+    let tx = conn.transaction().map_err(db_err)?;
+    store::clear_remote_id(&tx, thread_id).map_err(db_err)?;
+    store::clear_goal(&tx, thread_id).map_err(db_err)?;
+    tx.commit().map_err(db_err)?;
+    drop(conn);
+
+    close(thread_id);
+    super::events::emit(app, thread_id, "goal", json!({ "goal": null }));
+    super::turn::save_notice(app, db, thread_id, "contextCleared", "");
+    Ok(())
+}
+
+/// O objetivo local da conversa. Os eventos nativos do Codex mantêm status e conclusão sincronizados.
+pub fn thread_goal(db: &DbConnection, thread_id: &str) -> Result<Option<store::ThreadGoal>, String> {
+    let conn = db.lock().map_err(db_err)?;
+    store::goal(&conn, thread_id).map_err(db_err)
+}
+
+/// Compacta o histórico no motor, sem enviar `/compact` como texto comum ao Codex.
+pub async fn compact_context(app: &AppHandle, db: &DbConnection, thread_id: &str, instructions: Option<&str>) -> Result<(), String> {
+    compact_context_inner(app, db, thread_id, instructions, false).await
+}
+
+async fn compact_context_inner(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    instructions: Option<&str>,
+    automatic: bool,
+) -> Result<(), String> {
+    if status(thread_id).working {
+        return Err("Espere o turno terminar antes de compactar o contexto".into());
+    }
+    {
+        let conn = db.lock().map_err(db_err)?;
+        if !store::pending_requests(&conn, thread_id).map_err(db_err)?.is_empty() {
+            return Err("Resolva os pedidos pendentes antes de compactar o contexto".into());
+        }
+    }
+    let instructions = instructions.map(str::trim).filter(|text| !text.is_empty());
+    if instructions.is_some_and(|text| text.chars().count() > 10_000) {
+        return Err("As instruções de compactação podem ter no máximo 10.000 caracteres".into());
+    }
+    let row = thread(db, thread_id)?;
+    let engine = engine_of(&row)?;
+    if !engine.capabilities().context_compaction {
+        return Err("A compactação pelo ADE está disponível nas conversas Codex e Claude Code".into());
+    }
+    match engine {
+        Engine::Codex => {
+            if instructions.is_some() {
+                return Err("O app-server do Codex não aceita instruções personalizadas para compactar".into());
+            }
+            let session = codex::session(app, db, thread_id).await?;
+            let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
+            session.request("thread/compact/start", json!({ "threadId": remote })).await?;
+            Ok(())
+        }
+        Engine::Claude => {
+            let command = instructions.map_or_else(|| "/compact".to_string(), |text| format!("/compact {text}"));
+            if automatic {
+                let gate = send_gate(thread_id);
+                let _held = gate.lock().await;
+                if status(thread_id).working {
+                    return Err("Um turno começou antes da compactação automática".into());
+                }
+                {
+                    let conn = db.lock().map_err(db_err)?;
+                    if !store::pending_requests(&conn, thread_id).map_err(db_err)?.is_empty() {
+                        return Err("Há uma aprovação pendente antes da compactação automática".into());
+                    }
+                }
+                let session = claude::session(app, db, thread_id).await?;
+                return claude::send_auto_compact(app, db, &session);
+            }
+            send_mode(app, db, thread_id, &command, SendMode::SteerActive, &[]).await.map_err(String::from)
+        }
+        _ => unreachable!("capacidade de compactação sem implementação para {engine:?}"),
+    }
+}
+
+/// Compacta uma conversa Claude quando ela volta à tela, somente se a pessoa habilitou o modo no
+/// perfil, o último contexto passou do limite e não há turno nem aprovação pendente.
+pub async fn auto_compact_on_return(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<bool, String> {
+    const MODES_SETTING: &str = "chat.claude_idle_compaction_modes";
+    const DEFAULT_THRESHOLD: u64 = 200_000;
+
+    // O mesmo gate dos envios evita duas montagens React/StrictMode decidirem compactar juntas.
+    let gate = send_gate(thread_id);
+    let held = gate.lock().await;
+    let row = thread(db, thread_id)?;
+    let engine = engine_of(&row)?;
+    if !engine.capabilities().automatic_compaction || row.state != "active" {
+        return Ok(false);
+    }
+    let account = row.account_id.as_deref().unwrap_or("system:claude-code");
+    let modes = crate::database::get_setting(db, MODES_SETTING)?.and_then(|raw| serde_json::from_str::<HashMap<String, String>>(&raw).ok()).unwrap_or_default();
+    if modes.get(account).map(String::as_str) != Some("onReturn") || status(thread_id).working {
+        return Ok(false);
+    }
+
+    let threshold = claude::auto_compact_window(db, &row).map(u64::from).unwrap_or(DEFAULT_THRESHOLD);
+    let mut usage_item = {
+        let conn = db.lock().map_err(db_err)?;
+        if !store::pending_requests(&conn, thread_id).map_err(db_err)?.is_empty() {
+            return Ok(false);
+        }
+        let tail = store::tail_items(&conn, thread_id, 128).map_err(db_err)?;
+        let Some(item) = tail.into_iter().rev().find(|item| item.kind == ItemKind::Usage) else {
+            return Ok(false);
+        };
+        if item.auto_compact_attempted == Some(true) || item.context_tokens.is_none_or(|tokens| tokens < threshold) {
+            return Ok(false);
+        }
+        item
+    };
+
+    // A tentativa fica junto ao item de uso, na tabela de timeline já existente (sem schema novo).
+    usage_item.auto_compact_attempted = Some(true);
+    {
+        let conn = db.lock().map_err(db_err)?;
+        store::upsert_item(&conn, thread_id, None, &usage_item).map_err(db_err)?;
+    }
+    super::events::emit(app, thread_id, "item", json!({ "item": usage_item }));
+    drop(held);
+
+    match compact_context_inner(app, db, thread_id, None, true).await {
+        Ok(()) => {
+            super::turn::save_notice(
+                app,
+                db,
+                thread_id,
+                "autoCompact",
+                "O contexto passou do limite configurado para este perfil Claude Code.",
+            );
+            Ok(true)
+        }
+        Err(error) => {
+            // Se o turno começou na janela entre a checagem e o envio, deixe a próxima abertura tentar novamente.
+            usage_item.auto_compact_attempted = None;
+            if let Ok(conn) = db.lock() {
+                let _ = store::upsert_item(&conn, thread_id, None, &usage_item);
+            }
+            super::events::emit(app, thread_id, "item", json!({ "item": usage_item }));
+            Err(error)
+        }
+    }
+}
+
+/// Executa `/goal` na conversa. Codex usa a API persistente do app-server; Claude Code recebe seu
+/// comando nativo e o ADE mantém um espelho local para mostrar o objetivo entre turnos.
+pub async fn thread_goal_action(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    action: &str,
+    objective: Option<&str>,
+) -> Result<Option<store::ThreadGoal>, String> {
+    let row = thread(db, thread_id)?;
+    let engine = engine_of(&row)?;
+    let capabilities = engine.capabilities();
+    if !capabilities.persistent_goal {
+        return Err("Objetivos persistentes estão disponíveis nas conversas Codex e Claude Code".into());
+    }
+    let saved = thread_goal(db, thread_id)?;
+    if action == "show" {
+        return Ok(saved);
+    }
+    if action == "pause" || action == "resume" {
+        if !capabilities.goal_pause_resume {
+            return Err("Pausar e retomar objetivos está disponível no Codex; no Claude Code, use /goal clear para remover".into());
+        }
+        let current = saved.ok_or("Não há objetivo definido nesta conversa")?;
+        if action == "pause" {
+            if status(thread_id).working {
+                stop(app, db, thread_id).await?;
+            }
+            let session = codex::session(app, db, thread_id).await?;
+            let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
+            session.request("thread/goal/set", json!({ "threadId": remote, "status": "paused" })).await?;
+            let conn = db.lock().map_err(db_err)?;
+            let goal = store::set_goal_status(&conn, thread_id, "paused", crate::util::now_ts_ms()).map_err(db_err)?;
+            return Ok(goal);
+        }
+        if status(thread_id).working {
+            return Err("Espere o turno terminar antes de retomar o objetivo".into());
+        }
+        return start_codex_goal(app, db, thread_id, &current.objective, false).await;
+    }
+    if action == "clear" {
+        if status(thread_id).working {
+            return Err("Espere o turno terminar antes de limpar o objetivo".into());
+        }
+        match engine {
+            Engine::Codex => {
+                let session = codex::session(app, db, thread_id).await?;
+                let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
+                session.request("thread/goal/clear", json!({ "threadId": remote })).await?;
+            }
+            Engine::Claude => {
+                send_mode(app, db, thread_id, "/goal clear", SendMode::SteerActive, &[]).await.map_err(String::from)?;
+            }
+            _ => unreachable!(),
+        }
+        let conn = db.lock().map_err(db_err)?;
+        store::clear_goal(&conn, thread_id).map_err(db_err)?;
+        return Ok(None);
+    }
+    if action != "set" {
+        return Err("Ação de objetivo desconhecida".into());
+    }
+    let objective = objective.unwrap_or_default().trim();
+    if objective.is_empty() || objective.chars().count() > 10_000 {
+        return Err("Informe um objetivo entre 1 e 10.000 caracteres".into());
+    }
+    if status(thread_id).working {
+        return Err("Espere o turno terminar antes de definir outro objetivo".into());
+    }
+    match engine {
+        Engine::Codex => start_codex_goal(app, db, thread_id, objective, true).await,
+        Engine::Claude => {
+            let previous = thread_goal(db, thread_id)?;
+            {
+                let conn = db.lock().map_err(db_err)?;
+                store::set_goal(&conn, thread_id, objective, "active", crate::util::now_ts_ms()).map_err(db_err)?;
+            }
+            if let Err(error) = send_mode(app, db, thread_id, &format!("/goal {objective}"), SendMode::SteerActive, &[]).await {
+                let conn = db.lock().map_err(db_err)?;
+                match previous {
+                    Some(previous) => {
+                        store::set_goal(&conn, thread_id, &previous.objective, &previous.status, crate::util::now_ts_ms()).map_err(db_err)?;
+                    }
+                    None => { store::clear_goal(&conn, thread_id).map_err(db_err)?; }
+                }
+                return Err(String::from(error));
+            }
+            thread_goal(db, thread_id)
+        }
+        _ => unreachable!(),
+    }
+}
+
+async fn start_codex_goal(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    objective: &str,
+    replace: bool,
+) -> Result<Option<store::ThreadGoal>, String> {
+    let session = codex::session(app, db, thread_id).await?;
+    let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
+    if replace {
+        let _ = session.request("thread/goal/clear", json!({ "threadId": remote })).await;
+    }
+    session.request("thread/goal/set", json!({ "threadId": remote, "objective": objective, "status": "paused" })).await?;
+    {
+        let conn = db.lock().map_err(db_err)?;
+        store::set_goal(&conn, thread_id, objective, "paused", crate::util::now_ts_ms()).map_err(db_err)?;
+    }
+    let prompt = if replace { format!("Start working toward this goal: {objective}") } else { format!("Continue working toward this goal: {objective}") };
+    if let Err(error) = send_mode(app, db, thread_id, &prompt, SendMode::SteerActive, &[]).await {
+        let _ = session.request("thread/goal/set", json!({ "threadId": remote, "status": "paused" })).await;
+        return Err(String::from(error));
+    }
+    let response = session.request("thread/goal/set", json!({ "threadId": remote, "status": "active" })).await?;
+    let status = response.pointer("/goal/status").and_then(Value::as_str).unwrap_or("active");
+    let conn = db.lock().map_err(db_err)?;
+    store::set_goal(&conn, thread_id, objective, status, crate::util::now_ts_ms()).map(Some).map_err(db_err)
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -453,6 +1159,9 @@ pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort:
     let conn = db.lock().map_err(db_err)?;
     let before = store::thread(&conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
     let engine = engine_of(&before)?;
+    if crate::local_acp::is_local_acp_id(&before.agent_id) && access != "ask" {
+        return Err("Agentes ACP locais aceitam somente Supervisionado".into());
+    }
     if !engine.accepts(&access) {
         return Err(access_error(engine, &access));
     }

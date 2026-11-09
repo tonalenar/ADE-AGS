@@ -54,7 +54,10 @@ export function SelectionComment({ container, quoteKey }: { container: () => Ele
   const submit = () => {
     const text = comment.trim();
     if (!text) return;
-    addQuoteFor(quoteKey, { text: target.text, comment: text });
+    const quoted = target.source
+      ? `${t("chat.quote.source", { source: target.source })}\n${target.text}`
+      : target.text;
+    addQuoteFor(quoteKey, { text: quoted, comment: text, originItemId: target.originItemId });
     window.getSelection()?.removeAllRanges();
     close();
     // O foco volta ao campo de mensagem, onde o cartão acabou de aparecer.

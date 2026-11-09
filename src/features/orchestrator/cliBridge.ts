@@ -16,7 +16,7 @@ import { parseReview, useAskStore } from "@/features/ask/askStore";
 import { getAutonomy } from "@/features/missions/autonomy";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
-import { openThread, reloadThreads } from "@/features/chat/structured/store";
+import { openThread, reloadThreads, useStructured } from "@/features/chat/structured/store";
 import { openDesignInPanel } from "@/features/chat/store";
 import { openChatTerminal } from "@/features/chat/shellTerminal";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
@@ -175,8 +175,8 @@ async function handlePtyId(args: Record<string, unknown>): Promise<unknown> {
 }
 
 /**
- * Quién hace el pedido, con el nombre que la interfaz ya le da: la tab del agente o la
- * tarjeta de la flota. El backend manda el id; el nombre vive acá, que es donde está.
+ * Quem faz o pedido: tab TUI, conversa estruturada ou tarefa da frota. O backend manda o
+ * identificador; nomes legíveis ficam no estado da interface.
  *
  * Sin dueño (un `ags mcp` viejo, sin `--tab`) el agente comparte el navegador del
  * usuario, como hasta ahora: es peor, pero sigue andando.
@@ -187,6 +187,12 @@ function ownerOf(args: Record<string, unknown>): ViewOwner | null {
   if (owner.kind === "task") {
     const task = useRunsStore.getState().tasks.find((t) => t.id === owner.id);
     return { kind: "task", id: owner.id, label: task?.title ?? owner.id };
+  }
+  // Conversas estruturadas compartilham o transporte `--tab`, com uma chave `thread:<id>`.
+  // Não são tabs TUI: manter essa identidade é o que vincula seu navegador ao painel correto.
+  if (owner.id.startsWith("thread:")) {
+    const thread = useStructured.getState().threads.find((t) => `thread:${t.id}` === owner.id);
+    return thread ? { kind: "thread", id: owner.id, label: thread.title || thread.agentId } : null;
   }
   const tab = useTabsStore.getState().tabs.find((t) => t.id === owner.id);
   if (!tab) return null;
@@ -262,6 +268,47 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
     throw new Error("O usuário não respondeu: siga com o que puder decidir sozinho, ou deixe anotado no seu resultado.");
   }
   return { text: answer };
+}
+
+/** Pedido de segredo fora do transcript: o valor volta só ao backend para ser salvo no cofre. */
+async function handleSecretRequest(args: Record<string, unknown>): Promise<unknown> {
+  const label = str(args, "label");
+  if (!label) throw new Error("Falta identificar o segredo");
+  const owner = ownerOf(args);
+  if (!owner || owner.kind === "task") throw new Error("Segredos só podem ser pedidos por uma conversa interativa");
+  const timeoutMs = (typeof args.timeout_s === "number" ? args.timeout_s : 600) * 1000;
+  const description = str(args, "description");
+  const question = description ? `${label}\n\n${description}` : label;
+
+  const secret = await new Promise<string | null | typeof ASK_PENDING>((resolve) => {
+    const id = crypto.randomUUID();
+    let done = false;
+    const once = (value: string | null | typeof ASK_PENDING) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(value);
+    };
+    const timer = setTimeout(() => {
+      useAskStore.getState().drop(id);
+      once(ASK_PENDING);
+    }, timeoutMs);
+    useAskStore.getState().add({
+      id,
+      question,
+      options: [],
+      placeholder: i18n.t("ask.secret.placeholder"),
+      from: owner.label,
+      fromId: owner.id,
+      expiresAt: Date.now() + timeoutMs,
+      secret: true,
+      resolve: once,
+    });
+  });
+
+  if (secret === ASK_PENDING) return { status: "pending" };
+  if (secret === null) throw new Error("O pedido de segredo foi recusado");
+  return { secret };
 }
 
 /** El canvas donde vive la tab `tabId`: el de su misión o el de su carpeta. */
@@ -477,6 +524,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "tab.ptyId": return handlePtyId(args);
     case "browser.run": return handleBrowser(args);
     case "user.ask": return handleAsk(args);
+    case "user.secret": return handleSecretRequest(args);
     case "tab.screen": return handleScreen(args);
     case "canvas.connect": return handleCanvas(args, (key, a, b) => canvasActions.connect(key, a, b));
     case "canvas.disconnect": return handleCanvas(args, (key, a, b) => canvasActions.disconnectPair(key, a, b));

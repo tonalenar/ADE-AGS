@@ -52,6 +52,8 @@ pub struct Applied {
     pub strategy: Strategy,
     pub from_agent: String,
     pub to_agent: String,
+    pub from_label: Option<String>,
+    pub to_label: Option<String>,
     /// O acesso pedido não existe no agente novo (o Plano no Codex) e virou Supervisionado.
     pub access_changed: bool,
     /// O agente novo não tem tela de aprovação (o Antigravity em `-p`) e o acesso é Supervisionado: ele nega o que
@@ -74,7 +76,14 @@ pub fn apply_switch(conn: &Connection, thread_id: &str, new: &Switch, now: i64) 
     if !store::pending_requests(conn, thread_id).map_err(db_err)?.is_empty() {
         return Err("Responda ao pedido do agente antes de trocar de agente.".into());
     }
-    let (access, access_changed) = if engine.accepts(&new.access) { (new.access.clone(), false) } else { ("ask".to_string(), true) };
+    let local_acp = crate::local_acp::is_local_acp_id(&new.agent_id);
+    let (access, access_changed) = if local_acp {
+        ("ask".to_string(), new.access != "ask")
+    } else if engine.accepts(&new.access) {
+        (new.access.clone(), false)
+    } else {
+        ("ask".to_string(), true)
+    };
 
     conn.execute(
         "INSERT INTO chat_thread_native (thread_id, agent_id, account_id, remote_id, until_ms) VALUES (?1, ?2, ?3, ?4, ?5)
@@ -98,19 +107,30 @@ pub fn apply_switch(conn: &Connection, thread_id: &str, new: &Switch, now: i64) 
 
     conn.execute(
         "UPDATE chat_thread SET agent_id = ?2, remote_id = ?3, model = ?4, effort = ?5, access = ?6, account_id = ?7, memory = NULL, updated_at = ?8 WHERE id = ?1",
-        params![thread_id, new.agent_id, remote, new.model, new.effort, access, new.account_id, now],
+        params![thread_id, new.agent_id, remote, if local_acp { None } else { new.model.as_deref() }, if local_acp { None } else { new.effort.as_deref() }, access, if local_acp { None } else { new.account_id.as_deref() }, now],
     )
     .map_err(db_err)?;
     let updated = store::thread(conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
-    let no_approval = matches!(new.agent_id.as_str(), "antigravity" | "cursor") && access == "ask";
-    Ok(Applied { row: updated, strategy, from_agent: row.agent_id, to_agent: new.agent_id.clone(), access_changed, no_approval })
+    let no_approval = (matches!(new.agent_id.as_str(), "antigravity" | "cursor") || local_acp) && access == "ask";
+    Ok(Applied { row: updated, strategy, from_agent: row.agent_id, to_agent: new.agent_id.clone(), from_label: None, to_label: None, access_changed, no_approval })
 }
 
 /// O time acompanha a troca: o agente do integrante (ou do orquestrador) e o nome dele, no formato `Agente · Papel`,
 /// onde só a parte do agente muda. Devolve os times alterados (a tela os relê).
-pub fn switch_team_member(conn: &Connection, thread_ref: &str, from_agent: &str, to_agent: &str, now: i64) -> Result<Vec<String>, String> {
+pub fn switch_team_member(
+    conn: &Connection,
+    thread_ref: &str,
+    from_agent: &str,
+    to_agent: &str,
+    from_label_override: Option<&str>,
+    to_label_override: Option<&str>,
+    now: i64,
+) -> Result<Vec<String>, String> {
     let label_of = |id: &str| crate::agents::agent_def(id).map(|d| d.label.to_string()).unwrap_or_else(|| id.to_string());
-    let (from_label, to_label) = (label_of(from_agent), label_of(to_agent));
+    let (from_label, to_label) = (
+        from_label_override.map(str::to_owned).unwrap_or_else(|| label_of(from_agent)),
+        to_label_override.map(str::to_owned).unwrap_or_else(|| label_of(to_agent)),
+    );
     let mut changed: Vec<String> = Vec::new();
     // Orquestrador: o rótulo do time é o nome do agente.
     let mut stmt = conn.prepare("SELECT id, label FROM chat_team WHERE orchestrator = ?1").map_err(db_err)?;
@@ -145,8 +165,8 @@ struct Pending {
 
 fn pending_of(applied: &Applied) -> Pending {
     Pending {
-        from_label: label_of(&applied.from_agent),
-        to_label: label_of(&applied.to_agent),
+        from_label: applied.from_label.clone().unwrap_or_else(|| label_of(&applied.from_agent)),
+        to_label: applied.to_label.clone().unwrap_or_else(|| label_of(&applied.to_agent)),
         since_ms: match applied.strategy { Strategy::Full => None, Strategy::Delta { since_ms } => Some(since_ms) },
     }
 }
@@ -210,11 +230,13 @@ fn label_of(agent_id: &str) -> String {
 
 /// O aviso na timeline: o código `agentSwitch` e, no texto, o JSON que a tela traduz («agora com Codex»).
 pub fn notice_text(applied: &Applied) -> String {
+    let from_label = applied.from_label.clone().unwrap_or_else(|| label_of(&applied.from_agent));
+    let to_label = applied.to_label.clone().unwrap_or_else(|| label_of(&applied.to_agent));
     json!({
         "from": applied.from_agent,
         "to": applied.to_agent,
-        "fromLabel": label_of(&applied.from_agent),
-        "toLabel": label_of(&applied.to_agent),
+        "fromLabel": from_label,
+        "toLabel": to_label,
         "model": applied.row.model,
         "strategy": if matches!(applied.strategy, Strategy::Full) { "full" } else { "delta" },
         "accessChanged": applied.access_changed,
@@ -227,11 +249,29 @@ pub async fn switch_agent(app: &AppHandle, db: &DbConnection, thread_id: &str, n
     if api::status(thread_id).working {
         return Err("Espere o agente terminar o turno para trocar de agente.".into());
     }
+    let local_labels: std::collections::HashMap<String, String> = crate::local_acp::list(db)?
+        .into_iter().map(|provider| (provider.id, provider.label)).collect();
+    if crate::local_acp::is_local_acp_id(&new.agent_id) && !local_labels.contains_key(&new.agent_id) {
+        return Err("Este agente ACP local não está mais cadastrado".into());
+    }
     let now = crate::util::now_ts_ms();
     let (applied, teams) = {
         let conn = db.lock().map_err(db_err)?;
-        let applied = apply_switch(&conn, thread_id, &new, now)?;
-        let teams = switch_team_member(&conn, &format!("thread:{thread_id}"), &applied.from_agent, &applied.to_agent, now).unwrap_or_default();
+        let current = store::thread(&conn, thread_id).map_err(db_err)?
+            .ok_or("Conversa não encontrada")?;
+        crate::project_chat_policy::ensure_agent_enabled(&conn, &current.cwd, &new.agent_id)?;
+        let mut applied = apply_switch(&conn, thread_id, &new, now)?;
+        applied.from_label = local_labels.get(&applied.from_agent).cloned();
+        applied.to_label = local_labels.get(&applied.to_agent).cloned();
+        let teams = switch_team_member(
+            &conn,
+            &format!("thread:{thread_id}"),
+            &applied.from_agent,
+            &applied.to_agent,
+            applied.from_label.as_deref(),
+            applied.to_label.as_deref(),
+            now,
+        ).unwrap_or_default();
         (applied, teams)
     };
     // O processo do agente de antes fecha; o novo sobe na primeira mensagem (como numa conversa nova).

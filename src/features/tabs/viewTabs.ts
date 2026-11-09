@@ -45,8 +45,8 @@ export interface DiffView extends ViewBase {
 
 /** El agente que abrió un navegador y lo está manejando. */
 export interface ViewOwner {
-  /** Una tab de agente de esta ventana, o una tarea de la flota. */
-  kind: "tab" | "task";
+  /** Uma tab TUI, uma conversa estruturada do chat ou uma tarefa da frota. */
+  kind: "tab" | "thread" | "task";
   id: string;
   /** Cómo llamarlo en la interfaz. */
   label: string;
@@ -69,6 +69,8 @@ export interface BrowserView extends ViewBase {
   /** Mostra um Chrome de verdade (perfil próprio do app) em vez da página pelo proxy: é onde
    *  dá para entrar em sites que recusam navegador embutido, como a conta Google. Protótipo. */
   realChrome?: boolean;
+  /** Perfil local do navegador nativo. O id aponta para uma pasta de dados isolada do WebView2. */
+  browserProfileId?: string;
 }
 
 export interface DesktopAppView extends ViewBase {

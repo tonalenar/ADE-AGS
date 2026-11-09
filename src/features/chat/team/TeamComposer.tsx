@@ -5,9 +5,9 @@ import type { Attachment } from "../attachments/attachModel";
 import { messageFor } from "../attachments/send";
 import type { ConversationCard } from "../chatModel";
 import type { TeamPolicy, TeamView } from "./ipc";
-import { AgentMono, useRoleLabel } from "./TeamParts";
+import { useRoleLabel } from "./TeamParts";
 import {
-  applyMention, mentionOptions, mentionQuery, mentionSlug, rosterNotice, rosterSignature, routeMessage, teamLedBy,
+  mentionSlug, rosterNotice, rosterSignature, routeMessage, teamLedBy,
   type ComposerTarget, type MentionOption,
 } from "./teamModel";
 import type { TimelineItem } from "../timeline/types";
@@ -52,6 +52,8 @@ export interface TeamComposer {
   controls: React.ReactNode;
   /** O erro do último envio direto (@): a conversa que a pessoa está olhando o mostra. */
   error: string | null;
+  /** Os nomes dos integrantes para a paleta unificada `@` do composer. */
+  mentions: MentionOption[];
   /**
    * Prepara o envio: `null` = já foi direto a um integrante (pelo @), com a bolha pendente na conversa de `where`;
    * senão o texto a mandar ao orquestrador pelo caminho de sempre da conversa (com o resumo do time quando ele
@@ -107,43 +109,7 @@ export function useTeamComposer(conversation: ConversationCard | null, cards: Co
       : t("chat.team.placeholder", { agent: first ? mentionSlug(first.agentId) : "codex" }),
     controls: <TeamTargetSwitch orchestrator={conversation.tabId} />,
     error,
+    mentions: options,
     prepare,
   };
-}
-
-/**
- * O menu do @agente, acima da caixa do composer: aparece enquanto se escreve `@algo` e troca pelo
- * apelido do integrante escolhido. `apply` recebe o texto e o cursor novos.
- */
-export function TeamMentionMenu({ conversation, cards, text, caret, apply }: {
-  conversation: ConversationCard | null;
-  cards: ConversationCard[];
-  text: string;
-  caret: number;
-  apply: (text: string, caret: number) => void;
-}) {
-  const { t } = useTranslation();
-  const roleLabel = useRoleLabel();
-  const team = useTeamStore((s) => teamLedBy(s.teams, conversation?.tabId));
-  const options = useMentionOptions(team, cards);
-  const found = mentionQuery(text, caret);
-  if (!team || !found) return null;
-  const hits = mentionOptions(options, found.query);
-  if (hits.length === 0) return null;
-  return (
-    <div role="listbox" aria-label={t("chat.team.mention.label")}
-      className="mx-3 mt-2 p-1 rounded-lg text-chat-note bg-white/95 dark:bg-surface-raised/95 shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_8px_24px_-12px_rgba(0,0,0,0.45)]">
-      {hits.map((o) => (
-        <button key={o.ref} type="button" role="option" aria-selected={false}
-          onMouseDown={(e) => { e.preventDefault(); const next = applyMention(text, caret, o.name); apply(next.text, next.caret); }}
-          className="w-full flex items-center gap-2 h-7 px-2 rounded text-left text-gray-800 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07]">
-          <AgentMono agentId={o.agentId} label={o.name} size={16} />
-          <span className="truncate">{o.name}</span>
-          <span className="text-gray-400 dark:text-white/35">@{mentionSlug(o.name)}</span>
-          <span className="flex-1" />
-          <span className="text-[11px] text-gray-500 dark:text-white/45">{roleLabel(o.role)}</span>
-        </button>
-      ))}
-    </div>
-  );
 }

@@ -129,7 +129,8 @@ struct TaskEventPayload {
     event: AgentEvent,
 }
 
-fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
+fn emit_event(app: &AppHandle, db: &DbConnection, task_id: &str, attempt_id: &str, event: AgentEvent) {
+    super::execution_log::queue_fleet_event(app, db.clone(), task_id.to_string(), attempt_id.to_string(), event.clone());
     if let Some(data) = activity_data(&event) {
         crate::bus::publish(Some(app), crate::bus::Publish::new("task.activity").task(task_id).data(data));
     }
@@ -183,14 +184,15 @@ fn write_mcp_config(app: &AppHandle, task_id: &str) -> Option<PathBuf> {
     crate::ipc::mcp::write_config(app, task_id, &["mcp", "--task", task_id])
 }
 
-/// Dónde va el NDJSON crudo de una tarea.
-fn events_path_for(run_id: &str, task_id: &str) -> Result<PathBuf, String> {
+/// Onde fica o NDJSON cru de uma tentativa. O identificador exclusivo evita sobrescrever
+/// o histórico quando a mesma task é repetida ou roteada para outro agente.
+fn events_path_for(run_id: &str, task_id: &str, attempt_id: &str) -> Result<PathBuf, String> {
     let dir = crate::util::datadir::ags_home()
         .ok_or_else(|| "não foi possível localizar a pasta do usuário".to_string())?
         .join("runs")
         .join(run_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join(format!("{task_id}.jsonl")))
+    Ok(dir.join(format!("{task_id}-{attempt_id}.jsonl")))
 }
 
 /// Lo que un lanzamiento lleva además de la tarea, según el papel que cumple en su run.
@@ -243,7 +245,8 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // El id de sesión lo decide la app ANTES de lanzar: así la fila ya sabe a qué sesión
     // mirar, y reabrir la tarea como tab con `--resume` no depende de descubrir nada.
     let session_id = Uuid::new_v4().to_string();
-    let events_path = events_path_for(&task.run_id, &task.id)?;
+    let attempt_id = Uuid::new_v4().to_string();
+    let events_path = events_path_for(&task.run_id, &task.id, &attempt_id)?;
 
     // La cuenta se resuelve justo antes de lanzar, no al crear la tarea: si dejó de
     // existir, se aborta en vez de caer a la cuenta del sistema — que es lo mismo que hace
@@ -348,11 +351,46 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         }
     }
     group.adopt(&child);
+    let marked_running = match db.lock() {
+        Ok(conn) => store::mark_running(&conn, &task.id, &attempt_id, &session_id, &events_path.to_string_lossy()),
+        Err(error) => Err(error.to_string()),
+    };
+    match marked_running {
+        Ok(true) => {}
+        Ok(false) => {
+            // `task_cancel` pode marcar a tarefa enquanto o processo ainda está sendo criado.
+            // Não deixe esse processo sobreviver a uma tarefa que já saiu de `ready`.
+            group.kill_all();
+            return Ok(());
+        }
+        Err(error) => {
+            group.kill_all();
+            return Err(error);
+        }
+    }
     live().insert(task.id.clone(), group);
 
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        store::mark_running(&conn, &task.id, &session_id, &events_path.to_string_lossy())?;
+    // Fecha a janela entre a gravação de `running` e o registro do grupo vivo: se o
+    // cancelamento ganhou essa corrida, ele pode não ter encontrado o processo no mapa.
+    let still_running = match db.lock() {
+        Ok(conn) => store::task_by_id(&conn, &task.id)
+            .map(|task| task.is_some_and(|current| current.status == status::RUNNING)),
+        Err(error) => Err(error.to_string()),
+    };
+    match still_running {
+        Ok(true) => {}
+        Ok(false) => {
+            if let Some(mut group) = live().remove(&task.id) {
+                group.kill_all();
+            }
+            return Ok(());
+        }
+        Err(error) => {
+            if let Some(mut group) = live().remove(&task.id) {
+                group.kill_all();
+            }
+            return Err(error);
+        }
     }
     emit_changed(app, &task.id);
 
@@ -366,6 +404,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // terminar se le pregunta a su `app-server`, con el mismo entorno de la cuenta.
     let codex_account_env = (task.agent_id == "codex").then(|| launch.env.clone());
     let imposed_session = session_id.clone();
+    let event_attempt_id = attempt_id.clone();
 
     tokio::spawn(async move {
         // Keep the isolated config alive until the owned process has exited.
@@ -429,13 +468,13 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
                             if let Ok(conn) = db.lock() {
                                 let _ = store::set_session_id(&conn, &task_id, real);
                             }
-                            emit_event(&app, &task_id, event);
+                            emit_event(&app, &db, &task_id, &event_attempt_id, event);
                         }
                         AgentEvent::Finished { ref outcome } => {
                             emitted = Some(outcome.clone());
-                            emit_event(&app, &task_id, event);
+                            emit_event(&app, &db, &task_id, &event_attempt_id, event);
                         }
-                        event => emit_event(&app, &task_id, event),
+                        event => emit_event(&app, &db, &task_id, &event_attempt_id, event),
                     }
                 }
             }
@@ -471,9 +510,12 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         }
         if let Ok(conn) = db.lock() {
             let _ = store::finish_task(&conn, &task_id, &outcome);
+            if let Err(error) = super::execution_log::record_fleet_final(&conn, &task_id, &event_attempt_id, &outcome) {
+                eprintln!("[harness] não foi possível persistir o desfecho do worker: {error}");
+            }
         }
         if task_snapshot.role.as_deref()==Some(super::types::role::DREAMER) {crate::memory::notify_changed(&app);}
-        emit_event(&app, &task_id, AgentEvent::Finished { outcome });
+        emit_event(&app, &db, &task_id, &event_attempt_id, AgentEvent::Finished { outcome });
         emit_changed(&app, &task_id);
 
         if let Some(env) = codex_account_env {
@@ -492,6 +534,66 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
 /// Cancela una tarea en curso: marca la fila y mata el proceso con toda su descendencia.
 pub fn cancel(app: &AppHandle, task_id: &str) -> Result<(), String> {
     stop(app, task_id, status::CANCELLED)
+}
+
+/// Cancela várias tarefas de uma só vez antes de liberar o scheduler.
+/// Isso impede que cancelar um pai inicie um filho pendente entre dois encerramentos.
+pub fn cancel_many(app: &AppHandle, task_ids: &[String]) -> Result<Vec<String>, String> {
+    if task_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let db = app
+        .try_state::<DbConnection>()
+        .ok_or_else(|| "o banco de dados não está disponível".to_string())?;
+    let (cancelled, run_ids) = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        let tx = rusqlite::Transaction::new_unchecked(
+            &conn,
+            rusqlite::TransactionBehavior::Immediate,
+        )
+        .map_err(|error| error.to_string())?;
+        let mut cancelled = Vec::new();
+        let mut run_ids = Vec::new();
+        for task_id in task_ids {
+            let ended_at = crate::util::now_ts();
+            let changed = tx
+                .execute(
+                    "UPDATE tasks SET status = ?1, ended_at = ?2
+                     WHERE id = ?3 AND status IN ('pending', 'ready', 'running')",
+                    rusqlite::params![status::CANCELLED, ended_at, task_id],
+                )
+                .map_err(|error| error.to_string())?;
+            if changed == 1 {
+                store::close_active_attempt(
+                    &tx,
+                    task_id,
+                    status::CANCELLED,
+                    None,
+                    ended_at,
+                )?;
+                cancelled.push(task_id.clone());
+                if let Some(run) = store::run_of_task(&tx, task_id)? {
+                    if !run_ids.contains(&run.id) {
+                        run_ids.push(run.id);
+                    }
+                }
+            }
+        }
+        tx.commit().map_err(|error| error.to_string())?;
+        (cancelled, run_ids)
+    };
+
+    for task_id in &cancelled {
+        super::broker::drop_task(task_id);
+        if let Some(mut group) = live().remove(task_id) {
+            group.kill_all();
+        }
+        emit_changed(app, task_id);
+    }
+    for run_id in run_ids {
+        super::scheduler::tick(app, &run_id);
+    }
+    Ok(cancelled)
 }
 
 /// Para el proceso headless porque el usuario va a seguir la conversación en una terminal.
@@ -516,12 +618,16 @@ fn stop(app: &AppHandle, task_id: &str, new_status: &str) -> Result<(), String> 
     // `ready` también: una tarea que se está lanzando todavía no llegó a `running`, y
     // pararla en ese instante no puede quedar sin efecto. Y `pending`: parar una que espera
     // turno es sacarla de la cola.
-    conn.execute(
+    let ended_at = crate::util::now_ts();
+    let changed = conn.execute(
         "UPDATE tasks SET status = ?1, ended_at = ?2
          WHERE id = ?3 AND status IN ('pending', 'ready', 'running')",
-        rusqlite::params![new_status, crate::util::now_ts(), task_id],
+        rusqlite::params![new_status, ended_at, task_id],
     )
     .map_err(|e| e.to_string())?;
+    if changed == 1 {
+        store::close_active_attempt(&conn, task_id, new_status, None, ended_at)?;
+    }
     drop(conn);
 
     super::broker::drop_task(task_id);

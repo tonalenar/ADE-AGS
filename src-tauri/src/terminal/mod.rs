@@ -24,6 +24,7 @@ mod session;
 mod win_conpty;
 pub use pty_manager::*;
 pub(crate) use pty_manager::open_pty;
+pub(crate) use pty_manager::scrub_app_child_env;
 pub use session::SESSION_ENV;
 pub(crate) use session::{authorize, issue_conversation_token, publish_token, register_conversation, release_token};
 pub(crate) use session::authorize_actor;

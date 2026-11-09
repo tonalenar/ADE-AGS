@@ -85,8 +85,8 @@ function useTurnEnds(refs: string[]): number {
 /**
  * O cartão "Limites de uso" do Resumo: a cota da conta que a conversa usa (janela atual e semanal) e, num
  * time, as contas dos integrantes, recolhidas. Lê o `useUsageStore` (o mesmo do painel "Uso" do rodapé da
- * barra) e só pede de novo ao abrir o Resumo e ao fim de cada turno, com a validade do store (uma TUI só
- * sobe se a leitura tiver mais de 5 min). Sem fonte ou com falha: "não medido", sem barra.
+ * barra), e só atualiza as contas em uso ao abrir o Resumo e ao fim de cada turno, respeitando a validade
+ * do store. As outras contas mostram o último snapshot local. Sem fonte ou com falha: "não medido", sem barra.
  */
 export function LimitsCard({ conversation }: { conversation: ConversationCard }) {
   const { t } = useTranslation();
@@ -108,22 +108,21 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
 
   const refs = useMemo(() => [conversation.tabId], [conversation.tabId]);
   const turnEnds = useTurnEnds(refs);
-  // TODAS as contas conectadas dos agentes que expõem a cota, as da conversa primeiro; uma barra por janela em cada.
+  // Mostra as contas conectadas, com as usadas por esta conversa primeiro.
   const entries = useMemo(
     () => connectedAccounts({ accounts, systemAccounts, used, measured: MEASURED_AGENTS, agyInstalled: agy.usage?.installed ?? false, listedUnmeasured }),
     [accounts, systemAccounts, used, agy.usage?.installed, listedUnmeasured],
   );
 
-  // Ao abrir o Resumo e ao fim de um turno: relê as contas (login e criação acontecem fora da tela) e a cota de cada
-  // uma, com a validade do store (uma TUI do Claude só sobe se a leitura tiver mais de 5 min); o `agy` local também.
+  // Atualiza somente as contas desta conversa/time. As demais ficam visíveis com o último valor local conhecido.
   const keys = entries.map((e) => e.key).join("|");
   useEffect(() => {
     let alive = true;
     const run = async () => {
       if (!loaded) await useAccountsStore.getState().load().catch(() => undefined);
       const { refresh, refreshAgy } = useUsageStore.getState();
-      void refreshAgy(false);
-      for (const entry of entries) {
+      if (used.some((entry) => entry.agentId === "antigravity" && !entry.accountId)) void refreshAgy(false);
+      for (const entry of entries.filter((candidate) => candidate.who.length > 0)) {
         if (entry.account && MEASURED_AGENTS.has(entry.agentId) && !(entry.agentId === "antigravity" && !entry.accountId)) void refresh(entry.account as AgentAccount, false);
       }
       const rows = await accountUsageSummary(1).catch(() => [] as AccountUsageSummary[]);
@@ -131,7 +130,7 @@ export function LimitsCard({ conversation }: { conversation: ConversationCard })
     };
     void run();
     return () => { alive = false; };
-  }, [keys, turnEnds]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
+  }, [keys, turnEnds, used]); // eslint-disable-line react-hooks/exhaustive-deps -- `entries` muda com `keys`; `loaded` só vale na primeira vez
 
   // O pool da conversa: relido junto com a cota (a troca acontece no fim de um turno).
   const threadId = threadIdOf(conversation.tabId);

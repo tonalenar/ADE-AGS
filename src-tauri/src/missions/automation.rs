@@ -72,6 +72,14 @@ pub struct ArmedRoutine {
     pub name: String,
 }
 
+/// Uma tarefa estruturada armada antes do boot, aguardando a pessoa retomar a automação.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArmedScheduledTask {
+    pub id: String,
+    pub name: String,
+}
+
 /// O que a tela mostra: o que ficou pausado pelo reinício.
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -82,6 +90,7 @@ pub struct Status {
     pub resumed_at: Option<i64>,
     pub missions: Vec<ArmedMission>,
     pub routines: Vec<ArmedRoutine>,
+    pub scheduled_tasks: Vec<ArmedScheduledTask>,
     /// Rodadas de correção da frota que o fechamento interrompeu (o sweep do boot as marcou como
     /// falhas). Não voltam sozinhas nem com o botão: o lead delas morreu com o app.
     pub interrupted_fix_rounds: i64,
@@ -89,6 +98,15 @@ pub struct Status {
 
 /// O estado, lido do banco e das rotinas. `gate` e `routines` entram por parâmetro para testar.
 pub fn status(conn: &Connection, gate: Gate, routines: &[crate::routines::Routine]) -> Result<Status, String> {
+    status_with_scheduled_tasks(conn, gate, routines, &[])
+}
+
+fn status_with_scheduled_tasks(
+    conn: &Connection,
+    gate: Gate,
+    routines: &[crate::routines::Routine],
+    tasks: &[crate::scheduled_tasks::ScheduledTask],
+) -> Result<Status, String> {
     let boot_secs = gate.boot_ms / 1000;
     let mut stmt = conn
         .prepare("SELECT id, title FROM missions WHERE status = 'running' AND started_at IS NOT NULL AND started_at > 0 AND started_at < ?1 ORDER BY started_at, id")
@@ -102,6 +120,10 @@ pub fn status(conn: &Connection, gate: Gate, routines: &[crate::routines::Routin
         .into_iter()
         .filter_map(|id| routines.iter().find(|r| r.id == id).map(|r| ArmedRoutine { id: r.id.clone(), name: r.name.clone() }))
         .collect();
+    let scheduled_tasks: Vec<ArmedScheduledTask> = tasks.iter()
+        .filter(|task| task.enabled && gate.pauses(task.armed_at_ms))
+        .map(|task| ArmedScheduledTask { id: task.id.clone(), name: task.name.clone() })
+        .collect();
     let interrupted_fix_rounds: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM tasks WHERE fix_round > 0 AND error = ?1 AND COALESCE(ended_at, 0) >= ?2",
@@ -109,13 +131,14 @@ pub fn status(conn: &Connection, gate: Gate, routines: &[crate::routines::Routin
             |r| r.get(0),
         )
         .map_err(|e| e.to_string())?;
-    let armed = !missions.is_empty() || !routines.is_empty();
+    let armed = !missions.is_empty() || !routines.is_empty() || !scheduled_tasks.is_empty();
     Ok(Status {
         paused: gate.resumed_at.is_none() && armed,
         boot_ms: gate.boot_ms,
         resumed_at: gate.resumed_at,
         missions,
         routines,
+        scheduled_tasks,
         interrupted_fix_rounds,
     })
 }
@@ -138,8 +161,12 @@ pub fn catch_up_started(gate: Gate, started_secs: i64) -> i64 {
 
 fn current(db: &crate::database::DbConnection) -> Result<Status, String> {
     let routines = crate::routines::all();
+    let tasks = crate::scheduled_tasks::all().unwrap_or_else(|error| {
+        eprintln!("[tarefas agendadas] não foi possível ler o estado de pausa: {error}");
+        Vec::new()
+    });
     let conn = db.lock().map_err(|e| e.to_string())?;
-    status(&conn, gate(), &routines)
+    status_with_scheduled_tasks(&conn, gate(), &routines, &tasks)
 }
 
 #[tauri::command]

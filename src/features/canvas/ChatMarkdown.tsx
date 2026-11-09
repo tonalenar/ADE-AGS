@@ -2,7 +2,8 @@ import { Children, isValidElement, memo, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { openUrl } from "@tauri-apps/plugin-opener";
+
+import { openExternalUrl } from "@/shared/openExternalUrl";
 
 /**
  * Solo http/https salen del chat. Cualquier otro esquema (`javascript:`, `file:`, `data:`,
@@ -69,7 +70,7 @@ function CodeBlock({ lang, children }: { lang: string; children: ReactNode }) {
 /**
  * Markdown de las respuestas de los agentes. Seguro a propósito: `react-markdown` no
  * interpreta HTML crudo (no hay `rehype-raw` ni `dangerouslySetInnerHTML`), los enlaces solo
- * pueden ser http/https y abren en el navegador del sistema, y las imágenes no se cargan
+ * pueden ser http/https y respetan la preferencia de navegador, y las imágenes no se cargan
  * (traerlas le contaría al servidor de turno que se leyó el mensaje). `memo`: el chat de la
  * equipo re-renderiza con cada tarea o aprobación que cambia, y el texto de un mensaje ya escrito
  * no cambia.
@@ -112,7 +113,7 @@ const COMPONENTS: Components = {
     if (!safe) return <span className="underline decoration-dotted">{children}</span>;
     return (
       <a href={safe} title={safe} rel="noreferrer noopener" className="text-accent-600 underline hover:text-accent-500 dark:text-accent-300"
-        onClick={(e) => { e.preventDefault(); openUrl(safe).catch(console.error); }}>
+        onClick={(e) => { e.preventDefault(); openExternalUrl(safe).catch(console.error); }}>
         {children}
       </a>
     );

@@ -169,6 +169,74 @@ export interface PullFile {
   patch: string | null;
 }
 
+/** Conteúdo UTF-8 lido no commit atual do PR. Arquivos fora do limite têm `error`. */
+export interface PullFileContent {
+  path: string;
+  content: string | null;
+  error: string | null;
+}
+
+export interface PullCode {
+  headSha: string;
+  baseSha: string | null;
+  startSha: string | null;
+  provider: ForgeKind;
+  files: PullCodeFile[];
+}
+
+export interface PullCodeFile extends PullFile {
+  /** O patch excedeu o teto da resposta do painel Código. */
+  patchLimited: boolean;
+}
+
+export interface PullReviewCommentDraft {
+  id: string;
+  path: string;
+  body: string;
+  newLine: number | null;
+  oldLine: number | null;
+}
+
+export type PullReviewAction = "comment" | "approve" | "requestChanges";
+
+export interface PullReviewSubmission {
+  postedIds: string[];
+  errors: string[];
+  actionSubmitted: boolean;
+}
+
+export interface PullReviewThreadComment {
+  id: string;
+  author: string | null;
+  body: string;
+  createdAt: string | null;
+  webUrl: string | null;
+}
+
+export interface PullReviewThread {
+  id: string;
+  path: string | null;
+  line: number | null;
+  side: "LEFT" | "RIGHT" | null;
+  outdated: boolean;
+  resolved: boolean;
+  canResolve: boolean;
+  canReply: boolean;
+  replyToId: string;
+  comments: PullReviewThreadComment[];
+}
+
+export interface PullReviewThreads {
+  threads: PullReviewThread[];
+  truncated: boolean;
+}
+
+export interface PullFileContents {
+  files: PullFileContent[];
+  truncated: boolean;
+  headSha: string;
+}
+
 export interface LineRange { start: number; end: number }
 
 export interface GuideStopFile {

@@ -59,6 +59,20 @@ describe("a confirmação da troca", () => {
     expect(document.body.querySelector("[role=alert]")?.textContent).toContain("Espere o agente terminar o turno");
   });
 
+  it("na TUI avisa que abre uma nova aba e transfere texto limitado, sem reexecutar a tarefa", async () => {
+    await act(async () => { root.render(<AgentSwitchDialog from="Codex" to="Claude Code" busy={false} error={null} mode="newTui" hasContext onConfirm={() => undefined} onClose={() => undefined} />); });
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("chat.agentSwitch.tuiBody");
+    expect(text).toContain("chat.agentSwitch.tuiLoss");
+    expect(text).toContain("chat.agentSwitch.tuiConfirm");
+    expect(text).not.toContain("chat.agentSwitch.body");
+  });
+
+  it("explica quando o agente de origem não oferece transcript estruturado", async () => {
+    await act(async () => { root.render(<AgentSwitchDialog from="Gemini" to="Codex" busy={false} error={null} mode="newTui" hasContext={false} onConfirm={() => undefined} onClose={() => undefined} />); });
+    expect(document.body.textContent).toContain("chat.agentSwitch.tuiNoContext");
+  });
+
   it("o aviso do fio diz «agora com Codex · modelo» e o que o agente novo recebeu", async () => {
     const item = (strategy: string, accessChanged = false): TimelineItem => ({ kind: "notice", id: "n", label: "agentSwitch", text: JSON.stringify({ from: "claude-code", to: "codex", fromLabel: "Claude Code", toLabel: "Codex", model: "gpt-6.1-sol", strategy, accessChanged }) });
     await act(async () => { root.render(<NoticeRow item={item("full")} />); });

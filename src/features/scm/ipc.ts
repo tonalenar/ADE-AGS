@@ -1,7 +1,7 @@
 /** Control de versiones. Ver `src-tauri/src/scm/commands.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Branch, Commit, Compare, ScmEntry, ScmStatus, Tag } from "./types";
+import type { Branch, Commit, Compare, ScmEntry, ScmStatus, Tag, WorkingFiles } from "./types";
 
 /** `null` = la carpeta no está en un repo. */
 export const scmStatus = (cwd: string) => invoke<ScmStatus | null>("scm_status", { cwd });
@@ -33,6 +33,8 @@ export const scmFileAt = (root: string, path: string, rev: string) =>
 /** Los archivos que cambió un commit, contra su primer padre. */
 export const scmCommitFiles = (root: string, hash: string) =>
   invoke<ScmEntry[]>("scm_commit_files", { root, hash });
+/** Conteúdo completo e limitado dos arquivos modificados, staged e não rastreados. */
+export const scmWorkingFiles = (cwd: string) => invoke<WorkingFiles | null>("scm_working_files", { cwd });
 
 export const scmTags = (root: string) => invoke<Tag[]>("scm_tags", { root });
 /** Sin `target`, en HEAD. Con `message`, anotado. */

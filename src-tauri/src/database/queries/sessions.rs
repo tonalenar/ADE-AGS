@@ -748,6 +748,7 @@ pub fn db_delete_session_history(
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM session_history WHERE id = ?1", [&history_id])
         .map_err(|e| e.to_string())?;
+    crate::database::forget_archived_message_index(&history_id);
     Ok(())
 }
 
@@ -942,7 +943,11 @@ pub fn db_update_session_history(
     db: tauri::State<DbConnection>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    update_session_history(&conn, &history_id, &patch)
+    update_session_history(&conn, &history_id, &patch)?;
+    if patch.hidden.is_some() {
+        crate::database::invalidate_archived_message_index(&conn, &history_id)?;
+    }
+    Ok(())
 }
 
 /// Escapa `%`, `_` y el propio escape `!` para usar `q` como texto literal dentro de LIKE.

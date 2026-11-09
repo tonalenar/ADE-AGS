@@ -141,6 +141,75 @@ pub struct PullFile {
     pub patch: Option<String>,
 }
 
+/// Os SHAs que fixam uma versão revisável de um PR/MR.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PullReviewRefs {
+    pub head_sha: String,
+    pub base_sha: Option<String>,
+    pub start_sha: Option<String>,
+}
+
+/// Comentário local de uma linha alterada. O `id` só correlaciona o rascunho no cliente.
+#[derive(Debug, Clone)]
+pub struct PullReviewDraft {
+    pub id: String,
+    pub path: String,
+    pub body: String,
+    pub new_line: Option<u32>,
+    pub old_line: Option<u32>,
+    pub old_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum PullReviewAction {
+    Comment,
+    Approve,
+    RequestChanges,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullReviewSubmission {
+    pub posted_ids: Vec<String>,
+    pub errors: Vec<String>,
+    pub action_submitted: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullReviewThreadComment {
+    pub id: String,
+    pub author: Option<String>,
+    pub body: String,
+    pub created_at: Option<String>,
+    pub web_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullReviewThread {
+    pub id: String,
+    /// Caminho alterado que ancora a discussão, quando o provedor o informa.
+    pub path: Option<String>,
+    pub line: Option<u32>,
+    pub side: Option<String>,
+    pub outdated: bool,
+    pub resolved: bool,
+    pub can_resolve: bool,
+    pub can_reply: bool,
+    /// Id do comentário raiz para GitHub/Gitea ou id da discussão no GitLab.
+    pub reply_to_id: String,
+    pub comments: Vec<PullReviewThreadComment>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullReviewThreads {
+    pub threads: Vec<PullReviewThread>,
+    pub truncated: bool,
+}
+
 /// Cuenta líneas agregadas y quitadas de un diff unificado (GitLab no las da sueltas).
 pub(super) fn count_patch(patch: &str) -> (u64, u64) {
     patch.lines().fold((0, 0), |(a, d), l| {
@@ -302,6 +371,7 @@ pub fn normalize_state(state: Option<&str>) -> &'static str {
     }
 }
 
+#[derive(Clone)]
 pub struct Api {
     kind: ForgeKind,
     base: String,
@@ -409,6 +479,41 @@ impl Api {
         })
     }
 
+    /// GET JSON com teto de resposta para downloads de conteúdo. O token nunca sai da forja
+    /// autenticada e uma resposta inesperadamente grande não é acumulada em memória.
+    async fn get_limited(&self, path: &str, max_bytes: usize) -> Result<Value, ForgeError> {
+        let url = format!("{}{}", self.base, path);
+        let mut req = self.http.get(&url);
+        req = match self.kind {
+            ForgeKind::Gitea => req.header("Authorization", format!("token {}", self.token)),
+            _ => req.bearer_auth(&self.token),
+        };
+        if self.kind == ForgeKind::Github {
+            req = req.header("Accept", "application/vnd.github+json").header("X-GitHub-Api-Version", "2022-11-28");
+        }
+        let mut response = req.send().await.map_err(|e| ForgeError::Api(format!("No se pudo contactar a la API: {e}")))?;
+        let status = response.status();
+        if !status.is_success() {
+            let message = match status.as_u16() {
+                401 => "O host rejeitou a sessão; entre novamente".to_string(),
+                404 => "Arquivo não encontrado ou sem acesso a ele".to_string(),
+                code => format!("A forja respondeu HTTP {code} ao ler o arquivo"),
+            };
+            return Err(if status.as_u16() == 401 { ForgeError::Auth(message) } else { ForgeError::Api(message) });
+        }
+        if response.content_length().is_some_and(|length| length > max_bytes as u64) {
+            return Err(ForgeError::Api("O arquivo excedeu o limite de leitura de 1 MiB".into()));
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| ForgeError::Api(format!("Falha ao receber conteúdo do arquivo: {e}")))? {
+            if body.len().saturating_add(chunk.len()) > max_bytes {
+                return Err(ForgeError::Api("O arquivo excedeu o limite de leitura de 1 MiB".into()));
+            }
+            body.extend_from_slice(&chunk);
+        }
+        serde_json::from_slice(&body).map_err(|e| ForgeError::Api(format!("A forja retornou JSON inválido para o arquivo: {e}")))
+    }
+
     /// Una imagen de la descripción o de un comentario, lista para un `<img>`.
     ///
     /// La trae Rust y no el webview por las privadas: en un repo privado los adjuntos
@@ -472,6 +577,43 @@ impl Api {
 
     async fn get_list(&self, path: &str) -> Result<Vec<Value>, ForgeError> {
         Ok(self.get(path).await?.as_array().cloned().unwrap_or_default())
+    }
+
+    /// Endpoint GraphQL equivalente ao `/api/v3` de GitHub Enterprise.
+    fn github_graphql_url(&self) -> Result<String, ForgeError> {
+        let mut url = reqwest::Url::parse(&self.base).map_err(|e| ForgeError::Api(format!("URL da API GitHub inválida: {e}")))?;
+        url.set_path(if self.base == "https://api.github.com" || url.host_str().is_some_and(|host| host.ends_with(".ghe.com")) {
+            "/graphql"
+        } else {
+            "/api/graphql"
+        });
+        url.set_query(None);
+        url.set_fragment(None);
+        Ok(url.to_string())
+    }
+
+    async fn github_graphql(&self, query: &str, variables: Value) -> Result<Value, ForgeError> {
+        let response = self
+            .http
+            .post(self.github_graphql_url()?)
+            .bearer_auth(&self.token)
+            .header("Accept", "application/vnd.github+json")
+            .json(&json!({ "query": query, "variables": variables }))
+            .send()
+            .await
+            .map_err(|e| ForgeError::Api(format!("Não foi possível consultar a API GraphQL do GitHub: {e}")))?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        let value: Value = if text.trim().is_empty() { Value::Null } else { serde_json::from_str(&text).unwrap_or(Value::String(text)) };
+        if !status.is_success() {
+            let message = s(&value, "/message").unwrap_or_else(|| format!("HTTP {}", status.as_u16()));
+            return Err(if status.as_u16() == 401 { ForgeError::Auth(message) } else { ForgeError::Api(message) });
+        }
+        if let Some(errors) = value.get("errors").and_then(Value::as_array).filter(|errors| !errors.is_empty()) {
+            let message = errors.iter().filter_map(|error| s(error, "/message")).collect::<Vec<_>>().join("; ");
+            return Err(ForgeError::Api(if message.is_empty() { "A API GraphQL do GitHub recusou a operação".into() } else { message }));
+        }
+        value.get("data").cloned().ok_or_else(|| ForgeError::Api("A API GraphQL do GitHub não retornou `data`".into()))
     }
 
     pub async fn me(&self) -> Result<ForgeUser, ForgeError> {
@@ -848,6 +990,428 @@ impl Api {
         .ok_or_else(|| ForgeError::Api("La API no dijo el commit del PR".into()))
     }
 
+    pub fn kind(&self) -> ForgeKind {
+        self.kind
+    }
+
+    /// Las referencias exactas que necesitan los comentarios de línea.
+    pub async fn pull_review_refs(&self, repo: &str, number: u64) -> Result<PullReviewRefs, ForgeError> {
+        match self.kind {
+            ForgeKind::Gitlab => {
+                // GitLab mantiene versiones del diff; la primera es siempre la actual.
+                let versions = self
+                    .get_list(&format!("/projects/{}/merge_requests/{number}/versions?per_page=1", gl_project(repo)))
+                    .await?;
+                let latest = versions.first().ok_or_else(|| ForgeError::Api("O GitLab ainda não publicou as referências do diff deste MR".into()))?;
+                Ok(PullReviewRefs {
+                    head_sha: s(latest, "/head_commit_sha").ok_or_else(|| ForgeError::Api("O GitLab não informou o SHA atual do MR".into()))?,
+                    base_sha: s(latest, "/base_commit_sha"),
+                    start_sha: s(latest, "/start_commit_sha"),
+                })
+            }
+            _ => {
+                let value = self.get(&format!("/repos/{repo}/pulls/{number}")).await?;
+                Ok(PullReviewRefs {
+                    head_sha: s(&value, "/head/sha").ok_or_else(|| ForgeError::Api("A API não informou o SHA atual do PR".into()))?,
+                    base_sha: None,
+                    start_sha: None,
+                })
+            }
+        }
+    }
+
+    /// Publica a ação de revisão escolhida. GitLab cria uma discussão por linha e aprova em
+    /// chamada separada; se falhar ou o snapshot mudar, devolve os rascunhos já publicados.
+    pub async fn submit_pull_review(
+        &self,
+        repo: &str,
+        number: u64,
+        refs: &PullReviewRefs,
+        action: PullReviewAction,
+        summary: &str,
+        comments: &[PullReviewDraft],
+    ) -> Result<PullReviewSubmission, ForgeError> {
+        let review_body = if summary.trim().is_empty() && matches!(action, PullReviewAction::Comment) {
+            "Comentários de revisão de código enviados pelo ADE AGS."
+        } else {
+            summary.trim()
+        };
+        match self.kind {
+            ForgeKind::Github => {
+                let ids = comments.iter().map(|comment| comment.id.clone()).collect::<Vec<_>>();
+                let api_comments = comments
+                    .iter()
+                    .map(|comment| {
+                        let (line, side) = comment
+                            .new_line
+                            .map(|line| (line, "RIGHT"))
+                            .or_else(|| comment.old_line.map(|line| (line, "LEFT")))
+                            .ok_or_else(|| ForgeError::Api("Cada comentário precisa apontar para uma linha do diff".into()))?;
+                        Ok(json!({ "path": comment.path, "body": comment.body, "line": line, "side": side }))
+                    })
+                    .collect::<Result<Vec<_>, ForgeError>>()?;
+                self.call(
+                    Method::POST,
+                    &format!("/repos/{repo}/pulls/{number}/reviews"),
+                    Some(json!({
+                        "commit_id": refs.head_sha,
+                        "body": review_body,
+                        "event": match action {
+                            PullReviewAction::Comment => "COMMENT",
+                            PullReviewAction::Approve => "APPROVE",
+                            PullReviewAction::RequestChanges => "REQUEST_CHANGES",
+                        },
+                        "comments": api_comments,
+                    })),
+                )
+                .await?;
+                Ok(PullReviewSubmission { posted_ids: ids, errors: Vec::new(), action_submitted: true })
+            }
+            ForgeKind::Gitea => {
+                let ids = comments.iter().map(|comment| comment.id.clone()).collect::<Vec<_>>();
+                let api_comments = comments
+                    .iter()
+                    .map(|comment| {
+                        json!({
+                            "path": comment.path,
+                            "body": comment.body,
+                            "new_position": comment.new_line.unwrap_or(0),
+                            "old_position": comment.old_line.unwrap_or(0),
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                self.call(
+                    Method::POST,
+                    &format!("/repos/{repo}/pulls/{number}/reviews"),
+                    Some(json!({
+                        "commit_id": refs.head_sha,
+                        "event": match action {
+                            PullReviewAction::Comment => "COMMENT",
+                            PullReviewAction::Approve => "APPROVED",
+                            PullReviewAction::RequestChanges => "REQUEST_CHANGES",
+                        },
+                        "body": review_body,
+                        "comments": api_comments,
+                    })),
+                )
+                .await?;
+                Ok(PullReviewSubmission { posted_ids: ids, errors: Vec::new(), action_submitted: true })
+            }
+            ForgeKind::Gitlab => {
+                if matches!(action, PullReviewAction::RequestChanges) {
+                    return Err(ForgeError::Unsupported("O GitLab não oferece a ação de solicitar alterações nesta API".into()));
+                }
+                let mut posted_ids = Vec::new();
+                let mut errors = Vec::new();
+                for comment in comments {
+                    let (Some(base_sha), Some(start_sha)) = (&refs.base_sha, &refs.start_sha) else {
+                        return Err(ForgeError::Api("O GitLab não forneceu os SHAs base/start necessários para comentar no diff".into()));
+                    };
+                    match self.pull_review_refs(repo, number).await {
+                        Ok(current) if &current == refs => {}
+                        Ok(_) => {
+                            errors.push(format!("{}: o MR recebeu uma nova versão; os comentários restantes ficaram como rascunho", comment.id));
+                            break;
+                        }
+                        Err(error) => {
+                            errors.push(format!("{}: {error}", comment.id));
+                            break;
+                        }
+                    }
+                    let mut position = json!({
+                        "position_type": "text",
+                        "base_sha": base_sha,
+                        "head_sha": refs.head_sha,
+                        "start_sha": start_sha,
+                        "old_path": comment.old_path.as_deref().unwrap_or(&comment.path),
+                        "new_path": comment.path,
+                    });
+                    if let Some(line) = comment.new_line {
+                        position["new_line"] = json!(line);
+                    }
+                    if let Some(line) = comment.old_line {
+                        position["old_line"] = json!(line);
+                    }
+                    match self
+                        .call(
+                            Method::POST,
+                            &format!("/projects/{}/merge_requests/{number}/discussions", gl_project(repo)),
+                            Some(json!({ "body": comment.body, "position": position })),
+                        )
+                        .await
+                    {
+                        Ok(_) => posted_ids.push(comment.id.clone()),
+                        Err(error) => {
+                            errors.push(format!("{}: {error}", comment.id));
+                            break;
+                        }
+                    }
+                }
+                if errors.is_empty() && matches!(action, PullReviewAction::Approve) {
+                    match self.pull_review_refs(repo, number).await {
+                        Ok(current) if &current == refs => {
+                            if let Err(error) = self
+                                .call(
+                                    Method::POST,
+                                    &format!("/projects/{}/merge_requests/{number}/approve", gl_project(repo)),
+                                    Some(json!({ "sha": refs.head_sha })),
+                                )
+                                .await
+                            {
+                                errors.push(error.to_string());
+                            }
+                        }
+                        Ok(_) => errors.push("O MR recebeu uma nova versão; a aprovação não foi enviada".into()),
+                        Err(error) => errors.push(format!("Não foi possível confirmar o SHA antes de aprovar: {error}")),
+                    }
+                }
+                let action_submitted = errors.is_empty();
+                Ok(PullReviewSubmission { posted_ids, errors, action_submitted })
+            }
+            ForgeKind::Other => Err(ForgeError::Unsupported("Este host não oferece comentários de revisão pela API da ADE".into())),
+        }
+    }
+
+    /// Lista discussões de linha do código do PR. A leitura é paginada e limitada para
+    /// evitar que uma conversa antiga ou muito extensa ocupe memória sem teto.
+    pub async fn pull_review_threads(&self, repo: &str, number: u64) -> Result<PullReviewThreads, ForgeError> {
+        const MAX_THREADS: usize = 500;
+        match self.kind {
+            ForgeKind::Github => {
+                let (owner, name) = repo.split_once('/').ok_or_else(|| ForgeError::Api("O caminho GitHub deve ser owner/repo".into()))?;
+                if owner.is_empty() || name.is_empty() || name.contains('/') {
+                    return Err(ForgeError::Api("O caminho GitHub deve ser owner/repo".into()));
+                }
+                let query = r#"query($owner:String!, $name:String!, $number:Int!, $after:String) {
+                  repository(owner:$owner, name:$name) {
+                    pullRequest(number:$number) {
+                      reviewThreads(first:100, after:$after) {
+                        nodes {
+                          id path line originalLine diffSide isOutdated isResolved viewerCanResolve viewerCanReply
+                          comments(first:100) {
+                            nodes { databaseId body createdAt author { login } url }
+                            pageInfo { hasNextPage }
+                          }
+                        }
+                        pageInfo { hasNextPage endCursor }
+                      }
+                    }
+                  }
+                }"#;
+                let mut threads = Vec::new();
+                let mut after: Option<String> = None;
+                let mut has_next = true;
+                let mut comments_truncated = false;
+                let mut thread_limit_reached = false;
+                while has_next && threads.len() < MAX_THREADS {
+                    let data = self
+                        .github_graphql(query, json!({ "owner": owner, "name": name, "number": number, "after": after }))
+                        .await?;
+                    let pull = data
+                        .pointer("/repository/pullRequest")
+                        .filter(|value| !value.is_null())
+                        .ok_or_else(|| ForgeError::Api("O PR não existe ou a conta não tem acesso".into()))?;
+                    let page = pull.pointer("/reviewThreads").ok_or_else(|| ForgeError::Api("O GitHub não retornou as threads de revisão".into()))?;
+                    let page_nodes = page.get("nodes").and_then(Value::as_array).cloned().unwrap_or_default();
+                    let available = MAX_THREADS - threads.len();
+                    thread_limit_reached |= page_nodes.len() > available;
+                    for item in page_nodes.iter().take(available) {
+                        comments_truncated |= b(item, "/comments/pageInfo/hasNextPage");
+                        let comments = item
+                            .pointer("/comments/nodes")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .filter_map(|comment| {
+                                Some(PullReviewThreadComment {
+                                    id: n(comment, "/databaseId")?.to_string(),
+                                    author: s(comment, "/author/login"),
+                                    body: s(comment, "/body").unwrap_or_default(),
+                                    created_at: s(comment, "/createdAt"),
+                                    web_url: s(comment, "/url"),
+                                })
+                            })
+                            .collect::<Vec<_>>();
+                        let Some(root_comment) = comments.first() else { continue };
+                        threads.push(PullReviewThread {
+                            id: s(item, "/id").unwrap_or_default(),
+                            path: s(item, "/path"),
+                            line: n(item, "/line").or_else(|| n(item, "/originalLine")).and_then(|line| u32::try_from(line).ok()),
+                            side: s(item, "/diffSide"),
+                            outdated: b(item, "/isOutdated"),
+                            resolved: b(item, "/isResolved"),
+                            can_resolve: b(item, "/viewerCanResolve"),
+                            can_reply: b(item, "/viewerCanReply"),
+                            reply_to_id: root_comment.id.clone(),
+                            comments,
+                        });
+                    }
+                    has_next = b(page, "/pageInfo/hasNextPage");
+                    after = s(page, "/pageInfo/endCursor");
+                    if has_next && after.is_none() { break; }
+                }
+                let truncated = has_next || thread_limit_reached || comments_truncated;
+                Ok(PullReviewThreads { threads, truncated })
+            }
+            ForgeKind::Gitlab => {
+                let mut threads = Vec::new();
+                let mut page = 1usize;
+                loop {
+                    let discussions = self
+                        .get_list(&format!("/projects/{}/merge_requests/{number}/discussions?per_page=100&page={page}", gl_project(repo)))
+                        .await?;
+                    let count = discussions.len();
+                    for discussion in discussions {
+                        let notes = discussion.get("notes").and_then(Value::as_array).cloned().unwrap_or_default();
+                        let Some(root) = notes.iter().find(|note| !b(note, "/system")) else { continue };
+                        let position = root.get("position").filter(|value| !value.is_null());
+                        let path = position.and_then(|value| s(value, "/new_path").or_else(|| s(value, "/old_path")));
+                        if path.is_none() { continue; }
+                        let id = s(&discussion, "/id").unwrap_or_default();
+                        let comments = notes
+                            .iter()
+                            .filter_map(|note| {
+                                Some(PullReviewThreadComment {
+                                    id: n(note, "/id")?.to_string(),
+                                    author: s(note, "/author/username"),
+                                    body: s(note, "/body").unwrap_or_default(),
+                                    created_at: s(note, "/created_at"),
+                                    web_url: s(note, "/url"),
+                                })
+                            })
+                            .collect();
+                        let line = position
+                            .and_then(|value| n(value, "/new_line").map(|line| (line, "RIGHT".to_string())).or_else(|| n(value, "/old_line").map(|line| (line, "LEFT".to_string()))));
+                        let line_number = line.as_ref().and_then(|(line, _)| u32::try_from(*line).ok());
+                        threads.push(PullReviewThread {
+                            id: id.clone(),
+                            path,
+                            line: line_number,
+                            side: line.map(|(_, side)| side),
+                            outdated: position.is_none(),
+                            resolved: b(root, "/resolved"),
+                            can_resolve: b(root, "/resolvable"),
+                            can_reply: !b(root, "/system"),
+                            reply_to_id: id,
+                            comments,
+                        });
+                        if threads.len() >= MAX_THREADS { break; }
+                    }
+                    if count < 100 || threads.len() >= MAX_THREADS { break; }
+                    page += 1;
+                }
+                let truncated = threads.len() >= MAX_THREADS;
+                Ok(PullReviewThreads { threads, truncated })
+            }
+            ForgeKind::Gitea => {
+                let reviews = self.get_list(&format!("/repos/{repo}/pulls/{number}/reviews?limit=50&page=1")).await?;
+                let reviews_truncated = reviews.len() == 50;
+                let mut reviews = reviews.into_iter().filter_map(|review| n(&review, "/id")).collect::<Vec<_>>();
+                let mut tasks = tokio::task::JoinSet::new();
+                for _ in 0..6 {
+                    let Some(review_id) = reviews.pop() else { break };
+                    let api = self.clone();
+                    let repo = repo.to_string();
+                    tasks.spawn(async move { api.get_list(&format!("/repos/{repo}/pulls/{number}/reviews/{review_id}/comments")).await });
+                }
+                let mut raw_comments = Vec::new();
+                while let Some(result) = tasks.join_next().await {
+                    match result {
+                        Ok(Ok(comments)) => raw_comments.extend(comments),
+                        Ok(Err(error)) => return Err(error),
+                        Err(error) => return Err(ForgeError::Api(format!("Falha ao ler comentários da revisão: {error}"))),
+                    }
+                    if let Some(review_id) = reviews.pop() {
+                        let api = self.clone();
+                        let repo = repo.to_string();
+                        tasks.spawn(async move { api.get_list(&format!("/repos/{repo}/pulls/{number}/reviews/{review_id}/comments")).await });
+                    }
+                }
+                let mut roots: std::collections::BTreeMap<String, Vec<Value>> = std::collections::BTreeMap::new();
+                for comment in raw_comments {
+                    let root_id = n(&comment, "/in_reply_to_id")
+                        .map(|id| id.to_string())
+                        .or_else(|| s(&comment, "/in_reply_to_id"))
+                        .or_else(|| n(&comment, "/id").map(|id| id.to_string()));
+                    if let Some(root_id) = root_id { roots.entry(root_id).or_default().push(comment); }
+                }
+                let truncated = reviews_truncated || roots.len() > MAX_THREADS;
+                let mut threads = Vec::new();
+                for (root_id, comments) in roots.into_iter().take(MAX_THREADS) {
+                    let root = comments.iter().find(|comment| n(comment, "/id").is_some_and(|id| id.to_string() == root_id)).unwrap_or(&comments[0]);
+                    let thread_comments = comments
+                        .iter()
+                        .filter_map(|comment| Some(PullReviewThreadComment {
+                            id: n(comment, "/id")?.to_string(),
+                            author: s(comment, "/user/login"),
+                            body: s(comment, "/body").unwrap_or_default(),
+                            created_at: s(comment, "/created_at"),
+                            web_url: s(comment, "/html_url"),
+                        }))
+                        .collect::<Vec<_>>();
+                    let line = n(root, "/line").or_else(|| n(root, "/original_line")).and_then(|line| u32::try_from(line).ok());
+                    threads.push(PullReviewThread {
+                        id: root_id.clone(),
+                        path: s(root, "/path"),
+                        line,
+                        side: if n(root, "/line").is_some() { Some("RIGHT".into()) } else if n(root, "/original_line").is_some() { Some("LEFT".into()) } else { None },
+                        outdated: n(root, "/position").is_some_and(|position| position == 0),
+                        resolved: !root.get("resolver").is_none_or(Value::is_null),
+                        can_resolve: true,
+                        can_reply: true,
+                        reply_to_id: root_id,
+                        comments: thread_comments,
+                    });
+                }
+                Ok(PullReviewThreads { threads, truncated })
+            }
+            ForgeKind::Other => Err(ForgeError::Unsupported("Este host não oferece threads de revisão pela API da ADE".into())),
+        }
+    }
+
+    pub async fn reply_pull_review_thread(&self, repo: &str, number: u64, reply_to_id: &str, body: &str) -> Result<(), ForgeError> {
+        match self.kind {
+            ForgeKind::Github => {
+                self.call(Method::POST, &format!("/repos/{repo}/pulls/{number}/comments/{reply_to_id}/replies"), Some(json!({ "body": body }))).await?;
+            }
+            ForgeKind::Gitlab => {
+                self.call(
+                    Method::POST,
+                    &format!("/projects/{}/merge_requests/{number}/discussions/{reply_to_id}/notes", gl_project(repo)),
+                    Some(json!({ "body": body })),
+                ).await?;
+            }
+            ForgeKind::Gitea => {
+                self.call(Method::POST, &format!("/repos/{repo}/pulls/{number}/comments/{reply_to_id}/replies"), Some(json!({ "body": body }))).await?;
+            }
+            ForgeKind::Other => return Err(ForgeError::Unsupported("Este host não oferece respostas em threads de revisão".into())),
+        }
+        Ok(())
+    }
+
+    pub async fn set_pull_review_thread_resolved(&self, repo: &str, number: u64, thread_id: &str, resolved: bool) -> Result<(), ForgeError> {
+        match self.kind {
+            ForgeKind::Github => {
+                let mutation = if resolved { "resolveReviewThread" } else { "unresolveReviewThread" };
+                let query = format!("mutation($id:ID!){{{mutation}(input:{{threadId:$id}}){{thread{{id isResolved}}}}}}");
+                self.github_graphql(&query, json!({ "id": thread_id })).await?;
+            }
+            ForgeKind::Gitlab => {
+                self.call(
+                    Method::PUT,
+                    &format!("/projects/{}/merge_requests/{number}/discussions/{thread_id}", gl_project(repo)),
+                    Some(json!({ "resolved": resolved })),
+                ).await?;
+            }
+            ForgeKind::Gitea => {
+                let operation = if resolved { "resolve" } else { "unresolve" };
+                self.call(Method::POST, &format!("/repos/{repo}/pulls/comments/{thread_id}/{operation}"), None).await?;
+            }
+            ForgeKind::Other => return Err(ForgeError::Unsupported("Este host não oferece resolução de threads de revisão".into())),
+        }
+        Ok(())
+    }
+
     /// Los chequeos de CI de un commit.
     pub async fn checks(&self, repo: &str, sha: &str) -> Result<Vec<Check>, ForgeError> {
         match self.kind {
@@ -954,6 +1518,40 @@ impl Api {
         }
     }
 
+    /// Lê o conteúdo atual de um arquivo no commit da cabeça de um PR. O chamador valida
+    /// primeiro que `path` pertence à lista de arquivos desse mesmo PR.
+    pub async fn pull_file_content(&self, repo: &str, sha: &str, path: &str) -> Result<String, ForgeError> {
+        let encoded_repo = encode_repo_path(repo);
+        let encoded_path = encode_path(path);
+        let endpoint = match self.kind {
+            ForgeKind::Gitlab => format!(
+                "/projects/{}/repository/files/{}?ref={sha}",
+                gl_project(repo),
+                encode_segment(path),
+            ),
+            _ => format!("/repos/{encoded_repo}/contents/{encoded_path}?ref={sha}"),
+        };
+        let value = self.get_limited(&endpoint, 2 * 1024 * 1024).await?;
+        let declared_size = n(&value, "/size").unwrap_or(0) as usize;
+        const MAX_FILE_BYTES: usize = 1024 * 1024;
+        if declared_size > MAX_FILE_BYTES {
+            return Err(ForgeError::Api("Arquivo maior que o limite de 1 MiB para leitura no painel".into()));
+        }
+        if s(&value, "/encoding").as_deref() != Some("base64") {
+            return Err(ForgeError::Api("A forja não retornou conteúdo base64 para este arquivo".into()));
+        }
+        let encoded = s(&value, "/content").ok_or_else(|| ForgeError::Api("A forja não retornou o conteúdo do arquivo".into()))?;
+        let compact = encoded.chars().filter(|ch| !ch.is_ascii_whitespace()).collect::<String>();
+        use base64::Engine;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(compact)
+            .map_err(|e| ForgeError::Api(format!("Não foi possível decodificar o conteúdo do arquivo: {e}")))?;
+        if bytes.len() > MAX_FILE_BYTES {
+            return Err(ForgeError::Api("Arquivo maior que o limite de 1 MiB para leitura no painel".into()));
+        }
+        String::from_utf8(bytes).map_err(|_| ForgeError::Api("O arquivo não é texto UTF-8 e não pode ser mostrado como código".into()))
+    }
+
     pub(super) fn release_from(&self, v: &Value) -> Release {
         match self.kind {
             ForgeKind::Gitlab => Release {
@@ -1041,4 +1639,27 @@ impl Api {
             _ => format!("refs/pull/{number}/head"),
         }
     }
+}
+
+fn encode_segment(value: &str) -> String {
+    const HEX: &[u8; 16] = b"0123456789ABCDEF";
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            encoded.push('%');
+            encoded.push(HEX[(byte >> 4) as usize] as char);
+            encoded.push(HEX[(byte & 0x0f) as usize] as char);
+        }
+    }
+    encoded
+}
+
+fn encode_path(path: &str) -> String {
+    path.split('/').map(encode_segment).collect::<Vec<_>>().join("/")
+}
+
+fn encode_repo_path(repo: &str) -> String {
+    encode_path(repo)
 }

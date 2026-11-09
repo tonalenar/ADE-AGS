@@ -93,7 +93,6 @@ vi.mock("@/features/terminal/sessionDiscovery", () => ({
 vi.mock("@/features/skills/pendingSkillSetup", () => ({ awaitSkillSetup: async () => [] }));
 vi.mock("@/features/skills/ipc", () => ({ reconcileTabSkills: async () => {} }));
 vi.mock("@/features/prelaunch/ipc", () => ({ resolvePrelaunch: async () => [] }));
-vi.mock("@/features/accounts/ipc", () => ({ accountEnv: async () => ({}) }));
 vi.mock("@/shared/ipc/window", () => ({ homeDir: async () => "/tmp" }));
 vi.mock("@/features/browser/tabMcp", () => ({
   hasBrowserMcp: () => false,

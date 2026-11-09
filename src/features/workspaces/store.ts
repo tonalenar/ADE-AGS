@@ -25,6 +25,8 @@ interface WorkspacesState {
    *  diálogo de "cerrar actuales/mantener". Si devuelve `false`, el workspace no está
    *  abierto en ningún lado y el flujo normal (mostrar el diálogo) debe seguir. */
   focusIfOpen: (id: string) => Promise<boolean>;
+  /** Foca o workspace aberto seguinte/anterior em ordem estável, sem abrir nem fechar janelas. */
+  focusAdjacentOpenWorkspace: (delta: 1 | -1) => Promise<boolean>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   /** Falla (con mensaje legible) si el workspace tiene ventanas abiertas o es el de por defecto. */
   deleteWorkspace: (id: string) => Promise<void>;
@@ -84,6 +86,35 @@ export const useWorkspacesStore = create<WorkspacesState>((set, get) => ({
     const liveWindows = await ipc.openWindowsOf(id).catch(() => []);
     if (liveWindows.length === 0) return false;
     await focusWindow(liveWindows[0].label).catch(console.error);
+    return true;
+  },
+
+  focusAdjacentOpenWorkspace: async (delta) => {
+    const rows = await ipc.listWorkspaces();
+    set({ workspaces: rows });
+
+    // A lista vem do banco atualizado; as janelas vivas são consultadas em paralelo para
+    // não confiar em contagens antigas de outra janela da ADE.
+    const live = await Promise.all(rows.map(async (workspace) => {
+      const windows = await ipc.openWindowsOf(workspace.id).catch(() => []);
+      return {
+        workspace,
+        windows: [...windows].sort((a, b) => a.label.localeCompare(b.label)),
+      };
+    }));
+    const open = live
+      .filter((entry) => entry.windows.length > 0)
+      .sort((a, b) => a.workspace.name.localeCompare(b.workspace.name) || a.workspace.id.localeCompare(b.workspace.id));
+    if (open.length < 2) return false;
+
+    const currentId = useTabsStore.getState().workspaceId;
+    const currentIndex = open.findIndex((entry) => entry.workspace.id === currentId);
+    const nextIndex = currentIndex < 0
+      ? delta > 0 ? 0 : open.length - 1
+      : (currentIndex + delta + open.length) % open.length;
+    const target = open[nextIndex];
+    if (!target) return false;
+    await focusWindow(target.windows[0].label);
     return true;
   },
 

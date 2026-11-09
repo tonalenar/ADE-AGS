@@ -9,6 +9,7 @@ import type { Task } from "@/features/runs/types";
 import type { Squad } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { sustainedTabIds } from "@/features/terminal/activity";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { tabsByMission, useMissionIndex } from "./groups";
 import { agentStateOf, workersOf } from "./missionView";
@@ -287,7 +288,8 @@ export function DeliveryCard({ delivery }: { delivery: MissionDelivery }) {
     { key: "ci", label: t("missions.delivery.l.ci"), value: (
       <span className={`flex items-center gap-1.5 ${TONE[ci].text}`}><span className={`h-[7px] w-[7px] rounded-full ${TONE[ci].dot}`} />{capitalize(t(`missions.delivery.ci.${delivery.ciStatus}`))}</span>) },
     ...(pr ? [{ key: "pr", label: t("missions.delivery.l.pr"), value: prUrl(pr)
-      ? <a href={prUrl(pr)!} target="_blank" rel="noreferrer" className="font-medium text-accent-600 hover:underline dark:text-accent-400">{prLabel(pr)}</a>
+      ? <a href={prUrl(pr)!} target="_blank" rel="noreferrer" className="font-medium text-accent-600 hover:underline dark:text-accent-400"
+          onClick={(event) => { event.preventDefault(); openExternalUrl(prUrl(pr)!).catch(console.error); }}>{prLabel(pr)}</a>
       : <span className="font-medium text-accent-600 dark:text-accent-400">{prLabel(pr)}</span> }] : []),
     { key: "when", label: t("missions.delivery.l.when"), value: <span className="font-mono tabular-nums text-gray-500 dark:text-white/60">{when}</span> },
   ];

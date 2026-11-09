@@ -33,6 +33,13 @@ export type ChatAccess = "ask" | "edits" | "safe" | "full";
 
 export const ACCESS_MODES: ChatAccess[] = ["ask", "edits", "safe", "full"];
 
+/** As TUI cuja saída a ADE lê e mostra como timeline, em vez de um PTY bruto. */
+const TIMELINE_AGENTS = new Set(["claude-code", "codex"]);
+
+export function hasTimeline(agentId: string): boolean {
+  return TIMELINE_AGENTS.has(agentId);
+}
+
 /** Os flags de cada modo, por agente, conferidos no `--help` de cada CLI. Sem entrada = o agente não tem o modo. */
 const ACCESS_FLAGS: Record<Exclude<ChatAccess, "ask" | "safe">, Record<string, string>> = {
   edits: { "claude-code": "--permission-mode acceptEdits", "gemini-cli": "--approval-mode auto_edit" },
@@ -83,6 +90,7 @@ export function midTurnOf(agentId: string): MidTurn {
  * (a conversa vai por protocolo), os do motor do agente. Pura.
  */
 export function accessModesFor(agentId: string, protocol = false): ChatAccess[] {
+  if (protocol && agentId.startsWith("local-acp-")) return ["ask"];
   const engine = protocol ? PROTOCOL_AGENTS[agentId] : undefined;
   if (engine) return ACCESS_MODES.filter((mode) => engine.access.includes(mode));
   return ACCESS_MODES.filter((mode) =>
@@ -91,8 +99,18 @@ export function accessModesFor(agentId: string, protocol = false): ChatAccess[] 
 
 /** O agente tem o modo Plano? Por protocolo, é o do motor; na TUI, o flag de lançamento. Pura. */
 export function planSupported(agentId: string, protocol = false): boolean {
+  if (protocol && agentId.startsWith("local-acp-")) return false;
   const engine = protocol ? PROTOCOL_AGENTS[agentId] : undefined;
   return engine ? engine.plan : agentId in PLAN_FLAG;
+}
+
+/** Remove uma ocorrência explícita de comando ADE do texto, sem confundir `/planner` com `/plan`. */
+export function extractSlashCommand(text: string, command: string): { found: boolean; rest: string } {
+  const escaped = command.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(^|\\s)\\/${escaped}(?=$|\\s)`, "i");
+  let found = false;
+  const rest = text.replace(pattern, (_match, before: string) => { found = true; return before; }).trim();
+  return { found, rest };
 }
 
 export interface LaunchChoice {
@@ -101,8 +119,31 @@ export interface LaunchChoice {
   /** `null` = o esforço padrão da TUI. */
   effort: string | null;
   access: ChatAccess;
+  /** `service_tier=fast`; só tem efeito no Codex. */
+  fastMode?: boolean;
   /** Começa no modo Plano (onde o agente suporta). */
   plan?: boolean;
+}
+
+/** Comando anunciado pela sessão ACP ativa do provedor. */
+export interface ProviderSlashCommand {
+  name: string;
+  description: string;
+  inputHint: string | null;
+}
+
+/** Uma opção `select` que o provedor ACP anunciou para a sessão atual. */
+export interface ProviderConfigOption {
+  id: string;
+  label: string;
+  currentValue: string | null;
+  options: { value: string; label: string }[];
+}
+
+/** Recorte do catálogo ACP usado pelo seletor de modelo e raciocínio da conversa. */
+export interface ProviderRuntimeConfig {
+  model: ProviderConfigOption | null;
+  effort: ProviderConfigOption | null;
 }
 
 /** O comando com o modo de permissão (e o Plano, que no Claude é um modo de permissão e vence). Pura. */
@@ -131,7 +172,7 @@ export function readAccess(agentId: string, command: string): { access: ChatAcce
  * e esforço (`withModel`). Pura.
  */
 export function chatCommand(agentId: string, command: string, choice: LaunchChoice): string {
-  return withModel(agentId, withAccess(agentId, command, choice.access, choice.plan), choice.model, choice.effort);
+  return withModel(agentId, withAccess(agentId, command, choice.access, choice.plan), choice.model, choice.effort, choice.fastMode);
 }
 
 /** Uma cor estável por projeto, para o quadradinho com a inicial (tokens do tema, nunca hex). Pura. */

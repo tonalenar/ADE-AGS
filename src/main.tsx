@@ -1,15 +1,29 @@
 import { i18nReady } from "@/i18n/index";
+import "@fontsource-variable/geist";
+import "@fontsource-variable/geist-mono";
+import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
+import { useEffect } from "react";
 import ReactDOM from "react-dom/client";
-import { ThemeProvider } from "neogestify-ui-components";
+import { ThemeProvider, useTheme } from "neogestify-ui-components";
 import { Boot } from "@/app/Boot.tsx";
 import { whenHomeCanPaint } from "@/app/bootGate";
 import { loadAgentRegistry } from "@/features/agents/registry";
+import "@/features/settings/fontPreferences";
+import "@/features/settings/themePreferences";
+import "@/features/settings/motionPreferences";
 import { fontsReady } from "@/features/terminal/fontsReady";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
 import { reportBootStep } from "@/app/splash";
 import { installScaledMouseFix } from "@/features/terminal/scaledMouse";
+import { observeAppearanceMode } from "@/features/settings/appearanceMode";
+
+function AppearanceModeSync() {
+  const { setTheme } = useTheme();
+  useEffect(() => observeAppearanceMode(setTheme), [setTheme]);
+  return null;
+}
 
 // O bundle chegou: a abertura passa a "carregando os workspaces".
 reportBootStep(1);
@@ -56,6 +70,7 @@ const appReady = whenHomeCanPaint({ loadAgentRegistry, applyRendering: () => ren
 void i18nReady.finally(() => {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <ThemeProvider>
+      <AppearanceModeSync />
       <Boot appReady={appReady} />
     </ThemeProvider>
   );

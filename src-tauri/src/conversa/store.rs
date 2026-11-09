@@ -9,7 +9,7 @@
 //! - `chat_request`: os pedidos do agente (aprovar comando, aprovar edição, pergunta), com o id do
 //!   pedido no protocolo para responder.
 
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
 use crate::canal::timeline::Item;
@@ -21,6 +21,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             agent_id TEXT NOT NULL,
             remote_id TEXT,
             cwd TEXT NOT NULL,
+            workspace_id TEXT,
             title TEXT NOT NULL DEFAULT '',
             model TEXT,
             effort TEXT,
@@ -62,22 +63,133 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             created_at INTEGER NOT NULL,
             answered_at INTEGER
         );
-        CREATE INDEX IF NOT EXISTS idx_chat_request_state ON chat_request(thread_id, state);",
+        CREATE INDEX IF NOT EXISTS idx_chat_request_state ON chat_request(thread_id, state);
+        CREATE TABLE IF NOT EXISTS chat_thread_goal (
+            thread_id TEXT PRIMARY KEY REFERENCES chat_thread(id) ON DELETE CASCADE,
+            objective TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('active','paused','blocked','usageLimited','budgetLimited','complete')),
+            updated_at INTEGER NOT NULL
+        );",
     )?;
+    // Conversas anteriores à coluna seguem com `NULL` e usam o workspace que o ADE conseguir
+    // inferir pela pasta. Nenhuma conversa ou dado do usuário é removido.
+    let has_workspace_id = conn
+        .prepare("SELECT workspace_id FROM chat_thread LIMIT 0")
+        .is_ok();
+    if !has_workspace_id {
+        conn.execute_batch("ALTER TABLE chat_thread ADD COLUMN workspace_id TEXT;")?;
+    }
+    // Índice de busca local nas falas da pessoa e do agente. O FTS5 é incluído pelo SQLite bundled;
+    // a tabela não é a fonte da conversa e pode ser reconstruída a partir de `chat_item`.
+    conn.execute_batch(
+        "CREATE VIRTUAL TABLE IF NOT EXISTS chat_item_fts USING fts5(
+            thread_id UNINDEXED, item_id UNINDEXED, kind UNINDEXED, text,
+            tokenize = 'unicode61 remove_diacritics 2'
+        );
+        CREATE TABLE IF NOT EXISTS chat_item_fts_migration (version INTEGER PRIMARY KEY);
+        CREATE TRIGGER IF NOT EXISTS chat_item_fts_insert AFTER INSERT ON chat_item
+        WHEN json_valid(new.body)
+        BEGIN
+            INSERT INTO chat_item_fts(rowid, thread_id, item_id, kind, text)
+            SELECT new.rowid, new.thread_id, new.id, json_extract(new.body, '$.kind'), json_extract(new.body, '$.text')
+            WHERE json_extract(new.body, '$.kind') IN ('user', 'assistant')
+              AND length(COALESCE(json_extract(new.body, '$.text'), '')) > 0;
+        END;
+        CREATE TRIGGER IF NOT EXISTS chat_item_fts_update AFTER UPDATE ON chat_item
+        BEGIN
+            DELETE FROM chat_item_fts WHERE rowid = old.rowid;
+            INSERT INTO chat_item_fts(rowid, thread_id, item_id, kind, text)
+            SELECT new.rowid, new.thread_id, new.id, json_extract(new.body, '$.kind'), json_extract(new.body, '$.text')
+            WHERE json_valid(new.body)
+              AND json_extract(new.body, '$.kind') IN ('user', 'assistant')
+              AND length(COALESCE(json_extract(new.body, '$.text'), '')) > 0;
+        END;
+        CREATE TRIGGER IF NOT EXISTS chat_item_fts_delete AFTER DELETE ON chat_item
+        BEGIN
+            DELETE FROM chat_item_fts WHERE rowid = old.rowid;
+        END;",
+    )?;
+    let indexed = conn
+        .prepare("SELECT 1 FROM chat_item_fts_migration WHERE version = 1")?
+        .exists([])?;
+    if !indexed {
+        conn.execute_batch(
+            "INSERT INTO chat_item_fts(rowid, thread_id, item_id, kind, text)
+             SELECT item.rowid, item.thread_id, item.id, json_extract(item.body, '$.kind'), json_extract(item.body, '$.text')
+             FROM chat_item AS item
+             WHERE json_valid(item.body)
+               AND json_extract(item.body, '$.kind') IN ('user', 'assistant')
+               AND length(COALESCE(json_extract(item.body, '$.text'), '')) > 0
+               AND NOT EXISTS (SELECT 1 FROM chat_item_fts WHERE rowid = item.rowid);
+             INSERT INTO chat_item_fts_migration(version) VALUES (1);",
+        )?;
+    }
     // A permissão decidida no backend: o pedido INTEIRO (`chat_team::permission::Subject`, em JSON: o título só
     // guarda a primeira linha do comando) e quem respondeu e por quê (`person`, `policy`, `rule:<id>`).
-    for (column, ddl) in [("subject", "TEXT"), ("decided_by", "TEXT"), ("decided_why", "TEXT"), ("claimed_at", "INTEGER")] {
-        let has = conn.prepare("SELECT 1 FROM pragma_table_info('chat_request') WHERE name = ?1")?.exists([column])?;
+    for (column, ddl) in [
+        ("subject", "TEXT"),
+        ("decided_by", "TEXT"),
+        ("decided_why", "TEXT"),
+        ("claimed_at", "INTEGER"),
+    ] {
+        let has = conn
+            .prepare("SELECT 1 FROM pragma_table_info('chat_request') WHERE name = ?1")?
+            .exists([column])?;
         if !has {
-            conn.execute_batch(&format!("ALTER TABLE chat_request ADD COLUMN {column} {ddl};"))?;
+            conn.execute_batch(&format!(
+                "ALTER TABLE chat_request ADD COLUMN {column} {ddl};"
+            ))?;
         }
     }
     // O ai-memory na abertura do processo (`on` ou `off:<código>`): aditiva, nula até o primeiro processo abrir.
-    let has = conn.prepare("SELECT 1 FROM pragma_table_info('chat_thread') WHERE name = 'memory'")?.exists([])?;
+    let has = conn
+        .prepare("SELECT 1 FROM pragma_table_info('chat_thread') WHERE name = 'memory'")?
+        .exists([])?;
     if !has {
         conn.execute_batch("ALTER TABLE chat_thread ADD COLUMN memory TEXT;")?;
     }
+    // Conversas laterais mantêm a referência local à conversa que as originou.
+    for (column, ddl) in [
+        ("parent_ref", "TEXT"),
+        ("is_side_chat", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        let has = conn
+            .prepare("SELECT 1 FROM pragma_table_info('chat_thread') WHERE name = ?1")?
+            .exists([column])?;
+        if !has {
+            conn.execute_batch(&format!(
+                "ALTER TABLE chat_thread ADD COLUMN {column} {ddl};"
+            ))?;
+        }
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_chat_thread_parent_state
+         ON chat_thread(parent_ref, state) WHERE parent_ref IS NOT NULL;",
+    )?;
+    // Uma conversa filha aberta durante um turno guarda qual turno a originou. É nullable para
+    // conversas antigas, conversas abertas quando o pai está ocioso e relações com abas TUI.
+    let has_parent_turn_id = conn
+        .prepare("SELECT 1 FROM pragma_table_info('chat_thread') WHERE name = 'parent_turn_id'")?
+        .exists([])?;
+    if !has_parent_turn_id {
+        conn.execute_batch("ALTER TABLE chat_thread ADD COLUMN parent_turn_id TEXT;")?;
+    }
+    // Recibos de `chat_new`: uma repetição do harness recupera a mesma conversa e não reenvia
+    // silenciosamente o primeiro prompt quando o resultado do envio ficou incerto.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS chat_child_receipts (
+            caller_key TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            thread_id TEXT NOT NULL,
+            delivery_state TEXT NOT NULL CHECK(delivery_state IN ('prepared','submitting','accepted','retryable','unknown')),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (caller_key, request_id)
+        );",
+    )?;
     // As sessões nativas guardadas de cada agente que já esteve na conversa (trocar de agente, `troca.rs`): aditiva.
+    crate::runs::execution_log::migrate(conn)?;
     super::troca::migrate(conn)
 }
 
@@ -96,9 +208,46 @@ pub struct ThreadRow {
     pub account_id: Option<String>,
     /// O ai-memory na abertura do processo: `on`, ou `off:<código>`; `None` = o processo ainda não abriu.
     pub memory: Option<String>,
+    /// Referência local da conversa que originou uma conversa lateral (tab:<id> ou thread:<id>).
+    pub parent_ref: Option<String>,
+    /// ID do turno estruturado ativo que originou a conversa filha, quando não havia ambiguidade.
+    pub parent_turn_id: Option<String>,
+    /// Conversa lateral: fica fora da lista principal, acessível pelo painel da conversa de origem.
+    pub is_side_chat: bool,
     pub state: String,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+/// Trecho de uma mensagem que bateu na busca local da sidebar.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageSearchHit {
+    pub thread_id: String,
+    pub title: String,
+    pub agent_id: String,
+    pub cwd: String,
+    pub item_id: String,
+    pub kind: String,
+    pub excerpt: String,
+}
+
+/// Objetivo persistente associado a uma conversa por protocolo.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThreadGoal {
+    pub thread_id: String,
+    pub objective: String,
+    pub status: String,
+    pub updated_at: i64,
+}
+
+/// Recibo durável da criação de uma conversa filha pelo harness.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChildChatReceipt {
+    pub request_hash: String,
+    pub thread_id: String,
+    pub delivery_state: String,
 }
 
 /// O que se escolhe ao abrir uma conversa (e ao trocar depois).
@@ -109,49 +258,289 @@ pub struct Tuning {
     pub access: String,
 }
 
-const THREAD_COLS: &str = "id, agent_id, remote_id, cwd, title, model, effort, access, account_id, state, created_at, updated_at, memory";
+const THREAD_COLS: &str = "id, agent_id, remote_id, cwd, title, model, effort, access, account_id, state, created_at, updated_at, memory, parent_ref, is_side_chat, parent_turn_id";
 
 fn thread_of(r: &rusqlite::Row) -> rusqlite::Result<ThreadRow> {
     Ok(ThreadRow {
-        id: r.get(0)?, agent_id: r.get(1)?, remote_id: r.get(2)?, cwd: r.get(3)?, title: r.get(4)?,
-        model: r.get(5)?, effort: r.get(6)?, access: r.get(7)?, account_id: r.get(8)?, state: r.get(9)?,
-        created_at: r.get(10)?, updated_at: r.get(11)?, memory: r.get(12)?,
+        id: r.get(0)?,
+        agent_id: r.get(1)?,
+        remote_id: r.get(2)?,
+        cwd: r.get(3)?,
+        title: r.get(4)?,
+        model: r.get(5)?,
+        effort: r.get(6)?,
+        access: r.get(7)?,
+        account_id: r.get(8)?,
+        state: r.get(9)?,
+        created_at: r.get(10)?,
+        updated_at: r.get(11)?,
+        memory: r.get(12)?,
+        parent_ref: r.get(13)?,
+        is_side_chat: r.get::<_, i64>(14)? != 0,
+        parent_turn_id: r.get(15)?,
     })
 }
 
+fn active_parent_turn_id(
+    conn: &Connection,
+    parent_ref: Option<&str>,
+) -> rusqlite::Result<Option<String>> {
+    let Some(parent_thread_id) = parent_ref.and_then(|reference| reference.strip_prefix("thread:"))
+    else {
+        return Ok(None);
+    };
+    let mut statement = conn.prepare(
+        "SELECT id FROM chat_run WHERE thread_id = ?1 AND status = 'inProgress'
+         ORDER BY COALESCE(started_at, 0) DESC, id DESC LIMIT 2",
+    )?;
+    let turns = statement
+        .query_map([parent_thread_id], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok((turns.len() == 1).then(|| turns[0].clone()))
+}
+
 #[allow(clippy::too_many_arguments)]
-pub fn insert_thread(conn: &Connection, id: &str, agent_id: &str, cwd: &str, title: &str, tuning: &Tuning, account_id: Option<&str>, now: i64) -> rusqlite::Result<ThreadRow> {
+pub fn insert_thread(
+    conn: &Connection,
+    id: &str,
+    agent_id: &str,
+    cwd: &str,
+    title: &str,
+    tuning: &Tuning,
+    account_id: Option<&str>,
+    now: i64,
+) -> rusqlite::Result<ThreadRow> {
+    insert_thread_with_context(
+        conn, id, agent_id, cwd, title, tuning, account_id, None, None, now,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn insert_thread_with_parent(
+    conn: &Connection,
+    id: &str,
+    agent_id: &str,
+    cwd: &str,
+    title: &str,
+    tuning: &Tuning,
+    account_id: Option<&str>,
+    parent_ref: Option<&str>,
+    now: i64,
+) -> rusqlite::Result<ThreadRow> {
+    insert_thread_with_context(
+        conn, id, agent_id, cwd, title, tuning, account_id, parent_ref, None, now,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn insert_thread_with_context(
+    conn: &Connection,
+    id: &str,
+    agent_id: &str,
+    cwd: &str,
+    title: &str,
+    tuning: &Tuning,
+    account_id: Option<&str>,
+    parent_ref: Option<&str>,
+    workspace_id: Option<&str>,
+    now: i64,
+) -> rusqlite::Result<ThreadRow> {
+    let parent_turn_id = active_parent_turn_id(conn, parent_ref)?;
     conn.execute(
-        "INSERT INTO chat_thread (id, agent_id, cwd, title, model, effort, access, account_id, state, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'active', ?9, ?9)",
-        params![id, agent_id, cwd, title, tuning.model, tuning.effort, tuning.access, account_id, now],
+        "INSERT INTO chat_thread (id, agent_id, cwd, workspace_id, title, model, effort, access, account_id, state, created_at, updated_at, parent_ref, is_side_chat, parent_turn_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active', ?10, ?10, ?11, ?12, ?13)",
+        params![id, agent_id, cwd, workspace_id, title, tuning.model, tuning.effort, tuning.access, account_id, now, parent_ref, parent_ref.is_some(), parent_turn_id],
     )?;
     thread(conn, id).map(|t| t.expect("acabou de entrar"))
 }
 
+pub fn thread_workspace_id(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT workspace_id FROM chat_thread WHERE id = ?1",
+        [id],
+        |row| row.get(0),
+    )
+    .optional()
+}
+
 pub fn thread(conn: &Connection, id: &str) -> rusqlite::Result<Option<ThreadRow>> {
-    conn.query_row(&format!("SELECT {THREAD_COLS} FROM chat_thread WHERE id = ?1"), params![id], thread_of).optional()
+    conn.query_row(
+        &format!("SELECT {THREAD_COLS} FROM chat_thread WHERE id = ?1"),
+        params![id],
+        thread_of,
+    )
+    .optional()
 }
 
 /// As conversas, as mais recentes primeiro.
 pub fn threads(conn: &Connection) -> rusqlite::Result<Vec<ThreadRow>> {
-    let mut stmt = conn.prepare(&format!("SELECT {THREAD_COLS} FROM chat_thread ORDER BY updated_at DESC, created_at DESC"))?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {THREAD_COLS} FROM chat_thread ORDER BY updated_at DESC, created_at DESC"
+    ))?;
     stmt.query_map([], thread_of)?.collect()
 }
 
+/// Conversas-filhas ativas: é o lineage nativo do chat, independente do cadastro de times do canvas.
+pub fn active_side_threads(conn: &Connection) -> rusqlite::Result<Vec<ThreadRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {THREAD_COLS} FROM chat_thread
+         WHERE parent_ref IS NOT NULL AND state = 'active'
+         ORDER BY updated_at DESC, created_at DESC"
+    ))?;
+    stmt.query_map([], thread_of)?.collect()
+}
+
+pub fn child_chat_receipt(
+    conn: &Connection,
+    caller_key: &str,
+    request_id: &str,
+) -> rusqlite::Result<Option<ChildChatReceipt>> {
+    conn.query_row(
+        "SELECT request_hash, thread_id, delivery_state FROM chat_child_receipts
+         WHERE caller_key = ?1 AND request_id = ?2",
+        params![caller_key, request_id],
+        |row| {
+            Ok(ChildChatReceipt {
+                request_hash: row.get(0)?,
+                thread_id: row.get(1)?,
+                delivery_state: row.get(2)?,
+            })
+        },
+    )
+    .optional()
+}
+
+pub fn save_child_chat_receipt(
+    conn: &Connection,
+    caller_key: &str,
+    request_id: &str,
+    request_hash: &str,
+    thread_id: &str,
+    delivery_state: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO chat_child_receipts
+         (caller_key, request_id, request_hash, thread_id, delivery_state, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+        params![
+            caller_key,
+            request_id,
+            request_hash,
+            thread_id,
+            delivery_state,
+            now
+        ],
+    )?;
+    Ok(())
+}
+
+/// Troca o estado só se ainda for um dos esperados; evita que uma resposta tardia sobrescreva
+/// o resultado de outra tentativa já reclamada.
+pub fn transition_child_chat_receipt(
+    conn: &Connection,
+    caller_key: &str,
+    request_id: &str,
+    from: &[&str],
+    to: &str,
+    now: i64,
+) -> rusqlite::Result<bool> {
+    let mut changed = false;
+    for state in from {
+        changed |= conn.execute(
+            "UPDATE chat_child_receipts SET delivery_state = ?4, updated_at = ?5
+             WHERE caller_key = ?1 AND request_id = ?2 AND delivery_state = ?3",
+            params![caller_key, request_id, state, to, now],
+        )? > 0;
+    }
+    Ok(changed)
+}
+
+/// Lê o objetivo persistido da conversa, se houver.
+pub fn goal(conn: &Connection, thread_id: &str) -> rusqlite::Result<Option<ThreadGoal>> {
+    conn.query_row(
+        "SELECT thread_id, objective, status, updated_at FROM chat_thread_goal WHERE thread_id = ?1",
+        params![thread_id],
+        |r| Ok(ThreadGoal { thread_id: r.get(0)?, objective: r.get(1)?, status: r.get(2)?, updated_at: r.get(3)? }),
+    ).optional()
+}
+
+/// Cria ou atualiza o objetivo sem alterar nem apagar outros dados da conversa.
+pub fn set_goal(
+    conn: &Connection,
+    thread_id: &str,
+    objective: &str,
+    status: &str,
+    now: i64,
+) -> rusqlite::Result<ThreadGoal> {
+    conn.execute(
+        "INSERT INTO chat_thread_goal(thread_id, objective, status, updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(thread_id) DO UPDATE SET objective = excluded.objective, status = excluded.status, updated_at = excluded.updated_at",
+        params![thread_id, objective, status, now],
+    )?;
+    conn.query_row(
+        "SELECT thread_id, objective, status, updated_at FROM chat_thread_goal WHERE thread_id = ?1",
+        params![thread_id],
+        |r| Ok(ThreadGoal { thread_id: r.get(0)?, objective: r.get(1)?, status: r.get(2)?, updated_at: r.get(3)? }),
+    )
+}
+
+/// Atualiza o estado de um objetivo já existente.
+pub fn set_goal_status(
+    conn: &Connection,
+    thread_id: &str,
+    status: &str,
+    now: i64,
+) -> rusqlite::Result<Option<ThreadGoal>> {
+    conn.execute(
+        "UPDATE chat_thread_goal SET status = ?2, updated_at = ?3 WHERE thread_id = ?1",
+        params![thread_id, status, now],
+    )?;
+    goal(conn, thread_id)
+}
+
+/// Remove somente o objetivo da conversa.
+pub fn clear_goal(conn: &Connection, thread_id: &str) -> rusqlite::Result<bool> {
+    Ok(conn.execute(
+        "DELETE FROM chat_thread_goal WHERE thread_id = ?1",
+        params![thread_id],
+    )? > 0)
+}
+
+/// Apaga apenas uma conversa lateral (o histórico dependente é removido por ON DELETE CASCADE).
+pub fn delete_side_chat(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
+    conn.execute(
+        "DELETE FROM chat_thread WHERE id = ?1 AND is_side_chat = 1",
+        params![id],
+    )
+    .map(|n| n > 0)
+}
+
 pub fn set_remote_id(conn: &Connection, id: &str, remote: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_thread SET remote_id = ?2 WHERE id = ?1", params![id, remote]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_thread SET remote_id = ?2 WHERE id = ?1",
+        params![id, remote],
+    )
+    .map(|_| ())
 }
 
 /// Troca a conta da conversa (`None` = a principal do agente). A sessão antiga mora no perfil da conta antiga:
 /// quem troca também chama [`clear_remote_id`].
 pub fn set_account(conn: &Connection, id: &str, account_id: Option<&str>) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_thread SET account_id = ?2 WHERE id = ?1", params![id, account_id]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_thread SET account_id = ?2 WHERE id = ?1",
+        params![id, account_id],
+    )
+    .map(|_| ())
 }
 
 /// Esquece a sessão do agente: a próxima mensagem abre uma nova (sem tentar retomar a de outra conta).
 pub fn clear_remote_id(conn: &Connection, id: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_thread SET remote_id = NULL WHERE id = ?1", params![id]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_thread SET remote_id = NULL WHERE id = ?1",
+        params![id],
+    )
+    .map(|_| ())
 }
 
 pub fn set_tuning(conn: &Connection, id: &str, tuning: &Tuning, now: i64) -> rusqlite::Result<()> {
@@ -164,24 +553,46 @@ pub fn set_tuning(conn: &Connection, id: &str, tuning: &Tuning, now: i64) -> rus
 
 /// O ai-memory na abertura do processo da conversa (`on` ou `off:<código>`), para a tela mostrar o que de fato aconteceu.
 pub fn set_memory(conn: &Connection, id: &str, memory: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_thread SET memory = ?2 WHERE id = ?1", params![id, memory]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_thread SET memory = ?2 WHERE id = ?1",
+        params![id, memory],
+    )
+    .map(|_| ())
 }
 
 pub fn set_title(conn: &Connection, id: &str, title: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_thread SET title = ?2 WHERE id = ?1", params![id, title]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_thread SET title = ?2 WHERE id = ?1",
+        params![id, title],
+    )
+    .map(|_| ())
 }
 
 pub fn set_state(conn: &Connection, id: &str, state: &str, now: i64) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_thread SET state = ?2, updated_at = ?3 WHERE id = ?1", params![id, state, now]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_thread SET state = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, state, now],
+    )
+    .map(|_| ())
 }
 
 pub fn touch(conn: &Connection, id: &str, now: i64) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_thread SET updated_at = ?2 WHERE id = ?1", params![id, now]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_thread SET updated_at = ?2 WHERE id = ?1",
+        params![id, now],
+    )
+    .map(|_| ())
 }
 
 /// Grava um item: um novo vai para o fim; um que já existe (a ferramenta que terminou) fica no lugar.
-pub fn upsert_item(conn: &Connection, thread_id: &str, run_id: Option<&str>, item: &Item) -> rusqlite::Result<()> {
-    let body = serde_json::to_string(item).map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+pub fn upsert_item(
+    conn: &Connection,
+    thread_id: &str,
+    run_id: Option<&str>,
+    item: &Item,
+) -> rusqlite::Result<()> {
+    let body = serde_json::to_string(item)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
     conn.execute(
         "INSERT INTO chat_item (thread_id, id, seq, run_id, body)
          VALUES (?1, ?2, COALESCE((SELECT MAX(seq) FROM chat_item WHERE thread_id = ?1), 0) + 1, ?3, ?4)
@@ -194,18 +605,94 @@ pub fn upsert_item(conn: &Connection, thread_id: &str, run_id: Option<&str>, ite
 /// A timeline guardada, na ordem. Um corpo ilegível (de uma versão futura) fica de fora.
 pub fn items(conn: &Connection, thread_id: &str) -> rusqlite::Result<Vec<Item>> {
     let mut stmt = conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 ORDER BY seq")?;
-    let bodies: Vec<String> = stmt.query_map(params![thread_id], |r| r.get(0))?.collect::<Result<_, _>>()?;
-    Ok(bodies.iter().filter_map(|b| serde_json::from_str(b).ok()).collect())
+    let bodies: Vec<String> = stmt
+        .query_map(params![thread_id], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    Ok(bodies
+        .iter()
+        .filter_map(|b| serde_json::from_str(b).ok())
+        .collect())
 }
 
 /// Os últimos `limit` itens da conversa, do mais velho ao mais novo (a ponta, sem ler a conversa inteira).
 pub fn tail_items(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<Item>> {
-    let mut stmt = conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 ORDER BY seq DESC LIMIT ?2")?;
-    let bodies: Vec<String> = stmt.query_map(params![thread_id, limit], |r| r.get(0))?.collect::<Result<_, _>>()?;
-    Ok(bodies.iter().rev().filter_map(|b| serde_json::from_str(b).ok()).collect())
+    let mut stmt =
+        conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 ORDER BY seq DESC LIMIT ?2")?;
+    let bodies: Vec<String> = stmt
+        .query_map(params![thread_id, limit], |r| r.get(0))?
+        .collect::<Result<_, _>>()?;
+    Ok(bodies
+        .iter()
+        .rev()
+        .filter_map(|b| serde_json::from_str(b).ok())
+        .collect())
 }
 
-pub fn upsert_run(conn: &Connection, thread_id: &str, run_id: &str, status: &str, started_at: Option<i64>, completed_at: Option<i64>, duration_ms: Option<i64>) -> rusqlite::Result<()> {
+/// Busca local por palavras/prefixos em falas, sem ler o conteúdo para fora do SQLite da ADE.
+pub fn search_messages(
+    conn: &Connection,
+    match_query: &str,
+    excerpt_query: &str,
+    limit: usize,
+) -> rusqlite::Result<Vec<MessageSearchHit>> {
+    let mut stmt = conn.prepare(
+        "SELECT thread.id, thread.title, thread.agent_id, thread.cwd, item.item_id, item.kind, item.text
+         FROM chat_item_fts AS item
+         JOIN chat_thread AS thread ON thread.id = item.thread_id
+         WHERE chat_item_fts MATCH ?1 AND thread.is_side_chat = 0
+         ORDER BY bm25(chat_item_fts), thread.updated_at DESC
+         LIMIT ?2",
+    )?;
+    let mut rows = stmt.query(params![match_query, limit.min(50) as i64])?;
+    let mut hits = Vec::new();
+    while let Some(row) = rows.next()? {
+        let text: String = row.get(6)?;
+        hits.push(MessageSearchHit {
+            thread_id: row.get(0)?,
+            title: row.get(1)?,
+            agent_id: row.get(2)?,
+            cwd: row.get(3)?,
+            item_id: row.get(4)?,
+            kind: row.get(5)?,
+            excerpt: search_excerpt(&text, excerpt_query),
+        });
+    }
+    Ok(hits)
+}
+
+fn search_excerpt(text: &str, query: &str) -> String {
+    const MAX_CHARS: usize = 220;
+    let needle = query
+        .split_whitespace()
+        .next()
+        .unwrap_or(query)
+        .to_lowercase();
+    let lowered = text.to_lowercase();
+    let match_char = lowered
+        .find(&needle)
+        .map(|at| lowered[..at].chars().count())
+        .unwrap_or(0);
+    let chars: Vec<char> = text.chars().collect();
+    let start = match_char.saturating_sub(64).min(chars.len());
+    let excerpt: String = chars.iter().skip(start).take(MAX_CHARS).collect();
+    let prefix = if start > 0 { "…" } else { "" };
+    let suffix = if start + MAX_CHARS < chars.len() {
+        "…"
+    } else {
+        ""
+    };
+    format!("{prefix}{excerpt}{suffix}")
+}
+
+pub fn upsert_run(
+    conn: &Connection,
+    thread_id: &str,
+    run_id: &str,
+    status: &str,
+    started_at: Option<i64>,
+    completed_at: Option<i64>,
+    duration_ms: Option<i64>,
+) -> rusqlite::Result<()> {
     conn.execute(
         "INSERT INTO chat_run (id, thread_id, status, started_at, completed_at, duration_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(thread_id, id) DO UPDATE SET status = excluded.status,
@@ -218,8 +705,17 @@ pub fn upsert_run(conn: &Connection, thread_id: &str, run_id: &str, status: &str
 }
 
 /// O status gravado de um turno (`inProgress`, `completed`, `interrupted`, `failed`), se houver.
-pub fn run_status(conn: &Connection, thread_id: &str, run_id: &str) -> rusqlite::Result<Option<String>> {
-    conn.query_row("SELECT status FROM chat_run WHERE thread_id = ?1 AND id = ?2", params![thread_id, run_id], |r| r.get(0)).optional()
+pub fn run_status(
+    conn: &Connection,
+    thread_id: &str,
+    run_id: &str,
+) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT status FROM chat_run WHERE thread_id = ?1 AND id = ?2",
+        params![thread_id, run_id],
+        |r| r.get(0),
+    )
+    .optional()
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -241,13 +737,21 @@ pub struct RequestRow {
     pub created_at: i64,
 }
 
-const REQUEST_COLS: &str = "id, thread_id, rpc_id, kind, item_id, title, detail, options, state, created_at";
+const REQUEST_COLS: &str =
+    "id, thread_id, rpc_id, kind, item_id, title, detail, options, state, created_at";
 
 fn request_of(r: &rusqlite::Row) -> rusqlite::Result<RequestRow> {
     let options: String = r.get(7)?;
     Ok(RequestRow {
-        id: r.get(0)?, thread_id: r.get(1)?, rpc_id: r.get(2)?, kind: r.get(3)?, item_id: r.get(4)?, title: r.get(5)?,
-        detail: r.get(6)?, options: serde_json::from_str(&options).unwrap_or(serde_json::Value::Null), state: r.get(8)?,
+        id: r.get(0)?,
+        thread_id: r.get(1)?,
+        rpc_id: r.get(2)?,
+        kind: r.get(3)?,
+        item_id: r.get(4)?,
+        title: r.get(5)?,
+        detail: r.get(6)?,
+        options: serde_json::from_str(&options).unwrap_or(serde_json::Value::Null),
+        state: r.get(8)?,
         created_at: r.get(9)?,
     })
 }
@@ -261,19 +765,50 @@ pub fn insert_request(conn: &Connection, row: &RequestRow) -> rusqlite::Result<(
     // O `asked` da auditoria comum (`approval_audit`). Pergunta não é aprovação: fica de fora. Só o nome da
     // ferramenta (ou o tipo); o comando e o arquivo ficam no pedido. Best-effort: não impede o pedido.
     if row.kind != "question" {
-        let tool = row.options.get("tool").and_then(serde_json::Value::as_str).unwrap_or(&row.kind);
-        let _ = crate::approval_audit::asked(conn, crate::approval_audit::Source::Chat, &row.id, &row.thread_id, tool, row.created_at);
+        let tool = row
+            .options
+            .get("tool")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(&row.kind);
+        let _ = crate::approval_audit::asked(
+            conn,
+            crate::approval_audit::Source::Chat,
+            &row.id,
+            &row.thread_id,
+            tool,
+            row.created_at,
+        );
     }
     Ok(())
 }
 
 /// O `decided` da auditoria comum. Só grava se houve `asked` (perguntas não têm) e se é a primeira decisão.
-fn audit_decided(conn: &Connection, id: &str, outcome: crate::approval_audit::Outcome, scope: Option<&str>, by: &str, now: i64) {
-    let _ = crate::approval_audit::decided(conn, crate::approval_audit::Source::Chat, id, outcome, scope, by, now);
+fn audit_decided(
+    conn: &Connection,
+    id: &str,
+    outcome: crate::approval_audit::Outcome,
+    scope: Option<&str>,
+    by: &str,
+    now: i64,
+) {
+    let _ = crate::approval_audit::decided(
+        conn,
+        crate::approval_audit::Source::Chat,
+        id,
+        outcome,
+        scope,
+        by,
+        now,
+    );
 }
 
 pub fn request(conn: &Connection, id: &str) -> rusqlite::Result<Option<RequestRow>> {
-    conn.query_row(&format!("SELECT {REQUEST_COLS} FROM chat_request WHERE id = ?1"), params![id], request_of).optional()
+    conn.query_row(
+        &format!("SELECT {REQUEST_COLS} FROM chat_request WHERE id = ?1"),
+        params![id],
+        request_of,
+    )
+    .optional()
 }
 
 pub fn pending_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<Vec<RequestRow>> {
@@ -282,12 +817,24 @@ pub fn pending_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<
 }
 
 /// Marca respondido pela pessoa. `false` se já não estava pendente (respondido em outro lugar, ou expirou).
-pub fn answer_request(conn: &Connection, id: &str, answer: &str, now: i64) -> rusqlite::Result<bool> {
+pub fn answer_request(
+    conn: &Connection,
+    id: &str,
+    answer: &str,
+    now: i64,
+) -> rusqlite::Result<bool> {
     answer_request_by(conn, id, answer, now, "person", None)
 }
 
 /// Como `answer_request`, dizendo quem respondeu (`person`, `policy`, `rule:<id>`) e por quê (auditoria).
-pub fn answer_request_by(conn: &Connection, id: &str, answer: &str, now: i64, by: &str, why: Option<&str>) -> rusqlite::Result<bool> {
+pub fn answer_request_by(
+    conn: &Connection,
+    id: &str,
+    answer: &str,
+    now: i64,
+    by: &str,
+    why: Option<&str>,
+) -> rusqlite::Result<bool> {
     let changed = conn.execute(
         "UPDATE chat_request SET state = 'answered', answer = ?2, answered_at = ?3, decided_by = ?4, decided_why = ?5
           WHERE id = ?1 AND state = 'pending'",
@@ -296,14 +843,26 @@ pub fn answer_request_by(conn: &Connection, id: &str, answer: &str, now: i64, by
     if changed {
         let (outcome, scope) = crate::approval_audit::outcome_of_choice(answer);
         // `resolved` chega por `answer_request` ("pela pessoa"), mas quem desistiu foi o motor.
-        audit_decided(conn, id, outcome, scope, if answer == "resolved" { "agent" } else { by }, now);
+        audit_decided(
+            conn,
+            id,
+            outcome,
+            scope,
+            if answer == "resolved" { "agent" } else { by },
+            now,
+        );
     }
     Ok(changed)
 }
 
 /// RESERVA o pedido para responder ao agente: só um quem chega primeiro, e só se ele ainda está `pending`. A reserva
 /// esquecida (mais velha que `lease_ms`) pode ser tomada. `false` = não era dele; quem perde não responde nada.
-pub fn reserve_request(conn: &Connection, id: &str, now: i64, lease_ms: i64) -> rusqlite::Result<bool> {
+pub fn reserve_request(
+    conn: &Connection,
+    id: &str,
+    now: i64,
+    lease_ms: i64,
+) -> rusqlite::Result<bool> {
     conn.execute(
         "UPDATE chat_request SET claimed_at = ?2 WHERE id = ?1 AND state = 'pending' AND (claimed_at IS NULL OR claimed_at < ?3)",
         params![id, now, now - lease_ms],
@@ -313,16 +872,31 @@ pub fn reserve_request(conn: &Connection, id: &str, now: i64, lease_ms: i64) -> 
 
 /// Devolve a reserva (o envio ao agente falhou): o pedido segue `pending` para a pessoa.
 pub fn release_request(conn: &Connection, id: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_request SET claimed_at = NULL WHERE id = ?1 AND state = 'pending'", params![id]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_request SET claimed_at = NULL WHERE id = ?1 AND state = 'pending'",
+        params![id],
+    )
+    .map(|_| ())
 }
 
 /// Guarda o pedido inteiro (JSON de `permission::Subject`) para decidir sobre ele, na chegada ou depois.
 pub fn set_subject(conn: &Connection, id: &str, subject: &str) -> rusqlite::Result<()> {
-    conn.execute("UPDATE chat_request SET subject = ?2 WHERE id = ?1", params![id, subject]).map(|_| ())
+    conn.execute(
+        "UPDATE chat_request SET subject = ?2 WHERE id = ?1",
+        params![id, subject],
+    )
+    .map(|_| ())
 }
 
 pub fn subject_of(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
-    Ok(conn.query_row("SELECT subject FROM chat_request WHERE id = ?1", params![id], |r| r.get::<_, Option<String>>(0)).optional()?.flatten())
+    Ok(conn
+        .query_row(
+            "SELECT subject FROM chat_request WHERE id = ?1",
+            params![id],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
 }
 
 /// Quem respondeu um pedido e por quê (auditoria).
@@ -336,12 +910,24 @@ pub struct Decision {
 }
 
 /// As últimas decisões de uma conversa (quem respondeu e por quê), da mais nova para a mais velha.
-pub fn recent_decisions(conn: &Connection, thread_id: &str, limit: i64) -> rusqlite::Result<Vec<Decision>> {
+pub fn recent_decisions(
+    conn: &Connection,
+    thread_id: &str,
+    limit: i64,
+) -> rusqlite::Result<Vec<Decision>> {
     let mut stmt = conn.prepare(
         "SELECT id, COALESCE(answer, ''), decided_by, decided_why FROM chat_request
           WHERE thread_id = ?1 AND state = 'answered' ORDER BY answered_at DESC, id LIMIT ?2",
     )?;
-    stmt.query_map(params![thread_id, limit], |r| Ok(Decision { request_id: r.get(0)?, answer: r.get(1)?, by: r.get(2)?, why: r.get(3)? }))?.collect()
+    stmt.query_map(params![thread_id, limit], |r| {
+        Ok(Decision {
+            request_id: r.get(0)?,
+            answer: r.get(1)?,
+            by: r.get(2)?,
+            why: r.get(3)?,
+        })
+    })?
+    .collect()
 }
 
 /// Os pedidos pendentes de TODAS as conversas ativas (a varredura os decide; ver `conversa::permission`).
@@ -356,13 +942,25 @@ pub fn pending_all(conn: &Connection) -> rusqlite::Result<Vec<RequestRow>> {
 /// Os pendentes de uma conversa expiram (o turno acabou, ou o processo do agente fechou). Devolve os ids.
 pub fn expire_requests(conn: &Connection, thread_id: &str) -> rusqlite::Result<Vec<String>> {
     let ids: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT id FROM chat_request WHERE thread_id = ?1 AND state = 'pending'")?;
-        stmt.query_map(params![thread_id], |r| r.get(0))?.collect::<Result<_, _>>()?
+        let mut stmt =
+            conn.prepare("SELECT id FROM chat_request WHERE thread_id = ?1 AND state = 'pending'")?;
+        stmt.query_map(params![thread_id], |r| r.get(0))?
+            .collect::<Result<_, _>>()?
     };
-    conn.execute("UPDATE chat_request SET state = 'expired' WHERE thread_id = ?1 AND state = 'pending'", params![thread_id])?;
+    conn.execute(
+        "UPDATE chat_request SET state = 'expired' WHERE thread_id = ?1 AND state = 'pending'",
+        params![thread_id],
+    )?;
     let now = crate::util::now_ts_ms();
     for id in &ids {
-        audit_decided(conn, id, crate::approval_audit::Outcome::Cancelled, None, "expired", now);
+        audit_decided(
+            conn,
+            id,
+            crate::approval_audit::Outcome::Cancelled,
+            None,
+            "expired",
+            now,
+        );
     }
     Ok(ids)
 }
@@ -374,38 +972,73 @@ pub struct Sweep {
     pub requests: usize,
 }
 
-/// No arranque do app: nenhum agente de uma conversa sobrevive ao app, então todo turno `inProgress` e todo
-/// pedido `pending` que sobrou de um crash é órfão. O turno vira `interrupted`; o que ficou aberto na ponta da
-/// timeline ganha um `turnEnd` com o motivo (para a tela não mostrar um turno aberto para sempre); o pedido
-/// vira `expired` (clicar nele daria "o agente já fechou"). Nunca apaga linha. Idempotente.
+/// No arranque, depois de confirmar que não há outra instância usando o mesmo banco, reconcilia turnos e pedidos
+/// que sobraram de um crash. O turno vira `interrupted`; ferramentas sem resultado recebem o marcador de efeito
+/// desconhecido; timeline e evento do harness são gravados junto com a expiração dos pedidos, em uma transação.
+/// Nunca apaga linha nem reenvia ações ao provider. Idempotente.
 pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
-    let runs = close_orphan_runs(conn, None, now, "O app foi fechado antes de o turno terminar.")?;
+    let tx = conn.unchecked_transaction()?;
+    let runs = close_orphan_runs(
+        &tx,
+        None,
+        now,
+        "O app foi fechado antes de o turno terminar.",
+    )?;
     let orphans: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT id FROM chat_request WHERE state = 'pending'")?;
-        stmt.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+        let mut stmt = tx.prepare("SELECT id FROM chat_request WHERE state = 'pending'")?;
+        stmt.query_map([], |r| r.get(0))?
+            .collect::<Result<_, _>>()?
     };
     for id in &orphans {
-        audit_decided(conn, id, crate::approval_audit::Outcome::Cancelled, None, "app-closed", now);
+        audit_decided(
+            &tx,
+            id,
+            crate::approval_audit::Outcome::Cancelled,
+            None,
+            "app-closed",
+            now,
+        );
     }
-    let requests = conn.execute("UPDATE chat_request SET state = 'expired' WHERE state = 'pending'", [])?;
-    Ok(Sweep { runs: runs.len(), requests })
+    let requests = tx.execute(
+        "UPDATE chat_request SET state = 'expired' WHERE state = 'pending'",
+        [],
+    )?;
+    tx.commit()?;
+    Ok(Sweep {
+        runs: runs.len(),
+        requests,
+    })
 }
 
 /// Fecha os turnos `inProgress` sem agente vivo (de uma conversa, ou de todas): viram `interrupted`, e o que ficou na
 /// ponta da timeline ganha um `turnEnd` com `reason`. Devolve os turnos fechados (conversa, turno). Nunca apaga linha.
 /// O arranque usa em todas; o Parar, numa conversa cujo agente já não existe (a tela ficaria em «Pensando…»).
-pub fn close_orphan_runs(conn: &Connection, thread: Option<&str>, now: i64, reason: &str) -> rusqlite::Result<Vec<(String, String)>> {
+pub fn close_orphan_runs(
+    conn: &Connection,
+    thread: Option<&str>,
+    now: i64,
+    reason: &str,
+) -> rusqlite::Result<Vec<(String, String)>> {
     let runs: Vec<(String, String)> = {
         let mut stmt = conn.prepare("SELECT thread_id, id FROM chat_run WHERE status = 'inProgress' AND (?1 IS NULL OR thread_id = ?1)")?;
-        stmt.query_map(params![thread], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<Result<_, _>>()?
+        stmt.query_map(params![thread], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?
     };
     for (thread_id, run_id) in &runs {
+        // Reconciliação no boot deixa a timeline e o grafo consistentes antes de fechar o turno.
+        // Se uma gravação falhar, o chamador pode reverter tudo e tentar novamente no próximo boot.
+        super::turn::mark_unknown_outcomes(conn, thread_id, run_id, now)?;
+        crate::runs::execution_log::record_interrupted_turn(conn, thread_id, run_id, reason, now)?;
         conn.execute(
             "UPDATE chat_run SET status = 'interrupted', completed_at = COALESCE(completed_at, ?3) WHERE thread_id = ?1 AND id = ?2",
             params![thread_id, run_id, now],
         )?;
         // Só o turno que ficou na ponta da timeline fecha com o `turnEnd`: um fim jogado no meio fecharia o turno errado.
-        let last: Option<i64> = conn.query_row("SELECT MAX(seq) FROM chat_item WHERE thread_id = ?1 AND run_id = ?2", params![thread_id, run_id], |r| r.get(0))?;
+        let last: Option<i64> = conn.query_row(
+            "SELECT MAX(seq) FROM chat_item WHERE thread_id = ?1 AND run_id = ?2",
+            params![thread_id, run_id],
+            |r| r.get(0),
+        )?;
         let Some(last) = last else { continue };
         let others: i64 = conn.query_row(
             "SELECT COUNT(*) FROM chat_item WHERE thread_id = ?1 AND seq > ?2 AND COALESCE(run_id, '') != ?3",
@@ -413,10 +1046,14 @@ pub fn close_orphan_runs(conn: &Connection, thread: Option<&str>, now: i64, reas
             |r| r.get(0),
         )?;
         let end_id = format!("end:{run_id}");
-        let has_end: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM chat_item WHERE thread_id = ?1 AND id = ?2)", params![thread_id, end_id], |r| r.get(0))?;
+        let has_end: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM chat_item WHERE thread_id = ?1 AND id = ?2)",
+            params![thread_id, end_id],
+            |r| r.get(0),
+        )?;
         if others == 0 && !has_end {
             let mut end = Item::new(crate::canal::timeline::ItemKind::TurnEnd, end_id, Some(now));
-            end.interrupted = Some(false);
+            end.interrupted = Some(true);
             end.text = Some(reason.into());
             upsert_item(conn, thread_id, Some(run_id), &end)?;
         }

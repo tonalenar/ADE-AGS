@@ -513,7 +513,7 @@ fn una_tarea_arranca_lista_y_al_lanzarse_queda_corriendo_con_su_sesion() {
         status::READY
     );
 
-    store::mark_running(&conn, &id, "sesion-1", "/tmp/e.jsonl").unwrap();
+    store::mark_running(&conn, &id, "attempt-1", "sesion-1", "/tmp/e.jsonl").unwrap();
     let t = store::task_by_id(&conn, &id).unwrap().unwrap();
     assert_eq!(t.status, status::RUNNING);
     // El id de sesión lo puso la app ANTES de lanzar: es lo que después permite reabrir
@@ -530,7 +530,7 @@ fn cerrar_una_tarea_acumula_lo_que_gasto_en_su_run() {
     let b = tarea(&conn, &run);
 
     for id in [&a, &b] {
-        store::mark_running(&conn, id, "s", "/tmp/e.jsonl").unwrap();
+        store::mark_running(&conn, id, &format!("attempt-{id}"), "s", "/tmp/e.jsonl").unwrap();
         let outcome = TaskOutcome {
             ok: true,
             cost_usd: Some(0.25),
@@ -550,7 +550,7 @@ fn una_tarea_cancelada_no_la_pisa_el_fallo_del_proceso_que_se_mato() {
     let conn = test_db();
     let run = run_en(&conn);
     let id = tarea(&conn, &run);
-    store::mark_running(&conn, &id, "s", "/tmp/e.jsonl").unwrap();
+    store::mark_running(&conn, &id, "attempt-1", "s", "/tmp/e.jsonl").unwrap();
 
     conn.execute("UPDATE tasks SET status = 'cancelled' WHERE id = ?1", [&id])
         .unwrap();
@@ -587,8 +587,8 @@ fn al_arrancar_se_cierran_las_tareas_que_murieron_con_la_app() {
     let viva = tarea(&conn, &run);
     let cerrada = tarea(&conn, &run);
 
-    store::mark_running(&conn, &viva, "s", "/tmp/e.jsonl").unwrap();
-    store::mark_running(&conn, &cerrada, "s", "/tmp/e.jsonl").unwrap();
+    store::mark_running(&conn, &viva, "attempt-live", "s", "/tmp/e.jsonl").unwrap();
+    store::mark_running(&conn, &cerrada, "attempt-closed", "s", "/tmp/e.jsonl").unwrap();
     store::finish_task(
         &conn,
         &cerrada,
@@ -1452,7 +1452,7 @@ fn una_tarea_pasada_a_terminal_no_la_pisa_el_proceso_que_se_paro() {
     let conn = test_db();
     let run = run_en(&conn);
     let id = tarea(&conn, &run);
-    store::mark_running(&conn, &id, "s", "/tmp/e.jsonl").unwrap();
+    store::mark_running(&conn, &id, "attempt-1", "s", "/tmp/e.jsonl").unwrap();
 
     conn.execute(
         "UPDATE tasks SET status = ?1 WHERE id = ?2",
@@ -2618,6 +2618,7 @@ fn run_de(max_parallel: i64) -> Run {
         created_at: 0,
         ended_at: None,
         mission_id: None,
+        source_thread_id: None,
         squad_id: None,
         squad_name: None,
         squad_members: Vec::new(),
@@ -2925,7 +2926,7 @@ fn un_reintento_vuelve_a_la_cola_con_su_error_y_acumula_lo_gastado() {
     let run = run_en(&conn);
     let t = tarea_de_plan(&conn, &run, "a");
     store::mark_dispatched(&conn, &t).unwrap();
-    store::mark_running(&conn, &t, "s1", "/tmp/e.jsonl").unwrap();
+    store::mark_running(&conn, &t, "attempt-1", "s1", "/tmp/e.jsonl").unwrap();
     store::finish_task(
         &conn,
         &t,
@@ -2949,7 +2950,7 @@ fn un_reintento_vuelve_a_la_cola_con_su_error_y_acumula_lo_gastado() {
     assert!(tarea.session_id.is_none());
 
     store::mark_dispatched(&conn, &t).unwrap();
-    store::mark_running(&conn, &t, "s2", "/tmp/e.jsonl").unwrap();
+    store::mark_running(&conn, &t, "attempt-2", "s2", "/tmp/e.jsonl").unwrap();
     store::finish_task(
         &conn,
         &t,

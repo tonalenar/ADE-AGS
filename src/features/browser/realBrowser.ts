@@ -58,8 +58,8 @@ export function samePlace(a: Place | null, b: Place): boolean {
 }
 
 /** `script`: o piloto dos agentes, que o navegador roda em todo documento (o mesmo que o proxy injeta no outro). */
-export const realBrowserOpen = (id: string, url: string, place: Place, script?: string) =>
-  invoke<void>("real_browser_open", { id, url, place, script });
+export const realBrowserOpen = (id: string, url: string, place: Place, script?: string, profileId = "default") =>
+  invoke<void>("real_browser_open", { id, url, place, script, profileId });
 
 export const realBrowserPlace = (id: string, place: Place) => invoke<void>("real_browser_place", { id, place });
 
@@ -70,6 +70,10 @@ export const realBrowserNavigate = (id: string, url: string) => invoke<void>("re
 export const realBrowserHistory = (id: string, delta: number) => invoke<void>("real_browser_history", { id, delta });
 
 export const realBrowserClose = (id: string) => invoke<void>("real_browser_close", { id });
+
+/** Apaga os dados locais de um perfil gerenciado, somente depois da confirmação na interface. */
+export const realBrowserDeleteProfile = (profileId: string) =>
+  invoke<void>("real_browser_delete_profile", { profileId });
 
 export const realBrowserFocus = (id: string) => invoke<void>("real_browser_focus", { id });
 

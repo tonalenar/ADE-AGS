@@ -32,6 +32,37 @@ fn um_item_novo_vai_para_o_fim_e_o_atualizado_fica_no_lugar() {
 }
 
 #[test]
+fn a_busca_local_indexa_falas_com_prefixo_sem_acento_e_atualiza_o_indice() {
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    let user = crate::canal::timeline::Item {
+        text: Some("O coração azul apareceu no painel".into()),
+        ..crate::canal::timeline::Item::new(ItemKind::User, "u1".into(), Some(1))
+    };
+    let agent = crate::canal::timeline::Item {
+        text: Some("A resposta menciona uma luz verde".into()),
+        ..crate::canal::timeline::Item::new(ItemKind::Assistant, "a1".into(), Some(2))
+    };
+    let tool = crate::canal::timeline::Item {
+        text: Some("o coração não deve indexar saída de ferramenta".into()),
+        ..crate::canal::timeline::Item::new(ItemKind::Tool, "tool1".into(), Some(3))
+    };
+    store::upsert_item(&conn, "t1", None, &user).unwrap();
+    store::upsert_item(&conn, "t1", None, &agent).unwrap();
+    store::upsert_item(&conn, "t1", None, &tool).unwrap();
+
+    let hits = store::search_messages(&conn, "\"coracao\"*", "coracao", 30).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!((hits[0].thread_id.as_str(), hits[0].item_id.as_str(), hits[0].kind.as_str()), ("t1", "u1", "user"));
+    assert!(hits[0].excerpt.contains("coração"));
+
+    let changed = crate::canal::timeline::Item { text: Some("Agora prefiro violeta".into()), ..user };
+    store::upsert_item(&conn, "t1", None, &changed).unwrap();
+    assert!(store::search_messages(&conn, "\"coracao\"*", "coracao", 30).unwrap().is_empty());
+    assert_eq!(store::search_messages(&conn, "\"violeta\"*", "violeta", 30).unwrap()[0].item_id, "u1");
+}
+
+#[test]
 fn a_conversa_guarda_o_id_do_codex_e_a_troca_de_acesso() {
     let conn = crate::database::test_db();
     thread(&conn, "t1");
@@ -250,6 +281,7 @@ mod claude {
         ThreadRow {
             id: "t".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/p".into(), title: String::new(),
             model: Some("haiku".into()), effort: Some("low".into()), access: access.into(), account_id: None, memory: None,
+            parent_ref: None, parent_turn_id: None, is_side_chat: false,
             state: "active".into(), created_at: 1, updated_at: 1,
         }
     }
@@ -473,7 +505,7 @@ mod claude {
     fn criar_e_trocar_respeitam_o_que_cada_agente_aceita() {
         let db = Arc::new(Mutex::new(crate::database::test_db()));
         let input = |agent: &str, access: &str| NewThread {
-            agent_id: agent.into(), cwd: "/p".into(), title: "T".into(), model: None, effort: None, access: access.into(), account_id: None,
+            agent_id: agent.into(), cwd: "/p".into(), workspace_id: None, title: "T".into(), model: None, effort: None, access: access.into(), account_id: None, parent_ref: None,
         };
         let claude = api::create(&db, input("claude-code", "plan")).unwrap();
         assert_eq!((claude.agent_id.as_str(), claude.access.as_str()), ("claude-code", "plan"));

@@ -300,7 +300,11 @@ fn thread_id_of(result: &Value) -> Result<String, String> {
 
 fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<Arc<Session>, String> {
     let program = crate::util::find_program("codex").ok_or("Não achei o Codex CLI (codex) no PATH")?;
-    let mut cmd = crate::util::external_command(&program, &["app-server"]).map_err(|e| e.to_string())?;
+    let mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "codex");
+    let mut args = mcp.map(|mcp| mcp.codex_args).unwrap_or_default();
+    args.push("app-server".into());
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(crate::util::external_path(std::path::Path::new(&row.cwd)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -538,6 +542,22 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
                 }
                 emit(app, thread_id, "thread", json!({ "title": name.trim() }));
             }
+        }
+        "thread/goal/updated" => {
+            let native = params.get("goal").unwrap_or(&Value::Null);
+            if let (Some(objective), Some(status)) = (native.get("objective").and_then(Value::as_str), native.get("status").and_then(Value::as_str)) {
+                if let Ok(conn) = db.lock() {
+                    if let Ok(goal) = store::set_goal(&conn, thread_id, objective, status, native.get("updatedAt").and_then(Value::as_i64).unwrap_or_else(crate::util::now_ts_ms)) {
+                        emit(app, thread_id, "goal", json!({ "goal": goal }));
+                    }
+                }
+            }
+        }
+        "thread/goal/cleared" => {
+            if let Ok(conn) = db.lock() {
+                let _ = store::clear_goal(&conn, thread_id);
+            }
+            emit(app, thread_id, "goal", json!({ "goal": null }));
         }
         // Um erro que o Codex vai tentar de novo sozinho não aparece.
         "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {

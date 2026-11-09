@@ -471,8 +471,13 @@ pub struct MemberWorktree {
 /// existir), a partir do último commit da pasta do orquestrador. Pelo mesmo `runs::worktrees` da frota,
 /// na pasta das conversas (`chat-worktrees`). Nunca apaga nem força nada.
 #[tauri::command]
-pub async fn chat_team_worktree(cwd: String, role: String) -> Result<MemberWorktree, String> {
+pub async fn chat_team_worktree(db: State<'_, DbConnection>, cwd: String, role: String, agent_id: String) -> Result<MemberWorktree, String> {
+    let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            crate::project_chat_policy::ensure_agent_enabled(&conn, &cwd, &agent_id)?;
+        }
         let home = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?;
         let base = home.join("chat-worktrees");
         std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
@@ -485,6 +490,7 @@ pub async fn chat_team_worktree(cwd: String, role: String) -> Result<MemberWorkt
                 crate::runs::worktrees::create_named(&base, repo, &format!("{branch}-{short}"), "HEAD")?
             }
         };
+        crate::project_chat_policy::register_worktree_alias(&db, &wt.task_cwd.to_string_lossy(), &cwd)?;
         Ok(MemberWorktree { cwd: wt.task_cwd.to_string_lossy().into_owned(), branch: wt.branch, root: wt.root.to_string_lossy().into_owned() })
     })
     .await

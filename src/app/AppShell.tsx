@@ -43,6 +43,7 @@ import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
 import { BotToastHost } from "@/shared/brand/BotToastHost";
 import { AppConfirmHost } from "@/shared/ui/AppConfirmHost";
+import { ArchivedMessagePreviewHost } from "@/features/sessions/ArchivedMessagePreview";
 import { BotPanel } from "@/features/bot/LazyBotPanel";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
@@ -380,6 +381,7 @@ export function AppShell() {
       </div>
 
       <CommandPalette />
+      <ArchivedMessagePreviewHost />
       <CompareHost />
     </div>
   );

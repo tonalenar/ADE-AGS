@@ -4,16 +4,18 @@ O mesmo pedido para vários agentes/modelos ao mesmo tempo, cada um no seu workt
 
 ## Como usar
 
-1. Abra **Comparar modelos** pelo botão da barra do canvas (ícone de dois painéis, no fim da barra) ou pela paleta (Ctrl+K → "Comparar modelos…").
+1. Abra **Comparar modelos** pelo botão da barra do canvas (ícone de dois painéis, no fim da barra), pela paleta (Ctrl+K → "Comparar modelos…") ou pelo seletor de agente/modelo ao criar conversa: use Shift-clique em dois ou mais modelos e escolha **Comparar**. Nesse último caminho, a pasta e o texto do composer já vêm preenchidos.
 2. Preencha:
    - **Pasta do projeto**: precisa ser um repositório git com pelo menos um commit para isolar. O diálogo mostra a branch e o commit de onde os worktrees saem, e quantas mudanças sem commit **não** entram.
-   - **Pedido**: o texto que todos recebem.
+   - **Pedido**: o texto que todos recebem. O seletor do composer o preenche automaticamente; o diálogo segue editável antes de iniciar.
    - **Nome** (opcional): sai da primeira linha do pedido.
    - **Isolar** (padrão ligado). Desligado, todos usam a mesma pasta: só para perguntas de leitura (o diálogo e o próprio pedido avisam).
    - **Modelos**: de 2 a 6. Cada linha tem agente, modelo, esforço e, no Codex, Fast: o mesmo `ModelSelector` dos Squads.
 3. **Iniciar comparação** cria os worktrees e abre um terminal por modelo num canvas próprio, lado a lado sob o rótulo "Comparação: <nome>". Cada terminal recebe o pedido quando a TUI fica pronta.
 
 Cada modelo gasta tokens da própria conta: N modelos custam N vezes.
+
+O seletor não oferece Comparar quando o rascunho tem anexos/citações ou quando uma escolha usa conta específica, pois o fluxo atual não encaminha esse contexto nem as credenciais por modelo. Escolha uma conta principal e remova os anexos/citações para habilitar a ação.
 
 ## O que acontece por baixo
 

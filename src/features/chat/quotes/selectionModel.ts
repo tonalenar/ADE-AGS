@@ -24,11 +24,25 @@ export interface SelectionLike {
 export interface SelectionTarget {
   text: string;
   rect: Rect;
+  /** Origem opcional de uma área citável, como o caminho do arquivo no Diff. */
+  source?: string;
+  /** Item da timeline onde a seleção começou e terminou; só vale dentro da mesma mensagem. */
+  originItemId?: string;
 }
 
 const quotable = (node: Node | null): boolean => {
   const element = node instanceof Element ? node : node?.parentElement ?? null;
   return !!element?.closest("[data-quotable]");
+};
+
+const quoteSource = (node: Node | null): string | undefined => {
+  const element = node instanceof Element ? node : node?.parentElement ?? null;
+  return element?.closest("[data-quote-source]")?.getAttribute("data-quote-source")?.trim() || undefined;
+};
+
+const quoteItemId = (node: Node | null): string | undefined => {
+  const element = node instanceof Element ? node : node?.parentElement ?? null;
+  return element?.closest("[data-chat-item-id]")?.getAttribute("data-chat-item-id")?.trim() || undefined;
 };
 
 /** O trecho selecionado e onde ele está na tela, ou `null` se a seleção não é de uma fala desta lista. */
@@ -40,7 +54,13 @@ export function selectionTarget(selection: SelectionLike | null, container: Elem
   if (!anchorNode || !focusNode || !container.contains(anchorNode) || !container.contains(focusNode)) return null;
   if (!quotable(anchorNode) || !quotable(focusNode)) return null;
   const r = selection.getRangeAt(0).getBoundingClientRect();
-  return { text, rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } };
+  const anchorSource = quoteSource(anchorNode);
+  const focusSource = quoteSource(focusNode);
+  const source = anchorSource && anchorSource === focusSource ? anchorSource : undefined;
+  const anchorItemId = quoteItemId(anchorNode);
+  const focusItemId = quoteItemId(focusNode);
+  const originItemId = anchorItemId && anchorItemId === focusItemId ? anchorItemId : undefined;
+  return { text, source, ...(originItemId ? { originItemId } : {}), rect: { left: r.left, top: r.top, right: r.right, bottom: r.bottom, width: r.width, height: r.height } };
 }
 
 /** O atalho de «Comentar» para quem seleciona pelo teclado: ⌥⌘M no macOS, Ctrl+Shift+M nos outros. Pura. */

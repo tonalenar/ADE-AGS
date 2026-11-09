@@ -31,6 +31,7 @@ export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "android", key: "a" },
   { id: "team", key: "o" },
   { id: "pr", key: "p" },
+  { id: "side", key: "q" },
 ];
 
 /**
@@ -49,15 +50,17 @@ export const MORE_ENTRIES: PanelEntry[] = PANEL_ENTRIES.filter((e) => !ROW_CHOIC
  */
 export const COMPACT_HIDDEN: PanelChoice[] = ["diff", "browser", "files"];
 
-/** O que está disponível agora: o terminal precisa de uma conversa com gaveta; o PR ainda não tem aba no painel. */
+/** O terminal precisa de uma conversa com gaveta; PR depende da pasta do repositório. */
 export interface PanelAvailability {
   terminal: boolean;
   pr: boolean;
+  side?: boolean;
 }
 
 export function isAvailable(id: PanelChoice, available: PanelAvailability): boolean {
   if (id === "terminal") return available.terminal;
   if (id === "pr") return available.pr;
+  if (id === "side") return !!available.side;
   return true;
 }
 

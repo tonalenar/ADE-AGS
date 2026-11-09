@@ -26,7 +26,7 @@ Crate `ade-ags` (edition 2024), lib `ade_ags_lib`. O `src/main.rs` chama `ade_ag
 | `squads/`, `roles.rs` | squads e papéis |
 | `memory.rs` + `memory/` | memória persistente — ver [MEMORIA.md](MEMORIA.md) |
 | `decisions/` | Jev/Laya — ver [JEV.md](JEV.md) |
-| `canvas/`, `chat.rs`, `routines.rs`, `floors*.rs`, `design.rs` | canvas (as conexões funcionam como permissões), chat do usuário, rotinas, andares, pranchetas |
+| `canvas/`, `chat.rs`, `routines.rs`, `scheduled_tasks.rs`, `floors*.rs`, `design.rs` | canvas (as conexões funcionam como permissões), chat do usuário, rotinas e tarefas estruturadas agendadas, andares, pranchetas |
 | `preview/` | proxy local do navegador (seletor, rede, mocks, capturas) |
 | `sim_host/` | no macOS, impede o Expo de abrir o Device Hub. A tela do simulador continua em `simulator/` |
 | `iphone/` | iPhone e iPad físicos (só ver): lista pelo `devicectl`, sessão por aparelho com o helper Swift `ade-iphone-mirror` (`helpers/iphone-mirror`, CoreDevice privado fora do processo do app), HEVC pelo VideoToolbox e a tela nativa. Ver `docs/ade-ags/ESPELHAMENTO_IPHONE.md` |
@@ -76,6 +76,13 @@ Cuidados:
 - Seeds (`seeds.rs`) nunca sobrescrevem uma decisão do usuário.
 - Escritas usam `TransactionBehavior::Immediate`.
 - Nos testes, use `crate::database::test_db()` (banco em memória com o schema real). **Testes nunca tocam `~/.ags`.**
+
+## Tarefas agendadas do chat
+- `scheduled_tasks.rs` guarda definições e histórico de dispatch em `scheduled-tasks.json`, sidecar JSON versionado com gravação por arquivo temporário e `rename`; não usa DDL nem armazena transcript. O histórico só sai quando a pessoa exclui a tarefa.
+- `ipc::commands::scheduled_task` expõe gestão somente pela interface Tauri. O tick de `ipc::commands::routine` também despacha tarefas; não há segundo scheduler nem rota de criação pela CLI/MCP.
+- Conversa nova é criada como chat estruturado com `access=ask`. Conversa existente usa `QueueAfterActive`; a política de agente por projeto é validada na gestão e novamente no dispatch.
+- Na inicialização, cada horário vencido vira uma única entrada `missed`; recorrências são movidas ao próximo horário futuro, e tarefas únicas ficam desativadas. Não há catch-up automático nem rajada após reabrir o app. O gate `missions::automation` pausa tarefas armadas antes do boot até a pessoa retomar.
+- O histórico registra snapshot de pasta/agente/modelo, horários, status, resultado resumido e `threadId`; nenhum transcript é copiado para o sidecar.
 
 ## Helpers obrigatórios (`util/`)
 - **`util::spawn`**: `command`, `hidden_command`, `output`, `wait_copying_stdout` (com timeout) e `CREATE_NO_WINDOW`. `cmd /C` só é permitido no Graphify e no prelaunch.

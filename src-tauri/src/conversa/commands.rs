@@ -1,13 +1,14 @@
 //! Os comandos Tauri das conversas por protocolo: a tela chama o mesmo núcleo (`api`) que a CLI
 //! `ags chat` e o MCP. O processo do agente só sobe na primeira mensagem (`chat_thread_send`).
 
+use serde_json::Value;
 use tauri::{AppHandle, State};
 
 use crate::canal::timeline::Item;
 use crate::database::DbConnection;
 
 use super::api::{self, NewThread, ThreadStatus};
-use super::store::{RequestRow, ThreadRow};
+use super::store::{MessageSearchHit, RequestRow, ThreadRow};
 
 #[tauri::command]
 pub fn chat_threads(db: State<'_, DbConnection>) -> Result<Vec<ThreadRow>, String> {
@@ -20,13 +21,21 @@ pub fn chat_thread_create(
     db: State<'_, DbConnection>,
     agent_id: String,
     cwd: String,
+    workspace_id: Option<String>,
     title: String,
     model: Option<String>,
     effort: Option<String>,
     access: String,
     account_id: Option<String>,
+    parent_ref: Option<String>,
 ) -> Result<ThreadRow, String> {
-    api::create(&db, NewThread { agent_id, cwd, title, model, effort, access, account_id })
+    api::create(&db, NewThread { agent_id, cwd, workspace_id, title, model, effort, access, account_id, parent_ref })
+}
+
+#[tauri::command]
+pub async fn chat_side_chat_delete(db: State<'_, DbConnection>, thread_id: String) -> Result<(), String> {
+    let db = db.inner().clone();
+    api::delete_side_chat(&db, &thread_id).await
 }
 
 #[tauri::command]
@@ -41,6 +50,11 @@ pub fn chat_thread_items(db: State<'_, DbConnection>, thread_id: String) -> Resu
 }
 
 #[tauri::command]
+pub fn chat_thread_search(db: State<'_, DbConnection>, query: String, limit: Option<usize>) -> Result<Vec<MessageSearchHit>, String> {
+    api::search_messages(&db, &query, limit.unwrap_or(30))
+}
+
+#[tauri::command]
 pub fn chat_thread_requests(db: State<'_, DbConnection>, thread_id: String) -> Result<Vec<RequestRow>, String> {
     api::requests(&db, &thread_id)
 }
@@ -48,6 +62,54 @@ pub fn chat_thread_requests(db: State<'_, DbConnection>, thread_id: String) -> R
 #[tauri::command]
 pub fn chat_thread_status(thread_id: String) -> ThreadStatus {
     api::status(&thread_id)
+}
+
+#[tauri::command]
+pub fn chat_thread_provider_config(thread_id: String) -> Option<Value> {
+    super::opencode::provider_config(&thread_id)
+}
+
+#[tauri::command]
+pub fn chat_thread_goal_get(db: State<'_, DbConnection>, thread_id: String) -> Result<Option<super::store::ThreadGoal>, String> {
+    api::thread_goal(&db, &thread_id)
+}
+
+#[tauri::command]
+pub async fn chat_thread_goal_action(
+    app: AppHandle,
+    db: State<'_, DbConnection>,
+    thread_id: String,
+    action: String,
+    objective: Option<String>,
+) -> Result<Option<super::store::ThreadGoal>, String> {
+    let db = db.inner().clone();
+    api::thread_goal_action(&app, &db, &thread_id, &action, objective.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn chat_thread_compact_context(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, instructions: Option<String>) -> Result<(), String> {
+    let db = db.inner().clone();
+    api::compact_context(&app, &db, &thread_id, instructions.as_deref()).await
+}
+
+#[tauri::command]
+pub async fn chat_thread_auto_compact_on_return(
+    app: AppHandle,
+    db: State<'_, DbConnection>,
+    thread_id: String,
+) -> Result<bool, String> {
+    let db = db.inner().clone();
+    api::auto_compact_on_return(&app, &db, &thread_id).await
+}
+
+#[tauri::command]
+pub async fn chat_thread_clear_context(
+    app: AppHandle,
+    db: State<'_, DbConnection>,
+    thread_id: String,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    api::clear_context(&app, &db, &thread_id).await
 }
 
 #[tauri::command]

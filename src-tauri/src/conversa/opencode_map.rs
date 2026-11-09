@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 
 use crate::canal::event::{clip, first_line};
-use crate::canal::timeline::{claude_tool, plan_steps, Item, ItemKind, ToolKind, ToolStatus};
+use crate::canal::timeline::{claude_tool, plan_steps, Item, ItemKind, ToolKind, ToolStatus, UsageBreakdown};
 
 use super::claude_map::TurnResult;
 use super::codex_map::{Ask, DeltaKind};
@@ -78,11 +78,19 @@ pub fn initialize_params() -> Value {
 }
 
 pub fn new_session_params(cwd: &str) -> Value {
-    json!({ "cwd": cwd, "mcpServers": [] })
+    new_session_params_with_mcp(cwd, json!([]))
 }
 
 pub fn resume_params(session_id: &str, cwd: &str) -> Value {
-    json!({ "sessionId": session_id, "cwd": cwd, "mcpServers": [] })
+    resume_params_with_mcp(session_id, cwd, json!([]))
+}
+
+pub fn new_session_params_with_mcp(cwd: &str, mcp_servers: Value) -> Value {
+    json!({ "cwd": cwd, "mcpServers": mcp_servers })
+}
+
+pub fn resume_params_with_mcp(session_id: &str, cwd: &str, mcp_servers: Value) -> Value {
+    json!({ "sessionId": session_id, "cwd": cwd, "mcpServers": mcp_servers })
 }
 
 pub fn prompt_params(session_id: &str, text: &str) -> Value {
@@ -97,8 +105,63 @@ pub fn set_option_params(session_id: &str, config_id: &str, value: &str) -> Valu
 /// `session/new`/`session/resume` ou de `session/set_config_option`.
 pub fn config_option(result: &Value, id: &str) -> Option<(Option<String>, Vec<String>)> {
     let option = result.get("configOptions")?.as_array()?.iter().find(|o| str_of(o, "id") == Some(id))?;
-    let values = option.get("options").and_then(Value::as_array).into_iter().flatten().filter_map(|o| str_of(o, "value")).map(str::to_string).collect();
+    let values = select_values(option).into_iter().filter_map(|o| str_of(o, "value")).map(str::to_string).collect();
     Some((str_of(option, "currentValue").map(str::to_string), values))
+}
+
+/// Opção selecionável por categoria ACP. Categorias são a forma estável do protocolo para indicar
+/// modelo (`model`) e nível de raciocínio (`thought_level`); os IDs continuam sendo decisão do agente.
+pub fn config_option_for_category(result: &Value, category: &str, fallback_ids: &[&str]) -> Option<(String, Option<String>, Vec<String>)> {
+    let options = result.get("configOptions")?.as_array()?;
+    let option = options.iter().find(|o| str_of(o, "category") == Some(category))
+        .or_else(|| options.iter().find(|o| fallback_ids.iter().any(|id| str_of(o, "id") == Some(*id))))?;
+    if option.get("type").and_then(Value::as_str).is_some_and(|kind| kind != "select") {
+        return None;
+    }
+    let id = str_of(option, "id")?.to_string();
+    let current = str_of(option, "currentValue").map(str::to_string);
+    let values = select_values(option).into_iter().filter_map(|o| str_of(o, "value")).map(str::to_string).collect();
+    Some((id, current, values))
+}
+
+fn select_values(option: &Value) -> Vec<&Value> {
+    fn collect<'a>(items: &'a [Value], out: &mut Vec<&'a Value>) {
+        for item in items {
+            if let Some(value) = item.get("value").and_then(Value::as_str) {
+                if !value.is_empty() { out.push(item); }
+            } else if let Some(nested) = item.get("options").and_then(Value::as_array) {
+                collect(nested, out);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    if let Some(items) = option.get("options").and_then(Value::as_array) {
+        collect(items, &mut out);
+    }
+    out
+}
+
+/// Configuração visual limitada às categorias que a ADE apresenta no seletor do chat.
+/// Labels e valores são dados não confiáveis do provider: tamanho e quantidade são limitados.
+pub fn provider_config(result: &Value) -> Value {
+    fn option(result: &Value, category: &str, fallback_ids: &[&str]) -> Value {
+        let Some((id, current, _values)) = config_option_for_category(result, category, fallback_ids) else { return Value::Null };
+        let raw = result.get("configOptions").and_then(Value::as_array).and_then(|options| options.iter().find(|o| str_of(o, "id") == Some(id.as_str())));
+        let label = raw.and_then(|o| str_of(o, "name")).unwrap_or(category).chars().take(120).collect::<String>();
+        let mut seen = HashSet::new();
+        let options = raw.map(select_values).unwrap_or_default().into_iter().take(512).filter_map(|entry| {
+            let value = str_of(entry, "value")?;
+            if value.is_empty() || value.chars().count() > 200 || !seen.insert(value.to_string()) { return None; }
+            let name = str_of(entry, "name").unwrap_or(value).chars().take(120).collect::<String>();
+            Some(json!({ "value": value, "label": name }))
+        }).take(128).collect::<Vec<_>>();
+        let current = current.filter(|value| value.chars().count() <= 200);
+        json!({ "id": id, "label": label, "currentValue": current, "options": options })
+    }
+    json!({
+        "model": option(result, "model", &["model"]),
+        "effort": option(result, "thought_level", &["effort", "reasoning_effort"]),
+    })
 }
 
 /// O que um aviso `session/update` significa para a conversa.
@@ -435,7 +498,24 @@ pub fn usage_item(turn: &str, response: &Value, at: Option<i64>) -> Option<Item>
     let usage = response.get("usage")?;
     let n = |key: &str| usage.get(key).and_then(Value::as_u64);
     let total = n("totalTokens").or_else(|| Some(n("inputTokens")? + n("outputTokens").unwrap_or(0) + n("thoughtTokens").unwrap_or(0)))?;
-    (total > 0).then(|| Item::usage(format!("usage:{turn}"), at, total))
+    (total > 0).then(|| {
+        let mut item = Item::usage(format!("usage:{turn}"), at, total);
+        let breakdown = UsageBreakdown {
+            input: n("inputTokens"),
+            output: n("outputTokens"),
+            cached: n("cachedReadTokens"),
+            cache_write: n("cachedWriteTokens"),
+            reasoning: n("thoughtTokens"),
+            // O protocolo ACP não especifica se o raciocínio já está incluído em outputTokens.
+            ..UsageBreakdown::default()
+        };
+        if breakdown.input.is_some() || breakdown.output.is_some() || breakdown.cached.is_some()
+            || breakdown.cache_write.is_some() || breakdown.reasoning.is_some()
+        {
+            item.usage_breakdown = Some(breakdown);
+        }
+        item
+    })
 }
 
 /// O texto do erro de um `session/prompt` que falhou, curto.

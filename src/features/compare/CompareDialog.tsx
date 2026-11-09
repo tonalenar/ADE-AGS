@@ -11,6 +11,8 @@ import { modelsForAccount } from "@/features/squads/modelSelection";
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
+import { AttachmentStrip } from "@/features/chat/attachments/AttachmentStrip";
+import type { Attachment } from "@/features/chat/attachments/attachModel";
 
 import { compareCheck } from "./ipc";
 import { MAX_PICKS, defaultTitle, draftProblem } from "./model";
@@ -22,7 +24,7 @@ const field = "w-full px-2 rounded-md text-[12.5px] outline-none bg-white dark:b
 const labelCls = "text-[12px] font-medium text-gray-600 dark:text-gray-300";
 
 /** As duas primeiras escolhas: Claude Code e Codex, se estão instalados; senão os primeiros que houver. */
-function initialPicks(available: string[]): PickDraft[] {
+function defaultPicks(available: string[]): PickDraft[] {
   const preferred = ["claude-code", "codex", "opencode", "gemini-cli"].filter((id) => available.includes(id));
   const order = [...preferred, ...available.filter((id) => !preferred.includes(id))];
   return order.slice(0, 2).map((agentId) => ({ agentId, model: null, effort: null, fast: false }));
@@ -32,16 +34,17 @@ function initialPicks(available: string[]): PickDraft[] {
  * "Comparar modelos": a pasta, o pedido e de 2 a 6 agentes/modelos. Ao iniciar, cada um ganha um
  * worktree e uma branch e recebe o mesmo pedido num terminal do canvas da comparação.
  */
-export function CompareDialog({ initialCwd }: { initialCwd: string }) {
+export function CompareDialog({ initialCwd, initialPrompt = "", initialPicks: seededPicks, initialAttachments }: { initialCwd: string; initialPrompt?: string; initialPicks?: PickDraft[]; initialAttachments?: Attachment[] }) {
   const { t } = useTranslation();
   const detected = useTabsStore((s) => s.detectedAgents);
   const agents = useMemo(() => detected.filter((a) => a.available && a.id !== "bash"), [detected]);
   const available = useMemo(() => agents.map((a) => a.id), [agents]);
   const [cwd, setCwd] = useState(initialCwd);
   const [title, setTitle] = useState("");
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
+  const [attachments, setAttachments] = useState<Attachment[]>(() => initialAttachments ?? []);
   const [isolate, setIsolate] = useState(true);
-  const [picks, setPicks] = useState<PickDraft[]>(() => initialPicks(available));
+  const [picks, setPicks] = useState<PickDraft[]>(() => seededPicks?.length ? seededPicks : defaultPicks(available));
   const [roster, setRoster] = useState<Roster | null>(null);
   const [check, setCheck] = useState<RepoCheck | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,7 +78,7 @@ export function CompareDialog({ initialCwd }: { initialCwd: string }) {
     setBusy(true);
     setError("");
     try {
-      await startComparison({ cwd: cwd.trim(), title: title.trim() || defaultTitle(prompt), prompt, isolate, isRepo, picks });
+      await startComparison({ cwd: cwd.trim(), title: title.trim() || defaultTitle(prompt), prompt, attachments, isolate, isRepo, picks });
       closeCompareDialog();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -119,6 +122,13 @@ export function CompareDialog({ initialCwd }: { initialCwd: string }) {
           <textarea className={`${field} py-1.5 min-h-[110px] font-mono`} value={prompt} disabled={busy}
             onChange={(e) => setPrompt(e.target.value)} placeholder={t("compare.promptPlaceholder")} />
         </label>
+
+        {attachments.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <span className={labelCls}>{t("chat.attach.label")}</span>
+            <AttachmentStrip items={attachments} cwd={cwd} onRemove={(path) => setAttachments((current) => current.filter((item) => item.path !== path))} />
+          </div>
+        )}
 
         <label className="flex flex-col gap-1">
           <span className={labelCls}>{t("compare.name")}</span>

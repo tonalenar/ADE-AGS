@@ -32,5 +32,21 @@ export interface SearchResult {
   cancelled: boolean;
 }
 
+export interface QuickOpenFile {
+  name: string;
+  path: string;
+  rel: string;
+}
+
+export interface QuickOpenResult {
+  files: QuickOpenFile[];
+  truncated: boolean;
+  cancelled: boolean;
+}
+
 export const searchText = (root: string, query: string, options: SearchOptions) =>
   invoke<SearchResult>("explorer_search", { query: { root, query, ...options } });
+
+/** Busca nomes respeitando `.gitignore` e os limites do walker do backend. */
+export const quickOpenFiles = (root: string, query: string) =>
+  invoke<QuickOpenResult>("explorer_quick_open", { query: { root, query } });

@@ -3,6 +3,7 @@
 mod agents;
 mod app;
 mod ask;
+mod agent_secrets;
 mod notes;
 mod notify;
 mod floor;
@@ -12,6 +13,7 @@ pub mod conversas;
 pub(crate) mod peers;
 pub mod peer_queue;
 pub mod routine;
+pub mod scheduled_task;
 mod role;
 mod portals;
 mod replay;
@@ -36,6 +38,7 @@ mod windows;
 mod workspaces;
 
 pub use dispatch::dispatch;
+pub(crate) use agent_secrets::cleanup_expired_agent_secrets;
 
 #[cfg(test)]
 pub(crate) use agents::{match_account_id, match_preset_id};

@@ -2,7 +2,7 @@ import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
+import { Button, EditIcon, FolderIcon, Tooltip, TrashIcon } from "neogestify-ui-components";
 import { AlertaToast } from "@/shared/ui/alerts";
 import { useTranslation } from "react-i18next";
 
@@ -13,6 +13,7 @@ import { useAgentsStore } from "@/features/agents/store";
 import type { CustomAgent } from "@/features/agents/types";
 import { useSkillsStore } from "@/features/skills/store";
 import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
+import { LocalAcpSection } from "@/features/agents/LocalAcpSection";
 import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
@@ -31,6 +32,8 @@ import { SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings
 import { DevicesSection } from "@/features/settings/DevicesSection";
 import { WorktreesSection } from "@/features/settings/WorktreesSection";
 import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
+import { ClaudeAutoCompactSetting } from "@/features/chat/ClaudeAutoCompactSetting";
+import { SnoozeOptionsSetting } from "@/features/chat/SnoozeOptionsSetting";
 import { SettingsSidebar } from "@/features/chat/ChatPageSidebar";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { PermissionsSection } from "@/features/chat/permissions/PermissionsSection";
@@ -38,6 +41,11 @@ import { AiMemoryTabsSetting } from "@/features/settings/AiMemoryTabsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
+import { FontPreferencesSetting } from "@/features/settings/FontPreferencesSetting";
+import { AppearanceModeSetting } from "@/features/settings/AppearanceModeSetting";
+import { ThemePreferencesSetting } from "@/features/settings/ThemePreferencesSetting";
+import { MotionPreferencesSetting } from "@/features/settings/MotionPreferencesSetting";
+import { BrowserSearchSetting } from "@/features/browser/BrowserSearchSetting";
 import { useTabsStore } from "@/features/tabs/store";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
@@ -86,7 +94,7 @@ function SubTabs<T extends string>({ items, value, onChange }: {
 }
 
 type GeneralTab = "prefs" | "sync" | "updates";
-type AgentsTab = "tuis" | "orchestrator" | "routing" | "prelaunch" | "skillsDir" | "skillssh";
+type AgentsTab = "tuis" | "acp" | "orchestrator" | "routing" | "prelaunch" | "skillsDir" | "skillssh";
 type AdvancedTab = "cli" | "graphify";
 
 /**
@@ -156,6 +164,7 @@ export function SettingsPage() {
   ];
   const agentsTabs = [
     { id: "tuis" as const, label: t("settings.tuis") },
+    { id: "acp" as const, label: t("settings.agents.acp.tab") },
     { id: "orchestrator" as const, label: t("settings.orchestrator") },
     { id: "routing" as const, label: t("settings.routing") },
     { id: "prelaunch" as const, label: t("settings.prelaunch") },
@@ -196,17 +205,20 @@ export function SettingsPage() {
             <>
               <SubTabs items={generalTabs} value={generalTab} onChange={setGeneralTab} />
               {generalTab === "prefs" && (
-                <SettingsSection title={t("settings.general")} description={t("settings.general.desc")}>
-                  <SettingsGroup>
-                    <SettingsRow label={t("settings.language")}>
-                      <PopupSelect value={i18n.language} onChange={(e) => handleLanguage(e.target.value)}>
-                        {LANGUAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </PopupSelect>
-                    </SettingsRow>
-                    <NotificationsSetting />
-                    <SandboxSetting />
-                  </SettingsGroup>
-                </SettingsSection>
+                <div className="flex flex-col gap-5">
+                  <SettingsSection title={t("settings.general")} description={t("settings.general.desc")}>
+                    <SettingsGroup>
+                      <SettingsRow label={t("settings.language")}>
+                        <PopupSelect value={i18n.language} onChange={(e) => handleLanguage(e.target.value)}>
+                          {LANGUAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                        </PopupSelect>
+                      </SettingsRow>
+                      <NotificationsSetting />
+                      <SandboxSetting />
+                    </SettingsGroup>
+                  </SettingsSection>
+                  <BrowserSearchSetting />
+                </div>
               )}
               {generalTab === "sync" && <SyncSection />}
               {generalTab === "updates" && <UpdatesSection />}
@@ -214,14 +226,19 @@ export function SettingsPage() {
           )}
 
           {section === "appearance" && (
-            <SettingsSection title={t("settings.appearance")} description={t("settings.appearance.desc")}>
-              <SettingsGroup>
-                <SettingsRow label={t("settings.theme")}>
-                  <ThemeToggle />
-                </SettingsRow>
-                <RenderingSetting />
-              </SettingsGroup>
-            </SettingsSection>
+            <>
+              <SettingsSection title={t("settings.appearance")} description={t("settings.appearance.desc")}>
+                <SettingsGroup>
+                  <SettingsRow label={t("settings.theme")}>
+                    <AppearanceModeSetting />
+                  </SettingsRow>
+                  <RenderingSetting />
+                  <MotionPreferencesSetting />
+                </SettingsGroup>
+              </SettingsSection>
+              <ThemePreferencesSetting />
+              <FontPreferencesSetting />
+            </>
           )}
 
           {section === "accounts" && <ContasSection />}
@@ -314,6 +331,7 @@ export function SettingsPage() {
                 </SettingsSection>
               )}
               {agentsTab === "orchestrator" && <OrchestratorSection />}
+              {agentsTab === "acp" && <LocalAcpSection />}
               {agentsTab === "routing" && <RoutingSection />}
               {agentsTab === "prelaunch" && <PrelaunchSection />}
               {agentsTab === "skillsDir" && (
@@ -350,7 +368,7 @@ export function SettingsPage() {
             </>
           )}
 
-          {section === "chat" && <ChatModeSetting />}
+          {section === "chat" && <><ChatModeSetting /><ClaudeAutoCompactSetting /><SnoozeOptionsSetting /></>}
           {section === "devices" && <DevicesSection />}
           {section === "worktrees" && <WorktreesSection />}
           {section === "permissions" && <PermissionsSection />}

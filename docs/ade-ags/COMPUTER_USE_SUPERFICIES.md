@@ -29,10 +29,10 @@ A mensagem antiga "sim act exige a sessão de um terminal ADE AGS" vinha de `ter
 |---|---|---|---|
 | Claude Code, Codex, Gemini, OpenCode, Kimi, Hermes, Antigravity, Cursor em **aba de terminal** | `ags portal act`, `ags sim act`, `ags desk act` (shell) | token `ADE_SESSION` + PID descendente do PTY | ok |
 | Codex, Claude Code, OpenCode, Antigravity, Cursor em **conversa por protocolo** (`conversa/`) | `ags …` pelo shell do agente | `thread:<id>` + PID do cliente descendente do processo do motor (`register_process` nos cinco motores); também recebe `ADE_SESSION` | ok |
-| MCP `ags mcp --cwd` (abas de Claude Code e OpenCode; Hermes pela config gerenciada) | `browser_act`, `sim_act`, `desk_act` | `sim_act`/`desk_act` repassam o `ADE_TAB_ID`/`ADE_SESSION` que o processo do MCP herdou (ou o `--tab`) e o backend confere com `authorize_actor`, como na CLI; argumentos `from`/`session` do modelo são descartados | ok |
+| MCP `ags mcp --cwd` (abas de Claude Code, Codex, OpenCode e Hermes pela config gerenciada) | `browser_act`, `sim_act`, `desk_act` | `sim_act`/`desk_act` repassam o `ADE_TAB_ID`/`ADE_SESSION` que o processo do MCP herdou (ou o `--tab`) e o backend confere com `authorize_actor`, como na CLI; argumentos `from`/`session` do modelo são descartados | ok |
 | MCP `ags mcp --task` (frota) | `browser_act` | escopo pela tarefa | sem computer use: não há aba nem conversa que identifique a tarefa |
 
-Gemini, Kimi e Hermes não têm motor de conversa (só aba PTY). O Codex não recebe o MCP do ADE AGS (`McpStyle::None`): usa a CLI. As conversas por protocolo também não recebem o MCP: usam a CLI.
+Gemini, Kimi e Hermes não têm motor de conversa (só aba PTY). A TUI do Codex recebe o MCP por overrides `-c` exclusivos do processo; conversas por protocolo Codex, Claude Code, OpenCode e Antigravity também recebem a ponte MCP. A CLI `ags` continua disponível nas superfícies em que o MCP não está configurado.
 
 A conversa por protocolo recebe `ADE_SESSION` (decisão do usuário, P7 do desenho de unificação): `chat_team::env::thread_env` emite um token novo a cada processo do motor, que só vale depois de `register_process` saber o PID (um respawn troca o token, como num PTY novo). O token fica só na memória do app e no ambiente do motor; não é segredo do keyring. Com ele a conversa usa `memory.*`/`swarm.*` (memória e quadro da missão). Sem PID do peer (plataforma sem a API) a conversa é recusada. Um terminal que afirma ser `thread:x` não descende do processo daquela conversa e é recusado.
 
@@ -68,13 +68,13 @@ Conclusão: a liberação estreita (só a pasta `~/.ags/ipc`, rede fechada) exis
 
 | Agente | Aba PTY: CLI | Aba PTY: MCP (`browser_act`/`sim_act`/`desk_act`) | Conversa por protocolo | Skill `ags-orchestrator` |
 |---|---|---|---|---|
-| Claude Code | ok | ok (`--mcp-config`) | ok (CLI) | `.claude/skills` |
-| Codex | ok com escalonamento quando o sandbox bloqueia | — (não recebe o MCP) | ok com escalonamento (`workspace-write`) | `.agents/skills` |
+| Claude Code | ok | ok (`--mcp-config`) | ok (MCP + CLI) | `.claude/skills` |
+| Codex | ok com escalonamento quando o sandbox bloqueia | ok (overrides `-c` por processo) | ok com escalonamento (`workspace-write`, MCP + CLI) | `.agents/skills` |
 | Gemini CLI | ok (sem `--sandbox` ou com `permissive-open`) | — | sem motor | `.agents/skills` |
-| OpenCode | ok | ok (`OPENCODE_CONFIG_CONTENT`) | ok (CLI) | `.agents/skills` |
+| OpenCode | ok | ok (`OPENCODE_CONFIG_CONTENT`) | ok (MCP + CLI) | `.agents/skills` |
 | Kimi | ok | — | sem motor | `.agents/skills` |
 | Hermes | ok | MCP gerenciado; herança de `ADE_SESSION` não verificada | sem motor | não recebe: as skills dele ficam em `~/.hermes/skills`, fora do projeto |
-| Antigravity | ok | — | ok (CLI) | `.agents/skills` (o `agy` 1.5.0 lê essa pasta) |
+| Antigravity | ok | — | ok (MCP por turno + CLI) | `.agents/skills` (o `agy` 1.5.0 lê essa pasta) |
 | Cursor | ok | — | ok (CLI) | `.cursor/skills` |
 
 Estado pelo código e pelos testes com fakes (`ipc/test.rs`, `agents/contract.rs`, `terminal/session.rs`, `ipc/transport.rs`). O percurso real com Jev em cada CLI **não foi medido**: custa cota e exige OK.

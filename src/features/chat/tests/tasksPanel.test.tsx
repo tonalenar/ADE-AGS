@@ -138,7 +138,7 @@ describe("o painel de tarefas", () => {
   });
 
   it("no motor sem parar por tarefa, o botão fica desligado com o motivo", async () => {
-    useStructured.setState((s) => ({ live: { ...s.live, "th-o": { items: [{ kind: "tool", id: "t1", tool: "task", name: "Task", label: "Explorar", status: "running", at: NOW - 3_000 }], requests: [], phase: "working", drafts: [], error: null } } }));
+    useStructured.setState((s) => ({ live: { ...s.live, "th-o": { items: [{ kind: "tool", id: "t1", tool: "task", name: "Task", label: "Explorar", status: "running", at: NOW - 3_000 }], requests: [], phase: "working", drafts: [], error: null, providerCommands: [], providerConfig: null } } }));
     await mount(<TasksPanel conversation={card("th-o", "opencode")} />);
     const [stop] = byLabelStart("chat.tasks.stopEngine");
     expect(stop!.disabled).toBe(true);

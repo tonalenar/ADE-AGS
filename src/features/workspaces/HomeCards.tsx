@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Button, SearchIcon, WarningIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
-import { PALETTE_SHORTCUT } from "@/app/shortcuts";
+import { paletteShortcutLabel } from "@/app/shortcuts";
+import { useShortcutPreferences } from "@/app/shortcutPrefs";
 import { useAccountsStore } from "@/features/accounts/store";
 import { formatTokens, systemAccounts } from "@/features/accounts/usage";
 import type { AgentAccount } from "@/features/accounts/types";
@@ -63,7 +64,7 @@ function Row({ icon, title, meta, onClick, tone }: {
 
 /**
  * O topo da Home: o mascote, o nome e uma linha que diz como está tudo agora. Também é
- * onde a paleta se apresenta — quem não conhece o Ctrl+K o descobre aqui.
+ * onde a paleta se apresenta — quem não conhece o atalho da paleta o descobre aqui.
  */
 export function HomeHeader() {
   const { t } = useTranslation();
@@ -71,6 +72,8 @@ export function HomeHeader() {
   const { state, summary } = useMascotState();
   const pet = usePetStatus();
   const barFlash = useLevelBarClass(pet.level);
+  const shortcutBindings = useShortcutPreferences((s) => s.bindings);
+  const paletteShortcut = useMemo(() => paletteShortcutLabel(), [shortcutBindings]);
 
   return (
     <div className="flex items-center gap-5">
@@ -108,7 +111,7 @@ export function HomeHeader() {
         <SearchIcon className="w-3.5 h-3.5" />
         {t("palette.open")}
         <kbd className="ml-3 text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-white/8">
-          {PALETTE_SHORTCUT}
+          {paletteShortcut}
         </kbd>
       </Button>
     </div>

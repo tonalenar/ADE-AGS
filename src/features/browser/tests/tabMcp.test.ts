@@ -68,14 +68,14 @@ describe("qué TUI recibe el navegador y cómo nombra sus tools", () => {
     setAgentRegistry([
       entry("claude-code", "claudeFlags"),
       entry("opencode", "opencodeConfig"),
-      entry("codex", "none"),
+      entry("codex", "codexConfigOverrides"),
     ]);
   });
 
   it("lo reciben las TUIs con un formato verificado, no una sola", () => {
     expect(hasBrowserMcp("claude-code")).toBe(true);
     expect(hasBrowserMcp("opencode")).toBe(true);
-    expect(hasBrowserMcp("codex")).toBe(false);
+    expect(hasBrowserMcp("codex")).toBe(true);
     // Una TUI que el usuario agregó a mano: no está en el catálogo, no se le inventa nada.
     expect(hasBrowserMcp("mitui")).toBe(false);
     expect(hasBrowserMcp(null)).toBe(false);

@@ -17,6 +17,7 @@ import { refreshDevices, setDeviceState, useSimulatorStore } from "@/features/si
 import { ChatSwitch } from "@/features/settings/SettingsSection";
 import { PhysicalPane } from "@/features/iphone/PhysicalPane";
 import { PhysicalSection } from "@/features/iphone/PhysicalParts";
+import { ScreenRecordButton } from "@/features/recording/ScreenRecordButton";
 import { setPanelPick, useIphoneStore, watchPhysical } from "@/features/iphone/store";
 
 import {
@@ -149,8 +150,8 @@ function AgentControlFooter({ hint }: { hint: "ios" | "android" }) {
 }
 
 /** Manda a captura para o composer da conversa aberta, como `@caminho`. */
-function sendShotToChat(path: string, t: (k: string) => string) {
-  insertIntoComposer(mentionFor(null, path));
+function sendShotToChat(path: string, t: (k: string) => string, composerTarget?: string | null) {
+  insertIntoComposer(mentionFor(null, path), composerTarget);
   void AlertaToast(t("chat.devices.shot"), t("chat.devices.shotSent"), "success", 2500);
 }
 
@@ -159,15 +160,15 @@ function sendShotToChat(path: string, t: (k: string) => string) {
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
 /** O iOS do painel: o iPhone ou iPad físico escolhido (só ver, `iphone/PhysicalPane`) ou o simulador. */
-export function IosPane() {
+export function IosPane({ composerTarget }: { composerTarget?: string | null }) {
   const physical = useIphoneStore((s) => s.panelPick);
   const devices = useSimulatorStore((s) => s.devices);
   const loaded = useSimulatorStore((s) => s.loaded);
-  if (!physical) return <SimulatorPane />;
-  return <PhysicalPane device={physical} picker={<IosPicker devices={devices} current={null} loaded={loaded} physical={physical} />} />;
+  if (!physical) return <SimulatorPane composerTarget={composerTarget} />;
+  return <PhysicalPane device={physical} composerTarget={composerTarget} picker={<IosPicker devices={devices} current={null} loaded={loaded} physical={physical} />} />;
 }
 
-function SimulatorPane() {
+function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
   const { t } = useTranslation();
   const devices = useSimulatorStore((s) => s.devices);
   const loaded = useSimulatorStore((s) => s.loaded);
@@ -272,9 +273,10 @@ function SimulatorPane() {
             onClick={() => udid && simulatorRotate(udid, landscape ? "right" : "left").then((o) => setLandscape(o.startsWith("landscape"))).catch(fail)}>
             <RotateIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <NavButton label={t("chat.devices.shotToChat")} disabled={!booted} onClick={() => udid && simulatorScreenshot(udid).then((p) => sendShotToChat(p, t)).catch(fail)}>
+          <NavButton label={t("chat.devices.shotToChat")} disabled={!booted} onClick={() => udid && simulatorScreenshot(udid).then((p) => sendShotToChat(p, t, composerTarget)).catch(fail)}>
             <CameraIcon className="w-[17px] h-[17px]" />
           </NavButton>
+          {udid && <ScreenRecordButton kind="simulator" target={udid} composerTarget={composerTarget} label={current?.name ?? udid} disabled={!booted} className={ibCls} />}
           <NavButton label={dark ? t("chat.devices.appearanceLight") : t("chat.devices.appearanceDark")} disabled={!booted || dark === null}
             onClick={() => udid && simulatorAppearance(udid, dark ? "light" : "dark").then((a) => setDark(a === "dark")).catch(fail)}>
             <ContrastIcon className="w-[17px] h-[17px]" />
@@ -455,7 +457,7 @@ const LIST_EVERY_MS = 4000;
 const SWIPE_PX = 12;
 const LOGCAT_LINES = 200;
 
-export function AndroidPane() {
+export function AndroidPane({ composerTarget }: { composerTarget?: string | null }) {
   const { t } = useTranslation();
   const [list, setList] = useState<AndroidList | null>(null);
   const [infos, setInfos] = useState<Record<string, AndroidInfo>>({});
@@ -589,9 +591,10 @@ export function AndroidPane() {
           <NavButton label={t("canvas.device.recents")} disabled={!chosen} onClick={() => press("recents")}><SquareIcon className="w-[17px] h-[17px]" /></NavButton>
           <span aria-hidden="true" className="w-5 h-px my-1 bg-gray-200 dark:bg-white/[0.08]" />
           <NavButton label={t("chat.devices.rotate")} disabled={!chosen} onClick={() => chosen && androidRotate(chosen).catch(fail)}><RotateIcon className="w-[17px] h-[17px]" /></NavButton>
-          <NavButton label={t("chat.devices.shotToChat")} disabled={!chosen} onClick={() => chosen && androidScreenshot(chosen).then((p) => sendShotToChat(p, t)).catch(fail)}>
+          <NavButton label={t("chat.devices.shotToChat")} disabled={!chosen} onClick={() => chosen && androidScreenshot(chosen).then((p) => sendShotToChat(p, t, composerTarget)).catch(fail)}>
             <CameraIcon className="w-[17px] h-[17px]" />
           </NavButton>
+          {chosen && <ScreenRecordButton kind="android" target={chosen} composerTarget={composerTarget} label={info?.model || chosen} disabled={!ready.some((device) => device.serial === chosen)} className={ibCls} />}
           <NavButton label={t("chat.devices.volume")} disabled={!chosen} pop={() => (
             <div className="flex flex-col">
               <PopTitle>{t("chat.devices.volume")}</PopTitle>

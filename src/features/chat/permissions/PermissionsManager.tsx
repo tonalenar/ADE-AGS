@@ -81,6 +81,9 @@ export function PermissionsManager() {
       if (e.key.toLowerCase() !== "a" || !e.shiftKey || e.altKey) return;
       const chord = DESKTOP_OS === "macos" ? e.metaKey && !e.ctrlKey : e.ctrlKey && !e.metaKey;
       if (!chord) return;
+      // No terminal, a mesma combinação seleciona todo o histórico no buffer normal; o
+      // handler do xterm também a deixa chegar à TUI quando o buffer alternativo está ativo.
+      if (e.target instanceof Element && e.target.closest("[data-terminal-tab]")) return;
       // Na fase de captura, antes do terminal: o acorde não chega à TUI.
       e.preventDefault();
       e.stopPropagation();

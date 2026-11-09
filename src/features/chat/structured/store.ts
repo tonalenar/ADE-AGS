@@ -3,11 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 
 import { setComposing, useChatStore } from "../store";
 import {
-  chatAccountSet, chatRequestAnswer, chatThreadCreate, chatThreadInterrupt, chatThreadItems, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
+  chatAccountSet, chatRequestAnswer, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
   chatThreadSettle, chatThreads, chatThreadStatus, type ThreadAccess, type ThreadRow,
 } from "./ipc";
+import type { ThreadGoal } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
-import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, type ThreadEvent, type ThreadLive } from "./model";
+import { unsnoozeConversation } from "../shelf";
+import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
 
 /**
  * As conversas por protocolo, ao vivo: a lista (do banco) e, por conversa aberta, a timeline, os
@@ -17,11 +19,13 @@ import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, type Thread
 interface StructuredState {
   threads: ThreadRow[];
   live: Record<string, ThreadLive>;
+  goals: Record<string, ThreadGoal | null>;
+  goalNotices: Record<string, string | null>;
   /** As conversas cuja timeline já foi lida do banco. */
   hydrated: Record<string, boolean>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, hydrated: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {} }));
 
 const liveOf = (id: string) => useStructured.getState().live[id] ?? EMPTY_LIVE;
 
@@ -87,6 +91,12 @@ export function startStructured(): void {
       useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? applyThreadMeta(t, event) : t)) }));
       return;
     }
+    if (event.type === "goal") {
+      useStructured.setState((s) => ({ goals: { ...s.goals, [event.threadId]: event.goal } }));
+      return;
+    }
+    // Pedidos e falhas são pontos de atenção: tiram o fio do adiamento sem acordar turnos normais.
+    if (event.type === "request" || event.type === "error") unsnoozeConversation(threadKey(event.threadId));
     patchLive(event.threadId, (live) => applyThreadEvent(live, event));
     if (event.type === "item") {
       useStructured.setState((s) => ({ threads: s.threads.map((t) => (t.id === event.threadId ? { ...t, updatedAt: Date.now() } : t)) }));
@@ -98,14 +108,18 @@ export function startStructured(): void {
 export function hydrateThread(id: string): void {
   if (useStructured.getState().hydrated[id]) return;
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: true } }));
-  void Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id)])
-    .then(([items, requests, status]) => patchLive(id, (live) => ({
-      ...live,
-      // O que chegou por evento enquanto lia fica (é mais novo).
-      items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
-      requests: requests.length > 0 ? requests : live.requests,
-      phase: status.working ? "working" : live.phase,
-    })))
+  void Promise.all([chatThreadItems(id), chatThreadRequests(id), chatThreadStatus(id), chatThreadGoalGet(id), chatThreadProviderConfig(id)])
+    .then(([items, requests, status, goal, providerConfig]) => {
+      patchLive(id, (live) => ({
+        ...live,
+        // O que chegou por evento enquanto lia fica (é mais novo).
+        items: [...items.filter((i) => !live.items.some((x) => x.id === i.id)), ...live.items],
+        requests: requests.length > 0 ? requests : live.requests,
+        phase: status.working ? "working" : live.phase,
+        providerConfig: providerConfig ?? live.providerConfig,
+      }));
+      useStructured.setState((s) => ({ goals: { ...s.goals, [id]: Object.prototype.hasOwnProperty.call(s.goals, id) ? s.goals[id]! : goal } }));
+    })
     .catch(() => useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [id]: false } })));
 }
 
@@ -118,17 +132,19 @@ export function openThread(id: string): void {
 export interface NewThread {
   agentId: string;
   cwd: string;
+  workspaceId?: string | null;
   title: string;
   model: string | null;
   effort: string | null;
   access: ThreadAccess;
   accountId: string | null;
+  parentRef?: string | null;
 }
 
 /** Cria a conversa, mostra e manda a primeira mensagem. */
-export async function startThread(input: NewThread, text: string, images?: string[]): Promise<string> {
+export async function startThread(input: NewThread, text: string, images?: string[], background = false): Promise<string> {
   const id = await createThread(input);
-  openThread(id);
+  if (!background) openThread(id);
   sendToThread(id, text, undefined, undefined, images);
   return id;
 }
@@ -143,6 +159,7 @@ export async function createThread(input: NewThread): Promise<string> {
 
 /** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
 export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[]): void {
+  if (text.trim() || images?.length) unsnoozeConversation(threadKey(id));
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
   // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
   chatThreadSend(id, text, images).then(() => onSent?.(), (e) => {
@@ -155,16 +172,67 @@ export function interruptThread(id: string): void {
   chatThreadInterrupt(id).catch((e) => patchLive(id, (live) => ({ ...live, error: String(e) })));
 }
 
+export async function compactThread(id: string, instructions?: string): Promise<string | null> {
+  try {
+    await chatThreadCompactContext(id, instructions);
+    return null;
+  } catch (error) {
+    patchLive(id, (live) => ({ ...live, error: String(error) }));
+    return String(error);
+  }
+}
+
+/** Executa o modo opt-in de compactação ao reabrir uma conversa Claude. */
+export function autoCompactThreadOnReturn(id: string): void {
+  void chatThreadAutoCompactOnReturn(id).catch((error) => {
+    patchLive(id, (live) => ({ ...live, error: String(error) }));
+  });
+}
+
+export async function clearThreadContext(id: string): Promise<string | null> {
+  try {
+    await chatThreadClearContext(id);
+    useStructured.setState((s) => ({ goals: { ...s.goals, [id]: null }, goalNotices: { ...s.goalNotices, [id]: null } }));
+    return null;
+  } catch (error) {
+    patchLive(id, (live) => ({ ...live, error: String(error) }));
+    return String(error);
+  }
+}
+
+export async function runThreadGoalAction(id: string, action: "show" | "set" | "pause" | "resume" | "clear", objective?: string): Promise<string | null> {
+  try {
+    const goal = await chatThreadGoalAction(id, action, objective);
+    useStructured.setState((s) => ({ goals: { ...s.goals, [id]: goal }, goalNotices: { ...s.goalNotices, [id]: action === "show" && !goal ? "none" : null } }));
+    return null;
+  } catch (error) {
+    patchLive(id, (live) => ({ ...live, error: String(error) }));
+    return String(error);
+  }
+}
+
 export function answerRequest(threadId: string, requestId: string, choice: string): void {
+  unsnoozeConversation(threadKey(threadId));
   // Some da tela na hora; se o backend recusar (o agente fechou), o erro aparece.
   patchLive(threadId, (live) => ({ ...live, requests: live.requests.filter((r) => r.id !== requestId) }));
   chatRequestAnswer(requestId, choice).catch((e) => patchLive(threadId, (live) => ({ ...live, error: String(e) })));
 }
 
-export function retuneThread(id: string, model: string | null, effort: string | null, access: ThreadAccess): void {
-  chatThreadRetune(id, model, effort, access)
-    .then(upsertThread)
-    .catch((e) => patchLive(id, (live) => ({ ...live, error: String(e) })));
+export async function retuneThread(id: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<boolean> {
+  try {
+    const previous = useStructured.getState().threads.find((thread) => thread.id === id);
+    const updated = await chatThreadRetune(id, model, effort, access);
+    upsertThread(updated);
+    // Opções de raciocínio ACP podem depender do modelo. Descarte o snapshot anterior até
+    // a sessão seguinte anunciar a configuração correspondente ao modelo novo.
+    if (previous && isLocalAcpAgent(previous.agentId) && previous.model !== updated.model) {
+      patchLive(id, (live) => ({ ...live, providerConfig: null }));
+    }
+    return true;
+  } catch (e) {
+    patchLive(id, (live) => ({ ...live, error: String(e) }));
+    return false;
+  }
 }
 
 /**
@@ -174,6 +242,7 @@ export function retuneThread(id: string, model: string | null, effort: string | 
 export async function switchThreadAgent(id: string, agentId: string, model: string | null, effort: string | null, access: ThreadAccess): Promise<string | null> {
   try {
     upsertThread(await chatThreadSwitchAgent(id, agentId, model, effort, access, null));
+    patchLive(id, (live) => ({ ...live, providerConfig: null, providerCommands: [] }));
     return null;
   } catch (e) {
     return String(e);

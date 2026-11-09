@@ -825,6 +825,26 @@ pub fn display_points(display: (u32, u32), family: &str) -> (f64, f64) {
     ((f64::from(display.0) / scale).round(), (f64::from(display.1) / scale).round())
 }
 
+/// Mantém a moldura física na orientação do vídeo recebido. O CoreDevice informa o tamanho da tela ao abrir a
+/// sessão, mas o iPhone pode girar sem reconectar; quando o HEVC troca largura e altura, a dimensão reportada precisa
+/// acompanhar essa mudança para o espelho e os toques continuarem alinhados.
+pub fn display_for_video_orientation(
+    display: Option<(u32, u32)>,
+    coded: (u32, u32),
+) -> Option<(u32, u32)> {
+    let (w, h) = display?;
+    if w == 0 || h == 0 || coded.0 == 0 || coded.1 == 0 || coded.0 == coded.1 {
+        return Some((w, h));
+    }
+    let display_landscape = w > h;
+    let video_landscape = coded.0 > coded.1;
+    Some(if display_landscape == video_landscape {
+        (w, h)
+    } else {
+        (h, w)
+    })
+}
+
 /// Os botões físicos: página e uso HID. Página 0x0C (consumo): início 0x40, bloquear/lateral 0x30, volume 0xE9/0xEA,
 /// mudo 0xE2 (o botão de ação), Siri 0xCF.
 pub fn button_usage(name: &str) -> Option<(u16, u16)> {

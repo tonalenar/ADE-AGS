@@ -8,8 +8,9 @@ import { AccessMenu } from "./AccessMenu";
 import { AgentModelPicker } from "./AgentModelPicker";
 import { setChatWidth, useChatLook } from "./chatLook";
 import { accessModesFor, planSupported } from "./chatModel";
-import { loadChatPrefs, saveChatPrefs, type ChatPrefs, type ChatWidth } from "./chatPrefs";
-import { STRUCTURED_AGENTS } from "./structured/model";
+import { loadChatPrefs, saveChatPrefs, type ChatPrefs, type ChatWidth, type FollowUpBehavior } from "./chatPrefs";
+import { loadOrMigrateChatThreadEnvMode, saveChatThreadEnvMode, type ChatThreadEnvMode, type ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
+import { isLocalAcpAgent, isStructuredAgent } from "./structured/model";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
@@ -26,9 +27,11 @@ export function ChatModeSetting() {
   const startMode = useUiStore((s) => s.startMode);
   const setStartMode = useUiStore((s) => s.setStartMode);
   const width = useChatLook((s) => s.width);
-  const available = useAvailableAgents();
+  const available = useAvailableAgents({ includeLocalAcp: true });
   const agents = useMemo(() => available.filter((a) => a.id !== SHELL_AGENT_ID), [available]);
   const [prefs, setPrefs] = useState<ChatPrefs>(loadChatPrefs);
+  const [workspaceMode, setWorkspaceMode] = useState<ChatThreadEnvMode | "auto">(() => loadOrMigrateChatThreadEnvMode() ?? "auto");
+  const [worktreeSubmodules, setWorktreeSubmodules] = useState<ChatWorktreeSubmodules | "auto">(() => loadChatPrefs().worktreeSubmodules ?? "auto");
   const update = (patch: Partial<ChatPrefs>) => {
     // Do disco: a largura e o composer gravam nas mesmas preferências.
     const next = { ...loadChatPrefs(), ...patch };
@@ -36,9 +39,14 @@ export function ChatModeSetting() {
     saveChatPrefs(next);
   };
   const agentId = prefs.agentId ?? agents[0]?.id ?? null;
-  const viaProtocol = !!agentId && prefs.structured && STRUCTURED_AGENTS.has(agentId);
+  const localAcp = !!agentId && isLocalAcpAgent(agentId);
+  const viaProtocol = !!agentId && (isLocalAcpAgent(agentId) || (prefs.structured && isStructuredAgent(agentId)));
   const modes = agentId ? accessModesFor(agentId, viaProtocol) : ["ask" as const];
   const access = modes.includes(prefs.access) ? prefs.access : modes[0] ?? "ask";
+  const setDefaultWorkspaceMode = (mode: ChatThreadEnvMode | "auto") => {
+    setWorkspaceMode(mode);
+    saveChatThreadEnvMode(mode === "auto" ? null : mode);
+  };
 
   return (
     <>
@@ -62,9 +70,12 @@ export function ChatModeSetting() {
         <SettingsGroup>
           <SettingsRow label={t("chat.settings.defaultAgent")} hint={t("chat.settings.defaultAgentHint")}>
             <span className="rounded-lg border border-gray-200 dark:border-white/10">
-              <AgentModelPicker agents={agents} placement="below"
-                value={{ agentId, model: prefs.model, effort: prefs.effort, account: prefs.accountId }}
-                onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account })} />
+              <AgentModelPicker agents={agents} placement="below" showAccount={!localAcp}
+                value={{ agentId, model: localAcp ? null : prefs.model, effort: localAcp ? null : prefs.effort, account: localAcp ? null : prefs.accountId }}
+                onChange={(v) => {
+                  const customAcp = isLocalAcpAgent(v.agentId ?? "");
+                  update({ agentId: v.agentId, model: customAcp ? null : v.model, effort: customAcp ? null : v.effort, accountId: customAcp ? null : v.account, plan: customAcp ? false : prefs.plan });
+                }} />
             </span>
           </SettingsRow>
           <SettingsRow label={t("chat.settings.defaultAccess")} hint={t("chat.settings.defaultAccessHint")}>
@@ -72,12 +83,39 @@ export function ChatModeSetting() {
               <AccessMenu placement="below" value={access} available={modes} onChange={(next) => update({ access: next })} />
             </span>
           </SettingsRow>
-          <SettingsToggleRow label={t("chat.settings.worktree")} description={t("chat.settings.worktreeHint")}
-            checked={prefs.worktree} onChange={(worktree) => update({ worktree })} />
+          <SettingsRow label={t("chat.settings.worktree")} hint={t("chat.workspace.preferenceHint")}>
+            <ChatSegmented<ChatThreadEnvMode | "auto"> label={t("chat.settings.worktree")} value={workspaceMode}
+              onChange={setDefaultWorkspaceMode}
+              options={[
+                { value: "auto", label: t("chat.workspace.auto") },
+                { value: "local", label: t("chat.new.currentCheckout") },
+                { value: "worktree", label: t("chat.workspace.newWorktree") },
+              ]} />
+          </SettingsRow>
+          <SettingsRow label={t("chat.settings.worktreeSubmodules")} hint={t("chat.settings.worktreeSubmodulesHint")}>
+            <ChatSegmented<ChatWorktreeSubmodules | "auto"> label={t("chat.settings.worktreeSubmodules")} value={worktreeSubmodules}
+              onChange={(mode) => {
+                setWorktreeSubmodules(mode);
+                update({ worktreeSubmodules: mode === "auto" ? null : mode });
+              }}
+              options={[
+                { value: "auto", label: t("chat.workspace.auto") },
+                { value: "none", label: t("chat.workspace.submodules.none") },
+                { value: "top-level", label: t("chat.workspace.submodules.topLevel") },
+                { value: "recursive", label: t("chat.workspace.submodules.recursive") },
+              ]} />
+          </SettingsRow>
           <SettingsToggleRow label={t("chat.settings.plan")} description={t("chat.settings.planHint")}
             checked={prefs.plan} disabled={!!agentId && !planSupported(agentId, viaProtocol)} onChange={(plan) => update({ plan })} />
           <SettingsToggleRow label={t("chat.settings.structured")} description={t("chat.settings.structuredHint")}
-            checked={prefs.structured} onChange={(structured) => update({ structured })} />
+            checked={localAcp || prefs.structured} disabled={localAcp} onChange={(structured) => update({ structured })} />
+        </SettingsGroup>
+      </SettingsSection>
+
+      <SettingsSection title={t("chat.settings.composer")}>
+        <SettingsGroup>
+          <SettingsToggleRow label={t("chat.settings.showSkillsInSlashMenu")} description={t("chat.settings.showSkillsInSlashMenuHint")}
+            checked={prefs.showSkillsInSlashMenu} onChange={(showSkillsInSlashMenu) => update({ showSkillsInSlashMenu })} />
         </SettingsGroup>
       </SettingsSection>
 
@@ -89,6 +127,19 @@ export function ChatModeSetting() {
                 { value: "normal", label: t("chat.settings.widthNormal") },
                 { value: "wide", label: t("chat.settings.widthWide") },
                 { value: "full", label: t("chat.settings.widthFull") },
+              ]} />
+          </SettingsRow>
+        </SettingsGroup>
+      </SettingsSection>
+
+      <SettingsSection title={t("chat.settings.followUp")}>
+        <SettingsGroup>
+          <SettingsRow label={t("chat.settings.followUpBehavior")} hint={t("chat.settings.followUpBehaviorHint")}>
+            <ChatSegmented<FollowUpBehavior> label={t("chat.settings.followUpBehavior")} value={prefs.followUpBehavior}
+              onChange={(followUpBehavior) => update({ followUpBehavior })}
+              options={[
+                { value: "steer", label: t("chat.settings.followUpSteer") },
+                { value: "queue", label: t("chat.settings.followUpQueue") },
               ]} />
           </SettingsRow>
         </SettingsGroup>

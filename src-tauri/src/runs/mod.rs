@@ -15,6 +15,8 @@ mod agents;
 mod antigravity;
 mod broker;
 mod context;
+pub(crate) mod execution_log;
+mod harness;
 pub(crate) mod failure;
 pub(crate) mod fixrounds;
 pub(crate) mod handoff;
@@ -44,9 +46,11 @@ pub(crate) mod worktrees;
 pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
 pub(crate) use agents::{ClaudeCode, HeadlessAgent};
 pub(crate) use antigravity::Antigravity;
+pub(crate) use context::delegated_prompt;
 pub(crate) use routing::Complexity;
 pub use store::sweep_orphans;
 pub use types::{Fact, Run, Task};
+pub use harness::HarnessExecutionGraph;
 
 use std::time::Duration;
 
@@ -79,6 +83,88 @@ pub fn run_list_runs(
 ) -> Result<Vec<Run>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_runs(&conn, &workspace_id)
+}
+
+/// Um snapshot único de conversas, turnos e tarefas descendentes da conversa estruturada.
+#[tauri::command]
+pub fn run_list_harness_graph(
+    thread_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<HarnessExecutionGraph, String> {
+    let conn = db.lock().map_err(|error| error.to_string())?;
+    harness::thread_execution_graph(&conn, &thread_id)
+}
+
+/// Lê os eventos normalizados de uma tentativa da Frota sob demanda.
+/// Os frames brutos continuam no JSONL; esta resposta aplica o adapter do provider e limita
+/// o histórico para manter a leitura do painel pequena e previsível.
+#[tauri::command]
+pub fn run_read_attempt_events(
+    attempt_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<types::AgentEvent>, String> {
+    use std::collections::VecDeque;
+    use std::io::{Read, Seek, SeekFrom};
+
+    const MAX_BYTES: u64 = 4 * 1024 * 1024;
+    const MAX_EVENTS: usize = 400;
+
+    let (events_path, agent_id) = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        conn.query_row(
+            "SELECT events_path, agent_id FROM run_attempts WHERE id = ?1",
+            [&attempt_id],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )
+        .map_err(|error| format!("tentativa não encontrada: {error}"))?
+    };
+    if events_path.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let runs_dir = crate::util::datadir::ags_home()
+        .ok_or_else(|| "não foi possível localizar a pasta do usuário".to_string())?
+        .join("runs");
+    let canonical_runs = runs_dir.canonicalize().map_err(|error| error.to_string())?;
+    let path = std::path::PathBuf::from(events_path)
+        .canonicalize()
+        .map_err(|error| error.to_string())?;
+    if !path.starts_with(&canonical_runs) {
+        return Err("o caminho dos eventos da tentativa está fora da pasta da Frota".into());
+    }
+
+    let mut file = std::fs::File::open(path).map_err(|error| error.to_string())?;
+    let length = file.metadata().map_err(|error| error.to_string())?.len();
+    let offset = length.saturating_sub(MAX_BYTES);
+    if offset > 0 {
+        file.seek(SeekFrom::Start(offset)).map_err(|error| error.to_string())?;
+    }
+    let mut bytes = Vec::with_capacity(length.saturating_sub(offset) as usize);
+    file.read_to_end(&mut bytes).map_err(|error| error.to_string())?;
+    if offset > 0 {
+        if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
+            bytes.drain(..=newline);
+        } else {
+            return Ok(Vec::new());
+        }
+    }
+
+    let adapter = agents::adapter_for(&agent_id)
+        .ok_or_else(|| format!("não existe adapter de eventos para '{agent_id}'"))?;
+    let raw = String::from_utf8_lossy(&bytes);
+    let mut events = VecDeque::with_capacity(MAX_EVENTS);
+    for line in raw.lines() {
+        for event in adapter.parse_line(line) {
+            if matches!(event, types::AgentEvent::Quota { .. }) {
+                continue;
+            }
+            if events.len() == MAX_EVENTS {
+                events.pop_front();
+            }
+            events.push_back(event);
+        }
+    }
+    Ok(events.into_iter().collect())
 }
 
 /// Asigna la tarea, la crea y la lanza.
@@ -443,6 +529,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         allowed.push(orchestration_tool_name(crate::ipc::mcp::ASK_TOOL));
         if can_delegate {
             allowed.push(orchestration_tool_name("task_add"));
+            allowed.push(orchestration_tool_name("delegate_task"));
         }
         supervisor::start(
             app,
@@ -861,8 +948,8 @@ pub fn run_cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
 /// Lo que el agente anterior alcanzó a hacer: los pasos que quedaron en su registro de
 /// eventos y los commits que dejó en su rama.
 ///
-/// El registro se lee ACÁ y no al relanzar porque el lanzamiento lo pisa: cada intento
-/// escribe su `.jsonl` desde cero.
+/// Cada tentativa mantém seu próprio JSONL; `events_path` aponta para a tentativa anterior
+/// no momento do reroute.
 fn what_it_did(task: &Task) -> (Vec<String>, Vec<String>) {
     let mut did = Vec::new();
     if let Some(path) = &task.events_path

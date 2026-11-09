@@ -46,24 +46,25 @@ export function AskDialog() {
   const paint = agentPaint(question.fromId);
   const remaining = question.expiresAt - now;
   const free = question.options.length === 0;
+  const answerText = question.secret ? text : text.trim();
   if (question.review && question.options.length >= 2) {
     return <ReviewDialog question={question} review={question.review} remaining={remaining} answer={answer} />;
   }
 
   return (
     <AppDialog
-      title={t("ask.title", { agent: question.from })}
+      title={question.secret ? t("ask.secret.title", { agent: question.from }) : t("ask.title", { agent: question.from })}
       size="sm"
       onClose={() => answer(question.id, null)}
       closeOnEsc
       footer={
         <>
           <Button variant="outline" onClick={() => answer(question.id, null)}>
-            {t("ask.skip")}
+            {question.secret ? t("ask.secret.decline") : t("ask.skip")}
           </Button>
           {free && (
-            <Button variant="primary" disabled={!text.trim()} onClick={() => answer(question.id, text.trim())}>
-              {t("ask.send")}
+            <Button variant="primary" disabled={!text.trim()} onClick={() => answer(question.id, answerText)}>
+              {question.secret ? t("ask.secret.save") : t("ask.send")}
             </Button>
           )}
         </>
@@ -81,12 +82,15 @@ export function AskDialog() {
 
         {free ? (
           <Input
+            type={question.secret ? "password" : "text"}
+            autoComplete={question.secret ? "new-password" : undefined}
+            spellCheck={!question.secret}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && text.trim()) answer(question.id, text.trim());
+              if (e.key === "Enter" && text.trim()) answer(question.id, answerText);
             }}
-            placeholder={question.placeholder || t("ask.placeholder")}
+            placeholder={question.placeholder || (question.secret ? t("ask.secret.placeholder") : t("ask.placeholder"))}
             variant="outline"
             autoFocus
           />
@@ -106,6 +110,12 @@ export function AskDialog() {
               </Button>
             ))}
           </div>
+        )}
+
+        {question.secret && (
+          <p className="text-[11px] leading-relaxed text-gray-500 dark:text-white/45">
+            {t("ask.secret.privacy")}
+          </p>
         )}
 
         <p className="text-[11px] text-gray-400 dark:text-white/35">

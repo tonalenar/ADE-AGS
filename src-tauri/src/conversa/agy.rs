@@ -228,7 +228,11 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
     let name = crate::agents::agent_command("antigravity").unwrap_or("agy");
     let program = crate::util::find_program(name).ok_or("Não achei o Antigravity (agy) no PATH")?;
-    let args = map::launch_args(&row, text, conversation.as_deref());
+    let conversation_mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "antigravity");
+    let mut args = map::launch_args(&row, text, conversation.as_deref());
+    if let Some(mcp) = conversation_mcp.as_ref() {
+        args.extend(mcp.antigravity_args.iter().cloned());
+    }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(crate::util::external_path(std::path::Path::new(&row.cwd)))

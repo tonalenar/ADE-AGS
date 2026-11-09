@@ -7,6 +7,7 @@
 
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
@@ -71,23 +72,258 @@ pub(super) fn chat_list(app: &AppHandle, args: &Value) -> Result<Value, String> 
     Ok(json!({ "threads": threads }))
 }
 
+/// Provedores que aceitam conversas estruturadas, separados da lista de agentes headless da Frota.
+/// `commandAvailable: null` para ACP local: a configuração existe, mas seu executável fica
+/// guardado no chaveiro e só é lido na hora de iniciar a conversa.
+pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, String> {
+    let db = db(app)?;
+    let mut providers: Vec<Value> = [
+        api::Engine::Codex,
+        api::Engine::Claude,
+        api::Engine::OpenCode,
+        api::Engine::Antigravity,
+        api::Engine::Cursor,
+    ]
+    .into_iter()
+    .filter_map(|engine| {
+        let agent_id = match engine {
+            api::Engine::Codex => "codex",
+            api::Engine::Claude => "claude-code",
+            api::Engine::OpenCode => "opencode",
+            api::Engine::Antigravity => "antigravity",
+            api::Engine::Cursor => "cursor",
+        };
+        let def = crate::agents::agent_def(agent_id)?;
+        Some(json!({
+            "id": agent_id,
+            "label": def.label,
+            "kind": "built_in",
+            "protocol": engine.protocol(),
+            "configured": true,
+            "commandAvailable": crate::agents::command_exists(def.command),
+            "capabilities": engine.capabilities(),
+        }))
+    })
+    .collect();
+
+    for provider in crate::local_acp::list(&db)? {
+        let mut capabilities = serde_json::to_value(api::Engine::OpenCode.capabilities())
+            .map_err(|error| error.to_string())?;
+        // O bridge ACP local não oferece escolha de modelo/esforço nem elevação de acesso.
+        capabilities["accessModes"] = json!(["ask"]);
+        capabilities["plan"] = json!(false);
+        capabilities["persistentGoal"] = json!(false);
+        capabilities["goalPauseResume"] = json!(false);
+        providers.push(json!({
+            "id": provider.id,
+            "label": provider.label,
+            "kind": "local_acp",
+            "protocol": "agent-client-protocol",
+            "configured": true,
+            "commandAvailable": null,
+            "capabilities": capabilities,
+        }));
+    }
+
+    providers.sort_by(|left, right| {
+        let left_builtin = left["kind"] == "built_in";
+        let right_builtin = right["kind"] == "built_in";
+        right_builtin.cmp(&left_builtin).then_with(|| {
+            left["label"].as_str().unwrap_or_default()
+                .to_lowercase()
+                .cmp(&right["label"].as_str().unwrap_or_default().to_lowercase())
+        })
+    });
+    Ok(json!({ "providers": providers }))
+}
+
+pub(super) fn chat_compact(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let thread = thread_arg(args)?;
+    let instructions = arg_str_opt(args, "instructions");
+    let db = db(app)?;
+    tauri::async_runtime::block_on(api::compact_context(
+        app,
+        &db,
+        &thread,
+        instructions.as_deref(),
+    ))?;
+    Ok(json!({ "compacted": true, "thread": thread }))
+}
+
+pub(super) fn chat_goal(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let thread = thread_arg(args)?;
+    let action = arg_str_opt(args, "action").unwrap_or_else(|| "show".into());
+    let objective = arg_str_opt(args, "objective");
+    let db = db(app)?;
+    let goal = tauri::async_runtime::block_on(api::thread_goal_action(
+        app,
+        &db,
+        &thread,
+        &action,
+        objective.as_deref(),
+    ))?;
+    Ok(json!({ "thread": thread, "goal": goal }))
+}
+
 pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let text = arg_str(args, "text").map_err(|_| "Falta a mensagem: ags chat new \"...\" --cwd <pasta>".to_string())?;
+    let task = arg_str(args, "text")
+        .map_err(|_| "Falta a mensagem: ags chat new \"...\" --cwd <pasta>".to_string())?;
     let cwd = arg_str(args, "cwd").map_err(|_| "Falta a pasta: --cwd <pasta>".to_string())?;
     let db = db(app)?;
-    let row = api::create(&db, NewThread {
-        agent_id: arg_str_opt(args, "agent").unwrap_or_else(|| "codex".into()),
-        title: arg_str_opt(args, "title").unwrap_or_else(|| title_of(&text)),
-        cwd,
-        model: arg_str_opt(args, "model"),
-        effort: arg_str_opt(args, "effort"),
+    let parent_ref = arg_str_opt(args, "parent_ref");
+    let parent =
+        match parent_ref.as_deref().and_then(|reference| reference.strip_prefix("thread:")) {
+            Some(parent_id) => {
+                let parent = api::thread(&db, parent_id)?;
+                if parent.cwd != cwd {
+                    return Err("A conversa filha precisa usar a mesma pasta da conversa de origem".into());
+                }
+                Some(parent)
+            }
+            None => None,
+        };
+    if parent_ref.as_deref().is_some_and(|reference| {
+        !reference.starts_with("thread:") && !reference.starts_with("tab:")
+    }) {
+        return Err("A referência da conversa de origem precisa ser thread:<id> ou tab:<id>".into());
+    }
+    if parent_ref.as_deref().is_some_and(|reference| {
+        reference.len() > 512 || reference.chars().any(char::is_control)
+    }) {
+        return Err("A referência da conversa de origem é inválida".into());
+    }
+    let agent_id = arg_str_opt(args, "agent")
+        .or_else(|| parent.as_ref().map(|thread| thread.agent_id.clone()))
+        .unwrap_or_else(|| "codex".into());
+    let inherit_parent_settings = parent.as_ref().is_some_and(|thread| {
+        thread.agent_id == agent_id && !crate::local_acp::is_local_acp_id(&agent_id)
+    });
+    let inherited_model = parent.as_ref().filter(|_| inherit_parent_settings).and_then(|thread| thread.model.clone());
+    let inherited_effort = parent.as_ref().filter(|_| inherit_parent_settings).and_then(|thread| thread.effort.clone());
+    let inherited_account = parent.as_ref().filter(|_| inherit_parent_settings).and_then(|thread| thread.account_id.clone());
+    let context = arg_str_opt(args, "context");
+    let prompt = crate::runs::delegated_prompt(&task, context.as_deref())?;
+    let parented = parent_ref.is_some();
+    let access = if parented {
+        "ask".into()
+    } else {
+        arg_str_opt(args, "access").unwrap_or_else(|| "ask".into())
+    };
+    let input = NewThread {
+        agent_id: agent_id.clone(),
+        title: arg_str_opt(args, "title").unwrap_or_else(|| title_of(&task)),
+        cwd: cwd.clone(),
+        workspace_id: None,
+        model: arg_str_opt(args, "model").or(inherited_model),
+        effort: arg_str_opt(args, "effort").or(inherited_effort),
         // Aberta por um agente, a conversa começa supervisionada: o que ela rodar, a pessoa aprova.
-        access: arg_str_opt(args, "access").unwrap_or_else(|| "ask".into()),
-        account_id: arg_str_opt(args, "account"),
-    })?;
-    api::announce(app, &row);
-    tauri::async_runtime::block_on(api::send(app, &db, &row.id, &text))?;
-    Ok(json!({ "thread": row, "next": format!("ags chat wait {}", row.id) }))
+        // Conversas-filhas também começam supervisionadas, sem herdar uma elevação de acesso.
+        access,
+        account_id: arg_str_opt(args, "account").or(inherited_account),
+        parent_ref: parent_ref.clone(),
+    };
+    if let Some(identity) = child_request_identity(args, parent_ref.as_deref(), &cwd)? {
+        let outcome = api::create_child(&db, input, &identity)?;
+        let row = outcome.thread;
+        if !outcome.reused {
+            api::announce(app, &row);
+        }
+        match api::claim_child_delivery(&db, &identity)? {
+            api::ChildDeliveryClaim::Claimed { thread_id } => {
+                let send = tauri::async_runtime::block_on(api::send_mode(
+                    app,
+                    &db,
+                    &thread_id,
+                    &prompt,
+                    crate::conversa::envio::SendMode::QueueAfterActive,
+                    &[],
+                ));
+                match send {
+                    Ok(()) => {
+                        api::finish_child_delivery(&db, &identity, "accepted")?;
+                        Ok(json!({
+                            "thread": row,
+                            "next": format!("ags chat wait {}", row.id),
+                            "parented": parented,
+                            "reused": outcome.reused,
+                            "firstMessage": "accepted"
+                        }))
+                    }
+                    Err(error) => {
+                        let state = match &error {
+                            crate::conversa::envio::SendError::Unknown(_) => "unknown",
+                            crate::conversa::envio::SendError::Busy | crate::conversa::envio::SendError::NotSent(_) => "retryable",
+                        };
+                        api::finish_child_delivery(&db, &identity, state)?;
+                        Ok(json!({
+                            "thread": row,
+                            "next": format!("ags chat wait {}", row.id),
+                            "parented": parented,
+                            "reused": outcome.reused,
+                            "firstMessage": state,
+                            "sendError": error.to_string(),
+                            "retry": if state == "retryable" { "Repeat chat_new with the same client_request_id to retry safely." } else { "Do not resend this request; inspect the child chat because the provider may have received the message." }
+                        }))
+                    }
+                }
+            }
+            api::ChildDeliveryClaim::AlreadyClaimed { state, .. } => {
+                let warning = match state.as_str() {
+                    "accepted" => "The first message was accepted by the provider; this repeated request did not send it again.",
+                    "submitting" | "unknown" => "The first message may have reached the provider; inspect the child chat before sending another message.",
+                    "retryable" | "prepared" => "The first message was not submitted; repeat chat_new with the same client_request_id to retry.",
+                    _ => "The first-message state is unavailable; inspect the child chat before retrying.",
+                };
+                Ok(json!({
+                    "thread": row,
+                    "next": format!("ags chat wait {}", row.id),
+                    "parented": parented,
+                    "reused": true,
+                    "firstMessage": state,
+                    "note": warning
+                }))
+            }
+        }
+    } else {
+        let row = api::create(&db, input)?;
+        api::announce(app, &row);
+        tauri::async_runtime::block_on(api::send(app, &db, &row.id, &prompt))?;
+        Ok(json!({ "thread": row, "next": format!("ags chat wait {}", row.id), "parented": parented }))
+    }
+}
+
+fn child_request_identity(
+    args: &Value,
+    parent_ref: Option<&str>,
+    cwd: &str,
+) -> Result<Option<api::ChildRequestIdentity>, String> {
+    let read_id = |key: &str| -> Result<Option<String>, String> {
+        match args.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(value)) if !value.trim().is_empty() => Ok(Some(value.trim().to_string())),
+            Some(Value::String(_)) => Err("client_request_id não pode ficar vazio".into()),
+            Some(_) => Err("client_request_id precisa ser texto".into()),
+        }
+    };
+    let snake = read_id("client_request_id")?;
+    let camel = read_id("clientRequestId")?;
+    if snake.is_some() && camel.is_some() && snake != camel {
+        return Err("client_request_id e clientRequestId não podem ter valores diferentes".into());
+    }
+    let Some(request_id) = snake.or(camel) else { return Ok(None) };
+    if request_id.len() > 128 || request_id.chars().any(char::is_control) {
+        return Err("client_request_id deve ter até 128 caracteres sem controles".into());
+    }
+    let mut normalized = args.clone();
+    if let Some(object) = normalized.as_object_mut() {
+        object.remove("client_request_id");
+        object.remove("clientRequestId");
+    }
+    let bytes = serde_json::to_vec(&normalized).map_err(|error| error.to_string())?;
+    let request_hash = format!("{:x}", Sha256::digest(bytes));
+    let scope = parent_ref.map(str::to_string).unwrap_or_else(|| format!("cwd:{cwd}"));
+    let caller_key = format!("chat-new:{:x}", Sha256::digest(scope.as_bytes()));
+    Ok(Some(api::ChildRequestIdentity { caller_key, request_id, request_hash }))
 }
 
 pub(super) fn chat_send(app: &AppHandle, args: &Value) -> Result<Value, String> {

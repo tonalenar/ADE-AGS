@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
 import { WindowControls, WindowLights } from "@/app/WindowLights";
 import { useTabsStore } from "@/features/tabs/store";
+import { useLocalAcpStore } from "@/features/agents/localAcpStore";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { AttachCwdContext } from "./attachments/AttachmentStrip";
@@ -12,14 +13,18 @@ import { DropOverlay } from "./attachments/DropOverlay";
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
-import { chatProjects, conversationCards, type ChatProject, type ConversationCard } from "./chatModel";
+import { chatProjects, conversationCards, PROTOCOL_AGENTS, type ChatProject, type ConversationCard } from "./chatModel";
+import { ProjectBadge } from "./ChatProjectBadge";
+import { useChatProjectIdentityList } from "./chatProjectIdentity";
+import { normalizeProjectPath } from "./chatProjectPrefs";
 import { MissionsSection } from "@/features/missions/MissionsSection";
-import { ChatSidebar, IconButton, ProjectBadge, type FolderDiff } from "./ChatSidebar";
+import { ChatSidebar, IconButton, type FolderDiff } from "./ChatSidebar";
 import { ChatPage } from "./ChatPage";
 import { SettingsSidebar, SpacesSidebar } from "./ChatPageSidebar";
 import { isFullscreenRoute, isSettingsRoute } from "./chatSpaces";
 import { useElementWidth } from "./ComposerColumn";
-import { CHAT_SHELL_ATTR, ConversationView, hasTimeline } from "./ConversationView";
+import { CHAT_SHELL_ATTR, ConversationView } from "./ConversationView";
+import { hasTimeline } from "./chatModel";
 import { parseUnifiedDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
 import { startChatLive } from "./liveStore";
@@ -35,12 +40,12 @@ import { startQueueRunner } from "./queueRunner";
 import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
 import { runInShell } from "./shellTerminal";
+import { startProjectScriptSettleWatcher } from "./projectScriptAutomation";
 import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
 import { useTeamDraft } from "./team/draftStore";
-import { closeSummary, forgetLastPanel, type RightPanelTab, openTeamPanelFocused, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
-import { matchTeamShortcut } from "./panelMenu";
+import { closeSummary, forgetLastPanel, setChatBrowserFloatRect, type RightPanelTab, panelForNewConversation, setRightPanel, toggleRightPanel, useChatStore } from "./store";
 import { threadCards, threadIdOf, threadKey } from "./structured/model";
 import { startStructured, useStructured } from "./structured/store";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
@@ -63,11 +68,24 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const threads = useStructured((s) => s.threads);
   const selectedThread = useChatStore((s) => s.thread);
   const detected = useTabsStore((s) => s.detectedAgents);
+  const localProviders = useLocalAcpStore((s) => s.providers);
+  const localProvidersLoaded = useLocalAcpStore((s) => s.loaded);
+  const loadLocalProviders = useLocalAcpStore((s) => s.load);
+  useEffect(() => { if (!localProvidersLoaded) void loadLocalProviders().catch(console.error); }, [localProvidersLoaded, loadLocalProviders]);
   const cards = useMemo(() => {
-    const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? id;
+    const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? localProviders.find((a) => a.id === id)?.label ?? id;
     return [...threadCards(threads, groups, labelOf, selectedThread), ...conversationCards(groups)].sort((a, b) => b.openedAt - a.openedAt);
-  }, [groups, threads, detected, selectedThread]);
+  }, [groups, threads, detected, localProviders, selectedThread]);
   const projects = useMemo(() => chatProjects(groups), [groups]);
+  const projectIdentities = useChatProjectIdentityList();
+  const knownProjects = useMemo(() => {
+    const byPath = new Map(projects.map((candidate) => [normalizeProjectPath(candidate.cwd), candidate]));
+    for (const [cwd, metadata] of Object.entries(projectIdentities)) {
+      if (!byPath.has(cwd) && metadata.known && metadata.name) byPath.set(cwd, { cwd, name: metadata.name, branch: metadata.branch });
+    }
+    return [...byPath.values()];
+  }, [projects, projectIdentities]);
+  const selectableProjects = useMemo(() => knownProjects.filter((candidate) => !projectIdentities[normalizeProjectPath(candidate.cwd)]?.archived), [knownProjects, projectIdentities]);
   const closed = useMemo(() => {
     const open = new Set(cards.map((c) => c.cwd));
     return groups.flatMap((g) => g.workspaces).filter((w) => w.closed && !open.has(w.cwd)).map((w): ChatProject => ({ cwd: w.cwd, name: w.title, branch: w.branch }));
@@ -84,6 +102,11 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const { ref: mainRef } = useElementWidth<HTMLElement>();
   // Arquivos do Finder soltos na coluna do chat viram anexos do composer à vista (só os caminhos).
   useChatFileDrop(mainRef);
+  useEffect(() => {
+    const toggleSidebar = () => setSidebarOpen((open) => !open);
+    window.addEventListener("ade:chat-sidebar-toggle", toggleSidebar);
+    return () => window.removeEventListener("ade:chat-sidebar-toggle", toggleSidebar);
+  }, []);
   const [folder, setFolder] = useState<string | null>(null);
   // O "+" de um projeto na barra pede a tela de conversa nova já nessa pasta: a casca lê o pedido uma vez.
   const composeFolder = useChatStore((s) => s.composeFolder);
@@ -105,18 +128,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   useEffect(() => startChatLive(), []);
   useEffect(() => startStructured(), []);
   useEffect(() => startQueueRunner(), []);
-  // O atalho do Time (⌥⌘T no macOS, Ctrl+Shift+O nos outros) abre o painel Time e foca nele. Na fase de
-  // captura, antes do terminal: o acorde não chega à TUI. A casca só existe com o modo chat ligado.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (!matchTeamShortcut(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      openTeamPanelFocused();
-    };
-    window.addEventListener("keydown", onKey, { capture: true });
-    return () => window.removeEventListener("keydown", onKey, { capture: true });
-  }, []);
+  useEffect(() => startProjectScriptSettleWatcher(), []);
   // Uma conversa nova esquece a aba lembrada do painel: a próxima abertura mostra o estado vazio.
   useEffect(() => { if (composing) forgetLastPanel(); }, [composing]);
   // A caixa de permissões e o painel direito dividem o lado direito: abrir um fecha o outro.
@@ -143,14 +155,20 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
     if (next !== useChatStore.getState().panel) setRightPanel(next);
   }, [newScreen]);
 
-  const addProject = async () => {
+  const addProject = useCallback(async () => {
     const picked = await pickProjectFolder(t("home.dialogTitle"));
     if (!picked) return;
     setFolder(picked);
     newConversation();
-  };
+  }, [t]);
 
-  const project = active ? active.project : projects.find((p) => p.cwd === folder)?.name ?? null;
+  useEffect(() => {
+    const onAddProject = () => { void addProject(); };
+    window.addEventListener("ade:chat-add-project", onAddProject);
+    return () => window.removeEventListener("ade:chat-add-project", onAddProject);
+  }, [addProject]);
+
+  const project = active ? active.project : knownProjects.find((p) => p.cwd === folder)?.name ?? null;
 
   return (
     <div {...{ [CHAT_SHELL_ATTR]: "" }}
@@ -159,7 +177,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
         ? <SettingsSidebar onBack={closePage} />
         : <SpacesSidebar activeCount={cards.length} onBack={closePage} />)}
       {sidebarOpen && !page && (
-        <ChatSidebar cards={cards} closed={closed} diffs={diffs} selectedId={active?.tabId ?? null}
+        <ChatSidebar cards={cards} projects={knownProjects} closed={closed} diffs={diffs} selectedId={active?.tabId ?? null}
           onCollapse={() => setSidebarOpen(false)} onAddProject={() => { void addProject(); }}
           onReopen={(cwd) => { void reopenFolder(cwd); }}
           // As missões também se criam e se iniciam daqui (mesmos comandos das Abas e do Canvas).
@@ -180,7 +198,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
               </>
             )}
             <span data-tauri-drag-region className="flex-1 min-w-0 flex items-center gap-3 truncate">
-              {project && <span className="flex items-center gap-2 text-gray-500 dark:text-white/50 truncate"><ProjectBadge name={project} size="sm" />{project}</span>}
+              {project && <span className="flex items-center gap-2 text-gray-500 dark:text-white/50 truncate"><ProjectBadge name={project} cwd={active?.cwd ?? folder} size="sm" />{project}</span>}
               {project && <span aria-hidden="true" className="text-gray-300 dark:text-white/25">/</span>}
               <span className="font-medium truncate">{active ? active.title : t("chat.new.title")}</span>
               <TeamHeaderBadge conversation={active} />
@@ -190,7 +208,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             <ShellModeSwitch className="shrink-0" />
             {/* A fileira de ícones do painel, como no Claude Code: Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e ⋯. */}
             {/* O >_ alterna a gaveta do agente (TUI com timeline) ou abre a aba Terminal do painel (um shell na pasta). */}
-            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} />
+            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} prAvailable={!!(active?.cwd ?? folder)} sideAvailable={!!active && (!!PROTOCOL_AGENTS[active.agentId] || active.agentId.startsWith("local-acp-"))} />
             <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
             {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
             {!panelOpen && <WindowControls className="-mr-3" />}
@@ -204,7 +222,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
               {/* O «Rodar» dos blocos de código vai ao terminal da pasta da conversa aberta. */}
               <RunCodeContext.Provider value={runCode}>
               {active && activeThread ? <StructuredConversationView key={active.tabId} card={active} thread={activeThread} cards={cards} />
-                : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={projects} folder={folder} onFolder={setFolder} />}
+                : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={selectableProjects} folder={folder} onFolder={setFolder} />}
               </RunCodeContext.Provider>
             </AttachCwdContext.Provider>
           </div>
@@ -227,10 +245,56 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
 
       {!page && <RightPanel tabId={activeThread ? null : active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""}
         conversation={active} cards={cards} />}
+      <BrowserFloatHost hidden={!!page} />
       {!page && inboxOpen && <PermissionsInbox />}
       <PermissionsManager />
     </div>
   );
+}
+
+/** Mantém a prévia flutuante ancorada ao canto inferior direito da conversa, inclusive ao redimensionar a janela. */
+function BrowserFloatHost({ hidden }: { hidden: boolean }) {
+  const floating = useChatStore((s) => s.browserFloating);
+  const viewId = useChatStore((s) => s.browser?.viewId ?? null);
+  const measure = useCallback(() => {
+    if (!floating || hidden || !viewId) return;
+    const shell = document.querySelector<HTMLElement>(`[${CHAT_SHELL_ATTR}]`);
+    const main = shell?.querySelector<HTMLElement>("main");
+    if (!shell || !main) return;
+    const shellRect = shell.getBoundingClientRect();
+    const mainRect = main.getBoundingClientRect();
+    const state = useChatStore.getState();
+    const current = state.browser;
+    if (!current || current.viewId !== viewId) return;
+    const maxWidth = Math.max(280, mainRect.width - 24);
+    const width = Math.round(Math.min(state.browserFloatRect?.width ?? Math.min(560, Math.max(320, mainRect.width * 0.48)), maxWidth));
+    const maxHeight = Math.max(220, mainRect.height - 72);
+    const height = Math.round(Math.min(state.browserFloatRect?.height ?? Math.min(400, Math.max(240, mainRect.height * 0.42)), maxHeight));
+    setChatBrowserFloatRect({
+      left: Math.round(mainRect.right - shellRect.left - width - 18),
+      top: Math.round(mainRect.bottom - shellRect.top - height - 18),
+      width,
+      height,
+    });
+  }, [floating, hidden, viewId]);
+
+  useLayoutEffect(() => {
+    if (!floating || hidden || !viewId) return;
+    measure();
+    const shell = document.querySelector<HTMLElement>(`[${CHAT_SHELL_ATTR}]`);
+    const main = shell?.querySelector<HTMLElement>("main");
+    if (!shell || !main) return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell);
+    observer.observe(main);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [floating, hidden, measure, viewId]);
+
+  return null;
 }
 
 /** "Trabalhando · 52 s" no cabeçalho da conversa aberta (prancheta 13). */

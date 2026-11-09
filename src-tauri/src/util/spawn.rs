@@ -15,6 +15,8 @@
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};
 use std::process::{Command, ExitStatus, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// `CREATE_NO_WINDOW`. Sem isso um binário de console aberto por um app de janela
@@ -113,6 +115,128 @@ pub fn output(cmd: &mut Command, timeout: Duration) -> io::Result<Output> {
     output_with_input(cmd, None, timeout)
 }
 
+/// Executa um comando com prazo e teto real para os bytes de stdout mantidos em memória.
+/// Ao detectar o primeiro byte além do limite, encerra o grupo de processos e retorna erro.
+/// stderr vai para o nulo: saída diagnóstica não deve inflar memória nem vazar dados.
+pub fn output_with_stdout_limit(
+    cmd: &mut Command,
+    timeout: Duration,
+    max_stdout_bytes: usize,
+) -> io::Result<Output> {
+    apply_window(cmd, WindowMode::Hidden);
+    prepare_session(cmd);
+    let started = Instant::now();
+    let program = program_of(cmd);
+    let argv = redact_argv(cmd.get_args());
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut guard = GroupGuard::adopt(&child);
+    let exceeded = Arc::new(AtomicBool::new(false));
+    let reader_exceeded = exceeded.clone();
+    let (reader_done_tx, reader_done_rx) = std::sync::mpsc::channel();
+    let Some(mut pipe) = child.stdout.take() else {
+        guard.kill();
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err(io::Error::other("stdout indisponível"));
+    };
+    let reader = std::thread::spawn(move || {
+        let result = (|| {
+            let mut bytes = Vec::with_capacity(max_stdout_bytes.min(1024 * 1024));
+            let mut chunk = [0_u8; 8192];
+            loop {
+                let remaining = max_stdout_bytes.saturating_sub(bytes.len());
+                let read_len = if remaining == 0 {
+                    1
+                } else {
+                    remaining.min(chunk.len())
+                };
+                match pipe.read(&mut chunk[..read_len]) {
+                    Ok(0) => break,
+                    Ok(_) if remaining == 0 => {
+                        reader_exceeded.store(true, Ordering::Release);
+                        break;
+                    }
+                    Ok(count) => bytes.extend_from_slice(&chunk[..count]),
+                    Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(error) => return Err(error),
+                }
+            }
+            Ok(bytes)
+        })();
+        let _ = reader_done_tx.send(());
+        result
+    });
+
+    let mut child_status = None;
+    let mut reader_done = false;
+    let status = loop {
+        if exceeded.load(Ordering::Acquire) {
+            guard.kill();
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            log_finish(&program, &argv, started.elapsed(), None);
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("stdout excedeu o limite de {max_stdout_bytes} bytes"),
+            ));
+        }
+        if child_status.is_none() {
+            match child.try_wait() {
+                Ok(Some(status)) => child_status = Some(status),
+                Ok(None) => {}
+                Err(error) => {
+                    guard.kill();
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = reader.join();
+                    log_finish(&program, &argv, started.elapsed(), None);
+                    return Err(error);
+                }
+            }
+        }
+        if !reader_done {
+            reader_done = matches!(reader_done_rx.try_recv(), Ok(()));
+        }
+        if let Some(status) = child_status.filter(|_| reader_done) {
+            break status;
+        }
+        if started.elapsed() >= timeout {
+            guard.kill();
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = reader.join();
+            log_finish(&program, &argv, started.elapsed(), None);
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!("el comando no terminó en {}s", timeout.as_secs_f32()),
+            ));
+        }
+        std::thread::sleep(POLL);
+    };
+
+    let stdout = reader
+        .join()
+        .map_err(|_| io::Error::other("a leitura de stdout falhou"))??;
+    if exceeded.load(Ordering::Acquire) {
+        log_finish(&program, &argv, started.elapsed(), status.code());
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("stdout excedeu o limite de {max_stdout_bytes} bytes"),
+        ));
+    }
+    log_finish(&program, &argv, started.elapsed(), status.code());
+    Ok(Output {
+        status,
+        stdout,
+        stderr: Vec::new(),
+    })
+}
+
 /// Como [`output`], escrevendo `input` na entrada padrão do filho (numa thread, para um filho
 /// que só lê depois de escrever não travar os dois). Sem `input`, a entrada é nula.
 ///
@@ -158,6 +282,58 @@ pub fn output_with_input(cmd: &mut Command, input: Option<Vec<u8>>, timeout: Dur
         stdout: out_reader.join().unwrap_or_default(),
         stderr: err_reader.join().unwrap_or_default(),
     })
+}
+
+/// Executa um programa com um segredo temporário em `stdin`, sem herdar nem capturar a saída.
+/// Não registra programa, argumentos ou conteúdo: eles podem ser sensíveis, e o processo pode
+/// tentar ecoar a entrada. O buffer é zerado depois da escrita ou se o spawn falhar.
+pub fn run_with_secret_input(
+    cmd: &mut Command,
+    mut input: Vec<u8>,
+    timeout: Duration,
+) -> io::Result<(ExitStatus, Duration)> {
+    apply_window(cmd, WindowMode::Hidden);
+    prepare_session(cmd);
+    let started = Instant::now();
+    let mut child = match cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(child) => child,
+        Err(error) => {
+            input.fill(0);
+            return Err(error);
+        }
+    };
+    let mut guard = GroupGuard::adopt(&child);
+    let Some(mut pipe) = child.stdin.take() else {
+        input.fill(0);
+        guard.kill();
+        let _ = child.kill();
+        return Err(io::Error::other("stdin indisponível"));
+    };
+    let writer = std::thread::spawn(move || {
+        use std::io::Write;
+        let result = pipe.write_all(&input);
+        input.fill(0);
+        result
+    });
+
+    let status = wait_deadline(&mut child, &mut guard, timeout);
+    let _ = writer.join();
+    let elapsed = started.elapsed();
+    match status {
+        Ok(status) => {
+            eprintln!("[spawn] secret_input dur_ms={} exit={}", elapsed.as_millis(), status.code().map_or_else(|| "signal".into(), |code| code.to_string()));
+            Ok((status, elapsed))
+        }
+        Err(error) => {
+            eprintln!("[spawn] secret_input dur_ms={} exit=timeout", elapsed.as_millis());
+            Err(error)
+        }
+    }
 }
 
 /// Espera o filho copiando o stdout para o stderr deste processo. Usado pelo `ags test`,

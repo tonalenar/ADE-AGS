@@ -126,6 +126,14 @@ pub fn start_scheduler(app: AppHandle) {
             routines::recover(all, Local::now());
             Ok(())
         });
+        match crate::scheduled_tasks::recover_at_boot(Local::now()) {
+            Ok(true) => {
+                let _ = app.emit(super::scheduled_task::CHANGED_EVENT, ());
+                let _ = app.emit(crate::missions::automation::CHANGED_EVENT, ());
+            }
+            Ok(false) => {}
+            Err(error) => eprintln!("[tarefas agendadas] não foi possível recuperar horários: {error}"),
+        }
         loop {
             std::thread::sleep(TICK);
             // Las perdidas con la app cerrada que pidieron recuperarse: una vez, cuando su
@@ -162,6 +170,7 @@ pub fn start_scheduler(app: AppHandle) {
                     IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
                 });
             }
+            super::scheduled_task::scheduler_tick(&app, gate, Local::now().timestamp());
         }
     });
 }

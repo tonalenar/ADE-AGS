@@ -65,7 +65,7 @@ import { freeOrigin, layoutGroups, positionsToSave } from "./design/scope";
 import { useScopedDesigns } from "./design/useScopedDesigns";
 import { useCliOutdatedNotice } from "./cliStatus";
 import { useMissionIndex } from "@/features/missions/groups";
-import { RoutinesPanel } from "./RoutinesPanel";
+import { CanvasSchedulesPanel } from "./CanvasSchedulesPanel";
 import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
@@ -868,7 +868,7 @@ function CanvasInner() {
           onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0}
           onCompare={() => openCompareDialog(allTabs.find((tab) => tab.id === activeTabId)?.cwd ?? "")} />
         {compareOfKey(key) && <ComparisonBar comparisonId={compareOfKey(key)!} />}
-        {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
+        {panel === "routines" && <CanvasSchedulesPanel onClose={() => setPanel(null)} />}
         {panel === "design" && design.details.length > 0 && (
           <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onClose={() => { setPanel(null); setDesignFocus(null); }} />
         )}

@@ -15,7 +15,7 @@ use crate::util::now_ts;
 use super::types::{Fact, Run, Task, TaskOutcome, status};
 
 const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_parallel, budget_usd, \
-                           spent_usd, created_at, ended_at, mission_id, squad_id, squad_name";
+                           spent_usd, created_at, ended_at, mission_id, source_thread_id, squad_id, squad_name";
 
 const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, model, cwd, \
                             budget_usd, status, session_id, attempt, result, error, cost_usd, \
@@ -38,8 +38,9 @@ fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
         created_at: row.get(8)?,
         ended_at: row.get(9)?,
         mission_id: row.get(10)?,
-        squad_id: row.get(11)?,
-        squad_name: row.get(12)?,
+        source_thread_id: row.get(11)?,
+        squad_id: row.get(12)?,
+        squad_name: row.get(13)?,
         squad_members: Vec::new(),
     })
 }
@@ -262,6 +263,101 @@ pub fn runs_of_mission(conn: &Connection, mission_id: &str) -> Result<Vec<Run>, 
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|error| error.to_string())?;
     with_squad_members_many(conn, rows)
+}
+
+/// Runs originados numa conversa estruturada, mais recentes primeiro.
+pub fn runs_of_thread(conn: &Connection, thread_id: &str) -> Result<Vec<Run>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM runs WHERE source_thread_id = ?1 ORDER BY created_at DESC, rowid DESC"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([thread_id], row_to_run)
+        .map_err(|e| e.to_string())?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+    with_squad_members_many(conn, rows)
+}
+
+/// Registra a origem uma única vez; repetir a mesma ligação é seguro, trocar a conversa não.
+pub fn set_run_source_thread(
+    conn: &Connection,
+    run_id: &str,
+    thread_id: &str,
+) -> Result<(), String> {
+    let updated = conn
+        .execute(
+            "UPDATE runs SET source_thread_id = ?1
+             WHERE id = ?2 AND (source_thread_id IS NULL OR source_thread_id = ?1)",
+            rusqlite::params![thread_id, run_id],
+        )
+        .map_err(|e| e.to_string())?;
+    if updated == 1 {
+        return Ok(());
+    }
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT source_thread_id FROM runs WHERE id = ?1",
+            [run_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        .flatten();
+    match existing {
+        None => Err(format!("o run {run_id} não existe")),
+        Some(_) => Err(format!("o run {run_id} já pertence a outra conversa")),
+    }
+}
+
+/// Recibo idempotente de uma delegação feita pelo MCP.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DelegationReceipt {
+    pub request_hash: String,
+    pub run_id: String,
+    pub task_keys: Vec<String>,
+}
+
+pub fn delegation_receipt(
+    conn: &Connection,
+    caller_key: &str,
+    request_id: &str,
+) -> Result<Option<DelegationReceipt>, String> {
+    let raw: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT request_hash, run_id, task_keys_json
+             FROM run_delegation_receipts WHERE caller_key = ?1 AND request_id = ?2",
+            rusqlite::params![caller_key, request_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .map_err(|error| error.to_string())?;
+    raw.map(|(request_hash, run_id, task_keys)| {
+        let task_keys = serde_json::from_str(&task_keys)
+            .map_err(|error| format!("recibo de delegação inválido: {error}"))?;
+        Ok(DelegationReceipt { request_hash, run_id, task_keys })
+    })
+    .transpose()
+}
+
+pub fn save_delegation_receipt(
+    conn: &Connection,
+    caller_key: &str,
+    request_id: &str,
+    request_hash: &str,
+    run_id: &str,
+    task_keys: &[String],
+) -> Result<(), String> {
+    let task_keys = serde_json::to_string(task_keys).map_err(|error| error.to_string())?;
+    conn.execute(
+        "INSERT INTO run_delegation_receipts
+         (caller_key, request_id, request_hash, run_id, task_keys_json, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        rusqlite::params![caller_key, request_id, request_hash, run_id, task_keys, crate::util::now_ts_ms()],
+    )
+    .map_err(|error| format!("não consegui registrar a idempotência da delegação: {error}"))?;
+    Ok(())
 }
 
 #[derive(Default)]
@@ -955,17 +1051,92 @@ pub fn set_session_id(conn: &Connection, task_id: &str, session_id: &str) -> Res
 pub fn mark_running(
     conn: &Connection,
     task_id: &str,
+    attempt_id: &str,
     session_id: &str,
     events_path: &str,
-) -> Result<(), String> {
-    conn.execute(
+) -> Result<bool, String> {
+    if conn.is_autocommit() {
+        let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
+            .map_err(|e| e.to_string())?;
+        let changed = mark_running_inner(&tx, task_id, attempt_id, session_id, events_path)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        Ok(changed)
+    } else {
+        // Alguns providers (como Gemini Desktop) já reservam uma transação maior para
+        // gravar a consulta externa e a task juntas. Nesse caso, compomos na transação do
+        // chamador em vez de tentar abrir uma transação aninhada.
+        mark_running_inner(conn, task_id, attempt_id, session_id, events_path)
+    }
+}
+
+fn mark_running_inner(
+    conn: &Connection,
+    task_id: &str,
+    attempt_id: &str,
+    session_id: &str,
+    events_path: &str,
+) -> Result<bool, String> {
+    let assignment = conn
+        .query_row(
+            "SELECT run_id, agent_id, model FROM tasks WHERE id = ?1 AND status = ?2",
+            rusqlite::params![task_id, status::READY],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<String>>(2)?)),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
+    let Some((run_id, agent_id, model)) = assignment else {
+        return Ok(false);
+    };
+    let attempt: i64 = conn
+        .query_row(
+            "SELECT COALESCE(MAX(attempt), 0) + 1 FROM run_attempts WHERE task_id = ?1",
+            [task_id],
+            |row| row.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let now = now_ts();
+    let changed = conn.execute(
         "UPDATE tasks SET status = ?1, session_id = ?2, events_path = ?3, started_at = ?4,
                           attempt = attempt + 1
-         WHERE id = ?5",
-        rusqlite::params![status::RUNNING, session_id, events_path, now_ts(), task_id],
+         WHERE id = ?5 AND status = ?6",
+        rusqlite::params![status::RUNNING, session_id, events_path, now, task_id, status::READY],
     )
     .map_err(|e| e.to_string())?;
-    Ok(())
+    if changed == 1 {
+        conn.execute(
+            "INSERT INTO run_attempts (id, task_id, run_id, attempt, agent_id, model, session_id,
+                                       events_path, status, started_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'running', ?9)",
+            rusqlite::params![attempt_id, task_id, run_id, attempt, agent_id, model, session_id, events_path, now],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(changed == 1)
+}
+
+/// Fecha a tentativa viva mais recente. Tarefas que falharam antes de o processo nascer
+/// não têm tentativa e tornam esta operação um no-op.
+pub fn close_active_attempt(
+    conn: &Connection,
+    task_id: &str,
+    final_status: &str,
+    outcome: Option<&TaskOutcome>,
+    ended_at: i64,
+) -> Result<bool, String> {
+    let (result, error, tokens_in, tokens_out, cost_usd) = outcome.map_or(
+        (None, None, None, None, None),
+        |outcome| (outcome.result.as_deref(), outcome.error.as_deref(), outcome.tokens_in, outcome.tokens_out, outcome.cost_usd),
+    );
+    let changed = conn
+        .execute(
+            "UPDATE run_attempts SET status = ?1, result = ?2, error = ?3, tokens_in = ?4,
+                                     tokens_out = ?5, cost_usd = ?6, ended_at = ?7
+             WHERE id = (SELECT id FROM run_attempts
+                         WHERE task_id = ?8 AND ended_at IS NULL ORDER BY attempt DESC LIMIT 1)",
+            rusqlite::params![final_status, result, error, tokens_in, tokens_out, cost_usd, ended_at, task_id],
+        )
+        .map_err(|error| error.to_string())?;
+    Ok(changed == 1)
 }
 
 /// Save delivery only for the caller's running worker, without changing lifecycle/routing.
@@ -1032,6 +1203,7 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
     };
     // Como estaba ANTES de cerrarla: la cuenta y el modelo de ESTE intento (ver `ledger`).
     let attempt = task_by_id(conn, task_id)?;
+    let ended_at = now_ts();
     let closed = conn.execute(
         // Costo y tokens SUMAN: con reintentos, la tarea gastó lo de todos sus intentos, y
         // mostrar solo el último escondería lo que costó que fallara la primera vez.
@@ -1048,7 +1220,7 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
             outcome.cost_usd,
             outcome.tokens_in,
             outcome.tokens_out,
-            now_ts(),
+            ended_at,
             task_id,
         ],
     )
@@ -1058,6 +1230,7 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
         && let Some(task) = &attempt
     {
         super::ledger::record_attempt(conn, task, &outcome, now_ts())?;
+        close_active_attempt(conn, task_id, state, Some(&outcome), ended_at)?;
     }
 
     if let Some(cost) = outcome.cost_usd {
@@ -1071,28 +1244,66 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
     Ok(())
 }
 
-/// Cierra las tareas que quedaron `running` de una ejecución anterior de la app.
+/// Reconcilia tarefas deixadas pelo encerramento do app em uma única transação.
 ///
-/// El proceso de una tarea es hijo de la app: cuando la app se va, se va con ella. Una
-/// fila en `running` después de reabrir no es una tarea viva, es una que murió sin que
-/// nadie llegara a anotarlo — y dejarla así la mostraría para siempre como si estuviera
-/// trabajando. Corre en el arranque, junto al resto de la puesta a punto de la base.
+/// Os processos da Frota são filhos do app e não sobrevivem a ele. O scheduler mantém os
+/// estados internos `failed`/`cancelled`, mas tentativas originadas no chat registram também
+/// o evento `interrupted` que o grafo mostra. Nenhuma tarefa é relançada automaticamente.
 /// O erro que o sweep do boot grava numa tarefa que estava rodando (a tela de retomar conta as rodadas
 /// de correção interrompidas por ele, ver `missions::automation`).
 pub const SWEPT_RUNNING_ERROR: &str = "o app foi fechado enquanto esta tarefa rodava";
 
 pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
     let now = now_ts();
-    let n = conn
+    let event_at = crate::util::now_ts_ms();
+    let interrupted_attempts: Vec<(String, String)> = {
+        let mut statement = tx
+            .prepare(
+                "SELECT a.task_id, a.id FROM run_attempts a
+                 JOIN tasks t ON t.id = a.task_id
+                 WHERE t.status IN ('ready', 'running') AND a.ended_at IS NULL",
+            )
+            .map_err(|error| error.to_string())?;
+        statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(|error| error.to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|error| error.to_string())?
+    };
+    for (task_id, attempt_id) in &interrupted_attempts {
+        super::execution_log::record_fleet_interrupted(
+            &tx,
+            task_id,
+            attempt_id,
+            SWEPT_RUNNING_ERROR,
+            event_at,
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    let n = tx
         .execute(
             "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status IN ('ready', 'running')",
             rusqlite::params![status::FAILED, SWEPT_RUNNING_ERROR, now],
         )
         .map_err(|e| e.to_string())?;
+    tx.execute(
+        "UPDATE run_attempts
+         SET status = (SELECT status FROM tasks WHERE tasks.id = run_attempts.task_id),
+             error = (SELECT error FROM tasks WHERE tasks.id = run_attempts.task_id),
+             ended_at = (SELECT ended_at FROM tasks WHERE tasks.id = run_attempts.task_id)
+         WHERE ended_at IS NULL
+           AND EXISTS (SELECT 1 FROM tasks WHERE tasks.id = run_attempts.task_id
+                       AND tasks.status NOT IN ('ready', 'running'))",
+        [],
+    )
+    .map_err(|e| e.to_string())?;
     // Las que esperaban turno no se relanzan solas al reabrir: su lead murió con la app, y
     // un plan a medias corriendo sin nadie que lo mire no es lo que alguien dejó andando.
-    let waiting = conn
+    let waiting = tx
         .execute(
             "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status = ?4",
             rusqlite::params![
@@ -1104,7 +1315,7 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
         )
         .map_err(|e| e.to_string())?;
     let open_runs: Vec<String> = {
-        let mut stmt = conn
+        let mut stmt = tx
             .prepare("SELECT id FROM runs WHERE status = 'running'")
             .map_err(|e| e.to_string())?;
         let rows = stmt
@@ -1113,8 +1324,9 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
         rows.filter_map(|r| r.ok()).collect()
     };
     for run in open_runs {
-        refresh_run_status(&conn, &run)?;
+        refresh_run_status(&tx, &run)?;
     }
+    tx.commit().map_err(|error| error.to_string())?;
     Ok(n + waiting)
 }
 

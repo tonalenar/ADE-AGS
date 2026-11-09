@@ -8,9 +8,10 @@
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::{Value, json};
-use tauri::{AppHandle, Manager};
+use sha2::{Digest, Sha256};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::database::DbConnection;
 
@@ -27,6 +28,8 @@ pub struct Caller {
     pub workspace_id: String,
     pub cwd: String,
     pub mission_id: Option<String>,
+    /// Origem persistente da delegação quando o chamador é um chat estruturado.
+    pub source_thread_id: Option<String>,
 }
 
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
@@ -50,6 +53,7 @@ fn caller(conn: &Connection, payload: &Value) -> Result<Caller, String> {
             workspace_id: run.workspace_id,
             cwd: run.cwd,
             mission_id: run.mission_id,
+            source_thread_id: run.source_thread_id,
             task: Some(task),
         });
     }
@@ -57,14 +61,45 @@ fn caller(conn: &Connection, payload: &Value) -> Result<Caller, String> {
         .get("cwd")
         .and_then(Value::as_str)
         .ok_or("falta quem pede (taskId ou cwd)")?;
-    let workspace_id = store::workspace_of_folder(conn, cwd).ok_or_else(|| {
-        format!("{cwd} não está aberta em nenhum workspace do ADE AGS: abra-a numa aba para orquestrar de lá")
-    })?;
+    // Conversas do chat podem rodar num worktree sem tab própria. Use somente o workspace
+    // gravado na própria conversa e só quando o caminho também confere; abas comuns seguem
+    // resolvendo pelo cwd como antes.
+    let thread_context = match payload
+        .get("tabId")
+        .and_then(Value::as_str)
+        .and_then(|tab| tab.strip_prefix("thread:"))
+    {
+        Some(thread_id) => {
+            let workspace_id = conn
+                .query_row(
+                    "SELECT c.workspace_id FROM chat_thread c
+                     JOIN workspaces w ON w.id = c.workspace_id
+                     WHERE c.id = ?1 AND c.cwd = ?2 AND w.deleted_at IS NULL",
+                    rusqlite::params![thread_id, cwd],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| {
+                    format!("a conversa thread:{thread_id} não existe ou não corresponde a esta pasta")
+                })?;
+            Some((workspace_id, thread_id.to_string()))
+        }
+        None => None,
+    };
+    let workspace_id = thread_context
+        .as_ref()
+        .map(|(workspace_id, _)| workspace_id.clone())
+        .or_else(|| store::workspace_of_folder(conn, cwd))
+        .ok_or_else(|| {
+            format!("{cwd} não está aberta em nenhum workspace do ADE AGS: abra-a numa aba para orquestrar de lá")
+        })?;
     Ok(Caller {
         task: None,
         workspace_id,
         cwd: cwd.to_string(),
         mission_id: payload.get("missionId").and_then(Value::as_str).map(str::to_string),
+        source_thread_id: thread_context.map(|(_, thread_id)| thread_id),
     })
 }
 
@@ -78,6 +113,39 @@ fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
+}
+
+fn client_request_id(args: &Value) -> Result<Option<&str>, String> {
+    let snake = arg_str(args, "client_request_id");
+    let camel = arg_str(args, "clientRequestId");
+    if snake.is_some() && camel.is_some() && snake != camel {
+        return Err("client_request_id e clientRequestId não podem ter valores diferentes".into());
+    }
+    let Some(id) = snake.or(camel) else { return Ok(None) };
+    if id.len() > 128 || id.chars().any(char::is_control) {
+        return Err("client_request_id deve ter até 128 caracteres sem controles".into());
+    }
+    Ok(Some(id))
+}
+
+fn request_fingerprint(args: &Value) -> Result<String, String> {
+    let mut normalized = args.clone();
+    if let Some(object) = normalized.as_object_mut() {
+        object.remove("client_request_id");
+        object.remove("clientRequestId");
+    }
+    let bytes = serde_json::to_vec(&normalized).map_err(|error| error.to_string())?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
+fn caller_key(caller: &Caller) -> String {
+    if let Some(task) = &caller.task {
+        format!("task:{}", task.id)
+    } else if let Some(thread_id) = &caller.source_thread_id {
+        format!("thread:{thread_id}")
+    } else {
+        format!("workspace:{}:{}", caller.workspace_id, caller.cwd)
+    }
 }
 
 /// El run sobre el que actúa quien pide: el suyo si es una tarea; el nombrado o el último
@@ -94,7 +162,18 @@ fn run_for(conn: &Connection, caller: &Caller, args: &Value) -> Result<Run, Stri
         if run.workspace_id != caller.workspace_id {
             return Err(format!("o run {run_id} é de outro workspace"));
         }
+        if caller.source_thread_id.is_some()
+            && run.source_thread_id.as_deref() != caller.source_thread_id.as_deref()
+        {
+            return Err(format!("o run {run_id} pertence a outra conversa"));
+        }
         return Ok(run);
+    }
+    if let Some(thread_id) = caller.source_thread_id.as_deref() {
+        return store::runs_of_thread(conn, thread_id)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| "ainda não há nenhum run desta conversa: crie um com run_plan".to_string());
     }
     store::latest_run_in_folder(conn, &caller.workspace_id, &caller.cwd)?.ok_or_else(|| {
         "ainda não há nenhum run lançado desta pasta: crie um com run_plan".to_string()
@@ -106,8 +185,19 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
     {let conn=db.lock().map_err(|e|e.to_string())?;super::policy::guard_task(&conn,payload.get("taskId").and_then(Value::as_str),command)?;}
     match command {
         "run.roster" => roster_text(&db).map(text),
+        "run.harnessGraph" => {
+            let conn = db.lock().map_err(|error| error.to_string())?;
+            let caller = caller(&conn, payload)?;
+            let thread_id = caller
+                .source_thread_id
+                .as_deref()
+                .ok_or("harness_graph só pode ler a conversa estruturada de origem")?;
+            super::harness::thread_execution_graph(&conn, thread_id)
+                .map(|graph| json!(graph))
+        }
         "run.plan" => add_tasks(app, &db, payload, true).map(text),
         "run.addTask" => add_tasks(app, &db, payload, false).map(text),
+        "run.delegateTask" => delegate_task(app, &db, payload).map(text),
         "run.status" => {
             let conn = db.lock().map_err(|e| e.to_string())?;
             let caller = caller(&conn, payload)?;
@@ -304,21 +394,112 @@ fn add_tasks(
 
     scheduler::tick(app, &run_id);
 
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let run = store::run_by_id(&conn, &run_id)?.ok_or("o run se perdeu")?;
-    let head = if whole_plan {
-        format!(
-            "Plano aceito: {} tarefa(s) no run {}.",
-            created.len(),
-            run.id
-        )
-    } else {
-        format!("Tarea '{}' agregada al run {}.", created[0], run.id)
+    let (message, source_thread_id) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let run = store::run_by_id(&conn, &run_id)?.ok_or("o run se perdeu")?;
+        let head = if whole_plan {
+            format!(
+                "Plano aceito: {} tarefa(s) no run {}.",
+                created.len(),
+                run.id
+            )
+        } else {
+            format!("Tarea '{}' agregada al run {}.", created[0], run.id)
+        };
+        // Só aviso: duas tarefas em andamento declarando o mesmo lugar (`write_scopes`).
+        let warning = crate::missions::conflicts::scopes::warning_text(&crate::missions::conflicts::scopes::run_overlaps(&conn, &run.id).unwrap_or_default());
+        let warning = if warning.is_empty() { String::new() } else { format!("\n\n{warning}") };
+        (format!("{head}{warning}\n\n{}", board(&conn, &run)?), run.source_thread_id)
     };
-    // Só aviso: duas tarefas em andamento declarando o mesmo lugar (`write_scopes`).
-    let warning = crate::missions::conflicts::scopes::warning_text(&crate::missions::conflicts::scopes::run_overlaps(&conn, &run.id).unwrap_or_default());
-    let warning = if warning.is_empty() { String::new() } else { format!("\n\n{warning}") };
-    Ok(format!("{head}{warning}\n\n{}", board(&conn, &run)?))
+    if let Some(thread_id) = source_thread_id {
+        let _ = app.emit("cc-thread-run-changed", thread_id);
+    }
+    Ok(message)
+}
+
+/// Cria uma delegação de tarefa única, no mesmo scheduler do DAG. O worker recebe o MCP ADE,
+/// aparece no grafo da conversa de origem e pode ser consultado/cancelado pelas ferramentas existentes.
+fn delegate_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<String, String> {
+    let input = args(payload);
+    let task_prompt = arg_str(input, "task").or_else(|| arg_str(input, "prompt"))
+        .ok_or("falta 'task': descreva o trabalho para o agente filho")?;
+    let parent_context = match input.get("context") {
+        None => None,
+        Some(Value::String(value)) => Some(value.as_str()),
+        Some(_) => return Err("context precisa ser texto".into()),
+    };
+    let prompt = super::context::delegated_prompt(task_prompt, parent_context)?;
+    let client_request_id = client_request_id(input)?.map(str::to_string);
+    let mode = arg_str(input, "mode").unwrap_or("async");
+    if !matches!(mode, "async" | "wait") {
+        return Err("mode deve ser 'async' ou 'wait'".into());
+    }
+    let timeout_s = input.get("timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
+    let target = input.get("target").and_then(Value::as_object);
+    let agent = arg_str(input, "agent")
+        .or_else(|| target.and_then(|target| target.get("agent").and_then(Value::as_str)))
+        .or_else(|| target.and_then(|target| target.get("agent_id").and_then(Value::as_str)))
+        .or_else(|| target.and_then(|target| target.get("providerInstanceId").and_then(Value::as_str)))
+        .or_else(|| target.and_then(|target| target.get("provider_instance_id").and_then(Value::as_str)));
+    let model = arg_str(input, "model")
+        .or_else(|| target.and_then(|target| target.get("model").and_then(Value::as_str)));
+    let title = arg_str(input, "title").map(str::to_string).unwrap_or_else(|| {
+        task_prompt.lines().next().unwrap_or(task_prompt).trim().chars().take(96).collect()
+    });
+
+    let requesting = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        caller(&conn, payload)?
+    };
+    let key_seed = client_request_id.as_ref()
+        .map(|id| format!("{}\0{id}", caller_key(&requesting)))
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    let digest = Sha256::digest(key_seed.as_bytes());
+    let key = format!("delegate-{}", digest.iter().take(10).map(|byte| format!("{byte:02x}")).collect::<String>());
+
+    let mut task = serde_json::Map::new();
+    task.insert("key".into(), json!(key));
+    task.insert("title".into(), json!(title));
+    task.insert("prompt".into(), json!(prompt));
+    if let Some(agent) = agent { task.insert("agent".into(), json!(agent)); }
+    if let Some(model) = model { task.insert("model".into(), json!(model)); }
+    for name in ["complexity", "account_id", "isolate", "budget_usd", "result_schema", "write_scopes", "role"] {
+        if let Some(value) = input.get(name) { task.insert(name.into(), value.clone()); }
+    }
+
+    let mut plan_args = serde_json::Map::new();
+    plan_args.insert("tasks".into(), json!([Value::Object(task)]));
+    // Uma conversa cria um run próprio. Uma tarefa filha entra no run já aberto e não troca
+    // o objetivo do pai.
+    if requesting.task.is_none() {
+        plan_args.insert("objective".into(), json!(title));
+    }
+    if let Some(request_id) = &client_request_id {
+        plan_args.insert("client_request_id".into(), json!(request_id));
+    }
+    let mut delegated_payload = payload.clone();
+    delegated_payload["args"] = Value::Object(plan_args);
+
+    let (run_id, keys) = plan_tasks(db, &delegated_payload, true, |db| roster::snapshot(db, false))?;
+    let key = keys.first().cloned().ok_or("a delegação não criou a tarefa")?;
+    scheduler::tick(app, &run_id);
+    let (task_id, board_text, source_thread_id) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let run = store::run_by_id(&conn, &run_id)?.ok_or("o run da delegação se perdeu")?;
+        let task = store::task_in_run(&conn, &run_id, &key)?.ok_or("a tarefa da delegação se perdeu")?;
+        (task.id, board(&conn, &run)?, run.source_thread_id)
+    };
+    if let Some(thread_id) = source_thread_id {
+        let _ = app.emit("cc-thread-run-changed", thread_id);
+    }
+    let identity = format!("run_id={run_id}, task_id={task_id}, task_key={key}");
+    if mode == "wait" {
+        let mut wait_payload = payload.clone();
+        wait_payload["args"] = json!({"run_id": run_id, "task": key, "timeout_s": timeout_s});
+        let outcome = await_run(db, &wait_payload)?;
+        return Ok(format!("Delegação {identity}.\n\n{outcome}"));
+    }
+    Ok(format!("Delegação aceita em modo assíncrono: {identity}. Consulte com task_status/task_result, espere com run_await ou pare com task_cancel.\n\n{board_text}"))
 }
 
 /// Valida, rutea y crea las filas del plan, sin despachar nada. Devuelve el run y las keys
@@ -340,11 +521,28 @@ pub(crate) fn plan_tasks(
                 .map_err(|e| format!("a tarefa não tem a forma esperada: {e}"))?,
         ]
     };
+    let request_id = client_request_id(args)?.map(str::to_string);
+    let request_hash = request_id.as_ref().map(|_| request_fingerprint(args)).transpose()?;
 
     // Todo lo que no necesita el roster, antes de sondearlo.
     let (caller, existing_run, existing_keys) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let caller = caller(&conn, payload)?;
+        if let (Some(request_id), Some(request_hash)) = (&request_id, &request_hash) {
+            if let Some(receipt) = store::delegation_receipt(&conn, &caller_key(&caller), request_id)? {
+                if receipt.request_hash != *request_hash {
+                    return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
+                }
+                let run = store::run_by_id(&conn, &receipt.run_id)?
+                    .ok_or_else(|| "a delegação já foi concluída, mas seu run foi removido; use um client_request_id novo para criar outra".to_string())?;
+                for key in &receipt.task_keys {
+                    if store::task_in_run(&conn, &run.id, key)?.is_none() {
+                        return Err("a delegação já foi concluída, mas sua tarefa foi removida; use um client_request_id novo para criar outra".into());
+                    }
+                }
+                return Ok((run.id, receipt.task_keys));
+            }
+        }
         let run = match (&caller.task, whole_plan) {
             // Una tab con run_plan siempre crea un run nuevo: es "otro objetivo".
             (None, true) => None,
@@ -555,6 +753,23 @@ pub(crate) fn plan_tasks(
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
+        // A segunda consulta dentro da transação fecha a corrida entre duas chamadas iguais.
+        if let (Some(request_id), Some(request_hash)) = (&request_id, &request_hash) {
+            if let Some(receipt) = store::delegation_receipt(&tx, &caller_key(&caller), request_id)? {
+                if receipt.request_hash != *request_hash {
+                    return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
+                }
+                let run = store::run_by_id(&tx, &receipt.run_id)?
+                    .ok_or_else(|| "a delegação já foi concluída, mas seu run foi removido; use um client_request_id novo para criar outra".to_string())?;
+                for key in &receipt.task_keys {
+                    if store::task_in_run(&tx, &run.id, key)?.is_none() {
+                        return Err("a delegação já foi concluída, mas sua tarefa foi removida; use um client_request_id novo para criar outra".into());
+                    }
+                }
+                tx.commit().map_err(|error| error.to_string())?;
+                return Ok((run.id, receipt.task_keys));
+            }
+        }
         let run = match &existing_run {
             Some(run) => {
                 if let Some(o) = &objective {
@@ -573,6 +788,11 @@ pub(crate) fn plan_tasks(
                 budget,
             )?,
         };
+        if existing_run.is_none()
+            && let Some(thread_id) = caller.source_thread_id.as_deref()
+        {
+            store::set_run_source_thread(&tx, &run.id, thread_id)?;
+        }
 
         let mut ids: HashMap<String, String> = HashMap::new();
         for t in &order {
@@ -635,6 +855,17 @@ pub(crate) fn plan_tasks(
                 };
                 store::add_dep(&tx, &ids[&t.key], &dep_id)?;
             }
+        }
+        if let (Some(request_id), Some(request_hash)) = (&request_id, &request_hash) {
+            let task_keys: Vec<String> = order.iter().map(|task| task.key.clone()).collect();
+            store::save_delegation_receipt(
+                &tx,
+                &caller_key(&caller),
+                request_id,
+                request_hash,
+                &run.id,
+                &task_keys,
+            )?;
         }
         tx.commit().map_err(|error| error.to_string())?;
         run.id
@@ -839,6 +1070,7 @@ pub fn no_progress(tasks: &[Task]) -> Option<String> {
 /// tienen que poder cerrar sus filas.
 fn await_run(db: &DbConnection, payload: &Value) -> Result<String, String> {
     let args = args(payload);
+    let only_task = arg_str(args, "task").map(str::to_string);
     let timeout = Duration::from_secs(
         args.get("timeout_s")
             .and_then(Value::as_u64)
@@ -850,10 +1082,16 @@ fn await_run(db: &DbConnection, payload: &Value) -> Result<String, String> {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let caller = caller(&conn, payload)?;
         let run = run_for(&conn, &caller, args)?;
-        let tasks = store::tasks_of_run(&conn, &run.id)?
-            .into_iter()
-            .filter(|t| t.role.as_deref() != Some(role::LEAD))
-            .collect();
+        let tasks = if let Some(key) = only_task.as_deref() {
+            let task = store::task_in_run(&conn, &run.id, key)?
+                .ok_or_else(|| format!("o run não tem nenhuma tarefa '{key}'"))?;
+            vec![task]
+        } else {
+            store::tasks_of_run(&conn, &run.id)?
+                .into_iter()
+                .filter(|task| task.role.as_deref() != Some(role::LEAD))
+                .collect()
+        };
         Ok((run, tasks))
     };
 
@@ -1039,35 +1277,62 @@ fn reroute_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<S
 
 fn cancel_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<String, String> {
     let args = args(payload);
-    let (run, task) = {
+    let (task, targets) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let caller = caller(&conn, payload)?;
         let run = run_for(&conn, &caller, args)?;
         let key = arg_str(args, "task").ok_or("falta 'task' (key ou id)")?;
         let task = store::task_in_run(&conn, &run.id, key)?
             .ok_or_else(|| format!("o run não tem nenhuma tarefa '{key}'"))?;
-        if caller.task.as_ref().is_some_and(|c| c.id == task.id)
-            || task.role.as_deref() == Some(role::LEAD)
-        {
+        if task.role.as_deref() == Some(role::LEAD) {
             return Err("essa tarefa não pode ser cancelada daqui".into());
         }
-        if task.status == status::PENDING {
-            store::cancel_one_pending(&conn, &task.id)?;
+
+        let all_tasks = store::tasks_of_run(&conn, &run.id)?;
+        let mut subtree = HashSet::from([task.id.clone()]);
+        loop {
+            let before = subtree.len();
+            for child in &all_tasks {
+                if child.parent_id.as_ref().is_some_and(|parent| subtree.contains(parent)) {
+                    subtree.insert(child.id.clone());
+                }
+            }
+            if subtree.len() == before {
+                break;
+            }
         }
-        (run, task)
+        if caller.task.as_ref().is_some_and(|current| subtree.contains(&current.id)) {
+            return Err("essa tarefa contém a execução atual e não pode ser cancelada por ela".into());
+        }
+        let mut targets: Vec<Task> = all_tasks
+            .into_iter()
+            .filter(|candidate| {
+                subtree.contains(&candidate.id)
+                    && matches!(candidate.status.as_str(), status::PENDING | status::READY | status::RUNNING)
+            })
+            .collect();
+        targets.sort_by(|left, right| right.depth.cmp(&left.depth));
+        if targets.is_empty() {
+            return Err(format!("'{}' e suas tarefas filhas já terminaram", key_of(&task)));
+        }
+        (task, targets)
     };
-    match task.status.as_str() {
-        status::PENDING => {
-            supervisor::notify_changed(app, &task.id);
-            scheduler::tick(app, &run.id);
-        }
-        status::READY | status::RUNNING => supervisor::cancel(app, &task.id)?,
-        other => return Err(format!("'{}' ya terminó ({other})", key_of(&task))),
+    let target_ids: Vec<String> = targets.into_iter().map(|target| target.id).collect();
+    let cancelled = supervisor::cancel_many(app, &target_ids)?;
+    if cancelled.is_empty() {
+        return Err(format!("'{}' e suas tarefas filhas já terminaram", key_of(&task)));
     }
-    Ok(format!(
-        "'{}' cancelada. Lo que dependía de ella no va a correr.",
-        key_of(&task)
-    ))
+    let root_cancelled = cancelled.iter().any(|id| id == &task.id);
+    let descendants = cancelled.iter().filter(|id| *id != &task.id).count();
+    Ok(if descendants > 0 && !root_cancelled {
+        format!("'{}' já estava encerrada; {descendants} tarefa(s) filha(s) ativa(s) foram cancelada(s).", key_of(&task))
+    } else if descendants > 0 {
+        format!("'{}' cancelada com {descendants} tarefa(s) filha(s) ativa(s). Tarefas que dependem dela não vão iniciar.", key_of(&task))
+    } else if root_cancelled {
+        format!("'{}' cancelada. Tarefas que dependem dela não vão iniciar.", key_of(&task))
+    } else {
+        format!("'{}' já terminou", key_of(&task))
+    })
 }
 
 #[cfg(test)]
@@ -1124,7 +1389,7 @@ mod args_tests {
         let task = store::create_task(&conn, &store::NewTask {
             run_id: &run.id, title: "API", prompt: "Teste", agent_id: "codex", cwd: "/p", role: Some("worker"), ..Default::default()
         }).unwrap();
-        store::mark_running(&conn, &task.id, "session", "/events").unwrap();
+        store::mark_running(&conn, &task.id, "attempt-1", "session", "/events").unwrap();
         store::save_handoff(&conn, &task.id, &json!({"version":1,"summary":"Resumo técnico"})).unwrap();
         let task = store::task_by_id(&conn, &task.id).unwrap().unwrap();
         let board = board(&conn, &run).unwrap();

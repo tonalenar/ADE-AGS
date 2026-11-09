@@ -6,9 +6,10 @@ import { XIcon } from "../chatIcons";
  * Os cartões de citação: o trecho citado em cinza (cortado) e o comentário. No composer levam o «×» (mouse ou foco);
  * na bolha enviada são só leitura.
  */
-export function QuoteCards({ items, onRemove, className = "" }: {
-  items: { id: string; text: string; comment: string }[];
+export function QuoteCards({ items, onRemove, onNavigate, className = "" }: {
+  items: { id: string; text: string; comment: string; originItemId?: string }[];
   onRemove?: (id: string) => void;
+  onNavigate?: (originItemId: string) => void;
   className?: string;
 }) {
   const { t } = useTranslation();
@@ -19,6 +20,13 @@ export function QuoteCards({ items, onRemove, className = "" }: {
         <li key={q.id} className="group relative rounded-xl bg-gray-100 dark:bg-white/[0.07] border-l-[3px] border-gray-300 dark:border-white/25 pl-3 pr-8 py-1.5 text-left">
           <p className="m-0 text-chat-caption leading-snug text-gray-500 dark:text-white/50 line-clamp-2 whitespace-pre-wrap break-words" title={q.text}>{q.text}</p>
           <p className="m-0 mt-0.5 text-chat-note text-gray-900 dark:text-white whitespace-pre-wrap break-words">{q.comment}</p>
+          {q.originItemId && onNavigate && (
+            <button type="button" onClick={() => { if (q.originItemId) onNavigate(q.originItemId); }}
+              aria-label={t("chat.quote.goToSource")} title={t("chat.quote.goToSource")}
+              className="mt-1 rounded text-chat-caption font-medium text-accent-700 dark:text-accent-300 hover:underline">
+              {t("chat.quote.goToSource")}
+            </button>
+          )}
           {onRemove && (
             <button type="button" onClick={() => onRemove(q.id)} aria-label={t("chat.quote.remove")} title={t("chat.quote.remove")}
               className="absolute top-1 right-1 w-6 h-6 rounded-md flex items-center justify-center text-gray-500 dark:text-white/50 hover:bg-gray-200 dark:hover:bg-white/10

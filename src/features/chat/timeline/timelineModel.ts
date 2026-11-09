@@ -55,6 +55,8 @@ export interface Turn {
   end: TurnEnd | null;
   /** O último plano que o agente publicou no turno (TodoWrite, `update_plan`). */
   plan: PlanStep[] | null;
+  /** Item da timeline que publicou o plano, usado para a navegação da busca local. */
+  planItemId?: string | null;
   /** Um aviso do app no fio (não é um turno de verdade: sem mensagem, trabalho nem fim). */
   notice?: TimelineItem;
 }
@@ -125,7 +127,10 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
       current.body.push({ type: "assistant", key: item.id, item });
     } else if (item.kind === "tool") {
       tools.push(item);
-      if (item.tool === "todo" && item.plan && item.plan.length > 0) current.plan = item.plan;
+      if (item.tool === "todo" && item.plan && item.plan.length > 0) {
+        current.plan = item.plan;
+        current.planItemId = item.id;
+      }
       if (item.tool === "question") {
         if (item.status === "running") current.body.push({ type: "question", key: item.id, item });
         continue;

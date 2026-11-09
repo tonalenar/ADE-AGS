@@ -1,0 +1,10 @@
+{
+  "alvo": "schema-sqlite",
+  "sha256": "a7538354ddb8051fa0f34e826c37c96496709c4ee6d38fa9cbee84c2b13bf587",
+  "data": "2026-11-09",
+  "motivo": "vincula runs a conversas e adiciona recibos duráveis de delegação, com migração aditiva e sem perda de dados",
+  "semPerdaDeDados": true,
+  "arquivos": [
+    "src-tauri/src/database/schema.rs"
+  ]
+}

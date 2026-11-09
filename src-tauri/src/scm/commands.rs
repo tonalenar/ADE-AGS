@@ -3,7 +3,11 @@
 //! Todos son `async` y corren git en un hilo aparte: un `git status` en un repo grande
 //! tarda, y un comando síncrono de Tauri lo haría esperando en el hilo de la ventana.
 
-use std::path::Path;
+use std::{
+    fs::File,
+    io::Read,
+    path::{Component, Path},
+};
 
 use serde::Serialize;
 
@@ -691,6 +695,141 @@ pub async fn scm_working_diff(cwd: String) -> Result<Option<WorkingDiff>, ScmErr
             .or_else(|_| run_text(&root, &["diff", "--cached", "--no-color", "--no-ext-diff", "-M"], LOCAL))?;
         let (text, truncated) = clip_diff(raw, WORKING_DIFF_MAX);
         Ok(Some(WorkingDiff { root, text, truncated }))
+    })
+    .await
+}
+
+/// Teto para a busca no conteúdo dos arquivos alterados: evita devolver árvores grandes à janela.
+const WORKING_FILES_MAX: usize = 8 * 1024 * 1024;
+const WORKING_FILE_MAX: usize = 1024 * 1024;
+const WORKING_FILES_COUNT_MAX: usize = 500;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingFile {
+    pub path: String,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkingFiles {
+    pub files: Vec<WorkingFile>,
+    pub omitted_files: usize,
+    pub truncated: bool,
+}
+
+/// Conteúdo atual e limitado dos arquivos modificados, staged e não rastreados.
+/// Só percorre caminhos relativos listados pelo Git, canonicaliza cada alvo e rejeita
+/// links que saiam do repositório. Arquivos binários e maiores que o teto são omitidos.
+#[tauri::command]
+pub async fn scm_working_files(cwd: String) -> Result<Option<WorkingFiles>, ScmError> {
+    blocking(move || {
+        let Some(root) = repo_root(&cwd) else {
+            return Ok(None);
+        };
+        let root_path = Path::new(&root)
+            .canonicalize()
+            .map_err(|e| ScmError::Git(format!("No se pudo resolver la carpeta del repo: {e}")))?;
+        let status = run_text(
+            &root,
+            &["status", "--porcelain=v2", "-z", "--untracked-files=all"],
+            LOCAL,
+        )?;
+        let info = parse_status_v2(&status);
+        let mut changed = std::collections::BTreeSet::new();
+        for entry in info
+            .staged
+            .iter()
+            .chain(&info.unstaged)
+            .chain(&info.untracked)
+            .chain(&info.conflicted)
+        {
+            if entry.status != "D" {
+                changed.insert(entry.path.clone());
+            }
+        }
+
+        let mut result = WorkingFiles {
+            files: Vec::new(),
+            omitted_files: 0,
+            truncated: info.truncated,
+        };
+        if changed.len() > WORKING_FILES_COUNT_MAX {
+            result.truncated = true;
+        }
+        let mut used = 0usize;
+        for relative in changed.iter().take(WORKING_FILES_COUNT_MAX) {
+            let rel_path = Path::new(relative);
+            if rel_path.is_absolute()
+                || rel_path.components().any(|part| {
+                    matches!(
+                        part,
+                        Component::ParentDir | Component::RootDir | Component::Prefix(_)
+                    )
+                })
+            {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            }
+            let Ok(path) = root_path.join(rel_path).canonicalize() else {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            };
+            if !path.starts_with(&root_path) {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            }
+            let Ok(mut file) = File::open(&path) else {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            };
+            let Ok(metadata) = file.metadata() else {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            };
+            let remaining = WORKING_FILES_MAX.saturating_sub(used);
+            let limit = WORKING_FILE_MAX.min(remaining);
+            if !metadata.is_file() || metadata.len() > limit as u64 || limit == 0 {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            }
+            let mut bytes = Vec::with_capacity(metadata.len() as usize);
+            if file
+                .by_ref()
+                .take(limit as u64 + 1)
+                .read_to_end(&mut bytes)
+                .is_err()
+                || bytes.len() > limit
+            {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            }
+            if bytes.contains(&0) {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            }
+            let Ok(content) = String::from_utf8(bytes) else {
+                result.omitted_files += 1;
+                result.truncated = true;
+                continue;
+            };
+            used += content.len();
+            result.files.push(WorkingFile {
+                path: relative.clone(),
+                content,
+            });
+        }
+        result.omitted_files += changed.len().saturating_sub(WORKING_FILES_COUNT_MAX);
+        Ok(Some(result))
     })
     .await
 }

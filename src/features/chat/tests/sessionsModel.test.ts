@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/features/tabs/tabActions", () => ({ requestCloseItem: vi.fn() }));
 
 import { parseShelf } from "../shelf";
-import { buildSections, cleanTitle, countStates, initialOf, stepFocus, toggleAllProjects, toggleIn, visibleIds } from "../sidebar/sessionsModel";
+import { buildSections, cleanTitle, countStates, initialOf, moveByOne, moveVisibleByOne, stepFocus, toggleAllProjects, toggleIn, visibleIds } from "../sidebar/sessionsModel";
 import type { ConversationCard } from "../chatModel";
 
 const card = (id: string, project: string, openedAt: number, extra: Partial<ConversationCard> = {}): ConversationCard => ({
@@ -28,6 +28,13 @@ describe("as seções da barra de sessões", () => {
     expect(sections[0]).toMatchObject({ id: "pinned", kind: "pinned" });
     expect(sections[0]!.items.map((c) => c.tabId)).toEqual(["c", "b"]);
     expect(sections.flatMap((s) => s.items).filter((c) => c.tabId === "c")).toHaveLength(1);
+  });
+
+  it("aplica a ordem manual por projeto e põe conversas novas antes das ordenadas", () => {
+    const ordered = buildSections(cards, { ...base, orderBySection: { "project:ADE": ["c"] } });
+    expect(ordered.find((section) => section.id === "project:ADE")?.items.map((item) => item.tabId)).toEqual(["a", "c"]);
+    const moved = buildSections(cards, { ...base, orderBySection: { "project:ADE": ["c", "a"] } });
+    expect(moved.find((section) => section.id === "project:ADE")?.items.map((item) => item.tabId)).toEqual(["c", "a"]);
   });
 
   it("busca, filtro por pasta, adiadas e integrantes do time (aninhados) ficam de fora", () => {
@@ -72,14 +79,20 @@ describe("renomear e alternar", () => {
     expect(toggleIn(["a"], "b")).toEqual(["a", "b"]);
     expect(toggleIn(["a", "b"], "a")).toEqual(["b"]);
   });
+  it("move uma conversa no menu e mantém no lugar os ids que estão ocultos", () => {
+    expect(moveByOne(["a", "b", "c"], "b", -1)).toEqual(["b", "a", "c"]);
+    expect(moveByOne(["a", "b"], "a", -1)).toEqual(["a", "b"]);
+    expect(moveVisibleByOne(["a", "hidden", "b"], ["a", "b"], "a", 1)).toEqual(["b", "hidden", "a"]);
+  });
 });
 
 describe("o shelf guarda fixadas, não lidas e grupos recolhidos (aditivo)", () => {
   it("lixo vira vazio; o que já existia continua valendo", () => {
     expect(parseShelf({ snoozed: ["x"], pinned: ["p", 3], unread: "u", collapsed: ["project:A", null] })).toEqual({
-      snoozed: ["x"], settled: [], pinned: ["p"], unread: [], collapsed: ["project:A"],
+      snoozed: ["x"], settled: [], pinned: ["p"], orderBySection: {}, unread: [], collapsed: ["project:A"],
     });
-    expect(parseShelf("x")).toEqual({ snoozed: [], settled: [], pinned: [], unread: [], collapsed: [] });
+    expect(parseShelf({ orderBySection: { "project:A": ["b", "a", "a", 3], pinned: ["x"] } }).orderBySection).toEqual({ "project:A": ["b", "a"] });
+    expect(parseShelf("x")).toEqual({ snoozed: [], settled: [], pinned: [], orderBySection: {}, unread: [], collapsed: [] });
   });
 });
 

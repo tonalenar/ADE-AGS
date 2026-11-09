@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimateSpin, Button, Input, Select, Switch } from "neogestify-ui-components";
 
 import { ExternalIcon } from "@/app/icons";
 import { useUiStore } from "@/app/uiStore";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { useForgeStore } from "@/features/forge/store";
 import { SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
@@ -108,7 +108,7 @@ export function SyncSection() {
             <SettingsRow label={status.repo ?? ""} hint={account ? `@${account.login} · ${account.host}` : undefined}>
               <span className="flex items-center gap-1.5">
                 {status.webUrl && (
-                  <Button size="sm" variant="outline" onClick={() => openUrl(status.webUrl!).catch(console.error)}
+                  <Button size="sm" variant="outline" onClick={() => openExternalUrl(status.webUrl!).catch(console.error)}
                     className="flex items-center gap-1">
                     <ExternalIcon className="w-3 h-3" />
                     {t("forge.openWeb")}

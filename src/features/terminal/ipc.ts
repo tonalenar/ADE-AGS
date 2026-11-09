@@ -4,12 +4,20 @@ import { invoke } from "@tauri-apps/api/core";
 export interface PtyCreateArgs {
   command: string;
   cwd: string;
+  /** Provedor escolhido para esta aba, validado contra a política local do projeto. */
+  agentId?: string;
+  /** ID da conta local; credenciais e perfil são resolvidos no backend, nunca no WebView. */
+  accountId?: string;
   cols: number;
   rows: number;
-  /** Variables extra para ESTE proceso; `null` = ninguna (ver `pty_create` en Rust). */
+  /** Overrides posteriores à conta; `null` = nenhum (ver `pty_create` em Rust). */
   env: Record<string, string> | null;
+  /** Variáveis da TUI custom/MCP que precedem a conta na ordem de merge. */
+  envBeforeAccount?: Record<string, string> | null;
   /** Comandos ya resueltos a ejecutar antes del agente. */
   prelaunch: string[];
+  /** Argumentos MCP de sessão, aplicados pelo backend sem passar por shell. */
+  extraArgs?: string[];
   /** Somente para uma nova aba, após confirmação do preview. */
   aiMemoryContinuity?: boolean;
   /** Integrante de missão que pediu: o ambiente herdado perde as credenciais de outros serviços

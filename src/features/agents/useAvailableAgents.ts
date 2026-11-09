@@ -1,9 +1,10 @@
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 
 import { useTabsStore } from "@/features/tabs/store";
 import type { AgentInfo } from "@/features/tabs/types";
 
 import { useAgentsStore } from "./store";
+import { useLocalAcpStore } from "./localAcpStore";
 
 /**
  * Las TUIs que se pueden lanzar ahora mismo: las detectadas en el sistema más las que
@@ -16,9 +17,16 @@ import { useAgentsStore } from "./store";
  * Las custom siempre cuentan como disponibles: su comando lo escribió el usuario, así que
  * no hay nada que detectar (si no existe, falla al lanzar, con su mensaje).
  */
-export function useAvailableAgents(): AgentInfo[] {
+export function useAvailableAgents({ includeLocalAcp = false }: { includeLocalAcp?: boolean } = {}): AgentInfo[] {
   const detectedAgents = useTabsStore((s) => s.detectedAgents);
   const customAgents = useAgentsStore((s) => s.customAgents);
+  const localProviders = useLocalAcpStore((s) => s.providers);
+  const localProvidersLoaded = useLocalAcpStore((s) => s.loaded);
+  const loadLocalProviders = useLocalAcpStore((s) => s.load);
+
+  useEffect(() => {
+    if (includeLocalAcp && !localProvidersLoaded) void loadLocalProviders().catch(console.error);
+  }, [includeLocalAcp, loadLocalProviders, localProvidersLoaded]);
 
   return useMemo(
     () =>
@@ -31,7 +39,15 @@ export function useAvailableAgents(): AgentInfo[] {
           available: true,
           isCustom: true,
         })),
+        ...(includeLocalAcp ? localProviders.map((provider) => ({
+          id: provider.id,
+          label: provider.label,
+          command: "acp",
+          available: true,
+          isCustom: true,
+          isStructured: true,
+        })) : []),
       ].filter((a) => a.available),
-    [detectedAgents, customAgents]
+    [detectedAgents, customAgents, includeLocalAcp, localProviders]
   );
 }

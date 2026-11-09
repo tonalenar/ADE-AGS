@@ -95,7 +95,7 @@ fn arrancar(db: &DbConnection, id: &str) -> Task {
 /// Lo que hace el supervisor con una tarea que corre y termina.
 fn correr_y_cerrar(db: &DbConnection, task_id: &str, outcome: TaskOutcome) -> String {
     let conn = db.lock().unwrap();
-    runs_store::mark_running(&conn, task_id, "s-1", "/tmp/e.jsonl").unwrap();
+    runs_store::mark_running(&conn, task_id, "attempt-1", "s-1", "/tmp/e.jsonl").unwrap();
     runs_store::finish_task(&conn, task_id, &outcome).unwrap();
     let run = runs_store::run_of_task(&conn, task_id).unwrap().unwrap();
     runs_store::refresh_run_status(&conn, &run.id).unwrap()
@@ -1010,7 +1010,7 @@ fn cancelar_una_mision_que_corre_cancela_su_run() {
     let lead = arrancar(&db, &id);
     {
         let conn = db.lock().unwrap();
-        runs_store::mark_running(&conn, &lead.id, "s-1", "/tmp/e.jsonl").unwrap();
+        runs_store::mark_running(&conn, &lead.id, "attempt-1", "s-1", "/tmp/e.jsonl").unwrap();
     }
     let parados = RefCell::new(Vec::new());
     let m = cancel(&db, &id, |run_id| {
@@ -1291,7 +1291,7 @@ mod eventos {
                 runs_store::refresh_run(&conn, &lead.run_id).unwrap(),
                 ("running".into(), None)
             );
-            runs_store::mark_running(&conn, &lead.id, "s-1", "/tmp/e.jsonl").unwrap();
+            runs_store::mark_running(&conn, &lead.id, "attempt-1", "s-1", "/tmp/e.jsonl").unwrap();
             runs_store::finish_task(
                 &conn,
                 &lead.id,

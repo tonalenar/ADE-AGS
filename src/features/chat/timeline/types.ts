@@ -15,6 +15,17 @@ export interface PlanStep {
   status: StepStatus;
 }
 
+/** Categorias de tokens relatadas pelo provedor; algumas podem ser subconjuntos de outras. */
+export interface UsageBreakdown {
+  input?: number;
+  output?: number;
+  cached?: number;
+  cacheWrite?: number;
+  reasoning?: number;
+  /** Indica se o raciocínio já está contado em `output`. Ausente quando o provedor não define isso. */
+  reasoningInOutput?: boolean;
+}
+
 export interface TimelineItem {
   kind: TimelineItemKind;
   id: string;
@@ -35,6 +46,12 @@ export interface TimelineItem {
   plan?: PlanStep[];
   /** Os tokens de um item `usage`. */
   tokens?: number;
+  /** Categorias do uso informadas pelo agente, quando disponíveis. */
+  usageBreakdown?: UsageBreakdown;
+  /** Entrada de contexto informada pelo Claude, sem tokens de saída. */
+  contextTokens?: number;
+  /** A ADE já tentou compactar automaticamente a ponta deste contexto. */
+  autoCompactAttempted?: boolean;
 }
 
 export interface Timeline {

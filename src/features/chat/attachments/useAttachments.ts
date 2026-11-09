@@ -33,7 +33,19 @@ export function useAttachments() {
   const { t } = useTranslation();
   const [list, setList] = useState<Attachment[]>([]);
   const [notices, setNotices] = useState<string[]>([]);
+  const [pendingIngestions, setPendingIngestions] = useState(0);
+  const pendingIngestionsRef = useRef(0);
+  const mountedRef = useRef(false);
   const current = useRef<Attachment[]>([]);
+  const isIngestingAttachments = useCallback(() => pendingIngestionsRef.current > 0, []);
+  const beginIngestion = useCallback(() => {
+    pendingIngestionsRef.current += 1;
+    if (mountedRef.current) setPendingIngestions(pendingIngestionsRef.current);
+  }, []);
+  const endIngestion = useCallback(() => {
+    pendingIngestionsRef.current = Math.max(0, pendingIngestionsRef.current - 1);
+    if (mountedRef.current) setPendingIngestions(pendingIngestionsRef.current);
+  }, []);
 
   const describe = useCallback((r: Rejected): string => {
     switch (r.reason) {
@@ -45,40 +57,58 @@ export function useAttachments() {
   }, [t]);
 
   const add = useCallback((incoming: Attachment[], extra: string[] = []) => {
+    if (!mountedRef.current) return false;
     const next = addAttachments(current.current, incoming);
     current.current = next.list;
     setList(next.list);
     setNotices([...extra, ...next.rejected.map(describe)]);
+    return next.rejected.length === 0;
   }, [describe]);
 
   /** Caminhos que a pessoa soltou ou escolheu: só se confere o que são (nada é lido). */
-  const addPaths = useCallback(async (paths: string[]) => {
+  const addPaths = useCallback(async (paths: string[]): Promise<boolean> => {
     const unique = [...new Set(paths.filter((p) => p.length > 0))];
-    if (unique.length === 0) return;
+    if (unique.length === 0) return true;
+    beginIngestion();
     try {
-      add((await inspectPaths(unique)).map(fromInspected));
+      const inspected = await inspectPaths(unique);
+      if (!mountedRef.current) return false;
+      return add(inspected.map(fromInspected));
     } catch (e) {
-      setNotices([t("chat.attach.notice.inspect", { error: String(e) })]);
+      if (mountedRef.current) setNotices([t("chat.attach.notice.inspect", { error: String(e) })]);
+      return false;
+    } finally {
+      endIngestion();
     }
-  }, [add, t]);
+  }, [add, beginIngestion, endIngestion, t]);
 
   /** Arquivos que vieram do clipboard sem caminho: só imagem pode ser salva (numa pasta temporária do app). */
   const addFiles = useCallback(async (files: File[]) => {
+    if (files.length === 0) return;
+    beginIngestion();
     const out: Attachment[] = [];
     const extra: string[] = [];
-    for (const file of files) {
-      const name = !file.name || /^image\.\w+$/i.test(file.name) ? `${t("chat.attach.pastedName")}.${(file.type.split("/")[1] ?? "png").replace("jpeg", "jpg")}` : file.name;
-      if (!PASTE_MIMES.has(file.type)) { extra.push(t("chat.attach.notice.noPath", { name })); continue; }
-      if (file.size > MAX_IMAGE_BYTES) { extra.push(t("chat.attach.notice.tooBig", { name, max: formatSize(MAX_IMAGE_BYTES) })); continue; }
-      try {
-        const path = await savePastedImage(new Uint8Array(await file.arrayBuffer()), file.type);
-        out.push({ id: path, path, name, kind: "image", mime: file.type, size: file.size, preview: URL.createObjectURL(file), temp: true });
-      } catch (e) {
-        extra.push(t("chat.attach.notice.saveFailed", { name, error: String(e) }));
+    try {
+      for (const file of files) {
+        if (!mountedRef.current) break;
+        const name = !file.name || /^image\.\w+$/i.test(file.name) ? `${t("chat.attach.pastedName")}.${(file.type.split("/")[1] ?? "png").replace("jpeg", "jpg")}` : file.name;
+        if (!PASTE_MIMES.has(file.type)) { extra.push(t("chat.attach.notice.noPath", { name })); continue; }
+        if (file.size > MAX_IMAGE_BYTES) { extra.push(t("chat.attach.notice.tooBig", { name, max: formatSize(MAX_IMAGE_BYTES) })); continue; }
+        try {
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          if (!mountedRef.current) break;
+          const path = await savePastedImage(bytes, file.type);
+          if (!mountedRef.current) continue;
+          out.push({ id: path, path, name, kind: "image", mime: file.type, size: file.size, preview: URL.createObjectURL(file), temp: true });
+        } catch (e) {
+          if (mountedRef.current) extra.push(t("chat.attach.notice.saveFailed", { name, error: String(e) }));
+        }
       }
+      if (mountedRef.current) add(out, extra);
+    } finally {
+      endIngestion();
     }
-    add(out, extra);
-  }, [add, t]);
+  }, [add, beginIngestion, endIngestion, t]);
 
   /** Cmd/Ctrl+V na caixa: imagem e arquivos copiados viram anexo; texto comum passa para a caixa como sempre. */
   const onPaste = useCallback((e: React.ClipboardEvent) => {
@@ -104,7 +134,13 @@ export function useAttachments() {
     setNotices([]);
   }, []);
 
-  useEffect(() => () => { for (const a of current.current) if (a.preview?.startsWith("blob:")) URL.revokeObjectURL(a.preview); }, []);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      for (const a of current.current) if (a.preview?.startsWith("blob:")) URL.revokeObjectURL(a.preview);
+    };
+  }, []);
 
-  return { list, notices, addPaths, addFiles, onPaste, remove, clear, dismissNotices: () => setNotices([]) };
+  return { list, notices, ingesting: pendingIngestions > 0, isIngestingAttachments, addPaths, addFiles, onPaste, remove, clear, dismissNotices: () => setNotices([]) };
 }

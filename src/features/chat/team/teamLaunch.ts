@@ -22,11 +22,14 @@ export interface LeadSpec {
   agent: AgentInfo;
   /** A pasta em que a conversa roda (já o worktree novo, se pedido). */
   cwd: string;
+  /** Workspace da janela que abriu a conversa, mesmo quando ela roda num worktree. */
+  workspaceId: string;
   title: string;
   model: string | null;
   effort: string | null;
   access: ChatAccess;
   plan: boolean;
+  fastMode?: boolean;
   accountId: string | null;
   /** O valor do seletor de conta (um id, um pool ou `undefined`), como `startConversation` espera. */
   account: string | undefined;
@@ -53,7 +56,7 @@ export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarg
     if (spec.viaProtocol) {
       // No Claude o Plano é um modo de permissão: a conversa nasce nele (como em `startThread`).
       const id = await createThread({
-        agentId: spec.agent.id, cwd: spec.cwd, title: spec.title, model: spec.model, effort: spec.effort,
+        agentId: spec.agent.id, cwd: spec.cwd, workspaceId: spec.workspaceId, title: spec.title, model: spec.model, effort: spec.effort,
         access: spec.plan ? "plan" : spec.access, accountId: spec.accountId,
       });
       const ref = threadKey(id);
@@ -61,7 +64,7 @@ export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarg
     }
     const ref = await startConversation({
       cwd: spec.cwd, agent: spec.agent, prompt: "", title: spec.title, model: spec.model, effort: spec.effort, account: spec.account,
-      access: spec.access, plan: spec.plan, background: true,
+      access: spec.access, plan: spec.plan, fastMode: spec.fastMode, background: true,
     });
     return { ref, undo: () => close(ref) };
   };

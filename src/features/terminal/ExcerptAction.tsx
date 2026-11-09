@@ -3,9 +3,13 @@ import type { Terminal as XTerm } from "@xterm/xterm";
 import { useTranslation } from "react-i18next";
 
 import { SendIcon } from "@/app/icons";
+import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { highlightAgents } from "@/features/browser/agentHighlight";
 import { agentPaint } from "@/features/browser/agentPaint";
 import { useUnreadStore } from "@/features/canvas/chatUnread";
+import { ChatBubbleIcon } from "@/features/chat/chatIcons";
+import { addQuoteFor } from "@/features/chat/quotes/quoteStore";
+import { MAX_QUOTE_CHARS } from "@/features/chat/quotes/quoteModel";
 import { boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
@@ -160,14 +164,43 @@ export function ExcerptAction({ tabId, term, host }: { tabId: string; term: XTer
     if (excerpt.truncated) toast(cutNote(excerpt).trim());
   };
 
+  const toComposer = (excerpt: Excerpt) => {
+    // No modo T3, a própria conversa desta aba tem um composer com chips de citação. Guardamos o
+    // trecho lá para revisão; o terminal continua montado e nada é enviado automaticamente.
+    if (!chatShellOn(useUiStore.getState())) return;
+    const added = addQuoteFor(tabId, {
+      text: excerpt.text,
+      comment: tr("terminal.excerpt.composerContext"),
+    });
+    if (!added) return toast(tr("terminal.excerpt.composerNotAdded"), "warning");
+    useTabsStore.getState().activateTab(tabId);
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("[data-chat-composer]")?.focus();
+    }));
+    const notes = [
+      tr("terminal.excerpt.composerAdded"),
+      excerpt.truncated ? cutNote(excerpt).trim() : "",
+      excerpt.text.length > MAX_QUOTE_CHARS ? tr("terminal.excerpt.composerCut", { chars: MAX_QUOTE_CHARS }) : "",
+    ].filter(Boolean);
+    toast(notes.join(" "));
+  };
+
   const destinations = (excerpt: Excerpt): ContextMenuItem[] => {
     const tabs = useTabsStore.getState().tabs;
     const source = tabs.find((tab) => tab.id === tabId);
     const items: ContextMenuItem[] = [];
     if (source && source.agentId !== SHELL_AGENT_ID) {
+      if (chatShellOn(useUiStore.getState())) {
+        items.push({
+          key: "composer",
+          label: tr("terminal.excerpt.composer"),
+          icon: <ChatBubbleIcon className="w-3.5 h-3.5" />,
+          onSelect: () => toComposer(excerpt),
+        });
+      }
       const { boards, modes } = useCanvasStore.getState();
       const inCanvas = modes[boardKeyOfTab(source, boards)] === "canvas";
-      items.push({ key: "chat", label: tr(inCanvas ? "terminal.excerpt.chat" : "terminal.excerpt.chatCanvas"), onSelect: () => toChat(excerpt) });
+      items.push({ key: "chat", label: tr(inCanvas ? "terminal.excerpt.chat" : "terminal.excerpt.chatCanvas"), separator: items.length > 0, onSelect: () => toChat(excerpt) });
     }
     const others = tabs.filter((tab) => tab.id !== tabId && tab.agentId !== SHELL_AGENT_ID);
     if (others.length === 0) {

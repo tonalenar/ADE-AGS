@@ -17,6 +17,7 @@ import {
 
 import { useSkillsStore } from "@/features/skills/store";
 import { ChatSwitch } from "@/features/settings/SettingsSection";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { alwaysOnSkills, setSkillAlwaysOn } from "./ipc";
 
@@ -220,7 +221,8 @@ export function SkillDetailPage() {
               target="_blank"
               rel="noreferrer"
               className="max-w-[14rem] truncate text-[10px] text-accent-500 dark:text-accent-400 hover:underline"
-             title={meta.homepage}>
+             title={meta.homepage}
+              onClick={(event) => { event.preventDefault(); openExternalUrl(meta.homepage!).catch(console.error); }}>
               {meta.homepage}
             </a>
           )}

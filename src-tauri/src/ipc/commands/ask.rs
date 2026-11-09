@@ -48,7 +48,7 @@ pub(crate) fn member_refusal(lead: Option<&str>) -> Option<Value> {
 
 /// O orquestrador do time de `tab`, se ela é integrante (não o próprio orquestrador): o time do modo
 /// chat, senão a equipe do canvas.
-fn lead_of(app: &AppHandle, tab: &str) -> Option<String> {
+pub(super) fn lead_of(app: &AppHandle, tab: &str) -> Option<String> {
     use tauri::Manager;
     if let Some(db) = app.try_state::<crate::database::DbConnection>()
         && let Ok(conn) = db.lock()

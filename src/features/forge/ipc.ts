@@ -7,7 +7,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   DevicePoll, DeviceStart, ForgeItem, ForgeItemDetail, ForgeKind, ForgeKindInfo, ForgeRepo, GitAccount,
-  GuideLookup, GuideOutcome, GuideRequest, Label, NewIssue, NewPull, NewRelease, PullFile, Release, RepoTarget,
+  GuideLookup, GuideOutcome, GuideRequest, Label, NewIssue, NewPull, NewRelease, PullCode, PullFile, PullFileContents,
+  PullReviewAction, PullReviewCommentDraft, PullReviewSubmission, Release, RepoTarget,
+  PullReviewThreads,
 } from "./types";
 
 export const forgeKinds = () => invoke<ForgeKindInfo[]>("forge_kinds");
@@ -56,6 +58,30 @@ export const forgeCheckoutPull = (cwd: string, number: number) =>
 /** Os arquivos do PR com o diff de cada um (a vista do guia de revisão). */
 export const forgePullFiles = (cwd: string, number: number) =>
   invoke<PullFile[]>("forge_pull_files", { cwd, number });
+/** Lista os arquivos e fixa o commit da cabeça do PR para o painel de código. */
+export const forgePullCode = (cwd: string, number: number) =>
+  invoke<PullCode>("forge_pull_code", { cwd, number });
+/** Lê conteúdo UTF-8 de arquivos pertencentes ao commit da cabeça do PR. */
+export const forgePullFileContents = (cwd: string, number: number, headSha: string, paths: string[]) =>
+  invoke<PullFileContents>("forge_pull_file_contents", { cwd, number, headSha, paths });
+export const forgeSubmitPullReview = (
+  cwd: string,
+  number: number,
+  request: {
+    headSha: string;
+    baseSha: string | null;
+    startSha: string | null;
+    action: PullReviewAction;
+    summary: string;
+    comments: PullReviewCommentDraft[];
+  }
+) => invoke<PullReviewSubmission>("forge_submit_pull_review", { cwd, number, request });
+export const forgePullReviewThreads = (cwd: string, number: number, headSha: string) =>
+  invoke<PullReviewThreads>("forge_pull_review_threads", { cwd, number, headSha });
+export const forgeReplyPullReviewThread = (cwd: string, number: number, headSha: string, replyToId: string, body: string) =>
+  invoke<void>("forge_reply_pull_review_thread", { cwd, number, headSha, replyToId, body });
+export const forgeSetPullReviewThreadResolved = (cwd: string, number: number, headSha: string, threadId: string, resolved: boolean) =>
+  invoke<void>("forge_set_pull_review_thread_resolved", { cwd, number, headSha, threadId, resolved });
 /** O guia de revisão em cache deste PR, e se ficou para trás do commit atual. Ver `forge/guide_commands.rs`. */
 export const reviewGuideGet = (cwd: string, number: number) =>
   invoke<GuideLookup>("review_guide_get", { cwd, number });

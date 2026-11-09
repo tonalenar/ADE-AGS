@@ -11,7 +11,7 @@ export function CompareHost() {
   const diff = useCompareStore((s) => s.diff);
   return (
     <Suspense fallback={null}>
-      {dialog && <CompareDialog initialCwd={dialog.cwd} />}
+      {dialog && <CompareDialog initialCwd={dialog.cwd} initialPrompt={dialog.prompt} initialPicks={dialog.picks} initialAttachments={dialog.attachments} />}
       {diff && <DiffDialog comparisonId={diff.comparisonId} pick={diff.pick} />}
     </Suspense>
   );

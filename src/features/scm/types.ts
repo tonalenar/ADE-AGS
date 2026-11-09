@@ -81,6 +81,17 @@ export interface Compare {
   deletions: number;
 }
 
+export interface WorkingFile {
+  path: string;
+  content: string;
+}
+
+export interface WorkingFiles {
+  files: WorkingFile[];
+  omittedFiles: number;
+  truncated: boolean;
+}
+
 export interface Tag {
   name: string;
   /** El commit al que apunta (corto). */

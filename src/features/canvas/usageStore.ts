@@ -1,13 +1,12 @@
 import { create } from "zustand";
 
-import { accountEnv, antigravityCliUsage, codexAccountUsage, discoverAntigravityAccount, type AgyUsage } from "@/features/accounts/ipc";
+import { antigravityCliUsage, codexAccountUsage, discoverAntigravityAccount, type AgyUsage } from "@/features/accounts/ipc";
 import type { AgentAccount, CodexUsage } from "@/features/accounts/types";
 import { modelMeters, type ModelMeter } from "./antigravityQuota";
 import { agentAccountUsage, claudeLiveUsage, isUsageFresh, planLabel, type LiveUsage } from "@/features/accounts/usage";
 
 /** Cada cuánto se renuevan las cuotas mientras el canvas está abierto. */
 const EVERY = 5 * 60 * 1000;
-
 const isSystem = (a: AgentAccount) => a.id.startsWith("system:");
 
 export interface CodexEntry {
@@ -83,12 +82,11 @@ export const useUsageStore = create<UsageState>((set, get) => ({
     set(patch("busy", id, true));
     try {
       if (account.agentId === "claude-code") {
-        const env = isSystem(account) ? {} : await accountEnv(id);
-        let live = await claudeLiveUsage(id, env, force);
+        let live = await claudeLiveUsage(id, force);
         set(patch("claude", id, live));
         // Lo guardado puede estar vencido: se muestra al instante y se pregunta de verdad detrás.
         if (!force && live.available && live.cached && !isUsageFresh(live.fetchedAt, Math.floor(Date.now() / 1000))) {
-          live = await claudeLiveUsage(id, env, true);
+          live = await claudeLiveUsage(id, true);
           set(patch("claude", id, live));
         }
         if (get().plan[id] === undefined) {

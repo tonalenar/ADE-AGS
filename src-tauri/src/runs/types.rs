@@ -19,6 +19,9 @@ pub struct Run {
     pub ended_at: Option<i64>,
     /// La misión que este run intenta cumplir. `None` = lanzado a mano desde la flota.
     pub mission_id: Option<String>,
+    /// Conversa estruturada que originou a delegação. NULL em runs criados por outras superfícies.
+    #[serde(default)]
+    pub source_thread_id: Option<String>,
     /// Configuración de Squad copiada al iniciar; no se consulta la fila editable durante el run.
     pub squad_id: Option<String>,
     pub squad_name: Option<String>,
@@ -48,6 +51,7 @@ pub struct Task {
     pub cost_usd: Option<f64>,
     pub tokens_in: Option<i64>,
     pub tokens_out: Option<i64>,
+    /// JSONL cru da tentativa atual; cada tentativa mantém seu próprio arquivo histórico.
     pub events_path: Option<String>,
     /// La raíz del worktree en el que corre. `None` = corre en la carpeta del proyecto.
     pub worktree_path: Option<String>,

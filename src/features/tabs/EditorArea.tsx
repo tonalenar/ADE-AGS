@@ -2,7 +2,7 @@ import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useR
 import { useChatUnreadWatcher } from "@/features/canvas/chatUnread";
 import { useMissionWatcher } from "@/features/missions/watcher";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button, AddIcon, CloseIcon } from "neogestify-ui-components";
 
@@ -26,7 +26,8 @@ import { useChatStore } from "@/features/chat/store";
 import { useConversations } from "@/features/chat/unified/useConversations";
 import { ProtocolPane } from "@/features/tabs/ProtocolPane";
 import { TeamTabMarks } from "@/features/chat/team/TeamTabMarks";
-import { useChatShell } from "@/app/uiStore";
+import { chatShellOn, useChatShell, useUiStore } from "@/app/uiStore";
+import { NEW_WORKSPACE_AGENT_EVENT, canOpenWorkspaceAgent } from "@/features/tabs/workspaceCommands";
 
 // @xyflow/react pesa y solo hace falta en la vista canvas. Un import estático lo metía en
 // el arranque aunque `{canvas && …}` no lo montara. El tablero ya está en el store
@@ -54,6 +55,7 @@ const CanvasView = lazy(() =>
 export function EditorArea() {
   useChatUnreadWatcher();
   useMissionWatcher();
+  const location = useLocation();
   const layout = useWorkspaceLayout();
   // Com a casca do chat na tela, esta área só empresta o TerminalPanel (o terminal da conversa
   // aberta): nada de canvas, grade ou grupos por cima da tela da conversa.
@@ -66,6 +68,17 @@ export function EditorArea() {
   const groupIds = groups.map((g) => g.id).join("|");
   // Los huecos de la grade aparecen y desaparecen sin que cambie el árbol: hay que reobservarlos.
   const gridIds = grid ? grid.join("|") : "";
+
+  // A paleta e os atalhos pedem a mesma ação; revalidar aqui garante que só abrimos o
+  // assistente dentro do workspace e com uma pasta ativa. Nada inicia até a pessoa confirmar.
+  useEffect(() => {
+    const openWizard = () => {
+      const ui = useUiStore.getState();
+      if (!chatShellOn(ui) && canOpenWorkspaceAgent(location.pathname)) openNewAgentWizard();
+    };
+    window.addEventListener(NEW_WORKSPACE_AGENT_EVENT, openWizard);
+    return () => window.removeEventListener(NEW_WORKSPACE_AGENT_EVENT, openWizard);
+  }, [location.pathname]);
 
   const measure = useCallback(() => {
     const container = containerRef.current;

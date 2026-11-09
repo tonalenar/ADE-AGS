@@ -7,8 +7,9 @@
 //! O equivalente aqui é um WebView2 numa janela filha dentro da janela do app, criado direto pela API do WebView2
 //! (ver `native`: um `Webview` filho do Tauri faz a janela principal deixar de ser achada pelo nome):
 //!
-//! - **Perfil próprio**: `<dados>/portal-webview`, uma pasta de dados só dos Portais (o WebView2 sobe outro
-//!   navegador para ela), separada da do app. O login fica nela entre as sessões.
+//! - **Perfis isolados**: o perfil padrão preserva `<dados>/portal-webview`; perfis nomeados usam
+//!   `<dados>/portal-webview/profiles/<id>`. Agentes e conversas recebem ids estáveis próprios.
+//!   Todos ficam separados do WebView principal e do perfil pessoal do navegador do sistema.
 //! - **CDP de dentro**: `ICoreWebView2::CallDevToolsProtocolMethod` e `GetDevToolsProtocolEventReceiver`, o
 //!   mesmo papel do `webContents.debugger`. Por ele passam o piloto dos agentes (o script em todo documento, o
 //!   canal `Runtime.addBinding`), as fotos e os toques de verdade que o piloto pede.
@@ -49,12 +50,13 @@ mod native {
         Err(NO.into())
     }
     pub fn close(_: &AppHandle, _: &str) {}
+    pub async fn release_profile(_: &AppHandle, _: &std::path::Path) -> Result<(), String> { Ok(()) }
     pub async fn add_script(_: &AppHandle, _: &str, _: String) -> Result<(), String> {
         Err(NO.into())
     }
 }
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
@@ -84,9 +86,30 @@ pub struct Place {
 }
 
 /// Os Portais abertos.
-fn portals() -> &'static Mutex<HashSet<String>> {
-    static P: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-    P.get_or_init(|| Mutex::new(HashSet::new()))
+fn portals() -> &'static Mutex<HashMap<String, String>> {
+    static P: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// IDs viram nomes de pasta: só aceitam caracteres seguros e um tamanho limitado.
+fn checked_profile_id(id: &str) -> Result<String, String> {
+    if !id.is_empty() && id.len() <= 72 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+        Ok(id.to_string())
+    } else {
+        Err("O id do perfil do navegador é inválido.".into())
+    }
+}
+
+/// Só um perfil nomeado pela ADE pode ser removido; o sufixo nunca vira caminho arbitrário.
+fn checked_managed_profile_id(id: &str) -> Result<String, String> {
+    let id = checked_profile_id(id)?;
+    let uuid = id.strip_prefix("profile-").ok_or_else(|| "Somente perfis criados na ADE podem ser removidos.".to_string())?;
+    if uuid.len() != 36 || !uuid.bytes().enumerate().all(|(index, byte)| {
+        if [8, 13, 18, 23].contains(&index) { byte == b'-' } else { byte.is_ascii_hexdigit() }
+    }) {
+        return Err("O id do perfil do navegador é inválido.".into());
+    }
+    Ok(id)
 }
 
 /// O último endereço pedido para um Portal que ainda está abrindo: a aba manda navegar logo ao montar, antes de o
@@ -96,7 +119,7 @@ fn pending() -> &'static Mutex<HashMap<String, String>> {
     P.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Um Portal abre de cada vez (o primeiro cria o ambiente do WebView2 que os outros usam).
+/// Um Portal abre de cada vez; o ambiente WebView2 é reaproveitado somente pelo mesmo perfil.
 fn opening() -> &'static tokio::sync::Mutex<()> {
     static O: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     O.get_or_init(|| tokio::sync::Mutex::new(()))
@@ -129,18 +152,34 @@ fn physical(r: Rect, scale: f64) -> [i32; 4] {
 /// Abre o navegador do Portal `id` em cima dele, já com o piloto dos agentes, e carrega `url`. Aberto, só
 /// reposiciona: navegar é com `real_browser_navigate`.
 #[tauri::command]
-pub async fn real_browser_open(app: AppHandle, window: tauri::Window, id: String, url: String, place: Place, script: Option<String>) -> Result<(), String> {
+pub async fn real_browser_open(
+    app: AppHandle,
+    window: tauri::Window,
+    id: String,
+    url: String,
+    place: Place,
+    script: Option<String>,
+    profile_id: String,
+) -> Result<(), String> {
     let _one_at_a_time = opening().lock().await;
-    if !lock(portals()).contains(&id) {
+    let profile_id = checked_profile_id(&profile_id)?;
+    let existing_profile = lock(portals()).get(&id).cloned();
+    if existing_profile.as_deref() != Some(&profile_id) {
+        if existing_profile.is_some() {
+            lock(portals()).remove(&id);
+            native::close(&app, &id);
+        }
         let parent = window_handle(&window)?;
-        let profile = crate::util::datadir::app_data_dir(&app)?.join("portal-webview");
+        let profile_root = crate::util::datadir::app_data_dir(&app)?.join("portal-webview");
+        // Mantém a pasta antiga para o perfil padrão, preservando as sessões já existentes.
+        let profile = if profile_id == "default" { profile_root } else { profile_root.join("profiles").join(&profile_id) };
         std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
         // As mesmas flags do WebView do app (`tauri.conf.json`): também mantêm a página desenhando encoberta ou
         // recortada (`CalculateNativeWinOcclusion` desligado).
         let args = app.config().app.windows.first().and_then(|w| w.additional_browser_args.clone()).unwrap_or_default();
         let scale = window.scale_factor().unwrap_or(1.0);
         native::create(&app, parent, &id, profile, args, physical(place.rect, scale)).await?;
-        lock(portals()).insert(id.clone());
+        lock(portals()).insert(id.clone(), profile_id);
         // O piloto antes da primeira página: o canal (binding) e o script em todo documento novo.
         if let Some(script) = script {
             native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
@@ -215,7 +254,7 @@ pub fn real_browser_place(app: AppHandle, window: tauri::Window, id: String, pla
 #[tauri::command]
 pub async fn real_browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
     navigable(&url).ok_or("Endereço que o navegador não abre.")?;
-    if !lock(portals()).contains(&id) {
+    if !lock(portals()).contains_key(&id) {
         // Ainda abrindo: vai direto para cá quando abrir.
         lock(pending()).insert(id, url);
         return Ok(());
@@ -233,10 +272,34 @@ pub async fn real_browser_history(app: AppHandle, id: String, delta: i32) -> Res
 #[tauri::command]
 pub fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
     lock(pending()).remove(&id);
-    if lock(portals()).remove(&id) {
+    if lock(portals()).remove(&id).is_some() {
         native::close(&app, &id);
     }
     Ok(())
+}
+
+/// Remove os dados de um perfil criado pela ADE depois de confirmar que nenhum Portal o está usando.
+#[tauri::command]
+pub async fn real_browser_delete_profile(app: AppHandle, profile_id: String) -> Result<(), String> {
+    let profile_id = checked_managed_profile_id(&profile_id)?;
+    let _one_at_a_time = opening().lock().await;
+    if lock(portals()).values().any(|opened| opened == &profile_id) {
+        return Err("browser_profile_in_use".into());
+    }
+
+    let profile_path = crate::util::datadir::app_data_dir(&app)?
+        .join("portal-webview")
+        .join("profiles")
+        .join(&profile_id);
+    // O ambiente WebView2 é cacheado na thread da interface; soltá-lo antes de tentar apagar a pasta.
+    native::release_profile(&app, &profile_path).await?;
+    tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&profile_path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("browser_profile_delete_failed:{error}")),
+    })
+    .await
+    .map_err(|error| format!("Não foi possível concluir a remoção do perfil: {error}"))?
 }
 
 /// O foco do teclado vai para a página.

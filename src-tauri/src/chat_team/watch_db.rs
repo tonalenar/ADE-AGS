@@ -33,11 +33,18 @@ fn err(e: rusqlite::Error) -> String {
     e.to_string()
 }
 
-/// Os times que o vigia olha agora: com algum interruptor ligado, com o orquestrador aberto e ao menos um
-/// integrante que é uma conversa por protocolo aberta.
+/// Times do canvas e pais de conversas-filhas que o vigia olha agora. Filhos nativos do `chat_new` não precisam
+/// entrar no cadastro de times: o `parent_ref` já fornece a relação de lineage.
 pub fn gather(conn: &Connection, now: i64) -> Result<Vec<Watched>, String> {
     let mut out = Vec::new();
+    let mut by_parent: HashMap<String, usize> = HashMap::new();
+    let mut configured_parents = HashSet::new();
     for team in store::teams(conn)? {
+        if team.led() && team.origin != store::ORIGIN_MISSION {
+            // Um time existente é a autoridade para ligar/desligar os avisos do pai, inclusive quando ambos
+            // os interruptores estão desligados.
+            configured_parents.insert(team.orchestrator.clone());
+        }
         // Sem orquestrador (a coroa saiu do canvas) não há a quem avisar; origem de missão é do Vigia da missão.
         if (!team.watch && !team.watch_stall) || !team.led() || team.origin == store::ORIGIN_MISSION {
             continue;
@@ -57,13 +64,110 @@ pub fn gather(conn: &Connection, now: i64) -> Result<Vec<Watched>, String> {
                 members.push(view);
             }
         }
-        if members.is_empty() {
-            continue;
-        }
         let input = Input { flags: Flags { blocks: team.watch, stall: team.watch_stall }, members, sent };
+        by_parent.insert(team.orchestrator.clone(), out.len());
         out.push(Watched { orchestrator_name: super::api::orchestrator_peer_name(conn, &team), team, input });
     }
+
+    for child in chat::active_side_threads(conn).map_err(err)? {
+        let Some(parent_ref) = child.parent_ref.as_deref() else { continue };
+        let Some(parent) = parent_target(conn, parent_ref)? else { continue };
+        let index = if let Some(index) = by_parent.get(&parent).copied() {
+            index
+        } else {
+            // Um time explicitamente configurado controla o Vigia. Para uma delegação nativa fora de time,
+            // os avisos de bloqueio seguem o padrão seguro já usado pelos times do chat: ligados; sem alerta
+            // de estagnação, sem interrupção e sem resposta automática.
+            if configured_parents.contains(&parent) {
+                continue;
+            }
+            let watched = child_watcher(conn, &parent, &child, now)?;
+            let index = out.len();
+            by_parent.insert(parent.clone(), index);
+            out.push(watched);
+            index
+        };
+        let watched = &mut out[index];
+        if !watched.input.flags.blocks {
+            continue;
+        }
+        let member_ref = format!("thread:{}", child.id);
+        if watched.input.members.iter().any(|member| member.id == member_ref) {
+            continue;
+        }
+        let sent: HashSet<&str> = watched.input.sent.iter().map(|entry| entry.key.as_str()).collect();
+        let row = MemberRow {
+            team_id: watched.team.id.clone(),
+            member: member_ref,
+            agent_id: child.agent_id.clone(),
+            label: child.title.clone(),
+            role: "subagente".into(),
+            model: child.model.clone(),
+            policy: model::Policy::Ask,
+            branch: None,
+            worktree: None,
+            origin: "new".into(),
+            position: watched.input.members.len() as i64,
+            created_at: child.created_at,
+            updated_at: child.updated_at,
+            subagent: true,
+        };
+        if let Some(view) = member_view(conn, &row, &parent, &sent)? {
+            watched.input.members.push(view);
+        }
+    }
     Ok(out)
+}
+
+/// Normaliza a referência da UI para o destinatário real da fila e só vigia um pai que ainda existe.
+fn parent_target(conn: &Connection, parent_ref: &str) -> Result<Option<String>, String> {
+    if let Some(thread_id) = parent_ref.strip_prefix("thread:") {
+        return Ok(chat::thread(conn, thread_id).map_err(err)?.filter(|row| row.state == "active").map(|_| parent_ref.to_string()));
+    }
+    if let Some(tab_id) = parent_ref.strip_prefix("tab:") {
+        let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tabs WHERE id = ?1)", [tab_id], |row| row.get(0)).map_err(err)?;
+        return Ok(exists.then(|| tab_id.to_string()));
+    }
+    Ok(None)
+}
+
+/// Um grupo transitório para o lineage de conversas nativas, sem gravar um time sintético no banco.
+fn child_watcher(conn: &Connection, parent: &str, child: &chat::ThreadRow, now: i64) -> Result<Watched, String> {
+    let (agent_id, label, cwd, title, created_at, updated_at) = if let Some(thread_id) = model::thread_id_of(parent) {
+        let Some(row) = chat::thread(conn, thread_id).map_err(err)?.filter(|row| row.state == "active") else {
+            return Err("A conversa de origem não está mais ativa".into());
+        };
+        let title = row.title.clone();
+        (row.agent_id, title.clone(), row.cwd, title, row.created_at, row.updated_at)
+    } else {
+        let tab = conn.query_row("SELECT title, agent_label FROM tabs WHERE id = ?1", [parent], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        }).map_err(err)?;
+        (tab.1.clone(), tab.1, child.cwd.clone(), tab.0, now, now)
+    };
+    let team = TeamRow {
+        id: format!("chat-lineage:{parent}"),
+        orchestrator: parent.to_string(),
+        agent_id,
+        label,
+        cwd,
+        title,
+        created_at,
+        updated_at,
+        auto_decide: false,
+        allow_tools: false,
+        watch: true,
+        watch_stall: false,
+        origin: store::ORIGIN_CHAT.into(),
+        board_key: None,
+        mission_id: None,
+    };
+    let sent = sent_keys(conn, parent, now)?;
+    Ok(Watched {
+        orchestrator_name: super::api::orchestrator_peer_name(conn, &team),
+        team,
+        input: Input { flags: Flags { blocks: true, stall: false }, members: Vec::new(), sent },
+    })
 }
 
 /// As chaves do vigia já enviadas ao orquestrador (as da fila e as que ela já recolheu), com a hora.

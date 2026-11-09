@@ -1,10 +1,7 @@
-import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
-import { Loading } from "neogestify-ui-components";
 import { Terminal } from "@/features/terminal/LazyTerminal";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
-import { accountLoginCommand, accountLoginEnv } from "./login";
+import { accountLoginAccountId, accountLoginCommand } from "./login";
 
 interface LoginTerminalProps {
   account: AgentAccount;
@@ -15,8 +12,8 @@ interface LoginTerminalProps {
  *
  * Es una `Terminal` normal con dos diferencias que importan:
  *
- * - Corre con la variable de perfil de la TUI apuntada al directorio de la cuenta, así que
- *   el login que hagas acá adentro queda en ESA cuenta y no toca la del sistema.
+ * - Envía solo el ID de la cuenta; Rust resuelve el perfil al crear el proceso, así que el
+ *   login que hagas acá adentro queda en ESA cuenta y no toca la del sistema.
  * - No es una tab: no se persiste, no aparece en el historial de sesiones y su proceso
  *   muere al cerrar el diálogo (el cleanup de `Terminal` mata el PTY al desmontar).
  *
@@ -25,42 +22,13 @@ interface LoginTerminalProps {
  * carpeta — ruido innecesario para un flujo que solo tiene que llegar al navegador.
  */
 export function LoginTerminal({ account }: LoginTerminalProps) {
-  const { t } = useTranslation();
-  const envFor = useAccountsStore((s) => s.envFor);
   const load = useAccountsStore((s) => s.load);
-  const [env, setEnv] = useState<Record<string, string> | null>(null);
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let stale = false;
-    setEnv(null);
-    setError("");
-    accountLoginEnv(account.id, envFor)
-      .then((next) => { if (!stale) setEnv(next); })
-      .catch((e) => { if (!stale) setError(String(e)); });
-    return () => { stale = true; };
-  }, [account.id, envFor]);
-
-  if (error) {
-    return <p className="text-xs text-red-500 dark:text-red-400">{error}</p>;
-  }
-
-  // Sin las variables todavía no se puede lanzar nada: montar la terminal antes correría el
-  // login contra la cuenta del sistema, que es exactamente lo que hay que evitar.
-  if (!env) {
-    return (
-      <div className="h-96 flex items-center justify-center rounded-lg
-        border border-gray-200 dark:border-white/10">
-        <Loading variant="dots" size="small" color="gray" label={t("terminal.status.connecting")} />
-      </div>
-    );
-  }
-
   return (
     <div className="h-96 rounded-lg overflow-hidden border border-gray-200 dark:border-white/10">
       <Terminal
         command={accountLoginCommand(account)}
-        env={env}
+        agentId={account.agentId}
+        accountId={accountLoginAccountId(account.id)}
         isActive
         // Al salir la TUI se refresca la lista: si el login funcionó, la fila de la cuenta
         // pasa a mostrar el mail en vez de "sin iniciar sesión".

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AddIcon, Alert, Button, ChevronDownIcon, ChevronRightIcon, CloudIcon, DocumentIcon, EmptyState, MinusIcon,
   Skeleton, TextArea, Tooltip,
@@ -8,6 +7,7 @@ import {
 
 import { BranchIcon, ExternalIcon, GithubIcon, GitlabIcon, PullIcon, PushIcon, UndoIcon } from "@/app/icons";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { SignInButton } from "@/features/forge/SignInButton";
 import { useRepoTarget } from "@/features/forge/useRepoTarget";
@@ -579,7 +579,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               {remote.name} · {remote.host ?? remote.url}
             </span>
             {remote.webUrl && (
-              <IconAction label={t("scm.openWeb")} onClick={() => openUrl(remote.webUrl!).catch(console.error)}>
+              <IconAction label={t("scm.openWeb")} onClick={() => openExternalUrl(remote.webUrl!).catch(console.error)}>
                 <ExternalIcon className="w-3 h-3" />
               </IconAction>
             )}

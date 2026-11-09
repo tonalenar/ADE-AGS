@@ -4,11 +4,12 @@ import { useNavigate } from "react-router-dom";
 import { useUiStore } from "@/app/uiStore";
 import { MissionsSection } from "@/features/missions/MissionsSection";
 import { useTabsStore } from "@/features/tabs/store";
+import { useLocalAcpStore } from "@/features/agents/localAcpStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { newConversationIn, reopenFolder } from "../chatActions";
-import { conversationCards, type ChatProject } from "../chatModel";
+import { chatProjects, conversationCards, type ChatProject } from "../chatModel";
 import { ChatSidebar } from "../ChatSidebar";
 import { useFolderDiffs } from "../ChatShell";
 import { startChatLive } from "../liveStore";
@@ -28,6 +29,9 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   const navigate = useNavigate();
   const threads = useStructured((s) => s.threads);
   const detected = useTabsStore((s) => s.detectedAgents);
+  const localProviders = useLocalAcpStore((s) => s.providers);
+  const localProvidersLoaded = useLocalAcpStore((s) => s.loaded);
+  const loadLocalProviders = useLocalAcpStore((s) => s.load);
   const selected = useSelectedRef();
   const pet = usePetStatus();
   const chatMode = useUiStore((s) => s.chatMode);
@@ -35,21 +39,23 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   useEffect(() => startChatLive(), []);
   useEffect(() => startStructured(), []);
   useEffect(() => startQueueRunner(), []);
+  useEffect(() => { if (!localProvidersLoaded) void loadLocalProviders().catch(console.error); }, [localProvidersLoaded, loadLocalProviders]);
   const cards = useMemo(() => {
-    const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? id;
+    const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? localProviders.find((a) => a.id === id)?.label ?? id;
     // Os terminais de uma missão entram na lista como as demais conversas: o espelho da missão (`origin =
     // "mission"`) os agrupa sob o orquestrador com o selo "MISSÃO" (ver `TeamSidebar`). A seção de missões
     // (acima) segue sendo a lista das missões, com criar, iniciar e encerrar.
     return [...threadCards(threads, groups, labelOf, null), ...conversationCards(groups)]
       .sort((a, b) => b.openedAt - a.openedAt);
-  }, [groups, threads, detected]);
+  }, [groups, threads, detected, localProviders]);
   const closed = useMemo(() => {
     const open = new Set(cards.map((c) => c.cwd));
     return groups.flatMap((g) => g.workspaces).filter((w) => w.closed && !open.has(w.cwd)).map((w): ChatProject => ({ cwd: w.cwd, name: w.title, branch: w.branch }));
   }, [groups, cards]);
+  const projects = useMemo(() => chatProjects(groups), [groups]);
   const diffs = useFolderDiffs(cards);
   return (
-    <ChatSidebar cards={cards} closed={closed} diffs={diffs} selectedId={selected} width={width}
+    <ChatSidebar cards={cards} projects={projects} closed={closed} diffs={diffs} selectedId={selected} width={width}
       showHeader={false} showFooter={false}
       onCollapse={() => undefined}
       onNew={() => navigate("/")} onAddProject={() => navigate("/")}

@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "neogestify-ui-components";
 
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { htmlImagesToMarkdown } from "./htmlImages";
 
 /** Trae una imagen y devuelve algo que un `<img>` puede mostrar (un `data:`). */
@@ -67,8 +68,8 @@ function LoadedImage({ src, alt, load }: { src: string; alt: string; load: Image
  * eso es filtrar tu IP por mirar un catálogo. Sin él se muestra el texto alternativo. Los
  * PRs e issues sí lo pasan: son de tus repos, y las capturas son la mitad del reporte.
  *
- * Los enlaces abren en el navegador del sistema. Navegar DENTRO del webview reemplazaría
- * la app entera por una página web, sin forma de volver.
+ * Os links HTTP(S) seguem a preferência de navegador da ADE. Abrir no Browser cria uma
+ * superfície própria e não substitui a janela do app.
  */
 /**
  * Os tamanhos de cada tom. `compact` é o de sempre (skills, PRs, notas); `chat` é o da conversa do
@@ -194,7 +195,7 @@ export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock
     td: (p) => <td className="px-2 py-1 border-b border-gray-100 dark:border-white/5" {...p} />,
     a: ({ href, children }) => (
         <Button variant="custom"
-          onClick={() => { if (href) openUrl(href).catch(console.error); }}
+          onClick={() => { if (href) openExternalUrl(href).catch(console.error); }}
           className="text-accent-600 dark:text-accent-400 hover:underline text-left inline-block"
         >
           {children}

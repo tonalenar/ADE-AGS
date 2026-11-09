@@ -4,12 +4,12 @@ import { useTranslation } from "react-i18next";
 import { Markdown } from "@/shared/ui/LazyMarkdown";
 
 import {
-  BotIcon, ChevronDownIcon, ChevronRightIcon, EyeIcon, FilePlusIcon, GlobeIcon, ListIcon, PenIcon, QuestionIcon, SearchIcon, ShieldIcon, TerminalIcon, WrenchIcon,
+  BotIcon, ChevronDownIcon, ChevronRightIcon, EyeIcon, FilePlusIcon, GlobeIcon, ListIcon, PenIcon, QuestionIcon, SearchIcon, ShieldIcon, TerminalIcon, WrenchIcon, XIcon,
 } from "../chatIcons";
 
 import { useChatWidthClass } from "../chatLook";
 import { PlanCard } from "../LiveActivity";
-import { setRightPanel } from "../store";
+import { clearTimelineFind, setRightPanel, useChatStore } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
 import { renderChatCodeBlock } from "./CodeBlockFrame";
 import { parsePeerEnvelope, senderAgent } from "./peerEnvelope";
@@ -26,6 +26,7 @@ import { TurnEndNotice } from "./TurnEndNotice";
 import { endOutcome, fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
+import { searchTimelineItems } from "./searchUtils";
 
 const TOOL_ICON: Record<ToolKind, (p: { className?: string }) => React.JSX.Element> = {
   read: EyeIcon, edit: PenIcon, write: FilePlusIcon, command: TerminalIcon, search: SearchIcon,
@@ -66,9 +67,11 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId }: {
+export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
+  /** Identidade local usada para abrir a busca apenas na timeline visível. */
+  conversationKey?: string;
   /** O espaço no fim da lista para o composer que flutua por cima (`ChatFrame`); 0 = o fim de sempre. */
   bottomInset?: number;
   items: TimelineItem[];
@@ -99,6 +102,10 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   onResend?: (text: string) => void;
   /** Depois dos turnos, no fim do fio: as delegações e entregas do time (`team/TeamThreadFeed`). */
   after?: React.ReactNode;
+  /** Resultado da busca que deve ser levado à vista e realçado uma vez. */
+  searchTargetId?: string | null;
+  searchTargetToken?: number | null;
+  onSearchTargetApplied?: (token: number) => void;
 }) {
   const { t } = useTranslation();
   const turns = useMemo(() => timelineTurns(items), [items]);
@@ -128,6 +135,22 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const appliedSearchTokenRef = useRef<number | null>(null);
+  const [appliedSearchToken, setAppliedSearchToken] = useState<number | null>(null);
+  const findRequest = useChatStore((s) => s.timelineFind);
+  const findSession = findRequest?.conversationKey === conversationKey ? findRequest : null;
+  const findToken = findSession?.token ?? null;
+  const [findQuery, setFindQuery] = useState("");
+  const [findIndex, setFindIndex] = useState(0);
+  const previousConversationKey = useRef(conversationKey);
+  const findMatches = useMemo(
+    () => findQuery.trim() ? searchTimelineItems(items, findQuery, items.length) : [],
+    [items, findQuery],
+  );
+  const activeFindIndex = findMatches.length > 0 ? Math.min(findIndex, findMatches.length - 1) : 0;
+  const activeFindId = findMatches[activeFindIndex]?.id ?? null;
+  const highlightId = activeFindId ?? searchTargetId;
   // A pessoa está no fim e quer seguir o que chega. Só a rolagem dela muda isso (ver `onScroll`).
   const stick = useRef(true);
   // A rolagem suave que esta tela mandou ainda não foi interrompida pela pessoa (ver `onScroll`).
@@ -135,6 +158,20 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   const lastTop = useRef(0);
   const lastTurns = useRef(0);
   const lastPending = useRef(0);
+  useEffect(() => {
+    if (findToken !== null) findInputRef.current?.focus();
+  }, [findToken]);
+  useEffect(() => {
+    if (findToken === null) return;
+    return () => clearTimelineFind(findToken);
+  }, [findToken]);
+  useEffect(() => {
+    if (previousConversationKey.current === conversationKey) return;
+    previousConversationKey.current = conversationKey;
+    setFindQuery("");
+    setFindIndex(0);
+  }, [conversationKey]);
+  useEffect(() => { setFindIndex(0); }, [findQuery]);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -167,6 +204,49 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    if (!searchTargetId || !loaded || searchTargetToken === null || searchTargetToken === undefined) return;
+    if (appliedSearchTokenRef.current === searchTargetToken) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = contentRef.current?.querySelector<HTMLElement>(`[data-chat-item-id="${CSS.escape(searchTargetId)}"]`);
+      if (!target) return;
+      appliedSearchTokenRef.current = searchTargetToken;
+      setAppliedSearchToken(searchTargetToken);
+      stick.current = false;
+      following.current = false;
+      target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [searchTargetId, searchTargetToken, loaded, turns, onSearchTargetApplied]);
+
+  useEffect(() => {
+    if (!searchTargetId || searchTargetToken === null || searchTargetToken === undefined || appliedSearchToken !== searchTargetToken) return;
+    const timer = window.setTimeout(() => onSearchTargetApplied?.(searchTargetToken), 1800);
+    return () => window.clearTimeout(timer);
+  }, [searchTargetId, searchTargetToken, appliedSearchToken, onSearchTargetApplied]);
+
+  useEffect(() => {
+    if (findToken === null || !activeFindId || !loaded) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = contentRef.current?.querySelector<HTMLElement>(`[data-chat-item-id="${CSS.escape(activeFindId)}"]`);
+      if (!target) return;
+      stick.current = false;
+      following.current = false;
+      target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [findToken, activeFindId, loaded, turns]);
+
+  const stepFind = (delta: -1 | 1) => {
+    if (findMatches.length === 0) return;
+    setFindIndex((current) => (Math.min(current, findMatches.length - 1) + delta + findMatches.length) % findMatches.length);
+  };
+  const closeFind = () => {
+    if (findSession) clearTimelineFind(findSession.token);
+    setFindQuery("");
+    setFindIndex(0);
+  };
+
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 cc-scroll-hidden"
       onScroll={(e) => {
@@ -185,6 +265,33 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
       <AnswerContext.Provider value={onAnswer ?? null}>
       <div ref={contentRef} style={bottomInset > 0 ? { paddingBottom: bottomInset } : undefined}
         className={`${width} mx-auto px-4 sm:px-6 pt-4 ${bottomInset > 0 ? "" : "pb-6"} flex flex-col gap-4 text-chat-prose text-gray-900 dark:text-white`}>
+        {findSession && (
+          <div className="sticky top-2 z-20 mx-auto flex w-full max-w-[560px] items-center gap-1.5 rounded-xl border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-surface-raised/95 p-1.5 shadow-lg backdrop-blur">
+            <SearchIcon className="ml-1 w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+            <input ref={findInputRef} type="search" value={findQuery} onChange={(event) => setFindQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); closeFind(); }
+                else if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); stepFind(event.shiftKey ? -1 : 1); }
+              }}
+              aria-label={t("chat.find.label")} placeholder={t("chat.find.placeholder")}
+              className="min-w-0 flex-1 bg-transparent px-1 py-1 text-chat-ui text-gray-900 dark:text-white outline-none placeholder:text-gray-400 dark:placeholder:text-white/35" />
+            <span aria-live="polite" className="min-w-[4.5rem] text-center text-chat-caption text-gray-500 dark:text-white/45">
+              {!findQuery.trim() ? "" : !loaded ? t("chat.find.loading") : findMatches.length === 0 ? t("chat.find.noResults") : t("chat.find.position", { current: activeFindIndex + 1, total: findMatches.length })}
+            </span>
+            <button type="button" onClick={() => stepFind(-1)} disabled={!findMatches.length} aria-label={t("chat.find.previous")} title={t("chat.find.previous")}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 disabled:opacity-35 dark:text-white/55 dark:hover:bg-white/10">
+              <ChevronDownIcon className="h-4 w-4 rotate-180" />
+            </button>
+            <button type="button" onClick={() => stepFind(1)} disabled={!findMatches.length} aria-label={t("chat.find.next")} title={t("chat.find.next")}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 disabled:opacity-35 dark:text-white/55 dark:hover:bg-white/10">
+              <ChevronDownIcon className="h-4 w-4" />
+            </button>
+            <button type="button" onClick={closeFind} aria-label={t("chat.find.close")} title={t("chat.find.close")}
+              className="flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:text-white/55 dark:hover:bg-white/10">
+              <XIcon className="h-4 w-4" />
+            </button>
+          </div>
+        )}
         {truncated && (
           <p className="text-center text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.truncated")}</p>
         )}
@@ -203,8 +310,8 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         )}
         {turns.map((turn, i) => turn.notice
           ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
-          : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} />)}
-        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} /> : null; })}
+          : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} />)}
+        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} composerTarget={quoteKey} /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
           <div className="flex flex-col gap-1.5">
@@ -228,15 +335,18 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   );
 }
 
-function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolean; onOpenTerminal?: () => void }) {
+function TurnView({ turn, latest, onOpenTerminal, searchTargetId, composerTarget }: { turn: Turn; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string }) {
   const { t } = useTranslation();
   // Os turnos antigos começam recolhidos; o último (ou o em aberto), aberto.
-  const [open, setOpen] = useState(latest || turn.end === null);
+  const containsSearchTarget = !!searchTargetId && (turn.user?.id === searchTargetId || turn.final?.id === searchTargetId || turn.planItemId === searchTargetId || turn.body.some((row) => row.type === "assistant" && row.item.id === searchTargetId));
+  const [open, setOpen] = useState(latest || turn.end === null || containsSearchTarget);
+  useEffect(() => { if (containsSearchTarget) setOpen(true); }, [containsSearchTarget]);
   const foldable = turn.end !== null && turn.body.length > 0;
   return (
     <>
-      {turn.user && <UserMessage item={turn.user} />}
-      {turn.end === null && turn.plan && <PlanCard plan={turn.plan} />}
+      {turn.user && <UserMessage item={turn.user} searchHit={turn.user.id === searchTargetId} composerTarget={composerTarget} />}
+      {turn.plan && (turn.end === null || turn.planItemId === searchTargetId) &&
+        <PlanCard plan={turn.plan} itemId={turn.planItemId ?? undefined} searchHit={turn.planItemId === searchTargetId} />}
       {turn.end && (
         <button type="button" onClick={() => foldable && setOpen(!open)} aria-expanded={foldable ? open : undefined}
           className={`flex items-center gap-1.5 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
@@ -254,9 +364,9 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
         </button>
       )}
       {(open || turn.end === null) && turn.body.map((row, i) => (
-        <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && i === turn.body.length - 1} />
+        <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && i === turn.body.length - 1} searchTargetId={searchTargetId} />
       ))}
-      {turn.final && <AgentText item={turn.final} />}
+      {turn.final && <AgentText item={turn.final} searchHit={turn.final.id === searchTargetId} />}
       {turn.end && <TurnEndNotice end={turn.end} />}
       {turn.end && turn.end.files.length > 0 && <div><ChangedFilesCard files={turn.end.files} /></div>}
     </>
@@ -268,14 +378,14 @@ function TurnView({ turn, latest, onOpenTerminal }: { turn: Turn; latest: boolea
  * cai no terminal como mensagem do usuário), mostra só o corpo, no balão do remetente e com o logo
  * dele; o envelope de segurança continua indo ao modelo, só a tela o esconde (`peerEnvelope.ts`).
  */
-function UserMessage({ item }: { item: TimelineItem }) {
+function UserMessage({ item, searchHit = false, composerTarget }: { item: TimelineItem; searchHit?: boolean; composerTarget?: string }) {
   const reveal = useContext(RevealContext);
   const text = item.text ?? "";
   const peer = useMemo(() => parsePeerEnvelope(text), [text]);
   const [entering] = useState(() => !!peer && reveal.entering(item.id));
-  if (!peer) return <PersonBubble text={text} at={item.at} />;
+  if (!peer) return <PersonBubble text={text} at={item.at} itemId={item.id} searchHit={searchHit} composerTarget={composerTarget} />;
   return (
-    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body}>
+    <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body} itemId={item.id} searchHit={searchHit}>
       <Markdown content={peer.body} tone="chat" renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
@@ -285,25 +395,25 @@ function UserMessage({ item }: { item: TimelineItem }) {
  * Uma fala do agente em markdown. A que chegou agora aparece palavra a palavra; enquanto o texto
  * ainda chega (ou ainda está aparecendo), um cursor discreto fica no fim (`cc-stream-caret`).
  */
-function AgentText({ item }: { item: TimelineItem }) {
+function AgentText({ item, searchHit = false }: { item: TimelineItem; searchHit?: boolean }) {
   const reveal = useContext(RevealContext);
   const { text, revealing } = useRevealedText(item.id, item.text ?? "", reveal.animate(item));
   const caret = revealing || reveal.live(item.id);
   const [entering] = useState(() => reveal.entering(item.id));
   return (
-    <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""}>
+    <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""} itemId={item.id} searchHit={searchHit}>
       <Markdown content={text} tone="chat" renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
 
 /** `active`: a última linha do turno em aberto (o agente ainda está trabalhando nela). */
-function BodyRowView({ row, onOpenTerminal, active = false }: { row: BodyRow; onOpenTerminal?: () => void; active?: boolean }) {
+function BodyRowView({ row, onOpenTerminal, active = false, searchTargetId }: { row: BodyRow; onOpenTerminal?: () => void; active?: boolean; searchTargetId?: string | null }) {
   const { t } = useTranslation();
   const answer = useContext(AnswerContext);
   switch (row.type) {
     case "assistant":
-      return <AgentText item={row.item} />;
+      return <AgentText item={row.item} searchHit={row.item.id === searchTargetId} />;
     case "work":
       // Uma ferramenta só aparece como é; duas ou mais viram uma linha-resumo recolhida.
       return row.tools.length === 1

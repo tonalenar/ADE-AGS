@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 
-import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GlobeIcon, MaximizeIcon, MoreHorizontalIcon, PhoneIcon, PullRequestIcon, TerminalIcon, UsersIcon } from "./chatIcons";
+import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GlobeIcon, MaximizeIcon, MoreHorizontalIcon, PhoneIcon, PullRequestIcon, SideChatIcon, TerminalIcon, UsersIcon } from "./chatIcons";
 import { COMPACT_HIDDEN, entryForKey, isAvailable, keyLabel, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type PanelAvailability, type PanelChoice } from "./panelMenu";
-import { addSurface, setRightPanel, setTerminalOpen, togglePanelMaximized, toggleSummary, toggleSummaryPinned, useChatStore } from "./store";
+import { addSurface, setRightPanel, setTerminalOpen, toggleDiffPanel, togglePanelMaximized, toggleSummary, toggleSummaryPinned, useChatStore } from "./store";
 import { SUMMARY_ANCHOR_ATTR } from "./summary/SummaryPopover";
 import { TasksButton } from "./tasks/TasksButton";
 import { usePopover } from "./usePopover";
@@ -10,7 +10,7 @@ import { usePopover } from "./usePopover";
 /** Os ícones das linhas do menu "Abrir uma superfície". */
 export const ENTRY_ICON: Record<PanelChoice, (p: { className?: string }) => React.ReactElement> = {
   summary: DetailsIcon, browser: GlobeIcon, terminal: TerminalIcon, files: FilesIcon, diff: DiffIcon, design: DesignIcon,
-  ios: PhoneIcon, android: PhoneIcon, team: UsersIcon, pr: PullRequestIcon,
+  ios: PhoneIcon, android: PhoneIcon, team: UsersIcon, pr: PullRequestIcon, side: SideChatIcon,
 };
 
 const ROW_ICON: Record<string, (p: { className?: string }) => React.ReactElement> = {
@@ -106,7 +106,6 @@ export function onEntryKey(e: React.KeyboardEvent, available: PanelAvailability,
  * a aba Terminal do painel, um shell na pasta da conversa.
  */
 export function choosePanel(id: PanelChoice, drawerTabId: string | null, terminalOn: boolean): void {
-  if (id === "pr") return;
   if (id === "terminal") {
     if (drawerTabId) setTerminalOpen(drawerTabId, !terminalOn);
     else setRightPanel(useChatStore.getState().panel === "shell" ? null : "shell");
@@ -125,8 +124,8 @@ export function choosePanel(id: PanelChoice, drawerTabId: string | null, termina
     toggleSummary();
     return;
   }
-  if (useChatStore.getState().panel === id) setRightPanel(null);
-  else if (id === "diff") setRightPanel(id);
+  if (id === "diff") toggleDiffPanel();
+  else if (useChatStore.getState().panel === id) setRightPanel(null);
   else addSurface(id);
 }
 
@@ -134,13 +133,13 @@ export function choosePanel(id: PanelChoice, drawerTabId: string | null, termina
  * A fileira de ícones do painel (Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e o ⋯), como a do
  * Claude Code. Fica no cabeçalho principal da janela; com o painel maximizado, no cabeçalho dele.
  */
-export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: string | null; terminalAvailable: boolean }) {
+export function PanelToolbar({ drawerTabId, terminalAvailable, prAvailable = false, sideAvailable = false }: { drawerTabId: string | null; terminalAvailable: boolean; prAvailable?: boolean; sideAvailable?: boolean }) {
   const { t } = useTranslation();
   const panel = useChatStore((s) => s.panel);
   // O ícone do Resumo fica marcado com a coluna à vista (sem painel) ou com o cartão aberto (com painel).
   const summaryOn = useChatStore((s) => (s.panel === null ? s.summaryPinned : s.summaryOpen));
   const drawerOn = useChatStore((s) => (drawerTabId ? s.terminalOpen[drawerTabId] ?? false : false));
-  const available: PanelAvailability = { terminal: terminalAvailable, pr: false };
+  const available: PanelAvailability = { terminal: terminalAvailable, pr: prAvailable, side: sideAvailable };
   const choose = (id: PanelChoice) => choosePanel(id, drawerTabId, drawerOn);
   const terminalActive = drawerTabId ? drawerOn : panel === "shell";
   return (
@@ -162,7 +161,7 @@ export function PanelToolbar({ drawerTabId, terminalAvailable }: { drawerTabId: 
       })}
       {/* As tarefas em segundo plano (como no Claude Code): sempre na fileira, nunca no ⋯. */}
       <TasksButton />
-      <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android"} />
+      <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android" || panel === "pr" || panel === "side"} />
     </div>
   );
 }

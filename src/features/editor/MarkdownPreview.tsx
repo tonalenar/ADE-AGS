@@ -1,10 +1,10 @@
 import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components, type ExtraProps } from "react-markdown";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button, CheckIcon, CopyIcon, useTheme } from "neogestify-ui-components";
 
 import { splitFrontmatter } from "@/shared/ui/Markdown";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { isLocalUrl } from "@/features/tabs/viewTabs";
 import { TERMINAL_FONT } from "@/features/terminal/theme";
@@ -84,7 +84,7 @@ export default function MarkdownPreview({ source, path, cwd }: { source: string;
     else if (link.kind === "file") views.openFile(cwd, link.path);
     else if (link.kind === "url") {
       if (isLocalUrl(link.url)) views.openBrowser(cwd, link.url);
-      else openUrl(link.url).catch(console.error);
+      else openExternalUrl(link.url).catch(console.error);
     }
   }, [path, cwd, scrollTo]);
 

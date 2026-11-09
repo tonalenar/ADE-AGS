@@ -25,6 +25,8 @@ interface TabsState {
     accountId?: string;
     prelaunch?: PrelaunchStep[];
     scrubSecrets?: boolean;
+    /** Cria a aba sem selecioná-la; usado por conversas iniciadas em segundo plano. */
+    activate?: boolean;
     /** Solo al MOVER una tab entre ventanas: conserva cuándo se abrió de verdad. Es el
      *  piso temporal del descubrimiento de sesión, así que ponerle "ahora" descarta el
      *  transcript de un proceso que puede llevar horas vivo. */
@@ -61,7 +63,7 @@ export const useTabsStore = create<TabsState>((set) => ({
   workspaceId: DEFAULT_WORKSPACE_ID,
   hydrated: false,
 
-  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch, scrubSecrets, openedAt }) => {
+  addTab: ({ cwd, agent, title, titleIsCustom, ptyId, sessionId, historyId, accountId, prelaunch, scrubSecrets, openedAt, activate = true }) => {
     const id = crypto.randomUUID();
     const computedTitle =
       title ??
@@ -86,7 +88,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           openedAt: openedAt ?? Math.floor(Date.now() / 1000),
         },
       ],
-      activeTabId: id,
+      activeTabId: activate ? id : state.activeTabId,
     }));
     return id;
   },

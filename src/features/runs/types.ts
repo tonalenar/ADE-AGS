@@ -89,9 +89,55 @@ export interface Run {
   endedAt: number | null;
   /** La misión que este run intenta cumplir. `null` = lanzado a mano desde la flota. */
   missionId: string | null;
+  /** Conversa estruturada que criou a delegação. Ausente nos snapshots antigos. */
+  sourceThreadId?: string | null;
   squadId?: string | null;
   squadName?: string | null;
   squadMembers?: RunSquadMember[];
+}
+
+/** Identidade de execução comum projetada sobre conversas, turnos e tarefas persistidos pela ADE. */
+export type HarnessExecutionKind = "thread" | "turn" | "fleetRun" | "fleetTask" | "fleetAttempt";
+
+export interface HarnessExecutionNode {
+  id: string;
+  parentId: string | null;
+  kind: HarnessExecutionKind;
+  depth: number;
+  title: string;
+  status: string;
+  threadId: string | null;
+  runId: string | null;
+  agentId: string | null;
+  model: string | null;
+  planKey: string | null;
+  attempt: number | null;
+  createdAt: number;
+  startedAt: number | null;
+  endedAt: number | null;
+}
+
+export interface HarnessExecutionGraph {
+  rootThreadId: string;
+  /** Nós em ordem de pai antes de filho; `parentId` mantém a relação durável entre domínios. */
+  nodes: HarnessExecutionNode[];
+  /** Eventos semânticos mais recentes da linhagem, persistidos pelo ADE em ordem global. */
+  events: HarnessExecutionEvent[];
+}
+
+export interface HarnessExecutionEvent {
+  sequence: number;
+  nodeId: string;
+  parentNodeId: string | null;
+  threadId: string;
+  turnId: string | null;
+  runId: string | null;
+  taskId: string | null;
+  attemptId: string | null;
+  kind: string;
+  entityId: string | null;
+  payload: Record<string, unknown>;
+  createdAt: number;
 }
 
 /** Algo que un agente del run les dejó escrito a los demás. */

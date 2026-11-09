@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { Rect } from "@/features/tabs/layout/layoutStore";
+import type { ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
 
 /**
  * O estado da casca do chat que não é de domínio: onde fica o terminal da conversa aberta e se
@@ -40,10 +41,20 @@ interface ChatState {
   panelMaximized: boolean;
   /** O navegador da aba Navegador e onde desenhá-lo (como o terminal: por slot, sem remontar). */
   browser: { viewId: string; rect: Rect } | null;
+  /** O navegador está destacado como mini preview sobre a conversa. */
+  browserFloating: boolean;
+  /** Posição e tamanho do mini preview, relativos à casca do chat. */
+  browserFloatRect: Rect | null;
   /** O terminal da aba Terminal do painel (uma aba de shell na pasta da conversa) e onde desenhá-lo, como o navegador. */
   shell: { tabId: string; rect: Rect } | null;
   /** A conversa por protocolo aberta (ver `structured/`); `null` = a da aba ativa. */
   thread: string | null;
+  /** Resultado escolhido na busca local: a timeline rola até o item após abrir a conversa. */
+  threadSearchTarget: { threadId: string; itemId: string; token: number } | null;
+  /** Resultado da busca no transcript de uma TUI aberta: a timeline rola até o item. */
+  tabSearchTarget: { tabId: string; itemId: string; token: number } | null;
+  /** Pedido local para abrir a busca na timeline desta conversa. */
+  timelineFind: { conversationKey: string; token: number } | null;
   /** As superfícies abertas no painel direito, além do Diff, na ordem em que foram abertas (prancheta 8). */
   surfaces: Surface[];
   /** O aparelho escolhido em cada aba de dispositivo (pranchetas 9 e 10) e o nome curto dele, que vira o da aba. */
@@ -54,9 +65,17 @@ interface ChatState {
   /** A largura do painel direito, arrastando a borda (lembrada entre sessões). */
   panelWidth: number;
   /** Um texto para o composer da conversa aberta (a captura de um aparelho); `seq` muda a cada pedido. */
-  composerInsert: { seq: number; text: string } | null;
+  composerInsert: { seq: number; text: string; target?: string | null } | null;
+  /** Pedidos de inserção que ainda não chegaram ao composer da conversa de destino. */
+  composerInsertQueue: { seq: number; text: string; target?: string | null }[];
+  /** Arquivos produzidos numa superfície (por exemplo, uma gravação de tela) para anexar ao composer. */
+  composerAttach: { seq: number; paths: string[]; target?: string | null } | null;
+  /** Pedidos de anexo pendentes; uma restauração em andamento não sobrescreve capturas anteriores. */
+  composerAttachQueue: { seq: number; paths: string[]; target?: string | null }[];
   /** O design pedido para a aba Design (`ags design open`); `seq` muda a cada pedido. */
   designOpen: DesignOpenRequest | null;
+  /** Fala arquivada aberta em prévia local, sem retomar o agente. */
+  archivedMessagePreview: { workspaceId: string; hit: ArchivedMessageSearchHit } | null;
   /** As mensagens na fila de cada conversa (⌘⏎ com o agente trabalhando), na ordem. */
   queues: Record<string, QueuedMessage[]>;
 }
@@ -66,7 +85,7 @@ export interface DesignOpenRequest { designId: string; artboardId?: string | nul
 
 /** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
 export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty" | "tasks">;
-export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android"];
+export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android", "pr", "side"];
 
 /**
  * As abas do painel direito. O Resumo não é uma delas: sem painel ele é a coluna fixa da conversa (`summaryPinned`),
@@ -74,13 +93,13 @@ export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios",
  * `team/TeamPanel.tsx`). `tasks`: as tarefas em segundo plano da conversa (`tasks/TasksPanel.tsx`; não volta sozinha ao
  * reabrir o app). `empty`: o estado vazio do T3.
  */
-export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "empty";
+export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "pr" | "side" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
 
 const PANEL_KEY = "ags.chat.panel";
-const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team"];
+const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team", "pr", "side"];
 
 /**
  * O painel lembrado: a superfície que estava à vista, ou `"none"` (a pessoa o fechou). Sem nada
@@ -162,11 +181,60 @@ function readControl(): boolean {
 const initialPanel = readPanel();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, shell: null, thread: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, browserFloating: false, browserFloatRect: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
   surfaces: initialSurfaces(initialPanel),
-  devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, designOpen: null, panelWidth: readWidth(),
-  queues: {},
+  devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
+  queues: {}, archivedMessagePreview: null,
 }));
+
+let threadSearchToken = 0;
+let timelineFindToken = 0;
+
+/** Abre a busca local da conversa visível e leva o foco ao campo. */
+export function requestTimelineFind(conversationKey: string): number {
+  timelineFindToken += 1;
+  useChatStore.setState({ timelineFind: { conversationKey, token: timelineFindToken } });
+  return timelineFindToken;
+}
+
+/** Fecha somente o pedido que esta instância da busca ainda possui. */
+export function clearTimelineFind(token: number): void {
+  if (useChatStore.getState().timelineFind?.token === token) useChatStore.setState({ timelineFind: null });
+}
+
+/** Abre uma conversa por resultado de mensagem e pede à timeline que mostre o item encontrado. */
+export function requestThreadSearchJump(threadId: string, itemId: string): number {
+  threadSearchToken += 1;
+  useChatStore.setState({ threadSearchTarget: { threadId, itemId, token: threadSearchToken } });
+  return threadSearchToken;
+}
+
+/** Limpa apenas o salto que já foi aplicado; um clique mais novo permanece válido. */
+export function clearThreadSearchJump(token: number): void {
+  if (useChatStore.getState().threadSearchTarget?.token === token) useChatStore.setState({ threadSearchTarget: null });
+}
+
+/** Abre uma TUI pelo resultado de uma mensagem e pede à timeline que mostre o item. */
+export function requestTabSearchJump(tabId: string, itemId: string): number {
+  threadSearchToken += 1;
+  useChatStore.setState({ tabSearchTarget: { tabId, itemId, token: threadSearchToken } });
+  return threadSearchToken;
+}
+
+/** Limpa apenas o salto que já foi aplicado; um clique mais novo permanece válido. */
+export function clearTabSearchJump(token: number): void {
+  if (useChatStore.getState().tabSearchTarget?.token === token) useChatStore.setState({ tabSearchTarget: null });
+}
+
+/** Abre uma fala arquivada em modo somente leitura, sem lançar nem retomar o agente. */
+export function openArchivedMessagePreview(workspaceId: string, hit: ArchivedMessageSearchHit): void {
+  useChatStore.setState({ archivedMessagePreview: { workspaceId, hit } });
+}
+
+/** Fecha a prévia da fala arquivada. */
+export function closeArchivedMessagePreview(): void {
+  useChatStore.setState({ archivedMessagePreview: null });
+}
 
 /**
  * Uma mensagem esperando a vez no composer. `now` = a pessoa pediu «enviar agora» num motor que não aceita entrada no
@@ -210,6 +278,23 @@ export function unqueueMessage(key: string, id: string): string | null {
   if (!found) return null;
   setQueue(key, list.filter((m) => m.id !== id));
   return found.text;
+}
+
+/** Atualiza o texto de uma mensagem sem mudar seu ID, posição ou prioridade na fila. */
+export function updateQueuedMessage(key: string, id: string, text: string): boolean {
+  const clean = text.trim();
+  if (!clean) return false;
+  let updated = false;
+  useChatStore.setState((s) => {
+    const list = s.queues[key] ?? [];
+    const index = list.findIndex((m) => m.id === id);
+    if (index < 0) return s;
+    updated = true;
+    const next = [...list];
+    next[index] = { ...next[index]!, text: clean };
+    return { queues: { ...s.queues, [key]: next } };
+  });
+  return updated;
 }
 
 function setQueue(key: string, list: QueuedMessage[]): void {
@@ -263,12 +348,17 @@ export function setTerminalOpen(tabId: string, open: boolean): void {
 /** Abre o painel direito nesta aba; `null` fecha. */
 export function setRightPanel(panel: RightPanelTab | null): void {
   useChatStore.setState((s) => {
-    if (panel) return { panel };
+    if (panel) return { panel, ...(panel === "browser" ? { browserFloating: false, browserFloatRect: null } : {}) };
     // Ao fechar, lembra a aba à vista (o vazio não conta); fechar de novo, já fechado, não apaga a lembrança.
     const last = s.panel && s.panel !== "empty" ? s.panel : s.lastPanel;
     // O cartão flutuante do Resumo só existe com painel; sem ele, volta a coluna (se o Resumo estiver ligado).
     return { panel: null, panelMaximized: false, lastPanel: last, summaryOpen: false };
   });
+}
+
+/** Alterna a superfície Diff sem alterar o estado das outras superfícies. */
+export function toggleDiffPanel(): void {
+  setRightPanel(useChatStore.getState().panel === "diff" ? null : "diff");
 }
 
 /** Esquece a aba lembrada: a próxima abertura do painel (conversa nova) mostra o estado vazio. */
@@ -284,7 +374,8 @@ export function openTeamPanelFocused(): void {
 
 /** Abre uma superfície no painel (e mostra). */
 export function addSurface(surface: Surface): void {
-  useChatStore.setState((s) => ({ surfaces: s.surfaces.includes(surface) ? s.surfaces : [...s.surfaces, surface], panel: surface }));
+  useChatStore.setState((s) => ({ surfaces: s.surfaces.includes(surface) ? s.surfaces : [...s.surfaces, surface], panel: surface,
+    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null } : {}) }));
 }
 
 /** Fecha uma superfície; se era a que estava à vista, volta ao Diff. */
@@ -341,6 +432,34 @@ export function setChatBrowser(browser: { viewId: string; rect: Rect } | null): 
   useChatStore.setState({ browser });
 }
 
+/** Destaca o mesmo navegador sobre a conversa ou o devolve ao painel lateral. */
+export function toggleChatBrowserFloating(): void {
+  const state = useChatStore.getState();
+  if (!state.browser) return;
+  if (state.browserFloating) {
+    useChatStore.setState({ browserFloating: false, browserFloatRect: null, panel: "browser", panelMaximized: false });
+    return;
+  }
+  useChatStore.setState({
+    browserFloating: true,
+    browserFloatRect: null,
+    panel: null,
+    panelMaximized: false,
+    lastPanel: "browser",
+    summaryOpen: false,
+  });
+}
+
+/** Publica o retângulo do mini preview sem trocar o id/página do navegador. */
+export function setChatBrowserFloatRect(rect: Rect): void {
+  const state = useChatStore.getState();
+  if (!state.browser) return;
+  const browserChanged = !sameRect(state.browser.rect, rect);
+  const floatChanged = !sameRect(state.browserFloatRect, rect);
+  if (!browserChanged && !floatChanged) return;
+  useChatStore.setState({ browser: browserChanged ? { viewId: state.browser.viewId, rect } : state.browser, browserFloatRect: rect });
+}
+
 /** Escolhe o aparelho de uma aba de dispositivo e guarda o nome curto (o da aba). */
 export function setPanelDevice(kind: DeviceKind, id: string | null, name: string | null): void {
   const s = useChatStore.getState();
@@ -360,9 +479,43 @@ export function setDeviceControl(on: boolean): void {
   if (!on) void import("./devicesIpc").then((m) => m.computerUseForget()).catch(() => undefined);
 }
 
-/** Põe um texto no composer da conversa aberta (a captura de um aparelho, como `@caminho`). */
-export function insertIntoComposer(text: string): void {
-  useChatStore.setState((s) => ({ composerInsert: { seq: (s.composerInsert?.seq ?? 0) + 1, text } }));
+/** Põe um texto no composer da conversa de destino (a captura de um aparelho, como `@caminho`). */
+export function insertIntoComposer(text: string, target?: string | null): void {
+  useChatStore.setState((s) => {
+    const seq = Math.max(s.composerInsert?.seq ?? 0, ...s.composerInsertQueue.map((item) => item.seq)) + 1;
+    const request = { seq, text, target };
+    return { composerInsert: request, composerInsertQueue: [...s.composerInsertQueue, request] };
+  });
+}
+
+/** Pede ao composer aberto para anexar arquivos locais, sem enviá-los. */
+export function attachToComposer(paths: string[], target?: string | null): void {
+  const unique = [...new Set(paths.filter((path) => path.length > 0))];
+  if (unique.length === 0) return;
+  useChatStore.setState((s) => {
+    const seq = Math.max(s.composerAttach?.seq ?? 0, ...s.composerAttachQueue.map((item) => item.seq)) + 1;
+    const request = { seq, paths: unique, target };
+    return { composerAttach: request, composerAttachQueue: [...s.composerAttachQueue, request] };
+  });
+}
+
+/** Retira apenas os textos destinados ao composer ativo; os demais aguardam sua conversa. */
+export function takeComposerInserts(target: string | null): { seq: number; text: string; target?: string | null }[] {
+  let taken: { seq: number; text: string; target?: string | null }[] = [];
+  useChatStore.setState((state) => {
+    taken = state.composerInsertQueue.filter((item) => item.target == null || item.target === target);
+    if (taken.length === 0) return state;
+    const ids = new Set(taken.map((item) => item.seq));
+    return { composerInsertQueue: state.composerInsertQueue.filter((item) => !ids.has(item.seq)) };
+  });
+  return taken;
+}
+
+/** Reconhece anexos só depois de a inspeção terminar no composer que os recebeu. */
+export function acknowledgeComposerAttachments(sequences: number[]): void {
+  if (sequences.length === 0) return;
+  const ids = new Set(sequences);
+  useChatStore.setState((state) => ({ composerAttachQueue: state.composerAttachQueue.filter((item) => !ids.has(item.seq)) }));
 }
 
 /** Muda a largura do painel direito; `save` grava (no fim do arrasto, não a cada pixel). */

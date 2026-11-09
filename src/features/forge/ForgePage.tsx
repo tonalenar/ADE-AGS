@@ -1,4 +1,3 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +7,7 @@ import { ExternalIcon, IssueIcon, PullRequestIcon, TagIcon } from "@/app/icons";
 import { useShellGroups } from "@/app/shellContext";
 import { useTabsStore } from "@/features/tabs/store";
 import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { ForgeItemsView, type ItemFilter } from "./ForgeItemsView";
 import { ForgeIcon } from "./forgeMeta";
@@ -213,7 +213,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
         <ForgeIcon kind={target.kind} className="w-4 h-4 shrink-0 text-gray-500 dark:text-white/45" />
         {link ? (
           <button type="button"
-            onClick={() => { openUrl(link).catch(console.error); }}
+            onClick={() => { openExternalUrl(link).catch(console.error); }}
             title={`${t("forge.panel.openInBrowser")} · ${link}`}
             aria-label={`${t("forge.panel.openInBrowser")}: ${target.path}`}
             className="cc-t group min-w-0 flex items-center gap-1.5 rounded-md px-1 -mx-1 py-0.5

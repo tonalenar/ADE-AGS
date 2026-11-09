@@ -558,12 +558,12 @@ Development started from a phased plan (no longer in the tree; see `git log -- p
 | 8 · Orchestrator CLI | ✅ Done |
 | 9 · Orchestrator token budget | ✅ Done — compression, read cursors, push mode, watch ceiling, usage indicator |
 | 10 · Quick switcher, snapshots, analytics | 🚧 Partial — installers for six targets ship; the quick switcher, named snapshots and analytics don't |
-| 11 · MCP server management | ⏳ Planned — install once, attach per workspace or tab |
+| 11 · MCP server management | 🚧 Partial — ADE's own MCP is attached per process/session for supported agents; managing arbitrary user MCP servers remains planned |
 | Beyond the plan | ✅ Fleet, right panel (files, search, git), file/diff/browser tabs, plan usage |
 
 ### What's next
 
-**MCP servers.** The install-once-attach-anywhere model of skills, applied to MCP servers from the [official MCP registry](https://registry.modelcontextprotocol.io/). For agents that take configuration per invocation — Claude Code via `--mcp-config` / `--strict-mcp-config`, Codex via `CODEX_HOME` — that means real per-tab isolation: two tabs on the same folder seeing different servers, without touching a file you own. The fleet already launches its tasks this way for its own permission server.
+**User MCP servers.** The install-once-attach-anywhere model of skills, applied to MCP servers from the [official MCP registry](https://registry.modelcontextprotocol.io/), is still planned. Separately, ADE attaches its own MCP server to supported agent sessions: Claude Code uses `--mcp-config`, Codex uses process-only `-c` overrides, OpenCode receives merged per-process configuration, and Hermes uses its managed directory. These session-scoped paths do not edit the user's global Codex configuration. The fleet also launches its own permission server per task.
 
 **Signing in to your git host.** The source control panel uses whatever credentials `git` already has. A GitHub / GitLab login is the natural next step, and network operations already go through a single place for it to plug into.
 
