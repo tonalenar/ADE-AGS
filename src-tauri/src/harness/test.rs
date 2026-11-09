@@ -218,3 +218,224 @@ fn escopos_de_instancia_so_nas_capabilities_que_o_adapter_decide_sozinho() {
         }
     }
 }
+
+// ── Fase 1: identidade durável (`harness_run`, `harness_node`) ──────────────────────────────
+
+mod fase1 {
+    use rusqlite::Connection;
+
+    use crate::conversa::store::{self as chat, Tuning};
+    use crate::harness::state::{EndReason, NodeState, from_chat_run, from_fleet_run, from_task};
+    use crate::harness::store as harness;
+    use crate::runs::store::{self as fleet, NewTask, SWEPT_RUNNING_ERROR};
+
+    fn db() -> Connection {
+        crate::database::test_db()
+    }
+
+    fn tuning() -> Tuning {
+        Tuning { model: None, effort: None, access: "ask".into() }
+    }
+
+    fn thread(conn: &Connection, id: &str) {
+        chat::insert_thread(conn, id, "codex", "/p", "T", &tuning(), None, 1).unwrap();
+    }
+
+    fn child(conn: &Connection, id: &str, parent: &str) {
+        let parent_ref = format!("thread:{parent}");
+        chat::insert_thread_with_parent(conn, id, "codex", "/p", "T", &tuning(), None, Some(&parent_ref), 2).unwrap();
+    }
+
+    fn turn(conn: &Connection, thread: &str, id: &str, status: &str) {
+        chat::upsert_run(conn, thread, id, status, Some(1), None, None).unwrap();
+    }
+
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0)).unwrap()
+    }
+
+    fn fleet_run(conn: &Connection, source: Option<&str>) -> String {
+        conn.execute_batch("INSERT OR IGNORE INTO workspaces (id, name, created_at, last_active) VALUES ('w1', 'W', 0, 0)").unwrap();
+        let run = fleet::create_run(conn, "w1", "objetivo", "/p").unwrap();
+        if let Some(thread) = source {
+            fleet::set_run_source_thread(conn, &run.id, thread).unwrap();
+        }
+        run.id
+    }
+
+    fn fleet_task(conn: &Connection, run_id: &str, key: &str) -> String {
+        fleet::create_task(
+            conn,
+            &NewTask { run_id, title: key, prompt: "p", agent_id: "claude-code", cwd: "/p", plan_key: Some(key), ..Default::default() },
+        )
+        .unwrap()
+        .id
+    }
+
+    /// Teste 1.
+    #[test]
+    fn a_migracao_do_harness_roda_duas_vezes_sem_perder_linhas() {
+        let conn = db();
+        thread(&conn, "r");
+        turn(&conn, "r", "t1", "inProgress");
+        child(&conn, "c", "r");
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (1, 2));
+        harness::migrate(&conn).unwrap();
+        chat::migrate(&conn).unwrap();
+        crate::database::migrate_for_tests(&conn).unwrap();
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (1, 2), "migrar de novo não apaga nada");
+    }
+
+    #[test]
+    fn ligar_de_novo_o_mesmo_registro_nativo_devolve_o_mesmo_no() {
+        let conn = db();
+        thread(&conn, "r");
+        turn(&conn, "r", "t1", "inProgress");
+        let first = harness::link_child_chat(&conn, "r", "t1", "c", 5).unwrap();
+        assert_eq!(harness::link_child_chat(&conn, "r", "t1", "c", 6).unwrap(), first);
+        let run_id = fleet_run(&conn, Some("r"));
+        let node = harness::link_fleet_run(&conn, "r", "t1", &run_id, 7).unwrap();
+        assert_eq!(harness::link_fleet_run(&conn, "r", "t1", &run_id, 8).unwrap(), node);
+        let task = fleet_task(&conn, &run_id, "a");
+        let task_node = harness::link_fleet_task(&conn, &run_id, &task, None, 9).unwrap().unwrap();
+        assert_eq!(harness::link_fleet_task(&conn, &run_id, &task, None, 10).unwrap(), Some(task_node));
+        // root + filho de chat + run + tarefa, num único run do harness.
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (1, 4));
+    }
+
+    #[test]
+    fn a_tarefa_cuja_pai_tem_no_fica_sob_a_pai_e_a_sem_run_ligado_nao_vira_no() {
+        let conn = db();
+        thread(&conn, "r");
+        turn(&conn, "r", "t1", "inProgress");
+        let run_id = fleet_run(&conn, Some("r"));
+        let lead = fleet_task(&conn, &run_id, "lead");
+        let sub = fleet_task(&conn, &run_id, "sub");
+        // Sem nó para o run da Frota: tarefa não cria run nem nó.
+        assert_eq!(harness::link_fleet_task(&conn, &run_id, &lead, None, 1).unwrap(), None);
+        assert_eq!(count(&conn, "harness_node"), 0);
+        harness::link_fleet_run(&conn, "r", "t1", &run_id, 2).unwrap();
+        let lead_node = harness::link_fleet_task(&conn, &run_id, &lead, None, 3).unwrap().unwrap();
+        harness::link_fleet_task(&conn, &run_id, &sub, Some(&lead), 4).unwrap();
+        let parent: String = conn
+            .query_row("SELECT parent_id FROM harness_node WHERE legacy_ref = ?1", [format!("task:{sub}")], |row| row.get(0))
+            .unwrap();
+        assert_eq!(parent, lead_node);
+    }
+
+    #[test]
+    fn o_id_do_turno_nao_cruza_conversas() {
+        let conn = db();
+        thread(&conn, "a");
+        thread(&conn, "b");
+        // O mesmo `turn_id` em duas conversas: duas identidades, nunca uma só.
+        turn(&conn, "a", "t1", "inProgress");
+        turn(&conn, "b", "t1", "inProgress");
+        let a = harness::ensure_run(&conn, "a", "t1", 1).unwrap();
+        let b = harness::ensure_run(&conn, "b", "t1", 1).unwrap();
+        assert_ne!(a.run_id, b.run_id);
+        assert_ne!(a.root_node_id, b.root_node_id);
+        assert_eq!(harness::ensure_run(&conn, "a", "t1", 9).unwrap(), a);
+    }
+
+    /// Teste 8: só as linhas `harness_*` (e as dependentes da conversa) saem; a Frota fica.
+    #[test]
+    fn apagar_a_conversa_remove_so_as_linhas_do_harness_e_a_frota_fica() {
+        let conn = db();
+        thread(&conn, "r");
+        turn(&conn, "r", "t1", "inProgress");
+        child(&conn, "c", "r");
+        let run_id = fleet_run(&conn, Some("r"));
+        harness::link_fleet_run(&conn, "r", "t1", &run_id, 3).unwrap();
+        let task = fleet_task(&conn, &run_id, "a");
+        harness::link_fleet_task(&conn, &run_id, &task, None, 4).unwrap();
+        assert_eq!(count(&conn, "harness_node"), 4);
+        conn.execute("DELETE FROM chat_thread WHERE id = 'r'", []).unwrap();
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (0, 0));
+        assert_eq!((count(&conn, "runs"), count(&conn, "tasks")), (1, 1), "a Frota não é tocada");
+        assert_eq!(chat::thread(&conn, "c").unwrap().map(|row| row.id), Some("c".into()), "outra conversa também não");
+    }
+
+    /// Ajuste 2: apagar uma conversa lateral filha não pode deixar nó apontando para nada.
+    #[test]
+    fn apagar_a_conversa_lateral_filha_tira_o_no_dela_e_deixa_o_do_turno() {
+        let conn = db();
+        thread(&conn, "r");
+        turn(&conn, "r", "t1", "inProgress");
+        child(&conn, "c", "r");
+        child(&conn, "d", "r");
+        assert_eq!(count(&conn, "harness_node"), 3);
+        assert!(chat::delete_side_chat(&conn, "c").unwrap());
+        let refs: Vec<String> = conn
+            .prepare("SELECT legacy_ref FROM harness_node ORDER BY legacy_ref")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(refs, ["thread:d", "turn:r:t1"]);
+        assert_eq!(count(&conn, "harness_run"), 1);
+    }
+
+    /// Ajuste 2 (outras rotas): a Frota não tem rota de apagar, mas o CASCADE do workspace apaga run e
+    /// tarefas. Os nós saem na mesma operação (o gatilho dispara também nas deleções por CASCADE).
+    #[test]
+    fn apagar_o_run_ou_a_tarefa_da_frota_tira_os_nos_sem_estourar() {
+        let conn = db();
+        thread(&conn, "r");
+        turn(&conn, "r", "t1", "inProgress");
+        let run_a = fleet_run(&conn, Some("r"));
+        harness::link_fleet_run(&conn, "r", "t1", &run_a, 3).unwrap();
+        let task_a = fleet_task(&conn, &run_a, "a");
+        let task_b = fleet_task(&conn, &run_a, "b");
+        harness::link_fleet_task(&conn, &run_a, &task_a, None, 4).unwrap();
+        harness::link_fleet_task(&conn, &run_a, &task_b, None, 4).unwrap();
+        assert_eq!(count(&conn, "harness_node"), 4);
+        conn.execute("DELETE FROM tasks WHERE id = ?1", [&task_a]).unwrap();
+        assert_eq!(count(&conn, "harness_node"), 3);
+        // O workspace apaga o run e as tarefas por CASCADE.
+        conn.execute("DELETE FROM workspaces WHERE id = 'w1'", []).unwrap();
+        assert_eq!(count(&conn, "runs"), 0);
+        let left: Vec<String> = conn
+            .prepare("SELECT legacy_ref FROM harness_node")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(left, ["turn:r:t1"], "só o nó raiz do turno, que não tem origem apagada");
+    }
+
+    #[test]
+    fn o_estado_do_no_e_derivado_do_nativo() {
+        let state = |derived: crate::harness::state::Derived| derived.state;
+        assert_eq!(state(from_chat_run("inProgress", false)), NodeState::Running);
+        assert_eq!(state(from_chat_run("inProgress", true)), NodeState::Waiting);
+        assert_eq!(state(from_chat_run("completed", false)), NodeState::Completed);
+        assert_eq!(state(from_chat_run("failed", false)), NodeState::Failed);
+        assert_eq!(state(from_chat_run("interrupted", true)), NodeState::Interrupted);
+        // Valor desconhecido nunca vira terminal conhecido.
+        let unknown = from_chat_run("aborted", false);
+        assert_eq!(unknown.state, NodeState::Interrupted);
+        assert_eq!(unknown.end_reason, Some(EndReason::UnmappedNativeStatus));
+        assert!(unknown.outcome_unknown);
+
+        for (native, expected) in [
+            ("pending", NodeState::Pending),
+            ("ready", NodeState::Pending),
+            ("running", NodeState::Running),
+            ("done", NodeState::Completed),
+            ("failed", NodeState::Failed),
+            ("cancelled", NodeState::Cancelled),
+            ("handed_off", NodeState::HandedOff),
+            ("skipped", NodeState::Skipped),
+        ] {
+            assert_eq!(state(from_task(native, None)), expected, "{native}");
+        }
+        let swept = from_task("failed", Some(SWEPT_RUNNING_ERROR));
+        assert_eq!((swept.state, swept.end_reason), (NodeState::Interrupted, Some(EndReason::AppClosed)));
+        assert_eq!(from_task("skipped", None).end_reason, Some(EndReason::DependencyFailed));
+        assert_eq!(state(from_fleet_run("done")), NodeState::Completed);
+        assert!(NodeState::Cancelled.is_terminal() && !NodeState::Waiting.is_terminal());
+    }
+}
