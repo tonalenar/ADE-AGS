@@ -222,11 +222,6 @@ pub fn link_fleet_run(
     )
 }
 
-/// O nó do run da Frota, se ele foi ligado a um turno.
-pub fn fleet_run_node(conn: &Connection, fleet_run_id: &str) -> rusqlite::Result<Option<String>> {
-    Ok(node_by_source(conn, SourceKind::FleetRun, fleet_run_id)?.map(|node| node.id))
-}
-
 /// Liga a tarefa ao nó do run da Frota, ou ao da tarefa pai quando ele existe.
 ///
 /// Devolve `None` quando o run da Frota não tem nó (criado fora de conversa, ou sem turno ativo):

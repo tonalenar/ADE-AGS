@@ -22,20 +22,6 @@ pub enum NodeState {
 }
 
 impl NodeState {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Pending => "pending",
-            Self::Running => "running",
-            Self::Waiting => "waiting",
-            Self::Completed => "completed",
-            Self::Failed => "failed",
-            Self::Cancelled => "cancelled",
-            Self::Interrupted => "interrupted",
-            Self::Skipped => "skipped",
-            Self::HandedOff => "handed_off",
-        }
-    }
-
     pub const fn is_terminal(self) -> bool {
         !matches!(self, Self::Pending | Self::Running | Self::Waiting)
     }
@@ -47,16 +33,6 @@ pub enum EndReason {
     AppClosed,
     DependencyFailed,
     UnmappedNativeStatus,
-}
-
-impl EndReason {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AppClosed => "app_closed",
-            Self::DependencyFailed => "dependency_failed",
-            Self::UnmappedNativeStatus => "unmapped_native_status",
-        }
-    }
 }
 
 /// Estado derivado, com o atributo que acompanha um terminal (não é um estado).
