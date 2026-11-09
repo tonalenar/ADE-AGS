@@ -658,8 +658,10 @@ impl Motor {
                 ClaudeOut::Session(id) => self.abriu(&id),
                 ClaudeOut::Item(item) => self.out.guardar(*item),
                 ClaudeOut::Delta { item_id, delta, .. } => self.out.deltas.push((item_id, delta)),
-                // As tarefas e o que o subagente faz só vão à janela: a bancada compara a timeline e o turno.
-                ClaudeOut::Mode(_) | ClaudeOut::Task(_) | ClaudeOut::SubItem { .. } => {}
+                ClaudeOut::Task(task) => self.out.filhos.push(Filho { tipo: "task".into(), parent: None, task: Some(task), item: None }),
+                ClaudeOut::SubItem { parent, item } => self.out.filhos.push(Filho { tipo: "subitem".into(), parent: Some(parent), task: None, item: Some(*item) }),
+                // O modo de permissão não entra na timeline nem no filho.
+                ClaudeOut::Mode(_) => {}
                 ClaudeOut::Done(result) => {
                     // O resultado antes do `init` é a abertura que falhou (o `--resume` de uma sessão que não existe).
                     if self.out.abertura.is_none() {

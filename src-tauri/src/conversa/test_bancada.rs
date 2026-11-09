@@ -251,9 +251,37 @@ fn o_snapshot_afirma_o_tipo_do_item_e_o_pedido_que_sobra() {
     assert!(falhas.is_empty(), "{falhas:?}");
     assert!(super::replay_protocolo::snapshot(&cancelado)["pedidosPendentes"].as_array().unwrap().is_empty());
 
-    let errado = Espera { pedidos_pendentes: Some(vec![]), ..espera };
+    let errado = Espera { pedidos_pendentes: Some(vec![]), ..espera.clone() };
     let falhas = conferir(&errado, &aberto, Protocolo::ClaudeStream, &sem_placeholder);
     assert!(falhas.iter().any(|e| e.contains("pedidosPendentes")), "{falhas:?}");
+}
+
+/// B3: a tarefa e o que o subagente faz iam para o chão. Ficam em `filhos`, fora da timeline do pai,
+/// e o filho pode aparecer antes de o turno do pai acabar.
+#[test]
+fn o_motor_guarda_a_tarefa_e_o_item_do_subagente() {
+    let eventos = vec![
+        json!({ "type": "system", "subtype": "init", "session_id": "s1" }),
+        json!({ "type": "system", "subtype": "task_started", "task_id": "af9", "tool_use_id": "toolu_agent",
+            "description": "Responder com ok", "task_type": "local_agent", "prompt": "Responda só ok." }),
+        json!({ "type": "assistant", "parent_tool_use_id": "toolu_agent",
+            "message": { "id": "msg_sub", "content": [{ "type": "text", "text": "ok" }] } }),
+        json!({ "type": "assistant", "message": { "id": "msg_pai", "content": [{ "type": "text", "text": "o pai segue" }] } }),
+    ];
+    let saidas: Vec<Saida> = eventos.into_iter().enumerate().map(|(i, v)| Saida { at_ms: i as u64 * 10, evento: Evento::Linha(v.to_string()) }).collect();
+    let r = rodar(Protocolo::ClaudeStream, &saidas);
+    assert!(r.fim.is_none(), "o turno do pai continua aberto");
+    assert_eq!(r.texto(), "o pai segue", "a fala do filho não entra na timeline: {}", r.texto());
+    assert_eq!(r.filhos_compactos(), ["task:af9:started", "subitem:toolu_agent:assistant"]);
+    let espera = Espera { filhos: Some(vec!["task:af9:started".into(), "subitem:toolu_agent:assistant".into()]), tipos: Some(vec!["assistant".into()]), ..Espera::default() };
+    let falhas = conferir(&espera, &r, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.is_empty(), "{falhas:?}");
+    let snap = super::replay_protocolo::snapshot(&r);
+    assert_eq!(snap["filhos"][0]["tipo"], "task");
+    assert_eq!(snap["filhos"][0]["task"]["taskId"], "af9");
+    assert_eq!(snap["filhos"][1]["parent"], "toolu_agent");
+    assert_eq!(snap["filhos"][1]["item"]["text"], "ok");
+    assert!(snap["itens"].as_array().unwrap().iter().all(|i| i["text"] != "ok"));
 }
 
 // ── A retomada (`resume.rs`) com sessões abertas pela bancada ─────────────────

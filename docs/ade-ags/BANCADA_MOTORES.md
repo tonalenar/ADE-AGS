@@ -26,7 +26,7 @@ O fake **não é um binário**: os motores (`claude.rs`, `codex.rs`, `opencode.r
    - pula a linha que não é JSON;
    - passa o resto por `claude_map::Mapper`, `codex_map::{items_of, delta_of, ask_of, turn_end}` ou `opencode_map::Mapper`;
    - fecha o turno de um processo que caiu com `turn::dropped` + `turn::stderr_reason` (no Codex, sem o stderr, como o `codex.rs`).
-3. O `Resultado` traz a sessão, a timeline (o item atualizado fica no lugar, como no banco), os pedaços, os pedidos, o fim do turno, as linhas puladas e o maior silêncio. Traz também as classes de erro que o resto do app usa:
+3. O `Resultado` traz a sessão, a timeline (o item atualizado fica no lugar, como no banco), os pedaços, os pedidos, os filhos (`Task` e `SubItem`, fora da timeline), o fim do turno, as linhas puladas e o maior silêncio. Traz também as classes de erro que o resto do app usa:
    - `classe()`: `runs::failure::classify`;
    - `classe_para_o_pool()`: o filtro do `pool::after_turn` (interrupção não conta);
    - `falha_de_retomada()`: `resume::classify`, com a recusa do Codex como `Gone`, como em `codex::resume_failure`.
