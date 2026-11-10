@@ -49,6 +49,10 @@ pub struct Session {
     remote: Mutex<Option<String>>,
     /// O turno em andamento (o id é do app: o Claude não numera os turnos).
     turn: Mutex<Option<String>>,
+    /// Os `tool_use` que lançaram uma tarefa em segundo plano (`is_backgrounded`), pelo id. O desfecho deles vem pelo
+    /// canal de tarefas (`task_notification`, `stop_task`), não por `tool_result`: com o processo vivo, o fim do turno
+    /// não os marca (ver `finish_turn`).
+    background: Mutex<HashSet<String>>,
     /// Fecha o processo quando o turno acabar (modelo ou esforço trocados no meio do turno).
     stale: AtomicBool,
     /// Marca as chamadas de uso que fazem parte de uma compactação automática iniciada pela ADE.
@@ -278,6 +282,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         alive: AtomicBool::new(true),
         remote: Mutex::new(None),
         turn: Mutex::new(None),
+        background: Mutex::new(HashSet::new()),
         stale: AtomicBool::new(false),
         auto_compacting: AtomicBool::new(false),
         mapper: Mutex::new(Mapper::default()),
@@ -359,7 +364,8 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
         session.auto_compacting.store(false, Ordering::SeqCst);
         let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
         let (result, message) = turn::dropped(killed, tail.as_deref(), "Claude");
-        finish_turn(app, db, thread_id, &turn, &result);
+        // Sem o processo, o canal de tarefas morre com ele: nenhuma ferramenta fica de fora da marcação.
+        finish_turn(app, db, thread_id, &turn, &result, &HashSet::new());
         if let Some(message) = message {
             emit(app, thread_id, "error", json!({ "message": message }));
         }
@@ -431,29 +437,46 @@ fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: Optio
     }
 }
 
-fn finish_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, result: &claude_map::TurnResult) {
+/// Fecha o turno do Claude no banco e na janela. Em qualquer fim (normal, interrompido, com erro ou por queda), as
+/// ferramentas do turno que ficaram sem resultado viram «desfecho desconhecido», exceto as de `legit` (ver `gravar_fim`).
+fn finish_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, result: &claude_map::TurnResult, legit: &HashSet<String>) {
     let now = crate::util::now_ts_ms();
-    let (expired, _) = db.lock().ok().map(|conn| gravar_fim(&conn, thread_id, turn, result, &HashSet::new(), now)).unwrap_or_default();
+    let (expired, marked) = db.lock().ok().map(|conn| gravar_fim(&conn, thread_id, turn, result, legit, now)).unwrap_or_default();
     for id in expired {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
+    }
+    for item in marked {
+        emit(app, thread_id, "item", json!({ "item": item }));
     }
     save_items(app, db, thread_id, Some(turn), vec![claude_map::turn_end(turn, result, Some(now))]);
     super::pool::after_turn(app, db, thread_id, result);
 }
 
-/// O que o banco guarda quando o turno do Claude acaba: o status e os pedidos pendentes que expiram (devolve os ids).
-/// Separada de `finish_turn` para testar com `test_db()`. A marcação das ferramentas sem resultado entra na próxima etapa.
+/// O que o banco guarda quando o turno do Claude acaba: o status, os pedidos pendentes que expiram (devolve os ids) e as
+/// ferramentas sem desfecho, marcadas (devolve o que mudou, para a janela). `legit` são as tarefas em segundo plano que
+/// seguem com o processo vivo; com o processo caído, `legit` vem vazio, porque o canal de tarefas morre com ele.
+/// Separada de `finish_turn` para testar com `test_db()`.
 pub(super) fn gravar_fim(
     conn: &rusqlite::Connection,
     thread_id: &str,
     turn: &str,
     result: &claude_map::TurnResult,
-    _legit: &HashSet<String>,
+    legit: &HashSet<String>,
     now: i64,
 ) -> (Vec<String>, Vec<Item>) {
     let _ = store::upsert_run(conn, thread_id, turn, claude_map::run_status(result), None, Some(now), result.duration_ms);
     let expired = store::expire_requests(conn, thread_id).unwrap_or_default();
-    (expired, Vec::new())
+    let marked = turn::mark_unknown_outcomes_except(conn, thread_id, turn, now, legit).unwrap_or_default();
+    (expired, marked)
+}
+
+/// O id do `tool_use` que lançou a tarefa, se o evento `task` é o começo de uma tarefa em segundo plano
+/// (`is_backgrounded`). Pura: lê o que `tarefas::claude_task` devolveu.
+pub(super) fn tarefa_em_segundo_plano(task: &Value) -> Option<String> {
+    if task.get("op").and_then(Value::as_str) != Some("started") || task.get("background").and_then(Value::as_bool) != Some(true) {
+        return None;
+    }
+    task.get("toolUseId").and_then(Value::as_str).filter(|id| !id.is_empty()).map(str::to_string)
 }
 
 fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) {
@@ -491,7 +514,14 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
         }
         // As tarefas em segundo plano e o que um subagente faz vão só à janela (o painel de tarefas): não abrem turno,
         // porque o aviso de fim de um shell chega entre turnos, e não entram no banco da timeline.
-        Out::Task(task) => emit(app, thread_id, "task", json!({ "task": task })),
+        Out::Task(task) => {
+            if let Some(id) = tarefa_em_segundo_plano(&task)
+                && let Ok(mut background) = session.background.lock()
+            {
+                background.insert(id);
+            }
+            emit(app, thread_id, "task", json!({ "task": task }));
+        }
         Out::SubItem { parent, item } => emit(app, thread_id, "taskItem", json!({ "parentToolUseId": parent, "item": item })),
         Out::Done(result) => {
             let Some(turn) = session.turn() else { return };
@@ -500,7 +530,9 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
             if let Ok(mut asks) = session.asks.lock() {
                 asks.clear();
             }
-            finish_turn(app, db, thread_id, &turn, &result);
+            // Com o processo vivo, as tarefas em segundo plano seguem depois do fim do turno: o desfecho delas não é deste turno.
+            let legit = session.background.lock().map(|background| background.clone()).unwrap_or_default();
+            finish_turn(app, db, thread_id, &turn, &result, &legit);
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
             if session.stale.load(Ordering::SeqCst) {
                 close(thread_id);

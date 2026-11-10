@@ -1665,6 +1665,53 @@ mod desfecho_desconhecido {
         assert!(mudou.is_empty(), "nada ficou sem desfecho");
         assert!(store::items(&conn, "t1").unwrap().iter().all(|i| i.kind != ItemKind::Notice));
     }
+
+    #[test]
+    fn o_fim_do_claude_nao_marca_a_tarefa_em_segundo_plano_que_segue_com_o_processo_vivo() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("bg", "Bash", "npm run dev")).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("fg", "Bash", "cargo build")).unwrap();
+        let legit: HashSet<String> = HashSet::from(["bg".to_string()]);
+        let interrompido = TurnResult { interrupted: true, ..Default::default() };
+        claude::gravar_fim(&conn, "t1", "r1", &interrompido, &legit, 50);
+        let items = store::items(&conn, "t1").unwrap();
+        assert_eq!(item(&items, "bg").status, Some(ToolStatus::Running), "o desfecho da tarefa em segundo plano vem pelo canal de tarefas");
+        assert_eq!(item(&items, "fg").status, Some(ToolStatus::Error), "a de primeiro plano sem resultado é desfecho desconhecido");
+        let aviso = items.iter().find(|i| i.kind == ItemKind::Notice).expect("o aviso na timeline");
+        let texto = aviso.text.as_deref().unwrap();
+        assert!(texto.contains("`Bash cargo build`") && !texto.contains("npm run dev"), "{texto}");
+        assert_eq!(estado_do_turno(&conn, "r1"), "interrupted");
+    }
+
+    #[test]
+    fn o_fim_normal_do_claude_com_so_tarefa_em_segundo_plano_pendente_nao_avisa() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("bg", "Bash", "npm run dev")).unwrap();
+        let legit: HashSet<String> = HashSet::from(["bg".to_string()]);
+        let fim = TurnResult { duration_ms: Some(900), ..Default::default() };
+        let (_, mudou) = claude::gravar_fim(&conn, "t1", "r1", &fim, &legit, 50);
+        assert!(mudou.is_empty(), "a tarefa segue: nada muda");
+        let items = store::items(&conn, "t1").unwrap();
+        assert_eq!(item(&items, "bg").status, Some(ToolStatus::Running));
+        assert!(items.iter().all(|i| i.kind != ItemKind::Notice), "nenhuma ferramenta ficou sem desfecho");
+        assert!(unknown_outcome_note(&items).is_none());
+    }
+
+    #[test]
+    fn so_a_tarefa_em_segundo_plano_que_comecou_guarda_o_id_da_ferramenta() {
+        use super::super::tarefas::claude_task;
+        let comeco = |segundo_plano: bool| {
+            claude_task(&json!({ "type": "system", "subtype": "task_started", "task_id": "k1", "task_type": "local_bash", "tool_use_id": "toolu_bash", "is_backgrounded": segundo_plano, "description": "npm run dev" }), 1).unwrap()
+        };
+        assert_eq!(claude::tarefa_em_segundo_plano(&comeco(true)), Some("toolu_bash".to_string()));
+        assert_eq!(claude::tarefa_em_segundo_plano(&comeco(false)), None, "a de primeiro plano não sobrevive ao turno");
+        let fim = claude_task(&json!({ "type": "system", "subtype": "task_notification", "task_id": "k1", "tool_use_id": "toolu_bash", "status": "completed", "summary": "ok" }), 2).unwrap();
+        assert_eq!(claude::tarefa_em_segundo_plano(&fim), None, "só o começo conta: o fim chega pelo canal de tarefas");
+    }
 }
 
 // ── Fase 1 do harness: o filho de chat entra no `harness_run` do turno que o criou ─────────

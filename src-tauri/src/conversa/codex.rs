@@ -8,7 +8,7 @@
 //! (`working`/`idle`), `request` e `requestResolved` (aprovações e perguntas), `thread` (o título
 //! mudou), `error` e `closed`. O lock do banco só é pego para gravar, nunca durante o I/O.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -536,14 +536,16 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Session, method: &st
     }
 }
 
-/// O que o banco guarda quando o `turn/completed` chega, com qualquer status: o status do turno como veio, e os pedidos
-/// pendentes que expiram (devolve os ids). Separada para testar com `test_db()`. A marcação das ferramentas sem resultado
-/// entra na próxima etapa.
+/// O que o banco guarda quando o `turn/completed` chega, com qualquer status: o status do turno como veio, os pedidos
+/// pendentes que expiram (devolve os ids) e as ferramentas sem desfecho, marcadas (devolve o que mudou, para a janela).
+/// O Codex não põe tarefa em segundo plano na timeline (`collabAgentToolCall` e `subAgentActivity` só vão ao painel),
+/// então nenhuma ferramenta fica de fora da marcação. Separada para testar com `test_db()`.
 pub(super) fn gravar_fim(conn: &rusqlite::Connection, thread_id: &str, turn_id: &str, turn: &Value, now: i64) -> (Vec<String>, Vec<crate::canal::timeline::Item>) {
     let status = turn.get("status").and_then(Value::as_str).unwrap_or("completed");
     let _ = store::upsert_run(conn, thread_id, turn_id, status, None, Some(now), turn.get("durationMs").and_then(Value::as_i64));
     let expired = store::expire_requests(conn, thread_id).unwrap_or_default();
-    (expired, Vec::new())
+    let marked = turn::mark_unknown_outcomes_except(conn, thread_id, turn_id, now, &HashSet::new()).unwrap_or_default();
+    (expired, marked)
 }
 
 fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: Option<&str>, items: Vec<crate::canal::timeline::Item>) {
@@ -579,9 +581,12 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
             let id = turn.get("id").and_then(Value::as_str).unwrap_or("");
             let now = crate::util::now_ts_ms();
             session.turn_completed(id);
-            let (expired, _) = db.lock().ok().map(|conn| gravar_fim(&conn, thread_id, id, turn, now)).unwrap_or_default();
+            let (expired, marked) = db.lock().ok().map(|conn| gravar_fim(&conn, thread_id, id, turn, now)).unwrap_or_default();
             for rid in expired {
                 emit(app, thread_id, "requestResolved", json!({ "id": rid }));
+            }
+            for item in marked {
+                emit(app, thread_id, "item", json!({ "item": item }));
             }
             save_items(app, db, thread_id, Some(id), codex_map::turn_end(turn, Some(now)).into_iter().collect());
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
