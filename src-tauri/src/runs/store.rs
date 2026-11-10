@@ -357,6 +357,16 @@ pub fn save_delegation_receipt(
         rusqlite::params![caller_key, request_id, request_hash, run_id, task_keys, crate::util::now_ts_ms()],
     )
     .map_err(|error| format!("não consegui registrar a idempotência da delegação: {error}"))?;
+    // Escrita dupla (harness, contrato §11.6): o recibo antigo continua sendo a fonte.
+    crate::harness::receipts::mirror_delegation(
+        conn,
+        caller_key,
+        request_id,
+        request_hash,
+        run_id,
+        &task_keys,
+        crate::util::now_ts_ms(),
+    )?;
     Ok(())
 }
 
@@ -1155,6 +1165,41 @@ pub fn save_handoff(
         return Err("Only the current running worker can submit its handoff; historical tasks are immutable".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+thread_local! {
+    static RECOVERABLE_LOGS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn log_recoverable(message: &str) {
+    eprintln!("[harness] {message}");
+    #[cfg(test)]
+    RECOVERABLE_LOGS.with(|logs| logs.borrow_mut().push(message.to_string()));
+}
+
+#[cfg(test)]
+pub(crate) fn take_recoverable_logs() -> Vec<String> {
+    RECOVERABLE_LOGS.with(|logs| std::mem::take(&mut *logs.borrow_mut()))
+}
+
+/// Grava o fim. Se a escrita falha, o erro fica no log e a tarefa aberta passa a
+/// `failed` com essa mensagem, em vez de seguir `running` sem rastro.
+pub fn persist_finish(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> TaskOutcome {
+    match finish_task(conn, task_id, outcome) {
+        Ok(()) => outcome.clone(),
+        Err(error) => {
+            let message = format!("erro recuperável ao gravar o fim da tarefa {task_id}: {error}");
+            log_recoverable(&message);
+            let failed = TaskOutcome::failed(message);
+            if let Err(again) = finish_task(conn, task_id, &failed) {
+                log_recoverable(&format!(
+                    "erro recuperável ao gravar o fim da tarefa {task_id}: a tarefa segue aberta ({again})"
+                ));
+            }
+            failed
+        }
+    }
 }
 
 /// La tarea cerró. Acumula lo gastado en su run, que es lo que mira el presupuesto.

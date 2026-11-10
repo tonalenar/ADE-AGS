@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.64.0
+version: 1.65.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1172,7 +1172,7 @@ the CLI is the same:
 ags chat new "map the auth flow and list the files involved" --cwd . --client-request-id auth-map-01  # retries reuse the same child
 ags chat wait <id> --timeout 600     # blocks until the turn ends or the agent asks the person
 ags chat show <id> --last 10         # the last items, the last reply, pending requests
-ags chat send <id> "now write the failing test"
+ags chat send <id> "now write the failing test" --client-request-id test-01  # a retry returns the receipt, never resends
 ags chat stop <id>                   # interrupt the running turn
 ags chat list                        # active conversations (--all includes settled ones)
 ags chat providers                  # protocol-native providers and runtime capabilities
@@ -1191,6 +1191,10 @@ the first message was accepted, safe to retry, or uncertain; an uncertain delive
 silently resent, so inspect that child before sending another message. Use a new request id only
 when you intend to create a separate child. Use `agent_roster` for headless Fleet providers;
 `chat_providers` lists protocol-native chat providers.
+`chat_send` (and `ags chat send`) also accepts an optional `client_request_id`. Repeating the same id with the
+same thread and text returns the recorded `receipt` (`deliveryState`, `replayed`) and does **not** send the
+message again; the same id with different content is rejected. `deliveryState: "unknown"` means the message may
+have reached the agent: inspect the conversation (`chat_show`) before sending another. Without the id nothing changes.
 `chat_compact` supports Codex and Claude Code; `chat_goal` supports Codex and Claude Code, with
 pause/resume available only for Codex. Read `chat_providers.capabilities` before using them.
 Pass only the excerpt needed for the task in `context`; ADE marks it as untrusted and

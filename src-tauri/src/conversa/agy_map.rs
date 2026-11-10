@@ -365,6 +365,29 @@ pub fn tool_item(id: &str, name: &str, params: &Value, at: Option<i64>) -> Item 
     claude_tool(id, name, params, at)
 }
 
+/// Pura: o stderr do `agy` diz que a conversa de `--conversation` não existe? Só vale junto com «nenhuma linha do
+/// stdout chegou» (ver `resume::run_turn_resuming`). **A frase exata do CLI não foi capturada** (nenhuma fixture
+/// recusa a conversa): o critério é conservador, e são duas formas:
+/// - uma linha que cite «conversation» ou «session» colado a um marcador de inexistência;
+/// - o `AGY_ERROR: {...}` estruturado (o mesmo que `error_from_stderr` lê) com `NOT_FOUND` e a palavra «conversation»
+///   ou «session» na mensagem, que cobre «conversation <id> not found».
+///
+/// «file not found», «model not found» e erros de cota ou de login não casam.
+pub fn session_refused(stderr: &[String]) -> bool {
+    const SUBJECTS: [&str; 2] = ["conversation", "session"];
+    stderr.iter().any(|line| {
+        if super::resume::says_session_missing(line, &SUBJECTS) {
+            return true;
+        }
+        let Some(at) = line.find("AGY_ERROR") else { return false };
+        let Some(open) = line[at..].find('{') else { return false };
+        let Ok(value) = serde_json::from_str::<Value>(line[at + open..].trim()) else { return false };
+        let status = str_of(&value, "status").unwrap_or("").to_lowercase();
+        let message = ["message", "error"].iter().filter_map(|k| str_of(&value, k)).collect::<Vec<_>>().join(" ").to_lowercase();
+        status == "not_found" && SUBJECTS.iter().any(|s| message.contains(s))
+    })
+}
+
 /// O erro de um turno que acabou sem `result`: o `AGY_ERROR: {...}` que o `agy` escreve no stderr
 /// (com `message`, `error` ou `status`), ou a última linha com texto. Pura.
 pub fn error_from_stderr(tail: &[String]) -> String {

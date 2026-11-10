@@ -463,6 +463,32 @@ mod agy {
     }
 
     #[test]
+    fn a_conversa_recusada_do_agy_so_vale_para_a_frase_de_conversa_inexistente() {
+        use crate::conversa::agy_map::session_refused;
+        let linhas = |ls: &[&str]| ls.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        for l in [
+            "Error: conversation not found: abc",
+            "no such conversation: abc",
+            "Session not found",
+            "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"conversation abc not found\",\"retryable\":false}",
+            "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"Conversation does not exist\"}",
+        ] {
+            assert!(session_refused(&linhas(&["aviso qualquer", l])), "{l}");
+        }
+        for l in [
+            "Error: file not found: src/main.rs",
+            "ENOENT: no such file or directory, open 'a.txt'",
+            "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"file x not found\"}",
+            "AGY_ERROR: {\"status\":\"RESOURCE_EXHAUSTED\",\"message\":\"Cota esgotada\",\"retryable\":false}",
+            "AGY_ERROR: {\"status\":\"UNAUTHENTICATED\",\"message\":\"conversation requires login\"}",
+            "model not found: gemini",
+        ] {
+            assert!(!session_refused(&linhas(&[l])), "{l}");
+        }
+        assert!(!session_refused(&[]));
+    }
+
+    #[test]
     fn o_turno_vai_ao_banco_na_ordem() {
         let conn = crate::database::test_db();
         store::insert_thread(&conn, "t", "antigravity", "/p", "T", &store::Tuning { model: None, effort: None, access: "ask".into() }, None, 1).unwrap();
@@ -876,5 +902,20 @@ mod cursor {
         let tail = vec!["aviso qualquer".to_string(), "Error: not logged in. Run `cursor-agent login`".to_string(), "  ".to_string()];
         assert_eq!(error_from_stderr(&tail), "Error: not logged in. Run `cursor-agent login`");
         assert_eq!(error_from_stderr(&[]), "O Cursor terminou sem responder");
+    }
+
+    #[test]
+    fn a_sessao_recusada_do_cursor_so_vale_para_a_frase_de_sessao_inexistente() {
+        use crate::conversa::cursor_map::session_refused;
+        let linhas = |ls: &[&str]| ls.iter().map(|l| l.to_string()).collect::<Vec<_>>();
+        // Frases de sessão/conversa/chat inexistente (a frase exata do CLI não foi capturada: critério por subconjunto).
+        for l in ["Error: chat not found: abc", "Session not found", "error: no conversation found with id abc", "No chat found for 7a1b", "invalid session id", "Could not find chat abc", "Error: SESSION_NOT_FOUND"] {
+            assert!(session_refused(&linhas(&["aviso qualquer", l, ""])), "{l}");
+        }
+        // A frase do stderr é de outra coisa: não é prova de sessão recusada.
+        for l in ["Error: file not found: src/main.rs", "ENOENT: no such file or directory, open 'a.txt'", "tool read failed: path not found", "Error: not logged in. Run `cursor-agent login`", "model not found: grok", "workspace not found", "chat message too long"] {
+            assert!(!session_refused(&linhas(&[l])), "{l}");
+        }
+        assert!(!session_refused(&[]));
     }
 }

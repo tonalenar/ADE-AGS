@@ -2,6 +2,8 @@
 //! fechar o turno no banco, gravar os itens e avisar a janela. O lock do banco só é pego para
 //! gravar, nunca durante o I/O com o agente.
 
+use std::collections::HashSet;
+
 use serde_json::json;
 use tauri::AppHandle;
 
@@ -74,40 +76,58 @@ pub(crate) fn mark_unknown_outcomes(
     turn: &str,
     now: i64,
 ) -> rusqlite::Result<()> {
+    mark_unknown_outcomes_except(conn, thread_id, turn, now, &HashSet::new()).map(|_| ())
+}
+
+/// Como [`mark_unknown_outcomes`], com as ferramentas de `legit` de fora: o motor diz que elas seguem depois do fim do
+/// turno (no Claude, a tarefa em segundo plano, cujo desfecho vem pelo canal de tarefas). Devolve o que gravou (as
+/// ferramentas marcadas e o aviso), para a janela.
+pub(crate) fn mark_unknown_outcomes_except(
+    conn: &rusqlite::Connection,
+    thread_id: &str,
+    turn: &str,
+    now: i64,
+    legit: &HashSet<String>,
+) -> rusqlite::Result<Vec<Item>> {
+    let items: Vec<Item> = {
+        let mut stmt = conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 AND run_id = ?2 ORDER BY seq")?;
+        let rows = stmt.query_map(rusqlite::params![thread_id, turn], |r| r.get::<_, String>(0))?;
+        rows.filter_map(Result::ok).filter_map(|body| serde_json::from_str::<Item>(&body).ok()).collect()
+    };
+    let changed = unknown_outcome_items(&items, turn, now, legit);
+    for item in &changed {
+        store::upsert_item(conn, thread_id, Some(turn), item)?;
+    }
+    Ok(changed)
+}
+
+/// Pura: o que muda na timeline quando o turno `turn` acaba, dados os itens dele. Cada ferramenta ainda `Running` e
+/// fora de `legit` vira «desfecho desconhecido» (erro, com o código na saída) e, se houve alguma, o aviso
+/// `toolOutcomeUnknown` vai junto. Devolve só o que mudou. O aviso tem o id do turno: gravar de novo não duplica.
+pub fn unknown_outcome_items(items: &[Item], turn: &str, now: i64, legit: &HashSet<String>) -> Vec<Item> {
     use crate::canal::timeline::{ItemKind, ToolStatus};
-    let mut stmt =
-        conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 AND run_id = ?2")?;
-    let rows = stmt.query_map(rusqlite::params![thread_id, turn], |r| {
-        r.get::<_, String>(0)
-    })?;
-    let pending: Vec<Item> = rows
-        .filter_map(Result::ok)
-        .filter_map(|body| serde_json::from_str::<Item>(&body).ok())
-        .filter(|i| i.kind == ItemKind::Tool && i.status == Some(ToolStatus::Running))
+    let pending: Vec<&Item> = items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Tool && i.status == Some(ToolStatus::Running) && !legit.contains(&i.id))
         .collect();
     if pending.is_empty() {
-        return Ok(());
+        return Vec::new();
     }
-    let mut calls = Vec::new();
-    for mut tool in pending {
-        calls.push(tool_call_label(&tool));
-        tool.status = Some(ToolStatus::Error);
-        tool.output = Some(format!(
-            "{TOOL_OUTCOME_UNKNOWN}: a conversa parou antes do resultado; a ferramenta pode ter rodado."
-        ));
-        store::upsert_item(conn, thread_id, Some(turn), &tool)?;
-    }
-    let notice = Item {
+    let calls: Vec<String> = pending.iter().map(|tool| tool_call_label(tool)).collect();
+    let mut changed: Vec<Item> = pending
+        .iter()
+        .map(|tool| Item {
+            status: Some(ToolStatus::Error),
+            output: Some(format!("{TOOL_OUTCOME_UNKNOWN}: a conversa parou antes do resultado; a ferramenta pode ter rodado.")),
+            ..(*tool).clone()
+        })
+        .collect();
+    changed.push(Item {
         label: Some("toolOutcomeUnknown".into()),
         text: Some(unknown_outcome_text(&calls)),
-        ..Item::new(
-            crate::canal::timeline::ItemKind::Notice,
-            format!("n:toolOutcomeUnknown:{turn}"),
-            Some(now),
-        )
-    };
-    store::upsert_item(conn, thread_id, Some(turn), &notice)?;
-    Ok(())
+        ..Item::new(ItemKind::Notice, format!("n:toolOutcomeUnknown:{turn}"), Some(now))
+    });
+    changed
 }
 
 /// Pura: «Bash git push», «Edit src/a.rs», só o nome se não houver mais.

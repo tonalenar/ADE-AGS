@@ -447,18 +447,83 @@ fn un_cierre_con_error_deja_el_texto_como_error_y_no_como_resultado() {
     assert_eq!(outcome.result, None);
 }
 
-/// **El fin de una tarea lo decide el proceso, no un mensaje del agente.** Un agente puede
-/// colgarse, quedarse sin cupo o morir a mitad, y en ninguno de esos casos llega a emitir
-/// su `result`. Si el cierre dependiera de ese mensaje, la tarjeta se quedaría "corriendo"
-/// para siempre.
+/// O processo que morre sem o `result` ainda fecha a tarefa: senão a tarjeta ficaria
+/// `running` para sempre. Código 0 sem esse frame não é sucesso.
 #[test]
 fn una_tarea_que_muere_sin_decir_nada_igual_cierra() {
     let a = claude();
-    assert!(a.finish(None, 0).ok, "salir bien sin emitir nada es éxito");
+    let silencio = a.finish(None, 0);
+    assert!(!silencio.ok, "código 0 sem o frame result não é sucesso");
+    assert_eq!(
+        silencio.error.as_deref(),
+        Some(super::types::MISSING_FINAL_RESULT)
+    );
 
     let fallo = a.finish(None, 1);
     assert!(!fallo.ok);
     assert!(fallo.error.unwrap().contains("código 1"));
+}
+
+/// Saída 0 sem o frame final do adapter não pode gravar a tarefa como concluída.
+#[test]
+fn saida_zero_sem_frame_final_nao_vira_concluida() {
+    let outcome = claude().finish(None, 0);
+    assert!(!outcome.ok);
+    assert_eq!(outcome.error.as_deref(), Some(super::types::MISSING_FINAL_RESULT));
+
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    store::mark_running(&conn, &id, "attempt-1", "s", "/tmp/e.jsonl").unwrap();
+    store::finish_task(&conn, &id, &outcome).unwrap();
+
+    let task = store::task_by_id(&conn, &id).unwrap().unwrap();
+    assert_eq!(task.status, status::FAILED);
+    assert_eq!(task.error.as_deref(), Some(super::types::MISSING_FINAL_RESULT));
+}
+
+/// Se o UPDATE do fim falha, o erro não pode sumir: fica no log e a tarefa aberta
+/// passa a `failed`, em vez de seguir `running` sem ninguém saber.
+#[test]
+fn falha_ao_gravar_o_fim_fica_visivel() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    store::mark_running(&conn, &id, "attempt-1", "s", "/tmp/e.jsonl").unwrap();
+    let _ = store::take_recoverable_logs();
+    conn.execute(
+        "CREATE TRIGGER falha_gravacao_do_fim BEFORE UPDATE ON tasks
+         WHEN NEW.status IN ('done', 'failed')
+          AND (NEW.error IS NULL OR NEW.error NOT LIKE 'erro recuperável ao gravar o fim da tarefa%')
+         BEGIN
+           SELECT RAISE(ABORT, 'falha simulada na gravação');
+         END",
+        [],
+    )
+    .unwrap();
+
+    let outcome = store::persist_finish(
+        &conn,
+        &id,
+        &TaskOutcome {
+            ok: true,
+            result: Some("pronto".into()),
+            ..Default::default()
+        },
+    );
+
+    let task = store::task_by_id(&conn, &id).unwrap().unwrap();
+    assert_eq!(task.status, status::FAILED);
+    let error = task.error.unwrap();
+    assert!(error.starts_with("erro recuperável ao gravar o fim da tarefa"), "{error}");
+    assert!(error.contains("falha simulada na gravação"), "{error}");
+    assert!(!outcome.ok);
+    assert_eq!(outcome.error.as_deref(), Some(error.as_str()));
+    let logs = store::take_recoverable_logs();
+    assert!(
+        logs.iter().any(|line| line.contains("erro recuperável") && line.contains(&id)),
+        "{logs:?}"
+    );
 }
 
 // ── Las etiquetas de la tarjeta ─────────────────────────────────
@@ -3483,8 +3548,45 @@ mod otras_tuis {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Bash(ls -la)"))
         );
+        // Sem frame final no protocolo do Kimi, o código 0 continua sendo sucesso.
         let fin = agent.finish(None, 0);
+        assert!(fin.ok);
         assert_eq!(fin.result.as_deref(), Some("No hay nada."));
+        assert!(
+            eventos
+                .iter()
+                .any(|e| matches!(e, AgentEvent::Text { text } if text == "No hay nada."))
+        );
+    }
+
+    #[test]
+    fn saida_zero_sem_frame_final_nao_e_sucesso() {
+        let frase = crate::runs::types::MISSING_FINAL_RESULT;
+        for id in ["opencode", "codex", "gemini-cli"] {
+            let agent = adapter_for(id).unwrap();
+            let fin = agent.finish(None, 0);
+            assert!(!fin.ok, "{id}");
+            assert_eq!(fin.error.as_deref(), Some(frase), "{id}");
+        }
+
+        let codex = adapter_for("codex").unwrap();
+        run(
+            codex.as_ref(),
+            r#"{"type":"item.completed","item":{"id":"i","type":"agent_message","text":"PONG"}}"#,
+        );
+        let fin = codex.finish(None, 0);
+        assert!(!fin.ok);
+        assert_eq!(fin.error.as_deref(), Some(frase));
+
+        let opencode = adapter_for("opencode").unwrap();
+        run(
+            opencode.as_ref(),
+            r#"{"type":"text","sessionID":"ses_1","part":{"type":"text","text":"DONE"}}
+{"type":"step_finish","sessionID":"ses_1","part":{"type":"step-finish","reason":"tool-calls","tokens":{"input":1,"output":1},"cost":0}}"#,
+        );
+        let fin = opencode.finish(None, 0);
+        assert!(!fin.ok, "step_finish de tool-calls não encerra o turno");
+        assert_eq!(fin.error.as_deref(), Some(frase));
     }
 }
 
@@ -5084,6 +5186,65 @@ mod harness_fase1 {
         assert_eq!(node(&graph, "turn:raiz:t1").status, "inProgress", "só o root encerra o run");
         assert_eq!(graph.nodes.iter().find(|node| node.kind == "fleetTask").unwrap().status, "failed");
         assert_eq!(node(&graph, "turn:filha:ft1").status, "interrupted");
+    }
+
+    /// Um filho de chat e um run da Frota podem terminar primeiro. Só o evento final do próprio
+    /// turno do pai o torna terminal na projeção.
+    #[test]
+    fn filhos_de_chat_e_frota_terminam_antes_sem_fechar_o_turno_pai() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        let (run_id, _) = delegar(&world, "raiz", &["tarefa"], None).unwrap();
+        {
+            let conn = world.db.lock().unwrap();
+            chat::upsert_run(
+                &conn,
+                "filha",
+                "filho-final",
+                "completed",
+                Some(2),
+                Some(3),
+                Some(1),
+            )
+            .unwrap();
+            conn.execute("UPDATE tasks SET status = 'done', ended_at = 4", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE runs SET status = 'done', ended_at = 4 WHERE id = ?1",
+                [&run_id],
+            )
+            .unwrap();
+        }
+
+        let filhos_terminaram = graph(&world, "raiz");
+        assert_eq!(
+            node(&filhos_terminaram, "turn:filha:filho-final").status,
+            "completed"
+        );
+        assert_eq!(
+            node(&filhos_terminaram, &format!("run:{run_id}")).status,
+            "done"
+        );
+        assert_eq!(
+            node(&filhos_terminaram, "turn:raiz:t1").status,
+            "inProgress"
+        );
+        assert_eq!(ativos(&filhos_terminaram, "turn:raiz:t1"), 0);
+
+        // Este upsert representa o evento final do motor do próprio pai (result/turn/completed/etc.).
+        chat::upsert_run(
+            &world.db.lock().unwrap(),
+            "raiz",
+            "t1",
+            "completed",
+            Some(1),
+            Some(5),
+            Some(4),
+        )
+        .unwrap();
+        let pai_finalizou = graph(&world, "raiz");
+        assert_eq!(node(&pai_finalizou, "turn:raiz:t1").status, "completed");
+        assert_eq!(ativos(&pai_finalizou, "turn:raiz:t1"), 0);
     }
 
     /// Teste 7: depois das duas varreduras de boot, o turno e a tarefa que rodava aparecem

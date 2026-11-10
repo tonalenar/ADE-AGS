@@ -331,8 +331,32 @@ pub(super) fn chat_send(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let text = arg_str(args, "text").map_err(|_| "Falta a mensagem: ags chat send <id> \"...\"".to_string())?;
     let db = db(app)?;
     api::thread(&db, &thread)?;
-    tauri::async_runtime::block_on(api::send(app, &db, &thread, &text))?;
-    Ok(json!({ "sent": true, "next": format!("ags chat wait {thread}") }))
+    let next = format!("ags chat wait {thread}");
+    // Sem `client_request_id`, o caminho é o de sempre: sem recibo e sem efeito.
+    let Some(request_id) = send_request_id(args)? else {
+        tauri::async_runtime::block_on(api::send(app, &db, &thread, &text))?;
+        return Ok(json!({ "sent": true, "next": next }));
+    };
+    // Quem chamou: o MCP carimba o escopo da sessão (aba ou conversa); a CLI e o resto caem em `cli`.
+    let scope = arg_str_opt(args, "caller_scope").unwrap_or_else(|| "cli".into());
+    let receipt = tauri::async_runtime::block_on(api::send_with_request(app, &db, &thread, &text, &[], &scope, &request_id))?;
+    Ok(json!({ "sent": receipt.sent, "receipt": receipt, "next": next }))
+}
+
+/// O `client_request_id` (ou `clientRequestId`) de um envio, validado. `None` quando não veio.
+pub(crate) fn send_request_id(args: &Value) -> Result<Option<String>, String> {
+    let read = |key: &str| -> Result<Option<String>, String> {
+        match args.get(key) {
+            None | Some(Value::Null) => Ok(None),
+            Some(Value::String(value)) => crate::harness::receipts::validate_request_id(value).map(Some),
+            Some(_) => Err("client_request_id precisa ser texto".into()),
+        }
+    };
+    let (snake, camel) = (read("client_request_id")?, read("clientRequestId")?);
+    if snake.is_some() && camel.is_some() && snake != camel {
+        return Err("client_request_id e clientRequestId não podem ter valores diferentes".into());
+    }
+    Ok(snake.or(camel))
 }
 
 pub(super) fn chat_show(app: &AppHandle, args: &Value) -> Result<Value, String> {

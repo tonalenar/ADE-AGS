@@ -227,6 +227,7 @@ impl HeadlessAgent for Antigravity {
                 }
                 outcome
             }
+            None if code == 0 => TaskOutcome::failed(super::types::MISSING_FINAL_RESULT),
             None => TaskOutcome::failed(format!("Antigravity exited with code {code} without a terminal result")),
         }
     }

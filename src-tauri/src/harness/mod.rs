@@ -6,12 +6,19 @@
 //! registro nativo. O desenho, a matriz explicada e o plano de adoção estão em
 //! `docs/ade-ags/HARNESS_CONTRATO.md`. Não confundir com `runs::harness`, que é a projeção de leitura
 //! da árvore de execução.
+//!
+//! A Fase 2 acrescenta `receipts` (recibos idempotentes de comando) e `effects` (fila de efeitos com
+//! lease), contrato §11.
 
 pub mod capability;
+pub mod effects;
 pub mod identity;
 pub mod matrix;
+pub mod receipts;
 pub mod state;
 pub mod store;
 
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_fase2;
