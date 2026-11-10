@@ -23,7 +23,7 @@ import { SelectionComment } from "../quotes/SelectionComment";
 import { voicesByItem } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
-import { endOutcome, fileName, formatDuration, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
+import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
@@ -508,8 +508,9 @@ function InfraRow({ tools }: { tools: TimelineItem[] }) {
   );
 }
 
-function ToolRow({ tool }: { tool: TimelineItem }) {
+export function ToolRow({ tool }: { tool: TimelineItem }) {
   const { t } = useTranslation();
+  const unknownOutcome = isUnknownOutcome(tool);
   const [open, setOpen] = useState(false);
   const kind = tool.tool ?? "other";
   const Icon = TOOL_ICON[kind];
@@ -518,13 +519,19 @@ function ToolRow({ tool }: { tool: TimelineItem }) {
   const command = kind === "command" ? commandTitle(tool.label ?? "") : null;
   const target = command ? "" : kind === "todo" ? t("chat.tool.todoCount", { count: Number(tool.label ?? 0) }) : tool.path ? fileName(tool.path) : tool.label ?? "";
   const longCommand = !!command && (command.script || command.full.includes("\n") || command.full.length > 90);
-  const canOpen = !!tool.output || longCommand;
+  const canOpen = !!tool.output || longCommand || unknownOutcome;
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => canOpen && setOpen(!open)} aria-expanded={canOpen ? open : undefined}
         title={command?.full || tool.path || tool.label}
         className={`group flex min-w-0 items-center gap-2.5 min-h-[26px] whitespace-nowrap text-left text-chat-ui text-gray-600 dark:text-white/60 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
-        <Icon className={`w-4 h-4 shrink-0 ${tool.status === "error" || tool.status === "denied" ? "text-red-500 dark:text-red-400" : "text-gray-400 dark:text-white/40"}`} />
+        <Icon className={`w-4 h-4 shrink-0 ${
+          unknownOutcome
+            ? "text-amber-500 dark:text-amber-400"
+            : tool.status === "error" || tool.status === "denied"
+            ? "text-red-500 dark:text-red-400"
+            : "text-gray-400 dark:text-white/40"
+        }`} />
         <span className="shrink-0">{t(VERB[kind])}</span>
         {command && (
           <span className="min-w-0 flex-1 truncate whitespace-nowrap font-mono text-chat-code text-gray-500 dark:text-white/50">
@@ -541,8 +548,16 @@ function ToolRow({ tool }: { tool: TimelineItem }) {
           </span>
         )}
         {tool.status === "running" && <span aria-label={t("chat.tool.running")} className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-500 animate-pulse" />}
-        {tool.status === "error" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.failed")}</span>}
-        {tool.status === "denied" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.denied")}</span>}
+        {unknownOutcome ? (
+          <span role="status" aria-label={t("chat.tool.outcomeUnknown")} className="shrink-0 text-chat-caption text-amber-600 dark:text-amber-400 font-medium">
+            {t("chat.tool.outcomeUnknown")}
+          </span>
+        ) : (
+          <>
+            {tool.status === "error" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.failed")}</span>}
+            {tool.status === "denied" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.denied")}</span>}
+          </>
+        )}
         {canOpen && <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
       </button>
       {open && command && longCommand && (
@@ -551,7 +566,17 @@ function ToolRow({ tool }: { tool: TimelineItem }) {
           {command.full}
         </pre>
       )}
-      {open && tool.output && (
+      {open && unknownOutcome && (
+        <div role="status" aria-label={t("chat.tool.outcomeUnknown")}
+          className="m-0 ml-[26px] mt-1 mb-2 rounded-lg px-3 py-2 text-chat-note leading-snug
+          bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200">
+          <p className="m-0 font-medium">{t("chat.tool.outcomeUnknown")}</p>
+          <p className="m-0 mt-0.5 text-gray-700 dark:text-white/70">
+            {t("chat.tool.outcomeUnknownHelp")}
+          </p>
+        </div>
+      )}
+      {open && !unknownOutcome && tool.output && (
         <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-white/70">
           {tool.output}
