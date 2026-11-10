@@ -984,7 +984,7 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 
 ## 12. Fase 4: delegação única (`delegate_agent` com três destinos)
 
-**Objetivo:** o orquestrador escolhe **onde** o trabalho vai, de forma explícita, e a mesma pergunta repetida nunca vira prompt duplicado em nenhum dos três caminhos. Núcleo de backend; a entrega durável do resultado ao pai e a UI ficam fora (§12.8).
+**Objetivo:** o orquestrador escolhe **onde** o trabalho vai, de forma explícita, e a mesma pergunta repetida nunca vira prompt duplicado em nenhum dos três caminhos. Núcleo de backend. A entrega durável do resultado ao pai e a `connected_session` no painel fecharam depois, em §12.9.
 
 Código: `harness/delegate.rs` (decisão, recibo e classificação, provados sem o app), `ipc/commands/delegate.rs` (cola com o app: comando IPC `team.delegate`, na CLI `ags team delegate`), `ipc/commands/team.rs` (descoberta e leitura das sessões), `ipc/mcp.rs` (esquema e roteamento), `runs/orchestration.rs` (leitura do recibo da Frota). Testes: `harness/test_fase4.rs`, `ipc/test.rs` e `runs/test.rs`.
 
@@ -1063,8 +1063,96 @@ Os erros de delegação voltam como texto `"<código>: <mensagem>"` (`isError` n
 - Sem worker nem boot: um `submitting` deixado por uma queda só vira `unknown` quando a repetição chega (§12.4).
 - Sessões de outra pasta ligadas pela pessoa só valem se aparecerem entre os integrantes; a descoberta não as mostra se estiverem fechadas.
 - Um integrante que a pessoa elevou para `edits` ou `full` não recebe delegação até a pessoa baixar a política (§12.3, item 5): é a leitura literal de "nunca converter um vínculo em Acesso total". Se a pessoa quiser delegar a integrante elevado, é decisão dela.
-- Entrega durável do resultado ao pai, `ProviderSessionRef` e `ContextTransfer` (§2.2): Fase 4 restante.
+- ~~Entrega durável do resultado ao pai~~ **fechada em §12.9** (modo `async` dos três destinos). Continua aberto: `ProviderSessionRef` e `ContextTransfer` (§2.2).
+- ~~`connected_session` fora do painel~~ **fechado em §12.9.6**: a projeção e a árvore mostram a sessão conectada.
 - Desempenho não medido.
+
+## 12.9 Entrega assíncrona e persistente do resultado do filho (Fase 4, o que ficou aberto)
+
+**Objetivo:** um filho delegado com `mode = async` (conversa filha, tarefa da Frota ou sessão conectada) termina, e o resultado chega ao pai **mesmo que o app feche no meio**, como dado não confiável, limitado, **uma única vez**. Código: `harness/child_delivery.rs` (tudo em SQL sobre `&Connection`, sem relógio nem app), o laço em `ipc/commands/child_delivery.rs`, o registro nos três pontos de delegação (`ipc/commands/conversas.rs::chat_new`, `runs/orchestration.rs::delegate_task`, `ipc/commands/delegate.rs`) e a projeção em `runs/harness.rs`. Testes: `harness/child_delivery/test.rs`.
+
+### 12.9.1 O desenho em quatro peças
+
+| Peça | O que é | Onde |
+|---|---|---|
+| Acompanhamento | uma linha por filho delegado em `async`, gravada na delegação: tipo, filho, pai (`thread:<id>` ou `tab:<id>`), título, agente, turno de origem do pai, e (sessão) a mensagem de delegação | `harness_child_watch` (aditiva, criada por `child_delivery::migrate`, chamada de `harness::store::migrate`) |
+| Efeito | o **fim** vira um efeito `child_result`, `retry_safe = 1`, `max_attempts = 5`, lease de 60 s, chave `child_result:<tipo>:<filho>` | `harness_effect` (Fase 2) |
+| Recibo | `kind = child_result`, `caller_key = <pai>`, `request_id = <tipo>:<filho>`; fica `accepted` quando entregue e `retryable` quando o pai estava fechado | `harness_command_receipt` (Fase 2) |
+| Aviso | uma mensagem `notice` (raw) do pai para ele mesmo na fila durável, `client_id` próprio | `peer_queue` (a mesma fila e o mesmo entregador do vigia do chat) |
+
+`mode = wait` **não** registra nada: o pai já recebe o resultado na própria chamada, e um segundo aviso seria duplicata. Sem registro, um filho que termina nunca gera entrega.
+
+O resultado **não é copiado** para tabela nenhuma do harness. Na hora de entregar (e de desenhar o painel), `inspect` lê o registro nativo do filho (a fala do agente em `chat_item`, `tasks.result`, a resposta na fila). O efeito e o recibo guardam só ids e o canal (`peer:<id>`); um teste confere que o texto do agente nunca aparece neles.
+
+### 12.9.2 O que conta como "fim" de cada tipo de filho
+
+| Tipo | Fim | Resultado |
+|---|---|---|
+| `provider_chat` | o **primeiro** turno (`chat_run`) da conversa filha chegou a estado terminal (`completed`, `failed`, `interrupted`; status desconhecido vira `interrupted` com `outcomeUnknown`). Turno em andamento, mesmo esperando pergunta ou aprovação, não é fim. Os turnos seguintes são pedidos explícitos do pai (que usa `chat_wait`) e não geram entrega | a última fala do agente nesse turno |
+| `fleet_task` | `tasks.status` terminal pelo mesmo mapa de `harness::state::from_task` (`done`, `failed`, `cancelled`, `skipped`, `handed_off`; a tarefa varrida no boot é `interrupted`, nunca `failed`) | `tasks.result`; sem ele, o erro gravado em tarefa que falhou |
+| `connected_session` (terminal ou Gemini Desktop) | **a resposta da sessão ao pai** (`peer tell`/`handoff`/`ask` da sessão para o pai, depois da mensagem de delegação). Sem resposta não há fim observável: o nó segue `running` e nada é entregue | o texto da resposta |
+| `connected_session` (conversa `thread:<id>`) | a resposta acima, **ou** o primeiro turno aberto pela delegação terminou (até 10 s antes da mensagem, como o vigia) sem resposta | a resposta, ou a última fala do agente no turno |
+
+Registro nativo apagado antes do fim (a pessoa apagou a conversa ou a tarefa): `child_gone`, nada é entregue.
+
+### 12.9.3 Onde o resultado aparece no pai, e por que assim
+
+**Mensagem enfileirada para o próximo turno do pai, não item de timeline nem `steer`.** A fila durável tem um consumidor por destino, em ordem, que só digita com o pai livre (conversa sem turno aberto; terminal em silêncio). Assim o aviso:
+- **nunca interrompe um turno em andamento** (o contrário de um `steer`, que entraria no meio do raciocínio do pai);
+- **sobrevive ao app fechar** (a fila é uma tabela) e chega quando o pai estiver livre depois de reabrir;
+- é **dado, não ordem**: leva o cabeçalho `[Resultado de filho delegado via ADE AGS]`, o desfecho, e o texto do filho dentro de `<untrusted_data source="child:<tipo>:<filho>">…</untrusted_data>`, numa linha só (o texto do filho não cria linhas novas nem fecha ou abre o envelope: `</untrusted_data` e `<untrusted_data` dentro do texto viram `…-data`).
+
+Um item de timeline sozinho não acordaria o agente pai, que não leria o resultado. O painel (§12.9.6) mostra o mesmo resultado, marcado, em qualquer caso.
+
+**Limite:** até 1000 caracteres do resultado entram no aviso (a mensagem inteira fica abaixo de 1500, o limite em que a fila passa o texto por arquivo). Passou disso: `truncated="true"` no envelope e a frase "resultado cortado em 1000 caracteres; leia o resto em `chat_show <id>` / `task_result <id>`". O painel corta em 500, como antes.
+
+### 12.9.4 Exatamente uma entrega, mesmo com queda no meio
+
+1. **`settle`** (puro): para cada acompanhamento `watching` cujo filho terminou, numa transação: `receipts::begin`, `effects::enqueue` (a chave de dedupe impede o segundo efeito) e acompanhamento → `ended`.
+2. **`deliver`**: `effects::claim_next(kind = child_result)`; por efeito, **uma transação só**: `peer_queue::admit` do aviso (com `client_id` próprio) + acompanhamento `delivered` + recibo `accepted` + efeito `completed`. Falhou algo: a transação desfaz, o efeito volta a `pending` (`NotApplied`), e a passada para (a próxima, por evento ou no boot, tenta de novo; passadas as 5 tentativas, `failed`).
+3. A chave do aviso é `harness-child-<tipo>-<filho>`; a fila reconhece o mesmo `client_id` do mesmo remetente como repetição (nunca volta, nem depois de entregue: há tombstone).
+
+| Ponto da queda | Estado deixado | O que acontece depois |
+|---|---|---|
+| antes de `settle` | acompanhamento `watching` | a próxima passada vê o fim e cria o efeito |
+| entre `settle` e `deliver` | efeito `pending`, nada na fila | o boot (ou o próximo evento) entrega, uma vez |
+| com o efeito reclamado (`running`) | lease de 60 s | enquanto vive, ninguém toca; vencido, `recover_expired` (boot) o devolve a `pending` (é `retry_safe`) e a entrega acontece uma vez |
+| dentro da transação de entrega | nada gravado (SQLite desfaz) | idem: refaz a entrega, que ainda não existia |
+| depois da transação | `delivered`, efeito `completed`, aviso na fila | nada a refazer; a fila entrega quando o pai estiver livre |
+| aviso já na fila por outra via (versão anterior, vigia) | — | `admit` devolve repetição: conta como entregue por referência (`delivered_via = peer:<id>`), sem segunda mensagem |
+
+`recover_expired` roda no boot dentro do lease SQLite da Fase 5 (§13); logo depois das varreduras, `housekeeping` chama `pump` uma vez, o que entrega o resultado de um filho que terminou (ou foi varrido como `interrupted`) com o app fechado. O laço em `ipc/commands/child_delivery.rs` dorme no barramento (`chat.changed`, `task.changed`, `peer.message`), sem polling; só acorda o entregador da fila de cada destino depois de soltar o lock do banco.
+
+**Sessão conectada: sem segunda cópia.** A resposta da sessão **já é** uma mensagem na fila do pai: a entrega só marca `delivered` com `delivered_via = peer:<id>` (nenhum aviso novo). Quando o fim é o turno da conversa da sessão sem resposta, o aviso usa **a mesma chave do «terminou» do vigia do chat** (`chat_team::watch::end_key`): o primeiro que chegar entra na fila e o outro é reconhecido como repetição. Nunca saem dois avisos do mesmo fim.
+
+### 12.9.5 Pai fechado
+
+Decidido no momento de entregar, não antes: `thread:<id>` com `state = 'active'` (a mesma regra do vigia) ou `tab:<id>` com a aba ainda existente. Caso contrário:
+- **nada é enfileirado** (um destino sem consumidor só geraria um aviso de falha expirado);
+- acompanhamento → `parent_closed`, efeito → `cancelled` (não fica pendente nem tenta de novo), recibo → `retryable` (nada chegou ao pai);
+- o resultado continua legível onde sempre esteve: `chat_show` / `chat_wait` (conversa filha), `task_result` (Frota), a conversa ou a aba da sessão, e o nó da árvore se o pai for aberto de novo.
+
+Não há reentrega se o pai "reabrir": a decisão é terminal. Se a pessoa quiser o resultado, ele está no registro do filho.
+
+### 12.9.6 O painel mostra `connected_session`
+
+A projeção (`runs/harness.rs`) lê `harness_child_watch` dos pais da linhagem e emite um nó por sessão conectada acompanhada: `kind = connectedSession`, `id = session:<sessão>#<client_request_id>`, `childType = connected_session`, `title` (o nome pedido), `agentId`, `executionStatus` (`running` sem resposta; o desfecho depois), `origin` (`turn` com o `turnNodeId` **gravado** na delegação, ou `conversation`), `result` (`{ text ≤ 500, truncated, untrusted: true }`) e `outcomeUnknown`. Filho do turno de origem (ou da conversa), conta em `activeChildren` enquanto corre. Só leitura: o nó não tem botão de abrir nem de parar (o painel nunca encerra uma sessão). No front: `HarnessExecutionKind` ganhou `connectedSession`, `HarnessChildType` ganhou `connected_session`, e o rótulo `chat.harness.childType.connected_session` está nos três catálogos; o bloco do resultado é o mesmo da Fase 4, marcado como dado não confiável. Sessão delegada por um **terminal** (`tab:<id>`) não aparece: a árvore parte de uma conversa.
+
+### 12.9.7 O que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes: 37 em Rust (`harness::child_delivery::test`) contra um esqueleto `todo!()`: todos falharam. Depois da implementação, passam. No vitest, `harnessConnectedSession.test.tsx`: o teste do rótulo e o do catálogo falharam antes da tela; os outros dois são guarda.
+- Rust: fim de cada tipo gera exatamente uma entrega; rodar de novo não entrega outra; turno em andamento não é fim; só o primeiro turno conta; queda entre o fim e a entrega, e com o efeito reclamado (lease vivo e vencido), entrega uma vez; mensagem já na fila com a mesma chave conta por referência; resultado cortado e marcado; texto hostil não fecha nem abre o envelope nem cria linhas; o texto do agente não vai ao efeito nem ao recibo; pai fechado, apagado ou aba inexistente não recebe e nada fica na fila; sessão por resposta, por turno com a chave do vigia, e turno anterior à delegação não conta; `mode = wait` (sem registro) não entrega; a projeção mostra a sessão com tipo, agente, estado, origem e resultado marcado.
+- Vitest: `connected_session` aparece na árvore, com os campos acima, sem botão e sem comando de parada.
+- Sem relógio real (o `agora` é um número) e sem processo real.
+
+**Não verificado**
+- Nenhum provider, sessão ou terminal real: o "pai" é uma conversa do banco em memória, e a fila é a tabela. A cola do laço (`ipc/commands/child_delivery.rs`), o registro em `chat_new`/`delegate_task`/`delegate.rs` e a chamada do `housekeeping` **não têm teste de ponta a ponta** (dependem de `AppHandle`).
+- O consumidor da fila digitando o aviso no pai (conversa livre, terminal em silêncio) é o de sempre e não foi exercitado aqui.
+- **Janela entre criar e registrar:** se o app cair depois de criar o filho e antes de registrar o acompanhamento, esse filho não entrega sozinho. A repetição do mesmo `client_request_id` (o que o agente faz quando perde a resposta) registra de novo. Para a sessão, a resposta dela segue pelo canal normal.
+- Sessão de **terminal** que termina sem responder não tem fim observável (não há como o ADE provar). Sessão delegada por um terminal-pai não aparece no painel.
+- Corrida entre o vigia e a entrega do mesmo fim na mesma instância: coberta pela chave comum; não testada com dois laços reais.
+- Sem captura de tela do nó novo; sem medição de desempenho (a projeção ganhou, por sessão, uma a três leituras).
 
 ## 12.x Entrega de resultado e painel (Fase 4)
 
@@ -1076,7 +1164,7 @@ Campos novos e opcionais: os nós que não são filhos de agente seguem sem eles
 
 | Campo | Em quais nós | O que é |
 |---|---|---|
-| `childType` | conversa filha (`provider_chat`) e tarefa da Frota (`fleet_task`) | o tipo do agente filho. `connected_session` não existe no ADE, então não sai |
+| `childType` | conversa filha (`provider_chat`), tarefa da Frota (`fleet_task`) e sessão conectada (`connected_session`, desde §12.9.6) | o tipo do agente filho |
 | `executionStatus` | conversa filha (estado do último turno), run e tarefa | o estado do §3.1; vira `waiting` quando há pergunta ou aprovação pendente |
 | `result` | conversa filha (última fala do agente no último turno) e tarefa (`tasks.result`) | `{ text, truncated, untrusted: true }`; `text` tem no máximo 500 caracteres |
 | `blocked` | conversa filha e tarefa | `{ kind: question \| approval, count }`: os pedidos pendentes do próprio filho |
@@ -1102,7 +1190,7 @@ Campos novos e opcionais: os nós que não são filhos de agente seguem sem eles
 | MCP `chat_stop` (`chat.stop`) | a pessoa (sem `caller_scope`), ou a conversa ou aba que criou a filha (`parent_ref` = `thread:<pai>` ou `tab:<aba>`) | só o turno da filha. Tarefa da Frota e pasta, sem conversa de origem, não param conversa nenhuma |
 | CLI `ags chat stop` | a pessoa (a CLI não recebe `caller_scope`) | a conversa indicada |
 
-O escopo do MCP vem da sessão: `scoped_chat_payload` carimba `caller_scope` em `chat.send` e em `chat.stop`, e o modelo não escolhe esse campo. **Nunca se encerra o PTY de uma sessão conectada só por deixar de observá-la.** O ADE ainda não tem `connected_session`, então não há PTY de sessão conectada a proteger hoje. O painel só larga os próprios listeners ao desmontar, e um teste confere que desmontar não envia comando de parada nem seleciona conversa.
+O escopo do MCP vem da sessão: `scoped_chat_payload` carimba `caller_scope` em `chat.send` e em `chat.stop`, e o modelo não escolhe esse campo. **Nunca se encerra o PTY de uma sessão conectada só por deixar de observá-la.** A sessão conectada aparece no painel (§12.9.6) sem nenhum botão de abrir ou parar: o nó é só leitura. O painel só larga os próprios listeners ao desmontar, e um teste confere que desmontar não envia comando de parada nem seleciona conversa.
 
 Lacuna conhecida: a CLI `ags chat stop` roda com a identidade da pessoa. Um agente que chame a CLI pela própria terminal ainda não é barrado. Fechar isso depende de a CLI ser da pessoa, e isso não foi verificado.
 
@@ -1123,7 +1211,7 @@ Lacuna conhecida: a CLI `ags chat stop` roda com a identidade da pessoa. Um agen
 - Ponta a ponta: nenhum provider real foi executado. Pergunta, aprovação e resposta foram gravadas direto nas tabelas nos testes; nenhum adapter emitiu um pedido real.
 - Concorrência: a leitura da projeção e a decisão da pessoa correm em transações separadas; não há teste de corrida entre elas.
 - Desempenho: a projeção ganhou uma consulta por conversa filha (último turno) e lotes para pedidos e aprovações. Não medido.
-- O `connected_session` não existe no código. A regra de não encerrar PTY de sessão conectada fica registrada, sem teste contra um caso real.
+- `connected_session` no painel: ver §12.9.6. A regra de não encerrar PTY de sessão conectada vale para o painel (sem botão), sem teste contra um PTY real.
 
 ## 14. Fase 6: painel do harness e relação sinal/ruído
 
