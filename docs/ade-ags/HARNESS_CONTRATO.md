@@ -120,11 +120,11 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `interrupt` | U | U | U | U | U | U | U | U |
 | `turn_completion` | S | ? | S | ? | ? | ? | ? | ? |
 | `tool_events` | S | U | S | U | U | U | U | U |
-| `question` | S | ? | S | S | ? | S | ? | ? |
+| `question` | S | ? | S | S | ? | ? | ? | ? |
 | `approval` | U | U | U | U | U | U | U | U |
-| `child_spawn` | ? | U | ? | U | U | U | U | U |
-| `child_result` | ? | U | ? | U | U | U | U | U |
-| `child_stop` | ? | U | ? | U | U | U | U | U |
+| `child_spawn` | U | U | U | U | U | U | U | U |
+| `child_result` | U | U | U | U | U | U | U | U |
+| `child_stop` | U | U | U | U | U | U | U | U |
 | `resume` | S | S | S | S | ? | S | U | U |
 | `compact` | S | U | U | U | U | U | U | U |
 | `goal` | U | U | U | U | U | U | U | U |
@@ -136,7 +136,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396 células**: **164 `Supported`, 34 `Unknown`, 198 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 396): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396 células**: **163 `Supported`, 29 `Unknown`, 204 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 396): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
 
 <!-- contagem-matriz:inicio -->
 | Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
@@ -155,15 +155,15 @@ São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396
 | Fleet | hermes | 0 | 0 | 18 | Unsupported |
 | Fleet | antigravity | 8 | 2 | 8 | Unknown |
 | Fleet | cursor | 0 | 0 | 18 | Unsupported |
-| Tui | claude-code | 11 | 4 | 3 | Supported |
+| Tui | claude-code | 11 | 1 | 6 | Supported |
 | Tui | gemini-cli | 6 | 3 | 9 | Unsupported |
-| Tui | codex | 10 | 4 | 4 | Supported |
+| Tui | codex | 10 | 1 | 7 | Supported |
 | Tui | opencode | 8 | 2 | 8 | Supported |
 | Tui | kimi-code | 5 | 4 | 9 | Unsupported |
-| Tui | hermes | 7 | 2 | 9 | Unknown |
+| Tui | hermes | 6 | 3 | 9 | Unknown |
 | Tui | antigravity | 5 | 4 | 9 | Unsupported |
 | Tui | cursor | 5 | 3 | 10 | Unsupported |
-| **Total** | 22 colunas × 18 = 396 células | 164 | 34 | 198 | |
+| **Total** | 22 colunas × 18 = 396 células | 163 | 29 | 204 | |
 <!-- contagem-matriz:fim -->
 
 Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
@@ -183,7 +183,7 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 | tui/* (8 CLIs) | `steer` | teste manual em instância isolada, **com OK do usuário**: a TUI enfileira ou interrompe o texto digitado no meio do turno? |
 | tui/gemini-cli, opencode, kimi-code, hermes, antigravity, cursor | `turn_completion` | algum marcador de fim de turno no transcript ou no protocolo; hoje só há silêncio de 3 a 5 s |
 | tui/gemini-cli, kimi-code, antigravity, cursor | `question` | taxa de falso positivo do regex de tela, medida em capturas reais |
-| tui/claude-code, codex | `child_spawn`, `child_result`, `child_stop` | verificar se `canal/claude.rs` e `canal/codex.rs` expõem subagente do transcript como evento de filho |
+| tui/hermes | `question` | confirmar a ferramenta ask_user visível numa sessão Hermes real |
 | tui/kimi-code | `resume` | a flag de retomada do Kimi e se ele informa o id da sessão |
 | tui/antigravity | `usage` | uma fonte de uso por sessão (hoje há medidor por conta) |
 | tui/hermes | `ags_mcp` | listar as ferramentas `ags` numa sessão Hermes real |
@@ -200,6 +200,8 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 | tarefa da Frota (`fleet_task`) | `delegate_task`, `run_plan`, `task_add` (`runs/orchestration.rs`) | `run.result`, `await_run` (`runs/orchestration.rs:971-1027`, `:1071-1181`) | `cancel_task`: subárvore dentro do run; nunca o lead, nunca filhos de chat (`runs/orchestration.rs:1278-1330`) |
 
 Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta ou aviso. A entrega durável é da Fase 4.
+
+**Retomada automática de tarefa na Frota × Hand-off manual para aba (`resume`).** O §1.1 define `resume` como: a sessão nativa volta depois de reiniciar o app. Na Frota, o boot do app faz varredura (`store.rs:1256-1300`) e marca tarefas `ready`/`running` como `failed`, não havendo relançamento ou retomada automática da tarefa (`Unsupported`). Há, contudo, uma tensão com essa definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual ao usuário em terminal interativo, e não retomada da tarefa depois de reiniciar o app.
 
 **Escopo das superfícies.** `checkpoint` e `rollback` valem **só para arquivos** na Frota (ref oculta, `runs/checkpoints.rs:113-151`) e nas abas de TUI (`tab_checkpoints/`). Nenhuma superfície volta a conversa do provider. Na conversa estruturada as duas são `Unsupported`.
 
@@ -224,7 +226,7 @@ Conferido e **mantido** dos inventários: `Engine::of(...) != Some(Engine::Claud
 
 A função marca como "desfecho desconhecido" as ferramentas `Running` de um turno (`conversa/turn.rs:71-100`). Quem a chama:
 - `turn::record_end`, quando `result.interrupted || result.error.is_some()` (`turn.rs:56-59`);
-- `close_orphan_runs`, no boot, só para turnos ainda `inProgress` (`conversa/store.rs:1030`).
+- `close_orphan_runs`, no boot, só para turnos ainda `inProgress` (`conversa/store.rs:1068-1082`).
 
 | Motor | Fim pelo protocolo | Queda do processo com turno aberto | Boot |
 |---|---|---|---|
@@ -363,11 +365,11 @@ Diferenças de significado:
 | `chat_run.completed` | `completed` | |
 | `chat_run.failed` | `failed` | |
 | `chat_run.interrupted` | `interrupted` | |
-| `chat_run.status` com outro texto (o Codex grava o `turn.status` como veio, `codex.rs:491`) | `interrupted`, `end_reason = unmapped_native_status`, `outcome_unknown` | nunca promover um valor desconhecido a terminal conhecido |
+| `chat_run.status` com outro texto (o Codex grava o `turn.status` como veio, `codex.rs:492-493`) | `interrupted`, `end_reason = unmapped_native_status`, `outcome_unknown` | nunca promover um valor desconhecido a terminal conhecido |
 | `tasks.pending`, `ready` | `pending` | |
 | `tasks.running` | `running` | |
 | `tasks.done` | `completed` | |
-| `tasks.failed` com `error = SWEPT_RUNNING_ERROR` | `interrupted`, `end_reason = app_closed` | já é assim na projeção (`runs/harness.rs:243-245`) |
+| `tasks.failed` com `error = SWEPT_RUNNING_ERROR` | `interrupted`, `end_reason = app_closed` | estado vira `interrupted` (`runs/harness.rs:294-295, 321-323`); `end_reason` ainda não existe na projeção (Fase 3) |
 | `tasks.failed` (outro erro) | `failed` | |
 | `tasks.cancelled` | `cancelled` | no boot, `pending` vira `cancelled` com texto próprio (`runs/store.rs:1304-1316`) |
 | `tasks.handed_off` | `handed_off` | a pessoa assumiu numa aba |
@@ -512,10 +514,10 @@ A Fase 2 adiciona `harness_command_receipt` com `kind`. Leitura passa pela nova 
 | # | Bloqueio | Onde | Efeito |
 |---|---|---|---|
 | B1 | `Protocolo` tinha **3 variantes** | resolvido: `agy-stream` e `cursor-stream` entram no replay | as fixtures recorded dos dois rodam |
-| B2 | O snapshot não tem evento de filho, uso nem pedido pendente no fim | `replay_protocolo.rs:213-227` | "filho termina antes do pai" e "uso do turno" não são afirmáveis |
-| B3 | O `Motor` da bancada **descarta** `Task` e `SubItem` | `bancada.rs:611-614` | idem; os eventos de filho do Claude somem |
-| B4 | O oráculo não afirma o tipo do item nem "pedido ainda pendente" | `bancada.rs:725-748` (`Espera`) | não dá para provar `usage` nem pedido que sobra |
-| B5 | O guard recusa `ToolKind::Other` | `replay_protocolo.rs:233-241`, `bancada.rs:486-489` | ferramenta fora da lista no Cursor derrubaria a fixture |
+| B2 | O snapshot não tem evento de filho, uso nem pedido pendente no fim | resolvido para filhos, pedidos pendentes e tipos (`replay_protocolo.rs:223, 228, 230`); falta apenas `uso` | "uso do turno" ainda não entra no snapshot |
+| B3 | O `Motor` da bancada descartava `Task` e `SubItem` | resolvido: o Motor guarda ambos em `filhos` (`bancada.rs:795-796`, `test_bancada.rs:262-282`) | eventos de filho do Claude são preservados |
+| B4 | O oráculo não afirmava o tipo do item nem "pedido ainda pendente" | resolvido: `Espera` tem `tipos` e `pedidos_pendentes` (`bancada.rs:947-967`), conferidos pelo oráculo (`bancada.rs:1030-1034`) | oráculo afirma tipos e pedidos que sobram |
+| B5 | O guard recusava `ToolKind::Other` | resolvido: lista por protocolo via `other_aceito` (`bancada.rs:1086-1092`), usada em `:530-531` | Cursor aceita `mcp` e agy aceita `denied`, sem afrouxar os outros |
 | B6 | O Cursor fecha o turno por **prazo** (`quiet_after`) | resolvido no `read_turn` da bancada | `cursor-feliz` usa o `atMs` da captura, abaixo do silêncio, e o fim é o `result` |
 
 ### 5.3 Provas por adapter e prioridade
@@ -532,7 +534,7 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 | **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
 | **P1** frames fora de ordem | fixture `claude-fora-de-ordem` (o `tool_result` antes do `tool_use` é descartado hoje, `claude_map.rs:287-289`) | fixture `codex-fora-de-ordem` | fixture `acp-fora-de-ordem` | `requer captura real` | `requer captura real` | bancada; o oráculo documenta o comportamento atual |
 | **P2** turno feliz | **gravada** `claude-feliz` | **gravada** `codex-feliz` | fixture de base | **gravada** `antigravity-feliz` | **gravada** `cursor-feliz` | bancada |
-| **P2** filho termina antes do pai | bloqueado por B2 e B3 | bloqueado por B2 e B3 | sem frame de filho (o ACP só tem o cartão `think`) | `requer captura real` | `requer captura real` | só depois de ampliar snapshot e `Motor` |
+| **P2** filho termina antes do pai | bancada pronta (B2 e B3 resolvidos); requer fixture | bancada pronta (B2 e B3 resolvidos); requer fixture | sem frame de filho (o ACP só tem o cartão `think`) | `requer captura real` | `requer captura real` | bancada |
 
 Contagem da grade (9 cenários × 5 motores = 45 células): **9 com fixture exata** (a queda sintetizada do Codex, mais oito recorded: feliz de Claude, Codex, Antigravity e Cursor; interrupção de Claude e Codex; EOF de Antigravity e Cursor), **3 parciais** (pedido em Claude, Codex e ACP), **33 sem fixture**. O steer do Claude (`claude-steer-ferramenta` e `claude-steer-sem-ferramenta`) não é linha desta grade.
 
@@ -544,14 +546,14 @@ Contagem da grade (9 cenários × 5 motores = 45 células): **9 com fixture exat
 - **OpenCode com turno de modelo**, e um replay que leia `session/resume` / `session/load` pelo id que o ADE enviou. A captura de handshake já mostra `-32602` para sessão inexistente e `configOptions` para a sessão nova; não foi importada.
 - Capturas gastam a conta e a cota da pessoa e **exigem OK explícito e teto** (§8).
 
-### 5.5 Infraestrutura antes de qualquer fixture nova
+### 5.5 Infraestrutura da bancada (situação atual)
 
-Ordem, de menor a maior risco:
-1. Estender `Espera` e o snapshot com `filhos`, tipo do item e `pedidosPendentes` (B2 e B4).
-2. O `Motor` guardar `Out::Task` e `Out::SubItem` (B3).
-3. `Protocolo::AgyStream` (laço simples, sem prazo).
-4. `Protocolo::CursorStream`, reaproveitando o `read_turn` e o `Fake: Source` de `test_motores.rs`, devolvendo silêncio quando o próximo `atMs` passa de `quiet_after` (B6). Sem relógio real.
-5. Uma lista de ferramentas aceitas por protocolo no guard, sem afrouxar o dos outros três (B5).
+B1 a B6 foram resolvidos pela bancada ampliada:
+1. `Espera` e snapshot estendidos com `filhos`, tipo do item e `pedidosPendentes` (B2 e B4 resolvidos em `replay_protocolo.rs:223-230`, `bancada.rs:947-967, 1030-1034`). Falta apenas `uso` no snapshot.
+2. `Motor` guarda `Out::Task` e `Out::SubItem` (B3 resolvido em `bancada.rs:795-796`, `test_bancada.rs:262-282`).
+3. `Protocolo::AgyStream` implementado (B1).
+4. `Protocolo::CursorStream` implementado com `read_turn` (B6).
+5. Lista de ferramentas aceitas por protocolo no guard (`other_aceito` em `bancada.rs:1086-1092`, B5 resolvido).
 
 ## 6. Inferência de capability por nome
 
@@ -685,12 +687,58 @@ Só o que é decisão de produto ou de autorização.
 - Leitura direta do código para D1, D2, D3, D4, D8 e D10, e para as lacunas de §1.7.
 
 **Não verificado**
-- **Existir a linha não prova que ela diz o que a célula afirma.** O teste confere só arquivo e intervalo. O conteúdo de uma amostra de cerca de 25 citações foi lido; o resto vem dos inventários.
+- **Existir a linha não prova que ela diz o que a célula afirma.** O teste confere arquivo e intervalo. Uma auditoria linha a linha de todas as citações suspeitas e veredictos da matriz foi realizada (§9.1), corrigindo citações quebradas, afirmações não sustentadas e reclassificações comprovadas no código.
 - Nenhum provider real foi executado. Nenhuma célula tem captura real.
 - O T3 (`main` móvel) não foi relido: §2.6 repete o que o inventário `antigravity-t3.md` cita.
 - Sem medição de desempenho: o custo de `thread_execution_graph` (que carrega todas as conversas, `runs/harness.rs:100`) e de árvores profundas está **não medido**.
 - A suíte completa e o `cargo test --lib --bin ags` não foram rodados. `bun run check:fingerprint` continua falhando, como no commit base.
 - Nenhum teste visual, build, instalação, push ou PR.
+
+### 9.1 Auditoria e correções de evidências da matriz
+
+Auditoria completa das citações e afirmações da matriz de capabilities e do contrato (`auditoria-citacoes.md` e TSVs de veredictos), confirmando cada item diretamente no código:
+
+1. **Citações quebradas e afirmações não sustentadas corrigidas**:
+   - `claude/start`: rebaixado `Proof::Test` para `Proof::Code` citando `claude.rs:188-193` (o teste anteriormente citado não invocava `open`).
+   - `claude/interrupt`: substituído teste de outro motor por `test_bancada.rs:101-105`.
+   - `claude/tool_events`: adicionada citação da fixture `claude-normal-ok`.
+   - `claude/approval`: adicionada citação do código real de resolução (`claude.rs:600-611`, `api.rs:1116-1140`).
+   - `claude/child_spawn`: citação de teste corrigida para `tarefas_test.rs:33-44`.
+   - `claude/child_result`: nota corrigida (o texto de `Out::SubItem` é lido pelo adapter e exibido na janela via `taskItem`, mas não é gravado no banco; citação `claude_map.rs:202-215`).
+   - `codex/start`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:199-204`.
+   - `codex/interrupt`: citação de interrupção ajustada para `api.rs:1079-1082` (`turn/interrupt`).
+   - `codex/tool_events`: adicionada fixture `codex-normal-ok`.
+   - `codex/question`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:392-396`.
+   - `codex/approval`: citação de teste removida (apontava para Claude), citando `codex.rs:434-441`, fixture `codex-normal-ok` e `api.rs:1145`.
+   - `codex/resume`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:199-204` (removida citação indevida de `test_bancada.rs:272`).
+   - `codex/event_source`: rebaixado `Proof::Test` para `Proof::Code` citando o mapeamento JSON-RPC em `codex.rs:341-351`, `:364-371`, `:403-422`, `:469-501`.
+   - `opencode/steer`: adicionada citação de enfileiramento em `queueRunner.ts:48-58`.
+   - `opencode/goal`: removida citação falsa de `conversas.rs:113` (mantendo `bancada.rs:159`).
+   - `opencode/ags_mcp`: citação corrigida para `opencode.rs:474-489` (injeção de `mcp_servers`).
+   - `antigravity/usage`: adicionada citação de teste `test_motores.rs:347-377`.
+   - `cursor/interrupt`: esclarecido na nota que a fixture prova fim de turno por SIGKILL/queda de processo (`cursor.rs:217-223`), e não parada cooperativa pelo ADE.
+   - `cursor/child_result`: citação corrigida para `cursor_map.rs:129-140`.
+   - `cursor/resume`: elevado para `Proof::Test` com citação de teste `test_motores.rs:585-600` e nota sobre ausência de teste de sessão inválida.
+   - `local-acp/steer`: adicionada citação de `queueRunner.ts:48-58`.
+
+2. **Ajustes e tensões na Frota**:
+   - `codex/turn_completion`: citação corrigida de `:490-492` para `src-tauri/src/runs/adapters.rs:496-498`.
+   - 6 células de `resume` da Frota (`claude-code`, `gemini-cli`, `codex`, `opencode`, `kimi-code`, `antigravity`): mantido estado `Unsupported`, adicionada documentação da tensão com `run_hand_off_task` (`runs/mod.rs:1116-1157`), que reabre sessão nativa com `--resume` em nova aba interativa, mas não retoma a tarefa automaticamente no boot do app.
+
+3. **Reclassificações de estado**:
+   - `tui/claude-code` e `tui/codex`: `child_spawn`, `child_result`, `child_stop` rebaixados de `Unknown` para `Unsupported` com base em `canal/claude.rs:83-84` e `canal/codex.rs:83-84` (`nao_suporta("subagentes")`).
+   - `tui/hermes`: `question` rebaixado de `Supported` para `Unknown`, com `missing` registrando a necessidade de confirmação da ferramenta `ask_user` visível em sessão real do Hermes (`ags_mcp` do Hermes permanece `Unknown`).
+   - `tui/claude-code`: `question` mantido `Supported`, citando MCP `ask_user` e `canal/claude.rs:83-84`.
+   - `tui/gemini-cli` e `tui/codex`: `resume` com citações de descoberta de sessão (`session/title.rs:1400-1410`, `:1526-1540`).
+   - `tui/cursor`: `resume` corrigido para `registry.rs:398`.
+
+4. **Contrato e documentação**:
+   - §1.2 e §1.3: tabelas e contagens atualizadas (163 `Supported`, 29 `Unknown`, 204 `Unsupported`).
+   - §1.5: documentada a tensão entre retomada automática de tarefa na Frota e hand-off manual.
+   - §1.7: citação de `close_orphan_runs` corrigida para `conversa/store.rs:1068-1082`.
+   - §3.2: citação do Codex corrigida para `codex.rs:492-493` e frase de `SWEPT_RUNNING_ERROR` corrigida para esclarecer que `end_reason` não existe na projeção atual.
+   - §5.2, §5.3 e §5.5: B2, B3, B4 e B5 documentados como resolvidos pela bancada ampliada (`other_aceito` em `bancada.rs:1086-1092`, preservação de filhos em `bancada.rs:795-796`, etc.), restando apenas `uso` no snapshot.
+
 
 **Defeito do commit base encontrado e corrigido à parte:** `cargo test --lib` não compilava (três chamadas de `switch_team_member` em `conversa/troca_test.rs` com a assinatura antiga). O ajuste (`None, None`) está num commit separado e não muda comportamento de produção.
 
