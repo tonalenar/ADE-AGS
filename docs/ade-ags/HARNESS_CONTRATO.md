@@ -196,7 +196,7 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 
 | Nó do ADE | Criar | Resultado | Parar |
 |---|---|---|---|
-| conversa filha (`child_chat`) | `chat_new` com `client_request_id` (`ipc/commands/conversas.rs:225-268`, recibo em `conversa/api.rs:339-384`) | `chat_wait`/`chat_show` (`conversas.rs:357-388`); aviso do time com o último parágrafo (`chat_team/watch.rs:467-486`) | `chat_stop`: interrompe o turno da filha (`conversa/api.rs:1039-1080`) |
+| conversa filha (`child_chat`) | `chat_new` com `client_request_id` (`ipc/commands/conversas.rs:225-268`, recibo em `conversa/api.rs:339-384`) | `chat_wait`/`chat_show` (`conversas.rs:357-388`); aviso do time com o último parágrafo (`chat_team/watch.rs:467-486`) | `chat_stop`: interrompe o turno da filha (`conversa/api.rs:1051-1108`) |
 | tarefa da Frota (`fleet_task`) | `delegate_task`, `run_plan`, `task_add` (`runs/orchestration.rs`) | `run.result`, `await_run` (`runs/orchestration.rs:971-1027`, `:1071-1181`) | `cancel_task`: subárvore dentro do run; nunca o lead, nunca filhos de chat (`runs/orchestration.rs:1278-1330`) |
 
 Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta ou aviso. A entrega durável é da Fase 4.
@@ -209,7 +209,7 @@ Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta
 
 | # | Inventário | Afirmação | O que o código mostra | Efeito na matriz |
 |---|---|---|---|---|
-| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:201`, `opencode.rs:231`. Cursor e Antigravity **não** usam (`cursor.rs:326-336`, `agy.rs:312-322`) | Inventário errado no ponto. A observação de `resume` em cursor e agy diz que a sessão perdida não é classificada |
+| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:285`, `opencode.rs:231`. Cursor e Antigravity **não** usam (`cursor.rs:326-336`, `agy.rs:312-322`) | Inventário errado no ponto. A observação de `resume` em cursor e agy diz que a sessão perdida não é classificada |
 | D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7; nenhuma célula depende disso |
 | D3 | UI `chatModel.ts:74-80` × inventário | A UI anuncia `midTurn: steer` para o Claude; o inventário diz `unknown` | O Claude só escreve a linha `user` no stdin com o turno aberto (`claude.rs:570-578`) e não observa o desfecho. O comentário da própria UI admite "ou logo depois" (`chatModel.ts:66-67`) | `chat/claude-code` `steer` = `Unknown`; decisão em §1.8 |
 | D4 | `claude-codex` §2.1 #9-#11, §2.2 #9-#11 | `child_spawn`/`child_result` `supported` pela rota do ADE (`chat_new`, `chat_wait`) e `child_stop` pela rota nativa (`stop_task`) | Duas rotas misturadas na mesma capability | Separadas (§1.5). Claude: `child_spawn` fica `S` (nativo observado: `tarefas.rs:1-20`), `child_result` vira `U` (o resumo só vai à janela; o log só guarda id, título e status, `execution_log.rs:228-230`), `child_stop` fica `S`. Codex: `child_spawn` `S`, `child_result` `U`, `child_stop` `U` |
@@ -220,7 +220,7 @@ Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta
 | D9 | `tui-acp-frota` §5.1 | "98 pontos" de inferência por nome | Não reproduzível por comando: contou blocos de linhas e excluiu parte do registro | Substituído pela contagem reproduzível de §6.1 |
 | D10 | `tui-acp-frota` §3 (nota) × `adapter.rs` | (confirmado) o flag `Capabilities.mcp` do Antigravity é `true` | Confirmado: `adapter.rs:55` faz `has_task_mcp` seguir `supports_orchestration`, e o registro tem `McpStyle::None` (`registry.rs:384`). O flag contradiz a fonte | Anotado em `ags_mcp` de `tui/antigravity` |
 
-Conferido e **mantido** dos inventários: `Engine::of(...) != Some(Engine::Claude)` decide `NO_TASK_STOP` por nome (`api.rs:1105`); o Codex não chama `pool::after_turn` no `turn/completed` (`codex.rs:484-501`, já documentado em `BANCADA_MOTORES.md:113`); `unreachable!` em `api.rs:828`, `:953` e `:989`; só a primeira pergunta de um formulário recebe resposta.
+Conferido e **mantido** dos inventários: `Engine::of(...) != Some(Engine::Claude)` decide `NO_TASK_STOP` por nome (`api.rs:1132`); o Codex não chama `pool::after_turn` no `turn/completed` (`codex.rs:567-582`, já documentado em `BANCADA_MOTORES.md:113`); `unreachable!` em `api.rs:840`, `:953` e `:989`; só a primeira pergunta de um formulário recebe resposta.
 
 ### 1.7 `mark_unknown_outcomes` por motor (resolve D2)
 
@@ -231,7 +231,7 @@ A função marca como "desfecho desconhecido" as ferramentas `Running` de um tur
 | Motor | Fim pelo protocolo | Queda do processo com turno aberto | Boot |
 |---|---|---|---|
 | Claude | `finish_turn` próprio (`claude.rs:434-445`): **não** chama `record_end`. Nunca marca, nem com interrupção ou erro | `closed()` → `finish_turn` (`claude.rs:362`): **nunca marca** | marca |
-| Codex | `turn/completed` (`codex.rs:484-501`): **não passa por `turn::finish`**. Nunca marca, em nenhum `status`. Também não roda `pool::after_turn` | `closed()` → `turn::finish` (`codex.rs:394`): marca (queda é erro; fechar de propósito é interrupção) | marca |
+| Codex | `turn/completed` (`codex.rs:567-582`): **não passa por `turn::finish`**. Nunca marca, em nenhum `status`. Também não roda `pool::after_turn` | `closed()` → `turn::finish` (`codex.rs:480`): marca (queda é erro; fechar de propósito é interrupção) | marca |
 | OpenCode | `turn::finish` (`opencode.rs:814`): marca se interrompido ou com erro | `turn::finish` (`opencode.rs:589`): marca | marca |
 | Antigravity | `turn::finish` (`agy.rs:213`): idem | idem (EOF sem `result` vira erro) | marca |
 | Cursor | `turn::finish` (`cursor.rs:225`): idem | idem | marca |
@@ -365,7 +365,7 @@ Diferenças de significado:
 | `chat_run.completed` | `completed` | |
 | `chat_run.failed` | `failed` | |
 | `chat_run.interrupted` | `interrupted` | |
-| `chat_run.status` com outro texto (o Codex grava o `turn.status` como veio, `codex.rs:492-493`) | `interrupted`, `end_reason = unmapped_native_status`, `outcome_unknown` | nunca promover um valor desconhecido a terminal conhecido |
+| `chat_run.status` com outro texto (o Codex grava o `turn.status` como veio, `codex.rs:573-574`) | `interrupted`, `end_reason = unmapped_native_status`, `outcome_unknown` | nunca promover um valor desconhecido a terminal conhecido |
 | `tasks.pending`, `ready` | `pending` | |
 | `tasks.running` | `running` | |
 | `tasks.done` | `completed` | |
@@ -530,7 +530,7 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 | **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | **gravada** `antigravity-queda` (kill sem `result`) | **gravada** `cursor-queda` (kill sem `result`) | bancada |
 | **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste de banco; sem reabertura classificada | idem | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
 | **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
-| **P1** interrupção | **gravada** `claude-interrompido` | **gravada** `codex-interrompido-real` (e `codex-interrupt-antes-do-started`: `-32600` antes de `turn/started`) | fixture `acp-interrompido` | o kill gravado não separa interrupt de queda | o interrupt é kill, sem mensagem; ver `cursor-queda` | bancada |
+| **P1** interrupção | **gravada** `claude-interrompido` | **gravada** `codex-interrompido-real` (e `codex-interrupt-antes-do-started`: `-32600` antes de `turn/started`; o ADE segura o Parar e o manda no aviso: `codex_parar.rs`, `test_codex_parar.rs`) | fixture `acp-interrompido` | o kill gravado não separa interrupt de queda | o interrupt é kill, sem mensagem; ver `cursor-queda` | bancada |
 | **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
 | **P1** frames fora de ordem | fixture `claude-fora-de-ordem` (o `tool_result` antes do `tool_use` é descartado hoje, `claude_map.rs:287-289`) | fixture `codex-fora-de-ordem` | fixture `acp-fora-de-ordem` | `requer captura real` | `requer captura real` | bancada; o oráculo documenta o comportamento atual |
 | **P2** turno feliz | **gravada** `claude-feliz` | **gravada** `codex-feliz` | fixture de base | **gravada** `antigravity-feliz` | **gravada** `cursor-feliz` | bancada |
@@ -590,12 +590,12 @@ Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
 
 | Capability afetada | Onde |
 |---|---|
-| `child_stop` | `conversa/api.rs:1105` |
-| `compact`, `goal` | `conversa/api.rs:797`, `:913`, `:920-921` (textos); `ComposerAssistMenu.tsx:301-304`, `StructuredConversationView.tsx:156-197` |
+| `child_stop` | `conversa/api.rs:1132` |
+| `compact`, `goal` | `conversa/api.rs:809`, `:913`, `:920-921` (textos); `ComposerAssistMenu.tsx:301-304`, `StructuredConversationView.tsx:156-197` |
 | `steer` | `chatModel.ts:74-85` |
 | `approval` | `conversa/troca.rs:114`, `chat/structured/switchModel.ts:19-21` |
 | `usage` | `chat_team/watch_db.rs:257`, `chat/summary/LimitsCard.tsx:27-33` |
-| `resume` | `conversa/codex.rs:184`, `opencode.rs:194`, `tabs/continuity.ts:24` |
+| `resume` | `conversa/codex.rs:268`, `opencode.rs:194`, `tabs/continuity.ts:24` |
 | `ags_mcp` | `ipc/mcp.rs:2905`, `:2922`; `agents/adapter.rs:55`, `:93` (o flag que contradiz o registro) |
 | contrato duplicado | `ipc/commands/conversas.rs:78-124`, `conversa/api.rs:124-139` (`supports_access` deixa o ACP local aceitar cinco modos; a abertura só aceita `ask`, `opencode.rs:211-213`) |
 
@@ -607,7 +607,7 @@ Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
 4. Migrar Frota e orquestração (`supervisor.rs`, `mcp.rs`, `oneshot.rs`, `plan.rs`, `roster.rs`).
 5. Contas, uso e limites, pelo registro (não pelo descritor de execução).
 6. Ligar o teste de lint com baseline e baixá-lo a cada passo.
-7. Trocar os `unreachable!` (`api.rs:828`, `:953`, `:989`) por erro de capability, para uma flag ligada sem implementação não derrubar o processo.
+7. Trocar os `unreachable!` (`api.rs:840`, `:953`, `:989`) por erro de capability, para uma flag ligada sem implementação não derrubar o processo.
 
 ## 7. Fatia vertical da Fase 1
 
@@ -702,16 +702,16 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `claude/start`: rebaixado `Proof::Test` para `Proof::Code` citando `claude.rs:188-193` (o teste anteriormente citado não invocava `open`).
    - `claude/interrupt`: substituído teste de outro motor por `test_bancada.rs:101-105`.
    - `claude/tool_events`: adicionada citação da fixture `claude-normal-ok`.
-   - `claude/approval`: adicionada citação do código real de resolução (`claude.rs:600-611`, `api.rs:1116-1140`).
+   - `claude/approval`: adicionada citação do código real de resolução (`claude.rs:600-611`, `api.rs:1143-1167`).
    - `claude/child_spawn`: citação de teste corrigida para `tarefas_test.rs:33-44`.
    - `claude/child_result`: nota corrigida (o texto de `Out::SubItem` é lido pelo adapter e exibido na janela via `taskItem`, mas não é gravado no banco; citação `claude_map.rs:202-215`).
-   - `codex/start`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:199-204`.
-   - `codex/interrupt`: citação de interrupção ajustada para `api.rs:1079-1082` (`turn/interrupt`).
+   - `codex/start`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:283-288`.
+   - `codex/interrupt`: citação de interrupção ajustada para `api.rs:1104-1108` (`turn/interrupt`); a lógica do Parar pendente está em `codex.rs::Session::stop` e `codex_parar.rs`.
    - `codex/tool_events`: adicionada fixture `codex-normal-ok`.
-   - `codex/question`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:392-396`.
-   - `codex/approval`: citação de teste removida (apontava para Claude), citando `codex.rs:434-441`, fixture `codex-normal-ok` e `api.rs:1145`.
-   - `codex/resume`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:199-204` (removida citação indevida de `test_bancada.rs:272`).
-   - `codex/event_source`: rebaixado `Proof::Test` para `Proof::Code` citando o mapeamento JSON-RPC em `codex.rs:341-351`, `:364-371`, `:403-422`, `:469-501`.
+   - `codex/question`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:478-482`.
+   - `codex/approval`: citação de teste removida (apontava para Claude), citando `codex.rs:517-524`, fixture `codex-normal-ok` e `api.rs:1172`.
+   - `codex/resume`: rebaixado `Proof::Test` para `Proof::Code` citando `codex.rs:283-288` (removida citação indevida de `test_bancada.rs:272`).
+   - `codex/event_source`: rebaixado `Proof::Test` para `Proof::Code` citando o mapeamento JSON-RPC em `codex.rs:426-436`, `:364-371`, `:403-422`, `:469-501`.
    - `opencode/steer`: adicionada citação de enfileiramento em `queueRunner.ts:48-58`.
    - `opencode/goal`: removida citação falsa de `conversas.rs:113` (mantendo `bancada.rs:159`).
    - `opencode/ags_mcp`: citação corrigida para `opencode.rs:474-489` (injeção de `mcp_servers`).
@@ -736,7 +736,7 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - §1.2 e §1.3: tabelas e contagens atualizadas (163 `Supported`, 29 `Unknown`, 204 `Unsupported`).
    - §1.5: documentada a tensão entre retomada automática de tarefa na Frota e hand-off manual.
    - §1.7: citação de `close_orphan_runs` corrigida para `conversa/store.rs:1068-1082`.
-   - §3.2: citação do Codex corrigida para `codex.rs:492-493` e frase de `SWEPT_RUNNING_ERROR` corrigida para esclarecer que `end_reason` não existe na projeção atual.
+   - §3.2: citação do Codex corrigida para `codex.rs:573-574` e frase de `SWEPT_RUNNING_ERROR` corrigida para esclarecer que `end_reason` não existe na projeção atual.
    - §5.2, §5.3 e §5.5: B2, B3, B4 e B5 documentados como resolvidos pela bancada ampliada (`other_aceito` em `bancada.rs:1086-1092`, preservação de filhos em `bancada.rs:795-796`, etc.), restando apenas `uso` no snapshot.
 
 

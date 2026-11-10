@@ -683,17 +683,29 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
     if let Some(effort) = &row.effort {
         params["effort"] = json!(effort);
     }
-    let started = session.request_typed("turn/start", params).await.map_err(codex_error)?;
+    session.begin_start();
+    let started = match session.request_typed("turn/start", params).await {
+        Ok(started) => started,
+        Err(failure) => {
+            session.end_start(None);
+            return Err(codex_error(failure));
+        }
+    };
     // O turno conta como aberto já na resposta (o aviso `turn/started` pode chegar depois): quem
     // perguntar o estado logo em seguida (`ags chat wait`) não o vê parado.
     // Se o turno já acabou (o aviso chegou antes desta resposta), não reabre.
-    if let Some(turn) = started.pointer("/turn/id").and_then(Value::as_str) {
-        let finished = db.lock().ok()
-            .and_then(|conn| store::run_status(&conn, thread_id, turn).ok().flatten())
-            .is_some_and(|s| s != "inProgress");
-        if session.turn().is_none() && !finished {
+    // O Parar que veio antes da resposta fica amarrado a este turno (ver `codex_parar`).
+    let turn = started.pointer("/turn/id").and_then(Value::as_str);
+    let finished = turn.is_some_and(|turn| {
+        db.lock().ok().and_then(|conn| store::run_status(&conn, thread_id, turn).ok().flatten()).is_some_and(|s| s != "inProgress")
+    });
+    if let Some(turn) = turn.filter(|_| !finished) {
+        if session.turn().is_none() {
             session.set_turn(Some(turn.to_string()));
         }
+        session.end_start(Some(turn));
+    } else {
+        session.end_start(None);
     }
     Ok(())
 }
@@ -1039,8 +1051,9 @@ pub fn status(thread_id: &str) -> ThreadStatus {
 /// O Parar da pessoa: para o turno do agente vivo; sem agente vivo, fecha o turno que ficou aberto no banco (um
 /// agente que morreu sem fechar o turno deixaria a tela em «Pensando…» e a fila presa para sempre).
 pub async fn stop(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<(), String> {
-    if live_turn(thread_id).is_some() {
-        return interrupt(thread_id).await;
+    // Sem turno nenhum (Codex vivo, mas parado e sem `turn/start` a caminho) também fecha o que ficou aberto no banco.
+    if live_turn(thread_id).is_some() && interrupt(thread_id).await? != Interrupted::NoTurn {
+        return Ok(());
     }
     let now = crate::util::now_ts_ms();
     // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
@@ -1060,25 +1073,39 @@ pub async fn stop(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result
 /// O fim do turno que o Parar fechou sem agente vivo.
 pub const STOPPED_ORPHAN: &str = "O turno foi parado: o agente já não estava rodando.";
 
+/// O que o Parar fez.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Interrupted {
+    /// Mandou a parada ao agente.
+    Sent,
+    /// O turno do Codex ainda não abriu: a parada sai no `turn/started` (ver `codex_parar`).
+    Pending,
+    /// Não havia turno para parar.
+    NoTurn,
+}
+
 /// Para o turno em andamento.
-pub async fn interrupt(thread_id: &str) -> Result<(), String> {
+pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
     if let Some(session) = claude::get(thread_id) {
-        return claude::interrupt(&session).await;
+        return claude::interrupt(&session).await.map(|_| Interrupted::Sent);
     }
     if let Some(session) = opencode::get(thread_id) {
-        return opencode::interrupt(&session).await;
+        return opencode::interrupt(&session).await.map(|_| Interrupted::Sent);
     }
     if agy::get(thread_id).is_some() {
         agy::interrupt(thread_id);
-        return Ok(());
+        return Ok(Interrupted::Sent);
     }
     if cursor::get(thread_id).is_some() {
         cursor::interrupt(thread_id);
-        return Ok(());
+        return Ok(Interrupted::Sent);
     }
-    let Some(session) = codex::get(thread_id) else { return Ok(()) };
-    let (Some(remote), Some(turn)) = (session.remote(), session.turn()) else { return Ok(()) };
-    session.request("turn/interrupt", json!({ "threadId": remote, "turnId": turn })).await.map(|_| ())
+    let Some(session) = codex::get(thread_id) else { return Ok(Interrupted::NoTurn) };
+    Ok(match session.stop().await? {
+        codex::StopAction::Send(_) => Interrupted::Sent,
+        codex::StopAction::Deferred => Interrupted::Pending,
+        codex::StopAction::NoTurn => Interrupted::NoTurn,
+    })
 }
 
 /// O motivo de não parar uma tarefa só: o motor não tem como (só o Claude Code tem `stop_task`).
