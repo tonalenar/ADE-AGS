@@ -10,6 +10,7 @@
         "Rodando o build."
       ]
     ],
+    "filhos": [],
     "fim": {
       "durationMs": null,
       "error": "O processo do Codex fechou no meio do turno",
@@ -40,7 +41,17 @@
         "title": "{{cwd}}/src"
       }
     ],
-    "sessao": "{{session:1}}"
+    "pedidosPendentes": [
+      {
+        "kind": "fileChange",
+        "title": "{{cwd}}/src"
+      }
+    ],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "assistant",
+      "tool"
+    ]
   },
   "format": "ade-replay",
   "id": "codex-comando-falha-e-queda",

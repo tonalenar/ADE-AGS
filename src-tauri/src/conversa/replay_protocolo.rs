@@ -11,8 +11,8 @@
 //!
 //! Modos (`ADE_REPLAY_MODE`): `replay` (padrão: confere oráculo e snapshot), `refresh` (confere o oráculo e
 //! regrava o `expected`) e `record` (cria a fixture a partir de um `.jsonl` gravado à mão, ver o doc).
-//! O guard recusa a fixture com placeholder desconhecido, sem oráculo, com segredo, ou cuja ferramenta o
-//! mapeador não conhece (`ToolKind::Other`, o `UNKNOWN_TOOL` do deepseek-harness).
+//! O guard recusa a fixture com placeholder desconhecido, sem oráculo, com segredo, ou cuja ferramenta
+//! `Other` está fora da lista do protocolo. Claude, Codex e ACP continuam sem nenhum `Other` aceito.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -210,19 +210,25 @@ pub fn saidas(fixture: &Fixture) -> Vec<Saida> {
 }
 
 /// O snapshot: o que o motor produziu, com os placeholders de volta no lugar dos valores.
+/// As chaves saem em ordem alfabética, a mesma dos `expected` já gravados: um campo novo entra no
+/// lugar e o resto não se reordena no `refresh`.
 pub fn snapshot(r: &Resultado) -> Value {
     let fim = r.fim.as_ref().map(|f| json!({ "interrupted": f.interrupted, "error": f.error, "durationMs": f.duration_ms }));
-    let valor = json!({
-        "sessao": r.sessao(),
-        "aberturaFalhou": r.abertura.as_ref().and_then(|a| a.as_ref().err()),
-        "itens": r.itens,
-        "deltas": r.deltas,
-        "pedidos": r.pedidos.iter().map(|p| json!({ "kind": p.kind, "title": p.title })).collect::<Vec<_>>(),
-        "fim": fim,
-        "caiu": r.caiu,
-        "avisos": r.avisos,
-        "ignoradas": r.ignoradas,
-    });
+    let pedido = |p: &bancada::Pedido| json!({ "kind": p.kind, "title": p.title });
+    let mut map = serde_json::Map::new();
+    map.insert("aberturaFalhou".into(), json!(r.abertura.as_ref().and_then(|a| a.as_ref().err())));
+    map.insert("avisos".into(), json!(r.avisos));
+    map.insert("caiu".into(), json!(r.caiu));
+    map.insert("deltas".into(), json!(r.deltas));
+    map.insert("filhos".into(), serde_json::to_value(&r.filhos).unwrap_or(Value::Null));
+    map.insert("fim".into(), json!(fim));
+    map.insert("ignoradas".into(), json!(r.ignoradas));
+    map.insert("itens".into(), serde_json::to_value(&r.itens).unwrap_or(Value::Null));
+    map.insert("pedidos".into(), Value::Array(r.pedidos.iter().map(pedido).collect()));
+    map.insert("pedidosPendentes".into(), Value::Array(r.pedidos_pendentes().into_iter().map(pedido).collect()));
+    map.insert("sessao".into(), json!(r.sessao()));
+    map.insert("tipos".into(), json!(r.tipos()));
+    let valor = Value::Object(map);
     serde_json::from_str(&recolocar(&valor.to_string(), 99)).unwrap_or(valor)
 }
 
@@ -230,12 +236,12 @@ pub fn snapshot(r: &Resultado) -> Value {
 /// ou grava (refresh).
 pub fn tocar(fixture: &Fixture, oraculo: &Oraculo) -> Result<Value, String> {
     let r = bancada::rodar(fixture.protocol, &saidas(fixture));
-    let desconhecidas = r.ferramentas_desconhecidas();
-    if !desconhecidas.is_empty() {
+    let recusadas = r.ferramentas_recusadas(fixture.protocol);
+    if !recusadas.is_empty() {
         return Err(format!(
-            "{}: ferramenta que o mapeador não conhece ({}): mapeie em `canal::timeline` antes de gravar a fixture",
+            "{}: ferramenta que o mapeador não conhece e está fora da lista aceita deste protocolo ({}): mapeie em `canal::timeline` antes de gravar a fixture",
             fixture.id,
-            desconhecidas.join(", ")
+            recusadas.join(", ")
         ));
     }
     let expand = |s: &str| expandir(s).unwrap_or_else(|_| s.to_string());
