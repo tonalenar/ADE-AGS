@@ -209,7 +209,7 @@ Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta
 
 | # | Inventário | Afirmação | O que o código mostra | Efeito na matriz |
 |---|---|---|---|---|
-| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:285`, `opencode.rs:231`. Cursor e Antigravity **não** usam (`cursor.rs:326-336`, `agy.rs:312-322`) | Inventário errado no ponto. A observação de `resume` em cursor e agy diz que a sessão perdida não é classificada |
+| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também OpenCode (`claude.rs:190`, `codex.rs:285`, `opencode.rs:231`), e agora Cursor e Antigravity via `drive_resuming` (`cursor.rs:232-260`, `agy.rs:220-248`, `resume.rs:158-183`) | Inventário inicial errado. Unificado na Fase 3: Cursor e Antigravity passam por `open_resuming` e classificam sessão perdida como `Gone` com aviso `resumeLost` |
 | D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7; nenhuma célula depende disso |
 | D3 | UI `chatModel.ts:74-80` × inventário | A UI anuncia `midTurn: steer` para o Claude; o inventário diz `unknown` | O Claude só escreve a linha `user` no stdin com o turno aberto (`claude.rs:570-578`) e não observa o desfecho. O comentário da própria UI admite "ou logo depois" (`chatModel.ts:66-67`) | `chat/claude-code` `steer` = `Unknown`; decisão em §1.8 |
 | D4 | `claude-codex` §2.1 #9-#11, §2.2 #9-#11 | `child_spawn`/`child_result` `supported` pela rota do ADE (`chat_new`, `chat_wait`) e `child_stop` pela rota nativa (`stop_task`) | Duas rotas misturadas na mesma capability | Separadas (§1.5). Claude: `child_spawn` fica `S` (nativo observado: `tarefas.rs:1-20`), `child_result` vira `U` (o resumo só vai à janela; o log só guarda id, título e status, `execution_log.rs:228-230`), `child_stop` fica `S`. Codex: `child_spawn` `S`, `child_result` `U`, `child_stop` `U` |
@@ -528,7 +528,7 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 |---|---|---|---|---|---|---|
 | **P0** ferramenta sem resultado ao fim | fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` | fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` | fixture `acp-tool-sem-resultado` | `requer captura real` | `requer captura real` | fixa a lacuna de §1.7 como comportamento atual |
 | **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | **gravada** `antigravity-queda` (kill sem `result`) | **gravada** `cursor-queda` (kill sem `result`) | bancada |
-| **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste de banco; sem reabertura classificada | idem | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
+| **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste de retomada classificada (`drive_resuming` com `open_resuming`) | idem (`--resume` com `open_resuming`) | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
 | **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
 | **P1** interrupção | **gravada** `claude-interrompido` | **gravada** `codex-interrompido-real` (e `codex-interrupt-antes-do-started`: `-32600` antes de `turn/started`; o ADE segura o Parar e o manda no aviso: `codex_parar.rs`, `test_codex_parar.rs`) | fixture `acp-interrompido` | o kill gravado não separa interrupt de queda | o interrupt é kill, sem mensagem; ver `cursor-queda` | bancada |
 | **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
@@ -717,8 +717,8 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `opencode/ags_mcp`: citação corrigida para `opencode.rs:474-489` (injeção de `mcp_servers`).
    - `antigravity/usage`: adicionada citação de teste `test_motores.rs:347-377`.
    - `cursor/interrupt`: esclarecido na nota que a fixture prova fim de turno por SIGKILL/queda de processo (`cursor.rs:217-223`), e não parada cooperativa pelo ADE.
-   - `cursor/child_result`: citação corrigida para `cursor_map.rs:129-140`.
-   - `cursor/resume`: elevado para `Proof::Test` com citação de teste `test_motores.rs:585-600` e nota sobre ausência de teste de sessão inválida.
+   - `antigravity/resume`: elevado para `Proof::Test` com citação de `agy.rs:220-248`, `agy_map.rs:62-64` e teste `test_motores.rs:517-579` cobrindo sessão perdida (`Gone`) via `resume::open_resuming`.
+   - `cursor/resume`: atualizado para `Proof::Test` com citação de `cursor.rs:232-260`, `cursor_map.rs:78-80` e teste `test_motores.rs:947-1011` cobrindo sessão perdida (`Gone`) via `resume::open_resuming`.
    - `local-acp/steer`: adicionada citação de `queueRunner.ts:48-58`.
 
 2. **Ajustes e tensões na Frota**:
