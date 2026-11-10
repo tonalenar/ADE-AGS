@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.65.0
+version: 1.66.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1199,7 +1199,7 @@ have reached the agent: inspect the conversation (`chat_show`) before sending an
 pause/resume available only for Codex. Read `chat_providers.capabilities` before using them.
 Pass only the excerpt needed for the task in `context`; ADE marks it as untrusted and
 does not copy the parent's history. Child conversations always start supervised. Use
-`chat_wait`/`chat_show` to get the answer and `chat_stop` to interrupt it. For headless-only
+`chat_wait`/`chat_show` to get the answer and `chat_stop` to interrupt it. `chat_stop` only works on a child conversation that the calling conversation created; ADE refuses any other thread, and the person can stop any. For headless-only
 providers or worktrees, budgets, DAG dependencies and Fleet approvals, use `delegate_task` or
 `run_plan` instead.
 Use `harness_graph` to inspect the current structured conversation's descendants, Fleet tasks,
@@ -1269,7 +1269,7 @@ ADE agent that supports the requested runtime. `client_request_id` is required a
 retries; reusing it with different content is rejected. In `mode: "async"` the tool returns the
 child id for follow-up; `mode: "wait"` waits and hands the result back in the current turn.
 Native children use `chat_wait`/`chat_show` and `chat_stop`; Fleet tasks use `task_status`,
-`task_result`, `run_await` and `task_cancel`, which also stops active descendants. A native child
+`task_result`, `run_await` and `task_cancel`; `task_cancel` also stops active descendants, but only when the caller is the task's parent (or an ancestor) or the person. A native child
 starts supervised and remains linked in the side-chat panel. A Fleet child uses the scheduler's
 worktrees, budget, approval rules and task graph. For a known multi-part objective, inspect
 `agent_roster` and use `run_plan` to declare a Fleet DAG. In either runtime the child receives
