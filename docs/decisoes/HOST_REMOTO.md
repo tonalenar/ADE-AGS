@@ -10,7 +10,7 @@ Salvo indicação, `arquivo:linha` é relativo a `src-tauri/src/`.
 ## 1. Resumo
 
 - O IPC de hoje é um listener TCP em `127.0.0.1` com um token por processo, mais um canal de credencial com PID (§3). Ele não está exposto à rede **por causa do bind e do token**, não por um modelo de autorização.
-- Um token dá acesso a **219 dos 221 métodos** do despachador; os 2 de manutenção são negados a todos. Os métodos que dependem de PID exigem também o canal de credencial. O token é legível por qualquer processo do mesmo usuário, inclusive por agentes que rodam comandos. Ele não separa processos do mesmo usuário nem identifica cliente.
+- Um token dá acesso a **217 dos 221 métodos** do inventário; os 2 de manutenção e, desde a correção de F-01, `approval.decide` e `approval.list` são negados a todos (antes do `match`). Os métodos que dependem de PID exigem também o canal de credencial. O token é legível por qualquer processo do mesmo usuário, inclusive por agentes que rodam comandos. Ele não separa processos do mesmo usuário nem identifica cliente.
 - **Decisão:** o listener atual não será exposto à rede, nem com TLS na frente. O host remoto precisa de um contrato novo (identidade de cliente, capacidades por método, versão, limites antes da autenticação). Não é um túnel para este listener.
 - Achados (§6): **1 alta**, **3 médias** confirmadas, **1 média** condicional (não verificada), **5 baixas**, **2 informativos**.
 - Guardas (§9): **seis testes** em `ipc/test.rs`, que passam no código atual. Nenhuma falha de produção apareceu que exigisse parar.
@@ -58,7 +58,7 @@ Outros listeners do app, todos em loopback: o proxy de preview (`127.0.0.1` e `:
 
 ### 3.3 Métodos expostos
 
-- **221 braços** no `match` do despachador (dispatch.rs:99-348), todos com ponto no nome.
+- **221 braços** no `match` do despachador (dispatch.rs:99-348), todos com ponto no nome. *Depois de F-01 o `match` tem 219: `approval.decide` e `approval.list` saíram e são recusados antes dele. O Anexo A abaixo é o inventário original.*
 - Antes do `match`: a negação de manutenção, para **qualquer** chamador (dispatch.rs:86; ipc/mod.rs:31-35). E a checagem de papel Dreamer quando há `taskId` (dispatch.rs:89-98; runs/policy.rs:107-119).
 - O despachador **não confere identidade**. Só alguns métodos conferem, por conta própria e por PID de ancestralidade (terminal/session.rs:172-211): memória e swarm de sessão, segredos (ipc/commands/agent_secrets.rs:13-21) e computer use (computer_use/ios.rs:594).
 - Classificação preliminar (Anexo A):
@@ -105,8 +105,8 @@ Token e handshake (acesso a tudo que o IPC faz). PTYs e o texto enviado a eles. 
 
 - **Spoofing:** tarefa e aba são afirmadas no payload (F-02). O PID cobre só parte dos métodos (F-12).
 - **Tampering:** `tab.send` escreve em qualquer PTY por id, sem checar quem chama (F-09). O handshake pode ser redirecionado pelo ambiente (F-07).
-- **Repudiation:** o IPC não registra quem chama. Só conta bytes (server.rs:287-289). Aprovações não guardam a origem da decisão (IPC ou interface) no pedido. Confirmar em approval_audit.rs (F-01).
-- **Information disclosure:** `approval.list` expõe o `input` bruto da ferramenta (F-01). `tab.output` lê o terminal. `secret.consume` devolve o valor, só com PID (F-12).
+- **Repudiation:** o IPC não registra quem chama. Só conta bytes (server.rs:287-289). Aprovações não guardam a origem da decisão no pedido; com F-01 só a interface decide (`DecidedBy::User`).
+- **Information disclosure:** `approval.list` expunha o `input` bruto da ferramenta (F-01, fechado). `tab.output` lê o terminal. `secret.consume` devolve o valor, só com PID (F-12).
 - **Denial of service:** slots e memória antes do token (F-03).
 - **Elevation of privilege:** aprovar e lembrar regra (F-01). Agir como outra tarefa (F-02). Enviar texto a outra aba (F-09).
 
@@ -137,7 +137,7 @@ Severidade: **Alta** (explorável sem privilégio extra e quebra uma barreira hu
 
 | ID | Sev. | STRIDE | Achado | Evidência | Estado |
 |---|---|---|---|---|---|
-| F-01 | **Alta** | E, R, I | `approval.decide` e `approval.list` não conferem quem chama. Quem tem o token aprova ou nega qualquer pedido pendente e, com `--remember`, grava regra persistente. `approval.list` devolve `task_id` e o `input` bruto. A interface não usa o IPC para isso: decide pelo comando Tauri `run_decide_approval` | missions.rs:554-572; runs/mod.rs:1192, 1203-1230, 1232, 1237; runs/broker.rs:39-50; dispatch.rs:346-347; src/features/runs/ipc.ts:138 | Confirmado por leitura. A exploração depende de o agente chegar ao IPC (política de shell do usuário, não verificada) |
+| F-01 | **Alta** | E, R, I | `approval.decide` e `approval.list` não conferem quem chama. Quem tem o token aprova ou nega qualquer pedido pendente e, com `--remember`, grava regra persistente. `approval.list` devolve `task_id` e o `input` bruto. A interface não usa o IPC para isso: decide pelo comando Tauri `run_decide_approval` | missions.rs:554-572; runs/mod.rs:1192, 1203-1230, 1232, 1237; runs/broker.rs:39-50; dispatch.rs:346-347; src/features/runs/ipc.ts:138 | **Corrigido** (ver §6.1). Antes: confirmado por leitura; a exploração dependia de o agente chegar ao IPC (política de shell do usuário, não verificada) |
 | F-02 | Média | S, E | `taskId` vem do payload e não é provado. Quem tem o token age como outra tarefa: lê a memória aprovada do workspace dela e propõe alterações com o autor dela. Ids de tarefa com pedido pendente saem de `approval.list`; outras fontes de id não foram mapeadas | runs/orchestration.rs:202-204, 285-294; memory.rs:1179-1184, 1240-1246, 1362, 1403, 1451, 1500; runs/policy.rs:107-119 | Confirmado por leitura |
 | F-03 | Média | D | Recursos antes da autenticação. (1) O teto de 256 é um orçamento só, usado pelo TCP sem checagem e pelo canal de credencial: um cliente local segura todos os slots, e o agente vê "O app fechou a conexão". (2) O pedido é lido inteiro, até 8 MiB, antes de o token ser conferido. (3) O prazo vale por leitura: um cliente que manda um byte a cada 29 s segura o slot por tempo praticamente ilimitado | server.rs:23, 27, 70, 95, 106, 255-270; transport.rs:128, 247, 257, 328 | Confirmado por leitura. Não medido |
 | F-04 | Média (se confirmado) | I, E | Um agente com rede liberada e AF_UNIX bloqueado pode falar com o TCP do IPC, se conseguir ler `ipc.json`. A medição do Codex mostra rede externa liberada com `network.enabled = true`, e a coluna "TCP direto" ficou em "—" nessa linha | COMPUTER_USE_SUPERFICIES.md:47-57 | **Não verificado.** Medir antes de afirmar |
@@ -154,7 +154,12 @@ Severidade: **Alta** (explorável sem privilégio extra e quebra uma barreira hu
 
 Nenhuma correção foi implementada. Todas mudam o comportamento do IPC ou do transporte e pedem OK.
 
-- **F-01 (alta).** A proteção da frota é o broker. O Claude roda com `--permission-mode default` e `--permission-prompt-tool` (runs/agents.rs:115-150). O Bash só passa sem pergunta se a política do usuário liberar. Nas abas de terminal, quem decide é a política do próprio agente. *Correção:* tirar `approval.decide` do despachador (a interface já tem `run_decide_approval`); reduzir `approval.list` a metadados, sem `input` nem `task_id`; se algum fluxo headless precisar decidir, exigir confirmação fora do alcance do agente.
+- **F-01 (alta) — corrigido.** A proteção da frota é o broker. O Claude roda com `--permission-mode default` e `--permission-prompt-tool` (runs/agents.rs:115-150). O Bash só passa sem pergunta se a política do usuário liberar. Nas abas de terminal, quem decide é a política do próprio agente.
+  - **O que ficou.** `approval.decide` **e** `approval.list` são recusados **sempre**, para qualquer chamador do IPC (`ipc::person_only_error`, chamado no começo de `dispatch`, antes do token de tarefa, do PID e do banco; a CLI recusa antes de abrir a conexão). Os braços e os handlers saíram do despachador. A tela segue decidindo pelo comando Tauri `run_decide_approval`, que não mudou de contrato. O núcleo que decide (`runs::decide_from_screen`) é **privado** e o `broker` também: o IPC nem compila uma chamada a ele. `--remember` só existe na tela.
+  - **Por que fechar sempre, e não por PID.** O que o servidor verifica é o PID do par, e isso prova no máximo que o chamador **é** descendente de um PTY, conversa ou tarefa da ADE, nunca que **não é** agente: um `setsid`, um duplo fork ou `open -a Terminal` sai da árvore; o TCP não traz PID; o token está num arquivo legível pelo mesmo usuário; `ADE_TAB_ID` e `taskId` são declarados pelo chamador. Sem prova de que quem chama é a pessoa, a regra é recusar, como já se faz com `memory.compact` e `workspace.restore` (`AGENT_MAINTENANCE_DENIED`).
+  - **`approval.list`.** Também fechado: ele devolvia `task_id` e o `input` bruto (o comando que outro agente quer rodar), e nenhum fluxo de agente depende dele (skill, MCP e `cliBridge.ts` não o usam). A tela lista pelo comando Tauri `run_pending_approvals`.
+  - **Custo.** Sem tela (CI, `--headless`), não há mais resposta pela CLI: o pedido vence e é negado; o caminho é escrever regras de permissão da pasta antes (HEADLESS.md).
+  - **Fora do escopo (não alterado).** `peer.answer` (responde diálogos de TUI de integrantes do time, por escolha do orquestrador) e `fix.decide` seguem no despachador; entram na revisão de F-09 e da tabela por método (Anexo A).
 - **F-02 (média).** *Correção:* ligar `taskId` ao processo, como `ADE_SESSION` (token por tarefa conferido com PID). Ou exigir o canal com PID nos métodos `memory.*`, como já fazem os de `missions.rs` (`authenticated_tab`, missions.rs:182-395).
 - **F-03 (média).** *Correção:* orçamento separado por canal. No TCP, teto de tempo total por conexão (não por leitura) e teto para a primeira linha. Fechar o TCP para clientes novos quando a CLI puder usar o canal de credencial.
 - **F-04 (média, não verificada).** Medir o TCP direto com `network.enabled = true`, num servidor de loopback descartável, sem rede externa. Sem OK, o sandbox não é mexido.
@@ -256,7 +261,7 @@ Seis testes em `src-tauri/src/ipc/test.rs`, na seção "Guardas da superfície d
 2. **Windows.** Os testes `#[cfg(windows)]` não rodaram. A DACL do pipe (F-10) não foi examinada.
 3. **Sandbox do Codex com rede liberada (F-04).** O TCP direto com `network.enabled = true` não foi medido.
 4. **Leitura de `~/.ags/ipc.json` pelos agentes.** Depende de cada agente e da sua política de permissão. Não testado.
-5. **Alcance de `approval.decide` por um agente.** Depende da política de shell do usuário (`allowedTools` e regras do próprio agente). Não testado.
+5. **Alcance de `approval.decide` por um agente.** Era o risco antes de F-01; agora o IPC recusa sempre. Não medi se um agente ainda alcança o IPC (política de shell do usuário), o que deixou de importar para este método.
 6. **Comandos Tauri e webviews locais.** `build.rs:3` chama `tauri_build::build()` sem `AppManifest`, e `capabilities/default.json:5-7` usa `"*"`. Não confirmei se, sem o manifesto, os comandos do app ficam acessíveis a qualquer webview local, nem se o navegador nativo do painel recebe alguma ponte. Verificar em separado.
 7. **Ordem de `set_var` (F-08).** Observada no código. Nenhuma falha foi observada.
 8. **Negação de serviço (F-03).** Não medida. Não há número de latência nem de memória sob carga.
@@ -270,7 +275,7 @@ Só o que não muda comportamento pode seguir sem OK. O restante depende de OK e
 
 1. **Já feito, sem mudar comportamento:** as guardas de §9 e este documento.
 2. **Com OK, sem risco de runtime:** medição de F-04 numa sandbox de teste, sem rede externa.
-3. **Com OK (muda o IPC):** F-01 (tirar `approval.decide` do despachador e reduzir `approval.list`) e F-02 (identidade de tarefa). São as duas correções de maior valor.
+3. **Com OK (muda o IPC):** F-02 (identidade de tarefa). F-01 (`approval.decide` e `approval.list` recusados sempre) já foi corrigido com OK explícito.
 4. **Com OK (muda o transporte):** F-03 (orçamento e prazos antes da autenticação), F-05 (criação do handshake com modo), F-07 (validação de `AGS_HANDSHAKE`) e F-08 (ordem de `set_var`).
 5. **Fase 0 do plano (sem mudar comportamento):** classificar cada um dos 221 métodos com auditoria por handler e transformar o Anexo A num teste que falha quando um braço novo do despachador não tem classe. Isso fecha o item "método desconhecido é negado" do plano.
 6. **Decisão de arquitetura:** host com Tauri sem janela ou binário separado (§7.2). Cabe um ADR.
