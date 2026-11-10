@@ -554,9 +554,37 @@ pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &st
 /// motores o caminho já está no texto (ver `attach`). Uma imagem que não cabe nos limites segue só
 /// pelo texto: nunca derruba a mensagem.
 pub async fn send_with(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), String> {
+    send_with_class(app, db, thread_id, text, images).await.map_err(String::from)
+}
+
+/// Como [`send_with`], mas com a classe do erro (ver [`SendError`]): o envio com recibo precisa saber se a
+/// mensagem pode ter chegado.
+async fn send_with_class(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), SendError> {
     // A conta original renovou (conversa que trocou pelo pool)? Volta antes de enviar, só com a conversa livre.
     let text = if status(thread_id).working { text.to_string() } else { super::pool::before_send(app, db, thread_id, text) };
-    send_mode(app, db, thread_id, &text, SendMode::SteerActive, images).await.map_err(String::from)
+    send_mode(app, db, thread_id, &text, SendMode::SteerActive, images).await
+}
+
+/// O envio da pessoa com `client_request_id` (Fase 2, contrato §11.7): um reenvio idêntico devolve o recibo
+/// e **não** manda a mensagem de novo; o mesmo id com outro conteúdo falha. `scope` é quem chamou (aba ou
+/// conversa do MCP; `ui`, `cli`). Sem id, use [`send_with`].
+pub async fn send_with_request(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    text: &str,
+    images: &[String],
+    scope: &str,
+    request_id: &str,
+) -> Result<super::send_receipt::SendReceipt, String> {
+    let identity = super::send_receipt::identity(scope, request_id, thread_id, text, images)?;
+    // A conversa precisa existir antes de a intenção ser gravada.
+    thread(db, thread_id)?;
+    let owner = format!("send:{}", uuid::Uuid::new_v4());
+    super::send_receipt::run(db, &identity, thread_id, &owner, &crate::util::now_ts_ms, || {
+        send_with_class(app, db, thread_id, text, images)
+    })
+    .await
 }
 
 /// Uma trava por conversa: a checagem do turno e o envio (`turn/start`/`turn/steer`) acontecem juntos, sem

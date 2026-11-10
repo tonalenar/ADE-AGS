@@ -39,9 +39,21 @@ pub async fn chat_side_chat_delete(db: State<'_, DbConnection>, thread_id: Strin
 }
 
 #[tauri::command]
-pub async fn chat_thread_send(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, text: String, images: Option<Vec<String>>) -> Result<(), String> {
+pub async fn chat_thread_send(
+    app: AppHandle,
+    db: State<'_, DbConnection>,
+    thread_id: String,
+    text: String,
+    images: Option<Vec<String>>,
+    client_request_id: Option<String>,
+) -> Result<Option<super::send_receipt::SendReceipt>, String> {
     let db = db.inner().clone();
-    api::send_with(&app, &db, &thread_id, &text, &images.unwrap_or_default()).await
+    let images = images.unwrap_or_default();
+    // Sem o id, o caminho é o de sempre e a resposta continua vazia (`null`).
+    match client_request_id {
+        Some(request_id) => api::send_with_request(&app, &db, &thread_id, &text, &images, "ui", &request_id).await.map(Some),
+        None => api::send_with(&app, &db, &thread_id, &text, &images).await.map(|()| None),
+    }
 }
 
 #[tauri::command]

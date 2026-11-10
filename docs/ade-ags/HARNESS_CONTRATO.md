@@ -332,7 +332,7 @@ Fonte: inventário `antigravity-t3.md`, que cita o `main` móvel de `pingdotgg/t
 | `AppThread → Run → ExecutionNode` | **Adotar** como `chat_thread → HarnessRun → ExecutionNode` | É o que o plano já pede; só os nomes mudam |
 | `ProviderSession` (processo vivo) separado de `ProviderThread` (conversa nativa) | **Adotar a separação no vocabulário; persistir só a conversa nativa** (`ProviderSessionRef`). O processo fica como **instância** (escopo `instance`), só em memória | No ADE o processo não sobrevive ao app: os da Frota são filhos do app (`runs/store.rs:1249-1252`) e os de conversa morrem com ele (`opencode.rs:494`, `kill_on_drop`). Persistir um "runtime recuperável" prometeria o que não existe |
 | `ContextTransfer` (relação, barata, preguiçosa) separado de `ContextHandoff` (payload materializado) | **Adotar** | O ADE já tem três materializações sem registro comum: resumo de troca de agente (`handoff.rs`/`troca.rs`), contexto do `chat_new` e entrega da Frota. A relação com política e consumo rastreável falta; o payload já existe e não deve ser copiado |
-| Outbox durável de efeitos | **Não é pré-requisito.** O T3 a trata como "Tracked Follow-Up", fora da primeira fatia | Mesma conclusão: a Fase 1 não precisa de outbox. A Fase 2 usa evento transacional e receipt; o worker com lease só entra quando a Fase 5 provar a necessidade |
+| Outbox durável de efeitos | **Não é pré-requisito da Fase 1.** O T3 a trata como "Tracked Follow-Up", fora da primeira fatia | A Fase 1 não precisa de outbox. A Fase 2 entrega a fila de efeitos com claim e lease (§11); o **worker contínuo** só entra quando a Fase 5 provar a necessidade |
 | Receipts idempotentes | **Reaproveitar o que há** (`chat_child_receipts`, `run_delegation_receipts`) e unificar na Fase 2 | Os dois já têm `caller_key + request_id + request_hash`, mesma forma de chave |
 | Estados de nó (`pending`, `running`, `waiting`; `completed`, `interrupted`, `failed`, `cancelled`, `rolled_back`) | **Adotar com acréscimos** (§3) | O ADE tem `skipped` e `handed_off` na Frota. `rolled_back` fica reservado: nenhuma capability de conversa o sustenta |
 | Só o nó raiz conclui o run | **Adotar** | É a invariante 2 do plano (§3.3) |
@@ -483,7 +483,7 @@ Acréscimos previstos para as fases seguintes, **todos `ADD COLUMN`**:
 |---|---|---|
 | 0 (este PR) | contrato, matriz e tipos; **nada no banco** | tudo |
 | 1 | `harness_run`, `harness_node`, dois pontos de gravação, projeção unida (§7) | estado derivado do nativo; scheduler e adapters intactos |
-| 2 | `node_id` nos eventos; `harness_command_receipt` unificando os recibos; evento gravado na transação do comando; erro de gravação deixa de ir só a `stderr` | os dois recibos antigos, lidos e nunca apagados; sem outbox |
+| 2 | `node_id` nos eventos; `harness_command_receipt` unificando os recibos; `harness_effect` (fila com lease); evento gravado na transação do comando; erro de gravação deixa de ir só a `stderr` (§11) | os dois recibos antigos, lidos e nunca apagados; sem worker contínuo |
 | 3 | colunas de estado em `harness_node`; adapters gravam estado do root nos pontos de fim (§1.7 lista os pontos); nós de ferramenta, aprovação, pergunta e subagente nativo; descritor lido pela UI e pelo MCP | o nativo vence em divergência; `finish_turn` do Claude e `turn/completed` do Codex passam a chamar `record_end` |
 | 4 | `connected_session`, `ProviderSessionRef`, `ContextTransfer`, entrega durável do resultado ao pai | `chat_thread_native` e `remote_id` seguem como fonte operacional |
 | 5 | reconciliação por nó no boot; serialização entre instâncias; worker com lease **se** a prova pedir | as duas varreduras nativas |
@@ -758,3 +758,164 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
 - Que o turno é lido *dentro* da transação é garantido pela construção (a chamada usa `tx`), não por um teste de concorrência.
 - Desempenho: `thread_execution_graph` ganhou uma consulta a `harness_node` por lote de 400 conversas; **não medido**.
 - Com o harness quebrado (tabela ausente, por exemplo), criar conversa filha e delegar à Frota passam a falhar: é a escolha de §7.1, sem teste de migração parcial.
+
+## 11. Fase 2: recibos de comando e fila de efeitos (desenho e primeira fatia)
+
+**Objetivo da fase:** um comando que muda o mundo (enviar, interromper, criar filho, responder pedido, cancelar) ganha um recibo idempotente e, quando executa um efeito fora do banco, uma linha de efeito com dono e prazo. A repetição do mesmo comando devolve o recibo; nunca reinicia processo nem reenvia mensagem.
+
+Entregue nesta fatia: o módulo de recibos (`harness/receipts.rs`), a fila de efeitos (`harness/effects.rs`), o recibo do **envio de mensagem do chat estruturado** ponta a ponta (`conversa/send_receipt.rs`) e a leitura unificada dos dois recibos antigos. O resto da fase fica na ordem de §11.8.
+
+### 11.1 Tabelas (aditivas, no `migrate()` do módulo)
+
+Criadas por `harness::store::migrate`, que chama `receipts::migrate` e `effects::migrate`. `database/schema.rs` não muda; as tabelas ficam fora do alvo do fingerprint (§4.1). Sem `CHECK` de enumeração e sem FK: o recibo preserva a identidade do pedido mesmo se a pessoa apagar a conversa ou o run (mesma escolha de `run_delegation_receipts`).
+
+```sql
+CREATE TABLE IF NOT EXISTS harness_command_receipt (
+    kind           TEXT NOT NULL,      -- chat_send | chat_interrupt | chat_new | fleet_delegate | request_answer | task_cancel
+    caller_key     TEXT NOT NULL,      -- quem chamou (escopo do chamador, nunca o texto do pedido)
+    request_id     TEXT NOT NULL,      -- client_request_id
+    request_hash   TEXT NOT NULL,      -- sha256 do payload canônico (sem o próprio id)
+    target_ref     TEXT NOT NULL,      -- o alvo: thread_id, run_id…
+    node_id        TEXT,               -- harness_node, quando o comando já tem nó (Fase 3+)
+    state          TEXT NOT NULL,      -- prepared | submitting | accepted | retryable | unknown
+    result_json    TEXT,               -- resultado pequeno da aceitação (ids; nunca texto de agente)
+    event_sequence INTEGER,            -- cursor do evento (harness_execution_events.id); NULL até o comando migrar o evento
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL,
+    PRIMARY KEY (kind, caller_key, request_id)
+);
+
+CREATE TABLE IF NOT EXISTS harness_effect (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind               TEXT NOT NULL,          -- chat_send, … (validado em Rust)
+    dedupe_key         TEXT NOT NULL UNIQUE,   -- um efeito por intenção: enfileirar duas vezes devolve o mesmo
+    target_ref         TEXT NOT NULL,
+    state              TEXT NOT NULL,          -- pending | running | completed | failed | cancelled
+    retry_safe         INTEGER NOT NULL,       -- 1 se repetir o efeito é inofensivo (filesystem idempotente); 0 para provider
+    attempts           INTEGER NOT NULL DEFAULT 0,
+    max_attempts       INTEGER NOT NULL,
+    lease_owner        TEXT,
+    lease_until        INTEGER,                -- ms; só vale em `running`
+    causation_event_id INTEGER,                -- o evento que causou o efeito (NULL até o comando migrar o evento)
+    receipt_kind       TEXT, receipt_caller TEXT, receipt_request TEXT,   -- o recibo que o efeito serve
+    outcome_unknown    INTEGER NOT NULL DEFAULT 0,
+    last_error         TEXT,                   -- sanitizado (§11.4)
+    created_at         INTEGER NOT NULL,
+    updated_at         INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_harness_effect_ready ON harness_effect(state, lease_until);
+```
+
+O efeito **não guarda o payload**. O texto de uma mensagem, o prompt e qualquer segredo ficam só na memória de quem chamou (`AGENTS.md` §2.3). Por isso o worker nunca "reenvia sozinho" um `chat_send`: depois de uma queda só a repetição do comando, com o mesmo `client_request_id` e o texto de volta, reclama o efeito de novo (§11.6).
+
+### 11.2 Estados
+
+**Recibo** (mesmo vocabulário de `chat_child_receipts.delivery_state`):
+
+| Estado | Significa | Quem sai dele |
+|---|---|---|
+| `prepared` | a intenção está gravada; nada foi tentado | `claim` → `submitting` |
+| `submitting` | um chamador reclamou o efeito e está falando com o provider | `accepted`, `retryable` ou `unknown` |
+| `accepted` | o provider aceitou | terminal |
+| `retryable` | **nada chegou** ao provider (falha antes de sair) | `claim` → `submitting` com o mesmo `client_request_id` |
+| `unknown` | o pedido pode ter chegado | terminal: nunca repetir às cegas |
+
+**Efeito:**
+
+| Estado | Significa | Transições |
+|---|---|---|
+| `pending` | enfileirado, sem dono | `claim` → `running`; `cancel` → `cancelled` |
+| `running` | tem dono e `lease_until` | `complete` → `completed`; `fail` → `pending` (nada saiu e ainda há tentativa), `failed` (definitivo ou desfecho desconhecido); `cancel` → `cancelled`; lease vencido → ver §11.3 |
+| `completed` | o efeito foi aplicado | terminal |
+| `failed` | falhou de vez, ou `outcome_unknown = 1` | terminal |
+| `cancelled` | cancelado antes de concluir | terminal; um `complete` tardio do dono antigo é recusado |
+
+`fail` recebe uma **disposição**: `NotApplied` (o efeito certamente não saiu: volta a `pending` até `max_attempts`), `Permanent` (`failed`) ou `Unknown` (`failed` com `outcome_unknown = 1`).
+
+### 11.3 Lease e claim
+
+- `claim(id | próximo, dono, agora, lease_ms)` roda numa transação `Immediate` e faz **um** `UPDATE … WHERE state = 'pending'` (ou `running` com lease vencido); só quem vê `changes() == 1` é o dono. Duas conexões no mesmo arquivo nunca chegam as duas a `Claimed`.
+- O `agora` é um **parâmetro** (`util::now_ts_ms()` só na borda). Nenhum teste espera relógio.
+- `complete`, `fail` e `extend_lease` exigem `lease_owner = dono` e `state = 'running'`: o dono antigo, de lease vencido e já reclamado, não consegue concluir por cima.
+- **Lease vencido** (`running` com `lease_until <= agora`): o dono pode ter morrido antes **ou depois** de o efeito sair. O `claim` não decide sozinho:
+  - `retry_safe = 1` → reclama e conta a tentativa;
+  - `retry_safe = 0` → não reclama. O efeito vai a `failed` com `outcome_unknown = 1` e o recibo a `unknown`, **a menos que** `recover_expired` receba a capability do adapter que prova o desfecho (`Applied` → `completed`, `NotApplied` → `pending`, `Unknown` → `failed` + `outcome_unknown`).
+- `recover_expired` (boot ou worker) só pergunta ao adapter pelos efeitos `retry_safe = 0`; um `retry_safe = 1` de lease vencido volta a `pending` sem prova (ou a `failed`, se as tentativas acabaram).
+- `max_attempts` limita as reclamações: ao estourar, `failed`.
+- **Erro sanitizado** (`last_error`): só código curto e mensagem do próprio ADE. Passa por `sanitize_error`: uma linha, até 200 caracteres, sem controles, com tokens de aparência de segredo (`sk-…`, `ghp_…`, `Bearer …`, `chave=valor` de token/senha, sequências longas de base64/hex) trocados por `[redigido]`. O chamador **não** passa mensagem de provider nem texto do agente: o `chat_send` grava só `not_sent` ou `outcome_unknown`.
+
+### 11.4 Fronteiras de transação
+
+| Passo | Dentro do lock e da transação | Fora |
+|---|---|---|
+| 1. aceitar | `Immediate`: `begin` do recibo (confere hash), `enqueue` do efeito, e, quando o comando migrar, evento e projeção | — |
+| 2. reclamar | `Immediate`: `claim` do efeito e recibo `prepared/retryable` → `submitting` | — |
+| 3. executar | — | provider, filesystem, processo: **sem** lock do banco (`BACKEND.md`) |
+| 4. concluir | `Immediate`: `complete`/`fail` do efeito e o recibo → `accepted`/`retryable`/`unknown` | publicar na UI só **depois** deste commit |
+
+A tela e o `bus` nunca recebem "concluído" antes do passo 4. Hoje `queue_chat_event`/`queue_fleet_event` (`runs/execution_log.rs`) ainda fazem o contrário; a ordem de migração está em §11.8.
+
+### 11.5 O que acontece em cada ponto de crash (`chat_send`)
+
+| Ponto | Estado deixado | Recuperação |
+|---|---|---|
+| antes do passo 1 | nada | o comando nunca existiu; repetir é um comando novo |
+| entre 1 e 2 | recibo `prepared`, efeito `pending` | a repetição com o mesmo id reclama e executa (o efeito sai uma vez) |
+| entre 2 e 3 | recibo `submitting`, efeito `running` com lease | o desfecho é indecidível (o efeito pode ter saído): ao vencer o lease, `unknown`. Sem repetição cega |
+| entre 3 e 4 | idem | idem: sem capability de reconciliação do envio (a matriz marca `send` como "não é ack do agente", §1.1), vira `unknown` |
+| depois de 4 | recibo `accepted` | a repetição devolve o recibo, `replayed = true`, sem enviar |
+| falha de envio com `NotSent` | recibo `retryable`, efeito `pending` | a repetição reenvia (é seguro: nada saiu) |
+| falha com `Unknown` | recibo `unknown`, efeito `failed` + `outcome_unknown` | a repetição devolve o recibo com o aviso "confira a conversa" |
+
+Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reenvio durante um lease ainda vivo devolve `submitting` (sem enviar).
+
+### 11.6 Recibos antigos (unificação)
+
+`receipts::lookup`/`begin` leem `harness_command_receipt` e **caem nas duas tabelas antigas** (`chat_child_receipts` para `chat_new`, `run_delegation_receipts` para `fleet_delegate`), devolvendo o recibo no formato novo. A escrita de `fleet_delegate` é **dupla** (`runs::store::save_delegation_receipt` grava as duas) até a nova tabela ser provada em uso; `chat_new` continua só na antiga. Nada é apagado, e a antiga continua a fonte quando as duas divergem. O mesmo `client_request_id` com payload diferente falha fechado em qualquer das fontes.
+
+### 11.7 Comando de ponta a ponta: envio do chat estruturado
+
+- `chat_thread_send` (Tauri), `chat.send` (CLI `ags chat send --client-request-id …`) e `chat_send` (MCP) aceitam `client_request_id` (ou `clientRequestId`), até 128 caracteres, sem controles.
+- Chave: `kind = chat_send`, `caller_key = chat-send:<hash do escopo do chamador>` (aba/conversa do MCP; `ui` e `cli` nos outros casos), `request_id`. O hash do payload cobre conversa, texto e imagens.
+- **Sem o id, o caminho é o de antes**, sem recibo e sem efeito.
+- Com o id: `accepted` devolve o recibo sem enviar; `submitting` e `unknown` devolvem o recibo com aviso e **não** enviam; `prepared` e `retryable` reclamam o efeito e enviam uma vez.
+- Resposta: `{ requestId, deliveryState, replayed, sent, note? }`; `sent` só é `true` quando **esta** chamada enviou. O comando Tauri devolve `null` sem o id (como antes) e o recibo com ele; a CLI e o MCP devolvem `{ sent, receipt, next }`.
+- O escopo do MCP (`caller_scope`) é carimbado por `scoped_chat_payload` (`tab:<id>`, `cwd:<pasta>` ou `task:<id>`); um valor mandado pelo modelo é descartado.
+- Um erro `NotSent`/`Unknown` do provider volta como erro, como sempre, e o recibo fica `retryable`/`unknown`. A mensagem do provider **não** é gravada (só `not_sent` e `outcome_unknown`).
+
+### 11.8 Ordem de migração dos comandos
+
+| # | Comando | Estado | O que falta |
+|---|---|---|---|
+| 1 | `chat_send` | **entregue** (esta fatia) | evento e `causation_event_id` |
+| 2 | `fleet_delegate` | leitura unificada e escrita dupla (esta fatia) | trocar a leitura de `orchestration.rs` para `receipts::begin` |
+| 3 | `chat_new` | leitura unificada (esta fatia) | mover `claim_child_delivery` para `receipts`/`effects` |
+| 4 | `chat_interrupt` (`api::stop`) | próxima fatia | efeito `chat_interrupt`; a capability `interrupt` já existe na matriz |
+| 5 | `request_answer` (`answer.rs`) | próxima fatia | o recibo guarda o `request_id` do pedido; responder duas vezes não reenvia ao provider |
+| 6 | `task_cancel` (Frota) | próxima fatia | subárvore cancelada uma vez; efeito de filesystem `retry_safe` |
+| 7 | `queue_chat_event`/`queue_fleet_event` | depois dos comandos | gravar o evento na transação do passo 1; trocar o `stderr` por um sinal recuperável; só então a UI publica depois do commit |
+| 8 | worker contínuo | Fase 5, se a prova pedir | `claim_next` em laço, `recover_expired` no boot |
+
+### 11.9 O que a fatia não faz
+
+- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` existe e é testado, mas **ainda não é chamado no boot**.
+- Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id` ainda: as colunas existem (aditivas) e ficam `NULL` até `queue_chat_event` migrar.
+- Interrupt, spawn, resposta a pedido e cancelamento não usam a fila.
+- Nenhum provider real foi executado.
+
+### 11.10 Fase 2, primeira fatia: o que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes: 32 testes de `harness::test_fase2` contra esqueletos `unimplemented!()` (31 falharam, 1 passou por não depender do código). Depois da implementação, os 32 passam.
+- 13 testes de `conversa::send_receipt_test` (reenvio idêntico não reenvia; payload diferente falha fechado; `NotSent` → `retryable` e a repetição envia uma vez; `Unknown` nunca repete; queda entre aceitar e reclamar é recuperável; lease vivo devolve `submitting`; lease vencido vira `unknown`; o dono lento ainda conclui; a mensagem do provider não vai ao banco) e 4 de contrato do MCP e da CLI em `ipc/test.rs`.
+- Claim concorrente: duas conexões em threads no mesmo arquivo SQLite temporário (WAL), 40 efeitos disputados por `claim` e 30 por `claim_next`; cada efeito teve exatamente um dono. O `agora` é sempre injetado.
+- `cd src-tauri && cargo test --lib --bin ags`: 2685 + 52 testes, 0 falhas, 29 ignorados (os de sempre). Sem warning novo.
+- `node scripts/fingerprint.mjs`: ok (`schema-sqlite 96507e01a45b`, `protocolo-ipc 1959c50fc9d7`; nenhum reconhecimento foi necessário, o protocolo IPC não mudou).
+- `bunx tsc --noEmit` e `bun run check:test-lint` (sem violação nova).
+
+**Não verificado**
+- Nenhum provider real foi executado: o `execute` dos testes é um contador. O caminho `send_with_request` com `AppHandle` não tem teste de ponta a ponta.
+- O recibo e o efeito rodam em transações separadas (aceitar, reclamar, concluir); a atomicidade de cada passo é por construção e por teste de estado, não por injeção de falha no meio do commit.
+- Desempenho: `harness_effect` não tem consulta medida; o índice `(state, lease_until)` não foi exercitado com volume.
+- Ainda não existe comando de boot que chame `recover_expired`: um efeito `running` de provider só vira `unknown` quando a repetição do comando chega ao `claim` (§11.9).
+- Teste visual e a UI: `chatThreadSendOnce` existe em `ipc.ts`, mas nenhuma tela o chama ainda.

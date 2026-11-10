@@ -1185,6 +1185,56 @@ fn a_conversa_nova_pelo_mcp_abre_na_pasta_de_quem_pede() {
 }
 
 #[test]
+fn o_envio_do_chat_pelo_mcp_carimba_o_chamador_real_e_repassa_o_id() {
+    let call = |args: serde_json::Value| json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "chat_send", "arguments": args } });
+    let ctx = McpContext::Cwd { cwd: "/meu/projeto".into(), tab: Some("tab-7".into()), mission: None, role: None };
+    // O modelo não escolhe o escopo do recibo: o dele é descartado e vale o da sessão.
+    let args = json!({ "thread": "t1", "text": "oi", "client_request_id": "r1", "caller_scope": "tab:de-outro" });
+    let (_, sent) = mcp_session(&ctx, &[call(args)], |_, _| Ok(json!({ "sent": true })));
+    assert_eq!(sent[0].0, "chat.send");
+    assert_eq!(sent[0].1["caller_scope"], "tab:tab-7");
+    assert_eq!(sent[0].1["client_request_id"], "r1");
+    let bare = McpContext::Cwd { cwd: "/meu/projeto".into(), tab: None, mission: None, role: None };
+    let (_, sent) = mcp_session(&bare, &[call(json!({ "thread": "t1", "text": "oi" }))], |_, _| Ok(json!({})));
+    assert_eq!(sent[0].1["caller_scope"], "cwd:/meu/projeto");
+    assert!(sent[0].1.get("client_request_id").is_none(), "sem o id, nada é inventado");
+}
+
+#[test]
+fn a_tool_chat_send_anuncia_o_client_request_id() {
+    let ctx = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (out, _) = mcp_session(&ctx, &[list], |_, _| Ok(json!({})));
+    let tools = out[0]["result"]["tools"].as_array().unwrap();
+    let send = tools.iter().find(|t| t["name"] == "chat_send").expect("chat_send");
+    let props = &send["inputSchema"]["properties"];
+    assert_eq!(props["client_request_id"]["maxLength"], 128);
+    assert!(props.get("clientRequestId").is_some());
+    let required: Vec<&str> = send["inputSchema"]["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(required, ["thread", "text"], "o id é opcional: sem ele o envio é o de sempre");
+}
+
+#[test]
+fn o_client_request_id_do_envio_e_lido_validado_e_opcional() {
+    use super::commands::conversas::send_request_id;
+    assert_eq!(send_request_id(&json!({ "thread": "t" })).unwrap(), None);
+    assert_eq!(send_request_id(&json!({ "client_request_id": " a " })).unwrap().as_deref(), Some("a"));
+    assert_eq!(send_request_id(&json!({ "clientRequestId": "b" })).unwrap().as_deref(), Some("b"));
+    assert_eq!(send_request_id(&json!({ "client_request_id": "a", "clientRequestId": "a" })).unwrap().as_deref(), Some("a"));
+    assert!(send_request_id(&json!({ "client_request_id": "a", "clientRequestId": "b" })).is_err());
+    assert!(send_request_id(&json!({ "client_request_id": "" })).is_err());
+    assert!(send_request_id(&json!({ "client_request_id": 7 })).is_err());
+    assert!(send_request_id(&json!({ "client_request_id": "x".repeat(129) })).is_err());
+}
+
+#[test]
+fn a_ajuda_do_chat_send_fala_do_client_request_id() {
+    let cli = include_str!("../bin/cli.rs");
+    let at = cli.find("chat send <id>").expect("chat send na ajuda");
+    assert!(cli[at..].lines().nth(1).is_some_and(|l| l.contains("--client-request-id")), "a linha seguinte de `chat send` documenta o flag");
+}
+
+#[test]
 fn as_tools_do_chat_dizem_se_leem_ou_escrevem() {
     assert_eq!(super::mcp::annotations("chat_show")["readOnlyHint"], true);
     assert_eq!(super::mcp::annotations("chat_wait")["readOnlyHint"], true);

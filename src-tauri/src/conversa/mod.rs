@@ -39,6 +39,7 @@ pub mod opencode_map;
 pub mod permission;
 pub mod pool;
 pub mod resume;
+pub mod send_receipt;
 pub mod store;
 pub mod tarefas;
 pub mod troca;
@@ -58,6 +59,8 @@ mod replay_protocolo;
 mod troca_test;
 #[cfg(test)]
 mod tarefas_test;
+#[cfg(test)]
+mod send_receipt_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]

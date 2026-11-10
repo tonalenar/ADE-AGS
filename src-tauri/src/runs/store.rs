@@ -357,6 +357,16 @@ pub fn save_delegation_receipt(
         rusqlite::params![caller_key, request_id, request_hash, run_id, task_keys, crate::util::now_ts_ms()],
     )
     .map_err(|error| format!("não consegui registrar a idempotência da delegação: {error}"))?;
+    // Escrita dupla (harness, contrato §11.6): o recibo antigo continua sendo a fonte.
+    crate::harness::receipts::mirror_delegation(
+        conn,
+        caller_key,
+        request_id,
+        request_hash,
+        run_id,
+        &task_keys,
+        crate::util::now_ts_ms(),
+    )?;
     Ok(())
 }
 
