@@ -772,8 +772,6 @@ mod replay_protocolo {
     /// Variante derivada de `claude-feliz`: o `user` com resultado de ferramenta chega antes do `assistant`
     /// que anuncia `tool_use`. O oráculo do contrato exige que o turno termine e que a ferramenta feche.
     #[test]
-    #[ignore = "bug conhecido: claude_map descarta tool_result recebido antes de tool_use; ver HARNESS_CONTRATO §5.3"]
-    // quarantine: a ferramenta fica Running porque claude_map.rs descarta o resultado sem tool_use já registrado.
     fn replay_derivado_claude_tool_result_fora_de_ordem() {
         let mut saidas = captura("claude-feliz");
         mover(
