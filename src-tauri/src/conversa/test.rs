@@ -17,6 +17,13 @@ fn a_migracao_roda_duas_vezes_sem_erro() {
 }
 
 #[test]
+fn stop_de_tarefa_consulta_child_stop_na_matriz() {
+    assert!(super::api::supports_task_stop("claude-code"));
+    assert!(!super::api::supports_task_stop("codex"));
+    assert!(!super::api::supports_task_stop("provider-desconhecido"));
+}
+
+#[test]
 fn um_item_novo_vai_para_o_fim_e_o_atualizado_fica_no_lugar() {
     let conn = crate::database::test_db();
     thread(&conn, "t1");

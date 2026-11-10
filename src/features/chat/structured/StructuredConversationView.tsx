@@ -8,6 +8,7 @@ import { AgentModelPicker } from "../AgentModelPicker";
 import { ThreadAccountMenu } from "./ThreadAccountMenu";
 import { BotIcon } from "../chatIcons";
 import { accessModesFor, extractSlashCommand, midTurnOf, planSupported, queueHintKey, type ConversationCard } from "../chatModel";
+import { goalPauseResumeAvailable, isLegacyGoalClearAlias, matrixProviderForAgent, useHarnessCapability } from "../harnessCapabilities";
 import { messageFor } from "../attachments/send";
 import { ChatComposer } from "../ChatComposer";
 import { newConversationLocal } from "../chatActions";
@@ -60,7 +61,6 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   const [switchError, setSwitchError] = useState<string | null>(null);
   useEffect(() => {
     hydrateThread(thread.id);
-    if (thread.agentId === "claude-code") autoCompactThreadOnReturn(thread.id);
   }, [thread.id, thread.agentId]);
 
   const request: RequestRow | null = live.requests[0] ?? null;
@@ -72,7 +72,18 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   const queue = useChatStore((s) => s.queues[key]) ?? NO_QUEUE;
   const searchTarget = useChatStore((s) => s.threadSearchTarget?.threadId === thread.id ? s.threadSearchTarget : null);
   // O que o ⏎ faz com o agente trabalhando: entra no turno (Codex, Claude) ou para o turno e vai como o próximo.
-  const midTurn = midTurnOf(thread.agentId);
+  const matrixProvider = matrixProviderForAgent(thread.agentId);
+  const steerCapability = useHarnessCapability("chat", matrixProvider, "steer");
+  const interruptCapability = useHarnessCapability("chat", matrixProvider, "interrupt");
+  const compactCapability = useHarnessCapability("chat", matrixProvider, "compact");
+  const goalCapability = useHarnessCapability("chat", matrixProvider, "goal");
+  const switchApprovalCapability = useHarnessCapability("chat", matrixProviderForAgent(switchTo?.agentId ?? thread.agentId), "approval");
+  const midTurn = steerCapability.support === "supported" ? "steer"
+    : steerCapability.support === "unsupported" && interruptCapability.support === "supported" ? "interrupt"
+      : midTurnOf(thread.agentId);
+  useEffect(() => {
+    if (!compactCapability.loading && compactCapability.available) autoCompactThreadOnReturn(thread.id);
+  }, [thread.id, thread.agentId, compactCapability.loading, compactCapability.available]);
   // O texto chegando entra na timeline como item (o mesmo id do item final), e o raciocínio
   // chegando alimenta a linha viva.
   const items = useMemo(() => withDrafts(live.items, live.drafts), [live.items, live.drafts]);
@@ -124,7 +135,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
     <div title={locked ? t("chat.composer.lockedWhileWorking") : undefined} className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">
       {/* O trilho de agentes: escolher outro agente troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
       {/* A conta da conversa mora dentro do seletor de agente/modelo (no rodapé do popover), não solta no composer. */}
-      <AgentModelPicker agents={switchable} showAccount={false} disabled={locked} providerConfig={live.providerConfig}
+      <AgentModelPicker agents={switchable} harnessSurface="chat" showAccount={false} disabled={locked} providerConfig={live.providerConfig}
         accountSlot={isLocalAcpAgent(thread.agentId) ? null : <ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
         permission={{ value: menuAccess(thread.access), modes: accessModesFor(thread.agentId, true), onChange: locked ? undefined : (next) => retuneThread(thread.id, thread.model, thread.effort, next) }}
@@ -153,13 +164,14 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
                 <span className="shrink-0 font-semibold text-gray-700 dark:text-white/70">{t("chat.goal.label")}</span>
                 <span className="min-w-0 flex-1 truncate text-gray-600 dark:text-white/60" title={goal.objective}>{goal.objective}</span>
                 <span className="shrink-0 text-gray-400 dark:text-white/40">{t(`chat.goal.status.${goal.status}`)}</span>
-                {thread.agentId === "codex" && goal.status === "active" && (
+                {goalPauseResumeAvailable(matrixProvider) && goal.status === "active" && (
                   <GoalButton disabled={!!request} onClick={() => handleGoalAction("pause")}>{t("chat.goal.pause")}</GoalButton>
                 )}
-                {thread.agentId === "codex" && goal.status === "paused" && (
+                {goalPauseResumeAvailable(matrixProvider) && goal.status === "paused" && (
                   <GoalButton disabled={working || !!request} onClick={() => handleGoalAction("resume")}>{t("chat.goal.resume")}</GoalButton>
                 )}
-                <GoalButton disabled={working || !!request} onClick={() => handleGoalAction("clear")}>{t("chat.goal.clear")}</GoalButton>
+                <GoalButton disabled={!goalCapability.available || working || !!request} title={!goalCapability.available ? goalCapability.reason ?? undefined : undefined}
+                  onClick={() => handleGoalAction("clear")}>{t("chat.goal.clear")}</GoalButton>
               </>
             ) : <span className="text-gray-500 dark:text-white/45">{t("chat.goal.none")}</span>}
           </div>
@@ -186,15 +198,15 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
               return await retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access));
             }
             if (attachments.length === 0 && /^\/clear\s*$/i.test(text.trim())) { void clearThreadContext(thread.id); return; }
-            if (attachments.length === 0 && (thread.agentId === "codex" || thread.agentId === "claude-code")) {
+            if (attachments.length === 0) {
               const command = /^\/(compact|goal)(?:\s+([\s\S]*))?\s*$/i.exec(text.trim());
-              if (command?.[1]?.toLowerCase() === "compact") { void compactThread(thread.id, command[2]?.trim() || undefined); return; }
-              if (command?.[1]?.toLowerCase() === "goal") {
+              if (command?.[1]?.toLowerCase() === "compact" && compactCapability.available) { void compactThread(thread.id, command[2]?.trim() || undefined); return; }
+              if (command?.[1]?.toLowerCase() === "goal" && goalCapability.available) {
                 const argument = command[2]?.trim() ?? "";
                 if (!argument || /^edit$/i.test(argument)) { handleGoalAction("show"); return; }
                 const action = /^(clear|pause|resume)$/i.exec(argument)?.[1]?.toLowerCase();
                 if (action === "clear" || action === "pause" || action === "resume") { handleGoalAction(action); return; }
-                if (thread.agentId === "claude-code" && /^(stop|off|reset|none|cancel)$/i.test(argument)) { handleGoalAction("clear"); return; }
+                if (isLegacyGoalClearAlias(matrixProvider, argument)) { handleGoalAction("clear"); return; }
                 handleGoalAction("set", argument);
                 return;
               }
@@ -245,7 +257,8 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
             providerCommands={thread.agentId === "opencode" || isLocalAcpAgent(thread.agentId) ? live.providerCommands : []}
             onPlan={!locked && planSupported(thread.agentId, true) ? () => { void retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access)); } : undefined}
             context={context} />}
-          onStop={working && !request ? () => interruptThread(thread.id) : null}
+          onStop={working && !request && interruptCapability.available ? () => interruptThread(thread.id) : null}
+          stopUnavailableReason={working && !request && !interruptCapability.available ? interruptCapability.reason : null}
           controls={controls} />
         {isLocalAcpAgent(thread.agentId) && <p className="mx-2 mt-2 mb-0 text-[11px] leading-4 text-amber-700 dark:text-amber-300">{t("chat.localAcp.permissionWarning")}</p>}
         <ContextStrip branch={card.branch} worktree={card.isWorktree} />
@@ -263,7 +276,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           after={<><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>} />
       )} />
       {switchTo && (
-        <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError} noApproval={lacksApproval(switchTo.agentId, thread.access)}
+        <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError} noApproval={lacksApproval(switchApprovalCapability.support, thread.access, isLocalAcpAgent(switchTo.agentId))}
           onClose={() => setSwitchTo(null)}
           onConfirm={() => {
             setSwitching(true);
@@ -278,9 +291,9 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   );
 }
 
-function GoalButton({ disabled, onClick, children }: { disabled?: boolean; onClick: () => void; children: React.ReactNode }) {
+function GoalButton({ disabled, title, onClick, children }: { disabled?: boolean; title?: string; onClick: () => void; children: React.ReactNode }) {
   return (
-    <button type="button" disabled={disabled} onClick={onClick}
+    <button type="button" disabled={disabled} title={title} onClick={onClick}
       className="shrink-0 rounded-md px-2 py-1 text-[10px] font-medium text-gray-600 dark:text-white/60 hover:bg-gray-200/70 dark:hover:bg-white/[0.08] disabled:opacity-40">
       {children}
     </button>

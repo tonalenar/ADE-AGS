@@ -7,7 +7,9 @@ describe("a conversa por protocolo liga a troca de agente ao seletor", () => {
   const view = read("../structured/StructuredConversationView.tsx");
 
   it("o seletor mostra o trilho de agentes (não só o da conversa) e fica travado durante o turno", () => {
-    expect(view).toMatch(/<AgentModelPicker agents=\{switchable\} showAccount=\{false\} disabled=\{locked\}/);
+    expect(view).toMatch(/<AgentModelPicker agents=\{switchable\} harnessSurface="chat" showAccount=\{false\} disabled=\{locked\}/);
+    expect(view).toContain('useHarnessCapability("chat", matrixProviderForAgent(switchTo?.agentId ?? thread.agentId), "approval")');
+    expect(view).toContain("lacksApproval(switchApprovalCapability.support, thread.access");
     expect(view).toContain("const locked = working || !!request;");
   });
 
@@ -23,6 +25,14 @@ describe("a conversa por protocolo liga a troca de agente ao seletor", () => {
   it("o comando existe no backend e está registrado", () => {
     expect(read("../structured/ipc.ts")).toContain('invoke<ThreadRow>("chat_thread_switch_agent"');
     expect(read("../../../../src-tauri/src/app/run.rs")).toContain("crate::conversa::chat_thread_switch_agent");
+  });
+
+  it("compactação e objetivo seguem a matriz e preservam a política de pause/resume", () => {
+    expect(view).toContain("if (!compactCapability.loading && compactCapability.available) autoCompactThreadOnReturn(thread.id);");
+    expect(view).toContain("goalPauseResumeAvailable(matrixProvider)");
+    expect(view).toContain('disabled={!goalCapability.available || working || !!request}');
+    expect(view).toContain('title={!goalCapability.available ? goalCapability.reason ?? undefined : undefined}');
+    expect(view).not.toContain('thread.agentId === "codex" && goal.status');
   });
 });
 

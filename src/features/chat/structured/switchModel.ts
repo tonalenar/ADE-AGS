@@ -1,6 +1,7 @@
 import type { AgentInfo } from "@/features/tabs/types";
 
-import { isLocalAcpAgent, isStructuredAgent } from "./model";
+import { isStructuredAgent } from "./model";
+import type { HarnessSupport } from "../harnessCapabilities";
 
 /**
  * Os agentes que a conversa pode assumir: os que conversam por protocolo e estão instalados, com o da conversa
@@ -14,9 +15,9 @@ export function switchableAgents(detected: AgentInfo[], currentId: string, curre
 }
 
 /**
- * O agente novo não tem tela de aprovação (o Antigravity e o Cursor por `-p` não perguntam) e a conversa está em Supervisionado:
- * o que pediria aprovação é negado. A confirmação da troca avisa antes. Pura.
+ * A matriz marca se o provider tem um caminho de aprovação; ACP local conserva a política de acesso própria.
+ * A confirmação da troca avisa quando a conversa está em Supervisionado. Pura.
  */
-export function lacksApproval(agentId: string, access: string): boolean {
-  return (agentId === "antigravity" || agentId === "cursor" || isLocalAcpAgent(agentId)) && access === "ask";
+export function lacksApproval(support: HarnessSupport, access: string, localAcp = false): boolean {
+  return (support === "unsupported" || localAcp) && access === "ask";
 }

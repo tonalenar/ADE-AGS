@@ -12,9 +12,6 @@
     "} else if agent_id == \"kimi-code\" {",
     "if agent_id == \"gemini-cli\" && !crate::session::gemini_is_main_session(&path) {"
   ],
-  "src-tauri/src/conversa/troca.rs": [
-    "let no_approval = (matches!(new.agent_id.as_str(), \"antigravity\" | \"cursor\") || local_acp) && access == \"ask\";"
-  ],
   "src-tauri/src/agents/updates.rs": [
     "if agent.id == \"claude-code\" {",
     "result.new_version=if agent_id==\"claude-code\" {OfficialExecutor.execute(FixedCommand {program:\"claude\",args:&[\"--version\"]},CHECK_TIMEOUT).ok().and_then(|s|super::version_line(s.as_bytes(),&[]))} else if info.install.as_deref()==Some(\"bun\") {"
@@ -83,9 +80,6 @@
     "(c.agentId === \"claude-code\" || c.agentId === \"codex\") && !threadIdOf(c.tabId)), [cards]);"
   ],
   "src/features/chat/ComposerAssistMenu.tsx": [
-    "&& (command.id !== \"compact\" || (!!conversationKey && [\"codex\", \"claude-code\"].includes(agentId ?? \"\")))",
-    "&& (command.id !== \"goal\" || (!!conversationKey && (agentId === \"claude-code\" || (conversationKey.startsWith(\"thread:\") && agentId === \"codex\"))))",
-    "&& (command.id !== \"autocompact\" || (!!conversationKey && agentId === \"claude-code\"))",
     "const providerItems: AssistItem[] = token.trigger === \"/\" && token.start === 0 && conversationKey?.startsWith(\"thread:\") && (agentId === \"opencode\" || !!agentId?.startsWith(\"local-acp-\"))",
     "icon: <AgentMono agentId={agentId ?? \"opencode\"} label={agentId === \"opencode\" ? \"OpenCode\" : \"ACP\"} size={16} />,"
   ],
@@ -93,15 +87,7 @@
     "if (policy === \"read\") return { access: \"ask\", plan: agentId === \"claude-code\" };"
   ],
   "src/features/chat/structured/StructuredConversationView.tsx": [
-    "if (thread.agentId === \"claude-code\") autoCompactThreadOnReturn(thread.id);",
-    "{thread.agentId === \"codex\" && goal.status === \"active\" && (",
-    "{thread.agentId === \"codex\" && goal.status === \"paused\" && (",
-    "if (attachments.length === 0 && (thread.agentId === \"codex\" || thread.agentId === \"claude-code\")) {",
-    "if (thread.agentId === \"claude-code\" && /^(stop|off|reset|none|cancel)$/i.test(argument)) { handleGoalAction(\"clear\"); return; }",
     "providerCommands={thread.agentId === \"opencode\" || isLocalAcpAgent(thread.agentId) ? live.providerCommands : []}"
-  ],
-  "src/features/chat/structured/switchModel.ts": [
-    "return (agentId === \"antigravity\" || agentId === \"cursor\" || isLocalAcpAgent(agentId)) && access === \"ask\";"
   ],
   "src/features/chat/summary/LimitsCard.tsx": [
     "if (used.some((entry) => entry.agentId === \"antigravity\" && !entry.accountId)) void refreshAgy(false);",

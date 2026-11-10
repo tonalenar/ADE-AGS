@@ -13,6 +13,7 @@ import type { ForgeItem } from "@/features/forge/types";
 
 import { addSurface, setRightPanel } from "./store";
 import { PROTOCOL_AGENTS, type ProviderSlashCommand } from "./chatModel";
+import { legacyComposerCapabilityAvailable, matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { useChatPrefs } from "./chatPrefs";
 import type { ComposerAddonContext } from "./ChatComposer";
 import { AgentMono } from "./team/TeamParts";
@@ -34,6 +35,7 @@ interface AssistItem {
   group: "agents" | "files" | "commands" | "provider" | "skills" | "pullRequests";
   title: string;
   detail?: string;
+  disabled?: boolean;
   icon: React.ReactNode;
   run: () => void;
 }
@@ -146,6 +148,11 @@ export function ComposerAssistMenu({
   const token = useMemo(() => activeToken(context.text, context.caret), [context.text, context.caret]);
   const tokenKey = token ? `${token.trigger}:${token.start}:${token.query}:${context.caret}` : null;
   const tabId = conversationKey && !conversationKey.startsWith("thread:") ? conversationKey : null;
+  const capabilitySurface = conversationKey?.startsWith("thread:") ? "chat" : "tui";
+  const matrixApplies = capabilitySurface === "chat";
+  const matrixProvider = matrixProviderForAgent(agentId);
+  const compactAvailability = useHarnessCapability(capabilitySurface, matrixProvider, "compact");
+  const goalAvailability = useHarnessCapability(capabilitySurface, matrixProvider, "goal");
 
   useEffect(() => {
     if (skills.length === 0 && !skillsLoading && !requestedSkills.current) {
@@ -298,16 +305,19 @@ export function ComposerAssistMenu({
       .filter((command) => (command.id !== "side" || (!!conversationKey && !!agentId && (!!PROTOCOL_AGENTS[agentId] || agentId.startsWith("local-acp-"))))
         && (command.id !== "plan" || !!onPlan)
         && (command.id !== "clear" || !!conversationKey?.startsWith("thread:"))
-        && (command.id !== "compact" || (!!conversationKey && ["codex", "claude-code"].includes(agentId ?? "")))
-        // No TUI do Codex, /goal não é um comando nativo; no chat por protocolo a ADE usa o app-server.
-        && (command.id !== "goal" || (!!conversationKey && (agentId === "claude-code" || (conversationKey.startsWith("thread:") && agentId === "codex"))))
-        && (command.id !== "autocompact" || (!!conversationKey && agentId === "claude-code"))
+        && (command.id !== "compact" || (!!conversationKey && (matrixApplies || legacyComposerCapabilityAvailable(capabilitySurface, matrixProvider, "compact"))))
+        && (command.id !== "goal" || (!!conversationKey && (matrixApplies || legacyComposerCapabilityAvailable(capabilitySurface, matrixProvider, "goal"))))
+        && (command.id !== "autocompact" || (!!conversationKey && legacyComposerCapabilityAvailable(capabilitySurface, matrixProvider, "autocompact")))
         && matches(command.id, t(command.label), t(command.detail)))
       .map((command): AssistItem => ({
         key: `command:${command.id}`,
         group: "commands",
         title: t(command.label),
-        detail: t(command.detail),
+        detail: matrixApplies && command.id === "compact" && !compactAvailability.available ? compactAvailability.reason ?? ""
+          : matrixApplies && command.id === "goal" && !goalAvailability.available ? goalAvailability.reason ?? ""
+            : t(command.detail),
+        disabled: matrixApplies && ((command.id === "compact" && !compactAvailability.available)
+          || (command.id === "goal" && !goalAvailability.available)),
         icon: command.id === "model" ? <SettingsIcon className="w-4 h-4" />
           : command.id === "terminal" ? <TerminalIcon className="w-4 h-4" />
             : command.id === "files" ? <FilesIcon className="w-4 h-4" />
@@ -372,7 +382,7 @@ export function ComposerAssistMenu({
         }))
       : [];
     return [...commandItems, ...providerItems, ...skillsForToken, ...(showSkillsInSlashMenu ? [manage] : [])];
-  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, providerCommands, conversationKey, agentId]);
+  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, providerCommands, conversationKey, agentId, compactAvailability.available, compactAvailability.reason, goalAvailability.available, goalAvailability.reason]);
 
   const groups = useMemo(() => {
     const result: { group: AssistItem["group"]; label: string; items: AssistItem[] }[] = [];
@@ -391,7 +401,7 @@ export function ComposerAssistMenu({
   }, [cursor, items]);
 
   const choose = useCallback((item: AssistItem | undefined) => {
-    item?.run();
+    if (!item?.disabled) item?.run();
   }, []);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
@@ -431,11 +441,12 @@ export function ComposerAssistMenu({
                 const selected = index === cursor;
                 return (
                   <button key={item.key} ref={(node) => { if (node) itemNodes.current.set(item.key, node); else itemNodes.current.delete(item.key); }}
-                    type="button" role="option" aria-selected={selected}
+                    type="button" role="option" aria-selected={selected} aria-disabled={item.disabled || undefined} disabled={item.disabled}
+                    title={item.disabled ? item.detail : undefined}
                     onMouseDown={(event) => { event.preventDefault(); choose(item); }}
                     onMouseMove={() => setCursor(index)}
                     className={`w-full min-w-0 flex items-center gap-2 h-9 px-2.5 rounded-lg text-left
-                      ${selected ? "bg-accent-500/12 text-gray-900 dark:bg-accent-400/15 dark:text-white" : "text-gray-700 dark:text-white/75 hover:bg-gray-100 dark:hover:bg-white/[0.06]"}`}>
+                      ${item.disabled ? "cursor-not-allowed opacity-45" : selected ? "bg-accent-500/12 text-gray-900 dark:bg-accent-400/15 dark:text-white" : "text-gray-700 dark:text-white/75 hover:bg-gray-100 dark:hover:bg-white/[0.06]"}`}>
                     <span className="w-5 h-5 shrink-0 flex items-center justify-center text-gray-500 dark:text-white/50">{item.icon}</span>
                     <span className="min-w-0 flex-1 truncate text-[12px] font-medium" title={item.title}>{item.title}</span>
                     {item.detail && <span className="max-w-[48%] truncate text-[10.5px] text-gray-400 dark:text-white/35" title={item.detail}>{item.detail}</span>}

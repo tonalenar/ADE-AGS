@@ -1248,6 +1248,14 @@ pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
 /// O motivo de não parar uma tarefa só: o motor não tem como (só o Claude Code tem `stop_task`).
 pub const NO_TASK_STOP: &str = "Este agente não para uma tarefa só; o Parar do composer para o turno inteiro.";
 
+pub(super) fn supports_task_stop(provider: &str) -> bool {
+    crate::harness::matrix::supports(
+        provider,
+        crate::harness::capability::Surface::Chat,
+        crate::harness::capability::Capability::ChildStop,
+    ) == Some(crate::harness::capability::Support::Supported)
+}
+
 /// Para UMA tarefa em segundo plano da conversa (um shell ou um subagente), sem mexer no turno nem nas
 /// outras: o `control_request` `stop_task` do Claude Code. O fim chega pelo evento `task`
 /// (`task_notification` com `stopped`). Nos outros motores, recusa com o motivo.
@@ -1268,7 +1276,7 @@ fn claude_task_session(db: &DbConnection, thread_id: &str, task_id: &str) -> Res
     if task_id.trim().is_empty() {
         return Err("Tarefa inválida".into());
     }
-    if Engine::of(&thread(db, thread_id)?.agent_id) != Some(Engine::Claude) {
+    if !supports_task_stop(&thread(db, thread_id)?.agent_id) {
         return Err(NO_TASK_STOP.into());
     }
     claude::get(thread_id).ok_or_else(|| TASK_PROCESS_CLOSED.to_string())
