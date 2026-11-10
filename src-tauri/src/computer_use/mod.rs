@@ -424,6 +424,7 @@ mod cover;
 pub mod visual;
 pub(crate) mod ios;
 pub(crate) mod desktop;
+pub mod snapshot;
 
 pub(crate) const MAX_CAPTURE_SIDE: usize = 1200;
 

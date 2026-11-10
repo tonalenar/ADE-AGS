@@ -1,6 +1,9 @@
 import { createContext, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { useSnapshotCaption } from "@/features/recording/snapshotInfo";
+import { windowLabel } from "@/features/recording/snapshotTargets";
+
 import { FilesIcon, FolderIcon, XIcon } from "../chatIcons";
 import { formatSize, type AttachmentKind } from "./attachModel";
 import { Lightbox } from "./Lightbox";
@@ -77,16 +80,27 @@ export function AttachmentStrip({ items, onRemove, cwd = null, className = "" }:
 function ImageCard({ item, onOpen }: { item: ShownAttachment; onOpen: () => void }) {
   const { t } = useTranslation();
   const { src, missing } = useImagePreview(item.path, item.preview ?? null);
+  // Foto do SnapShot com o JSON ao lado: a legenda diz o app e o título (ou a tela). Outra foto não ganha nada.
+  const caption = useSnapshotCaption(item.path);
+  const captionText = caption === null ? null
+    : caption.kind === "main" ? t("screenRecording.targetMain")
+    : caption.kind === "display" ? t("screenRecording.targetDisplay", { number: caption.number })
+    : windowLabel(caption);
   return (
-    <button type="button" onClick={onOpen} aria-label={t("chat.attach.zoom", { name: item.name })} title={item.name}
-      className="block w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-gray-100 dark:bg-white/[0.07] ring-1 ring-black/10 dark:ring-white/10 hover:ring-2 hover:ring-accent-500/60">
-      {src ? (
-        <img src={src} alt={item.name} className="w-full h-full object-cover" draggable={false} />
-      ) : (
-        <span className="w-full h-full flex items-center justify-center px-1 text-center text-chat-caption text-gray-400 dark:text-white/35">
-          {missing ? t("chat.attach.missing") : ""}
-        </span>
+    <span className="flex max-w-[7.5rem] flex-col items-start gap-1">
+      <button type="button" onClick={onOpen} aria-label={t("chat.attach.zoom", { name: item.name })} title={item.name}
+        className="block w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-gray-100 dark:bg-white/[0.07] ring-1 ring-black/10 dark:ring-white/10 hover:ring-2 hover:ring-accent-500/60">
+        {src ? (
+          <img src={src} alt={item.name} className="w-full h-full object-cover" draggable={false} />
+        ) : (
+          <span className="w-full h-full flex items-center justify-center px-1 text-center text-chat-caption text-gray-400 dark:text-white/35">
+            {missing ? t("chat.attach.missing") : ""}
+          </span>
+        )}
+      </button>
+      {captionText && (
+        <span className="block max-w-full truncate text-chat-caption text-gray-500 dark:text-white/45" title={captionText}>{captionText}</span>
       )}
-    </button>
+    </span>
   );
 }
