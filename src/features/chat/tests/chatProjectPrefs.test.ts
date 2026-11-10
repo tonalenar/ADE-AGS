@@ -32,7 +32,8 @@ describe("padrões locais de conversa por projeto", () => {
       fastMode: true, worktree: true, structured: false, accountId: "não persistir",
     })).toEqual({
       agentId: "codex", model: "gpt-6", effort: "high", access: "full", plan: true,
-      fastMode: true, worktree: true, structured: false,
+      // Sem valor válido, o projeto fixa "none" (não herda a escolha de submódulos do T3).
+      fastMode: true, worktree: true, worktreeSubmodules: "none", structured: false,
     });
     expect(parseChatProjectDefaults({ access: "admin" })?.access).toBe("safe");
     expect(parseChatProjectDefaults("lixo")).toBeNull();
@@ -44,7 +45,7 @@ describe("padrões locais de conversa por projeto", () => {
 
     expect(loadChatProjectDefaults("/work/repo")).toEqual({
       agentId: "codex", model: "gpt-6", effort: "high", access: "full", plan: false,
-      fastMode: false, worktree: false, structured: true,
+      fastMode: false, worktree: false, worktreeSubmodules: "none", structured: true,
     });
     const raw = localStorage.getItem(STORAGE_KEY) ?? "";
     expect(raw).not.toContain("conta-local");
