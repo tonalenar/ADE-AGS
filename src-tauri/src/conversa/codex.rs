@@ -120,6 +120,11 @@ impl Session {
         self.gate(StopGate::begin_start);
     }
 
+    /// Há um `turn/start` a caminho: o turno abre, e o banco não pode ser fechado por um Parar que chega agora.
+    pub(crate) fn opening(&self) -> bool {
+        self.gate(|g| g.starting())
+    }
+
     /// A resposta do `turn/start` chegou (`Some(id)`) ou o pedido falhou, ou o turno já acabou (`None`).
     pub(crate) fn end_start(&self, turn: Option<&str>) {
         self.gate(|g| g.end_start(turn));
