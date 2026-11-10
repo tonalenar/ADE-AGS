@@ -573,7 +573,7 @@ fn o_fim_do_turno_que_caiu_grava_o_erro_no_item_e_expira_os_pedidos() {
     store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
     pending_request(&conn, "q1", "t1");
     let (result, _) = super::turn::dropped(false, None, "Codex");
-    assert_eq!(super::turn::record_end(&conn, "t1", "r1", &result, 50), ["q1"]);
+    assert_eq!(super::turn::record_end(&conn, "t1", "r1", &result, 50).0, ["q1"]);
     assert_eq!(store::run_status(&conn, "t1", "r1").unwrap().as_deref(), Some("failed"), "o turno não fica inProgress");
     let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("o turnEnd é gravado");
     assert_eq!((end.id.as_str(), end.interrupted, end.text.as_deref()), ("end:r1", Some(false), Some("O processo do Codex fechou no meio do turno")));
@@ -1671,6 +1671,24 @@ mod desfecho_desconhecido {
         Item { name: Some(name.into()), tool: Some(ToolKind::Command), label: Some(label.into()), status: Some(ToolStatus::Running), ..Item::new(ItemKind::Tool, id.into(), Some(10)) }
     }
 
+    /// O que o `record_end` devolve é o que a janela recebe: a ferramenta sem desfecho e o aviso, e mais nada. Num fim
+    /// normal, sem erro nem interrupção, a marcação vale do mesmo jeito.
+    #[test]
+    fn o_fim_normal_devolve_a_janela_a_ferramenta_marcada_e_o_aviso() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("c1", "Bash", "npm test")).unwrap();
+        let done = Item { status: Some(ToolStatus::Done), ..running("c0", "Bash", "git status") };
+        store::upsert_item(&conn, "t1", Some("r1"), &done).unwrap();
+        let (expirados, marcados) = record_end(&conn, "t1", "r1", &TurnResult::default(), 50);
+        assert!(expirados.is_empty());
+        let ids: Vec<&str> = marcados.iter().map(|i| i.id.as_str()).collect();
+        assert_eq!(ids, ["c1", "n:toolOutcomeUnknown:r1"], "a janela recebe a ferramenta sem desfecho e o aviso, e mais nada");
+        assert_eq!(marcados[0].status, Some(ToolStatus::Error));
+        assert!(marcados[0].output.as_deref().is_some_and(|o| o.starts_with(TOOL_OUTCOME_UNKNOWN)));
+    }
+
     #[test]
     fn o_turno_que_caiu_com_ferramenta_pendente_marca_o_desfecho_desconhecido() {
         let conn = crate::database::test_db();
@@ -1704,9 +1722,12 @@ mod desfecho_desconhecido {
         let conn = crate::database::test_db();
         thread(&conn, "t1");
         store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
-        store::upsert_item(&conn, "t1", Some("r1"), &running("c1", "Bash", "ls")).unwrap();
+        // A ferramenta já tinha desfecho quando o turno acabou bem: não há o que avisar. Com ela ainda `Running`, o fim
+        // normal a marca (`o_fim_normal_devolve_a_janela_a_ferramenta_marcada_e_o_aviso`).
+        let fechada = Item { status: Some(ToolStatus::Done), ..running("c1", "Bash", "ls") };
+        store::upsert_item(&conn, "t1", Some("r1"), &fechada).unwrap();
         record_end(&conn, "t1", "r1", &Default::default(), 50);
-        assert!(store::items(&conn, "t1").unwrap().iter().all(|i| i.kind != ItemKind::Notice), "terminou bem: o motor fecha a ferramenta");
+        assert!(store::items(&conn, "t1").unwrap().iter().all(|i| i.kind != ItemKind::Notice), "terminou bem e sem ferramenta pendente: não avisa");
         store::upsert_run(&conn, "t1", "r2", "inProgress", Some(60), None, None).unwrap();
         let (result, _) = dropped(false, None, "Codex");
         record_end(&conn, "t1", "r2", &result, 70);
