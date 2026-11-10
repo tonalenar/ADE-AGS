@@ -117,6 +117,7 @@ export function ComposerAssistMenu({
   teamOptions = [],
   providerCommands = [],
   onPlan,
+  allowSideChat = true,
   context,
 }: {
   cwd: string | null;
@@ -128,6 +129,8 @@ export function ComposerAssistMenu({
   providerCommands?: ProviderSlashCommand[];
   /** Alterna o modo Plano da conversa; omitido quando o agente não oferece esse modo ou está ocupado. */
   onPlan?: () => void;
+  /** `false` numa pergunta lateral: ela não abre outra (o T3 também não deixa). */
+  allowSideChat?: boolean;
   context: ComposerAddonContext;
 }) {
   const { t } = useTranslation();
@@ -302,7 +305,7 @@ export function ComposerAssistMenu({
     if (token.trigger === "$" ) return [...skillsForToken, manage];
 
     const commandItems: AssistItem[] = COMMANDS
-      .filter((command) => (command.id !== "side" || (!!conversationKey && !!agentId && (!!PROTOCOL_AGENTS[agentId] || agentId.startsWith("local-acp-"))))
+      .filter((command) => (command.id !== "side" || (allowSideChat && !!conversationKey && !!agentId && (!!PROTOCOL_AGENTS[agentId] || agentId.startsWith("local-acp-"))))
         && (command.id !== "plan" || (!!onPlan && planAvailability.support === "supported"))
         && (command.id !== "clear" || !!conversationKey?.startsWith("thread:"))
         && (command.id !== "compact" || (!!conversationKey && compactAvailability.available))
@@ -382,7 +385,7 @@ export function ComposerAssistMenu({
         }))
       : [];
     return [...commandItems, ...providerItems, ...skillsForToken, ...(showSkillsInSlashMenu ? [manage] : [])];
-  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, providerCommands, conversationKey, agentId, compactAvailability.available, compactAvailability.reason, goalAvailability.available, goalAvailability.reason, planAvailability.support]);
+  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, allowSideChat, providerCommands, conversationKey, agentId, compactAvailability.available, compactAvailability.reason, goalAvailability.available, goalAvailability.reason, planAvailability.support]);
 
   const groups = useMemo(() => {
     const result: { group: AssistItem["group"]; label: string; items: AssistItem[] }[] = [];

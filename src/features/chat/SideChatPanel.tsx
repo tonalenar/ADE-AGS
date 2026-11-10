@@ -2,22 +2,24 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 
+import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import { readTuning } from "@/features/canvas/tabTuning";
+import { useTabsStore } from "@/features/tabs/store";
 
-import { readAccess, type ConversationCard } from "./chatModel";
+import { type ConversationCard } from "./chatModel";
 import { chatSideChatDelete, chatThreadItems, type ThreadRow } from "./structured/ipc";
 import { createThread, settleThread, sendToThread, useStructured } from "./structured/store";
 import { threadIdOf, threadKey } from "./structured/model";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
-import { ChatComposer } from "./ChatComposer";
+import { switchableAgents } from "./structured/switchModel";
+import { SideChatDraftView } from "./SideChatDraft";
 import { messageFor } from "./attachments/send";
 import type { Attachment } from "./attachments/attachModel";
 import { useChatLive } from "./liveStore";
 import { insertIntoComposer } from "./store";
-import { useTabsStore } from "@/features/tabs/store";
 import { conversationTimeline } from "./ipc";
 import type { TimelineItem } from "./timeline/types";
-import { canOpenSideChat, sideChatContext, sideChatParentReference } from "./sideChatModel";
+import { canOpenSideChat, sideChatAccountFor, sideChatContext, sideChatDraftDefaults, sideChatHistory, sideChatParentReference, type SideChatDraft } from "./sideChatModel";
 import { NewChatIcon, SideChatIcon, XIcon } from "./chatIcons";
 
 function cardForThread(thread: ThreadRow, parent: ConversationCard, label: string): ConversationCard {
@@ -36,11 +38,25 @@ function cardForThread(thread: ThreadRow, parent: ConversationCard, label: strin
   };
 }
 
-/** Conversa independente no painel lateral; o terminal e a conversa de origem continuam montados. */
+/** A lixeira do cabeçalho (o `chatIcons` não tem uma): o traço usa a cor do texto. */
+function TrashIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className={className}>
+      <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3" />
+    </svg>
+  );
+}
+
+/**
+ * A pergunta lateral: uma conversa independente ao lado da conversa de origem, com o histórico dela na frente (a
+ * mesma timeline do chat principal) e o composer compacto. Cabeçalho enxuto: título, Trazer para conversa, Excluir e
+ * Nova. A origem e o terminal continuam montados; perguntar aqui não interrompe o turno dela.
+ */
 export function SideChatPanel({ conversation, cards = [] }: { conversation: ConversationCard | null; cards?: ConversationCard[] }) {
   const { t } = useTranslation();
   const threads = useStructured((s) => s.threads);
   const detected = useTabsStore((s) => s.detectedAgents);
+  const availableAgents = useAvailableAgents({ includeLocalAcp: true });
   const tab = useTabsStore((s) => conversation && !conversation.tabId.startsWith("thread:") ? s.tabs.find((row) => row.id === conversation.tabId) : undefined);
   const parentThreadId = conversation ? threadIdOf(conversation.tabId) : null;
   const parentThread = useStructured((s) => parentThreadId ? s.threads.find((row) => row.id === parentThreadId) : undefined);
@@ -48,15 +64,14 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   const command = tab?.command ?? "";
   const tuning = useMemo(() => conversation && !parentThread ? readTuning(conversation.agentId, command) : null,
     [conversation?.agentId, parentThread, command]);
-  const access = useMemo(() => conversation && !parentThread ? readAccess(conversation.agentId, command) : null,
-    [conversation?.agentId, parentThread, command]);
   const ref = conversation ? sideChatParentReference(conversation) : null;
   const sideChats = useMemo(
     () => threads.filter((row) => row.isSideChat && row.parentRef === ref).sort((a, b) => b.updatedAt - a.updatedAt),
     [threads, ref],
   );
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [drafting, setDrafting] = useState(false);
+  // O rascunho só existe quando a pessoa mexe nele; sem isso, vale o padrão da origem (ver `draftValue`).
+  const [draft, setDraft] = useState<SideChatDraft | null>(null);
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -67,6 +82,9 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   const answerItems = useStructured((s) => selectedId ? s.live[selectedId]?.items : undefined) ?? [];
   const answer = [...answerItems].reverse().find((item) => item.kind === "assistant" && item.text?.trim())?.text?.trim() ?? "";
   const selectedWorking = selectedId ? live[selectedId]?.phase === "working" : false;
+  // O histórico da origem, limitado, é o mesmo que a timeline do chat principal mostra: a pergunta lateral o herda na tela.
+  const history = useMemo(() => sideChatHistory(items), [items]);
+  const sideView = useMemo(() => ({ history: history.items, truncated: history.truncated }), [history]);
 
   useEffect(() => {
     if (!conversation || !ref) {
@@ -105,23 +123,34 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   }, [selectedId, sideChats]);
 
   const eligible = canOpenSideChat(conversation) && !!ref;
+
+  if (!eligible || !conversation) {
+    return <div className="flex-1 min-h-0 grid place-items-center p-8 text-center text-chat-note text-gray-500 dark:text-white/45">
+      <div><SideChatIcon className="w-6 h-6 mx-auto mb-2 opacity-50" /><p>{t("chat.sideChat.unsupported")}</p></div>
+    </div>;
+  }
+
+  // O padrão de uma pergunta nova vem da origem: o agente, o modelo e o esforço (a permissão começa supervisionada).
+  const draftValue = draft ?? sideChatDraftDefaults(conversation.agentId, parentThread?.model ?? tuning?.model ?? null, parentThread?.effort ?? tuning?.effort ?? null);
+  const agents = switchableAgents(availableAgents, conversation.agentId, conversation.agentLabel);
+
   const create = async (question: string, attachments: Attachment[]) => {
-    if (!conversation || !ref || !eligible || !question.trim()) return false;
+    if (!ref || !question.trim()) return false;
     setError(null);
     setLoading(true);
     try {
       const id = await createThread({
-        agentId: conversation.agentId,
+        agentId: draftValue.agentId,
         cwd: conversation.cwd,
         title: question.trim().replace(/\s+/g, " ").slice(0, 72) || t("chat.sideChat.title"),
-        model: parentThread?.model ?? tuning?.model ?? null,
-        effort: parentThread?.effort ?? tuning?.effort ?? null,
-        access: "ask",
-        accountId: parentThread?.accountId ?? tab?.accountId ?? null,
+        model: draftValue.model,
+        effort: draftValue.effort,
+        access: draftValue.access,
+        accountId: sideChatAccountFor(draftValue.agentId, conversation.agentId, parentThread?.accountId ?? tab?.accountId ?? null),
         parentRef: ref,
       });
       setSelectedId(id);
-      setDrafting(false);
+      setDraft(null);
       const sent = messageFor(threadKey(id), sideChatContext(items, question), attachments);
       sendToThread(id, sent.text, (message) => setError(message), undefined, sent.images);
       return true;
@@ -134,7 +163,7 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   };
 
   const bringBack = () => {
-    if (!conversation || !answer || parentBusy || selectedWorking) return;
+    if (!answer || parentBusy || selectedWorking) return;
     const text = "[" + t("chat.sideChat.contextLabel") + ": " + (selected?.title ?? t("chat.sideChat.title")) + "]\n" + answer.slice(0, 6000);
     insertIntoComposer(text, conversation.tabId);
   };
@@ -155,37 +184,50 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
     }
   };
 
-  if (!eligible || !conversation) {
-    return <div className="flex-1 min-h-0 grid place-items-center p-8 text-center text-chat-note text-gray-500 dark:text-white/45">
-      <div><SideChatIcon className="w-6 h-6 mx-auto mb-2 opacity-50" /><p>{t("chat.sideChat.unsupported")}</p></div>
-    </div>;
-  }
+  const startNew = () => {
+    setSelectedId(null);
+    setDraft(null);
+    setError(null);
+  };
 
   const activeCard = selected ? cardForThread(selected, conversation, detected.find((row) => row.id === selected.agentId)?.label ?? selected.agentId) : null;
-  const effectiveAccess = parentThread?.access === "plan" ? "ask" : parentThread?.access ?? access?.access ?? "ask";
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
-      <header className="shrink-0 flex items-center gap-2 px-3 h-11 border-b border-gray-200 dark:border-white/[0.08]">
+      <header className="shrink-0 flex items-center gap-1 pl-3 pr-2 h-10 border-b border-gray-200 dark:border-white/[0.08]">
         <SideChatIcon className="w-4 h-4 shrink-0 text-gray-500 dark:text-white/50" />
-        <span className="min-w-0 flex-1 truncate text-chat-ui font-medium">{t("chat.sideChat.title")}</span>
-        <button type="button" onClick={() => { setSelectedId(null); setDrafting(true); setError(null); }}
-          aria-label={t("chat.sideChat.new")} title={t("chat.sideChat.new")}
-          className="w-7 h-7 rounded-md grid place-items-center text-gray-500 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.08]">
+        <span className="min-w-0 flex-1 truncate text-chat-ui font-medium" title={selected?.title || undefined}>
+          {selected ? selected.title || t("chat.sideChat.title") : t("chat.sideChat.title")}
+        </span>
+        {selected && (
+          <button type="button" onClick={bringBack} disabled={!answer || parentBusy || selectedWorking}
+            className="h-7 px-2 shrink-0 rounded-md text-chat-caption font-medium text-gray-600 dark:text-white/60 hover:bg-gray-100 dark:hover:bg-white/[0.08] disabled:opacity-40">
+            {t("chat.sideChat.bringBack")}
+          </button>
+        )}
+        {selected && (
+          <button type="button" onClick={() => void remove(selected)} disabled={selectedWorking}
+            aria-label={t("chat.sideChat.delete")} title={t("chat.sideChat.delete")}
+            className="w-7 h-7 shrink-0 rounded-md grid place-items-center text-gray-500 dark:text-white/50 hover:text-red-600 dark:hover:text-red-400 hover:bg-gray-100 dark:hover:bg-white/[0.08] disabled:opacity-40">
+            <TrashIcon className="w-4 h-4" />
+          </button>
+        )}
+        <button type="button" onClick={startNew} aria-label={t("chat.sideChat.new")} title={t("chat.sideChat.new")}
+          className="w-7 h-7 shrink-0 rounded-md grid place-items-center text-gray-500 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.08]">
           <NewChatIcon className="w-4 h-4" />
         </button>
       </header>
       {sideChats.length > 0 && (
-        <nav aria-label={t("chat.sideChat.list")} className="shrink-0 flex gap-1.5 overflow-x-auto cc-scroll-hidden px-3 py-2 border-b border-gray-200 dark:border-white/[0.08]">
+        <nav aria-label={t("chat.sideChat.list")} className="shrink-0 flex gap-1.5 overflow-x-auto cc-scroll-hidden px-3 py-1.5 border-b border-gray-200 dark:border-white/[0.08]">
           {sideChats.map((row) => (
-            <div key={row.id} className={"shrink-0 h-7 max-w-[220px] flex items-center rounded-lg border text-chat-caption " +
-              (selectedId === row.id ? "border-accent-500/40 bg-accent-500/10 text-gray-900 dark:text-white" : "border-gray-200 dark:border-white/10 text-gray-500 dark:text-white/50")}>
-              <button type="button" onClick={() => { if (row.state === "settled") settleThread(row.id, false); setSelectedId(row.id); setDrafting(false); }}
+            <div key={row.id} className={"shrink-0 h-6 max-w-[220px] flex items-center rounded-md text-chat-caption " +
+              (selectedId === row.id ? "bg-gray-100 dark:bg-white/[0.08] text-gray-900 dark:text-white" : "text-gray-500 dark:text-white/50")}>
+              <button type="button" onClick={() => { if (row.state === "settled") settleThread(row.id, false); setSelectedId(row.id); setDraft(null); }}
                 className="min-w-0 h-full px-2 truncate" title={row.title}>{row.title || t("chat.sideChat.title")}</button>
               <button type="button" onClick={() => void remove(row)} disabled={live[row.id]?.phase === "working"}
                 aria-label={t("chat.sideChat.delete")} title={t("chat.sideChat.delete")}
-                className="w-6 h-full grid place-items-center text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40">
-                <XIcon className="w-3.5 h-3.5" />
+                className="w-5 h-full grid place-items-center text-gray-400 hover:text-red-600 dark:hover:text-red-400 disabled:opacity-40">
+                <XIcon className="w-3 h-3" />
               </button>
             </div>
           ))}
@@ -193,32 +235,10 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
       )}
       {error && <p role="alert" className="shrink-0 px-3 py-2 text-chat-caption text-red-600 dark:text-red-400 break-words">{error}</p>}
       {selected && activeCard ? (
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="shrink-0 flex items-center justify-end gap-2 px-3 py-1.5 border-b border-gray-200 dark:border-white/[0.08]">
-            <button type="button" disabled={!answer || parentBusy || selectedWorking} onClick={bringBack}
-              className="h-7 px-2 rounded-md text-chat-caption font-medium text-gray-600 dark:text-white/60 hover:bg-gray-100 dark:hover:bg-white/[0.08] disabled:opacity-40">
-              {t("chat.sideChat.bringBack")}
-            </button>
-          </div>
-          <StructuredConversationView key={selected.id} card={activeCard} thread={selected} cards={cards} />
-        </div>
+        <StructuredConversationView key={selected.id} card={activeCard} thread={selected} cards={cards} side={sideView} />
       ) : (
-        <div className="flex-1 min-h-0 flex flex-col">
-          <div className="flex-1 min-h-0 overflow-y-auto cc-scroll-hidden p-5">
-            <p className="text-chat-note text-gray-500 dark:text-white/45">{drafting
-              ? t("chat.sideChat.contextHint")
-              : t("chat.sideChat.empty", { agent: conversation.agentLabel })}</p>
-          </div>
-          <div className="shrink-0 pb-3">
-            <ChatComposer cwd={conversation.cwd} quoteKey={null} disabled={loading}
-              placeholder={t("chat.sideChat.placeholder")}
-              onSubmit={(text, attachments) => create(text, attachments)}
-              controls={<span className="px-1.5 text-chat-caption text-gray-400 dark:text-white/35" title={t("chat.sideChat.supervised")}>{t("chat.sideChat.supervisedShort")}</span>} />
-            <div className="flex justify-end px-4 pt-1 text-chat-caption text-gray-400 dark:text-white/35">
-              {t("chat.sideChat.agent", { agent: conversation.agentLabel })} · {t("chat.access." + effectiveAccess)}
-            </div>
-          </div>
-        </div>
+        <SideChatDraftView conversation={conversation} history={history.items} truncated={history.truncated} parentBusy={parentBusy}
+          agents={agents} draft={draftValue} busy={loading} onDraftChange={setDraft} onSubmit={create} />
       )}
     </div>
   );

@@ -17,6 +17,7 @@ import { VoiceInputButton } from "@/features/recording/VoiceInputButton";
 import { QuoteCards } from "./quotes/QuoteCards";
 import { addQuoteFor, clearQuotesFor, removeQuoteFor, useQuotes } from "./quotes/quoteStore";
 import { QueueList } from "./QueueList";
+import { ComposerMoreActions } from "./ComposerMoreActions";
 import { useChatPrefs } from "./chatPrefs";
 import { acknowledgeComposerAttachments, requestTabSearchJump, requestThreadSearchJump, takeComposerInserts, useChatStore, type QueuedMessage } from "./store";
 import { getPromptStash, loadPromptStashes, MAX_PROMPT_STASHES, removePromptStash, savePromptStash, usePromptStash, type PromptStash } from "./promptStash";
@@ -70,7 +71,7 @@ export interface ComposerControlsContext {
  * o clipe os põem numa fileira de miniaturas acima do texto; o bloco (miniaturas + texto) cresce até 40%
  * da janela e depois rola por dentro, sem barra, com o enviar sempre à vista. Enviar só com anexos vale.
  */
-export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, stopUnavailableReason = null, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false }: {
+export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, stopUnavailableReason = null, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false, compact = false }: {
   placeholder: string;
   /** Logo depois do anexar, à esquerda (o segmentado "Time | Só o orquestrador", prancheta 15). */
   leading?: React.ReactNode;
@@ -113,6 +114,11 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   turnActive?: boolean;
   /** Uma pergunta/aprovação espera resposta direta, independentemente da preferência. */
   forceSend?: boolean;
+  /**
+   * Layout compacto (a pergunta lateral): anexar e microfone à vista; arquivo, câmera e gravação vão para o
+   * «Mais ações». Sem ele, a barra é a de sempre.
+   */
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   // A leitura dos rascunhos roda uma vez ao montar; o `t` mais novo vale só para a mensagem de erro.
@@ -678,6 +684,26 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     restoreQueuedDraft(original, text);
   }, [editingQueueId, waiting, text]);
 
+  // Os botões secundários e o de voz: na barra normal ficam todos à vista; no compacto, o arquivo, a câmera e a gravação
+  // vão para o «Mais ações» e o microfone fica à vista. São os mesmos elementos nos dois layouts.
+  const stashButton = (
+        <button type="button" data-chat-prompt-stash="" onClick={() => {
+          if (hasStashContent) void saveCurrentPrompt();
+          else if (stashes.length > 0) setStashMenuOpen((open) => !open);
+        }}
+          disabled={editingQueueId !== null || stashBusy || attachments.ingesting || (!hasStashContent && (!stashLoaded || stashes.length === 0))}
+          aria-label={t(hasStashContent ? "chat.stash.save" : stashes.length > 0 ? "chat.stash.open" : "chat.stash.restore")}
+          aria-haspopup="menu" aria-expanded={stashMenuOpen}
+          title={`${t(hasStashContent ? "chat.stash.save" : stashes.length > 0 ? "chat.stash.open" : "chat.stash.restore")} · ⌘/Ctrl+S · ${t("chat.stash.sessionHint")}`}
+          className="relative w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-35 disabled:hover:bg-transparent">
+          <ArchiveIcon className="w-4 h-4" />
+          {stashes.length > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full flex items-center justify-center bg-accent-600 text-[9px] leading-none font-semibold text-white">{stashes.length}</span>}
+        </button>
+  );
+  const snapshotButton = <DesktopSnapshotButton target={eventTarget} disabled={stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40" />;
+  const recordButton = <ScreenRecordButton kind="desktop" target="main-display" composerTarget={eventTarget} label={t("screenRecording.display")} disabled={stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white" />;
+  const voiceButton = <VoiceInputButton onTranscript={insertTranscript} isComposerActive={isComposerActive} disabled={disabled || stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40" />;
+
   return (
     <>
     {onUnqueue && onUpdateQueued && <QueueList items={waiting} editingId={editingQueueId} canSave={!!text.trim()}
@@ -844,21 +870,19 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
           className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
           <PaperclipIcon className="w-4 h-4" />
         </button>
-        <button type="button" data-chat-prompt-stash="" onClick={() => {
-          if (hasStashContent) void saveCurrentPrompt();
-          else if (stashes.length > 0) setStashMenuOpen((open) => !open);
-        }}
-          disabled={editingQueueId !== null || stashBusy || attachments.ingesting || (!hasStashContent && (!stashLoaded || stashes.length === 0))}
-          aria-label={t(hasStashContent ? "chat.stash.save" : stashes.length > 0 ? "chat.stash.open" : "chat.stash.restore")}
-          aria-haspopup="menu" aria-expanded={stashMenuOpen}
-          title={`${t(hasStashContent ? "chat.stash.save" : stashes.length > 0 ? "chat.stash.open" : "chat.stash.restore")} · ⌘/Ctrl+S · ${t("chat.stash.sessionHint")}`}
-          className="relative w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-35 disabled:hover:bg-transparent">
-          <ArchiveIcon className="w-4 h-4" />
-          {stashes.length > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full flex items-center justify-center bg-accent-600 text-[9px] leading-none font-semibold text-white">{stashes.length}</span>}
-        </button>
-        <DesktopSnapshotButton target={eventTarget} disabled={stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40" />
-        <ScreenRecordButton kind="desktop" target="main-display" composerTarget={eventTarget} label={t("screenRecording.display")} disabled={stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white" />
-        <VoiceInputButton onTranscript={insertTranscript} isComposerActive={isComposerActive} disabled={disabled || stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40" />
+        {compact ? (
+          <>
+            {voiceButton}
+            <ComposerMoreActions>{stashButton}{snapshotButton}{recordButton}</ComposerMoreActions>
+          </>
+        ) : (
+          <>
+            {stashButton}
+            {snapshotButton}
+            {recordButton}
+            {voiceButton}
+          </>
+        )}
         {leading}
         </div>
         <div data-composer-right className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-0.5">
