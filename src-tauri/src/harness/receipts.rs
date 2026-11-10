@@ -13,6 +13,7 @@ use sha2::{Digest, Sha256};
 
 pub const KIND_CHAT_SEND: &str = "chat_send";
 pub const KIND_CHAT_NEW: &str = "chat_new";
+pub const KIND_CHAT_INTERRUPT: &str = "chat_interrupt";
 pub const KIND_FLEET_DELEGATE: &str = "fleet_delegate";
 
 /// O erro de um id reaproveitado com outro conteúdo (o mesmo texto dos recibos antigos).

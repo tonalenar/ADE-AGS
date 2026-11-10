@@ -40,6 +40,7 @@ pub mod permission;
 pub mod pool;
 pub mod resume;
 pub mod send_receipt;
+pub mod stop_receipt;
 pub mod store;
 pub mod tarefas;
 pub mod troca;
@@ -61,6 +62,8 @@ mod troca_test;
 mod tarefas_test;
 #[cfg(test)]
 mod send_receipt_test;
+#[cfg(test)]
+mod stop_receipt_test;
 #[cfg(test)]
 mod test;
 #[cfg(test)]

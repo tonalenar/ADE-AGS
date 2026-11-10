@@ -437,12 +437,20 @@ pub(super) fn chat_stop(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let thread = thread_arg(args)?;
     let db = db(app)?;
     // O escopo de quem para vem da sessão do MCP (`caller_scope`). Sem ele, quem para é a pessoa.
+    let scope = arg_str_opt(args, "caller_scope");
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        api::check_stop_scope(&conn, arg_str_opt(args, "caller_scope").as_deref(), &thread)?;
+        api::check_stop_scope(&conn, scope.as_deref(), &thread)?;
     }
-    tauri::async_runtime::block_on(api::stop(app, &db, &thread))?;
-    Ok(json!({ "stopped": true }))
+    // Sem `client_request_id`, o caminho é o de sempre: sem recibo e sem efeito.
+    let Some(request_id) = send_request_id(args)? else {
+        tauri::async_runtime::block_on(api::stop(app, &db, &thread))?;
+        return Ok(json!({ "stopped": true }));
+    };
+    // Com o id, o Parar tem recibo: repetir não manda outra interrupção (contrato §11.11).
+    let scope = scope.unwrap_or_else(|| "cli".into());
+    let receipt = tauri::async_runtime::block_on(api::stop_with_request(app, &db, &thread, &scope, &request_id))?;
+    Ok(json!({ "stopped": true, "sent": receipt.sent, "receipt": receipt, "next": format!("ags chat wait {thread}") }))
 }
 
 /// O que os agentes das conversas esperam da pessoa (de uma conversa, ou de todas).

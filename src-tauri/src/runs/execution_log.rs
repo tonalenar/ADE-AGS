@@ -7,7 +7,7 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::sync::{OnceLock, mpsc};
+use std::sync::{Once, OnceLock, mpsc};
 use tauri::Emitter;
 
 #[derive(Clone, Debug, Serialize)]
@@ -59,7 +59,10 @@ enum QueuedEvent {
         db: crate::database::DbConnection,
         thread_id: String,
         event_type: String,
+        /// O payload compactado, o que vai para o log.
         payload: Value,
+        /// O payload completo que a janela recebe, quando é conclusão (fase, pedido ou fechamento).
+        ui: Option<Value>,
     },
     Fleet {
         app: tauri::AppHandle,
@@ -68,9 +71,26 @@ enum QueuedEvent {
         attempt_id: String,
         event: super::types::AgentEvent,
     },
+    Replay {
+        app: tauri::AppHandle,
+        db: crate::database::DbConnection,
+    },
 }
 
 static WRITER: OnceLock<mpsc::Sender<QueuedEvent>> = OnceLock::new();
+/// A repetição das falhas pendentes roda uma vez por processo, no primeiro trabalho da fila.
+static REPLAY: Once = Once::new();
+
+/// O sinal de uma gravação que falhou de vez: a janela recebe `LOG_FAILED_EVENT`, o barramento o `LOG_FAILED_TOPIC`.
+pub const LOG_FAILED_EVENT: &str = "cc-harness-log-failed";
+pub const LOG_FAILED_TOPIC: &str = "harness.log_failed";
+/// O que a árvore da conversa recebe depois de uma gravação, com o cursor de cada uma.
+const TREE_EVENT: &str = "cc-harness-event";
+/// Quantas vezes a gravação de um evento é tentada antes de virar falha. A espera pelo lock do SQLite já vem do
+/// `busy_timeout`; a repetição cobre só a falha passageira, sem dormir.
+const PERSIST_ATTEMPTS: i64 = 3;
+/// Quantas falhas pendentes uma repetição leva por vez.
+const REPLAY_BATCH: i64 = 200;
 
 fn writer() -> &'static mpsc::Sender<QueuedEvent> {
     WRITER.get_or_init(|| {
@@ -79,52 +99,55 @@ fn writer() -> &'static mpsc::Sender<QueuedEvent> {
             .name("ags-harness-event-log".into())
             .spawn(move || {
                 while let Ok(event) = receiver.recv() {
-                    let (app, result) = match event {
-                        QueuedEvent::Chat {
-                            app,
-                            db,
-                            thread_id,
-                            event_type,
-                            payload,
-                        } => {
-                            let result = db
-                                .lock()
-                                .map_err(|error| error.to_string())
-                                .and_then(|conn| {
-                                    persist_chat_event(&conn, &thread_id, &event_type, &payload)
-                                });
-                            (app, result)
-                        }
-                        QueuedEvent::Fleet {
-                            app,
-                            db,
-                            task_id,
-                            attempt_id,
-                            event,
-                        } => {
-                            let result = db
-                                .lock()
-                                .map_err(|error| error.to_string())
-                                .and_then(|conn| {
-                                    persist_fleet_event(&conn, &task_id, &attempt_id, &event)
-                                });
-                            (app, result)
-                        }
-                    };
-                    match result {
-                        Ok(changes) => {
-                            for change in changes {
-                                let _ = app.emit("cc-harness-event", change);
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("[harness] evento semântico não persistido: {error}")
-                        }
-                    }
+                    handle(event);
                 }
             });
         sender
     })
+}
+
+/// Executa um trabalho da fila: tenta gravar (com repetição), registra a falha se houver, e só então entrega à janela
+/// e ao barramento. Roda na thread da fila; se ela já caiu, roda no chamador (`send_or_handle`).
+fn handle(event: QueuedEvent) {
+    let now = crate::util::now_ts_ms();
+    match event {
+        QueuedEvent::Chat { app, db, thread_id, event_type, payload, ui } => {
+            let job = ChatJob { thread_id: &thread_id, event_type: &event_type, payload: &payload, ui: ui.as_ref() };
+            settle_chat(&db, &job, now, &mut AppSink(&app));
+        }
+        QueuedEvent::Fleet { app, db, task_id, attempt_id, event } => match persist_settled(&db, |conn| persist_fleet_event(conn, &task_id, &attempt_id, &event)) {
+            Settled::Persisted(changes) => {
+                if !changes.is_empty() {
+                    AppSink(&app).changed(changes);
+                }
+            }
+            Settled::Orphan => {}
+            Settled::Failed { error, attempts } => {
+                let kind = event_kind(&event);
+                fail_write(
+                    &db,
+                    &FailedWrite {
+                        scope: "fleet",
+                        thread_id: None,
+                        task_id: Some(&task_id),
+                        attempt_id: Some(&attempt_id),
+                        event_kind: &kind,
+                        payload_json: None,
+                        error: &error,
+                        attempts,
+                    },
+                    now,
+                    &mut AppSink(&app),
+                );
+            }
+        },
+        QueuedEvent::Replay { app, db } => {
+            let changes = replay_chat_failures(&db, now, |conn, thread_id, event_type, payload| persist_chat_event(conn, thread_id, event_type, payload));
+            if !changes.is_empty() {
+                AppSink(&app).changed(changes);
+            }
+        }
+    }
 }
 
 /// Grava o evento do chat e devolve quem mudou, cada conversa com o cursor do seu último evento.
@@ -189,22 +212,27 @@ pub(crate) fn lineage_cursor(conn: &Connection, thread_ids: &[String]) -> Result
     Ok(cursor)
 }
 
-/// Enfileira fora do adapter: a gravação pode aguardar o lock curto do SQLite sem bloquear
-/// emissão de UI nem correr o risco de um adapter segurar o mesmo lock.
+/// Enfileira fora do adapter: a gravação pode aguardar o lock curto do SQLite sem bloquear emissão de UI nem correr o
+/// risco de um adapter segurar o mesmo lock. Com `publish`, a fase, o pedido ou o fechamento só saem à janela e ao
+/// barramento depois da tentativa de gravação (contrato §11.4): quem os entrega é a fila.
 pub(crate) fn queue_chat_event(
     app: &tauri::AppHandle,
     db: crate::database::DbConnection,
     thread_id: String,
     event_type: String,
     payload: Value,
+    publish: bool,
 ) {
-    let payload = compact_chat_payload(&event_type, &payload);
-    let _ = writer().send(QueuedEvent::Chat {
+    let compact = compact_chat_payload(&event_type, &payload);
+    let ui = publish.then_some(payload);
+    ensure_replay(app, &db);
+    send_or_handle(QueuedEvent::Chat {
         app: app.clone(),
         db,
         thread_id,
         event_type,
-        payload,
+        payload: compact,
+        ui,
     });
 }
 
@@ -223,13 +251,261 @@ pub(crate) fn queue_fleet_event(
     ) {
         return;
     }
-    let _ = writer().send(QueuedEvent::Fleet {
+    ensure_replay(app, &db);
+    send_or_handle(QueuedEvent::Fleet {
         app: app.clone(),
         db,
         task_id,
         attempt_id,
         event,
     });
+}
+
+/// Na primeira vez que o processo enfileira algo, repete as falhas de conversa que ficaram abertas: as de antes de um
+/// reinício, ou as desta vida se a gravação voltou. Uma vez por processo, sem relógio nem polling.
+fn ensure_replay(app: &tauri::AppHandle, db: &crate::database::DbConnection) {
+    REPLAY.call_once(|| {
+        let _ = writer().send(QueuedEvent::Replay { app: app.clone(), db: db.clone() });
+    });
+}
+
+/// Entrega o trabalho à thread da fila. Se ela já caiu, faz no chamador: o evento não se perde.
+fn send_or_handle(job: QueuedEvent) {
+    if let Err(mpsc::SendError(job)) = writer().send(job) {
+        handle(job);
+    }
+}
+
+/// O tipo do evento da Frota (o `kind` do `AgentEvent`), para o registro da falha.
+fn event_kind(event: &super::types::AgentEvent) -> String {
+    serde_json::to_value(event)
+        .ok()
+        .and_then(|value| value.get("kind").and_then(Value::as_str).map(str::to_string))
+        .unwrap_or_else(|| "unknown".into())
+}
+
+// Falha de gravação visível (contrato §11.11): tipos da fila e do registro de falhas.
+
+/// Para onde vai o que a fila entrega à janela e ao barramento depois de tentar gravar.
+pub(crate) trait LogSink {
+    fn changed(&mut self, changes: Vec<TreeChanged>);
+    fn failed(&mut self, signal: Value);
+    fn conversation(&mut self, ui: &Value, logged: bool);
+}
+
+/// Um evento de conversa a gravar. `ui` é o payload completo que a janela recebe (só fase, pedido e fechamento).
+pub(crate) struct ChatJob<'a> {
+    pub thread_id: &'a str,
+    pub event_type: &'a str,
+    pub payload: &'a Value,
+    pub ui: Option<&'a Value>,
+}
+
+/// O desfecho de uma gravação, depois das tentativas.
+#[derive(Debug)]
+pub(crate) enum Settled {
+    Persisted(Vec<TreeChanged>),
+    Orphan,
+    Failed { error: String, attempts: i64 },
+}
+
+/// Uma falha de gravação a registrar para recuperar depois.
+pub(crate) struct FailedWrite<'a> {
+    pub scope: &'a str,
+    pub thread_id: Option<&'a str>,
+    pub task_id: Option<&'a str>,
+    pub attempt_id: Option<&'a str>,
+    pub event_kind: &'a str,
+    pub payload_json: Option<&'a str>,
+    pub error: &'a str,
+    pub attempts: i64,
+}
+
+/// A janela e o barramento, de verdade: o que a fila entrega depois de tentar gravar.
+struct AppSink<'a>(&'a tauri::AppHandle);
+
+impl LogSink for AppSink<'_> {
+    fn changed(&mut self, changes: Vec<TreeChanged>) {
+        for change in changes {
+            let _ = self.0.emit(TREE_EVENT, change);
+        }
+    }
+
+    fn failed(&mut self, signal: Value) {
+        let _ = self.0.emit(LOG_FAILED_EVENT, signal.clone());
+        crate::bus::publish(Some(self.0), crate::bus::Publish::new(LOG_FAILED_TOPIC).data(signal));
+    }
+
+    fn conversation(&mut self, ui: &Value, logged: bool) {
+        crate::conversa::events::publish_conversation(self.0, ui, logged);
+    }
+}
+
+/// Tenta a gravação até `PERSIST_ATTEMPTS` vezes. Uma falha de chave estrangeira não se repete: a conversa do evento
+/// já não existe, então não há onde gravar e não é perda.
+pub(crate) fn persist_settled(
+    db: &crate::database::DbConnection,
+    mut persist: impl FnMut(&Connection) -> Result<Vec<TreeChanged>, String>,
+) -> Settled {
+    let mut last = String::new();
+    for _ in 0..PERSIST_ATTEMPTS {
+        let result = db.lock().map_err(|error| error.to_string()).and_then(|conn| persist(&*conn));
+        match result {
+            Ok(changes) => return Settled::Persisted(changes),
+            Err(error) if error.contains("FOREIGN KEY constraint failed") => return Settled::Orphan,
+            Err(error) => last = error,
+        }
+    }
+    Settled::Failed { error: crate::harness::effects::sanitize_error(&last), attempts: PERSIST_ATTEMPTS }
+}
+
+/// O passo que a fila faz por evento de conversa: tenta gravar, registra a falha se houver, e só então entrega à janela
+/// e ao barramento. A conclusão (fase, pedido, fechamento) sai sempre depois da tentativa (contrato §11.4); se a
+/// gravação falhou, sai com `logged = false` e com o sinal de falha, para ninguém ficar esperando.
+pub(crate) fn settle_chat_with(
+    db: &crate::database::DbConnection,
+    job: &ChatJob,
+    now: i64,
+    persist: impl FnMut(&Connection) -> Result<Vec<TreeChanged>, String>,
+    sink: &mut dyn LogSink,
+) {
+    let logged = match persist_settled(db, persist) {
+        Settled::Persisted(changes) => {
+            if !changes.is_empty() {
+                sink.changed(changes);
+            }
+            true
+        }
+        // A conversa já não existe: não há o que gravar, e não há perda.
+        Settled::Orphan => true,
+        Settled::Failed { error, attempts } => {
+            let payload_json = job.payload.to_string();
+            fail_write(
+                db,
+                &FailedWrite {
+                    scope: "chat",
+                    thread_id: Some(job.thread_id),
+                    task_id: None,
+                    attempt_id: None,
+                    event_kind: job.event_type,
+                    payload_json: Some(&payload_json),
+                    error: &error,
+                    attempts,
+                },
+                now,
+                sink,
+            );
+            false
+        }
+    };
+    if let Some(ui) = job.ui {
+        sink.conversation(ui, logged);
+    }
+}
+
+/// O evento de conversa gravado de verdade (`persist_chat_event`), pelo mesmo caminho dos testes.
+fn settle_chat(db: &crate::database::DbConnection, job: &ChatJob, now: i64, sink: &mut dyn LogSink) {
+    settle_chat_with(db, job, now, |conn| persist_chat_event(conn, job.thread_id, job.event_type, job.payload), sink);
+}
+
+/// Registra a falha para recuperar depois (`harness_log_failure`) e avisa a janela e o barramento. Se nem o registro
+/// cabe no banco, o aviso sai mesmo assim, com `failureId` nulo, e o motivo vai ao stderr.
+pub(crate) fn fail_write(db: &crate::database::DbConnection, write: &FailedWrite, now: i64, sink: &mut dyn LogSink) {
+    let failure_id = match db.lock() {
+        Ok(conn) => match conn.execute(
+            "INSERT INTO harness_log_failure
+             (scope, thread_id, task_id, attempt_id, event_kind, payload_json, last_error, attempts, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                write.scope,
+                write.thread_id,
+                write.task_id,
+                write.attempt_id,
+                write.event_kind,
+                write.payload_json,
+                write.error,
+                write.attempts,
+                now
+            ],
+        ) {
+            Ok(_) => Some(conn.last_insert_rowid()),
+            Err(error) => {
+                eprintln!("[harness] falha de gravação sem registro: {error}");
+                None
+            }
+        },
+        Err(error) => {
+            eprintln!("[harness] falha de gravação sem registro: {error}");
+            None
+        }
+    };
+    sink.failed(json!({
+        "scope": write.scope,
+        "threadId": write.thread_id,
+        "taskId": write.task_id,
+        "attemptId": write.attempt_id,
+        "eventType": write.event_kind,
+        "error": write.error,
+        "attempts": write.attempts,
+        "failureId": failure_id,
+    }));
+}
+
+/// Repete as falhas de conversa ainda abertas: regrava o evento (já compactado, sem texto de agente) e fecha a linha.
+/// Uma conversa que sumiu também fecha a linha, porque não há o que recuperar. A Frota não guarda payload para repetir,
+/// então a falha dela só fica visível. Devolve o que mudou na árvore, para a janela atualizar.
+pub(crate) fn replay_chat_failures(
+    db: &crate::database::DbConnection,
+    now: i64,
+    mut persist: impl FnMut(&Connection, &str, &str, &Value) -> Result<Vec<TreeChanged>, String>,
+) -> Vec<TreeChanged> {
+    let pending = match db.lock() {
+        Ok(conn) => pending_chat(&conn).unwrap_or_default(),
+        Err(_) => return Vec::new(),
+    };
+    let mut changes = Vec::new();
+    for (id, thread_id, event_kind, payload_json) in pending {
+        let payload: Value = serde_json::from_str(&payload_json).unwrap_or_else(|_| json!({}));
+        match persist_settled(db, |conn| persist(conn, &thread_id, &event_kind, &payload)) {
+            Settled::Persisted(found) => {
+                changes.extend(found);
+                close_failure(db, id, now);
+            }
+            Settled::Orphan => close_failure(db, id, now),
+            Settled::Failed { error, attempts } => keep_failure(db, id, &error, attempts),
+        }
+    }
+    changes
+}
+
+/// As falhas de conversa ainda abertas, a mais antiga primeiro.
+fn pending_chat(conn: &Connection) -> rusqlite::Result<Vec<(i64, String, String, String)>> {
+    let mut statement = conn.prepare(
+        "SELECT id, thread_id, event_kind, payload_json FROM harness_log_failure
+         WHERE scope = 'chat' AND resolved_at IS NULL AND thread_id IS NOT NULL AND payload_json IS NOT NULL
+         ORDER BY id LIMIT ?1",
+    )?;
+    let found = statement
+        .query_map(params![REPLAY_BATCH], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(found)
+}
+
+fn close_failure(db: &crate::database::DbConnection, id: i64, now: i64) {
+    if let Ok(conn) = db.lock() {
+        let _ = conn.execute("UPDATE harness_log_failure SET resolved_at = ?2 WHERE id = ?1", params![id, now]);
+    }
+}
+
+fn keep_failure(db: &crate::database::DbConnection, id: i64, error: &str, attempts: i64) {
+    if let Ok(conn) = db.lock() {
+        let _ = conn.execute(
+            "UPDATE harness_log_failure SET attempts = attempts + ?2, last_error = ?3 WHERE id = ?1",
+            params![id, attempts, error],
+        );
+    }
 }
 
 fn pick(value: &Value, keys: &[&str]) -> Value {
@@ -302,6 +578,23 @@ fn compact_chat_payload(event_type: &str, payload: &Value) -> Value {
 
 /// Tabela criada depois de `chat_thread`, para a FK preservar o histórico junto da conversa.
 pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    // Falhas de gravação do log que ainda não foram regravadas (contrato §11.11): aditiva, só cria.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS harness_log_failure (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            scope        TEXT NOT NULL,
+            thread_id    TEXT,
+            task_id      TEXT,
+            attempt_id   TEXT,
+            event_kind   TEXT NOT NULL,
+            payload_json TEXT,
+            last_error   TEXT NOT NULL,
+            attempts     INTEGER NOT NULL,
+            created_at   INTEGER NOT NULL,
+            resolved_at  INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_harness_log_failure_open ON harness_log_failure(resolved_at);",
+    )?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS harness_execution_events (
             sequence INTEGER PRIMARY KEY AUTOINCREMENT,

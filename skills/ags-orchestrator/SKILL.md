@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.69.0
+version: 1.70.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1184,7 +1184,7 @@ ags chat new "map the auth flow and list the files involved" --cwd . --client-re
 ags chat wait <id> --timeout 600     # blocks until the turn ends or the agent asks the person
 ags chat show <id> --last 10         # the last items, the last reply, pending requests
 ags chat send <id> "now write the failing test" --client-request-id test-01  # a retry returns the receipt, never resends
-ags chat stop <id>                   # interrupt the running turn
+ags chat stop <id> --client-request-id stop-01   # a retry returns the receipt (outcome: sent, deferred or no_turn) and never interrupts again
 ags chat list                        # active conversations (--all includes settled ones)
 ags chat providers                  # protocol-native providers and runtime capabilities
 ags chat compact <id>               # compact Codex or Claude Code context when idle
