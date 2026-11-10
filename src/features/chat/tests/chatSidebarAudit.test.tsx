@@ -109,7 +109,13 @@ describe("auditoria: cada botão da barra do modo chat", () => {
     await click(host.querySelector("[data-session-id='a'] [aria-label='chat.sidebar.more']"));
     const snooze = [...document.querySelectorAll("button, [role=menuitem]")].find((b) => b.textContent?.includes("chat.sidebar.snooze"));
     await click(snooze!);
+    // Adiar agora pergunta até quando: abre o diálogo com os presets (duração ou horário) e um campo livre.
+    expect(useShelf.getState().snoozed).toEqual([]);
+    const preset = [...document.querySelectorAll("button")].find((b) => /chat\.sidebar\.snooze(ForDuration|TodayAt|TomorrowAt)/.test(b.textContent ?? ""));
+    expect(preset).toBeTruthy();
+    await click(preset!);
     expect(useShelf.getState().snoozed).toEqual(["a"]);
+    expect(useShelf.getState().snoozedUntil?.a).toBeGreaterThan(Date.now());
     expect(host.querySelector("[data-session-id='a']")).toBeNull();
   });
 
