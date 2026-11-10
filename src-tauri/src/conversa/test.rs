@@ -1507,8 +1507,16 @@ mod ponta_a_ponta {
 // ── Ferramenta interrompida: TOOL_OUTCOME_UNKNOWN ──────────────────────
 
 mod desfecho_desconhecido {
+    use std::collections::HashSet;
+
+    use serde_json::json;
+
     use crate::canal::timeline::{Item, ItemKind, ToolKind, ToolStatus};
 
+    use super::super::claude;
+    use super::super::claude_map::TurnResult;
+    use super::super::codex;
+    use super::super::codex_map::items_of;
     use super::super::resume::{unknown_outcome_note, with_note};
     use super::super::store;
     use super::super::turn::{dropped, record_end, StopReason, TOOL_OUTCOME_UNKNOWN};
@@ -1571,6 +1579,138 @@ mod desfecho_desconhecido {
         assert_eq!(StopReason::classify("failed", Some("O modelo recusou o pedido"), false), StopReason::Refusal);
         let names: Vec<_> = [StopReason::Completed, StopReason::Aborted, StopReason::Error, StopReason::MaxTokens, StopReason::Refusal, StopReason::Timeout].iter().map(|r| r.as_str()).collect();
         assert_eq!(names, ["completed", "aborted", "error", "max-tokens", "refusal", "timeout"]);
+    }
+
+    /// O estado do turno em `chat_run`, como o banco o guardou.
+    fn estado_do_turno(conn: &rusqlite::Connection, turno: &str) -> String {
+        conn.query_row("SELECT status FROM chat_run WHERE thread_id = 't1' AND id = ?1", rusqlite::params![turno], |r| r.get(0)).unwrap()
+    }
+
+    /// Um item da timeline pelo id, ou um pânico com o nome dele.
+    fn item<'a>(items: &'a [Item], id: &str) -> &'a Item {
+        items.iter().find(|i| i.id == id).unwrap_or_else(|| panic!("{id} sumiu da timeline"))
+    }
+
+    #[test]
+    fn o_fim_normal_do_claude_marca_a_ferramenta_que_nunca_recebeu_resultado() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("c1", "Bash", "git push origin dev")).unwrap();
+        let done = Item { status: Some(ToolStatus::Done), ..running("c0", "Bash", "git status") };
+        store::upsert_item(&conn, "t1", Some("r1"), &done).unwrap();
+        let fim = TurnResult { duration_ms: Some(900), ..Default::default() };
+        let (expirados, mudou) = claude::gravar_fim(&conn, "t1", "r1", &fim, &HashSet::new(), 50);
+        assert!(expirados.is_empty());
+        assert_eq!(mudou.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["c1", "n:toolOutcomeUnknown:r1"], "só a ferramenta sem resultado e o aviso mudam");
+        let items = store::items(&conn, "t1").unwrap();
+        let push = item(&items, "c1");
+        assert_eq!(push.status, Some(ToolStatus::Error), "a ferramenta não fica rodando para sempre");
+        assert!(push.output.as_deref().is_some_and(|o| o.starts_with(TOOL_OUTCOME_UNKNOWN)), "{push:?}");
+        assert_eq!(item(&items, "c0").status, Some(ToolStatus::Done), "a que terminou fica como estava");
+        assert_eq!(estado_do_turno(&conn, "r1"), "completed", "o status do turno é o do `result`");
+        assert!(unknown_outcome_note(&items).is_some(), "o próximo envio leva o aviso ao agente");
+    }
+
+    #[test]
+    fn a_queda_do_claude_marca_a_ferramenta_sem_resultado() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("c1", "Bash", "npm run dev")).unwrap();
+        let (queda, _) = dropped(false, Some("panic: sem memória"), "Claude");
+        claude::gravar_fim(&conn, "t1", "r1", &queda, &HashSet::new(), 50);
+        let items = store::items(&conn, "t1").unwrap();
+        assert_eq!(item(&items, "c1").status, Some(ToolStatus::Error), "a queda levou o processo e a ferramenta junto");
+        assert_eq!(estado_do_turno(&conn, "r1"), "failed");
+    }
+
+    #[test]
+    fn o_turno_do_codex_que_completa_marca_o_comando_que_nunca_terminou() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_item(&conn, "t1", Some("turn_1"), &items_of(&json!({ "type": "commandExecution", "id": "call_0", "command": "git status", "status": "completed" }), Some(1))[0]).unwrap();
+        store::upsert_item(&conn, "t1", Some("turn_1"), &items_of(&json!({ "type": "commandExecution", "id": "call_1", "command": "bun test", "status": "inProgress" }), Some(2))[0]).unwrap();
+        let turno = json!({ "id": "turn_1", "status": "completed", "durationMs": 8850 });
+        let (expirados, _) = codex::gravar_fim(&conn, "t1", "turn_1", &turno, 50);
+        assert!(expirados.is_empty());
+        let items = store::items(&conn, "t1").unwrap();
+        let comando = item(&items, "call_1");
+        assert_eq!(comando.status, Some(ToolStatus::Error), "o comando não fica rodando para sempre");
+        assert!(comando.output.as_deref().is_some_and(|o| o.starts_with(TOOL_OUTCOME_UNKNOWN)), "{comando:?}");
+        assert_eq!(item(&items, "call_0").status, Some(ToolStatus::Done));
+        assert_eq!(estado_do_turno(&conn, "turn_1"), "completed");
+        assert!(unknown_outcome_note(&items).is_some(), "o próximo envio leva o aviso ao agente");
+    }
+
+    #[test]
+    fn o_turno_do_codex_interrompido_tambem_marca_o_comando_sem_resultado() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_item(&conn, "t1", Some("turn_1"), &items_of(&json!({ "type": "commandExecution", "id": "call_1", "command": "bun test", "status": "inProgress" }), Some(2))[0]).unwrap();
+        let turno = json!({ "id": "turn_1", "status": "interrupted" });
+        codex::gravar_fim(&conn, "t1", "turn_1", &turno, 50);
+        let items = store::items(&conn, "t1").unwrap();
+        assert_eq!(item(&items, "call_1").status, Some(ToolStatus::Error));
+        assert_eq!(estado_do_turno(&conn, "turn_1"), "interrupted");
+    }
+
+    #[test]
+    fn o_turno_do_codex_que_completa_sem_comando_pendente_nao_avisa() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_item(&conn, "t1", Some("turn_1"), &items_of(&json!({ "type": "commandExecution", "id": "call_0", "command": "git status", "status": "completed" }), Some(1))[0]).unwrap();
+        let turno = json!({ "id": "turn_1", "status": "completed" });
+        let (_, mudou) = codex::gravar_fim(&conn, "t1", "turn_1", &turno, 50);
+        assert!(mudou.is_empty(), "nada ficou sem desfecho");
+        assert!(store::items(&conn, "t1").unwrap().iter().all(|i| i.kind != ItemKind::Notice));
+    }
+
+    #[test]
+    fn o_fim_do_claude_nao_marca_a_tarefa_em_segundo_plano_que_segue_com_o_processo_vivo() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("bg", "Bash", "npm run dev")).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("fg", "Bash", "cargo build")).unwrap();
+        let legit: HashSet<String> = HashSet::from(["bg".to_string()]);
+        let interrompido = TurnResult { interrupted: true, ..Default::default() };
+        claude::gravar_fim(&conn, "t1", "r1", &interrompido, &legit, 50);
+        let items = store::items(&conn, "t1").unwrap();
+        assert_eq!(item(&items, "bg").status, Some(ToolStatus::Running), "o desfecho da tarefa em segundo plano vem pelo canal de tarefas");
+        assert_eq!(item(&items, "fg").status, Some(ToolStatus::Error), "a de primeiro plano sem resultado é desfecho desconhecido");
+        let aviso = items.iter().find(|i| i.kind == ItemKind::Notice).expect("o aviso na timeline");
+        let texto = aviso.text.as_deref().unwrap();
+        assert!(texto.contains("`Bash cargo build`") && !texto.contains("npm run dev"), "{texto}");
+        assert_eq!(estado_do_turno(&conn, "r1"), "interrupted");
+    }
+
+    #[test]
+    fn o_fim_normal_do_claude_com_so_tarefa_em_segundo_plano_pendente_nao_avisa() {
+        let conn = crate::database::test_db();
+        thread(&conn, "t1");
+        store::upsert_run(&conn, "t1", "r1", "inProgress", Some(1), None, None).unwrap();
+        store::upsert_item(&conn, "t1", Some("r1"), &running("bg", "Bash", "npm run dev")).unwrap();
+        let legit: HashSet<String> = HashSet::from(["bg".to_string()]);
+        let fim = TurnResult { duration_ms: Some(900), ..Default::default() };
+        let (_, mudou) = claude::gravar_fim(&conn, "t1", "r1", &fim, &legit, 50);
+        assert!(mudou.is_empty(), "a tarefa segue: nada muda");
+        let items = store::items(&conn, "t1").unwrap();
+        assert_eq!(item(&items, "bg").status, Some(ToolStatus::Running));
+        assert!(items.iter().all(|i| i.kind != ItemKind::Notice), "nenhuma ferramenta ficou sem desfecho");
+        assert!(unknown_outcome_note(&items).is_none());
+    }
+
+    #[test]
+    fn so_a_tarefa_em_segundo_plano_que_comecou_guarda_o_id_da_ferramenta() {
+        use super::super::tarefas::claude_task;
+        let comeco = |segundo_plano: bool| {
+            claude_task(&json!({ "type": "system", "subtype": "task_started", "task_id": "k1", "task_type": "local_bash", "tool_use_id": "toolu_bash", "is_backgrounded": segundo_plano, "description": "npm run dev" }), 1).unwrap()
+        };
+        assert_eq!(claude::tarefa_em_segundo_plano(&comeco(true)), Some("toolu_bash".to_string()));
+        assert_eq!(claude::tarefa_em_segundo_plano(&comeco(false)), None, "a de primeiro plano não sobrevive ao turno");
+        let fim = claude_task(&json!({ "type": "system", "subtype": "task_notification", "task_id": "k1", "tool_use_id": "toolu_bash", "status": "completed", "summary": "ok" }), 2).unwrap();
+        assert_eq!(claude::tarefa_em_segundo_plano(&fim), None, "só o começo conta: o fim chega pelo canal de tarefas");
     }
 }
 

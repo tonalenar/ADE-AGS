@@ -1,0 +1,6 @@
+{
+  "checks": [
+    { "label": "a thread é a da abertura", "expect": { "sessao": "{{session:1}}" } },
+    { "label": "o turno completa; o mapeador deixa o comando sem item/completed como running (quem o fecha é o turn/completed: teste de banco)", "expect": { "fim": "ok", "ferramentas": ["Bash:running"] } }
+  ]
+}
