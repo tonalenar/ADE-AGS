@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
 
+import { DESKTOP_OS } from "@/app/platform";
+import { presentDeviceTool } from "@/features/chat/deviceDemand";
 import { AlertaToast } from "@/shared/ui/alerts";
 
 import type { Tone } from "./ConnectHint";
@@ -40,16 +42,18 @@ export function PhysicalMenu({ device, name, tone, ready, onDone }: { device: st
   const { t } = useTranslation();
   const act = useDeviceActions(device, name);
   const c = MENU[tone];
+  const gesture = presentDeviceTool(DESKTOP_OS, "ios-physical", "home", ready, t("iphone.system"), t);
+  const button = presentDeviceTool(DESKTOP_OS, "ios-physical", "volume", ready, t("iphone.buttons"), t);
   return (
     <div className="flex flex-col">
       <div className={c.title}>{t("iphone.system")}</div>
       {SYSTEM_GESTURES.map((g) => (
-        <button key={g} type="button" role="menuitem" disabled={!ready} onClick={() => { act.gesture(g); onDone(); }} className={c.item}>{act.label.gesture(g)}</button>
+        <button key={g} type="button" role="menuitem" disabled={gesture.disabled} title={gesture.disabled ? gesture.label : undefined} onClick={() => { act.gesture(g); onDone(); }} className={c.item}>{act.label.gesture(g)}</button>
       ))}
       <div className={c.rule} />
       <div className={c.title}>{t("iphone.buttons")}</div>
       {HARDWARE_BUTTONS.map((b) => (
-        <button key={b} type="button" role="menuitem" disabled={!ready} onClick={() => { act.button(b); onDone(); }} className={c.item}>{act.label.button(b)}</button>
+        <button key={b} type="button" role="menuitem" disabled={button.disabled} title={button.disabled ? button.label : undefined} onClick={() => { act.button(b); onDone(); }} className={c.item}>{act.label.button(b)}</button>
       ))}
       {!ready && <p className="m-0 px-2.5 py-1.5 text-[11px] leading-snug opacity-60">{t("iphone.notReady")}</p>}
     </div>

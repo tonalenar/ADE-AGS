@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { DESKTOP_OS } from "@/app/platform";
+import { presentDeviceTool } from "@/features/chat/deviceDemand";
 import { usePopover } from "@/features/chat/usePopover";
 import { ScreenRecordButton } from "@/features/recording/ScreenRecordButton";
 import { AlertaToast } from "@/shared/ui/alerts";
@@ -25,7 +27,7 @@ const ICON = {
   more: <Icon><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Icon>,
 };
 
-const btn = "nodrag inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-600 dark:text-white/70 hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40 disabled:pointer-events-none";
+const btn = "nodrag inline-flex h-8 w-8 items-center justify-center rounded-full text-gray-600 dark:text-white/70 hover:bg-gray-200 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40";
 const DOT: Record<"ok" | "wait" | "off", string> = {
   ok: "bg-emerald-500 dark:bg-emerald-400",
   wait: "bg-amber-400 animate-pulse motion-reduce:animate-none",
@@ -44,6 +46,9 @@ export function DeviceBar({ device, name, status, ready, composerTarget }: { dev
   const view = statusView(status);
   const fail = (e: unknown) => { void AlertaToast(name, String(e), "error", 5000); };
   const live = view.tone === "ok" ? t("iphone.bar.live") : t(view.key);
+  const home = presentDeviceTool(DESKTOP_OS, "ios-physical", "home", ready, t("iphone.home"), t);
+  const apps = presentDeviceTool(DESKTOP_OS, "ios-physical", "appSwitcher", ready, t("iphone.bar.apps"), t);
+  const shotAction = presentDeviceTool(DESKTOP_OS, "ios-physical", "screenshot", view.tone === "ok", t("iphone.bar.shot"), t);
 
   const takeShot = () => {
     iphoneScreenshot(device)
@@ -63,11 +68,11 @@ export function DeviceBar({ device, name, status, ready, composerTarget }: { dev
           {live}
         </span>
         <span aria-hidden="true" className="mx-1 h-4 w-px bg-gray-200 dark:bg-white/10" />
-        <button type="button" className={btn} disabled={!ready} title={t("iphone.home")} aria-label={t("iphone.home")}
+        <button type="button" className={btn} disabled={home.disabled} title={home.label} aria-label={home.label}
           onClick={() => iphoneGesture(device, "home").catch(fail)}>{ICON.home}</button>
-        <button type="button" className={btn} disabled={!ready} title={t("iphone.bar.apps")} aria-label={t("iphone.bar.apps")}
+        <button type="button" className={btn} disabled={apps.disabled} title={apps.label} aria-label={apps.label}
           onClick={() => iphoneAppSwitcher(device).catch(fail)}>{ICON.apps}</button>
-        <button type="button" className={btn} disabled={view.tone !== "ok"} title={t("iphone.bar.shot")} aria-label={t("iphone.bar.shot")}
+        <button type="button" className={btn} disabled={shotAction.disabled} title={shotAction.label} aria-label={shotAction.label}
           onClick={takeShot}>{ICON.shot}</button>
         <ScreenRecordButton className={btn} kind="iphone" target={device} composerTarget={composerTarget} label={name} disabled={!ready || view.tone !== "ok"} />
         <button type="button" className={btn} title={t("iphone.bar.rotateHint")} aria-label={t("iphone.bar.rotateHint")}
