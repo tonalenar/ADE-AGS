@@ -12,6 +12,8 @@ import { threadKey } from "./model";
 import { useStructured } from "./store";
 
 const ACTIVE = new Set(["pending", "ready", "running"]);
+/** O que o contrato §3.1 ainda não trata como fim, mais o `inProgress` nativo do turno. O resto é terminal. */
+const TURN_OPEN = new Set(["inProgress", "pending", "running", "waiting", "ready"]);
 
 interface ChildSnapshot {
   working: boolean;
@@ -50,6 +52,12 @@ function graphStatusKey(node: HarnessExecutionNode, childStatus?: string): strin
   if (node.kind === "thread") return `chat.harness.childStatus.${childStatus ?? "idle"}`;
   if (node.kind === "turn") return `chat.harness.turnStatus.${node.status}`;
   return `chat.harness.status.${node.status}`;
+}
+
+/** Filhos ainda vivos de um turno que já acabou. O ponto de status continua o do próprio turno. */
+function turnActiveChildren(node: HarnessExecutionNode): number {
+  if (node.kind !== "turn" || TURN_OPEN.has(node.status)) return 0;
+  return Math.max(0, node.activeChildren ?? 0);
 }
 
 function nodeColor(node: HarnessExecutionNode, childStatus?: string): string {
@@ -231,6 +239,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
       : undefined;
     const statusKey = graphStatusKey(node, childStatus);
     const statusLabel = t(statusKey, { defaultValue: childStatus ?? node.status });
+    const activeChildren = turnActiveChildren(node);
     const label = node.kind === "turn"
       ? `${t("chat.harness.turnTitle")} · ${new Date(node.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
       : node.kind === "fleetAttempt"
@@ -243,6 +252,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
         <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-white/85" title={node.title}>{label}</span>
         {node.agentId && <span className="shrink-0 max-w-[8rem] truncate text-gray-400 dark:text-white/35">{node.agentId}{node.model ? ` · ${node.model}` : ""}</span>}
         <span className="shrink-0 text-gray-500 dark:text-white/45">{statusLabel}</span>
+        {activeChildren > 0 && <span className="shrink-0 text-gray-500 dark:text-white/45">{t("chat.harness.activeChildren", { count: activeChildren })}</span>}
         {pending > 0 && <span className="shrink-0 text-amber-600 dark:text-amber-400">{pending}</span>}
       </>
     );

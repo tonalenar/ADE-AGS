@@ -121,6 +121,8 @@ export interface HarnessExecutionNode {
   harnessRunId?: string | null;
   /** Só no nó `turn`: o id do `chat_run`. É o valor que `runId` guarda nesse nó (nome ambíguo, mantido por compatibilidade). */
   chatRunId?: string | null;
+  /** Só no nó `turn`: filhos diretos ainda não terminais (conversa filha ou run da Frota). Ausente nos outros nós. */
+  activeChildren?: number | null;
 }
 
 export interface HarnessExecutionGraph {
