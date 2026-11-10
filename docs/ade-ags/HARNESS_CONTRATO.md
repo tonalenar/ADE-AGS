@@ -406,7 +406,7 @@ Diferenças de significado:
    - run **terminal**: o root acabou;
    - run **assentado**: todos os nós são terminais.
    O nó de turno da projeção traz `activeChildren`: quantos filhos diretos ainda não são terminais. Filho direto é quem tem esse turno como `parentId` — a conversa filha ou o run da Frota. Um run da Frota conta uma vez, não cada tarefa. A conversa filha vale o estado do último turno dela (§3.2); sem nenhum turno, ela é `pending` no nó, mas **não conta como ativa**: uma conversa lateral aberta e nunca usada mostraria "1 filho ativo" para sempre. `chat_thread.state` não entra. O mapa é `harness::state` (`interrupted`, `failed`, `cancelled`, `completed`, `skipped` e `handed_off` são terminais). Run legado sem nó e sem turno pai não entra. Não há coluna nem estado novo: a contagem é derivada na leitura e os outros nós omitem o campo. Quando o turno está terminal e a contagem é maior que zero, a árvore mostra "N filhos ativos" junto do status; o ponto de status continua o do turno. A mesma projeção chega à CLI (`run.harnessGraph`) e ao MCP (`harness_graph`), então o campo aparece lá sem comando novo. Decisão do usuário; o item 4 de §8 fica fechado.
-9. **Cancelamento.** Cancelar o root é parar o turno dele. Descendentes só são cancelados por ordem do pai ou da pessoa, com escopo verificado (Fase 4). Parar uma conversa filha interrompe o turno dela; cancelar na Frota age na subárvore do run, nunca no lead nem em filhos de chat (`runs/orchestration.rs:1278-1330`). Nunca se encerra o PTY original de uma sessão conectada.
+9. **Cancelamento.** Cancelar o root é parar o turno dele. Descendentes só são cancelados por ordem do pai ou da pessoa, com escopo verificado (Fase 4, §12.x.3). Parar uma conversa filha interrompe o turno dela; cancelar na Frota age na subárvore do run, nunca no lead nem em filhos de chat (`runs/orchestration.rs::cancel_targets`). Nunca se encerra o PTY original de uma sessão conectada.
 
 ### 3.4 Reinício do app
 
@@ -1059,3 +1059,62 @@ Os erros de delegação voltam como texto `"<código>: <mensagem>"` (`isError` n
 - Um integrante que a pessoa elevou para `edits` ou `full` não recebe delegação até a pessoa baixar a política (§12.3, item 5): é a leitura literal de "nunca converter um vínculo em Acesso total". Se a pessoa quiser delegar a integrante elevado, é decisão dela.
 - Entrega durável do resultado ao pai, `ProviderSessionRef` e `ContextTransfer` (§2.2): Fase 4 restante.
 - Desempenho não medido.
+
+## 12.x Entrega de resultado e painel (Fase 4)
+
+Fase 4 da auditoria de paridade: o que o pai recebe do filho, o que a pessoa vê e quem pode cancelar. Código: `runs/harness.rs` (projeção), `runs/orchestration.rs` (alcance do cancelamento), `conversa/api.rs` (escopo do Parar) e `src/features/chat/structured/HarnessRunFeed.tsx` (painel). Esta seção tem subtítulo próprio para não colidir com o §12 da Fase 4 de outro integrante.
+
+### 12.x.1 O que a projeção leva em cada filho
+
+Campos novos e opcionais: os nós que não são filhos de agente seguem sem eles. CLI (`run.harnessGraph`) e MCP (`harness_graph`) recebem o mesmo JSON; não há comando novo.
+
+| Campo | Em quais nós | O que é |
+|---|---|---|
+| `childType` | conversa filha (`provider_chat`) e tarefa da Frota (`fleet_task`) | o tipo do agente filho. `connected_session` não existe no ADE, então não sai |
+| `executionStatus` | conversa filha (estado do último turno), run e tarefa | o estado do §3.1; vira `waiting` quando há pergunta ou aprovação pendente |
+| `result` | conversa filha (última fala do agente no último turno) e tarefa (`tasks.result`) | `{ text, truncated, untrusted: true }`; `text` tem no máximo 500 caracteres |
+| `blocked` | conversa filha e tarefa | `{ kind: question \| approval, count }`: os pedidos pendentes do próprio filho |
+| `blockedChildren` | turno, run e conversa com filho bloqueado | quantos filhos diretos estão bloqueados ou têm um descendente bloqueado |
+| `origin` | conversa filha, run e tarefa | `{ createdBy: turn \| task \| conversation, turnNodeId?, taskNodeId? }` |
+
+`status` da conversa filha continua sendo `thread.state` (um teste da Fase 1 fixa isso). Quem diz o que a execução faz é `executionStatus`.
+
+### 12.x.2 Regras
+
+1. **Bloqueio só com turno ou tarefa em andamento.** Pedido do chat (`chat_request` pendente) bloqueia a conversa filha só quando o último turno está `inProgress`. Aprovação da Frota (`task_approvals.status = 'pending'`) bloqueia a tarefa só quando ela está `running`. Pedido que sobrou de turno ou tarefa já terminados não bloqueia: a pessoa não tem o que responder.
+2. **Pergunta antes de aprovação.** Quando o filho tem os dois, `blocked.kind` é `question`; `count` soma todos.
+3. **Propaga sem mudar o pai.** O bloqueio sobe pela árvore como `blockedChildren` (uma contagem), em cada ancestral. O estado do pai não muda por causa dele (§3.3 regra 6).
+4. **Entrega é dado, não instrução.** O `result` sai com `untrusted: true` e, se passou de 500 caracteres, com `truncated: true`. O painel mostra o texto num bloco próprio, com o rótulo "resposta do agente (dado não confiável)"; o texto entra como texto, nunca como HTML.
+5. **Origem por id gravado, nunca por `cwd`.** `turn` quer dizer que o turno do pai criou (`turnNodeId`). `task` quer dizer que outra tarefa da Frota delegou (`taskNodeId`), e `turnNodeId` é o turno do run. `conversation` quer dizer que nasceu fora de turno: não há turno para pendurar.
+6. **Pedido de aprovação é gravado antes de o agente esperar.** O broker (`runs/broker.rs`) grava `task_approvals` como `pending` antes de bloquear na fila; por isso a projeção, que só lê o banco, vê o bloqueio. O boot fecha os pendentes órfãos (`sweep_orphans`).
+
+### 12.x.3 Cancelamento com escopo verificado
+
+| Comando | Quem pode | O que age |
+|---|---|---|
+| `run.cancelTask` (MCP `task_cancel`) | a pessoa (pela conversa de origem ou pela pasta), ou uma tarefa **ancestral** da alvo | a subárvore da alvo, no mesmo run, só nas tarefas pendentes, prontas ou rodando. Nunca o lead. Irmã, filho e outra linhagem recebem erro |
+| MCP `chat_stop` (`chat.stop`) | a pessoa (sem `caller_scope`), ou a conversa ou aba que criou a filha (`parent_ref` = `thread:<pai>` ou `tab:<aba>`) | só o turno da filha. Tarefa da Frota e pasta, sem conversa de origem, não param conversa nenhuma |
+| CLI `ags chat stop` | a pessoa (a CLI não recebe `caller_scope`) | a conversa indicada |
+
+O escopo do MCP vem da sessão: `scoped_chat_payload` carimba `caller_scope` em `chat.send` e em `chat.stop`, e o modelo não escolhe esse campo. **Nunca se encerra o PTY de uma sessão conectada só por deixar de observá-la.** O ADE ainda não tem `connected_session`, então não há PTY de sessão conectada a proteger hoje. O painel só larga os próprios listeners ao desmontar, e um teste confere que desmontar não envia comando de parada nem seleciona conversa.
+
+Lacuna conhecida: a CLI `ags chat stop` roda com a identidade da pessoa. Um agente que chame a CLI pela própria terminal ainda não é barrado. Fechar isso depende de a CLI ser da pessoa, e isso não foi verificado.
+
+### 12.x.4 A tela
+
+`HarnessRunFeed` mostra, em uma linha por filho, o tipo, o agente, o estado, a origem e o bloqueio. O bloqueio vira um botão com nome acessível ("{título}: pergunta pendente"); ativá-lo abre a conversa filha ou, para tarefa, a tela da Frota. A entrega abre um bloco à parte, marcado como dado não confiável. O turno mostra "N filhos bloqueados" e mantém a cor e o estado.
+
+### 12.x.5 O que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes do código: 14 em Rust (`runs::test::harness_fase4`, 9, e `conversa::test::harness_fase4`, 5), todos vermelhos antes da implementação; e no vitest (`harnessDelivery.test.tsx`), 5 vermelhos antes da tela. O sexto (desmontar não encerra nada) já passava e serve de guarda. Depois, todos verdes.
+- `cd src-tauri && cargo test --lib --bin ags`: 2725 + 52 testes, 0 falhas, 30 ignorados já existentes. Nenhum aviso de compilação nos arquivos tocados.
+- `bunx vitest run src/features/chat/structured`: 8 testes, verdes (os 2 de `harnessActiveChildren` e os 6 novos).
+- `bunx tsc --noEmit`, `bun run check:i18n`, `bun run check:test-lint` e `bun run check:babel`: sem achado novo.
+
+**Não verificado**
+- Visual: nenhuma captura da tela; o painel não foi aberto numa instância isolada. O bloco de entrega e o destaque de bloqueio não foram vistos.
+- Ponta a ponta: nenhum provider real foi executado. Pergunta, aprovação e resposta foram gravadas direto nas tabelas nos testes; nenhum adapter emitiu um pedido real.
+- Concorrência: a leitura da projeção e a decisão da pessoa correm em transações separadas; não há teste de corrida entre elas.
+- Desempenho: a projeção ganhou uma consulta por conversa filha (último turno) e lotes para pedidos e aprovações. Não medido.
+- O `connected_session` não existe no código. A regra de não encerrar PTY de sessão conectada fica registrada, sem teste contra um caso real.

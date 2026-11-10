@@ -1,10 +1,17 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
 import { selectConversation } from "@/features/chat/unified/selectionActions";
 import { listHarnessExecutionGraph, readAttemptEvents } from "@/features/runs/ipc";
-import type { AgentEvent, HarnessExecutionEvent, HarnessExecutionGraph, HarnessExecutionNode } from "@/features/runs/types";
+import type {
+  AgentEvent,
+  HarnessExecutionEvent,
+  HarnessExecutionGraph,
+  HarnessExecutionNode,
+  HarnessNodeResult,
+} from "@/features/runs/types";
 
 import { BotIcon, ChevronRightIcon } from "../chatIcons";
 import { chatThreadRequests, chatThreadStatus, type ThreadRow } from "./ipc";
@@ -14,6 +21,8 @@ import { useStructured } from "./store";
 const ACTIVE = new Set(["pending", "ready", "running"]);
 /** O que o contrato §3.1 ainda não trata como fim, mais o `inProgress` nativo do turno. O resto é terminal. */
 const TURN_OPEN = new Set(["inProgress", "pending", "running", "waiting", "ready"]);
+/** Limite da entrega do filho, o mesmo que a projeção aplica (contrato §12.x). */
+const RESULT_MAX_CHARS = 500;
 
 interface ChildSnapshot {
   working: boolean;
@@ -48,10 +57,14 @@ function descendants(rootId: string, threads: ThreadRow[]): LineageChat[] {
   return result;
 }
 
+/** Rótulo do estado. Conversa filha sem live store cai no estado de execução da projeção, não no `thread.state`. */
 function graphStatusKey(node: HarnessExecutionNode, childStatus?: string): string {
-  if (node.kind === "thread") return `chat.harness.childStatus.${childStatus ?? "idle"}`;
+  if (node.kind === "thread") {
+    if (childStatus) return `chat.harness.childStatus.${childStatus}`;
+    return node.executionStatus ? `chat.harness.status.${node.executionStatus}` : "chat.harness.childStatus.idle";
+  }
   if (node.kind === "turn") return `chat.harness.turnStatus.${node.status}`;
-  return `chat.harness.status.${node.status}`;
+  return `chat.harness.status.${node.executionStatus ?? node.status}`;
 }
 
 /** Filhos ainda vivos de um turno que já acabou. O ponto de status continua o do próprio turno. */
@@ -61,7 +74,7 @@ function turnActiveChildren(node: HarnessExecutionNode): number {
 }
 
 function nodeColor(node: HarnessExecutionNode, childStatus?: string): string {
-  const status = childStatus ?? node.status;
+  const status = childStatus ?? node.executionStatus ?? node.status;
   if (status === "waiting" || status === "pending" || status === "ready") return "bg-amber-500";
   if (status === "interrupted") return "bg-amber-500";
   if (status === "working" || status === "running" || status === "inProgress") return "bg-emerald-500";
@@ -73,6 +86,7 @@ function nodeColor(node: HarnessExecutionNode, childStatus?: string): string {
 /** Árvore comum do harness: threads, turnos estruturados e tarefas headless da Frota. */
 export function HarnessRunFeed({ threadId }: { threadId: string }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [graph, setGraph] = useState<HarnessExecutionGraph | null>(null);
   const [childSnapshots, setChildSnapshots] = useState<Record<string, ChildSnapshot>>({});
   const [open, setOpen] = useState(false);
@@ -184,10 +198,14 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
   const childCount = lineageChats.length;
   const activeCount = tasks.filter((node) => ACTIVE.has(node.status)).length
     + lineageChats.filter(({ thread }) => live[thread.id]?.phase === "working" || childSnapshots[thread.id]?.working).length;
-  const attentionCount = lineageChats.filter(({ thread }) => Math.max(
-    childSnapshots[thread.id]?.pending ?? 0,
-    live[thread.id]?.requests.filter((request) => request.state === "pending").length ?? 0,
-  ) > 0).length;
+  // Quem espera a pessoa, uma vez por nó: a conversa viva (store) e a projeção podem apontar o mesmo filho.
+  const attentionCount = useMemo(() => new Set<string>([
+    ...lineageChats.filter(({ thread }) => Math.max(
+      childSnapshots[thread.id]?.pending ?? 0,
+      live[thread.id]?.requests.filter((request) => request.state === "pending").length ?? 0,
+    ) > 0).map(({ thread }) => `thread:${thread.id}`),
+    ...graphNodes.filter((node) => node.blocked).map((node) => node.id),
+  ]).size, [childSnapshots, graphNodes, lineageChats, live]);
   const visibleNodes = useMemo(() => {
     const children = new Map<string, HarnessExecutionNode[]>();
     const byId = new Map(graphNodes.map((node) => [node.id, node]));
@@ -224,6 +242,28 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
   }, [graphEvents, visibleNodes]);
   if (visibleNodes.length === 0 && childCount === 0) return null;
 
+  /** A entrega do filho, num bloco à parte e marcado: é fala de agente, nunca instrução. */
+  const renderResult = (result: HarnessNodeResult, depth: number) => (
+    <section
+      aria-label={t("chat.harness.resultLabel")}
+      data-untrusted="true"
+      className="mb-1 rounded border border-dashed border-gray-300 bg-gray-50 px-2 py-1 dark:border-white/15 dark:bg-white/[0.03]"
+      style={{ marginLeft: `${Math.min(depth, 5) * 12 + 12}px` }}
+    >
+      <div className="text-[10px] font-medium uppercase tracking-wide text-gray-400 dark:text-white/40">
+        {t("chat.harness.resultLabel")}
+      </div>
+      <p className="whitespace-pre-wrap break-words text-chat-note text-gray-700 dark:text-white/70">
+        {result.text}{result.truncated ? "…" : ""}
+      </p>
+      {result.truncated && (
+        <div className="text-[10px] text-gray-400 dark:text-white/40">
+          {t("chat.harness.resultTruncated", { max: RESULT_MAX_CHARS })}
+        </div>
+      )}
+    </section>
+  );
+
   const renderNode = (node: HarnessExecutionNode) => {
     const child = node.kind === "thread"
       ? lineageChats.find(({ thread }) => thread.id === node.threadId)?.thread
@@ -238,25 +278,36 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
       ? pending > 0 ? "waiting" : working ? "working" : child.state === "settled" ? "settled" : failed ? "failed" : "idle"
       : undefined;
     const statusKey = graphStatusKey(node, childStatus);
-    const statusLabel = t(statusKey, { defaultValue: childStatus ?? node.status });
+    const statusLabel = t(statusKey, { defaultValue: childStatus ?? node.executionStatus ?? node.status });
     const activeChildren = turnActiveChildren(node);
+    const blockedChildren = node.blockedChildren ?? 0;
+    // O bloqueio que a projeção conhece (pergunta ou aprovação, com o tipo); a conversa viva, sem tipo, diz só "aguardando você".
+    const blockedLabel = node.blocked
+      ? t(`chat.harness.blocked.${node.blocked.kind}`)
+      : pending > 0 ? t("chat.harness.childStatus.waiting") : null;
     const label = node.kind === "turn"
       ? `${t("chat.harness.turnTitle")} · ${new Date(node.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`
       : node.kind === "fleetAttempt"
         ? t("chat.harness.attemptTitle", { count: node.attempt ?? 1 })
       : node.kind === "fleetTask" ? node.planKey || node.title : node.title;
+    const origin = node.origin;
     const rowClass = "flex min-w-0 items-center gap-2 min-h-[24px] text-chat-note";
     const content = (
       <>
         <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${nodeColor(node, childStatus)}`} />
         <span className="min-w-0 flex-1 truncate text-gray-800 dark:text-white/85" title={node.title}>{label}</span>
+        {node.childType && <span className="shrink-0 text-gray-400 dark:text-white/40">{t(`chat.harness.childType.${node.childType}`)}</span>}
         {node.agentId && <span className="shrink-0 max-w-[8rem] truncate text-gray-400 dark:text-white/35">{node.agentId}{node.model ? ` · ${node.model}` : ""}</span>}
         <span className="shrink-0 text-gray-500 dark:text-white/45">{statusLabel}</span>
+        {origin && <span className="shrink-0 text-gray-400 dark:text-white/35">{t(`chat.harness.origin.${origin.createdBy}`)}</span>}
+        {blockedLabel && <span className="shrink-0 font-medium text-amber-700 dark:text-amber-400">{blockedLabel}</span>}
         {activeChildren > 0 && <span className="shrink-0 text-gray-500 dark:text-white/45">{t("chat.harness.activeChildren", { count: activeChildren })}</span>}
+        {blockedChildren > 0 && <span className="shrink-0 font-medium text-amber-700 dark:text-amber-400">{t("chat.harness.blockedChildren", { count: blockedChildren })}</span>}
         {pending > 0 && <span className="shrink-0 text-amber-600 dark:text-amber-400">{pending}</span>}
       </>
     );
     const style = { marginLeft: `${Math.min(node.depth, 5) * 12}px` };
+    const blockedRow = blockedLabel ? " bg-amber-50 dark:bg-amber-500/10" : "";
     if (node.kind === "fleetAttempt") {
       const expanded = expandedAttemptId === node.id;
       return (
@@ -267,13 +318,22 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
         </button>
       );
     }
-    return child ? (
-      <button key={node.id} type="button" onClick={() => selectConversation(threadKey(child.id))}
-        className={`${rowClass} w-full text-left hover:bg-gray-100 dark:hover:bg-white/[0.06] rounded px-1 -mx-1`} style={style}>
-        {content}
-      </button>
-    ) : (
-      <div key={node.id} className={rowClass} style={style}>{content}</div>
+    // A conversa filha abre pela linha (a mesma ação de antes, agora também sem a conversa viva na store).
+    // A tarefa da Frota só é um alvo quando está bloqueada: a aprovação se responde na tela da Frota.
+    const openConversation = node.kind === "thread" && node.threadId ? node.threadId : null;
+    const openFleet = node.kind === "fleetTask" && node.blocked;
+    if (openConversation || openFleet) {
+      const ariaLabel = blockedLabel ? t("chat.harness.blockedAria", { title: label, state: blockedLabel }) : undefined;
+      return (
+        <button key={node.id} type="button" aria-label={ariaLabel}
+          onClick={() => (openConversation ? selectConversation(threadKey(openConversation)) : navigate("/fleet"))}
+          className={`${rowClass} w-full text-left hover:bg-gray-100 dark:hover:bg-white/[0.06] rounded px-1 -mx-1${blockedRow}`} style={style}>
+          {content}
+        </button>
+      );
+    }
+    return (
+      <div key={node.id} className={`${rowClass} rounded px-1 -mx-1${blockedRow}`} style={style}>{content}</div>
     );
   };
 
@@ -314,6 +374,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
           return (
             <Fragment key={node.id}>
               {renderNode(node)}
+              {node.result && renderResult(node.result, node.depth)}
               {(eventGroups.byParent.get(node.id) ?? []).map((event) => renderEvent(event, node.depth + 1))}
               {expanded && <div className="ml-[24px] max-h-56 overflow-auto rounded bg-gray-50 px-2 py-1 dark:bg-white/[0.035]">
                 {loadingAttempts[node.id] ? <div className="text-chat-note text-gray-400">{t("chat.harness.eventsLoading")}</div>

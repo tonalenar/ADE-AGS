@@ -5555,5 +5555,19 @@
   "chat.harness.turnStatus.inProgress": "working",
   "chat.harness.turnStatus.completed": "completed",
   "chat.harness.turnStatus.interrupted": "interrupted",
-  "chat.harness.turnStatus.failed": "failed"
+  "chat.harness.turnStatus.failed": "failed",
+  "chat.harness.childType.provider_chat": "conversation",
+  "chat.harness.childType.fleet_task": "task",
+  "chat.harness.origin.turn": "created by the turn",
+  "chat.harness.origin.task": "created by another task",
+  "chat.harness.origin.conversation": "created by the conversation",
+  "chat.harness.status.completed": "completed",
+  "chat.harness.status.waiting": "waiting on you",
+  "chat.harness.blocked.question": "question pending",
+  "chat.harness.blocked.approval": "approval pending",
+  "chat.harness.blockedChildren_one": "{{count}} blocked child",
+  "chat.harness.blockedChildren_other": "{{count}} blocked children",
+  "chat.harness.blockedAria": "{{title}}: {{state}}",
+  "chat.harness.resultLabel": "agent reply (untrusted data)",
+  "chat.harness.resultTruncated": "shortened (up to {{max}} characters)"
 }

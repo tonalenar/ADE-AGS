@@ -413,6 +413,11 @@ pub(super) fn chat_wait(app: &AppHandle, args: &Value) -> Result<Value, String> 
 pub(super) fn chat_stop(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let thread = thread_arg(args)?;
     let db = db(app)?;
+    // O escopo de quem para vem da sessão do MCP (`caller_scope`). Sem ele, quem para é a pessoa.
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        api::check_stop_scope(&conn, arg_str_opt(args, "caller_scope").as_deref(), &thread)?;
+    }
     tauri::async_runtime::block_on(api::stop(app, &db, &thread))?;
     Ok(json!({ "stopped": true }))
 }
