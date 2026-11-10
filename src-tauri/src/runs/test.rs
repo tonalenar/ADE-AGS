@@ -4901,6 +4901,14 @@ mod harness_fase1 {
         graph.nodes.iter().any(|node| node.id == id)
     }
 
+    fn ativos(graph: &HarnessExecutionGraph, id: &str) -> i64 {
+        assert!(
+            graph.nodes.iter().filter(|node| node.kind != "turn").all(|node| node.active_children.is_none()),
+            "a contagem só existe no nó de turno"
+        );
+        node(graph, id).active_children.expect("o turno traz activeChildren")
+    }
+
     /// Teste 3: filho de chat e filho da Frota do mesmo turno ficam no mesmo `harness_run`.
     #[test]
     fn a_delegacao_com_turno_ativo_gera_fleet_run_e_tarefas_sob_o_mesmo_run() {
@@ -5152,5 +5160,100 @@ mod harness_fase1 {
         assert!(graph.nodes.iter().all(|node| node.node_id.is_none() && node.harness_run_id.is_none()));
         assert_eq!(node(&graph, "turn:raiz:t1").chat_run_id.as_deref(), Some("t1"));
         assert_eq!(node(&graph, "turn:raiz:t1").run_id.as_deref(), Some("t1"), "runId segue por compatibilidade");
+    }
+
+    /// Regra 8: o turno terminal conta filhos diretos que ainda não terminaram. O run da Frota entra
+    /// uma vez; a conversa filha vale o último turno; o estado da thread não é execução.
+    #[test]
+    fn turno_terminal_conta_filhos_diretos_ainda_ativos() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        child(&world, "parada", "raiz");
+        let (run_id, tasks) = delegar(&world, "raiz", &["a", "b", "c"], None).unwrap();
+        assert_eq!(tasks.len(), 3);
+        {
+            let conn = world.db.lock().unwrap();
+            // O último turno da filha segue; o da parada já acabou, mesmo com um anterior em curso.
+            chat::upsert_run(&conn, "filha", "antigo", "completed", Some(2), Some(3), Some(1)).unwrap();
+            chat::upsert_run(&conn, "filha", "atual", "inProgress", Some(4), None, None).unwrap();
+            chat::upsert_run(&conn, "parada", "antes", "inProgress", Some(2), None, None).unwrap();
+            chat::upsert_run(&conn, "parada", "depois", "completed", Some(6), Some(7), Some(1)).unwrap();
+            conn.execute("UPDATE chat_thread SET state = 'settled' WHERE id = 'filha'", []).unwrap();
+        }
+
+        let aberto = graph(&world, "raiz");
+        assert_eq!(node(&aberto, "turn:raiz:t1").status, "inProgress");
+        assert_eq!(ativos(&aberto, "turn:raiz:t1"), 2, "a contagem existe mesmo com o turno ainda em curso");
+
+        chat::upsert_run(&world.db.lock().unwrap(), "raiz", "t1", "completed", Some(1), Some(8), Some(1)).unwrap();
+        let ambos = graph(&world, "raiz");
+        assert_eq!(node(&ambos, "turn:raiz:t1").status, "completed");
+        assert_eq!(node(&ambos, &format!("run:{run_id}")).status, "running");
+        assert_eq!(node(&ambos, "thread:filha").status, "settled", "o estado da thread não é o da execução");
+        assert_eq!(node(&ambos, "thread:filha").parent_id.as_deref(), Some("turn:raiz:t1"));
+        assert_eq!(ativos(&ambos, "turn:raiz:t1"), 2, "run em andamento mais a filha com turno em curso");
+        assert_eq!(
+            ambos.nodes.iter().filter(|node| node.kind == "fleetTask" && node.run_id.as_deref() == Some(run_id.as_str())).count(),
+            3,
+            "três tarefas não viram três filhos"
+        );
+        let json = serde_json::to_value(node(&ambos, "turn:raiz:t1")).unwrap();
+        assert_eq!(json["activeChildren"], 2);
+        assert!(serde_json::to_value(node(&ambos, &format!("run:{run_id}"))).unwrap().get("activeChildren").is_none());
+
+        chat::upsert_run(&world.db.lock().unwrap(), "filha", "atual", "completed", Some(4), Some(9), Some(1)).unwrap();
+        let so_run = graph(&world, "raiz");
+        assert_eq!(ativos(&so_run, "turn:raiz:t1"), 1, "só o run da Frota, uma vez");
+
+        {
+            let conn = world.db.lock().unwrap();
+            conn.execute("UPDATE runs SET status = 'done', ended_at = 9 WHERE id = ?1", [&run_id]).unwrap();
+            chat::upsert_run(&conn, "filha", "atual", "inProgress", Some(4), None, None).unwrap();
+        }
+        let so_filha = graph(&world, "raiz");
+        assert_eq!(ativos(&so_filha, "turn:raiz:t1"), 1, "só a conversa filha com o último turno em curso");
+
+        {
+            let conn = world.db.lock().unwrap();
+            conn.execute("UPDATE runs SET status = 'failed', ended_at = 10 WHERE id = ?1", [&run_id]).unwrap();
+            conn.execute("UPDATE tasks SET status = 'failed', error = 'quebrou', ended_at = 10 WHERE run_id = ?1", [&run_id]).unwrap();
+            chat::upsert_run(&conn, "filha", "atual", "failed", Some(4), Some(11), Some(1)).unwrap();
+        }
+        let falhos = graph(&world, "raiz");
+        assert_eq!(node(&falhos, "turn:raiz:t1").status, "completed", "filho falho não muda o status do turno");
+        assert_eq!(node(&falhos, &format!("run:{run_id}")).status, "failed");
+        assert_eq!(node(&falhos, "turn:filha:atual").status, "failed");
+        assert_eq!(ativos(&falhos, "turn:raiz:t1"), 0, "filhos terminais não contam");
+
+        // Run criado com o pai já ocioso: sem nó e sem turno pai, mesmo `running`, fica fora.
+        let (legado, _) = delegar(&world, "raiz", &["z"], None).unwrap();
+        let depois = graph(&world, "raiz");
+        let legado_no = node(&depois, &format!("run:{legado}"));
+        assert_eq!(legado_no.status, "running");
+        assert_eq!(legado_no.parent_id.as_deref(), Some("thread:raiz"));
+        assert!(legado_no.node_id.is_none());
+        assert_eq!(node(&depois, "turn:raiz:t1").status, "completed");
+        assert_eq!(ativos(&depois, "turn:raiz:t1"), 0);
+    }
+
+    /// Sem turno a filha é `pending`. Com o último turno concluído, `chat_thread.state = active` não a mantém.
+    #[test]
+    fn conversa_filha_sem_turno_e_pendente_e_o_estado_da_thread_nao_e_execucao() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        {
+            let conn = world.db.lock().unwrap();
+            chat::upsert_run(&conn, "raiz", "t1", "completed", Some(1), Some(2), Some(1)).unwrap();
+            conn.execute("UPDATE chat_thread SET state = 'active' WHERE id = 'filha'", []).unwrap();
+        }
+        let sem_turno = graph(&world, "raiz");
+        assert_eq!(node(&sem_turno, "thread:filha").parent_id.as_deref(), Some("turn:raiz:t1"));
+        assert!(sem_turno.nodes.iter().all(|node| node.kind != "turn" || node.thread_id.as_deref() != Some("filha")));
+        assert_eq!(ativos(&sem_turno, "turn:raiz:t1"), 1, "sem turno a filha conta como pending");
+
+        chat::upsert_run(&world.db.lock().unwrap(), "filha", "ft", "completed", Some(3), Some(4), Some(1)).unwrap();
+        let concluida = graph(&world, "raiz");
+        assert_eq!(node(&concluida, "thread:filha").status, "active");
+        assert_eq!(ativos(&concluida, "turn:raiz:t1"), 0);
     }
 }

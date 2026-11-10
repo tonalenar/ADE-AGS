@@ -5489,6 +5489,8 @@
   "chat.harness.childCount_other": "{{count}} conversaciones hijas",
   "chat.harness.activeCount_one": "{{count}} activa",
   "chat.harness.activeCount_other": "{{count}} activas",
+  "chat.harness.activeChildren_one": "{{count}} hijo activo",
+  "chat.harness.activeChildren_other": "{{count}} hijos activos",
   "chat.harness.attentionCount_one": "{{count}} esperando por ti",
   "chat.harness.attentionCount_other": "{{count}} esperando por ti",
   "chat.harness.status.pending": "en cola",

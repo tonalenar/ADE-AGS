@@ -5489,6 +5489,8 @@
   "chat.harness.childCount_other": "{{count}} child chats",
   "chat.harness.activeCount_one": "{{count}} active",
   "chat.harness.activeCount_other": "{{count}} active",
+  "chat.harness.activeChildren_one": "{{count}} active child",
+  "chat.harness.activeChildren_other": "{{count}} active children",
   "chat.harness.attentionCount_one": "{{count}} waiting on you",
   "chat.harness.attentionCount_other": "{{count}} waiting on you",
   "chat.harness.status.pending": "queued",
