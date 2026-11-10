@@ -47,6 +47,8 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         // A fila das mensagens entre agentes volta a andar de onde parou (ver `peer_queue`).
         crate::ipc::start_peer_queue(app.clone());
         crate::ipc::start_chat_watch(app.clone());
+        // O resultado de um filho delegado em modo async chega ao pai pela fila durável (contrato §12.9).
+        crate::ipc::start_child_delivery(app.clone());
         // O canal estruturado: o estado de cada aba de Claude Code/Codex lido do transcript (ver `canal`).
         crate::ipc::start_canal(app.clone());
         // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.

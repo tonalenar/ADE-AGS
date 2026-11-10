@@ -228,6 +228,27 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
         if !outcome.reused {
             api::announce(app, &row);
         }
+        // `delegate_agent` em modo async: o resultado desta conversa filha chega ao pai quando ela terminar (§12.9).
+        // Idempotente: a repetição do mesmo `client_request_id` também cura uma queda entre criar e registrar.
+        if arg_str_opt(args, "harness_delivery").as_deref() == Some("async") {
+            if let Some(parent_ref) = parent_ref.as_deref() {
+                let conn = db.lock().map_err(|error| error.to_string())?;
+                crate::harness::child_delivery::register(
+                    &conn,
+                    &crate::harness::child_delivery::WatchSpec {
+                        kind: crate::harness::delegate::Target::ProviderChat,
+                        child_ref: &row.id,
+                        parent_ref,
+                        title: &row.title,
+                        agent_id: &row.agent_id,
+                        parent_turn_id: row.parent_turn_id.as_deref(),
+                        session_id: None,
+                        message_id: None,
+                    },
+                    crate::util::now_ts_ms(),
+                )?;
+            }
+        }
         match api::claim_child_delivery(&db, &identity)? {
             api::ChildDeliveryClaim::Claimed { thread_id } => {
                 let send = tauri::async_runtime::block_on(api::send_mode(
@@ -318,6 +339,8 @@ fn child_request_identity(
     if let Some(object) = normalized.as_object_mut() {
         object.remove("client_request_id");
         object.remove("clientRequestId");
+        // Não muda o que a criação pede: o mesmo id com ou sem a entrega assíncrona é o mesmo pedido.
+        object.remove("harness_delivery");
     }
     let bytes = serde_json::to_vec(&normalized).map_err(|error| error.to_string())?;
     let request_hash = format!("{:x}", Sha256::digest(bytes));

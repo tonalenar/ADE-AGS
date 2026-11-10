@@ -13,6 +13,8 @@ use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use serde::Serialize;
 
 use crate::conversa::store as chat;
+use crate::harness::child_delivery;
+use crate::harness::delegate::Target;
 use crate::harness::state::{self, NodeState};
 use crate::harness::store as harness_store;
 use super::execution_log::{self, HarnessEvent};
@@ -56,8 +58,8 @@ pub struct HarnessExecutionNode {
     /// Motivo persistido do evento `turn.interrupted`, quando houve sweep de boot.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub interruption_reason: Option<String>,
-    /// Só nos agentes filhos: `provider_chat` (conversa filha) ou `fleet_task` (tarefa da Frota). O ADE
-    /// não tem `connected_session`, então esse tipo não sai. Os outros nós omitem o campo.
+    /// Só nos agentes filhos: `provider_chat` (conversa filha), `fleet_task` (tarefa da Frota) ou
+    /// `connected_session` (sessão já aberta e ligada ao time, delegada em modo `async`). Os outros nós omitem o campo.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub child_type: Option<String>,
     /// Estado de execução (contrato §3.1) dos filhos: conversa, run e tarefa. Em conversa filha, `status`
@@ -494,6 +496,49 @@ pub fn thread_execution_graph_since(
         }
     }
 
+    // Sessões conectadas delegadas em modo `async` (contrato §12.9): não têm tabela nativa de execução, então o nó
+    // vem do acompanhamento gravado na delegação. Estado e resultado são lidos na hora do registro da própria sessão
+    // (a resposta dela na fila, ou o turno dela), nunca copiados para o acompanhamento.
+    let parent_refs: Vec<String> = thread_ids.iter().map(|id| format!("thread:{id}")).collect();
+    let thread_depth: HashMap<&str, i64> = lineage.iter().map(|(thread, _, depth)| (thread.id.as_str(), *depth)).collect();
+    for watch in child_delivery::watches_of_parents(conn, &parent_refs)? {
+        if watch.kind != Target::ConnectedSession {
+            continue;
+        }
+        let Some(parent_thread) = watch.parent_ref.strip_prefix("thread:") else { continue };
+        let origin_turn = watch
+            .parent_turn_id
+            .as_ref()
+            .map(|turn| format!("turn:{parent_thread}:{turn}"))
+            .filter(|id| turn_node_ids.contains(id));
+        let (derived, unknown, result) = match child_delivery::inspect(conn, &watch)? {
+            child_delivery::Inspection::Ended(end) => (
+                end.state,
+                end.unknown,
+                end.text.as_deref().filter(|text| !text.trim().is_empty()).map(result_of),
+            ),
+            _ => (NodeState::Running, false, None),
+        };
+        nodes.push(HarnessExecutionNode {
+            id: format!("session:{}", watch.child_ref),
+            parent_id: Some(origin_turn.clone().unwrap_or_else(|| format!("thread:{parent_thread}"))),
+            kind: "connectedSession".into(),
+            depth: thread_depth.get(parent_thread).copied().unwrap_or(0) + 1 + i64::from(origin_turn.is_some()),
+            title: watch.title.clone(),
+            status: derived.as_str().to_string(),
+            thread_id: Some(parent_thread.to_string()),
+            agent_id: Some(watch.agent_id.clone()).filter(|agent| !agent.is_empty()),
+            created_at: watch.created_at,
+            started_at: Some(watch.created_at),
+            child_type: Some("connected_session".into()),
+            execution_status: Some(derived.as_str().to_string()),
+            result,
+            origin: Some(origin_of(origin_turn, None)),
+            outcome_unknown: unknown.then_some(true),
+            ..Default::default()
+        });
+    }
+
     for node in &mut nodes {
         if let Some(link) = links.get(&node.id) {
             node.node_id = Some(link.node_id.clone());
@@ -604,6 +649,8 @@ fn direct_child_is_active(nodes: &[HarnessExecutionNode], child: &HarnessExecuti
             .and_then(|id| last_turn(nodes, id))
             .is_some_and(|turn| !state::from_chat_run(&turn.status, false).state.is_terminal()),
         "fleetRun" => !state::from_fleet_run(&child.status).state.is_terminal(),
+        // A sessão conectada não tem turno próprio na projeção: o estado de execução já é o que ela entregou.
+        "connectedSession" => matches!(child.execution_status.as_deref(), Some("pending" | "running" | "waiting")),
         _ => false,
     }
 }

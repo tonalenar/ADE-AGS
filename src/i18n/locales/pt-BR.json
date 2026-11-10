@@ -5582,6 +5582,7 @@
   "chat.harness.turnStatus.failed": "falhou",
   "chat.harness.childType.provider_chat": "conversa",
   "chat.harness.childType.fleet_task": "tarefa",
+  "chat.harness.childType.connected_session": "sessão conectada",
   "chat.harness.origin.turn": "criado pelo turno",
   "chat.harness.origin.task": "criado por outra tarefa",
   "chat.harness.origin.conversation": "criado pela conversa",

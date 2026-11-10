@@ -312,6 +312,13 @@ fn timed_out(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>) 
     out.push(Notice { key, member: m.id.clone(), text: timeout_text(m, now - base) });
 }
 
+/// A chave de dedupe do «terminou» de um integrante (`member` = `thread:<id>`) num turno. A entrega do resultado de
+/// uma sessão conectada (`harness::child_delivery`) usa a MESMA chave: quem chegar primeiro entra na fila, e o outro
+/// é reconhecido como repetição. Nunca saem dois avisos do mesmo fim.
+pub fn end_key(member: &str, run_id: &str) -> String {
+    format!("{KEY_PREFIX}end-{member}-{run_id}")
+}
+
 /// O «terminou» tipado: o turno que o orquestrador pediu acabou e o integrante não mandou mensagem a ele.
 fn finished(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>) {
     let Some(t) = &m.last_turn else { return };
@@ -322,7 +329,7 @@ fn finished(m: &Member, sent: &HashSet<&str>, now: i64, out: &mut Vec<Notice>) {
     if t.status == TurnStatus::Failed || (t.status == TurnStatus::Completed && t.final_text.as_deref().is_some_and(asks_the_person)) {
         return;
     }
-    let key = format!("{KEY_PREFIX}end-{}-{}", m.id, t.run_id);
+    let key = end_key(&m.id, &t.run_id);
     if !sent.contains(key.as_str()) {
         out.push(Notice { key, member: m.id.clone(), text: finished_text(m, t) });
     }
