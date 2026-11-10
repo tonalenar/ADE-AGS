@@ -419,7 +419,7 @@ O que o contrato acrescenta (Fases 3 e 5, não agora):
 - Todo nó não terminal vira `interrupted` com `end_reason = app_closed` **na mesma transação** da varredura nativa. A reconciliação fica explícita: `end_source = reconciliation`.
 - `outcome_unknown = 1` quando havia ferramenta `Running`, ou envio em `submitting`/`unknown` (`chat_child_receipts.delivery_state`).
 - Nó `waiting` vira `interrupted`: o processo que esperava a resposta morreu e o pedido expirou. Não se retoma uma aprovação.
-- **"Retomar" nunca altera o histórico.** Cria uma nova attempt correlacionada ao nó antigo, escolhida pela pessoa. Só existe onde a capability `resume` for `Supported` e provada.
+- **"Retomar" nunca altera o histórico.** Cria uma nova attempt correlacionada ao nó antigo, escolhida pela pessoa. Só existe onde a capability `resume` for `Supported` e provada. Na Frota headless a correlação não ganha coluna: `resume_task` (`runs/store.rs`) insere outra linha em `run_attempts` com o mesmo `task_id` e `attempt` = anterior + 1. A linha anterior (status, resultado, erro, `events_path`) não é reescrita e o JSONL dela não é truncado. `failed`, `interrupted` e o desfecho desconhecido (`failed` com `MISSING_FINAL_RESULT`) entram sem flag. `done` só entra com pedido explícito. `ready`/`running`, ou uma tentativa ainda aberta, não ganham segunda linha. A rodada automática de correção e o reroute passam pela mesma reserva (`reserve_next_attempt`); o contador operacional `tasks.attempt` continua podendo zerar no reroute, e o de `run_attempts` não. A tela da Frota segue mostrando a linha corrente da tarefa, não a lista de tentativas.
 
 ## 4. Plano de migração aditiva
 

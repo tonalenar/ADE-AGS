@@ -712,17 +712,165 @@ pub fn skip_task(conn: &Connection, task_id: &str, reason: &str) -> Result<bool,
 }
 
 /// Vuelve a la cola para un segundo intento, con el motivo del primero.
+///
+/// A tentativa anterior fica intacta: isto passa por [`resume_task`], que abre outra linha.
 #[cfg(test)]
 pub fn requeue_for_retry(conn: &Connection, task_id: &str, error: &str) -> Result<bool, String> {
-    let n = conn
-        .execute(
-            "UPDATE tasks SET status = ?1, last_error = ?2, error = NULL, result = NULL, structured_handoff = NULL,
-                              ended_at = NULL, session_id = NULL
-             WHERE id = ?3 AND status = ?4",
-            rusqlite::params![status::PENDING, error, task_id, status::FAILED],
+    let Some(task) = task_by_id(conn, task_id)? else {
+        return Ok(false);
+    };
+    if task.status != status::FAILED {
+        return Ok(false);
+    }
+    resume_task(conn, task_id, false)?;
+    conn.execute(
+        "UPDATE tasks SET last_error = ?1 WHERE id = ?2",
+        rusqlite::params![error, task_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// Tentativa aberta pela retomada. A correlação com a anterior é `(task_id, attempt)`:
+/// o mesmo `task_id` e `attempt` igual ao maior já gravado mais um. Não há coluna nova.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResumedAttempt {
+    pub id: String,
+    pub task_id: String,
+    pub attempt: i64,
+    /// Id da linha anterior, quando havia uma.
+    pub previous_id: Option<String>,
+}
+
+struct AttemptHead {
+    id: String,
+    attempt: i64,
+    status: String,
+    ended_at: Option<i64>,
+}
+
+fn latest_attempt(conn: &Connection, task_id: &str) -> Result<Option<AttemptHead>, String> {
+    conn.query_row(
+        "SELECT id, attempt, status, ended_at FROM run_attempts
+         WHERE task_id = ?1 ORDER BY attempt DESC LIMIT 1",
+        [task_id],
+        |row| {
+            Ok(AttemptHead {
+                id: row.get(0)?,
+                attempt: row.get(1)?,
+                status: row.get(2)?,
+                ended_at: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|error| error.to_string())
+}
+
+pub(crate) fn open_attempt_is_running(conn: &Connection, task_id: &str) -> Result<bool, String> {
+    let running: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM run_attempts
+             WHERE task_id = ?1 AND ended_at IS NULL AND status = ?2",
+            rusqlite::params![task_id, status::RUNNING],
+            |row| row.get(0),
         )
-        .map_err(|e| e.to_string())?;
-    Ok(n > 0)
+        .map_err(|error| error.to_string())?;
+    Ok(running > 0)
+}
+
+/// Abre a próxima tentativa, ou reaproveita a reserva que ainda não foi lançada.
+///
+/// Não atualiza linha com `ended_at` preenchido e não abre o arquivo de eventos.
+pub(crate) fn reserve_next_attempt(conn: &Connection, task_id: &str) -> Result<ResumedAttempt, String> {
+    let task = task_by_id(conn, task_id)?.ok_or_else(|| "a tarefa não existe".to_string())?;
+    if open_attempt_is_running(conn, task_id)? {
+        return Err("a tarefa ainda está em execução e não ganha outra tentativa".into());
+    }
+    let previous = latest_attempt(conn, task_id)?;
+    if let Some(open) = previous.as_ref().filter(|row| row.ended_at.is_none()) {
+        conn.execute(
+            "UPDATE run_attempts SET agent_id = ?1, model = ?2
+             WHERE id = ?3 AND ended_at IS NULL AND status != ?4",
+            rusqlite::params![task.agent_id, task.model, open.id, status::RUNNING],
+        )
+        .map_err(|error| error.to_string())?;
+        return Ok(ResumedAttempt {
+            id: open.id.clone(),
+            task_id: task_id.to_string(),
+            attempt: open.attempt,
+            previous_id: None,
+        });
+    }
+    let attempt = previous.as_ref().map(|row| row.attempt).unwrap_or(0) + 1;
+    let id = Uuid::new_v4().to_string();
+    // Placeholder até o processo nascer. Não é o `events_path` da tentativa anterior
+    // e este caminho não é criado aqui: nada é truncado.
+    let events_path = format!("attempt://{task_id}/{id}.jsonl");
+    conn.execute(
+        "INSERT INTO run_attempts (id, task_id, run_id, attempt, agent_id, model, session_id,
+                                   events_path, status, started_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, '', ?7, ?8, ?9)",
+        rusqlite::params![
+            id,
+            task_id,
+            task.run_id,
+            attempt,
+            task.agent_id,
+            task.model,
+            events_path,
+            status::PENDING,
+            now_ts(),
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(ResumedAttempt {
+        id,
+        task_id: task_id.to_string(),
+        attempt,
+        previous_id: previous.map(|row| row.id),
+    })
+}
+
+/// Retoma uma tarefa da Frota com uma tentativa nova, correlacionada à anterior.
+///
+/// `failed` e `interrupted` (e a falha de desfecho desconhecido, que continua `failed`)
+/// entram sem flag. `done` só entra com `explicit`. `ready` e `running`, ou qualquer
+/// tentativa ainda aberta, não ganham outra linha. A linha anterior não é atualizada:
+/// status, resultado, erro e `events_path` ficam onde foram gravados. A linha da tarefa
+/// volta para `pending` porque é o estado corrente que o scheduler lê; o histórico é
+/// `run_attempts`.
+pub fn resume_task(conn: &Connection, task_id: &str, explicit: bool) -> Result<ResumedAttempt, String> {
+    let task = task_by_id(conn, task_id)?.ok_or_else(|| "a tarefa não existe".to_string())?;
+    if matches!(task.status.as_str(), status::READY | status::RUNNING) || open_attempt_is_running(conn, task_id)? {
+        return Err("a tarefa ainda está em execução e não ganha outra tentativa".into());
+    }
+    if latest_attempt(conn, task_id)?.is_some_and(|row| row.ended_at.is_none()) {
+        return Err("já existe uma tentativa em aberto para esta tarefa".into());
+    }
+    let resumable = match task.status.as_str() {
+        status::FAILED | "interrupted" => true,
+        status::DONE if explicit => true,
+        status::DONE => {
+            return Err("uma tarefa concluída não é retomada sem pedido explícito".into());
+        }
+        _ => false,
+    };
+    if !resumable {
+        return Err("esta tarefa não está num estado que possa ser retomado".into());
+    }
+    let changed = conn
+        .execute(
+            "UPDATE tasks SET status = ?1, last_error = COALESCE(error, last_error), error = NULL,
+                              result = NULL, structured_handoff = NULL, ended_at = NULL, session_id = NULL
+             WHERE id = ?2 AND status = ?3",
+            rusqlite::params![status::PENDING, task_id, task.status],
+        )
+        .map_err(|error| error.to_string())?;
+    if changed != 1 {
+        return Err("a tarefa mudou antes da retomada".into());
+    }
+    reserve_next_attempt(conn, task_id)
 }
 
 /// Le pasa la tarea a otro agente: nueva asignación, el traspaso escrito, y de vuelta a la
@@ -742,6 +890,9 @@ pub fn reroute_task(
     handoff: &str,
     auto_account: bool,
 ) -> Result<bool, String> {
+    if open_attempt_is_running(conn, task_id)? {
+        return Ok(false);
+    }
     let n = conn
         .execute(
             "UPDATE tasks SET agent_id = ?1, model = ?2, account_id = ?3, routed_by = ?4, route_note = ?5,
@@ -755,6 +906,11 @@ pub fn reroute_task(
             ],
         )
         .map_err(|e| e.to_string())?;
+    if n == 1 {
+        // A linha anterior de `run_attempts` não entra neste UPDATE. A próxima é outra
+        // linha, com `attempt` monotônico, mesmo que o contador da tarefa volte a zero.
+        reserve_next_attempt(conn, task_id)?;
+    }
     Ok(n > 0)
 }
 
@@ -1097,13 +1253,10 @@ fn mark_running_inner(
     let Some((run_id, agent_id, model)) = assignment else {
         return Ok(false);
     };
-    let attempt: i64 = conn
-        .query_row(
-            "SELECT COALESCE(MAX(attempt), 0) + 1 FROM run_attempts WHERE task_id = ?1",
-            [task_id],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())?;
+    let open = latest_attempt(conn, task_id)?.filter(|row| row.ended_at.is_none());
+    if open.as_ref().is_some_and(|row| row.status == status::RUNNING) {
+        return Ok(false);
+    }
     let now = now_ts();
     let changed = conn.execute(
         "UPDATE tasks SET status = ?1, session_id = ?2, events_path = ?3, started_at = ?4,
@@ -1112,7 +1265,35 @@ fn mark_running_inner(
         rusqlite::params![status::RUNNING, session_id, events_path, now, task_id, status::READY],
     )
     .map_err(|e| e.to_string())?;
-    if changed == 1 {
+    if changed != 1 {
+        return Ok(false);
+    }
+    if let Some(open) = open {
+        // A retomada já criou a linha. Promove essa, sem abrir uma segunda.
+        conn.execute(
+            "UPDATE run_attempts SET id = ?1, status = 'running', agent_id = ?2, model = ?3,
+                                     session_id = ?4, events_path = ?5, started_at = ?6
+             WHERE id = ?7 AND ended_at IS NULL AND status != ?8",
+            rusqlite::params![
+                attempt_id,
+                agent_id,
+                model,
+                session_id,
+                events_path,
+                now,
+                open.id,
+                status::RUNNING,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    } else {
+        let attempt: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(attempt), 0) + 1 FROM run_attempts WHERE task_id = ?1",
+                [task_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO run_attempts (id, task_id, run_id, attempt, agent_id, model, session_id,
                                        events_path, status, started_at)
@@ -1121,7 +1302,7 @@ fn mark_running_inner(
         )
         .map_err(|e| e.to_string())?;
     }
-    Ok(changed == 1)
+    Ok(true)
 }
 
 /// Fecha a tentativa viva mais recente. Tarefas que falharam antes de o processo nascer
