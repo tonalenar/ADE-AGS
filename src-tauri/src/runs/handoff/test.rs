@@ -15,7 +15,8 @@ fn worker(conn: &Connection, run: &str, name: &str) -> Task {
         run_id: run, title: name, prompt: "Task-specific request", agent_id: "codex", cwd: "/p",
         role: Some("worker"), functional_role: Some("backend"), ..Default::default()
     }).unwrap();
-    store::mark_running(conn, &task.id, "attempt-1", "s", "/events").unwrap();
+    let attempt_id = format!("attempt-{}", task.id);
+    store::mark_running(conn, &task.id, &attempt_id, "s", "/events").unwrap();
     store::task_by_id(conn, &task.id).unwrap().unwrap()
 }
 fn deliver(conn: &Connection, task: &Task, summary: &str) -> Task {
@@ -254,7 +255,8 @@ fn mission_squad_edits_preserve_handoff_origin_dependencies_and_snapshot() {
             account_id:member.account_id.as_deref(), reasoning_effort:member.reasoning_effort.as_deref(), ..Default::default()
         }).unwrap();
         conn.execute("INSERT INTO task_deps(task_id,depends_on) VALUES(?1,?2)", [&task.id,&dependency.id]).unwrap();
-        store::mark_running(&conn, &task.id, "attempt-1", "session", "/events").unwrap();
+        let attempt_id = format!("attempt-{}", task.id);
+        store::mark_running(&conn, &task.id, &attempt_id, "session", "/events").unwrap();
         old_backend = deliver(&conn, &task, "HISTORICAL_HANDOFF");
         fail_mission_run(&conn, &first_run);
         input.members[0].role_id="qa".into();
