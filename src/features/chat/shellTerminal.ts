@@ -29,17 +29,22 @@ export function resetLoginShell(): void {
   loginShell = null;
 }
 
-// Uma criação por pasta de cada vez: dois pedidos seguidos (o efeito montando duas vezes, o Rodar logo depois de
-// abrir) davam duas abas de shell, e o painel mostrava duas cópias do banner.
+// Uma criação por pasta (e conjunto de reservas) de cada vez: dois pedidos seguidos (o efeito montando duas vezes, o
+// Rodar logo depois de abrir) davam duas abas de shell, e o painel mostrava duas cópias do banner.
 const creating = new Map<string, Promise<string>>();
 
-/** A aba de shell da pasta, criada se ainda não houver. Criar não troca a conversa aberta (a aba ativa fica). */
-export function ensureShellTab(cwd: string): Promise<string> {
-  const inFlight = creating.get(cwd);
+/**
+ * Um shell da pasta para uma aba Terminal da coluna: o primeiro que ainda não está em `taken` (os que as outras abas da
+ * coluna já mostram), criado se não houver. Assim cada aba da coluna é um terminal próprio, e abrir de novo reaproveita
+ * os que sobraram (fechar uma aba da coluna não mata o PTY). Criar não troca a conversa aberta (a aba ativa fica).
+ */
+export function claimShellTab(cwd: string, taken: ReadonlySet<string>): Promise<string> {
+  const key = `${cwd}\u0000${[...taken].sort().join(",")}`;
+  const inFlight = creating.get(key);
   if (inFlight) return inFlight;
   const made = loginShellCommand().then((command) => {
     const tabs = useTabsStore.getState();
-    const existing = findShellTab(tabs.tabs, cwd, command);
+    const existing = findShellTab(tabs.tabs.filter((t) => !taken.has(t.id)), cwd, command);
     if (existing) return existing;
     const before = tabs.activeTabId;
     const base: AgentInfo = tabs.detectedAgents.find((a) => a.id === SHELL_AGENT_ID)
@@ -49,9 +54,19 @@ export function ensureShellTab(cwd: string): Promise<string> {
     // O `addTab` ativa a aba nova; no chat a aba ativa é a conversa aberta, que não muda por isso.
     if (before !== null) useTabsStore.setState({ activeTabId: before });
     return id;
-  }).finally(() => creating.delete(cwd));
-  creating.set(cwd, made);
+  }).finally(() => creating.delete(key));
+  creating.set(key, made);
   return made;
+}
+
+/**
+ * O shell da pasta, criado se ainda não houver. Com uma aba Terminal da coluna à vista nessa pasta, é o dela (o «Rodar»
+ * dos blocos e o `ags` escrevem no terminal que a pessoa está vendo, não num que ficou escondido).
+ */
+export function ensureShellTab(cwd: string): Promise<string> {
+  const visible = useChatStore.getState().shell?.tabId;
+  if (visible && findShellTab(useTabsStore.getState().tabs.filter((t) => t.id === visible), cwd)) return Promise.resolve(visible);
+  return claimShellTab(cwd, new Set());
 }
 
 /** Abre a aba Terminal do painel (o shell nasce nela, na pasta da conversa). */

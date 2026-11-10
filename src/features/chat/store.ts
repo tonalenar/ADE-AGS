@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { Rect } from "@/features/tabs/layout/layoutStore";
+import { closeTab, moveTab, openTab, panelOfActive, reconcileColumn, type ColumnKind, type ColumnTab } from "./columnTabs";
 import type { ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
 
 /**
@@ -39,6 +40,13 @@ interface ChatState {
   panelFocus: number;
   /** O painel ocupa a área toda (a conversa some), como o "Maximizar" do T3. */
   panelMaximized: boolean;
+  /**
+   * As abas da coluna (a barra de abas do T3) e a que está à vista. `panel` continua sendo a superfície da aba ativa
+   * (ou `"empty"`/`null`): o resto do app lê e escreve `panel`, e o `reconcileColumn` (no fim deste arquivo) mantém as
+   * abas coerentes com ele. Não persistem entre aberturas do app; só `panel`.
+   */
+  columnTabs: ColumnTab[];
+  columnActive: string | null;
   /** O navegador da aba Navegador e onde desenhá-lo (como o terminal: por slot, sem remontar). */
   browser: { viewId: string; rect: Rect } | null;
   /** O navegador está destacado como mini preview sobre a conversa. */
@@ -179,9 +187,14 @@ function readControl(): boolean {
 }
 
 const initialPanel = readPanel();
+/** A coluna ao abrir o app: uma aba da superfície lembrada (se houver). */
+const initialColumn = ((): { tabs: ColumnTab[]; active: string | null } => {
+  const first = reconcileColumn(initialPanel, { tabs: [], active: null });
+  return first ?? { tabs: [], active: null };
+})();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, browserFloating: false, browserFloatRect: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -380,7 +393,82 @@ export function addSurface(surface: Surface): void {
 
 /** Fecha uma superfície; se era a que estava à vista, volta ao Diff. */
 export function removeSurface(surface: Surface): void {
-  useChatStore.setState((s) => ({ surfaces: s.surfaces.filter((x) => x !== surface), panel: s.panel === surface ? "diff" : s.panel }));
+  useChatStore.setState((s) => {
+    const dropped = s.columnTabs.filter((tab) => tab.kind === surface).map((tab) => tab.id);
+    return {
+      surfaces: s.surfaces.filter((x) => x !== surface), panel: s.panel === surface ? "diff" : s.panel,
+      columnTabs: s.columnTabs.filter((tab) => tab.kind !== surface),
+      columnActive: s.columnActive && dropped.includes(s.columnActive) ? null : s.columnActive,
+    };
+  });
+}
+
+/** O `surfaces` legado acompanha as abas: a superfície entra ao abrir a primeira aba dela. */
+const withSurface = (surfaces: Surface[], kind: ColumnKind): Surface[] =>
+  (SURFACES as ColumnKind[]).includes(kind) && !surfaces.includes(kind as Surface) ? [...surfaces, kind as Surface] : surfaces;
+
+/**
+ * Abre uma aba na coluna e a mostra. Superfície de uma aba só (ou sem `forceNew`) foca a que já existe; o "+" do T3
+ * abre sempre uma nova de navegador/terminal (`forceNew`), com `profileId` se o submenu do Browser escolheu um.
+ */
+export function openColumnTab(kind: ColumnKind, opts: { forceNew?: boolean; profileId?: string } = {}): string {
+  let id = "";
+  useChatStore.setState((s) => {
+    const next = openTab({ tabs: s.columnTabs, active: s.columnActive }, kind, opts);
+    id = next.id;
+    return {
+      columnTabs: next.tabs, columnActive: next.active, panel: kind, surfaces: withSurface(s.surfaces, kind),
+      ...(kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+    };
+  });
+  return id;
+}
+
+/** Mostra uma aba já aberta. Nenhuma instância (terminal, navegador) é desmontada: só muda quem publica o slot. */
+export function activateColumnTab(id: string): void {
+  useChatStore.setState((s) => {
+    const tab = s.columnTabs.find((candidate) => candidate.id === id);
+    if (!tab) return s;
+    return { columnActive: id, panel: tab.kind, ...(tab.kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}) };
+  });
+}
+
+/**
+ * Fecha a aba (a vizinha assume; sem nenhuma, o estado vazio). Só tira o assento da barra: o navegador e o shell que ela
+ * mostrava continuam vivos (escondidos), e o próximo "+" os reaproveita. Nunca mata um PTY.
+ */
+export function closeColumnTab(id: string): void {
+  useChatStore.setState((s) => {
+    const closed = s.columnTabs.find((tab) => tab.id === id);
+    if (!closed) return s;
+    const next = closeTab({ tabs: s.columnTabs, active: s.columnActive }, id);
+    const stillHas = next.tabs.some((tab) => tab.kind === closed.kind);
+    const patch: Partial<ChatState> = {
+      columnTabs: next.tabs, columnActive: next.active,
+      surfaces: stillHas ? s.surfaces : s.surfaces.filter((x) => x !== closed.kind),
+    };
+    // Com o painel aberto, a aba nova (ou o vazio) vira a vista; fechado, só a lembrança.
+    if (s.panel !== null && s.columnActive === id) patch.panel = panelOfActive(next);
+    else if (s.panel === null && s.columnActive === id) patch.lastPanel = next.active ? panelOfActive(next) as Exclude<RightPanelTab, "empty"> : null;
+    return patch;
+  });
+}
+
+/** Reordena as abas: `id` vai para o índice `to`. */
+export function moveColumnTab(id: string, to: number): void {
+  useChatStore.setState((s) => {
+    const tabs = moveTab(s.columnTabs, id, to);
+    return tabs === s.columnTabs ? s : { columnTabs: tabs };
+  });
+}
+
+/** Guarda o recurso (id de `ViewTab`/aba de shell) que a aba mostra neste escopo (conversa/pasta). */
+export function setColumnTabResource(id: string, scope: string, resourceId: string): void {
+  useChatStore.setState((s) => {
+    const tab = s.columnTabs.find((candidate) => candidate.id === id);
+    if (!tab || tab.resources?.[scope] === resourceId) return s;
+    return { columnTabs: s.columnTabs.map((candidate) => (candidate.id === id ? { ...candidate, resources: { ...candidate.resources, [scope]: resourceId } } : candidate)) };
+  });
 }
 
 /** O nome de uma aba de navegador: o host com a porta (`localhost:1420`); `null` sem endereço. Pura. */
@@ -546,4 +634,11 @@ useChatStore.subscribe((state, prev) => {
   } catch {
     /* sem lembrar, vale só nesta abertura */
   }
+});
+
+// A barra de abas segue o `panel`: quem só muda `panel` (atalhos, comandos, `addSurface`) ganha a aba correspondente.
+useChatStore.subscribe((state, prev) => {
+  if (state.panel === prev.panel && state.columnActive === prev.columnActive && state.columnTabs === prev.columnTabs) return;
+  const patch = reconcileColumn(state.panel, { tabs: state.columnTabs, active: state.columnActive });
+  if (patch) useChatStore.setState({ columnTabs: patch.tabs, columnActive: patch.active });
 });
