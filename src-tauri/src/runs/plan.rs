@@ -65,7 +65,10 @@ fn valid_key(key: &str) -> bool {
 /// Reject incompatible schemas without rewriting their meaning or launching inference.
 pub fn validate_result_schema(agent: &str, schema: &serde_json::Value) -> Result<(), String> {
     if agent == crate::desktop_apps::GEMINI_DESKTOP { return Err("Gemini Desktop cannot enforce result_schema".into()); }
-    if agent != "codex" { return Ok(()); }
+    crate::runs::validate_result_schema_for_agent(agent, schema)
+}
+
+pub(crate) fn validate_codex_result_schema(schema: &serde_json::Value) -> Result<(), String> {
     if schema.get("type").and_then(serde_json::Value::as_str) != Some("object") {
         return Err("result_schema do Codex: a raiz deve ter type=object".into());
     }
@@ -131,6 +134,13 @@ mod schema_tests {
         invalid["$defs"]["detail"]["additionalProperties"] = json!(true);
         assert!(validate_result_schema("codex", &invalid).unwrap_err().contains("$.$defs.detail"));
         assert!(validate_result_schema("codex", &json!({"type":"array"})).is_err());
+    }
+
+    #[test]
+    fn capability_de_result_schema_vem_do_adapter_headless() {
+        let invalid = json!({"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]});
+        let adapter = crate::runs::agents::adapter_for("codex").expect("adapter Codex");
+        assert!(adapter.validate_result_schema(&invalid).unwrap_err().contains("additionalProperties"));
     }
 }
 

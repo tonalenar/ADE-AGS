@@ -35,7 +35,11 @@ use tail::Tailer;
 
 /// Os agentes com canal estruturado.
 pub fn supported(agent_id: &str) -> bool {
-    matches!(agent_id, "claude-code" | "codex")
+    crate::harness::matrix::supports(
+        agent_id,
+        crate::harness::capability::Surface::Tui,
+        crate::harness::capability::Capability::ToolEvents,
+    ) == Some(crate::harness::capability::Support::Supported)
 }
 
 // ── Modo ──────────────────────────────────────────────────────────────

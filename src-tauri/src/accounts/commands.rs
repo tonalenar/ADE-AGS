@@ -119,7 +119,7 @@ pub fn create_agent_account(
 
 /// Las TUIs que aceptan una cuenta por API key, y cómo la guarda cada una.
 fn supports_api_key(agent_id: &str) -> bool {
-    matches!(agent_id, "claude-code" | "codex")
+    crate::agents::adapter_for(agent_id).is_some_and(|adapter| adapter.supports_api_key_account())
 }
 
 /// Alta de una cuenta por API key: sin terminal de login.
@@ -150,7 +150,7 @@ pub async fn create_agent_api_key_account(
     let api_key = api_key.trim().to_string();
     super::secrets::validate_key(&api_key)?;
     let base_url = match base_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
-        Some(_) if agent_id != "claude-code" => {
+        Some(_) if !crate::agents::adapter_for(&agent_id).is_some_and(|adapter| adapter.supports_custom_api_base_url()) => {
             return Err("Un endpoint propio solo se admite en cuentas de Claude Code".into());
         }
         Some(url) => Some(super::secrets::validate_base_url(url)?),

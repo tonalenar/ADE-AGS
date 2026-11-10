@@ -218,6 +218,16 @@ fn fast_snapshot_is_copied_for_lead_and_member_and_survives_squad_edits() {
 }
 
 #[test]
+fn fast_mode_e_refresh_de_cota_declarados_pelo_adapter() {
+    let codex = crate::agents::adapter_for("codex").unwrap();
+    let claude = crate::agents::adapter_for("claude-code").unwrap();
+    assert!(codex.supports_fast_mode());
+    assert!(crate::runs::agents::adapter_for("codex").unwrap().refresh_account_usage_after_task());
+    assert!(!claude.supports_fast_mode());
+    assert!(!crate::runs::agents::adapter_for("claude-code").unwrap().refresh_account_usage_after_task());
+}
+
+#[test]
 fn fast_snapshot_migration_is_additive_idempotent_and_defaults_old_runs_off() {
     let conn = test_db();
     let run = run_en(&conn);

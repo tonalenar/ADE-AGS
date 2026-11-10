@@ -347,6 +347,22 @@ impl HeadlessAgent for OpenCode {
 pub struct Codex(Mutex<Tally>);
 
 impl HeadlessAgent for Codex {
+    fn refresh_account_usage_after_task(&self) -> bool { true }
+
+    fn validate_result_schema(&self, schema: &serde_json::Value) -> Result<(), String> {
+        super::plan::validate_codex_result_schema(schema)
+    }
+
+    fn prompt_via_stdin(&self, args: &mut Vec<String>, prompt: &str) -> bool {
+        match args.last_mut() {
+            Some(last) if last == prompt => {
+                *last = "-".into();
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn launch(
         &self,
         prompt: &str,
