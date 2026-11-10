@@ -1356,6 +1356,46 @@ fn a_ajuda_do_chat_send_fala_do_client_request_id() {
 }
 
 #[test]
+fn a_tool_chat_stop_anuncia_o_client_request_id() {
+    let ctx = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (out, _) = mcp_session(&ctx, &[list], |_, _| Ok(json!({})));
+    let tools = out[0]["result"]["tools"].as_array().unwrap();
+    let stop = tools.iter().find(|t| t["name"] == "chat_stop").expect("chat_stop");
+    let props = &stop["inputSchema"]["properties"];
+    assert_eq!(props["client_request_id"]["maxLength"], 128);
+    assert!(props.get("clientRequestId").is_some());
+    let required: Vec<&str> = stop["inputSchema"]["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(required, ["thread"], "o id é opcional: sem ele o Parar é o de sempre");
+}
+
+#[test]
+fn o_parar_pelo_mcp_carimba_o_chamador_real_e_repassa_o_id() {
+    let call = |args: serde_json::Value| json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "chat_stop", "arguments": args } });
+    let ctx = McpContext::Cwd { cwd: "/meu/projeto".into(), tab: Some("tab-7".into()), mission: None, role: None };
+    let args = json!({ "thread": "t1", "client_request_id": "s1", "caller_scope": "tab:de-outro" });
+    let (_, sent) = mcp_session(&ctx, &[call(args)], |_, _| Ok(json!({ "stopped": true })));
+    assert_eq!(sent[0].0, "chat.stop");
+    assert_eq!(sent[0].1["caller_scope"], "tab:tab-7", "o escopo vem da sessão, não do modelo");
+    assert_eq!(sent[0].1["client_request_id"], "s1");
+}
+
+#[test]
+fn a_ajuda_do_chat_stop_fala_do_client_request_id() {
+    let cli = include_str!("../bin/cli.rs");
+    let at = cli.find("chat stop <id>").expect("chat stop na ajuda");
+    assert!(cli[at..].lines().nth(1).is_some_and(|l| l.contains("--client-request-id")), "a linha seguinte de `chat stop` documenta o flag");
+}
+
+#[test]
+fn o_comando_tauri_do_parar_recebe_o_client_request_id() {
+    let commands = include_str!("../conversa/commands.rs");
+    let at = commands.find("fn chat_thread_interrupt").expect("o comando Tauri do Parar");
+    let signature = commands[at..].lines().next().unwrap_or_default();
+    assert!(signature.contains("client_request_id: Option<String>"), "o Parar do Tauri não recebe o id: {signature}");
+}
+
+#[test]
 fn as_tools_do_chat_dizem_se_leem_ou_escrevem() {
     assert_eq!(super::mcp::annotations("chat_show")["readOnlyHint"], true);
     assert_eq!(super::mcp::annotations("chat_wait")["readOnlyHint"], true);

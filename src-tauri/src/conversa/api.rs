@@ -1133,9 +1133,33 @@ pub fn status(thread_id: &str) -> ThreadStatus {
 /// O Parar da pessoa: para o turno do agente vivo; sem agente vivo, fecha o turno que ficou aberto no banco (um
 /// agente que morreu sem fechar o turno deixaria a tela em «Pensando…» e a fila presa para sempre).
 pub async fn stop(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<(), String> {
+    stop_now(app, db, thread_id).await.map(|_| ())
+}
+
+/// O Parar com `client_request_id` (Fase 2, contrato §11.11): repetir o mesmo id devolve o recibo e não manda outra
+/// interrupção; o mesmo id com outra conversa falha fechado. `scope` é quem chamou (`ui`, `cli`, aba ou conversa do
+/// MCP). Sem id, use [`stop`].
+pub async fn stop_with_request(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    scope: &str,
+    request_id: &str,
+) -> Result<super::stop_receipt::StopReceipt, String> {
+    let identity = super::stop_receipt::identity(scope, request_id, thread_id)?;
+    // A conversa precisa existir antes de o recibo ser gravado (como no envio).
+    thread(db, thread_id)?;
+    let owner = format!("stop:{}", uuid::Uuid::new_v4());
+    super::stop_receipt::run(db, &identity, thread_id, &owner, &crate::util::now_ts_ms, || stop_now(app, db, thread_id)).await
+}
+
+/// O corpo do Parar: manda a interrupção se há turno. Sem turno, fecha no banco o que ficou aberto e avisa a tela.
+/// Devolve o que aconteceu (`Sent`, `Pending` ou `NoTurn`).
+async fn stop_now(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Interrupted, String> {
     // Sem turno nenhum (Codex vivo, mas parado e sem `turn/start` a caminho) também fecha o que ficou aberto no banco.
-    if live_turn(thread_id).is_some() && interrupt(thread_id).await? != Interrupted::NoTurn {
-        return Ok(());
+    let interrupted = if live_turn(thread_id).is_some() { interrupt(thread_id).await? } else { Interrupted::NoTurn };
+    if interrupted != Interrupted::NoTurn {
+        return Ok(interrupted);
     }
     let now = crate::util::now_ts_ms();
     // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
@@ -1149,7 +1173,7 @@ pub async fn stop(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result
         super::events::emit(app, thread_id, "item", json!({ "item": end }));
     }
     super::events::emit(app, thread_id, "phase", json!({ "phase": "idle" }));
-    Ok(())
+    Ok(Interrupted::NoTurn)
 }
 
 /// Quem pode parar a conversa `target` (contrato §3.3 regra 9). Sem `caller_scope` é a pessoa, e para qualquer
@@ -1192,10 +1216,17 @@ pub enum Interrupted {
 
 /// Para o turno em andamento.
 pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
+    // Claude e OpenCode respondem ok mesmo sem turno e não mandam nada: isso não é uma parada enviada.
     if let Some(session) = claude::get(thread_id) {
+        if session.turn().is_none() {
+            return Ok(Interrupted::NoTurn);
+        }
         return claude::interrupt(&session).await.map(|_| Interrupted::Sent);
     }
     if let Some(session) = opencode::get(thread_id) {
+        if session.turn().is_none() {
+            return Ok(Interrupted::NoTurn);
+        }
         return opencode::interrupt(&session).await.map(|_| Interrupted::Sent);
     }
     if agy::get(thread_id).is_some() {

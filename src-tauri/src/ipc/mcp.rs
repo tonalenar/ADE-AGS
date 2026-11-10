@@ -2069,8 +2069,12 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_stop",
-            "description": "Interrupt the conversation's running turn.",
-            "inputSchema": { "type": "object", "properties": { "thread": thread.clone() }, "required": ["thread"] },
+            "description": "Interrupt the conversation's running turn. Pass a stable client_request_id when retrying after a lost response: repeating it returns the recorded receipt (`receipt.outcome`: sent, deferred or no_turn) and never interrupts the agent again. `no_turn` means there was no running turn, so nothing was sent.",
+            "inputSchema": { "type": "object", "properties": {
+                "thread": thread.clone(),
+                "client_request_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Stable caller-generated id for safe retries after a lost response. Reusing it with another conversation is rejected." },
+                "clientRequestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Alias for client_request_id." }
+            }, "required": ["thread"] },
         }),
         json!({
             "name": "chat_pending",
