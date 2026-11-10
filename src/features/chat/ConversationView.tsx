@@ -12,7 +12,8 @@ import { AgentModelPicker } from "./AgentModelPicker";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu";
 import { newConversationLocal, retuneConversationTab, sendToConversation, startConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
-import { accessModesFor, extractSlashCommand, hasTimeline, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
+import { accessModesFor, extractSlashCommand, fastModeSupported, hasTimeline, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
+import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { messageFor } from "./attachments/send";
 import { ChatComposer } from "./ChatComposer";
 import { useChatPrefs } from "./chatPrefs";
@@ -82,6 +83,8 @@ function rectIn(el: HTMLElement | null) {
 export function ConversationView({ card, cards = [] }: { card: ConversationCard; cards?: ConversationCard[] }) {
   const { t } = useTranslation();
   const followUpBehavior = useChatPrefs().followUpBehavior;
+  const planCapability = useHarnessCapability("tui", matrixProviderForAgent(card.agentId), "plan");
+  const hasPlan = planCapability.support === "supported";
   const timeline = hasTimeline(card.agentId);
   const terminalOpen = useTerminalOpen(card);
   const slotRef = useRef<HTMLDivElement>(null);
@@ -114,6 +117,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const [switchTo, setSwitchTo] = useState<TuiSwitchTarget | null>(null);
   const [switching, setSwitching] = useState(false);
   const [switchError, setSwitchError] = useState<string | null>(null);
+  const switchPlanCapability = useHarnessCapability("tui", matrixProviderForAgent(switchTo?.agent.id ?? card.agentId), "plan");
   // Orquestrador de um time: "Time | Só o orquestrador", o @agente e o resumo do time (prancheta 15).
   const team = useTeamComposer(card, cards);
   // Trocar reinicia o agente (retomando a sessão): nunca no meio de um turno.
@@ -146,7 +150,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       <AgentModelPicker agents={switchableAgents} showAccount={false} disabled={locked}
         value={{ agentId: card.agentId, model: tuning.model, effort: tuning.effort, account: null }}
         permission={{ value: access.plan ? "ask" : access.access, modes: accessModesFor(card.agentId), onChange: locked ? undefined : (next) => retune({ access: next, plan: false }) }}
-        speed={card.agentId === "codex" ? { fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) } : undefined}
+        speed={fastModeSupported(card.agentId) ? { fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) } : undefined}
         onChange={(v) => {
           if (v.agentId && v.agentId !== card.agentId) {
             const target = switchableAgents.find((candidate) => candidate.id === v.agentId);
@@ -163,7 +167,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           }
           retune({ model: v.model, effort: v.effort });
         }} />
-      {planSupported(card.agentId) && (
+      {hasPlan && (
         <button type="button" disabled={locked} onClick={() => retune({ plan: !access.plan })} aria-pressed={access.plan}
           title={access.plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
           className="flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">
@@ -188,7 +192,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
               showBotToast({ title: t("chat.plan.label"), text: t("chat.composer.lockedWhileWorking"), tone: "info", ms: 6000 });
               return false;
             }
-            if (!planSupported(card.agentId)) {
+            if (!hasPlan) {
               showBotToast({ title: t("chat.plan.label"), text: t("chat.plan.unsupported"), tone: "info", ms: 6000 });
               return false;
             }
@@ -213,7 +217,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
               showBotToast({ title: t("chat.plan.label"), text: t("chat.composer.lockedWhileWorking"), tone: "info", ms: 6000 });
               return false;
             }
-            if (!planSupported(card.agentId)) {
+            if (!hasPlan) {
               showBotToast({ title: t("chat.plan.label"), text: t("chat.plan.unsupported"), tone: "info", ms: 6000 });
               return false;
             }
@@ -232,7 +236,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
         onStop={busy && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
         leading={team?.controls}
         addon={(context) => <ComposerAssistMenu cwd={card.cwd} agentId={card.agentId} conversationKey={card.tabId}
-          teamOptions={team?.mentions} onPlan={!locked && planSupported(card.agentId) ? () => retune({ plan: !access.plan }) : undefined}
+          teamOptions={team?.mentions} onPlan={!locked && hasPlan ? () => retune({ plan: !access.plan }) : undefined}
           context={context} />}
         controls={controls} />
       <ContextStrip branch={card.branch} worktree={card.isWorktree}>
@@ -261,7 +265,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           model: switchTo.model,
           effort: switchTo.effort,
           access: targetAccess,
-          plan: access.plan && planSupported(switchTo.agent.id),
+          plan: access.plan && switchPlanCapability.support === "supported",
           fastMode: false,
         }).catch((error: unknown) => {
           setSwitchError(String(error));

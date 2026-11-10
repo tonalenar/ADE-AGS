@@ -46,6 +46,7 @@ import { AppearanceModeSetting } from "@/features/settings/AppearanceModeSetting
 import { ThemePreferencesSetting } from "@/features/settings/ThemePreferencesSetting";
 import { MotionPreferencesSetting } from "@/features/settings/MotionPreferencesSetting";
 import { BrowserSearchSetting } from "@/features/browser/BrowserSearchSetting";
+import { BrowserImportSetting } from "@/features/browser/BrowserImportSetting";
 import { useTabsStore } from "@/features/tabs/store";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
@@ -218,6 +219,7 @@ export function SettingsPage() {
                     </SettingsGroup>
                   </SettingsSection>
                   <BrowserSearchSetting />
+                  <BrowserImportSetting />
                 </div>
               )}
               {generalTab === "sync" && <SyncSection />}

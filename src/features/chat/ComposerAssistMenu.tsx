@@ -149,10 +149,10 @@ export function ComposerAssistMenu({
   const tokenKey = token ? `${token.trigger}:${token.start}:${token.query}:${context.caret}` : null;
   const tabId = conversationKey && !conversationKey.startsWith("thread:") ? conversationKey : null;
   const capabilitySurface = conversationKey?.startsWith("thread:") ? "chat" : "tui";
-  const matrixApplies = capabilitySurface === "chat";
   const matrixProvider = matrixProviderForAgent(agentId);
   const compactAvailability = useHarnessCapability(capabilitySurface, matrixProvider, "compact");
   const goalAvailability = useHarnessCapability(capabilitySurface, matrixProvider, "goal");
+  const planAvailability = useHarnessCapability(capabilitySurface, matrixProvider, "plan");
 
   useEffect(() => {
     if (skills.length === 0 && !skillsLoading && !requestedSkills.current) {
@@ -303,21 +303,21 @@ export function ComposerAssistMenu({
 
     const commandItems: AssistItem[] = COMMANDS
       .filter((command) => (command.id !== "side" || (!!conversationKey && !!agentId && (!!PROTOCOL_AGENTS[agentId] || agentId.startsWith("local-acp-"))))
-        && (command.id !== "plan" || !!onPlan)
+        && (command.id !== "plan" || (!!onPlan && planAvailability.support === "supported"))
         && (command.id !== "clear" || !!conversationKey?.startsWith("thread:"))
-        && (command.id !== "compact" || (!!conversationKey && (matrixApplies || legacyComposerCapabilityAvailable(capabilitySurface, matrixProvider, "compact"))))
-        && (command.id !== "goal" || (!!conversationKey && (matrixApplies || legacyComposerCapabilityAvailable(capabilitySurface, matrixProvider, "goal"))))
+        && (command.id !== "compact" || (!!conversationKey && compactAvailability.available))
+        && (command.id !== "goal" || (!!conversationKey && goalAvailability.available))
         && (command.id !== "autocompact" || (!!conversationKey && legacyComposerCapabilityAvailable(capabilitySurface, matrixProvider, "autocompact")))
         && matches(command.id, t(command.label), t(command.detail)))
       .map((command): AssistItem => ({
         key: `command:${command.id}`,
         group: "commands",
         title: t(command.label),
-        detail: matrixApplies && command.id === "compact" && !compactAvailability.available ? compactAvailability.reason ?? ""
-          : matrixApplies && command.id === "goal" && !goalAvailability.available ? goalAvailability.reason ?? ""
+        detail: command.id === "compact" && !compactAvailability.available ? compactAvailability.reason ?? ""
+          : command.id === "goal" && !goalAvailability.available ? goalAvailability.reason ?? ""
             : t(command.detail),
-        disabled: matrixApplies && ((command.id === "compact" && !compactAvailability.available)
-          || (command.id === "goal" && !goalAvailability.available)),
+        disabled: (command.id === "compact" && !compactAvailability.available)
+          || (command.id === "goal" && !goalAvailability.available),
         icon: command.id === "model" ? <SettingsIcon className="w-4 h-4" />
           : command.id === "terminal" ? <TerminalIcon className="w-4 h-4" />
             : command.id === "files" ? <FilesIcon className="w-4 h-4" />
@@ -363,7 +363,7 @@ export function ComposerAssistMenu({
       ...commandItems.map((command) => normalized(command.key.slice("command:".length))),
       ...(showSkillsInSlashMenu ? compatibleSkills.map((skill) => normalized(skillSlug(skill))) : []),
     ]);
-    const providerItems: AssistItem[] = token.trigger === "/" && token.start === 0 && conversationKey?.startsWith("thread:") && (agentId === "opencode" || !!agentId?.startsWith("local-acp-"))
+    const providerItems: AssistItem[] = token.trigger === "/" && token.start === 0 && conversationKey?.startsWith("thread:") && providerCommands.length > 0
       ? providerCommands
         .filter((command) => !reservedCommands.has(normalized(command.name)))
         .filter((command) => matches(command.name, command.description, command.inputHint))
@@ -382,7 +382,7 @@ export function ComposerAssistMenu({
         }))
       : [];
     return [...commandItems, ...providerItems, ...skillsForToken, ...(showSkillsInSlashMenu ? [manage] : [])];
-  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, providerCommands, conversationKey, agentId, compactAvailability.available, compactAvailability.reason, goalAvailability.available, goalAvailability.reason]);
+  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, providerCommands, conversationKey, agentId, compactAvailability.available, compactAvailability.reason, goalAvailability.available, goalAvailability.reason, planAvailability.support]);
 
   const groups = useMemo(() => {
     const result: { group: AssistItem["group"]; label: string; items: AssistItem[] }[] = [];

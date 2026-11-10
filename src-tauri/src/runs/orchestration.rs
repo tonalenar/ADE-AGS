@@ -499,37 +499,32 @@ fn delegate_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<
     let mut delegated_payload = payload.clone();
     delegated_payload["args"] = Value::Object(plan_args);
 
-    let (run_id, keys) = plan_tasks(db, &delegated_payload, true, |db| roster::snapshot(db, false))?;
+    let watch_parent = if mode == "async" && requesting.task.is_none() {
+        match (&requesting.source_thread_id, payload.get("tabId").and_then(Value::as_str)) {
+            (Some(thread_id), _) => Some(format!("thread:{thread_id}")),
+            (None, Some(tab)) if !tab.trim().is_empty() => Some(crate::harness::child_delivery::parent_ref_of_caller(tab)),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    let (run_id, keys) = plan_tasks_watched(
+        db,
+        &delegated_payload,
+        true,
+        |db| roster::snapshot(db, false),
+        watch_parent.as_deref(),
+    )?;
     let key = keys.first().cloned().ok_or("a delegação não criou a tarefa")?;
     scheduler::tick(app, &run_id);
     let (task_id, board_text, source_thread_id) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let run = store::run_by_id(&conn, &run_id)?.ok_or("o run da delegação se perdeu")?;
         let task = store::task_in_run(&conn, &run_id, &key)?.ok_or("a tarefa da delegação se perdeu")?;
-        // Modo async, pedido por uma conversa ou aba (não por outra tarefa, que já recebe pelo run): o resultado chega
-        // ao pai quando a tarefa terminar (contrato §12.9). Idempotente na repetição do mesmo `client_request_id`.
-        if mode == "async" && requesting.task.is_none() {
-            let parent_ref = match (&run.source_thread_id, payload.get("tabId").and_then(Value::as_str)) {
-                (Some(thread_id), _) => Some(format!("thread:{thread_id}")),
-                (None, Some(tab)) if !tab.trim().is_empty() => Some(crate::harness::child_delivery::parent_ref_of_caller(tab)),
-                _ => None,
-            };
-            if let Some(parent_ref) = parent_ref {
-                crate::harness::child_delivery::register(
-                    &conn,
-                    &crate::harness::child_delivery::WatchSpec {
-                        kind: crate::harness::delegate::Target::FleetTask,
-                        child_ref: &task.id,
-                        parent_ref: &parent_ref,
-                        title: &task.title,
-                        agent_id: &task.agent_id,
-                        parent_turn_id: None,
-                        session_id: None,
-                        message_id: None,
-                    },
-                    crate::util::now_ts_ms(),
-                )?;
-            }
+        // A criação já gravou o acompanhamento na mesma transação. Aqui só cura uma repetição que
+        // achou o recibo fora daquela transação (dado antigo, ou a consulta de antes do `INSERT`).
+        if let Some(parent_ref) = watch_parent.as_deref() {
+            watch_fleet_task(&conn, parent_ref, &task, crate::util::now_ts_ms())?;
         }
         (task.id, board(&conn, &run)?, run.source_thread_id)
     };
@@ -554,6 +549,18 @@ pub(crate) fn plan_tasks(
     payload: &Value,
     whole_plan: bool,
     snapshot: impl FnOnce(&DbConnection) -> Result<roster::Roster, String>,
+) -> Result<(String, Vec<String>), String> {
+    plan_tasks_watched(db, payload, whole_plan, snapshot, None)
+}
+
+/// Como [`plan_tasks`]. `watch_parent` (`thread:<id>` ou `tab:<id>`), quando há, grava o acompanhamento
+/// da tarefa na mesma transação que a cria (contrato §12.9).
+fn plan_tasks_watched(
+    db: &DbConnection,
+    payload: &Value,
+    whole_plan: bool,
+    snapshot: impl FnOnce(&DbConnection) -> Result<roster::Roster, String>,
+    watch_parent: Option<&str>,
 ) -> Result<(String, Vec<String>), String> {
     let args = args(payload);
     let tasks: Vec<PlanTask> = if whole_plan {
@@ -737,6 +744,15 @@ pub(crate) fn plan_tasks(
             };
             (request, complexity, None)
         };
+        if let Some(agent_id) = request.agent_id.as_deref() {
+            if let Some(error) = crate::harness::matrix::unsupported_capability_error(
+                agent_id,
+                crate::harness::capability::Surface::Fleet,
+                crate::harness::capability::Capability::Start,
+            ) {
+                return Err(error);
+            }
+        }
         match routing::resolve_pool(db, &request).and_then(|r| routing::route(&roster, &tiers, &r, now)) {
             Ok(a) => {
                 if let Some(schema) = &t.result_schema
@@ -802,6 +818,13 @@ pub(crate) fn plan_tasks(
                 for key in &receipt.task_keys {
                     if store::task_in_run(&tx, &run.id, key)?.is_none() {
                         return Err("a delegação já foi concluída, mas sua tarefa foi removida; use um client_request_id novo para criar outra".into());
+                    }
+                }
+                if let Some(parent_ref) = watch_parent {
+                    for key in &receipt.task_keys {
+                        if let Some(task) = store::task_in_run(&tx, &run.id, key)? {
+                            watch_fleet_task(&tx, parent_ref, &task, crate::util::now_ts_ms())?;
+                        }
                     }
                 }
                 tx.commit().map_err(|error| error.to_string())?;
@@ -889,6 +912,9 @@ pub(crate) fn plan_tasks(
                 },
             )?;
             super::pool_failover::record_task_pool(&tx, &created.id, assignment.pool_origin.as_ref())?;
+            if let Some(parent_ref) = watch_parent {
+                watch_fleet_task(&tx, parent_ref, &created, linked_at)?;
+            }
             // Só entra num run que já tem nó: tarefa nunca cria run (contrato §2.5).
             crate::harness::store::link_fleet_task(
                 &tx,
@@ -931,6 +957,24 @@ pub(crate) fn plan_tasks(
 }
 
 // ── Leer ────────────────────────────────────────────────────────
+
+fn watch_fleet_task(conn: &Connection, parent_ref: &str, task: &Task, now: i64) -> Result<(), String> {
+    crate::harness::child_delivery::register(
+        conn,
+        &crate::harness::child_delivery::WatchSpec {
+            kind: crate::harness::delegate::Target::FleetTask,
+            child_ref: &task.id,
+            parent_ref,
+            title: &task.title,
+            agent_id: &task.agent_id,
+            parent_turn_id: None,
+            session_id: None,
+            message_id: None,
+        },
+        now,
+    )?;
+    Ok(())
+}
 
 fn first_line(text: &str, max: usize) -> String {
     let line = text

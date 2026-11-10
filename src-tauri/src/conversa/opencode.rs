@@ -25,6 +25,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::database::DbConnection;
 
 use super::claude_map::TurnResult;
+use super::codex_parar::{StopAction, StopGate};
 use super::events::emit;
 use super::opencode_map::{self as map, Mapper, Out};
 use super::{permission, resume, store, turn};
@@ -52,6 +53,8 @@ pub struct Session {
     /// quando o turno delas começa; se a fila é descartada, cada uma vira um aviso «não enviada».
     lane: turn::Lane,
     started: Mutex<Option<Instant>>,
+    /// O Parar que chega antes de o prompt mostrar que roda (ver `codex_parar`). Trava antes da da fila (`lane`).
+    stop: Mutex<StopGate>,
     /// Fecha o processo quando o turno acabar (modelo, esforço ou acesso trocados no meio do turno).
     stale: AtomicBool,
     /// Durante o `session/load` o OpenCode reenvia o histórico todo: não vira nada.
@@ -90,6 +93,12 @@ impl Session {
     /// Tira o turno em andamento: quem o tira é quem o fecha (o fim do prompt ou o processo que caiu).
     fn take_turn(&self) -> Option<String> {
         self.lane.take_turn()
+    }
+
+    /// O guarda do Parar. Envenenado só se alguém panicou com a trava: o estado é trivial, segue com ele.
+    fn gate<T>(&self, f: impl FnOnce(&mut StopGate) -> T) -> T {
+        let mut gate = self.stop.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut gate)
     }
 
     fn send(&self, msg: &Value) -> Result<(), String> {
@@ -512,6 +521,7 @@ fn spawn(
         provider_config: Mutex::new(Value::Null),
         lane: turn::Lane::default(),
         started: Mutex::new(None),
+        stop: Mutex::new(StopGate::default()),
         stale: AtomicBool::new(false),
         quiet: AtomicBool::new(false),
         mapper: Mutex::new(Mapper::new("")),
@@ -560,6 +570,7 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
 
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     let killed = !session.alive.swap(false, Ordering::SeqCst);
+    session.gate(StopGate::reset);
     let waiting: Vec<Reply> = session.pending.lock().map(|mut p| p.drain().map(|(_, r)| r).collect()).unwrap_or_default();
     for reply in waiting {
         let _ = reply.send(Err(format!("O processo de {} fechou", session.provider_label)));
@@ -633,6 +644,9 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
                     }
                     emit(app, &session.thread_id, "providerConfig", json!({ "config": map::provider_config(&config) }));
                 } else if !session.quiet.load(Ordering::SeqCst) {
+                    if is_turn_update(&update) {
+                        confirm_turn(session);
+                    }
                     let outs = session
                         .mapper
                         .lock()
@@ -797,6 +811,8 @@ fn end_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id:
     if session.turn().as_deref() != Some(turn_id) {
         return;
     }
+    // O prompt acabou: o Parar pendente dele não tem mais turno para parar.
+    session.gate(|gate| gate.on_completed(turn_id));
     session.take_turn();
     if let Ok(mut asks) = session.asks.lock() {
         asks.clear();
@@ -825,12 +841,15 @@ fn end_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id:
     }
 }
 
-/// Para o turno em andamento: o aviso `session/cancel`, e os pedidos de permissão em aberto
-/// respondem "cancelado" (o OpenCode espera por eles para terminar).
-pub async fn interrupt(session: &Session) -> Result<(), String> {
-    let Some(remote) = session.remote() else { return Ok(()) };
-    if session.turn().is_none() {
-        return Ok(());
+/// Para o turno em andamento: o aviso `session/cancel`, e os pedidos de permissão em aberto respondem "cancelado"
+/// (o OpenCode espera por eles para terminar). Com o prompt ainda sem aviso do agente, o Parar fica pendente
+/// (`Deferred`) e o cancelamento sai no primeiro `session/update` do turno (ver `confirm_turn`): um agente que ainda
+/// não leu o prompt ignoraria o aviso. A fila descarta já, como sempre.
+pub async fn interrupt(session: &Session) -> Result<StopAction, String> {
+    let Some(remote) = session.remote() else { return Ok(StopAction::NoTurn) };
+    let action = session.gate(|gate| gate.request_stop(session.turn().as_deref()));
+    if action == StopAction::NoTurn {
+        return Ok(action);
     }
     let waiting: Vec<Value> = session.asks.lock().map(|mut a| std::mem::take(&mut *a)).unwrap_or_default();
     for rpc_id in waiting {
@@ -838,7 +857,29 @@ pub async fn interrupt(session: &Session) -> Result<(), String> {
     }
     // O que esperava a vez não vai mais: cada mensagem fica marcada como «não enviada» na timeline.
     session.discard_queue();
-    session.notify("session/cancel", json!({ "sessionId": remote }))
+    if let StopAction::Send(_) = action {
+        session.notify("session/cancel", json!({ "sessionId": remote }))?;
+    }
+    Ok(action)
+}
+
+/// Um `session/update` que só o turno em andamento produz: o agente está rodando o prompt. Os avisos de sessão
+/// (`available_commands_update`, `config_option_update`, `current_mode_update`) não contam.
+pub(super) fn is_turn_update(update: &Value) -> bool {
+    matches!(
+        update.get("sessionUpdate").and_then(Value::as_str),
+        Some("agent_message_chunk" | "agent_thought_chunk" | "tool_call" | "tool_call_update")
+    )
+}
+
+/// Um `session/update` do turno chegou: o prompt roda. O Parar que esperava por isso sai agora (`session/cancel`).
+fn confirm_turn(session: &Session) {
+    let Some(turn) = session.turn() else { return };
+    if session.gate(|gate| gate.on_started(&turn)) {
+        if let Some(remote) = session.remote() {
+            let _ = session.notify("session/cancel", json!({ "sessionId": remote }));
+        }
+    }
 }
 
 /// Responde ao `session/request_permission` (`rpc_id` e `options` como estão em `chat_request`).

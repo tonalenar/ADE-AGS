@@ -431,6 +431,13 @@ pub fn provision_begin(conn: &Connection, team_id: &str, agent_id: &str, role: &
         updated_at: now,
     };
     store::insert_provision(conn, &row)?;
+    if let Some(owner) = crate::harness::presence::current_id() {
+        conn.execute(
+            "UPDATE chat_team_provision SET owner_instance = ?2 WHERE id = ?1 AND owner_instance IS NULL",
+            rusqlite::params![row.id, owner],
+        )
+        .map_err(|error| error.to_string())?;
+    }
     Ok(row)
 }
 
@@ -461,6 +468,12 @@ pub fn link_provisioned(conn: &Connection, team_id: &str, mut new: NewMember, pr
 pub fn reconcile_provisions(conn: &Connection, now: i64) -> Result<usize, String> {
     let mut changed = 0;
     for row in store::provisions(conn, None)? {
+        let owner: Option<String> = conn
+            .query_row("SELECT owner_instance FROM chat_team_provision WHERE id = ?1", [&row.id], |r| r.get(0))
+            .unwrap_or(None);
+        if crate::harness::presence::owner_is_protected(conn, owner.as_deref(), now).unwrap_or(false) {
+            continue;
+        }
         let linked = row.member.as_deref().map(|m| store::member(conn, m)).transpose()?.flatten().is_some_and(|m| m.team_id == row.team_id);
         let (state, failure) = match (linked, &row.member) {
             (true, _) => ("active", None),

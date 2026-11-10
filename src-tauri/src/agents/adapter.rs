@@ -49,6 +49,17 @@ pub struct Capabilities {
 pub trait AgentAdapter: Send + Sync {
     fn def(&self) -> &'static AgentDef;
 
+    /// Ordem de fallback em consultas únicas somente leitura. A elegibilidade é confirmada
+    /// novamente pelo `HeadlessAgent::enforces_read_only`.
+    fn read_only_priority(&self) -> Option<u8> { None }
+
+    /// Se o fluxo de contas aceita uma credencial em vez de login pela CLI.
+    fn supports_api_key_account(&self) -> bool { false }
+    /// Se o fluxo de conta por credencial permite usar endpoint compatível próprio.
+    fn supports_custom_api_base_url(&self) -> bool { false }
+    /// Se o seletor e a Frota podem usar a faixa de serviço rápida.
+    fn supports_fast_mode(&self) -> bool { false }
+
     /// The headless launcher can receive the ADE MCP orchestration tools.
     fn supports_orchestration(&self) -> bool { false }
     /// The task launcher can inject ADE MCP independently of terminal/Lead support.
@@ -106,6 +117,9 @@ fn row(id: &'static str) -> &'static AgentDef {
 struct Claude;
 
 impl AgentAdapter for Claude {
+    fn read_only_priority(&self) -> Option<u8> { Some(0) }
+    fn supports_api_key_account(&self) -> bool { true }
+    fn supports_custom_api_base_url(&self) -> bool { true }
     fn supports_orchestration(&self) -> bool { true }
     fn def(&self) -> &'static AgentDef {
         row("claude-code")
@@ -123,6 +137,7 @@ impl AgentAdapter for Claude {
 struct Gemini;
 
 impl AgentAdapter for Gemini {
+    fn read_only_priority(&self) -> Option<u8> { Some(2) }
     fn def(&self) -> &'static AgentDef {
         row("gemini-cli")
     }
@@ -139,6 +154,9 @@ impl AgentAdapter for Gemini {
 struct Codex;
 
 impl AgentAdapter for Codex {
+    fn read_only_priority(&self) -> Option<u8> { Some(1) }
+    fn supports_api_key_account(&self) -> bool { true }
+    fn supports_fast_mode(&self) -> bool { true }
     fn supports_orchestration(&self) -> bool { true }
     fn has_task_mcp(&self) -> bool { true }
     fn def(&self) -> &'static AgentDef {
@@ -157,6 +175,7 @@ impl AgentAdapter for Codex {
 struct OpenCode;
 
 impl AgentAdapter for OpenCode {
+    fn read_only_priority(&self) -> Option<u8> { Some(3) }
     fn supports_orchestration(&self) -> bool { true }
     fn def(&self) -> &'static AgentDef {
         row("opencode")

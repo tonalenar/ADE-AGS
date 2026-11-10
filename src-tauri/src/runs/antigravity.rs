@@ -135,6 +135,23 @@ struct Stream {
 pub(crate) struct Antigravity(Mutex<Stream>);
 
 impl HeadlessAgent for Antigravity {
+    fn prepare_task_profile(
+        &self,
+        mcp_config: Option<&Path>,
+        allowed_tools: &[String],
+        read_only: bool,
+        cwd: &str,
+    ) -> Result<Option<super::agents::PreparedTaskProfile>, String> {
+        let profile = TaskProfile::prepare(mcp_config, allowed_tools, read_only, cwd)?;
+        let workspace = profile.workspace();
+        let env = profile.env();
+        Ok(Some(super::agents::PreparedTaskProfile::new(
+            workspace,
+            env,
+            Box::new(profile),
+        )))
+    }
+
     fn launch(&self, prompt: &str, model: Option<&str>, _budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch {
         if !ctx.account_env.contains_key(SERVER_ENV)
             || !ctx.account_env.contains_key("HOME")

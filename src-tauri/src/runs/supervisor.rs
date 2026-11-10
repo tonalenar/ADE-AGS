@@ -38,7 +38,7 @@ pub const TASK_CHANGED: &str = "cc-task-changed";
 /// keep the role policy; a change to an unsupported provider must not add Codex flags.
 pub(crate) fn fast_for_task(conn: &rusqlite::Connection, task: &Task) -> Result<bool, String> {
     use rusqlite::OptionalExtension;
-    if task.agent_id != "codex" {
+    if !crate::agents::adapter_for(&task.agent_id).is_some_and(|adapter| adapter.supports_fast_mode()) {
         return Ok(false);
     }
     let value = if task.role.as_deref() == Some(super::types::role::LEAD) {
@@ -267,15 +267,15 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     if !extras.allowed_tools.is_empty() && mcp_config.is_none() {
         return Err("ADE MCP configuration unavailable: build/stage the current ags CLI before starting orchestration".into());
     }
-    let task_profile = if task.agent_id == "antigravity" {
-        let profile = super::antigravity::TaskProfile::prepare(
-            mcp_config.as_deref(), &extras.allowed_tools, read_only, &task.cwd,
-        )?;
-        account_env.extend(profile.env());
-        Some(profile)
-    } else {
-        None
-    };
+    let task_profile = adapter.prepare_task_profile(
+        mcp_config.as_deref(),
+        &extras.allowed_tools,
+        read_only,
+        &task.cwd,
+    )?;
+    if let Some(profile) = &task_profile {
+        account_env.extend(profile.env().clone());
+    }
     // La foto de antes: el estado en que arranca, para poder volver acá (ver `checkpoints`).
     // El líder no toca archivos: sin foto.
     if !read_only {
@@ -307,7 +307,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // prompt no puede pasar por `cmd.exe` (ver `util::launch`).
     let program = crate::util::find_program(&launch.program)
         .unwrap_or_else(|| std::path::PathBuf::from(&launch.program));
-    let workspace = task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace());
+    let workspace = task_profile
+        .as_ref()
+        .map_or_else(|| PathBuf::from(&task.cwd), |profile| profile.workspace().to_path_buf());
     // Ver `sandbox`: el agente escribe solo en su carpeta, su cuenta y los temporales.
     let sandbox_mode = super::sandbox::Mode::from_db(&db);
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
@@ -408,9 +410,8 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let task_id = task.id.clone();
     let task_snapshot = task.clone();
     let quota_key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
-    // Codex no informa su cupo en el stream de `exec --json` (Claude sí, ver `quota`): al
-    // terminar se le pregunta a su `app-server`, con el mismo entorno de la cuenta.
-    let codex_account_env = (task.agent_id == "codex").then(|| launch.env.clone());
+    // O adapter pede uma atualização de uso posterior quando seu stream não traz a cota.
+    let account_refresh_env = adapter.refresh_account_usage_after_task().then(|| launch.env.clone());
     let imposed_session = session_id.clone();
     let event_attempt_id = attempt_id.clone();
 
@@ -534,7 +535,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         emit_event(&app, &db, &task_id, &event_attempt_id, AgentEvent::Finished { outcome });
         emit_changed(&app, &task_id);
 
-        if let Some(env) = codex_account_env {
+        if let Some(env) = account_refresh_env {
             let (db, key) = (db.clone(), quota_key.clone());
             // Aparte y sin esperarlo: levantar el `app-server` tarda un segundo, y el cupo no
             // cambia el resultado de esta tarea, solo cómo se rutean las próximas.

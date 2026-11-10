@@ -7,7 +7,8 @@ import { ChatSegmented, SettingsGroup, SettingsRow, SettingsSection, SettingsTog
 import { AccessMenu } from "./AccessMenu";
 import { AgentModelPicker } from "./AgentModelPicker";
 import { setChatWidth, useChatLook } from "./chatLook";
-import { accessModesFor, planSupported } from "./chatModel";
+import { accessModesFor } from "./chatModel";
+import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { loadChatPrefs, saveChatPrefs, type ChatPrefs, type ChatWidth, type FollowUpBehavior } from "./chatPrefs";
 import { loadOrMigrateChatThreadEnvMode, saveChatThreadEnvMode, type ChatThreadEnvMode, type ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
 import { isLocalAcpAgent, isStructuredAgent } from "./structured/model";
@@ -41,6 +42,7 @@ export function ChatModeSetting() {
   const agentId = prefs.agentId ?? agents[0]?.id ?? null;
   const localAcp = !!agentId && isLocalAcpAgent(agentId);
   const viaProtocol = !!agentId && (isLocalAcpAgent(agentId) || (prefs.structured && isStructuredAgent(agentId)));
+  const planCapability = useHarnessCapability(viaProtocol ? "chat" : "tui", matrixProviderForAgent(agentId), "plan");
   const modes = agentId ? accessModesFor(agentId, viaProtocol) : ["ask" as const];
   const access = modes.includes(prefs.access) ? prefs.access : modes[0] ?? "ask";
   const setDefaultWorkspaceMode = (mode: ChatThreadEnvMode | "auto") => {
@@ -106,7 +108,7 @@ export function ChatModeSetting() {
               ]} />
           </SettingsRow>
           <SettingsToggleRow label={t("chat.settings.plan")} description={t("chat.settings.planHint")}
-            checked={prefs.plan} disabled={!!agentId && !planSupported(agentId, viaProtocol)} onChange={(plan) => update({ plan })} />
+            checked={prefs.plan} disabled={!!agentId && planCapability.support !== "supported"} onChange={(plan) => update({ plan })} />
           <SettingsToggleRow label={t("chat.settings.structured")} description={t("chat.settings.structuredHint")}
             checked={localAcp || prefs.structured} disabled={localAcp} onChange={(structured) => update({ structured })} />
         </SettingsGroup>

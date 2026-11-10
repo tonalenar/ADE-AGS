@@ -8,6 +8,10 @@ use crate::database::DbConnection;
 /// Restaura la ventana que el usuario va a ver y deja el resto para después del
 /// primer cuadro. Skills, barrido y adjuntos van a un hilo: no bloquean ese cuadro.
 fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
+    // Presença no SQLite antes de qualquer turno: o boot da outra instância não marca o que é desta.
+    if let Some(db) = app.try_state::<DbConnection>() {
+        crate::harness::presence::start(db.inner().clone());
+    }
     // O instante do boot: o que foi armado antes dele espera a pessoa retomar (ver `missions::automation`).
     crate::missions::automation::mark_boot();
     // Antes dos terminais restaurados: o `open` do PATH e o chamariz já existem
@@ -178,7 +182,9 @@ pub fn run() {
             crate::project_chat_policy::chat_project_agent_policy_check,
             crate::project_chat_policy::chat_project_agent_policy_save,
             crate::project_chat_policy::chat_project_agent_policy_clear,
-            crate::computer_use::desktop::desktop_screenshot,
+            crate::computer_use::snapshot::desktop_screenshot,
+            crate::computer_use::snapshot::snapshot_targets,
+            crate::computer_use::snapshot::snapshot_info,
             crate::ipc::commands::simulators::simulator_tell,
             crate::real_browser::real_browser_open,
             crate::real_browser::real_browser_place,
@@ -545,6 +551,10 @@ pub fn run() {
             crate::preview::preview_add_mock,
             crate::preview::preview_list_mocks,
             crate::preview::preview_clear_mocks,
+            // Importação de cookies de um perfil do Firefox (ver `preview/importer`): só a revisão e a gravação cifrada.
+            crate::preview::browser_import_profiles,
+            crate::preview::browser_import_review,
+            crate::preview::browser_import_apply,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
             // Detección de agentes

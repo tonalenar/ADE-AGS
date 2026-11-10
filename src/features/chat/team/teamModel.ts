@@ -7,6 +7,7 @@
  * (conversa por protocolo). É a mesma chave que o backend usa no canvas e no `peer`.
  */
 import type { TeamFeedItem, TeamMember, TeamPolicy, TeamView } from "./ipc";
+import { readHarnessCapability } from "../harnessCapabilities";
 
 /** O prefixo de uma conversa por protocolo (o mesmo de `structured/model.ts` e de `canvas/board.ts`). */
 export const THREAD_REF = "thread:";
@@ -38,7 +39,7 @@ export function branchFor(role: string): string {
  * o Plano (não edita); nos outros, supervisionado: nunca mais do que a política deixa.
  */
 export function conversationAccess(policy: TeamPolicy, agentId: string): { access: "ask" | "edits" | "full"; plan: boolean } {
-  if (policy === "read") return { access: "ask", plan: agentId === "claude-code" };
+  if (policy === "read") return { access: "ask", plan: readHarnessCapability("tui", agentId, "plan").support === "supported" };
   if (policy === "ask") return { access: "ask", plan: false };
   return { access: policy, plan: false };
 }

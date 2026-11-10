@@ -450,6 +450,24 @@ mod claude {
     }
 
     #[test]
+    fn o_recurso_ui_do_mcp_apps_chega_ao_item_da_ferramenta_mesmo_com_o_resultado_antes_do_uso() {
+        let recurso = json!({ "uri": "ui://srv/app", "mimeType": "text/html;profile=mcp-app", "text": format!("<p>{}</p>", "y".repeat(9_000)) });
+        let resultado = json!({ "type": "user", "message": { "role": "user", "content": [
+            { "type": "tool_result", "tool_use_id": "toolu_app", "content": [{ "type": "resource", "resource": recurso }] }] } });
+        let uso = assistant("msg_app", json!({ "type": "tool_use", "id": "toolu_app", "name": "mcp__srv__show", "input": {} }));
+        // Ordem normal: o uso e depois o resultado.
+        let mut m = Mapper::default();
+        m.feed(&uso, 1);
+        let fechado = items(m.feed(&resultado, 2));
+        assert_eq!(fechado[0].app_resource.as_ref().map(|a| a.html.len()), Some(9_007));
+        // Resultado que chega antes do uso: o recurso espera pelo id, como o `output`.
+        let mut m = Mapper::default();
+        assert!(m.feed(&resultado, 1).is_empty());
+        let junto = items(m.feed(&uso, 2));
+        assert_eq!(junto[0].app_resource.as_ref().map(|a| a.uri.as_str()), Some("ui://srv/app"));
+    }
+
+    #[test]
     fn a_saida_do_plano_vira_o_plano_na_timeline() {
         let mut m = Mapper::default();
         let plan = items(m.feed(&assistant("msg_3", json!({ "type": "tool_use", "id": "toolu_p", "name": "ExitPlanMode",

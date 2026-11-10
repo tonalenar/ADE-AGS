@@ -1,6 +1,8 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { SNAPSHOT_DEFAULT_EVENT } from "@/features/recording/snapshotTargets";
+
 import { isDesktopSnapshotTargetMounted, takeDesktopSnapshot } from "../composerCommands";
 
 /** Um composer com o botão de SnapShot, como o `ChatComposer` monta. */
@@ -31,13 +33,13 @@ describe("comando de SnapShot do composer", () => {
     expect(isDesktopSnapshotTargetMounted("thread:1")).toBe(false);
   });
 
-  it("o atalho dispara o mesmo botão do clique e não toca em outro composer", () => {
+  it("o atalho pede a captura padrão ao mesmo botão e não toca em outro composer", () => {
     const first = mountComposer("thread:1");
     const other = mountComposer("thread:2");
     const onFirst = vi.fn();
     const onOther = vi.fn();
-    first.addEventListener("click", onFirst);
-    other.addEventListener("click", onOther);
+    first.addEventListener(SNAPSHOT_DEFAULT_EVENT, onFirst);
+    other.addEventListener(SNAPSHOT_DEFAULT_EVENT, onOther);
     expect(takeDesktopSnapshot("thread:1")).toBe(true);
     expect(onFirst).toHaveBeenCalledTimes(1);
     expect(onOther).not.toHaveBeenCalled();

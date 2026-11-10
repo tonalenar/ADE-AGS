@@ -29,7 +29,7 @@ pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Comp
 /// El modo Fast es un `service_tier` de Codex: en otro agente no existe y se rechaza en vez
 /// de guardarlo y que quede sin efecto.
 pub(crate) fn validate_fast_input(agent_id: &str, fast: bool) -> Result<(), String> {
-    if fast && agent_id != "codex" {
+    if fast && !crate::agents::adapter_for(agent_id).is_some_and(|adapter| adapter.supports_fast_mode()) {
         return Err("Fast mode is only available for the Codex agent".into());
     }
     Ok(())

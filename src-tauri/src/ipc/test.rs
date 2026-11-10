@@ -406,10 +406,14 @@ fn nenhum_caminho_do_ipc_decide_lista_nem_lembra_regra_de_aprovacao() {
         for proibido in ["decide_approval", "pending_approvals", "approval_decide", "approval_list", "remember_rule", "release_matching"] {
             assert!(!src.contains(proibido), "{path} chama {proibido}: decidir aprovação é só da tela");
         }
-        if !path.ends_with("ipc/mod.rs") {
+        // `mod.rs` define a recusa; `authz.rs` os classifica como `Person` (só a pessoa, pela tela), o que é a mesma recusa.
+        if !path.ends_with("ipc/mod.rs") && !path.ends_with("ipc/authz.rs") {
             assert!(!src.contains("\"approval.decide\"") && !src.contains("\"approval.list\""), "{path} oferece approval.* pelo IPC");
         }
     }
+    // Na tabela de autorização, os dois só aparecem como "só a pessoa, pela tela".
+    let tabela = include_str!("authz.rs");
+    assert!(tabela.contains("(\"approval.decide\", SCREEN_APPROVAL)") && tabela.contains("(\"approval.list\", SCREEN_APPROVAL)"));
     // O MCP também não tem tool para isso.
     assert!(!include_str!("mcp.rs").contains("approval_decide") && !include_str!("mcp.rs").contains("approval_list"));
     assert!(!include_str!("../../../src/features/orchestrator/cliBridge.ts").contains("approval.decide"));
@@ -2235,5 +2239,668 @@ mod arquivo_do_handshake {
         let corpo = &protocolo[inicio..inicio + protocolo[inicio..].find("\n}\n").unwrap()];
         assert!(corpo.contains("env_handshake_is_trusted("), "AGS_HANDSHAKE é aceito sem validar a origem");
         assert!(!corpo.contains(".filter(|p| p.is_file())"), "sobrou o filtro antigo (só existe)");
+    }
+}
+
+// ── F-09 completo: autorização por método (`ipc/authz.rs`) ──────────────────────────────────
+//
+// A tabela única de classes (livre, escopo, pessoa, pessoa-ou-escopo) é consultada no começo do despachador. Estes testes
+// provam: (1) todo método do despachador tem classe e método novo sem classe é recusado; (2) cada classe aceita e recusa o
+// que deve, por método sensível; (3) os fluxos que a skill documenta continuam passando no escopo certo.
+
+mod autorizacao {
+    use super::super::authz::{self, Class, Target};
+    use super::json;
+    use crate::canvas::{Board, Boards};
+    use crate::terminal::Principal;
+    use serde_json::Value;
+    use std::cell::Cell;
+
+    /// A missão `missao-1`: o orquestrador `lead` liga `m1`, `m2`, um portal, um aparelho, uma nota e uma conversa filha.
+    /// `solta` está em outro canvas e não liga a ninguém.
+    fn mundo() -> Boards {
+        let missao: Board = serde_json::from_value(json!({
+            "edges": [
+                { "id": "e1", "a": "lead", "b": "m1" },
+                { "id": "e2", "a": "lead", "b": "m2" },
+                { "id": "e3", "a": "lead", "b": "portal-web" },
+                { "id": "e4", "a": "lead", "b": "portal-iphone" },
+                { "id": "e5", "a": "lead", "b": "thread:filha" },
+                { "id": "e6", "a": "lead", "b": "note-plano" }
+            ],
+            "orchestrators": ["lead"],
+            "nodes": { "lead": {}, "m1": {}, "m2": {}, "thread:filha": {} },
+            "portals": { "portal-web": { "name": "Web" }, "portal-iphone": { "name": "iPhone", "kind": "ios" } },
+            "notes": { "note-plano": { "name": "Plano" } }
+        }))
+        .unwrap();
+        let solta: Board = serde_json::from_value(json!({ "nodes": { "solta": {}, "aba-da-pessoa": {} } })).unwrap();
+        Boards::from([("/repo#m:missao-1".to_string(), missao), ("/outra".to_string(), solta)])
+    }
+
+    fn aba(id: &str) -> Result<Principal, String> {
+        Ok(Principal::Tab(id.into()))
+    }
+    fn tarefa(id: &str) -> Result<Principal, String> {
+        Ok(Principal::Task(id.into()))
+    }
+    fn fora() -> Result<Principal, String> {
+        Ok(Principal::Outside)
+    }
+
+    /// Roda a autorização. `abriu` = pares `(recurso, quem abriu)`.
+    fn decide(comando: &str, args: Value, quem: Result<Principal, String>, abriu: &[(&str, &str)]) -> Result<Value, String> {
+        let boards = mundo();
+        authz::authorize(comando, &args, || quem, || boards, &|id| abriu.iter().find(|(r, _)| *r == id).map(|(_, o)| o.to_string()))
+    }
+
+    fn passa(comando: &str, args: Value, quem: Result<Principal, String>) -> Value {
+        decide(comando, args, quem, &[]).unwrap_or_else(|e| panic!("{comando} deveria passar: {e}"))
+    }
+
+    fn recusa(comando: &str, args: Value, quem: Result<Principal, String>) -> String {
+        decide(comando, args, quem, &[]).err().unwrap_or_else(|| panic!("{comando} deveria ser recusado"))
+    }
+
+    fn com_prefixo(prefixo: &str) -> Vec<&'static str> {
+        authz::METHODS.iter().map(|(m, _)| *m).filter(|m| m.starts_with(prefixo)).collect()
+    }
+
+    // ── 1. A tabela é completa e fecha por padrão ──
+
+    /// Os métodos que o `match` do despachador atende, lidos do código.
+    fn bracos_do_despachador() -> Vec<String> {
+        let fonte = include_str!("commands/dispatch.rs");
+        let inicio = fonte.find("let result = match command {").expect("o match do despachador mudou de forma");
+        let fim = fonte.find("other => Err(format!(\"Comando desconhecido").expect("o braço final mudou de forma");
+        fonte[inicio..fim]
+            .lines()
+            .map(str::trim_start)
+            .filter(|l| l.starts_with('"'))
+            .filter_map(|l| {
+                let nome = &l[1..1 + l[1..].find('"')?];
+                l[nome.len() + 2..].trim_start().starts_with("=>").then(|| nome.to_string())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn todo_metodo_do_despachador_tem_classe_e_a_tabela_nao_tem_metodo_fantasma() {
+        let bracos = bracos_do_despachador();
+        assert!(bracos.len() > 200, "a leitura do despachador achou só {} braços", bracos.len());
+        let sem_classe: Vec<_> = bracos.iter().filter(|m| authz::class_of(m).is_none()).collect();
+        assert!(sem_classe.is_empty(), "método novo sem classe de autorização (adicione em ipc/authz.rs): {sem_classe:?}");
+        // `approval.*` não tem braço (recusado antes do `match`), mas tem classe.
+        let mut esperados: Vec<String> = bracos.clone();
+        esperados.extend(["approval.decide".to_string(), "approval.list".to_string()]);
+        let fantasmas: Vec<_> = authz::METHODS.iter().map(|(m, _)| *m).filter(|m| !esperados.iter().any(|e| e == m)).collect();
+        assert!(fantasmas.is_empty(), "classe para método que o despachador não atende: {fantasmas:?}");
+        let mut nomes: Vec<_> = authz::METHODS.iter().map(|(m, _)| *m).collect();
+        nomes.sort_unstable();
+        let total = nomes.len();
+        nomes.dedup();
+        assert_eq!(nomes.len(), total, "método com duas entradas na tabela");
+        assert_eq!(total, bracos.len() + 2);
+    }
+
+    #[test]
+    fn metodo_sem_classe_e_recusado_para_qualquer_chamador() {
+        for quem in [fora(), aba("m1"), tarefa("t1")] {
+            let erro = recusa("novo.metodo", json!({}), quem);
+            assert!(erro.contains("novo.metodo") && erro.contains("classe"), "{erro}");
+        }
+        assert!(authz::class_of("novo.metodo").is_none());
+    }
+
+    #[test]
+    fn a_contagem_por_classe_e_a_documentada() {
+        let (mut livre, mut escopo, mut pessoa, mut papel) = (0, 0, 0, 0);
+        for (_, classe) in authz::METHODS {
+            match classe {
+                Class::Free => livre += 1,
+                Class::Scope(_) => escopo += 1,
+                Class::Person(_) => pessoa += 1,
+                Class::PersonOrScope(_) => papel += 1,
+            }
+        }
+        // O mesmo número está em docs/decisoes/HOST_REMOTO.md (F-09 e Anexo A).
+        assert_eq!((livre, escopo, pessoa, papel), (LIVRE, ESCOPO, PESSOA, PAPEL), "atualize o HOST_REMOTO.md junto com a tabela");
+    }
+    const LIVRE: usize = 27;
+    const ESCOPO: usize = 188;
+    const PESSOA: usize = 4;
+    const PAPEL: usize = 2;
+
+    #[test]
+    fn o_despachador_aplica_a_tabela_antes_de_qualquer_comando() {
+        let fonte = include_str!("commands/dispatch.rs");
+        let tabela = fonte.find("crate::ipc::authz::authorize(").expect("o despachador não consulta a tabela de autorização");
+        let prova = fonte.find("crate::ipc::guard::task_proof_error(args").expect("a prova do taskId sumiu");
+        let politica = fonte.find("guard_task(&conn, args.get(\"taskId\")").expect("a política da tarefa mudou de forma");
+        let braco = fonte.find("let result = match command {").unwrap();
+        assert!(prova < tabela && tabela < politica && tabela < braco, "a tabela precisa vir depois da prova do taskId e antes do resto");
+        // O resto do despachador usa os argumentos com a identidade provada, não os do chamador.
+        assert!(fonte[tabela..braco].contains("let args = &args;") || fonte[tabela..braco].contains("let args = &"), "o despachador segue usando os argumentos declarados");
+    }
+
+    // ── 2. Livre ──
+
+    #[test]
+    fn livre_nao_pede_nem_resolve_identidade() {
+        for metodo in ["app.status", "agent.list", "account.list", "tab.list", "chat.list", "events.since", "skill.list", "workspace.status", "mcp.cancel"] {
+            let chamadas = Cell::new(0);
+            let boards = mundo();
+            let args = json!({ "x": 1 });
+            let saida = authz::authorize(metodo, &args, || { chamadas.set(chamadas.get() + 1); Err("sem identidade".into()) }, || boards, &|_| None);
+            assert_eq!(saida.unwrap(), args, "{metodo}");
+            assert_eq!(chamadas.get(), 0, "{metodo} resolveu a identidade sem precisar");
+        }
+    }
+
+    // ── 3. Pessoa ──
+
+    #[test]
+    fn pessoa_e_recusada_para_todo_chamador_e_a_mensagem_manda_para_a_tela() {
+        for metodo in ["approval.decide", "approval.list", "memory.compact", "workspace.restore"] {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Person(_))), "{metodo}");
+            for quem in [fora(), aba("lead"), tarefa("t1")] {
+                let erro = recusa(metodo, json!({}), quem);
+                assert!(erro.contains("interface") || erro.contains("tela"), "{metodo}: {erro}");
+            }
+        }
+    }
+
+    // ── 4. Escopo de aba (tab.output, tab.close, tab.state, tab.send, watch, replay) ──
+
+    const POR_ABA: [&str; 8] = ["tab.output", "tab.close", "tab.state", "tab.send", "watch.add", "watch.remove", "replay.start", "replay.stop"];
+
+    #[test]
+    fn um_agente_age_em_si_nos_ligados_a_ele_e_nas_abas_que_ele_abriu() {
+        for metodo in POR_ABA {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::Tab("tab")))), "{metodo} não está no escopo de aba");
+            let ok = |de: &str, alvo: &str, abriu: &[(&str, &str)]| decide(metodo, json!({ "tab": alvo }), aba(de), abriu).is_ok();
+            assert!(ok("m1", "m1", &[]), "{metodo}: a si mesmo");
+            assert!(ok("m1", "lead", &[]), "{metodo}: o orquestrador ligado a ele");
+            assert!(ok("m1", "m2", &[]), "{metodo}: o outro integrante da estrela");
+            assert!(ok("lead", "m2", &[]), "{metodo}: o orquestrador alcança o time");
+            assert!(ok("solta", "terminal-que-abri", &[("terminal-que-abri", "solta")]), "{metodo}: a aba que ele abriu");
+        }
+    }
+
+    #[test]
+    fn um_agente_nao_age_em_aba_de_outro_nem_da_pessoa() {
+        for metodo in POR_ABA {
+            let erro = decide(metodo, json!({ "tab": "aba-da-pessoa" }), aba("m1"), &[]).unwrap_err();
+            assert!(erro.contains("aba-da-pessoa"), "{metodo}: a recusa diz qual aba: {erro}");
+            assert!(decide(metodo, json!({ "tab": "solta" }), aba("m1"), &[]).is_err(), "{metodo}: aba de outro canvas");
+            assert!(decide(metodo, json!({ "tab": "x" }), aba("m1"), &[("x", "outro-agente")]).is_err(), "{metodo}: aba aberta por outro");
+            assert!(decide(metodo, json!({ "tab": "lead" }), aba("solta"), &[]).is_err(), "{metodo}: sem ligação alguma");
+            assert!(decide(metodo, json!({ "tab": "m1" }), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa da Frota não tem aba");
+            assert!(decide(metodo, json!({}), aba("m1"), &[]).is_err(), "{metodo}: sem alvo não há o que provar");
+        }
+    }
+
+    #[test]
+    fn a_pessoa_no_proprio_terminal_continua_com_o_acesso_que_tem() {
+        for metodo in POR_ABA {
+            assert!(decide(metodo, json!({ "tab": "aba-da-pessoa" }), fora(), &[]).is_ok(), "{metodo}");
+        }
+    }
+
+    #[test]
+    fn identidade_que_nao_se_prova_nao_chega_ao_handler() {
+        for metodo in ["tab.output", "portal.list", "device.list", "chat.show"] {
+            let erro = decide(metodo, json!({ "tab": "m1", "thread": "filha" }), Err("ADE_TAB_ID não corresponde a este terminal.".into()), &[]).unwrap_err();
+            assert!(erro.contains("ADE_TAB_ID"), "{metodo}: {erro}");
+        }
+    }
+
+    // ── 5. Conversas do modo chat ──
+
+    #[test]
+    fn conversa_so_dentro_do_alcance_de_quem_chama() {
+        for metodo in ["chat.show", "chat.send", "chat.wait", "chat.stop", "chat.open", "chat.settle", "chat.goal", "chat.compact"] {
+            let ok = |de: &str, alvo: &str, abriu: &[(&str, &str)]| decide(metodo, json!({ "thread": alvo }), aba(de), abriu).is_ok();
+            assert!(ok("lead", "filha", &[]), "{metodo}: conversa ligada no canvas");
+            assert!(ok("thread:eu", "eu", &[]), "{metodo}: a própria conversa");
+            assert!(ok("m1", "nova", &[("thread:nova", "m1")]), "{metodo}: a conversa que ele abriu com `chat new`");
+            assert!(!ok("m1", "da-pessoa", &[]), "{metodo}: conversa da pessoa");
+            assert!(!ok("m1", "nova", &[("thread:nova", "m2")]), "{metodo}: conversa aberta por outro");
+            assert!(decide(metodo, json!({ "thread": "da-pessoa" }), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa da Frota");
+            assert!(decide(metodo, json!({ "thread": "da-pessoa" }), fora(), &[]).is_ok(), "{metodo}: a pessoa em terminal próprio");
+        }
+    }
+
+    #[test]
+    fn chat_pending_sem_conversa_so_para_quem_esta_fora_e_chat_list_e_livre() {
+        assert!(decide("chat.pending", json!({}), aba("m1"), &[]).unwrap_err().contains("--thread"));
+        assert!(decide("chat.pending", json!({}), aba("m1"), &[]).is_err(), "um agente lista os pedidos de todas as conversas");
+        assert!(decide("chat.pending", json!({ "thread": "filha" }), aba("m1"), &[]).is_ok());
+        assert!(decide("chat.pending", json!({ "thread": "da-pessoa" }), aba("m1"), &[]).is_err());
+        assert!(decide("chat.pending", json!({}), fora(), &[]).is_ok());
+        assert!(matches!(authz::class_of("chat.list"), Some(Class::Free)));
+    }
+
+    // ── 6. O chamador provado (portais, aparelhos, notas, pares, equipe…) ──
+
+    #[test]
+    fn portais_e_aparelhos_exigem_o_chamador_provado_e_o_handler_so_enxerga_o_alcance_dele() {
+        let mut metodos = com_prefixo("portal.");
+        metodos.extend(com_prefixo("device."));
+        assert!(metodos.len() >= 37, "{}", metodos.len());
+        for metodo in metodos {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::Caller))), "{metodo}");
+            // Aceita o agente provado e entrega o `from` provado ao handler (que resolve o alvo pelo canvas dele).
+            let entregue = passa(metodo, json!({ "name": "Web" }), aba("m1"));
+            assert_eq!(entregue["from"], "m1", "{metodo}");
+            // Um `from` declarado de outra aba nunca chega ao handler.
+            assert!(decide(metodo, json!({ "from": "lead" }), aba("m1"), &[]).unwrap_err().contains("lead"), "{metodo}");
+            // Tarefa da Frota e quem não prova nada: recusados.
+            assert!(decide(metodo, json!({}), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa");
+            assert!(decide(metodo, json!({}), fora(), &[]).is_err(), "{metodo}: sem identidade o handler já não tem o que resolver");
+        }
+    }
+
+    #[test]
+    fn os_handlers_de_portal_e_aparelho_resolvem_o_alvo_pelo_canvas_do_chamador() {
+        let portais = include_str!("commands/portals.rs");
+        assert!(portais.matches("let from = caller(args)?;").count() >= 3, "portais não partem do chamador");
+        assert!(portais.contains("fn reachable(boards: &Boards, from: &str)"), "o alcance dos portais mudou de forma");
+        let aparelhos = include_str!("commands/devices.rs");
+        for funcao in ["pub(super) fn device_list(", "pub(super) fn device_create(", "pub(super) fn device_action("] {
+            let inicio = aparelhos.find(funcao).unwrap_or_else(|| panic!("{funcao} mudou de forma"));
+            let corpo = &aparelhos[inicio..inicio + 1200.min(aparelhos.len() - inicio)];
+            assert!(corpo.contains("caller(args)?"), "{funcao} não parte do chamador");
+        }
+        // As confirmações por aparelho (confiança persistente, controles sensíveis) seguem no `device_action`.
+        assert!(aparelhos.contains("ios_target(") || aparelhos.contains("resolve_with_physical"), "o alvo do aparelho não é resolvido pelo alcance");
+    }
+
+    #[test]
+    fn pares_notas_equipe_e_chat_com_a_pessoa_exigem_o_chamador_provado() {
+        for metodo in ["peer.ask", "peer.tell", "peer.deliver", "peer.handoff", "peer.check", "peer.recruit", "peer.connect", "peer.disconnect", "peer.role", "peer.list", "peer.pending", "peer.queue", "peer.receipt", "ci.watch", "notify.send", "note.list", "note.read", "note.create", "note.write", "note.edit", "team.list", "team.candidates", "team.create", "team.link", "team.unlink", "team.role", "team.delegate", "say.send", "recall.get", "floor.create", "floor.list", "role.create", "role.edit", "routine.list", "routine.show", "routine.create", "routine.edit", "routine.enable", "routine.disable", "routine.run", "routine.delete", "secret.request", "secret.consume", "secret.revoke", "sim.act", "desk.act", "swarm.note", "swarm.promote", "swarm.question", "swarm.read", "memory.search", "memory.suggest", "memory.history", "memory.index", "memory.open", "memory.usage", "memory.export"] {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::Caller))), "{metodo}");
+            assert_eq!(passa(metodo, json!({}), aba("m1"))["from"], "m1", "{metodo}");
+            assert!(decide(metodo, json!({ "from": "lead" }), aba("m1"), &[]).is_err(), "{metodo}: from forjado");
+            assert!(decide(metodo, json!({}), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa");
+            assert!(decide(metodo, json!({}), fora(), &[]).is_err(), "{metodo}: fora");
+        }
+    }
+
+    #[test]
+    fn criar_aba_conversa_design_e_workspace_servem_ao_agente_provado_e_a_pessoa_fora() {
+        for metodo in ["tab.create", "chat.new", "design.create", "design.update", "design.delete", "design.open", "skill.install", "skill.new", "skill.edit", "window.create", "workspace.open", "pool.create"] {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::CallerOrOutside))), "{metodo}");
+            assert_eq!(passa(metodo, json!({}), aba("m1"))["from"], "m1", "{metodo}");
+            assert!(passa(metodo, json!({ "x": 1 }), fora()).get("from").is_none(), "{metodo}: a pessoa fora segue sem `from`");
+            assert!(decide(metodo, json!({}), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa");
+            assert!(decide(metodo, json!({ "from": "lead" }), aba("m1"), &[]).is_err(), "{metodo}: from forjado");
+        }
+    }
+
+    #[test]
+    fn um_agente_nao_fecha_o_workspace_atual_so_a_pessoa() {
+        assert!(decide("workspace.open", json!({ "workspace": "w", "closeCurrent": true }), aba("m1"), &[]).unwrap_err().contains("terminais"));
+        assert!(decide("workspace.open", json!({ "workspace": "w", "closeCurrent": true }), fora(), &[]).is_ok());
+        assert!(decide("workspace.open", json!({ "workspace": "w" }), aba("m1"), &[]).is_ok());
+    }
+
+    // ── 7. Frota: tarefa, run, navegador, forge ──
+
+    #[test]
+    fn frota_aceita_a_tarefa_a_aba_e_a_pessoa_mas_nunca_a_identidade_trocada() {
+        for metodo in ["run.status", "run.result", "run.plan", "run.cancelTask", "run.await", "browser.run", "forge.run", "user.ask", "gemini.consult", "run.approve", "run.handoff"] {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::Fleet))), "{metodo}");
+            assert!(decide(metodo, json!({ "taskId": "t1" }), tarefa("t1"), &[]).is_ok(), "{metodo}: a própria tarefa");
+            assert!(decide(metodo, json!({ "tabId": "m1" }), aba("m1"), &[]).is_ok(), "{metodo}: a própria aba");
+            assert!(decide(metodo, json!({ "cwd": "/repo" }), fora(), &[]).is_ok(), "{metodo}: a pessoa resolvendo pela pasta");
+            assert!(decide(metodo, json!({ "taskId": "outra" }), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa agindo como outra");
+            assert!(decide(metodo, json!({ "tabId": "lead" }), aba("m1"), &[]).is_err(), "{metodo}: aba agindo como outra");
+            assert!(decide(metodo, json!({ "tabId": "m1" }), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa não declara aba");
+        }
+    }
+
+    #[test]
+    fn as_ferramentas_de_memoria_da_tarefa_so_servem_a_propria_tarefa() {
+        for metodo in ["memory.list", "memory.get", "memory.searchApproved", "memory.propose", "memory.update", "memory.delete", "memory.promoteFact", "memory.workspaceHistory"] {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::Task))), "{metodo}");
+            assert!(decide(metodo, json!({ "taskId": "t1" }), tarefa("t1"), &[]).is_ok(), "{metodo}");
+            assert!(decide(metodo, json!({}), aba("m1"), &[]).is_err(), "{metodo}: aba");
+            assert!(decide(metodo, json!({}), fora(), &[]).is_err(), "{metodo}: fora");
+            assert!(decide(metodo, json!({ "taskId": "outra" }), tarefa("t1"), &[]).is_err(), "{metodo}");
+        }
+    }
+
+    // ── 8. Missão ──
+
+    #[test]
+    fn missao_so_a_do_proprio_quadro_e_so_a_coroa_aplica_ou_limpa() {
+        for metodo in ["mission.status", "mission.wait", "mission.review", "mission.timings", "mission.precheck", "mission.startcheck", "mission.efficiency"] {
+            assert!(decide(metodo, json!({ "mission": "missao-1" }), aba("m1"), &[]).is_ok(), "{metodo}: a missão dele");
+            assert!(decide(metodo, json!({ "mission": "outra" }), aba("m1"), &[]).is_err(), "{metodo}: missão alheia");
+            assert!(decide(metodo, json!({ "mission": "missao-1" }), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa");
+            assert!(decide(metodo, json!({ "mission": "qualquer" }), fora(), &[]).is_ok(), "{metodo}: CI e a pessoa fora");
+        }
+        for metodo in ["mission.accept", "mission.apply", "mission.redeliver", "mission.cleanup"] {
+            assert!(decide(metodo, json!({ "mission": "missao-1" }), aba("lead"), &[]).is_ok(), "{metodo}: a coroa da missão");
+            assert!(decide(metodo, json!({ "mission": "missao-1" }), aba("m1"), &[]).unwrap_err().contains("orquestrador"), "{metodo}: integrante");
+            assert!(decide(metodo, json!({ "mission": "outra" }), aba("lead"), &[]).is_err(), "{metodo}: coroa de outra missão");
+            assert!(decide(metodo, json!({ "mission": "x" }), fora(), &[]).is_ok(), "{metodo}: CI");
+        }
+    }
+
+    #[test]
+    fn criar_ou_iniciar_missao_e_apagar_worktrees_e_config_so_para_quem_esta_fora() {
+        for metodo in ["mission.create", "mission.run", "mission.start", "worktrees.prune", "pool.delete"] {
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::Outside))), "{metodo}");
+            assert!(decide(metodo, json!({}), fora(), &[]).is_ok(), "{metodo}: a pessoa/CI fora da árvore do ADE");
+            for quem in [aba("lead"), aba("m1"), tarefa("t1")] {
+                let erro = decide(metodo, json!({}), quem, &[]).unwrap_err();
+                assert!(erro.contains("pessoa"), "{metodo}: {erro}");
+            }
+        }
+    }
+
+    // ── 9. Pessoa-ou-escopo: o orquestrador provado, ou a pessoa pela tela ──
+
+    #[test]
+    fn decidir_e_responder_pelo_integrante_e_do_orquestrador_ou_da_pessoa_pela_tela() {
+        for metodo in ["fix.decide", "peer.answer"] {
+            assert!(matches!(authz::class_of(metodo), Some(Class::PersonOrScope(_))), "{metodo}");
+            assert!(decide(metodo, json!({}), aba("lead"), &[]).is_ok(), "{metodo}: o orquestrador");
+            assert!(decide(metodo, json!({}), aba("m1"), &[]).unwrap_err().contains("orquestrador"), "{metodo}: integrante");
+            assert!(decide(metodo, json!({}), tarefa("t1"), &[]).is_err(), "{metodo}: tarefa");
+            let tela = decide(metodo, json!({}), fora(), &[]).unwrap_err();
+            assert!(tela.contains("tela"), "{metodo}: a pessoa decide pela tela: {tela}");
+        }
+    }
+
+    // ── 10. O despachador usa a identidade provada ──
+
+    #[test]
+    fn a_tarefa_provada_entra_nos_argumentos_e_o_taskid_declarado_de_outra_e_recusado() {
+        // Sem `taskId` o handler nunca resolvia a política (Dreamer somente leitura): agora entra o provado.
+        let entregue = passa("run.status", json!({}), tarefa("t1"));
+        assert_eq!(entregue["taskId"], "t1");
+        assert!(entregue.get("tabId").is_none());
+    }
+
+    #[test]
+    fn a_aba_provada_nunca_e_substituida_por_outra_no_from() {
+        assert_eq!(passa("peer.tell", json!({ "from": "m1", "to": "lead", "text": "oi" }), aba("m1"))["from"], "m1");
+        assert!(decide("peer.tell", json!({ "from": "lead", "to": "m1", "text": "oi" }), aba("m1"), &[]).is_err());
+    }
+
+    // ── 11. Os fluxos da skill continuam funcionando no escopo certo ──
+
+    /// `(comando, argumentos)` que um agente da missão (`m1`, integrante) usa, como a skill documenta. Cada um passa.
+    fn fluxos_do_integrante() -> Vec<(&'static str, Value)> {
+        vec![
+            // Abrir abas, rodar, ler (as abas que ele abriu entram em `ABRIU`).
+            ("tab.create", json!({ "cwd": "/repo", "agent": "bash", "initPrompt": "bun dev" })),
+            ("tab.list", json!({})),
+            ("tab.output", json!({ "tab": "t-abriu" })),
+            ("tab.send", json!({ "tab": "t-abriu", "text": "cargo test" })),
+            ("tab.state", json!({ "tab": "t-abriu" })),
+            ("tab.close", json!({ "tab": "t-abriu" })),
+            ("watch.add", json!({ "tab": "t-abriu", "idle": 5 })),
+            ("watch.wait", json!({ "timeout": 120 })),
+            ("watch.list", json!({})),
+            ("watch.remove", json!({ "tab": "t-abriu" })),
+            ("events.wait", json!({ "after": 0 })),
+            ("events.since", json!({ "after": 0 })),
+            // Conversar com os ligados no canvas.
+            ("peer.list", json!({})),
+            ("peer.ask", json!({ "to": "lead", "text": "?" })),
+            ("peer.tell", json!({ "to": "lead", "text": "pronto" })),
+            ("peer.check", json!({})),
+            ("peer.deliver", json!({ "to": "lead", "text": "{}" })),
+            ("peer.handoff", json!({ "to": "lead", "text": "{}" })),
+            ("peer.queue", json!({})),
+            ("peer.receipt", json!({ "id": "1" })),
+            ("peer.pending", json!({})),
+            ("peer.recruit", json!({ "name": "Tests", "agent": "codex" })),
+            ("peer.connect", json!({ "to": "m2" })),
+            ("peer.disconnect", json!({ "to": "m2" })),
+            ("peer.role", json!({ "to": "m2", "role": "reviewer" })),
+            ("ci.watch", json!({ "pr": 1 })),
+            ("notify.send", json!({ "message": "pronto" })),
+            // Time do modo chat.
+            ("team.list", json!({})),
+            ("team.candidates", json!({})),
+            ("team.link", json!({ "to": "m2" })),
+            ("team.unlink", json!({ "to": "m2" })),
+            ("team.role", json!({ "to": "m2", "role": "x" })),
+            ("team.delegate", json!({ "to": "m2", "task": "x", "client_request_id": "a" })),
+            // Navegador e aparelhos do canvas.
+            ("portal.list", json!({})),
+            ("portal.create", json!({ "name": "Docs", "url": "https://example.com" })),
+            ("portal.open", json!({ "url": "https://example.com" })),
+            ("portal.navigate", json!({ "name": "Web", "url": "https://example.com" })),
+            ("portal.snapshot", json!({ "name": "Web" })),
+            ("portal.click", json!({ "name": "Web", "target": "e1" })),
+            ("portal.type", json!({ "name": "Web", "target": "e1", "text": "x" })),
+            ("portal.press", json!({ "name": "Web", "key": "Enter" })),
+            ("portal.act", json!({ "name": "Web", "goal": "abrir" })),
+            ("portal.reset", json!({ "name": "Web" })),
+            ("portal.close", json!({ "name": "Web" })),
+            ("device.list", json!({})),
+            ("device.create", json!({ "name": "iPhone", "ios": true })),
+            ("device.start", json!({ "name": "iPhone" })),
+            ("device.shot", json!({ "name": "iPhone" })),
+            ("device.tap", json!({ "name": "iPhone", "x": 1, "y": 2 })),
+            ("device.apps", json!({ "name": "iPhone" })),
+            ("device.act", json!({ "name": "iPhone", "action": "tap" })),
+            ("sim.act", json!({ "name": "iPhone", "goal": "abrir ajustes" })),
+            ("desk.act", json!({ "goal": "abrir" })),
+            // Notas, designs, chat com a pessoa, rotinas, andares, papéis.
+            ("note.list", json!({})),
+            ("note.read", json!({ "name": "Plano" })),
+            ("note.write", json!({ "name": "Plano", "content": "x" })),
+            ("note.edit", json!({ "name": "Plano", "old": "a", "new": "b" })),
+            ("design.create", json!({ "title": "Checkout" })),
+            ("design.list", json!({})),
+            ("design.artboard.add", json!({ "designId": "d1", "title": "Cart" })),
+            ("design.update", json!({ "artboardId": "a1", "html": "<p/>" })),
+            ("design.view", json!({})),
+            ("design.open", json!({ "designId": "d1" })),
+            ("say.send", json!({ "text": "oi" })),
+            ("recall.get", json!({})),
+            ("routine.create", json!({ "name": "Tests", "text": "x", "at": "09:00" })),
+            ("routine.list", json!({})),
+            ("routine.edit", json!({ "name": "Tests", "text": "y" })),
+            ("floor.create", json!({ "name": "Refactor" })),
+            ("floor.list", json!({})),
+            ("role.list", json!({})),
+            ("role.show", json!({ "name": "reviewer" })),
+            ("role.create", json!({ "name": "Sec", "text": "x" })),
+            ("role.edit", json!({ "name": "Sec", "text": "y" })),
+            // Skills, contas, catálogos, workspaces.
+            ("skill.list", json!({})),
+            ("skill.search", json!({ "query": "react" })),
+            ("skill.install", json!({ "skill": "git-helper" })),
+            ("skill.show", json!({ "skill": "git-helper" })),
+            ("skill.new", json!({ "name": "x", "content": "y" })),
+            ("skill.edit", json!({ "skill": "x", "content": "y" })),
+            ("agent.list", json!({})),
+            ("account.list", json!({})),
+            ("pool.list", json!({})),
+            ("pool.create", json!({ "name": "Work", "agent": "claude-code" })),
+            ("prelaunch.list", json!({})),
+            ("workspace.list", json!({})),
+            ("workspace.status", json!({})),
+            ("workspace.open", json!({ "workspace": "client-project" })),
+            ("window.list", json!({})),
+            ("window.create", json!({})),
+            ("app.status", json!({})),
+            // Conversas do modo chat que ele abriu.
+            ("chat.list", json!({})),
+            ("chat.providers", json!({})),
+            ("chat.new", json!({ "text": "mapear", "cwd": "/repo" })),
+            ("chat.wait", json!({ "thread": "c-abriu" })),
+            ("chat.show", json!({ "thread": "c-abriu" })),
+            ("chat.send", json!({ "thread": "c-abriu", "text": "agora o teste" })),
+            ("chat.stop", json!({ "thread": "c-abriu" })),
+            ("chat.compact", json!({ "thread": "c-abriu" })),
+            ("chat.goal", json!({ "thread": "c-abriu", "action": "show" })),
+            ("chat.pending", json!({ "thread": "c-abriu" })),
+            // Memória e swarm da missão, correções, frota pela CLI.
+            ("memory.search", json!({ "query": "auth" })),
+            ("memory.suggest", json!({ "key": "k", "body": "b" })),
+            ("memory.index", json!({})),
+            ("memory.open", json!({ "path": "MEMORY.md" })),
+            ("memory.history", json!({ "key": "k", "scope": "mission" })),
+            ("memory.usage", json!({})),
+            ("memory.export", json!({})),
+            ("swarm.read", json!({})),
+            ("swarm.note", json!({ "body": "x" })),
+            ("swarm.question", json!({ "body": "x" })),
+            ("swarm.promote", json!({ "note": "n", "key": "k" })),
+            ("fix.list", json!({})),
+            ("mission.precheck", json!({ "mission": "missao-1" })),
+            ("mission.timings", json!({ "mission": "missao-1" })),
+            ("mission.efficiency", json!({ "mission": "missao-1" })),
+            ("mission.review", json!({ "mission": "missao-1" })),
+            ("mission.startcheck", json!({ "mission": "missao-1" })),
+            ("run.roster", json!({ "tabId": "m1" })),
+            ("run.status", json!({ "tabId": "m1" })),
+            ("run.result", json!({ "tabId": "m1", "task": "a" })),
+            ("run.await", json!({ "tabId": "m1" })),
+            ("run.facts", json!({ "tabId": "m1" })),
+            ("run.addFact", json!({ "tabId": "m1", "body": "x" })),
+            ("run.cancelTask", json!({ "tabId": "m1", "task": "a" })),
+            ("run.rerouteTask", json!({ "tabId": "m1", "task": "a" })),
+            ("run.plan", json!({ "tabId": "m1" })),
+            ("browser.run", json!({ "tabId": "m1", "cwd": "/repo", "request": { "op": "snapshot" } })),
+            ("forge.run", json!({ "tabId": "m1", "tool": "git_account" })),
+            ("gemini.status", json!({ "tabId": "m1" })),
+            ("user.ask", json!({ "tabId": "m1", "question": "?" })),
+            ("secret.request", json!({ "label": "token" })),
+            ("secret.revoke", json!({ "secretId": "s" })),
+            ("mcp.cancel", json!({ "callId": "c" })),
+        ]
+    }
+
+    #[test]
+    fn os_fluxos_da_skill_passam_para_o_integrante_da_missao_no_escopo_dele() {
+        let abriu = [("t-abriu", "m1"), ("thread:c-abriu", "m1")];
+        for (comando, args) in fluxos_do_integrante() {
+            decide(comando, args.clone(), aba("m1"), &abriu).unwrap_or_else(|e| panic!("o fluxo documentado `{comando}` quebrou para o integrante: {e}"));
+        }
+    }
+
+    #[test]
+    fn os_fluxos_do_orquestrador_passam_inclusive_decidir_aplicar_e_limpar() {
+        for (comando, args) in [
+            ("peer.answer", json!({ "to": "m1", "answer": "1" })),
+            ("fix.decide", json!({ "scope": "mission:missao-1", "action": "accept" })),
+            ("mission.apply", json!({ "mission": "missao-1" })),
+            ("mission.accept", json!({ "mission": "missao-1", "task": "a" })),
+            ("mission.cleanup", json!({ "mission": "missao-1" })),
+            ("mission.redeliver", json!({ "mission": "missao-1" })),
+            ("tab.output", json!({ "tab": "m2" })),
+            ("tab.send", json!({ "tab": "m2", "text": "x" })),
+            ("peer.recruit", json!({ "name": "Perf" })),
+            ("floor.create", json!({ "name": "Refactor" })),
+            ("portal.snapshot", json!({ "name": "Web" })),
+            ("device.shot", json!({ "name": "iPhone" })),
+            ("chat.show", json!({ "thread": "filha" })),
+        ] {
+            decide(comando, args.clone(), aba("lead"), &[]).unwrap_or_else(|e| panic!("`{comando}` quebrou para o orquestrador: {e}"));
+        }
+    }
+
+    #[test]
+    fn os_fluxos_do_agente_da_frota_passam_pela_tarefa_dele() {
+        for (comando, args) in [
+            ("run.roster", json!({ "taskId": "t1" })),
+            ("run.status", json!({ "taskId": "t1" })),
+            ("run.plan", json!({ "taskId": "t1" })),
+            ("run.addTask", json!({ "taskId": "t1" })),
+            ("run.delegateTask", json!({ "taskId": "t1" })),
+            ("run.result", json!({ "taskId": "t1", "task": "a" })),
+            ("run.await", json!({ "taskId": "t1" })),
+            ("run.handoff", json!({ "taskId": "t1" })),
+            ("run.addFact", json!({ "taskId": "t1" })),
+            ("run.facts", json!({ "taskId": "t1" })),
+            ("run.factBody", json!({ "taskId": "t1" })),
+            ("run.cancelTask", json!({ "taskId": "t1" })),
+            ("run.rerouteTask", json!({ "taskId": "t1" })),
+            ("run.harnessGraph", json!({ "taskId": "t1" })),
+            ("run.approve", json!({ "taskId": "t1" })),
+            ("memory.list", json!({ "taskId": "t1" })),
+            ("memory.propose", json!({ "taskId": "t1" })),
+            ("browser.run", json!({ "taskId": "t1", "request": { "op": "snapshot" } })),
+            ("forge.run", json!({ "taskId": "t1", "tool": "git_pr_list" })),
+            ("gemini.consult", json!({ "taskId": "t1" })),
+            ("user.ask", json!({ "taskId": "t1", "question": "?" })),
+            ("mcp.cancel", json!({ "callId": "c" })),
+            ("app.status", json!({})),
+            ("agent.list", json!({})),
+        ] {
+            decide(comando, args.clone(), tarefa("t1"), &[]).unwrap_or_else(|e| panic!("o fluxo da Frota `{comando}` quebrou: {e}"));
+        }
+    }
+
+    #[test]
+    fn a_pessoa_num_terminal_proprio_continua_com_a_cli_toda_menos_o_que_e_so_da_tela() {
+        let mut recusados = Vec::new();
+        for (metodo, classe) in authz::METHODS {
+            let args = json!({ "tab": "aba-da-pessoa", "thread": "t", "mission": "m", "name": "x" });
+            let saida = decide(metodo, args, fora(), &[]);
+            match (classe, saida) {
+                (Class::Person(_) | Class::PersonOrScope(_), Ok(_)) => panic!("{metodo} deixou a pessoa fora passar por cima da tela"),
+                (Class::Person(_) | Class::PersonOrScope(_), Err(_)) => {}
+                (_, Err(erro)) => recusados.push(format!("{metodo}: {erro}")),
+                (_, Ok(_)) => {}
+            }
+        }
+        // Os únicos recusados à pessoa fora (além da tela) são os que só existem a partir de um agente identificado:
+        // o handler já exigia o `ADE_TAB_ID` deles. Nenhum método de aba, conversa, missão, frota ou catálogo.
+        for linha in &recusados {
+            let metodo = linha.split(':').next().unwrap();
+            assert!(matches!(authz::class_of(metodo), Some(Class::Scope(Target::Caller | Target::Task))), "a pessoa fora perdeu acesso a {linha}");
+        }
+    }
+
+    #[test]
+    fn o_argumento_que_a_tabela_le_e_o_que_o_handler_usa() {
+        let tabs = include_str!("commands/tabs.rs");
+        assert!(tabs.contains("arg_str(args, \"tab\")"), "tab.* não lê `tab`");
+        let conversas = include_str!("commands/conversas.rs");
+        assert!(conversas.contains("arg_str(args, \"thread\")"), "chat.* não lê `thread`");
+        let missoes = include_str!("commands/missions.rs");
+        assert!(missoes.contains("arg_str(args, \"mission\")"), "mission.* não lê `mission`");
+    }
+
+    #[test]
+    fn uma_conversa_filha_so_nasce_sob_quem_a_abre() {
+        let nova = |args: Value, quem| decide("chat.new", args, quem, &[]);
+        assert!(nova(json!({ "parent_ref": "thread:eu" }), aba("thread:eu")).is_ok());
+        assert!(nova(json!({ "parent_ref": "tab:m1" }), aba("m1")).is_ok());
+        assert!(nova(json!({ "parent_ref": "thread:outra" }), aba("m1")).is_err(), "injetaria a entrega no pai alheio");
+        assert!(nova(json!({ "parent_ref": "tab:lead" }), aba("m1")).is_err());
+        assert!(nova(json!({ "parent_ref": "thread:qualquer" }), fora()).is_ok());
+    }
+
+    #[test]
+    fn a_skill_e_o_usage_dizem_o_alcance_por_metodo() {
+        let skill = include_str!("../../../skills/ags-orchestrator/SKILL.md");
+        for frase in ["every command that acts on another session's resource", "`mission create|run|start`", "`--close-current`", "run `ags` from your own shell"] {
+            assert!(skill.contains(frase), "a skill não diz: {frase}");
+        }
+        let cli = include_str!("../bin/cli.rs");
+        assert!(cli.contains("Autorização por método:") && cli.contains("`mission create|run|start`, `worktrees prune`"), "o USAGE não diz o alcance por método");
+        let docs = include_str!("../../../docs/decisoes/HOST_REMOTO.md");
+        assert!(docs.contains("F-09 (completo)") && docs.contains("Anexo A: inventário dos 221 métodos e a classe de cada um"));
+    }
+
+    #[test]
+    fn a_conversa_aberta_por_um_agente_fica_registrada_para_ele_continuar() {
+        let conversas = include_str!("commands/conversas.rs");
+        let inicio = conversas.find("pub(super) fn chat_new(").expect("chat_new mudou de forma");
+        let corpo = &conversas[inicio..inicio + conversas[inicio..].find("\n}\n").unwrap()];
+        assert!(corpo.matches("remember_opener(args, &row.id)").count() == 2, "chat new não registra quem abriu a conversa nos dois caminhos: o agente não conseguiria dar `chat wait`");
+        assert!(conversas.contains("crate::ipc::guard::record_opened("), "remember_opener não grava em guard::record_opened");
     }
 }

@@ -7,7 +7,7 @@ import { turnLive } from "../activityModel";
 import { AgentModelPicker } from "../AgentModelPicker";
 import { ThreadAccountMenu } from "./ThreadAccountMenu";
 import { BotIcon } from "../chatIcons";
-import { accessModesFor, extractSlashCommand, midTurnOf, planSupported, queueHintKey, type ConversationCard } from "../chatModel";
+import { accessModesFor, extractSlashCommand, midTurnOf, queueHintKey, type ConversationCard } from "../chatModel";
 import { goalPauseResumeAvailable, isLegacyGoalClearAlias, matrixProviderForAgent, useHarnessCapability } from "../harnessCapabilities";
 import { messageFor } from "../attachments/send";
 import { ChatComposer } from "../ChatComposer";
@@ -33,6 +33,7 @@ import { withDrafts } from "../timeline/streaming";
 import type { RequestRow, ThreadRow } from "./ipc";
 import { EMPTY_LIVE, isLocalAcpAgent, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
 import { AgentSwitchDialog } from "./AgentSwitchDialog";
+import { LogFailureNotice } from "./LogFailureNotice";
 import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retuneThread, runThreadGoalAction, sendToThread, switchThreadAgent, useStructured } from "./store";
 import { lacksApproval, switchableAgents } from "./switchModel";
 import { showBotToast } from "@/shared/brand/botToastStore";
@@ -77,6 +78,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   const interruptCapability = useHarnessCapability("chat", matrixProvider, "interrupt");
   const compactCapability = useHarnessCapability("chat", matrixProvider, "compact");
   const goalCapability = useHarnessCapability("chat", matrixProvider, "goal");
+  const planCapability = useHarnessCapability("chat", matrixProvider, "plan");
   const switchApprovalCapability = useHarnessCapability("chat", matrixProviderForAgent(switchTo?.agentId ?? thread.agentId), "approval");
   const midTurn = steerCapability.support === "supported" ? "steer"
     : steerCapability.support === "unsupported" && interruptCapability.support === "supported" ? "interrupt"
@@ -143,7 +145,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           if (v.agentId && v.agentId !== thread.agentId) { setSwitchError(null); setSwitchTo({ agentId: v.agentId, model: v.model }); return; }
           retuneThread(thread.id, v.model, v.effort, thread.access);
         }} />
-      {planSupported(thread.agentId, true) && (
+      {planCapability.support === "supported" && (
         <button type="button" disabled={locked} aria-pressed={plan} onClick={() => retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access))}
           title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
           className="flex shrink-0 items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50 disabled:hover:bg-transparent">
@@ -177,11 +179,12 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           </div>
         )}
         {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
+        <LogFailureNotice threadId={thread.id} />
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd} quoteKey={card.tabId} quoteThreadId={thread.id} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
           turnActive={working} forceSend={!!request}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working
-            ? t(queueHintKey(thread.agentId, followUpBehavior), { key: QUEUE_KEY })
+            ? t(queueHintKey(thread.agentId, followUpBehavior, steerCapability.support, interruptCapability.support), { key: QUEUE_KEY })
             : team?.placeholder ?? t("chat.composer.reply")}
           onSubmit={async (text, attachments) => {
             if (question) { answer(text); return; }
@@ -191,7 +194,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
                 showBotToast({ title: t("chat.plan.label"), text: t("chat.composer.lockedWhileWorking"), tone: "info", ms: 6000 });
                 return false;
               }
-              if (!planSupported(thread.agentId, true)) {
+              if (planCapability.support !== "supported") {
                 showBotToast({ title: t("chat.plan.label"), text: t("chat.plan.unsupported"), tone: "info", ms: 6000 });
                 return false;
               }
@@ -234,7 +237,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
                 showBotToast({ title: t("chat.plan.label"), text: t("chat.composer.lockedWhileWorking"), tone: "info", ms: 6000 });
                 return false;
               }
-              if (!planSupported(thread.agentId, true)) {
+              if (planCapability.support !== "supported") {
                 showBotToast({ title: t("chat.plan.label"), text: t("chat.plan.unsupported"), tone: "info", ms: 6000 });
                 return false;
               }
@@ -254,8 +257,8 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           leading={question ? null : team?.controls}
           addon={(context) => <ComposerAssistMenu cwd={thread.cwd} agentId={thread.agentId} conversationKey={key}
             teamOptions={team?.mentions}
-            providerCommands={thread.agentId === "opencode" || isLocalAcpAgent(thread.agentId) ? live.providerCommands : []}
-            onPlan={!locked && planSupported(thread.agentId, true) ? () => { void retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access)); } : undefined}
+            providerCommands={live.providerCommands}
+            onPlan={!locked && planCapability.support === "supported" ? () => { void retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access)); } : undefined}
             context={context} />}
           onStop={working && !request && interruptCapability.available ? () => interruptThread(thread.id) : null}
           stopUnavailableReason={working && !request && !interruptCapability.available ? interruptCapability.reason : null}

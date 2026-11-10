@@ -9,9 +9,6 @@ export type HarnessSupport = "supported" | "unsupported" | "unknown";
 // Exceções de compatibilidade: a matriz diverge da oferta atual de comandos em algumas superfícies.
 // Não sobrescrever essas divergências nesta fase.
 const LEGACY_COMPOSER_CAPABILITIES = new Set([
-  "tui:claude-code:compact",
-  "tui:codex:compact",
-  "tui:claude-code:goal",
   "tui:claude-code:autocompact",
   "chat:claude-code:autocompact",
 ]);

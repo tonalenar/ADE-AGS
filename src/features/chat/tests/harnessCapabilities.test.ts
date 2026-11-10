@@ -27,10 +27,10 @@ describe("capabilityAvailability", () => {
     expect(matrixProviderForAgent("codex")).toBe("codex");
   });
 
-  it("preserva no registro os comandos TUI cuja célula contradiz o uso atual", () => {
-    expect(legacyComposerCapabilityAvailable("tui", "codex", "compact")).toBe(true);
-    expect(legacyComposerCapabilityAvailable("tui", "claude-code", "compact")).toBe(true);
-    expect(legacyComposerCapabilityAvailable("tui", "claude-code", "goal")).toBe(true);
+  it("mantém separadas as exceções legadas de autocompactação", () => {
+    expect(legacyComposerCapabilityAvailable("tui", "codex", "compact")).toBe(false);
+    expect(legacyComposerCapabilityAvailable("tui", "claude-code", "compact")).toBe(false);
+    expect(legacyComposerCapabilityAvailable("tui", "claude-code", "goal")).toBe(false);
     expect(legacyComposerCapabilityAvailable("tui", "codex", "goal")).toBe(false);
     expect(legacyComposerCapabilityAvailable("chat", "claude-code", "autocompact")).toBe(true);
     expect(legacyComposerCapabilityAvailable("tui", "claude-code", "autocompact")).toBe(true);

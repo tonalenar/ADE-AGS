@@ -28,38 +28,6 @@ const ALLOW: &str = "Autorizar esta ação";
 const DENY: &str = "Recusar";
 const INPUT: &str = include_str!("desk_input.swift");
 
-/// Salva uma captura pontual da tela principal para revisão e anexo manual ao chat.
-#[tauri::command(async)]
-pub fn desktop_screenshot() -> Result<String, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let base = dirs::picture_dir()
-            .or_else(dirs::home_dir)
-            .ok_or("Não encontrei a pasta Imagens deste usuário.")?;
-        let dir = base.join("ADE AGS");
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("Não consegui criar a pasta de capturas: {e}"))?;
-        let path = dir.join(format!(
-            "ADE-AGS_SnapShot_{}_{}.png",
-            chrono::Local::now().format("%Y-%m-%d_%H-%M-%S"),
-            uuid::Uuid::new_v4().simple()
-        ));
-        let mut command = crate::util::spawn::hidden_command("/usr/sbin/screencapture");
-        command.args(["-x", "-t", "png"]).arg(&path);
-        let result = crate::util::spawn::output(&mut command, Duration::from_secs(15))
-            .map_err(|e| format!("Não consegui capturar a tela principal: {e}"))?;
-        if !result.status.success() || !path.is_file() {
-            let _ = std::fs::remove_file(&path);
-            return Err("O macOS não conseguiu salvar a captura de tela.".into());
-        }
-        Ok(path.to_string_lossy().into_owned())
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Err("A captura pontual da tela está disponível no macOS nesta versão.".into())
-    }
-}
-
 fn busy() -> &'static Mutex<bool> {
     static S: OnceLock<Mutex<bool>> = OnceLock::new();
     S.get_or_init(Default::default)

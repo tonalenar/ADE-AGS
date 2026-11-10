@@ -95,6 +95,22 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
     if let Some(error) = crate::ipc::guard::task_proof_error(args, crate::ipc::current_client_pid()) {
         return Response::err(error);
     }
+    // F-09: a tabela de classes por método (ipc/authz.rs). Prova quem chama pelo PID do canal de credencial e devolve os
+    // argumentos com a identidade **provada** no lugar da declarada. Método sem classe é recusado.
+    let patched = match crate::ipc::authz::authorize(
+        command,
+        args,
+        || {
+            let text = |key: &str| args.get(key).and_then(Value::as_str);
+            crate::terminal::principal_of(text("session"), &[text("from").unwrap_or(""), text("tabId").unwrap_or("")], text("taskId"), crate::ipc::current_client_pid())
+        },
+        crate::canvas::load_boards,
+        &crate::ipc::guard::opened_by,
+    ) {
+        Ok(patched) => patched,
+        Err(error) => return Response::err(error),
+    };
+    let args = &patched;
     if command != "run.approve" && args.get("taskId").and_then(Value::as_str).is_some() {
         use tauri::Manager;
         let Some(db) = app.try_state::<crate::database::DbConnection>() else {

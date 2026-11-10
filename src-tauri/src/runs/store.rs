@@ -407,8 +407,8 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
         "INSERT INTO tasks (id, run_id, title, prompt, agent_id, account_id, model, cwd,
                             budget_usd, status, created_at, complexity, routed_by, route_note,
                             role, plan_key, parent_id, depth, isolate, result_schema, functional_role, reasoning_effort,
-                            auto_account)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                            auto_account, owner_instance)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
         rusqlite::params![
             id,
             new.run_id,
@@ -433,6 +433,7 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
             new.functional_role,
             new.reasoning_effort,
             new.auto_account as i64,
+            crate::harness::presence::current_id(),
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -1260,9 +1261,10 @@ fn mark_running_inner(
     let now = now_ts();
     let changed = conn.execute(
         "UPDATE tasks SET status = ?1, session_id = ?2, events_path = ?3, started_at = ?4,
-                          attempt = attempt + 1
+                          attempt = attempt + 1,
+                          owner_instance = COALESCE(owner_instance, ?7)
          WHERE id = ?5 AND status = ?6",
-        rusqlite::params![status::RUNNING, session_id, events_path, now, task_id, status::READY],
+        rusqlite::params![status::RUNNING, session_id, events_path, now, task_id, status::READY, crate::harness::presence::current_id()],
     )
     .map_err(|e| e.to_string())?;
     if changed != 1 {
@@ -1480,22 +1482,34 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
 pub const SWEPT_RUNNING_ERROR: &str = "o app foi fechado enquanto esta tarefa rodava";
 
 pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
+    sweep_orphans_at(db, now_ts(), crate::util::now_ts_ms())
+}
+
+/// Como [`sweep_orphans`], com o relógio injetado. `now` é segundos (colunas da Frota); `now_ms` é a
+/// presença. Tarefa cujo dono tem presença válida não é interrompida. Dono vazio segue a regra antiga.
+pub fn sweep_orphans_at(db: &DbConnection, now: i64, now_ms: i64) -> Result<usize, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let tx = conn
         .unchecked_transaction()
         .map_err(|error| error.to_string())?;
-    let now = now_ts();
-    let event_at = crate::util::now_ts_ms();
+    let event_at = now_ms;
     let interrupted_attempts: Vec<(String, String)> = {
         let mut statement = tx
             .prepare(
                 "SELECT a.task_id, a.id FROM run_attempts a
                  JOIN tasks t ON t.id = a.task_id
-                 WHERE t.status IN ('ready', 'running') AND a.ended_at IS NULL",
+                 WHERE t.status IN ('ready', 'running') AND a.ended_at IS NULL
+                   AND NOT (
+                     t.owner_instance IS NOT NULL AND TRIM(t.owner_instance) != ''
+                     AND EXISTS (
+                       SELECT 1 FROM harness_instance h
+                       WHERE h.id = t.owner_instance AND h.valid_until > ?1
+                     )
+                   )",
             )
             .map_err(|error| error.to_string())?;
         statement
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .query_map([now_ms], |row| Ok((row.get(0)?, row.get(1)?)))
             .map_err(|error| error.to_string())?
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(|error| error.to_string())?
@@ -1512,8 +1526,16 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     }
     let n = tx
         .execute(
-            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status IN ('ready', 'running')",
-            rusqlite::params![status::FAILED, SWEPT_RUNNING_ERROR, now],
+            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3
+             WHERE status IN ('ready', 'running')
+               AND NOT (
+                 owner_instance IS NOT NULL AND TRIM(owner_instance) != ''
+                 AND EXISTS (
+                   SELECT 1 FROM harness_instance h
+                   WHERE h.id = tasks.owner_instance AND h.valid_until > ?4
+                 )
+               )",
+            rusqlite::params![status::FAILED, SWEPT_RUNNING_ERROR, now, now_ms],
         )
         .map_err(|e| e.to_string())?;
     tx.execute(
@@ -1531,12 +1553,21 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     // un plan a medias corriendo sin nadie que lo mire no es lo que alguien dejó andando.
     let waiting = tx
         .execute(
-            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status = ?4",
+            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3
+             WHERE status = ?4
+               AND NOT (
+                 owner_instance IS NOT NULL AND TRIM(owner_instance) != ''
+                 AND EXISTS (
+                   SELECT 1 FROM harness_instance h
+                   WHERE h.id = tasks.owner_instance AND h.valid_until > ?5
+                 )
+               )",
             rusqlite::params![
                 status::CANCELLED,
                 "o app foi fechado antes de chegar a vez dela de rodar",
                 now,
-                status::PENDING
+                status::PENDING,
+                now_ms
             ],
         )
         .map_err(|e| e.to_string())?;

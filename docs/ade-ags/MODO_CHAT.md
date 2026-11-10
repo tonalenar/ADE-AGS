@@ -227,6 +227,7 @@ PATH do shell de login e a pasta do instalador do Cursor).
   As perguntas do agente à pessoa (`interaction_query`) não travam: o `cursor-agent -p` as recusa sozinho.
 - **Parar sem agente vivo** (todos os motores, `api::stop`, também `ags chat stop`): fecha no banco o turno que ficou aberto
   daquela conversa, com o fim «o agente já não estava rodando», e a janela volta a ociosa. Antes, o Parar não fazia nada.
+- **Parar do Claude e do OpenCode durante a abertura do turno** (`codex_parar.rs`, o mesmo guarda): a mensagem já saiu, mas o agente ainda não mostrou que o turno roda. O Parar fica pendente e sai no primeiro aviso do turno (`system/status`, `stream_event`, `assistant` ou `user` no Claude; `session/update` de conteúdo no OpenCode); o fim do turno ou um envio que não saiu o descartam. Enquanto isso, o Parar não fecha no banco o turno que está abrindo (`api::close_idle_orphans`). A resposta do recibo é `deferred`, como no Codex (contrato §11.13).
 - **Parar do Codex antes do `turn/started`** (`codex_parar.rs`): o app-server só aceita `turn/interrupt` depois do aviso e antes recusa com `-32600`, então o turno seguia rodando e o Parar sumia. Agora o Parar recebido entre o `turn/start` e o `turn/started` fica **pendente na sessão** e sai quando o aviso chega; se o turno acaba antes (ou o `turn/start` falha), a pendência é descartada. Sem turno aberto nem `turn/start` a caminho, o Parar cai no fechamento do turno órfão acima.
 
 ### Antigravity por protocolo (`agy --print` em stream-json)

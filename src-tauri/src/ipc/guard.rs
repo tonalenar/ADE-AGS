@@ -23,13 +23,19 @@ pub(crate) fn task_proof_error(args: &Value, client_pid: Option<u32>) -> Option<
 /// só escreve em si, nas abas do canvas que o alcançam (`canvas::reachable`) e nas que ele mesmo abriu.
 pub(crate) fn tab_send_error(boards: &Boards, caller: &Caller, target: &str, opened_by: Option<&str>) -> Option<String> {
     let Caller::Tab(me) = caller else { return None };
-    if me == target || opened_by == Some(me.as_str()) || crate::canvas::reachable(boards, me).contains(target) {
+    if in_reach(boards, me, target, opened_by) {
         return None;
     }
     Some(format!(
         "A aba {target} não é sua nem do seu time: um agente só escreve em si, nas abas conectadas a ele no canvas e nas que ele mesmo abriu \
 (`ags tab create`). Para falar com um agente conectado use `ags peer tell`; para outra aba, peça à pessoa que a conecte no canvas."
     ))
+}
+
+/// O recurso `target` (uma aba, `thread:<id>`…) está ao alcance de `me`? É ele mesmo, foi ele quem o abriu (`opened_by`) ou o
+/// canvas o liga a ele (`canvas::reachable`: vizinhos e, para o orquestrador, o time todo).
+pub(crate) fn in_reach(boards: &Boards, me: &str, target: &str, opened_by: Option<&str>) -> bool {
+    me == target || opened_by == Some(me) || crate::canvas::reachable(boards, me).contains(target)
 }
 
 const FIX_DECIDE_SCREEN: &str = "Decidir depois do teto de rodadas de correção é do orquestrador da missão (a coroa no canvas, provada pelo terminal dele) \
@@ -55,11 +61,16 @@ const OPENED_MAX: usize = 4096;
 
 /// Registra quem abriu a aba (só quando provado).
 pub(crate) fn record_opened_tab(opener: &str, tab: &str) {
+    record_opened(opener, tab);
+}
+
+/// Registra quem abriu um recurso: uma aba (`<id>`) ou uma conversa (`thread:<id>`). Só com identidade provada.
+pub(crate) fn record_opened(opener: &str, resource: &str) {
     let mut opened = OPENED.lock().unwrap_or_else(|e| e.into_inner());
-    if opened.len() >= OPENED_MAX && !opened.contains_key(tab) {
+    if opened.len() >= OPENED_MAX && !opened.contains_key(resource) {
         opened.clear();
     }
-    opened.insert(tab.to_string(), opener.to_string());
+    opened.insert(resource.to_string(), opener.to_string());
 }
 
 pub(crate) fn opened_by(tab: &str) -> Option<String> {

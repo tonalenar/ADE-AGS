@@ -15,7 +15,7 @@ import { matrixProviderForAgent, readHarnessCapability, useHarnessCapability, ty
 
 import { CheckIcon, SearchIcon, StarIcon, ZapIcon } from "./chatIcons";
 import { AccessMenu } from "./AccessMenu";
-import type { ChatAccess, ProviderRuntimeConfig } from "./chatModel";
+import { fastModeSupported, reasoningEffortSupported, type ChatAccess, type ProviderRuntimeConfig } from "./chatModel";
 import { usePopover } from "./usePopover";
 
 const MAX_COMPARE_PICKS = 6;
@@ -35,11 +35,8 @@ interface PickerComparePick extends PickDraft {
   account: string | null;
 }
 
-/** Os agentes cujo esforço vira flag (ver `withModel`). Nos outros o menu de esforço some. */
-const EFFORT_AGENTS = new Set(["claude-code", "codex", "antigravity"]);
-
 /** O agente tem esforço que vira flag? (o controle some nos outros) */
-export const hasEffort = (agentId: string | null): boolean => !!agentId && EFFORT_AGENTS.has(agentId);
+export const hasEffort = reasoningEffortSupported;
 
 export interface AgentModelValue {
   agentId: string | null;
@@ -198,7 +195,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const selectedModel = current.find((m) => m.id === value.model) ?? null;
   const efforts = agent ? effortsOf(agent.id, value.model, current, value.agentId, providerConfig) : [];
   const showReasoning = (!!permission || !!speed) && efforts.length > 0;
-  const showFast = !!speed && agent?.id === "codex" && selectedModel?.fastSupported === true;
+  const showFast = !!speed && fastModeSupported(agent?.id) && selectedModel?.fastSupported === true;
   const hasFooter = !!permission || !!speed || !!accountSlot || showAccount;
 
   useLayoutEffect(() => {
@@ -327,7 +324,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
       agentId: r.agent.id,
       model: r.model,
       effort,
-      fast: r.agent.id === "codex" && speed?.fast === true && selected?.fastSupported === true,
+      fast: fastModeSupported(r.agent.id) && speed?.fast === true && selected?.fastSupported === true,
       account,
     };
     setComparePicks((current) => {
@@ -468,7 +465,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                         const nextModel = r.model ? pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig).find((m) => m.id === r.model) : null;
                         // Ao escolher outro agente numa conversa aberta, a troca ainda vai passar
                         // por confirmação; não altere/reinicie o agente atual antes dela.
-                        if (sameAgent && speed?.fast && (r.agent.id !== "codex" || nextModel?.fastSupported !== true)) {
+                        if (sameAgent && speed?.fast && (!fastModeSupported(r.agent.id) || nextModel?.fastSupported !== true)) {
                           speed.onChange(false);
                         }
                         setOpen(false);
@@ -599,8 +596,8 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
-  const { roster } = useRoster(!!agentId && EFFORT_AGENTS.has(agentId), open);
-  if (!agentId || !EFFORT_AGENTS.has(agentId)) return null;
+  const { roster } = useRoster(reasoningEffortSupported(agentId), open);
+  if (!reasoningEffortSupported(agentId)) return null;
   const levels = reasoningOptions(model, catalogOf(roster, agentId, account));
   const efforts = levels.length > 0 ? levels : DEFAULT_EFFORTS;
   const label = (e: string) => t(`chat.effort.${e}`, { defaultValue: e });
@@ -623,7 +620,7 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
               {value === e && <CheckIcon className="w-3.5 h-3.5" />}
             </button>
           ))}
-          {agentId === "codex" && (
+          {fastModeSupported(agentId) && (
             <div className="flex items-center gap-2 min-h-7 px-2 mt-1 pt-1 border-t border-gray-200 dark:border-white/10 text-chat-note text-gray-500 dark:text-white/45">
               <ZapIcon className="w-3.5 h-3.5" /><span className="flex-1">{t("chat.picker.fast")}</span><span>{t("chat.picker.fastOff")}</span>
             </div>

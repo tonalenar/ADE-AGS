@@ -33,7 +33,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ## 1. Matriz capability × provider/superfície
 
-### 1.1 As 18 capabilities
+### 1.1 As 19 capabilities
 
 | Capability | Pergunta que a célula responde | O que **não** conta |
 |---|---|---|
@@ -51,6 +51,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `resume` | A sessão nativa volta depois de reiniciar o app? | abrir sessão nova com aviso |
 | `compact` | O ADE pede compactação e o protocolo responde? | configurar uma janela de auto-compact |
 | `goal` | Há objetivo persistente nativo? | texto `/goal` sem evento de volta |
+| `plan` | O ADE consegue iniciar a execução em modo nativo de planejamento? | criar um DAG de tarefas do ADE na Frota |
 | `checkpoint` | Há foto do estado da execução? | foto da conversa (nenhuma superfície tem) |
 | `rollback` | Dá para voltar ao estado de uma foto? | reverter a conversa do provider (nenhuma superfície faz) |
 | `usage` | Há uso de tokens, custo ou limite por sessão? | medidor por conta |
@@ -60,7 +61,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.2 A matriz
 
-`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 18 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
+`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 19 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
 
 **Conversa estruturada (`conversa/`)**
 
@@ -80,6 +81,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `resume` | S | S | ? | S | S | ? |
 | `compact` | ? | S | U | U | U | U |
 | `goal` | ? | S | U | U | U | U |
+| `plan` | S | U | S | S | S | U |
 | `checkpoint` | U | U | U | U | U | U |
 | `rollback` | U | U | U | U | U | U |
 | `usage` | S | S | S | S | U | ? |
@@ -104,6 +106,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `resume` | U | U | U | U | U | U | U | U |
 | `compact` | U | U | U | U | U | U | U | U |
 | `goal` | U | U | U | U | U | U | U | U |
+| `plan` | U | U | U | U | U | U | U | U |
 | `checkpoint` | S | S | S | S | S | U | S | U |
 | `rollback` | S | S | S | S | S | U | S | U |
 | `usage` | S | S | S | S | U | U | S | U |
@@ -126,8 +129,9 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `child_result` | U | U | U | U | U | U | U | U |
 | `child_stop` | U | U | U | U | U | U | U | U |
 | `resume` | S | S | S | S | ? | S | U | U |
-| `compact` | S | U | U | U | U | U | U | U |
-| `goal` | U | U | U | U | U | U | U | U |
+| `compact` | ? | U | ? | U | U | U | U | U |
+| `goal` | ? | U | U | U | U | U | U | U |
+| `plan` | S | U | U | U | U | U | U | U |
 | `checkpoint` | S | S | S | S | S | S | S | S |
 | `rollback` | S | S | S | S | S | S | S | S |
 | `usage` | S | U | S | S | U | U | ? | U |
@@ -136,34 +140,34 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396 células**: **163 `Supported`, 29 `Unknown`, 204 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 396): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 19 capabilities = **418 células**: **167 `Supported`, 32 `Unknown`, 219 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 418): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
 
 <!-- contagem-matriz:inicio -->
 | Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
-|---|---|---|---|---|---|
-| Chat | claude-code | 13 | 2 | 3 | Supported |
-| Chat | codex | 14 | 0 | 4 | Supported |
-| Chat | opencode | 8 | 1 | 9 | Supported |
-| Chat | antigravity | 8 | 0 | 10 | Supported |
-| Chat | cursor | 7 | 0 | 11 | Unsupported |
-| Chat | local-acp | 6 | 3 | 9 | Unknown |
-| Fleet | claude-code | 10 | 0 | 8 | Supported |
-| Fleet | gemini-cli | 8 | 0 | 10 | Unsupported |
-| Fleet | codex | 9 | 0 | 9 | Supported |
-| Fleet | opencode | 9 | 0 | 9 | Supported |
-| Fleet | kimi-code | 7 | 0 | 11 | Unsupported |
-| Fleet | hermes | 0 | 0 | 18 | Unsupported |
-| Fleet | antigravity | 8 | 2 | 8 | Unknown |
-| Fleet | cursor | 0 | 0 | 18 | Unsupported |
-| Tui | claude-code | 11 | 1 | 6 | Supported |
-| Tui | gemini-cli | 6 | 3 | 9 | Unsupported |
-| Tui | codex | 10 | 1 | 7 | Supported |
-| Tui | opencode | 8 | 2 | 8 | Supported |
-| Tui | kimi-code | 5 | 4 | 9 | Unsupported |
-| Tui | hermes | 6 | 3 | 9 | Unknown |
-| Tui | antigravity | 5 | 4 | 9 | Unsupported |
-| Tui | cursor | 5 | 3 | 10 | Unsupported |
-| **Total** | 22 colunas × 18 = 396 células | 163 | 29 | 204 | |
+|---|---|---:|---:|---:|---|
+| Chat | claude-code | 14 | 2 | 3 | Supported |
+| Chat | codex | 14 | 0 | 5 | Supported |
+| Chat | opencode | 9 | 1 | 9 | Supported |
+| Chat | antigravity | 9 | 0 | 10 | Supported |
+| Chat | cursor | 8 | 0 | 11 | Unsupported |
+| Chat | local-acp | 6 | 3 | 10 | Unknown |
+| Fleet | claude-code | 10 | 0 | 9 | Supported |
+| Fleet | gemini-cli | 8 | 0 | 11 | Unsupported |
+| Fleet | codex | 9 | 0 | 10 | Supported |
+| Fleet | opencode | 9 | 0 | 10 | Supported |
+| Fleet | kimi-code | 7 | 0 | 12 | Unsupported |
+| Fleet | hermes | 0 | 0 | 19 | Unsupported |
+| Fleet | antigravity | 8 | 2 | 9 | Unknown |
+| Fleet | cursor | 0 | 0 | 19 | Unsupported |
+| Tui | claude-code | 11 | 3 | 5 | Supported |
+| Tui | gemini-cli | 6 | 3 | 10 | Unsupported |
+| Tui | codex | 10 | 2 | 7 | Supported |
+| Tui | opencode | 8 | 2 | 9 | Supported |
+| Tui | kimi-code | 5 | 4 | 10 | Unsupported |
+| Tui | hermes | 6 | 3 | 10 | Unknown |
+| Tui | antigravity | 5 | 4 | 10 | Unsupported |
+| Tui | cursor | 5 | 3 | 11 | Unsupported |
+| **Total** | 22 colunas × 19 = 418 células | 167 | 32 | 219 | |
 <!-- contagem-matriz:fim -->
 
 Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
@@ -176,6 +180,9 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 |---|---|---|
 | chat/claude-code | `compact` | captura real recebendo `/compact` como linha `user` e o evento que marca a conclusão |
 | chat/claude-code | `goal` | evento do Claude com o status do objetivo e prova de que `/goal` como linha `user` é executado |
+| tui/claude-code | `compact` | captura real de `/compact` executado na TUI e evento observável de conclusão |
+| tui/codex | `compact` | captura real de `/compact` executado na TUI do Codex |
+| tui/claude-code | `goal` | captura real de `/goal` executado na TUI e do estado persistente retornado |
 | chat/opencode | `resume` | a captura de handshake existe, mas o replay não a ingere: a bancada só lê a resposta de id 2, e nela o `session/resume` de sessão inexistente é `-32602`; `session/new` (id 4) cria a sessão. Falta casear o id que o ADE enviou, e um turno de modelo |
 | chat/local-acp | `approval`, `usage`, `ags_mcp` | captura de um agente ACP local real (pedido de permissão, resposta do `session/prompt`, ferramentas `ags`) |
 | chat/local-acp | `resume` | o descritor de sessão ler `agentCapabilities` do `initialize` |
@@ -585,54 +592,42 @@ grep -rn --include='*.rs' -E '"claude-code"|"codex"|"opencode"|"antigravity"|"cu
 grep -rn --include='*.ts' --include='*.tsx' -E "['\"](codex|claude-code|claude|opencode|antigravity|cursor|gemini-cli|kimi-code|hermes)['\"]" src | grep -v -E '\.test\.|/tests/|__tests__|test/'
 ```
 
-| Linguagem | Linhas | Arquivos | Capability ou comportamento do harness (migrar) | Registro, adaptador ou apresentação (permitido) | Contas, uso e limites | Padrão de produto, catálogo, fixture |
-|---|---|---|---|---|---|---|
-| Rust (baseline documentada) | 284 | 57 | 149 em 26 arquivos | 54 em 10 | 40 em 9 | 41 em 12 |
-| TS/TSX (baseline documentada) | 182 | 55 | 88 em 36 arquivos | 43 em 6 | 51 em 13 | 0 |
+**Antes desta rodada:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**.
 
-**Reprodução em 10/11/2026, antes desta migração:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**. O comando acima reproduz esses totais brutos. Os subtotais por papel na tabela são a classificação da auditoria de 09/11 e ainda não foram recontados linha a linha; portanto não descrevem essa reprodução atual.
+**Depois desta rodada:** Rust **298 linhas em 56 arquivos**; TS/TSX **162 linhas em 53 arquivos**. São ocorrências brutas de nomes; ainda incluem escolhas de parser, executável, formato, produto e catálogo. Não representam inferências de capability.
 
-**Depois desta rodada:** Rust **306 linhas em 57 arquivos**; TS/TSX **176 linhas em 55 arquivos**. No TypeScript saíram sete linhas brutas líquidas, incluindo gates que agora consultam a matriz e comparações de provider que foram para o registro de compatibilidade. Rust ficou no mesmo total bruto: duas comparações migraram (`approval` e `child_stop`) e duas linhas do teste inline de `chat providers` contêm o provider serializado; `troca.rs` deixou de ser contado como arquivo. O guard reduziu de **112 para 102 comparações**. `steer`, `interrupt`, `compact`, `goal`, `approval` e `child_stop` migraram parcialmente; `start` também chega ao seletor.
+O guarda anterior tinha baseline de **102 comparações diretas**. O guarda ampliado procura decisões de capability por comparação direta, `matches!`, expressões e braços de `match`, `switch` e listas em `.includes(agent)`, `.has(agent)` e `.contains(agent)`, examinando a declaração, condição e ramo. Depois das migrações, o baseline de capability ficou vazio (**0 ocorrências**). A comparação não é uma subtração bruta de 102: o novo critério exclui identidade sem decisão de capability, como escolher parser, CLI, conta ou formato, que pertence ao adapter/registro. `provider_comparisons.baseline.json` registra apenas exceções classificadas; no estado final não há exceções.
 
-Ressalvas: a contagem é bruta. Inclui testes inline dentro de arquivos de produção (`runs/oneshot.rs`, `runs/plan.rs`, `ipc/commands/pool.rs`) e falsos positivos de paginação (`"cursor"` em `ipc/mcp.rs:1011` e `:1044`, `runs/orchestration.rs:234`, `runs/model_discovery.rs:731`). A classificação por arquivo é por leitura do papel do arquivo, não linha a linha. O número "98" do inventário `tui-acp-frota` não é reprodutível e não deve ser citado.
+### 6.2 Fonte única e critério do guarda
 
-### 6.2 Fonte única proposta
+- `harness::matrix` é a fonte de estado das capabilities por provider e superfície; `agents/registry.rs` e os adapters guardam identidade, protocolo e implementação concreta. `harness_capability_matrix` expõe a matriz pelo Tauri, e `harness::matrix::supports` faz a consulta tipada no Rust.
+- `Engine::capabilities()` deriva `steer`, `compact`, `goal` e `plan` da matriz. No caminho estruturado, envio, interrupção, compactação, objetivo e criação recusam `Unsupported` com erro explícito. O frontend consulta a mesma matriz por uma store compartilhada; `plan` só habilita o compositor quando a célula está `Supported`. `Unknown` continua distinguível e mantém os caminhos legados existentes onde a interface/API já os oferecia.
+- A Frota consulta `Start` antes de iniciar ou atribuir uma execução; o adapter decide se sabe executar headless e orquestrar. Regras de stdin, `result_schema`, prioridade read-only, perfil isolado e atualização de cota posterior pertencem ao adapter headless.
+- `watch_db` usa o adapter de conversa para escolher o parser de pressão da janela Claude. Isso não infere a capability geral `usage`: a célula `Usage` significa uso, custo ou limite por sessão, não o contador de contexto.
+- O guarda percorre Rust e TypeScript/TSX de produção fora dos adapters/registros e arquivos de teste; em arquivos Rust, ignora o trecho `#[cfg(test)]`. No frontend, `harnessCapabilities.ts` é o registro compartilhado de compatibilidade. Só conta quando há id conhecido, comparação do agente/provider e marca de capability na expressão, declaração, condição ou ramo. Testes sintéticos cobrem `matches!`, expressões e braços de `match`, `switch`, comparações `==`/`!=` e listas nomeadas em `.includes(agent)`, `.has(agent)` e `.contains(agent)`. Escolhas de parser, executável, conta, formato e apresentação sem decisão de capability ficam fora do grupo.
 
-- **Uma só fonte:** `harness::matrix` (esta Fase 0) para o que cada provider promete, e o registro de agentes (`agents/registry.rs`) para o que ele **é** (comando, MCP, retomada, sessões). O descritor não duplica o registro: aponta para ele. `harness_capability_matrix` expõe a matriz inteira ao frontend pelo Tauri; `harness::matrix::supports` é a consulta tipada no backend.
-- **Quem consome:** `Engine::capabilities()` (`conversa/api.rs`) deriva `steer`, `compact` e `goal` da matriz; `Unknown` preserva a disponibilidade legada e só `Unsupported` bloqueia. `harness_capability_matrix` fornece a matriz ao frontend; o seletor e o compositor estruturado consultam uma store única. `ags chat providers` agora inclui `harnessCapabilities` para cada provider nativo e para o ACP local.
-- **Regra de saída (Fase 3):** nenhuma comparação `agent_id == "<nome>"` decide capability fora do adapter e do registro. Um teste de lint com baseline (mesma ideia do `check:test-lint`) falha quando o número de ocorrências do grupo "migrar" cresce.
-- A fonte inclui o escopo por **sessão**: o ACP local lê `agentCapabilities`; o Claude só marca `steer` quando houver captura.
+### 6.3 Migrações da rodada
 
-### 6.3 Lista por arquivo (grupo "migrar")
-
-**Rust** (linhas brutas): `conversa/api.rs` 31, `database/queries/session_search.rs` 13, `ipc/commands/conversas.rs` 12, `runs/roster.rs` 12, `runs/oneshot.rs` 8, `runs/plan.rs` 7, `canal/mod.rs` 6, `chat_team/permission.rs` 5, `ai_memory/tabs.rs` 5, `ipc/transport.rs` 5, `ipc/commands/canal.rs` 5, `ipc/mcp.rs` 5, `ipc/commands/peers.rs` 4, `runs/orchestration.rs` 4, `runs/supervisor.rs` 4, `session/panel.rs` 4, `runs/fixrounds.rs` 3, `runs/routing.rs` 3, `runs/mod.rs` 3, `session/title.rs` 3, `canal/timeline.rs` 2, `conversa/troca.rs` 1, `terminal/pty_manager.rs` 1, `chat_team/watch_db.rs` 1, `squads/store.rs` 1, `runs/quota.rs` 1.
-
-**TS/TSX:** `chat/AgentModelPicker.tsx` 11, `chat/NewConversation.tsx` 7, `missions/vigia.ts` 7, `chat/structured/StructuredConversationView.tsx` 6, `chat/chatModel.ts` 5, `chat/ComposerAssistMenu.tsx` 5, `missions/modelFlags.ts` 5, `chat/ClaudeAutoCompactSetting.tsx` 3, `runs/RoutingSection.tsx` 3, e 27 arquivos com 1 ou 2 ocorrências (`chat/tasks/useConversationTasks.ts`, `chat/team/teamModel.ts`, `chat/structured/switchModel.ts`, `chat/ChatSidebar.tsx`, `chat/ConversationView.tsx`, `canvas/tabTuning.ts`, `canvas/RoleEditDialog.tsx`, `squads/*`, `terminal/Terminal.tsx`, `tabs/continuity.ts`, `palette/CommandPalette.tsx` e outros).
-
-Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
-
-| Capability afetada | Onde |
+| Área | Resultado |
 |---|---|
-| `child_stop` | `conversa/api.rs` consulta `ChildStop` antes do `stop_task`; a matriz confirma Claude `Supported` e Codex `Unsupported` |
-| `compact`, `goal` | `conversa/api.rs` e `chat.providers` usam a matriz; o composer estruturado desabilita `Unsupported` com a nota. A matriz da TUI contradiz a oferta legada de `/compact` para Codex/Claude e `/goal` para Claude; essas exceções ficaram centralizadas no registro de compatibilidade e precisam de decisão sobre o contrato antes da migração. `autocompact` fica no registro porque a matriz Chat não descreve essa sintaxe nativa.
-| `steer`, `interrupt` | `conversa/api.rs` e a escolha de envio/parada no compositor estruturado usam a matriz; `PROTOCOL_AGENTS` ainda informa acesso e Plano, que não são capabilities da matriz. |
-| `approval` | `conversa/troca.rs` e `chat/structured/switchModel.ts` consultam `Approval`; ACP local mantém sua regra própria enquanto a célula é `Unknown`. |
-| `usage` | `chat_team/watch_db.rs:257`, `chat/summary/LimitsCard.tsx:27-33` |
-| `resume` | `conversa/codex.rs:268`, `opencode.rs:194`, `tabs/continuity.ts:24` |
-| `ags_mcp` | `ipc/mcp.rs:2905`, `:2922`; `agents/adapter.rs:55`, `:93` (o flag que contradiz o registro) |
-| contrato duplicado | `ipc/commands/conversas.rs:78-124`, `conversa/api.rs:124-139` (`supports_access` deixa o ACP local aceitar cinco modos; a abertura só aceita `ask`, `opencode.rs:211-213`) |
+| Frontend: `steer`, `interrupt`, `compact`, `goal`, `approval`, `start` | Consultas via store única da matriz; seletores bloqueiam `Unsupported`. `plan` também usa a matriz. |
+| API e MCP de conversa | `chat_new`, `chat_send`, `chat_stop`, `chat_compact` e `chat_goal` passam pelos gates de `Start`, `Send`, `Interrupt`, `Compact` e `Goal`; as tools MCP compartilham as rotas e recebem erro claro em `Unsupported`. |
+| Frota e orquestração | `Start` é validado antes do roteamento/criação de tarefa. Stdin, `result_schema`, read-only, perfis de tarefa, fast mode e refresh de cota são declarados pelo adapter headless. |
+| `teamModel.ts` e `watch_db.rs` | O modo de leitura deriva `plan` da célula TUI; o parser de pressão de contexto consulta o adapter em vez de comparar o nome. |
+| `plan` | Nova capability em todas as 22 colunas, com evidência e prova por célula. O compositor e os modos de conversa só ativam Plano quando a matriz diz `Supported`. |
+| Guarda e baseline | A busca cobre as formas indiretas de §6.2. Baseline anterior: 102 comparações diretas; baseline final: 0 inferências de capability fora do adapter/registro. |
 
-### 6.4 Ordem de migração e estado
+### 6.4 Critério de saída da Fase 0
 
-1. **Concluído:** `harness::matrix::supports` consulta a matriz; `harness_capability_matrix` expõe-a pelo Tauri e `ags chat providers` inclui a coluna `harnessCapabilities`.
-2. **Pendente:** substituir a cópia de modos de acesso e Plano em `PROTOCOL_AGENTS` exige uma fonte Tauri para `EngineCapabilities`; essas opções não correspondem às 18 células atuais da matriz. Manter teste de paridade até haver contrato comum.
-3. **Parcial:** `Engine::capabilities()` deriva `steer`, `compact` e `goal`; o MCP `chat_goal` recusa `Unsupported`; o gate de `stop_task` consulta `ChildStop`. Frontend consulta `steer`, `interrupt`, `compact`, `goal`, `approval` e `start`. Faltam `teamModel.ts`, `watch_db.rs` e outros comportamentos em `api.rs`; Plano não tem célula na matriz. As células TUI de `/compact` e `/goal` divergem dos comandos legados oferecidos; `autocompact` continua na compatibilidade Claude, pois a matriz Chat não descreve essa sintaxe nativa. `pause/resume` de goal também fica no registro do Codex: a matriz não tem uma capability separada para essas ações.
-4. **Pendente:** migrar Frota e orquestração (`supervisor.rs`, `mcp.rs`, `oneshot.rs`, `plan.rs`, `roster.rs`).
-5. **Pendente:** contas, uso e limites continuam no registro, não no descritor de execução.
-6. **Parcial:** `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro` lê Rust e TS/TSX e aplica baseline por arquivo e expressão. Remove-se a linha do baseline junto com cada migração; o baseline caiu de 112 para **102** comparações. A comparação guarda `agent_id`, `agentId`, `agent` ou `provider` com igualdade textual a um provider conhecido; padrões mais indiretos ainda precisam ser cobertos.
-7. **Pendente:** trocar os `unreachable!` (`api.rs:840`, `:953`, `:989`) por erro de capability, para uma flag ligada sem implementação não derrubar o processo.
+**Fechado nesta rodada:** nenhuma capability é inferida por comparação de nome fora do adapter/registro. O guarda indireto passa com baseline vazio (**0**); as comparações de identidade que restam escolhem implementação, parser, executável, conta ou apresentação, sem declarar suporte.
 
-**Faltam para a Fase 0:** migração dos pontos restantes acima; a UI ainda não trata Plano pela matriz porque não há essa capability; decidir as divergências TUI de `/compact` e `/goal`; aplicar indisponibilidade no MCP às demais tools/capabilities `Unsupported`; ampliar o teste de guarda para padrões mais indiretos; e recontar os subtotais por papel. O seletor preserva providers `Unknown`; no composer estruturado, `Unsupported` fica desabilitado com a nota da célula. `Unknown` não é bloqueado.
+**Plano e prova.** `plan` é uma das 19 capabilities em cada coluna. As 22 células de `plan` têm evidência não vazia e prova diferente de `None`, conferidas por teste. Nenhuma delas afirma `RealCapture`; a prova é de código/tabela. O compositor consulta a matriz e só oferece a ação Plano quando a célula é `Supported`.
+
+**Divergência da TUI.** O composer legado ainda aceita `/compact` de Claude/Codex e `/goal` de Claude, mas o contrato não tem captura que prove execução e resposta observável. As três células ficam `Unknown`; a disponibilidade legada não reclassifica a matriz como `Supported`. `Unknown` significa que o ADE não promete o efeito. O seletor de Plano não usa esse fallback.
+
+**`Unsupported` no MCP.** `chat_new`, envio, parada, compactação e objetivo passam pelos gates compartilhados de `Start`, `Send`, `Interrupt`, `Compact` e `Goal`; tarefa da Frota valida `Start` antes do roteamento/criação. A resposta explicita capability, provider e superfície.
+
+**Não sobra lacuna do critério de saída.** Capturas reais de Claude/Codex para `/compact` e de Claude para `/goal` continuam como pendência de prova em §1.4; não impedem fechar o critério, pois suas células permanecem `Unknown`. Nenhum CLI real foi executado nesta rodada.
 
 ## 7. Fatia vertical da Fase 1
 
@@ -706,18 +701,27 @@ Só o que é decisão de produto ou de autorização.
 
 ## 9. O que foi e o que não foi verificado
 
-**Verificado**
-- `cd src-tauri && cargo test --lib harness`: 14 testes do módulo novo passam. Eles conferem: 22 colunas esperadas; 18 capabilities em ordem por coluna; todo `Supported` com evidência e prova; todo `Unknown` com o que falta provar; todo `Unsupported` com motivo; **cada citação `arquivo:linha` aponta para arquivo e linhas que existem**; a tabela concorda com `Engine::capabilities()`; o doc concorda com a tabela.
-- `bun run check:test-lint`.
-- Leitura direta do código para D1, D2, D3, D4, D8 e D10, e para as lacunas de §1.7.
+**Verificado nesta rodada**
+- `cd src-tauri && cargo test --lib --bin ags`: biblioteca **2.933 aprovados, 0 falhas, 29 ignorados**; binário `ags`: **53 aprovados, 0 falhas**.
+- `cargo test --lib --bin ags harness::test::`: **28 aprovados, 0 falhas**. Confere as 22 colunas e 19 capabilities, todas as provas e citações, a contagem documentada, os estados `Unknown` da TUI, as provas de `plan` e o guarda de padrões indiretos.
+- `bunx tsc --noEmit`: passou.
+- `bun run check:i18n`: passou; 0 chaves ausentes ou divergentes.
+- `bun run check:test-lint`: passou; 40 violações antigas no baseline e nenhuma nova.
+- `bunx vitest run src/features/chat src/features/terminal`: **149 arquivos e 1.109 testes aprovados**.
+- `git diff --check`: passou. As dependências ausentes foram instaladas com `bun install --frozen-lockfile` (328 pacotes; lockfile sem alteração).
+
+**Falhas encontradas e corrigidas durante a migração**
+- `run_plan_rejeita_member_indisponivel_no_roster_antes_de_criar_task`: o primeiro gate de `Start` alterava o erro para provider removido. O gate agora só intercepta um `Unsupported` conhecido; o teste passou isoladamente e na suíte completa.
+- `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro`: a forma `.contains()` encontrou uma asserção de teste inline. O guarda agora ignora código sob `#[cfg(test)]`; o teste do guarda e o recorte de 28 testes passaram.
+- `a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor` e o fixture de índices de `guarda_encontra_padroes_indiretos_de_capability_sem_contar_identidade` falharam em recortes anteriores por tratar o ACP local como OpenCode e por índices desatualizados; ambos foram corrigidos e passaram na suíte completa.
 
 **Não verificado**
-- **Existir a linha não prova que ela diz o que a célula afirma.** O teste confere arquivo e intervalo. Uma auditoria linha a linha de todas as citações suspeitas e veredictos da matriz foi realizada (§9.1), corrigindo citações quebradas, afirmações não sustentadas e reclassificações comprovadas no código.
-- Nenhum provider real foi executado. Nenhuma célula tem captura real.
-- O T3 (`main` móvel) não foi relido: §2.6 repete o que o inventário `antigravity-t3.md` cita.
-- Sem medição de desempenho: o custo de `thread_execution_graph` (que carrega todas as conversas, `runs/harness.rs:100`) e de árvores profundas está **não medido**.
-- A suíte completa e o `cargo test --lib --bin ags` não foram rodados. `bun run check:fingerprint` continua falhando, como no commit base.
-- Nenhum teste visual, build, instalação, push ou PR.
+- Nenhum CLI real de agente foi executado. As células `plan` têm prova de código/tabela e nenhuma reivindica `RealCapture`; as capturas pendentes permanecem em §1.4.
+- Nenhum teste visual, build ou instalação foi feito. Também não houve push ou PR.
+- O T3 (`main` móvel) não foi relido: §2.6 repete o inventário `antigravity-t3.md`.
+- Desempenho de `thread_execution_graph` e de árvores profundas continua **não medido**.
+- `bun run check:fingerprint` e a suíte Vitest fora de `src/features/chat` e `src/features/terminal` não foram executados nesta rodada.
+- `cargo fmt --all -- --check` havia reportado diferenças de formatação em vários arquivos do repositório; não aplicou alterações e não foi reexecutado após este lote.
 
 ### 9.1 Auditoria e correções de evidências da matriz
 
@@ -759,7 +763,7 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `tui/cursor`: `resume` corrigido para `registry.rs:398`.
 
 4. **Contrato e documentação**:
-   - §1.2 e §1.3: tabelas e contagens atualizadas (163 `Supported`, 29 `Unknown`, 204 `Unsupported`).
+   - §1.2 e §1.3: na auditoria original, a matriz tinha 18 capabilities e 163 `Supported`, 29 `Unknown` e 204 `Unsupported`; a extensão `plan` e a contagem atual de 19 capabilities estão em §1.3.
    - §1.5: documentada a tensão entre retomada automática de tarefa na Frota e hand-off manual.
    - §1.7: citação de `close_orphan_runs` corrigida para `conversa/store.rs:1068-1082`.
    - §3.2: citação do Codex corrigida para `codex.rs:573-574` e frase de `SWEPT_RUNNING_ERROR` corrigida para esclarecer que `end_reason` não existe na projeção atual.
@@ -922,14 +926,28 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 
 - Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13). O replay das falhas de gravação (§11.11) roda na primeira vez que a fila é usada no processo, não no boot.
 - Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id`. As colunas existem (aditivas) e ficam `NULL`: o desenho (§11.4) pede o evento gravado na transação do passo 1, o que exige um tipo de evento novo na projeção (`runs/harness.rs`), que está em outra frente. Essa migração fica para `chat_send` e `chat_interrupt` (§11.8, itens 1, 4 e 7).
-- Spawn, resposta a pedido e cancelamento não usam recibo nem fila de efeitos. O Parar usa desde a segunda fatia (§11.11).
+- Spawn, resposta a pedido e cancelamento não usam recibo nem fila de efeitos. O Parar usa desde a segunda fatia (§11.11), e o núcleo comum (`harness/command.rs`, §11.13) já serve envio e Parar: `request_answer` e `task_cancel` precisam só de um `ReceiptCommand` novo.
+- Interrupção do Claude sem captura real: não existe captura de `control_request interrupt` depois de uma linha `user` e antes de o turno mostrar que roda. O ADE espera o primeiro aviso do turno (§11.13) em vez de mandar o `interrupt` às cegas. Falta a captura `claude-interrupt-depois-do-user` (`ADE_REPLAY_MODE=record`) para provar o efeito. O `session/cancel` do ACP antes do primeiro `session/update` também não tem captura.
+- O aviso do log só aparece para falhas recebidas com a janela aberta. A conversa não consulta `harness_log_failure` ao abrir, então uma falha de sessão anterior não é mostrada até o replay resolvê-la. Dispensar o aviso vale só nesta janela.
 - Nenhum provider real foi executado.
 
 ### 13. Fase 5: recuperação e reconciliação
 
-Ao abrir o ADE, `app::housekeeping` toma `harness_recovery_lease` no mesmo SQLite antes de reconciliar recibos/efeitos, turnos órfãos, tarefas da Frota, permissões e provisionamentos. A migração aditiva do lease fica em `harness::store::migrate`; `database/schema.rs` e `user_version` não mudam.
+Ao abrir o ADE, `app::housekeeping` toma `harness_recovery_lease` no mesmo SQLite antes de reconciliar recibos/efeitos, intenções de filho, turnos órfãos, tarefas da Frota, permissões e provisionamentos. A migração aditiva do lease e da presença fica em `harness::store::migrate`; `database/schema.rs` e `user_version` não mudam. A reconciliação das intenções (`reconcile_intentions`, §12.9) roda nesse lease mesmo quando outra instância já está aberta; as varreduras que interrompem trabalho continuam de fora nesse caso.
 
-O lease é uma linha singleton (`id = 1`) com `owner` e `lease_until`. A tomada faz `UPDATE` condicional numa transação `Immediate`, aceitando somente linha livre ou vencida. O instante de referência é argumento das funções; o boot injeta `util::now_ts_ms()`. A rotina libera por comparação do dono ao terminar; se o processo cair, outra instância pode tomar depois de cinco minutos. Um segundo boot que encontrar lease válido adia toda a reconciliação. O lease protege o conjunto de sweeps, enquanto o mutex Rust do banco fica livre durante cada operação que não precisa dele.
+O lease é uma linha singleton (`id = 1`) com `owner` e `lease_until`. A tomada faz `UPDATE` condicional numa transação `Immediate`, aceitando somente linha livre ou vencida. O instante de referência é argumento das funções; o boot injeta `util::now_ts_ms()`. A rotina libera por comparação do dono ao terminar; se o processo cair, outra instância pode tomar depois de cinco minutos. Um segundo boot que encontrar lease válido adia toda a reconciliação. O lease protege o conjunto de sweeps, enquanto o mutex Rust do banco fica livre durante cada operação que não precisa dele. O lease **não** diz de quem é o turno: só impede duas varreduras ao mesmo tempo.
+
+### 13.1 Presença da instância
+
+Cada processo vivo grava uma linha em `harness_instance` (`id`, `pid`, `beat_at`, `valid_until`). O id é um UUID deste processo, armado em `presence::start` antes dos turnos (`app::run::start_ui`). O primeiro batimento é síncrono; um laço renova a cada 30 s (`HEARTBEAT_EVERY_MS`), sem olhar trabalho nem fila. A validade é três batimentos (`PRESENCE_TTL_MS` = 90 s): um atraso do laço não parece morte. `valid_until > agora` é presença válida. O `agora` das funções é argumento; o laço injeta `util::now_ts_ms()`.
+
+O dono do que está em execução é uma coluna aditiva e anulável: `chat_run.owner_instance`, `tasks.owner_instance`, `mission_member_state.owner_instance` e `chat_team_provision.owner_instance` (esta no `migrate` do módulo do time). Entra quando o turno abre (`upsert_run` em `inProgress`), quando a tarefa é criada ou passa a `running` (`create_task`, `mark_running`) e quando um integrante entra em `provisioning`. Sem id de processo armado (os testes que não sobem o laço), a coluna fica vazia.
+
+`conversa::store::sweep_orphans`, `runs::sweep_orphans` e as reconciliações de integrante pulam a linha cujo dono tem presença válida. Dono vazio ou só espaços é dado antigo: a varredura marca como antes. Presença vencida é instância morta: o turno vira `interrupted` e a tarefa `running`/`ready` vira `failed`, como hoje. Pedido de chat de um turno protegido não expira. O Parar de uma conversa (`close_orphan_runs` com conversa dada) não consulta presença: ele fecha o turno de propósito.
+
+O handshake em arquivo (`other_instance_alive`) continua: se ele vê outra instância, o boot não varre. Isso protege dado antigo sem dono. Se o handshake falha e a outra instância está no mesmo banco, a presença é o que segura o trabalho dela. Uma queda só aparece para a varredura depois que `valid_until` vence (até 90 s depois do último batimento).
+
+Testes: `harness::test_boot` com duas conexões no mesmo arquivo temporário e o tempo injetado. A instância B não marca o turno nem a tarefa de A; marca o da presença vencida e o sem dono.
 
 Decisões da reconciliação de efeitos:
 
@@ -982,7 +1000,7 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 | Desfecho | Quando | `sent` | Recibo |
 |---|---|---|---|
 | `sent` | o motor mandou a interrupção nesta chamada | `true` | `accepted` |
-| `deferred` | Codex com o `turn/start` ainda sem resposta: o Parar fica pendente em `codex_parar` e sai no `turn/started` | `false` | `accepted` |
+| `deferred` | Codex com o `turn/start` ainda sem resposta; Claude e OpenCode com o turno ainda sem aviso do agente (§11.13): o Parar fica pendente em `codex_parar` e sai no primeiro aviso do turno | `false` | `accepted` |
 | `no_turn` | não há turno: nada vai ao agente; o que ficou aberto no banco é fechado, como antes | `false` | `accepted` |
 | erro do motor | o motor não disse se a parada chegou | `false` | `unknown`, e o erro volta à chamada |
 
@@ -1002,7 +1020,7 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 
 - Tela: `chat_thread_interrupt` aceita `client_request_id` e devolve o recibo quando há id. A UI não foi alterada e continua chamando sem o id.
 - CLI e MCP: `ags chat stop` e `chat_stop` documentam o id; a skill sobe para 1.68.0.
-- Nenhuma tela mostra o aviso `cc-harness-log-failed` nem `logged: false` ainda. O sinal existe; a apresentação não.
+- O aviso `cc-harness-log-failed` aparece na conversa afetada desde a terceira fatia (§11.13). `logged: false` ainda não tem tela.
 
 **`event_sequence` e `causation_event_id`:** continuam `NULL`, pelo motivo de §11.9.
 
@@ -1020,7 +1038,7 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 
 - Nenhum provider real nem CLI real foi executado. Os testes usam um motor de mentira que conta as chamadas.
 - Claude e OpenCode sem turno (`no_turn`): o caminho foi lido no código, sem teste com sessão viva.
-- Corrida entre um Parar e o primeiro envio de Claude ou OpenCode: a parada pode fechar, no banco, um turno que acabou de abrir. O Codex já tem essa proteção (`starting`); os outros motores ainda não. Fica para uma fatia própria.
+- Corrida entre um Parar e o primeiro envio de Claude ou OpenCode: resolvida na terceira fatia (§11.13), com testes sem processo. A captura real dessa janela continua faltando (§11.9).
 - Falha de gravação com lock real do SQLite não foi provada: a injeção de falha é uma closure.
 - Replay só roda na primeira fila do processo, não no boot (§13). Falhas da Frota não são repetidas.
 - Desempenho não medido. `ags test affected` e `cargo clippy` não foram rodados.
@@ -1048,6 +1066,46 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 **Provado** (`cargo test --lib conversa`): `test.rs:779-901` (o guarda, com closures e sem processo nem relógio: recusa antes de qualquer evento → turno novo e aviso, na ordem `run:<id>`, `forget`, `notice`, `run:-`; falha depois de eventos → nenhuma repetição e id mantido; `file not found` de ferramenta → nenhuma repetição; retomada que funciona → nenhuma sessão nova e nenhum aviso; turno novo que falha → não repete; sem id remoto; erro sem explicação; turno concluído) e `test_motores.rs:465-489` e `:907-920` (os classificadores, com frases positivas e negativas).
 
 **Não verificado:** nenhum CLI real foi executado. A ligação em `cursor.rs`/`agy.rs` (contagem das linhas do stdout, captura do stderr, limpeza do banco e gravação do aviso) não tem teste de ponta a ponta; só o guarda e os classificadores têm. O aviso não foi visto na tela.
+
+### 11.13 Fase 2, terceira fatia: núcleo comum, Parar na abertura do turno e aviso do log na tela
+
+**Objetivo:** fechar os três itens que a segunda fatia deixou abertos: um núcleo comum para os recibos de comando, a corrida entre o Parar e o primeiro envio no Claude e no OpenCode, e o aviso de falha do log na conversa afetada.
+
+**Núcleo comum** (`harness/command.rs`). `send_receipt` e `stop_receipt` viram tipos que implementam `ReceiptCommand`: a `Spec` (tipo do efeito, limite de tentativas, prazo do lease e o rótulo das mensagens de erro), o `settle` (o resultado vira um `Settlement`: `Applied`, `NotApplied` ou `Unknown`) e as respostas (`replay` e `reply`). O núcleo faz aceitar, reclamar, concluir e a repetição, uma vez só. O que não mudou: a chave `(kind, caller_key, request_id)`, o prefixo `chat-send:` e `chat-interrupt:` e o hash do pedido. Um teste fixa esses valores, porque recibos já gravados dependem deles. `send_receipt_test` e `stop_receipt_test` não foram alterados.
+
+**A corrida** (o guarda de `codex_parar.rs`, agora usado pelos três motores):
+- **Claude:** o id do turno nasce antes da escrita da mensagem (`Session::ensure_turn`, sob o guarda). Um Parar que chega daí em diante vê o turno, fica `deferred` e não toca no banco. O `control_request interrupt` sai uma vez, no primeiro aviso do turno (`is_turn_line`: `system/status`, `stream_event`, `assistant` ou `user`), depois das saídas da linha. Uma escrita que falha desfaz a abertura.
+- **OpenCode (ACP):** o `session/cancel` sai só no primeiro `session/update` de conteúdo do turno (`is_turn_update`). Um `session/prompt` que responde sem aviso descarta a pendência.
+- **Banco:** o fechamento de órfãos do Parar (`api::close_idle_orphans`) roda sob o lock do banco e não fecha nada enquanto há turno rodando ou abrindo (`turn_busy`, que inclui o `starting` do Codex). Se um turno começa entre a decisão e o fechamento, o Parar é registrado nele.
+
+**O `interrupt` do Claude vale depois da linha `user`?** Não está provado, e o ADE não conta com isso. O que as capturas mostram:
+- `claude-interrompido`: o `interrupt` chega com o assistente já em streaming (depois do `message` de início) e é honrado (`aborted_streaming`, `still_queued: []`). O aviso escolhido (`stream_event`, `assistant`) cai nesse mesmo ponto.
+- `claude-steer-sem-ferramenta`: uma linha `user` escrita no meio do turno não é aplicada na hora. Vira fila e só roda como turno seguinte, depois do `result`, com um `status: requesting` novo.
+- A resposta ao `interrupt` traz `still_queued`: mensagem enfileirada é contada à parte do turno em curso.
+
+Nenhuma captura tem `interrupt` depois de uma linha `user` e antes do primeiro aviso do turno. O Codex tem a prova dessa janela (`codex-interrupt-antes-do-started`: `-32600`), e o Claude não. Por isso o Parar espera o aviso. Se o CLI aceitasse o `interrupt` ali, o custo é um Parar que sai um pouco depois; se não aceitasse, o Parar não se perde.
+
+**O aviso do log na conversa.** A conversa estruturada mostra `LogFailureNotice` (região `role="status"`, sempre no DOM, com o motivo sanitizado e o botão «Dispensar aviso»). O sinal `cc-harness-log-failed` entra no store (`recordLogFailure`) só quando traz `threadId`; a falha de tarefa da Frota não aparece no chat. Dispensar vale nesta janela: a falha continua em `harness_log_failure`. Não cria mensagem no chat.
+
+**O que foi verificado**
+- Testes primeiro, sem processo: `conversa::test_parar_turno` (11 testes). Com o guarda do Claude desligado (mutação temporária: o Parar manda o `interrupt` na hora) e sem a checagem de turno ocupado no fechamento de órfãos, quatro testes falham nas asserções certas: o `interrupt` sai antes do primeiro aviso do turno (três casos) e o turno que está abrindo é fechado no banco. Depois da restauração (SHA-256 conferido), os 11 passam.
+- `cargo test --lib --bin ags` (a suíte do CI, no estado desta fatia): lib com 2940 passando, 0 falhando e 29 ignorados; bin `ags` com 53 passando. Os 14 testes novos desta fatia estão nessa conta. O teste pré-existente `memory::usage::test::registra_e_aplica_retencao_por_workspace` levou mais de 60 s sozinho, e a suíte inteira 479 s; não investiguei a causa.
+- Subconjunto no estado restaurado (`test_parar_turno`, `send_receipt_test`, `stop_receipt_test`, `test_codex_parar`, `harness::test_command`): 53 passam, 0 falham. `send_receipt_test` e `stop_receipt_test` passam sem alteração. O hash e a chave pinados em `test_command` batem com o código.
+- Avisos do build: 21, nenhum em arquivo desta fatia.
+- `node scripts/fingerprint.mjs`: ok (`schema-sqlite 96507e01a45b`, `protocolo-ipc 8db93c467088`). Nenhum arquivo de schema ou de protocolo foi tocado.
+- `bunx tsc --noEmit`: ok. `bun run check:i18n`: ok, 0 achados. `bun run check:test-lint`: ok, 40 do baseline e nenhum novo. `bun run check:babel`: ok, 1390 arquivos.
+- `bunx vitest run src/features/chat src/i18n`: 129 arquivos e 947 testes passando, incluídos os 10 novos do aviso.
+
+**O que não foi verificado**
+- Nenhum CLI real foi executado. Os testes usam sessões sem processo e o motor de mentira do guarda.
+- A captura do Claude com `interrupt` depois de `user` (acima). Falta `claude-interrupt-depois-do-user`.
+- OpenCode: a `Session` guarda `AppHandle`, então não há teste de ponta a ponta. A corrida do ACP é provada no guarda (`StopGate`), com a mesma sequência de chamadas de `opencode.rs`. A ordem do `confirm_turn` no `dispatch` do Claude também não tem teste: o `dispatch` precisa de `AppHandle`.
+- Falha de gravação com o lock real do SQLite: a injeção continua sendo uma closure.
+- O aviso só mostra falhas recebidas com a janela aberta (ver §11.9).
+- `codex_parar.rs` manteve o nome, porque a matriz de capabilities e os docs citam o caminho. Renomear é tarefa separada.
+- A ordem do `confirm_turn` no `dispatch` do Claude (depois das saídas da linha) não tem teste: o `dispatch` precisa de `AppHandle`. Foi conferida por leitura.
+- Um Parar pendente espera o primeiro aviso do turno. Se o Claude ficar mudo com o processo vivo, o Parar espera até o turno acabar ou o processo cair. Não há prazo de reenvio, e essa escolha é do usuário. Um turno que termina sem nenhum aviso de conteúdo descarta o Parar pendente.
+- `cargo clippy --all-targets` não foi rodado. A linha de base do HEAD, antes desta fatia, não foi medida nesta sessão. Desempenho não medido.
 
 ## 12. Fase 4: delegação única (`delegate_agent` com três destinos)
 
@@ -1136,18 +1194,20 @@ Os erros de delegação voltam como texto `"<código>: <mensagem>"` (`isError` n
 
 ## 12.9 Entrega assíncrona e persistente do resultado do filho (Fase 4, o que ficou aberto)
 
-**Objetivo:** um filho delegado com `mode = async` (conversa filha, tarefa da Frota ou sessão conectada) termina, e o resultado chega ao pai **mesmo que o app feche no meio**, como dado não confiável, limitado, **uma única vez**. Código: `harness/child_delivery.rs` (tudo em SQL sobre `&Connection`, sem relógio nem app), o laço em `ipc/commands/child_delivery.rs`, o registro nos três pontos de delegação (`ipc/commands/conversas.rs::chat_new`, `runs/orchestration.rs::delegate_task`, `ipc/commands/delegate.rs`) e a projeção em `runs/harness.rs`. Testes: `harness/child_delivery/test.rs`.
+**Objetivo:** um filho delegado com `mode = async` (conversa filha, tarefa da Frota ou sessão conectada) termina, e o resultado chega ao pai **mesmo que o app feche no meio**, como dado não confiável, limitado, **uma única vez**. Código: `harness/child_delivery.rs` (tudo em SQL sobre `&Connection`, sem relógio nem app), o laço em `ipc/commands/child_delivery.rs`, o registro nos três pontos de delegação (`ipc/commands/conversas.rs::chat_new`, `runs/orchestration.rs::delegate_task`, `ipc/commands/delegate.rs`) e a projeção em `runs/harness.rs`. Testes: `harness/child_delivery/test.rs` e `harness/test_boot.rs`.
 
 ### 12.9.1 O desenho em quatro peças
 
 | Peça | O que é | Onde |
 |---|---|---|
-| Acompanhamento | uma linha por filho delegado em `async`, gravada na delegação: tipo, filho, pai (`thread:<id>` ou `tab:<id>`), título, agente, turno de origem do pai, e (sessão) a mensagem de delegação | `harness_child_watch` (aditiva, criada por `child_delivery::migrate`, chamada de `harness::store::migrate`) |
+| Acompanhamento | uma linha por filho delegado em `async`, gravada **na mesma transação** que cria o filho: tipo, filho, pai (`thread:<id>` ou `tab:<id>`), título, agente, turno de origem do pai, e (sessão) a mensagem de delegação. Estado `watching`. Se a criação sai do SQLite (processo ou aba), a linha nasce antes, em `intended`, e o boot a promove ou cancela | `harness_child_watch` (aditiva, criada por `child_delivery::migrate`, chamada de `harness::store::migrate`) |
 | Efeito | o **fim** vira um efeito `child_result`, `retry_safe = 1`, `max_attempts = 5`, lease de 60 s, chave `child_result:<tipo>:<filho>` | `harness_effect` (Fase 2) |
 | Recibo | `kind = child_result`, `caller_key = <pai>`, `request_id = <tipo>:<filho>`; fica `accepted` quando entregue e `retryable` quando o pai estava fechado | `harness_command_receipt` (Fase 2) |
 | Aviso | uma mensagem `notice` (raw) do pai para ele mesmo na fila durável, `client_id` próprio | `peer_queue` (a mesma fila e o mesmo entregador do vigia do chat) |
 
 `mode = wait` **não** registra nada: o pai já recebe o resultado na própria chamada, e um segundo aviso seria duplicata. Sem registro, um filho que termina nunca gera entrega.
+
+**A mesma transação, ou uma intenção.** `chat_new` em modo async (`create_child_async`) grava o acompanhamento no mesmo `COMMIT` da conversa e do recibo. `delegate_task` grava no mesmo `COMMIT` da tarefa (`plan_tasks_watched`). Desfazer a transação desfaz os dois; não fica filho sem acompanhamento. A sessão conectada (`ipc/commands/delegate.rs`) manda a mensagem para uma aba ou um processo antes de saber o `message_id`: a linha nasce `intended` **antes** do envio e, com a mensagem aceita, passa a `watching` (`activate`). No boot, dentro do lease do §13 e **antes** das varreduras, `reconcile_intentions`: intenção cujo filho existe (conversa, tarefa ou mensagem `delegate:<pedido>` que não foi recusa) vira `watching`, e o id da mensagem entra na linha; intenção sem filho vira `cancelled` e não gera entrega. `settle` só olha `watching`.
 
 O resultado **não é copiado** para tabela nenhuma do harness. Na hora de entregar (e de desenhar o painel), `inspect` lê o registro nativo do filho (a fala do agente em `chat_item`, `tasks.result`, a resposta na fila). O efeito e o recibo guardam só ids e o canal (`peer:<id>`); um teste confere que o texto do agente nunca aparece neles.
 
@@ -1212,11 +1272,12 @@ A projeção (`runs/harness.rs`) lê `harness_child_watch` dos pais da linhagem 
 - Rust: fim de cada tipo gera exatamente uma entrega; rodar de novo não entrega outra; turno em andamento não é fim; só o primeiro turno conta; queda entre o fim e a entrega, e com o efeito reclamado (lease vivo e vencido), entrega uma vez; mensagem já na fila com a mesma chave conta por referência; resultado cortado e marcado; texto hostil não fecha nem abre o envelope nem cria linhas; o texto do agente não vai ao efeito nem ao recibo; pai fechado, apagado ou aba inexistente não recebe e nada fica na fila; sessão por resposta, por turno com a chave do vigia, e turno anterior à delegação não conta; `mode = wait` (sem registro) não entrega; a projeção mostra a sessão com tipo, agente, estado, origem e resultado marcado.
 - Vitest: `connected_session` aparece na árvore, com os campos acima, sem botão e sem comando de parada.
 - Sem relógio real (o `agora` é um número) e sem processo real.
+- `harness::test_boot`: duas conexões no mesmo SQLite temporário. Intenção com filho (conversa, tarefa, mensagem de sessão) vira acompanhamento e a entrega sai uma vez; intenção sem filho é cancelada. Rollback da transação que cria a conversa e o acompanhamento não deixa nenhum dos dois. `create_child_async` já grava `watching`. Presença válida de A impede B de marcar o turno e a tarefa; presença vencida e dono vazio são marcados. O prazo vence em `valid_until`, não um milissegundo antes.
 
 **Não verificado**
 - Nenhum provider, sessão ou terminal real: o "pai" é uma conversa do banco em memória, e a fila é a tabela. A cola do laço (`ipc/commands/child_delivery.rs`), o registro em `chat_new`/`delegate_task`/`delegate.rs` e a chamada do `housekeeping` **não têm teste de ponta a ponta** (dependem de `AppHandle`).
 - O consumidor da fila digitando o aviso no pai (conversa livre, terminal em silêncio) é o de sempre e não foi exercitado aqui.
-- **Janela entre criar e registrar:** se o app cair depois de criar o filho e antes de registrar o acompanhamento, esse filho não entrega sozinho. A repetição do mesmo `client_request_id` (o que o agente faz quando perde a resposta) registra de novo. Para a sessão, a resposta dela segue pelo canal normal.
+- Queda entre criar o filho e gravar o acompanhamento: a conversa e a tarefa da Frota nascem na mesma transação, então ou os dois existem ou nenhum. A sessão deixa `intended`; o boot entrega se a mensagem existe e cancela se não existe (`harness::test_boot`, duas conexões no mesmo arquivo, `agora` injetado).
 - Sessão de **terminal** que termina sem responder não tem fim observável (não há como o ADE provar). Sessão delegada por um terminal-pai não aparece no painel.
 - Corrida entre o vigia e a entrega do mesmo fim na mesma instância: coberta pela chave comum; não testada com dois laços reais.
 - Sem captura de tela do nó novo; sem medição de desempenho (a projeção ganhou, por sessão, uma a três leituras).

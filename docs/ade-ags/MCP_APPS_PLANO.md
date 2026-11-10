@@ -178,7 +178,7 @@ flowchart TD
 
 ## 7. Fundação segura (fatia entregue)
 
-O desenho original deste plano (seção 4) previa o parser no Rust primeiro e, na fatia 2, um contêiner que já aceitaria `https:` em imagens. A fatia autorizada foi outra: **só o contêiner e o ciclo de vida**, sem o app chamar ferramenta, postar mensagem ou abrir tela cheia. O campo citado na fatia 1 original (`application/vnd.mcp.app+html`) **não é** o da spec estável.
+O desenho original deste plano (seção 4) previa o parser no Rust primeiro e, na fatia 2, um contêiner que já aceitaria `https:` em imagens. A fatia 1 autorizada foi outra: **só o contêiner e o ciclo de vida**, sem o app chamar ferramenta, postar mensagem ou abrir tela cheia (a fatia 2, em 7.1, liberou mensagem e tela cheia com aprovação). O campo citado na fatia 1 original (`application/vnd.mcp.app+html`) **não é** o da spec estável.
 
 ### Campo do ext-apps (spec 2026-01-26, `specification/2026-01-26/apps.mdx`)
 
@@ -198,15 +198,37 @@ No resultado que a timeline já guarda em `tool.output`, o mesmo objeto aparece 
 - `parseMcpAppResource` acha o recurso. A linha da ferramenta (`ToolRow`) mostra o app no lugar do `<pre>` do resultado.
 - Contêiner: iframe `srcdoc`, `sandbox="allow-scripts"` (a constante `DESIGN_SANDBOX`, sem `allow-same-origin`), `referrerpolicy="no-referrer"`. CSP reaproveitada de `isolatedFrame.ts` (`ISOLATED_FRAME_CSP`, a mesma da prévia visual: `connect-src 'none'`, `navigate-to 'none'`, sem `https:`). `<meta http-equiv>` e `<base>` saem com `stripUnsafeHead` de `srcdoc.ts`. O tema entra como variáveis CSS via `appThemeDeclarations()`.
 - Navegação: o script do srcdoc cancela clique em link externo, submit e `window.open`, e avisa `navigate-away`. O host desmonta o iframe e mostra que o app parou. Âncora (`#`) fica na página.
-- Qualquer JSON-RPC com `id` (`tools/call`, `ui/message`, `ui/request-display-mode`, `ui/initialize`, …) volta erro `-32601` com a mensagem `não suportado ainda`, e o método entra no registro da sessão. Notificação sem `id` só é registrada. Erro do app não sobe para a timeline (`McpAppBoundary` e `try/catch` na ponte).
+- Na fatia 1, qualquer JSON-RPC com `id` (`tools/call`, `ui/message`, `ui/request-display-mode`, `ui/initialize`, …) volta erro `-32601` com a mensagem `não suportado ainda`, e o método entra no registro da sessão. Notificação sem `id` só é registrada. Erro do app não sobe para a timeline (`McpAppBoundary` e `try/catch` na ponte). Desde a fatia 2 isso vale para o que não tem handler (ver 7.1).
 - `close()` tira o listener de `message`. Esta fatia não arma timer no host. O documento do iframe some com o quadro, e os timers de lá vão junto.
 
-### O que falta
+## 7.1 Fatia 2: o app aparece, e age só com aprovação (entregue)
 
-- O canal da timeline (`src-tauri/src/canal/timeline.rs`, `result_text`) ainda só junta blocos `text` e corta em 4.000 caracteres. Um recurso que não esteja nesse texto não aparece. Não houve mudança de schema.
-- `resources/read` a partir de `_meta.ui.resourceUri`, com o agente da conversa vivo.
-- Aprovar ferramenta (inclusive só leitura), mensagem na thread, nota de contexto e tela cheia com a guarda de 5 segundos. A CSP declarada pelo servidor (`connectDomains` / `resourceDomains`) continua fechada.
-- Rede externa, mesmo CDN pública, continua desligada.
+### O recurso chega à tela
+- `canal/timeline.rs`: `app_resource_of(content)` acha o recurso `ui://` (`content[].resource`, `contents[]`, ou o mesmo JSON dentro de um bloco `text`) e o item ganha o campo próprio `appResource { uri, mimeType, html }`, **fora** do `output`, que continua cortado em 4.000 caracteres. O `blob` base64 já vai decodificado.
+- Limite: `APP_RESOURCE_MAX` = 512 KiB de HTML. Acima disso o recurso inteiro fica de fora (HTML cortado não é app) e o base64 que já passa do limite nem é decodificado. URI sem `ui://` ou MIME sem `text/html;profile=mcp-app` não entra.
+- Os dois caminhos usam a mesma função: a leitura do transcript (`canal/timeline.rs`) e a conversa estruturada do Claude (`conversa/claude_map.rs`, inclusive o resultado que chega antes do uso). O Codex e os outros motores não foram tocados: o `mcpToolCall` do Codex não traz o resultado hoje.
+- Sem mudança de schema: o item é JSON (`body`) e o campo é opcional (`serde(default)`, some do JSON quando vazio). Efeito colateral: o store da conversa passa a gravar até 512 KiB a mais por app.
+- A tela usa `item.appResource` (revalidado) e só cai para o texto do `output` em itens antigos. O servidor mostrado no diálogo sai do nome da ferramenta (`mcp__servidor__ferramenta`, `servidor.ferramenta`) ou do host do `ui://`.
+- **Próximo passo, não feito:** quando a ferramenta só aponta `_meta.ui.resourceUri` sem o HTML, o host da spec faz `resources/read` no servidor. A ADE não tem cliente MCP do lado do host que faça isso com segurança (o `ipc/mcp.rs` é o servidor da própria ADE para os agentes), então a ferramenta aparece como ferramenta comum. Quando houver esse cliente, a leitura entra no mesmo campo `appResource`.
+
+### Aprovação humana (`mcpAppHandlers.ts`, `McpAppApprovalDialog.tsx`)
+- O diálogo é da ADE (`AppDialog`), **fora do iframe**, com servidor, ferramenta e argumentos (ou o texto da mensagem), como dados em bloco. Fechar (X, Esc) é negar: o app recebe erro (-32000). Um segundo pedido com a aprovação aberta recebe -32001, sem empilhar diálogos. Desmontar o quadro com aprovação aberta nega.
+- `ui/message` **sempre** pede. Aprovada, o texto vai para o composer da conversa visível pelo `insertIntoComposer` (o caminho que já existia), marcado `[App MCP «servidor»] …`. **Nada é enviado sozinho.** Só texto, até 4.000 caracteres; imagem e recurso ficam de fora.
+- `tools/call`: a política está pronta e testada (pede aprovação, salvo ferramenta `readOnlyHint`; negado devolve erro e nada executa), mas **só existe com um `toolHost`**. Como não há caminho seguro para executar ferramenta do servidor do app pelo host, a timeline não passa `toolHost`, e `tools/call` **continua recusado com -32601**, sem diálogo. Ligar é passar um `toolHost` (`isReadOnly` + `call`) ao `McpAppFrame` quando o cliente MCP do host existir. A anotação `readOnlyHint` também vem desse cliente (`tools/list`).
+- Todo o resto (`ui/initialize`, …) segue recusado com -32601.
+
+### Tela cheia (`mcpAppFullscreen.ts`, `McpAppFrame.tsx`)
+- O app avisa o clique (`user-gesture`, só `isTrusted`). O host só aceita o aviso com o `iframe` em foco (`document.activeElement`), porque o app pode postar a mensagem sozinho; o foco só vai para lá por clique da pessoa.
+- Qualquer `pointerdown` ou `keydown` fora do app (captura na janela) marca atividade. O clique no app **não conta** se houve atividade fora nos 5 s anteriores, e atividade depois do clique, antes do pedido, também o invalida. O clique vale para um único pedido, em até 2 s.
+- `ui/request-display-mode` com `fullscreen` e sem clique válido devolve `{ mode: "inline" }` (a spec deixa o host devolver o modo real). `inline` volta à conversa.
+- Saída: `Escape` fora do app (teclas dentro do iframe não chegam ao host), botão de canto («Voltar à conversa», do host) e qualquer aprovação pendente, do app ou outro diálogo da ADE (`useAskStore`), que também impede de abrir.
+- É o **mesmo iframe**: só a classe do pai muda (`fixed inset-0`), e o quadro mantém a altura. Reparentar o iframe o recarregaria.
+
+### O que falta
+- Executar `tools/call` (cliente MCP no host) e `resources/read` a partir de `_meta.ui.resourceUri`.
+- Nota de contexto (`setContextNote`, fatia 4) e vivacidade ligada ao agente da conversa (fatia 5).
+- Conferir na instância isolada: tela cheia com `position: fixed` dentro da timeline (nenhum ancestral com `transform` o prende) e o foco do `iframe` no WebKit do Tauri.
+- A CSP declarada pelo servidor (`connectDomains` / `resourceDomains`) e a rede externa continuam fechadas.
 
 ## 8. O que Exige OK Explícito do Usuário Antes de Implementar
 

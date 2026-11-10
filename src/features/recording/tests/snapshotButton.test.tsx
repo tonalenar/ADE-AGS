@@ -41,7 +41,8 @@ afterEach(async () => {
 
 async function render(target: string | null): Promise<HTMLButtonElement | null> {
   await act(async () => { root.render(<DesktopSnapshotButton target={target} />); });
-  return host.querySelector("button");
+  // O seletor de tela ou janela fica antes da câmera: a câmera é a que tem o atributo do atalho.
+  return host.querySelector<HTMLButtonElement>("[data-chat-desktop-snapshot]");
 }
 
 /** Clica e deixa a promessa da captura terminar, sem relógio real. */

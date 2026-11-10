@@ -34,39 +34,70 @@ fn run(app: &AppHandle, args: &Value) -> Result<Value, DelegateError> {
         &identity,
         &crate::util::now_ts_ms,
         || revalidate(app, &db, &from, &request),
-        |target| send(app, &from, target, &request),
+        |target| {
+            // A sessão nasce fora desta transação (a mensagem vai para uma aba ou um processo).
+            // A intenção fica gravada antes; o boot promove ou cancela (§12.9).
+            if request.mode == Mode::Async {
+                intend_session(&db, &from, &request, target);
+            }
+            send(app, &from, target, &request)
+        },
     )?;
     watch_result(&db, &from, &request, &response);
     Ok(response)
 }
 
-/// `mode = async`: o resultado da sessão chega ao pai quando ela terminar (contrato §12.9). Só depois de a mensagem
-/// ter sido aceita; a repetição do mesmo pedido (recibo `accepted`) também registra, o que cura uma queda entre
-/// enviar e registrar. Falhar aqui nunca desfaz a delegação: a resposta da sessão segue pelo canal de sempre.
+/// `mode = async`: o resultado da sessão chega ao pai quando ela terminar (contrato §12.9). A intenção já foi
+/// gravada antes do envio. Aqui ela vira acompanhamento ativo, com o id da mensagem. A repetição do recibo
+/// `accepted` também ativa. Falhar aqui nunca desfaz a delegação: o boot reconcilia a intenção.
 fn watch_result(db: &DbConnection, from: &str, request: &SessionRequest, response: &Value) {
     if request.mode != Mode::Async || response.get("deliveryState").and_then(Value::as_str) != Some("accepted") {
         return;
     }
     let Some(session) = response.get("to").and_then(Value::as_str) else { return };
     let Ok(conn) = db.lock() else { return };
+    let message_id = response.get("messageId").and_then(Value::as_i64);
+    if let Err(error) = write_session(&conn, from, request, session, message_id, true) {
+        eprintln!("[harness] não foi possível acompanhar a sessão delegada: {error}");
+    }
+}
+
+fn intend_session(db: &DbConnection, from: &str, request: &SessionRequest, session: &str) {
+    let Ok(conn) = db.lock() else { return };
+    if let Err(error) = write_session(&conn, from, request, session, None, false) {
+        eprintln!("[harness] não foi possível gravar a intenção de acompanhar a sessão: {error}");
+    }
+}
+
+fn write_session(
+    conn: &rusqlite::Connection,
+    from: &str,
+    request: &SessionRequest,
+    session: &str,
+    message_id: Option<i64>,
+    activate: bool,
+) -> Result<(), String> {
     let parent_ref = child_delivery::parent_ref_of_caller(from);
     let child_ref = format!("{session}#{}", request.request_id);
-    let title = request.to.clone();
-    let agent = child_delivery::session_agent(&conn, session);
-    let turn = child_delivery::current_turn(&conn, &parent_ref).ok().flatten();
+    let agent = child_delivery::session_agent(conn, session);
+    let turn = child_delivery::current_turn(conn, &parent_ref).ok().flatten();
     let spec = child_delivery::WatchSpec {
         kind: delegate::Target::ConnectedSession,
         child_ref: &child_ref,
         parent_ref: &parent_ref,
-        title: &title,
+        title: &request.to,
         agent_id: &agent,
         parent_turn_id: turn.as_deref(),
         session_id: Some(session),
-        message_id: response.get("messageId").and_then(Value::as_i64),
+        message_id,
     };
-    if let Err(error) = child_delivery::register(&conn, &spec, crate::util::now_ts_ms()) {
-        eprintln!("[harness] não foi possível acompanhar a sessão delegada: {error}");
+    let now = crate::util::now_ts_ms();
+    if activate {
+        child_delivery::activate(conn, &spec, now)?;
+    } else {
+        child_delivery::intend(conn, &spec, now)?;
     }
+    Ok(())
 }
 
 /// A revalidação do instante do envio: lê as sessões de novo e confere tudo antes de escrever. Uma aba

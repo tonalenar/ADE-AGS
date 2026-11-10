@@ -283,6 +283,133 @@ fn classify_caller_with(session: Option<&str>, from: Option<&str>, client_pid: O
     if inside_an_ade_process(client, parent) { Err(ERR_STRIPPED.into()) } else { Ok(Caller::Outside) }
 }
 
+// ── Quem chama, para a tabela de autorização por método (HOST_REMOTO.md, F-09) ─────────────
+
+const ERR_TASK_AND_TAB: &str = "Este pedido declara uma tarefa da Frota e uma aba ao mesmo tempo. Uma tarefa age como tarefa e uma aba como aba: \
+não misture `taskId` com `from`, `tabId` ou `ADE_SESSION`. O comando foi recusado.";
+const ERR_NOT_IN_ADE: &str = "Este pedido declara a identidade de uma aba ou conversa do ADE AGS (ADE_TAB_ID, ADE_SESSION ou --from), mas o processo que chamou \
+não está dentro dela. O comando foi recusado: não defina essas variáveis à mão. Rodando fora do app, use o `ags` sem elas.";
+
+/// Quem chama o IPC, depois de o servidor provar o que pôde. Diferente de [`Caller`], que só separa "aba" de "fora", este
+/// também conhece a **tarefa da Frota** e deduz a aba pela árvore de processos quando o chamador não declara nada.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Principal {
+    /// Terminal de aba ou conversa por protocolo (`thread:<id>`), provado pelo processo (e pelo token, se veio).
+    Tab(String),
+    /// O agente de uma tarefa da Frota, provado pelo PID registrado pelo supervisor.
+    Task(String),
+    /// Fora de todo processo do ADE e sem identidade declarada: a pessoa num terminal próprio, ou CI. Não prova que não seja
+    /// um agente que se destacou da árvore (`setsid`, duplo fork): é o limite conhecido (HOST_REMOTO.md, F-09).
+    Outside,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Owner {
+    Tab(String),
+    Task(String),
+}
+
+/// O dono (aba, conversa ou tarefa) cujo processo-raiz é `pid` ou um ancestral dele. O mais próximo vence.
+fn owner_of(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> Option<Owner> {
+    let roots: Vec<(Owner, u32)> = {
+        let sessions = registry();
+        sessions
+            .by_token
+            .values()
+            .map(|bound| (Owner::Tab(bound.tab.clone()), bound.root_pid))
+            .chain(sessions.conversations.iter().map(|(tab, root)| (Owner::Tab(tab.clone()), *root)))
+            .chain(sessions.task_roots.iter().map(|(task, root)| (Owner::Task(task.clone()), *root)))
+            .collect()
+    };
+    if pid == 0 {
+        return None;
+    }
+    let mut current = pid;
+    let mut seen = Vec::with_capacity(8);
+    for _ in 0..MAX_ANCESTORS {
+        if let Some((owner, _)) = roots.iter().find(|(_, root)| *root == current) {
+            return Some(owner.clone());
+        }
+        if current <= 1 || seen.contains(&current) {
+            return None;
+        }
+        seen.push(current);
+        match parent(current) {
+            Some(next) if next != current && next != 0 => current = next,
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Prova quem chama. `claims` são as abas que o pedido declara (`from`, `tabId`), `task_id` a tarefa declarada e `session` o
+/// `ADE_SESSION`; nenhum vale por si: o que vale é o PID do outro lado do canal de credencial.
+///
+/// - `taskId` declarado: tem de ser o processo da tarefa ([`authorize_task`]); não pode vir junto com aba.
+/// - o cliente está na árvore de uma aba ou conversa: é essa aba, e o que ele declarou (`from`, `tabId`, sessão) tem de bater;
+/// - o cliente está na árvore de uma tarefa: é essa tarefa (e não declara aba);
+/// - fora de toda árvore: [`Principal::Outside`], **desde que não declare identidade**: um `from` sem prova é forjado;
+/// - sem PID (TCP, CLI antiga): recusa, porque nada prova de que lado está.
+pub fn principal_of(session: Option<&str>, claims: &[&str], task_id: Option<&str>, client_pid: Option<u32>) -> Result<Principal, String> {
+    principal_with(session, claims, task_id, client_pid, parent_pid)
+}
+
+fn principal_with(
+    session: Option<&str>,
+    claims: &[&str],
+    task_id: Option<&str>,
+    client_pid: Option<u32>,
+    mut parent: impl FnMut(u32) -> Option<u32>,
+) -> Result<Principal, String> {
+    let clean = |value: &str| {
+        let value = value.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    };
+    let session = session.and_then(clean);
+    let claims: Vec<String> = claims.iter().filter_map(|claim| clean(claim)).collect();
+    if let Some(task) = task_id.and_then(clean) {
+        if session.is_some() || !claims.is_empty() {
+            return Err(ERR_TASK_AND_TAB.into());
+        }
+        authorize_task_with(&task, client_pid, &mut parent)?;
+        return Ok(Principal::Task(task));
+    }
+    if !ancestry_required() {
+        // Sem API de PID do peer (outros Unix): o token é o que há, como em `authorize`.
+        return match (session, claims.first()) {
+            (Some(session), claim) => bound_tab(Some(&session), claim.map(String::as_str)).map(|bound| Principal::Tab(bound.tab)),
+            (None, Some(claim)) if claim.starts_with(crate::chat_team::model::THREAD_PREFIX) => authorize_actor(None, Some(claim), client_pid).map(Principal::Tab),
+            (None, Some(_)) => Err(ERR_MISSING.into()),
+            (None, None) => Ok(Principal::Outside),
+        };
+    }
+    let Some(client) = client_pid.filter(|pid| *pid > 0) else {
+        return Err(ERR_NO_PID.into());
+    };
+    match owner_of(client, &mut parent) {
+        Some(Owner::Tab(tab)) => {
+            if claims.iter().any(|claim| *claim != tab) {
+                return Err(ERR_FORGED.into());
+            }
+            if let Some(session) = &session {
+                if bound_tab(Some(session), Some(&tab)).is_err() {
+                    return Err(ERR_FORGED.into());
+                }
+            }
+            Ok(Principal::Tab(tab))
+        }
+        Some(Owner::Task(task)) => {
+            // O ambiente de uma tarefa headless não tem aba nem sessão: declarar uma é tentar trocar de identidade.
+            if session.is_some() || !claims.is_empty() {
+                return Err(ERR_TASK_AND_TAB.into());
+            }
+            Ok(Principal::Task(task))
+        }
+        None if session.is_some() || !claims.is_empty() => Err(ERR_NOT_IN_ADE.into()),
+        None => Ok(Principal::Outside),
+    }
+}
+
 /// `pid` é (ou descende de) o processo de algum PTY, conversa ou tarefa registrados.
 fn inside_an_ade_process(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
     let roots: Vec<u32> = {
@@ -635,5 +762,107 @@ mod tests {
         assert_eq!(classify_caller(Some(" "), Some(""), Some(1)).unwrap(), Caller::Outside, "campos vazios não são identidade");
         // Sem PID (TCP) não dá para saber de que lado está: recusa.
         assert!(classify_caller(None, None, None).is_err());
+    }
+
+    // ── Principal: quem chama, provado pela árvore de processos (tabela de autorização por método) ──
+
+    /// Uma aba com um processo-raiz de mentira (fora da faixa de PIDs reais), para não se confundir com os outros testes.
+    struct Fake {
+        tab: String,
+        token: String,
+    }
+
+    impl Fake {
+        fn new(root: u32) -> Self {
+            let tab = format!("principal-{}", uuid::Uuid::new_v4());
+            let token = uuid::Uuid::new_v4().to_string();
+            publish_token(&tab, &token, root);
+            Self { tab, token }
+        }
+    }
+
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            release_token(&self.token);
+        }
+    }
+
+    #[test]
+    fn o_principal_de_quem_nao_declara_nada_vem_da_arvore_de_processos() {
+        if !ancestry_required() {
+            return;
+        }
+        let aba = Fake::new(4_100_000_001);
+        let parents = HashMap::from([(4_100_000_003, 4_100_000_002), (4_100_000_002, 4_100_000_001)]);
+        let parent = |pid: u32| parents.get(&pid).copied();
+        // O próprio shell, um filho e um neto (o `ags mcp` do agente) são a aba, sem `ADE_TAB_ID` nem sessão (`env -i`).
+        for pid in [4_100_000_001, 4_100_000_002, 4_100_000_003] {
+            assert_eq!(principal_with(None, &[], None, Some(pid), parent), Ok(Principal::Tab(aba.tab.clone())), "pid {pid}");
+        }
+        // Declarar o que bate (aba e sessão) também serve; campos vazios não são declaração.
+        assert_eq!(principal_with(Some(&aba.token), &[&aba.tab, "", " "], None, Some(4_100_000_003), parent), Ok(Principal::Tab(aba.tab.clone())));
+    }
+
+    #[test]
+    fn identidade_declarada_que_nao_e_a_da_arvore_e_forjada() {
+        if !ancestry_required() {
+            return;
+        }
+        let minha = Fake::new(4_100_000_011);
+        let outra = Fake::new(4_100_000_021);
+        let parents = HashMap::from([(4_100_000_012, 4_100_000_011)]);
+        let parent = |pid: u32| parents.get(&pid).copied();
+        // Dentro da aba `minha`, dizer ser `outra` (por `from`/`tabId` ou pela sessão dela).
+        let forjada = principal_with(None, &[&outra.tab], None, Some(4_100_000_012), parent).unwrap_err();
+        assert!(forjada.contains("ADE_TAB_ID"), "{forjada}");
+        assert!(principal_with(None, &["", &outra.tab], None, Some(4_100_000_012), parent).is_err());
+        assert!(principal_with(Some(&outra.token), &[], None, Some(4_100_000_012), parent).is_err(), "o token de outra aba não prova esta");
+        assert!(principal_with(Some("token-inventado"), &[], None, Some(4_100_000_012), parent).is_err());
+        drop(minha);
+    }
+
+    #[test]
+    fn quem_esta_fora_da_arvore_e_a_pessoa_so_se_nao_declara_identidade() {
+        if !ancestry_required() {
+            return;
+        }
+        let aba = Fake::new(4_100_000_031);
+        let parents = HashMap::from([(4_100_000_041, 4_100_000_040)]);
+        let parent = |pid: u32| parents.get(&pid).copied();
+        // Um terminal próprio, fora de todo processo do ADE.
+        assert_eq!(principal_with(None, &[], None, Some(4_100_000_041), parent), Ok(Principal::Outside));
+        assert_eq!(principal_with(Some(" "), &["", ""], None, Some(4_100_000_041), parent), Ok(Principal::Outside));
+        // Mas dizer ser uma aba sem estar nela é forjar (um `setsid` com o ambiente herdado, `--from` à mão).
+        let forjada = principal_with(None, &[&aba.tab], None, Some(4_100_000_041), parent).unwrap_err();
+        assert!(forjada.contains("não está dentro dela"), "{forjada}");
+        assert!(principal_with(Some(&aba.token), &[], None, Some(4_100_000_041), parent).is_err());
+        // O TCP não traz PID: nada prova de que lado está.
+        assert!(principal_with(None, &[], None, None, parent).unwrap_err().contains("PID"));
+        assert!(principal_with(None, &[&aba.tab], None, Some(0), parent).is_err());
+    }
+
+    #[test]
+    fn o_principal_da_tarefa_vem_do_processo_que_o_supervisor_registrou() {
+        if !ancestry_required() {
+            return;
+        }
+        let tarefa = task_id("principal");
+        register_task_process(&tarefa, 4_100_000_051);
+        let parents = HashMap::from([(4_100_000_053, 4_100_000_052), (4_100_000_052, 4_100_000_051)]);
+        let parent = |pid: u32| parents.get(&pid).copied();
+        // Sem declarar nada, o `ags` do shell do agente da tarefa é a tarefa; declarando o `taskId` certo também.
+        assert_eq!(principal_with(None, &[], None, Some(4_100_000_053), parent), Ok(Principal::Task(tarefa.clone())));
+        assert_eq!(principal_with(None, &[], Some(&tarefa), Some(4_100_000_053), parent), Ok(Principal::Task(tarefa.clone())));
+        // `taskId` de outra tarefa, ou de um processo que não é o dela: recusado.
+        let outra = task_id("outra");
+        assert!(principal_with(None, &[], Some(&outra), Some(4_100_000_053), parent).is_err());
+        assert!(principal_with(None, &[], Some(&tarefa), Some(4_100_000_099), parent).is_err());
+        assert!(principal_with(None, &[], Some(&tarefa), None, parent).is_err(), "o TCP não prova tarefa");
+        // Uma tarefa não é uma aba: declarar as duas é trocar de identidade.
+        assert!(principal_with(None, &["uma-aba"], Some(&tarefa), Some(4_100_000_053), parent).unwrap_err().contains("tarefa"));
+        assert!(principal_with(None, &["uma-aba"], None, Some(4_100_000_053), parent).is_err());
+        release_task_process(&tarefa);
+        // Liberada, o processo dela volta a ser um estranho ao ADE.
+        assert_eq!(principal_with(None, &[], None, Some(4_100_000_053), parent), Ok(Principal::Outside));
     }
 }

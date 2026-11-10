@@ -100,7 +100,7 @@ impl Engine {
                 // `edits` não aparece na tela do Codex, mas continua aceito pela CLI e pelo MCP:
                 // `codex_map` o trata como `safe` (`on-request`, `workspace-write`).
                 access_modes: &["ask", "edits", "safe", "full"],
-                plan: false,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -109,7 +109,7 @@ impl Engine {
             },
             Engine::Claude => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: true,
@@ -118,7 +118,7 @@ impl Engine {
             },
             Engine::OpenCode => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -127,7 +127,7 @@ impl Engine {
             },
             Engine::Antigravity => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -136,7 +136,7 @@ impl Engine {
             },
             Engine::Cursor => EngineCapabilities {
                 access_modes: &["ask", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -190,23 +190,11 @@ pub(crate) fn unsupported_capability_error(
     provider: &str,
     capability: crate::harness::capability::Capability,
 ) -> Option<String> {
-    let matrix_provider = if crate::local_acp::is_local_acp_id(provider) {
-        "local-acp"
-    } else {
-        provider
-    };
-    (crate::harness::matrix::supports(
-        matrix_provider,
+    crate::harness::matrix::unsupported_capability_error(
+        provider,
         crate::harness::capability::Surface::Chat,
         capability,
-    ) == Some(crate::harness::capability::Support::Unsupported))
-    .then(|| {
-        format!(
-            "Capability '{}' não está disponível para '{}' nesta superfície: a matriz marca Unsupported",
-            capability.id(),
-            provider
-        )
-    })
+    )
 }
 
 /// O turno em andamento de uma conversa, em qualquer um dos agentes. `None` = sem processo aberto.
@@ -262,7 +250,7 @@ pub struct NewThread {
 }
 
 pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> {
-    create_inner(db, input, None).map(|outcome| outcome.thread)
+    create_inner(db, input, None, false).map(|outcome| outcome.thread)
 }
 
 /// Identidade estável de um pedido de conversa filha feito pelo harness.
@@ -292,7 +280,17 @@ pub fn create_child(
     input: NewThread,
     identity: &ChildRequestIdentity,
 ) -> Result<ChildThreadOutcome, String> {
-    create_inner(db, input, Some(identity))
+    create_inner(db, input, Some(identity), false)
+}
+
+/// Como [`create_child`], e o acompanhamento do resultado (`harness_child_watch`) entra na **mesma**
+/// transação que grava a conversa e o recibo. Uma queda no meio não deixa filha sem entrega.
+pub fn create_child_async(
+    db: &DbConnection,
+    input: NewThread,
+    identity: &ChildRequestIdentity,
+) -> Result<ChildThreadOutcome, String> {
+    create_inner(db, input, Some(identity), true)
 }
 
 fn existing_child_outcome(
@@ -322,10 +320,14 @@ fn create_inner(
     db: &DbConnection,
     input: NewThread,
     identity: Option<&ChildRequestIdentity>,
+    async_watch: bool,
 ) -> Result<ChildThreadOutcome, String> {
     if let Some(identity) = identity {
         let conn = db.lock().map_err(db_err)?;
         if let Some(outcome) = existing_child_outcome(&conn, identity)? {
+            if async_watch {
+                register_chat_watch(&conn, &outcome.thread)?;
+            }
             return Ok(outcome);
         }
     }
@@ -391,6 +393,9 @@ fn create_inner(
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(db_err)?;
             if let Some(outcome) = existing_child_outcome(&tx, identity)? {
+                if async_watch {
+                    register_chat_watch(&tx, &outcome.thread)?;
+                }
                 tx.commit().map_err(db_err)?;
                 (outcome.thread, false)
             } else {
@@ -429,6 +434,9 @@ fn create_inner(
                     now,
                 )
                 .map_err(db_err)?;
+                if async_watch {
+                    register_chat_watch(&tx, &row)?;
+                }
                 tx.commit().map_err(db_err)?;
                 (row, true)
             }
@@ -477,6 +485,26 @@ fn create_inner(
         thread: row,
         reused: !created,
     })
+}
+
+/// O acompanhamento da conversa filha, na conexão ou na transação de quem está criando.
+fn register_chat_watch(conn: &rusqlite::Connection, row: &ThreadRow) -> Result<(), String> {
+    let Some(parent_ref) = row.parent_ref.as_deref() else { return Ok(()) };
+    crate::harness::child_delivery::register(
+        conn,
+        &crate::harness::child_delivery::WatchSpec {
+            kind: crate::harness::delegate::Target::ProviderChat,
+            child_ref: &row.id,
+            parent_ref,
+            title: &row.title,
+            agent_id: &row.agent_id,
+            parent_turn_id: row.parent_turn_id.as_deref(),
+            session_id: None,
+            message_id: None,
+        },
+        crate::util::now_ts_ms(),
+    )?;
+    Ok(())
 }
 
 fn validate_workspace(conn: &rusqlite::Connection, workspace_id: Option<&str>) -> Result<(), String> {
@@ -692,6 +720,9 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
         row
     };
     let engine = engine_of(&row).map_err(SendError::NotSent)?;
+    if let Some(error) = unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Send) {
+        return Err(SendError::NotSent(error));
+    }
     if crate::local_acp::is_local_acp_id(&row.agent_id) {
         let exists = crate::local_acp::contains(db, &row.agent_id).map_err(SendError::NotSent)?;
         if !exists {
@@ -883,6 +914,9 @@ async fn compact_context_inner(
     }
     let row = thread(db, thread_id)?;
     let engine = engine_of(&row)?;
+    if let Some(error) = unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Compact) {
+        return Err(error);
+    }
     if !engine.capabilities().context_compaction {
         return Err("A compactação pelo ADE está disponível nas conversas Codex e Claude Code".into());
     }
@@ -915,7 +949,8 @@ async fn compact_context_inner(
             }
             send_mode(app, db, thread_id, &command, SendMode::SteerActive, &[]).await.map_err(String::from)
         }
-        _ => unreachable!("capacidade de compactação sem implementação para {engine:?}"),
+        _ => Err(unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Compact)
+            .unwrap_or_else(|| format!("O adapter {engine:?} não implementa compactação apesar da matriz"))),
     }
 }
 
@@ -1046,7 +1081,8 @@ pub async fn thread_goal_action(
             Engine::Claude => {
                 send_mode(app, db, thread_id, "/goal clear", SendMode::SteerActive, &[]).await.map_err(String::from)?;
             }
-            _ => unreachable!(),
+            _ => return Err(unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Goal)
+                .unwrap_or_else(|| "O adapter atual não implementa limpeza de objetivo".into())),
         }
         let conn = db.lock().map_err(db_err)?;
         store::clear_goal(&conn, thread_id).map_err(db_err)?;
@@ -1082,7 +1118,8 @@ pub async fn thread_goal_action(
             }
             thread_goal(db, thread_id)
         }
-        _ => unreachable!(),
+        _ => Err(unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Goal)
+            .unwrap_or_else(|| "O adapter atual não implementa objetivos persistentes".into())),
     }
 }
 
@@ -1156,24 +1193,69 @@ pub async fn stop_with_request(
 /// O corpo do Parar: manda a interrupção se há turno. Sem turno, fecha no banco o que ficou aberto e avisa a tela.
 /// Devolve o que aconteceu (`Sent`, `Pending` ou `NoTurn`).
 async fn stop_now(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Interrupted, String> {
-    // Sem turno nenhum (Codex vivo, mas parado e sem `turn/start` a caminho) também fecha o que ficou aberto no banco.
-    let interrupted = if live_turn(thread_id).is_some() { interrupt(thread_id).await? } else { Interrupted::NoTurn };
+    let row = thread(db, thread_id)?;
+    // A matriz só barra a interrupção de um turno vivo: fechar no banco um turno órfão não depende do motor.
+    if live_turn(thread_id).is_some() {
+        if let Some(error) = unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Interrupt) {
+            return Err(error);
+        }
+    }
+    let interrupted = interrupt_if_live(thread_id).await?;
     if interrupted != Interrupted::NoTurn {
         return Ok(interrupted);
     }
+    // Sem turno nenhum (Codex vivo, mas parado e sem `turn/start` a caminho) também fecha o que ficou aberto no banco.
     let now = crate::util::now_ts_ms();
-    // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
-    let ends: Vec<Item> = {
+    let ends = {
         let conn = db.lock().map_err(db_err)?;
-        let closed = store::close_orphan_runs(&conn, Some(thread_id), now, STOPPED_ORPHAN).map_err(db_err)?;
-        let ids: Vec<String> = closed.iter().map(|(_, run)| format!("end:{run}")).collect();
-        if ids.is_empty() { Vec::new() } else { store::items(&conn, thread_id).map_err(db_err)?.into_iter().filter(|i| ids.contains(&i.id)).collect() }
+        close_idle_orphans(&conn, thread_id, now)?
     };
+    let Some(ends) = ends else {
+        // Um turno começou entre a decisão e o fechamento: o Parar é registrado nele, e nada do banco foi fechado.
+        return interrupt_if_live(thread_id).await;
+    };
+    // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
     for end in ends {
         super::events::emit(app, thread_id, "item", json!({ "item": end }));
     }
     super::events::emit(app, thread_id, "phase", json!({ "phase": "idle" }));
     Ok(Interrupted::NoTurn)
+}
+
+/// O Parar quando há um agente vivo; sem agente, não há turno para parar.
+async fn interrupt_if_live(thread_id: &str) -> Result<Interrupted, String> {
+    if live_turn(thread_id).is_some() { interrupt(thread_id).await } else { Ok(Interrupted::NoTurn) }
+}
+
+/// Há um turno rodando ou abrindo nesta conversa. O Codex abre com `starting` antes de ter o id do turno.
+fn turn_busy(thread_id: &str) -> bool {
+    live_turn(thread_id).is_some_and(|turn| turn.is_some()) || codex::get(thread_id).is_some_and(|session| session.opening())
+}
+
+/// Fecha no banco os turnos órfãos da conversa e devolve os fins gravados, para a tela. `None` quando há turno rodando
+/// ou abrindo agora: nada é fechado. A checagem e o fechamento correm sob o lock do banco. Um envio que abre um turno
+/// marca o guarda antes de gravar a linha dele (`Session::ensure_turn`), e não pode ser fechado pelo Parar que chegou
+/// um instante antes.
+pub(super) fn close_idle_orphans(conn: &rusqlite::Connection, thread_id: &str, now: i64) -> Result<Option<Vec<Item>>, String> {
+    if turn_busy(thread_id) {
+        return Ok(None);
+    }
+    let closed = store::close_orphan_runs(conn, Some(thread_id), now, STOPPED_ORPHAN).map_err(db_err)?;
+    let ids: Vec<String> = closed.iter().map(|(_, run)| format!("end:{run}")).collect();
+    if ids.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let items = store::items(conn, thread_id).map_err(db_err)?;
+    Ok(Some(items.into_iter().filter(|i| ids.contains(&i.id)).collect()))
+}
+
+/// O que o Parar fez, conforme o guarda do motor (`codex_parar`).
+fn interrupted_of(action: codex::StopAction) -> Interrupted {
+    match action {
+        codex::StopAction::Send(_) => Interrupted::Sent,
+        codex::StopAction::Deferred => Interrupted::Pending,
+        codex::StopAction::NoTurn => Interrupted::NoTurn,
+    }
 }
 
 /// Quem pode parar a conversa `target` (contrato §3.3 regra 9). Sem `caller_scope` é a pessoa, e para qualquer
@@ -1208,26 +1290,21 @@ pub const STOPPED_ORPHAN: &str = "O turno foi parado: o agente já não estava r
 pub enum Interrupted {
     /// Mandou a parada ao agente.
     Sent,
-    /// O turno do Codex ainda não abriu: a parada sai no `turn/started` (ver `codex_parar`).
+    /// O turno ainda não mostrou que roda: a parada sai no primeiro aviso dele (Codex: `turn/started`; Claude e OpenCode:
+    /// o primeiro aviso do turno), ver `codex_parar`.
     Pending,
     /// Não havia turno para parar.
     NoTurn,
 }
 
-/// Para o turno em andamento.
+/// Para o turno em andamento. O motor decide com o guarda do Parar (`codex_parar`): o que chega antes de o turno mostrar
+/// que roda fica pendente e sai depois; o que chega com o turno rodando sai na hora.
 pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
-    // Claude e OpenCode respondem ok mesmo sem turno e não mandam nada: isso não é uma parada enviada.
     if let Some(session) = claude::get(thread_id) {
-        if session.turn().is_none() {
-            return Ok(Interrupted::NoTurn);
-        }
-        return claude::interrupt(&session).await.map(|_| Interrupted::Sent);
+        return claude::interrupt(&session).await.map(interrupted_of);
     }
     if let Some(session) = opencode::get(thread_id) {
-        if session.turn().is_none() {
-            return Ok(Interrupted::NoTurn);
-        }
-        return opencode::interrupt(&session).await.map(|_| Interrupted::Sent);
+        return opencode::interrupt(&session).await.map(interrupted_of);
     }
     if agy::get(thread_id).is_some() {
         agy::interrupt(thread_id);
@@ -1238,11 +1315,7 @@ pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
         return Ok(Interrupted::Sent);
     }
     let Some(session) = codex::get(thread_id) else { return Ok(Interrupted::NoTurn) };
-    Ok(match session.stop().await? {
-        codex::StopAction::Send(_) => Interrupted::Sent,
-        codex::StopAction::Deferred => Interrupted::Pending,
-        codex::StopAction::NoTurn => Interrupted::NoTurn,
-    })
+    session.stop().await.map(interrupted_of)
 }
 
 /// O motivo de não parar uma tarefa só: o motor não tem como (só o Claude Code tem `stop_task`).

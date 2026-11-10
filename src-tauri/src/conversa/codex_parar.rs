@@ -1,9 +1,16 @@
-//! O Parar do Codex que chega antes de o turno abrir (puro, sem processo).
+//! O Parar que chega antes de o turno mostrar que roda (puro, sem processo). Vale para os três motores que
+//! recebem o Parar por protocolo: Codex, Claude e OpenCode (ACP).
 //!
-//! O app-server só aceita `turn/interrupt` depois do `turn/started`; antes disso recusa com `-32600`
-//! ("no active turn to interrupt"). Entre o `turn/start` sair e o `turn/started` chegar há uma janela em
-//! que a pessoa já vê o turno rodando. Nela, o Parar não pode ser mandado nem perdido: fica **pendente** e
-//! sai quando o aviso chega. Se o turno terminar (ou o `turn/start` falhar) antes, a pendência morre junto.
+//! O app-server do Codex só aceita `turn/interrupt` depois do `turn/started`; antes disso recusa com `-32600`
+//! ("no active turn to interrupt"; captura em `fixtures/protocolo/codex-interrupt-antes-do-started.json`). No
+//! Claude e no OpenCode a mesma janela existe por outro motivo: a linha `user` (ou o prompt ACP) já foi escrita,
+//! mas o agente ainda não mostrou que o turno roda. O que a captura do Claude prova é que o `interrupt`
+//! interrompe um turno em streaming (`claude-interrompido`) e que mensagem enfileirada é contada à parte do
+//! turno em curso (`still_queued`); nenhuma captura prova o efeito sobre um turno que acabou de nascer.
+//!
+//! Por isso o Parar nessa janela fica **pendente** e sai quando o motor mostra que o turno roda: o `turn/started`
+//! no Codex, o primeiro aviso do turno no Claude, o primeiro `session/update` no ACP. Se o turno terminar (ou o
+//! envio falhar) antes, a pendência morre junto. Nunca se manda o Parar às cegas.
 //!
 //! A pendência é amarrada ao id do turno quando ele é conhecido, para um Parar velho nunca cair no turno
 //! seguinte. Antes da resposta do `turn/start` o id ainda não existe ([`Wanted::Any`]); a resposta o fixa.
@@ -81,6 +88,19 @@ impl StopGate {
     /// O processo caiu ou a conversa fechou: nada mais fica pendente.
     pub fn reset(&mut self) {
         *self = Self::default();
+    }
+
+    /// Um turno novo nasce sem nada herdado: o que restava de um turno anterior (Parar pendente, aviso de início) não
+    /// vale para ele. Quem abre o turno com o id já conhecido (Claude, OpenCode) chama isto antes de o tornar visível.
+    pub fn begin_turn(&mut self) {
+        self.starting = false;
+        self.started = None;
+        self.wanted = None;
+    }
+
+    /// Há um `turn/start` a caminho, sem o id do turno ainda (só o Codex passa por aqui).
+    pub fn starting(&self) -> bool {
+        self.starting
     }
 
     /// Um Parar da pessoa. `turn` é o turno em andamento da sessão, se houver.

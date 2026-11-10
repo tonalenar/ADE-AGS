@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-/// As 18 capabilities que o plano da Fase 0 pede por provider e superfície.
+/// As 19 capabilities que o plano da Fase 0 pede por provider e superfície.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
@@ -38,6 +38,8 @@ pub enum Capability {
     Compact,
     /// Objetivo persistente nativo.
     Goal,
+    /// O ADE consegue iniciar a execução em modo nativo de planejamento.
+    Plan,
     /// Foto do estado da execução (hoje só de arquivos, nunca da conversa do provider).
     Checkpoint,
     /// Voltar ao estado de uma foto (hoje só arquivos).
@@ -50,7 +52,7 @@ pub enum Capability {
 
 impl Capability {
     /// Todas, na ordem em que cada coluna da matriz as lista.
-    pub const ALL: [Capability; 18] = [
+    pub const ALL: [Capability; 19] = [
         Capability::Start,
         Capability::Send,
         Capability::Steer,
@@ -65,6 +67,7 @@ impl Capability {
         Capability::Resume,
         Capability::Compact,
         Capability::Goal,
+        Capability::Plan,
         Capability::Checkpoint,
         Capability::Rollback,
         Capability::Usage,
@@ -88,6 +91,7 @@ impl Capability {
             Capability::Resume => "resume",
             Capability::Compact => "compact",
             Capability::Goal => "goal",
+            Capability::Plan => "plan",
             Capability::Checkpoint => "checkpoint",
             Capability::Rollback => "rollback",
             Capability::Usage => "usage",
@@ -207,15 +211,15 @@ pub struct Cell {
     pub claim: Claim,
 }
 
-/// Uma coluna da matriz: um provider numa superfície, com as 18 capabilities.
+/// Uma coluna da matriz: um provider numa superfície, com as 19 capabilities.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 pub struct ProviderMatrix {
     pub surface: Surface,
     /// O id do registro de agentes (`claude-code`, `codex`…) ou `local-acp` para o ACP cadastrado pela pessoa.
     pub provider: &'static str,
-    /// Sempre as 18, na ordem de [`Capability::ALL`].
-    pub cells: [Cell; 18],
-    /// Fora das 18: o agente consegue chamar as ferramentas `ags` (MCP do ADE) e, assim, criar filhos que o
+    /// Sempre as 19, na ordem de [`Capability::ALL`].
+    pub cells: [Cell; 19],
+    /// Fora das 19: o agente consegue chamar as ferramentas `ags` (MCP do ADE) e, assim, criar filhos que o
     /// ADE controla (chat filho, tarefa da Frota)? Decide a delegação, não o filho nativo.
     pub ags_mcp: Claim,
 }
@@ -230,7 +234,7 @@ pub struct Counts {
 
 impl ProviderMatrix {
     /// A célula da capability. A posição é o discriminante do enum; os testes garantem que cada coluna
-    /// lista as 18 na ordem de [`Capability::ALL`].
+    /// lista as 19 na ordem de [`Capability::ALL`].
     pub fn cell(&self, capability: Capability) -> &Cell {
         &self.cells[capability as usize]
     }

@@ -174,6 +174,14 @@ pub(super) fn chat_goal(app: &AppHandle, args: &Value) -> Result<Value, String> 
     Ok(json!({ "thread": thread, "goal": goal }))
 }
 
+/// F-09: a conversa nasce sob quem a abriu (identidade provada pelo despachador, em `from`). É o que deixa o agente dar
+/// `chat wait`, `show`, `send` e `stop` nela depois, sem a conversa precisar estar ligada no canvas.
+fn remember_opener(args: &Value, thread_id: &str) {
+    if let Some(opener) = arg_str_opt(args, "from").map(|from| from.trim().to_string()).filter(|from| !from.is_empty()) {
+        crate::ipc::guard::record_opened(&opener, &format!("{}{thread_id}", crate::chat_team::model::THREAD_PREFIX));
+    }
+}
+
 pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let task = arg_str(args, "text")
         .map_err(|_| "Falta a mensagem: ags chat new \"...\" --cwd <pasta>".to_string())?;
@@ -204,6 +212,9 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let agent_id = arg_str_opt(args, "agent")
         .or_else(|| parent.as_ref().map(|thread| thread.agent_id.clone()))
         .unwrap_or_else(|| "codex".into());
+    if let Some(error) = api::unsupported_capability_error(&agent_id, crate::harness::capability::Capability::Start) {
+        return Err(error);
+    }
     let inherit_parent_settings = parent.as_ref().is_some_and(|thread| {
         thread.agent_id == agent_id && !crate::local_acp::is_local_acp_id(&agent_id)
     });
@@ -232,31 +243,17 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
         parent_ref: parent_ref.clone(),
     };
     if let Some(identity) = child_request_identity(args, parent_ref.as_deref(), &cwd)? {
-        let outcome = api::create_child(&db, input, &identity)?;
+        // Modo async: o acompanhamento entra na mesma transação que cria a conversa (§12.9).
+        let async_delivery = arg_str_opt(args, "harness_delivery").as_deref() == Some("async");
+        let outcome = if async_delivery {
+            api::create_child_async(&db, input, &identity)?
+        } else {
+            api::create_child(&db, input, &identity)?
+        };
         let row = outcome.thread;
+        remember_opener(args, &row.id);
         if !outcome.reused {
             api::announce(app, &row);
-        }
-        // `delegate_agent` em modo async: o resultado desta conversa filha chega ao pai quando ela terminar (§12.9).
-        // Idempotente: a repetição do mesmo `client_request_id` também cura uma queda entre criar e registrar.
-        if arg_str_opt(args, "harness_delivery").as_deref() == Some("async") {
-            if let Some(parent_ref) = parent_ref.as_deref() {
-                let conn = db.lock().map_err(|error| error.to_string())?;
-                crate::harness::child_delivery::register(
-                    &conn,
-                    &crate::harness::child_delivery::WatchSpec {
-                        kind: crate::harness::delegate::Target::ProviderChat,
-                        child_ref: &row.id,
-                        parent_ref,
-                        title: &row.title,
-                        agent_id: &row.agent_id,
-                        parent_turn_id: row.parent_turn_id.as_deref(),
-                        session_id: None,
-                        message_id: None,
-                    },
-                    crate::util::now_ts_ms(),
-                )?;
-            }
         }
         match api::claim_child_delivery(&db, &identity)? {
             api::ChildDeliveryClaim::Claimed { thread_id } => {
@@ -316,6 +313,7 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
         }
     } else {
         let row = api::create(&db, input)?;
+        remember_opener(args, &row.id);
         api::announce(app, &row);
         tauri::async_runtime::block_on(api::send(app, &db, &row.id, &prompt))?;
         Ok(json!({ "thread": row, "next": format!("ags chat wait {}", row.id), "parented": parented }))
