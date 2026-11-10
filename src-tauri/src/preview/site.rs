@@ -626,8 +626,10 @@ impl Site {
 }
 
 /// Lo guardado de un site al abrirlo. El archivo cifrado manda. Si no hay (o no abre), el del
-/// formato anterior se lee una vez: con clave queda cifrado en su lugar; sin clave se borra, para
-/// que no quede texto plano en el disco. Un archivo que no abre se ignora, como uno roto.
+/// formato anterior se lee: con clave queda cifrado en su lugar y el claro se borra. Sin clave el
+/// claro **se queda como está** (ninguna migración borra datos de la persona, AGENTS.md §2.3): se
+/// usa en memoria, no se escribe nada nuevo en claro, y se migra cuando haya clave. Un archivo que
+/// no abre se ignora, como uno roto, y tampoco se borra.
 fn load(origin: &str, file: Option<&Path>, legacy: Option<&Path>, key: Option<&SealKey>) -> Saved {
     let sealed = match (file, key) {
         (Some(file), Some(key)) => {
@@ -649,8 +651,7 @@ fn load(origin: &str, file: Option<&Path>, legacy: Option<&Path>, key: Option<&S
         return saved;
     }
     let Some(saved) = std::fs::read(legacy).ok().and_then(|b| serde_json::from_slice::<Saved>(&b).ok()) else {
-        // Un claro que no se entiende tampoco puede quedarse.
-        remove_legacy(legacy);
+        // Un claro que no se entiende se ignora como antes; no se borra: es de la persona.
         return Saved::default();
     };
     match (file, key) {
@@ -664,8 +665,9 @@ fn load(origin: &str, file: Option<&Path>, legacy: Option<&Path>, key: Option<&S
                 Err(e) => eprintln!("[preview] no se pudo pasar el estado anterior al formato cifrado ({e}); queda como está"),
             }
         }
-        // Sin clave no hay dónde guardarlo cifrado: no puede quedar en claro en el disco.
-        _ => remove_legacy(legacy),
+        // Sin clave no hay dónde guardarlo cifrado: el claro anterior queda intacto (no se borra
+        // dato de la persona) y se migra en la próxima apertura con clave. Nada nuevo va en claro.
+        _ => eprintln!("[preview] sin clave del keyring: el estado anterior en claro queda como está hasta poder cifrarlo"),
     }
     saved
 }

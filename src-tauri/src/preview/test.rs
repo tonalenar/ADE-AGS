@@ -1090,7 +1090,11 @@ fn sin_clave_el_sitio_no_escribe_nada_en_el_disco() {
     assert!(!site.is_dirty(), "sin dónde guardar, no hay nada pendiente");
     site.save_now().unwrap();
 
-    assert!(!dir.join(legacy_file_name(origin)).exists(), "el archivo en claro no puede quedarse");
+    assert_eq!(
+        std::fs::read(dir.join(legacy_file_name(origin))).unwrap(),
+        serde_json::to_vec(&anterior).unwrap(),
+        "sin clave, el archivo anterior de la persona queda intacto (ninguna migración borra datos)"
+    );
     assert_eq!(std::fs::read(dir.join(file_name(origin))).unwrap(), antes, "el cifrado no se toca sin clave");
     for entrada in std::fs::read_dir(&dir).unwrap() {
         let bytes = std::fs::read(entrada.unwrap().path()).unwrap();

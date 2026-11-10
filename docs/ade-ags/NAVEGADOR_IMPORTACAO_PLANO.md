@@ -222,3 +222,6 @@ flowchart TD
 **Testes:** em `src-tauri/src/preview/test.rs`, com keyring falso injetável e diretório temporário. O keyring real não é usado. Cobrem: nenhuma cookie nem valor de storage em claro no disco; reabrir devolve as mesmas sessões; migração do formato antigo; sobrante em claro se apaga sem pisar o cifrado; sem chave, nada em claro, nada gravado e o cifrado intacto; arquivo adulterado ou copiado de outro site ignorado; erro do keyring não cria chave nova; chave ilegível não é sobrescrita; sem keyring o site fica sem chave; nonce distinto a cada gravação; migração que falha preserva o claro.
 
 **Não verificado:** a integração com o keyring real (Keychain do macOS e Secret Service do Linux) não foi exercitada nesta máquina, para não tocar o keyring pessoal. Também não foi testado com o arquivo de um login real de dev server. A chave não é zerada ao sair da memória, porque o `ring` não faz isso.
+
+
+> **Ajuste na integração (2026-11-10):** sem chave do keyring, o arquivo anterior em claro **não é apagado**. Fica intacto, é usado só em memória e é migrado na próxima abertura com chave, porque nenhuma migração apaga dados da pessoa (AGENTS.md §2.3). Nada novo é gravado em claro. Um arquivo anterior que não se entende também é ignorado, sem ser apagado.
