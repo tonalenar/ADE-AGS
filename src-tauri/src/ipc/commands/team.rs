@@ -20,6 +20,7 @@ use super::peer_queue::{self, Delivery, Sent};
 use super::peers::{self, OpenTab};
 use crate::chat_team::{api, model, store};
 use crate::database::DbConnection;
+use crate::harness::delegate::{code as delegate_code, describe_session, CallerFacts, DelegateError, MemberFacts, SessionFacts, Transport};
 use crate::ipc::protocol::{arg_str, arg_str_opt};
 use crate::peer_queue::store::NewMessage;
 
@@ -264,48 +265,91 @@ pub(super) fn team_candidates(app: &AppHandle, args: &Value) -> Result<Value, St
     let team = led_team(&db, &from)?;
     let me = me_of(app, &from)?;
     let list = candidates(app, &db, &me, &team)?;
+    let caller = CallerFacts { id: me.id.clone(), cwd: me.cwd.clone() };
     let candidates: Vec<Value> = list
         .iter()
         .map(|candidate| {
-            let member = team
-                .members
-                .iter()
-                .find(|member| member.member == candidate.id);
-            let protocol_thread = model::thread_id_of(&candidate.id);
-            let transport = if protocol_thread.is_some() {
-                "conversation"
-            } else if candidate.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
-                "gemini_desktop"
-            } else {
-                "pty"
-            };
-            let working = protocol_thread
-                .as_deref()
-                .map(|thread| crate::conversa::api::status(thread).working)
-                .unwrap_or_else(|| crate::canal::busy(&candidate.id));
-            json!({
-                "id": candidate.id,
-                "name": candidate.name,
-                "agent": candidate.agent,
-                "agentId": candidate.agent_id,
-                "transport": transport,
-                "working": working,
-                "sameWorkspace": candidate.cwd == me.cwd,
-                "linked": member.is_some(),
-                "canLink": member.is_none(),
-                "canMessage": member.is_some(),
-                "role": member.map(|member| member.role.clone()),
-                "policy": member.map(|member| member.policy),
-                "subagent": member.map(|member| member.subagent),
-            })
+            let member = team.members.iter().find(|member| member.member == candidate.id);
+            describe_session(&caller, &session_facts(app, candidate, member, false))
         })
         .collect();
     Ok(json!({
         "teamId": team.team.id,
         "teamTitle": team.team.title,
         "candidates": candidates,
-        "note": "Para uma sessão sem linked=true, ligue-a primeiro com team_link. O backend revalida o id, o escopo e o papel ao executar essa ação.",
+        "note": "Para uma sessão sem linked=true, ligue-a primeiro com team_link. canReceiveWork diz se delegate_agent (target=connected_session) aceitaria a sessão agora; blocker é o primeiro motivo de recusa. Sessões de outras pastas só aparecem se a pessoa já as ligou. O backend revalida id, pasta, política e estado ao enviar.",
     }))
+}
+
+/// O que se sabe de uma sessão agora, para a descoberta e para a delegação. `deep` pergunta também à janela
+/// se a aba tem processo (a descoberta fica só no registro de PTYs do backend, que é barato).
+fn session_facts(app: &AppHandle, tab: &OpenTab, member: Option<&store::MemberRow>, deep: bool) -> SessionFacts {
+    let protocol_thread = model::thread_id_of(&tab.id);
+    let transport = if protocol_thread.is_some() {
+        Transport::Conversation
+    } else if tab.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        Transport::GeminiDesktop
+    } else {
+        Transport::Pty
+    };
+    let connected = match transport {
+        // Só entram na lista as conversas ativas e os portais que existem.
+        Transport::Conversation | Transport::GeminiDesktop => true,
+        Transport::Pty => {
+            crate::terminal::pty_for_tab(tab.id.clone()).is_some()
+                || (deep && super::tabs::pty_id_for_tab(app, &tab.id, Some(&tab.window)).is_ok())
+        }
+    };
+    let working = protocol_thread
+        .map(|thread| crate::conversa::api::status(thread).working)
+        .unwrap_or_else(|| crate::canal::busy(&tab.id));
+    SessionFacts {
+        id: tab.id.clone(),
+        name: tab.name.clone(),
+        agent: tab.agent.clone(),
+        agent_id: tab.agent_id.clone(),
+        transport,
+        cwd: tab.cwd.clone(),
+        connected,
+        working,
+        member: member.map(|member| MemberFacts { policy: member.policy, role: member.role.clone(), subagent: member.subagent }),
+    }
+}
+
+/// As sessões que a delegação pode nomear, lidas agora: as abertas (mesma pasta ou do time) e os
+/// integrantes que já não estão abertos (para a recusa dizer "desconectada", não "não existe").
+/// `deep_for` é a sessão escolhida: só ela paga a pergunta à janela.
+pub(super) fn delegation_snapshot(
+    app: &AppHandle,
+    db: &DbConnection,
+    from: &str,
+    deep_for: Option<&str>,
+) -> Result<(CallerFacts, Vec<SessionFacts>), DelegateError> {
+    let team = led_team(db, from).map_err(|error| DelegateError::new(delegate_code::NOT_ORCHESTRATOR, error))?;
+    let me = me_of(app, from).map_err(|error| DelegateError::new(delegate_code::CALLER_NOT_OPEN, error))?;
+    let list = candidates(app, db, &me, &team).map_err(|error| DelegateError::new(delegate_code::SNAPSHOT_FAILED, error))?;
+    let mut sessions: Vec<SessionFacts> = list
+        .iter()
+        .map(|tab| {
+            let member = team.members.iter().find(|member| member.member == tab.id);
+            let deep = deep_for.is_some_and(|to| to == tab.id || to.trim().eq_ignore_ascii_case(tab.name.trim()));
+            session_facts(app, tab, member, deep)
+        })
+        .collect();
+    for member in team.members.iter().filter(|member| !list.iter().any(|tab| tab.id == member.member)) {
+        sessions.push(SessionFacts {
+            id: member.member.clone(),
+            name: member.label.clone(),
+            agent: crate::agents::agent_label(&member.agent_id).unwrap_or(&member.agent_id).to_string(),
+            agent_id: member.agent_id.clone(),
+            transport: if model::thread_id_of(&member.member).is_some() { Transport::Conversation } else { Transport::Pty },
+            cwd: String::new(),
+            connected: false,
+            working: false,
+            member: Some(MemberFacts { policy: member.policy, role: member.role.clone(), subagent: member.subagent }),
+        });
+    }
+    Ok((CallerFacts { id: me.id, cwd: me.cwd }, sessions))
 }
 
 /// `ags team create [--title ...]`: um orquestrador do canvas (coroa dada pela pessoa) vira o

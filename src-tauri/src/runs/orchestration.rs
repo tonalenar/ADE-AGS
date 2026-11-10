@@ -138,6 +138,25 @@ fn request_fingerprint(args: &Value) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
+/// O recibo da delegação, lido pelo recibo unificado do harness (contrato §12.4): a tabela nova e, na
+/// falta dela, `run_delegation_receipts`. O mesmo id com outro conteúdo falha fechado.
+fn delegation_receipt(
+    conn: &rusqlite::Connection,
+    caller_key: &str,
+    request_id: &str,
+    request_hash: &str,
+) -> Result<Option<store::DelegationReceipt>, String> {
+    let Some(receipt) = crate::harness::receipts::lookup(conn, crate::harness::receipts::KIND_FLEET_DELEGATE, caller_key, request_id)? else {
+        return Ok(None);
+    };
+    if receipt.request_hash != request_hash {
+        return Err(crate::harness::receipts::MISMATCH.into());
+    }
+    let task_keys = serde_json::from_str(receipt.result_json.as_deref().unwrap_or("[]"))
+        .map_err(|error| format!("recibo de delegação inválido: {error}"))?;
+    Ok(Some(store::DelegationReceipt { request_hash: receipt.request_hash, run_id: receipt.target_ref, task_keys }))
+}
+
 fn caller_key(caller: &Caller) -> String {
     if let Some(task) = &caller.task {
         format!("task:{}", task.id)
@@ -529,10 +548,7 @@ pub(crate) fn plan_tasks(
         let conn = db.lock().map_err(|e| e.to_string())?;
         let caller = caller(&conn, payload)?;
         if let (Some(request_id), Some(request_hash)) = (&request_id, &request_hash) {
-            if let Some(receipt) = store::delegation_receipt(&conn, &caller_key(&caller), request_id)? {
-                if receipt.request_hash != *request_hash {
-                    return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
-                }
+            if let Some(receipt) = delegation_receipt(&conn, &caller_key(&caller), request_id, request_hash)? {
                 let run = store::run_by_id(&conn, &receipt.run_id)?
                     .ok_or_else(|| "a delegação já foi concluída, mas seu run foi removido; use um client_request_id novo para criar outra".to_string())?;
                 for key in &receipt.task_keys {
@@ -755,10 +771,7 @@ pub(crate) fn plan_tasks(
             .map_err(|error| error.to_string())?;
         // A segunda consulta dentro da transação fecha a corrida entre duas chamadas iguais.
         if let (Some(request_id), Some(request_hash)) = (&request_id, &request_hash) {
-            if let Some(receipt) = store::delegation_receipt(&tx, &caller_key(&caller), request_id)? {
-                if receipt.request_hash != *request_hash {
-                    return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
-                }
+            if let Some(receipt) = delegation_receipt(&tx, &caller_key(&caller), request_id, request_hash)? {
                 let run = store::run_by_id(&tx, &receipt.run_id)?
                     .ok_or_else(|| "a delegação já foi concluída, mas seu run foi removido; use um client_request_id novo para criar outra".to_string())?;
                 for key in &receipt.task_keys {
