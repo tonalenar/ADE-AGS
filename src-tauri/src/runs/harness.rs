@@ -9,6 +9,7 @@ use rusqlite::{Connection, params_from_iter};
 use serde::Serialize;
 
 use crate::conversa::store as chat;
+use crate::harness::state;
 use crate::harness::store as harness_store;
 use super::execution_log::{self, HarnessEvent};
 
@@ -40,6 +41,10 @@ pub struct HarnessExecutionNode {
     /// Só no nó de turno: o id do `chat_run`. É o mesmo valor de `run_id` nesse nó, que guarda o
     /// turno e não o run da Frota; o nome claro vem aqui e `run_id` fica por compatibilidade.
     pub chat_run_id: Option<String>,
+    /// Só no nó de turno: filhos diretos que ainda não terminaram (conversa filha ou run da Frota).
+    /// Derivado na leitura; os outros nós omitem o campo. Ver contrato §3.3 regra 8.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_children: Option<i64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -212,6 +217,7 @@ pub fn thread_execution_graph(
                 node_id: None,
                 harness_run_id: None,
                 chat_run_id: None,
+                active_children: None,
             created_at: thread.created_at,
             started_at: None,
             ended_at: (thread.state == "settled").then_some(thread.updated_at),
@@ -234,6 +240,7 @@ pub fn thread_execution_graph(
                 node_id: None,
                 harness_run_id: None,
                 chat_run_id: Some(turn.id.clone()),
+                active_children: None,
                 created_at: turn.started_at.unwrap_or(thread.created_at),
                 started_at: turn.started_at,
                 ended_at: turn.ended_at,
@@ -268,6 +275,7 @@ pub fn thread_execution_graph(
                 node_id: None,
                 harness_run_id: None,
                 chat_run_id: None,
+                active_children: None,
                 created_at: run.created_at,
                 started_at: Some(run.created_at),
                 ended_at: run.ended_at,
@@ -297,6 +305,7 @@ pub fn thread_execution_graph(
                     node_id: None,
                     harness_run_id: None,
                     chat_run_id: None,
+                active_children: None,
                     created_at: task.created_at,
                     started_at: task.started_at,
                     ended_at: task.ended_at,
@@ -324,6 +333,7 @@ pub fn thread_execution_graph(
                         node_id: None,
                         harness_run_id: None,
                         chat_run_id: None,
+                active_children: None,
                         created_at: attempt.started_at,
                         started_at: Some(attempt.started_at),
                         ended_at: attempt.ended_at,
@@ -340,11 +350,59 @@ pub fn thread_execution_graph(
         }
     }
 
+    // A contagem olha a árvore já montada: o pai do run da Frota só existe depois do vínculo com o turno.
+    let counts = active_child_counts(&nodes);
+    for node in &mut nodes {
+        if node.kind == "turn" {
+            node.active_children = Some(counts.get(&node.id).copied().unwrap_or(0));
+        }
+    }
+
     Ok(HarnessExecutionGraph {
         root_thread_id: root_thread_id.to_string(),
         nodes,
         events,
     })
+}
+
+/// Filhos diretos não terminais de cada turno. Conversa filha: estado do último turno (§3.2),
+/// nunca `chat_thread.state`. Run da Frota: uma vez, pelo `runs.status`. Tarefa, tentativa e run
+/// legado (pai é a conversa, não o turno) ficam de fora.
+fn active_child_counts(nodes: &[HarnessExecutionNode]) -> HashMap<String, i64> {
+    let turns: HashSet<&str> = nodes
+        .iter()
+        .filter(|node| node.kind == "turn")
+        .map(|node| node.id.as_str())
+        .collect();
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    for child in nodes {
+        let Some(parent_id) = child.parent_id.as_deref() else {
+            continue;
+        };
+        if !turns.contains(parent_id) || !direct_child_is_active(nodes, child) {
+            continue;
+        }
+        *counts.entry(parent_id.to_string()).or_default() += 1;
+    }
+    counts
+}
+
+/// O último turno da conversa, na ordem da projeção (`started_at`, depois `id`).
+fn last_turn<'a>(nodes: &'a [HarnessExecutionNode], thread_id: &str) -> Option<&'a HarnessExecutionNode> {
+    nodes.iter().rev().find(|node| node.kind == "turn" && node.thread_id.as_deref() == Some(thread_id))
+}
+
+fn direct_child_is_active(nodes: &[HarnessExecutionNode], child: &HarnessExecutionNode) -> bool {
+    match child.kind.as_str() {
+        // Sem turno a filha é `pending`. `inProgress` com pedido pendente vira `waiting`, que também
+        // não é terminal: a contagem não precisa ler `chat_request`.
+        "thread" => match child.thread_id.as_deref().and_then(|id| last_turn(nodes, id)) {
+            Some(turn) => !state::from_chat_run(&turn.status, false).state.is_terminal(),
+            None => true,
+        },
+        "fleetRun" => !state::from_fleet_run(&child.status).state.is_terminal(),
+        _ => false,
+    }
 }
 
 fn load_chat_turns(
