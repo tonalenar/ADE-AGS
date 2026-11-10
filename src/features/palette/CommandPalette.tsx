@@ -1021,17 +1021,21 @@ function PaletteDialog() {
         shortcut: shortcutForId("chat.teamPanel") ?? undefined,
         run: openTeamPanelFocused,
       });
-      if (DESKTOP_OS === "macos") {
-        list.push({
-          id: "voiceInput.toggle",
-          group: "actions",
-          title: t("shortcuts.dictation"),
-          keywords: ["dictation", "voice input", "microphone", "ditado", "voz", "microfone"],
-          icon: <MicIcon className={icon} />,
-          shortcut: shortcutForId("composer.dictation") ?? undefined,
-          run: () => window.dispatchEvent(new Event("ade:voice-input-toggle")),
-        });
-      }
+      const voiceUnavailable = DESKTOP_OS === "windows"
+        ? t("voiceInput.unavailable.windows")
+        : DESKTOP_OS === "linux"
+          ? t("voiceInput.unavailable.linux")
+          : undefined;
+      list.push({
+        id: "voiceInput.toggle",
+        group: "actions",
+        title: t("shortcuts.dictation"),
+        subtitle: voiceUnavailable,
+        keywords: ["dictation", "voice input", "microphone", "ditado", "voz", "microfone"],
+        icon: <MicIcon className={icon} />,
+        shortcut: shortcutForId("composer.dictation") ?? undefined,
+        run: () => window.dispatchEvent(new Event("ade:voice-input-toggle")),
+      });
     }
 
     if (canTogglePreview) {
