@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.71.0
+version: 1.72.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -234,6 +234,31 @@ ags tab send <id> "q" --no-enter                   # a key, for a pager or a pro
 terminal environment it injected (`ADE_SESSION`, `ADE_TAB_ID`) and from your process tree, so run `ags` from your
 own shell with that environment intact: `env -i`, a cleaned sandbox or a detached process is refused too. A tab you
 did not open and are not connected to belongs to the person.
+
+The same reach applies to **every command that acts on another session's resource** (the app checks it per
+method, and refuses with the id and what to do instead):
+
+- **Tabs** — `tab output`, `tab send`, `tab close`, `tab state`, `watch add`, `watch remove`: your own tab, the tabs
+  connected to you on the canvas and the tabs you opened with `ags tab create`. `tab list`, `watch list|wait`,
+  `events since|wait` and the catalogs (`agents`, `accounts`, `skills`, `roles`, `app status`…) need no reach.
+- **Chat conversations** — `chat show|wait|send|stop|open|settle|goal|compact <id>`: your own conversation, the ones
+  connected to you and the ones you opened with `ags chat new` (a child conversation is registered to whoever
+  opened it, so `chat wait <id>` right after `chat new` works). `chat pending` without an id lists every
+  conversation's requests: give the id. A child is only created under **you** (`parent_ref` is yours or nothing).
+- **Canvas resources** — `portal …`, `device …`, `note …`, `peer …`, `team …`, `sim act`, `desk act`, `say`/`recall`,
+  `routine …`, `floor …`, `role create|edit`, `notify`, `secret …`, `memory …`/`swarm …` (the mission's memory):
+  they act through *your* terminal, so they only see what the canvas connects to you. A fleet task (headless) has no
+  canvas: these are refused for it; it uses the `run_*`/`task_*` tools.
+- **Missions** — `mission status|wait|review|timings|precheck|startcheck|efficiency <id>` only for the mission of your
+  own canvas board; `mission accept|apply|redeliver|cleanup <id>` only for that mission's **orchestrator**.
+  `mission create|run|start` (they spend the user's budget), `worktrees prune` and `pool delete` are **only the
+  person's** (from the app or from the person's own terminal): ask the user.
+- **Decisions** — `fix decide` and `peer answer` are the orchestrator's (proven by the crown on the canvas) or the
+  person's, on the screen. `approval …`, `memory compact` and `workspace restore` are the person's alone.
+
+All of it is proven from the terminal environment the app injected **and your process tree** (a call from outside
+the tree that claims to be a tab is refused), so run `ags` from your own shell. The person, in a terminal of their
+own outside the app, keeps the access they always had.
 
 A shell runs **anything** you send, with the user's permissions, in their real environment.
 Send only what the task needs; never `rm -rf`, a force push, a database drop or anything
@@ -1103,8 +1128,8 @@ ags workspace open --workspace "client-project"      # id or name
 ags workspace open --workspace "client-project" --close-current
 ```
 
-`--close-current` closes what's open now. Ask before using it — the user may have unsaved
-work in those tabs.
+`--close-current` closes what's open now, including the user's terminals and agents, so **an agent is refused**
+when it passes it: only the person closes the current workspace. Open the other workspace without the flag.
 
 ## Installing skills
 

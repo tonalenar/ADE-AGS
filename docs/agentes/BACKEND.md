@@ -20,7 +20,7 @@ Crate `ade-ags` (edition 2024), lib `ade_ags_lib`. O `src/main.rs` chama `ade_ag
 | `agents/` | `registry.rs` (tabela `AGENTS`), `adapter.rs` (trait `AgentAdapter` e `Capabilities` derivadas), detecção, agentes custom, atualizações, `contract.rs` |
 | `accounts/` | várias contas por TUI (isoladas por env: `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `XDG_DATA_HOME`), pools, saúde, keyring, OAuth do Antigravity |
 | `terminal/` | PTY (portable-pty + ConPTY próprio), contenção de processos (Job Object/grupo POSIX), token `ADE_SESSION`, anexos |
-| `ipc/` | servidor da CLI (`protocol.rs`, `server.rs`, `transport.rs`), `commands/dispatch.rs`, `bridge.rs` (pede ao front), `mcp.rs` — ver [CLI_MCP.md](CLI_MCP.md) |
+| `ipc/` | servidor da CLI (`protocol.rs`, `server.rs`, `transport.rs`), `commands/dispatch.rs`, `authz.rs` (a classe de autorização de cada método; método novo precisa de uma), `bridge.rs` (pede ao front), `mcp.rs` — ver [CLI_MCP.md](CLI_MCP.md) |
 | `missions/` | missões, equipe (`team.rs`), entrega, revisão, conflitos, precheck, timings, `vigia.rs` — ver [ORQUESTRACAO.md](ORQUESTRACAO.md) |
 | `runs/` | frota headless: supervisor, scheduler, roteamento, worktrees, broker, sandbox, handoff, fix rounds |
 | `squads/`, `roles.rs` | squads e papéis |
