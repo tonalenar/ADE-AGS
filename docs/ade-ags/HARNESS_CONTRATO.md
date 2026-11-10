@@ -1118,3 +1118,71 @@ Lacuna conhecida: a CLI `ags chat stop` roda com a identidade da pessoa. Um agen
 - Concorrência: a leitura da projeção e a decisão da pessoa correm em transações separadas; não há teste de corrida entre elas.
 - Desempenho: a projeção ganhou uma consulta por conversa filha (último turno) e lotes para pedidos e aprovações. Não medido.
 - O `connected_session` não existe no código. A regra de não encerrar PTY de sessão conectada fica registrada, sem teste contra um caso real.
+
+## 14. Fase 6: painel do harness e relação sinal/ruído
+
+Fase 6 da auditoria de paridade: a pessoa ver "quem trabalha, em quê, o que bloqueia e como terminou" sem abrir terminal nem log, com a tela atualizada por evento e sem spam no chat. Código: `runs/execution_log.rs` (cursor e delta), `runs/harness.rs` (projeção), `runs/mod.rs` (comando), e no front `HarnessRunFeed.tsx`, `harnessTreeModel.ts` e `useHarnessGraph.ts` em `src/features/chat/structured/`.
+
+### 14.1 Como a árvore era buscada, e como passou a ser
+
+| | Antes | Agora |
+|---|---|---|
+| Disparo | evento Tauri, sem polling (`cc-task-changed`, `cc-thread-run-changed`, `cc-chat-thread`, `cc-harness-event` com o id da conversa) | `cc-harness-event` com `{ threadId, cursor }`, `cc-task-changed` e `cc-thread-run-changed`. `cc-chat-thread` deixou de disparar o grafo |
+| Leitura | a árvore inteira, com os 250 eventos mais recentes, a cada evento, depois de um debounce de 50 ms (`setTimeout`) | `run_list_harness_graph(threadId, afterCursor)`: os nós sempre atuais e os eventos só como delta |
+| Repetição | cada aviso, mesmo repetido, gerava uma leitura inteira | aviso com cursor que o front já aplicou não chama o backend; só há uma leitura em voo, e a rajada vira no máximo uma leitura depois, sem timer |
+| Status das filhas | `chat_thread_status` e `chat_thread_requests` a cada `cc-chat-thread`, isto é, a cada trecho de texto | só no aviso de evento persistido com cursor novo, e só para filha que a store ainda não acompanha |
+
+Não havia polling antes: o ganho é o cursor e o delta. Nenhum `setTimeout`, `setInterval` ou `sleep` governa a atualização.
+
+### 14.2 O cursor
+
+- O cursor é `harness_execution_events.sequence`, global e crescente (`AUTOINCREMENT`). O cursor de uma linhagem é o maior `sequence` entre as conversas dela (0 sem eventos). Como a gravação passa por uma fila serial, a sequência cresce na ordem do commit.
+- `cc-harness-event` sai depois da gravação, uma vez por conversa afetada, com o payload `{ threadId, cursor }` (`TreeChanged`): o `threadId` e a sequência do último evento persistido **dessa conversa**. Criar uma conversa filha avisa a filha e a pai. O payload não leva texto, rótulo nem frame. Antes o payload era só o id (string); o único ouvinte era o painel, e a mudança é aditiva para ele.
+- `run_list_harness_graph(thread_id, after_cursor: Option<i64>)` devolve `cursor` e `reset`:
+  - sem `after_cursor`: a janela inteira (até 250 eventos) e `reset = true`;
+  - `after_cursor` ≤ cursor da linhagem: só os eventos com `sequence > after_cursor` e `reset = false`;
+  - `after_cursor` à frente do banco (o front viu uma sequência que o banco não reconhece): a janela inteira e `reset = true`;
+  - mais de 250 eventos depois do cursor: a janela inteira e `reset = true`, porque um delta com buraco não se remenda.
+- Os **nós voltam sempre atuais**, com delta ou não. O estado deles vem das tabelas nativas (turnos, tarefas, tentativas), não do log: um delta só de eventos esconderia mudança de status. A economia é o payload dos eventos e o redesenho: o front mantém a mesma referência dos nós que não mudaram (`applyGraphResponse`).
+- O front só pede a leitura se o aviso for de uma conversa da linhagem e o cursor passar do aplicado (`shouldSync`). Um aviso repetido ou antigo não chama o backend.
+- O motivo da interrupção do turno (`interruptionReason`) deixou de sair da janela de 250 eventos e passou a vir de uma consulta própria (`interruption_reasons`), porque a resposta pode trazer só o delta. Também deixou de se perder quando o turno interrompido sai da janela.
+- `run.harnessGraph` (CLI) e `harness_graph` (MCP) recebem o mesmo JSON, com `cursor` e `reset` a mais. Sem `after_cursor`, `reset` é sempre verdadeiro; não há comando novo.
+
+### 14.3 Em andamento versus persistido
+
+Todo evento da lista já foi persistido (tem `sequence`); não existe evento "em memória" na árvore. "Em andamento" é o que **abriu e ainda não tem o evento que fecha**: `tool.started` sem `tool.completed`, `tool.failed` ou `tool.denied` (mesmo `entityId`); `turn.started` sem `turn.ended`, `turn.interrupted` ou `turn.error`; `fleet.attempt.started` sem `fleet.attempt.finished` ou `fleet.attempt.interrupted` (mesmo `attemptId`). O resto é "registrado". A conta é `eventPhases` (`harnessTreeModel.ts`); o evento carrega `data-phase` e o número da sequência no `title`.
+
+### 14.4 A tela
+
+- **Árvore** (`role="tree"`): um nó por linha, em `role="treeitem"` com `aria-level` e `aria-expanded`. A conversa raiz não é uma linha. Só a linha em foco entra na ordem de Tab (roving `tabindex`).
+- **Teclado** (`treeKey`): Seta para baixo e para cima andam entre as linhas visíveis; Home e End vão às pontas; Seta para a direita abre o nó e, já aberto, desce ao primeiro filho; Seta para a esquerda fecha o nó e, já fechado, sobe ao pai; Enter e Espaço alternam. Tecla dentro de um botão ou do detalhe é dele e não alterna o nó. Clicar na linha também alterna.
+- **Padrão de abertura**: tudo começa recolhido, exceto o nó que tem filho bloqueado (`blockedChildren > 0`), que abre sozinho para a pessoa achar o que pede decisão. A escolha da pessoa vale a partir daí.
+- **Cartão resumido (uma linha por nó)**: ponto de estado, título, tipo, agente e modelo, estado em texto, "resultado desconhecido", número de tentativas (na tarefa), origem, filhos ativos e bloqueados, e o bloqueio com o botão que abre a conversa filha (ou a Frota, para tarefa). **Não leva** texto de evento, rótulo de ferramenta, raw frame nem a resposta do filho.
+- **Detalhe sob demanda** (`data-detail`, só no DOM com o nó aberto): estado final (ou "em andamento desde"), motivo da interrupção, aviso de resultado desconhecido, a entrega do filho (bloco não confiável, como na Fase 4) e os eventos do nó. Na tentativa, o log do provider (`run_read_attempt_events`) só é lido ao abrir, e uma vez.
+- **Estados visíveis em texto, não só em cor**: `aguardando você`, `interrompida`, `cancelada` e `resultado desconhecido`, com `data-state` na linha. O botão de bloqueio mantém o nome acessível "{título}: pergunta pendente".
+- **Resultado desconhecido** (`outcomeUnknown`, só quando verdadeiro): status nativo que o ADE não mapeia (`from_chat_run`, `from_task` e `from_fleet_run` com `outcome_unknown`) e tarefa ou tentativa que saiu sem o resultado final (`MISSING_FINAL_RESULT`). Nunca vira conclusão nem falha conhecida.
+
+### 14.5 Consolidação do progresso de baixo nível
+
+`consolidateEvents` separa o que a pessoa precisa ver do que é rotina:
+
+| Fica como marco (linha própria) | Vira resumo (uma linha por trecho seguido) |
+|---|---|
+| turno iniciado, concluído, interrompido ou com erro; aprovação e pergunta pedidas e respondidas; `tool.failed` e `tool.denied`; conversa e subagente criados; tentativa da Frota iniciada, concluída ou interrompida; objetivo e aviso do runtime | `tool.started`, `tool.completed`, `fleet.tool.started`, `message.user`, `message.assistant`, `turn.usage`, `subagent.item` |
+
+O resumo é só contagem (`N eventos de rotina · X de ferramenta · Y de mensagem`) e a faixa de sequência: nenhum texto de ferramenta ou de mensagem. "Ver todos os eventos" abre cada evento, sob pedido.
+
+**Nada disso cria mensagem de chat.** Os eventos continuam indo só ao log semântico (`harness_execution_events`) e à árvore; o chat não ganha item por evento de ferramenta ou de tela. As notificações que o ADE já manda (Vigia, aprovação, conclusão do filho) não mudaram. Um teste (`harnessTree.test.tsx`) injeta 30 avisos seguidos e confere que a store do chat não muda e que nenhum comando de envio sai.
+
+### 14.6 Aviso sticky de atualização de agente
+
+Regressão proibida: o aviso explícito de atualização de agente fica na tela até a dispensa manual (`sticky` em `src/shared/brand/botToastStore.ts`; `AgentUpdateWatcher.tsx` os cria). A Fase 6 não mexeu nesses arquivos. O teste `src/shared/brand/tests/botToastSticky.test.tsx` prova que aviso novo, em qualquer quantidade, e o tempo (até 7 dias simulados) não o removem, que só o X o fecha, e que o resultado de atualização (sucesso ou falha) nasce `sticky`. Uma mutação que tira o `sticky` do store e do host faz os 7 testes falharem.
+
+### 14.7 O que foi e o que não foi verificado
+
+Ver o relatório de entrega. Em resumo, sem build, sem instância isolada e sem captura de tela: a tela foi exercida só por vitest em happy-dom.
+
+**Fora de escopo e dívida conhecida**
+- A janela de eventos (até 250, só metadados) continua indo na primeira leitura; "sob demanda" vale para o detalhe renderizado e para o log do provider, não para o carregamento dos eventos compactos.
+- As linhas não são memoizadas por componente: o ganho de redesenho vem de manter a referência dos nós iguais e de não renderizar detalhe fechado. Não medido.
+- `cc-chat-thread` não dispara mais o grafo. Estado de nó que mude sem gravar evento nem emitir `cc-task-changed` ou `cc-thread-run-changed` só aparece na próxima leitura. Não encontrei esse caso no código, mas não há teste que o exclua.

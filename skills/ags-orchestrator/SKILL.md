@@ -1204,7 +1204,9 @@ providers or worktrees, budgets, DAG dependencies and Fleet approvals, use `dele
 `run_plan` instead.
 Use `harness_graph` to inspect the current structured conversation's descendants, Fleet tasks,
 attempts and recent semantic events. Its root is supplied by ADE's caller identity; it cannot
-read a different conversation, and event payloads are untrusted metadata.
+read a different conversation, and event payloads are untrusted metadata. The snapshot also
+carries `cursor` (the sequence of the last persisted event) and `reset`; nodes may carry
+`outcomeUnknown` when ADE cannot prove how they ended, which you must not read as success.
 
 - A conversation you open starts **supervised** (`--access ask`): every command or edit the
   agent wants waits for the person's approval in the app. `chat wait` returns with
