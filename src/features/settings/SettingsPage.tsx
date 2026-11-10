@@ -9,6 +9,7 @@ import { useTranslation } from "react-i18next";
 import i18n, { setLanguage } from "@/i18n/index";
 import { useChatShell, useUiStore, type SettingsSectionId } from "@/app/uiStore";
 import { ContasSection } from "@/features/accounts/ContasSection";
+import { ProvidersSection } from "@/features/providers/ProvidersSection";
 import { useAgentsStore } from "@/features/agents/store";
 import type { CustomAgent } from "@/features/agents/types";
 import { useSkillsStore } from "@/features/skills/store";
@@ -148,6 +149,7 @@ export function SettingsPage() {
     appearance: t("settings.appearance"),
     chat: t("settings.chat"),
     accounts: t("settings.accounts"),
+    providers: t("settings.providers"),
     agents: t("settings.agents"),
     memory: t("settings.memory"),
     terminal: t("settings.terminal"),
@@ -244,6 +246,7 @@ export function SettingsPage() {
           )}
 
           {section === "accounts" && <ContasSection />}
+          {section === "providers" && <ProvidersSection />}
 
           {section === "agents" && (
             <>

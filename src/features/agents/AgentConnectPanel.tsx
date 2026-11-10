@@ -20,12 +20,13 @@ export function AgentConnectPanel({ agent, onLogin }: {
   const { t } = useTranslation();
   const accounts = useAccountsStore((s) => s.accounts);
   const systemAccounts = useAccountsStore((s) => s.systemAccounts);
-  const offer = accountConnectOffer(agent.id, agent.available);
+  const accountCapable = useAccountsStore((s) => s.capable.some((c) => c.agentId === agent.id));
+  const offer = accountConnectOffer(agent.id, agent.available, accountCapable);
   const linked = [...systemAccounts, ...accounts].filter((a) => a.agentId === agent.id);
 
   return (
     <div className="flex flex-col gap-2 rounded-lg px-3 py-2.5 bg-gray-100/70 dark:bg-white/4">
-      {agent.id !== "antigravity" && (
+      {(agent.id !== "antigravity" || accountCapable) && (
         linked.length === 0
           ? <p className="text-[11.5px] text-gray-500 dark:text-white/45">{t("settings.tuis.connect.none")}</p>
           : linked.map((account) => <LinkedAccount key={account.id} account={account} />)

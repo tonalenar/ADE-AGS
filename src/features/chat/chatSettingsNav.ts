@@ -6,7 +6,7 @@ import type { SettingsSectionId } from "@/app/uiStore";
  */
 export const CHAT_SETTINGS_GROUPS: { titleKey: string; items: SettingsSectionId[] }[] = [
   { titleKey: "chat.settingsNav.app", items: ["general", "appearance", "chat", "shortcuts"] },
-  { titleKey: "chat.settingsNav.agents", items: ["agents", "accounts", "permissions", "memory", "decisions"] },
+  { titleKey: "chat.settingsNav.agents", items: ["agents", "providers", "accounts", "permissions", "memory", "decisions"] },
   { titleKey: "chat.settingsNav.tools", items: ["terminal", "devices", "worktrees", "advanced"] },
 ];
 
@@ -28,6 +28,7 @@ export const SETTINGS_SEARCH: Record<SettingsSectionId, { keys: string[]; words?
   chat: { keys: ["chat.settings.toggle", "chat.settings.worktree", "chat.settings.plan"] },
   shortcuts: { keys: [] },
   agents: { keys: ["settings.tuis", "settings.orchestrator", "settings.routing", "settings.prelaunch", "settings.skillsDir", "settings.skillssh"] },
+  providers: { keys: [], words: ["login", "antigravity", "claude", "codex", "gemini", "api key", "chave"] },
   accounts: { keys: [] },
   memory: { keys: [] },
   decisions: { keys: ["settings.decisions.provider"], words: ["laya", "jev"] },

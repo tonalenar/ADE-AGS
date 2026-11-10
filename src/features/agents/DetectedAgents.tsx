@@ -39,6 +39,7 @@ export function DetectedAgents() {
   const loadAccounts = useAccountsStore((s) => s.load);
   const accounts = useAccountsStore((s) => s.accounts);
   const systemAccounts = useAccountsStore((s) => s.systemAccounts);
+  const capable = useAccountsStore((s) => s.capable);
 
   useEffect(() => { loadAccounts().catch(() => undefined); }, [loadAccounts]);
 
@@ -140,7 +141,7 @@ export function DetectedAgents() {
           const why = btn?.disabledReason ? reasonText(t, btn.disabledReason) : undefined;
           const open = openId === agent.id;
           const install = installRowState(agent.available, offers[agent.id], installing !== null || updating !== null);
-          const linked = agent.id === "antigravity"
+          const linked = agent.id === "antigravity" && !capable.some((c) => c.agentId === "antigravity")
             ? null
             : [...systemAccounts, ...accounts].filter((a) => a.agentId === agent.id).length;
           return (
