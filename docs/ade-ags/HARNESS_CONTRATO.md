@@ -210,7 +210,7 @@ Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta
 | # | Inventário | Afirmação | O que o código mostra | Efeito na matriz |
 |---|---|---|---|---|
 | D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:285`, `opencode.rs:231`. Cursor e Antigravity **não** usam `open_resuming` e não devem: têm um processo por turno e o prompt sai junto com `--resume`/`--conversation`. Usam `resume::run_turn_resuming` (`cursor.rs:243-267`, `agy.rs:224-248`, `resume.rs:176-199`), que só recai numa sessão nova com prova de recusa antes do turno (§11.12) | Inventário errado no ponto. A célula de `resume` de cursor e agy cita o guarda e os testes dele |
-| D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7. Depois da Fase 3, as células de Claude (`tool_events`) e de Codex (`turn_completion`) citam a correção; o estado delas não muda |
+| D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7. Corrigido depois da Fase 3 para OpenCode, Antigravity e Cursor (o fim normal também marca); as células `tool_events` desses motores citam a correção. As de Claude (`tool_events`) e de Codex (`turn_completion`) seguem citando a correção anterior; o estado delas não muda |
 | D3 | UI `chatModel.ts:74-80` × inventário | A UI anuncia `midTurn: steer` para o Claude; o inventário diz `unknown` | O Claude só escreve a linha `user` no stdin com o turno aberto (`claude.rs:570-578`) e não observa o desfecho. O comentário da própria UI admite "ou logo depois" (`chatModel.ts:66-67`) | `chat/claude-code` `steer` = `Unknown`; decisão em §1.8 |
 | D4 | `claude-codex` §2.1 #9-#11, §2.2 #9-#11 | `child_spawn`/`child_result` `supported` pela rota do ADE (`chat_new`, `chat_wait`) e `child_stop` pela rota nativa (`stop_task`) | Duas rotas misturadas na mesma capability | Separadas (§1.5). Claude: `child_spawn` fica `S` (nativo observado: `tarefas.rs:1-20`), `child_result` vira `U` (o resumo só vai à janela; o log só guarda id, título e status, `execution_log.rs:228-230`), `child_stop` fica `S`. Codex: `child_spawn` `S`, `child_result` `U`, `child_stop` `U` |
 | D5 | `antigravity-t3` §1.1 | `child_spawn` e `child_result` = `unknown` | O adapter só mapeia o **nome** da ferramenta para um cartão `Task` (`agy_map.rs:331-334`), igual ao Cursor (`cursor_map.rs:298-300`), que o inventário do Cursor marcou `unsupported`. O inventário do agy afirma que o CLI tem subagente nativo sem citar prova | `Unsupported` nos dois, pela mesma regra (sem caminho no ADE). Não prova que o agy não tenha subagente |
@@ -224,8 +224,8 @@ Conferido e **mantido** dos inventários: `Engine::of(...) != Some(Engine::Claud
 
 ### 1.7 `mark_unknown_outcomes` por motor (resolve D2)
 
-A função marca como "desfecho desconhecido" as ferramentas `Running` de um turno (`conversa/turn.rs:70-80`, que chama `mark_unknown_outcomes_except`; as exceções vêm do motor). Quem a chama:
-- `turn::record_end`, quando `result.interrupted || result.error.is_some()` (`turn.rs:59-61`): os motores de `turn::finish` (OpenCode, Antigravity, Cursor e a queda do Codex);
+A função marca como "desfecho desconhecido" as ferramentas `Running` de um turno (`conversa/turn.rs:82-111`, que chama `mark_unknown_outcomes_except`; as exceções vêm do motor). Quem a chama:
+- `turn::record_end`, em **qualquer** fim: normal, interrompido ou com erro (`turn.rs:67-74`). A lista de exceções é vazia nos motores de `turn::finish` (OpenCode, Antigravity, Cursor e a queda do Codex), pelo critério abaixo;
 - `claude::gravar_fim`, em **qualquer** fim do turno do Claude (`claude.rs:455-471`), com as exceções da regra abaixo;
 - `codex::gravar_fim`, no `turn/completed`, com **qualquer** `status` (`codex.rs:539-549`);
 - `close_orphan_runs`, no boot, só para turnos ainda `inProgress` (`conversa/store.rs:1068-1082`).
@@ -234,17 +234,27 @@ A função marca como "desfecho desconhecido" as ferramentas `Running` de um tur
 |---|---|---|---|
 | Claude | `Out::Done` → `finish_turn` (`claude.rs:440-453`) → `gravar_fim`: **marca** em `result` normal, interrompido ou com erro, **exceto** as tarefas em segundo plano com o processo vivo | `closed()` → `finish_turn` (`claude.rs:368`), sem exceção: **marca tudo** | marca |
 | Codex | `turn/completed` → `gravar_fim` (`codex.rs:539-549`): **marca em qualquer `status`**. Não roda `pool::after_turn`, como antes | `closed()` → `turn::finish` (`codex.rs:480`): marca (queda é erro; fechar de propósito é interrupção) | marca |
-| OpenCode | `turn::finish` (`opencode.rs:814`): marca se interrompido ou com erro. **Não** marca no fim normal | `turn::finish` (`opencode.rs:589`): marca | marca |
-| Antigravity | `turn::finish` (`agy.rs:213`): idem | idem (EOF sem `result` vira erro) | marca |
-| Cursor | `turn::finish` (`cursor.rs:225`): idem | idem | marca |
+| OpenCode | `turn::finish` (`opencode.rs:814`): **marca em qualquer fim** (normal, interrompido ou com erro), sem exceção (critério abaixo) | `turn::finish` (`opencode.rs:589`): marca | marca |
+| Antigravity | `turn::finish` (`agy.rs:214`): **marca em qualquer fim**, como o OpenCode | idem (EOF sem `result` vira erro) | marca |
+| Cursor | `turn::finish` (`cursor.rs:233`): **marca em qualquer fim**, como o OpenCode | idem | marca |
 
 **Exceção das tarefas em segundo plano (Claude).** O evento `task` de começo com `is_backgrounded: true` diz qual `tool_use` a lançou (`tool_use_id`). `tarefa_em_segundo_plano` (`claude.rs:473-480`) guarda esse id em `Session.background`. Com o processo vivo, o fim do turno não marca esse item: o desfecho dele vem pelo canal de tarefas (`task_notification`, ou o `stop_task` que encerra a tarefa). A exceção vale para a tarefa viva e para a já encerrada, porque nos dois casos o desfecho já chega pelo canal. Se o processo cai ou é fechado, nenhuma exceção vale: o canal morre com ele, e o item fica marcado. O Codex não precisa dessa exceção: `collabAgentToolCall` e `subAgentActivity` não viram item da timeline, só vão ao painel de tarefas.
 
+**Exceções por motor (critério).** Uma ferramenta só fica de fora da marcação se o motor garante que ela segue depois do fim do turno pelo próprio canal. Só o Claude tem esse canal (a tarefa em segundo plano com o processo vivo, acima). Para OpenCode/ACP, Antigravity e Cursor a lista de exceções é vazia, com estas citações do `record_end` (`turn.rs:56-74`):
+- **OpenCode (ACP):** `session/prompt` só responde no fim do turno (`opencode_map.rs:10-11`), e o mapeador não tem tarefa em segundo plano (nenhuma ocorrência de `background` em `opencode_map.rs`). Um `tool_call` sem atualização final nessa hora não tem quem o feche depois (`opencode.rs:789-826`).
+- **Antigravity:** o `result` é o último evento, e cada turno é um processo (`agy.rs:214`, `agy_map.rs:195-242`). O mapeador também não tem tarefa em segundo plano.
+- **Cursor:** o turno fecha no `result`, que o `cursor-agent` só manda depois dos shells em segundo plano (`cursor_map.rs:13-15`), ou por silêncio, que não vence com ferramenta `Running` (`cursor_map.rs:155-158`). Um sinal depois do fim de uma chamada desfaz esse fim (`cursor_map.rs:126-127`), então o turno segue até o `result`.
+- **Codex:** `collabAgentToolCall` e `subAgentActivity` não viram item da timeline (ver acima): lista vazia, como antes.
+
+**Prova (derivada, não captura real).** `replay_derivado_agy_fim_normal_marca_ferramenta_sem_resultado` e `replay_derivado_cursor_fim_normal_marca_ferramenta_sem_resultado` cortam o frame que fecha a ferramenta em `antigravity-feliz` e `cursor-feliz` (capturas `recorded`). `replay_derivado_acp_fim_normal_marca_ferramenta_sem_resultado` usa uma sequência ACP sintetizada, porque não há captura real de ACP. O controle `replay_derivado_fim_normal_com_ferramenta_concluida_fica_intacta` mostra que a ferramenta concluída não é marcada. Esses testes provam o que o código faz com essa entrada, o mesmo limite de `claude-tool-sem-resultado`: não provam que a CLI real produz `tool_use` sem desfecho num fim normal (em `conversa/test_bancada.rs`).
+
 Lacunas reais, em ordem de risco:
-1. **OpenCode, Antigravity e Cursor, no fim normal**: não marcam quando o turno acaba **sem erro** (`turn::finish` → `record_end`, `turn.rs:59-61`, só age em erro ou interrupção). Claude e Codex foram corrigidos nesta fase. Para os três, a decisão falta (§8): a premissa de que "os outros motores já marcam no fim normal" não se confirma no código.
+1. **Resolvida nesta correção (fecha o que a Fase 3 deixou aberto)**: OpenCode, Antigravity e Cursor marcam também no fim normal, pelo `record_end` (`turn.rs:67-74`), com a lista de exceções vazia (critério acima). Antes, `turn::finish` só agia em erro ou interrupção.
 2. Não há captura real que mostre `tool_use` sem `tool_result` num fim normal do Claude, nem `commandExecution` `inProgress` no `turn/completed` do Codex. As fixtures `claude-tool-sem-resultado` e `codex-tool-sem-resultado` são sintetizadas: provam o que o código faz com essa entrada, não que a CLI real a produz.
 3. Tarefa em segundo plano que acaba sem `tool_result` continua `Running` na timeline: o ADE sabe que a tarefa acabou, mas não fecha o item. Já era assim e não muda aqui.
-4. Os itens marcados por `record_end` (OpenCode, Antigravity, Cursor e a queda do Codex) não são emitidos à janela: a tela só os vê ao recarregar. Gap antigo, fora desta fase.
+4. **Resolvida nesta correção**: `turn::finish` emite à janela os itens que `record_end` marcou (`turn.rs:43-54`), como Claude e Codex já faziam. Antes, a tela só os via ao recarregar.
+
+**O que foi e o que não foi verificado nesta correção.** Verificado: `cargo test --lib conversa`, com os testes derivados novos (três falhavam antes da correção e passam depois; o controle já passava) e o teste de que `record_end` devolve à janela o que marcou. Não verificado: o comportamento real da CLI de OpenCode, Antigravity e Cursor quando uma ferramenta termina sem desfecho num fim normal; a emissão de fato à janela (só pela leitura de `turn::finish`, sem teste de janela); a tela.
 
 ### 1.8 Conflito do `steer` do Claude: decisão
 
@@ -533,7 +543,7 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 
 | Cenário | Claude | Codex | OpenCode (ACP) | Antigravity | Cursor | Como |
 |---|---|---|---|---|---|---|
-| **P0** ferramenta sem resultado ao fim | **feito** (§1.7): fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` (`gravar_fim`) | **feito**: fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` (`gravar_fim`) | fixture `acp-tool-sem-resultado` | `requer captura real` | `requer captura real` | Claude e Codex marcam no fim (a fixture fixa a entrada; o teste de banco, o efeito). OpenCode, Antigravity e Cursor ainda não marcam no fim normal (§1.7, lacuna 1) |
+| **P0** ferramenta sem resultado ao fim | **feito** (§1.7): fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` (`gravar_fim`) | **feito**: fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` (`gravar_fim`) | **feito** (§1.7): sequência ACP sintetizada, sem arquivo de fixture (`replay_derivado_acp_fim_normal_marca_ferramenta_sem_resultado`); não há captura real de ACP | derivado de `antigravity-feliz` (`replay_derivado_agy_fim_normal_marca_ferramenta_sem_resultado`); `requer captura real` da CLI | derivado de `cursor-feliz` (`replay_derivado_cursor_fim_normal_marca_ferramenta_sem_resultado`); `requer captura real` da CLI | Claude e Codex marcam no fim (a fixture fixa a entrada; o teste de banco, o efeito). OpenCode, Antigravity e Cursor marcam também no fim normal (§1.7); as provas deles são derivadas, e a CLI real só se prova com captura |
 | **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | **gravada** `antigravity-queda` (kill sem `result`) | **gravada** `cursor-queda` (kill sem `result`) | bancada |
 | **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste do guarda `run_turn_resuming` com fakes (`test.rs:779-901`): recusa antes do turno → turno novo com aviso; o resto não repete | idem (`--resume`, mesmo guarda) | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
 | **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
@@ -682,7 +692,7 @@ Nada de `database/schema.rs` nem `ipc/protocol.rs`. Os testes da Fase 1 ficam no
 - `node_id` nos eventos, recibos unificados, evento transacional (Fase 2).
 - `ProviderSessionRef`, `ContextTransfer`, `connected_session` (Fases 3 e 4).
 - **Recuperação:** nenhuma. Depois do reinício a árvore mostra o que as duas varreduras já produzem hoje (interrompido e `failed`/`cancelled`). Não há replay de evento, cursor, retomada de sessão nem relançamento.
-- Leitura do descritor pela UI, IPC ou MCP; correção da lacuna de §1.7; migração dos 149 pontos por nome.
+- Leitura do descritor pela UI, IPC ou MCP; correção das lacunas 1 e 4 de §1.7 (feita depois da Fase 3; as lacunas 2 e 3 seguem abertas); migração dos 149 pontos por nome.
 - Run da Frota fora de conversa, sessões de TUI e filhos criados com o pai ocioso.
 
 ## 8. Decisões em aberto para o usuário
