@@ -11,8 +11,10 @@
 
 pub mod bridge;
 pub mod cancel;
+pub(crate) mod guard;
 pub(crate) mod commands;
 pub mod install;
+mod intake;
 pub mod mcp;
 pub mod protocol;
 mod server;
