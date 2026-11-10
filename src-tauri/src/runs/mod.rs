@@ -51,6 +51,8 @@ pub(crate) use routing::Complexity;
 pub use store::sweep_orphans;
 pub use types::{Fact, Run, Task};
 pub use harness::HarnessExecutionGraph;
+#[cfg(test)]
+pub(crate) use harness::thread_execution_graph;
 
 use std::time::Duration;
 

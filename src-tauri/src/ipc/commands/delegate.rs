@@ -12,6 +12,7 @@ use tauri::AppHandle;
 
 use super::{peers, team};
 use crate::database::DbConnection;
+use crate::harness::child_delivery;
 use crate::harness::delegate::{self, DelegateError, Mode, SendResult, SessionRequest};
 
 /// `team.delegate`: o erro volta como `<código>: <mensagem>`.
@@ -28,13 +29,44 @@ fn run(app: &AppHandle, args: &Value) -> Result<Value, DelegateError> {
         .clone();
     // O recibo é de quem chamou de verdade (a aba), nunca de um campo que o modelo escolheu.
     let identity = request.identity(&format!("tab:{from}"));
-    delegate::dispatch(
+    let response = delegate::dispatch(
         &db,
         &identity,
         &crate::util::now_ts_ms,
         || revalidate(app, &db, &from, &request),
         |target| send(app, &from, target, &request),
-    )
+    )?;
+    watch_result(&db, &from, &request, &response);
+    Ok(response)
+}
+
+/// `mode = async`: o resultado da sessão chega ao pai quando ela terminar (contrato §12.9). Só depois de a mensagem
+/// ter sido aceita; a repetição do mesmo pedido (recibo `accepted`) também registra, o que cura uma queda entre
+/// enviar e registrar. Falhar aqui nunca desfaz a delegação: a resposta da sessão segue pelo canal de sempre.
+fn watch_result(db: &DbConnection, from: &str, request: &SessionRequest, response: &Value) {
+    if request.mode != Mode::Async || response.get("deliveryState").and_then(Value::as_str) != Some("accepted") {
+        return;
+    }
+    let Some(session) = response.get("to").and_then(Value::as_str) else { return };
+    let Ok(conn) = db.lock() else { return };
+    let parent_ref = child_delivery::parent_ref_of_caller(from);
+    let child_ref = format!("{session}#{}", request.request_id);
+    let title = request.to.clone();
+    let agent = child_delivery::session_agent(&conn, session);
+    let turn = child_delivery::current_turn(&conn, &parent_ref).ok().flatten();
+    let spec = child_delivery::WatchSpec {
+        kind: delegate::Target::ConnectedSession,
+        child_ref: &child_ref,
+        parent_ref: &parent_ref,
+        title: &title,
+        agent_id: &agent,
+        parent_turn_id: turn.as_deref(),
+        session_id: Some(session),
+        message_id: response.get("messageId").and_then(Value::as_i64),
+    };
+    if let Err(error) = child_delivery::register(&conn, &spec, crate::util::now_ts_ms()) {
+        eprintln!("[harness] não foi possível acompanhar a sessão delegada: {error}");
+    }
 }
 
 /// A revalidação do instante do envio: lê as sessões de novo e confere tudo antes de escrever. Uma aba
