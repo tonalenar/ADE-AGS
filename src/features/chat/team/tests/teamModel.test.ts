@@ -50,7 +50,7 @@ describe("quem é quem no time", () => {
   });
 
   it("a conversa nova nunca tem mais acesso do que a política deixa", () => {
-    expect(conversationAccess("read", "claude-code")).toEqual({ access: "ask", plan: true });
+    expect(conversationAccess("read", "claude-code")).toEqual({ access: "ask", plan: false });
     expect(conversationAccess("read", "codex")).toEqual({ access: "ask", plan: false });
     expect(conversationAccess("edits", "codex")).toEqual({ access: "edits", plan: false });
     expect(conversationAccess("full", "codex")).toEqual({ access: "full", plan: false });

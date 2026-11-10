@@ -4846,6 +4846,8 @@
   "chat.composer.queueHintInterrupt": "⏎ stops the turn and sends · {{key}} queues it",
   "chat.composer.queueHintSteerQueue": "⏎ queues it · {{key}} sends now, mid-turn",
   "chat.composer.queueHintInterruptQueue": "⏎ queues it · {{key}} stops the turn and sends",
+  "chat.composer.queueHintUnknown": "⏎ sends now; the agent may read it during or after the turn · {{key}} queues it",
+  "chat.composer.queueHintUnknownQueue": "⏎ queues it · {{key}} sends now; the agent may read it during or after the turn",
   "chat.composer.queueHintClaude": "⏎ goes to Claude now; it reads it mid-turn or right after the turn · {{key}} queues it",
   "chat.composer.queueHintClaudeQueue": "⏎ queues it · {{key}} goes to Claude now; it reads it mid-turn or right after the turn",
   "chat.composer.queueAction": "Queue message",

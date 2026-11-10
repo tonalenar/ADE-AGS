@@ -15,8 +15,8 @@ describe("permissões da conversa", () => {
 
   it("o Plano vence a permissão no Claude", () => {
     expect(withAccess("claude-code", "claude", "full", true)).toBe("claude --permission-mode plan");
-    expect(planSupported("claude-code")).toBe(true);
-    expect(planSupported("codex")).toBe(false);
+    expect(planSupported("claude-code", false, "supported")).toBe(true);
+    expect(planSupported("codex", false, "unsupported")).toBe(false);
   });
 
   it("modo que o agente não tem nunca dá MAIS permissão", () => {
