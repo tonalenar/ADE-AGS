@@ -1034,7 +1034,7 @@ pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
         &tx,
         None,
         now,
-        "O app foi fechado antes de o turno terminar.",
+        "O processo do ADE foi fechado ou caiu antes de o turno terminar.",
     )?;
     let orphans: Vec<String> = {
         let mut stmt = tx.prepare("SELECT id FROM chat_request WHERE state = 'pending'")?;

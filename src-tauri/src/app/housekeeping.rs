@@ -28,9 +28,11 @@ pub fn spawn_housekeeping(app: AppHandle) {
     if !SECRET_CLEANER_STARTED.swap(true, Ordering::SeqCst) {
         std::thread::Builder::new()
             .name("agent-secret-expiry".into())
-            .spawn(|| loop {
-                crate::ipc::commands::cleanup_expired_agent_secrets();
-                std::thread::sleep(Duration::from_secs(15 * 60));
+            .spawn(|| {
+                loop {
+                    crate::ipc::commands::cleanup_expired_agent_secrets();
+                    std::thread::sleep(Duration::from_secs(15 * 60));
+                }
             })
             .expect("hilo de expiração de segredos");
     }
@@ -48,32 +50,77 @@ fn run(app: AppHandle) {
         if crate::ipc::other_instance_alive() {
             eprintln!("[ade-ags] hay otra instancia abierta: no se limpian sus tareas");
         } else {
-            match crate::runs::sweep_orphans(&db) {
-                Ok(n) if n > 0 => {
-                    eprintln!("[runs] {n} tarea(s) headless quedaron colgadas del cierre anterior");
+            let now = crate::util::now_ts_ms();
+            let recovery = crate::harness::recovery::with_boot_lease(&db, now, || {
+                {
+                    let conn = db.lock().map_err(|error| error.to_string())?;
+                    // Uma falha aqui não pode impedir as varreduras seguintes (turnos órfãos, Frota, integrantes).
+                    match crate::harness::effects::recover_expired(&conn, now, &mut |_| {
+                        // Nenhum provider atual prova se `chat_send` saiu antes da queda.
+                        crate::harness::effects::Reconcile::Unknown
+                    }) {
+                        Ok(effects)
+                            if !effects.completed.is_empty()
+                                || !effects.requeued.is_empty()
+                                || !effects.unknown.is_empty() =>
+                        {
+                            eprintln!(
+                                "[harness] recuperação: {} concluído(s), {} na fila, {} desfecho(s) desconhecido(s)",
+                                effects.completed.len(),
+                                effects.requeued.len(),
+                                effects.unknown.len()
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => eprintln!("[harness] não foi possível reconciliar os efeitos: {error}"),
+                    }
+                    match crate::conversa::store::sweep_orphans(&conn, now) {
+                        Ok(sweep) if sweep.runs + sweep.requests > 0 => eprintln!(
+                            "[conversa] {} turno(s) e {} pedido(s) órfãos marcados no arranque",
+                            sweep.runs, sweep.requests
+                        ),
+                        Ok(_) => {}
+                        Err(error) => {
+                            eprintln!("[conversa] não foi possível reconciliar turnos: {error}")
+                        }
+                    }
                 }
-                Ok(_) => {}
-                Err(error) => {
-                    eprintln!("[runs] no se pudieron cerrar las tareas huérfanas: {error}")
-                }
-            }
-            // Integrantes que ficaram `provisioning` (o app caiu entre gravar e abrir): `active` ou `failed`
-            // pelo estado real (ver `missions::members` e `chat_team::api::reconcile_provisions`).
-            if let Ok(conn) = db.lock() {
-                let now = crate::util::now_ts_ms();
-                match crate::missions::members::reconcile(&conn, None, true, now) {
-                    Ok(n) if n > 0 => eprintln!("[missions] {n} integrante(s) reconciliado(s) no boot"),
+                match crate::runs::sweep_orphans(&db) {
+                    Ok(n) if n > 0 => {
+                        eprintln!("[runs] {n} tarefa(s) headless interrompida(s) no boot")
+                    }
                     Ok(_) => {}
-                    Err(error) => eprintln!("[missions] não foi possível reconciliar os integrantes: {error}"),
+                    Err(error) => eprintln!("[runs] não foi possível reconciliar tarefas: {error}"),
                 }
-                if let Err(error) = crate::chat_team::api::reconcile_provisions(&conn, now) {
-                    eprintln!("[chat_team] não foi possível reconciliar os integrantes: {error}");
+                {
+                    // Integrantes em `provisioning`: reconciliar pelo estado real após uma queda.
+                    let conn = db.lock().map_err(|error| error.to_string())?;
+                    match crate::missions::members::reconcile(&conn, None, true, now) {
+                        Ok(n) if n > 0 => {
+                            eprintln!("[missions] {n} integrante(s) reconciliado(s) no boot")
+                        }
+                        Ok(_) => {}
+                        Err(error) => eprintln!(
+                            "[missions] não foi possível reconciliar integrantes: {error}"
+                        ),
+                    }
+                    if let Err(error) = crate::chat_team::api::reconcile_provisions(&conn, now) {
+                        eprintln!("[chat_team] não foi possível reconciliar integrantes: {error}");
+                    }
                 }
+                if let Err(error) = crate::runs::sweep_orphan_approvals(&db) {
+                    eprintln!("[runs] não foi possível fechar permissões órfãs: {error}");
+                }
+                crate::ipc::mcp::sweep_configs(&db);
+                Ok(())
+            });
+            match recovery {
+                Ok(Some(())) => {}
+                Ok(None) => eprintln!(
+                    "[harness] recuperação de boot adiada: outra instância possui o lease SQLite"
+                ),
+                Err(error) => eprintln!("[harness] recuperação de boot incompleta: {error}"),
             }
-            if let Err(error) = crate::runs::sweep_orphan_approvals(&db) {
-                eprintln!("[runs] no se pudieron cerrar los permisos huérfanos: {error}");
-            }
-            crate::ipc::mcp::sweep_configs(&db);
         }
     }
     SWEEP_DONE.store(true, Ordering::SeqCst);

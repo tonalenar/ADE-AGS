@@ -32,6 +32,11 @@ export interface TurnEnd {
   superseded?: boolean;
 }
 
+/** A ferramenta ficou sem desfecho conhecido: o backend a marcou com `TOOL_OUTCOME_UNKNOWN` (ver `conversa/turn.rs`). */
+export function isUnknownOutcome(tool: Pick<TimelineItem, "status" | "output">): boolean {
+  return tool.status === "error" && typeof tool.output === "string" && tool.output.startsWith("TOOL_OUTCOME_UNKNOWN");
+}
+
 /**
  * O desfecho para a tela. Erro vence "interrompido": se o processo caiu, a pessoa não parou nada; só é
  * "interrompido" o que ela mesma interrompeu.

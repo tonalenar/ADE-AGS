@@ -406,20 +406,20 @@ Diferenças de significado:
    - run **terminal**: o root acabou;
    - run **assentado**: todos os nós são terminais.
    O nó de turno da projeção traz `activeChildren`: quantos filhos diretos ainda não são terminais. Filho direto é quem tem esse turno como `parentId` — a conversa filha ou o run da Frota. Um run da Frota conta uma vez, não cada tarefa. A conversa filha vale o estado do último turno dela (§3.2); sem nenhum turno, ela é `pending` no nó, mas **não conta como ativa**: uma conversa lateral aberta e nunca usada mostraria "1 filho ativo" para sempre. `chat_thread.state` não entra. O mapa é `harness::state` (`interrupted`, `failed`, `cancelled`, `completed`, `skipped` e `handed_off` são terminais). Run legado sem nó e sem turno pai não entra. Não há coluna nem estado novo: a contagem é derivada na leitura e os outros nós omitem o campo. Quando o turno está terminal e a contagem é maior que zero, a árvore mostra "N filhos ativos" junto do status; o ponto de status continua o do turno. A mesma projeção chega à CLI (`run.harnessGraph`) e ao MCP (`harness_graph`), então o campo aparece lá sem comando novo. Decisão do usuário; o item 4 de §8 fica fechado.
-9. **Cancelamento.** Cancelar o root é parar o turno dele. Descendentes só são cancelados por ordem do pai ou da pessoa, com escopo verificado (Fase 4). Parar uma conversa filha interrompe o turno dela; cancelar na Frota age na subárvore do run, nunca no lead nem em filhos de chat (`runs/orchestration.rs:1278-1330`). Nunca se encerra o PTY original de uma sessão conectada.
+9. **Cancelamento.** Cancelar o root é parar o turno dele. Descendentes só são cancelados por ordem do pai ou da pessoa, com escopo verificado (Fase 4, §12.x.3). Parar uma conversa filha interrompe o turno dela; cancelar na Frota age na subárvore do run, nunca no lead nem em filhos de chat (`runs/orchestration.rs::cancel_targets`). Nunca se encerra o PTY original de uma sessão conectada.
 
 ### 3.4 Reinício do app
 
-O que já acontece (e o contrato mantém):
-- **Conversa** (`conversa/store.rs::sweep_orphans`, chamado em `database/connection.rs:159`): turno `inProgress` vira `interrupted`; ferramentas sem resultado ganham `TOOL_OUTCOME_UNKNOWN`; pedidos `pending` viram `expired`; tudo numa transação. Nunca reenvia nada.
-- **Frota** (`runs/store.rs::sweep_orphans`, chamado em `app/housekeeping.rs:51`): `ready` e `running` viram `failed` com `SWEPT_RUNNING_ERROR`; `pending` vira `cancelled`; o status do run é recalculado. Não relança.
-- As duas varreduras só rodam se `ipc::other_instance_alive()` for falso. Isso é uma checagem, não um lock: a serialização entre instâncias é da Fase 5 e **não está provada**.
+O boot chama as reconciliações depois que a janela existe, em `app/housekeeping.rs`, sob o lease descrito no §13:
+- **Conversa** (`conversa/store.rs::sweep_orphans`): turno `inProgress` vira `interrupted`; ferramentas sem resultado ganham `TOOL_OUTCOME_UNKNOWN`; pedidos `pending` viram `expired`; tudo numa transação. Nunca reenvia nada.
+- **Frota** (`runs/store.rs::sweep_orphans`): `ready` e `running` viram `failed` com `SWEPT_RUNNING_ERROR`; `pending` vira `cancelled`; o status do run é recalculado. Não relança.
+- `ipc::other_instance_alive()` continua evitando sweep enquanto uma instância está ativa; a tomada condicional no SQLite fecha a corrida entre boots simultâneos.
 
-O que o contrato acrescenta (Fases 3 e 5, não agora):
+O que o contrato acrescenta:
 - Todo nó não terminal vira `interrupted` com `end_reason = app_closed` **na mesma transação** da varredura nativa. A reconciliação fica explícita: `end_source = reconciliation`.
 - `outcome_unknown = 1` quando havia ferramenta `Running`, ou envio em `submitting`/`unknown` (`chat_child_receipts.delivery_state`).
 - Nó `waiting` vira `interrupted`: o processo que esperava a resposta morreu e o pedido expirou. Não se retoma uma aprovação.
-- **"Retomar" nunca altera o histórico.** Cria uma nova attempt correlacionada ao nó antigo, escolhida pela pessoa. Só existe onde a capability `resume` for `Supported` e provada.
+- **"Retomar" nunca altera o histórico.** Cria uma nova attempt correlacionada ao nó antigo, escolhida pela pessoa. Só existe onde a capability `resume` for `Supported` e provada. Na Frota headless a correlação não ganha coluna: `resume_task` (`runs/store.rs`) insere outra linha em `run_attempts` com o mesmo `task_id` e `attempt` = anterior + 1. A linha anterior (status, resultado, erro, `events_path`) não é reescrita e o JSONL dela não é truncado. `failed`, `interrupted` e o desfecho desconhecido (`failed` com `MISSING_FINAL_RESULT`) entram sem flag. `done` só entra com pedido explícito. `ready`/`running`, ou uma tentativa ainda aberta, não ganham segunda linha. A rodada automática de correção e o reroute passam pela mesma reserva (`reserve_next_attempt`); o contador operacional `tasks.attempt` continua podendo zerar no reroute, e o de `run_attempts` não. A tela da Frota segue mostrando a linha corrente da tarefa, não a lista de tentativas.
 
 ## 4. Plano de migração aditiva
 
@@ -894,7 +894,7 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 | # | Comando | Estado | O que falta |
 |---|---|---|---|
 | 1 | `chat_send` | **entregue** (esta fatia) | evento e `causation_event_id` |
-| 2 | `fleet_delegate` | leitura unificada e escrita dupla (esta fatia) | trocar a leitura de `orchestration.rs` para `receipts::begin` |
+| 2 | `fleet_delegate` | leitura unificada e escrita dupla; **a leitura de `orchestration.rs` passa por `receipts::lookup` desde a Fase 4 (§12.5)** | `begin` no lugar do `INSERT` da delegação |
 | 3 | `chat_new` | leitura unificada (esta fatia) | mover `claim_child_delivery` para `receipts`/`effects` |
 | 4 | `chat_interrupt` (`api::stop`) | próxima fatia | efeito `chat_interrupt`; a capability `interrupt` já existe na matriz |
 | 5 | `request_answer` (`answer.rs`) | próxima fatia | o recibo guarda o `request_id` do pedido; responder duas vezes não reenvia ao provider |
@@ -904,10 +904,36 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 
 ### 11.9 O que a fatia não faz
 
-- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` existe e é testado, mas **ainda não é chamado no boot**.
+- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13).
 - Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id` ainda: as colunas existem (aditivas) e ficam `NULL` até `queue_chat_event` migrar.
 - Interrupt, spawn, resposta a pedido e cancelamento não usam a fila.
 - Nenhum provider real foi executado.
+
+### 13. Fase 5: recuperação e reconciliação
+
+Ao abrir o ADE, `app::housekeeping` toma `harness_recovery_lease` no mesmo SQLite antes de reconciliar recibos/efeitos, turnos órfãos, tarefas da Frota, permissões e provisionamentos. A migração aditiva do lease fica em `harness::store::migrate`; `database/schema.rs` e `user_version` não mudam.
+
+O lease é uma linha singleton (`id = 1`) com `owner` e `lease_until`. A tomada faz `UPDATE` condicional numa transação `Immediate`, aceitando somente linha livre ou vencida. O instante de referência é argumento das funções; o boot injeta `util::now_ts_ms()`. A rotina libera por comparação do dono ao terminar; se o processo cair, outra instância pode tomar depois de cinco minutos. Um segundo boot que encontrar lease válido adia toda a reconciliação. O lease protege o conjunto de sweeps, enquanto o mutex Rust do banco fica livre durante cada operação que não precisa dele.
+
+Decisões da reconciliação de efeitos:
+
+- `pending` nunca reclamado continua na fila e o mesmo `client_request_id` pode reclamá-lo. A intenção e o efeito foram gravados juntos no passo 1 (§11.4).
+- `running` com lease ainda válido não é tocado. O pedido repetido retorna `submitting`; esperar evita concorrer com o dono que ainda pode estar enviando.
+- `running` com lease vencido e `retry_safe = 1` volta a `pending` (ou `failed` por tentativas esgotadas), porque repetir é idempotente.
+- `running` com lease vencido e `retry_safe = 0` é consultado pela capability de reconciliação. `chat_send` não tem capability que prove aceitação; portanto recebe `failed/outcome_unknown`, o recibo recebe `unknown` e nunca é executado de novo com aquele id. Nenhum texto ou payload do provider é persistido.
+- Os estados do recibo separam a conclusão do envio (`accepted`, `retryable`, `unknown`) do estado do turno e do trabalho posterior. `accepted` significa que o provider aceitou o envio; não significa que o turno terminou, nem que um diff ou checkpoint foi salvo.
+
+O sweep do turno grava `turn.interrupted` na mesma transação em que fecha `chat_run`; o evento guarda a razão legível “O processo do ADE foi fechado ou caiu antes de o turno terminar.” `runs::harness::thread_execution_graph` expõe essa razão em `interruptionReason` no nó do turno, além do evento. Registros antigos sem evento ficam sem razão. Estado de lease vencido fica no recibo/efeito, com `unknown` como motivo operacional; não é apresentado como conclusão do turno.
+
+| Fronteira de crash de `chat_send` | Estado recuperado | Repetição do mesmo id | Máximo de chamadas ao provider |
+|---|---|---|---:|
+| Antes do commit da intenção | Nenhuma linha | Cria intenção e envia | 1 |
+| Após o commit, antes do claim | `prepared` + `pending` preservados | Reclama e envia | 1 |
+| Durante o efeito, lease vivo | `submitting` + `running`; boot não toma o lease | Aguarda; depois do vencimento, sem capability, vira `unknown` | 1 |
+| Após o efeito, antes de concluir | `submitting` + `running`; desfecho externo não comprovável | Lease vencido vira `unknown`; não reenvia | 1 |
+| Dentro da conclusão, antes do recibo final | O passo 4 é uma transação: crash antes do commit reverte efeito e recibo; após o commit ambos ficam finais | Antes: lease vencido vira `unknown`; após: replay de `accepted` | 1 |
+
+Os testes usam fake de envio com contador e instantes numéricos. Não executam provider ou CLI real. A tabela é uma garantia por estado e atomicidade local; o intervalo entre aceitação remota e commit local permanece inerentemente ambíguo para providers sem consulta de idempotência.
 
 ### 11.10 Fase 2, primeira fatia: o que foi e o que não foi verificado
 
@@ -923,7 +949,7 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 - Nenhum provider real foi executado: o `execute` dos testes é um contador. O caminho `send_with_request` com `AppHandle` não tem teste de ponta a ponta.
 - O recibo e o efeito rodam em transações separadas (aceitar, reclamar, concluir); a atomicidade de cada passo é por construção e por teste de estado, não por injeção de falha no meio do commit.
 - Desempenho: `harness_effect` não tem consulta medida; o índice `(state, lease_until)` não foi exercitado com volume.
-- Ainda não existe comando de boot que chame `recover_expired`: um efeito `running` de provider só vira `unknown` quando a repetição do comando chega ao `claim` (§11.9).
+- Na fotografia da Fase 2, `recover_expired` ainda não era chamado no boot. A Fase 5 adiciona essa chamada sob o lease SQLite (§13).
 - Teste visual e a UI: `chatThreadSendOnce` existe em `ipc.ts`, mas nenhuma tela o chama ainda.
 
 ### 11.12 Retomada por turno do Cursor e do Antigravity: não repetir às cegas
@@ -949,3 +975,146 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 **Provado** (`cargo test --lib conversa`): `test.rs:779-901` (o guarda, com closures e sem processo nem relógio: recusa antes de qualquer evento → turno novo e aviso, na ordem `run:<id>`, `forget`, `notice`, `run:-`; falha depois de eventos → nenhuma repetição e id mantido; `file not found` de ferramenta → nenhuma repetição; retomada que funciona → nenhuma sessão nova e nenhum aviso; turno novo que falha → não repete; sem id remoto; erro sem explicação; turno concluído) e `test_motores.rs:465-489` e `:907-920` (os classificadores, com frases positivas e negativas).
 
 **Não verificado:** nenhum CLI real foi executado. A ligação em `cursor.rs`/`agy.rs` (contagem das linhas do stdout, captura do stderr, limpeza do banco e gravação do aviso) não tem teste de ponta a ponta; só o guarda e os classificadores têm. O aviso não foi visto na tela.
+
+## 12. Fase 4: delegação única (`delegate_agent` com três destinos)
+
+**Objetivo:** o orquestrador escolhe **onde** o trabalho vai, de forma explícita, e a mesma pergunta repetida nunca vira prompt duplicado em nenhum dos três caminhos. Núcleo de backend; a entrega durável do resultado ao pai e a UI ficam fora (§12.8).
+
+Código: `harness/delegate.rs` (decisão, recibo e classificação, provados sem o app), `ipc/commands/delegate.rs` (cola com o app: comando IPC `team.delegate`, na CLI `ags team delegate`), `ipc/commands/team.rs` (descoberta e leitura das sessões), `ipc/mcp.rs` (esquema e roteamento), `runs/orchestration.rs` (leitura do recibo da Frota). Testes: `harness/test_fase4.rs`, `ipc/test.rs` e `runs/test.rs`.
+
+### 12.1 Esquema de `delegate_agent`
+
+Campos comuns: `task` (obrigatório), `client_request_id` (obrigatório, até 128 caracteres, sem controles), `context` (até 16 KiB, vai como dado não confiável), `mode` (`async` padrão | `wait`), `timeout_s` (10 a 1800, padrão 300).
+
+`target` escolhe o destino: `provider_chat` | `fleet_task` | `connected_session`. **Compatibilidade:** sem `target`, `execution` (`chat` | `fleet`) vale como apelido (`chat` = `provider_chat`, `fleet` = `fleet_task`) e a chamada envia exatamente o que enviava. Os dois juntos têm de concordar (`target_conflict`). `required` do esquema agora é `task` e `client_request_id`; sem `target` nem `execution`, o erro de antes (`execution precisa ser 'chat' ou 'fleet'`) volta com a menção ao `target`.
+
+| Destino | O que faz | Campos próprios | Recibo |
+|---|---|---|---|
+| `provider_chat` | abre uma conversa nova de um provider nativo (`chat.new`, filha da chamadora) | `agent`, `model`, `effort`, `title` | `chat_new` (`chat_child_receipts`), resultado = id da conversa |
+| `fleet_task` | cria uma tarefa headless da Frota (`run.delegateTask`) | `agent`, `model`, `complexity`, `account_id`, `isolate`, `budget_usd`, `result_schema`, `write_scopes`, `role`, `title` | `fleet_delegate` (`harness_command_receipt` + `run_delegation_receipts`), resultado = id do run e as chaves das tarefas |
+| `connected_session` | entrega o trabalho a uma sessão **já aberta e ligada ao time** (`team.delegate`, que usa `peer tell`, ou `peer ask` em `mode=wait`; na CLI, `ags team delegate <nome> --task … --client-request-id <id>`) | `to` (id ou nome de `team_candidates`), `constraints`, `expecting`, `policy` (`read` \| `ask`, padrão `ask`), `when_busy` (`fail` padrão \| `queue`) | `connected_session` (`harness_command_receipt`), resultado = id da mensagem |
+
+Os campos de outro destino são ignorados, não repassados. `connected_session` não cria PTY, worktree nem orçamento de Frota.
+
+### 12.2 Descoberta (`team_candidates`)
+
+Cada candidato traz, além do que já trazia: `cwd`, `available` e `availability` (`available` | `busy` | `disconnected`), `canReceiveWork` (o `delegate_agent` aceitaria agora, com `when_busy=queue`), `blocker` (o primeiro código de recusa, ou `null`), `policy` real (nunca escondida) e `requiresPersonApproval`. A lista **não amplia** o que o agente enxerga: continuam entrando só os integrantes e as sessões da mesma pasta. `requiresPersonApproval` é `true` para quem não é integrante e é de outra pasta (hoje nunca aparece na lista; vale se a regra de visibilidade mudar). A lista não cria acesso: o envio revalida.
+
+### 12.3 Validações no instante do envio (`connected_session`)
+
+Tudo é lido de novo no envio (`team::delegation_snapshot`), nunca de uma listagem antiga, e **antes** de qualquer escrita. A primeira falha vence, e nada é gravado na sessão nem no recibo.
+
+| Ordem | Checagem | Código |
+|---|---|---|
+| 0 | quem chama é o orquestrador do time e a conversa dele está aberta | `not_orchestrator`, `caller_not_open` |
+| 1 | a sessão existe entre as abertas (mesma pasta ou do time) e os integrantes; nome repetido recusa | `session_not_found`, `session_ambiguous` |
+| 2 | não é a própria chamadora nem um terminal comum (`bash`) | `session_incompatible` |
+| 3 | está conectada: aba com processo, conversa ativa ou portal. Integrante cuja aba fechou também cai aqui | `session_disconnected` |
+| 4 | está no time; sem vínculo, a mesma pasta pede `team_link` e outra pasta é da pessoa. **O envio nunca liga sozinho** | `session_not_linked`, `session_other_workspace` |
+| 5 | a política do integrante não passa do teto (`ask` por padrão). Pedir `edits` ou `full` como teto é recusado. **Nunca converte vínculo em Acesso total** nem o eleva | `policy_elevated`, `policy_not_allowed` |
+| 6 | não está no meio de um turno, salvo `when_busy=queue` (a mensagem entra na fila da sessão) | `session_busy` |
+
+A mesma checagem alimenta `blocker` na descoberta. A ocupação lida é um instante: a fila do `peer` ainda recusa o que quebrou entre a leitura e a escrita (então `not_sent`). Uma aba que o registro de PTYs do backend não conhece é perguntada à janela, só para a sessão escolhida.
+
+### 12.4 Recibo e idempotência
+
+Chave: `(kind, caller_key, request_id)`. Para `connected_session`, `kind = connected_session` e `caller_key = tab:<aba da chamada>`, carimbada pelo MCP a partir da sessão e nunca do modelo. O hash cobre destino, `to`, `task`, `constraints`, `expecting`, `context`, `mode`, `policy` e `when_busy`; **não** cobre o `client_request_id` nem o prazo. O `result_json` guarda só ids (`messageId`, `queued`), nunca texto de agente.
+
+| Situação na repetição | Resultado |
+|---|---|
+| recibo `accepted`, mesmo hash | devolve o mesmo resultado (`replayed: true`, `sent: false`, mesmo `messageId`). **Não revalida e não envia** |
+| mesmo id, outro hash | `request_conflict` (o texto de `receipts::MISMATCH`), sem revalidar nem enviar |
+| `submitting` dentro de 120 s | devolve `deliveryState: submitting`, sem enviar |
+| `submitting` vencido (> 120 s) | vira `unknown` e devolve, sem enviar: o dono pode ter enviado antes de morrer |
+| `unknown` | devolve com o aviso "confira a conversa ou a aba"; nunca repete às cegas |
+| `retryable` (nada chegou) | **só** uma chamada explícita com o mesmo id tenta de novo, uma vez; não há retry silencioso |
+| a validação do §12.3 falhou | nenhum recibo; depois de corrigir o estado, a mesma chave é um pedido novo |
+
+O `peer` recebe `id = delegate:<client_request_id>`, de modo que a fila dele também não digita duas vezes. Respostas do `peer tell`/`ask` viram: `sent` (entregue ou na fila) → `accepted`; recusa, cancelamento, escalada ou duplicata não repetida → `not_sent`; texto escrito sem confirmação, erro depois do enfileiramento ou resposta ilegível → `outcome_unknown`. A fala do agente em `mode=wait` volta como `untrustedReply` e nunca entra no recibo; na repetição ela não existe mais (leia a conversa). O lock do banco nunca fica preso durante a revalidação nem o envio.
+
+### 12.5 Os três caminhos num só recibo
+
+`delegate::lookup_replay(conn, target, caller_key, request_id, hash)` lê o recibo de qualquer destino pelo `harness::receipts::lookup` (tabela nova e, na falta dela, a antiga) e devolve o id da conversa (`provider_chat`), do run (`fleet_task`) ou da sessão (`connected_session`; a mensagem fica no `result_json`). Mesmo id com outro hash é `request_conflict`.
+
+- `fleet_task`: `runs/orchestration.rs` deixou de ler `run_delegation_receipts` direto e lê pelo `receipts::lookup`. A escrita continua dupla (`save_delegation_receipt`): nada duplicado, e a antiga segue como fonte onde só ela existe.
+- `provider_chat`: o recibo continua o de `chat_child_receipts` (estados `prepared`..`unknown`), lido pelo mesmo caminho. Não migrei a escrita.
+- `connected_session`: só a tabela nova.
+
+### 12.6 Erros
+
+Os erros de delegação voltam como texto `"<código>: <mensagem>"` (`isError` no MCP). Códigos: `invalid_target`, `target_conflict`, `invalid_request`, `not_orchestrator`, `caller_not_open`, `snapshot_failed`, `session_not_found`, `session_ambiguous`, `session_disconnected`, `session_busy`, `session_incompatible`, `session_not_linked`, `session_other_workspace`, `policy_elevated`, `policy_not_allowed`, `request_conflict`, `not_sent`, `outcome_unknown`, `receipt_failed`. Em `not_sent`, `outcome_unknown` e `receipt_failed` o recibo já foi tocado; nos demais, nada foi escrito.
+
+### 12.7 O que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes: 43 testes de `harness::test_fase4` contra um esqueleto `todo!()` (todos falharam) e o teste de leitura unificada da Frota (falhou: sem a linha da tabela antiga a repetição criava outro run). Depois da implementação passam, mais 6 de contrato do MCP em `ipc/test.rs`.
+- Em cada destino: repetição idempotente (a mesma conversa, o mesmo run, a mesma mensagem), outro conteúdo falha fechado. Sessão ocupada, de outra pasta, desconectada, não ligada, com política elevada ou incompatível falha **sem** chamar o envio e sem recibo.
+- Chamada antiga sem `target` envia o mesmo payload que `target` novo (`chat.new` e `run.delegateTask`).
+
+**Não verificado / fora**
+- Nenhum agente real foi acionado: o envio dos testes é um contador. A cola `ipc/commands/delegate.rs` e `team::delegation_snapshot` (que dependem do `AppHandle`, do registro de PTYs e da janela) **não têm teste de ponta a ponta**.
+- A mesma `client_request_id` usada em destinos diferentes não é detectada: cada destino tem o seu `kind` e o seu `caller_key`.
+- Sem worker nem boot: um `submitting` deixado por uma queda só vira `unknown` quando a repetição chega (§12.4).
+- Sessões de outra pasta ligadas pela pessoa só valem se aparecerem entre os integrantes; a descoberta não as mostra se estiverem fechadas.
+- Um integrante que a pessoa elevou para `edits` ou `full` não recebe delegação até a pessoa baixar a política (§12.3, item 5): é a leitura literal de "nunca converter um vínculo em Acesso total". Se a pessoa quiser delegar a integrante elevado, é decisão dela.
+- Entrega durável do resultado ao pai, `ProviderSessionRef` e `ContextTransfer` (§2.2): Fase 4 restante.
+- Desempenho não medido.
+
+## 12.x Entrega de resultado e painel (Fase 4)
+
+Fase 4 da auditoria de paridade: o que o pai recebe do filho, o que a pessoa vê e quem pode cancelar. Código: `runs/harness.rs` (projeção), `runs/orchestration.rs` (alcance do cancelamento), `conversa/api.rs` (escopo do Parar) e `src/features/chat/structured/HarnessRunFeed.tsx` (painel). Esta seção tem subtítulo próprio para não colidir com o §12 da Fase 4 de outro integrante.
+
+### 12.x.1 O que a projeção leva em cada filho
+
+Campos novos e opcionais: os nós que não são filhos de agente seguem sem eles. CLI (`run.harnessGraph`) e MCP (`harness_graph`) recebem o mesmo JSON; não há comando novo.
+
+| Campo | Em quais nós | O que é |
+|---|---|---|
+| `childType` | conversa filha (`provider_chat`) e tarefa da Frota (`fleet_task`) | o tipo do agente filho. `connected_session` não existe no ADE, então não sai |
+| `executionStatus` | conversa filha (estado do último turno), run e tarefa | o estado do §3.1; vira `waiting` quando há pergunta ou aprovação pendente |
+| `result` | conversa filha (última fala do agente no último turno) e tarefa (`tasks.result`) | `{ text, truncated, untrusted: true }`; `text` tem no máximo 500 caracteres |
+| `blocked` | conversa filha e tarefa | `{ kind: question \| approval, count }`: os pedidos pendentes do próprio filho |
+| `blockedChildren` | turno, run e conversa com filho bloqueado | quantos filhos diretos estão bloqueados ou têm um descendente bloqueado |
+| `origin` | conversa filha, run e tarefa | `{ createdBy: turn \| task \| conversation, turnNodeId?, taskNodeId? }` |
+
+`status` da conversa filha continua sendo `thread.state` (um teste da Fase 1 fixa isso). Quem diz o que a execução faz é `executionStatus`.
+
+### 12.x.2 Regras
+
+1. **Bloqueio só com turno ou tarefa em andamento.** Pedido do chat (`chat_request` pendente) bloqueia a conversa filha só quando o último turno está `inProgress`. Aprovação da Frota (`task_approvals.status = 'pending'`) bloqueia a tarefa só quando ela está `running`. Pedido que sobrou de turno ou tarefa já terminados não bloqueia: a pessoa não tem o que responder.
+2. **Pergunta antes de aprovação.** Quando o filho tem os dois, `blocked.kind` é `question`; `count` soma todos.
+3. **Propaga sem mudar o pai.** O bloqueio sobe pela árvore como `blockedChildren` (uma contagem), em cada ancestral. O estado do pai não muda por causa dele (§3.3 regra 6).
+4. **Entrega é dado, não instrução.** O `result` sai com `untrusted: true` e, se passou de 500 caracteres, com `truncated: true`. O painel mostra o texto num bloco próprio, com o rótulo "resposta do agente (dado não confiável)"; o texto entra como texto, nunca como HTML.
+5. **Origem por id gravado, nunca por `cwd`.** `turn` quer dizer que o turno do pai criou (`turnNodeId`). `task` quer dizer que outra tarefa da Frota delegou (`taskNodeId`), e `turnNodeId` é o turno do run. `conversation` quer dizer que nasceu fora de turno: não há turno para pendurar.
+6. **Pedido de aprovação é gravado antes de o agente esperar.** O broker (`runs/broker.rs`) grava `task_approvals` como `pending` antes de bloquear na fila; por isso a projeção, que só lê o banco, vê o bloqueio. O boot fecha os pendentes órfãos (`sweep_orphans`).
+
+### 12.x.3 Cancelamento com escopo verificado
+
+| Comando | Quem pode | O que age |
+|---|---|---|
+| `run.cancelTask` (MCP `task_cancel`) | a pessoa (pela conversa de origem ou pela pasta), ou uma tarefa **ancestral** da alvo | a subárvore da alvo, no mesmo run, só nas tarefas pendentes, prontas ou rodando. Nunca o lead. Irmã, filho e outra linhagem recebem erro |
+| MCP `chat_stop` (`chat.stop`) | a pessoa (sem `caller_scope`), ou a conversa ou aba que criou a filha (`parent_ref` = `thread:<pai>` ou `tab:<aba>`) | só o turno da filha. Tarefa da Frota e pasta, sem conversa de origem, não param conversa nenhuma |
+| CLI `ags chat stop` | a pessoa (a CLI não recebe `caller_scope`) | a conversa indicada |
+
+O escopo do MCP vem da sessão: `scoped_chat_payload` carimba `caller_scope` em `chat.send` e em `chat.stop`, e o modelo não escolhe esse campo. **Nunca se encerra o PTY de uma sessão conectada só por deixar de observá-la.** O ADE ainda não tem `connected_session`, então não há PTY de sessão conectada a proteger hoje. O painel só larga os próprios listeners ao desmontar, e um teste confere que desmontar não envia comando de parada nem seleciona conversa.
+
+Lacuna conhecida: a CLI `ags chat stop` roda com a identidade da pessoa. Um agente que chame a CLI pela própria terminal ainda não é barrado. Fechar isso depende de a CLI ser da pessoa, e isso não foi verificado.
+
+### 12.x.4 A tela
+
+`HarnessRunFeed` mostra, em uma linha por filho, o tipo, o agente, o estado, a origem e o bloqueio. O bloqueio vira um botão com nome acessível ("{título}: pergunta pendente"); ativá-lo abre a conversa filha ou, para tarefa, a tela da Frota. A entrega abre um bloco à parte, marcado como dado não confiável. O turno mostra "N filhos bloqueados" e mantém a cor e o estado.
+
+### 12.x.5 O que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes do código: 14 em Rust (`runs::test::harness_fase4`, 9, e `conversa::test::harness_fase4`, 5), todos vermelhos antes da implementação; e no vitest (`harnessDelivery.test.tsx`), 5 vermelhos antes da tela. O sexto (desmontar não encerra nada) já passava e serve de guarda. Depois, todos verdes.
+- `cd src-tauri && cargo test --lib --bin ags`: 2725 + 52 testes, 0 falhas, 30 ignorados já existentes. Nenhum aviso de compilação nos arquivos tocados.
+- `bunx vitest run src/features/chat/structured`: 8 testes, verdes (os 2 de `harnessActiveChildren` e os 6 novos).
+- `bunx tsc --noEmit`, `bun run check:i18n`, `bun run check:test-lint` e `bun run check:babel`: sem achado novo.
+
+**Não verificado**
+- Visual: nenhuma captura da tela; o painel não foi aberto numa instância isolada. O bloco de entrega e o destaque de bloqueio não foram vistos.
+- Ponta a ponta: nenhum provider real foi executado. Pergunta, aprovação e resposta foram gravadas direto nas tabelas nos testes; nenhum adapter emitiu um pedido real.
+- Concorrência: a leitura da projeção e a decisão da pessoa correm em transações separadas; não há teste de corrida entre elas.
+- Desempenho: a projeção ganhou uma consulta por conversa filha (último turno) e lotes para pedidos e aprovações. Não medido.
+- O `connected_session` não existe no código. A regra de não encerrar PTY de sessão conectada fica registrada, sem teste contra um caso real.

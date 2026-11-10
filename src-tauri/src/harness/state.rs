@@ -25,6 +25,21 @@ impl NodeState {
     pub const fn is_terminal(self) -> bool {
         !matches!(self, Self::Pending | Self::Running | Self::Waiting)
     }
+
+    /// O nome que a projeção devolve ao front, à CLI e ao MCP (contrato §3.1).
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Waiting => "waiting",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Interrupted => "interrupted",
+            Self::Skipped => "skipped",
+            Self::HandedOff => "handed_off",
+        }
+    }
 }
 
 /// Por que o estado é terminal quando o nativo não diz.
@@ -33,6 +48,13 @@ pub enum EndReason {
     AppClosed,
     DependencyFailed,
     UnmappedNativeStatus,
+}
+
+/// Razão legível persistida no evento `turn.interrupted`; turnos antigos podem não tê-la.
+pub fn chat_interruption_reason(status: &str, reason: Option<&str>) -> Option<String> {
+    (status == "interrupted")
+        .then(|| reason.map(str::to_owned))
+        .flatten()
 }
 
 /// Estado derivado, com o atributo que acompanha um terminal (não é um estado).
@@ -44,7 +66,11 @@ pub struct Derived {
 }
 
 const fn plain(state: NodeState) -> Derived {
-    Derived { state, end_reason: None, outcome_unknown: false }
+    Derived {
+        state,
+        end_reason: None,
+        outcome_unknown: false,
+    }
 }
 
 /// `chat_run.status`. `waiting` é quando há `chat_request.pending` do turno.

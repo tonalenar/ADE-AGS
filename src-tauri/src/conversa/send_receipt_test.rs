@@ -19,19 +19,51 @@ fn id(request: &str, text: &str) -> CommandIdentity {
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
-    tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(future)
+    tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap()
+        .block_on(future)
 }
 
-fn run(db: &DbConnection, identity: &CommandIdentity, now: i64, calls: &Cell<u32>, outcome: Result<(), SendError>) -> Result<SendReceipt, String> {
-    block_on(send_receipt::run(db, identity, "t1", "dono-1", &|| now, || {
-        calls.set(calls.get() + 1);
-        async move { outcome }
-    }))
+fn run(
+    db: &DbConnection,
+    identity: &CommandIdentity,
+    now: i64,
+    calls: &Cell<u32>,
+    outcome: Result<(), SendError>,
+) -> Result<SendReceipt, String> {
+    block_on(send_receipt::run(
+        db,
+        identity,
+        "t1",
+        "dono-1",
+        &|| now,
+        || {
+            calls.set(calls.get() + 1);
+            async move { outcome }
+        },
+    ))
 }
 
 fn receipt_state(db: &DbConnection, identity: &CommandIdentity) -> ReceiptState {
     let conn = db.lock().unwrap();
-    receipts::lookup(&conn, &identity.kind, &identity.caller_key, &identity.request_id).unwrap().unwrap().state
+    receipts::lookup(
+        &conn,
+        &identity.kind,
+        &identity.caller_key,
+        &identity.request_id,
+    )
+    .unwrap()
+    .unwrap()
+    .state
+}
+
+fn recover(db: &DbConnection, now: i64) {
+    let conn = db.lock().unwrap();
+    effects::recover_expired(&conn, now, &mut |_| {
+        crate::harness::effects::Reconcile::Unknown
+    })
+    .unwrap();
 }
 
 #[test]
@@ -40,9 +72,15 @@ fn um_reenvio_identico_devolve_o_recibo_sem_mandar_a_mensagem_de_novo() {
     let calls = Cell::new(0);
     let identity = id("r1", "oi");
     let first = run(&db, &identity, 1_000, &calls, Ok(())).unwrap();
-    assert_eq!((first.delivery_state.as_str(), first.replayed, first.sent), ("accepted", false, true));
+    assert_eq!(
+        (first.delivery_state.as_str(), first.replayed, first.sent),
+        ("accepted", false, true)
+    );
     let again = run(&db, &identity, 2_000, &calls, Ok(())).unwrap();
-    assert_eq!((again.delivery_state.as_str(), again.replayed, again.sent), ("accepted", true, false));
+    assert_eq!(
+        (again.delivery_state.as_str(), again.replayed, again.sent),
+        ("accepted", true, false)
+    );
     assert!(again.note.is_some());
     assert_eq!(calls.get(), 1, "o provider recebeu a mensagem uma vez");
 }
@@ -63,15 +101,32 @@ fn o_mesmo_id_em_outra_conversa_tambem_falha_fechado() {
     let calls = Cell::new(0);
     run(&db, &id("r1", "oi"), 1_000, &calls, Ok(())).unwrap();
     let other = send_receipt::identity("ui", "r1", "t2", "oi", &[]).unwrap();
-    assert_eq!(run(&db, &other, 2_000, &calls, Ok(())).unwrap_err(), MISMATCH);
+    assert_eq!(
+        run(&db, &other, 2_000, &calls, Ok(())).unwrap_err(),
+        MISMATCH
+    );
 }
 
 #[test]
 fn chamadores_diferentes_podem_usar_o_mesmo_id() {
     let db = db();
     let calls = Cell::new(0);
-    run(&db, &send_receipt::identity("tab:a", "r1", "t1", "oi", &[]).unwrap(), 1_000, &calls, Ok(())).unwrap();
-    run(&db, &send_receipt::identity("tab:b", "r1", "t1", "oi", &[]).unwrap(), 1_000, &calls, Ok(())).unwrap();
+    run(
+        &db,
+        &send_receipt::identity("tab:a", "r1", "t1", "oi", &[]).unwrap(),
+        1_000,
+        &calls,
+        Ok(()),
+    )
+    .unwrap();
+    run(
+        &db,
+        &send_receipt::identity("tab:b", "r1", "t1", "oi", &[]).unwrap(),
+        1_000,
+        &calls,
+        Ok(()),
+    )
+    .unwrap();
     assert_eq!(calls.get(), 2);
 }
 
@@ -80,13 +135,34 @@ fn falha_antes_de_sair_deixa_o_recibo_retryable_e_a_repeticao_envia_uma_vez() {
     let db = db();
     let calls = Cell::new(0);
     let identity = id("r1", "oi");
-    let error = run(&db, &identity, 1_000, &calls, Err(SendError::NotSent("a sessão não abriu".into()))).unwrap_err();
+    let error = run(
+        &db,
+        &identity,
+        1_000,
+        &calls,
+        Err(SendError::NotSent("a sessão não abriu".into())),
+    )
+    .unwrap_err();
     assert_eq!(error, "a sessão não abriu");
     assert_eq!(receipt_state(&db, &identity), ReceiptState::Retryable);
     let retried = run(&db, &identity, 2_000, &calls, Ok(())).unwrap();
-    assert_eq!((retried.delivery_state.as_str(), retried.replayed, retried.sent), ("accepted", false, true));
-    assert_eq!(calls.get(), 2, "a primeira nunca saiu; a segunda é o único envio");
-    assert_eq!(run(&db, &identity, 3_000, &calls, Ok(())).unwrap().replayed, true);
+    assert_eq!(
+        (
+            retried.delivery_state.as_str(),
+            retried.replayed,
+            retried.sent
+        ),
+        ("accepted", false, true)
+    );
+    assert_eq!(
+        calls.get(),
+        2,
+        "a primeira nunca saiu; a segunda é o único envio"
+    );
+    assert_eq!(
+        run(&db, &identity, 3_000, &calls, Ok(())).unwrap().replayed,
+        true
+    );
     assert_eq!(calls.get(), 2);
 }
 
@@ -95,11 +171,21 @@ fn desfecho_desconhecido_nunca_e_repetido_as_cegas() {
     let db = db();
     let calls = Cell::new(0);
     let identity = id("r1", "oi");
-    let error = run(&db, &identity, 1_000, &calls, Err(SendError::Unknown("a resposta se perdeu".into()))).unwrap_err();
+    let error = run(
+        &db,
+        &identity,
+        1_000,
+        &calls,
+        Err(SendError::Unknown("a resposta se perdeu".into())),
+    )
+    .unwrap_err();
     assert!(error.contains("a resposta se perdeu"));
     assert_eq!(receipt_state(&db, &identity), ReceiptState::Unknown);
     let again = run(&db, &identity, 2_000, &calls, Ok(())).unwrap();
-    assert_eq!((again.delivery_state.as_str(), again.replayed, again.sent), ("unknown", true, false));
+    assert_eq!(
+        (again.delivery_state.as_str(), again.replayed, again.sent),
+        ("unknown", true, false)
+    );
     assert!(again.note.unwrap().contains("confira a conversa"));
     assert_eq!(calls.get(), 1);
 }
@@ -109,9 +195,18 @@ fn a_mensagem_do_provider_nao_vai_para_o_banco() {
     let db = db();
     let calls = Cell::new(0);
     let identity = id("r1", "oi");
-    run(&db, &identity, 1_000, &calls, Err(SendError::Unknown("o agente disse SEGREDO-123".into()))).unwrap_err();
+    run(
+        &db,
+        &identity,
+        1_000,
+        &calls,
+        Err(SendError::Unknown("o agente disse SEGREDO-123".into())),
+    )
+    .unwrap_err();
     let conn = db.lock().unwrap();
-    let error: Option<String> = conn.query_row("SELECT last_error FROM harness_effect", [], |r| r.get(0)).unwrap();
+    let error: Option<String> = conn
+        .query_row("SELECT last_error FROM harness_effect", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(error.as_deref(), Some("outcome_unknown"));
     let dump: String = conn
         .query_row(
@@ -132,9 +227,16 @@ fn queda_depois_de_aceitar_e_antes_de_reclamar_e_recuperavel() {
     assert_eq!(receipt_state(&db, &identity), ReceiptState::Prepared);
     let calls = Cell::new(0);
     let done = run(&db, &identity, 5_000, &calls, Ok(())).unwrap();
-    assert_eq!((done.delivery_state.as_str(), done.sent), ("accepted", true));
+    assert_eq!(
+        (done.delivery_state.as_str(), done.sent),
+        ("accepted", true)
+    );
     assert_eq!(calls.get(), 1);
-    let rows: i64 = db.lock().unwrap().query_row("SELECT COUNT(*) FROM harness_effect", [], |r| r.get(0)).unwrap();
+    let rows: i64 = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM harness_effect", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(rows, 1, "o efeito é um só");
 }
 
@@ -148,13 +250,22 @@ fn queda_depois_de_reclamar_com_o_lease_vivo_nao_reenvia_e_vencido_vira_unknown(
     // O processo caiu depois do claim: o efeito pode ou não ter saído.
     let calls = Cell::new(0);
     let during = run(&db, &identity, 1_000 + LEASE_MS - 1, &calls, Ok(())).unwrap();
-    assert_eq!((during.delivery_state.as_str(), during.replayed), ("submitting", true));
+    assert_eq!(
+        (during.delivery_state.as_str(), during.replayed),
+        ("submitting", true)
+    );
     let after = run(&db, &identity, 1_000 + LEASE_MS, &calls, Ok(())).unwrap();
-    assert_eq!((after.delivery_state.as_str(), after.replayed, after.sent), ("unknown", true, false));
+    assert_eq!(
+        (after.delivery_state.as_str(), after.replayed, after.sent),
+        ("unknown", true, false)
+    );
     assert_eq!(calls.get(), 0, "nunca repete às cegas");
     assert_eq!(receipt_state(&db, &identity), ReceiptState::Unknown);
     let effect = effects::get(&db.lock().unwrap(), 1).unwrap().unwrap();
-    assert_eq!((effect.state, effect.outcome_unknown), (EffectState::Failed, true));
+    assert_eq!(
+        (effect.state, effect.outcome_unknown),
+        (EffectState::Failed, true)
+    );
 }
 
 #[test]
@@ -162,11 +273,28 @@ fn o_dono_que_volta_depois_do_lease_vencido_ainda_conclui_o_recibo() {
     let db = db();
     let identity = id("r1", "oi");
     send_receipt::accept(&db, &identity, "t1", 1_000).unwrap();
-    let Reserved::Owner { effect_id } = send_receipt::reserve(&db, &identity, "dono-lento", 1_000).unwrap() else { panic!() };
+    let Reserved::Owner { effect_id } =
+        send_receipt::reserve(&db, &identity, "dono-lento", 1_000).unwrap()
+    else {
+        panic!()
+    };
     let calls = Cell::new(0);
-    assert_eq!(run(&db, &identity, 1_000 + LEASE_MS, &calls, Ok(())).unwrap().delivery_state, "unknown");
+    assert_eq!(
+        run(&db, &identity, 1_000 + LEASE_MS, &calls, Ok(()))
+            .unwrap()
+            .delivery_state,
+        "unknown"
+    );
     // O dono lento termina e prova que o provider aceitou.
-    let state = send_receipt::finish(&db, &identity, effect_id, "dono-lento", &Ok(()), 1_000 + LEASE_MS + 5).unwrap();
+    let state = send_receipt::finish(
+        &db,
+        &identity,
+        effect_id,
+        "dono-lento",
+        &Ok(()),
+        1_000 + LEASE_MS + 5,
+    )
+    .unwrap();
     assert_eq!(state, ReceiptState::Accepted);
     assert_eq!(receipt_state(&db, &identity), ReceiptState::Accepted);
 }
@@ -185,8 +313,116 @@ fn imagens_diferentes_mudam_o_hash() {
 }
 
 #[test]
+fn crash_antes_do_commit_da_intencao_nao_duplica_o_envio() {
+    let db = db();
+    let identity = id("r1", "oi");
+    let calls = Cell::new(0);
+    // A queda ocorreu antes de aceitar: banco vazio; a repetição é o primeiro comando.
+    let result = run(&db, &identity, 1_000, &calls, Ok(())).unwrap();
+    assert_eq!(result.delivery_state, "accepted");
+    assert_eq!(calls.get(), 1);
+    run(&db, &identity, 2_000, &calls, Ok(())).unwrap();
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn crash_apos_commit_e_antes_do_claim_reaproveita_o_pending() {
+    let db = db();
+    let identity = id("r1", "oi");
+    let calls = Cell::new(0);
+    send_receipt::accept(&db, &identity, "t1", 1_000).unwrap();
+    recover(&db, 1_001);
+    assert_eq!(receipt_state(&db, &identity), ReceiptState::Prepared);
+    let result = run(&db, &identity, 2_000, &calls, Ok(())).unwrap();
+    assert_eq!(result.delivery_state, "accepted");
+    assert_eq!(calls.get(), 1);
+    assert_eq!(
+        db.lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM harness_effect", [], |r| r
+                .get::<_, i64>(0))
+            .unwrap(),
+        1
+    );
+}
+
+#[test]
+fn crash_durante_o_efeito_com_lease_vivo_espera_e_depois_vira_unknown() {
+    let db = db();
+    let identity = id("r1", "oi");
+    let calls = Cell::new(0);
+    send_receipt::accept(&db, &identity, "t1", 1_000).unwrap();
+    let Reserved::Owner { .. } =
+        send_receipt::reserve(&db, &identity, "dono-morto", 1_000).unwrap()
+    else {
+        panic!()
+    };
+    // O fake registra que o provider foi chamado antes da queda no meio do efeito.
+    calls.set(calls.get() + 1);
+    recover(&db, 1_000 + LEASE_MS - 1);
+    assert_eq!(receipt_state(&db, &identity), ReceiptState::Submitting);
+    recover(&db, 1_000 + LEASE_MS);
+    let again = run(&db, &identity, 1_000 + LEASE_MS + 1, &calls, Ok(())).unwrap();
+    assert_eq!(again.delivery_state, "unknown");
+    assert!(again.replayed && !again.sent);
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn crash_apos_o_efeito_e_antes_de_concluir_termina_unknown_sem_repetir() {
+    let db = db();
+    let identity = id("r1", "oi");
+    let calls = Cell::new(0);
+    send_receipt::accept(&db, &identity, "t1", 1_000).unwrap();
+    let Reserved::Owner { .. } =
+        send_receipt::reserve(&db, &identity, "dono-morto", 1_000).unwrap()
+    else {
+        panic!()
+    };
+    // O fake representa aceitação pelo provider; o crash acontece antes do passo 4.
+    calls.set(calls.get() + 1);
+    recover(&db, 1_000 + LEASE_MS);
+    let again = run(&db, &identity, 1_000 + LEASE_MS + 1, &calls, Ok(())).unwrap();
+    assert_eq!(again.delivery_state, "unknown");
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn crash_antes_do_recibo_final_reverte_o_passo_atomico_e_reconcilia_unknown() {
+    let db = db();
+    let identity = id("r1", "oi");
+    let calls = Cell::new(0);
+    send_receipt::accept(&db, &identity, "t1", 1_000).unwrap();
+    let Reserved::Owner { effect_id } =
+        send_receipt::reserve(&db, &identity, "dono-morto", 1_000).unwrap()
+    else {
+        panic!()
+    };
+    calls.set(calls.get() + 1);
+    {
+        let mut conn = db.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        // Simula a queda depois de atualizar o efeito, antes de mudar o recibo: o rollback da
+        // transação do passo 4 mantém ambos em `running/submitting`.
+        effects::complete(&tx, effect_id, "dono-morto", 1_000 + LEASE_MS - 1).unwrap();
+        drop(tx);
+    }
+    assert_eq!(receipt_state(&db, &identity), ReceiptState::Submitting);
+    recover(&db, 1_000 + LEASE_MS);
+    let again = run(&db, &identity, 1_000 + LEASE_MS + 1, &calls, Ok(())).unwrap();
+    assert_eq!(again.delivery_state, "unknown");
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
 fn o_recibo_serializa_em_camel_case_sem_nota_vazia() {
-    let receipt = SendReceipt { request_id: "r1".into(), delivery_state: "accepted".into(), replayed: false, sent: true, note: None };
+    let receipt = SendReceipt {
+        request_id: "r1".into(),
+        delivery_state: "accepted".into(),
+        replayed: false,
+        sent: true,
+        note: None,
+    };
     assert_eq!(
         serde_json::to_value(receipt).unwrap(),
         serde_json::json!({ "requestId": "r1", "deliveryState": "accepted", "replayed": false, "sent": true })

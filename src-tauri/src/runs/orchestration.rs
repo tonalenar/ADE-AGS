@@ -138,6 +138,25 @@ fn request_fingerprint(args: &Value) -> Result<String, String> {
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
+/// O recibo da delegação, lido pelo recibo unificado do harness (contrato §12.4): a tabela nova e, na
+/// falta dela, `run_delegation_receipts`. O mesmo id com outro conteúdo falha fechado.
+fn delegation_receipt(
+    conn: &rusqlite::Connection,
+    caller_key: &str,
+    request_id: &str,
+    request_hash: &str,
+) -> Result<Option<store::DelegationReceipt>, String> {
+    let Some(receipt) = crate::harness::receipts::lookup(conn, crate::harness::receipts::KIND_FLEET_DELEGATE, caller_key, request_id)? else {
+        return Ok(None);
+    };
+    if receipt.request_hash != request_hash {
+        return Err(crate::harness::receipts::MISMATCH.into());
+    }
+    let task_keys = serde_json::from_str(receipt.result_json.as_deref().unwrap_or("[]"))
+        .map_err(|error| format!("recibo de delegação inválido: {error}"))?;
+    Ok(Some(store::DelegationReceipt { request_hash: receipt.request_hash, run_id: receipt.target_ref, task_keys }))
+}
+
 fn caller_key(caller: &Caller) -> String {
     if let Some(task) = &caller.task {
         format!("task:{}", task.id)
@@ -529,10 +548,7 @@ pub(crate) fn plan_tasks(
         let conn = db.lock().map_err(|e| e.to_string())?;
         let caller = caller(&conn, payload)?;
         if let (Some(request_id), Some(request_hash)) = (&request_id, &request_hash) {
-            if let Some(receipt) = store::delegation_receipt(&conn, &caller_key(&caller), request_id)? {
-                if receipt.request_hash != *request_hash {
-                    return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
-                }
+            if let Some(receipt) = delegation_receipt(&conn, &caller_key(&caller), request_id, request_hash)? {
                 let run = store::run_by_id(&conn, &receipt.run_id)?
                     .ok_or_else(|| "a delegação já foi concluída, mas seu run foi removido; use um client_request_id novo para criar outra".to_string())?;
                 for key in &receipt.task_keys {
@@ -755,10 +771,7 @@ pub(crate) fn plan_tasks(
             .map_err(|error| error.to_string())?;
         // A segunda consulta dentro da transação fecha a corrida entre duas chamadas iguais.
         if let (Some(request_id), Some(request_hash)) = (&request_id, &request_hash) {
-            if let Some(receipt) = store::delegation_receipt(&tx, &caller_key(&caller), request_id)? {
-                if receipt.request_hash != *request_hash {
-                    return Err("client_request_id já foi usado com outro conteúdo; use um ID novo".into());
-                }
+            if let Some(receipt) = delegation_receipt(&tx, &caller_key(&caller), request_id, request_hash)? {
                 let run = store::run_by_id(&tx, &receipt.run_id)?
                     .ok_or_else(|| "a delegação já foi concluída, mas seu run foi removido; use um client_request_id novo para criar outra".to_string())?;
                 for key in &receipt.task_keys {
@@ -1294,47 +1307,76 @@ fn reroute_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<S
     ))
 }
 
-fn cancel_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<String, String> {
+/// O alcance de `run.cancelTask`: a tarefa pedida e as que ficam abaixo dela e ainda não terminaram,
+/// as mais fundas primeiro. Só lê o banco; quem cancela é `cancel_task`.
+pub(super) fn cancel_targets(conn: &Connection, payload: &Value) -> Result<(Task, Vec<Task>), String> {
     let args = args(payload);
+    let caller = caller(conn, payload)?;
+    let run = run_for(conn, &caller, args)?;
+    let key = arg_str(args, "task").ok_or("falta 'task' (key ou id)")?;
+    let task = store::task_in_run(conn, &run.id, key)?
+        .ok_or_else(|| format!("o run não tem nenhuma tarefa '{key}'"))?;
+    if task.role.as_deref() == Some(role::LEAD) {
+        return Err("essa tarefa não pode ser cancelada daqui".into());
+    }
+
+    let all_tasks = store::tasks_of_run(conn, &run.id)?;
+    let mut subtree = HashSet::from([task.id.clone()]);
+    loop {
+        let before = subtree.len();
+        for child in &all_tasks {
+            if child.parent_id.as_ref().is_some_and(|parent| subtree.contains(parent)) {
+                subtree.insert(child.id.clone());
+            }
+        }
+        if subtree.len() == before {
+            break;
+        }
+    }
+    if caller.task.as_ref().is_some_and(|current| subtree.contains(&current.id)) {
+        return Err("essa tarefa contém a execução atual e não pode ser cancelada por ela".into());
+    }
+    // Ordem do pai: uma tarefa só cancela o que a sua linhagem criou. Irmã, filho e outra linhagem não mandam nela.
+    if let Some(current) = caller.task.as_ref() {
+        if !ancestors_of(&all_tasks, &task.id).contains(&current.id) {
+            return Err(format!("só a tarefa que criou '{}' ou a pessoa pode cancelá-la", key_of(&task)));
+        }
+    }
+    let mut targets: Vec<Task> = all_tasks
+        .into_iter()
+        .filter(|candidate| {
+            subtree.contains(&candidate.id)
+                && matches!(candidate.status.as_str(), status::PENDING | status::READY | status::RUNNING)
+        })
+        .collect();
+    targets.sort_by(|left, right| right.depth.cmp(&left.depth));
+    if targets.is_empty() {
+        return Err(format!("'{}' e suas tarefas filhas já terminaram", key_of(&task)));
+    }
+    Ok((task, targets))
+}
+
+/// Os ids das tarefas acima de `id` na linhagem: o pai, o pai do pai, e assim por diante.
+fn ancestors_of(tasks: &[Task], id: &str) -> HashSet<String> {
+    let mut found = HashSet::new();
+    let mut current = id.to_string();
+    while let Some(parent) = tasks
+        .iter()
+        .find(|task| task.id == current)
+        .and_then(|task| task.parent_id.clone())
+    {
+        if !found.insert(parent.clone()) {
+            break;
+        }
+        current = parent;
+    }
+    found
+}
+
+fn cancel_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<String, String> {
     let (task, targets) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let caller = caller(&conn, payload)?;
-        let run = run_for(&conn, &caller, args)?;
-        let key = arg_str(args, "task").ok_or("falta 'task' (key ou id)")?;
-        let task = store::task_in_run(&conn, &run.id, key)?
-            .ok_or_else(|| format!("o run não tem nenhuma tarefa '{key}'"))?;
-        if task.role.as_deref() == Some(role::LEAD) {
-            return Err("essa tarefa não pode ser cancelada daqui".into());
-        }
-
-        let all_tasks = store::tasks_of_run(&conn, &run.id)?;
-        let mut subtree = HashSet::from([task.id.clone()]);
-        loop {
-            let before = subtree.len();
-            for child in &all_tasks {
-                if child.parent_id.as_ref().is_some_and(|parent| subtree.contains(parent)) {
-                    subtree.insert(child.id.clone());
-                }
-            }
-            if subtree.len() == before {
-                break;
-            }
-        }
-        if caller.task.as_ref().is_some_and(|current| subtree.contains(&current.id)) {
-            return Err("essa tarefa contém a execução atual e não pode ser cancelada por ela".into());
-        }
-        let mut targets: Vec<Task> = all_tasks
-            .into_iter()
-            .filter(|candidate| {
-                subtree.contains(&candidate.id)
-                    && matches!(candidate.status.as_str(), status::PENDING | status::READY | status::RUNNING)
-            })
-            .collect();
-        targets.sort_by(|left, right| right.depth.cmp(&left.depth));
-        if targets.is_empty() {
-            return Err(format!("'{}' e suas tarefas filhas já terminaram", key_of(&task)));
-        }
-        (task, targets)
+        cancel_targets(&conn, payload)?
     };
     let target_ids: Vec<String> = targets.into_iter().map(|target| target.id).collect();
     let cancelled = supervisor::cancel_many(app, &target_ids)?;

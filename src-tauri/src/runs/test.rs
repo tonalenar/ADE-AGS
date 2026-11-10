@@ -3031,6 +3031,198 @@ fn un_reintento_vuelve_a_la_cola_con_su_error_y_acumula_lo_gastado() {
     assert_eq!(tarea.cost_usd, Some(0.75));
 }
 
+struct TentativaGravada {
+    id: String,
+    attempt: i64,
+    status: String,
+    result: Option<String>,
+    error: Option<String>,
+    events_path: String,
+    session_id: String,
+    ended_at: Option<i64>,
+}
+
+fn tentativas_de(conn: &Connection, task_id: &str) -> Vec<TentativaGravada> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, attempt, status, result, error, events_path, session_id, ended_at
+             FROM run_attempts WHERE task_id = ?1 ORDER BY attempt",
+        )
+        .unwrap();
+    stmt.query_map([task_id], |row| {
+        Ok(TentativaGravada {
+            id: row.get(0)?,
+            attempt: row.get(1)?,
+            status: row.get(2)?,
+            result: row.get(3)?,
+            error: row.get(4)?,
+            events_path: row.get(5)?,
+            session_id: row.get(6)?,
+            ended_at: row.get(7)?,
+        })
+    })
+    .unwrap()
+    .collect::<Result<Vec<_>, _>>()
+    .unwrap()
+}
+
+/// Fecha uma tentativa com resultado, erro e um JSONL só dela.
+fn fechar_tentativa(conn: &Connection, run: &str, resultado: &str, erro: &str) -> (String, std::path::PathBuf) {
+    let id = tarea(conn, run);
+    let path = std::env::temp_dir().join(format!("ade-ags-attempt-{id}.jsonl"));
+    let events = path.to_string_lossy().to_string();
+    store::mark_running(conn, &id, &format!("attempt-{id}"), "sessao-1", &events).unwrap();
+    std::fs::write(&path, b"evento antigo\n").unwrap();
+    store::finish_task(
+        conn,
+        &id,
+        &TaskOutcome {
+            ok: false,
+            result: Some(resultado.into()),
+            error: Some(erro.into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    (id, path)
+}
+
+/// A correlação é `(task_id, attempt)`: a nova linha usa o mesmo `task_id` e `attempt + 1`.
+/// A anterior não muda, e o JSONL dela não é reescrito.
+#[test]
+fn retomar_failed_ou_interrupted_abre_tentativa_nova_sem_reescrever_a_anterior() {
+    let conn = test_db();
+    let run = run_en(&conn);
+
+    for (rotulo, status_final) in [("falha", status::FAILED), ("interrompida", "interrupted")] {
+        let (id, path) = fechar_tentativa(&conn, &run, "saida parcial", "não compilou");
+        if status_final != status::FAILED {
+            conn.execute(
+                "UPDATE tasks SET status = ?1 WHERE id = ?2",
+                rusqlite::params![status_final, id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE run_attempts SET status = ?1 WHERE task_id = ?2",
+                rusqlite::params![status_final, id],
+            )
+            .unwrap();
+        }
+        let antes = tentativas_de(&conn, &id);
+        assert_eq!(antes.len(), 1, "{rotulo}");
+        let arquivo = std::fs::read(&path).unwrap();
+
+        let nova = store::resume_task(&conn, &id, false).unwrap();
+        assert_eq!(nova.task_id, id);
+        assert_eq!(nova.attempt, antes[0].attempt + 1);
+        assert_eq!(nova.previous_id.as_deref(), Some(antes[0].id.as_str()));
+
+        let depois = tentativas_de(&conn, &id);
+        assert_eq!(depois.len(), 2, "{rotulo}");
+        assert_eq!(depois[0].id, antes[0].id, "{rotulo}");
+        assert_eq!(depois[0].attempt, antes[0].attempt, "{rotulo}");
+        assert_eq!(depois[0].status, antes[0].status, "{rotulo}");
+        assert_eq!(depois[0].result, antes[0].result, "{rotulo}");
+        assert_eq!(depois[0].error, antes[0].error, "{rotulo}");
+        assert_eq!(depois[0].events_path, antes[0].events_path, "{rotulo}");
+        assert_eq!(depois[0].session_id, antes[0].session_id, "{rotulo}");
+        assert_eq!(depois[0].ended_at, antes[0].ended_at, "{rotulo}");
+        assert_eq!(std::fs::read(&path).unwrap(), arquivo, "{rotulo}");
+        assert_ne!(depois[1].events_path, depois[0].events_path, "{rotulo}");
+        assert_eq!(depois[1].attempt, antes[0].attempt + 1, "{rotulo}");
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+/// Desfecho desconhecido (`MISSING_FINAL_RESULT`) é falha: a retomada também não mexe na tentativa velha.
+#[test]
+fn retomar_desfecho_desconhecido_abre_tentativa_correlacionada() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let (id, path) = fechar_tentativa(
+        &conn,
+        &run,
+        "parcial",
+        super::types::MISSING_FINAL_RESULT,
+    );
+    let antes = tentativas_de(&conn, &id);
+    let arquivo = std::fs::read(&path).unwrap();
+
+    let nova = store::resume_task(&conn, &id, false).unwrap();
+    assert_eq!(nova.attempt, 2);
+    assert_eq!(nova.previous_id.as_deref(), Some(antes[0].id.as_str()));
+
+    let depois = tentativas_de(&conn, &id);
+    assert_eq!(depois.len(), 2);
+    assert_eq!(depois[0].status, antes[0].status);
+    assert_eq!(depois[0].result.as_deref(), Some("parcial"));
+    assert_eq!(depois[0].error.as_deref(), Some(super::types::MISSING_FINAL_RESULT));
+    assert_eq!(depois[0].events_path, antes[0].events_path);
+    assert_eq!(std::fs::read(&path).unwrap(), arquivo);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn tarefa_done_nao_e_retomada_sem_pedido_explicito() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    let path = std::env::temp_dir().join(format!("ade-ags-attempt-done-{id}.jsonl"));
+    let events = path.to_string_lossy().to_string();
+    store::mark_running(&conn, &id, "attempt-1", "sessao-done", &events).unwrap();
+    std::fs::write(&path, b"resultado antigo\n").unwrap();
+    store::finish_task(
+        &conn,
+        &id,
+        &TaskOutcome {
+            ok: true,
+            result: Some("pronto".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let antes = tentativas_de(&conn, &id);
+    let arquivo = std::fs::read(&path).unwrap();
+
+    let recusa = store::resume_task(&conn, &id, false).unwrap_err();
+    assert!(recusa.contains("pedido explícito"), "{recusa}");
+    assert_eq!(tentativas_de(&conn, &id).len(), 1);
+    assert_eq!(store::task_by_id(&conn, &id).unwrap().unwrap().status, status::DONE);
+    assert_eq!(std::fs::read(&path).unwrap(), arquivo);
+
+    let nova = store::resume_task(&conn, &id, true).unwrap();
+    assert_eq!(nova.attempt, antes[0].attempt + 1);
+    let depois = tentativas_de(&conn, &id);
+    assert_eq!(depois.len(), 2);
+    assert_eq!(depois[0].status, status::DONE);
+    assert_eq!(depois[0].result.as_deref(), Some("pronto"));
+    assert_eq!(depois[0].error, antes[0].error);
+    assert_eq!(depois[0].events_path, antes[0].events_path);
+    assert_eq!(std::fs::read(&path).unwrap(), arquivo);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn tarefa_rodando_nao_ganha_segunda_tentativa_simultanea() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    assert!(store::mark_running(&conn, &id, "attempt-1", "sessao-viva", "/tmp/ade-ags-viva.jsonl").unwrap());
+    assert_eq!(tentativas_de(&conn, &id).len(), 1);
+
+    let recusa = store::resume_task(&conn, &id, true).unwrap_err();
+    assert!(recusa.contains("em execução"), "{recusa}");
+    assert_eq!(tentativas_de(&conn, &id).len(), 1);
+
+    // Status forçado de volta a `ready` com a tentativa ainda aberta: não nasce outra linha.
+    conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ?1", [&id]).unwrap();
+    assert!(!store::mark_running(&conn, &id, "attempt-2", "sessao-2", "/tmp/ade-ags-viva-2.jsonl").unwrap());
+    let ainda = tentativas_de(&conn, &id);
+    assert_eq!(ainda.len(), 1);
+    assert_eq!(ainda[0].id, "attempt-1");
+    assert_eq!(ainda[0].status, status::RUNNING);
+}
+
 #[test]
 fn el_estado_del_run_sale_de_sus_tareas() {
     let db = db_compartida();
@@ -4931,9 +5123,9 @@ mod harness_fase1 {
     use crate::conversa::store::{self as chat, Tuning};
     use crate::database::DbConnection;
 
-    struct Mundo {
-        db: DbConnection,
-        cwd: String,
+    pub(super) struct Mundo {
+        pub(super) db: DbConnection,
+        pub(super) cwd: String,
         dir: PathBuf,
     }
 
@@ -4944,7 +5136,7 @@ mod harness_fase1 {
     }
 
     /// Conversas na MESMA pasta, cada uma com o turno `t1` em curso.
-    fn mundo(threads: &[&str]) -> Mundo {
+    pub(super) fn mundo(threads: &[&str]) -> Mundo {
         let dir = std::env::temp_dir().join(format!("ags-harness-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let cwd = dir.to_string_lossy().into_owned();
@@ -4964,7 +5156,7 @@ mod harness_fase1 {
         Mundo { db, cwd, dir }
     }
 
-    fn child(world: &Mundo, id: &str, parent: &str) {
+    pub(super) fn child(world: &Mundo, id: &str, parent: &str) {
         let conn = world.db.lock().unwrap();
         chat::insert_thread_with_context(
             &conn, id, "claude-code", &world.cwd, "filha", &Tuning { model: None, effort: None, access: "ask".into() },
@@ -4974,7 +5166,7 @@ mod harness_fase1 {
     }
 
     /// A conversa `thread` delega à Frota (`run_plan` com as `keys` dadas), como o MCP faz.
-    fn delegar(world: &Mundo, thread: &str, keys: &[&str], request: Option<&str>) -> Result<(String, Vec<String>), String> {
+    pub(super) fn delegar(world: &Mundo, thread: &str, keys: &[&str], request: Option<&str>) -> Result<(String, Vec<String>), String> {
         let tasks: Vec<_> = keys
             .iter()
             .map(|key| json!({ "key": key, "title": key, "prompt": "faça", "agent": "claude-code", "model": "haiku", "isolate": false }))
@@ -4987,15 +5179,15 @@ mod harness_fase1 {
         plan_tasks(&world.db, &payload, true, |_| Ok(roster_de_prueba()))
     }
 
-    fn count(world: &Mundo, table: &str) -> i64 {
+    pub(super) fn count(world: &Mundo, table: &str) -> i64 {
         world.db.lock().unwrap().query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0)).unwrap()
     }
 
-    fn graph(world: &Mundo, thread: &str) -> HarnessExecutionGraph {
+    pub(super) fn graph(world: &Mundo, thread: &str) -> HarnessExecutionGraph {
         thread_execution_graph(&world.db.lock().unwrap(), thread).unwrap()
     }
 
-    fn node<'a>(graph: &'a HarnessExecutionGraph, id: &str) -> &'a HarnessExecutionNode {
+    pub(super) fn node<'a>(graph: &'a HarnessExecutionGraph, id: &str) -> &'a HarnessExecutionNode {
         graph.nodes.iter().find(|node| node.id == id).unwrap_or_else(|| panic!("falta o nó {id}"))
     }
 
@@ -5056,6 +5248,33 @@ mod harness_fase1 {
         assert!(tasks.iter().all(|task| position(&format!("run:{run_id}")) < position(&task.id)));
     }
 
+    #[test]
+    fn turno_interrompido_expoe_na_projecao_a_razao_persistida_no_evento() {
+        let world = mundo(&["raiz"]);
+        {
+            let conn = world.db.lock().unwrap();
+            chat::close_orphan_runs(
+                &conn,
+                Some("raiz"),
+                20,
+                "O processo do ADE foi fechado ou caiu antes de o turno terminar.",
+            )
+            .unwrap();
+        }
+
+        let graph = graph(&world, "raiz");
+        let turn = node(&graph, "turn:raiz:t1");
+        assert_eq!(turn.status, "interrupted");
+        assert_eq!(
+            turn.interruption_reason.as_deref(),
+            Some("O processo do ADE foi fechado ou caiu antes de o turno terminar.")
+        );
+        assert!(graph.events.iter().any(|event| {
+            event.kind == "turn.interrupted"
+                && event.payload["reason"] == turn.interruption_reason.clone().unwrap()
+        }));
+    }
+
     /// Ajuste 3: o retry idempotente pelo recibo devolve o mesmo run e não cria nó novo, mesmo que o
     /// turno já tenha acabado e o do retry nem fosse ligar.
     #[test]
@@ -5073,6 +5292,31 @@ mod harness_fase1 {
         // O mesmo id com outro conteúdo continua falhando fechado.
         assert!(delegar(&world, "raiz", &["a", "b"], Some("req-1")).is_err());
         assert_eq!(count(&world, "harness_node"), nodes);
+    }
+
+    /// Fase 4: a leitura do recibo da delegação passa pelo recibo unificado. Com a linha da tabela
+    /// antiga fora do caminho, a tabela nova sozinha ainda devolve o mesmo run e a mesma tarefa, e o
+    /// mesmo id com outro conteúdo ainda falha fechado.
+    #[test]
+    fn a_delegacao_repetida_le_o_recibo_unificado_e_nao_so_o_antigo() {
+        let world = mundo(&["raiz"]);
+        let first = delegar(&world, "raiz", &["a"], Some("req-u")).unwrap();
+        assert_eq!(count(&world, "harness_command_receipt"), 1, "a escrita dupla grava o recibo novo");
+        world.db.lock().unwrap().execute("DELETE FROM run_delegation_receipts", []).unwrap();
+        assert_eq!(delegar(&world, "raiz", &["a"], Some("req-u")).unwrap(), first, "o recibo novo basta");
+        assert_eq!((count(&world, "runs"), count(&world, "tasks")), (1, 1));
+        assert!(delegar(&world, "raiz", &["a", "b"], Some("req-u")).unwrap_err().contains("outro conteúdo"));
+        assert_eq!((count(&world, "runs"), count(&world, "tasks")), (1, 1));
+    }
+
+    /// O recibo gravado só na tabela antiga (antes da Fase 2) continua valendo.
+    #[test]
+    fn o_recibo_so_na_tabela_antiga_continua_valendo() {
+        let world = mundo(&["raiz"]);
+        let first = delegar(&world, "raiz", &["a"], Some("req-l")).unwrap();
+        world.db.lock().unwrap().execute("DELETE FROM harness_command_receipt", []).unwrap();
+        assert_eq!(delegar(&world, "raiz", &["a"], Some("req-l")).unwrap(), first);
+        assert_eq!((count(&world, "runs"), count(&world, "tasks")), (1, 1));
     }
 
     /// Teste 5 (Frota): sem turno inequívoco o run não vira nó e fica na projeção antiga, sob a conversa.
@@ -5416,5 +5660,345 @@ mod harness_fase1 {
         let concluida = graph(&world, "raiz");
         assert_eq!(node(&concluida, "thread:filha").status, "active");
         assert_eq!(ativos(&concluida, "turn:raiz:t1"), 0);
+    }
+}
+
+// ── Fase 4 do harness: resultado do filho, bloqueio, origem e alcance do cancelamento ──────────
+
+mod harness_fase4 {
+    use rusqlite::params;
+    use serde_json::{Value, json};
+
+    use super::super::harness::HarnessExecutionGraph;
+    use super::super::orchestration::{cancel_targets, plan_tasks};
+    use super::super::types::role;
+    use super::harness_fase1::{child, delegar, graph, mundo, node, Mundo};
+    use super::roster_de_prueba;
+    use super::store::{self, NewTask};
+    use crate::conversa::store as chat;
+
+    /// O nó como JSON. Os campos da Fase 4 existem só no contrato serializado, que é o que a CLI e o MCP leem.
+    fn json_of(graph: &HarnessExecutionGraph, id: &str) -> Value {
+        serde_json::to_value(node(graph, id)).unwrap()
+    }
+
+    fn tarefa_id(world: &Mundo, key: &str) -> String {
+        world
+            .db
+            .lock()
+            .unwrap()
+            .query_row("SELECT id FROM tasks WHERE plan_key = ?1", [key], |row| row.get(0))
+            .unwrap()
+    }
+
+    /// Um pedido do chat (`question`, `command` ou `fileChange`) no estado dado.
+    fn pedido(world: &Mundo, thread: &str, id: &str, kind: &str, state: &str) {
+        world
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO chat_request (id, thread_id, rpc_id, kind, title, state, created_at)
+                 VALUES (?1, ?2, ?1, ?3, 'pedido', ?4, 1)",
+                params![id, thread, kind, state],
+            )
+            .unwrap();
+    }
+
+    /// Uma fala do agente no turno dado. É dela que sai a entrega do filho de chat.
+    fn fala(world: &Mundo, thread: &str, turn: &str, seq: i64, texto: &str) {
+        let id = format!("m{seq}");
+        let body = json!({ "kind": "assistant", "id": id, "text": texto }).to_string();
+        world
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO chat_item (thread_id, id, seq, run_id, body) VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![thread, id, seq, turn, body],
+            )
+            .unwrap();
+    }
+
+    /// Um pedido de permissão que a tarefa da Frota está esperando (`task_approvals`).
+    fn aprovacao(world: &Mundo, task_id: &str, id: &str, status: &str) {
+        world
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO task_approvals (id, task_id, tool_name, input_json, status, asked_at)
+                 VALUES (?1, ?2, 'Edit', '{}', ?3, 1)",
+                params![id, task_id, status],
+            )
+            .unwrap();
+    }
+
+    /// Pergunta pendente do filho: o próprio filho fica bloqueado, o turno do pai só ganha a contagem,
+    /// e o estado terminal do pai não muda por causa dele.
+    #[test]
+    fn a_pergunta_pendente_do_filho_bloqueia_o_filho_e_o_pai_so_ganha_um_filho_bloqueado() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        chat::upsert_run(&world.db.lock().unwrap(), "filha", "ft1", "inProgress", Some(2), None, None).unwrap();
+        pedido(&world, "filha", "q1", "question", "pending");
+
+        let aberto = graph(&world, "raiz");
+        let filha = json_of(&aberto, "thread:filha");
+        assert_eq!(filha["childType"], "provider_chat");
+        assert_eq!(filha["executionStatus"], "waiting");
+        assert_eq!(filha["blocked"], json!({ "kind": "question", "count": 1 }));
+        assert_eq!(filha["origin"]["createdBy"], "turn");
+        assert_eq!(filha["origin"]["turnNodeId"], "turn:raiz:t1");
+        let turno = json_of(&aberto, "turn:raiz:t1");
+        assert_eq!(turno["status"], "inProgress", "o pai segue em andamento");
+        assert_eq!(turno["blockedChildren"], 1);
+
+        // O pai termina: o filho segue bloqueado, e o estado terminal do pai não muda por causa dele.
+        chat::upsert_run(&world.db.lock().unwrap(), "raiz", "t1", "completed", Some(1), Some(9), Some(1)).unwrap();
+        let pai_acabou = graph(&world, "raiz");
+        assert_eq!(json_of(&pai_acabou, "turn:raiz:t1")["status"], "completed");
+        assert_eq!(json_of(&pai_acabou, "turn:raiz:t1")["blockedChildren"], 1);
+
+        // A pessoa responde: o bloqueio some e o filho volta a rodar.
+        world.db.lock().unwrap().execute("UPDATE chat_request SET state = 'answered' WHERE id = 'q1'", []).unwrap();
+        let respondida = graph(&world, "raiz");
+        let filha = json_of(&respondida, "thread:filha");
+        assert!(filha.get("blocked").is_none());
+        assert_eq!(filha["executionStatus"], "running");
+        assert!(json_of(&respondida, "turn:raiz:t1").get("blockedChildren").is_none());
+    }
+
+    /// Um pedido que sobrou de um turno já terminado não bloqueia: a pessoa não tem o que responder.
+    #[test]
+    fn pedido_que_sobrou_de_turno_ja_terminado_nao_bloqueia_o_filho() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        chat::upsert_run(&world.db.lock().unwrap(), "filha", "ft1", "completed", Some(2), Some(3), Some(1)).unwrap();
+        pedido(&world, "filha", "q1", "command", "pending");
+        let snapshot = graph(&world, "raiz");
+        let filha = json_of(&snapshot, "thread:filha");
+        assert!(filha.get("blocked").is_none());
+        assert_eq!(filha["executionStatus"], "completed");
+        assert!(json_of(&snapshot, "turn:raiz:t1").get("blockedChildren").is_none());
+    }
+
+    /// Aprovação pendente de uma tarefa da Frota: a tarefa fica bloqueada, o run e o turno recebem a
+    /// contagem, e o tipo é `fleet_task`. A irmã que não roda segue sem bloqueio.
+    #[test]
+    fn a_aprovacao_pendente_da_tarefa_bloqueia_a_tarefa_e_propaga_ao_run_e_ao_turno() {
+        let world = mundo(&["raiz"]);
+        let (run_id, _) = delegar(&world, "raiz", &["a", "b"], None).unwrap();
+        world
+            .db
+            .lock()
+            .unwrap()
+            .execute("UPDATE tasks SET status = 'running', started_at = 5 WHERE plan_key = 'a'", [])
+            .unwrap();
+        let task_a = tarefa_id(&world, "a");
+        aprovacao(&world, &task_a, "ap1", "pending");
+
+        let aberto = graph(&world, "raiz");
+        let task = json_of(&aberto, &format!("task:{task_a}"));
+        assert_eq!(task["childType"], "fleet_task");
+        assert_eq!(task["executionStatus"], "waiting");
+        assert_eq!(task["blocked"], json!({ "kind": "approval", "count": 1 }));
+        assert_eq!(task["origin"]["createdBy"], "turn");
+        assert_eq!(task["origin"]["turnNodeId"], "turn:raiz:t1");
+        assert_eq!(json_of(&aberto, &format!("run:{run_id}"))["blockedChildren"], 1);
+        assert_eq!(json_of(&aberto, "turn:raiz:t1")["blockedChildren"], 1);
+        assert_eq!(json_of(&aberto, "turn:raiz:t1")["status"], "inProgress");
+        let irma = json_of(&aberto, &format!("task:{}", tarefa_id(&world, "b")));
+        assert!(irma.get("blocked").is_none());
+        assert_eq!(irma["executionStatus"], "pending");
+
+        // A pessoa decide: o bloqueio some e a tarefa volta a rodar.
+        world.db.lock().unwrap().execute("UPDATE task_approvals SET status = 'allowed' WHERE id = 'ap1'", []).unwrap();
+        let decidida = graph(&world, "raiz");
+        let task = json_of(&decidida, &format!("task:{task_a}"));
+        assert!(task.get("blocked").is_none());
+        assert_eq!(task["executionStatus"], "running");
+        assert!(json_of(&decidida, "turn:raiz:t1").get("blockedChildren").is_none());
+    }
+
+    /// Aprovação pendente de tarefa que não está rodando não bloqueia: sobra de um estado anterior.
+    #[test]
+    fn aprovacao_pendente_de_tarefa_que_nao_roda_nao_bloqueia() {
+        let world = mundo(&["raiz"]);
+        delegar(&world, "raiz", &["a"], None).unwrap();
+        let task = tarefa_id(&world, "a");
+        aprovacao(&world, &task, "ap1", "pending");
+        let snapshot = graph(&world, "raiz");
+        let task_json = json_of(&snapshot, &format!("task:{task}"));
+        assert!(task_json.get("blocked").is_none());
+        assert_eq!(task_json["executionStatus"], "pending");
+        assert!(json_of(&snapshot, "turn:raiz:t1").get("blockedChildren").is_none());
+    }
+
+    /// A entrega do filho de chat é a última fala do último turno, limitada a 500 caracteres e marcada
+    /// como não confiável. Uma fala de turno antigo não aparece.
+    #[test]
+    fn a_entrega_do_filho_de_chat_vem_do_ultimo_turno_limitada_e_marcada_como_nao_confiavel() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        child(&world, "curta", "raiz");
+        {
+            let conn = world.db.lock().unwrap();
+            chat::upsert_run(&conn, "filha", "ft0", "completed", Some(2), Some(3), Some(1)).unwrap();
+            chat::upsert_run(&conn, "filha", "ft1", "completed", Some(4), Some(5), Some(1)).unwrap();
+            chat::upsert_run(&conn, "curta", "ct1", "completed", Some(2), Some(3), Some(1)).unwrap();
+        }
+        fala(&world, "filha", "ft0", 1, "fala do turno antigo");
+        fala(&world, "filha", "ft1", 2, &"x".repeat(620));
+        fala(&world, "curta", "ct1", 3, "pronto");
+
+        let snapshot = graph(&world, "raiz");
+        let longa = json_of(&snapshot, "thread:filha")["result"].clone();
+        assert_eq!(longa["text"].as_str().unwrap().chars().count(), 500);
+        assert!(longa["text"].as_str().unwrap().starts_with('x'), "vem do último turno");
+        assert_eq!(longa["truncated"], true);
+        assert_eq!(longa["untrusted"], true);
+        assert_eq!(
+            json_of(&snapshot, "thread:curta")["result"],
+            json!({ "text": "pronto", "truncated": false, "untrusted": true })
+        );
+    }
+
+    /// A entrega da tarefa da Frota é o `result` do agente, limitado e marcado como não confiável.
+    #[test]
+    fn a_entrega_da_tarefa_da_frota_vem_limitada_e_marcada_como_nao_confiavel() {
+        let world = mundo(&["raiz"]);
+        delegar(&world, "raiz", &["a"], None).unwrap();
+        world
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET status = 'done', ended_at = 4, result = ?1 WHERE plan_key = 'a'",
+                params!["r".repeat(600)],
+            )
+            .unwrap();
+        let snapshot = graph(&world, "raiz");
+        let task = json_of(&snapshot, &format!("task:{}", tarefa_id(&world, "a")));
+        assert_eq!(task["result"]["text"].as_str().unwrap().chars().count(), 500);
+        assert_eq!(task["result"]["truncated"], true);
+        assert_eq!(task["result"]["untrusted"], true);
+        assert_eq!(task["executionStatus"], "completed");
+    }
+
+    /// A origem diz quem criou o filho e de qual turno: o turno, outra tarefa que delegou, ou a conversa
+    /// quando o filho nasce fora de turno.
+    #[test]
+    fn a_origem_diz_quem_criou_o_filho_e_de_qual_turno() {
+        let world = mundo(&["raiz"]);
+        delegar(&world, "raiz", &["a"], None).unwrap();
+        let task_a = tarefa_id(&world, "a");
+        // `b` é criada pela própria tarefa `a`: é ela que delega a `b`.
+        let payload = json!({ "taskId": task_a, "args": {
+            "key": "b", "title": "b", "prompt": "p", "agent": "claude-code", "model": "haiku", "isolate": false } });
+        plan_tasks(&world.db, &payload, false, |_| Ok(roster_de_prueba())).unwrap();
+        let task_b = tarefa_id(&world, "b");
+
+        let snapshot = graph(&world, "raiz");
+        let b = json_of(&snapshot, &format!("task:{task_b}"));
+        assert_eq!(b["parentId"], format!("task:{task_a}"));
+        assert_eq!(
+            b["origin"],
+            json!({ "createdBy": "task", "turnNodeId": "turn:raiz:t1", "taskNodeId": format!("task:{task_a}") })
+        );
+        assert_eq!(
+            json_of(&snapshot, &format!("task:{task_a}"))["origin"],
+            json!({ "createdBy": "turn", "turnNodeId": "turn:raiz:t1" })
+        );
+
+        // Fora de turno não há turno para pendurar: a origem é a conversa, no run, na tarefa e na filha.
+        chat::upsert_run(&world.db.lock().unwrap(), "raiz", "t1", "completed", Some(1), Some(2), Some(1)).unwrap();
+        let (solto, _) = delegar(&world, "raiz", &["c"], None).unwrap();
+        child(&world, "ociosa", "raiz");
+        let snapshot = graph(&world, "raiz");
+        assert_eq!(json_of(&snapshot, &format!("run:{solto}"))["origin"], json!({ "createdBy": "conversation" }));
+        assert_eq!(
+            json_of(&snapshot, &format!("task:{}", tarefa_id(&world, "c")))["origin"],
+            json!({ "createdBy": "conversation" })
+        );
+        assert_eq!(json_of(&snapshot, "thread:ociosa")["origin"], json!({ "createdBy": "conversation" }));
+    }
+
+    /// Só os agentes filhos levam tipo, resultado, bloqueio e origem. A conversa-raiz e o turno não levam,
+    /// e o run da Frota é só o contêiner das tarefas.
+    #[test]
+    fn so_os_agentes_filhos_levam_tipo_resultado_bloqueio_e_origem() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        let (run_id, _) = delegar(&world, "raiz", &["a"], None).unwrap();
+        // A própria conversa-raiz tem uma pergunta pendente: ela não é um filho, então não se bloqueia nem conta.
+        pedido(&world, "raiz", "pergunta-da-raiz", "question", "pending");
+        let snapshot = graph(&world, "raiz");
+        for id in ["thread:raiz", "turn:raiz:t1"] {
+            let no = json_of(&snapshot, id);
+            for campo in ["childType", "result", "blocked", "origin"] {
+                assert!(no.get(campo).is_none(), "{id} não leva {campo}");
+            }
+        }
+        assert!(json_of(&snapshot, "turn:raiz:t1").get("blockedChildren").is_none());
+        assert!(json_of(&snapshot, &format!("run:{run_id}")).get("childType").is_none());
+        assert_eq!(json_of(&snapshot, "thread:filha")["childType"], "provider_chat");
+        assert_eq!(json_of(&snapshot, &format!("task:{}", tarefa_id(&world, "a")))["childType"], "fleet_task");
+    }
+
+    /// Cancelar descendente é ordem do pai ou da pessoa. A pessoa (pela conversa de origem) e o pai da
+    /// tarefa podem; a filha, a irmã, a própria tarefa e outra conversa não. O lead não é cancelado daqui.
+    #[test]
+    fn cancelar_descendente_so_pelo_pai_ou_pela_pessoa_no_run_da_frota() {
+        let world = mundo(&["raiz", "outra"]);
+        let (run_id, _) = delegar(&world, "raiz", &["pai", "irma", "filho"], None).unwrap();
+        world
+            .db
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE tasks SET parent_id = (SELECT id FROM tasks WHERE plan_key = 'pai') WHERE plan_key = 'filho'",
+                [],
+            )
+            .unwrap();
+        let pai = tarefa_id(&world, "pai");
+        let irma = tarefa_id(&world, "irma");
+        let filho = tarefa_id(&world, "filho");
+        let pessoa = |alvo: &str| json!({ "tabId": "thread:raiz", "cwd": world.cwd, "args": { "task": alvo } });
+        let outra = |alvo: &str| json!({ "tabId": "thread:outra", "cwd": world.cwd, "args": { "task": alvo } });
+        let de_tarefa = |quem: &str, alvo: &str| json!({ "taskId": quem, "args": { "task": alvo } });
+        let alcance = |payload: &Value| -> Result<Vec<String>, String> {
+            let conn = world.db.lock().unwrap();
+            cancel_targets(&conn, payload).map(|(_, targets)| targets.into_iter().filter_map(|t| t.plan_key).collect())
+        };
+
+        assert_eq!(alcance(&pessoa("filho")).unwrap(), ["filho"], "a pessoa, pela conversa de origem, cancela");
+        assert_eq!(alcance(&de_tarefa(&pai, "filho")).unwrap(), ["filho"], "o pai cancela o filho");
+        assert!(alcance(&de_tarefa(&filho, "pai")).is_err(), "o filho não cancela o pai");
+        assert!(alcance(&de_tarefa(&filho, "filho")).is_err(), "a tarefa não cancela a si mesma");
+        assert!(alcance(&de_tarefa(&irma, "filho")).is_err(), "a irmã não cancela o filho de outra tarefa");
+        assert!(alcance(&de_tarefa(&irma, "pai")).is_err(), "a irmã não cancela o pai");
+        assert!(alcance(&outra("filho")).is_err(), "outra conversa não mexe no run desta");
+
+        {
+            let conn = world.db.lock().unwrap();
+            store::create_task(
+                &conn,
+                &NewTask {
+                    run_id: &run_id,
+                    title: "lider",
+                    prompt: "p",
+                    agent_id: "claude-code",
+                    cwd: &world.cwd,
+                    role: Some(role::LEAD),
+                    plan_key: Some("lider"),
+                    depth: 0,
+                    queued: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        }
+        assert!(alcance(&pessoa("lider")).is_err(), "o lead nunca é cancelado daqui");
     }
 }
