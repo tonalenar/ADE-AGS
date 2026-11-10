@@ -922,7 +922,9 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 
 - Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13). O replay das falhas de gravação (§11.11) roda na primeira vez que a fila é usada no processo, não no boot.
 - Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id`. As colunas existem (aditivas) e ficam `NULL`: o desenho (§11.4) pede o evento gravado na transação do passo 1, o que exige um tipo de evento novo na projeção (`runs/harness.rs`), que está em outra frente. Essa migração fica para `chat_send` e `chat_interrupt` (§11.8, itens 1, 4 e 7).
-- Spawn, resposta a pedido e cancelamento não usam recibo nem fila de efeitos. O Parar usa desde a segunda fatia (§11.11).
+- Spawn, resposta a pedido e cancelamento não usam recibo nem fila de efeitos. O Parar usa desde a segunda fatia (§11.11), e o núcleo comum (`harness/command.rs`, §11.13) já serve envio e Parar: `request_answer` e `task_cancel` precisam só de um `ReceiptCommand` novo.
+- Interrupção do Claude sem captura real: não existe captura de `control_request interrupt` depois de uma linha `user` e antes de o turno mostrar que roda. O ADE espera o primeiro aviso do turno (§11.13) em vez de mandar o `interrupt` às cegas. Falta a captura `claude-interrupt-depois-do-user` (`ADE_REPLAY_MODE=record`) para provar o efeito. O `session/cancel` do ACP antes do primeiro `session/update` também não tem captura.
+- O aviso do log só aparece para falhas recebidas com a janela aberta. A conversa não consulta `harness_log_failure` ao abrir, então uma falha de sessão anterior não é mostrada até o replay resolvê-la. Dispensar o aviso vale só nesta janela.
 - Nenhum provider real foi executado.
 
 ### 13. Fase 5: recuperação e reconciliação
@@ -982,7 +984,7 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 | Desfecho | Quando | `sent` | Recibo |
 |---|---|---|---|
 | `sent` | o motor mandou a interrupção nesta chamada | `true` | `accepted` |
-| `deferred` | Codex com o `turn/start` ainda sem resposta: o Parar fica pendente em `codex_parar` e sai no `turn/started` | `false` | `accepted` |
+| `deferred` | Codex com o `turn/start` ainda sem resposta; Claude e OpenCode com o turno ainda sem aviso do agente (§11.13): o Parar fica pendente em `codex_parar` e sai no primeiro aviso do turno | `false` | `accepted` |
 | `no_turn` | não há turno: nada vai ao agente; o que ficou aberto no banco é fechado, como antes | `false` | `accepted` |
 | erro do motor | o motor não disse se a parada chegou | `false` | `unknown`, e o erro volta à chamada |
 
@@ -1002,7 +1004,7 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 
 - Tela: `chat_thread_interrupt` aceita `client_request_id` e devolve o recibo quando há id. A UI não foi alterada e continua chamando sem o id.
 - CLI e MCP: `ags chat stop` e `chat_stop` documentam o id; a skill sobe para 1.68.0.
-- Nenhuma tela mostra o aviso `cc-harness-log-failed` nem `logged: false` ainda. O sinal existe; a apresentação não.
+- O aviso `cc-harness-log-failed` aparece na conversa afetada desde a terceira fatia (§11.13). `logged: false` ainda não tem tela.
 
 **`event_sequence` e `causation_event_id`:** continuam `NULL`, pelo motivo de §11.9.
 
@@ -1020,7 +1022,7 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 
 - Nenhum provider real nem CLI real foi executado. Os testes usam um motor de mentira que conta as chamadas.
 - Claude e OpenCode sem turno (`no_turn`): o caminho foi lido no código, sem teste com sessão viva.
-- Corrida entre um Parar e o primeiro envio de Claude ou OpenCode: a parada pode fechar, no banco, um turno que acabou de abrir. O Codex já tem essa proteção (`starting`); os outros motores ainda não. Fica para uma fatia própria.
+- Corrida entre um Parar e o primeiro envio de Claude ou OpenCode: resolvida na terceira fatia (§11.13), com testes sem processo. A captura real dessa janela continua faltando (§11.9).
 - Falha de gravação com lock real do SQLite não foi provada: a injeção de falha é uma closure.
 - Replay só roda na primeira fila do processo, não no boot (§13). Falhas da Frota não são repetidas.
 - Desempenho não medido. `ags test affected` e `cargo clippy` não foram rodados.
@@ -1048,6 +1050,46 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 **Provado** (`cargo test --lib conversa`): `test.rs:779-901` (o guarda, com closures e sem processo nem relógio: recusa antes de qualquer evento → turno novo e aviso, na ordem `run:<id>`, `forget`, `notice`, `run:-`; falha depois de eventos → nenhuma repetição e id mantido; `file not found` de ferramenta → nenhuma repetição; retomada que funciona → nenhuma sessão nova e nenhum aviso; turno novo que falha → não repete; sem id remoto; erro sem explicação; turno concluído) e `test_motores.rs:465-489` e `:907-920` (os classificadores, com frases positivas e negativas).
 
 **Não verificado:** nenhum CLI real foi executado. A ligação em `cursor.rs`/`agy.rs` (contagem das linhas do stdout, captura do stderr, limpeza do banco e gravação do aviso) não tem teste de ponta a ponta; só o guarda e os classificadores têm. O aviso não foi visto na tela.
+
+### 11.13 Fase 2, terceira fatia: núcleo comum, Parar na abertura do turno e aviso do log na tela
+
+**Objetivo:** fechar os três itens que a segunda fatia deixou abertos: um núcleo comum para os recibos de comando, a corrida entre o Parar e o primeiro envio no Claude e no OpenCode, e o aviso de falha do log na conversa afetada.
+
+**Núcleo comum** (`harness/command.rs`). `send_receipt` e `stop_receipt` viram tipos que implementam `ReceiptCommand`: a `Spec` (tipo do efeito, limite de tentativas, prazo do lease e o rótulo das mensagens de erro), o `settle` (o resultado vira um `Settlement`: `Applied`, `NotApplied` ou `Unknown`) e as respostas (`replay` e `reply`). O núcleo faz aceitar, reclamar, concluir e a repetição, uma vez só. O que não mudou: a chave `(kind, caller_key, request_id)`, o prefixo `chat-send:` e `chat-interrupt:` e o hash do pedido. Um teste fixa esses valores, porque recibos já gravados dependem deles. `send_receipt_test` e `stop_receipt_test` não foram alterados.
+
+**A corrida** (o guarda de `codex_parar.rs`, agora usado pelos três motores):
+- **Claude:** o id do turno nasce antes da escrita da mensagem (`Session::ensure_turn`, sob o guarda). Um Parar que chega daí em diante vê o turno, fica `deferred` e não toca no banco. O `control_request interrupt` sai uma vez, no primeiro aviso do turno (`is_turn_line`: `system/status`, `stream_event`, `assistant` ou `user`), depois das saídas da linha. Uma escrita que falha desfaz a abertura.
+- **OpenCode (ACP):** o `session/cancel` sai só no primeiro `session/update` de conteúdo do turno (`is_turn_update`). Um `session/prompt` que responde sem aviso descarta a pendência.
+- **Banco:** o fechamento de órfãos do Parar (`api::close_idle_orphans`) roda sob o lock do banco e não fecha nada enquanto há turno rodando ou abrindo (`turn_busy`, que inclui o `starting` do Codex). Se um turno começa entre a decisão e o fechamento, o Parar é registrado nele.
+
+**O `interrupt` do Claude vale depois da linha `user`?** Não está provado, e o ADE não conta com isso. O que as capturas mostram:
+- `claude-interrompido`: o `interrupt` chega com o assistente já em streaming (depois do `message` de início) e é honrado (`aborted_streaming`, `still_queued: []`). O aviso escolhido (`stream_event`, `assistant`) cai nesse mesmo ponto.
+- `claude-steer-sem-ferramenta`: uma linha `user` escrita no meio do turno não é aplicada na hora. Vira fila e só roda como turno seguinte, depois do `result`, com um `status: requesting` novo.
+- A resposta ao `interrupt` traz `still_queued`: mensagem enfileirada é contada à parte do turno em curso.
+
+Nenhuma captura tem `interrupt` depois de uma linha `user` e antes do primeiro aviso do turno. O Codex tem a prova dessa janela (`codex-interrupt-antes-do-started`: `-32600`), e o Claude não. Por isso o Parar espera o aviso. Se o CLI aceitasse o `interrupt` ali, o custo é um Parar que sai um pouco depois; se não aceitasse, o Parar não se perde.
+
+**O aviso do log na conversa.** A conversa estruturada mostra `LogFailureNotice` (região `role="status"`, sempre no DOM, com o motivo sanitizado e o botão «Dispensar aviso»). O sinal `cc-harness-log-failed` entra no store (`recordLogFailure`) só quando traz `threadId`; a falha de tarefa da Frota não aparece no chat. Dispensar vale nesta janela: a falha continua em `harness_log_failure`. Não cria mensagem no chat.
+
+**O que foi verificado**
+- Testes primeiro, sem processo: `conversa::test_parar_turno` (11 testes). Com o guarda do Claude desligado (mutação temporária: o Parar manda o `interrupt` na hora) e sem a checagem de turno ocupado no fechamento de órfãos, quatro testes falham nas asserções certas: o `interrupt` sai antes do primeiro aviso do turno (três casos) e o turno que está abrindo é fechado no banco. Depois da restauração (SHA-256 conferido), os 11 passam.
+- `cargo test --lib --bin ags` (a suíte do CI, no estado desta fatia): lib com 2940 passando, 0 falhando e 29 ignorados; bin `ags` com 53 passando. Os 14 testes novos desta fatia estão nessa conta. O teste pré-existente `memory::usage::test::registra_e_aplica_retencao_por_workspace` levou mais de 60 s sozinho, e a suíte inteira 479 s; não investiguei a causa.
+- Subconjunto no estado restaurado (`test_parar_turno`, `send_receipt_test`, `stop_receipt_test`, `test_codex_parar`, `harness::test_command`): 53 passam, 0 falham. `send_receipt_test` e `stop_receipt_test` passam sem alteração. O hash e a chave pinados em `test_command` batem com o código.
+- Avisos do build: 21, nenhum em arquivo desta fatia.
+- `node scripts/fingerprint.mjs`: ok (`schema-sqlite 96507e01a45b`, `protocolo-ipc 8db93c467088`). Nenhum arquivo de schema ou de protocolo foi tocado.
+- `bunx tsc --noEmit`: ok. `bun run check:i18n`: ok, 0 achados. `bun run check:test-lint`: ok, 40 do baseline e nenhum novo. `bun run check:babel`: ok, 1390 arquivos.
+- `bunx vitest run src/features/chat src/i18n`: 129 arquivos e 947 testes passando, incluídos os 10 novos do aviso.
+
+**O que não foi verificado**
+- Nenhum CLI real foi executado. Os testes usam sessões sem processo e o motor de mentira do guarda.
+- A captura do Claude com `interrupt` depois de `user` (acima). Falta `claude-interrupt-depois-do-user`.
+- OpenCode: a `Session` guarda `AppHandle`, então não há teste de ponta a ponta. A corrida do ACP é provada no guarda (`StopGate`), com a mesma sequência de chamadas de `opencode.rs`. A ordem do `confirm_turn` no `dispatch` do Claude também não tem teste: o `dispatch` precisa de `AppHandle`.
+- Falha de gravação com o lock real do SQLite: a injeção continua sendo uma closure.
+- O aviso só mostra falhas recebidas com a janela aberta (ver §11.9).
+- `codex_parar.rs` manteve o nome, porque a matriz de capabilities e os docs citam o caminho. Renomear é tarefa separada.
+- A ordem do `confirm_turn` no `dispatch` do Claude (depois das saídas da linha) não tem teste: o `dispatch` precisa de `AppHandle`. Foi conferida por leitura.
+- Um Parar pendente espera o primeiro aviso do turno. Se o Claude ficar mudo com o processo vivo, o Parar espera até o turno acabar ou o processo cair. Não há prazo de reenvio, e essa escolha é do usuário. Um turno que termina sem nenhum aviso de conteúdo descarta o Parar pendente.
+- `cargo clippy --all-targets` não foi rodado. A linha de base do HEAD, antes desta fatia, não foi medida nesta sessão. Desempenho não medido.
 
 ## 12. Fase 4: delegação única (`delegate_agent` com três destinos)
 
