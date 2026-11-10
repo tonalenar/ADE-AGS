@@ -23,11 +23,11 @@ Este documento fecha o contrato da Fase 0 do harness comum. Ele não muda compor
 O campo `runId` do nó de turno em `runs/harness.rs` guarda o id do `chat_run`, não o de `runs`. Esse nome é ambíguo: a Fase 1 acrescentou `chatRunId` com o mesmo valor e manteve `runId` por compatibilidade até a UI migrar (§7.2).
 
 **O que o estado da matriz significa.** O estado descreve o adapter **do ADE**, não o provider.
-- `Supported`: há caminho de código ponta a ponta. A força da prova vem à parte (`Proof`: `Code`, `Test`, `Fixture`).
+- `Supported`: há caminho de código ponta a ponta. A força da prova vem à parte (`Proof`: `Code`, `Test`, `Fixture`, `RealCapture`).
 - `Unsupported`: o ADE não tem caminho ou o recusa de forma explícita. A UI e o MCP não devem oferecer. Não prova que o provider não tenha o recurso.
 - `Unknown`: o caminho existe, mas o efeito não tem resposta nem evento observável, ou depende de algo que o repositório não prova. Não se promete. A célula diz o que falta provar.
 
-**Nenhuma célula tem captura real.** Não existe transcript gravado de nenhum provider no repositório. As três fixtures de protocolo (`conversa/fixtures/protocolo/`) têm `origin.kind: synthesized`. Por isso `Supported` aqui significa "o ADE tem código e, às vezes, teste do mapeador", nunca "provado contra o provider real". Um teste (`nenhuma_celula_alega_captura_real_enquanto_nao_houver_uma`) impede a tabela de afirmar o contrário.
+Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigravity e Cursor). As três antigas continuam `synthesized`. `RealCapture` só aparece numa célula cuja evidência aponta para uma fixture que existe e tem `origin.kind: recorded`. O teste `nenhuma_celula_alega_captura_real_enquanto_nao_houver_uma` exige isso. Célula sem essa prova não alega captura.
 
 **Pendência do fingerprint (não resolvida aqui).** No commit base, `node scripts/fingerprint.mjs` falha: `schema-sqlite` mudou (`database/schema.rs`, sha256 `96507e01a45b…`) e não tem registro de reconhecimento. As mudanças são aditivas, mas o reconhecimento exige revisão e fica para a fase que tocar o schema (ou para o usuário). Esta tarefa **não** reconheceu nada e **não** tocou `database/schema.rs` nem `ipc/protocol.rs`. O CI vai continuar vermelho nesse passo até alguém registrar (ver §8).
 
@@ -68,7 +68,7 @@ O campo `runId` do nó de turno em `runs/harness.rs` guarda o id do `chat_run`, 
 |---|---|---|---|---|---|---|
 | `start` | S | S | S | S | S | S |
 | `send` | S | S | S | S | S | S |
-| `steer` | ? | S | U | U | U | U |
+| `steer` | S | S | U | U | U | U |
 | `interrupt` | S | S | S | S | S | S |
 | `turn_completion` | S | S | S | S | S | S |
 | `tool_events` | S | S | S | S | S | S |
@@ -136,12 +136,12 @@ O campo `runId` do nó de turno em `runs/harness.rs` guarda o id do `chat_run`, 
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396 células**: **163 `Supported`, 35 `Unknown`, 198 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 396): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396 células**: **164 `Supported`, 34 `Unknown`, 198 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 396): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
 
 <!-- contagem-matriz:inicio -->
 | Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
 |---|---|---|---|---|---|
-| Chat | claude-code | 12 | 3 | 3 | Supported |
+| Chat | claude-code | 13 | 2 | 3 | Supported |
 | Chat | codex | 14 | 0 | 4 | Supported |
 | Chat | opencode | 8 | 1 | 9 | Supported |
 | Chat | antigravity | 8 | 0 | 10 | Supported |
@@ -163,7 +163,7 @@ São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396
 | Tui | hermes | 7 | 2 | 9 | Unknown |
 | Tui | antigravity | 5 | 4 | 9 | Unsupported |
 | Tui | cursor | 5 | 3 | 10 | Unsupported |
-| **Total** | 22 colunas × 18 = 396 células | 163 | 35 | 198 | |
+| **Total** | 22 colunas × 18 = 396 células | 164 | 34 | 198 | |
 <!-- contagem-matriz:fim -->
 
 Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
@@ -174,10 +174,9 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 
 | Onde | Capability | O que falta provar |
 |---|---|---|
-| chat/claude-code | `steer` | captura real do `claude -p` com linha `user` escrita com o turno aberto, mostrando se ela entra no mesmo turno ou só no `result` seguinte |
 | chat/claude-code | `compact` | captura real recebendo `/compact` como linha `user` e o evento que marca a conclusão |
 | chat/claude-code | `goal` | evento do Claude com o status do objetivo e prova de que `/goal` como linha `user` é executado |
-| chat/opencode | `resume` | fixture real de `opencode acp` com resposta a `session/resume` e `session/load` |
+| chat/opencode | `resume` | a captura de handshake existe, mas o replay não a ingere: a bancada só lê a resposta de id 2, e nela o `session/resume` de sessão inexistente é `-32602`; `session/new` (id 4) cria a sessão. Falta casear o id que o ADE enviou, e um turno de modelo |
 | chat/local-acp | `approval`, `usage`, `ags_mcp` | captura de um agente ACP local real (pedido de permissão, resposta do `session/prompt`, ferramentas `ags`) |
 | chat/local-acp | `resume` | o descritor de sessão ler `agentCapabilities` do `initialize` |
 | fleet/antigravity | `question`, `approval`, `ags_mcp` | perfil gerado para uma tarefa real (ferramentas `ags`) e um pedido `request-review` sem terminal |
@@ -242,10 +241,10 @@ Lacunas reais, em ordem de risco:
 
 ### 1.8 Conflito do `steer` do Claude: decisão
 
-- **A matriz marca `Unknown`.** `SteerActive` sempre entra (`api.rs:571`), o ADE escreve a linha e abre o turno na hora (`claude.rs:572-578`), e nada confirma se ela entrou no turno corrente ou ficou na fila do CLI.
-- **A declaração `MidTurnBehavior::Steer` (`api.rs:88`) e a cópia `PROTOCOL_AGENTS` (`chatModel.ts:76`) ficam como estão.** Esta tarefa não muda comportamento nem UI. O contrato apenas proíbe derivar uma **promessa** de `steer` para o Claude a partir delas.
-- Um teste (`o_steer_do_claude_fica_unknown_ate_haver_captura_real`) fixa a decisão. Outro (`a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor`) amarra a tabela a `Engine::capabilities()`: `mid_turn = Steer` exige `steer != Unsupported`; `Interrupt` exige `Unsupported`; o mesmo para `compact` e `goal`.
-- Quando houver captura real, a célula vira `Supported` ou `Unsupported`. Se `Unsupported`, o «enviar agora» do Claude passa a interromper e reenviar, como o OpenCode. A cópia da tela é decisão de produto (§8).
+- **A matriz marca `Supported`, com limite.** Em turno com ferramenta a mensagem entra depois da fronteira da ferramenta (`claude-steer-ferramenta`). Em turno sem ferramenta a resposta corrente não muda e a mensagem vira um novo turno logo depois do `result` (`claude-steer-sem-ferramenta`): o primeiro `result` não traz `STEER_OK`; o segundo, na mesma sessão, traz.
+- **A declaração `MidTurnBehavior::Steer` (`api.rs:88`) e a cópia `PROTOCOL_AGENTS` (`chatModel.ts:76`) ficam como estão.** Esta tarefa não muda comportamento nem UI.
+- Um teste (`o_steer_do_claude_fica_unknown_ate_haver_captura_real`) fixa o texto da observação. Outro (`a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor`) amarra a tabela a `Engine::capabilities()`: `mid_turn = Steer` exige `steer != Unsupported`; `Interrupt` exige `Unsupported`; o mesmo para `compact` e `goal`.
+- A cópia da tela, que promete só "entra no turno em andamento", continua decisão de produto (§8): a captura sem ferramenta mostra o outro destino.
 
 ## 2. Modelo de identidade
 
@@ -503,8 +502,8 @@ A Fase 2 adiciona `harness_command_receipt` com `kind`. Leitura passa pela nova 
 
 ### 5.1 O que existe
 
-- Três fixtures de protocolo, todas `synthesized`: `claude-ferramenta-aprovacao-e-cota`, `codex-comando-falha-e-queda`, `acp-pedido-e-max-tokens`. Cinco roteiros (cota, retomada, JSON quebrado, stall) para os mesmos três protocolos.
-- Nenhum transcript gravado. O modo `record` existe (`replay_protocolo.rs`) e nunca foi usado.
+- Três fixtures de protocolo `synthesized`: `claude-ferramenta-aprovacao-e-cota`, `codex-comando-falha-e-queda`, `acp-pedido-e-max-tokens`. Cinco roteiros (cota, retomada, JSON quebrado, stall) para os mesmos três protocolos.
+- Onze fixtures `recorded`, gravadas com `record` a partir do stdout sanitizado (2026-11-09): `claude-feliz`, `claude-interrompido`, `claude-steer-ferramenta`, `claude-steer-sem-ferramenta`, `codex-feliz`, `codex-interrompido-real`, `codex-interrupt-antes-do-started`, `antigravity-feliz`, `antigravity-queda`, `cursor-feliz`, `cursor-queda`. `opencode-resume-e-load` não entrou: a bancada só trata a resposta de id 2 como sessão.
 - A bancada toca **só a leitura** (o que o provider escreve). As linhas `in` (o que o ADE escreve) são ignoradas (`replay_protocolo.rs:198-210`). Nada prova o que o ADE manda.
 - O que o replay **não** vê: o banco. `mark_unknown_outcomes`, `sweep_orphans` e o estado do turno em `chat_run` não aparecem no snapshot. Eles pedem teste de banco (`test_db()`), como `conversa/test.rs:565-597`.
 
@@ -512,12 +511,12 @@ A Fase 2 adiciona `harness_command_receipt` com `kind`. Leitura passa pela nova 
 
 | # | Bloqueio | Onde | Efeito |
 |---|---|---|---|
-| B1 | `Protocolo` tem **3 variantes** (`claude-stream`, `codex-app-server`, `acp`) | `bancada.rs:42-52`, `replay_protocolo.rs:141` | Antigravity e Cursor não têm replay |
+| B1 | `Protocolo` tinha **3 variantes** | resolvido: `agy-stream` e `cursor-stream` entram no replay | as fixtures recorded dos dois rodam |
 | B2 | O snapshot não tem evento de filho, uso nem pedido pendente no fim | `replay_protocolo.rs:213-227` | "filho termina antes do pai" e "uso do turno" não são afirmáveis |
 | B3 | O `Motor` da bancada **descarta** `Task` e `SubItem` | `bancada.rs:611-614` | idem; os eventos de filho do Claude somem |
 | B4 | O oráculo não afirma o tipo do item nem "pedido ainda pendente" | `bancada.rs:725-748` (`Espera`) | não dá para provar `usage` nem pedido que sobra |
 | B5 | O guard recusa `ToolKind::Other` | `replay_protocolo.rs:233-241`, `bancada.rs:486-489` | ferramenta fora da lista no Cursor derrubaria a fixture |
-| B6 | O Cursor fecha o turno por **prazo** (`quiet_after`), que o `Motor` da bancada não modela | `cursor_map.rs:155-165`, `:350-383` | copiar a regra à mão duplicaria o fim de turno |
+| B6 | O Cursor fecha o turno por **prazo** (`quiet_after`) | resolvido no `read_turn` da bancada | `cursor-feliz` usa o `atMs` da captura, abaixo do silêncio, e o fim é o `result` |
 
 ### 5.3 Provas por adapter e prioridade
 
@@ -526,22 +525,23 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 | Cenário | Claude | Codex | OpenCode (ACP) | Antigravity | Cursor | Como |
 |---|---|---|---|---|---|---|
 | **P0** ferramenta sem resultado ao fim | fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` | fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` | fixture `acp-tool-sem-resultado` | `requer captura real` | `requer captura real` | fixa a lacuna de §1.7 como comportamento atual |
-| **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | `requer captura real` | `requer captura real` | bancada |
+| **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | **gravada** `antigravity-queda` (kill sem `result`) | **gravada** `cursor-queda` (kill sem `result`) | bancada |
 | **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste de banco; sem reabertura classificada | idem | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
 | **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
-| **P1** interrupção | fixture `claude-interrompido` | fixture `codex-interrompido` | fixture `acp-interrompido` | `requer captura real` | `requer captura real` | bancada |
+| **P1** interrupção | **gravada** `claude-interrompido` | **gravada** `codex-interrompido-real` (e `codex-interrupt-antes-do-started`: `-32600` antes de `turn/started`) | fixture `acp-interrompido` | o kill gravado não separa interrupt de queda | o interrupt é kill, sem mensagem; ver `cursor-queda` | bancada |
 | **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
 | **P1** frames fora de ordem | fixture `claude-fora-de-ordem` (o `tool_result` antes do `tool_use` é descartado hoje, `claude_map.rs:287-289`) | fixture `codex-fora-de-ordem` | fixture `acp-fora-de-ordem` | `requer captura real` | `requer captura real` | bancada; o oráculo documenta o comportamento atual |
-| **P2** turno feliz | fixture de base | fixture de base | fixture de base | `requer captura real` | `requer captura real` | bancada |
+| **P2** turno feliz | **gravada** `claude-feliz` | **gravada** `codex-feliz` | fixture de base | **gravada** `antigravity-feliz` | **gravada** `cursor-feliz` | bancada |
 | **P2** filho termina antes do pai | bloqueado por B2 e B3 | bloqueado por B2 e B3 | sem frame de filho (o ACP só tem o cartão `think`) | `requer captura real` | `requer captura real` | só depois de ampliar snapshot e `Motor` |
 
-Contagem da grade (9 cenários × 5 motores = 45 células): **1 com fixture exata** (queda no Codex), **3 parciais** (pedido em Claude, Codex e ACP), **41 sem fixture**. O número vem do inventário `cursor-replay` e foi conferido contra a lista de arquivos de `fixtures/protocolo/` e `fixtures/roteiros/`.
+Contagem da grade (9 cenários × 5 motores = 45 células): **9 com fixture exata** (a queda sintetizada do Codex, mais oito recorded: feliz de Claude, Codex, Antigravity e Cursor; interrupção de Claude e Codex; EOF de Antigravity e Cursor), **3 parciais** (pedido em Claude, Codex e ACP), **33 sem fixture**. O steer do Claude (`claude-steer-ferramenta` e `claude-steer-sem-ferramenta`) não é linha desta grade.
 
 ### 5.4 O que exige captura real (nunca sintetizar)
 
-- **Cursor e Antigravity inteiros.** O mapeador do Cursor diz que nenhum turno real foi feito e que os testes usam as linhas de exemplo da doc (`cursor_map.rs:5-8`). O do agy tem os campos de ferramenta "do changelog e do parser das tarefas" (`test_motores.rs:1-6`). Uma fixture `synthesized` dos dois teria oráculo escrito da intenção e deve ficar marcada como pendente de captura, nunca como `recorded`.
-- **O que o ADE escreve ao provider** (`steer`, `/compact`, `/goal`, `turn/steer`, `turn/interrupt`): a bancada não lê stdin.
-- **Resposta do OpenCode a `session/resume` e `session/load`.**
+- **Queda com stderr** de Cursor e Antigravity. O que há é kill sem `result` e sem stderr (`cursor-queda`, `antigravity-queda`).
+- **Interrupt de protocolo** do Cursor e do Antigravity. Os dois matam o processo; a captura não separa isso de uma queda.
+- **O que o ADE escreve e o motor não lê** (`/compact`, `/goal`, `turn/steer`): a bancada ignora `in`. O steer do Claude e o `turn/interrupt` do Codex estão no transcript como `in`, e o efeito está nos frames `out`.
+- **OpenCode com turno de modelo**, e um replay que leia `session/resume` / `session/load` pelo id que o ADE enviou. A captura de handshake já mostra `-32602` para sessão inexistente e `configOptions` para a sessão nova; não foi importada.
 - Capturas gastam a conta e a cota da pessoa e **exigem OK explícito e teto** (§8).
 
 ### 5.5 Infraestrutura antes de qualquer fixture nova
