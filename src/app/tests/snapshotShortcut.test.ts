@@ -74,3 +74,11 @@ describe("SnapShot no macOS", () => {
     expect(clashes).toEqual([]);
   });
 });
+
+describe("ditado no macOS", () => {
+  it("Cmd+Shift+D no composer casa o ditado sem exigir Ctrl", () => {
+    ctx.values = { composerFocus: true, isDesktop: true };
+    const cmdShiftD = { key: "D", code: "KeyD", ctrlKey: false, shiftKey: true, altKey: false, metaKey: true };
+    expect(matchShortcut(cmdShiftD)?.id).toBe("composer.dictation");
+  });
+});
