@@ -135,6 +135,10 @@ export interface HarnessExecutionNode {
   blockedChildren?: number | null;
   /** Quem criou o filho e de qual turno. */
   origin?: HarnessNodeOrigin | null;
+  /** Só no nó de turno interrompido: a razão legível gravada no evento `turn.interrupted`. */
+  interruptionReason?: string | null;
+  /** O ADE não consegue provar como o nó terminou. Só vem quando é verdadeiro; nunca vira conclusão nem falha. */
+  outcomeUnknown?: boolean | null;
 }
 
 /** Só agentes filhos: uma conversa filha ou uma tarefa da Frota. */
@@ -163,8 +167,21 @@ export interface HarnessExecutionGraph {
   rootThreadId: string;
   /** Nós em ordem de pai antes de filho; `parentId` mantém a relação durável entre domínios. */
   nodes: HarnessExecutionNode[];
-  /** Eventos semânticos mais recentes da linhagem, persistidos pelo ADE em ordem global. */
+  /**
+   * Eventos semânticos persistidos pelo ADE em ordem global. Com `reset`, a janela mais recente; sem ele, só o que
+   * veio depois do cursor pedido (Fase 6).
+   */
   events: HarnessExecutionEvent[];
+  /** A sequência do último evento persistido da linhagem. Ausente num backend antigo. */
+  cursor?: number;
+  /** Verdadeiro quando `events` é a janela inteira. Ausente num backend antigo, tratado como verdadeiro. */
+  reset?: boolean;
+}
+
+/** O aviso `cc-harness-event`: a árvore da conversa mudou, e `cursor` é o último evento persistido dela. */
+export interface HarnessTreeChanged {
+  threadId: string;
+  cursor: number;
 }
 
 export interface HarnessExecutionEvent {

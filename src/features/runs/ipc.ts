@@ -9,9 +9,13 @@ export const listTasks = (workspaceId: string) =>
 export const listRuns = (workspaceId: string) =>
   invoke<Run[]>("run_list_runs", { workspaceId });
 
-/** Snapshot único das conversas, turnos e tarefas do lineage estruturado. */
-export const listHarnessExecutionGraph = (threadId: string) =>
-  invoke<HarnessExecutionGraph>("run_list_harness_graph", { threadId });
+/**
+ * Snapshot das conversas, turnos e tarefas do lineage estruturado (`run_list_harness_graph`, `runs/mod.rs`).
+ * Com `afterCursor` (o `cursor` da resposta anterior), os eventos voltam só como delta; sem ele, ou com um cursor
+ * que o banco não reconhece, voltam inteiros com `reset`. Os nós voltam sempre atuais.
+ */
+export const listHarnessExecutionGraph = (threadId: string, afterCursor: number | null = null) =>
+  invoke<HarnessExecutionGraph>("run_list_harness_graph", { threadId, afterCursor });
 
 /** Lê o trecho normalizado mais recente do JSONL de uma tentativa, só quando solicitado. */
 export const readAttemptEvents = (attemptId: string) =>
