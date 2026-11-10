@@ -58,15 +58,12 @@ pub trait HeadlessAgent {
     /// texto y varias herramientas a la vez; vacío = línea sin nada que mostrar.
     fn parse_line(&self, line: &str) -> Vec<AgentEvent>;
 
-    /// El veredicto final. `emitted` es lo que el agente llegó a decir de sí mismo, que
-    /// puede no existir: el código de salida es la única señal que siempre está.
+    /// O veredito final. `emitted` é o frame de resultado do adapter. Sem ele, código 0
+    /// não é sucesso: o processo fechou, mas o protocolo não confirmou o desfecho.
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
         match emitted {
-            Some(o) => o,
-            None if code == 0 => TaskOutcome {
-                ok: true,
-                ..Default::default()
-            },
+            Some(outcome) => outcome,
+            None if code == 0 => TaskOutcome::failed(super::types::MISSING_FINAL_RESULT),
             None => TaskOutcome::failed(format!(
                 "o agente terminou com código {code} sem dar resultado"
             )),

@@ -1157,6 +1157,41 @@ pub fn save_handoff(
     Ok(())
 }
 
+#[cfg(test)]
+thread_local! {
+    static RECOVERABLE_LOGS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+fn log_recoverable(message: &str) {
+    eprintln!("[harness] {message}");
+    #[cfg(test)]
+    RECOVERABLE_LOGS.with(|logs| logs.borrow_mut().push(message.to_string()));
+}
+
+#[cfg(test)]
+pub(crate) fn take_recoverable_logs() -> Vec<String> {
+    RECOVERABLE_LOGS.with(|logs| std::mem::take(&mut *logs.borrow_mut()))
+}
+
+/// Grava o fim. Se a escrita falha, o erro fica no log e a tarefa aberta passa a
+/// `failed` com essa mensagem, em vez de seguir `running` sem rastro.
+pub fn persist_finish(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> TaskOutcome {
+    match finish_task(conn, task_id, outcome) {
+        Ok(()) => outcome.clone(),
+        Err(error) => {
+            let message = format!("erro recuperável ao gravar o fim da tarefa {task_id}: {error}");
+            log_recoverable(&message);
+            let failed = TaskOutcome::failed(message);
+            if let Err(again) = finish_task(conn, task_id, &failed) {
+                log_recoverable(&format!(
+                    "erro recuperável ao gravar o fim da tarefa {task_id}: a tarefa segue aberta ({again})"
+                ));
+            }
+            failed
+        }
+    }
+}
+
 /// La tarea cerró. Acumula lo gastado en su run, que es lo que mira el presupuesto.
 ///
 /// Solo pisa filas abiertas (`ready` o `running`). Si el usuario canceló, el proceso muere

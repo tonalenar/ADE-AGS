@@ -508,12 +508,19 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             let (db, task) = (db.clone(), task_snapshot.clone());
             let _ = tokio::task::spawn_blocking(move || super::checkpoints::auto(&db, &task, super::checkpoints::kind::AFTER)).await;
         }
-        if let Ok(conn) = db.lock() {
-            let _ = store::finish_task(&conn, &task_id, &outcome);
+        let outcome = if let Ok(conn) = db.lock() {
+            let outcome = store::persist_finish(&conn, &task_id, &outcome);
             if let Err(error) = super::execution_log::record_fleet_final(&conn, &task_id, &event_attempt_id, &outcome) {
                 eprintln!("[harness] não foi possível persistir o desfecho do worker: {error}");
             }
-        }
+            outcome
+        } else {
+            let message = format!(
+                "erro recuperável ao gravar o fim da tarefa {task_id}: o banco não pôde ser travado"
+            );
+            eprintln!("[harness] {message}");
+            TaskOutcome::failed(message)
+        };
         if task_snapshot.role.as_deref()==Some(super::types::role::DREAMER) {crate::memory::notify_changed(&app);}
         emit_event(&app, &db, &task_id, &event_attempt_id, AgentEvent::Finished { outcome });
         emit_changed(&app, &task_id);

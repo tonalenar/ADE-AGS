@@ -546,7 +546,11 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         Ok(()) => true,
         Err(e) => {
             if let Ok(conn) = db.lock() {
-                let _ = store::finish_task(&conn, &task_id, &types::TaskOutcome::failed(e));
+                store::persist_finish(&conn, &task_id, &types::TaskOutcome::failed(e));
+            } else {
+                eprintln!(
+                    "[harness] erro recuperável ao gravar o fim da tarefa {task_id}: o banco não pôde ser travado"
+                );
             }
             supervisor::notify_changed(app, &task_id);
             false
