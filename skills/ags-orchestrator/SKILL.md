@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.65.0
+version: 1.66.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1262,12 +1262,24 @@ the member is not asked twice, and a timeout alone does not close it.
 ## Dynamic delegation from protocol chats
 
 Structured Codex, Claude Code and OpenCode conversations receive the ADE MCP scoped to their
-conversation and project. For one separable piece, use `delegate_agent` and choose the execution
-runtime: `chat` starts a native child conversation from `chat_providers`, while `fleet` starts a
-headless Fleet task routed from `agent_roster`. This lets the orchestrator select any connected
+conversation and project. For one separable piece, use `delegate_agent` and choose the `target`:
+`provider_chat` starts a native child conversation from `chat_providers`, `fleet_task` starts a
+headless Fleet task routed from `agent_roster`, and `connected_session` hands the work to a session
+that is already open and linked to your team (the old `execution: chat|fleet` still works as an
+alias of the first two). This lets the orchestrator select any connected
 ADE agent that supports the requested runtime. `client_request_id` is required and stable across
 retries; reusing it with different content is rejected. In `mode: "async"` the tool returns the
 child id for follow-up; `mode: "wait"` waits and hands the result back in the current turn.
+For `connected_session`, call `team_candidates` first: each entry says the provider, folder,
+availability (`available`, `busy` or `disconnected`), `canReceiveWork`, the policy, and whether the
+person must approve the link; link a same-folder session with `team_link`, then pass its id or name
+as `to`. ADE re-checks at send time that the session exists and is connected, is not busy (unless
+`when_busy: "queue"`), is in your folder or already linked by the person, and that its policy is not
+above `ask`. If any check fails, nothing is written to the session and the error starts with a
+stable code (`session_busy`, `session_disconnected`, `session_not_linked`, `session_other_workspace`,
+`policy_elevated`, …). A link is never turned into full access. Repeating the same
+`client_request_id` returns the same message and never queues the prompt twice; `outcome_unknown`
+means the message may have arrived, so inspect the session before asking again.
 Native children use `chat_wait`/`chat_show` and `chat_stop`; Fleet tasks use `task_status`,
 `task_result`, `run_await` and `task_cancel`, which also stops active descendants. A native child
 starts supervised and remains linked in the side-chat panel. A Fleet child uses the scheduler's

@@ -894,7 +894,7 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 | # | Comando | Estado | O que falta |
 |---|---|---|---|
 | 1 | `chat_send` | **entregue** (esta fatia) | evento e `causation_event_id` |
-| 2 | `fleet_delegate` | leitura unificada e escrita dupla (esta fatia) | trocar a leitura de `orchestration.rs` para `receipts::begin` |
+| 2 | `fleet_delegate` | leitura unificada e escrita dupla; **a leitura de `orchestration.rs` passa por `receipts::lookup` desde a Fase 4 (§12.5)** | `begin` no lugar do `INSERT` da delegação |
 | 3 | `chat_new` | leitura unificada (esta fatia) | mover `claim_child_delivery` para `receipts`/`effects` |
 | 4 | `chat_interrupt` (`api::stop`) | próxima fatia | efeito `chat_interrupt`; a capability `interrupt` já existe na matriz |
 | 5 | `request_answer` (`answer.rs`) | próxima fatia | o recibo guarda o `request_id` do pedido; responder duas vezes não reenvia ao provider |
@@ -949,3 +949,87 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 **Provado** (`cargo test --lib conversa`): `test.rs:779-901` (o guarda, com closures e sem processo nem relógio: recusa antes de qualquer evento → turno novo e aviso, na ordem `run:<id>`, `forget`, `notice`, `run:-`; falha depois de eventos → nenhuma repetição e id mantido; `file not found` de ferramenta → nenhuma repetição; retomada que funciona → nenhuma sessão nova e nenhum aviso; turno novo que falha → não repete; sem id remoto; erro sem explicação; turno concluído) e `test_motores.rs:465-489` e `:907-920` (os classificadores, com frases positivas e negativas).
 
 **Não verificado:** nenhum CLI real foi executado. A ligação em `cursor.rs`/`agy.rs` (contagem das linhas do stdout, captura do stderr, limpeza do banco e gravação do aviso) não tem teste de ponta a ponta; só o guarda e os classificadores têm. O aviso não foi visto na tela.
+
+## 12. Fase 4: delegação única (`delegate_agent` com três destinos)
+
+**Objetivo:** o orquestrador escolhe **onde** o trabalho vai, de forma explícita, e a mesma pergunta repetida nunca vira prompt duplicado em nenhum dos três caminhos. Núcleo de backend; a entrega durável do resultado ao pai e a UI ficam fora (§12.8).
+
+Código: `harness/delegate.rs` (decisão, recibo e classificação, provados sem o app), `ipc/commands/delegate.rs` (cola com o app, comando `harness.delegate`), `ipc/commands/team.rs` (descoberta e leitura das sessões), `ipc/mcp.rs` (esquema e roteamento), `runs/orchestration.rs` (leitura do recibo da Frota). Testes: `harness/test_fase4.rs`, `ipc/test.rs` e `runs/test.rs`.
+
+### 12.1 Esquema de `delegate_agent`
+
+Campos comuns: `task` (obrigatório), `client_request_id` (obrigatório, até 128 caracteres, sem controles), `context` (até 16 KiB, vai como dado não confiável), `mode` (`async` padrão | `wait`), `timeout_s` (10 a 1800, padrão 300).
+
+`target` escolhe o destino: `provider_chat` | `fleet_task` | `connected_session`. **Compatibilidade:** sem `target`, `execution` (`chat` | `fleet`) vale como apelido (`chat` = `provider_chat`, `fleet` = `fleet_task`) e a chamada envia exatamente o que enviava. Os dois juntos têm de concordar (`target_conflict`). `required` do esquema agora é `task` e `client_request_id`; sem `target` nem `execution`, o erro de antes (`execution precisa ser 'chat' ou 'fleet'`) volta com a menção ao `target`.
+
+| Destino | O que faz | Campos próprios | Recibo |
+|---|---|---|---|
+| `provider_chat` | abre uma conversa nova de um provider nativo (`chat.new`, filha da chamadora) | `agent`, `model`, `effort`, `title` | `chat_new` (`chat_child_receipts`), resultado = id da conversa |
+| `fleet_task` | cria uma tarefa headless da Frota (`run.delegateTask`) | `agent`, `model`, `complexity`, `account_id`, `isolate`, `budget_usd`, `result_schema`, `write_scopes`, `role`, `title` | `fleet_delegate` (`harness_command_receipt` + `run_delegation_receipts`), resultado = id do run e as chaves das tarefas |
+| `connected_session` | entrega o trabalho a uma sessão **já aberta e ligada ao time** (`harness.delegate`, que usa `peer tell`, ou `peer ask` em `mode=wait`) | `to` (id ou nome de `team_candidates`), `constraints`, `expecting`, `policy` (`read` \| `ask`, padrão `ask`), `when_busy` (`fail` padrão \| `queue`) | `connected_session` (`harness_command_receipt`), resultado = id da mensagem |
+
+Os campos de outro destino são ignorados, não repassados. `connected_session` não cria PTY, worktree nem orçamento de Frota.
+
+### 12.2 Descoberta (`team_candidates`)
+
+Cada candidato traz, além do que já trazia: `cwd`, `available` e `availability` (`available` | `busy` | `disconnected`), `canReceiveWork` (o `delegate_agent` aceitaria agora, com `when_busy=queue`), `blocker` (o primeiro código de recusa, ou `null`), `policy` real (nunca escondida) e `requiresPersonApproval`. A lista **não amplia** o que o agente enxerga: continuam entrando só os integrantes e as sessões da mesma pasta. `requiresPersonApproval` é `true` para quem não é integrante e é de outra pasta (hoje nunca aparece na lista; vale se a regra de visibilidade mudar). A lista não cria acesso: o envio revalida.
+
+### 12.3 Validações no instante do envio (`connected_session`)
+
+Tudo é lido de novo no envio (`team::delegation_snapshot`), nunca de uma listagem antiga, e **antes** de qualquer escrita. A primeira falha vence, e nada é gravado na sessão nem no recibo.
+
+| Ordem | Checagem | Código |
+|---|---|---|
+| 0 | quem chama é o orquestrador do time e a conversa dele está aberta | `not_orchestrator`, `caller_not_open` |
+| 1 | a sessão existe entre as abertas (mesma pasta ou do time) e os integrantes; nome repetido recusa | `session_not_found`, `session_ambiguous` |
+| 2 | não é a própria chamadora nem um terminal comum (`bash`) | `session_incompatible` |
+| 3 | está conectada: aba com processo, conversa ativa ou portal. Integrante cuja aba fechou também cai aqui | `session_disconnected` |
+| 4 | está no time; sem vínculo, a mesma pasta pede `team_link` e outra pasta é da pessoa. **O envio nunca liga sozinho** | `session_not_linked`, `session_other_workspace` |
+| 5 | a política do integrante não passa do teto (`ask` por padrão). Pedir `edits` ou `full` como teto é recusado. **Nunca converte vínculo em Acesso total** nem o eleva | `policy_elevated`, `policy_not_allowed` |
+| 6 | não está no meio de um turno, salvo `when_busy=queue` (a mensagem entra na fila da sessão) | `session_busy` |
+
+A mesma checagem alimenta `blocker` na descoberta. A ocupação lida é um instante: a fila do `peer` ainda recusa o que quebrou entre a leitura e a escrita (então `not_sent`). Uma aba que o registro de PTYs do backend não conhece é perguntada à janela, só para a sessão escolhida.
+
+### 12.4 Recibo e idempotência
+
+Chave: `(kind, caller_key, request_id)`. Para `connected_session`, `kind = connected_session` e `caller_key = tab:<aba da chamada>`, carimbada pelo MCP a partir da sessão e nunca do modelo. O hash cobre destino, `to`, `task`, `constraints`, `expecting`, `context`, `mode`, `policy` e `when_busy`; **não** cobre o `client_request_id` nem o prazo. O `result_json` guarda só ids (`messageId`, `queued`), nunca texto de agente.
+
+| Situação na repetição | Resultado |
+|---|---|
+| recibo `accepted`, mesmo hash | devolve o mesmo resultado (`replayed: true`, `sent: false`, mesmo `messageId`). **Não revalida e não envia** |
+| mesmo id, outro hash | `request_conflict` (o texto de `receipts::MISMATCH`), sem revalidar nem enviar |
+| `submitting` dentro de 120 s | devolve `deliveryState: submitting`, sem enviar |
+| `submitting` vencido (> 120 s) | vira `unknown` e devolve, sem enviar: o dono pode ter enviado antes de morrer |
+| `unknown` | devolve com o aviso "confira a conversa ou a aba"; nunca repete às cegas |
+| `retryable` (nada chegou) | **só** uma chamada explícita com o mesmo id tenta de novo, uma vez; não há retry silencioso |
+| a validação do §12.3 falhou | nenhum recibo; depois de corrigir o estado, a mesma chave é um pedido novo |
+
+O `peer` recebe `id = delegate:<client_request_id>`, de modo que a fila dele também não digita duas vezes. Respostas do `peer tell`/`ask` viram: `sent` (entregue ou na fila) → `accepted`; recusa, cancelamento, escalada ou duplicata não repetida → `not_sent`; texto escrito sem confirmação, erro depois do enfileiramento ou resposta ilegível → `outcome_unknown`. A fala do agente em `mode=wait` volta como `untrustedReply` e nunca entra no recibo; na repetição ela não existe mais (leia a conversa). O lock do banco nunca fica preso durante a revalidação nem o envio.
+
+### 12.5 Os três caminhos num só recibo
+
+`delegate::lookup_replay(conn, target, caller_key, request_id, hash)` lê o recibo de qualquer destino pelo `harness::receipts::lookup` (tabela nova e, na falta dela, a antiga) e devolve o id da conversa (`provider_chat`), do run (`fleet_task`) ou da sessão (`connected_session`; a mensagem fica no `result_json`). Mesmo id com outro hash é `request_conflict`.
+
+- `fleet_task`: `runs/orchestration.rs` deixou de ler `run_delegation_receipts` direto e lê pelo `receipts::lookup`. A escrita continua dupla (`save_delegation_receipt`): nada duplicado, e a antiga segue como fonte onde só ela existe.
+- `provider_chat`: o recibo continua o de `chat_child_receipts` (estados `prepared`..`unknown`), lido pelo mesmo caminho. Não migrei a escrita.
+- `connected_session`: só a tabela nova.
+
+### 12.6 Erros
+
+Os erros de delegação voltam como texto `"<código>: <mensagem>"` (`isError` no MCP). Códigos: `invalid_target`, `target_conflict`, `invalid_request`, `not_orchestrator`, `caller_not_open`, `snapshot_failed`, `session_not_found`, `session_ambiguous`, `session_disconnected`, `session_busy`, `session_incompatible`, `session_not_linked`, `session_other_workspace`, `policy_elevated`, `policy_not_allowed`, `request_conflict`, `not_sent`, `outcome_unknown`, `receipt_failed`. Em `not_sent`, `outcome_unknown` e `receipt_failed` o recibo já foi tocado; nos demais, nada foi escrito.
+
+### 12.7 O que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes: 43 testes de `harness::test_fase4` contra um esqueleto `todo!()` (todos falharam) e o teste de leitura unificada da Frota (falhou: sem a linha da tabela antiga a repetição criava outro run). Depois da implementação passam, mais 6 de contrato do MCP em `ipc/test.rs`.
+- Em cada destino: repetição idempotente (a mesma conversa, o mesmo run, a mesma mensagem), outro conteúdo falha fechado. Sessão ocupada, de outra pasta, desconectada, não ligada, com política elevada ou incompatível falha **sem** chamar o envio e sem recibo.
+- Chamada antiga sem `target` envia o mesmo payload que `target` novo (`chat.new` e `run.delegateTask`).
+
+**Não verificado / fora**
+- Nenhum agente real foi acionado: o envio dos testes é um contador. A cola `ipc/commands/delegate.rs` e `team::delegation_snapshot` (que dependem do `AppHandle`, do registro de PTYs e da janela) **não têm teste de ponta a ponta**.
+- A mesma `client_request_id` usada em destinos diferentes não é detectada: cada destino tem o seu `kind` e o seu `caller_key`.
+- Sem worker nem boot: um `submitting` deixado por uma queda só vira `unknown` quando a repetição chega (§12.4).
+- Sessões de outra pasta ligadas pela pessoa só valem se aparecerem entre os integrantes; a descoberta não as mostra se estiverem fechadas.
+- Um integrante que a pessoa elevou para `edits` ou `full` não recebe delegação até a pessoa baixar a política (§12.3, item 5): é a leitura literal de "nunca converter um vínculo em Acesso total". Se a pessoa quiser delegar a integrante elevado, é decisão dela.
+- Entrega durável do resultado ao pai, `ProviderSessionRef` e `ContextTransfer` (§2.2): Fase 4 restante.
+- Desempenho não medido.
