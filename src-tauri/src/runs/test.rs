@@ -6002,3 +6002,160 @@ mod harness_fase4 {
         assert!(alcance(&pessoa("lider")).is_err(), "o lead nunca é cancelado daqui");
     }
 }
+
+/// Fase 6: a árvore do harness muda por evento com cursor, e o front pede só o delta.
+mod harness_fase6 {
+    use serde_json::{Value, json};
+
+    use super::super::execution_log::{self, HarnessEvent};
+    use super::super::harness::{HarnessExecutionGraph, thread_execution_graph, thread_execution_graph_since};
+    use super::harness_fase1::{child, mundo, node, Mundo};
+    use crate::conversa::store as chat;
+
+    /// Uma chamada de ferramenta que começou na conversa: grava um evento semântico novo (um por `id`).
+    fn ferramenta(world: &Mundo, thread: &str, id: &str, status: &str) {
+        let payload = json!({ "item": { "id": id, "kind": "tool", "name": "Edit", "label": "src/a.rs", "status": status } });
+        execution_log::record_chat_event(&world.db.lock().unwrap(), thread, "item", &payload).unwrap();
+    }
+
+    fn desde(world: &Mundo, thread: &str, depois: Option<i64>) -> HarnessExecutionGraph {
+        thread_execution_graph_since(&world.db.lock().unwrap(), thread, depois).unwrap()
+    }
+
+    fn sequencias(events: &[HarnessEvent]) -> Vec<i64> {
+        events.iter().map(|event| event.sequence).collect()
+    }
+
+    #[test]
+    fn o_cursor_do_grafo_e_a_ultima_sequencia_da_linhagem() {
+        let world = mundo(&["raiz", "outra"]);
+        child(&world, "filha", "raiz");
+        assert_eq!(thread_execution_graph(&world.db.lock().unwrap(), "raiz").unwrap().cursor, 0, "sem evento, o cursor é 0");
+
+        ferramenta(&world, "raiz", "a", "running");
+        ferramenta(&world, "filha", "b", "running");
+        ferramenta(&world, "outra", "c", "running");
+
+        let graph = desde(&world, "raiz", None);
+        let da_linhagem = sequencias(&graph.events);
+        assert_eq!(graph.cursor, *da_linhagem.last().unwrap(), "o cursor é o último evento da linhagem");
+        let global: i64 = world.db.lock().unwrap()
+            .query_row("SELECT MAX(sequence) FROM harness_execution_events", [], |row| row.get(0)).unwrap();
+        assert!(global > graph.cursor, "evento de outra conversa não move o cursor desta linhagem");
+    }
+
+    #[test]
+    fn sem_cursor_a_arvore_vem_inteira_e_marca_reset() {
+        let world = mundo(&["raiz"]);
+        ferramenta(&world, "raiz", "a", "running");
+        ferramenta(&world, "raiz", "a", "done");
+        let graph = desde(&world, "raiz", None);
+        assert!(graph.reset, "a primeira leitura é sempre a árvore inteira");
+        assert_eq!(graph.events.len(), 2);
+        assert!(!graph.nodes.is_empty());
+    }
+
+    #[test]
+    fn com_o_cursor_certo_so_os_eventos_novos_voltam() {
+        let world = mundo(&["raiz", "outra"]);
+        ferramenta(&world, "raiz", "a", "running");
+        let visto = desde(&world, "raiz", None).cursor;
+        ferramenta(&world, "raiz", "a", "done");
+        ferramenta(&world, "outra", "x", "running");
+        ferramenta(&world, "raiz", "b", "running");
+
+        let delta = desde(&world, "raiz", Some(visto));
+        assert!(!delta.reset, "o cursor bate: é um delta");
+        assert_eq!(delta.events.len(), 2, "só os dois eventos novos desta linhagem");
+        assert!(delta.events.iter().all(|event| event.sequence > visto && event.thread_id == "raiz"));
+        assert_eq!(delta.cursor, delta.events.last().unwrap().sequence);
+        assert!(!delta.nodes.is_empty(), "os nós voltam sempre atuais: o estado deles não vem dos eventos");
+    }
+
+    #[test]
+    fn sem_novidade_o_delta_vem_vazio_e_o_cursor_nao_anda() {
+        let world = mundo(&["raiz"]);
+        ferramenta(&world, "raiz", "a", "running");
+        let visto = desde(&world, "raiz", None).cursor;
+        let delta = desde(&world, "raiz", Some(visto));
+        assert!(!delta.reset);
+        assert!(delta.events.is_empty());
+        assert_eq!(delta.cursor, visto);
+    }
+
+    #[test]
+    fn cursor_a_frente_do_banco_pede_a_arvore_inteira() {
+        let world = mundo(&["raiz"]);
+        ferramenta(&world, "raiz", "a", "running");
+        let atual = desde(&world, "raiz", None).cursor;
+        let delta = desde(&world, "raiz", Some(atual + 50));
+        assert!(delta.reset, "um cursor que o banco nunca viu não bate");
+        assert_eq!(delta.cursor, atual);
+        assert_eq!(delta.events.len(), 1, "a janela inteira volta");
+    }
+
+    #[test]
+    fn delta_maior_que_a_janela_vira_reset_em_vez_de_perder_eventos() {
+        let world = mundo(&["raiz"]);
+        ferramenta(&world, "raiz", "primeira", "running");
+        let visto = desde(&world, "raiz", None).cursor;
+        for index in 0..(execution_log::EVENT_WINDOW + 5) {
+            ferramenta(&world, "raiz", &format!("t{index}"), "running");
+        }
+        let delta = desde(&world, "raiz", Some(visto));
+        assert!(delta.reset, "um buraco entre o cursor e a janela não se remenda com delta");
+        assert_eq!(delta.events.len(), execution_log::EVENT_WINDOW);
+    }
+
+    #[test]
+    fn o_evento_de_mudanca_leva_o_cursor_de_cada_conversa_afetada() {
+        let world = mundo(&["raiz"]);
+        let pai = json!({ "thread": { "id": "filha", "agentId": "codex", "title": "F", "parentRef": "thread:raiz" } });
+        {
+            let conn = world.db.lock().unwrap();
+            chat::insert_thread_with_context(
+                &conn, "filha", "claude-code", &world.cwd, "filha",
+                &chat::Tuning { model: None, effort: None, access: "ask".into() },
+                None, Some("thread:raiz"), Some("w1"), 2,
+            ).unwrap();
+        }
+        let changed = execution_log::persist_chat_event(&world.db.lock().unwrap(), "filha", "created", &pai).unwrap();
+        let por_conversa: Vec<&str> = changed.iter().map(|change| change.thread_id.as_str()).collect();
+        assert_eq!(por_conversa, ["filha", "raiz"], "criar o filho avisa a conversa dele e a do pai");
+        let conn = world.db.lock().unwrap();
+        for change in &changed {
+            let ultimo: i64 = conn.query_row(
+                "SELECT MAX(sequence) FROM harness_execution_events WHERE thread_id = ?1",
+                [&change.thread_id], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(change.cursor, ultimo, "o cursor é a sequência do último evento persistido da conversa");
+        }
+        let json: Value = serde_json::to_value(&changed[0]).unwrap();
+        assert_eq!(json["threadId"], "filha");
+        assert!(json["cursor"].is_i64(), "o payload do evento tem só threadId e cursor, sem conteúdo");
+        assert_eq!(json.as_object().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn evento_repetido_nao_move_o_cursor() {
+        let world = mundo(&["raiz"]);
+        ferramenta(&world, "raiz", "a", "running");
+        let antes = desde(&world, "raiz", None).cursor;
+        ferramenta(&world, "raiz", "a", "running");
+        assert_eq!(desde(&world, "raiz", None).cursor, antes, "a chave de deduplicação segura o cursor");
+    }
+
+    #[test]
+    fn desfecho_desconhecido_aparece_no_turno_e_na_tarefa() {
+        let world = mundo(&["raiz"]);
+        {
+            let conn = world.db.lock().unwrap();
+            chat::upsert_run(&conn, "raiz", "t1", "algumaCoisaNova", Some(1), Some(2), None).unwrap();
+        }
+        let graph = desde(&world, "raiz", None);
+        let turno = serde_json::to_value(node(&graph, "turn:raiz:t1")).unwrap();
+        assert_eq!(turno["outcomeUnknown"], true, "status nativo que o ADE não mapeia é desfecho desconhecido");
+        let raiz = serde_json::to_value(node(&graph, "thread:raiz")).unwrap();
+        assert!(raiz.get("outcomeUnknown").is_none(), "o campo só sai quando é verdadeiro");
+    }
+}

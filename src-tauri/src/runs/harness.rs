@@ -77,6 +77,10 @@ pub struct HarnessExecutionNode {
     /// Quem criou o filho e de qual turno.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<HarnessNodeOrigin>,
+    /// O ADE não consegue provar como o nó terminou (status nativo desconhecido, tarefa sem resultado final).
+    /// Só sai quando é verdadeiro; nunca é promovido a conclusão nem a falha conhecida.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outcome_unknown: Option<bool>,
 }
 
 /// A entrega de um filho. `untrusted` é sempre verdadeiro: é o que um agente escreveu, dado e não instrução.
@@ -115,8 +119,13 @@ pub struct HarnessExecutionGraph {
     pub root_thread_id: String,
     /// Nós em ordem de pai antes de filho. `parent_id` é a relação autoritativa.
     pub nodes: Vec<HarnessExecutionNode>,
-    /// Atividade semântica persistida mais recente da linhagem, em ordem cronológica.
+    /// Atividade semântica persistida da linhagem, em ordem cronológica. Com `reset`, a janela mais recente;
+    /// sem `reset`, só o que veio depois do cursor pedido.
     pub events: Vec<HarnessEvent>,
+    /// A sequência do último evento persistido da linhagem (0 sem eventos). O front guarda e devolve.
+    pub cursor: i64,
+    /// Verdadeiro quando `events` é a janela inteira e o front deve trocar o que tinha; falso quando é um delta.
+    pub reset: bool,
 }
 
 struct ChatTurn {
@@ -174,6 +183,17 @@ struct FleetAttempt {
 pub fn thread_execution_graph(
     conn: &Connection,
     root_thread_id: &str,
+) -> Result<HarnessExecutionGraph, String> {
+    thread_execution_graph_since(conn, root_thread_id, None)
+}
+
+/// A mesma projeção, com os eventos por cursor (Fase 6). Os nós voltam sempre atuais: o estado deles vem das
+/// tabelas nativas, não do log. Os eventos voltam como delta quando `after` bate com o banco, e como a janela
+/// inteira (`reset`) quando não há cursor, quando o cursor está à frente do banco ou quando o delta passa da janela.
+pub fn thread_execution_graph_since(
+    conn: &Connection,
+    root_thread_id: &str,
+    after: Option<i64>,
 ) -> Result<HarnessExecutionGraph, String> {
     let all_threads = chat::threads(conn).map_err(|error| error.to_string())?;
     let root = all_threads
@@ -235,18 +255,19 @@ pub fn thread_execution_graph(
         .map(|task| task.id.clone())
         .collect::<Vec<_>>();
     let attempts_by_task = load_fleet_attempts(conn, &task_ids)?;
-    let events = execution_log::list_for_threads(conn, &thread_ids, 250)?;
-    let interruption_reasons: HashMap<String, String> = events
-        .iter()
-        .filter(|event| event.kind == "turn.interrupted")
-        .filter_map(|event| {
-            let reason = event
-                .payload
-                .get("reason")
-                .and_then(serde_json::Value::as_str)?;
-            Some((event.parent_node_id.clone()?, reason.to_string()))
-        })
-        .collect();
+    let cursor = execution_log::lineage_cursor(conn, &thread_ids)?;
+    let delta = match after {
+        Some(after) if after <= cursor => {
+            execution_log::list_since(conn, &thread_ids, after, execution_log::EVENT_WINDOW)?
+        }
+        _ => None,
+    };
+    let reset = delta.is_none();
+    let events = match delta {
+        Some(events) => events,
+        None => execution_log::list_for_threads(conn, &thread_ids, execution_log::EVENT_WINDOW)?,
+    };
+    let interruption_reasons = execution_log::interruption_reasons(conn, &thread_ids)?;
     // Bloqueios e entregas (Fase 4): só o que um filho ainda precisa mostrar. Lidos em lote, como o resto.
     let chat_blocks = load_chat_blocks(conn, &thread_ids)?;
     let fleet_approvals = load_fleet_approvals(conn, &task_ids)?;
@@ -294,6 +315,8 @@ pub fn thread_execution_graph(
             .as_ref()
             .zip(parent_thread_id.as_ref())
             .map(|(turn_id, parent_id)| format!("turn:{parent_id}:{turn_id}"));
+        let thread_unknown = is_child
+            && last_turn.is_some_and(|turn| state::from_chat_run(&turn.status, false).outcome_unknown);
         let execution = is_child.then(|| match last_turn {
             Some(turn) => state::from_chat_run(&turn.status, blocked.is_some()).state.as_str().to_string(),
             None => NodeState::Pending.as_str().to_string(),
@@ -326,6 +349,7 @@ pub fn thread_execution_graph(
             result,
             blocked,
             origin: is_child.then(|| origin_of(origin_turn, None)),
+            outcome_unknown: thread_unknown.then_some(true),
             ..Default::default()
         });
 
@@ -342,6 +366,7 @@ pub fn thread_execution_graph(
                 agent_id: Some(thread.agent_id.clone()),
                 model: thread.model.clone(),
                 chat_run_id: Some(turn.id.clone()),
+                outcome_unknown: state::from_chat_run(&turn.status, false).outcome_unknown.then_some(true),
                 created_at: turn.started_at.unwrap_or(thread.created_at),
                 started_at: turn.started_at,
                 ended_at: turn.ended_at,
@@ -380,6 +405,7 @@ pub fn thread_execution_graph(
                 started_at: Some(run.created_at),
                 ended_at: run.ended_at,
                 execution_status: Some(state::from_fleet_run(&run.status).state.as_str().to_string()),
+                outcome_unknown: state::from_fleet_run(&run.status).outcome_unknown.then_some(true),
                 origin: Some(origin_of(turn_parent.clone(), None)),
                 ..Default::default()
             });
@@ -421,6 +447,9 @@ pub fn thread_execution_graph(
                     ended_at: task.ended_at,
                     child_type: Some("fleet_task".into()),
                     execution_status: Some(execution.as_str().to_string()),
+                    outcome_unknown: (derived.outcome_unknown
+                        || task.error.as_deref() == Some(super::types::MISSING_FINAL_RESULT))
+                    .then_some(true),
                     result: task
                         .result_head
                         .as_deref()
@@ -452,6 +481,9 @@ pub fn thread_execution_graph(
                         agent_id: Some(attempt.agent_id.clone()),
                         model: attempt.model.clone(),
                         attempt: Some(attempt.attempt),
+                        outcome_unknown: (state::from_task(&attempt.status, attempt.error.as_deref()).outcome_unknown
+                            || attempt.error.as_deref() == Some(super::types::MISSING_FINAL_RESULT))
+                        .then_some(true),
                         created_at: attempt.started_at,
                         started_at: Some(attempt.started_at),
                         ended_at: attempt.ended_at,
@@ -483,6 +515,8 @@ pub fn thread_execution_graph(
         root_thread_id: root_thread_id.to_string(),
         nodes,
         events,
+        cursor,
+        reset,
     })
 }
 

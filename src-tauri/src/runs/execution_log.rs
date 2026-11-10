@@ -27,6 +27,18 @@ pub struct HarnessEvent {
     pub created_at: i64,
 }
 
+/// Quantos eventos a janela do feed leva. Também é o teto de um delta: acima disso o front recebe a árvore inteira.
+pub(crate) const EVENT_WINDOW: usize = 250;
+
+/// "A árvore desta conversa mudou", o payload de `cc-harness-event`. Leva só o id e o cursor (a sequência
+/// do último evento persistido da conversa): o front compara com o que já aplicou e pede o delta.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct TreeChanged {
+    pub thread_id: String,
+    pub cursor: i64,
+}
+
 struct EventDraft<'a> {
     thread_id: &'a str,
     parent_node_id: Option<&'a str>,
@@ -79,22 +91,7 @@ fn writer() -> &'static mpsc::Sender<QueuedEvent> {
                                 .lock()
                                 .map_err(|error| error.to_string())
                                 .and_then(|conn| {
-                                    record_chat_event(&conn, &thread_id, &event_type, &payload)
-                                        .map_err(|error| error.to_string())
-                                })
-                                .map(|()| {
-                                    let mut affected = vec![thread_id];
-                                    if event_type == "created" {
-                                        if let Some(parent) = payload
-                                            .get("thread")
-                                            .and_then(|thread| thread.get("parentRef"))
-                                            .and_then(Value::as_str)
-                                            .and_then(|parent| parent.strip_prefix("thread:"))
-                                        {
-                                            affected.push(parent.to_string());
-                                        }
-                                    }
-                                    affected
+                                    persist_chat_event(&conn, &thread_id, &event_type, &payload)
                                 });
                             (app, result)
                         }
@@ -109,17 +106,15 @@ fn writer() -> &'static mpsc::Sender<QueuedEvent> {
                                 .lock()
                                 .map_err(|error| error.to_string())
                                 .and_then(|conn| {
-                                    record_fleet_event(&conn, &task_id, &attempt_id, &event)
-                                        .map_err(|error| error.to_string())
-                                })
-                                .map(|thread_id| thread_id.into_iter().collect());
+                                    persist_fleet_event(&conn, &task_id, &attempt_id, &event)
+                                });
                             (app, result)
                         }
                     };
                     match result {
-                        Ok(thread_ids) => {
-                            for thread_id in thread_ids {
-                                let _ = app.emit("cc-harness-event", thread_id);
+                        Ok(changes) => {
+                            for change in changes {
+                                let _ = app.emit("cc-harness-event", change);
                             }
                         }
                         Err(error) => {
@@ -130,6 +125,68 @@ fn writer() -> &'static mpsc::Sender<QueuedEvent> {
             });
         sender
     })
+}
+
+/// Grava o evento do chat e devolve quem mudou, cada conversa com o cursor do seu último evento.
+/// Criar uma conversa filha também muda a árvore da conversa pai.
+pub(crate) fn persist_chat_event(
+    conn: &Connection,
+    thread_id: &str,
+    event_type: &str,
+    payload: &Value,
+) -> Result<Vec<TreeChanged>, String> {
+    record_chat_event(conn, thread_id, event_type, payload).map_err(|error| error.to_string())?;
+    let mut affected = vec![thread_id.to_string()];
+    if event_type == "created" {
+        if let Some(parent) = payload
+            .get("thread")
+            .and_then(|thread| thread.get("parentRef"))
+            .and_then(Value::as_str)
+            .and_then(|parent| parent.strip_prefix("thread:"))
+        {
+            affected.push(parent.to_string());
+        }
+    }
+    with_cursors(conn, affected)
+}
+
+/// O mesmo para um evento de tentativa da Frota: avisa a conversa de origem do run, se houver.
+pub(crate) fn persist_fleet_event(
+    conn: &Connection,
+    task_id: &str,
+    attempt_id: &str,
+    event: &super::types::AgentEvent,
+) -> Result<Vec<TreeChanged>, String> {
+    let thread_id = record_fleet_event(conn, task_id, attempt_id, event)
+        .map_err(|error| error.to_string())?;
+    with_cursors(conn, thread_id.into_iter().collect())
+}
+
+fn with_cursors(conn: &Connection, thread_ids: Vec<String>) -> Result<Vec<TreeChanged>, String> {
+    thread_ids
+        .into_iter()
+        .map(|thread_id| {
+            let cursor = lineage_cursor(conn, std::slice::from_ref(&thread_id))?;
+            Ok(TreeChanged { thread_id, cursor })
+        })
+        .collect()
+}
+
+/// A sequência do último evento persistido das conversas dadas (0 se não há nenhum). A sequência é global
+/// e só cresce, então o maior valor de uma linhagem serve de cursor para ela inteira.
+pub(crate) fn lineage_cursor(conn: &Connection, thread_ids: &[String]) -> Result<i64, String> {
+    let mut cursor = 0_i64;
+    for ids in thread_ids.chunks(400) {
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT COALESCE(MAX(sequence), 0) FROM harness_execution_events WHERE thread_id IN ({placeholders})"
+        );
+        let max: i64 = conn
+            .query_row(&sql, rusqlite::params_from_iter(ids.iter()), |row| row.get(0))
+            .map_err(|error| error.to_string())?;
+        cursor = cursor.max(max);
+    }
+    Ok(cursor)
 }
 
 /// Enfileira fora do adapter: a gravação pode aguardar o lock curto do SQLite sem bloquear
@@ -831,6 +888,27 @@ pub(crate) fn record_fleet_interrupted(
     .map(|_| ())
 }
 
+const EVENT_COLUMNS: &str = "sequence, thread_id, parent_node_id, turn_id, run_id, task_id, attempt_id, kind, entity_id, payload_json, created_at";
+
+fn event_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<HarnessEvent> {
+    let sequence: i64 = row.get(0)?;
+    let payload_json: String = row.get(9)?;
+    Ok(HarnessEvent {
+        sequence,
+        node_id: format!("event:{sequence}"),
+        thread_id: row.get(1)?,
+        parent_node_id: row.get(2)?,
+        turn_id: row.get(3)?,
+        run_id: row.get(4)?,
+        task_id: row.get(5)?,
+        attempt_id: row.get(6)?,
+        kind: row.get(7)?,
+        entity_id: row.get(8)?,
+        payload: serde_json::from_str(&payload_json).unwrap_or(Value::Null),
+        created_at: row.get(10)?,
+    })
+}
+
 /// Carrega a atividade semântica mais recente de uma linhagem para o feed do harness.
 pub(crate) fn list_for_threads(
     conn: &Connection,
@@ -844,8 +922,8 @@ pub(crate) fn list_for_threads(
     for ids in thread_ids.chunks(400) {
         let placeholders = vec!["?"; ids.len()].join(",");
         let sql = format!(
-            "SELECT sequence, thread_id, parent_node_id, turn_id, run_id, task_id, attempt_id, kind, entity_id, payload_json, created_at
-             FROM harness_execution_events WHERE thread_id IN ({placeholders}) ORDER BY sequence DESC LIMIT ?"
+            "SELECT {EVENT_COLUMNS} FROM harness_execution_events
+             WHERE thread_id IN ({placeholders}) ORDER BY sequence DESC LIMIT ?"
         );
         let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
         let mut bindings = ids
@@ -856,27 +934,11 @@ pub(crate) fn list_for_threads(
         bindings.push(rusqlite::types::Value::Integer(
             limit.min(i64::MAX as usize) as i64,
         ));
-        let mut rows = statement
-            .query(rusqlite::params_from_iter(bindings.iter()))
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(bindings.iter()), event_from_row)
             .map_err(|error| error.to_string())?;
-        while let Some(row) = rows.next().map_err(|error| error.to_string())? {
-            let sequence: i64 = row.get(0).map_err(|error| error.to_string())?;
-            let payload_json: String = row.get(9).map_err(|error| error.to_string())?;
-            let payload = serde_json::from_str(&payload_json).unwrap_or(Value::Null);
-            events.push(HarnessEvent {
-                sequence,
-                node_id: format!("event:{sequence}"),
-                thread_id: row.get(1).map_err(|error| error.to_string())?,
-                parent_node_id: row.get(2).map_err(|error| error.to_string())?,
-                turn_id: row.get(3).map_err(|error| error.to_string())?,
-                run_id: row.get(4).map_err(|error| error.to_string())?,
-                task_id: row.get(5).map_err(|error| error.to_string())?,
-                attempt_id: row.get(6).map_err(|error| error.to_string())?,
-                kind: row.get(7).map_err(|error| error.to_string())?,
-                entity_id: row.get(8).map_err(|error| error.to_string())?,
-                payload,
-                created_at: row.get(10).map_err(|error| error.to_string())?,
-            });
+        for row in rows {
+            events.push(row.map_err(|error| error.to_string())?);
         }
     }
     events.sort_by_key(|event| event.sequence);
@@ -884,4 +946,71 @@ pub(crate) fn list_for_threads(
         events.drain(..events.len() - limit);
     }
     Ok(events)
+}
+
+/// Os eventos da linhagem depois do cursor, em ordem cronológica. `None` quando há mais de `limit`:
+/// um delta com buraco não se remenda, e quem chamou precisa da janela inteira.
+pub(crate) fn list_since(
+    conn: &Connection,
+    thread_ids: &[String],
+    after: i64,
+    limit: usize,
+) -> Result<Option<Vec<HarnessEvent>>, String> {
+    let mut events = Vec::new();
+    for ids in thread_ids.chunks(400) {
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT {EVENT_COLUMNS} FROM harness_execution_events
+             WHERE thread_id IN ({placeholders}) AND sequence > ? ORDER BY sequence ASC LIMIT ?"
+        );
+        let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
+        let mut bindings = ids
+            .iter()
+            .cloned()
+            .map(rusqlite::types::Value::Text)
+            .collect::<Vec<_>>();
+        bindings.push(rusqlite::types::Value::Integer(after));
+        bindings.push(rusqlite::types::Value::Integer(
+            limit.saturating_add(1).min(i64::MAX as usize) as i64,
+        ));
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(bindings.iter()), event_from_row)
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            events.push(row.map_err(|error| error.to_string())?);
+        }
+    }
+    events.sort_by_key(|event| event.sequence);
+    Ok((events.len() <= limit).then_some(events))
+}
+
+/// A razão legível de cada turno interrompido (chave: o nó do turno). Lida à parte porque a projeção
+/// precisa dela mesmo quando a resposta traz só o delta dos eventos.
+pub(crate) fn interruption_reasons(
+    conn: &Connection,
+    thread_ids: &[String],
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let mut reasons = std::collections::HashMap::new();
+    for ids in thread_ids.chunks(400) {
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT parent_node_id, payload_json FROM harness_execution_events
+             WHERE kind = 'turn.interrupted' AND parent_node_id IS NOT NULL AND thread_id IN ({placeholders})
+             ORDER BY sequence ASC"
+        );
+        let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(rusqlite::params_from_iter(ids.iter()), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            let (node_id, payload_json) = row.map_err(|error| error.to_string())?;
+            let payload: Value = serde_json::from_str(&payload_json).unwrap_or(Value::Null);
+            if let Some(reason) = payload.get("reason").and_then(Value::as_str) {
+                reasons.insert(node_id, reason.to_string());
+            }
+        }
+    }
+    Ok(reasons)
 }
