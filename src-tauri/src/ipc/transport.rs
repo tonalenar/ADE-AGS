@@ -320,7 +320,9 @@ fn accept_windows(
             None
         };
         match slots.try_acquire() {
-            None => unsafe { CloseHandle(pipe) },
+            None => {
+                unsafe { CloseHandle(pipe) };
+            }
             Some(slot) => {
                 let file = unsafe { std::fs::File::from_raw_handle(pipe as RawHandle) };
                 if let Ok(writer) = file.try_clone() {
