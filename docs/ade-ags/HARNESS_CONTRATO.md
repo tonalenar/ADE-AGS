@@ -902,17 +902,17 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 | 1 | `chat_send` | **entregue** (esta fatia) | evento e `causation_event_id` |
 | 2 | `fleet_delegate` | leitura unificada e escrita dupla; **a leitura de `orchestration.rs` passa por `receipts::lookup` desde a Fase 4 (§12.5)** | `begin` no lugar do `INSERT` da delegação |
 | 3 | `chat_new` | leitura unificada (esta fatia) | mover `claim_child_delivery` para `receipts`/`effects` |
-| 4 | `chat_interrupt` (`api::stop`) | próxima fatia | efeito `chat_interrupt`; a capability `interrupt` já existe na matriz |
+| 4 | `chat_interrupt` (`api::stop`) | **entregue** (segunda fatia, §11.11) | evento e `causation_event_id` (§11.9) |
 | 5 | `request_answer` (`answer.rs`) | próxima fatia | o recibo guarda o `request_id` do pedido; responder duas vezes não reenvia ao provider |
 | 6 | `task_cancel` (Frota) | próxima fatia | subárvore cancelada uma vez; efeito de filesystem `retry_safe` |
-| 7 | `queue_chat_event`/`queue_fleet_event` | depois dos comandos | gravar o evento na transação do passo 1; trocar o `stderr` por um sinal recuperável; só então a UI publica depois do commit |
+| 7 | `queue_chat_event`/`queue_fleet_event` | **parcial** (segunda fatia, §11.11): `stderr` trocado por sinal recuperável, e conclusão só depois da tentativa | gravar o evento na transação do passo 1 (depende de `chat_send` e `chat_interrupt` migrarem o evento) |
 | 8 | worker contínuo | Fase 5, se a prova pedir | `claim_next` em laço, `recover_expired` no boot |
 
-### 11.9 O que a fatia não faz
+### 11.9 O que as fatias ainda não fazem
 
-- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13).
-- Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id` ainda: as colunas existem (aditivas) e ficam `NULL` até `queue_chat_event` migrar.
-- Interrupt, spawn, resposta a pedido e cancelamento não usam a fila.
+- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13). O replay das falhas de gravação (§11.11) roda na primeira vez que a fila é usada no processo, não no boot.
+- Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id`. As colunas existem (aditivas) e ficam `NULL`: o desenho (§11.4) pede o evento gravado na transação do passo 1, o que exige um tipo de evento novo na projeção (`runs/harness.rs`), que está em outra frente. Essa migração fica para `chat_send` e `chat_interrupt` (§11.8, itens 1, 4 e 7).
+- Spawn, resposta a pedido e cancelamento não usam recibo nem fila de efeitos. O Parar usa desde a segunda fatia (§11.11).
 - Nenhum provider real foi executado.
 
 ### 13. Fase 5: recuperação e reconciliação
@@ -957,6 +957,63 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 - Desempenho: `harness_effect` não tem consulta medida; o índice `(state, lease_until)` não foi exercitado com volume.
 - Na fotografia da Fase 2, `recover_expired` ainda não era chamado no boot. A Fase 5 adiciona essa chamada sob o lease SQLite (§13).
 - Teste visual e a UI: `chatThreadSendOnce` existe em `ipc.ts`, mas nenhuma tela o chama ainda.
+
+### 11.11 Fase 2, segunda fatia: Parar idempotente e falha de gravação visível
+
+**Objetivo:** o Parar (`chat_interrupt`, §11.8 item 4) ganha recibo e efeito como o envio. E uma falha de gravação do log de execução (§11.8 item 7) deixa de ir só ao `stderr`: vira um sinal que a janela e o harness veem e que pode ser regravado.
+
+**Parar com `client_request_id`** (`conversa/stop_receipt.rs`, `api::stop_with_request`)
+
+- Entradas: `chat_thread_interrupt` (Tauri, `client_request_id` opcional), `ags chat stop <id> --client-request-id` (CLI) e `chat_stop` (MCP, `client_request_id` ou `clientRequestId`). Sem o id, o caminho é o de sempre: sem recibo e sem efeito. O comando Tauri devolve `null`; a CLI e o MCP devolvem `{ stopped: true }`.
+- Chave: `kind = chat_interrupt`, `caller_key = chat-interrupt:<hash do escopo>`, `request_id`. O hash do payload cobre só a conversa, e o escopo é o de quem chamou (`ui`, `cli`, aba ou conversa do MCP).
+- Efeito `chat_interrupt`: `retry_safe = 0` (é o provider), `max_attempts = 3`, lease de 30 s.
+- Desfecho, guardado em `result_json.outcome`:
+
+| Desfecho | Quando | `sent` | Recibo |
+|---|---|---|---|
+| `sent` | o motor mandou a interrupção nesta chamada | `true` | `accepted` |
+| `deferred` | Codex com o `turn/start` ainda sem resposta: o Parar fica pendente em `codex_parar` e sai no `turn/started` | `false` | `accepted` |
+| `no_turn` | não há turno: nada vai ao agente; o que ficou aberto no banco é fechado, como antes | `false` | `accepted` |
+| erro do motor | o motor não disse se a parada chegou | `false` | `unknown`, e o erro volta à chamada |
+
+- Repetição com o mesmo id: devolve o recibo gravado (`replayed = true`, `sent = false`) e não chama o motor. Lease vivo: `submitting`. Recibo `unknown`: nunca se repete às cegas, porque a interrupção pode ter chegado. O mesmo id com outra conversa falha fechado.
+- Claude e OpenCode respondem ok à interrupção mesmo sem turno. Antes, isso contava como `sent`; agora, sem turno, o desfecho é `no_turn` (`api::interrupt`). Agy e cursor não mudaram: têm um processo por turno.
+
+**Falha de gravação do log** (`runs/execution_log.rs`)
+
+- A fila tenta gravar até 3 vezes (`PERSIST_ATTEMPTS`), sem dormir: a espera pelo lock já vem do `busy_timeout`. Falha de chave estrangeira não se repete: a conversa do evento foi apagada, não há onde gravar e não conta como perda.
+- Falha de vez: uma linha em `harness_log_failure`, criada no `migrate()` do módulo (aditiva): `scope`, `thread_id`, `task_id`, `attempt_id`, `event_kind`, `payload_json`, `last_error`, `attempts`, `created_at`, `resolved_at`. O erro passa por `sanitize_error`. O payload é o compactado do log, sem texto de agente. A Frota não guarda payload, então a falha dela não é repetida.
+- Sinal: a janela recebe `cc-harness-log-failed` e o barramento publica `harness.log_failed`. Os dois trazem `scope`, `threadId` ou `taskId`, `eventType`, `error`, `attempts` e `failureId`.
+- Ordem (§11.4): fase, pedido e fechamento saem à janela (`cc-chat-thread`) e ao barramento (`chat.changed`) só depois da tentativa de gravação. `chat.changed` leva `logged`, que vira `false` quando a gravação falhou, para quem espera (`ags chat wait`) saber que o log não tem o evento. Itens e tarefas continuam saindo na hora, sem esperar a fila.
+- Replay: na primeira vez que o processo enfileira algo, a fila repete as falhas de conversa abertas (até 200 por vez): regrava o evento e marca `resolved_at`. Uma repetição que falha de novo soma tentativas e fica aberta. Roda uma vez por processo; não há worker nem relógio.
+- Se a fila já caiu, o trabalho roda no chamador (`send_or_handle`): o evento não se perde.
+
+**O que muda para quem chama**
+
+- Tela: `chat_thread_interrupt` aceita `client_request_id` e devolve o recibo quando há id. A UI não foi alterada e continua chamando sem o id.
+- CLI e MCP: `ags chat stop` e `chat_stop` documentam o id; a skill sobe para 1.68.0.
+- Nenhuma tela mostra o aviso `cc-harness-log-failed` nem `logged: false` ainda. O sinal existe; a apresentação não.
+
+**`event_sequence` e `causation_event_id`:** continuam `NULL`, pelo motivo de §11.9.
+
+**O que foi verificado**
+
+- Testes primeiro, com esqueleto que falha por `unimplemented!`: 9 em `conversa::stop_receipt_test`, 3 contratos em `ipc/test.rs` (CLI, comando Tauri e schema do MCP) e 10 em `runs::execution_log_test`. Os 22 falharam com o esqueleto. O guarda de encaminhamento do MCP já passava antes e continuou passando.
+- Depois da implementação, os 22 passam.
+- `cd src-tauri && cargo test --lib --bin ags`: 2828 passaram, 0 falharam, 30 ignorados. Linha de base do mesmo HEAD: 2804 passaram, 1 falhou, 30 ignorados. A falha da linha de base era de OCR local (`computer_use::capture`); no pós-mudança ela não aconteceu, e rodada isolada passa.
+- Avisos do build: 21 antes e 21 depois, com os mesmos arquivos.
+- `node scripts/fingerprint.mjs`: ok (`schema-sqlite 96507e01a45b`, `protocolo-ipc 1959c50fc9d7`; nenhum reconhecimento). O `database/schema.rs` e o `ipc/protocol.rs` não mudaram.
+- `bun run check:test-lint`: ok, 40 violações antigas no baseline e nenhuma nova.
+- `bun run check:catalogs`: ok (a skill e a ajuda da CLI batem com o código).
+
+**O que não foi verificado**
+
+- Nenhum provider real nem CLI real foi executado. Os testes usam um motor de mentira que conta as chamadas.
+- Claude e OpenCode sem turno (`no_turn`): o caminho foi lido no código, sem teste com sessão viva.
+- Corrida entre um Parar e o primeiro envio de Claude ou OpenCode: a parada pode fechar, no banco, um turno que acabou de abrir. O Codex já tem essa proteção (`starting`); os outros motores ainda não. Fica para uma fatia própria.
+- Falha de gravação com lock real do SQLite não foi provada: a injeção de falha é uma closure.
+- Replay só roda na primeira fila do processo, não no boot (§13). Falhas da Frota não são repetidas.
+- Desempenho não medido. `ags test affected` e `cargo clippy` não foram rodados.
 
 ### 11.12 Retomada por turno do Cursor e do Antigravity: não repetir às cegas
 
