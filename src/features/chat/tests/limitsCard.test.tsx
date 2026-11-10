@@ -156,14 +156,15 @@ describe("o cartão Limites de uso", () => {
 describe("atualização: ao abrir e no fim de cada turno, sem polling", () => {
   it("pede a leitura (com a validade do store, sem forçar) ao abrir", async () => {
     await mount();
-    // todas as contas conectadas (a da conversa primeiro), com a validade do store (nada forçado)
-    expect(refreshes).toEqual([["system:claude-code", false], ["ton", false], ["system:codex", false]]);
+    // só a conta que a conversa usa é relida, com a validade do store (nada forçado); as outras mostram
+    // o último snapshot local (Ton e Codex estão listadas, mas não são pedidas).
+    expect(refreshes).toEqual([["system:claude-code", false]]);
   });
 
   it("pede de novo quando o turno termina, e só então", async () => {
     await mount();
     const first = refreshes.length;
-    expect(first).toBe(3);
+    expect(first).toBe(1);
     await act(async () => { useChatLive.setState({ phase: { "tab-1": "working" } }); });
     expect(refreshes).toHaveLength(first);
     await act(async () => { useChatLive.setState({ phase: { "tab-1": "idle" } }); });

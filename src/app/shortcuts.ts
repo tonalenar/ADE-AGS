@@ -289,14 +289,16 @@ export function getShortcuts(projectContext?: { cwd: string | null; scripts: Ret
   const resolved: Shortcut[] = [];
   for (const shortcut of SHORTCUTS) {
     if (Object.prototype.hasOwnProperty.call(overrides, shortcut.id) && overrides[shortcut.id] === null) {
-      resolved.push({ ...shortcut, when: conditions[shortcut.id], key: "", ctrl: false, shift: false, alt: false, meta: false, display: "", enabled: false });
+      resolved.push({ ...shortcut, when: conditions[shortcut.id] ?? shortcut.when, key: "", ctrl: false, shift: false, alt: false, meta: false, display: "", enabled: false });
       continue;
     }
     const saved = overrides[shortcut.id];
     const binding = saved ?? {
       key: shortcut.key, ctrl: shortcut.ctrl ?? true, shift: Boolean(shortcut.shift), alt: Boolean(shortcut.alt), meta: Boolean(shortcut.meta),
     };
-    const when = conditions[shortcut.id];
+    // A condição editada nas Configurações vale; sem ela, vale a da tabela (sem isso o `when` padrão de
+    // `chat.find`, `thread.undo`, Ctrl+1…9 etc. se perdia e o acorde roubava a tecla do terminal).
+    const when = conditions[shortcut.id] ?? shortcut.when;
     const collides = (candidate: ShortcutBinding) => resolved.some((other) => other.enabled !== false
       && shortcutBindingKey(bindingOf(other)) === shortcutBindingKey(candidate)
       && shortcutWhensOverlap(other.when, when));

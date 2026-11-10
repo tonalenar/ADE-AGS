@@ -11,7 +11,7 @@ describe("parseChatPrefs", () => {
 
   it("guarda só o que serve", () => {
     expect(parseChatPrefs({ cwd: "/p", agentId: "codex", model: 3, effort: "", accountId: "a1", access: "ask", extra: true }))
-      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, fastMode: false, worktree: false, structured: true, width: "normal", followUpBehavior: "steer" });
+      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true });
   });
 
   it("aceita fila como comportamento padrão e descarta valores desconhecidos", () => {

@@ -19,7 +19,9 @@ describe("«Comentar» está ligado às duas conversas (protocolo e TUI)", () =>
 
   it("o texto que vai ao agente leva as citações depois do texto e antes dos anexos", () => {
     const composer = read("../ChatComposer.tsx");
-    expect(composer).toContain("onSubmit(withQuotes(text, quotes), attachments.list)");
+    // O envio escolhe `onSubmit` ou `onBackgroundSubmit` (`send`); a fila usa `onQueue`: os três levam o mesmo par.
+    expect(composer).toContain("send(withQuotes(text, quotes), attachments.list)");
+    expect(composer).toContain("onQueue(withQuotes(text, quotes), attachments.list)");
     const attach = read("../attachments/send.ts");
     expect(attach).toContain("withAttachmentBlock(text, attachments)");
   });

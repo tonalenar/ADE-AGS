@@ -112,6 +112,9 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   forceSend?: boolean;
 }) {
   const { t } = useTranslation();
+  // A leitura dos rascunhos roda uma vez ao montar; o `t` mais novo vale só para a mensagem de erro.
+  const tRef = useRef(t);
+  tRef.current = t;
   const eventTarget = composerTarget ?? quoteKey;
   const followUpBehavior = useChatPrefs().followUpBehavior;
   const [text, setText] = useState("");
@@ -393,10 +396,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   useEffect(() => {
     let active = true;
     void loadPromptStashes().catch(() => {
-      if (active) setStashStatus(t("chat.stash.loadFailed"));
+      if (active) setStashStatus(tRef.current("chat.stash.loadFailed"));
     });
     return () => { active = false; };
-  }, [t]);
+  }, []);
   const deleteStash = async (id: string) => {
     if (stashBusy) return;
     setStashBusy(true);
