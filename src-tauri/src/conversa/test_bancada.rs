@@ -603,6 +603,54 @@ mod replay_protocolo {
         assert!(erro.contains("FerramentaNova") && erro.contains("não conhece"), "{erro}");
     }
 
+    /// B5: a lista é por protocolo. Os três primeiros continuam recusando qualquer `Other`.
+    /// agy e Cursor só deixam passar o nome da lista; o resto derruba a fixture. Os frames são o
+    /// mínimo para o mapeador emitir o item. Não afirmam o que o provider manda.
+    #[test]
+    fn a_lista_de_ferramentas_e_por_protocolo_e_nao_afrouxa_os_tres() {
+        let rodar = |protocol: &str, transcript: Value| {
+            let f = ler(&fixture(transcript, protocol)).unwrap();
+            tocar(&f, &oraculo(serde_json::json!([{ "label": "le", "expect": {} }])))
+        };
+        let codex = rodar("codex-app-server", serde_json::json!([
+            { "atMs": 0, "out": { "method": "item/completed", "params": { "item": { "id": "c", "type": "mcpToolCall", "server": "ags", "tool": "x", "status": "completed" } } } },
+        ]));
+        assert!(codex.unwrap_err().contains("ags.x"), "o Codex continua recusando Other");
+        let acp = rodar("acp", serde_json::json!([
+            { "atMs": 0, "out": { "jsonrpc": "2.0", "method": "session/update", "params": { "update": {
+                "sessionUpdate": "tool_call", "toolCallId": "c", "title": "FerramentaNova", "kind": "other", "status": "completed"
+            } } } },
+        ]));
+        assert!(acp.unwrap_err().contains("FerramentaNova"), "o ACP continua recusando Other");
+        let filho = rodar("claude-stream", serde_json::json!([
+            { "atMs": 0, "out": { "type": "assistant", "parent_tool_use_id": "pai", "message": { "id": "m", "content": [
+                { "type": "tool_use", "id": "t", "name": "FerramentaNova", "input": {} }
+            ] } } },
+        ]));
+        assert!(filho.unwrap_err().contains("FerramentaNova"), "o filho não fura o guard");
+
+        let negado = rodar("agy-stream", serde_json::json!([
+            { "atMs": 0, "out": { "event": "result", "result": { "status": "SUCCESS", "denied_actions": ["git push"] } } },
+        ]));
+        assert!(negado.is_ok(), "denied está na lista do agy: {negado:?}");
+        let solto = rodar("agy-stream", serde_json::json!([
+            { "atMs": 0, "out": { "event": "step_update", "step_update": { "step_index": 1, "state": "DONE", "step_type": "xyzzy", "tool_name": "xyzzy" } } },
+        ]));
+        assert!(solto.unwrap_err().contains("xyzzy"), "nome fora da lista do agy cai");
+
+        let mcp = rodar("cursor-stream", serde_json::json!([
+            { "atMs": 0, "out": { "type": "tool_call", "subtype": "started", "call_id": "c", "session_id": "s",
+                "tool_call": { "mcpToolCall": { "args": { "toolName": "mcp" } } } } },
+        ]));
+        assert!(mcp.is_ok(), "mcp está na lista do Cursor só para exercitar o guard: {mcp:?}");
+        let outro = rodar("cursor-stream", serde_json::json!([
+            { "atMs": 0, "out": { "type": "tool_call", "subtype": "started", "call_id": "c", "session_id": "s",
+                "tool_call": { "mcpToolCall": { "args": { "toolName": "xyzzy" } } } } },
+        ]));
+        let erro = outro.unwrap_err();
+        assert!(erro.contains("xyzzy") && erro.contains("fora da lista"), "{erro}");
+    }
+
     #[test]
     fn sem_oraculo_ou_com_formato_errado_nao_roda() {
         assert!(ler_oraculo("{\"checks\": []}").unwrap_err().contains("ao menos um"));

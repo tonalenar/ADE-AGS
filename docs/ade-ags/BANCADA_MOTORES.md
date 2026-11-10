@@ -189,7 +189,7 @@ A fixture é recusada quando:
 - tem um placeholder de tipo desconhecido;
 - não tem oráculo, ou o oráculo não tem nenhum check;
 - uma entrada tem mais de um tipo ou está fora de ordem;
-- **a timeline tem uma ferramenta que o mapeador não conhece** (`ToolKind::Other`, o `UNKNOWN_TOOL` do deepseek-harness). Mapeie a ferramenta em `canal::timeline` antes de gravar.
+- **a timeline (ou um filho) tem uma ferramenta `Other` fora da lista do protocolo.** Claude, Codex e ACP não aceitam nenhum `Other`. O agy aceita o nome `denied` (a ação negada que o mapeador grava assim). O Cursor aceita, por enquanto, só o nome `mcp`, que existe para o guard ter o que deixar passar; não é um catálogo do provider. Um nome novo derruba a fixture até entrar na lista. Mapeie a ferramenta em `canal::timeline` antes de gravar, quando ela for uma ferramenta de verdade.
 
 ### Fixtures atuais
 

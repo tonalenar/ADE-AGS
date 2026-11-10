@@ -11,8 +11,8 @@
 //!
 //! Modos (`ADE_REPLAY_MODE`): `replay` (padrão: confere oráculo e snapshot), `refresh` (confere o oráculo e
 //! regrava o `expected`) e `record` (cria a fixture a partir de um `.jsonl` gravado à mão, ver o doc).
-//! O guard recusa a fixture com placeholder desconhecido, sem oráculo, com segredo, ou cuja ferramenta o
-//! mapeador não conhece (`ToolKind::Other`, o `UNKNOWN_TOOL` do deepseek-harness).
+//! O guard recusa a fixture com placeholder desconhecido, sem oráculo, com segredo, ou cuja ferramenta
+//! `Other` está fora da lista do protocolo. Claude, Codex e ACP continuam sem nenhum `Other` aceito.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -236,12 +236,12 @@ pub fn snapshot(r: &Resultado) -> Value {
 /// ou grava (refresh).
 pub fn tocar(fixture: &Fixture, oraculo: &Oraculo) -> Result<Value, String> {
     let r = bancada::rodar(fixture.protocol, &saidas(fixture));
-    let desconhecidas = r.ferramentas_desconhecidas();
-    if !desconhecidas.is_empty() {
+    let recusadas = r.ferramentas_recusadas(fixture.protocol);
+    if !recusadas.is_empty() {
         return Err(format!(
-            "{}: ferramenta que o mapeador não conhece ({}): mapeie em `canal::timeline` antes de gravar a fixture",
+            "{}: ferramenta que o mapeador não conhece e está fora da lista aceita deste protocolo ({}): mapeie em `canal::timeline` antes de gravar a fixture",
             fixture.id,
-            desconhecidas.join(", ")
+            recusadas.join(", ")
         ));
     }
     let expand = |s: &str| expandir(s).unwrap_or_else(|_| s.to_string());

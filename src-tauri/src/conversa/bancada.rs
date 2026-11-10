@@ -525,9 +525,28 @@ impl Resultado {
             .collect()
     }
 
-    /// As ferramentas que o mapeador não reconheceu (`ToolKind::Other`): o guard das fixtures recusa.
-    pub fn ferramentas_desconhecidas(&self) -> Vec<String> {
-        self.itens.iter().filter(|i| i.tool == Some(ToolKind::Other)).map(|i| i.name.clone().unwrap_or_default()).collect()
+    /// Ferramentas `Other` fora da lista do protocolo, na timeline e nos filhos. Lista vazia recusa
+    /// todo `Other` (Claude, Codex e ACP, como antes).
+    pub fn ferramentas_recusadas(&self, protocolo: Protocolo) -> Vec<String> {
+        let aceitos = other_aceito(protocolo);
+        let mut nomes = Vec::new();
+        let mut ver = |item: &Item| {
+            if item.tool == Some(ToolKind::Other) {
+                let nome = item.name.clone().unwrap_or_default();
+                if !aceitos.iter().any(|aceito| *aceito == nome) {
+                    nomes.push(nome);
+                }
+            }
+        };
+        for item in &self.itens {
+            ver(item);
+        }
+        for filho in &self.filhos {
+            if let Some(item) = &filho.item {
+                ver(item);
+            }
+        }
+        nomes
     }
 
     /// O tipo de cada item da timeline, na ordem, como o JSON do snapshot (`assistant`, `tool`, `usage`…).
@@ -1059,4 +1078,15 @@ fn id_de(v: &Value) -> String {
 
 fn id_de_opt(v: &Value) -> Option<String> {
     v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|n| n.to_string())).or_else(|| v.as_i64().map(|n| n.to_string()))
+}
+
+/// Nomes de `ToolKind::Other` que o guard deixa passar. Vazio = qualquer Other reprova.
+/// Não é o catálogo do provider. `denied` é o nome que o `agy_map` grava na ação negada. `mcp` só
+/// existe para o teste do guard do Cursor ter um nome dentro da lista; a captura real é que acrescenta os outros.
+fn other_aceito(protocolo: Protocolo) -> &'static [&'static str] {
+    match protocolo {
+        Protocolo::ClaudeStream | Protocolo::CodexAppServer | Protocolo::Acp => &[],
+        Protocolo::AgyStream => &["denied"],
+        Protocolo::CursorStream => &["mcp"],
+    }
 }
