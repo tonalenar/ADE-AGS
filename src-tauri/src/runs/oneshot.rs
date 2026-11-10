@@ -15,9 +15,19 @@ use super::agents::{adapter_for, LaunchCtx};
 use super::types::{AgentEvent, TaskOutcome};
 use crate::database::DbConnection;
 
-/// As TUIs que sabem rodar uma chamada destas. A ordem é a da escolha automática quando o
-/// ruteo não decide.
-pub const READ_ONLY_AGENTS: &[&str] = &["claude-code", "codex", "gemini-cli", "opencode"];
+/// As TUIs elegíveis vêm do adapter: prioridade de roteamento e garantia read-only.
+pub fn read_only_agents() -> Vec<&'static str> {
+    let mut eligible: Vec<_> = crate::agents::adapters()
+        .iter()
+        .filter_map(|adapter| {
+            let priority = adapter.read_only_priority()?;
+            let runner = adapter.headless()?;
+            runner.enforces_read_only().then_some((priority, adapter.def().id))
+        })
+        .collect();
+    eligible.sort_by_key(|(priority, _)| *priority);
+    eligible.into_iter().map(|(_, id)| id).collect()
+}
 
 /// Acima disto a linha de comando do Windows recusa o lançamento (limite de ~32 mil).
 const ARGV_LIMIT: usize = 24_000;
@@ -39,23 +49,7 @@ pub struct OneShot<'a> {
 /// - Claude Code: `claude -p` sem prompt o lê do stdin (o mesmo que `supervisor` faz).
 /// - Codex: `codex exec -` lê as instruções do stdin.
 pub(crate) fn prompt_via_stdin(agent_id: &str, args: &mut Vec<String>, prompt: &str) -> bool {
-    match agent_id {
-        "claude-code" => match args.iter().position(|a| a == "-p") {
-            Some(i) if args.get(i + 1).is_some_and(|a| a == prompt) => {
-                args.remove(i + 1);
-                true
-            }
-            _ => false,
-        },
-        "codex" => match args.last_mut() {
-            Some(last) if last == prompt => {
-                *last = "-".into();
-                true
-            }
-            _ => false,
-        },
-        _ => false,
-    }
+    adapter_for(agent_id).is_some_and(|adapter| adapter.prompt_via_stdin(args, prompt))
 }
 
 /// Lê o stdout inteiro da CLI com o tradutor dela e devolve o veredicto. Pura (fora o
@@ -87,12 +81,10 @@ pub(crate) fn outcome_of(
 
 /// Roda a chamada e espera. Bloqueia: chame de `spawn_blocking`.
 pub fn run_read_only(db: &DbConnection, req: &OneShot) -> Result<TaskOutcome, String> {
-    if !READ_ONLY_AGENTS.contains(&req.agent_id) {
-        return Err(format!("'{}' não roda uma chamada somente leitura sem terminal", req.agent_id));
-    }
     let adapter = adapter_for(req.agent_id)
         .ok_or_else(|| format!("ainda não sabemos rodar '{}' sem terminal", req.agent_id))?;
-    if !adapter.enforces_read_only() {
+    let selected_for_read_only = crate::agents::adapter_for(req.agent_id).is_some_and(|adapter| adapter.read_only_priority().is_some());
+    if !selected_for_read_only || !adapter.enforces_read_only() {
         return Err(format!("'{}' não garante somente leitura sem terminal", req.agent_id));
     }
     // Igual à frota: uma conta que sumiu aborta, não cai na do sistema (gastaria cota alheia).
@@ -116,7 +108,7 @@ pub fn run_read_only(db: &DbConnection, req: &OneShot) -> Result<TaskOutcome, St
     let mut launch = adapter.launch(req.prompt, req.model, None, &ctx);
     let via_stdin = prompt_via_stdin(req.agent_id, &mut launch.args, req.prompt);
     if !via_stdin && launch.args.iter().map(|a| a.len() + 1).sum::<usize>() > ARGV_LIMIT {
-        return Err(format!("o pedido é grande demais para '{}': use Claude Code ou Codex", req.agent_id));
+        return Err(format!("o pedido é grande demais para '{}': use uma TUI com entrada de prompt por stdin", req.agent_id));
     }
 
     let program = crate::util::find_program(&launch.program).unwrap_or_else(|| std::path::PathBuf::from(&launch.program));
@@ -194,9 +186,15 @@ mod tests {
 
     #[test]
     fn so_tuis_que_garantem_somente_leitura() {
-        for id in READ_ONLY_AGENTS {
+        assert_eq!(read_only_agents(), ["claude-code", "codex", "gemini-cli", "opencode"]);
+        for id in read_only_agents() {
             let adapter = adapter_for(id).unwrap_or_else(|| panic!("{id} sem adaptador headless"));
             assert!(adapter.enforces_read_only(), "{id}");
         }
+    }
+
+    #[test]
+    fn um_agente_sem_capacidade_read_only_e_excluido_da_selecao() {
+        assert!(!read_only_agents().contains(&"kimi-code"));
     }
 }

@@ -43,6 +43,14 @@ mod opencode_models_test;
 #[cfg(test)]
 mod execution_log_test;
 pub(crate) mod types;
+
+/// Delega a validação do schema ao adapter headless, que conhece as restrições da própria CLI.
+pub(crate) fn validate_result_schema_for_agent(agent_id: &str, schema: &serde_json::Value) -> Result<(), String> {
+    if let Some(adapter) = agents::adapter_for(agent_id) {
+        return adapter.validate_result_schema(schema);
+    }
+    Ok(())
+}
 pub(crate) mod worktrees;
 
 pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
@@ -630,6 +638,13 @@ pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<
 pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
     // Desktop participants have a durable, assisted execution transport, not a CLI.
     if agent_id == crate::desktop_apps::GEMINI_DESKTOP { return Ok(()); }
+    if let Some(error) = crate::harness::matrix::unsupported_capability_error(
+        agent_id,
+        crate::harness::capability::Surface::Fleet,
+        crate::harness::capability::Capability::Start,
+    ) {
+        return Err(error);
+    }
     let adapter = crate::agents::adapter_for(agent_id)
         .ok_or_else(|| format!("'{agent_id}' não é um provider conhecido"))?;
     if !adapter.capabilities().headless {

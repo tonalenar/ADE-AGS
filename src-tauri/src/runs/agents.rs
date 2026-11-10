@@ -7,6 +7,7 @@
 //! código cinco veces.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use super::activity::{text_line, tool_label};
 use super::types::{AgentEvent, TaskOutcome};
@@ -16,6 +17,26 @@ pub struct Launch {
     pub program: String,
     pub args: Vec<String>,
     pub env: HashMap<String, String>,
+}
+
+/// Ambiente e pasta temporários que um adapter precisa manter até o processo terminar.
+pub struct PreparedTaskProfile {
+    workspace: PathBuf,
+    env: HashMap<String, String>,
+    _lifetime: Box<dyn std::any::Any + Send>,
+}
+
+impl PreparedTaskProfile {
+    pub fn new(
+        workspace: PathBuf,
+        env: HashMap<String, String>,
+        lifetime: Box<dyn std::any::Any + Send>,
+    ) -> Self {
+        Self { workspace, env, _lifetime: lifetime }
+    }
+
+    pub fn workspace(&self) -> &Path { &self.workspace }
+    pub fn env(&self) -> &HashMap<String, String> { &self.env }
 }
 
 /// Lo que hace falta saber para armar el lanzamiento y que no está en la tarea.
@@ -70,6 +91,24 @@ pub trait HeadlessAgent {
         }
     }
 
+    /// Ajusta o argv para as CLIs que leem o prompt pelo stdin. Cada adapter conhece seu protocolo.
+    fn prompt_via_stdin(&self, _args: &mut Vec<String>, _prompt: &str) -> bool { false }
+
+    /// Valida `result_schema` conforme as restrições reais da CLI deste adapter.
+    fn validate_result_schema(&self, _schema: &serde_json::Value) -> Result<(), String> { Ok(()) }
+
+    /// Prepara perfil isolado e indica se deve sobreviver até o fim do processo.
+    fn prepare_task_profile(
+        &self,
+        _mcp_config: Option<&Path>,
+        _allowed_tools: &[String],
+        _read_only: bool,
+        _cwd: &str,
+    ) -> Result<Option<PreparedTaskProfile>, String> { Ok(None) }
+
+    /// Capacidades específicas da execução headless, declaradas pelo adapter.
+    fn refresh_account_usage_after_task(&self) -> bool { false }
+
     /// Si su CLI hace cumplir `LaunchCtx::read_only`. Una que no puede no corre como lead.
     fn enforces_read_only(&self) -> bool {
         true
@@ -91,6 +130,16 @@ pub fn adapter_for(agent_id: &str) -> Option<Box<dyn HeadlessAgent + Send + Sync
 pub struct ClaudeCode;
 
 impl HeadlessAgent for ClaudeCode {
+    fn prompt_via_stdin(&self, args: &mut Vec<String>, prompt: &str) -> bool {
+        match args.iter().position(|arg| arg == "-p") {
+            Some(index) if args.get(index + 1).is_some_and(|arg| arg == prompt) => {
+                args.remove(index + 1);
+                true
+            }
+            _ => false,
+        }
+    }
+
     fn launch(
         &self,
         prompt: &str,

@@ -15,7 +15,8 @@ import { threadMessage, tuiMessage } from "./attachments/send";
 import { startConversation } from "./chatActions";
 import { setComposing } from "./store";
 import { BotIcon, BranchIcon, CheckIcon, ChevronDownIcon, FolderGitIcon, FolderIcon, SettingsIcon } from "./chatIcons";
-import { accessModesFor, conversationTitle, extractSlashCommand, planSupported, type ChatProject } from "./chatModel";
+import { accessModesFor, conversationTitle, extractSlashCommand, fastModeSupported, type ChatProject } from "./chatModel";
+import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { chatNewWorktree } from "./ipc";
 import { clearDraft, setDraftLead, useTeamDraft } from "./team/draftStore";
 import { TeamTargetSwitch } from "./team/TeamComposer";
@@ -208,16 +209,18 @@ export function NewConversation({ projects, folder, onFolder }: {
   const mine = !!agent && prefs.agentId === agent.id;
   // Por protocolo (sem TUI) o agente tem os acessos e o Plano do motor dele; na TUI, os flags dela.
   const viaProtocol = !!agent && (isLocalAcpAgent(agent.id) || (prefs.structured && isStructuredAgent(agent.id)));
+  const planCapability = useHarnessCapability(viaProtocol ? "chat" : "tui", matrixProviderForAgent(agent?.id), "plan");
+  const hasPlan = planCapability.support === "supported";
   const modes = agent ? accessModesFor(agent.id, viaProtocol) : ["ask" as const];
   const access = modes.includes(prefs.access) ? prefs.access : modes.includes("safe") ? "safe" : "ask";
-  const plan = !!agent && planSupported(agent.id, viaProtocol) && prefs.plan;
+  const plan = !!agent && hasPlan && prefs.plan;
   const projectDefaultChoices: ChatProjectDefaults = {
     agentId: agent?.id ?? null,
     model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null,
     effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null,
     access,
     plan,
-    fastMode: agent?.id === "codex" && !viaProtocol && prefs.fastMode,
+    fastMode: fastModeSupported(agent?.id) && !viaProtocol && prefs.fastMode,
     worktree: workspaceMode.worktree,
     worktreeSubmodules: worktreeSubmodules.mode,
     structured: isLocalAcpAgent(agent?.id ?? "") || prefs.structured,
@@ -399,7 +402,7 @@ export function NewConversation({ projects, folder, onFolder }: {
     setError("");
     const planCommand = extractSlashCommand(prompt, "plan");
     if (planCommand.found && prompt.trim().toLowerCase() === "/plan" && attachments.length === 0) {
-      if (!agent || !planSupported(agent.id, viaProtocol)) {
+      if (!agent || !hasPlan) {
         setError(t("chat.plan.unsupported"));
         return false;
       }
@@ -437,7 +440,7 @@ export function NewConversation({ projects, folder, onFolder }: {
         setComposing(true); // a tela não troca no meio da criação, nem na primeira conversa de todas
         const result = await launchDraftTeam({
           agent, cwd, workspaceId, title: conversationTitle(launchPrompt) ?? project.name, model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null,
-          access, plan: launchPlan, fastMode: agent.id === "codex" && !viaProtocol && prefs.fastMode,
+          access, plan: launchPlan, fastMode: fastModeSupported(agent.id) && !viaProtocol && prefs.fastMode,
           accountId: mine && !isLocalAcpAgent(agent.id) ? prefs.accountId : null, account: mine && !isLocalAcpAgent(agent.id) ? prefs.accountId ?? undefined : undefined, viaProtocol,
         }, draftMembers, launchPrompt, draftTarget, attachments);
         if (!result.ok) {
@@ -470,7 +473,7 @@ export function NewConversation({ projects, folder, onFolder }: {
         account: mine ? prefs.accountId ?? undefined : undefined,
         access,
         plan: launchPlan,
-        fastMode: agent.id === "codex" && prefs.fastMode,
+        fastMode: fastModeSupported(agent.id) && prefs.fastMode,
         background,
       });
       update({ cwd: project.cwd, agentId: agent.id });
@@ -509,7 +512,7 @@ export function NewConversation({ projects, folder, onFolder }: {
           onBackgroundSubmit={!withTeam ? (prompt, attachments) => submit(prompt, attachments, true) : undefined}
           addon={(context) => <ComposerAssistMenu cwd={project?.cwd ?? null} agentId={agent?.id ?? null}
             teamOptions={withTeam ? draftMentions : undefined}
-            onPlan={agent && planSupported(agent.id, viaProtocol) ? () => update({ plan: !prefs.plan }) : undefined}
+            onPlan={agent && hasPlan ? () => update({ plan: !prefs.plan }) : undefined}
             context={context} />}
           controls={({ text, attachments, hasQuotes }) => (
             <>
@@ -517,11 +520,11 @@ export function NewConversation({ projects, folder, onFolder }: {
               <AgentModelPicker agents={projectAgents} showAccount={!isLocalAcpAgent(agent?.id ?? "")} disabled={!projectPolicyLoaded || projectPolicySaving}
                 value={{ agentId: agent?.id ?? null, model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null, account: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.accountId : null }}
                 permission={{ value: access, modes, onChange: (next) => update({ access: next, plan: false }) }}
-                speed={agent?.id === "codex" && !viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}
+                speed={fastModeSupported(agent?.id) && !viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}
                 onCompare={(picks) => openCompareDialog(project?.cwd ?? "", { prompt: text, picks, attachments })}
                 compareDisabled={hasQuotes}
-                onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: v.agentId === "codex" ? prefs.fastMode : false })} />
-              {agent && planSupported(agent.id, viaProtocol) && (
+                onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId) ? prefs.fastMode : false })} />
+              {agent && hasPlan && (
                 <button type="button" onClick={() => update({ plan: !prefs.plan })} aria-pressed={plan}
                   title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
                   className="flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07]">

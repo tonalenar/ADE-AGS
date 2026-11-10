@@ -18,7 +18,7 @@ use super::guide::{build_prompt, load, parse_guide, pr_dir, repair_prompt, save,
 use super::provider::ForgeError;
 use super::store::{data_dir, db};
 use crate::database::DbConnection;
-use crate::runs::oneshot::{run_read_only, OneShot, READ_ONLY_AGENTS};
+use crate::runs::oneshot::{read_only_agents, run_read_only, OneShot};
 use crate::runs::routing::{AccountChoice, Assignment, Complexity, RouteRequest};
 
 /// Quanto se espera por cada tentativa do modelo. Um PR grande leva minutos.
@@ -105,7 +105,7 @@ pub(crate) fn pick_agent(
 ) -> Result<Assignment, String> {
     let account = if req.auto_account { AccountChoice::Auto } else { AccountChoice::Fixed(req.account_id.clone()) };
     if let Some(agent) = req.agent_id.as_deref().filter(|a| !a.is_empty()) {
-        if !READ_ONLY_AGENTS.contains(&agent) {
+        if !read_only_agents().contains(&agent) {
             return Err(format!("'{agent}' não gera o guia: escolha Claude Code, Codex, Gemini ou OpenCode"));
         }
         return route(&RouteRequest {
@@ -117,11 +117,11 @@ pub(crate) fn pick_agent(
     }
     let mut notes = Vec::new();
     match route(&RouteRequest { agent_id: None, model: None, complexity: Some(Complexity::Standard), account: account.clone() }) {
-        Ok(a) if READ_ONLY_AGENTS.contains(&a.agent_id.as_str()) => return Ok(a),
+        Ok(a) if read_only_agents().contains(&a.agent_id.as_str()) => return Ok(a),
         Ok(a) => notes.push(format!("{}: não garante somente leitura", a.agent_id)),
         Err(e) => notes.push(e),
     }
-    for agent in READ_ONLY_AGENTS {
+    for agent in read_only_agents() {
         match route(&RouteRequest { agent_id: Some(agent.to_string()), model: None, complexity: None, account: account.clone() }) {
             Ok(a) => return Ok(a),
             Err(e) => notes.push(format!("{agent}: {e}")),

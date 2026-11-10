@@ -100,7 +100,7 @@ impl Engine {
                 // `edits` não aparece na tela do Codex, mas continua aceito pela CLI e pelo MCP:
                 // `codex_map` o trata como `safe` (`on-request`, `workspace-write`).
                 access_modes: &["ask", "edits", "safe", "full"],
-                plan: false,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -109,7 +109,7 @@ impl Engine {
             },
             Engine::Claude => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: true,
@@ -118,7 +118,7 @@ impl Engine {
             },
             Engine::OpenCode => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -127,7 +127,7 @@ impl Engine {
             },
             Engine::Antigravity => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -136,7 +136,7 @@ impl Engine {
             },
             Engine::Cursor => EngineCapabilities {
                 access_modes: &["ask", "full", "plan"],
-                plan: true,
+                plan: supported(crate::harness::capability::Capability::Plan),
                 mid_turn,
                 context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
@@ -190,23 +190,11 @@ pub(crate) fn unsupported_capability_error(
     provider: &str,
     capability: crate::harness::capability::Capability,
 ) -> Option<String> {
-    let matrix_provider = if crate::local_acp::is_local_acp_id(provider) {
-        "local-acp"
-    } else {
-        provider
-    };
-    (crate::harness::matrix::supports(
-        matrix_provider,
+    crate::harness::matrix::unsupported_capability_error(
+        provider,
         crate::harness::capability::Surface::Chat,
         capability,
-    ) == Some(crate::harness::capability::Support::Unsupported))
-    .then(|| {
-        format!(
-            "Capability '{}' não está disponível para '{}' nesta superfície: a matriz marca Unsupported",
-            capability.id(),
-            provider
-        )
-    })
+    )
 }
 
 /// O turno em andamento de uma conversa, em qualquer um dos agentes. `None` = sem processo aberto.
@@ -732,6 +720,9 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
         row
     };
     let engine = engine_of(&row).map_err(SendError::NotSent)?;
+    if let Some(error) = unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Send) {
+        return Err(SendError::NotSent(error));
+    }
     if crate::local_acp::is_local_acp_id(&row.agent_id) {
         let exists = crate::local_acp::contains(db, &row.agent_id).map_err(SendError::NotSent)?;
         if !exists {
@@ -923,6 +914,9 @@ async fn compact_context_inner(
     }
     let row = thread(db, thread_id)?;
     let engine = engine_of(&row)?;
+    if let Some(error) = unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Compact) {
+        return Err(error);
+    }
     if !engine.capabilities().context_compaction {
         return Err("A compactação pelo ADE está disponível nas conversas Codex e Claude Code".into());
     }
@@ -955,7 +949,8 @@ async fn compact_context_inner(
             }
             send_mode(app, db, thread_id, &command, SendMode::SteerActive, &[]).await.map_err(String::from)
         }
-        _ => unreachable!("capacidade de compactação sem implementação para {engine:?}"),
+        _ => Err(unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Compact)
+            .unwrap_or_else(|| format!("O adapter {engine:?} não implementa compactação apesar da matriz"))),
     }
 }
 
@@ -1086,7 +1081,8 @@ pub async fn thread_goal_action(
             Engine::Claude => {
                 send_mode(app, db, thread_id, "/goal clear", SendMode::SteerActive, &[]).await.map_err(String::from)?;
             }
-            _ => unreachable!(),
+            _ => return Err(unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Goal)
+                .unwrap_or_else(|| "O adapter atual não implementa limpeza de objetivo".into())),
         }
         let conn = db.lock().map_err(db_err)?;
         store::clear_goal(&conn, thread_id).map_err(db_err)?;
@@ -1122,7 +1118,8 @@ pub async fn thread_goal_action(
             }
             thread_goal(db, thread_id)
         }
-        _ => unreachable!(),
+        _ => Err(unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Goal)
+            .unwrap_or_else(|| "O adapter atual não implementa objetivos persistentes".into())),
     }
 }
 
@@ -1196,6 +1193,13 @@ pub async fn stop_with_request(
 /// O corpo do Parar: manda a interrupção se há turno. Sem turno, fecha no banco o que ficou aberto e avisa a tela.
 /// Devolve o que aconteceu (`Sent`, `Pending` ou `NoTurn`).
 async fn stop_now(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Interrupted, String> {
+    let row = thread(db, thread_id)?;
+    // A matriz só barra a interrupção de um turno vivo: fechar no banco um turno órfão não depende do motor.
+    if live_turn(thread_id).is_some() {
+        if let Some(error) = unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Interrupt) {
+            return Err(error);
+        }
+    }
     let interrupted = interrupt_if_live(thread_id).await?;
     if interrupted != Interrupted::NoTurn {
         return Ok(interrupted);

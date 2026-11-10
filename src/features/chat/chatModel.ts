@@ -2,6 +2,7 @@ import { withAutonomy } from "@/features/missions/autonomy";
 import { withModel } from "@/features/missions/modelFlags";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
+import { readHarnessCapability } from "./harnessCapabilities";
 
 /**
  * O modelo do modo chat, sem React: o que a sidebar lista, como uma conversa se chama e com que
@@ -36,8 +37,20 @@ export const ACCESS_MODES: ChatAccess[] = ["ask", "edits", "safe", "full"];
 /** As TUI cuja saída a ADE lê e mostra como timeline, em vez de um PTY bruto. */
 const TIMELINE_AGENTS = new Set(["claude-code", "codex"]);
 
+/** Flags específicos declarados pelo adapter de lançamento da TUI. */
+const REASONING_EFFORT_AGENTS = new Set(["claude-code", "codex", "antigravity"]);
+const FAST_MODE_AGENTS = new Set(["codex"]);
+
 export function hasTimeline(agentId: string): boolean {
   return TIMELINE_AGENTS.has(agentId);
+}
+
+export function reasoningEffortSupported(agentId: string | null): boolean {
+  return agentId !== null && REASONING_EFFORT_AGENTS.has(agentId);
+}
+
+export function fastModeSupported(agentId: string | null | undefined): boolean {
+  return !!agentId && FAST_MODE_AGENTS.has(agentId);
 }
 
 /** Os flags de cada modo, por agente, conferidos no `--help` de cada CLI. Sem entrada = o agente não tem o modo. */
@@ -71,12 +84,12 @@ const PLAN_FLAG: Record<string, string> = { "claude-code": "--permission-mode pl
  */
 export type MidTurn = "steer" | "interrupt";
 
-export const PROTOCOL_AGENTS: Record<string, { access: ChatAccess[]; plan: boolean; midTurn: MidTurn }> = {
-  codex: { access: ["ask", "safe", "full"], plan: false, midTurn: "steer" },
-  "claude-code": { access: ["ask", "edits", "safe", "full"], plan: true, midTurn: "steer" },
-  opencode: { access: ["ask", "edits", "safe", "full"], plan: true, midTurn: "interrupt" },
-  antigravity: { access: ["ask", "edits", "safe", "full"], plan: true, midTurn: "interrupt" },
-  cursor: { access: ["ask", "full"], plan: true, midTurn: "interrupt" },
+export const PROTOCOL_AGENTS: Record<string, { access: ChatAccess[]; midTurn: MidTurn }> = {
+  codex: { access: ["ask", "safe", "full"], midTurn: "steer" },
+  "claude-code": { access: ["ask", "edits", "safe", "full"], midTurn: "steer" },
+  opencode: { access: ["ask", "edits", "safe", "full"], midTurn: "interrupt" },
+  antigravity: { access: ["ask", "edits", "safe", "full"], midTurn: "interrupt" },
+  cursor: { access: ["ask", "full"], midTurn: "interrupt" },
 };
 
 /** O «enviar agora» deste agente por protocolo (ver [`MidTurn`]). Um motor desconhecido para o turno: é o que
@@ -86,17 +99,20 @@ export function midTurnOf(agentId: string): MidTurn {
 }
 
 /**
- * A chave de i18n do aviso do composer ao enviar com o agente trabalhando.
- * O Codex promete steer ("no meio do turno"); Claude (`claude-code`) usa a frase neutra ("vai para o Claude agora;
- * ele a lê no meio ou logo depois do turno"), pois a capability `steer` do Claude é Unknown no contrato do harness;
- * os demais (Cursor, Antigravity, OpenCode) interrompem o turno. Pura.
+ * A chave de i18n do aviso do composer ao enviar com o agente trabalhando. `Unknown` usa um texto neutro;
+ * só uma capability provada escolhe entre a frase de steer e a de interrupção.
  */
-export function queueHintKey(agentId: string, followUpBehavior: "steer" | "queue" | "send" = "steer"): string {
+export function queueHintKey(
+  agentId: string,
+  followUpBehavior: "steer" | "queue" | "send" = "steer",
+  steerSupport = readHarnessCapability("chat", agentId, "steer").support,
+  interruptSupport = readHarnessCapability("chat", agentId, "interrupt").support,
+): string {
   const queued = followUpBehavior === "queue";
-  if (agentId === "claude-code") {
-    return queued ? "chat.composer.queueHintClaudeQueue" : "chat.composer.queueHintClaude";
+  if (steerSupport === "unknown" || (steerSupport === "unsupported" && interruptSupport !== "supported")) {
+    return queued ? "chat.composer.queueHintUnknownQueue" : "chat.composer.queueHintUnknown";
   }
-  const midTurn = midTurnOf(agentId);
+  const midTurn: MidTurn = steerSupport === "supported" ? "steer" : "interrupt";
   if (midTurn === "steer") {
     return queued ? "chat.composer.queueHintSteerQueue" : "chat.composer.queueHintSteer";
   }
@@ -115,11 +131,14 @@ export function accessModesFor(agentId: string, protocol = false): ChatAccess[] 
     mode === "ask" || (mode === "safe" ? withAutonomy(agentId, "x", "safe") !== "x" : !!ACCESS_FLAGS[mode][agentId]));
 }
 
-/** O agente tem o modo Plano? Por protocolo, é o do motor; na TUI, o flag de lançamento. Pura. */
-export function planSupported(agentId: string, protocol = false): boolean {
-  if (protocol && agentId.startsWith("local-acp-")) return false;
-  const engine = protocol ? PROTOCOL_AGENTS[agentId] : undefined;
-  return engine ? engine.plan : agentId in PLAN_FLAG;
+/** O modo Plano só pode ser iniciado quando a matriz prova o suporte na superfície escolhida. */
+export function planSupported(agentId: string, protocol = false, support = readHarnessCapability(
+  protocol ? "chat" : "tui",
+  agentId.startsWith("local-acp-") ? "local-acp" : agentId,
+  "plan",
+).support): boolean {
+  // Plano só aparece quando a matriz prova o caminho; Unknown não habilita um modo novo.
+  return support === "supported";
 }
 
 /** Remove uma ocorrência explícita de comando ADE do texto, sem confundir `/planner` com `/plan`. */

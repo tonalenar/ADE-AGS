@@ -34,6 +34,9 @@ fn claude_code() {
     assert_eq!(env.len(), 1);
 
     assert!(caps.accounts);
+    assert!(agent.supports_api_key_account());
+    assert!(agent.supports_custom_api_base_url());
+    assert!(!agent.supports_fast_mode());
     assert!(caps.sessions);
     assert!(caps.resume);
     assert!(caps.skills);
@@ -67,6 +70,9 @@ fn codex() {
     assert!(!env.contains_key("CLAUDE_CONFIG_DIR"));
 
     assert!(caps.accounts);
+    assert!(agent.supports_api_key_account());
+    assert!(!agent.supports_custom_api_base_url());
+    assert!(agent.supports_fast_mode());
     assert!(caps.sessions);
     assert!(caps.resume);
     assert!(caps.skills);

@@ -212,6 +212,9 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let agent_id = arg_str_opt(args, "agent")
         .or_else(|| parent.as_ref().map(|thread| thread.agent_id.clone()))
         .unwrap_or_else(|| "codex".into());
+    if let Some(error) = api::unsupported_capability_error(&agent_id, crate::harness::capability::Capability::Start) {
+        return Err(error);
+    }
     let inherit_parent_settings = parent.as_ref().is_some_and(|thread| {
         thread.agent_id == agent_id && !crate::local_acp::is_local_acp_id(&agent_id)
     });

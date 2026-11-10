@@ -12,34 +12,34 @@ function formatHint(catalog: Record<string, string>, key: string, shortcut = "�
 }
 
 describe("aviso do composer ao enviar com agente trabalhando (mid-turn hint)", () => {
-  it("Claude usa o texto neutro e Codex mantém o texto de steer", () => {
-    const claudeKey = queueHintKey("claude-code", "send");
-    const codexKey = queueHintKey("codex", "send");
-    const cursorKey = queueHintKey("cursor", "send");
+  it("Unknown usa texto neutro; Supported steer e interrupt mantêm suas frases", () => {
+    const claudeKey = queueHintKey("claude-code", "send", "unknown", "unsupported");
+    const codexKey = queueHintKey("codex", "send", "supported", "unsupported");
+    const cursorKey = queueHintKey("cursor", "send", "unsupported", "supported");
 
-    expect(claudeKey).toBe("chat.composer.queueHintClaude");
+    expect(claudeKey).toBe("chat.composer.queueHintUnknown");
     expect(codexKey).toBe("chat.composer.queueHintSteer");
     expect(cursorKey).toBe("chat.composer.queueHintInterrupt");
 
     // No catálogo pt-BR:
     expect(formatHint(ptBR, codexKey)).toBe("⏎ manda agora, no meio do turno · ⌘⏎ põe na fila");
-    expect(formatHint(ptBR, claudeKey)).toBe("⏎ vai para o Claude agora; ele a lê no meio ou logo depois do turno · ⌘⏎ põe na fila");
+    expect(formatHint(ptBR, claudeKey)).toBe("⏎ envia agora; o agente pode ler durante ou depois do turno · ⌘⏎ põe na fila");
 
     // Na inversão (followUpBehavior: "queue"):
-    const claudeQueueKey = queueHintKey("claude-code", "queue");
-    const codexQueueKey = queueHintKey("codex", "queue");
+    const claudeQueueKey = queueHintKey("claude-code", "queue", "unknown", "unsupported");
+    const codexQueueKey = queueHintKey("codex", "queue", "supported", "unsupported");
     expect(formatHint(ptBR, codexQueueKey)).toBe("⏎ põe na fila · ⌘⏎ manda agora, no meio do turno");
-    expect(formatHint(ptBR, claudeQueueKey)).toBe("⏎ põe na fila · ⌘⏎ vai para o Claude agora; ele a lê no meio ou logo depois do turno");
+    expect(formatHint(ptBR, claudeQueueKey)).toBe("⏎ põe na fila · ⌘⏎ envia agora; o agente pode ler durante ou depois do turno");
   });
 
-  it("os catálogos em en e es também trazem a variante neutra do Claude e o steer do Codex", () => {
-    const claudeKey = queueHintKey("claude-code", "send");
-    const codexKey = queueHintKey("codex", "send");
+  it("os catálogos em en e es também trazem a variante Unknown e o steer do Codex", () => {
+    const claudeKey = queueHintKey("claude-code", "send", "unknown", "unsupported");
+    const codexKey = queueHintKey("codex", "send", "supported", "unsupported");
 
     expect(formatHint(en, codexKey)).toBe("⏎ sends now, mid-turn · ⌘⏎ queues it");
-    expect(formatHint(en, claudeKey)).toBe("⏎ goes to Claude now; it reads it mid-turn or right after the turn · ⌘⏎ queues it");
+    expect(formatHint(en, claudeKey)).toBe("⏎ sends now; the agent may read it during or after the turn · ⌘⏎ queues it");
 
     expect(formatHint(es, codexKey)).toBe("⏎ envía ahora, en medio del turno · ⌘⏎ lo pone en la cola");
-    expect(formatHint(es, claudeKey)).toBe("⏎ va para Claude ahora; lo lee en medio o justo después del turno · ⌘⏎ lo pone en la cola");
+    expect(formatHint(es, claudeKey)).toBe("⏎ lo envía ahora; el agente puede leerlo durante o después del turno · ⌘⏎ lo pone en la cola");
   });
 });

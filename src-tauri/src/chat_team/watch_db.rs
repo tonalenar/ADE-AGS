@@ -254,7 +254,9 @@ pub fn calls_of(items: &[Item]) -> Vec<Call> {
 /// estimativa do texto depois dele. Os outros motores gravam o uso por TURNO (não o tamanho do contexto):
 /// `None` (não medido). Pura. O segundo campo é a chave da medida (o `usage` que a ancorou).
 pub fn context_of(agent_id: &str, model: Option<&str>, items: &[Item]) -> Option<(f64, String)> {
-    if agent_id != "claude-code" {
+    // Pressão de contexto exige o contador de janela do Claude. `Usage` cobre o uso por sessão,
+    // não garante a mesma semântica de janela nas outras TUIs; a engine/adapter escolhe o parser.
+    if crate::conversa::api::Engine::of(agent_id) != Some(crate::conversa::api::Engine::Claude) {
         return None;
     }
     let at = items.iter().rposition(|i| i.kind == ItemKind::Usage)?;

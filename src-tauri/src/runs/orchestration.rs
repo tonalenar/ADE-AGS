@@ -744,6 +744,15 @@ fn plan_tasks_watched(
             };
             (request, complexity, None)
         };
+        if let Some(agent_id) = request.agent_id.as_deref() {
+            if let Some(error) = crate::harness::matrix::unsupported_capability_error(
+                agent_id,
+                crate::harness::capability::Surface::Fleet,
+                crate::harness::capability::Capability::Start,
+            ) {
+                return Err(error);
+            }
+        }
         match routing::resolve_pool(db, &request).and_then(|r| routing::route(&roster, &tiers, &r, now)) {
             Ok(a) => {
                 if let Some(schema) = &t.result_schema

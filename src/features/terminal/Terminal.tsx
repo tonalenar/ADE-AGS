@@ -29,6 +29,7 @@ import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { getSetting } from "@/shared/ipc/settings";
 import { CLAUDE_AUTO_COMPACT_WINDOW_ENV, CLAUDE_AUTO_COMPACT_WINDOWS_SETTING, claudeAutoCompactWindow } from "@/features/chat/claudeAutoCompact";
+import { legacyComposerCapabilityAvailable } from "@/features/chat/harnessCapabilities";
 import { resolvePrelaunch } from "@/features/prelaunch/ipc";
 import { reconcileTabSkills } from "@/features/skills/ipc";
 import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
@@ -479,7 +480,7 @@ function TerminalImpl({
         // Claude aplica este limite apenas ao processo desta TUI; não alteramos os arquivos
         // de configuração da pessoa. A variável é o override de sessão documentado pelo CLI.
         let claudeCompactEnv: Record<string, string> | null = null;
-        if (agentId === "claude-code") {
+        if (legacyComposerCapabilityAvailable("tui", agentId ?? null, "autocompact")) {
           try {
             const raw = await getSetting(CLAUDE_AUTO_COMPACT_WINDOWS_SETTING);
             const window = claudeAutoCompactWindow(raw, accountId);

@@ -51,12 +51,12 @@ describe("o «enviar agora» de cada motor", () => {
   });
 
   it("Claude usa a chave de aviso neutro no composer; Codex usa a de steer", () => {
-    expect(queueHintKey("claude-code", "steer")).toBe("chat.composer.queueHintClaude");
-    expect(queueHintKey("claude-code", "queue")).toBe("chat.composer.queueHintClaudeQueue");
-    expect(queueHintKey("codex", "steer")).toBe("chat.composer.queueHintSteer");
-    expect(queueHintKey("codex", "queue")).toBe("chat.composer.queueHintSteerQueue");
-    expect(queueHintKey("cursor", "steer")).toBe("chat.composer.queueHintInterrupt");
-    expect(queueHintKey("cursor", "queue")).toBe("chat.composer.queueHintInterruptQueue");
+    expect(queueHintKey("claude-code", "steer", "unknown", "unsupported")).toBe("chat.composer.queueHintUnknown");
+    expect(queueHintKey("claude-code", "queue", "unknown", "unsupported")).toBe("chat.composer.queueHintUnknownQueue");
+    expect(queueHintKey("codex", "steer", "supported", "unsupported")).toBe("chat.composer.queueHintSteer");
+    expect(queueHintKey("codex", "queue", "supported", "unsupported")).toBe("chat.composer.queueHintSteerQueue");
+    expect(queueHintKey("cursor", "steer", "unsupported", "supported")).toBe("chat.composer.queueHintInterrupt");
+    expect(queueHintKey("cursor", "queue", "unsupported", "supported")).toBe("chat.composer.queueHintInterruptQueue");
   });
 
   it("no motor que entra no turno, a mensagem vai na hora, sem fila nem parar", () => {

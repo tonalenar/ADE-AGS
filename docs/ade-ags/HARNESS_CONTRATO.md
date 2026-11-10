@@ -33,7 +33,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ## 1. Matriz capability × provider/superfície
 
-### 1.1 As 18 capabilities
+### 1.1 As 19 capabilities
 
 | Capability | Pergunta que a célula responde | O que **não** conta |
 |---|---|---|
@@ -51,6 +51,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `resume` | A sessão nativa volta depois de reiniciar o app? | abrir sessão nova com aviso |
 | `compact` | O ADE pede compactação e o protocolo responde? | configurar uma janela de auto-compact |
 | `goal` | Há objetivo persistente nativo? | texto `/goal` sem evento de volta |
+| `plan` | O ADE consegue iniciar a execução em modo nativo de planejamento? | criar um DAG de tarefas do ADE na Frota |
 | `checkpoint` | Há foto do estado da execução? | foto da conversa (nenhuma superfície tem) |
 | `rollback` | Dá para voltar ao estado de uma foto? | reverter a conversa do provider (nenhuma superfície faz) |
 | `usage` | Há uso de tokens, custo ou limite por sessão? | medidor por conta |
@@ -60,7 +61,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.2 A matriz
 
-`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 18 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
+`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 19 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
 
 **Conversa estruturada (`conversa/`)**
 
@@ -80,6 +81,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `resume` | S | S | ? | S | S | ? |
 | `compact` | ? | S | U | U | U | U |
 | `goal` | ? | S | U | U | U | U |
+| `plan` | S | U | S | S | S | U |
 | `checkpoint` | U | U | U | U | U | U |
 | `rollback` | U | U | U | U | U | U |
 | `usage` | S | S | S | S | U | ? |
@@ -104,6 +106,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `resume` | U | U | U | U | U | U | U | U |
 | `compact` | U | U | U | U | U | U | U | U |
 | `goal` | U | U | U | U | U | U | U | U |
+| `plan` | U | U | U | U | U | U | U | U |
 | `checkpoint` | S | S | S | S | S | U | S | U |
 | `rollback` | S | S | S | S | S | U | S | U |
 | `usage` | S | S | S | S | U | U | S | U |
@@ -126,8 +129,9 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `child_result` | U | U | U | U | U | U | U | U |
 | `child_stop` | U | U | U | U | U | U | U | U |
 | `resume` | S | S | S | S | ? | S | U | U |
-| `compact` | S | U | U | U | U | U | U | U |
-| `goal` | U | U | U | U | U | U | U | U |
+| `compact` | ? | U | ? | U | U | U | U | U |
+| `goal` | ? | U | U | U | U | U | U | U |
+| `plan` | S | U | U | U | U | U | U | U |
 | `checkpoint` | S | S | S | S | S | S | S | S |
 | `rollback` | S | S | S | S | S | S | S | S |
 | `usage` | S | U | S | S | U | U | ? | U |
@@ -136,34 +140,34 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 18 capabilities = **396 células**: **163 `Supported`, 29 `Unknown`, 204 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 396): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 19 capabilities = **418 células**: **167 `Supported`, 32 `Unknown`, 219 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 418): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
 
 <!-- contagem-matriz:inicio -->
 | Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
-|---|---|---|---|---|---|
-| Chat | claude-code | 13 | 2 | 3 | Supported |
-| Chat | codex | 14 | 0 | 4 | Supported |
-| Chat | opencode | 8 | 1 | 9 | Supported |
-| Chat | antigravity | 8 | 0 | 10 | Supported |
-| Chat | cursor | 7 | 0 | 11 | Unsupported |
-| Chat | local-acp | 6 | 3 | 9 | Unknown |
-| Fleet | claude-code | 10 | 0 | 8 | Supported |
-| Fleet | gemini-cli | 8 | 0 | 10 | Unsupported |
-| Fleet | codex | 9 | 0 | 9 | Supported |
-| Fleet | opencode | 9 | 0 | 9 | Supported |
-| Fleet | kimi-code | 7 | 0 | 11 | Unsupported |
-| Fleet | hermes | 0 | 0 | 18 | Unsupported |
-| Fleet | antigravity | 8 | 2 | 8 | Unknown |
-| Fleet | cursor | 0 | 0 | 18 | Unsupported |
-| Tui | claude-code | 11 | 1 | 6 | Supported |
-| Tui | gemini-cli | 6 | 3 | 9 | Unsupported |
-| Tui | codex | 10 | 1 | 7 | Supported |
-| Tui | opencode | 8 | 2 | 8 | Supported |
-| Tui | kimi-code | 5 | 4 | 9 | Unsupported |
-| Tui | hermes | 6 | 3 | 9 | Unknown |
-| Tui | antigravity | 5 | 4 | 9 | Unsupported |
-| Tui | cursor | 5 | 3 | 10 | Unsupported |
-| **Total** | 22 colunas × 18 = 396 células | 163 | 29 | 204 | |
+|---|---|---:|---:|---:|---|
+| Chat | claude-code | 14 | 2 | 3 | Supported |
+| Chat | codex | 14 | 0 | 5 | Supported |
+| Chat | opencode | 9 | 1 | 9 | Supported |
+| Chat | antigravity | 9 | 0 | 10 | Supported |
+| Chat | cursor | 8 | 0 | 11 | Unsupported |
+| Chat | local-acp | 6 | 3 | 10 | Unknown |
+| Fleet | claude-code | 10 | 0 | 9 | Supported |
+| Fleet | gemini-cli | 8 | 0 | 11 | Unsupported |
+| Fleet | codex | 9 | 0 | 10 | Supported |
+| Fleet | opencode | 9 | 0 | 10 | Supported |
+| Fleet | kimi-code | 7 | 0 | 12 | Unsupported |
+| Fleet | hermes | 0 | 0 | 19 | Unsupported |
+| Fleet | antigravity | 8 | 2 | 9 | Unknown |
+| Fleet | cursor | 0 | 0 | 19 | Unsupported |
+| Tui | claude-code | 11 | 3 | 5 | Supported |
+| Tui | gemini-cli | 6 | 3 | 10 | Unsupported |
+| Tui | codex | 10 | 2 | 7 | Supported |
+| Tui | opencode | 8 | 2 | 9 | Supported |
+| Tui | kimi-code | 5 | 4 | 10 | Unsupported |
+| Tui | hermes | 6 | 3 | 10 | Unknown |
+| Tui | antigravity | 5 | 4 | 10 | Unsupported |
+| Tui | cursor | 5 | 3 | 11 | Unsupported |
+| **Total** | 22 colunas × 19 = 418 células | 167 | 32 | 219 | |
 <!-- contagem-matriz:fim -->
 
 Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
@@ -176,6 +180,9 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 |---|---|---|
 | chat/claude-code | `compact` | captura real recebendo `/compact` como linha `user` e o evento que marca a conclusão |
 | chat/claude-code | `goal` | evento do Claude com o status do objetivo e prova de que `/goal` como linha `user` é executado |
+| tui/claude-code | `compact` | captura real de `/compact` executado na TUI e evento observável de conclusão |
+| tui/codex | `compact` | captura real de `/compact` executado na TUI do Codex |
+| tui/claude-code | `goal` | captura real de `/goal` executado na TUI e do estado persistente retornado |
 | chat/opencode | `resume` | a captura de handshake existe, mas o replay não a ingere: a bancada só lê a resposta de id 2, e nela o `session/resume` de sessão inexistente é `-32602`; `session/new` (id 4) cria a sessão. Falta casear o id que o ADE enviou, e um turno de modelo |
 | chat/local-acp | `approval`, `usage`, `ags_mcp` | captura de um agente ACP local real (pedido de permissão, resposta do `session/prompt`, ferramentas `ags`) |
 | chat/local-acp | `resume` | o descritor de sessão ler `agentCapabilities` do `initialize` |
@@ -585,54 +592,42 @@ grep -rn --include='*.rs' -E '"claude-code"|"codex"|"opencode"|"antigravity"|"cu
 grep -rn --include='*.ts' --include='*.tsx' -E "['\"](codex|claude-code|claude|opencode|antigravity|cursor|gemini-cli|kimi-code|hermes)['\"]" src | grep -v -E '\.test\.|/tests/|__tests__|test/'
 ```
 
-| Linguagem | Linhas | Arquivos | Capability ou comportamento do harness (migrar) | Registro, adaptador ou apresentação (permitido) | Contas, uso e limites | Padrão de produto, catálogo, fixture |
-|---|---|---|---|---|---|---|
-| Rust (baseline documentada) | 284 | 57 | 149 em 26 arquivos | 54 em 10 | 40 em 9 | 41 em 12 |
-| TS/TSX (baseline documentada) | 182 | 55 | 88 em 36 arquivos | 43 em 6 | 51 em 13 | 0 |
+**Antes desta rodada:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**.
 
-**Reprodução em 10/11/2026, antes desta migração:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**. O comando acima reproduz esses totais brutos. Os subtotais por papel na tabela são a classificação da auditoria de 09/11 e ainda não foram recontados linha a linha; portanto não descrevem essa reprodução atual.
+**Depois desta rodada:** Rust **298 linhas em 56 arquivos**; TS/TSX **162 linhas em 53 arquivos**. São ocorrências brutas de nomes; ainda incluem escolhas de parser, executável, formato, produto e catálogo. Não representam inferências de capability.
 
-**Depois desta rodada:** Rust **306 linhas em 57 arquivos**; TS/TSX **176 linhas em 55 arquivos**. No TypeScript saíram sete linhas brutas líquidas, incluindo gates que agora consultam a matriz e comparações de provider que foram para o registro de compatibilidade. Rust ficou no mesmo total bruto: duas comparações migraram (`approval` e `child_stop`) e duas linhas do teste inline de `chat providers` contêm o provider serializado; `troca.rs` deixou de ser contado como arquivo. O guard reduziu de **112 para 102 comparações**. `steer`, `interrupt`, `compact`, `goal`, `approval` e `child_stop` migraram parcialmente; `start` também chega ao seletor.
+O guarda anterior tinha baseline de **102 comparações diretas**. O guarda ampliado procura decisões de capability por comparação direta, `matches!`, expressões e braços de `match`, `switch` e listas em `.includes(agent)`, `.has(agent)` e `.contains(agent)`, examinando a declaração, condição e ramo. Depois das migrações, o baseline de capability ficou vazio (**0 ocorrências**). A comparação não é uma subtração bruta de 102: o novo critério exclui identidade sem decisão de capability, como escolher parser, CLI, conta ou formato, que pertence ao adapter/registro. `provider_comparisons.baseline.json` registra apenas exceções classificadas; no estado final não há exceções.
 
-Ressalvas: a contagem é bruta. Inclui testes inline dentro de arquivos de produção (`runs/oneshot.rs`, `runs/plan.rs`, `ipc/commands/pool.rs`) e falsos positivos de paginação (`"cursor"` em `ipc/mcp.rs:1011` e `:1044`, `runs/orchestration.rs:234`, `runs/model_discovery.rs:731`). A classificação por arquivo é por leitura do papel do arquivo, não linha a linha. O número "98" do inventário `tui-acp-frota` não é reprodutível e não deve ser citado.
+### 6.2 Fonte única e critério do guarda
 
-### 6.2 Fonte única proposta
+- `harness::matrix` é a fonte de estado das capabilities por provider e superfície; `agents/registry.rs` e os adapters guardam identidade, protocolo e implementação concreta. `harness_capability_matrix` expõe a matriz pelo Tauri, e `harness::matrix::supports` faz a consulta tipada no Rust.
+- `Engine::capabilities()` deriva `steer`, `compact`, `goal` e `plan` da matriz. No caminho estruturado, envio, interrupção, compactação, objetivo e criação recusam `Unsupported` com erro explícito. O frontend consulta a mesma matriz por uma store compartilhada; `plan` só habilita o compositor quando a célula está `Supported`. `Unknown` continua distinguível e mantém os caminhos legados existentes onde a interface/API já os oferecia.
+- A Frota consulta `Start` antes de iniciar ou atribuir uma execução; o adapter decide se sabe executar headless e orquestrar. Regras de stdin, `result_schema`, prioridade read-only, perfil isolado e atualização de cota posterior pertencem ao adapter headless.
+- `watch_db` usa o adapter de conversa para escolher o parser de pressão da janela Claude. Isso não infere a capability geral `usage`: a célula `Usage` significa uso, custo ou limite por sessão, não o contador de contexto.
+- O guarda percorre Rust e TypeScript/TSX de produção fora dos adapters/registros e arquivos de teste; em arquivos Rust, ignora o trecho `#[cfg(test)]`. No frontend, `harnessCapabilities.ts` é o registro compartilhado de compatibilidade. Só conta quando há id conhecido, comparação do agente/provider e marca de capability na expressão, declaração, condição ou ramo. Testes sintéticos cobrem `matches!`, expressões e braços de `match`, `switch`, comparações `==`/`!=` e listas nomeadas em `.includes(agent)`, `.has(agent)` e `.contains(agent)`. Escolhas de parser, executável, conta, formato e apresentação sem decisão de capability ficam fora do grupo.
 
-- **Uma só fonte:** `harness::matrix` (esta Fase 0) para o que cada provider promete, e o registro de agentes (`agents/registry.rs`) para o que ele **é** (comando, MCP, retomada, sessões). O descritor não duplica o registro: aponta para ele. `harness_capability_matrix` expõe a matriz inteira ao frontend pelo Tauri; `harness::matrix::supports` é a consulta tipada no backend.
-- **Quem consome:** `Engine::capabilities()` (`conversa/api.rs`) deriva `steer`, `compact` e `goal` da matriz; `Unknown` preserva a disponibilidade legada e só `Unsupported` bloqueia. `harness_capability_matrix` fornece a matriz ao frontend; o seletor e o compositor estruturado consultam uma store única. `ags chat providers` agora inclui `harnessCapabilities` para cada provider nativo e para o ACP local.
-- **Regra de saída (Fase 3):** nenhuma comparação `agent_id == "<nome>"` decide capability fora do adapter e do registro. Um teste de lint com baseline (mesma ideia do `check:test-lint`) falha quando o número de ocorrências do grupo "migrar" cresce.
-- A fonte inclui o escopo por **sessão**: o ACP local lê `agentCapabilities`; o Claude só marca `steer` quando houver captura.
+### 6.3 Migrações da rodada
 
-### 6.3 Lista por arquivo (grupo "migrar")
-
-**Rust** (linhas brutas): `conversa/api.rs` 31, `database/queries/session_search.rs` 13, `ipc/commands/conversas.rs` 12, `runs/roster.rs` 12, `runs/oneshot.rs` 8, `runs/plan.rs` 7, `canal/mod.rs` 6, `chat_team/permission.rs` 5, `ai_memory/tabs.rs` 5, `ipc/transport.rs` 5, `ipc/commands/canal.rs` 5, `ipc/mcp.rs` 5, `ipc/commands/peers.rs` 4, `runs/orchestration.rs` 4, `runs/supervisor.rs` 4, `session/panel.rs` 4, `runs/fixrounds.rs` 3, `runs/routing.rs` 3, `runs/mod.rs` 3, `session/title.rs` 3, `canal/timeline.rs` 2, `conversa/troca.rs` 1, `terminal/pty_manager.rs` 1, `chat_team/watch_db.rs` 1, `squads/store.rs` 1, `runs/quota.rs` 1.
-
-**TS/TSX:** `chat/AgentModelPicker.tsx` 11, `chat/NewConversation.tsx` 7, `missions/vigia.ts` 7, `chat/structured/StructuredConversationView.tsx` 6, `chat/chatModel.ts` 5, `chat/ComposerAssistMenu.tsx` 5, `missions/modelFlags.ts` 5, `chat/ClaudeAutoCompactSetting.tsx` 3, `runs/RoutingSection.tsx` 3, e 27 arquivos com 1 ou 2 ocorrências (`chat/tasks/useConversationTasks.ts`, `chat/team/teamModel.ts`, `chat/structured/switchModel.ts`, `chat/ChatSidebar.tsx`, `chat/ConversationView.tsx`, `canvas/tabTuning.ts`, `canvas/RoleEditDialog.tsx`, `squads/*`, `terminal/Terminal.tsx`, `tabs/continuity.ts`, `palette/CommandPalette.tsx` e outros).
-
-Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
-
-| Capability afetada | Onde |
+| Área | Resultado |
 |---|---|
-| `child_stop` | `conversa/api.rs` consulta `ChildStop` antes do `stop_task`; a matriz confirma Claude `Supported` e Codex `Unsupported` |
-| `compact`, `goal` | `conversa/api.rs` e `chat.providers` usam a matriz; o composer estruturado desabilita `Unsupported` com a nota. A matriz da TUI contradiz a oferta legada de `/compact` para Codex/Claude e `/goal` para Claude; essas exceções ficaram centralizadas no registro de compatibilidade e precisam de decisão sobre o contrato antes da migração. `autocompact` fica no registro porque a matriz Chat não descreve essa sintaxe nativa.
-| `steer`, `interrupt` | `conversa/api.rs` e a escolha de envio/parada no compositor estruturado usam a matriz; `PROTOCOL_AGENTS` ainda informa acesso e Plano, que não são capabilities da matriz. |
-| `approval` | `conversa/troca.rs` e `chat/structured/switchModel.ts` consultam `Approval`; ACP local mantém sua regra própria enquanto a célula é `Unknown`. |
-| `usage` | `chat_team/watch_db.rs:257`, `chat/summary/LimitsCard.tsx:27-33` |
-| `resume` | `conversa/codex.rs:268`, `opencode.rs:194`, `tabs/continuity.ts:24` |
-| `ags_mcp` | `ipc/mcp.rs:2905`, `:2922`; `agents/adapter.rs:55`, `:93` (o flag que contradiz o registro) |
-| contrato duplicado | `ipc/commands/conversas.rs:78-124`, `conversa/api.rs:124-139` (`supports_access` deixa o ACP local aceitar cinco modos; a abertura só aceita `ask`, `opencode.rs:211-213`) |
+| Frontend: `steer`, `interrupt`, `compact`, `goal`, `approval`, `start` | Consultas via store única da matriz; seletores bloqueiam `Unsupported`. `plan` também usa a matriz. |
+| API e MCP de conversa | `chat_new`, `chat_send`, `chat_stop`, `chat_compact` e `chat_goal` passam pelos gates de `Start`, `Send`, `Interrupt`, `Compact` e `Goal`; as tools MCP compartilham as rotas e recebem erro claro em `Unsupported`. |
+| Frota e orquestração | `Start` é validado antes do roteamento/criação de tarefa. Stdin, `result_schema`, read-only, perfis de tarefa, fast mode e refresh de cota são declarados pelo adapter headless. |
+| `teamModel.ts` e `watch_db.rs` | O modo de leitura deriva `plan` da célula TUI; o parser de pressão de contexto consulta o adapter em vez de comparar o nome. |
+| `plan` | Nova capability em todas as 22 colunas, com evidência e prova por célula. O compositor e os modos de conversa só ativam Plano quando a matriz diz `Supported`. |
+| Guarda e baseline | A busca cobre as formas indiretas de §6.2. Baseline anterior: 102 comparações diretas; baseline final: 0 inferências de capability fora do adapter/registro. |
 
-### 6.4 Ordem de migração e estado
+### 6.4 Critério de saída da Fase 0
 
-1. **Concluído:** `harness::matrix::supports` consulta a matriz; `harness_capability_matrix` expõe-a pelo Tauri e `ags chat providers` inclui a coluna `harnessCapabilities`.
-2. **Pendente:** substituir a cópia de modos de acesso e Plano em `PROTOCOL_AGENTS` exige uma fonte Tauri para `EngineCapabilities`; essas opções não correspondem às 18 células atuais da matriz. Manter teste de paridade até haver contrato comum.
-3. **Parcial:** `Engine::capabilities()` deriva `steer`, `compact` e `goal`; o MCP `chat_goal` recusa `Unsupported`; o gate de `stop_task` consulta `ChildStop`. Frontend consulta `steer`, `interrupt`, `compact`, `goal`, `approval` e `start`. Faltam `teamModel.ts`, `watch_db.rs` e outros comportamentos em `api.rs`; Plano não tem célula na matriz. As células TUI de `/compact` e `/goal` divergem dos comandos legados oferecidos; `autocompact` continua na compatibilidade Claude, pois a matriz Chat não descreve essa sintaxe nativa. `pause/resume` de goal também fica no registro do Codex: a matriz não tem uma capability separada para essas ações.
-4. **Pendente:** migrar Frota e orquestração (`supervisor.rs`, `mcp.rs`, `oneshot.rs`, `plan.rs`, `roster.rs`).
-5. **Pendente:** contas, uso e limites continuam no registro, não no descritor de execução.
-6. **Parcial:** `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro` lê Rust e TS/TSX e aplica baseline por arquivo e expressão. Remove-se a linha do baseline junto com cada migração; o baseline caiu de 112 para **102** comparações. A comparação guarda `agent_id`, `agentId`, `agent` ou `provider` com igualdade textual a um provider conhecido; padrões mais indiretos ainda precisam ser cobertos.
-7. **Pendente:** trocar os `unreachable!` (`api.rs:840`, `:953`, `:989`) por erro de capability, para uma flag ligada sem implementação não derrubar o processo.
+**Fechado nesta rodada:** nenhuma capability é inferida por comparação de nome fora do adapter/registro. O guarda indireto passa com baseline vazio (**0**); as comparações de identidade que restam escolhem implementação, parser, executável, conta ou apresentação, sem declarar suporte.
 
-**Faltam para a Fase 0:** migração dos pontos restantes acima; a UI ainda não trata Plano pela matriz porque não há essa capability; decidir as divergências TUI de `/compact` e `/goal`; aplicar indisponibilidade no MCP às demais tools/capabilities `Unsupported`; ampliar o teste de guarda para padrões mais indiretos; e recontar os subtotais por papel. O seletor preserva providers `Unknown`; no composer estruturado, `Unsupported` fica desabilitado com a nota da célula. `Unknown` não é bloqueado.
+**Plano e prova.** `plan` é uma das 19 capabilities em cada coluna. As 22 células de `plan` têm evidência não vazia e prova diferente de `None`, conferidas por teste. Nenhuma delas afirma `RealCapture`; a prova é de código/tabela. O compositor consulta a matriz e só oferece a ação Plano quando a célula é `Supported`.
+
+**Divergência da TUI.** O composer legado ainda aceita `/compact` de Claude/Codex e `/goal` de Claude, mas o contrato não tem captura que prove execução e resposta observável. As três células ficam `Unknown`; a disponibilidade legada não reclassifica a matriz como `Supported`. `Unknown` significa que o ADE não promete o efeito. O seletor de Plano não usa esse fallback.
+
+**`Unsupported` no MCP.** `chat_new`, envio, parada, compactação e objetivo passam pelos gates compartilhados de `Start`, `Send`, `Interrupt`, `Compact` e `Goal`; tarefa da Frota valida `Start` antes do roteamento/criação. A resposta explicita capability, provider e superfície.
+
+**Não sobra lacuna do critério de saída.** Capturas reais de Claude/Codex para `/compact` e de Claude para `/goal` continuam como pendência de prova em §1.4; não impedem fechar o critério, pois suas células permanecem `Unknown`. Nenhum CLI real foi executado nesta rodada.
 
 ## 7. Fatia vertical da Fase 1
 
@@ -706,18 +701,27 @@ Só o que é decisão de produto ou de autorização.
 
 ## 9. O que foi e o que não foi verificado
 
-**Verificado**
-- `cd src-tauri && cargo test --lib harness`: 14 testes do módulo novo passam. Eles conferem: 22 colunas esperadas; 18 capabilities em ordem por coluna; todo `Supported` com evidência e prova; todo `Unknown` com o que falta provar; todo `Unsupported` com motivo; **cada citação `arquivo:linha` aponta para arquivo e linhas que existem**; a tabela concorda com `Engine::capabilities()`; o doc concorda com a tabela.
-- `bun run check:test-lint`.
-- Leitura direta do código para D1, D2, D3, D4, D8 e D10, e para as lacunas de §1.7.
+**Verificado nesta rodada**
+- `cd src-tauri && cargo test --lib --bin ags`: biblioteca **2.933 aprovados, 0 falhas, 29 ignorados**; binário `ags`: **53 aprovados, 0 falhas**.
+- `cargo test --lib --bin ags harness::test::`: **28 aprovados, 0 falhas**. Confere as 22 colunas e 19 capabilities, todas as provas e citações, a contagem documentada, os estados `Unknown` da TUI, as provas de `plan` e o guarda de padrões indiretos.
+- `bunx tsc --noEmit`: passou.
+- `bun run check:i18n`: passou; 0 chaves ausentes ou divergentes.
+- `bun run check:test-lint`: passou; 40 violações antigas no baseline e nenhuma nova.
+- `bunx vitest run src/features/chat src/features/terminal`: **149 arquivos e 1.109 testes aprovados**.
+- `git diff --check`: passou. As dependências ausentes foram instaladas com `bun install --frozen-lockfile` (328 pacotes; lockfile sem alteração).
+
+**Falhas encontradas e corrigidas durante a migração**
+- `run_plan_rejeita_member_indisponivel_no_roster_antes_de_criar_task`: o primeiro gate de `Start` alterava o erro para provider removido. O gate agora só intercepta um `Unsupported` conhecido; o teste passou isoladamente e na suíte completa.
+- `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro`: a forma `.contains()` encontrou uma asserção de teste inline. O guarda agora ignora código sob `#[cfg(test)]`; o teste do guarda e o recorte de 28 testes passaram.
+- `a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor` e o fixture de índices de `guarda_encontra_padroes_indiretos_de_capability_sem_contar_identidade` falharam em recortes anteriores por tratar o ACP local como OpenCode e por índices desatualizados; ambos foram corrigidos e passaram na suíte completa.
 
 **Não verificado**
-- **Existir a linha não prova que ela diz o que a célula afirma.** O teste confere arquivo e intervalo. Uma auditoria linha a linha de todas as citações suspeitas e veredictos da matriz foi realizada (§9.1), corrigindo citações quebradas, afirmações não sustentadas e reclassificações comprovadas no código.
-- Nenhum provider real foi executado. Nenhuma célula tem captura real.
-- O T3 (`main` móvel) não foi relido: §2.6 repete o que o inventário `antigravity-t3.md` cita.
-- Sem medição de desempenho: o custo de `thread_execution_graph` (que carrega todas as conversas, `runs/harness.rs:100`) e de árvores profundas está **não medido**.
-- A suíte completa e o `cargo test --lib --bin ags` não foram rodados. `bun run check:fingerprint` continua falhando, como no commit base.
-- Nenhum teste visual, build, instalação, push ou PR.
+- Nenhum CLI real de agente foi executado. As células `plan` têm prova de código/tabela e nenhuma reivindica `RealCapture`; as capturas pendentes permanecem em §1.4.
+- Nenhum teste visual, build ou instalação foi feito. Também não houve push ou PR.
+- O T3 (`main` móvel) não foi relido: §2.6 repete o inventário `antigravity-t3.md`.
+- Desempenho de `thread_execution_graph` e de árvores profundas continua **não medido**.
+- `bun run check:fingerprint` e a suíte Vitest fora de `src/features/chat` e `src/features/terminal` não foram executados nesta rodada.
+- `cargo fmt --all -- --check` havia reportado diferenças de formatação em vários arquivos do repositório; não aplicou alterações e não foi reexecutado após este lote.
 
 ### 9.1 Auditoria e correções de evidências da matriz
 
@@ -759,7 +763,7 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `tui/cursor`: `resume` corrigido para `registry.rs:398`.
 
 4. **Contrato e documentação**:
-   - §1.2 e §1.3: tabelas e contagens atualizadas (163 `Supported`, 29 `Unknown`, 204 `Unsupported`).
+   - §1.2 e §1.3: na auditoria original, a matriz tinha 18 capabilities e 163 `Supported`, 29 `Unknown` e 204 `Unsupported`; a extensão `plan` e a contagem atual de 19 capabilities estão em §1.3.
    - §1.5: documentada a tensão entre retomada automática de tarefa na Frota e hand-off manual.
    - §1.7: citação de `close_orphan_runs` corrigida para `conversa/store.rs:1068-1082`.
    - §3.2: citação do Codex corrigida para `codex.rs:573-574` e frase de `SWEPT_RUNNING_ERROR` corrigida para esclarecer que `end_reason` não existe na projeção atual.
