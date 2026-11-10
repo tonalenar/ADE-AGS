@@ -2144,7 +2144,7 @@ fn scoped_chat_payload(
 }
 
 /// `delegate_agent` com `target = connected_session`: a ADE revalida a sessão e grava o recibo
-/// (`harness.delegate`). O remetente vem da aba do processo do MCP, nunca de um campo do modelo.
+/// (`team.delegate`). O remetente vem da aba do processo do MCP, nunca de um campo do modelo.
 fn delegate_to_session<F>(context: &McpContext, input: &serde_json::Map<String, Value>, send: &mut F) -> Value
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
@@ -2159,7 +2159,7 @@ where
         }
     }
     payload.insert("from".into(), json!(tab));
-    match send("harness.delegate", Value::Object(payload)) {
+    match send("team.delegate", Value::Object(payload)) {
         Ok(data) => content(data),
         Err(error) => tool_error(&error),
     }

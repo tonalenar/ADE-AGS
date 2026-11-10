@@ -1,4 +1,4 @@
-//! `harness.delegate`: `delegate_agent` com `target = connected_session` (Fase 4, contrato §12).
+//! `team.delegate` (`ags team delegate`): `delegate_agent` com `target = connected_session` (Fase 4, contrato §12).
 //!
 //! Entrega o trabalho a uma sessão que já está aberta e ligada ao time do orquestrador, pelo mesmo
 //! caminho do `peer tell`/`peer ask`. Aqui só há a cola com o app: o que a sessão é agora
@@ -14,7 +14,7 @@ use super::{peers, team};
 use crate::database::DbConnection;
 use crate::harness::delegate::{self, DelegateError, Mode, SendResult, SessionRequest};
 
-/// `harness.delegate`: o erro volta como `<código>: <mensagem>`.
+/// `team.delegate`: o erro volta como `<código>: <mensagem>`.
 pub(super) fn delegate_session(app: &AppHandle, args: &Value) -> Result<Value, String> {
     run(app, args).map_err(|error| error.render())
 }

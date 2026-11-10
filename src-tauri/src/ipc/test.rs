@@ -1254,7 +1254,7 @@ fn delegate_agent_para_sessao_conectada_vai_ao_backend_com_a_aba_real() {
     });
     let (out, sent) = mcp_session(&ctx, &[delegate_call(args)], |_, _| Ok(json!({ "delegated": true, "messageId": 7 })));
     assert_eq!(sent.len(), 1);
-    assert_eq!(sent[0].0, "harness.delegate");
+    assert_eq!(sent[0].0, "team.delegate");
     let payload = &sent[0].1;
     assert_eq!(payload["from"], "thread:pai");
     assert_eq!(payload["to"], "Codex · Backend");
@@ -1302,7 +1302,7 @@ fn o_esquema_do_delegate_agent_declara_os_tres_destinos_e_mantem_o_antigo() {
     assert_eq!(props["policy"]["enum"], json!(["read", "ask"]), "o teto nunca passa de ask");
     let required: Vec<&str> = tool["inputSchema"]["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
     assert_eq!(required, ["task", "client_request_id"]);
-    assert!(dispatched_commands().contains(&"harness.delegate".to_string()), "ninguém atende harness.delegate");
+    assert!(dispatched_commands().contains(&"team.delegate".to_string()), "ninguém atende team.delegate");
 }
 
 #[test]

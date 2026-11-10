@@ -128,6 +128,11 @@ TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por proto
                [--subagent]                     só a pessoa aumenta (painel Time). --subagent marca apoio que só executa o que você enviar
   team unlink <nome>                          Tira do time (a corda sai; a conversa continua aberta)
   team role <nome> <papel> [--policy read]    Troca o papel (e só baixa a política); [--subagent [false]] liga ou desliga a marca
+  team delegate <nome> --task \"...\"          Entrega o trabalho a uma sessão já ligada ao time (o mesmo que delegate_agent com
+               --client-request-id <id>         target=connected_session). A ADE revalida no envio: sessão conectada, livre, da sua
+               [--constraints \"...\"]           pasta ou já ligada pela pessoa, política até ask; se algo falhar nada é enviado e o erro
+               [--expecting \"...\"]             vem como <código>: <mensagem>. A mesma id repetida devolve a mesma mensagem, nunca envia de novo
+               [--mode async|wait] [--when-busy fail|queue] [--policy read|ask] [--timeout-s 300]
   Delegue com peer tell/ask/deliver, como numa missão: as conversas por protocolo recebem como mensagem
 
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
@@ -1081,6 +1086,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "team.link" | "team.unlink" => &["to"],
         "team.role" => &["to", "role"],
         "team.create" => &["title"],
+        "team.delegate" => &["to", "task"],
         "team.list" | "team.candidates" => &[],
         "ci.watch" => &["pr"],
         // `ags peer deliver --file entrega.json` (ao orquestrador) ou `ags peer deliver QA --file ...`.
@@ -1407,6 +1413,15 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(requested + 90)
         }
         "peer.tell" => Duration::from_secs(90),
+        // `team delegate` revalida e envia (`mode=async`) ou espera a resposta como o `peer ask` (`mode=wait`).
+        "team.delegate" => {
+            if args.get("mode").and_then(Value::as_str) == Some("wait") {
+                let requested = args.get("timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
+                Duration::from_secs(requested + 90)
+            } else {
+                Duration::from_secs(90)
+            }
+        }
         // `chat wait` bloqueia até o turno acabar (tope 1 h); abrir a conversa sobe o agente e começa o turno.
         "chat.wait" => {
             let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(1, 3600);

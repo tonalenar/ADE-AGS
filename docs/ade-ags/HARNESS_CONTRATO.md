@@ -954,7 +954,7 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 
 **Objetivo:** o orquestrador escolhe **onde** o trabalho vai, de forma explícita, e a mesma pergunta repetida nunca vira prompt duplicado em nenhum dos três caminhos. Núcleo de backend; a entrega durável do resultado ao pai e a UI ficam fora (§12.8).
 
-Código: `harness/delegate.rs` (decisão, recibo e classificação, provados sem o app), `ipc/commands/delegate.rs` (cola com o app, comando `harness.delegate`), `ipc/commands/team.rs` (descoberta e leitura das sessões), `ipc/mcp.rs` (esquema e roteamento), `runs/orchestration.rs` (leitura do recibo da Frota). Testes: `harness/test_fase4.rs`, `ipc/test.rs` e `runs/test.rs`.
+Código: `harness/delegate.rs` (decisão, recibo e classificação, provados sem o app), `ipc/commands/delegate.rs` (cola com o app: comando IPC `team.delegate`, na CLI `ags team delegate`), `ipc/commands/team.rs` (descoberta e leitura das sessões), `ipc/mcp.rs` (esquema e roteamento), `runs/orchestration.rs` (leitura do recibo da Frota). Testes: `harness/test_fase4.rs`, `ipc/test.rs` e `runs/test.rs`.
 
 ### 12.1 Esquema de `delegate_agent`
 
@@ -966,7 +966,7 @@ Campos comuns: `task` (obrigatório), `client_request_id` (obrigatório, até 12
 |---|---|---|---|
 | `provider_chat` | abre uma conversa nova de um provider nativo (`chat.new`, filha da chamadora) | `agent`, `model`, `effort`, `title` | `chat_new` (`chat_child_receipts`), resultado = id da conversa |
 | `fleet_task` | cria uma tarefa headless da Frota (`run.delegateTask`) | `agent`, `model`, `complexity`, `account_id`, `isolate`, `budget_usd`, `result_schema`, `write_scopes`, `role`, `title` | `fleet_delegate` (`harness_command_receipt` + `run_delegation_receipts`), resultado = id do run e as chaves das tarefas |
-| `connected_session` | entrega o trabalho a uma sessão **já aberta e ligada ao time** (`harness.delegate`, que usa `peer tell`, ou `peer ask` em `mode=wait`) | `to` (id ou nome de `team_candidates`), `constraints`, `expecting`, `policy` (`read` \| `ask`, padrão `ask`), `when_busy` (`fail` padrão \| `queue`) | `connected_session` (`harness_command_receipt`), resultado = id da mensagem |
+| `connected_session` | entrega o trabalho a uma sessão **já aberta e ligada ao time** (`team.delegate`, que usa `peer tell`, ou `peer ask` em `mode=wait`; na CLI, `ags team delegate <nome> --task … --client-request-id <id>`) | `to` (id ou nome de `team_candidates`), `constraints`, `expecting`, `policy` (`read` \| `ask`, padrão `ask`), `when_busy` (`fail` padrão \| `queue`) | `connected_session` (`harness_command_receipt`), resultado = id da mensagem |
 
 Os campos de outro destino são ignorados, não repassados. `connected_session` não cria PTY, worktree nem orçamento de Frota.
 

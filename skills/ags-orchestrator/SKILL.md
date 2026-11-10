@@ -1279,7 +1279,7 @@ above `ask`. If any check fails, nothing is written to the session and the error
 stable code (`session_busy`, `session_disconnected`, `session_not_linked`, `session_other_workspace`,
 `policy_elevated`, …). A link is never turned into full access. Repeating the same
 `client_request_id` returns the same message and never queues the prompt twice; `outcome_unknown`
-means the message may have arrived, so inspect the session before asking again.
+means the message may have arrived, so inspect the session before asking again. From the shell, `ags team delegate <name> --task "..." --client-request-id <id>` does the same.
 Native children use `chat_wait`/`chat_show` and `chat_stop`; Fleet tasks use `task_status`,
 `task_result`, `run_await` and `task_cancel`, which also stops active descendants. A native child
 starts supervised and remains linked in the side-chat panel. A Fleet child uses the scheduler's
@@ -1585,7 +1585,7 @@ flags of each command.
 | TESTES LOCAIS | `test affected`, `test run`, `test status`, `test smoke` |
 | TABS | `tab list`, `tab state`, `tab create`, `tab close`, `tab output`, `tab send` |
 | AGENTES CONECTADOS | `peers`, `peer ask`, `peer tell`, `peer check`, `peer deliver`, `peer handoff`, `peer queue`, `peer receipt`, `peer pending`, `peer answer`, `ci watch`, `notify`, `peer recruit`, `peer connect`, `peer disconnect`, `peer role` |
-| TIME DO MODO CHAT | `team list`, `team candidates`, `team create`, `team link`, `team unlink`, `team role` |
+| TIME DO MODO CHAT | `team list`, `team candidates`, `team create`, `team link`, `team unlink`, `team role`, `team delegate` |
 | CORREÇÕES | `fix list`, `fix decide` |
 | POOLS DE CONTAS | `pools`, `pool create`, `pool delete` |
 | DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device apps`, `device launch`, `device close`, `device`, `device open`, `device button`, `device rotate`, `device clipboard`, `device say` |
