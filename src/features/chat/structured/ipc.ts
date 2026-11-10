@@ -80,6 +80,22 @@ export const chatSideChatDelete = (threadId: string) => invoke<void>("chat_side_
 /** `images`: caminhos de imagens para o motor que as recebe em linha (o Claude); o caminho já está no texto. */
 export const chatThreadSend = (threadId: string, text: string, images?: string[]) =>
   invoke<void>("chat_thread_send", { threadId, text, images: images && images.length > 0 ? images : null });
+
+/** O recibo de um envio com `clientRequestId` (contrato do harness §11.7). */
+export interface SendReceipt {
+  requestId: string;
+  /** `accepted`, `submitting`, `retryable` ou `unknown`. */
+  deliveryState: string;
+  /** `true` numa repetição: o recibo veio do banco e nada foi enviado. */
+  replayed: boolean;
+  /** `true` só quando esta chamada enviou a mensagem ao provider. */
+  sent: boolean;
+  note?: string;
+}
+
+/** Como `chatThreadSend`, mas idempotente: repetir o mesmo `clientRequestId` devolve o recibo sem reenviar. */
+export const chatThreadSendOnce = (threadId: string, text: string, clientRequestId: string, images?: string[]) =>
+  invoke<SendReceipt>("chat_thread_send", { threadId, text, images: images && images.length > 0 ? images : null, clientRequestId });
 /** Troca o agente da conversa (só entre turnos): a mesma conversa, outro agente (`conversa/troca.rs`). */
 export const chatThreadSwitchAgent = (threadId: string, agentId: string, model: string | null, effort: string | null, access: ThreadAccess, accountId: string | null) =>
   invoke<ThreadRow>("chat_thread_switch_agent", { threadId, agentId, model, effort, access, accountId });

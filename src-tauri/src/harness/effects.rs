@@ -421,30 +421,30 @@ pub fn recover_expired(
     for effect in expired {
         let verdict = if effect.retry_safe { Reconcile::NotApplied } else { reconcile(&effect) };
         let resolved = atomically(conn, || {
-            let (sql_state, unknown, code): (&str, bool, Option<&str>) = match verdict {
-                Reconcile::Applied => ("completed", false, None),
-                Reconcile::NotApplied if effect.attempts < effect.max_attempts => ("pending", false, None),
-                Reconcile::NotApplied => ("failed", false, Some(EXHAUSTED_CODE)),
-                Reconcile::Unknown => ("failed", true, Some(UNKNOWN_CODE)),
+            let (next, unknown, code): (EffectState, bool, Option<&str>) = match verdict {
+                Reconcile::Applied => (EffectState::Completed, false, None),
+                Reconcile::NotApplied if effect.attempts < effect.max_attempts => (EffectState::Pending, false, None),
+                Reconcile::NotApplied => (EffectState::Failed, false, Some(EXHAUSTED_CODE)),
+                Reconcile::Unknown => (EffectState::Failed, true, Some(UNKNOWN_CODE)),
             };
             let changed = conn
                 .execute(
                     "UPDATE harness_effect
                      SET state = ?2, outcome_unknown = ?3, last_error = ?4, lease_owner = NULL, lease_until = NULL, updated_at = ?5
                      WHERE id = ?1 AND state = 'running' AND lease_until <= ?5",
-                    params![effect.id, sql_state, unknown as i64, code, now],
+                    params![effect.id, next.as_str(), unknown as i64, code, now],
                 )
                 .map_err(db_err)?
                 > 0;
             if changed {
-                match (verdict, sql_state) {
-                    (Reconcile::Applied, _) => {
+                match verdict {
+                    Reconcile::Applied => {
                         sync_receipt(conn, &effect, &[ReceiptState::Prepared, ReceiptState::Submitting], ReceiptState::Accepted, now)?
                     }
-                    (Reconcile::Unknown, _) => {
+                    Reconcile::Unknown => {
                         sync_receipt(conn, &effect, &[ReceiptState::Prepared, ReceiptState::Submitting], ReceiptState::Unknown, now)?
                     }
-                    (Reconcile::NotApplied, _) => {
+                    Reconcile::NotApplied => {
                         sync_receipt(conn, &effect, &[ReceiptState::Submitting], ReceiptState::Retryable, now)?
                     }
                 }

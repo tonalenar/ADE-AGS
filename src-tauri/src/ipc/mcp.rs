@@ -2036,10 +2036,12 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_send",
-            "description": "Send another message to a chat-mode conversation. During a turn it joins that turn (codex, claude-code) or waits in a queue for the next one (opencode, antigravity, cursor).",
+            "description": "Send another message to a chat-mode conversation. During a turn it joins that turn (codex, claude-code) or waits in a queue for the next one (opencode, antigravity, cursor). Pass a stable client_request_id when retrying after a lost response: repeating it returns the recorded receipt (`receipt.deliveryState`, `replayed`) and never sends the message again; reusing it with a different thread or text is rejected. If `deliveryState` is `unknown`, the message may have reached the agent: inspect the conversation before sending another.",
             "inputSchema": { "type": "object", "properties": {
                 "thread": thread.clone(),
-                "text": { "type": "string", "description": "The message." }
+                "text": { "type": "string", "description": "The message." },
+                "client_request_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Stable caller-generated id for safe retries after a lost response. Reusing it with different content is rejected." },
+                "clientRequestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Alias for client_request_id." }
             }, "required": ["thread", "text"] },
         }),
         json!({
@@ -2107,6 +2109,18 @@ fn scoped_chat_payload(
     command: &str,
     mut args: serde_json::Map<String, Value>,
 ) -> Value {
+    // O recibo do envio é do chamador real: o escopo vem da sessão, nunca do modelo.
+    if command == "chat.send" {
+        args.remove("caller_scope");
+        let scope = match context {
+            McpContext::Task(task) => format!("task:{task}"),
+            McpContext::Cwd { cwd, tab, .. } => match tab.as_deref().filter(|tab| !tab.trim().is_empty()) {
+                Some(tab) => format!("tab:{tab}"),
+                None => format!("cwd:{cwd}"),
+            },
+        };
+        args.insert("caller_scope".into(), json!(scope));
+    }
     // Uma conversa filha de thread usa a mesma pasta e a linhagem do chamador real. O modelo
     // não escolhe o parent_ref nem pode mudar o cwd do pai: ambos vêm do escopo da sessão.
     if let (McpContext::Cwd { cwd, tab, .. }, "chat.new") = (context, command) {
