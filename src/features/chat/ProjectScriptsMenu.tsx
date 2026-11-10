@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useShortcutPreferences } from "@/app/shortcutPrefs";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -29,6 +29,10 @@ type EditorState = { id: string | null; name: string; command: string; setup: bo
 /** Ações locais do projeto e importação revisável do t3.json. Importar nunca executa comandos. */
 export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?: ViewOwner | null }) {
   const { t } = useTranslation();
+  // O efeito de leitura roda por projeto: o `t` mais novo vale só para a mensagem de erro. Com `t` nas deps,
+  // trocar de idioma (ou um `t` novo a cada render) zerava o editor aberto e recarregava tudo em laço.
+  const tRef = useRef(t);
+  tRef.current = t;
   const { open, setOpen, ref } = usePopover<HTMLSpanElement>();
   const [scripts, setScripts] = useState<ChatProjectScript[]>(() => loadChatProjectScripts(cwd));
   const [editor, setEditor] = useState<EditorState | null>(null);
@@ -53,11 +57,11 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
     }).catch((cause) => {
       if (current) {
         setScripts(loadChatProjectScripts(cwd));
-        setError(`${t("chat.projectScripts.legacyMigrationError")} ${cause instanceof Error ? cause.message : String(cause)}`);
+        setError(`${tRef.current("chat.projectScripts.legacyMigrationError")} ${cause instanceof Error ? cause.message : String(cause)}`);
       }
     });
     return () => { current = false; };
-  }, [cwd, t]);
+  }, [cwd]);
 
   const persist = (next: ChatProjectScript[]): boolean => {
     if (!saveChatProjectScripts(cwd, next)) {
