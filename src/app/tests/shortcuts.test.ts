@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { shortcutWhensOverlap } from "../shortcutWhen";
 import {
   SHORTCUTS,
   matchShortcut,
@@ -73,16 +74,35 @@ describe("matchShortcut", () => {
   });
 
   it("una tecla que no está en la tabla no matchea", () => {
-    expect(matchShortcut(chord({ key: "z", ctrlKey: true }))).toBeNull();
+    // O `z` saiu daqui: Ctrl+Z (⌘+Z no macOS) agora é `thread.undo`, e o handler global o devolve ao terminal.
+    expect(matchShortcut(chord({ key: "j", ctrlKey: true }))).toBeNull();
+  });
+
+  it("o `when` padrão da tabela vale: Ctrl+F fora da timeline não vira busca (segue para o terminal)", () => {
+    expect(matchShortcut(chord({ key: "f", ctrlKey: true }))).toBeNull();
   });
 });
 
 describe("la tabla de atajos", () => {
-  /// Dos filas con el mismo acorde harían que la segunda fuera inalcanzable, y el síntoma
-  /// sería "este atajo no hace nada" sin ninguna pista de por qué.
-  it("no tiene acordes repetidos", () => {
-    const chords = SHORTCUTS.map((s) => `${s.key}${s.shift ? "+shift" : ""}`);
-    expect(new Set(chords).size).toBe(chords.length);
+  /// Dos filas con el mismo acorde y condiciones que pueden cumplirse a la vez harían que la segunda fuera
+  /// inalcanzable, y el síntoma sería "este atajo no hace nada" sin ninguna pista de por qué. Repetir el acorde
+  /// vale cuando los `when` no se solapan (Ctrl+1…9 sirve a la lista, al selector de modelos o a la paleta).
+  it("no tiene acordes repetidos con condiciones que se solapan", () => {
+    const sameChord = (a: (typeof SHORTCUTS)[number], b: (typeof SHORTCUTS)[number]) => a.key === b.key
+      && (a.ctrl ?? true) === (b.ctrl ?? true) && Boolean(a.shift) === Boolean(b.shift)
+      && Boolean(a.alt) === Boolean(b.alt) && Boolean(a.meta) === Boolean(b.meta);
+    // Sin tecla = acción sin acorde por defecto (solo paleta o Configuración).
+    const withChord = SHORTCUTS.filter((s) => s.key !== "");
+    const clashes: string[] = [];
+    withChord.forEach((a, i) => withChord.slice(i + 1).forEach((b) => {
+      if (sameChord(a, b) && shortcutWhensOverlap(a.when, b.when)) clashes.push(`${a.id} × ${b.id}`);
+    }));
+    expect(clashes).toEqual([]);
+  });
+
+  it("los ids son únicos", () => {
+    const ids = SHORTCUTS.map((s) => s.id);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("las teclas están en minúscula, que es como se comparan", () => {
