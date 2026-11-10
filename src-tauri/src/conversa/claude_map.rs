@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use serde_json::{json, Value};
 
 use crate::canal::event::{clip, first_line, parse_ts_ms};
-use crate::canal::timeline::{claude_context_tokens, claude_tokens, claude_tool, result_text, Item, ItemKind, ToolKind, ToolStatus, UsageBreakdown};
+use crate::canal::timeline::{app_resource_of, claude_context_tokens, claude_tokens, claude_tool, result_text, AppResource, Item, ItemKind, ToolKind, ToolStatus, UsageBreakdown};
 
 use super::codex_map::{Ask, DeltaKind};
 use super::store::ThreadRow;
@@ -154,6 +154,8 @@ struct EarlyResult {
     meta_denied: bool,
     error: bool,
     output: Option<String>,
+    /// O recurso `ui://` do MCP Apps, já separado do texto (que é cortado).
+    app: Option<AppResource>,
 }
 
 /// Lê a saída do Claude linha a linha. Guarda o que precisa para dar ids estáveis (o texto que
@@ -308,6 +310,7 @@ impl Mapper {
                         meta_denied: meta.get(id).is_some_and(|d| *d != "accept"),
                         error: block.get("is_error").and_then(Value::as_bool) == Some(true),
                         output: result_text(block.get("content")).filter(|o| !o.trim().is_empty()),
+                        app: app_resource_of(block.get("content")),
                     };
                     if let Some(item) = self.tools.remove(id) {
                         out.push(Out::Item(Box::new(self.finish_tool(item, pending))));
@@ -327,6 +330,8 @@ impl Mapper {
         let denied = self.denied.remove(&item.id) || pending.meta_denied;
         let error = pending.error;
         item.status = Some(if denied { ToolStatus::Denied } else if error { ToolStatus::Error } else { ToolStatus::Done });
+        // O app MCP (`ui://`) vai no campo próprio, nunca pelo corte do `output`.
+        item.app_resource = pending.app;
         if let Some(output) = pending.output {
             // O plano já está no item; o "ok" do Claude não acrescenta nada.
             if item.name.as_deref() != Some("ExitPlanMode") || denied || error {

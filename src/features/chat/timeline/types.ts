@@ -26,6 +26,16 @@ export interface UsageBreakdown {
   reasoningInOutput?: boolean;
 }
 
+/**
+ * O recurso de UI do MCP Apps (`ui://`) que a ferramenta devolveu, guardado pelo backend fora do `output` (que é
+ * cortado). `html` já vem decodificado e limitado a 512 KiB.
+ */
+export interface TimelineAppResource {
+  uri: string;
+  mimeType: string;
+  html: string;
+}
+
 export interface TimelineItem {
   kind: TimelineItemKind;
   id: string;
@@ -52,6 +62,8 @@ export interface TimelineItem {
   contextTokens?: number;
   /** A ADE já tentou compactar automaticamente a ponta deste contexto. */
   autoCompactAttempted?: boolean;
+  /** O app MCP que a ferramenta devolveu. A tela o mostra isolado no lugar do resultado. */
+  appResource?: TimelineAppResource;
 }
 
 export interface Timeline {
