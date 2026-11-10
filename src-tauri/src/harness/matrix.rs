@@ -301,7 +301,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Send, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:344-351"], "o prompt vai ao stdin só na partida e o stdin é fechado"),
             unsup(Capability::Steer, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:344-351"], "não há mensagem a uma tarefa em curso"),
             sup(Capability::Interrupt, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:535-537", "src-tauri/src/runs/supervisor.rs:613-648", "src-tauri/src/terminal/containment.rs:119-121"], "mata o grupo de processos; não é interrupção graciosa"),
-            sup(Capability::TurnCompletion, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:63-90", "src-tauri/src/runs/adapters.rs:699-701"], "não há frame final no protocolo; código 0 fica `failed`"),
+            sup(Capability::TurnCompletion, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:63-90", "src-tauri/src/runs/adapters.rs:715-721"], "não há frame final no protocolo: o código 0 é o único sinal e conta como sucesso"),
             sup(Capability::ToolEvents, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:678-695"], "só o início da ferramenta"),
             unsup(Capability::Question, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:639-656"], "não recebe MCP"),
             unsup(Capability::Approval, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:625-627", "src-tauri/src/runs/adapters.rs:704-706"], "aprova tudo; não pode ser lead (`enforces_read_only` falso)"),

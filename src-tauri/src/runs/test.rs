@@ -3548,9 +3548,10 @@ mod otras_tuis {
                 .iter()
                 .any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Bash(ls -la)"))
         );
+        // Sem frame final no protocolo do Kimi, o código 0 continua sendo sucesso.
         let fin = agent.finish(None, 0);
-        assert!(!fin.ok, "o protocolo do Kimi não tem frame final");
-        assert_eq!(fin.error.as_deref(), Some(crate::runs::types::MISSING_FINAL_RESULT));
+        assert!(fin.ok);
+        assert_eq!(fin.result.as_deref(), Some("No hay nada."));
         assert!(
             eventos
                 .iter()
@@ -3561,7 +3562,7 @@ mod otras_tuis {
     #[test]
     fn saida_zero_sem_frame_final_nao_e_sucesso() {
         let frase = crate::runs::types::MISSING_FINAL_RESULT;
-        for id in ["opencode", "codex", "gemini-cli", "kimi-code"] {
+        for id in ["opencode", "codex", "gemini-cli"] {
             let agent = adapter_for(id).unwrap();
             let fin = agent.finish(None, 0);
             assert!(!fin.ok, "{id}");

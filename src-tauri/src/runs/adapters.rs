@@ -713,7 +713,11 @@ impl HeadlessAgent for Kimi {
     }
 
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
-        lock(&self.0).finish_with(emitted, code)
+        // O `--print` do Kimi não tem frame que encerre o turno: o código de saída é o único sinal.
+        // Exigir um frame aqui faria toda tarefa do Kimi que terminou bem virar falha.
+        let mut tally = lock(&self.0);
+        tally.final_frame = true;
+        tally.finish_with(emitted, code)
     }
 
     /// `--prompt` siempre aprueba solo: no hay cómo sacarle las ediciones ni el shell.
