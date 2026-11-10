@@ -26,6 +26,7 @@ pub mod claude;
 pub mod claude_map;
 pub mod codex;
 pub mod codex_map;
+pub mod codex_parar;
 pub mod envio;
 pub mod events;
 pub mod handoff;
@@ -61,6 +62,8 @@ mod tarefas_test;
 mod test;
 #[cfg(test)]
 mod test_bancada;
+#[cfg(test)]
+mod test_codex_parar;
 #[cfg(test)]
 mod test_memoria;
 #[cfg(test)]

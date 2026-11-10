@@ -227,6 +227,7 @@ PATH do shell de login e a pasta do instalador do Cursor).
   As perguntas do agente à pessoa (`interaction_query`) não travam: o `cursor-agent -p` as recusa sozinho.
 - **Parar sem agente vivo** (todos os motores, `api::stop`, também `ags chat stop`): fecha no banco o turno que ficou aberto
   daquela conversa, com o fim «o agente já não estava rodando», e a janela volta a ociosa. Antes, o Parar não fazia nada.
+- **Parar do Codex antes do `turn/started`** (`codex_parar.rs`): o app-server só aceita `turn/interrupt` depois do aviso e antes recusa com `-32600`, então o turno seguia rodando e o Parar sumia. Agora o Parar recebido entre o `turn/start` e o `turn/started` fica **pendente na sessão** e sai quando o aviso chega; se o turno acaba antes (ou o `turn/start` falha), a pendência é descartada. Sem turno aberto nem `turn/start` a caminho, o Parar cai no fechamento do turno órfão acima.
 
 ### Antigravity por protocolo (`agy --print` em stream-json)
 
