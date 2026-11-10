@@ -774,6 +774,132 @@ mod retomada {
     }
 }
 
+// ── Cursor e Antigravity: um processo por turno, a retomada não se repete às cegas ──
+
+mod retomada_por_turno {
+    use std::cell::RefCell;
+
+    use super::super::resume::{lost_notice, run_turn_resuming, TurnAttempt};
+    use super::super::{agy_map, cursor_map};
+
+    type Refused = fn(&[String]) -> bool;
+
+    /// Os dois motores de um processo por turno e a frase que cada CLI escreveria para uma sessão inexistente.
+    fn motores() -> [(&'static str, Refused, &'static str); 2] {
+        [
+            ("cursor", cursor_map::session_refused, "Error: chat not found: abc"),
+            ("antigravity", agy_map::session_refused, "AGY_ERROR: {\"status\":\"NOT_FOUND\",\"message\":\"conversation abc not found\"}"),
+        ]
+    }
+
+    fn falha(began: bool, stderr: &[&str]) -> TurnAttempt<&'static str> {
+        TurnAttempt { result: Err(stderr.last().copied().unwrap_or("O processo terminou sem responder").to_string()), began, stderr: stderr.iter().map(|l| l.to_string()).collect() }
+    }
+
+    fn ok(valor: &'static str) -> TurnAttempt<&'static str> {
+        TurnAttempt { result: Ok(valor), began: true, stderr: Vec::new() }
+    }
+
+    /// Roda o guarda com as tentativas roteirizadas (em ordem). Devolve o desfecho e o que aconteceu, em ordem:
+    /// `run:<id|->`, `forget` e `notice:<código>`. Sem processo e sem relógio.
+    fn rodar(remote: Option<&str>, refused: Refused, script: Vec<TurnAttempt<&'static str>>) -> (Result<&'static str, String>, Vec<String>, Vec<String>) {
+        let script = RefCell::new(script.into_iter());
+        let eventos = RefCell::new(Vec::new());
+        let avisos = RefCell::new(Vec::new());
+        let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(run_turn_resuming(
+            remote,
+            refused,
+            |id| {
+                eventos.borrow_mut().push(format!("run:{}", id.unwrap_or("-")));
+                let next = script.borrow_mut().next().expect("tentativa a mais: o turno foi repetido");
+                async move { next }
+            },
+            || eventos.borrow_mut().push("forget".into()),
+            |code, text| {
+                eventos.borrow_mut().push(format!("notice:{code}"));
+                avisos.borrow_mut().push(text.to_string());
+            },
+        ));
+        (out, eventos.into_inner(), avisos.into_inner())
+    }
+
+    #[test]
+    fn a_sessao_recusada_antes_de_qualquer_evento_roda_o_turno_novo_uma_vez_e_avisa() {
+        for (motor, refused, frase) in motores() {
+            let (out, eventos, avisos) = rodar(Some("abc"), refused, vec![falha(false, &["aviso qualquer", frase]), ok("nova")]);
+            assert_eq!(out, Ok("nova"), "{motor}");
+            assert_eq!(eventos, ["run:abc", "forget", "notice:resumeLost", "run:-"], "{motor}: limpa o id, avisa e só então roda sem retomada");
+            assert_eq!(avisos, [lost_notice(frase)], "{motor}: o aviso diz o motivo");
+        }
+    }
+
+    #[test]
+    fn a_nova_sessao_que_tambem_falha_nao_e_repetida() {
+        for (motor, refused, frase) in motores() {
+            let (out, eventos, _) = rodar(Some("abc"), refused, vec![falha(false, &[frase]), falha(false, &[frase])]);
+            assert_eq!(out, Err(frase.to_string()), "{motor}");
+            assert_eq!(eventos.iter().filter(|e| e.starts_with("run:")).count(), 2, "{motor}: o turno novo roda uma vez só");
+        }
+    }
+
+    #[test]
+    fn a_falha_depois_de_eventos_do_turno_nao_repete_nada_e_mantem_o_id() {
+        for (motor, refused, frase) in motores() {
+            // Mesmo com a frase de sessão inexistente no stderr: o agente já começou (e pode ter editado e rodado).
+            let (out, eventos, avisos) = rodar(Some("abc"), refused, vec![falha(true, &[frase])]);
+            assert_eq!(out, Err(frase.to_string()), "{motor}");
+            assert_eq!(eventos, ["run:abc"], "{motor}: nenhuma repetição, o id não é limpo");
+            assert!(avisos.is_empty(), "{motor}");
+        }
+    }
+
+    #[test]
+    fn o_file_not_found_de_uma_ferramenta_no_stderr_nao_repete_o_turno() {
+        for (motor, refused, _) in motores() {
+            for linha in ["Error: file not found: src/main.rs", "ENOENT: no such file or directory, open 'a.txt'", "tool read failed: path not found"] {
+                let (out, eventos, avisos) = rodar(Some("abc"), refused, vec![falha(false, &[linha])]);
+                assert_eq!(out, Err(linha.to_string()), "{motor}: {linha}");
+                assert_eq!(eventos, ["run:abc"], "{motor}: {linha}");
+                assert!(avisos.is_empty(), "{motor}: {linha}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_retomada_que_funciona_nao_abre_sessao_nova_nem_avisa() {
+        for (motor, refused, _) in motores() {
+            let (out, eventos, avisos) = rodar(Some("abc"), refused, vec![ok("retomada")]);
+            assert_eq!(out, Ok("retomada"), "{motor}");
+            assert_eq!(eventos, ["run:abc"], "{motor}");
+            assert!(avisos.is_empty(), "{motor}");
+        }
+    }
+
+    #[test]
+    fn sem_id_remoto_ou_com_erro_sem_explicacao_nao_ha_nova_tentativa() {
+        for (motor, refused, frase) in motores() {
+            // Primeiro turno da conversa: não há sessão a perder, então não há aviso nem repetição.
+            let (out, eventos, _) = rodar(None, refused, vec![falha(false, &[frase])]);
+            assert_eq!(out, Err(frase.to_string()), "{motor}");
+            assert_eq!(eventos, ["run:-"], "{motor}");
+            // Erro transitório sem a frase (processo que caiu, stderr vazio): o prompt já saiu, o turno só falha.
+            let (out, eventos, _) = rodar(Some("abc"), refused, vec![falha(false, &[])]);
+            assert!(out.is_err(), "{motor}");
+            assert_eq!(eventos, ["run:abc"], "{motor}");
+        }
+    }
+
+    #[test]
+    fn o_turno_que_acabou_sem_erro_ou_parado_nao_e_repetido_mesmo_com_a_frase_no_stderr() {
+        for (motor, refused, frase) in motores() {
+            let parado = TurnAttempt { result: Ok("parado"), began: false, stderr: vec![frase.to_string()] };
+            let (out, eventos, _) = rodar(Some("abc"), refused, vec![parado]);
+            assert_eq!(out, Ok("parado"), "{motor}");
+            assert_eq!(eventos, ["run:abc"], "{motor}");
+        }
+    }
+}
+
 // ── Etapa 3 (A1): opções do OpenCode que não se engolem, e o item de aviso ──
 
 mod opcoes {

@@ -209,7 +209,7 @@ Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta
 
 | # | Inventário | Afirmação | O que o código mostra | Efeito na matriz |
 |---|---|---|---|---|
-| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:285`, `opencode.rs:231`. Cursor e Antigravity **não** usam (`cursor.rs:326-336`, `agy.rs:312-322`) | Inventário errado no ponto. A observação de `resume` em cursor e agy diz que a sessão perdida não é classificada |
+| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:285`, `opencode.rs:231`. Cursor e Antigravity **não** usam `open_resuming` e não devem: têm um processo por turno e o prompt sai junto com `--resume`/`--conversation`. Usam `resume::run_turn_resuming` (`cursor.rs:243-267`, `agy.rs:224-248`, `resume.rs:176-199`), que só recai numa sessão nova com prova de recusa antes do turno (§11.12) | Inventário errado no ponto. A célula de `resume` de cursor e agy cita o guarda e os testes dele |
 | D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7. Depois da Fase 3, as células de Claude (`tool_events`) e de Codex (`turn_completion`) citam a correção; o estado delas não muda |
 | D3 | UI `chatModel.ts:74-80` × inventário | A UI anuncia `midTurn: steer` para o Claude; o inventário diz `unknown` | O Claude só escreve a linha `user` no stdin com o turno aberto (`claude.rs:570-578`) e não observa o desfecho. O comentário da própria UI admite "ou logo depois" (`chatModel.ts:66-67`) | `chat/claude-code` `steer` = `Unknown`; decisão em §1.8 |
 | D4 | `claude-codex` §2.1 #9-#11, §2.2 #9-#11 | `child_spawn`/`child_result` `supported` pela rota do ADE (`chat_new`, `chat_wait`) e `child_stop` pela rota nativa (`stop_task`) | Duas rotas misturadas na mesma capability | Separadas (§1.5). Claude: `child_spawn` fica `S` (nativo observado: `tarefas.rs:1-20`), `child_result` vira `U` (o resumo só vai à janela; o log só guarda id, título e status, `execution_log.rs:228-230`), `child_stop` fica `S`. Codex: `child_spawn` `S`, `child_result` `U`, `child_stop` `U` |
@@ -535,7 +535,7 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 |---|---|---|---|---|---|---|
 | **P0** ferramenta sem resultado ao fim | **feito** (§1.7): fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` (`gravar_fim`) | **feito**: fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` (`gravar_fim`) | fixture `acp-tool-sem-resultado` | `requer captura real` | `requer captura real` | Claude e Codex marcam no fim (a fixture fixa a entrada; o teste de banco, o efeito). OpenCode, Antigravity e Cursor ainda não marcam no fim normal (§1.7, lacuna 1) |
 | **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | **gravada** `antigravity-queda` (kill sem `result`) | **gravada** `cursor-queda` (kill sem `result`) | bancada |
-| **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste de banco; sem reabertura classificada | idem | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
+| **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste do guarda `run_turn_resuming` com fakes (`test.rs:779-901`): recusa antes do turno → turno novo com aviso; o resto não repete | idem (`--resume`, mesmo guarda) | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
 | **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
 | **P1** interrupção | **gravada** `claude-interrompido` | **gravada** `codex-interrompido-real` (e `codex-interrupt-antes-do-started`: `-32600` antes de `turn/started`; o ADE segura o Parar e o manda no aviso: `codex_parar.rs`, `test_codex_parar.rs`) | fixture `acp-interrompido` | o kill gravado não separa interrupt de queda | o interrupt é kill, sem mensagem; ver `cursor-queda` | bancada |
 | **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
@@ -727,7 +727,8 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `antigravity/usage`: adicionada citação de teste `test_motores.rs:347-377`.
    - `cursor/interrupt`: esclarecido na nota que a fixture prova fim de turno por SIGKILL/queda de processo (`cursor.rs:217-223`), e não parada cooperativa pelo ADE.
    - `cursor/child_result`: citação corrigida para `cursor_map.rs:129-140`.
-   - `cursor/resume`: elevado para `Proof::Test` com citação de teste `test_motores.rs:585-600` e nota sobre ausência de teste de sessão inválida.
+   - `antigravity/resume`: `Proof::Test` com `agy.rs:224-248`, `agy_map.rs:376-389`, `resume.rs:176-199` e os testes `test.rs:779-901` e `test_motores.rs:465-489` (guarda de retomada por turno, §11.12). Não passa por `open_resuming`.
+   - `cursor/resume`: `Proof::Test` com `cursor.rs:243-267`, `cursor_map.rs:390-392`, `resume.rs:176-199` e os testes `test.rs:779-901` e `test_motores.rs:907-920` (guarda de retomada por turno, §11.12). Não passa por `open_resuming`.
    - `local-acp/steer`: adicionada citação de `queueRunner.ts:48-58`.
 
 2. **Ajustes e tensões na Frota**:
@@ -924,3 +925,27 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 - Desempenho: `harness_effect` não tem consulta medida; o índice `(state, lease_until)` não foi exercitado com volume.
 - Ainda não existe comando de boot que chame `recover_expired`: um efeito `running` de provider só vira `unknown` quando a repetição do comando chega ao `claim` (§11.9).
 - Teste visual e a UI: `chatThreadSendOnce` existe em `ipc.ts`, mas nenhuma tela o chama ainda.
+
+### 11.12 Retomada por turno do Cursor e do Antigravity: não repetir às cegas
+
+O Cursor (`--resume <id>`) e o Antigravity (`--conversation <id>`) sobem **um processo por turno**, e o prompt sai junto com o id. Por isso **não** usam `resume::open_resuming`, que abre a sessão antes de qualquer mensagem sair e pode repeti-la: aqui, repetir é rodar o prompt de novo depois de o agente ter editado arquivos ou rodado comandos. A tentativa que envolveu o turno inteiro em `open_resuming` foi rejeitada por isso (retentativa em erro transitório, e um `not found` genérico, de uma ferramenta, virando "sessão perdida").
+
+`resume::run_turn_resuming` (`resume.rs:176-199`) só repete o turno quando **as três** condições valem:
+1. havia id remoto e o turno acabou em erro;
+2. **nenhuma linha de stdout chegou** (`began == false`): nem `init`/`system` com o id da sessão, nem item, nem texto, nem linha ilegível;
+3. o classificador **do motor** reconhece, no stderr, a frase de sessão ou conversa inexistente.
+
+Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.remote_id`), grava o aviso `resumeLost` (`lost_notice`) e roda o turno **uma vez** sem retomada. Se o turno novo também falhar, o erro é devolvido, sem terceira tentativa. Qualquer outro desfecho é o de antes: o turno falha (ou termina) e o id é mantido. Em particular: sem retentativa em erro transitório, sem repetição depois de qualquer evento do turno, sem repetição quando o stderr é um `file not found` ou `model not found` de outra coisa, e sem repetição de turno parado ou concluído.
+
+| Motor | Classificador | Critério (conservador) |
+|---|---|---|
+| Cursor | `cursor_map::session_refused` (`cursor_map.rs:390-392`) | alguma linha do stderr tem «chat», «session» ou «conversation» **colado** a um marcador de inexistência (`not found`, `no … found`, `no such …`, `does not exist`, `invalid …`, `unknown …`, `could not find …`, `expired`); `_` vale como espaço |
+| Antigravity | `agy_map::session_refused` (`agy_map.rs:376-389`) | o mesmo, com «conversation» ou «session», **ou** um `AGY_ERROR: {...}` (o formato que `error_from_stderr` já lê) com `status = NOT_FOUND` e «conversation»/«session» na mensagem |
+
+**Evidência da frase: não há captura.** Nenhuma fixture (`cursor-*`, `antigravity-*`) recusa a sessão: `cursor-queda` e `antigravity-queda` são kill sem stderr. O único «Session not found» do repositório é o do Hermes (`agents/registry.rs:358`) e o «No conversation found» é o do Claude (`claude.rs:226`); nenhum dos dois prova o que o `cursor-agent` ou o `agy` escrevem. As frases acima são hipóteses, e o critério as exige **coladas ao nome da sessão**, mais o stdout vazio: um falso positivo é improvável, e um falso negativo só devolve o comportamento de antes (o turno falha, o id fica). O `NOT_FOUND` do `AGY_ERROR` vem do vocabulário gRPC que o próprio `AGY_ERROR` já usa (`RESOURCE_EXHAUSTED`, `test_motores.rs:459`), também sem captura da conversa inexistente.
+
+**Lacuna conhecida:** se o CLI recusar a sessão por um frame de stdout (um `result` com `is_error`, por exemplo) em vez de stderr, o turno conta como iniciado e não é repetido. É o lado seguro; só uma captura real decide se vale cobrir.
+
+**Provado** (`cargo test --lib conversa`): `test.rs:779-901` (o guarda, com closures e sem processo nem relógio: recusa antes de qualquer evento → turno novo e aviso, na ordem `run:<id>`, `forget`, `notice`, `run:-`; falha depois de eventos → nenhuma repetição e id mantido; `file not found` de ferramenta → nenhuma repetição; retomada que funciona → nenhuma sessão nova e nenhum aviso; turno novo que falha → não repete; sem id remoto; erro sem explicação; turno concluído) e `test_motores.rs:465-489` e `:907-920` (os classificadores, com frases positivas e negativas).
+
+**Não verificado:** nenhum CLI real foi executado. A ligação em `cursor.rs`/`agy.rs` (contagem das linhas do stdout, captura do stderr, limpeza do banco e gravação do aviso) não tem teste de ponta a ponta; só o guarda e os classificadores têm. O aviso não foi visto na tela.

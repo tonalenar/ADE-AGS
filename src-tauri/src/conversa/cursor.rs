@@ -25,6 +25,7 @@ use super::agy::pick_duration;
 use super::cursor_map::{self as map, Mapper, Out};
 use super::claude_map::TurnResult;
 use super::events::emit;
+use super::resume::{run_turn_resuming, Observed, TurnAttempt};
 use super::{store, turn};
 
 /// Linhas finais do stderr guardadas para explicar um processo que fechou sem `result`.
@@ -33,19 +34,26 @@ const STDERR_TAIL: usize = 20;
 const EXIT_GRACE: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// O stdout do `cursor-agent` como fonte do `read_turn`: cada espera respeita o prazo de silêncio do turno.
-struct Stdout(tokio::io::Lines<BufReader<tokio::process::ChildStdout>>);
+/// `lines` conta o que chegou: com ao menos uma linha o processo já aceitou a sessão (`resume::run_turn_resuming`).
+struct Stdout {
+    lines: tokio::io::Lines<BufReader<tokio::process::ChildStdout>>,
+    received: usize,
+}
 
 impl map::Source for Stdout {
     async fn next(&mut self, quiet: Option<std::time::Duration>) -> map::Read {
         let line = match quiet {
-            Some(limit) => match tokio::time::timeout(limit, self.0.next_line()).await {
+            Some(limit) => match tokio::time::timeout(limit, self.lines.next_line()).await {
                 Ok(line) => line,
                 Err(_) => return map::Read::Quiet,
             },
-            None => self.0.next_line().await,
+            None => self.lines.next_line().await,
         };
         match line {
-            Ok(Some(line)) => map::Read::Line(line),
+            Ok(Some(line)) => {
+                self.received += 1;
+                map::Read::Line(line)
+            }
             _ => map::Read::Eof,
         }
     }
@@ -228,19 +236,48 @@ async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tu
     }
 }
 
-/// Roda o processo do turno. `Ok(Some)` = o `result` chegou; `Ok(None)` = o processo acabou sem ele
-/// (parado de propósito); `Err` = não subiu, ou caiu com erro.
+/// O turno com a retomada guardada: um processo por turno, então o prompt sai junto com o `--resume`. Só cai numa
+/// conversa nova com PROVA de que o `cursor-agent` recusou a sessão antes de o turno começar (nenhuma linha do stdout
+/// e o stderr de sessão inexistente: `cursor_map::session_refused`); qualquer outro erro falha o turno e mantém o id.
+/// Ver `resume::run_turn_resuming`.
 async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) -> Result<Option<TurnResult>, String> {
+    let remote = session.conversation.lock().ok().and_then(|c| c.clone());
+    run_turn_resuming(
+        remote.as_deref(),
+        map::session_refused,
+        |conversation| {
+            let conversation = conversation.map(str::to_string);
+            async move {
+                let mut seen = Observed::default();
+                let result = run_process(app, db, session, turn_id, text, conversation.as_deref(), &mut seen).await;
+                TurnAttempt { result, began: seen.began, stderr: seen.stderr }
+            }
+        },
+        || {
+            if let Ok(mut c) = session.conversation.lock() {
+                *c = None;
+            }
+            if let Ok(conn) = db.lock() {
+                let _ = store::clear_remote_id(&conn, &session.thread_id);
+            }
+        },
+        |code, notice| turn::save_notice(app, db, &session.thread_id, code, notice),
+    )
+    .await
+}
+
+/// Roda o processo do turno. `Ok(Some)` = o `result` chegou; `Ok(None)` = o processo acabou sem ele
+/// (parado de propósito); `Err` = não subiu, ou caiu com erro. `seen` recebe o que o processo mostrou.
+async fn run_process(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str, conversation: Option<&str>, seen: &mut Observed) -> Result<Option<TurnResult>, String> {
     let thread_id = session.thread_id.as_str();
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
-    let conversation = session.conversation.lock().ok().and_then(|c| c.clone());
     // A mesma resolução do app (PATH do shell de login e a pasta do instalador do Cursor), não um `which`.
     let name = crate::agents::agent_command("cursor").unwrap_or("cursor-agent");
     let program = crate::util::find_program(name).ok_or("Não achei o Cursor (cursor-agent) no PATH")?;
-    let args = map::launch_args(&row, text, conversation.as_deref());
+    let args = map::launch_args(&row, text, conversation);
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(crate::util::external_path(std::path::Path::new(&row.cwd)))
@@ -294,7 +331,7 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
             }
         }
     };
-    let mut source = Stdout(BufReader::new(stdout).lines());
+    let mut source = Stdout { lines: BufReader::new(stdout).lines(), received: 0 };
     // Para no `result`, no EOF ou no silêncio vencido; a fala que ficou aberta não se perde.
     let done = map::read_turn(&mut mapper, &mut source, apply, crate::util::now_ts_ms).await;
     // O processo pode seguir vivo depois do `result` (um servidor em segundo plano o segura): uma folga para sair
@@ -313,10 +350,12 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
     if let Some(task) = stderr_task {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), task).await;
     }
+    let lines = tail.lock().map(|t| t.clone()).unwrap_or_default();
+    seen.began = source.received > 0;
+    seen.stderr = lines.clone();
     if done.is_some() || session.killed.load(Ordering::SeqCst) {
         return Ok(done);
     }
-    let lines = tail.lock().map(|t| t.clone()).unwrap_or_default();
     let code = status.map(|s| s.code().unwrap_or(-1));
     // Saiu sem `result` e sem ninguém parar: o erro é o do stderr.
     Err(if code == Some(0) && lines.is_empty() { "O Cursor terminou sem responder".into() } else { map::error_from_stderr(&lines) })

@@ -153,3 +153,74 @@ pub fn with_note(note: Option<&str>, text: &str) -> String {
         None => text.to_string(),
     }
 }
+
+/// O que o processo de um turno viu enquanto rodava: quem o executa preenche, `run_turn_resuming` lê.
+#[derive(Debug, Default, Clone)]
+pub struct Observed {
+    pub began: bool,
+    pub stderr: Vec<String>,
+}
+
+/// O que o processo de UM turno deixa para decidir se a sessão foi recusada antes de o turno começar.
+#[derive(Debug, Clone)]
+pub struct TurnAttempt<T> {
+    /// O desfecho do turno: o que `drive` devolve (`Err` = não subiu ou caiu com erro).
+    pub result: Result<T, String>,
+    /// Chegou alguma linha do stdout do turno (o `init`/`system` com o id da sessão, item, texto, o que for). Com
+    /// isso o processo aceitou a sessão e o prompt já saiu: nada de repetir.
+    pub began: bool,
+    /// As linhas finais do stderr do processo (a prova que o classificador do motor lê).
+    pub stderr: Vec<String>,
+}
+
+/// Motores de UM processo por turno (Cursor, Antigravity): o `--resume`/`--conversation` vai junto com o prompt, então
+/// **não** se usa [`open_resuming`] (feito para abrir a sessão antes de qualquer mensagem sair). Repetir o turno só é
+/// seguro com PROVA de que o processo recusou a sessão antes de o turno começar:
+/// 1. havia id remoto (`remote`) e o turno acabou em erro (`Err`);
+/// 2. nenhuma linha do stdout chegou (`began == false`): nem `init`, nem item, nem texto;
+/// 3. o classificador do motor (`refused`) reconhece, no stderr, a frase de sessão ou conversa inexistente.
+///
+/// Só nesse caso: `forget` limpa o id remoto (memória e banco), `notice("resumeLost", …)` grava o aviso e o turno
+/// roda UMA vez, sem retomada (`run(None)`). Qualquer outro desfecho (erro depois de eventos, erro sem a frase,
+/// parada, sucesso) é devolvido como está, com o id mantido: o prompt já saiu e repeti-lo duplicaria ações.
+pub async fn run_turn_resuming<T, R, RF>(remote: Option<&str>, refused: impl Fn(&[String]) -> bool, mut run: R, mut forget: impl FnMut(), mut notice: impl FnMut(&str, &str)) -> Result<T, String>
+where
+    R: FnMut(Option<&str>) -> RF,
+    RF: Future<Output = TurnAttempt<T>>,
+{
+    let first = run(remote).await;
+    let reason = match &first.result {
+        Err(message) if remote.is_some() && !first.began && refused(&first.stderr) => message.clone(),
+        _ => return first.result,
+    };
+    forget();
+    notice("resumeLost", &lost_notice(&reason));
+    run(None).await.result
+}
+
+/// Pura: a linha de erro de um CLI diz que a sessão (conversa, chat) não existe? Casa só frases que citam o próprio
+/// `subjects` do motor, coladas a um marcador de inexistência («chat not found», «no conversation found», «invalid
+/// session»…). Um «file not found» ou «model not found» de outra coisa não casa. `_` vale como espaço
+/// (`SESSION_NOT_FOUND`).
+pub fn says_session_missing(line: &str, subjects: &[&str]) -> bool {
+    let line = line.to_lowercase().replace('_', " ");
+    subjects.iter().any(|s| {
+        [
+            format!("{s} not found"),
+            format!("no {s} found"),
+            format!("no such {s}"),
+            format!("{s} does not exist"),
+            format!("{s} doesn't exist"),
+            format!("{s} not exist"),
+            format!("invalid {s}"),
+            format!("unknown {s}"),
+            format!("could not find {s}"),
+            format!("couldn't find {s}"),
+            format!("cannot find {s}"),
+            format!("unable to find {s}"),
+            format!("{s} expired"),
+        ]
+        .iter()
+        .any(|phrase| line.contains(phrase.as_str()))
+    })
+}
