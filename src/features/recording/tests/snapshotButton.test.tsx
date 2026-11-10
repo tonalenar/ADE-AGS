@@ -15,7 +15,7 @@ vi.mock("@/features/chat/store", () => ({ attachToComposer: vi.fn() }));
 vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: vi.fn() }));
 vi.mock("../ipc", () => ({ desktopScreenshot: vi.fn() }));
 
-const SHOT = "/Users/tonalencar/Pictures/ADE AGS/ADE-AGS_SnapShot_teste.png";
+const SHOT = "/Users/pessoa/Pictures/ADE AGS/ADE-AGS_SnapShot_teste.png";
 const MAC_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)";
 
 let host: HTMLDivElement;

@@ -32,24 +32,24 @@ Da seção de prévias gerais do T3 Code:
 Auditado diretamente no código-fonte da ADE:
 
 1. **Prévia visual isolada de blocos HTML (estática):**
-   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/chat/timeline/VisualReplyPreview.tsx#L10-L47): a função `appThemeDeclarations()` (linhas 10–24) extrai e sanitiza os tokens de tema CSS (`COLOR_TOKENS`, `FONT_TOKENS`), rejeitando caracteres perigosos como `<>;{}`.
-   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/chat/timeline/VisualReplyPreview.tsx#L26-L47): `visualReplyDocument(html)` monta um documento HTML com CSP restritiva (`default-src 'none'; connect-src 'none'; img-src data: blob:; style-src 'unsafe-inline' data:; script-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; navigate-to 'none'`) e injeta script para interceptar e prevenir navegação por cliques em `a[href]` (linhas 45–46).
-   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/chat/timeline/VisualReplyPreview.tsx#L49-L74): o componente `VisualReplyPreview` renderiza a página em um modal `ViewModal` com `<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcDoc={...} />`.
-   - [`src/features/chat/timeline/CodeBlockFrame.tsx`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/chat/timeline/CodeBlockFrame.tsx#L8-L62): exibe a ação explícita de "Visualizar" apenas para blocos de código com linguagem `html`/`htm`, abrindo o modal.
+   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](../../src/features/chat/timeline/VisualReplyPreview.tsx#L10-L47): a função `appThemeDeclarations()` (linhas 10–24) extrai e sanitiza os tokens de tema CSS (`COLOR_TOKENS`, `FONT_TOKENS`), rejeitando caracteres perigosos como `<>;{}`.
+   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](../../src/features/chat/timeline/VisualReplyPreview.tsx#L26-L47): `visualReplyDocument(html)` monta um documento HTML com CSP restritiva (`default-src 'none'; connect-src 'none'; img-src data: blob:; style-src 'unsafe-inline' data:; script-src 'unsafe-inline'; frame-src 'none'; form-action 'none'; navigate-to 'none'`) e injeta script para interceptar e prevenir navegação por cliques em `a[href]` (linhas 45–46).
+   - [`src/features/chat/timeline/VisualReplyPreview.tsx`](../../src/features/chat/timeline/VisualReplyPreview.tsx#L49-L74): o componente `VisualReplyPreview` renderiza a página em um modal `ViewModal` com `<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" srcDoc={...} />`.
+   - [`src/features/chat/timeline/CodeBlockFrame.tsx`](../../src/features/chat/timeline/CodeBlockFrame.tsx#L8-L62): exibe a ação explícita de "Visualizar" apenas para blocos de código com linguagem `html`/`htm`, abrindo o modal.
 
 2. **Isolamento de iframe de Canvas e Pranchetas de Design:**
-   - [`src/features/canvas/design/srcdoc.ts`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/canvas/design/srcdoc.ts#L79-L103): constrói documentos para pranchetas em sandbox sem `allow-same-origin`.
-   - [`src/features/design/frameBridge.ts`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/design/frameBridge.ts#L1-L6): estabelece canal de mensagens hostil/filtrado entre o app e as pranchetas via eventos de ponte.
+   - [`src/features/canvas/design/srcdoc.ts`](../../src/features/canvas/design/srcdoc.ts#L79-L103): constrói documentos para pranchetas em sandbox sem `allow-same-origin`.
+   - [`src/features/design/frameBridge.ts`](../../src/features/design/frameBridge.ts#L1-L6): estabelece canal de mensagens hostil/filtrado entre o app e as pranchetas via eventos de ponte.
 
 3. **Servidor MCP e Ferramentas da ADE:**
-   - [`src-tauri/src/ipc/mcp.rs`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src-tauri/src/ipc/mcp.rs#L1-L26): servidor stdio JSON-RPC 2.0 que conecta agentes de IA ao backend da ADE via protocolo IPC local.
-   - [`src-tauri/src/ipc/mcp.rs`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src-tauri/src/ipc/mcp.rs#L31-L41): broker de aprovação de ferramentas (`approve_tool_use`) com timeout humano configurável (`APPROVAL_TIMEOUT_SECS = 3600`).
-   - [`src-tauri/src/ipc/mcp.rs`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src-tauri/src/ipc/mcp.rs#L63-L98): contexto MCP escopado para tarefas headless (`Task`) ou abas interativas (`Cwd`).
-   - [`src-tauri/src/ipc/mcp.rs`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src-tauri/src/ipc/mcp.rs#L240-L501): ferramentas de navegador (`browser_navigate`, `browser_snapshot`, `browser_click`, etc.) operam apenas com saídas estruturadas de texto, JSON e screenshots. Não há suporte a MCP Apps nem a `html_render` ou `html_preview`.
+   - [`src-tauri/src/ipc/mcp.rs`](../../src-tauri/src/ipc/mcp.rs#L1-L26): servidor stdio JSON-RPC 2.0 que conecta agentes de IA ao backend da ADE via protocolo IPC local.
+   - [`src-tauri/src/ipc/mcp.rs`](../../src-tauri/src/ipc/mcp.rs#L31-L41): broker de aprovação de ferramentas (`approve_tool_use`) com timeout humano configurável (`APPROVAL_TIMEOUT_SECS = 3600`).
+   - [`src-tauri/src/ipc/mcp.rs`](../../src-tauri/src/ipc/mcp.rs#L63-L98): contexto MCP escopado para tarefas headless (`Task`) ou abas interativas (`Cwd`).
+   - [`src-tauri/src/ipc/mcp.rs`](../../src-tauri/src/ipc/mcp.rs#L240-L501): ferramentas de navegador (`browser_navigate`, `browser_snapshot`, `browser_click`, etc.) operam apenas com saídas estruturadas de texto, JSON e screenshots. Não há suporte a MCP Apps nem a `html_render` ou `html_preview`.
 
 4. **Ponte de Comandos do Orquestrador e Diálogos de Aprovação:**
-   - [`src/features/orchestrator/cliBridge.ts`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/orchestrator/cliBridge.ts#L522-L538): despacha comandos de backend para as stores do frontend, incluindo `user.ask` (linha 526) e `user.secret` (linha 527).
-   - [`src/features/ask/askStore.ts`](file:///Users/tonalencar/.t3/worktrees/ADE-AGS/t3-95285688/src/features/ask/askStore.ts#L15): gerencia o estado e as confirmações de ações pendentes que dependem de decisão da pessoa usuária.
+   - [`src/features/orchestrator/cliBridge.ts`](../../src/features/orchestrator/cliBridge.ts#L522-L538): despacha comandos de backend para as stores do frontend, incluindo `user.ask` (linha 526) e `user.secret` (linha 527).
+   - [`src/features/ask/askStore.ts`](../../src/features/ask/askStore.ts#L15): gerencia o estado e as confirmações de ações pendentes que dependem de decisão da pessoa usuária.
 
 ---
 
