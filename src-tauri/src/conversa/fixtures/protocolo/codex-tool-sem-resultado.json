@@ -1,0 +1,135 @@
+{
+  "agent": "codex",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": false,
+    "deltas": [],
+    "filhos": [],
+    "fim": {
+      "durationMs": 8850,
+      "error": null,
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000000140,
+        "id": "msg_1",
+        "kind": "assistant",
+        "text": "Rodando os testes."
+      },
+      {
+        "at": 1790000000150,
+        "id": "call_1",
+        "kind": "tool",
+        "label": "bun test",
+        "name": "Bash",
+        "status": "running",
+        "tool": "command"
+      },
+      {
+        "at": 1790000009000,
+        "durationMs": 8850,
+        "id": "end:turn_1",
+        "interrupted": false,
+        "kind": "turnEnd"
+      }
+    ],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "assistant",
+      "tool",
+      "turnEnd"
+    ]
+  },
+  "format": "ade-replay",
+  "id": "codex-tool-sem-resultado",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "métodos e itens de conversa/codex.rs (on_notification) e conversa/codex_map.rs; o caso é o turn/completed com commandExecution inProgress, que nenhuma captura real tem",
+    "kind": "synthesized"
+  },
+  "protocol": "codex-app-server",
+  "title": "Codex: o turno completa com um comando em andamento que nunca recebeu item/completed",
+  "transcript": [
+    {
+      "atMs": 0,
+      "in": {
+        "id": 1,
+        "method": "thread/start",
+        "params": {
+          "cwd": "{{cwd}}"
+        }
+      }
+    },
+    {
+      "atMs": 120,
+      "out": {
+        "id": 1,
+        "result": {
+          "thread": {
+            "id": "{{session:1}}"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 130,
+      "out": {
+        "method": "turn/started",
+        "params": {
+          "turn": {
+            "id": "turn_1",
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 140,
+      "out": {
+        "method": "item/completed",
+        "params": {
+          "item": {
+            "id": "msg_1",
+            "text": "Rodando os testes.",
+            "type": "agentMessage"
+          },
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "atMs": 150,
+      "out": {
+        "method": "item/started",
+        "params": {
+          "item": {
+            "command": "bun test",
+            "id": "call_1",
+            "status": "inProgress",
+            "type": "commandExecution"
+          },
+          "turnId": "turn_1"
+        }
+      }
+    },
+    {
+      "atMs": 9000,
+      "out": {
+        "method": "turn/completed",
+        "params": {
+          "turn": {
+            "durationMs": 8850,
+            "id": "turn_1",
+            "status": "completed"
+          }
+        }
+      }
+    }
+  ],
+  "version": 2
+}

@@ -1,0 +1,111 @@
+{
+  "agent": "claude-code",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": false,
+    "deltas": [],
+    "filhos": [],
+    "fim": {
+      "durationMs": 1200,
+      "error": null,
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000000010,
+        "id": "msg_1#0",
+        "kind": "assistant",
+        "text": "Vou rodar os testes."
+      },
+      {
+        "at": 1790000000020,
+        "id": "toolu_1",
+        "kind": "tool",
+        "label": "bun test",
+        "name": "Bash",
+        "status": "running",
+        "tool": "command"
+      }
+    ],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "assistant",
+      "tool"
+    ]
+  },
+  "format": "ade-replay",
+  "id": "claude-tool-sem-resultado",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "linhas no formato do claude -p stream-json (como claude-ferramenta-aprovacao-e-cota); o caso é o fim normal sem tool_result, que nenhuma captura real tem",
+    "kind": "synthesized"
+  },
+  "protocol": "claude-stream",
+  "title": "Claude: o turno acaba normalmente com uma ferramenta que nunca recebeu tool_result",
+  "transcript": [
+    {
+      "atMs": 0,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "init",
+        "type": "system"
+      }
+    },
+    {
+      "atMs": 10,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "Vou rodar os testes.",
+              "type": "text"
+            }
+          ],
+          "id": "msg_1",
+          "role": "assistant"
+        },
+        "parent_tool_use_id": null,
+        "type": "assistant",
+        "uuid": "u-1"
+      }
+    },
+    {
+      "atMs": 20,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "id": "toolu_1",
+              "input": {
+                "command": "bun test"
+              },
+              "name": "Bash",
+              "type": "tool_use"
+            }
+          ],
+          "id": "msg_2",
+          "role": "assistant"
+        },
+        "parent_tool_use_id": null,
+        "type": "assistant",
+        "uuid": "u-2"
+      }
+    },
+    {
+      "atMs": 30,
+      "out": {
+        "duration_ms": 1200,
+        "is_error": false,
+        "result": "Pronto.",
+        "session_id": "{{session:1}}",
+        "subtype": "success",
+        "type": "result"
+      }
+    }
+  ],
+  "version": 2
+}

@@ -1,0 +1,7 @@
+{
+  "checks": [
+    { "label": "a sessão é a do init", "expect": { "sessao": "{{session:1}}" } },
+    { "label": "o texto antes da ferramenta fica na timeline", "expect": { "textoContem": "Vou rodar os testes." } },
+    { "label": "o turno acaba bem; o mapeador deixa a ferramenta sem tool_result como running (quem a fecha é o fim do turno: teste de banco)", "expect": { "fim": "ok", "ferramentas": ["Bash:running"] } }
+  ]
+}

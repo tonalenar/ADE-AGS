@@ -536,6 +536,16 @@ fn on_request(app: &AppHandle, db: &DbConnection, session: &Session, method: &st
     }
 }
 
+/// O que o banco guarda quando o `turn/completed` chega, com qualquer status: o status do turno como veio, e os pedidos
+/// pendentes que expiram (devolve os ids). Separada para testar com `test_db()`. A marcação das ferramentas sem resultado
+/// entra na próxima etapa.
+pub(super) fn gravar_fim(conn: &rusqlite::Connection, thread_id: &str, turn_id: &str, turn: &Value, now: i64) -> (Vec<String>, Vec<crate::canal::timeline::Item>) {
+    let status = turn.get("status").and_then(Value::as_str).unwrap_or("completed");
+    let _ = store::upsert_run(conn, thread_id, turn_id, status, None, Some(now), turn.get("durationMs").and_then(Value::as_i64));
+    let expired = store::expire_requests(conn, thread_id).unwrap_or_default();
+    (expired, Vec::new())
+}
+
 fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: Option<&str>, items: Vec<crate::canal::timeline::Item>) {
     if items.is_empty() {
         return;
@@ -569,12 +579,8 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
             let id = turn.get("id").and_then(Value::as_str).unwrap_or("");
             let now = crate::util::now_ts_ms();
             session.turn_completed(id);
-            let expired = db.lock().ok().map(|conn| {
-                let status = turn.get("status").and_then(Value::as_str).unwrap_or("completed");
-                let _ = store::upsert_run(&conn, thread_id, id, status, None, Some(now), turn.get("durationMs").and_then(Value::as_i64));
-                store::expire_requests(&conn, thread_id).unwrap_or_default()
-            });
-            for rid in expired.unwrap_or_default() {
+            let (expired, _) = db.lock().ok().map(|conn| gravar_fim(&conn, thread_id, id, turn, now)).unwrap_or_default();
+            for rid in expired {
                 emit(app, thread_id, "requestResolved", json!({ "id": rid }));
             }
             save_items(app, db, thread_id, Some(id), codex_map::turn_end(turn, Some(now)).into_iter().collect());

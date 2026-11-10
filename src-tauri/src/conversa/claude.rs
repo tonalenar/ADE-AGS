@@ -11,7 +11,7 @@
 //! `requestResolved`, `thread`, `error`, `closed`). O lock do banco só é pego para gravar, nunca
 //! durante o I/O.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -433,15 +433,27 @@ fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: Optio
 
 fn finish_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, result: &claude_map::TurnResult) {
     let now = crate::util::now_ts_ms();
-    let expired = db.lock().ok().map(|conn| {
-        let _ = store::upsert_run(&conn, thread_id, turn, claude_map::run_status(result), None, Some(now), result.duration_ms);
-        store::expire_requests(&conn, thread_id).unwrap_or_default()
-    });
-    for id in expired.unwrap_or_default() {
+    let (expired, _) = db.lock().ok().map(|conn| gravar_fim(&conn, thread_id, turn, result, &HashSet::new(), now)).unwrap_or_default();
+    for id in expired {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
     save_items(app, db, thread_id, Some(turn), vec![claude_map::turn_end(turn, result, Some(now))]);
     super::pool::after_turn(app, db, thread_id, result);
+}
+
+/// O que o banco guarda quando o turno do Claude acaba: o status e os pedidos pendentes que expiram (devolve os ids).
+/// Separada de `finish_turn` para testar com `test_db()`. A marcação das ferramentas sem resultado entra na próxima etapa.
+pub(super) fn gravar_fim(
+    conn: &rusqlite::Connection,
+    thread_id: &str,
+    turn: &str,
+    result: &claude_map::TurnResult,
+    _legit: &HashSet<String>,
+    now: i64,
+) -> (Vec<String>, Vec<Item>) {
+    let _ = store::upsert_run(conn, thread_id, turn, claude_map::run_status(result), None, Some(now), result.duration_ms);
+    let expired = store::expire_requests(conn, thread_id).unwrap_or_default();
+    (expired, Vec::new())
 }
 
 fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) {
