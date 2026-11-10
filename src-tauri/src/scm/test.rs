@@ -666,3 +666,30 @@ fn o_diff_de_trabalho_e_cortado_sem_partir_caractere() {
     // "é" ocupa 2 bytes: cortar em 2 cairia no meio dele.
     assert_eq!(clip_diff("aé".into(), 2), ("a".into(), true));
 }
+
+#[test]
+fn a_lista_de_worktrees_marca_a_pasta_atual_e_um_head_solto() {
+    use super::commands::worktrees_from_porcelain;
+    let raw = "\
+worktree /repo
+HEAD abc
+branch refs/heads/main
+
+worktree /repo/.worktrees/fix
+HEAD def
+branch refs/heads/cc/fix
+
+worktree /repo/.worktrees/solto
+HEAD ghi
+detached
+";
+    let rows = worktrees_from_porcelain(raw, "/repo/");
+    assert_eq!(rows.len(), 3);
+    assert!(rows[0].current);
+    assert_eq!(rows[0].branch.as_deref(), Some("main"));
+    assert_eq!(rows[0].path, "/repo");
+    assert!(!rows[1].current);
+    assert_eq!(rows[1].branch.as_deref(), Some("cc/fix"));
+    assert!(!rows[2].current);
+    assert_eq!(rows[2].branch, None);
+}

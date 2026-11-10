@@ -474,6 +474,7 @@ pub fn run() {
             crate::scm::scm_create_tag,
             crate::scm::scm_push_tag,
             crate::scm::scm_delete_tag,
+            crate::scm::scm_worktrees,
             // Cuentas de git (GitHub, GitLab, Gitea…): repos, clonar, PRs e issues
             crate::forge::forge_kinds,
             crate::forge::forge_oauth_available,

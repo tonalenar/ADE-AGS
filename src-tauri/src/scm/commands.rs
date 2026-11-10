@@ -833,3 +833,45 @@ pub async fn scm_working_files(cwd: String) -> Result<Option<WorkingFiles>, ScmE
     })
     .await
 }
+
+/// Um worktree já aberto neste repositório. Só leitura: a lista vem de
+/// `git worktree list --porcelain` e não cria, remove nem troca de pasta.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScmWorktree {
+    pub path: String,
+    pub branch: Option<String>,
+    /// A pasta cuja raiz o painel está mostrando.
+    pub current: bool,
+}
+
+fn same_worktree_path(left: &str, right: &str) -> bool {
+    fn key(path: &str) -> String {
+        path.replace('\\', "/").trim_end_matches('/').to_string()
+    }
+    key(left) == key(right)
+}
+
+/// Traduz o porcelain do git para a lista do painel. `root` é a pasta atual;
+/// barra final e `\` não mudam qual linha é a atual. Um bloco `detached` fica
+/// sem branch.
+pub(crate) fn worktrees_from_porcelain(raw: &str, root: &str) -> Vec<ScmWorktree> {
+    crate::runs::worktrees::parse_worktree_porcelain(raw)
+        .into_iter()
+        .map(|(path, branch)| {
+            let path = path.to_string_lossy().into_owned();
+            let current = same_worktree_path(&path, root);
+            ScmWorktree { path, branch, current }
+        })
+        .collect()
+}
+
+/// Os worktrees ligados a este repositório, inclusive o checkout principal.
+#[tauri::command]
+pub async fn scm_worktrees(root: String) -> Result<Vec<ScmWorktree>, ScmError> {
+    blocking(move || {
+        let raw = run_text(&root, &["worktree", "list", "--porcelain"], LOCAL)?;
+        Ok(worktrees_from_porcelain(&raw, &root))
+    })
+    .await
+}
