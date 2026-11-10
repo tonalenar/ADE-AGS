@@ -138,13 +138,20 @@ describe("withBrowserMcp", () => {
   it("devuelve comando sin cambios y env vacío cuando tab_browser_mcp devuelve null", async () => {
     mockInvoke.mockResolvedValueOnce(null);
     const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code", "m-scope-456");
-    expect(result).toEqual({ command: "claude", env: {} });
+    expect(result).toEqual({ command: "claude", env: {}, args: [] });
+  });
+
+  it("repassa os launchArgs do backend como args nativos, sem concatená-los ao comando", async () => {
+    mockInvoke.mockResolvedValueOnce({ configPath: "", allowedTools: [], env: {}, toolPrefix: "", launchArgs: ["-c", "mcp_servers.ags.url=\"http://x\""] });
+    const result = await withBrowserMcp("codex", "/repo", "tab-1", "codex", null);
+    expect(result.command).toBe("codex");
+    expect(result.args).toEqual(["-c", "mcp_servers.ags.url=\"http://x\""]);
   });
 
   it("tolera errores de invoke y arranca la tab como siempre", async () => {
     mockInvoke.mockRejectedValueOnce(new Error("tauri error"));
     const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code", "m-scope-456");
-    expect(result).toEqual({ command: "claude", env: {} });
+    expect(result).toEqual({ command: "claude", env: {}, args: [] });
   });
 });
 
