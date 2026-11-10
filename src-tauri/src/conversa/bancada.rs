@@ -610,7 +610,8 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
 }
 
 /// O Cursor pelo `read_turn` de verdade. A fonte devolve silêncio quando o próximo `atMs` passa de
-/// `quiet_after`; não há relógio de parede. O fim da lista é EOF (o processo acabou), não silêncio.
+/// `quiet_after`; não há relógio de parede. O fim do transcript sem `close` só encerra a captura: não prova
+/// que o processo terminou. Apenas um evento `Fecha` gravado representa EOF do processo.
 fn rodar_cursor(saidas: &[Saida]) -> Resultado {
     let mut motor = Motor {
         protocolo: Protocolo::CursorStream,
@@ -644,7 +645,7 @@ fn rodar_cursor(saidas: &[Saida]) -> Resultado {
     motor.out.relogio_ms = agora.load(Ordering::Relaxed);
     if let Some(result) = done {
         motor.terminou(result);
-    } else {
+    } else if saidas.iter().any(|saida| matches!(saida.evento, Evento::Fecha { .. })) {
         let erro = fonte.stderr.as_deref().map(|s| cursor_map::error_from_stderr(&s.lines().map(str::to_string).collect::<Vec<_>>())).unwrap_or_else(|| "O Cursor terminou sem responder".into());
         motor.terminou(TurnResult { interrupted: false, error: Some(erro), duration_ms: None });
         motor.out.caiu = true;

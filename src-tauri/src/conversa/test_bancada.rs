@@ -502,6 +502,8 @@ mod pool {
 mod replay_protocolo {
     use serde_json::Value;
 
+    use super::super::bancada::{self, Espera, Evento, Protocolo, Saida};
+
     use super::super::replay_protocolo::*;
 
     fn fixture(transcript: Value, protocol: &str) -> String {
@@ -696,6 +698,211 @@ mod replay_protocolo {
 
     fn outs(fixture: &Value) -> Vec<&Value> {
         fixture["transcript"].as_array().unwrap().iter().filter(|e| e.get("out").is_some()).map(|e| &e["out"]).collect()
+    }
+
+    /// Variante derivada: os eventos são sempre lidos de uma captura `recorded`; o teste só os corta ou move.
+    /// O rótulo e `origem` tornam a proveniência revisável sem duplicar centenas de linhas de transcript.
+    fn captura(id: &str) -> Vec<Saida> {
+        let texto = std::fs::read_to_string(pasta().join(format!("{id}.json"))).unwrap();
+        let fixture = ler(&texto).unwrap();
+        assert_eq!(
+            fixture.origin["kind"], "recorded",
+            "{id} precisa ser captura real sanitizada"
+        );
+        super::super::replay_protocolo::saidas(&fixture)
+    }
+
+    fn quadro(saida: &Saida) -> Option<Value> {
+        match &saida.evento {
+            Evento::Linha(line) => serde_json::from_str(line).ok(),
+            Evento::Fecha { .. } => None,
+        }
+    }
+
+    fn mover(
+        saidas: &mut Vec<Saida>,
+        origem: impl Fn(&Value) -> bool,
+        alvo: impl Fn(&Value) -> bool,
+        depois: bool,
+    ) {
+        let index = |predicado: &dyn Fn(&Value) -> bool, frames: &[Saida]| {
+            frames
+                .iter()
+                .position(|saida| quadro(saida).is_some_and(|out| predicado(&out)))
+                .expect("frame da captura ausente")
+        };
+        let from = index(&origem, saidas);
+        let moving = saidas.remove(from);
+        let to = index(&alvo, saidas) + usize::from(depois);
+        saidas.insert(to, moving);
+    }
+
+    fn oraculo_estado(protocolo: Protocolo, saidas: &[Saida], fim: &str, texto: Option<&str>) {
+        let resultado = bancada::rodar(protocolo, saidas);
+        let espera: Espera = serde_json::from_value(serde_json::json!({ "fim": fim })).unwrap();
+        let falhas = bancada::conferir(&espera, &resultado, protocolo, &|s| expandir(s).unwrap());
+        assert!(
+            falhas.is_empty(),
+            "oráculo derivado falhou: {falhas:?}; resultado={:?}",
+            super::super::replay_protocolo::snapshot(&resultado)
+        );
+        if let Some(texto) = texto {
+            let parcial = resultado.deltas.iter().map(|(_, delta)| delta.as_str()).collect::<String>();
+            assert!(resultado.texto().contains(texto) || parcial.contains(texto), "texto esperado {texto:?}; timeline={:?}; deltas={parcial:?}", resultado.texto());
+        }
+    }
+
+    fn ate_frame(mut saidas: Vec<Saida>, predicado: impl Fn(&Value) -> bool) -> Vec<Saida> {
+        let index = saidas
+            .iter()
+            .position(|saida| quadro(saida).is_some_and(|out| predicado(&out)))
+            .expect("frame da captura ausente");
+        saidas.truncate(index + 1);
+        saidas
+    }
+
+    fn sem_frame_final(saidas: Vec<Saida>, predicado: impl Fn(&Value) -> bool) -> Vec<Saida> {
+        let index = saidas
+            .iter()
+            .position(|saida| quadro(saida).is_some_and(|out| predicado(&out)))
+            .expect("frame final da captura ausente");
+        saidas.into_iter().take(index).collect()
+    }
+
+    /// Variante derivada de `claude-feliz`: o `user` com resultado de ferramenta chega antes do `assistant`
+    /// que anuncia `tool_use`. O oráculo do contrato exige que o turno termine e que a ferramenta feche.
+    #[test]
+    #[ignore = "bug conhecido: claude_map descarta tool_result recebido antes de tool_use; ver HARNESS_CONTRATO §5.3"]
+    // quarantine: a ferramenta fica Running porque claude_map.rs descarta o resultado sem tool_use já registrado.
+    fn replay_derivado_claude_tool_result_fora_de_ordem() {
+        let mut saidas = captura("claude-feliz");
+        mover(
+            &mut saidas,
+            |out| out["type"] == "user",
+            |out| {
+                out["type"] == "assistant"
+                    && out.pointer("/message/content/0/type")
+                        == Some(&Value::String("tool_use".into()))
+            },
+            false,
+        );
+        // A transformação é só uma permutação dos frames reais de `claude-feliz`.
+        oraculo_estado(Protocolo::ClaudeStream, &saidas, "ok", None);
+        let resultado = bancada::rodar(Protocolo::ClaudeStream, &saidas);
+        assert_eq!(resultado.ferramentas(), ["Read:done"]);
+    }
+
+    /// Variante derivada de `codex-feliz`: `turn/started` é movido para logo depois da resposta a `turn/start`.
+    #[test]
+    fn replay_derivado_codex_started_depois_da_resposta_turn_start() {
+        let mut saidas = captura("codex-feliz");
+        mover(
+            &mut saidas,
+            |out| out["method"] == "turn/started",
+            |out| out["id"] == 3,
+            true,
+        );
+        oraculo_estado(Protocolo::CodexAppServer, &saidas, "ok", Some("conteúdo"));
+    }
+
+    /// Variante derivada de `antigravity-feliz`: o DONE da ferramenta chega depois do texto de resposta.
+    #[test]
+    fn replay_derivado_antigravity_ferramenta_depois_do_texto() {
+        let mut saidas = captura("antigravity-feliz");
+        mover(
+            &mut saidas,
+            |out| {
+                out["event"] == "step_update"
+                    && out.pointer("/step_update/step_index") == Some(&Value::from(2))
+                    && out.pointer("/step_update/state") == Some(&Value::String("DONE".into()))
+            },
+            |out| {
+                out["event"] == "step_update"
+                    && out.pointer("/step_update/step_index") == Some(&Value::from(3))
+                    && out.pointer("/step_update/state") == Some(&Value::String("ACTIVE".into()))
+            },
+            true,
+        );
+        oraculo_estado(
+            Protocolo::AgyStream,
+            &saidas,
+            "ok",
+            Some("conteúdo do arquivo"),
+        );
+    }
+
+    /// Variante derivada de `cursor-feliz`: o fim da leitura chega após a resposta textual final.
+    #[test]
+    fn replay_derivado_cursor_ferramenta_depois_do_texto() {
+        let mut saidas = captura("cursor-feliz");
+        mover(
+            &mut saidas,
+            |out| out["type"] == "tool_call" && out["subtype"] == "completed",
+            |out| {
+                out["type"] == "assistant"
+                    && out
+                        .pointer("/message/content/0/text")
+                        .and_then(Value::as_str)
+                        .is_some_and(|s| s.starts_with("O arquivo `teste.txt` contém"))
+            },
+            true,
+        );
+        oraculo_estado(Protocolo::CursorStream, &saidas, "ok", Some("O arquivo"));
+    }
+
+    /// Cortes derivados: cada prefixo termina no meio de uma ferramenta (Claude/Cursor) ou texto (Codex/agy).
+    #[test]
+    fn replay_derivado_streams_parciais_ficam_abertos() {
+        for (id, protocol, predicado, texto) in [
+            ("claude-feliz", Protocolo::ClaudeStream, 0, None),
+            ("codex-feliz", Protocolo::CodexAppServer, 1, Some("O")),
+            ("antigravity-feliz", Protocolo::AgyStream, 2, Some("O")),
+            ("cursor-feliz", Protocolo::CursorStream, 3, None),
+        ] {
+            let parcial = ate_frame(captura(id), move |out| match predicado {
+                0 => {
+                    out["type"] == "assistant"
+                        && out.pointer("/message/content/0/type")
+                            == Some(&Value::String("tool_use".into()))
+                }
+                1 => out["method"] == "item/agentMessage/delta",
+                2 => {
+                    out["event"] == "step_update"
+                        && out.pointer("/step_update/step_index") == Some(&Value::from(3))
+                        && out.pointer("/step_update/state")
+                            == Some(&Value::String("ACTIVE".into()))
+                }
+                _ => out["type"] == "tool_call" && out["subtype"] == "started",
+            });
+            oraculo_estado(protocol, &parcial, "aberto", texto);
+        }
+    }
+
+    /// Remover somente o frame final (e o que vem depois) deriva um processo ocioso sem sinal de conclusão.
+    #[test]
+    fn replay_derivado_processo_ocioso_sem_frame_final_nao_conclui_turno() {
+        for (id, protocol, final_frame) in [
+            ("claude-feliz", Protocolo::ClaudeStream, 0),
+            ("codex-feliz", Protocolo::CodexAppServer, 1),
+            ("antigravity-feliz", Protocolo::AgyStream, 2),
+            ("cursor-feliz", Protocolo::CursorStream, 3),
+        ] {
+            let ocioso = sem_frame_final(captura(id), move |out| match final_frame {
+                0 => out["type"] == "result",
+                1 => out["method"] == "turn/completed",
+                2 => out["event"] == "result",
+                _ => out["type"] == "result",
+            });
+            oraculo_estado(protocol, &ocioso, "aberto", None);
+            if id == "codex-feliz" {
+                assert!(
+                    ocioso.iter().any(|saida| quadro(saida)
+                        .is_some_and(|out| out.pointer("/params/status/type")
+                            == Some(&Value::String("idle".into())))),
+                    "a captura Codex conserva o status idle, sem turn/completed"
+                );
+            }
+        }
     }
 
     /// Os frames decisivos ficam no transcript. O snapshot só vê o que o motor produz.
