@@ -74,7 +74,9 @@ impl Engine {
     pub const fn capabilities(self) -> EngineCapabilities {
         match self {
             Engine::Codex => EngineCapabilities {
-                access_modes: &["ask", "safe", "full"],
+                // `edits` não aparece na tela do Codex, mas continua aceito pela CLI e pelo MCP:
+                // `codex_map` o trata como `safe` (`on-request`, `workspace-write`).
+                access_modes: &["ask", "edits", "safe", "full"],
                 plan: false,
                 mid_turn: MidTurnBehavior::Steer,
                 context_compaction: true,
