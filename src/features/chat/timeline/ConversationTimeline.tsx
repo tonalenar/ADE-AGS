@@ -9,6 +9,8 @@ import {
 
 import { useChatWidthClass } from "../chatLook";
 import { PlanCard } from "../LiveActivity";
+import { McpAppFrame } from "../mcpApps/McpAppFrame";
+import { parseMcpAppResource } from "../mcpApps/mcpAppResource";
 import { clearTimelineFind, setRightPanel, useChatStore } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
 import { renderChatCodeBlock } from "./CodeBlockFrame";
@@ -519,7 +521,8 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
   const command = kind === "command" ? commandTitle(tool.label ?? "") : null;
   const target = command ? "" : kind === "todo" ? t("chat.tool.todoCount", { count: Number(tool.label ?? 0) }) : tool.path ? fileName(tool.path) : tool.label ?? "";
   const longCommand = !!command && (command.script || command.full.includes("\n") || command.full.length > 90);
-  const canOpen = !!tool.output || longCommand || unknownOutcome;
+  const app = useMemo(() => (tool.output ? parseMcpAppResource(tool.output) : null), [tool.output]);
+  const canOpen = (!!tool.output && !app) || longCommand || unknownOutcome;
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => canOpen && setOpen(!open)} aria-expanded={canOpen ? open : undefined}
@@ -576,7 +579,12 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
           </p>
         </div>
       )}
-      {open && tool.output && (
+      {app && (
+        <div className="ml-[26px] mt-1 mb-2 overflow-hidden rounded-lg border border-gray-200 dark:border-white/[0.08]">
+          <McpAppFrame html={app.html} />
+        </div>
+      )}
+      {open && tool.output && !app && (
         <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-white/70">
           {tool.output}

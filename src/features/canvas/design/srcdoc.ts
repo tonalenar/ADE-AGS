@@ -89,7 +89,7 @@ export const SCROLLBAR_CSS =
   "::-webkit-scrollbar-button{display:none}::-webkit-scrollbar-corner{background:transparent}";
 
 /** Remove `<meta http-equiv>` e `<base>` do conteúdo: não podem afrouxar a CSP nem redirecionar. */
-function stripUnsafeHead(html: string): string {
+export function stripUnsafeHead(html: string): string {
   return html.replace(/<meta\b[^>]*http-equiv[^>]*>/gi, "").replace(/<base\b[^>]*>/gi, "");
 }
 
