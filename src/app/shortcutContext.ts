@@ -5,7 +5,7 @@ import { structuredOf } from "@/features/terminal/structuredState";
 import { useUiStore } from "@/app/uiStore";
 import { activeTimelineConversationKey } from "@/features/chat/timeline/findModel";
 import { activePreviewViewId } from "@/features/browser/commands";
-import { activeComposerCommandTarget, isAgentModelPickerOpen, isComposerCommandAvailable, isFilePickerTargetMounted, isPromptStashTargetMounted } from "@/features/chat/composerCommands";
+import { activeComposerCommandTarget, isAgentModelPickerOpen, isComposerCommandAvailable, isDesktopSnapshotTargetMounted, isFilePickerTargetMounted, isPromptStashTargetMounted } from "@/features/chat/composerCommands";
 import { isPullRequestCopyAvailable } from "@/features/forge/pullRequestCommands";
 import { selectedConversationPinTarget } from "@/features/chat/selectedConversationCommands";
 import { isFullscreenRoute } from "@/features/chat/chatSpaces";
@@ -65,6 +65,7 @@ export function shortcutContext(pathname: string): ShortcutWhenValues {
     projectSearchOpen: uiState.drawer === "search",
     filePickerAvailable: inChatShell && isFilePickerTargetMounted(composerTarget),
     promptStashAvailable: inChatShell && isPromptStashTargetMounted(composerTarget),
+    snapshotAvailable: inChatShell && isDesktopSnapshotTargetMounted(composerTarget),
     composerAlternateAvailable: inChatShell && isComposerCommandAvailable(composerTarget, "sendAlternate"),
     composerBackgroundAvailable: inChatShell && isComposerCommandAvailable(composerTarget, "sendBackground"),
     composerSendAndNewThreadAvailable: inChatShell && isComposerCommandAvailable(composerTarget, "sendAndNewThread"),

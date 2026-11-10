@@ -7,6 +7,8 @@ import { COMPOSER_COMMAND_EVENT, FILE_PICKER_COMMAND_EVENT, type ComposerCommand
 import { AttachmentStrip } from "./attachments/AttachmentStrip";
 import { registerDropSink } from "./attachments/dropRegistry";
 import { useAttachments } from "./attachments/useAttachments";
+import { forgetPendingCaptures } from "./attachments/pendingCaptures";
+import { useComposerCaptures } from "./attachments/useComposerCaptures";
 import { ArchiveIcon, ArrowUpIcon, PaperclipIcon, StopIcon, XIcon } from "./chatIcons";
 import { withQuotes } from "./quotes/quoteModel";
 import { ScreenRecordButton } from "@/features/recording/ScreenRecordButton";
@@ -254,6 +256,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         historyDraft.current = null;
         setHistoryIndex(null);
         setText("");
+        forgetPendingCaptures(eventTarget, attachments.list.map((item) => item.path));
         attachments.clear();
         if (quoteKey) clearQuotesFor(quoteKey);
       }
@@ -469,6 +472,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     }
   }, [attachQueue, attachments.addPaths, eventTarget, stashRestoring, t]);
 
+  // Capturas (SnapShot e gravações) ainda não enviadas voltam ao rascunho deste alvo, depois de trocar de
+  // conversa ou recarregar. Quando saem do rascunho (enviadas, removidas ou guardadas), saem do registro.
+  useComposerCaptures({ target: eventTarget, list: attachments.list, addPaths: attachments.addPaths, notify: setStashStatus });
+
   // O bloco cresce com o texto e com as miniaturas até 40% da janela; a caixa tem a altura do texto todo
   // e quem rola é o miolo (`scroller`), de modo que o enviar não sai da tela.
   const scroller = useRef<HTMLDivElement>(null);
@@ -509,6 +516,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     historyDraft.current = null;
     setHistoryIndex(null);
     setText("");
+    forgetPendingCaptures(eventTarget, attachments.list.map((item) => item.path));
     attachments.clear();
     if (quoteKey) clearQuotesFor(quoteKey);
     return true;
@@ -536,6 +544,8 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       historyDraft.current = null;
       setHistoryIndex(null);
       setText("");
+      // Pode rodar depois de a conversa já ter trocado (o envio cria a conversa): o registro sai aqui, não no efeito.
+      forgetPendingCaptures(eventTarget, attachments.list.map((item) => item.path));
       attachments.clear();
       if (quoteKey) clearQuotesFor(quoteKey);
       return true;
