@@ -21,6 +21,7 @@ const ICON = {
   home: <Icon><path d="M3 11 12 4l9 7v9H5v-9" /></Icon>,
   apps: <Icon><rect x="3" y="6" width="7" height="12" rx="1.5" /><rect x="14" y="6" width="7" height="12" rx="1.5" /></Icon>,
   shot: <Icon><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></Icon>,
+  rotate: <Icon><path d="M4 12a8 8 0 1 0 2.3-5.6" /><path d="M4 4v4h4" /></Icon>,
   more: <Icon><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Icon>,
 };
 
