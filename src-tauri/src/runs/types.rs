@@ -176,12 +176,11 @@ pub enum AgentEvent {
     Quota { quota: super::quota::Quota },
 }
 
-/// El veredicto de una tarea.
+/// O veredito de uma tarefa.
 ///
-/// Sale del evento de cierre de la TUI, y si nunca llegó, del código de salida. Ese orden
-/// importa: un agente puede colgarse, quedarse sin presupuesto o morir a mitad, y en
-/// ninguno de esos casos llega a decir nada. **El fin de una tarea lo decide el proceso,
-/// no un mensaje del agente.**
+/// O sucesso só existe com o frame final do adapter. Código 0 sem esse frame é
+/// `MISSING_FINAL_RESULT`, nunca conclusão. Sem o frame e com outro código, a tarefa
+/// também falha: o processo encerra a linha, mas não a promove a sucesso.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskOutcome {
@@ -192,6 +191,9 @@ pub struct TaskOutcome {
     pub tokens_in: Option<i64>,
     pub tokens_out: Option<i64>,
 }
+
+/// Saída do processo sem o frame final do protocolo. Não é conclusão.
+pub const MISSING_FINAL_RESULT: &str = "o agente saiu sem o resultado final";
 
 impl TaskOutcome {
     pub fn failed(message: impl Into<String>) -> Self {

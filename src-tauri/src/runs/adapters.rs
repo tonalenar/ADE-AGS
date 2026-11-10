@@ -12,8 +12,9 @@
 //! - **Permisos:** sin consola que conteste, lo que preguntaría se rechaza, igual que Claude
 //!   Code sin broker. Las ediciones pasan; los comandos, según lo que cada TUI permite
 //!   (ver cada `launch`).
-//! - **El cierre:** varias no emiten un "terminé" con el resultado, así que se junta en el
-//!   camino (el último mensaje, los tokens) y se arma al salir el proceso.
+//! - **O fechamento:** o texto e os tokens se acumulam no caminho. Sucesso só com o frame
+//!   final do protocolo (`step_finish`/`stop`, `turn.completed`, `result`). Código 0 sem
+//!   esse frame é falha, não conclusão.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -39,6 +40,8 @@ struct Tally {
     /// Un problema que la TUI informó sin cortar la corrida. Solo es el motivo si la
     /// corrida igual termina mal.
     warning: Option<String>,
+    /// O protocolo mandou o frame que encerra o turno.
+    final_frame: bool,
 }
 
 impl Tally {
@@ -61,12 +64,14 @@ impl Tally {
     }
 
     fn outcome(&self, code: i32) -> TaskOutcome {
-        let ok = code == 0 && self.error.is_none();
+        let ok = code == 0 && self.error.is_none() && self.final_frame;
         TaskOutcome {
             ok,
             result: if ok { self.last_text.clone() } else { None },
             error: if ok {
                 None
+            } else if code == 0 && self.error.is_none() && !self.final_frame {
+                Some(super::types::MISSING_FINAL_RESULT.to_string())
             } else {
                 Some(
                     self.error
@@ -79,6 +84,10 @@ impl Tally {
             tokens_in: self.tokens_in,
             tokens_out: self.tokens_out,
         }
+    }
+
+    fn finish_with(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
+        emitted.unwrap_or_else(|| self.outcome(code))
     }
 }
 
@@ -306,6 +315,10 @@ impl HeadlessAgent for OpenCode {
                 if let Some(c) = part.get("cost").and_then(Value::as_f64) {
                     tally.cost = Some(tally.cost.unwrap_or(0.0) + c);
                 }
+                // `tool-calls` é passo intermediário. `stop` é o fim do turno.
+                if part.get("reason").and_then(Value::as_str) == Some("stop") {
+                    tally.final_frame = true;
+                }
             }
             Some("error") => {
                 let message = v
@@ -322,7 +335,7 @@ impl HeadlessAgent for OpenCode {
     }
 
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
-        emitted.unwrap_or_else(|| lock(&self.0).outcome(code))
+        lock(&self.0).finish_with(emitted, code)
     }
 }
 
@@ -475,9 +488,11 @@ impl HeadlessAgent for Codex {
             Some("turn.completed") => {
                 let n = |p: &str| v.pointer(p).and_then(Value::as_i64);
                 tally.add_tokens(n("/usage/input_tokens"), n("/usage/output_tokens"));
+                tally.final_frame = true;
                 Vec::new()
             }
             Some("turn.failed") => {
+                tally.final_frame = true;
                 tally.error = v
                     .pointer("/error/message")
                     .and_then(Value::as_str)
@@ -494,7 +509,7 @@ impl HeadlessAgent for Codex {
     }
 
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
-        emitted.unwrap_or_else(|| lock(&self.0).outcome(code))
+        lock(&self.0).finish_with(emitted, code)
     }
 }
 
@@ -590,6 +605,7 @@ impl HeadlessAgent for Gemini {
                 out
             }
             Some("result") => {
+                tally.final_frame = true;
                 let mut out: Vec<AgentEvent> = Self::flush(&mut tally).into_iter().collect();
                 let n = |p: &str| v.pointer(p).and_then(Value::as_i64);
                 tally.add_tokens(n("/stats/input_tokens"), n("/stats/output_tokens"));
@@ -612,7 +628,7 @@ impl HeadlessAgent for Gemini {
     }
 
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
-        emitted.unwrap_or_else(|| lock(&self.0).outcome(code))
+        lock(&self.0).finish_with(emitted, code)
     }
 }
 
@@ -697,7 +713,7 @@ impl HeadlessAgent for Kimi {
     }
 
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
-        emitted.unwrap_or_else(|| lock(&self.0).outcome(code))
+        lock(&self.0).finish_with(emitted, code)
     }
 
     /// `--prompt` siempre aprueba solo: no hay cómo sacarle las ediciones ni el shell.
