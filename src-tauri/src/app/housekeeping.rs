@@ -54,21 +54,25 @@ fn run(app: AppHandle) {
             let recovery = crate::harness::recovery::with_boot_lease(&db, now, || {
                 {
                     let conn = db.lock().map_err(|error| error.to_string())?;
-                    let effects =
-                        crate::harness::effects::recover_expired(&conn, now, &mut |_| {
-                            // Nenhum provider atual prova se `chat_send` saiu antes da queda.
-                            crate::harness::effects::Reconcile::Unknown
-                        })?;
-                    if !effects.completed.is_empty()
-                        || !effects.requeued.is_empty()
-                        || !effects.unknown.is_empty()
-                    {
-                        eprintln!(
-                            "[harness] recuperação: {} concluído(s), {} na fila, {} desfecho(s) desconhecido(s)",
-                            effects.completed.len(),
-                            effects.requeued.len(),
-                            effects.unknown.len()
-                        );
+                    // Uma falha aqui não pode impedir as varreduras seguintes (turnos órfãos, Frota, integrantes).
+                    match crate::harness::effects::recover_expired(&conn, now, &mut |_| {
+                        // Nenhum provider atual prova se `chat_send` saiu antes da queda.
+                        crate::harness::effects::Reconcile::Unknown
+                    }) {
+                        Ok(effects)
+                            if !effects.completed.is_empty()
+                                || !effects.requeued.is_empty()
+                                || !effects.unknown.is_empty() =>
+                        {
+                            eprintln!(
+                                "[harness] recuperação: {} concluído(s), {} na fila, {} desfecho(s) desconhecido(s)",
+                                effects.completed.len(),
+                                effects.requeued.len(),
+                                effects.unknown.len()
+                            );
+                        }
+                        Ok(_) => {}
+                        Err(error) => eprintln!("[harness] não foi possível reconciliar os efeitos: {error}"),
                     }
                     match crate::conversa::store::sweep_orphans(&conn, now) {
                         Ok(sweep) if sweep.runs + sweep.requests > 0 => eprintln!(
