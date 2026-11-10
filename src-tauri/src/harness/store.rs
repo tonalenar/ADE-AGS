@@ -67,6 +67,7 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     // Fase 2: recibos de comando e fila de efeitos (contrato §11). Aditivas e independentes das de cima.
     super::receipts::migrate(conn)?;
     super::effects::migrate(conn)?;
+    super::recovery::migrate(conn)?;
     Ok(())
 }
 

@@ -35,6 +35,13 @@ pub enum EndReason {
     UnmappedNativeStatus,
 }
 
+/// Razão legível persistida no evento `turn.interrupted`; turnos antigos podem não tê-la.
+pub fn chat_interruption_reason(status: &str, reason: Option<&str>) -> Option<String> {
+    (status == "interrupted")
+        .then(|| reason.map(str::to_owned))
+        .flatten()
+}
+
 /// Estado derivado, com o atributo que acompanha um terminal (não é um estado).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Derived {
@@ -44,7 +51,11 @@ pub struct Derived {
 }
 
 const fn plain(state: NodeState) -> Derived {
-    Derived { state, end_reason: None, outcome_unknown: false }
+    Derived {
+        state,
+        end_reason: None,
+        outcome_unknown: false,
+    }
 }
 
 /// `chat_run.status`. `waiting` é quando há `chat_request.pending` do turno.
