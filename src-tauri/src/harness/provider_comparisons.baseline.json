@@ -83,9 +83,6 @@
     "(c.agentId === \"claude-code\" || c.agentId === \"codex\") && !threadIdOf(c.tabId)), [cards]);"
   ],
   "src/features/chat/ComposerAssistMenu.tsx": [
-    "&& (command.id !== \"compact\" || (!!conversationKey && [\"codex\", \"claude-code\"].includes(agentId ?? \"\")))",
-    "&& (command.id !== \"goal\" || (!!conversationKey && (agentId === \"claude-code\" || (conversationKey.startsWith(\"thread:\") && agentId === \"codex\"))))",
-    "&& (command.id !== \"autocompact\" || (!!conversationKey && agentId === \"claude-code\"))",
     "const providerItems: AssistItem[] = token.trigger === \"/\" && token.start === 0 && conversationKey?.startsWith(\"thread:\") && (agentId === \"opencode\" || !!agentId?.startsWith(\"local-acp-\"))",
     "icon: <AgentMono agentId={agentId ?? \"opencode\"} label={agentId === \"opencode\" ? \"OpenCode\" : \"ACP\"} size={16} />,"
   ],
@@ -93,15 +90,7 @@
     "if (policy === \"read\") return { access: \"ask\", plan: agentId === \"claude-code\" };"
   ],
   "src/features/chat/structured/StructuredConversationView.tsx": [
-    "if (thread.agentId === \"claude-code\") autoCompactThreadOnReturn(thread.id);",
-    "{thread.agentId === \"codex\" && goal.status === \"active\" && (",
-    "{thread.agentId === \"codex\" && goal.status === \"paused\" && (",
-    "if (attachments.length === 0 && (thread.agentId === \"codex\" || thread.agentId === \"claude-code\")) {",
-    "if (thread.agentId === \"claude-code\" && /^(stop|off|reset|none|cancel)$/i.test(argument)) { handleGoalAction(\"clear\"); return; }",
     "providerCommands={thread.agentId === \"opencode\" || isLocalAcpAgent(thread.agentId) ? live.providerCommands : []}"
-  ],
-  "src/features/chat/structured/switchModel.ts": [
-    "return (agentId === \"antigravity\" || agentId === \"cursor\" || isLocalAcpAgent(agentId)) && access === \"ask\";"
   ],
   "src/features/chat/summary/LimitsCard.tsx": [
     "if (used.some((entry) => entry.agentId === \"antigravity\" && !entry.accountId)) void refreshAgy(false);",
