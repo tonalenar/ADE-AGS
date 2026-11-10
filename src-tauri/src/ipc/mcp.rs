@@ -2109,8 +2109,8 @@ fn scoped_chat_payload(
     command: &str,
     mut args: serde_json::Map<String, Value>,
 ) -> Value {
-    // O recibo do envio é do chamador real: o escopo vem da sessão, nunca do modelo.
-    if command == "chat.send" {
+    // O recibo do envio e a parada de filha são do chamador real: o escopo vem da sessão, nunca do modelo.
+    if matches!(command, "chat.send" | "chat.stop") {
         args.remove("caller_scope");
         let scope = match context {
             McpContext::Task(task) => format!("task:{task}"),

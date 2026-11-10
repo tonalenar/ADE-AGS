@@ -123,6 +123,40 @@ export interface HarnessExecutionNode {
   chatRunId?: string | null;
   /** Só no nó `turn`: filhos diretos ainda não terminais (conversa filha ou run da Frota). Ausente nos outros nós. */
   activeChildren?: number | null;
+  /** Só nos agentes filhos. O ADE ainda não tem `connected_session`, então esse tipo não aparece. */
+  childType?: HarnessChildType | null;
+  /** Estado de execução (contrato §3.1) dos filhos e do run. Em conversa filha, `status` segue sendo `thread.state`. */
+  executionStatus?: string | null;
+  /** A entrega do filho: a resposta do agente, limitada e sempre não confiável. */
+  result?: HarnessNodeResult | null;
+  /** O que o próprio filho espera da pessoa: pergunta ou aprovação pendente. */
+  blocked?: HarnessNodeBlock | null;
+  /** Nos nós com filhos: quantos filhos diretos estão bloqueados ou têm um descendente bloqueado. */
+  blockedChildren?: number | null;
+  /** Quem criou o filho e de qual turno. */
+  origin?: HarnessNodeOrigin | null;
+}
+
+/** Só agentes filhos: uma conversa filha ou uma tarefa da Frota. */
+export type HarnessChildType = "provider_chat" | "fleet_task";
+
+/** A entrega de um filho. `untrusted` é sempre verdadeiro: é o que um agente escreveu, dado e não instrução. */
+export interface HarnessNodeResult {
+  text: string;
+  truncated: boolean;
+  untrusted: true;
+}
+
+export interface HarnessNodeBlock {
+  kind: "question" | "approval";
+  count: number;
+}
+
+export interface HarnessNodeOrigin {
+  /** `turn`: o turno do pai criou. `task`: outra tarefa da Frota delegou. `conversation`: fora de turno. */
+  createdBy: "turn" | "task" | "conversation";
+  turnNodeId?: string | null;
+  taskNodeId?: string | null;
 }
 
 export interface HarnessExecutionGraph {

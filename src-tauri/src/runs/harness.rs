@@ -2,18 +2,26 @@
 //!
 //! Conversas estruturadas, turnos e tarefas headless mantêm suas tabelas e ciclos nativos. Este
 //! módulo só lhes dá uma identidade de nó e relação de pai para que o harness consulte uma árvore.
+//!
+//! Na Fase 4, cada filho que é agente (conversa filha ou tarefa da Frota) também traz o que a pessoa
+//! precisa ver: tipo, estado de execução, a entrega limitada e marcada como não confiável, o bloqueio
+//! (pergunta ou aprovação pendente) e a origem. Tudo é lido na hora; nada disso é gravado aqui.
 
 use std::collections::{HashMap, HashSet};
 
-use rusqlite::{Connection, params_from_iter};
+use rusqlite::{Connection, OptionalExtension, params_from_iter};
 use serde::Serialize;
 
 use crate::conversa::store as chat;
-use crate::harness::state;
+use crate::harness::state::{self, NodeState};
 use crate::harness::store as harness_store;
 use super::execution_log::{self, HarnessEvent};
+use super::types::status;
 
-#[derive(Clone, Debug, Serialize)]
+/// Quantos caracteres da resposta de um filho a projeção leva. O texto inteiro fica na conversa ou na tarefa.
+const RESULT_PREVIEW_CHARS: usize = 500;
+
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HarnessExecutionNode {
     /// Identidade ADE com prefixo de tipo: `thread:`, `turn:`, `run:`, `task:` ou `attempt:`.
@@ -45,6 +53,57 @@ pub struct HarnessExecutionNode {
     /// Derivado na leitura; os outros nós omitem o campo. Ver contrato §3.3 regra 8.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_children: Option<i64>,
+    /// Só nos agentes filhos: `provider_chat` (conversa filha) ou `fleet_task` (tarefa da Frota). O ADE
+    /// não tem `connected_session`, então esse tipo não sai. Os outros nós omitem o campo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub child_type: Option<String>,
+    /// Estado de execução (contrato §3.1) dos filhos: conversa, run e tarefa. Em conversa filha, `status`
+    /// continua sendo `thread.state`; este campo é o estado do último turno, que é o que roda.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub execution_status: Option<String>,
+    /// A entrega do filho (a resposta do agente), limitada e sempre marcada como não confiável.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<HarnessNodeResult>,
+    /// O bloqueio do próprio filho: pergunta ou aprovação que a pessoa precisa responder.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked: Option<HarnessNodeBlock>,
+    /// Só nos nós com filhos: quantos filhos diretos estão bloqueados ou têm um descendente bloqueado.
+    /// O estado do pai não muda por causa disso (contrato §3.3 regra 6).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blocked_children: Option<i64>,
+    /// Quem criou o filho e de qual turno.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<HarnessNodeOrigin>,
+}
+
+/// A entrega de um filho. `untrusted` é sempre verdadeiro: é o que um agente escreveu, dado e não instrução.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessNodeResult {
+    pub text: String,
+    pub truncated: bool,
+    pub untrusted: bool,
+}
+
+/// O que um filho espera da pessoa. `kind` é `question` (o agente perguntou) ou `approval` (o agente pediu
+/// permissão). `count` conta os pedidos pendentes desse filho.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessNodeBlock {
+    pub kind: String,
+    pub count: i64,
+}
+
+/// Quem criou o filho e de qual turno. `created_by` é `turn` (o turno do pai criou), `task` (outra tarefa
+/// da Frota delegou) ou `conversation` (a conversa, fora de turno: não há turno para pendurar).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HarnessNodeOrigin {
+    pub created_by: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub turn_node_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_node_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -88,6 +147,8 @@ struct FleetTask {
     created_at: i64,
     started_at: Option<i64>,
     ended_at: Option<i64>,
+    /// Os primeiros caracteres do `result` da tarefa (uma a mais que o limite, para saber se cortou).
+    result_head: Option<String>,
 }
 
 struct FleetAttempt {
@@ -172,6 +233,20 @@ pub fn thread_execution_graph(
         .collect::<Vec<_>>();
     let attempts_by_task = load_fleet_attempts(conn, &task_ids)?;
     let events = execution_log::list_for_threads(conn, &thread_ids, 250)?;
+    // Bloqueios e entregas (Fase 4): só o que um filho ainda precisa mostrar. Lidos em lote, como o resto.
+    let chat_blocks = load_chat_blocks(conn, &thread_ids)?;
+    let fleet_approvals = load_fleet_approvals(conn, &task_ids)?;
+    let last_turns: Vec<(String, String)> = lineage
+        .iter()
+        .filter(|(_, parent, _)| parent.is_some())
+        .filter_map(|(thread, _, _)| {
+            turns_by_thread
+                .get(&thread.id)
+                .and_then(|turns| turns.last())
+                .map(|turn| (thread.id.clone(), turn.id.clone()))
+        })
+        .collect();
+    let chat_results = load_chat_results(conn, &last_turns)?;
     // Nós com linha (`harness_node`): ganham o id estável e, no run da Frota, o pai durável. Quem não
     // tem linha (run sem turno ativo, conversa filha com o pai ocioso, dados anteriores à Fase 1)
     // segue só pela derivação acima. Nó cujo registro nativo sumiu nunca aparece: a árvore parte
@@ -191,15 +266,34 @@ pub fn thread_execution_graph(
     let mut nodes = Vec::new();
     for (thread, parent_thread_id, depth) in &lineage {
         let thread_node_id = format!("thread:{}", thread.id);
+        let is_child = parent_thread_id.is_some();
+        let last_turn = turns_by_thread.get(&thread.id).and_then(|turns| turns.last());
+        // Só um turno ainda em andamento pode estar esperando a pessoa. Pedido que sobrou de turno
+        // terminado não bloqueia: não há o que responder.
+        let blocked = chat_blocks
+            .get(&thread.id)
+            .filter(|_| is_child && last_turn.is_some_and(|turn| turn.status == "inProgress"))
+            .cloned();
+        // O turno do pai que originou esta conversa (`parent_turn_id`), quando havia um só em curso.
+        let origin_turn = thread
+            .parent_turn_id
+            .as_ref()
+            .zip(parent_thread_id.as_ref())
+            .map(|(turn_id, parent_id)| format!("turn:{parent_id}:{turn_id}"));
+        let execution = is_child.then(|| match last_turn {
+            Some(turn) => state::from_chat_run(&turn.status, blocked.is_some()).state.as_str().to_string(),
+            None => NodeState::Pending.as_str().to_string(),
+        });
+        let result = if is_child {
+            chat_results.get(&thread.id).map(|head| result_of(head))
+        } else {
+            None
+        };
         nodes.push(HarnessExecutionNode {
             id: thread_node_id.clone(),
-            parent_id: parent_thread_id.as_ref().map(|parent_id| {
-                thread
-                    .parent_turn_id
-                    .as_ref()
-                    .map(|turn_id| format!("turn:{parent_id}:{turn_id}"))
-                    .unwrap_or_else(|| format!("thread:{parent_id}"))
-            }),
+            parent_id: parent_thread_id
+                .as_ref()
+                .map(|parent_id| origin_turn.clone().unwrap_or_else(|| format!("thread:{parent_id}"))),
             kind: "thread".into(),
             depth: *depth,
             title: if thread.title.trim().is_empty() {
@@ -209,18 +303,16 @@ pub fn thread_execution_graph(
             },
             status: thread.state.clone(),
             thread_id: Some(thread.id.clone()),
-            run_id: None,
             agent_id: Some(thread.agent_id.clone()),
             model: thread.model.clone(),
-            plan_key: None,
-                attempt: None,
-                node_id: None,
-                harness_run_id: None,
-                chat_run_id: None,
-                active_children: None,
             created_at: thread.created_at,
-            started_at: None,
             ended_at: (thread.state == "settled").then_some(thread.updated_at),
+            child_type: is_child.then(|| "provider_chat".to_string()),
+            execution_status: execution,
+            result,
+            blocked,
+            origin: is_child.then(|| origin_of(origin_turn, None)),
+            ..Default::default()
         });
 
         for turn in turns_by_thread.get(&thread.id).into_iter().flatten() {
@@ -235,15 +327,11 @@ pub fn thread_execution_graph(
                 run_id: Some(turn.id.clone()),
                 agent_id: Some(thread.agent_id.clone()),
                 model: thread.model.clone(),
-                plan_key: None,
-                attempt: None,
-                node_id: None,
-                harness_run_id: None,
                 chat_run_id: Some(turn.id.clone()),
-                active_children: None,
                 created_at: turn.started_at.unwrap_or(thread.created_at),
                 started_at: turn.started_at,
                 ended_at: turn.ended_at,
+                ..Default::default()
             });
         }
 
@@ -261,26 +349,33 @@ pub fn thread_execution_graph(
             let under_turn = i64::from(turn_parent.is_some());
             nodes.push(HarnessExecutionNode {
                 id: run_node_id.clone(),
-                parent_id: Some(turn_parent.unwrap_or_else(|| thread_node_id.clone())),
+                parent_id: Some(turn_parent.clone().unwrap_or_else(|| thread_node_id.clone())),
                 kind: "fleetRun".into(),
                 depth: depth + 1 + under_turn,
                 title: run.title.clone(),
                 status: run.status.clone(),
                 thread_id: Some(thread.id.clone()),
                 run_id: Some(run.id.clone()),
-                agent_id: None,
-                model: None,
-                plan_key: None,
-                attempt: None,
-                node_id: None,
-                harness_run_id: None,
-                chat_run_id: None,
-                active_children: None,
                 created_at: run.created_at,
                 started_at: Some(run.created_at),
                 ended_at: run.ended_at,
+                execution_status: Some(state::from_fleet_run(&run.status).state.as_str().to_string()),
+                origin: Some(origin_of(turn_parent.clone(), None)),
+                ..Default::default()
             });
             for task in tasks_by_run.get(&run.id).into_iter().flatten() {
+                let derived = state::from_task(&task.status, task.error.as_deref());
+                // Aprovação só bloqueia tarefa que está rodando: sobra de um estado anterior não conta.
+                let blocked = fleet_approvals
+                    .get(&task.id)
+                    .copied()
+                    .filter(|count| *count > 0 && task.status == status::RUNNING)
+                    .map(|count| HarnessNodeBlock { kind: "approval".into(), count });
+                let execution = if blocked.is_some() && derived.state == NodeState::Running {
+                    NodeState::Waiting
+                } else {
+                    derived.state
+                };
                 nodes.push(HarnessExecutionNode {
                     id: format!("task:{}", task.id),
                     parent_id: task
@@ -301,14 +396,22 @@ pub fn thread_execution_graph(
                     agent_id: Some(task.agent_id.clone()),
                     model: task.model.clone(),
                     plan_key: task.plan_key.clone(),
-                    attempt: None,
-                    node_id: None,
-                    harness_run_id: None,
-                    chat_run_id: None,
-                active_children: None,
                     created_at: task.created_at,
                     started_at: task.started_at,
                     ended_at: task.ended_at,
+                    child_type: Some("fleet_task".into()),
+                    execution_status: Some(execution.as_str().to_string()),
+                    result: task
+                        .result_head
+                        .as_deref()
+                        .filter(|head| !head.is_empty())
+                        .map(result_of),
+                    blocked,
+                    origin: Some(origin_of(
+                        turn_parent.clone(),
+                        task.parent_id.as_ref().map(|id| format!("task:{id}")),
+                    )),
+                    ..Default::default()
                 });
                 for attempt in attempts_by_task.get(&task.id).into_iter().flatten() {
                     nodes.push(HarnessExecutionNode {
@@ -328,15 +431,11 @@ pub fn thread_execution_graph(
                         run_id: Some(attempt.run_id.clone()),
                         agent_id: Some(attempt.agent_id.clone()),
                         model: attempt.model.clone(),
-                        plan_key: None,
                         attempt: Some(attempt.attempt),
-                        node_id: None,
-                        harness_run_id: None,
-                        chat_run_id: None,
-                active_children: None,
                         created_at: attempt.started_at,
                         started_at: Some(attempt.started_at),
                         ended_at: attempt.ended_at,
+                        ..Default::default()
                     });
                 }
             }
@@ -350,12 +449,14 @@ pub fn thread_execution_graph(
         }
     }
 
-    // A contagem olha a árvore já montada: o pai do run da Frota só existe depois do vínculo com o turno.
+    // As contagens olham a árvore já montada: o pai do run da Frota só existe depois do vínculo com o turno.
     let counts = active_child_counts(&nodes);
+    let blocked = blocked_children_counts(&nodes);
     for node in &mut nodes {
         if node.kind == "turn" {
             node.active_children = Some(counts.get(&node.id).copied().unwrap_or(0));
         }
+        node.blocked_children = blocked.get(&node.id).copied();
     }
 
     Ok(HarnessExecutionGraph {
@@ -387,6 +488,52 @@ fn active_child_counts(nodes: &[HarnessExecutionNode]) -> HashMap<String, i64> {
     counts
 }
 
+/// Por pai, quantos filhos diretos estão bloqueados ou têm um descendente bloqueado. É só leitura: o pai
+/// mantém o estado que tinha (contrato §3.3 regra 6), e a pessoa vê o bloqueio descendo a árvore.
+fn blocked_children_counts(nodes: &[HarnessExecutionNode]) -> HashMap<String, i64> {
+    let parent_of: HashMap<&str, &str> = nodes
+        .iter()
+        .filter_map(|node| node.parent_id.as_deref().map(|parent| (node.id.as_str(), parent)))
+        .collect();
+    // Cada nó bloqueado e todos os seus ancestrais: o caminho de cada bloqueio até a raiz.
+    let mut branch: HashSet<&str> = HashSet::new();
+    for node in nodes.iter().filter(|node| node.blocked.is_some()) {
+        let mut current = Some(node.id.as_str());
+        while let Some(id) = current {
+            if !branch.insert(id) {
+                break;
+            }
+            current = parent_of.get(id).copied();
+        }
+    }
+    let mut counts: HashMap<String, i64> = HashMap::new();
+    for id in &branch {
+        if let Some(parent) = parent_of.get(*id) {
+            *counts.entry((*parent).to_string()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+/// A origem de um filho: quem o criou. Sem turno nem tarefa que delegou, quem criou foi a conversa.
+fn origin_of(turn_node_id: Option<String>, task_node_id: Option<String>) -> HarnessNodeOrigin {
+    let created_by = match (&task_node_id, &turn_node_id) {
+        (Some(_), _) => "task",
+        (None, Some(_)) => "turn",
+        (None, None) => "conversation",
+    };
+    HarnessNodeOrigin { created_by, turn_node_id, task_node_id }
+}
+
+/// A entrega limitada: até 500 caracteres, sempre marcada como não confiável.
+fn result_of(head: &str) -> HarnessNodeResult {
+    HarnessNodeResult {
+        text: head.chars().take(RESULT_PREVIEW_CHARS).collect(),
+        truncated: head.chars().count() > RESULT_PREVIEW_CHARS,
+        untrusted: true,
+    }
+}
+
 /// O último turno da conversa, na ordem da projeção (`started_at`, depois `id`).
 fn last_turn<'a>(nodes: &'a [HarnessExecutionNode], thread_id: &str) -> Option<&'a HarnessExecutionNode> {
     nodes.iter().rev().find(|node| node.kind == "turn" && node.thread_id.as_deref() == Some(thread_id))
@@ -405,6 +552,90 @@ fn direct_child_is_active(nodes: &[HarnessExecutionNode], child: &HarnessExecuti
         "fleetRun" => !state::from_fleet_run(&child.status).state.is_terminal(),
         _ => false,
     }
+}
+
+/// Os pedidos do chat que a pessoa ainda precisa responder, por conversa. Pergunta tem precedência sobre
+/// aprovação: quando o agente pergunta, é a resposta que ele espera.
+fn load_chat_blocks(
+    conn: &Connection,
+    thread_ids: &[String],
+) -> Result<HashMap<String, HarnessNodeBlock>, String> {
+    let mut blocks: HashMap<String, HarnessNodeBlock> = HashMap::new();
+    for ids in thread_ids.chunks(400) {
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT thread_id, kind, COUNT(*) FROM chat_request
+             WHERE state = 'pending' AND thread_id IN ({placeholders})
+             GROUP BY thread_id, kind"
+        );
+        let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params_from_iter(ids.iter().map(String::as_str)), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, i64>(2)?))
+            })
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            let (thread_id, kind, count) = row.map_err(|error| error.to_string())?;
+            let block = blocks
+                .entry(thread_id)
+                .or_insert_with(|| HarnessNodeBlock { kind: "approval".into(), count: 0 });
+            block.count += count;
+            if kind == "question" {
+                block.kind = "question".into();
+            }
+        }
+    }
+    Ok(blocks)
+}
+
+/// As aprovações que cada tarefa da Frota está esperando (`task_approvals` ainda `pending`).
+fn load_fleet_approvals(conn: &Connection, task_ids: &[String]) -> Result<HashMap<String, i64>, String> {
+    let mut pending = HashMap::new();
+    for ids in task_ids.chunks(400) {
+        let placeholders = vec!["?"; ids.len()].join(",");
+        let sql = format!(
+            "SELECT task_id, COUNT(*) FROM task_approvals
+             WHERE status = 'pending' AND task_id IN ({placeholders})
+             GROUP BY task_id"
+        );
+        let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
+        let rows = statement
+            .query_map(params_from_iter(ids.iter().map(String::as_str)), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|error| error.to_string())?;
+        for row in rows {
+            let (task_id, count) = row.map_err(|error| error.to_string())?;
+            pending.insert(task_id, count);
+        }
+    }
+    Ok(pending)
+}
+
+/// A última fala do agente no último turno de cada filho, cortada no limite mais um caractere (para
+/// saber se cortou). Lê uma linha por filho, e só o começo do texto.
+fn load_chat_results(
+    conn: &Connection,
+    last_turns: &[(String, String)],
+) -> Result<HashMap<String, String>, String> {
+    let mut results = HashMap::new();
+    for (thread_id, turn_id) in last_turns {
+        let head: Option<Option<String>> = conn
+            .query_row(
+                "SELECT substr(json_extract(body, '$.text'), 1, ?3) FROM chat_item
+                 WHERE thread_id = ?1 AND run_id = ?2 AND json_extract(body, '$.kind') = 'assistant'
+                   AND length(COALESCE(json_extract(body, '$.text'), '')) > 0
+                 ORDER BY seq DESC LIMIT 1",
+                rusqlite::params![thread_id, turn_id, (RESULT_PREVIEW_CHARS + 1) as i64],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if let Some(Some(head)) = head {
+            results.insert(thread_id.clone(), head);
+        }
+    }
+    Ok(results)
 }
 
 fn load_chat_turns(
@@ -481,11 +712,12 @@ fn load_fleet_tasks(
     run_ids: &[String],
 ) -> Result<HashMap<String, Vec<FleetTask>>, String> {
     let mut tasks_by_run: HashMap<String, Vec<FleetTask>> = HashMap::new();
+    let head = RESULT_PREVIEW_CHARS + 1;
     for ids in run_ids.chunks(400) {
         let placeholders = vec!["?"; ids.len()].join(",");
         let sql = format!(
             "SELECT id, run_id, title, status, agent_id, model, plan_key, parent_id, depth,
-                    created_at, started_at, ended_at, error
+                    created_at, started_at, ended_at, error, substr(result, 1, {head})
              FROM tasks WHERE run_id IN ({placeholders}) ORDER BY run_id, created_at, rowid"
         );
         let mut statement = conn.prepare(&sql).map_err(|error| error.to_string())?;
@@ -505,6 +737,7 @@ fn load_fleet_tasks(
                     started_at: row.get(10)?,
                     ended_at: row.get(11)?,
                     error: row.get(12)?,
+                    result_head: row.get(13)?,
                 })
             })
             .map_err(|error| error.to_string())?;

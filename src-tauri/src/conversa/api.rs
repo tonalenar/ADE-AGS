@@ -1098,6 +1098,30 @@ pub async fn stop(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result
     Ok(())
 }
 
+/// Quem pode parar a conversa `target` (contrato §3.3 regra 9). Sem `caller_scope` é a pessoa, e para qualquer
+/// conversa. Com ele, é um agente que chamou pelo MCP, e o escopo vem da sessão, nunca do modelo: esse agente só
+/// para a conversa filha que a própria conversa (`thread:<id>`) ou a própria aba (`tab:<id>`) criou. Tarefa da
+/// Frota e pasta, sem conversa de origem, não param conversa nenhuma.
+pub fn check_stop_scope(conn: &rusqlite::Connection, caller_scope: Option<&str>, target: &str) -> Result<(), String> {
+    const FORA_DO_ESCOPO: &str = "só a conversa que criou esta filha, ou a pessoa, pode pará-la";
+    let Some(scope) = caller_scope else {
+        return Ok(());
+    };
+    let Some(tab) = scope.strip_prefix("tab:") else {
+        return Err(FORA_DO_ESCOPO.into());
+    };
+    // A mesma regra de `chat.new`: a conversa que origina é `thread:<id>`, e a aba de TUI é `tab:<id>`.
+    let expected = if tab.starts_with("thread:") { tab.to_string() } else { format!("tab:{tab}") };
+    let row = store::thread(conn, target)
+        .map_err(db_err)?
+        .ok_or_else(|| format!("não há nenhuma conversa {target}"))?;
+    if row.parent_ref.as_deref() == Some(expected.as_str()) {
+        Ok(())
+    } else {
+        Err(FORA_DO_ESCOPO.into())
+    }
+}
+
 /// O fim do turno que o Parar fechou sem agente vivo.
 pub const STOPPED_ORPHAN: &str = "O turno foi parado: o agente já não estava rodando.";
 

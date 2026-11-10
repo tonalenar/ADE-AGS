@@ -2013,3 +2013,63 @@ mod harness_fase1 {
         assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (0, 0));
     }
 }
+
+// ── Fase 4 do harness: quem pode parar uma conversa filha (escopo verificado) ───────────────────
+
+mod harness_fase4 {
+    use crate::conversa::api::check_stop_scope;
+    use crate::conversa::store::{self, Tuning};
+
+    fn tuning() -> Tuning {
+        Tuning { model: None, effort: None, access: "ask".into() }
+    }
+
+    /// `raiz`; `filha`, criada pela própria conversa; `tui`, criada por uma aba de terminal.
+    fn conversas() -> rusqlite::Connection {
+        let conn = crate::database::test_db();
+        store::insert_thread_with_context(&conn, "raiz", "claude-code", "/p", "raiz", &tuning(), None, None, None, 1).unwrap();
+        store::insert_thread_with_context(&conn, "filha", "claude-code", "/p", "filha", &tuning(), None, Some("thread:raiz"), None, 2).unwrap();
+        store::insert_thread_with_context(&conn, "tui", "claude-code", "/p", "tui", &tuning(), None, Some("tab:abc"), None, 3).unwrap();
+        conn
+    }
+
+    /// A pessoa, que não tem escopo de agente, para qualquer conversa.
+    #[test]
+    fn a_pessoa_para_qualquer_conversa() {
+        let conn = conversas();
+        assert!(check_stop_scope(&conn, None, "filha").is_ok());
+        assert!(check_stop_scope(&conn, None, "raiz").is_ok());
+    }
+
+    /// Um agente de conversa para só a filha que a própria conversa criou: nem o pai, nem outra conversa.
+    #[test]
+    fn um_agente_de_conversa_so_para_a_filha_dele() {
+        let conn = conversas();
+        assert!(check_stop_scope(&conn, Some("tab:thread:raiz"), "filha").is_ok());
+        assert!(check_stop_scope(&conn, Some("tab:thread:raiz"), "raiz").is_err(), "não para o próprio pai");
+        assert!(check_stop_scope(&conn, Some("tab:thread:outra"), "filha").is_err(), "outra conversa não para a filha");
+    }
+
+    /// A filha criada por uma aba de TUI só é parada pela mesma aba.
+    #[test]
+    fn a_filha_de_aba_de_tui_so_e_parada_pela_aba() {
+        let conn = conversas();
+        assert!(check_stop_scope(&conn, Some("tab:abc"), "tui").is_ok());
+        assert!(check_stop_scope(&conn, Some("tab:thread:raiz"), "tui").is_err());
+    }
+
+    /// Tarefa da Frota e pasta, sem conversa de origem, não param conversa nenhuma.
+    #[test]
+    fn tarefa_e_pasta_nao_param_conversa() {
+        let conn = conversas();
+        assert!(check_stop_scope(&conn, Some("task:t1"), "filha").is_err());
+        assert!(check_stop_scope(&conn, Some("cwd:/p"), "filha").is_err());
+    }
+
+    /// Uma conversa que não existe não passa no escopo de agente.
+    #[test]
+    fn conversa_inexistente_nao_passa_no_escopo_de_agente() {
+        let conn = conversas();
+        assert!(check_stop_scope(&conn, Some("tab:thread:raiz"), "nao-existe").is_err());
+    }
+}
