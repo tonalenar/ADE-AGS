@@ -7,8 +7,10 @@
 //! - [`install`] — instalar/desinstalar el binario `ags` en el PATH del usuario.
 //! - [`mcp`] — el servidor MCP que les da a los agentes sus herramientas.
 //! - [`cancel`] — las llamadas de ese servidor que el agente canceló.
+//! - [`authz`] — a tabela de classes de autorização por método (F-09), consultada no começo do despachador.
 //! - [`spill`] — respostas grandes da CLI e do MCP vão para `~/.ags/spill/` (cabeça, cauda e caminho).
 
+pub(crate) mod authz;
 pub mod bridge;
 pub mod cancel;
 pub(crate) mod guard;

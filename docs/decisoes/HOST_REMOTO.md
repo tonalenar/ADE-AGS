@@ -1,6 +1,6 @@
 # Host remoto e serviço em segundo plano: modelo de ameaça e pré-requisitos
 
-> Fase 8 da auditoria de paridade. Documento de **decisão e revisão de superfície**. Nada foi aberto à rede: bind em `127.0.0.1`, porta efêmera e transporte não mudaram. A análise original só acrescentou seis testes de guarda; as correções de F-01 e de F-02, F-03, F-05, F-07, F-08 e F-09 (parcial), com `peer.answer` e `fix.decide`, vieram depois, com OK explícito, e estão em §6.
+> Fase 8 da auditoria de paridade. Documento de **decisão e revisão de superfície**. Nada foi aberto à rede: bind em `127.0.0.1`, porta efêmera e transporte não mudaram. A análise original só acrescentou seis testes de guarda; as correções de F-01, F-02, F-03, F-05, F-07, F-08 e F-09 (agora **completa**: tabela de autorização por método), com `peer.answer` e `fix.decide`, vieram depois, com OK explícito, e estão em §6.
 
 - Data: 2026-11-10. Base: commit `62846e26` (início da análise).
 - Relacionados: [AMBIENTES_REMOTOS.md](../ade-ags/AMBIENTES_REMOTOS.md) (proposta), [SEGURANCA_LOCAL.md](../ade-ags/SEGURANCA_LOCAL.md), [COMPUTER_USE_SUPERFICIES.md](../ade-ags/COMPUTER_USE_SUPERFICIES.md), [ESPELHAMENTO_IPHONE.md](../ade-ags/ESPELHAMENTO_IPHONE.md), [CLI_MCP.md](../agentes/CLI_MCP.md).
@@ -10,9 +10,9 @@ Salvo indicação, `arquivo:linha` é relativo a `src-tauri/src/`.
 ## 1. Resumo
 
 - O IPC de hoje é um listener TCP em `127.0.0.1` com um token por processo, mais um canal de credencial com PID (§3). Ele não está exposto à rede **por causa do bind e do token**, não por um modelo de autorização.
-- Um token dá acesso a **217 dos 221 métodos** do inventário; os 2 de manutenção e, desde a correção de F-01, `approval.decide` e `approval.list` são negados a todos (antes do `match`). Os métodos que dependem de PID exigem também o canal de credencial. O token é legível por qualquer processo do mesmo usuário, inclusive por agentes que rodam comandos. Ele não separa processos do mesmo usuário nem identifica cliente.
+- O token, sozinho, não autoriza mais nada além de **27 métodos livres** (catálogo e metadado). Desde a correção completa de F-09, cada um dos 221 métodos tem uma **classe** em `ipc/authz.rs` (livre, escopo, pessoa, pessoa-ou-escopo), consultada no começo do despachador; método sem classe é recusado. O escopo é provado pelo PID do canal de credencial contra a árvore de processos do ADE (§6.1). O token continua legível por qualquer processo do mesmo usuário e não identifica cliente: quem roda **fora** de toda árvore do ADE e não declara identidade (a pessoa num terminal próprio, CI) mantém o acesso de sempre, e o servidor não a distingue de um agente que se destacou da árvore (limite conhecido).
 - **Decisão:** o listener atual não será exposto à rede, nem com TLS na frente. O host remoto precisa de um contrato novo (identidade de cliente, capacidades por método, versão, limites antes da autenticação). Não é um túnel para este listener.
-- Achados (§6): **1 alta**, **3 médias** confirmadas, **1 média** condicional (não verificada), **5 baixas**, **2 informativos**. **Estado:** corrigidos F-01, F-02, F-03, F-05, F-07 e F-08; **F-09 parcial** (só `tab.send`); F-04 e F-10 seguem não verificados; F-06, F-11 e F-12 sem mudança. `peer.answer` e `fix.decide` agora exigem papel provado.
+- Achados (§6): **1 alta**, **3 médias** confirmadas, **1 média** condicional (não verificada), **5 baixas**, **2 informativos**. **Estado:** corrigidos F-01, F-02, F-03, F-05, F-07, F-08 e **F-09 (completo)**; F-04 e F-10 seguem não verificados; F-06, F-11 e F-12 sem mudança. `peer.answer` e `fix.decide` agora exigem papel provado.
 - Guardas (§9): **seis testes** em `ipc/test.rs`, que passam no código atual. Nenhuma falha de produção apareceu que exigisse parar.
 - Não verificado (§10): prova em runtime (nenhum processo do app estava rodando e a aplicação não foi executada nesta tarefa), Windows, medições de sandbox e de carga.
 
@@ -21,7 +21,7 @@ Salvo indicação, `arquivo:linha` é relativo a `src-tauri/src/`.
 - Lido: `ipc/{server,transport,protocol,mod}.rs`, `ipc/commands/{dispatch,tabs,missions,runs,agent_secrets}.rs`, `bin/cli.rs`, `ipc/mcp.rs` (anotações `DESTRUCTIVE`), `ipc/bridge.rs`, `terminal/session.rs`, `runs/{mod,broker,orchestration,policy,agents}.rs`, `memory.rs`, `approval_audit.rs`, `app/{run,shutdown,housekeeping}.rs`, `terminal/pty_manager.rs`, `database/wal.rs`, `preview/proxy.rs`, `accounts/antigravity_oauth.rs`, `util/loopback_trust.rs`, `util/datadir.rs`, `build.rs`, `capabilities/default.json`, `real_browser/native.rs`.
 - Documentos: AGENTS.md, `docs/agentes/{BACKEND,CLI_MCP}.md`, `docs/ade-ags/{ARCHITECTURE,AMBIENTES_REMOTOS,SEGURANCA_LOCAL,COMPUTER_USE_SUPERFICIES}.md`, e o início de `ESPELHAMENTO_IPHONE.md`.
 - Não executei a aplicação nem um build de instalação. Rodei `cargo test --lib ipc` e `cargo test --lib --bin ags` (§9).
-- A classificação dos métodos (Anexo A) é **preliminar**: vem do nome e da leitura de alguns handlers. A auditoria por handler é o item 0 do plano.
+- A classificação preliminar dos métodos veio do nome e da leitura de alguns handlers. F-09 completo a substituiu por uma tabela por método (Anexo A, `ipc/authz.rs`).
 
 ## 3. Inventário da superfície atual (a)
 
@@ -60,8 +60,8 @@ Outros listeners do app, todos em loopback: o proxy de preview (`127.0.0.1` e `:
 
 - **221 braços** no `match` do despachador (dispatch.rs:99-348), todos com ponto no nome. *Depois de F-01 o `match` tem 219: `approval.decide` e `approval.list` saíram e são recusados antes dele. O Anexo A abaixo é o inventário original.*
 - Antes do `match`: a negação de manutenção, para **qualquer** chamador (dispatch.rs:86; ipc/mod.rs:31-35). E a checagem de papel Dreamer quando há `taskId` (dispatch.rs:89-98; runs/policy.rs:107-119).
-- O despachador **não confere identidade**. Só alguns métodos conferem, por conta própria e por PID de ancestralidade (terminal/session.rs:172-211): memória e swarm de sessão, segredos (ipc/commands/agent_secrets.rs:13-21) e computer use (computer_use/ios.rs:594).
-- Classificação preliminar (Anexo A):
+- *Antes de F-09 completo:* o despachador não conferia identidade; só alguns métodos conferiam, por conta própria e por PID de ancestralidade (terminal/session.rs:172-211): memória e swarm de sessão, segredos (ipc/commands/agent_secrets.rs:13-21) e computer use (computer_use/ios.rs:594). **Agora** a tabela `ipc/authz.rs` classifica todos (§6.1, Anexo A); os handlers acima seguem conferindo por conta própria, como defesa em profundidade.
+- Classificação preliminar, **histórica** (a classe real de cada método, de F-09 completo, está no Anexo A):
 
 | Classe | Significado | Quantidade |
 |---|---|---|
@@ -104,11 +104,11 @@ Token e handshake (acesso a tudo que o IPC faz). PTYs e o texto enviado a eles. 
 ### 4.3 STRIDE
 
 - **Spoofing:** tarefa e aba são afirmadas no payload (F-02). O PID cobre só parte dos métodos (F-12).
-- **Tampering:** `tab.send` escreve em qualquer PTY por id, sem checar quem chama (F-09). O handshake pode ser redirecionado pelo ambiente (F-07).
+- **Tampering:** `tab.send` escrevia em qualquer PTY por id, sem checar quem chama (F-09, corrigido). O handshake podia ser redirecionado pelo ambiente (F-07, corrigido).
 - **Repudiation:** o IPC não registra quem chama. Só conta bytes (server.rs:287-289). Aprovações não guardam a origem da decisão no pedido; com F-01 só a interface decide (`DecidedBy::User`).
-- **Information disclosure:** `approval.list` expunha o `input` bruto da ferramenta (F-01, fechado). `tab.output` lê o terminal. `secret.consume` devolve o valor, só com PID (F-12).
+- **Information disclosure:** `approval.list` expunha o `input` bruto da ferramenta (F-01, fechado). `tab.output` lia o terminal de qualquer aba (F-09, corrigido: escopo de aba). `secret.consume` devolve o valor, só com PID (F-12).
 - **Denial of service:** slots e memória antes do token (F-03).
-- **Elevation of privilege:** aprovar e lembrar regra (F-01). Agir como outra tarefa (F-02). Enviar texto a outra aba (F-09).
+- **Elevation of privilege:** aprovar e lembrar regra (F-01). Agir como outra tarefa (F-02). Enviar texto a outra aba, ler ou fechar outra aba, pilotar o portal ou o aparelho de outro (F-09, corrigido).
 
 ### 4.4 Alvo remoto
 
@@ -124,7 +124,7 @@ Para cada item: o que existe hoje, o que cabe no ADE e o que exige componente no
 | RPC versionado | `PROTOCOL_VERSION = 1` com igualdade na CLI (protocol.rs:135; cli.rs:1587). Métodos são strings no `match`, sem metadado (dispatch.rs:99-348) | o `match` pode virar tabela de métodos com classe, capacidade e versão mínima | registro de métodos, negociação de capacidades e versão de contrato |
 | Identidade por ambiente | token por processo (server.rs:66). PID no canal de credencial (transport.rs:252) | o PID serve para o local | identidade de dispositivo (par de chaves, com a privada no keyring do cliente) |
 | Pareamento e revogação | não existe. O cliente é um processo do mesmo usuário | nada | convite de uso único com prazo, tabela de dispositivos e revogação imediata. Exige schema novo, fora deste trabalho |
-| Autorização por método e workspace | só a negação de manutenção (dispatch.rs:86), o papel Dreamer (policy.rs:107-119) e o PID de ancestralidade (session.rs:172-211) | a tabela de classe por método (Anexo A) e a checagem no despachador, com negação por padrão | capacidades (`session.observe`, `files.write`, `terminal.execute`, `approval.decide` etc.) e escopo por workspace |
+| Autorização por método e workspace | **feito para o IPC local:** a tabela de classe por método (`ipc/authz.rs`, Anexo A) e a checagem no começo do despachador, com negação por padrão e um teste que falha se aparecer método sem classe | o que falta é mapear as classes para capacidades nomeadas e escopo por workspace | capacidades (`session.observe`, `files.write`, `terminal.execute`, `approval.decide` etc.), escopo por workspace, identidade de dispositivo no lugar do PID |
 | Proteção de rede | só loopback (server.rs:63) | o bind já existe | TLS com identidade de peer, limites por cliente e proteção contra replay |
 | Logs e auditoria | `approval_audit.rs` registra aprovações de frota e de chat (approval_audit.rs:1-14). O IPC não registra pedidos (server.rs:287-289) | o registro de aprovações é o modelo | registro por principal, método e resultado, sem argumentos nem transcript |
 | Expiração de sessões | `ADE_SESSION` por aba (COMPUTER_USE_SUPERFICIES.md:28). Segredos com prazo de 24 h (CLI_MCP.md:67). O token do IPC não expira | sessões de aba e segredos | prazo e renovação para clientes remotos |
@@ -145,7 +145,7 @@ Severidade: **Alta** (explorável sem privilégio extra e quebra uma barreira hu
 | F-06 | Baixa (Média se o listener ganhar HTTP) | S, T | O IPC não confere `Host` nem `Origin`. Hoje a proteção vem do formato e do token. A checagem existe em `util::loopback_trust`, usada pelo proxy de preview | server.rs:267-270; util/loopback_trust.rs:38-66; preview/proxy.rs:208-213 | Confirmado. Guarda de formato criada (§9). Checagem de Host/Origin **não implementada**, conforme o pedido |
 | F-07 | Baixa | S, T, I | A CLI aceita o handshake apontado por `AGS_HANDSHAKE` ou `CONTROLCODE_HANDSHAKE` sem checar a origem. Quem define o ambiente do agente manda comandos e argumentos a um listener escolhido por ele. O token real não sai, porque a CLI usa o token do arquivo apontado | protocol.rs:61-73 | **Corrigido** (origem, nome e PID vivo validados; ver §6.1) |
 | F-08 | Baixa | — | Ordem de arranque: o thread `wal-checkpoint` é criado (run.rs:81) antes de `path_env::configure` (run.rs:89) e de `export_instance_env` (run.rs:92), que chamam `set_var`. Os `SAFETY` (server.rs:41-46) exigem um thread só. Sem falha observada | app/run.rs:81, 89, 92; database/wal.rs:49-50 | **Corrigido** (ordem de arranque; ver §6.1) |
-| F-09 | Média (local); **Alta** se exposto | E, T, I | Sem autorização por método. O despachador não confere quem chama. Verificado: `tab.send` escreve texto em qualquer aba por id, sem checagem (`pty_id_for_tab` também não confere). `tab.output` lê o terminal. Os demais métodos não foram auditados um a um | dispatch.rs:85-349; ipc/commands/tabs.rs:66-74, 746-756 | **Parcial**: só `tab.send` tem escopo. O resto do despachador segue sem autorização por método (§6.1) |
+| F-09 | Média (local); **Alta** se exposto | E, T, I | Sem autorização por método. O despachador não conferia quem chama: `tab.send` escrevia em qualquer aba por id, `tab.output` lia o terminal de qualquer aba, `tab.close`, `portal.*`, `device.*`, `chat.*` e `mission.*` agiam sobre recursos de outra sessão por id ou por `from` declarado | dispatch.rs:85-349; ipc/commands/tabs.rs:66-74, 746-756 | **Corrigido** (completo): tabela de classes por método em `ipc/authz.rs`, escopo provado pelo PID (§6.1). Limite: a pessoa num terminal próprio e o agente que se destaca da árvore |
 | F-10 | Baixa | I, E | Named pipe do Windows sem DACL explícita: a criação passa atributos de segurança nulos e conta com o padrão do token. `PIPE_REJECT_REMOTE_CLIENTS` impede o acesso pela rede | transport.rs:283, 288 | **Não verificado** (sem Windows nesta análise) |
 | F-11 | Informativo | S | O token vale enquanto o processo vive, sem expiração nem revogação. Aceitável localmente; insuficiente para o host remoto | server.rs:66, 234-242 | Confirmado |
 | F-12 | Informativo (controle que funciona) | — | Métodos com PID (`authorize` e `authorize_actor`) são recusados no TCP quando a ancestralidade é exigida, que é o caso em macOS, Linux e Windows (`ancestry_required`). `secret.consume` sai só por esse canal. A recusa da CLI (cli.rs:1007) é conveniência | terminal/session.rs:85-92, 172-211; ipc/commands/agent_secrets.rs:13-21, 83-88 | Confirmado por leitura |
@@ -167,7 +167,7 @@ Nenhuma correção foi implementada. Todas mudam o comportamento do IPC ou do tr
 - **F-06 (baixa).** Se o listener aceitar HTTP um dia, aplicar `util::loopback_trust::check` no mesmo ponto do parse. A guarda de formato (§9) impede que isso aconteça por acidente.
 - **F-07 (baixa) — corrigido.** *Proposta original:* aceitar `AGS_HANDSHAKE` só se o caminho estiver em `ags_home()/ipc/`, e conferir que o PID do arquivo está vivo.
 - **F-08 (baixa) — corrigido.** *Proposta original:* chamar `export_instance_env` e `path_env::configure` antes de `spawn_wal_maintenance`, ou trocar `set_var` por `Command::env`.
-#### Correções de F-02, F-03, F-05, F-07, F-08, F-09 (parcial), `peer.answer` e `fix.decide`
+#### Correções de F-02, F-03, F-05, F-07, F-08, F-09 (completo), `peer.answer` e `fix.decide`
 
 Nada disto abre o IPC à rede (o bind e o transporte ficam como estavam; as guardas de §9 seguem passando). Código novo: `ipc/guard.rs` (predicados puros), `ipc/intake.rs` (vagas e leitura do pedido), `terminal/session.rs` (`authorize_task`, `classify_caller`).
 
@@ -176,9 +176,30 @@ Nada disto abre o IPC à rede (o bind e o transporte ficam como estavam; as guar
 - **F-05 — handshake.** O temporário nasce com `create_new` (O_EXCL) e modo `0600` numa só chamada, depois do `remove_file` de um sobrado; não segue link plantado no nome previsível. `~/.ags/ipc` (e qualquer pasta que o handshake crie) fica `0700`, inclusive uma `ipc/` antiga em `0755`. A pasta de dados que já existia (`~/.ags`) não é mexida. No Windows nada mudou (sem modo).
 - **F-07 — `AGS_HANDSHAKE`.** A CLI só usa o handshake do ambiente se, depois de `canonicalize` (links resolvidos), ele for um `<pid>.json` direto em `ipc/` da pasta de dados ou do nome antigo (`~/.controlcode/ipc`), com o PID do arquivo igual ao do nome e **vivo** (`kill(pid, 0)`; `OpenProcess` no Windows, não compilado nesta análise). Senão a variável é ignorada e vale o global. Não mudou o caso `ADE_AGS_DATA_DIR` (a instância isolada já vencia a variável).
 - **F-08 — arranque.** `spawn_wal_maintenance` (o primeiro thread de `run()`) passou para depois de `rendering::configure`, `path_env::configure` e `export_instance_env`. Um teste lê `run.rs` e falha se um criador de thread voltar antes de algum `set_var`.
-- **F-09 (parcial) — `tab.send`.** `tab.send` prova quem chama antes de escrever (`terminal::classify_caller`): (1) identidade declarada (`ADE_SESSION`/`ADE_TAB_ID`) tem de ser provada por token + PID (ou, numa conversa, pelo PID do motor); (2) sem identidade, o cliente tem de estar **fora** de toda árvore de PTY, conversa ou tarefa do ADE: é a pessoa no terminal dela, e segue livre; dentro delas, sem identidade (`env -i`, sandbox), é recusado; (3) um agente do ADE só escreve em **si, nas abas que o alcançam no canvas (`canvas::reachable`) e nas que ele mesmo abriu** (`tab create` com identidade provada, registrado em memória). Em outra aba: recusa com o id na mensagem. O `ADE_SESSION` deixou de atravessar a ponte do `tab create` para a interface. **O que não prova:** quem se destaca da árvore (`setsid`, duplo fork, `open -a Terminal`) ou roda num terminal próprio é indistinguível da pessoa e escreve em qualquer aba, como antes; e sem PID (TCP, CLI antiga) a chamada é recusada. As abas abertas antes de um reinício do app não têm dono registrado: o agente precisa da conexão no canvas. **Não corrigido (documentado):** o resto do despachador (§3.3, Anexo A) segue sem autorização por método: `tab.output`, `tab.close`, `portal.*`, `device.*` e os demais conferem no máximo o `from` declarado. A tabela de classe por método e a negação por padrão continuam sendo o item 5 de §11.
+- **F-09 (primeira etapa) — `tab.send`.** `tab.send` prova quem chama antes de escrever (`terminal::classify_caller`): (1) identidade declarada (`ADE_SESSION`/`ADE_TAB_ID`) tem de ser provada por token + PID (ou, numa conversa, pelo PID do motor); (2) sem identidade, o cliente tem de estar **fora** de toda árvore de PTY, conversa ou tarefa do ADE: é a pessoa no terminal dela, e segue livre; dentro delas, sem identidade (`env -i`, sandbox), é recusado; (3) um agente do ADE só escreve em **si, nas abas que o alcançam no canvas (`canvas::reachable`) e nas que ele mesmo abriu** (`tab create` com identidade provada, registrado em memória). Em outra aba: recusa com o id na mensagem. O `ADE_SESSION` deixou de atravessar a ponte do `tab create` para a interface. **O que não prova:** quem se destaca da árvore (`setsid`, duplo fork, `open -a Terminal`) ou roda num terminal próprio é indistinguível da pessoa e escreve em qualquer aba, como antes; e sem PID (TCP, CLI antiga) a chamada é recusada. As abas abertas antes de um reinício do app não têm dono registrado: o agente precisa da conexão no canvas. *(Estado no momento da correção parcial; o resto do despachador foi coberto depois pela tabela de classes: ver F-09 (completo) abaixo.)*
 - **`peer.answer` — papel provado.** É legítimo do **orquestrador** do integrante (skill e `CANAL_ESTRUTURADO.md`): digita a opção no diálogo de TUI dele. Antes o servidor confiava no `from` declarado. Agora o handler usa `authorize_actor` (token + PID, ou o PID do motor da conversa) e só então confere a coroa e o alcance no canvas. Sem prova, recusa. A CLI manda `from` e `session` só do ambiente do terminal.
 - **`fix.decide` — papel provado, `fix.list` aberto.** A decisão depois do teto de rodadas (aceitar com pendências, rodada extra, abortar) é do **orquestrador da missão** (a mensagem de escalonamento é a resposta do `tell` dele) ou da pessoa, pela tela (`run_fix_decide`, que não passa pelo IPC). Agora o IPC exige o chamador provado (`classify_caller`) **e** que ele seja a coroa do canvas da missão do escopo `mission:<id>` (`ipc::guard::fix_decide_error`). Recusados: integrante, orquestrador de outra missão, escopo `run:<id>` (Frota, que não tem orquestrador de terminal a provar) e quem não prova nada (inclusive a pessoa num terminal próprio: ela usa a tela). Nenhum fluxo documentado de agente foi quebrado: o MCP não tem ferramenta `fix_*` e a skill só cita o comando no contexto do orquestrador. `fix.list` é leitura e não mudou. **Custo:** a pessoa não decide mais `fix decide` pela CLI fora do ADE; decide pela tela.
+- **F-09 (completo) — autorização por método.** Código novo: `ipc/authz.rs` (a tabela e o porteiro), `terminal::principal_of` (quem chama), `ipc/guard::in_reach` e `record_opened`. A chamada fica no despachador, **depois** da prova do `taskId` (F-02) e **antes** da política da tarefa, do banco e do `match`; o resto do despachador passa a usar os argumentos devolvidos pelo porteiro, com a identidade **provada** no lugar da declarada.
+  - **Quem chama (`Principal`).** Provado pelo PID do canal de credencial, não pelo que o pedido declara. O cliente na árvore de uma aba ou conversa registrada é essa aba (mesmo sem `ADE_TAB_ID`/`ADE_SESSION`: `env -i` não vira "pessoa"); na árvore do processo de uma tarefa da Frota, é essa tarefa; fora de toda árvore e **sem declarar identidade**, é `Outside` (a pessoa num terminal próprio, CI). **Declarar** `from`, `tabId` ou sessão de uma aba que o PID não é, é forjar e o pedido é recusado; declarar `taskId` junto com aba também. Sem PID (TCP, CLI antiga), recusa: isso fecha o caminho de F-04 para todo método que não é livre. O `from` que o handler recebe é o provado.
+  - **As classes.** `livre` (27): catálogo e metadado, sem identidade. `escopo` (188): o recurso tem de estar no alcance provado de quem chama. `pessoa` (4): recusado pelo IPC a todos (`approval.decide`, `approval.list`, `memory.compact`, `workspace.restore`). `pessoa-ou-escopo` (2): o orquestrador provado (a coroa no canvas) ou a pessoa pela tela (`fix.decide`, `peer.answer`). Contagem por alvo no Anexo A.
+  - **O alcance (`escopo`).**
+    - *aba* (`tab output|send|close|state`, `watch add|remove`, `replay start|stop`): a própria, as ligadas no canvas (`canvas::reachable`: vizinhos e, para o orquestrador, o time) e as que o agente abriu (`tab create`, registrado em memória).
+    - *conversa* (`chat show|wait|send|stop|open|settle|goal|compact`, e `chat pending` com id): o mesmo alcance sobre `thread:<id>`. `chat new` registra quem abriu a filha, e `parent_ref` só pode ser o próprio chamador.
+    - *chamador* (94: `portal.*`, `device.*`, `note.*`, `peer.*`, `team.*`, `sim`/`desk act`, `routine.*`, `memory.*` de terminal, `secret.*`…): exige aba ou conversa provada, e o handler resolve o alvo pelo canvas dessa aba (portal e aparelho só os ligados a ela). As confirmações por aparelho e a confiança do iPhone seguem no `device_action`, que não mudou.
+    - *chamador-ou-fora* (32: `tab create`, `chat new`, `design.*` de escrita, `skill install|new|edit`, `window create`, `workspace open`, `pool create`): o agente provado ou a pessoa fora. **Um agente não passa `workspace open --close-current`** (mata os terminais).
+    - *frota* (21: `run.*`, `browser run`, `forge run`, `user ask`, `gemini.*`): o `taskId` (ou a aba) declarado tem de ser o provado, e uma tarefa sem `taskId` recebe o dela (a política do papel Dreamer passa a valer também para a CLI do shell da tarefa).
+    - *tarefa* (8: as ferramentas `memory.*` da Frota): só a própria tarefa.
+    - *missão* (7) e *missão-coroa* (4): a missão do quadro de quem chama; aplicar, aceitar, reentregar e limpar só o orquestrador dela.
+    - *fora* (5: `mission create|run|start`, `worktrees prune`, `pool delete`): só quem está fora da árvore do ADE, porque gastam orçamento, apagam disco ou mudam configuração da pessoa e nenhum fluxo documentado de agente depende deles.
+  - **Fluxos legítimos.** Um teste por comando da skill usado por agentes passa o pedido pelo porteiro no escopo certo (integrante, orquestrador e agente da Frota), e um teste confere que a pessoa fora do app só perde o que é só da tela ou o que já exigia `ADE_TAB_ID`.
+  - **O que mudou para quem usa.** (1) `tab output|close|state`, `watch add|remove`, `chat <ação> <id>` e `mission <ação> <id>` só no alcance de quem chama; a pessoa **dentro de um terminal da ADE** é tratada como o agente daquela aba (não dá para distingui-la), como já era com `tab send`: ela usa a tela ou um terminal próprio. (2) `chat pending` sem id só fora do app. (3) `mission create|run|start`, `worktrees prune` e `pool delete` só fora do app (CI e a pessoa seguem). (4) `workspace open --close-current` só a pessoa. (5) `from` à mão (`--from <aba>`) deixou de valer: o `from` é o provado. (6) um `ags` por TCP (sem canal de credencial) só chama os 27 métodos livres.
+  - **Limites que ficam.**
+    - O servidor não distingue a pessoa num terminal próprio de um agente que se destacou da árvore (`setsid`, duplo fork, `open -a Terminal`): ele ganha o acesso de `Outside`.
+    - Nos Unix sem API de PID do peer só vale o token (fallback explícito de `authorize`).
+    - O registro de "quem abriu" é em memória: depois de reiniciar o app, o agente precisa do canvas para alcançar as abas e conversas que abriu antes.
+    - `tab list`, `chat list`, `workspace list|status`, `window list`, `events`, `watch list|wait` e `design list|get|view` são livres e mostram **metadado** (ids, títulos, pastas, estado) de outras sessões; o conteúdo (saída do terminal, transcript da conversa) é de escopo. Num host remoto isso pede capacidade própria (`session.observe`).
+    - Designs e skills são do workspace, sem dono por agente.
+    - Na Frota, o run de uma aba é o do workspace (ou da conversa) dela; `runId` e `missionId` são declarados e conferidos só contra o workspace, não por agente. Dentro de um workspace, um agente alcança os runs dele.
 - **F-10 (baixa, não verificada).** DACL explícita com o SID do usuário na criação do pipe.
 
 ## 7. PTYs, efeitos, encerramento e upgrade (d)
@@ -255,13 +276,22 @@ Seis testes em `src-tauri/src/ipc/test.rs`, na seção "Guardas da superfície d
 | `os_limites_do_canal_ficam_no_codigo` | teto de 256 conexões por canal e de 32 sem token (agora em `ipc/intake.rs`), teto de 8 MiB, janela de 1 KiB para o token e prazos totais de 5 s e 30 s | server.rs:23, 27, 95, 106, 255; transport.rs:247, 257 |
 | `o_handshake_e_o_socket_de_credencial_continuam_so_do_usuario` | `0600` no handshake e no socket. `PIPE_REJECT_REMOTE_CLIENTS` no Windows | server.rs:137; transport.rs:236, 283 |
 
-**Resultado** (executado em 2026-11-10, no worktree com as mudanças desta análise):
+Além das seis guardas, o módulo `autorizacao` de `ipc/test.rs` (F-09 completo) cobre: a tabela completa (todo braço do despachador tem classe, nenhuma classe sem braço, método sem classe recusado), uma recusa e um aceite por classe e por método sensível (`tab.output|close|state|send`, `watch`, `replay`, `chat.*`, `portal.*`, `device.*`, `mission.*`, `run.*`, `memory.*` da tarefa…), o `from` forjado, a tarefa que declara aba, o `workspace open --close-current`, a conversa filha sob quem a abre, os fluxos da skill para o integrante, o orquestrador e o agente da Frota, e o que a pessoa fora do app mantém. Em `terminal/session.rs`, quatro testes de `principal_of` com árvore de processos simulada.
+
+**Resultado** (executado em 2026-11-10, no worktree com as mudanças desta análise; os números de F-09 completo estão no fim da seção):
 
 - `cd src-tauri && cargo test --lib ipc`: **236 passed, 0 failed**. As seis guardas passam.
 - `cd src-tauri && cargo test --lib --bin ags`: lib com **2792 passed, 0 failed, 30 ignored** (ignorados já existentes no repositório; nenhum novo nas guardas). Bin `ags` com **52 passed, 0 failed**. As linhas "1 passed" do log são o teste `memory::concurrency::subprocess_writer`, que reexecuta o próprio binário; estão dentro da mesma execução da lib.
 - `bun run check:test-lint`: "Lint de testes ok: 40 violação(ões) antiga(s) no baseline, nenhuma nova."
 - Avisos de compilação: nenhum aponta para `src/ipc/`. Os avisos existentes estão em `approval_audit.rs`, `conversa/`, `desktop_apps/`, `floors.rs`, `notifier.rs`, `runs/store.rs`, `skills/mount.rs` e `util/test.rs`, e já estavam lá antes deste trabalho.
 - Escopo do diff: só `src-tauri/src/ipc/test.rs` (acréscimo) e este documento.
+
+**Resultado de F-09 (completo)** (executado em 2026-11-10, no worktree com as mudanças):
+
+- `cd src-tauri && cargo test --lib ipc`: **303 passed, 0 failed** (antes: 236; o módulo `autorizacao` tem 35 testes novos, mais o de F-01 ajustado para aceitar `approval.*` na tabela como `pessoa`).
+- `cd src-tauri && cargo test --lib --bin ags`: lib **2981 passed, 0 failed, 29 ignored**; bin `ags` **53 passed, 0 failed**.
+- `node scripts/fingerprint.mjs`: ok (`protocol.rs` não mudou: nada a reconhecer). `bun run check:catalogs`: em dia.
+- Não rodei `bun run check:test-lint` (faltam as dependências do node no worktree) nem compilei para Windows (sem o toolchain mingw aqui).
 
 **Não feito:** teste de mutação (trocar o bind em `server.rs` de propósito e ver a guarda falhar). Não toquei o bind nem em arquivo temporário; a prova de que a guarda falharia é a asserção exata sobre o texto de `server.rs`, não uma execução com a mudança.
 
@@ -281,8 +311,8 @@ Seis testes em `src-tauri/src/ipc/test.rs`, na seção "Guardas da superfície d
 12. **Correções de F-02 a F-09 em runtime.** Testadas por unidade, por leitura de código e pelos contratos de `ipc/test.rs`. Não subi o app nem uma tarefa da Frota real para ver o `taskId` provado, nem medi a classificação por PID com um agente de verdade (o `parent_pid` só rodou nos testes que usam o próprio PID e PID 1).
 13. **Windows.** `pid_alive` (`OpenProcess`), o `accept_windows` com `Slots` e o prazo do pipe não foram compilados nem executados aqui.
 14. **Prova no macOS e Linux só pela descendência de PID.** Um agente que se destaca da árvore burla F-09 e a identidade sem `ADE_SESSION`; é o limite que F-01 já descrevia.
-10. **Classificação dos 221 métodos.** Preliminar, pelo nome e pela leitura de alguns handlers.
-11. **Identidade nos demais métodos.** `device.*`, `portal.*` e os outros não foram auditados um a um.
+10. **Classificação dos 221 métodos (F-09 completo).** A classe de cada um é uma decisão de projeto lida do handler e do uso na skill, não uma medição: o teste prova que a tabela é completa e que cada classe aceita e recusa o que diz, não que cada handler faz o que o doc dele diz. Os handlers de `portal.*` e `device.*` seguem resolvendo o alvo pelo canvas do `from`; o teste confere o código por leitura.
+11. **F-09 em runtime.** Não subi o app, um agente real nem uma aba com `ags` de verdade: a prova é por unidade (árvore de processos simulada), por leitura de código e pelos contratos de `ipc/test.rs`. Nenhuma medição de latência do porteiro (no Windows cada passo da árvore pede um snapshot de processos). O código só de Windows (`parent_pid`, `OpenProcess`) não foi compilado aqui; `principal_of` não acrescenta código por plataforma.
 
 ## 11. Ordem de trabalho
 
@@ -291,62 +321,80 @@ Só o que não muda comportamento pode seguir sem OK. O restante depende de OK e
 1. **Já feito, sem mudar comportamento:** as guardas de §9 e este documento.
 2. **Com OK, sem risco de runtime:** medição de F-04 numa sandbox de teste, sem rede externa.
 3. **Feito com OK (muda o IPC):** F-01 (`approval.decide` e `approval.list` recusados sempre) e F-02 (`taskId` provado pelo PID da tarefa).
-4. **Feito com OK (muda o transporte):** F-03 (vagas por canal, teto sem token, token cedo, prazo total), F-05, F-07 e F-08, mais `peer.answer`, `fix.decide` e o escopo de `tab.send` (F-09 parcial).
-5. **Fase 0 do plano (sem mudar comportamento; autorização geral por método continua pendente):** classificar cada um dos 221 métodos com auditoria por handler e transformar o Anexo A num teste que falha quando um braço novo do despachador não tem classe. Isso fecha o item "método desconhecido é negado" do plano.
+4. **Feito com OK (muda o transporte):** F-03 (vagas por canal, teto sem token, token cedo, prazo total), F-05, F-07 e F-08, mais `peer.answer`, `fix.decide` e o escopo de `tab.send` (primeira etapa de F-09).
+5. **Feito com OK (muda o IPC): F-09 completo.** Cada um dos 221 métodos tem classe em `ipc/authz.rs`; um teste falha quando um braço novo do despachador não tem entrada e o método sem classe é recusado. Isso fecha o item "método desconhecido é negado" do plano. Falta, para o host remoto, mapear as classes para capacidades nomeadas.
 6. **Decisão de arquitetura:** host com Tauri sem janela ou binário separado (§7.2). Cabe um ADR.
 7. **Depois de 1 a 6:** identidade de dispositivo e pareamento (exige schema novo, com OK) e, só então, um cliente remoto mínimo.
 
 Clientes web e mobile ficam para depois do contrato do servidor (AMBIENTES_REMOTOS.md:110). Não recebem token do IPC nem chave de provider.
 
-## Anexo A: inventário dos 221 métodos
+## Anexo A: inventário dos 221 métodos e a classe de cada um
 
-Classes: L leitura · E escrita comum · X executa ou controla · D destrutivo · A aprovação · S segredo · M manutenção (negada). Classificação preliminar, pelo nome e pela leitura de alguns handlers. Cada item é `método classe`, agrupado por família.
+A **classe real** de cada método está em `src-tauri/src/ipc/authz.rs` (`METHODS`); esta lista é a mesma tabela, por família, e o teste `a_contagem_por_classe_e_a_documentada` (`ipc/test.rs`) falha se os totais abaixo e o código divergirem. Cada item é `método classe`.
 
-- **account**: list L
-- **agent**: list L
-- **app**: status L
-- **approval**: decide A, list L
-- **browser**: run X
-- **chat**: compact X, goal E, list L, new X, open E, pending L, providers L, send X, settle E, show L, stop D, wait L
-- **ci**: watch E
-- **design**: approve E, approve.all E, archive D, artboard.add E, artboard.approve E, artboard.delete D, artboard.duplicate E, artboard.reject E, artboard.resize E, artboard.revert E, artboard.update E, comment E, comment.add E, comment.resolve E, create E, delete D, get L, list L, note.add E, open E, page.add E, page.delete D, page.rename E, reject E, revert E, update E, view L
-- **desk**: act X
-- **device**: act X, apps L, button X, clipboard X, close X, create E, key X, launch X, list L, open X, rotate X, say X, shot L, start X, swipe X, tap X, tree L, type X
-- **events**: since L, wait L
-- **fix**: decide A, list L
-- **floor**: create E, list L
-- **forge**: run X
-- **gemini**: consult X, result L, status L
-- **mcp**: cancel D
-- **memory**: compact M, delete E, export L, get L, history L, index L, list L, open L, promoteFact E, propose E, search L, searchApproved L, suggest L, update E, usage L, workspaceHistory L
-- **mission**: accept E, apply X, cleanup D, create X, efficiency L, precheck X, redeliver X, review L, run X, start X, startcheck X, status L, timings L, wait L
-- **note**: create E, edit E, list L, read L, write E
-- **notify**: send X
-- **peer**: answer E, ask X, check L, connect E, deliver X, disconnect E, handoff X, list L, pending L, queue L, receipt L, recruit X, role E, tell X
-- **pool**: create E, delete D, list L
-- **portal**: act X, click X, close D, console L, create E, history L, hover X, layout L, list L, navigate X, open E, press X, reset D, screenshot L, scroll X, select X, snapshot L, type X, wait L
-- **prelaunch**: list L
-- **recall**: get L
-- **replay**: start E, status L, stop E
-- **role**: create E, edit E, list L, show L
-- **routine**: create E, delete D, disable E, edit E, enable E, list L, run X, show L
-- **run**: addFact E, addTask X, approve A, await L, cancelTask D, delegateTask X, factBody L, facts L, handoff X, harnessGraph L, plan X, rerouteTask X, result L, roster L, status L
-- **say**: send X
-- **secret**: consume S, request S, revoke D
-- **sim**: act X
-- **skill**: edit E, install X, list L, new E, search L, show L
-- **swarm**: note E, promote E, question E, read L
-- **tab**: close D, create X, list L, output L, send X, state L
-- **team**: candidates L, create E, delegate X, link E, list L, role E, unlink E
-- **user**: ask E
-- **watch**: add E, list L, remove E, wait L
-- **window**: create E, list L
-- **workspace**: list L, open E, restore M, status L
-- **worktrees**: list L, prune D
+Classes: **livre** (catálogo ou metadado, sem identidade) · **escopo:<alvo>** (o recurso tem de estar no alcance provado de quem chama; ver F-09 em §6.1) · **pessoa** (só pela tela; recusado pelo IPC) · **pessoa-ou-escopo:coroa** (o orquestrador provado ou a pessoa pela tela).
 
-Totais: L 82 · E 64 · X 53 · D 15 · A 3 · S 2 · M 2 · **221**.
+Alvos de escopo: *aba* (a própria, as ligadas no canvas, as que abriu) · *conversa* (o mesmo, sobre `thread:<id>`) · *chamador* (exige aba ou conversa provada; o handler resolve o alvo pelo canvas dela) · *chamador-ou-fora* (o mesmo, ou a pessoa fora do app) · *frota* (o `taskId` ou a aba declarada tem de ser a provada) · *tarefa* (só a tarefa) · *missão* e *missão-coroa* (a do quadro de quem chama; a segunda só o orquestrador) · *fora* (só quem está fora da árvore do ADE).
+
+- **account**: list livre
+- **agent**: list livre
+- **app**: status livre
+- **approval**: decide pessoa, list pessoa
+- **browser**: run escopo:frota
+- **chat**: providers livre, list livre, show escopo:conversa, wait escopo:conversa, send escopo:conversa, stop escopo:conversa, open escopo:conversa, settle escopo:conversa, goal escopo:conversa, compact escopo:conversa, pending escopo:conversa (id opcional), new escopo:chamador-ou-fora
+- **ci**: watch escopo:chamador
+- **design**: list livre, get livre, view livre, create escopo:chamador-ou-fora, delete escopo:chamador-ou-fora, archive escopo:chamador-ou-fora, page.add escopo:chamador-ou-fora, page.rename escopo:chamador-ou-fora, page.delete escopo:chamador-ou-fora, artboard.add escopo:chamador-ou-fora, artboard.update escopo:chamador-ou-fora, artboard.revert escopo:chamador-ou-fora, artboard.approve escopo:chamador-ou-fora, artboard.reject escopo:chamador-ou-fora, artboard.duplicate escopo:chamador-ou-fora, artboard.delete escopo:chamador-ou-fora, artboard.resize escopo:chamador-ou-fora, update escopo:chamador-ou-fora, revert escopo:chamador-ou-fora, approve escopo:chamador-ou-fora, approve.all escopo:chamador-ou-fora, reject escopo:chamador-ou-fora, comment escopo:chamador-ou-fora, comment.add escopo:chamador-ou-fora, comment.resolve escopo:chamador-ou-fora, note.add escopo:chamador-ou-fora, open escopo:chamador-ou-fora
+- **desk**: act escopo:chamador
+- **device**: list escopo:chamador, act escopo:chamador, apps escopo:chamador, create escopo:chamador, start escopo:chamador, tap escopo:chamador, swipe escopo:chamador, type escopo:chamador, key escopo:chamador, launch escopo:chamador, close escopo:chamador, shot escopo:chamador, tree escopo:chamador, open escopo:chamador, button escopo:chamador, say escopo:chamador, rotate escopo:chamador, clipboard escopo:chamador
+- **events**: since livre, wait livre
+- **fix**: list livre, decide pessoa-ou-escopo:coroa
+- **floor**: list escopo:chamador, create escopo:chamador
+- **forge**: run escopo:frota
+- **gemini**: status escopo:frota, consult escopo:frota, result escopo:frota
+- **mcp**: cancel livre
+- **memory**: compact pessoa, search escopo:chamador, suggest escopo:chamador, history escopo:chamador, index escopo:chamador, open escopo:chamador, usage escopo:chamador, export escopo:chamador, list escopo:tarefa, get escopo:tarefa, searchApproved escopo:tarefa, workspaceHistory escopo:tarefa, propose escopo:tarefa, update escopo:tarefa, delete escopo:tarefa, promoteFact escopo:tarefa
+- **mission**: status escopo:missão, wait escopo:missão, review escopo:missão, timings escopo:missão, precheck escopo:missão, startcheck escopo:missão, efficiency escopo:missão, accept escopo:missão-coroa, apply escopo:missão-coroa, redeliver escopo:missão-coroa, cleanup escopo:missão-coroa, create escopo:fora, run escopo:fora, start escopo:fora
+- **note**: list escopo:chamador, read escopo:chamador, create escopo:chamador, write escopo:chamador, edit escopo:chamador
+- **notify**: send escopo:chamador
+- **peer**: answer pessoa-ou-escopo:coroa, list escopo:chamador, ask escopo:chamador, tell escopo:chamador, deliver escopo:chamador, handoff escopo:chamador, check escopo:chamador, recruit escopo:chamador, connect escopo:chamador, disconnect escopo:chamador, role escopo:chamador, queue escopo:chamador, receipt escopo:chamador, pending escopo:chamador
+- **pool**: list livre, create escopo:chamador-ou-fora, delete escopo:fora
+- **portal**: list escopo:chamador, create escopo:chamador, open escopo:chamador, close escopo:chamador, navigate escopo:chamador, history escopo:chamador, snapshot escopo:chamador, click escopo:chamador, hover escopo:chamador, type escopo:chamador, press escopo:chamador, select escopo:chamador, scroll escopo:chamador, wait escopo:chamador, screenshot escopo:chamador, console escopo:chamador, layout escopo:chamador, act escopo:chamador, reset escopo:chamador
+- **prelaunch**: list livre
+- **recall**: get escopo:chamador
+- **replay**: status livre, start escopo:aba, stop escopo:aba
+- **role**: list livre, show livre, create escopo:chamador, edit escopo:chamador
+- **routine**: list escopo:chamador, show escopo:chamador, create escopo:chamador, edit escopo:chamador, enable escopo:chamador, disable escopo:chamador, run escopo:chamador, delete escopo:chamador
+- **run**: approve escopo:frota, roster escopo:frota, plan escopo:frota, addTask escopo:frota, delegateTask escopo:frota, status escopo:frota, result escopo:frota, await escopo:frota, handoff escopo:frota, addFact escopo:frota, facts escopo:frota, factBody escopo:frota, cancelTask escopo:frota, rerouteTask escopo:frota, harnessGraph escopo:frota
+- **say**: send escopo:chamador
+- **secret**: request escopo:chamador, consume escopo:chamador, revoke escopo:chamador
+- **sim**: act escopo:chamador
+- **skill**: list livre, search livre, show livre, install escopo:chamador-ou-fora, new escopo:chamador-ou-fora, edit escopo:chamador-ou-fora
+- **swarm**: note escopo:chamador, question escopo:chamador, promote escopo:chamador, read escopo:chamador
+- **tab**: list livre, output escopo:aba, send escopo:aba, close escopo:aba, state escopo:aba, create escopo:chamador-ou-fora
+- **team**: list escopo:chamador, candidates escopo:chamador, create escopo:chamador, link escopo:chamador, unlink escopo:chamador, role escopo:chamador, delegate escopo:chamador
+- **user**: ask escopo:frota
+- **watch**: list livre, wait livre, add escopo:aba, remove escopo:aba
+- **window**: list livre, create escopo:chamador-ou-fora
+- **workspace**: list livre, status livre, restore pessoa, open escopo:chamador-ou-fora
+- **worktrees**: list livre, prune escopo:fora
+
+Totais: livre 27 · escopo 188 (chamador 94, chamador-ou-fora 32, frota 21, aba 8, conversa 9, tarefa 8, missão 7, missão-coroa 4, fora 5) · pessoa 4 · pessoa-ou-escopo 2 · **221**.
+
+### A classificação preliminar (histórica)
+
+Antes da tabela, a classificação do inventário era preliminar, pelo nome e por alguns handlers: L leitura 82 · E escrita comum 64 · X executa ou controla 53 · D destrutivo 15 · A aprovação 3 · S segredo 2 · M manutenção 2. Ela serviu de ponto de partida e deixou de ser a referência: a tabela de classes acima a substitui. Os 15 destrutivos (`chat.stop`, `design.archive`, `design.artboard.delete`, `design.delete`, `design.page.delete`, `mcp.cancel`, `mission.cleanup`, `pool.delete`, `portal.close`, `portal.reset`, `routine.delete`, `run.cancelTask`, `secret.revoke`, `tab.close`, `worktrees.prune`) ficaram assim: `chat.stop`, `tab.close` em escopo de conversa e de aba; `mission.cleanup` só o orquestrador da missão; `pool.delete` e `worktrees.prune` só fora do app; `portal.close|reset`, `routine.delete` e `secret.revoke` pelo chamador provado; `run.cancelTask` pela frota; `design.*` de remoção pelo chamador-ou-fora; `mcp.cancel` livre (o `callId` é um UUID que só o dono da chamada conhece).
 
 ## Anexo B: arquivos alterados na análise original
 
 - `docs/decisoes/HOST_REMOTO.md`: este documento.
 - `src-tauri/src/ipc/test.rs`: seis testes de guarda ao fim do arquivo. Nenhuma linha existente foi alterada.
+
+## Anexo C: arquivos alterados em F-09 (completo)
+
+- `src-tauri/src/ipc/authz.rs` (novo): a tabela de classes e o porteiro (`authorize`).
+- `src-tauri/src/terminal/session.rs`: `Principal` e `principal_of` (quem chama, pela árvore de processos).
+- `src-tauri/src/ipc/guard.rs`: `in_reach` e `record_opened` (a regra de alcance de `tab.send` virou geral).
+- `src-tauri/src/ipc/commands/dispatch.rs`: chama o porteiro depois da prova do `taskId` e usa os argumentos devolvidos.
+- `src-tauri/src/ipc/commands/conversas.rs`: `chat new` registra quem abriu a conversa.
+- `src-tauri/src/bin/cli.rs`, `skills/ags-orchestrator/SKILL.md` (1.72.0), `docs/agentes/CLI_MCP.md`: documentação do alcance por método.
+- `src-tauri/src/ipc/test.rs`: módulo `autorizacao` (tabela completa, uma recusa e um aceite por classe e por método sensível, fluxos da skill).

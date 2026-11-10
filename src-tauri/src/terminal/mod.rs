@@ -28,6 +28,6 @@ pub(crate) use pty_manager::scrub_app_child_env;
 pub use session::SESSION_ENV;
 pub(crate) use session::{authorize, issue_conversation_token, publish_token, register_conversation, release_token};
 pub(crate) use session::authorize_actor;
-pub use session::{authorize_task, classify_caller, register_task_process, release_task_process, Caller};
+pub use session::{authorize_task, classify_caller, principal_of, register_task_process, release_task_process, Caller, Principal};
 #[cfg(test)]
 pub(crate) use session::ancestry_required;

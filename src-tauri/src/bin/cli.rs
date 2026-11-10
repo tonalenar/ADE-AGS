@@ -57,9 +57,9 @@ TABS
                                               para comando interativo (login, código, pergunta, assistente)
              [--in-chat]                      · o mesmo de qualquer conversa ou aba do chat (sem --agent)
              [--new-tab]                      · uma aba comum, fora do painel
-  tab close <id>                              Fecha uma tab
+  tab close <id>                              Fecha uma tab (a sua, as conectadas a você, as que você abriu)
   tab output <id> [--lines 40]                O que é NOVO desde a leitura anterior,
-             [--full] [--raw]                 comprimido (erros, avisos, final)
+             [--full] [--raw]                 comprimido (erros, avisos, final). Mesmo alcance de `tab send`
   tab send <id> \"...\" [--no-enter]            Escreve no terminal dela (+ Enter) —
                                               assim a conversa segue com
                                               uma tab que já está aberta
@@ -67,6 +67,10 @@ TABS
                                               Um agente do ADE só escreve em si, nas abas conectadas
                                               a ele no canvas e nas que ele mesmo abriu (`tab create`);
                                               em outra, recusa. A pessoa, em terminal próprio, escreve em qualquer
+                                              Autorização por método: `tab output|close|state`, `watch add|remove`, `chat <ação> <id>`
+                                              e `mission <ação> <id>` seguem a mesma regra (o que é seu, do seu time ou que você abriu;
+                                              a missão do seu quadro). `mission create|run|start`, `worktrees prune`, `pool delete` e
+                                              `approval` só a pessoa. Quem roda fora do app (terminal próprio, CI) segue como antes
 
 AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peers                                       Quem está conectado a você
