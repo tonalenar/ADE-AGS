@@ -35,7 +35,8 @@ describe("o Cursor no seletor de modelo", () => {
   it("lista os modelos que o `cursor-agent models` informou (cada variante de esforço é um modelo)", async () => {
     await act(async () => { root.render(<AgentModelPicker agents={AGENTS} value={{ agentId: "cursor", model: null, effort: null, account: null }} onChange={() => undefined} />); });
     await act(async () => { (host.querySelector("button[aria-haspopup=dialog]") as HTMLElement).click(); });
-    const options = [...host.querySelectorAll("[role=option]")].map((o) => o.textContent);
+    // O popover do seletor sai por portal no <body>, para o composer não o cortar: as consultas dele partem de lá.
+    const options = [...document.body.querySelectorAll("[role=option]")].map((o) => o.textContent);
     expect(options.some((o) => o?.includes("GPT-5.1 Codex High"))).toBe(true);
     expect(options.some((o) => o?.includes("GPT-5.1 Codex Low"))).toBe(true);
     expect(options.some((o) => o?.includes("Auto"))).toBe(true);
@@ -47,7 +48,7 @@ describe("o Cursor no seletor de modelo", () => {
     expect(host.innerHTML).toBe("");
     await act(async () => { root.render(<AgentModelPicker agents={AGENTS} value={{ agentId: "cursor", model: null, effort: null, account: null }} onChange={() => undefined} />); });
     await act(async () => { (host.querySelector("button[aria-haspopup=dialog]") as HTMLElement).click(); });
-    expect(host.textContent).toContain("chat.picker.cursorEffort");
+    expect(document.body.textContent).toContain("chat.picker.cursorEffort");
   });
 });
 
@@ -58,7 +59,7 @@ describe("a conta da conversa aberta", () => {
     // Fechado: a conta não aparece na linha do composer.
     expect(host.querySelector("[data-testid=conta]")).toBeNull();
     await act(async () => { (host.querySelector("button[aria-haspopup=dialog]") as HTMLElement).click(); });
-    const conta = host.querySelector("[data-testid=conta]");
+    const conta = document.body.querySelector("[data-testid=conta]");
     expect(conta).not.toBeNull();
     // Dentro do mesmo popover dos modelos.
     expect(conta!.closest("[role=dialog]")).not.toBeNull();

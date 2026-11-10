@@ -41,8 +41,9 @@ describe("troca de provedor no painel de uma TUI", () => {
         speed={{ fast: true, onChange: speedChange }} onChange={onChange} />);
     });
     await act(async () => { (host.querySelector("button[aria-haspopup=dialog]") as HTMLButtonElement).click(); });
-    await act(async () => { (host.querySelector('[role="tab"][aria-label="Claude Code"]') as HTMLButtonElement).click(); });
-    const target = [...host.querySelectorAll('[role="option"]')].find((option) => option.textContent?.includes("sonnet")) as HTMLButtonElement;
+    await act(async () => { (document.body.querySelector('[role="tab"][aria-label="Claude Code"]') as HTMLButtonElement).click(); });
+    // O popover do seletor sai por portal no <body>.
+    const target = [...document.body.querySelectorAll('[role="option"]')].find((option) => option.textContent?.includes("sonnet")) as HTMLButtonElement;
     await act(async () => { target.click(); });
 
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ agentId: "claude-code", model: "sonnet" }));
