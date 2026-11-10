@@ -848,7 +848,9 @@ async fn una_regla_contesta_en_lugar_del_servidor_y_queda_anotada() {
 // ── Lo que se guarda de cada sitio ───────────────────────────────
 
 use super::log::SetCookie;
-use super::site::{default_path, file_name, path_matches, store_cookie, Site, StorageCopy};
+use super::site::{
+    default_path, file_name, key_from, legacy_file_name, path_matches, store_cookie, KeyStore, SealKey, Saved, Site, StorageCopy,
+};
 
 fn site_dir(tag: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("cc-site-{tag}-{}", uuid::Uuid::new_v4()))
@@ -858,6 +860,16 @@ fn cookie(line: &str, at: i64) -> SetCookie {
     let mut c = parse_set_cookie(line, at / 1000).unwrap();
     c.at = at;
     c
+}
+
+/// La clave fija de estos tests: cada reapertura usa la misma, como en la app.
+fn clave_de_prueba() -> std::sync::Arc<SealKey> {
+    std::sync::Arc::new(SealKey::from_bytes(&[7u8; 32]).unwrap())
+}
+
+/// Abre un site con la clave de prueba. Sin carpeta (`None`) vive solo en memoria.
+fn abrir(origin: &str, dir: Option<&std::path::Path>) -> std::sync::Arc<Site> {
+    Site::open(origin, dir, Some(clave_de_prueba()))
 }
 
 #[test]
@@ -924,7 +936,7 @@ fn el_sitio_sobrevive_a_reiniciar_la_app() {
     let origin = "http://localhost:5173";
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
     {
-        let site = Site::open(origin, Some(&dir));
+        let site = abrir(origin, Some(&dir));
         site.store_from_server(&["sid=abc; Path=/; HttpOnly".into(), "tema=oscuro; Max-Age=3600".into()], "/login", "http://localhost:5173/login", now);
         site.store_from_script("idioma=es", "/panel", "http://localhost:5173/panel", now);
         site.save_storage(StorageCopy {
@@ -942,7 +954,7 @@ fn el_sitio_sobrevive_a_reiniciar_la_app() {
         assert_eq!(mode, 0o600, "tiene sesiones adentro: solo lo lee el usuario");
     }
 
-    let reopened = Site::open(origin, Some(&dir));
+    let reopened = abrir(origin, Some(&dir));
     assert_eq!(reopened.cookie_header("/", now / 1000).as_deref(), Some("sid=abc; tema=oscuro; idioma=es"));
     assert_eq!(reopened.script_cookies("/", now / 1000).0, "tema=oscuro; idioma=es");
     let restore = reopened.take_restore();
@@ -953,7 +965,7 @@ fn el_sitio_sobrevive_a_reiniciar_la_app() {
     // Olvidar el sitio deja el archivo como el de uno nunca abierto.
     reopened.forget_all();
     reopened.save_now().unwrap();
-    let forgotten = Site::open(origin, Some(&dir));
+    let forgotten = abrir(origin, Some(&dir));
     assert!(forgotten.cookies(now / 1000).is_empty());
     assert_eq!(forgotten.take_restore(), StorageCopy::default());
     let _ = std::fs::remove_dir_all(&dir);
@@ -965,11 +977,11 @@ fn el_sitio_sobrevive_a_reiniciar_la_app() {
 fn despues_de_guardar_ya_no_se_repone() {
     let dir = site_dir("sin-reponer");
     let origin = "http://localhost:3000";
-    let first = Site::open(origin, Some(&dir));
+    let first = abrir(origin, Some(&dir));
     first.save_storage(StorageCopy { local: Some(vec![("token".into(), "1".into())]), session: None });
     first.save_now().unwrap();
 
-    let second = Site::open(origin, Some(&dir));
+    let second = abrir(origin, Some(&dir));
     second.save_storage(StorageCopy { local: Some(vec![]), session: Some(vec![]) });
     assert_eq!(second.take_restore(), StorageCopy::default());
     let _ = std::fs::remove_dir_all(&dir);
@@ -981,9 +993,264 @@ fn un_archivo_roto_se_ignora() {
     let dir = site_dir("roto");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join(file_name("http://localhost:1")), b"{ no es json").unwrap();
-    let site = Site::open("http://localhost:1", Some(&dir));
+    let site = abrir("http://localhost:1", Some(&dir));
     assert!(site.cookies(0).is_empty());
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Una sesión no puede quedar en texto plano en la carpeta de datos: ni la cookie ni el
+/// storage aparecen en claro en ningún archivo del sitio.
+#[test]
+fn la_sesion_no_queda_en_claro_en_el_disco() {
+    let dir = site_dir("en-claro");
+    let origin = "http://localhost:5173";
+    let now = 1_000_000_i64;
+    let site = abrir(origin, Some(&dir));
+    site.store_from_server(&["sid=SECRETO-COOKIE-123; Path=/; HttpOnly".into()], "/login", "http://localhost:5173/login", now);
+    site.save_storage(StorageCopy { local: Some(vec![("token".into(), "SECRETO-STORAGE-456".into())]), session: None });
+    site.save_now().unwrap();
+
+    let mut archivos = 0;
+    for entrada in std::fs::read_dir(&dir).unwrap() {
+        let bytes = std::fs::read(entrada.unwrap().path()).unwrap();
+        archivos += 1;
+        let texto = String::from_utf8_lossy(&bytes);
+        assert!(!texto.contains("SECRETO-COOKIE-123"), "la cookie quedó en claro en el disco");
+        assert!(!texto.contains("SECRETO-STORAGE-456"), "el storage quedó en claro en el disco");
+    }
+    assert!(archivos > 0, "tiene que haber un archivo que revisar");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// El formato anterior (JSON en claro) se lee una vez: la sesión sigue en su lugar y el
+/// archivo en claro desaparece.
+#[test]
+fn el_archivo_en_claro_del_formato_anterior_se_migra_y_se_borra() {
+    let dir = site_dir("migracion");
+    std::fs::create_dir_all(&dir).unwrap();
+    let origin = "http://localhost:5173";
+    let now = 1_000_000_i64;
+    let anterior = Saved {
+        origin: origin.into(),
+        cookies: vec![cookie("sid=abc; Path=/; HttpOnly", now)],
+        local: Some(vec![("token".into(), "token-viejo-123".into())]),
+        session: None,
+    };
+    let en_claro = dir.join(legacy_file_name(origin));
+    std::fs::write(&en_claro, serde_json::to_vec(&anterior).unwrap()).unwrap();
+
+    let site = abrir(origin, Some(&dir));
+    assert_eq!(site.cookie_header("/", now / 1000).as_deref(), Some("sid=abc"));
+    assert!(!en_claro.exists(), "el archivo en claro tiene que desaparecer tras la migración");
+    assert!(dir.join(file_name(origin)).exists(), "queda el archivo cifrado");
+    drop(site);
+
+    let reabierto = abrir(origin, Some(&dir));
+    assert_eq!(reabierto.cookie_header("/", now / 1000).as_deref(), Some("sid=abc"));
+    assert_eq!(
+        reabierto.take_restore().local,
+        Some(vec![("token".into(), "token-viejo-123".into())]),
+        "el storage también migra"
+    );
+    for entrada in std::fs::read_dir(&dir).unwrap() {
+        let bytes = std::fs::read(entrada.unwrap().path()).unwrap();
+        let texto = String::from_utf8_lossy(&bytes);
+        assert!(!texto.contains("sid=abc") && !texto.contains("token-viejo-123"), "nada queda en claro");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Sin clave (el keyring no dio la clave), el site vive solo en memoria: no se graba nada, ni la
+/// sesión ni el storage. El cifrado de antes no se lee ni se pisa, y un archivo en claro del
+/// formato anterior se usa esta vez y se borra.
+#[test]
+fn sin_clave_el_sitio_no_escribe_nada_en_el_disco() {
+    let dir = site_dir("sin-clave");
+    std::fs::create_dir_all(&dir).unwrap();
+    let origin = "http://localhost:5173";
+    let now = 1_000_000_i64;
+    {
+        let cifrado = abrir(origin, Some(&dir));
+        cifrado.store_from_server(&["sid=conclave; Path=/".into()], "/login", "http://localhost:5173/login", now);
+        cifrado.save_now().unwrap();
+    }
+    let antes = std::fs::read(dir.join(file_name(origin))).unwrap();
+    let anterior = Saved {
+        origin: origin.into(),
+        cookies: vec![cookie("viejo=1; Path=/", now)],
+        local: None,
+        session: None,
+    };
+    std::fs::write(dir.join(legacy_file_name(origin)), serde_json::to_vec(&anterior).unwrap()).unwrap();
+
+    let site = Site::open(origin, Some(&dir), None);
+    assert_eq!(site.cookie_header("/", now / 1000).as_deref(), Some("viejo=1"), "esta ejecución lo usa, en memoria");
+    site.store_from_server(&["sid=SECRETO-SIN-CLAVE; Path=/".into()], "/login", "http://localhost:5173/login", now);
+    site.save_storage(StorageCopy { local: Some(vec![("token".into(), "SECRETO-SIN-CLAVE".into())]), session: None });
+    assert!(!site.is_dirty(), "sin dónde guardar, no hay nada pendiente");
+    site.save_now().unwrap();
+
+    assert!(!dir.join(legacy_file_name(origin)).exists(), "el archivo en claro no puede quedarse");
+    assert_eq!(std::fs::read(dir.join(file_name(origin))).unwrap(), antes, "el cifrado no se toca sin clave");
+    for entrada in std::fs::read_dir(&dir).unwrap() {
+        let bytes = std::fs::read(entrada.unwrap().path()).unwrap();
+        assert!(!String::from_utf8_lossy(&bytes).contains("SECRETO-SIN-CLAVE"), "nada de esta ejecución llega al disco");
+    }
+    let reabierto = abrir(origin, Some(&dir));
+    assert_eq!(reabierto.cookie_header("/", now / 1000).as_deref(), Some("sid=conclave"), "vuelve lo cifrado de antes, sin lo de esta ejecución");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Si el cifrado ya abre, un archivo en claro que haya quedado de antes es un sobrante: se borra y
+/// no pisa lo cifrado.
+#[test]
+fn un_claro_sobrante_se_borra_y_no_pisa_lo_cifrado() {
+    let dir = site_dir("sobrante");
+    std::fs::create_dir_all(&dir).unwrap();
+    let origin = "http://localhost:5173";
+    let now = 1_000_000_i64;
+    {
+        let site = abrir(origin, Some(&dir));
+        site.store_from_server(&["sid=nuevo; Path=/".into()], "/", "http://localhost:5173/", now);
+        site.save_now().unwrap();
+    }
+    let viejo = Saved {
+        origin: origin.into(),
+        cookies: vec![cookie("sid=viejo; Path=/", now)],
+        local: None,
+        session: None,
+    };
+    std::fs::write(dir.join(legacy_file_name(origin)), serde_json::to_vec(&viejo).unwrap()).unwrap();
+
+    let site = abrir(origin, Some(&dir));
+    assert_eq!(site.cookie_header("/", now / 1000).as_deref(), Some("sid=nuevo"), "gana lo cifrado");
+    assert!(!dir.join(legacy_file_name(origin)).exists(), "el sobrante se borra");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Si no se puede escribir el cifrado, el archivo en claro se queda: la sesión no se pierde.
+#[test]
+fn la_migracion_que_falla_conserva_el_claro() {
+    let dir = site_dir("migracion-fallida");
+    std::fs::create_dir_all(&dir).unwrap();
+    let origin = "http://localhost:5173";
+    let now = 1_000_000_i64;
+    let anterior = Saved {
+        origin: origin.into(),
+        cookies: vec![cookie("sid=abc; Path=/; HttpOnly", now)],
+        local: None,
+        session: None,
+    };
+    let en_claro = dir.join(legacy_file_name(origin));
+    std::fs::write(&en_claro, serde_json::to_vec(&anterior).unwrap()).unwrap();
+    // Un directorio en el lugar del cifrado hace que el cambio de nombre falle.
+    std::fs::create_dir_all(dir.join(file_name(origin))).unwrap();
+
+    let site = abrir(origin, Some(&dir));
+    assert_eq!(site.cookie_header("/", now / 1000).as_deref(), Some("sid=abc"), "la sesión sigue en memoria");
+    assert!(en_claro.exists(), "sin cifrado guardado, el claro no se borra");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Un archivo cifrado adulterado, o copiado al de otro site, no abre: el site arranca vacío.
+#[test]
+fn un_archivo_adulterado_o_copiado_de_otro_sitio_se_ignora() {
+    let dir = site_dir("adulterado");
+    let origen = "http://localhost:5173";
+    let otro = "http://localhost:3000";
+    let now = 1_000_000_i64;
+    {
+        let site = abrir(origen, Some(&dir));
+        site.store_from_server(&["sid=abc; Path=/".into()], "/", "http://localhost:5173/", now);
+        site.save_now().unwrap();
+    }
+    assert_eq!(abrir(origen, Some(&dir)).cookie_header("/", now / 1000).as_deref(), Some("sid=abc"), "control: el archivo sano abre");
+
+    std::fs::copy(dir.join(file_name(origen)), dir.join(file_name(otro))).unwrap();
+    assert!(abrir(otro, Some(&dir)).cookies(now / 1000).is_empty(), "el origen va autenticado: copiado a otro site no abre");
+
+    let archivo = dir.join(file_name(origen));
+    let mut bytes = std::fs::read(&archivo).unwrap();
+    let ultimo = bytes.len() - 1;
+    bytes[ultimo] ^= 0x01;
+    std::fs::write(&archivo, &bytes).unwrap();
+    assert!(abrir(origen, Some(&dir)).cookies(now / 1000).is_empty(), "un byte cambiado: la etiqueta lo rechaza");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Cada grabación lleva su propio nonce: el mismo texto sale distinto cada vez y en claro no aparece.
+#[test]
+fn cada_grabacion_lleva_un_nonce_distinto() {
+    let clave = clave_de_prueba();
+    let texto = b"mismo texto de prueba";
+    let a = clave.seal("http://localhost:5173", texto).unwrap();
+    let b = clave.seal("http://localhost:5173", texto).unwrap();
+    assert_ne!(a, b, "dos grabaciones del mismo estado no pueden salir iguales");
+    assert!(!a.windows(texto.len()).any(|w| w == &texto[..]), "el texto no aparece en claro");
+    assert_eq!(clave.open("http://localhost:5173", &a).as_deref(), Some(&texto[..]));
+}
+
+/// Un keyring falso: guarda un valor en memoria, cuenta las escrituras y, con `fallar`, cada acceso falla.
+#[derive(Default)]
+struct FakeKeys {
+    valor: std::sync::Mutex<Option<String>>,
+    fallar: bool,
+    escrituras: std::sync::atomic::AtomicUsize,
+}
+
+impl KeyStore for FakeKeys {
+    fn read_key(&self) -> Result<Option<String>, String> {
+        if self.fallar {
+            return Err("acceso negado al keyring".into());
+        }
+        Ok(self.valor.lock().unwrap().clone())
+    }
+
+    fn write_key(&self, value: &str) -> Result<(), String> {
+        if self.fallar {
+            return Err("acceso negado al keyring".into());
+        }
+        self.escrituras.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        *self.valor.lock().unwrap() = Some(value.to_string());
+        Ok(())
+    }
+}
+
+fn cuantas_escrituras(keys: &FakeKeys) -> usize {
+    keys.escrituras.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+#[test]
+fn la_clave_se_crea_la_primera_vez_y_despues_se_reusa() {
+    let keys = FakeKeys::default();
+    let primera = SealKey::load_or_create(&keys).unwrap();
+    let sellado = primera.seal("http://localhost:5173", b"hola").unwrap();
+    let segunda = SealKey::load_or_create(&keys).unwrap();
+    assert_eq!(cuantas_escrituras(&keys), 1, "la clave se guarda una sola vez");
+    assert_eq!(segunda.open("http://localhost:5173", &sellado).as_deref(), Some(&b"hola"[..]));
+}
+
+#[test]
+fn un_error_del_keyring_no_crea_una_clave_nueva() {
+    let keys = FakeKeys { fallar: true, ..Default::default() };
+    assert!(SealKey::load_or_create(&keys).is_err());
+    assert_eq!(cuantas_escrituras(&keys), 0, "un fallo al leer no puede tapar la clave que ya existe");
+}
+
+#[test]
+fn una_clave_guardada_que_no_se_entiende_no_se_pisa() {
+    let keys = FakeKeys::default();
+    *keys.valor.lock().unwrap() = Some("no-es-una-clave".into());
+    assert!(SealKey::load_or_create(&keys).is_err());
+    assert_eq!(cuantas_escrituras(&keys), 0);
+    assert_eq!(keys.valor.lock().unwrap().as_deref(), Some("no-es-una-clave"));
+}
+
+#[test]
+fn sin_keyring_el_sitio_queda_sin_clave_y_con_keyring_tiene_una() {
+    let roto = FakeKeys { fallar: true, ..Default::default() };
+    assert!(key_from(&roto).is_none());
+    assert!(key_from(&FakeKeys::default()).is_some());
 }
 
 // ── Pedidos a otros orígenes (`cors.rs`) ─────────────────────────
