@@ -3031,6 +3031,198 @@ fn un_reintento_vuelve_a_la_cola_con_su_error_y_acumula_lo_gastado() {
     assert_eq!(tarea.cost_usd, Some(0.75));
 }
 
+struct TentativaGravada {
+    id: String,
+    attempt: i64,
+    status: String,
+    result: Option<String>,
+    error: Option<String>,
+    events_path: String,
+    session_id: String,
+    ended_at: Option<i64>,
+}
+
+fn tentativas_de(conn: &Connection, task_id: &str) -> Vec<TentativaGravada> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, attempt, status, result, error, events_path, session_id, ended_at
+             FROM run_attempts WHERE task_id = ?1 ORDER BY attempt",
+        )
+        .unwrap();
+    stmt.query_map([task_id], |row| {
+        Ok(TentativaGravada {
+            id: row.get(0)?,
+            attempt: row.get(1)?,
+            status: row.get(2)?,
+            result: row.get(3)?,
+            error: row.get(4)?,
+            events_path: row.get(5)?,
+            session_id: row.get(6)?,
+            ended_at: row.get(7)?,
+        })
+    })
+    .unwrap()
+    .collect::<Result<Vec<_>, _>>()
+    .unwrap()
+}
+
+/// Fecha uma tentativa com resultado, erro e um JSONL só dela.
+fn fechar_tentativa(conn: &Connection, run: &str, resultado: &str, erro: &str) -> (String, std::path::PathBuf) {
+    let id = tarea(conn, run);
+    let path = std::env::temp_dir().join(format!("ade-ags-attempt-{id}.jsonl"));
+    let events = path.to_string_lossy().to_string();
+    store::mark_running(conn, &id, &format!("attempt-{id}"), "sessao-1", &events).unwrap();
+    std::fs::write(&path, b"evento antigo\n").unwrap();
+    store::finish_task(
+        conn,
+        &id,
+        &TaskOutcome {
+            ok: false,
+            result: Some(resultado.into()),
+            error: Some(erro.into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    (id, path)
+}
+
+/// A correlação é `(task_id, attempt)`: a nova linha usa o mesmo `task_id` e `attempt + 1`.
+/// A anterior não muda, e o JSONL dela não é reescrito.
+#[test]
+fn retomar_failed_ou_interrupted_abre_tentativa_nova_sem_reescrever_a_anterior() {
+    let conn = test_db();
+    let run = run_en(&conn);
+
+    for (rotulo, status_final) in [("falha", status::FAILED), ("interrompida", "interrupted")] {
+        let (id, path) = fechar_tentativa(&conn, &run, "saida parcial", "não compilou");
+        if status_final != status::FAILED {
+            conn.execute(
+                "UPDATE tasks SET status = ?1 WHERE id = ?2",
+                rusqlite::params![status_final, id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE run_attempts SET status = ?1 WHERE task_id = ?2",
+                rusqlite::params![status_final, id],
+            )
+            .unwrap();
+        }
+        let antes = tentativas_de(&conn, &id);
+        assert_eq!(antes.len(), 1, "{rotulo}");
+        let arquivo = std::fs::read(&path).unwrap();
+
+        let nova = store::resume_task(&conn, &id, false).unwrap();
+        assert_eq!(nova.task_id, id);
+        assert_eq!(nova.attempt, antes[0].attempt + 1);
+        assert_eq!(nova.previous_id.as_deref(), Some(antes[0].id.as_str()));
+
+        let depois = tentativas_de(&conn, &id);
+        assert_eq!(depois.len(), 2, "{rotulo}");
+        assert_eq!(depois[0].id, antes[0].id, "{rotulo}");
+        assert_eq!(depois[0].attempt, antes[0].attempt, "{rotulo}");
+        assert_eq!(depois[0].status, antes[0].status, "{rotulo}");
+        assert_eq!(depois[0].result, antes[0].result, "{rotulo}");
+        assert_eq!(depois[0].error, antes[0].error, "{rotulo}");
+        assert_eq!(depois[0].events_path, antes[0].events_path, "{rotulo}");
+        assert_eq!(depois[0].session_id, antes[0].session_id, "{rotulo}");
+        assert_eq!(depois[0].ended_at, antes[0].ended_at, "{rotulo}");
+        assert_eq!(std::fs::read(&path).unwrap(), arquivo, "{rotulo}");
+        assert_ne!(depois[1].events_path, depois[0].events_path, "{rotulo}");
+        assert_eq!(depois[1].attempt, antes[0].attempt + 1, "{rotulo}");
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+/// Desfecho desconhecido (`MISSING_FINAL_RESULT`) é falha: a retomada também não mexe na tentativa velha.
+#[test]
+fn retomar_desfecho_desconhecido_abre_tentativa_correlacionada() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let (id, path) = fechar_tentativa(
+        &conn,
+        &run,
+        "parcial",
+        super::types::MISSING_FINAL_RESULT,
+    );
+    let antes = tentativas_de(&conn, &id);
+    let arquivo = std::fs::read(&path).unwrap();
+
+    let nova = store::resume_task(&conn, &id, false).unwrap();
+    assert_eq!(nova.attempt, 2);
+    assert_eq!(nova.previous_id.as_deref(), Some(antes[0].id.as_str()));
+
+    let depois = tentativas_de(&conn, &id);
+    assert_eq!(depois.len(), 2);
+    assert_eq!(depois[0].status, antes[0].status);
+    assert_eq!(depois[0].result.as_deref(), Some("parcial"));
+    assert_eq!(depois[0].error.as_deref(), Some(super::types::MISSING_FINAL_RESULT));
+    assert_eq!(depois[0].events_path, antes[0].events_path);
+    assert_eq!(std::fs::read(&path).unwrap(), arquivo);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn tarefa_done_nao_e_retomada_sem_pedido_explicito() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    let path = std::env::temp_dir().join(format!("ade-ags-attempt-done-{id}.jsonl"));
+    let events = path.to_string_lossy().to_string();
+    store::mark_running(&conn, &id, "attempt-1", "sessao-done", &events).unwrap();
+    std::fs::write(&path, b"resultado antigo\n").unwrap();
+    store::finish_task(
+        &conn,
+        &id,
+        &TaskOutcome {
+            ok: true,
+            result: Some("pronto".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let antes = tentativas_de(&conn, &id);
+    let arquivo = std::fs::read(&path).unwrap();
+
+    let recusa = store::resume_task(&conn, &id, false).unwrap_err();
+    assert!(recusa.contains("pedido explícito"), "{recusa}");
+    assert_eq!(tentativas_de(&conn, &id).len(), 1);
+    assert_eq!(store::task_by_id(&conn, &id).unwrap().unwrap().status, status::DONE);
+    assert_eq!(std::fs::read(&path).unwrap(), arquivo);
+
+    let nova = store::resume_task(&conn, &id, true).unwrap();
+    assert_eq!(nova.attempt, antes[0].attempt + 1);
+    let depois = tentativas_de(&conn, &id);
+    assert_eq!(depois.len(), 2);
+    assert_eq!(depois[0].status, status::DONE);
+    assert_eq!(depois[0].result.as_deref(), Some("pronto"));
+    assert_eq!(depois[0].error, antes[0].error);
+    assert_eq!(depois[0].events_path, antes[0].events_path);
+    assert_eq!(std::fs::read(&path).unwrap(), arquivo);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn tarefa_rodando_nao_ganha_segunda_tentativa_simultanea() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    assert!(store::mark_running(&conn, &id, "attempt-1", "sessao-viva", "/tmp/ade-ags-viva.jsonl").unwrap());
+    assert_eq!(tentativas_de(&conn, &id).len(), 1);
+
+    let recusa = store::resume_task(&conn, &id, true).unwrap_err();
+    assert!(recusa.contains("em execução"), "{recusa}");
+    assert_eq!(tentativas_de(&conn, &id).len(), 1);
+
+    // Status forçado de volta a `ready` com a tentativa ainda aberta: não nasce outra linha.
+    conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ?1", [&id]).unwrap();
+    assert!(!store::mark_running(&conn, &id, "attempt-2", "sessao-2", "/tmp/ade-ags-viva-2.jsonl").unwrap());
+    let ainda = tentativas_de(&conn, &id);
+    assert_eq!(ainda.len(), 1);
+    assert_eq!(ainda[0].id, "attempt-1");
+    assert_eq!(ainda[0].status, status::RUNNING);
+}
+
 #[test]
 fn el_estado_del_run_sale_de_sus_tareas() {
     let db = db_compartida();

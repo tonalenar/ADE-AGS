@@ -849,13 +849,20 @@ fn stamp_status(conn: &Connection, task_id: &str, fix_status: &str, status_to: O
 }
 
 fn requeue(conn: &Connection, task_id: &str, key: &str, brief: &str, round: i64, full_gate: bool) -> Result<(), String> {
-    conn.execute(
+    if store::open_attempt_is_running(conn, task_id)? {
+        return Err("a tarefa ainda está em execução e não ganha outra tentativa".into());
+    }
+    let queued = conn.execute(
         "UPDATE tasks SET status = ?1, last_error = ?2, error = NULL, result = NULL, structured_handoff = NULL,
                           ended_at = NULL, session_id = NULL, work_key = ?3, fix_round = ?4, full_gate = ?5, fix_status = ''
          WHERE id = ?6 AND status IN ('failed', 'cancelled')",
         params![status::PENDING, brief, key, round, full_gate as i64, task_id],
     )
     .map_err(|e| e.to_string())?;
+    if queued == 1 {
+        // Nova linha em `run_attempts`. A anterior já fechada não é atualizada.
+        store::reserve_next_attempt(conn, task_id)?;
+    }
     Ok(())
 }
 
