@@ -193,13 +193,18 @@ A fixture é recusada quando:
 
 ### Fixtures atuais
 
-Todas sintetizadas.
+Três sintetizadas e onze `recorded` (captura de 2026-11-09). O oráculo de cada `recorded` foi escrito à mão a partir dos frames.
 
 | id | Cobre |
 |---|---|
 | `claude-ferramenta-aprovacao-e-cota` | `Read` e `Bash`, linha cortada, aprovação, cota com hora de renovação |
 | `codex-comando-falha-e-queda` | `thread/resume`, comando com saída ≠ 0, `error` com `willRetry`, aprovação de arquivo, queda com stderr |
 | `acp-pedido-e-max-tokens` | raciocínio, fala em pedaços, `request_permission` de edição, diff, `max_tokens` |
+| `claude-feliz`, `claude-interrompido` | turno com `Read` e `result`; interrupt com `result` `aborted_streaming` |
+| `claude-steer-ferramenta`, `claude-steer-sem-ferramenta` | steer depois da ferramenta (`STEER_OK` no mesmo turno); steer no texto (segundo turno) |
+| `codex-feliz`, `codex-interrompido-real`, `codex-interrupt-antes-do-started` | turno com comando; interrupt depois de `turn/started`; `-32600` antes de `turn/started` |
+| `antigravity-feliz`, `antigravity-queda` | `read_file` e `result`; kill sem `result` |
+| `cursor-feliz`, `cursor-queda` | `readToolCall` e `result`; kill sem `result` |
 
 ## 3. Mock de `invoke` (front)
 

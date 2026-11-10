@@ -1,0 +1,23 @@
+{
+  "checks": [
+    {
+      "label": "os dois turnos são a mesma sessão",
+      "expect": {
+        "sessao": "{{session:1}}"
+      }
+    },
+    {
+      "label": "a contagem do primeiro turno permanece na fala",
+      "expect": {
+        "textoContem": "1\n2\n3"
+      }
+    },
+    {
+      "label": "o fim que fica é o do segundo result, com STEER_OK",
+      "expect": {
+        "fim": "ok",
+        "textoContem": "STEER_OK"
+      }
+    }
+  ]
+}

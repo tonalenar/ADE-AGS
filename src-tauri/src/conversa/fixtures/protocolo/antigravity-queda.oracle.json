@@ -1,0 +1,17 @@
+{
+  "checks": [
+    {
+      "label": "o init abre a conversa",
+      "expect": {
+        "sessao": "{{session:1}}"
+      }
+    },
+    {
+      "label": "EOF sem result é queda do turno",
+      "expect": {
+        "fim": "caiu",
+        "erroContem": "Antigravity"
+      }
+    }
+  ]
+}

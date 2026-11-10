@@ -1,0 +1,946 @@
+{
+  "agent": "cursor",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": false,
+    "deltas": [
+      [
+        "cursor:bancada:r1",
+        "The"
+      ],
+      [
+        "cursor:bancada:r1",
+        " user wants me to"
+      ],
+      [
+        "cursor:bancada:r1",
+        " read the file teste.txt and show its contents."
+      ],
+      [
+        "cursor:bancada:t2",
+        "V"
+      ],
+      [
+        "cursor:bancada:t2",
+        "ou"
+      ],
+      [
+        "cursor:bancada:t2",
+        " ler"
+      ],
+      [
+        "cursor:bancada:t2",
+        " `"
+      ],
+      [
+        "cursor:bancada:t2",
+        "teste"
+      ],
+      [
+        "cursor:bancada:t2",
+        ".txt"
+      ],
+      [
+        "cursor:bancada:t2",
+        "`"
+      ],
+      [
+        "cursor:bancada:t2",
+        " e"
+      ],
+      [
+        "cursor:bancada:t2",
+        " mostrar"
+      ],
+      [
+        "cursor:bancada:t2",
+        " o"
+      ],
+      [
+        "cursor:bancada:t2",
+        " conteúdo"
+      ],
+      [
+        "cursor:bancada:t2",
+        "."
+      ],
+      [
+        "cursor:bancada:r3",
+        "The"
+      ],
+      [
+        "cursor:bancada:r3",
+        " file"
+      ],
+      [
+        "cursor:bancada:r3",
+        " contains"
+      ],
+      [
+        "cursor:bancada:r3",
+        " \"LINHA_TESTE\"."
+      ],
+      [
+        "cursor:bancada:t4",
+        "O"
+      ],
+      [
+        "cursor:bancada:t4",
+        " arquivo"
+      ],
+      [
+        "cursor:bancada:t4",
+        " `"
+      ],
+      [
+        "cursor:bancada:t4",
+        "teste"
+      ],
+      [
+        "cursor:bancada:t4",
+        ".txt"
+      ],
+      [
+        "cursor:bancada:t4",
+        "`"
+      ],
+      [
+        "cursor:bancada:t4",
+        " contém"
+      ],
+      [
+        "cursor:bancada:t4",
+        ":\n\n"
+      ],
+      [
+        "cursor:bancada:t4",
+        "```"
+      ],
+      [
+        "cursor:bancada:t4",
+        "\n"
+      ],
+      [
+        "cursor:bancada:t4",
+        "LIN"
+      ],
+      [
+        "cursor:bancada:t4",
+        "HA"
+      ],
+      [
+        "cursor:bancada:t4",
+        "_"
+      ],
+      [
+        "cursor:bancada:t4",
+        "TEST"
+      ],
+      [
+        "cursor:bancada:t4",
+        "E"
+      ],
+      [
+        "cursor:bancada:t4",
+        "\n"
+      ],
+      [
+        "cursor:bancada:t4",
+        "```"
+      ]
+    ],
+    "filhos": [],
+    "fim": {
+      "durationMs": 5040,
+      "error": null,
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000007813,
+        "id": "cursor:bancada:r1",
+        "kind": "reasoning",
+        "text": "The user wants me to read the file teste.txt and show its contents."
+      },
+      {
+        "at": 1790000007814,
+        "id": "cursor:bancada:t2",
+        "kind": "assistant",
+        "text": "Vou ler `teste.txt` e mostrar o conteúdo."
+      },
+      {
+        "at": 1790000007949,
+        "id": "cursor:bancada:ccall-{{session:3}}-0\nfc_{{session:4}}_0",
+        "kind": "tool",
+        "name": "Read",
+        "output": "LINHA_TESTE",
+        "path": "{{cwd}}",
+        "status": "done",
+        "tool": "read"
+      },
+      {
+        "at": 1790000009944,
+        "id": "cursor:bancada:r3",
+        "kind": "reasoning",
+        "text": "The file contains \"LINHA_TESTE\"."
+      },
+      {
+        "at": 1790000010246,
+        "id": "cursor:bancada:t4",
+        "kind": "assistant",
+        "text": "O arquivo `teste.txt` contém:\n\n```\nLINHA_TESTE\n```"
+      }
+    ],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "reasoning",
+      "assistant",
+      "tool",
+      "reasoning",
+      "assistant"
+    ]
+  },
+  "format": "ade-replay",
+  "id": "cursor-feliz",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "cursor-agent 2026.11.05-86047df, modelo grok-4.7-low (o init diz Grok 4.7 256K Low), captura de 2026-11-09. O atMs é o da captura, não o carimbo de 10 em 10 do record, para o fim ser o result e não o silêncio. Os pedaços da fala ficam todos: sem eles o texto do turno não fecha. O close da captura é code 0.",
+    "kind": "recorded",
+    "recordedAt": 1794270985
+  },
+  "protocol": "cursor-stream",
+  "title": "Turno feliz do Cursor com read e result",
+  "transcript": [
+    {
+      "atMs": 5207,
+      "out": {
+        "apiKeySource": "login",
+        "cwd": "{{cwd}}",
+        "model": "Grok 4.7 256K Low",
+        "permissionMode": "default",
+        "session_id": "{{session:1}}",
+        "subtype": "init",
+        "type": "system"
+      }
+    },
+    {
+      "atMs": 5208,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "Leia o arquivo teste.txt e mostre o conteudo.",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        "session_id": "{{session:1}}",
+        "type": "user"
+      }
+    },
+    {
+      "atMs": 7354,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": "The",
+        "timestamp_ms": 1794268518180,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 7560,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " user wants me to",
+        "timestamp_ms": 1794268518386,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 7813,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " read the file teste.txt and show its contents.",
+        "timestamp_ms": 1794268518639,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 7813,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "completed",
+        "timestamp_ms": 1794268518639,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 7813,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "V",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7813,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "ou",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7813,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " ler",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " `",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "teste",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": ".txt",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "`",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " e",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518639,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " mostrar",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518640,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " o",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518640,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " conteúdo",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518640,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": ".",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518640,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "Vou ler `teste.txt` e mostrar o conteúdo.",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "model_call_id": "{{session:2}}-0-jbxd",
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268518640,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 7814,
+      "out": {
+        "call_id": "call-{{session:3}}-0\nfc_{{session:4}}_0",
+        "model_call_id": "{{session:2}}-0-jbxd",
+        "session_id": "{{session:1}}",
+        "subtype": "started",
+        "timestamp_ms": 1794268518640,
+        "tool_call": {
+          "hookAdditionalContexts": [],
+          "readToolCall": {
+            "args": {
+              "path": "{{cwd}}"
+            }
+          },
+          "startedAtMs": "1794268518575",
+          "toolCallId": "call-{{session:3}}-0\nfc_{{session:4}}_0"
+        },
+        "type": "tool_call"
+      }
+    },
+    {
+      "atMs": 7949,
+      "out": {
+        "call_id": "call-{{session:3}}-0\nfc_{{session:4}}_0",
+        "model_call_id": "{{session:2}}-0-jbxd",
+        "session_id": "{{session:1}}",
+        "subtype": "completed",
+        "timestamp_ms": 1794268518775,
+        "tool_call": {
+          "completedAtMs": "1794268518710",
+          "hookAdditionalContexts": [],
+          "readToolCall": {
+            "args": {
+              "path": "{{cwd}}"
+            },
+            "result": {
+              "success": {
+                "content": "LINHA_TESTE\n",
+                "exceededLimit": false,
+                "fileSize": 12,
+                "isEmpty": false,
+                "path": "{{cwd}}",
+                "readRange": {
+                  "endLine": 2,
+                  "startLine": 1
+                },
+                "relatedCursorRulePaths": [],
+                "relatedCursorRules": [],
+                "totalLines": 2
+              }
+            }
+          },
+          "startedAtMs": "1794268518575",
+          "toolCallId": "call-{{session:3}}-0\nfc_{{session:4}}_0"
+        },
+        "type": "tool_call"
+      }
+    },
+    {
+      "atMs": 9580,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": "The",
+        "timestamp_ms": 1794268520405,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9580,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " file",
+        "timestamp_ms": 1794268520406,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9689,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " contains",
+        "timestamp_ms": 1794268520514,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9944,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " \"LINHA_TESTE\".",
+        "timestamp_ms": 1794268520769,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9944,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "completed",
+        "timestamp_ms": 1794268520769,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9944,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "O",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520769,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9945,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " arquivo",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520771,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9945,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " `",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520771,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9945,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "teste",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520771,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9945,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": ".txt",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520771,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "`",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520773,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " contém",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": ":\n\n",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "```",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "\n",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "LIN",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "HA",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "_",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "TEST",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9948,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "E",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9949,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "\n",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9949,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "```",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268520774,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 10246,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "O arquivo `teste.txt` contém:\n\n```\nLINHA_TESTE\n```",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 10246,
+      "out": {
+        "duration_api_ms": 5040,
+        "duration_ms": 5040,
+        "is_error": false,
+        "request_id": "{{session:2}}",
+        "result": "Vou ler `teste.txt` e mostrar o conteúdo.O arquivo `teste.txt` contém:\n\n```\nLINHA_TESTE\n```",
+        "session_id": "{{session:1}}",
+        "subtype": "success",
+        "type": "result",
+        "usage": {
+          "cacheReadTokens": 23552,
+          "cacheWriteTokens": 0,
+          "inputTokens": 11843,
+          "outputTokens": 94,
+          "reasoningTokens": 38
+        }
+      }
+    },
+    {
+      "atMs": 10688,
+      "close": {}
+    }
+  ],
+  "version": 2
+}

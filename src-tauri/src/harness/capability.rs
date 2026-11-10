@@ -122,7 +122,7 @@ pub enum Scope {
     Model,
 }
 
-/// A prova mais forte que existe hoje para o estado. Não há captura real de nenhum provider no repositório.
+/// A prova mais forte que existe hoje para o estado. `RealCapture` só vale com fixture `recorded`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Proof {
@@ -134,7 +134,7 @@ pub enum Proof {
     Test,
     /// Uma fixture sintética de protocolo (`origin.kind: synthesized`).
     Fixture,
-    /// Uma captura gravada de um provider real. Nenhuma célula chega aqui ainda.
+    /// Uma captura gravada de um provider real (`origin.kind: recorded`).
     RealCapture,
 }
 

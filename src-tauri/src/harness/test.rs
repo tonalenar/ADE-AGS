@@ -102,9 +102,27 @@ fn todo_unsupported_diz_o_motivo() {
 
 #[test]
 fn nenhuma_celula_alega_captura_real_enquanto_nao_houver_uma() {
+    let root = repo_root();
+    let mut reais = 0;
     for (key, claim) in every_claim() {
-        assert_ne!(claim.proof, Proof::RealCapture, "{key}: o repositório não tem captura real de nenhum provider");
+        if claim.proof != Proof::RealCapture {
+            continue;
+        }
+        reais += 1;
+        let mut achou = false;
+        for citation in claim.evidence {
+            let (path, _) = parse_citation(citation);
+            if !path.contains("conversa/fixtures/protocolo/") || !path.ends_with(".json") || path.ends_with(".oracle.json") {
+                continue;
+            }
+            let text = std::fs::read_to_string(root.join(path)).unwrap_or_else(|error| panic!("{key}: {citation}: {error}"));
+            let value: serde_json::Value = serde_json::from_str(&text).unwrap_or_else(|error| panic!("{key}: {citation}: {error}"));
+            assert_eq!(value["origin"]["kind"].as_str(), Some("recorded"), "{key}: {path} não é recorded");
+            achou = true;
+        }
+        assert!(achou, "{key}: prova recorded sem fixture que exista e seja recorded");
     }
+    assert!(reais > 0, "há captura recorded; a regra não pode ficar vazia");
 }
 
 fn parse_citation(citation: &str) -> (&str, Option<(usize, usize)>) {
@@ -140,9 +158,13 @@ fn as_citacoes_apontam_para_arquivos_e_linhas_que_existem() {
 fn o_steer_do_claude_fica_unknown_ate_haver_captura_real() {
     let claude = find(Surface::Chat, "claude-code").expect("coluna do Claude");
     let steer = claude.claim(Capability::Steer);
-    assert_eq!(steer.support, Support::Unknown);
-    assert!(steer.missing.contains("captura real"));
-    assert!(!steer.promises(), "a UI não pode prometer o que o ADE não observa");
+    assert_eq!(steer.support, Support::Supported);
+    assert_eq!(steer.proof, Proof::RealCapture);
+    assert_eq!(
+        steer.note,
+        "em turno com ferramenta a mensagem entra depois da fronteira da ferramenta; em turno sem ferramenta a resposta corrente não muda e a mensagem vira um novo turno logo depois do `result`."
+    );
+    assert!(steer.promises());
 }
 
 fn engine_of(provider: &str) -> Engine {

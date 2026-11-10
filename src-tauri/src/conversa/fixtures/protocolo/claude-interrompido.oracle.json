@@ -1,0 +1,16 @@
+{
+  "checks": [
+    {
+      "label": "o init abre a sessão",
+      "expect": {
+        "sessao": "{{session:1}}"
+      }
+    },
+    {
+      "label": "o result aborted_streaming é interrupção, não erro do turno",
+      "expect": {
+        "fim": "interrompido"
+      }
+    }
+  ]
+}
