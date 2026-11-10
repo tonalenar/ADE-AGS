@@ -153,6 +153,92 @@ impl UsageBreakdown {
     }
 }
 
+/// O maior HTML de um app MCP que a timeline guarda (em bytes, já decodificado). Acima disso o recurso
+/// fica de fora inteiro: um HTML cortado no meio não é um app.
+pub const APP_RESOURCE_MAX: usize = 512 * 1024;
+const APP_MIME: &str = "text/html;profile=mcp-app";
+/// Quantos nós, e a que profundidade, a busca pelo recurso no resultado da ferramenta olha.
+const APP_SEARCH_NODES: usize = 200;
+const APP_SEARCH_DEPTH: usize = 8;
+/// Um resultado em texto só é lido como JSON até este tamanho (o HTML escapado cabe com folga).
+const APP_JSON_MAX: usize = 2 * APP_RESOURCE_MAX;
+
+/// O recurso de UI do MCP Apps (ext-apps, spec 2026-01-26) que a ferramenta devolveu: `uri` com esquema
+/// `ui://`, `mimeType` `text/html;profile=mcp-app` e o HTML (do `text`, ou do `blob` em base64, já decodificado).
+/// Vai num campo próprio do item, fora do `output`, que continua cortado em [`OUTPUT_MAX`].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppResource {
+    pub uri: String,
+    pub mime_type: String,
+    pub html: String,
+}
+
+fn is_app_mime(mime: &str) -> bool {
+    let mime = mime.to_ascii_lowercase();
+    let mut parts = mime.split(';').map(str::trim);
+    parts.next() == Some("text/html") && parts.any(|p| p == "profile=mcp-app")
+}
+
+fn is_ui_uri(uri: &str) -> bool {
+    uri.len() > "ui://".len() && uri.starts_with("ui://") && !uri.chars().any(|c| c.is_whitespace() || c == '<' || c == '>')
+}
+
+/// O HTML de um recurso: `text`, ou `blob` em base64. `None` se vazio ou acima de [`APP_RESOURCE_MAX`].
+fn app_html(resource: &Value) -> Option<String> {
+    use base64::Engine;
+    if let Some(text) = resource.get("text").and_then(Value::as_str).filter(|t| !t.trim().is_empty()) {
+        return (text.len() <= APP_RESOURCE_MAX).then(|| text.to_string());
+    }
+    let blob = resource.get("blob").and_then(Value::as_str).filter(|b| !b.trim().is_empty())?;
+    // Não decodifica um base64 que já passa do limite: 4 caracteres por 3 bytes.
+    if blob.len() > APP_RESOURCE_MAX / 3 * 4 + 4 {
+        return None;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(blob.trim()).ok()?;
+    if bytes.len() > APP_RESOURCE_MAX {
+        return None;
+    }
+    let html = String::from_utf8_lossy(&bytes).into_owned();
+    (!html.trim().is_empty()).then_some(html)
+}
+
+fn as_app_resource(value: &Value) -> Option<AppResource> {
+    let uri = value.get("uri").and_then(Value::as_str).filter(|u| is_ui_uri(u))?;
+    let mime = value.get("mimeType").and_then(Value::as_str).filter(|m| is_app_mime(m))?;
+    Some(AppResource { uri: uri.to_string(), mime_type: mime.to_string(), html: app_html(value)? })
+}
+
+fn find_app(value: &Value, depth: usize, budget: &mut usize) -> Option<AppResource> {
+    if *budget == 0 || depth > APP_SEARCH_DEPTH {
+        return None;
+    }
+    *budget -= 1;
+    if let Some(found) = as_app_resource(value) {
+        return Some(found);
+    }
+    match value {
+        // O resultado do MCP pode vir como texto que é o próprio JSON do recurso.
+        Value::String(text) => {
+            let trimmed = text.trim_start();
+            if text.len() > APP_JSON_MAX || !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+                return None;
+            }
+            find_app(&serde_json::from_str::<Value>(text).ok()?, depth + 1, budget)
+        }
+        Value::Array(items) => items.iter().find_map(|item| find_app(item, depth + 1, budget)),
+        Value::Object(map) => map.values().find_map(|child| find_app(child, depth + 1, budget)),
+        _ => None,
+    }
+}
+
+/// O recurso de app MCP dentro do `content` de um `tool_result`: `content[].resource` embutido, `contents[]`, ou
+/// o mesmo JSON dentro de um bloco de texto. Sem passar pelo corte do texto. Pura.
+pub fn app_resource_of(content: Option<&Value>) -> Option<AppResource> {
+    let mut budget = APP_SEARCH_NODES;
+    find_app(content?, 0, &mut budget)
+}
+
 /// Um item da timeline. Os campos que não valem para o tipo ficam de fora do JSON.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,6 +293,9 @@ pub struct Item {
     /// Evita repetir a compactação automática ao reabrir a mesma ponta de contexto.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_compact_attempted: Option<bool>,
+    /// O HTML do app MCP (`ui://`) que a ferramenta devolveu, limitado a [`APP_RESOURCE_MAX`]. A tela o isola num iframe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub app_resource: Option<AppResource>,
 }
 
 impl Item {
@@ -214,7 +303,7 @@ impl Item {
         Item {
             kind, id, at, text: None, name: None, tool: None, label: None, path: None, added: None, removed: None,
             status: None, output: None, question: None, interrupted: None, duration_ms: None, plan: None, tokens: None, usage_breakdown: None,
-            context_tokens: None, auto_compact_attempted: None,
+            context_tokens: None, auto_compact_attempted: None, app_resource: None,
         }
     }
 
@@ -322,10 +411,13 @@ impl Builder {
         self.items.push(item);
     }
 
-    fn finish_tool(&mut self, id: &str, status: ToolStatus, output: Option<String>) {
+    fn finish_tool(&mut self, id: &str, status: ToolStatus, output: Option<String>, app: Option<AppResource>) {
         if let Some(&index) = self.tools.get(id) {
             let tool = &mut self.items[index];
             tool.status = Some(status);
+            if app.is_some() {
+                tool.app_resource = app;
+            }
             if output.as_deref().is_some_and(|o| !o.trim().is_empty()) {
                 tool.output = output;
             }
@@ -378,7 +470,7 @@ impl Builder {
                             let error = block.get("is_error").and_then(Value::as_bool) == Some(true);
                             let status = if denied { ToolStatus::Denied } else if error { ToolStatus::Error } else { ToolStatus::Done };
                             let output = result_text(block.get("content")).map(|o| clip(&o, OUTPUT_MAX));
-                            self.finish_tool(id, status, output);
+                            self.finish_tool(id, status, output, app_resource_of(block.get("content")));
                         }
                         Some("text") if !has_results => {
                             let text = block.get("text").and_then(Value::as_str).unwrap_or("");
@@ -513,7 +605,7 @@ impl Builder {
                 "function_call_output" | "custom_tool_call_output" | "local_shell_call_output" => {
                     let Some(id) = payload.get("call_id").and_then(Value::as_str) else { return };
                     let (status, output) = codex_output(payload.get("output"));
-                    self.finish_tool(id, status, output.map(|o| clip(&o, OUTPUT_MAX)));
+                    self.finish_tool(id, status, output.map(|o| clip(&o, OUTPUT_MAX)), None);
                 }
                 _ => {}
             },

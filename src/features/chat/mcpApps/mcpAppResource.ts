@@ -6,8 +6,12 @@
  * corpo em `text` ou `blob` (base64). O mesmo objeto aparece no resultado
  * da ferramenta como recurso embutido, em `content[].resource`.
  *
- * `_meta.ui.resourceUri` só aponta o URI. Sem o HTML aqui, esta fatia não busca
- * o recurso no servidor.
+ * O backend guarda o recurso no campo `appResource` do item (fora do `output`, que é cortado em 4.000
+ * caracteres). `parseMcpAppResource` lê o `output` só como reserva, para itens antigos.
+ *
+ * `_meta.ui.resourceUri` só aponta o URI. Sem o HTML no resultado o host da spec faz `resources/read` no
+ * servidor, e a ADE ainda não tem um cliente MCP do lado do host para isso: é o próximo passo, e hoje a
+ * ferramenta nessa situação aparece como uma ferramenta comum.
  */
 
 const MCP_APP_MIME = "text/html;profile=mcp-app";
@@ -104,6 +108,28 @@ export function parseMcpAppResource(output: string): McpAppResource | null {
   } catch {
     return null;
   }
+}
+
+/** O recurso do item: o campo próprio do backend (revalidado, vem de transcript) ou, se faltar, o texto do `output`. */
+export function appResourceOf(item: { appResource?: unknown; output?: string }): McpAppResource | null {
+  const own = item.appResource;
+  if (isRecord(own)) {
+    const found = asResource({ uri: own.uri, mimeType: own.mimeType, text: own.html });
+    if (found) return found;
+  }
+  return item.output ? parseMcpAppResource(item.output) : null;
+}
+
+/**
+ * O servidor dono do app, para o diálogo de aprovação. O nome da ferramenta MCP do Claude é
+ * `mcp__servidor__ferramenta`; o do Codex, `servidor.ferramenta`. Sem isso, o host do `ui://servidor/…`.
+ */
+export function mcpAppServerOf(toolName: string | undefined, uri: string): string {
+  const claude = /^mcp__(.+?)__.+$/.exec(toolName ?? "");
+  if (claude?.[1]) return claude[1];
+  const codex = /^([^.\s]+)\.[^\s]+$/.exec(toolName ?? "");
+  if (codex?.[1]) return codex[1];
+  return /^ui:\/\/([^/]+)/.exec(uri)?.[1] ?? "?";
 }
 
 export { MCP_APP_MIME };

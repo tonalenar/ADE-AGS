@@ -5,6 +5,9 @@ import { ISOLATED_FRAME_CSP } from "@/features/chat/timeline/isolatedFrame";
 export const MCP_APP_SANDBOX = DESIGN_SANDBOX;
 
 /**
+ * O app avisa o host quando a pessoa clica nele (`user-gesture`, só clique de verdade: `isTrusted`), para a
+ * regra da tela cheia. O host ainda confere que o quadro está em foco, porque o app pode postar essa mensagem.
+ *
  * O app avisa o host antes de sair da própria página. Link âncora (`#`) fica;
  * o resto (outro URL, formulário, `window.open`) é cancelado. A CSP
  * (`navigate-to 'none'`) é a segunda trava.
@@ -29,6 +32,10 @@ document.addEventListener("click",function(e){
   e.preventDefault();
   e.stopPropagation();
   leave();
+},true);
+document.addEventListener("click",function(e){
+  if(!e.isTrusted)return;
+  try{parent.postMessage({source:"ags-mcp-app",kind:"user-gesture"},"*");}catch(x){}
 },true);
 document.addEventListener("submit",function(e){
   e.preventDefault();

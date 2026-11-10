@@ -482,6 +482,7 @@ fn segredo_nao_vai_para_a_pendencia() {
 // ── Timeline do modo chat ─────────────────────────────────────────────
 
 mod timeline_tests {
+    use base64::Engine;
     use serde_json::json;
 
     use super::super::timeline::{self, claude_tokens, count_lines, patch_stats, plan_steps, ItemKind, PlanStep, StepStatus, ToolKind, ToolStatus};
@@ -627,6 +628,94 @@ mod timeline_tests {
         assert_eq!(claude_tokens(None), None);
         assert_eq!(claude_tokens(Some(&json!({"input_tokens": 0}))), None);
         assert_eq!(claude_tokens(Some(&json!({"output_tokens": 3, "input_tokens": 2}))), Some(5));
+    }
+
+    // ── Recurso `ui://` do MCP Apps ──────────────────────────────────
+
+    const APP_URI: &str = "ui://weather-server/dashboard-template";
+    const APP_MIME: &str = "text/html;profile=mcp-app";
+
+    fn app_resource(html: &str) -> serde_json::Value {
+        json!({ "uri": APP_URI, "mimeType": APP_MIME, "text": html })
+    }
+
+    /// Uma ferramenta MCP e o resultado dela (`content` do `tool_result`), pelo transcript do Claude.
+    fn mcp_timeline(content: serde_json::Value) -> timeline::Timeline {
+        build("claude-code", &[
+            json!({"type": "assistant", "uuid": "a1", "message": {"content": [
+                {"type": "tool_use", "id": "m1", "name": "mcp__weather__show", "input": {}}
+            ]}}),
+            json!({"type": "user", "uuid": "u1", "message": {"content": [
+                {"type": "tool_result", "tool_use_id": "m1", "content": content}
+            ]}}),
+        ])
+    }
+
+    fn app_of(t: &timeline::Timeline) -> Option<&timeline::AppResource> {
+        t.items.iter().find(|i| i.kind == ItemKind::Tool).and_then(|i| i.app_resource.as_ref())
+    }
+
+    #[test]
+    fn o_recurso_ui_embutido_sobrevive_na_timeline_sem_passar_pelo_corte_do_texto() {
+        // O resultado traz o recurso como bloco `resource` (sem bloco `text`): antes se perdia.
+        let embutido = mcp_timeline(json!([{ "type": "text", "text": "ok" }, { "type": "resource", "resource": app_resource("<p id=\"app\">clima</p>") }]));
+        let app = app_of(&embutido).expect("o recurso some");
+        assert_eq!((app.uri.as_str(), app.mime_type.as_str(), app.html.as_str()), (APP_URI, APP_MIME, "<p id=\"app\">clima</p>"));
+        assert_eq!(embutido.items[0].output.as_deref(), Some("ok"));
+
+        // Como JSON dentro do texto, com HTML bem maior que o corte de 4.000 caracteres do `output`.
+        let html = format!("<p>{}</p>", "x".repeat(60_000));
+        let no_texto = mcp_timeline(json!([{ "type": "text", "text": json!({ "contents": [app_resource(&html)] }).to_string() }]));
+        assert_eq!(app_of(&no_texto).map(|a| a.html.len()), Some(html.len()));
+        assert!(no_texto.items[0].output.as_deref().is_some_and(|o| o.chars().count() <= 4_001), "o output continua cortado");
+
+        // `contents[]` direto, com o corpo em base64.
+        let blob = base64::engine::general_purpose::STANDARD.encode("<p>blob</p>");
+        let em_blob = mcp_timeline(json!({ "contents": [{ "uri": APP_URI, "mimeType": APP_MIME, "blob": blob }] }));
+        assert_eq!(app_of(&em_blob).map(|a| a.html.as_str()), Some("<p>blob</p>"));
+    }
+
+    #[test]
+    fn o_recurso_ui_respeita_o_limite_de_tamanho() {
+        let max = timeline::APP_RESOURCE_MAX;
+        assert_eq!(max, 512 * 1024);
+        let no_limite = "a".repeat(max);
+        assert_eq!(app_of(&mcp_timeline(json!([{ "type": "resource", "resource": app_resource(&no_limite) }]))).map(|a| a.html.len()), Some(max));
+        // Um byte acima: não entra, e o HTML nunca é cortado no meio (HTML cortado não é app).
+        let acima = "a".repeat(max + 1);
+        assert!(app_of(&mcp_timeline(json!([{ "type": "resource", "resource": app_resource(&acima) }]))).is_none());
+        // Em base64 o limite vale para o HTML já decodificado, e o base64 inchado nem é decodificado.
+        let blob = base64::engine::general_purpose::STANDARD.encode(&acima);
+        assert!(app_of(&mcp_timeline(json!([{ "type": "resource", "resource": { "uri": APP_URI, "mimeType": APP_MIME, "blob": blob } }]))).is_none());
+        let blob_ok = base64::engine::general_purpose::STANDARD.encode(&no_limite);
+        assert_eq!(app_of(&mcp_timeline(json!([{ "type": "resource", "resource": { "uri": APP_URI, "mimeType": APP_MIME, "blob": blob_ok } }]))).map(|a| a.html.len()), Some(max));
+    }
+
+    #[test]
+    fn o_recurso_ui_exige_o_uri_e_o_mime_do_mcp_apps() {
+        let outro_mime = json!({ "uri": APP_URI, "mimeType": "text/html", "text": "<p>x</p>" });
+        let outro_uri = json!({ "uri": "https://example.com/app", "mimeType": APP_MIME, "text": "<p>x</p>" });
+        let vazio = json!({ "uri": APP_URI, "mimeType": APP_MIME, "text": "   " });
+        for recurso in [outro_mime, outro_uri, vazio] {
+            assert!(app_of(&mcp_timeline(json!([{ "type": "resource", "resource": recurso }]))).is_none());
+        }
+        // Só apontar `_meta.ui.resourceUri` não é o HTML: nada a guardar (o `resources/read` é o próximo passo).
+        assert!(app_of(&mcp_timeline(json!([{ "type": "text", "text": "15:04" }]))).is_none());
+        // `;profile=mcp-app` com espaço e caixa diferente continua sendo o mesmo tipo.
+        let tolerante = json!({ "uri": APP_URI, "mimeType": "Text/HTML; profile=mcp-app", "text": "<p>x</p>" });
+        assert!(app_of(&mcp_timeline(json!([{ "type": "resource", "resource": tolerante }]))).is_some());
+    }
+
+    #[test]
+    fn o_campo_do_app_vai_em_camel_case_e_some_do_json_quando_vazio() {
+        let t = mcp_timeline(json!([{ "type": "resource", "resource": app_resource("<p>oi</p>") }]));
+        let raw = serde_json::to_value(&t.items[0]).unwrap();
+        assert_eq!(raw["appResource"], json!({ "uri": APP_URI, "mimeType": APP_MIME, "html": "<p>oi</p>" }));
+        let sem = serde_json::to_string(&mcp_timeline(json!("só texto")).items[0]).unwrap();
+        assert!(!sem.contains("appResource"));
+        // Um item gravado antes do campo continua legível.
+        let old: timeline::Item = serde_json::from_str(r#"{"kind":"tool","id":"x"}"#).unwrap();
+        assert!(old.app_resource.is_none());
     }
 
     #[test]
