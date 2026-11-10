@@ -95,9 +95,10 @@ fn arrancar(db: &DbConnection, id: &str) -> Task {
 /// Lo que hace el supervisor con una tarea que corre y termina.
 fn correr_y_cerrar(db: &DbConnection, task_id: &str, outcome: TaskOutcome) -> String {
     let conn = db.lock().unwrap();
+    let _ = runs_store::mark_dispatched(&conn, task_id).unwrap();
     let attempt_number = count(&conn, "SELECT COUNT(*) FROM run_attempts");
     let attempt_id = format!("attempt-{task_id}-{attempt_number}");
-    runs_store::mark_running(&conn, task_id, &attempt_id, "s-1", "/tmp/e.jsonl").unwrap();
+    assert!(runs_store::mark_running(&conn, task_id, &attempt_id, "s-1", "/tmp/e.jsonl").unwrap());
     runs_store::finish_task(&conn, task_id, &outcome).unwrap();
     let run = runs_store::run_of_task(&conn, task_id).unwrap().unwrap();
     runs_store::refresh_run_status(&conn, &run.id).unwrap()
