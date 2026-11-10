@@ -108,9 +108,11 @@ to test responsive layouts. There are no screenshots in these tools: read the pa
 an image of a page, `ags portal screenshot <portal>` saves a PNG and returns its path. Never launch your own browser \
 window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas.\n\
 Computer use: browser_act (canvas browser), sim_act (a reachable iOS simulator or physical iPhone/iPad) and desk_act (the Mac screen; \
-the person consents at the start of every act) let Jev drive a whole goal. device_list shows reachable devices and stable phone ids; \
-device_shot takes a local screenshot; device_action performs one authorized tap, swipe, key, button or type. Never guess between phones. \
-Pass expects so success is checked, read \
+the person consents at the start of every act) let Jev drive a whole goal. On iOS, Jev gets local OCR text first; the screenshot is sent only for unlabeled icons or ambiguous labels. device_list shows reachable devices and stable phone ids; \
+device_shot takes a local screenshot; device_action can list iPhone apps, launch/close one by bundle id, open a URL, tap, swipe, press a key/button or type. \
+For a physical iPhone connected to this ADE, use device_list → device_shot → device_action (or `ags device` from this ADE session), not external `sim-use ios-device tap`: that accessibility tap may report success while App Store apps ignore it. \
+Use the screenshot before coordinate taps; coordinates are iOS points. If these device tools are unavailable, this is not an interactive ADE session; do not fall back to simulator-only control. Never guess between phones. \
+For a multi-screen iPhone goal, pass the entire route to one sim_act call and set enough steps; do not send user-facing progress after each screen. Report the verified outcome once, unless the user asks for progress or a confirmation/blocker needs input. Pass expects so success is checked, read \
 report.status (done / unverified / blocked / unsure / stuck / limit): a call that returns is not a success by itself, \
 and a blocked act must not be retried unchanged. timeout includes the person answering a confirmation: use 300 when \
 one is likely. One act at a time per device.\n\
@@ -653,7 +655,7 @@ fn computer_use_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": "sim_act",
-            "description": format!("Reach a goal on an iOS simulator or a physical iPhone/iPad that the user connected to you on the ADE canvas (or shared in the chat panel): Jev looks at the screen and taps, scrolls or types while this tool does it, the same as `ags sim act`. Use `device_list` to see reachable devices and their stable UDID ids. Physical-device actions use the same per-device confirmation and trust rules as `ags device`; typing always asks. Needs Settings → Decisions → Jev with the browser pilot and the visual fallback turned on. {ACT_REPORT}"),
+            "description": format!("Reach a goal on an iOS simulator or a physical iPhone/iPad that the user connected to you on the ADE canvas (or shared in the chat panel): `sim act` reads OCR locally and asks Jev in text first, then taps the selected OCR box; it sends the screenshot only when an unlabeled icon or ambiguous labels need the visual fallback. Put a multi-screen route in one call with enough `steps`; do not send user-facing progress after each screen. Report the verified outcome once unless the user asks for progress or a confirmation/blocker needs input. Use `device_list` to see reachable devices and their stable UDID ids. Physical-device actions use the same per-device confirmation and trust rules as `ags device`; text-selected clicks ask until the phone is trusted, and sensitive clicks and typing always ask. Needs Settings → Decisions → Jev with the browser pilot and the visual fallback turned on. {ACT_REPORT}"),
             "inputSchema": { "type": "object", "properties": {
                 "name": { "type": "string", "description": "The reachable iOS device's name or id, as `device_list` shows it. For a physical iPhone/iPad, use its stable UDID id." },
                 "goal": goal.clone(),
@@ -693,10 +695,12 @@ fn device_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "device_action",
-            "description": "Perform one `ags device` action on a reachable device. On physical iPhones, tap/swipe/key/button ask for confirmation until trusted for that phone, and type always asks; no answer means no action. Use `device_shot` first for coordinate-based taps. The iPhone physical path rejects unsupported operations before acting.",
+            "description": "Perform one `ags device` action on a reachable device. Use this native ADE tool path for a physical iPhone in the chat panel; external `sim-use ios-device tap` can report success while App Store apps ignore the tap. On physical iPhones, list apps, launch/close by bundle ID, open URLs, tap, swipe, key and button are supported; mutating actions ask for confirmation until trusted for that phone, and typing always asks. Use `device_shot` first for coordinate-based taps (iOS points). The chat-panel control switch and per-device trust still apply.",
             "inputSchema": { "type": "object", "properties": {
                 "name": { "type": "string", "description": "The device name or stable id from `device_list`." },
-                "action": { "type": "string", "enum": ["tap", "swipe", "type", "key", "button"], "description": "The one-step device action." },
+                "action": { "type": "string", "enum": ["apps", "launch", "close", "open", "tap", "swipe", "type", "key", "button"], "description": "The one-step device action; `apps` lists installed iPhone apps, `launch`/`close` take a bundle ID, and `open` takes a URL." },
+                "package": { "type": "string", "description": "App bundle ID for `launch` or `close` (for example, `com.apple.mobilesafari`)." },
+                "url": { "type": "string", "description": "Absolute URL to open on the iPhone, including an app URL scheme if needed." },
                 "x": { "type": "number", "description": "Tap x in iOS points." },
                 "y": { "type": "number", "description": "Tap y in iOS points." },
                 "x1": { "type": "number", "description": "Swipe start x in iOS points." },

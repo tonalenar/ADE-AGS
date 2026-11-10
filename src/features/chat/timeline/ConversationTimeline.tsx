@@ -477,7 +477,7 @@ function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} title={activity || title}
-        className="flex min-w-0 items-center gap-2.5 min-h-[26px] text-left text-chat-ui text-gray-600 dark:text-white/60 hover:text-gray-900 dark:hover:text-white/85">
+        className="flex min-w-0 items-center gap-2.5 min-h-[26px] whitespace-nowrap text-left text-chat-ui text-gray-600 dark:text-white/60 hover:text-gray-900 dark:hover:text-white/85">
         <Icon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
         <span className="shrink-0 whitespace-nowrap">{title}</span>
         {summary.failed > 0 && <span className="shrink-0 whitespace-nowrap text-chat-caption text-red-600 dark:text-red-400">· {t("chat.work.failed", { count: summary.failed })}</span>}
@@ -498,7 +498,7 @@ function InfraRow({ tools }: { tools: TimelineItem[] }) {
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
-        className="flex items-center gap-2.5 min-h-[26px] text-left text-chat-ui text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75">
+        className="flex min-w-0 items-center gap-2.5 min-h-[26px] whitespace-nowrap text-left text-chat-ui text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75">
         <TerminalIcon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
         <span>{t("chat.tool.infra", { count: tools.length })}</span>
         <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />
@@ -523,7 +523,7 @@ function ToolRow({ tool }: { tool: TimelineItem }) {
     <div className="flex flex-col">
       <button type="button" onClick={() => canOpen && setOpen(!open)} aria-expanded={canOpen ? open : undefined}
         title={command?.full || tool.path || tool.label}
-        className={`group flex items-center gap-2.5 min-h-[26px] text-left text-chat-ui text-gray-600 dark:text-white/60 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
+        className={`group flex min-w-0 items-center gap-2.5 min-h-[26px] whitespace-nowrap text-left text-chat-ui text-gray-600 dark:text-white/60 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
         <Icon className={`w-4 h-4 shrink-0 ${tool.status === "error" || tool.status === "denied" ? "text-red-500 dark:text-red-400" : "text-gray-400 dark:text-white/40"}`} />
         <span className="shrink-0">{t(VERB[kind])}</span>
         {command && (

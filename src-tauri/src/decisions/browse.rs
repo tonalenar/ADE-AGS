@@ -298,17 +298,22 @@ pub fn goal_done_probability(answers: &BTreeMap<String, super::protocol::Decisio
 
 /// Pergunta ao provedor principal. Bloqueante: chamar de `spawn_blocking`.
 pub fn pick(db: &DbConnection, query: &StepQuery) -> StepReply {
+    let total_started = Instant::now();
+    let config_started = Instant::now();
     let settings = match db.lock().ok().and_then(|conn| config::load(&conn).ok()) {
         Some(settings) => settings,
         None => return StepReply::without_choice("error", "Não consegui ler os ajustes de Decisões."),
     };
+    let config_ms = millis(config_started);
     if !settings.active() || !settings.allows(POINT_BROWSE) {
         return StepReply::without_choice(
             "off",
             "O Jev não está pilotando navegadores: ligue em Ajustes → Decisões (Navegador do canvas).",
         );
     }
+    let clean_started = Instant::now();
     let clean = clean_query(query, settings.provider.max_options());
+    let clean_ms = millis(clean_started);
     if clean.operations.len() < 2 {
         return StepReply::without_choice("error", "A página não ofereceu opções suficientes para escolher.");
     }
@@ -319,10 +324,33 @@ pub fn pick(db: &DbConnection, query: &StepQuery) -> StepReply {
         || labels.into_iter().any(|(_, label)| memory_secret("", &without_addresses(label), None));
     let scan_ms = millis(scan_started);
     if secret {
+        eprintln!(
+            "[decisions] Jev navegador: resultado=privacidade config={} ms limpeza={} ms varredura={} ms total={} ms",
+            config_ms,
+            clean_ms,
+            scan_ms,
+            millis(total_started),
+        );
         return StepReply::without_choice("secret", "A página tem algo que parece um segredo: não enviei ao provedor.");
     }
+    let keyring_started = Instant::now();
     let api_key = config::load_key();
-    pick_with(db, &settings, api_key.as_deref(), &clean, scan_ms)
+    let keyring_ms = millis(keyring_started);
+    let reply = pick_with(db, &settings, api_key.as_deref(), &clean, scan_ms);
+    let cost = reply.cost.as_ref();
+    eprintln!(
+        "[decisions] Jev navegador: resultado={} config={} ms limpeza={} ms varredura={} ms cofre={} ms provedor={} ms tentativas={} espera={} ms total={} ms",
+        reply.status,
+        config_ms,
+        clean_ms,
+        scan_ms,
+        keyring_ms,
+        reply.latency_ms.unwrap_or(0),
+        cost.map_or(0, |value| value.attempts),
+        cost.map_or(0, |value| value.backoff_ms),
+        millis(total_started),
+    );
+    reply
 }
 
 fn millis(since: Instant) -> u64 {

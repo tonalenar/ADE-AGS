@@ -21,6 +21,7 @@ const ICON = {
   home: <Icon><path d="M3 11 12 4l9 7v9H5v-9" /></Icon>,
   apps: <Icon><rect x="3" y="6" width="7" height="12" rx="1.5" /><rect x="14" y="6" width="7" height="12" rx="1.5" /></Icon>,
   shot: <Icon><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></Icon>,
+  rotate: <Icon><path d="M4 12a8 8 0 1 0 2.3-5.6" /><path d="M4 4v4h4" /></Icon>,
   more: <Icon><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Icon>,
 };
 
@@ -32,8 +33,9 @@ const DOT: Record<"ok" | "wait" | "off", string> = {
 };
 
 /**
- * A pílula embaixo do aparelho: estado ao vivo, início, alternador de apps, foto, gravação e "⋯" com Sistema e
- * Botões. A orientação do aparelho físico acompanha o próprio iPhone; a rotação por comando fica no simulador.
+ * A pílula embaixo do aparelho: estado ao vivo, início, alternador de apps, foto (salva e oferece copiar), gravação,
+ * orientação (acompanha o giro físico do aparelho; a rotação por comando fica no simulador) e "⋯" com Sistema e
+ * Botões. É a pessoa mexendo: não pede confirmação.
  */
 export function DeviceBar({ device, name, status, ready, composerTarget }: { device: string; name: string; status: MirrorStatus | undefined; ready: boolean; composerTarget?: string | null }) {
   const { t } = useTranslation();
@@ -68,6 +70,8 @@ export function DeviceBar({ device, name, status, ready, composerTarget }: { dev
         <button type="button" className={btn} disabled={view.tone !== "ok"} title={t("iphone.bar.shot")} aria-label={t("iphone.bar.shot")}
           onClick={takeShot}>{ICON.shot}</button>
         <ScreenRecordButton className={btn} kind="iphone" target={device} composerTarget={composerTarget} label={name} disabled={!ready || view.tone !== "ok"} />
+        <button type="button" className={btn} title={t("iphone.bar.rotateHint")} aria-label={t("iphone.bar.rotateHint")}
+          onClick={() => { void AlertaToast(name, t("iphone.bar.rotateHint"), "info", 6000); }}>{ICON.rotate}</button>
         <div ref={ref} className="relative">
           <button type="button" className={`${btn} ${open ? "bg-gray-200 dark:bg-white/10" : ""}`} title={t("chat.devices.more")} aria-label={t("chat.devices.more")}
             aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>{ICON.more}</button>

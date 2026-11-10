@@ -11,7 +11,7 @@ import { HIBERNATE_OPTIONS } from "./prefs";
 import type { SimDevice } from "./ipc";
 
 const icon = "w-[15px] h-[15px]";
-const button = "nodrag cc-t relative flex items-center justify-center h-7 min-w-7 px-1.5 rounded-full text-white/75 hover:text-white hover:bg-white/12 disabled:opacity-35 disabled:hover:bg-transparent";
+const button = "nodrag cc-t relative flex shrink-0 items-center justify-center h-7 min-w-7 px-1.5 rounded-full text-white/75 hover:text-white hover:bg-white/12 disabled:opacity-35 disabled:hover:bg-transparent";
 
 function Svg({ children }: { children: ReactNode }) {
   return (
@@ -28,6 +28,9 @@ const ICONS = {
   shot: <Svg><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></Svg>,
   chat: <Svg><path d="M4 5h16v11H9l-5 4z" /></Svg>,
   more: <Svg><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></Svg>,
+  refresh: <Svg><path d="M20 11a8 8 0 0 0-14.9-4M4 4v4h4M4 13a8 8 0 0 0 14.9 4M20 20v-4h-4" /></Svg>,
+  disconnect: <Svg><path d="M9 6.5v11M15 6.5v11" strokeWidth={2.8} /></Svg>,
+  reconnect: <Svg><path d="M9 6.5v11l9-5.5-9-5.5Z" fill="currentColor" stroke="none" /></Svg>,
   light: <Svg><path d="M13 3L5 14h6l-1 7 8-11h-6z" /></Svg>,
   phone: <Svg><rect x="7" y="2.5" width="10" height="19" rx="2.5" /></Svg>,
   pad: <Svg><rect x="4.5" y="3" width="15" height="18" rx="2" /></Svg>,
@@ -131,6 +134,8 @@ function PhysicalHome({ device, name, ready }: { device: string; name: string; r
 export interface SimBarActions {
   onPick: (udid: string) => void;
   onOpenPicker: () => void;
+  onSearchPhysical: () => void;
+  onTogglePhysicalSession: () => void;
   onButton: (name: "home" | "lock") => void;
   onShot: () => void;
   onRotate: () => void;
@@ -151,9 +156,8 @@ export interface SimBarActions {
  */
 export function SimulatorBar({ full, devices, current, physical, state, scale, light, hibernateMin, single, agents, chatOpen, closeArmed, actions }: {
   full: boolean;
-  /** O nó mostra um aparelho físico: o início e o "⋯" com Sistema e Botões; sem os controles que só o simulador
-   *  tem (girar, foto, conversa, modo leve, hibernar, desligar). */
-  physical?: { id: string; device: PhysicalDevice | undefined; status: MirrorStatus | undefined };
+  /** O nó físico mostra buscar, pausar/reconectar, início e "⋯" com Sistema e Botões. */
+  physical?: { id: string; device: PhysicalDevice | undefined; status: MirrorStatus | undefined; disconnected: boolean; searching: boolean; sessionBusy: boolean };
   devices: SimDevice[];
   current: SimDevice | undefined;
   state: SimDevice["state"] | "error";
@@ -173,7 +177,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
   const name = physical ? physical.device?.name : current?.name;
   const label = name ? (full ? name : name.replace(/^iPhone |^iPad /, "")) : t("simulator.pick");
   const tone = physical ? statusView(physical.status).tone : null;
-  const dot: SimDevice["state"] | "error" = tone === "ok" ? "booted" : tone === "wait" ? "booting" : tone === "off" ? (physical?.status?.state === "paused" ? "shutdown" : "error") : state;
+  const dot: SimDevice["state"] | "error" = physical?.disconnected ? "shutdown" : tone === "ok" ? "booted" : tone === "wait" ? "booting" : tone === "off" ? (physical?.status?.state === "paused" ? "shutdown" : "error") : state;
 
   const zoom = (
     <>
@@ -197,9 +201,20 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
       <DevicePicker devices={devices} current={current} picked={physical?.id ?? current?.udid} state={dot} label={label} onPick={actions.onPick} onOpen={actions.onOpenPicker} />
       {physical ? (
         <>
-          <MirrorStatusLine status={physical.status} className="ml-1.5 shrink text-[11px] text-white/70" />
+          {physical.disconnected
+            ? <span className="ml-1.5 shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10.5px] text-white/70" title={t("iphone.session.paused")}>{t("iphone.status.paused")}</span>
+            : <MirrorStatusLine status={physical.status} className="ml-1.5 min-w-0 shrink text-[11px] text-white/70" />}
           <span className="flex-1" />
-          <PhysicalHome device={physical.id} name={label} ready={canTouch(physical.status)} />
+          <button type="button" className={button} title={t("iphone.search")} aria-label={t("iphone.search")} disabled={physical.searching}
+            onClick={actions.onSearchPhysical}>
+            <span className={physical.searching ? "animate-spin" : ""}>{ICONS.refresh}</span>
+          </button>
+          <button type="button" className={button} title={t(physical.disconnected ? "iphone.session.connect" : "iphone.session.disconnect")}
+            aria-label={t(physical.disconnected ? "iphone.session.connect" : "iphone.session.disconnect")} aria-pressed={physical.disconnected}
+            disabled={physical.sessionBusy} onClick={actions.onTogglePhysicalSession}>
+            {physical.disconnected ? ICONS.reconnect : ICONS.disconnect}
+          </button>
+          <PhysicalHome device={physical.id} name={label} ready={!physical.disconnected && canTouch(physical.status)} />
         </>
       ) : full ? <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/12" /> : <span className="flex-1" />}
       {!physical && (
@@ -242,7 +257,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
                 {zoom}
               </div>
             )}
-            {physical && <PhysicalMenu device={physical.id} name={label} tone="dark" ready={canTouch(physical.status)} onDone={() => setMenu(false)} />}
+            {physical && <PhysicalMenu device={physical.id} name={label} tone="dark" ready={!physical.disconnected && canTouch(physical.status)} onDone={() => setMenu(false)} />}
             {!full && !physical && (
               <button type="button" role="menuitemcheckbox" aria-checked={light} onClick={actions.onLight}
                 className="cc-t flex h-[30px] w-full items-center gap-2.5 rounded-md px-2.5 text-left text-white/90 hover:bg-white/8">

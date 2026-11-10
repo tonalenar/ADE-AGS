@@ -39,6 +39,10 @@ Resultado de `agent_update` também pode trazer `timeout` ou `failed` em `error`
 7. Modo automático é opt-in (`agents.autoUpdate`, padrão desligado): checa ao abrir e a cada 6 h e
    atualiza só agentes com `canAutoUpdate` e sem `busy`. Desligado: só mostra o aviso
    "Codex 0.160.0 disponível — Atualizar".
+8. Avisos de versão disponível ficam até a pessoa fechar no `×`. Eles não expiram por tempo, não
+   são descartados ao chegar um quarto aviso, e clicar em **Atualizar** não fecha o aviso. O
+   fechamento manual fica salvo por agente e versão; uma versão nova gera outro aviso. Avisos
+   persistentes podem ser percorridos numa pilha rolável.
 
 ## Onde a lista acha o programa no macOS
 

@@ -10,6 +10,10 @@ export interface BotToast {
   /** Texto del botón de acción; sin él, el aviso no tiene botón. */
   actionLabel?: string;
   onAction?: () => void;
+  /** Avisa quando a pessoa fecha manualmente no X. */
+  onDismiss?: () => void;
+  /** Mantém o aviso após a ação, para que só o X o feche. */
+  keepOpenOnAction?: boolean;
   /** Cuánto dura en pantalla, en milisegundos. */
   ms: number;
   /** A ação pode ser chamada por `thread.undo` enquanto este aviso estiver visível. */
@@ -22,7 +26,7 @@ export interface BotToast {
 
 export type BotToastInput = Omit<BotToast, "id" | "ms" | "tone"> & { tone?: BotToastTone; ms?: number };
 
-/** Cuántos avisos transitórios se conservan a la vez; los fijos no se expulsan. */
+/** Cuántos avisos temporales se conservan; los persistentes no se eliminan al agregar otros. */
 export const MAX_BOT_TOASTS = 3;
 export const DEFAULT_BOT_TOAST_MS = 8000;
 
@@ -44,15 +48,9 @@ export const useBotToastStore = create<BotToastState>((set, get) => ({
     const id = nextId++;
     const toast: BotToast = { ...input, id, tone: input.tone ?? "info", ms: input.ms ?? DEFAULT_BOT_TOAST_MS };
     set((state) => {
-      const toasts = [...state.toasts, toast];
-      // Avisos fixos (por exemplo, atualizações de agentes) só saem por ação da pessoa.
-      // Limite os avisos transitórios sem expulsar um aviso fixo da fila.
-      while (toasts.length > MAX_BOT_TOASTS) {
-        const oldestTransient = toasts.findIndex((item) => !item.sticky);
-        if (oldestTransient < 0) break;
-        toasts.splice(oldestTransient, 1);
-      }
-      return { toasts };
+      const next = [...state.toasts, toast];
+      const keptTransient = new Set(next.filter((item) => !item.sticky).slice(-MAX_BOT_TOASTS).map((item) => item.id));
+      return { toasts: next.filter((item) => item.sticky || keptTransient.has(item.id)) };
     });
     return id;
   },

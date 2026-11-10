@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.63.0
+version: 1.64.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -928,6 +928,10 @@ It is the user's own phone, so the rules are stricter than on a simulator:
 
 ```bash
 ags device list                               # reachable devices, stable ids, state and transport
+ags device apps iPhone                        # installed app names and bundle ids
+ags device launch iPhone com.apple.mobilesafari # open an installed app by bundle id
+ags device close iPhone com.apple.mobilesafari  # terminate its running process
+ags device open iPhone https://example.com      # open a URL or app URL scheme
 ags device shot iPhone                        # local PNG + screen size in points (no question asked)
 ags device tap iPhone --x 201 --y 610         # points, like the simulator
 ags device swipe iPhone --dir left            # or --x1 --y1 --x2 --y2 [--ms 300]
@@ -938,21 +942,23 @@ ags device type iPhone "hello"                # US keyboard ASCII only
 ags sim act iPhone "Open the Settings search" --expect "text:Search" --steps 6
 ```
 
-- **Every** `tap`, `swipe`, `key` and `button` asks the user in the app (with the current photo) until they
-  answer "Autorizar sempre neste aparelho" for that phone; `type` asks **every time**. No answer = refused.
-  `sim act` uses the same per-device "always" and still asks for sensitive labels, unlabeled icons and typing.
+- App listing requires the user to share the device with control enabled. `launch`, `close`, `open`, `tap`,
+  `swipe`, `key` and `button` ask in the app until the user answers "Autorizar sempre neste aparelho" for
+  that phone; `type` asks **every time**. No answer = refused. `sim act` reads the screen with local OCR first and asks Jev in text; it sends a screenshot only for an unlabeled icon or ambiguous labels. Text-selected taps use the exact OCR box and ask for confirmation until the phone is trusted; sensitive labels and typing still ask.
 - You only reach a phone linked to your canvas actor, or shared in the chat panel. Chat-shared devices are
   read-only (`shot`) unless the user enabled "Allow agents to control devices". Never ask the user to switch
   this off to go faster.
-- Not available on a real device: `start`, `open`, `launch`, `close`, `rotate`, `clipboard`, `tree`,
-  `tap --text`. Nothing installs, reboots or changes settings on the phone by itself.
+- Not available on a real device: `start`, `rotate`, `clipboard`, `tree`, `tap --text`. Agents use a screenshot
+  and iOS-point coordinates for taps. Nothing installs, reboots, or changes settings on the phone by itself.
+- The chat panel can pause the ADE session without removing Mac pairing; while paused, mirror and agent actions
+  stay blocked until the user reconnects.
 - The phone must be unlocked and paired. The agent opens a mirror session silently when needed and waits for
   the HID connection (up to 20 s, event-driven). If the last frame is missing or the decoder marked an anomaly,
   the photo falls back to `xcrun devicectl device capture screenshot`; the local log records `fonte=espelho|devicectl`
   and elapsed milliseconds. A mirror frame is accepted only after the keyframe that recovered the stream.
 
-The MCP equivalents are `device_list` (read-only), `device_shot` (read-only) and `device_action` (one
-authorized `tap`, `swipe`, `key`, `button` or `type`). They use the same caller identity, reach check and
+The MCP equivalents are `device_list` (read-only), `device_shot` (read-only) and `device_action` (apps, app
+launch/close, URL open, `tap`, `swipe`, `key`, `button` or `type`). They use the same caller identity, reach check and
 physical-phone confirmations as the CLI; fleet task MCP contexts cannot call them. `sim_act` also accepts a
 linked physical iPhone/iPad and uses the same safe capture path.
 
@@ -980,6 +986,10 @@ ags portal act Shop "log in, add the Backpack to the cart and open the cart" \
 ags sim act iPhone "Open General in Settings" --expect "text:iPhone Storage" --timeout 300
 ags desk act "Open Mail and show the inbox" --expect "text:Inbox" --timeout 300
 ```
+
+For a multi-step iPhone goal, use one `ags sim act` call with the whole goal instead of repeating screenshot and tap calls. If Jev is active and has balance, you may use it without asking for separate approval when it improves precision or speed; choose the local path when that is better. This does not authorize standalone quota-consuming benchmarks, probes or pilot tests, which still need explicit approval and a cap. Do not send the user a progress message for each intermediate screen; if needed, give one short line and report the verified final result once, unless the user asked for progress or a confirmation/blocker needs input. Keep execution rows on one line, truncating overflow while preserving full details in the expanded row. The iOS driver sends local OCR text to Jev first and only uploads the screenshot when the visual fallback is needed for an unlabeled icon or ambiguous text.
+
+On screens with a continuously moving mascot, video, spinner or counter (including Erian), do not wait for the screenshot to become pixel-identical. Decide from the goal-relevant text and controls, use a stable `--expect text:…` when one exists, and let Jev finish the full route in one `sim act`. Use raw `device tap` only for a deliberate coordinate action; it does not consult Jev.
 
 Flags (all three): `--steps 1..15` (default 8), `--timeout 10..1800` seconds (default 115), `--expect`
 (repeatable) and `--fill`. On iOS, `--expect visual:changed|darker|lighter` compares the screen's pixels with the
@@ -1562,7 +1572,7 @@ flags of each command.
 | TIME DO MODO CHAT | `team list`, `team candidates`, `team create`, `team link`, `team unlink`, `team role` |
 | CORREÇÕES | `fix list`, `fix decide` |
 | POOLS DE CONTAS | `pools`, `pool create`, `pool delete` |
-| DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device launch`, `device close`, `device`, `device open`, `device button`, `device rotate`, `device clipboard`, `device say` |
+| DISPOSITIVOS DO CANVAS | `devices`, `device create`, `device start`, `device tap`, `device swipe`, `device type`, `device apps`, `device launch`, `device close`, `device`, `device open`, `device button`, `device rotate`, `device clipboard`, `device say` |
 | PORTAIS DO CANVAS | `portals`, `portal create`, `portal close`, `open`, `portal navigate`, `portal snapshot`, `portal`, `portal type`, `portal press`, `portal reset`, `portal act` |
 | SIMULADOR IOS | `sim act` |
 | COMPUTER USE DO MAC | `desk act` |

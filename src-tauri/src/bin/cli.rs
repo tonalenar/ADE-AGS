@@ -149,6 +149,7 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   device tap <dispositivo> --x N --y N        Toca · ou --text \"Entrar\" (procura o elemento na tela)
   device swipe <dispositivo> --dir up|down|left|right   · ou --x1 --y1 --x2 --y2 [--ms 300]
   device type <dispositivo> \"texto\"          Digita (só ASCII) · device key <d> back|home|enter|...
+  device apps <iPhone>                        Lista nome e bundle id dos apps instalados
   device launch <dispositivo> <pacote>        Abre um app (com.android.settings)
   device close <dispositivo> <pacote>         Fecha o app (com.apple.mobilesafari no iOS)
   device shot|tree <dispositivo>              Captura (devolve o caminho do PNG) · elementos com seu texto e onde tocar
@@ -158,8 +159,9 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   device rotate <dispositivo> [left|right]    Gira o aparelho um quarto de volta (padrão left; no Android alterna retrato/paisagem)
   device clipboard <dispositivo> [\"texto\"]   Sem texto, mostra o que o iPhone copiou; com texto, põe na área de transferência dele
   device say <dispositivo> \"mensagem\"         Responde na conversa do simulador (a pessoa e os outros agentes veem)
-  Aparelhos do painel do modo chat (id chat:<udid|serial>) também aparecem em `devices`, para qualquer aba;
-  sem a chave \"Permitir que agentes controlem dispositivos\" da pessoa, só shot e tree
+  iPhone/iPad físicos do painel do chat também aparecem em `devices`; apps, launch, close, open, toque, gesto e digitação
+  usam o CoreDevice do Xcode pelo USB ou Wi-Fi e respeitam a chave de controle e a confirmação por aparelho.
+  Sem a chave \"Permitir que agentes controlem dispositivos\" da pessoa, o painel só libera shot e tree.
 
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
   portals                                     Os portais que você controla, cada um com seu estado: pronto, carregando, sem runtime,
@@ -184,6 +186,7 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
 SIMULADOR IOS — nó conectado ao seu terminal; Jev e reserva visual habilitados
   sim act <simulador> \"objetivo\" [--fill screen=valor] [--expect text:trecho|visual:changed|darker|lighter]... [--steps 8] [--timeout 115]
                                               Foto + HID; confirmação de ações sensíveis na UI; --fill só no campo já focado
+                                              OCR local → Jev em texto; imagem só para ícones sem rótulo ou ambiguidade
                                               visual: confere os pixels contra a 1ª foto (tema que só troca a paleta); report.effects por ação
                                               Alvo sob o teclado ou a barra: rola antes (scroll → reveal); tecla sempre pergunta à pessoa
                                               Um act por aparelho. Exit 0 só diz que veio o relatório: leia report.status
@@ -1132,6 +1135,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "pool.create" | "pool.delete" => &["name"],
         "device.create" => &["name"],
         "device.start" | "device.shot" | "device.tree" => &["name"],
+        "device.apps" => &["name"],
         "device.type" => &["name", "text"],
         "device.key" => &["name", "key"],
         "device.launch" | "device.close" => &["name", "package"],
@@ -1415,6 +1419,9 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         c if c.starts_with("portal.") => Duration::from_secs(120),
         // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).
         "device.start" => Duration::from_secs(150),
+        // Encerrar um processo físico exige inventário dos apps e a lista de processos antes do PID.
+        "device.close" => Duration::from_secs(150),
+        "device.apps" | "device.launch" | "device.open" => Duration::from_secs(90),
         "sim.act" | "desk.act" => Duration::from_secs(ade_ags_lib::ipc::mcp::act_timeout_secs(args.get("timeout")) + 75),
         c if c.starts_with("device.") => Duration::from_secs(60),
         // `routine run` espera a que el agente de destino se calle (hasta 60 s).

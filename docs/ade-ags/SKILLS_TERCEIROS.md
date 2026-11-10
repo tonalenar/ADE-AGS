@@ -71,6 +71,7 @@ Por isso as skills de terceiros entram como complemento:
 | Necessidade | Use |
 |---|---|
 | Atingir um objetivo no simulador iOS | `ags sim act` / `sim_act` |
+| Controlar um iPhone/iPad físico compartilhado com a ADE | `ags device` / `device_list`, `device_shot`, `device_action` |
 | Ler a árvore de acessibilidade do simulador, elementos fora da tela, valores exatos | `jev-sim-use exec ui` (local, só leitura) |
 | Android, simulador que o `sim act` não alcança, ou a pessoa pediu jev-sim-use pelo nome | `jev-sim-use "<objetivo>"`, nunca com um act rodando no mesmo aparelho. Nunca definir, pedir ou exportar `TYPESAFE_API_KEY` |
 | Atingir um objetivo na tela do Mac | `ags desk act` / `desk_act` |
