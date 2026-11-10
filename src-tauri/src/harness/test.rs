@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crate::conversa::api::{Engine, MidTurnBehavior};
 
 use super::capability::{Capability, Claim, Proof, Scope, Support, Surface};
-use super::matrix::{find, matrix};
+use super::matrix::{find, matrix, supports};
 
 const DOC: &str = include_str!("../../../docs/ade-ags/HARNESS_CONTRATO.md");
 const PROVIDER_COMPARISON_BASELINE: &str = include_str!("provider_comparisons.baseline.json");
@@ -36,7 +36,7 @@ fn source_provider_comparisons(path: &Path, root: &Path, found: &mut BTreeMap<St
         }
         let source = std::fs::read_to_string(&file).unwrap_or_else(|error| panic!("{}: {error}", file.display()));
         for line in source.lines().map(str::trim) {
-            if !line.contains("==") || !["agent_id", "agentId", "provider"].iter().any(|name| line.contains(name)) {
+            if !line.contains("==") || !["agent_id", "agentId", "provider", "agent"].iter().any(|name| line.contains(name)) {
                 continue;
             }
             if !PROVIDER_IDS.iter().any(|provider| line.contains(&format!("\"{provider}\"")) || line.contains(&format!("'{provider}'"))) {
@@ -54,11 +54,14 @@ fn comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro() {
     source_provider_comparisons(&root.join("src-tauri/src"), &root, &mut actual);
     source_provider_comparisons(&root.join("src"), &root, &mut actual);
     let baseline: BTreeMap<String, Vec<String>> = serde_json::from_str(PROVIDER_COMPARISON_BASELINE).unwrap();
-    for (file, lines) in actual {
-        for (line, count) in lines {
-            let allowed = baseline.get(&file).map(|known| known.iter().filter(|known_line| **known_line == line).count()).unwrap_or_default();
-            assert!(count <= allowed, "nova comparação de provider fora de adapter/registro em {file}: {line}");
+    let files: std::collections::BTreeSet<String> = actual.keys().chain(baseline.keys()).cloned().collect();
+    for file in files {
+        let current = actual.remove(&file).unwrap_or_default();
+        let mut expected = BTreeMap::new();
+        for line in baseline.get(&file).into_iter().flatten() {
+            *expected.entry(line.clone()).or_insert(0) += 1;
         }
+        assert_eq!(current, expected, "comparações por provider fora do adapter/registro mudaram em {file}; atualize o baseline após uma migração");
     }
 }
 
@@ -115,6 +118,28 @@ fn os_ids_das_capabilities_sao_unicos() {
     ids.sort_unstable();
     ids.dedup();
     assert_eq!(ids.len(), 18);
+}
+
+#[test]
+fn supports_consulta_supported_unknown_e_unsupported_na_matriz() {
+    assert_eq!(supports("claude-code", Surface::Chat, Capability::Steer), Some(Support::Supported));
+    assert_eq!(supports("opencode", Surface::Chat, Capability::Steer), Some(Support::Unsupported));
+    assert_eq!(supports("claude-code", Surface::Chat, Capability::Compact), Some(Support::Unknown));
+    assert_eq!(supports("inexistente", Surface::Chat, Capability::Steer), None);
+    assert!(crate::conversa::api::unsupported_capability_error("opencode", Capability::Goal)
+        .unwrap()
+        .contains("Unsupported"));
+    assert!(crate::conversa::api::unsupported_capability_error("local-acp-00000000-0000-4000-8000-000000000000", Capability::Goal)
+        .unwrap()
+        .contains("local-acp-00000000-0000-4000-8000-000000000000"));
+    assert_eq!(crate::conversa::api::unsupported_capability_error("claude-code", Capability::Compact), None);
+}
+
+#[test]
+fn comando_tauri_expoe_a_matriz_sem_duplicar_o_catalogo() {
+    let exposed = super::commands::harness_capability_matrix();
+    assert_eq!(exposed.as_slice(), matrix());
+    assert!(serde_json::to_value(exposed).is_ok());
 }
 
 #[test]

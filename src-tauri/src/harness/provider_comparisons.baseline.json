@@ -16,9 +16,23 @@
     "let no_approval = (matches!(new.agent_id.as_str(), \"antigravity\" | \"cursor\") || local_acp) && access == \"ask\";"
   ],
   "src-tauri/src/agents/updates.rs": [
+    "if agent.id == \"claude-code\" {",
     "result.new_version=if agent_id==\"claude-code\" {OfficialExecutor.execute(FixedCommand {program:\"claude\",args:&[\"--version\"]},CHECK_TIMEOUT).ok().and_then(|s|super::version_line(s.as_bytes(),&[]))} else if info.install.as_deref()==Some(\"bun\") {"
   ],
+  "src-tauri/src/agents/contract.rs": [
+    "agent.def().id == \"claude-code\","
+  ],
+  "src-tauri/src/usage/terminal.rs": [
+    "let roots = if agent == \"claude-code\" {",
+    "} else if agent == \"codex\" {",
+    "} else if agent == \"opencode\" {",
+    "if agent == \"opencode\" {",
+    "} else if agent == \"claude-code\" {",
+    "let records = if agent == \"opencode\" {",
+    "} else if agent == \"codex\" {"
+  ],
   "src-tauri/src/usage/limits.rs": [
+    "out.push(if agent == \"codex\" {",
     "let agent=if limit.provider==\"codex\" {\"codex\"} else {\"claude-code\"};"
   ],
   "src-tauri/src/accounts/health.rs": [
@@ -45,7 +59,12 @@
     "if (agentId === \"claude-code\") {"
   ],
   "src/features/chat/AgentModelPicker.tsx": [
+    "const showFast = !!speed && agent?.id === \"codex\" && selectedModel?.fastSupported === true;",
     "refreshRosterModels(\"opencode\", value.agentId === \"opencode\" && value.account && !value.account.startsWith(\"pool:\") ? value.account : null)",
+    "fast: r.agent.id === \"codex\" && speed?.fast === true && selected?.fastSupported === true,",
+    "const group = r.agent.id === \"opencode\" && r.model?.includes(\"/\") ? r.model.split(\"/\")[0] : null;",
+    "const prevGroup = i > 0 && rows[i - 1].agent.id === \"opencode\" ? rows[i - 1].model?.split(\"/\")[0] : undefined;",
+    "if (sameAgent && speed?.fast && (r.agent.id !== \"codex\" || nextModel?.fastSupported !== true)) {",
     "{roster && tab === \"opencode\" && !query.trim() && catalogOf(roster, \"opencode\", value.agentId === \"opencode\" ? value.account : null).length === 0 && (",
     "{agentId === \"codex\" && ("
   ],
@@ -53,7 +72,11 @@
     "speed={card.agentId === \"codex\" ? { fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) } : undefined}"
   ],
   "src/features/chat/NewConversation.tsx": [
+    "fastMode: agent?.id === \"codex\" && !viaProtocol && prefs.fastMode,",
+    "access, plan: launchPlan, fastMode: agent.id === \"codex\" && !viaProtocol && prefs.fastMode,",
+    "fastMode: agent.id === \"codex\" && prefs.fastMode,",
     ": t(\"chat.team.placeholder\", { agent: firstMember ? mentionSlug(firstMember.kind === \"new\" ? firstMember.agent.id : firstMember.conv.agentId) : \"codex\" })} disabled={!project || !agent || !projectPolicyLoaded || projectPolicySaving || !workspaceSettingsLoaded}",
+    "speed={agent?.id === \"codex\" && !viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}",
     "onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: v.agentId === \"codex\" ? prefs.fastMode : false })} />"
   ],
   "src/features/chat/ChatSidebar.tsx": [
@@ -102,7 +125,11 @@
     "browserPaste: agentId === \"claude-code\" || !!agentId?.startsWith(\"opencode\"),",
     "if (agentId === \"claude-code\") {"
   ],
+  "src/features/agents/DetectedAgents.tsx": [
+    "const linked = agent.id === \"antigravity\""
+  ],
   "src/features/agents/AgentConnectPanel.tsx": [
+    "{agent.id !== \"antigravity\" && (",
     "const taken = accounts.some((a) => a.agentId === \"claude-code\" && a.name === name.trim());"
   ],
   "src/features/agents/accountConnect.ts": [
@@ -150,11 +177,18 @@
     "helperText={agentId === \"codex\"",
     "{agentId === \"claude-code\" && ("
   ],
+  "src/features/accounts/AccountsManager.tsx": [
+    "<NavItem active={section?.kind === \"agent\" && section.id === \"antigravity\"}",
+    ") : section?.kind === \"agent\" && section.id === \"antigravity\" ? ("
+  ],
   "src/features/accounts/AccountUsagePopover.tsx": [
     "if (account.agentId !== \"claude-code\") return;",
     "{account.agentId === \"claude-code\" && (",
     "{account.agentId === \"codex\" && <CodexUsageSection account={account} />}",
     "{account.agentId !== \"claude-code\" && account.agentId !== \"codex\" && ("
+  ],
+  "src/features/accounts/AntigravityAccountsPane.tsx": [
+    "if (!stale) setInstalled(agents.some((a) => a.id === \"antigravity\" && a.available));"
   ],
   "src/features/compare/model.ts": [
     "if (agentId === \"claude-code\") return text;"

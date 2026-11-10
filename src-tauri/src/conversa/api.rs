@@ -33,6 +33,15 @@ pub enum Engine {
     Cursor,
 }
 
+/// Registro dos motores de conversa por protocolo. A matriz recebe o mesmo id que `Engine::of` resolve.
+const CHAT_ENGINE_REGISTRY: [(&str, Engine); 5] = [
+    ("codex", Engine::Codex),
+    ("claude-code", Engine::Claude),
+    ("opencode", Engine::OpenCode),
+    ("antigravity", Engine::Antigravity),
+    ("cursor", Engine::Cursor),
+];
+
 /// Capacidades observáveis do runtime de conversa. A camada de orquestração consulta este
 /// contrato em vez de inferir suporte pelo nome do agente.
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,56 +80,77 @@ impl Engine {
 
     /// Capacidades descritas só quando já há implementação no runtime atual. Isso não torna
     /// providers diferentes iguais por baixo: cada adapter continua usando o protocolo nativo.
-    pub const fn capabilities(self) -> EngineCapabilities {
+    pub fn capabilities(self) -> EngineCapabilities {
+        let provider = self.provider_id();
+        let supported = |capability| {
+            crate::harness::matrix::supports(
+                provider,
+                crate::harness::capability::Surface::Chat,
+                capability,
+            )
+                .is_some_and(|support| support != crate::harness::capability::Support::Unsupported)
+        };
+        let mid_turn = if supported(crate::harness::capability::Capability::Steer) {
+            MidTurnBehavior::Steer
+        } else {
+            MidTurnBehavior::Interrupt
+        };
         match self {
             Engine::Codex => EngineCapabilities {
                 // `edits` não aparece na tela do Codex, mas continua aceito pela CLI e pelo MCP:
                 // `codex_map` o trata como `safe` (`on-request`, `workspace-write`).
                 access_modes: &["ask", "edits", "safe", "full"],
                 plan: false,
-                mid_turn: MidTurnBehavior::Steer,
-                context_compaction: true,
+                mid_turn,
+                context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
-                persistent_goal: true,
+                persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: true,
             },
             Engine::Claude => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
                 plan: true,
-                mid_turn: MidTurnBehavior::Steer,
-                context_compaction: true,
+                mid_turn,
+                context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: true,
-                persistent_goal: true,
+                persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
             },
             Engine::OpenCode => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
                 plan: true,
-                mid_turn: MidTurnBehavior::Interrupt,
-                context_compaction: false,
+                mid_turn,
+                context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
-                persistent_goal: false,
+                persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
             },
             Engine::Antigravity => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
                 plan: true,
-                mid_turn: MidTurnBehavior::Interrupt,
-                context_compaction: false,
+                mid_turn,
+                context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
-                persistent_goal: false,
+                persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
             },
             Engine::Cursor => EngineCapabilities {
                 access_modes: &["ask", "full", "plan"],
                 plan: true,
-                mid_turn: MidTurnBehavior::Interrupt,
-                context_compaction: false,
+                mid_turn,
+                context_compaction: supported(crate::harness::capability::Capability::Compact),
                 automatic_compaction: false,
-                persistent_goal: false,
+                persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
             },
         }
+    }
+
+    fn provider_id(self) -> &'static str {
+        CHAT_ENGINE_REGISTRY
+            .iter()
+            .find_map(|(provider, engine)| (*engine == self).then_some(*provider))
+            .expect("todo Engine precisa ter id no registro de conversa")
     }
 
     pub fn supports_access(self, access: &str) -> bool {
@@ -129,15 +159,10 @@ impl Engine {
     }
 
     pub fn of(agent_id: &str) -> Option<Engine> {
-        match agent_id {
-            "codex" => Some(Engine::Codex),
-            "claude-code" => Some(Engine::Claude),
-            "opencode" => Some(Engine::OpenCode),
-            "antigravity" => Some(Engine::Antigravity),
-            "cursor" => Some(Engine::Cursor),
-            id if crate::local_acp::is_local_acp_id(id) => Some(Engine::OpenCode),
-            _ => None,
-        }
+        CHAT_ENGINE_REGISTRY
+            .iter()
+            .find_map(|(provider, engine)| (*provider == agent_id).then_some(*engine))
+            .or_else(|| crate::local_acp::is_local_acp_id(agent_id).then_some(Engine::OpenCode))
     }
 
     /// Os acessos que o agente aceita. O Plano é um modo do Claude (permissão), do OpenCode (o agente
@@ -159,6 +184,29 @@ fn engine_for(agent_id: &str) -> Result<Engine, String> {
 
 fn engine_of(row: &ThreadRow) -> Result<Engine, String> {
     engine_for(&row.agent_id)
+}
+
+pub(crate) fn unsupported_capability_error(
+    provider: &str,
+    capability: crate::harness::capability::Capability,
+) -> Option<String> {
+    let matrix_provider = if crate::local_acp::is_local_acp_id(provider) {
+        "local-acp"
+    } else {
+        provider
+    };
+    (crate::harness::matrix::supports(
+        matrix_provider,
+        crate::harness::capability::Surface::Chat,
+        capability,
+    ) == Some(crate::harness::capability::Support::Unsupported))
+    .then(|| {
+        format!(
+            "Capability '{}' não está disponível para '{}' nesta superfície: a matriz marca Unsupported",
+            capability.id(),
+            provider
+        )
+    })
 }
 
 /// O turno em andamento de uma conversa, em qualquer um dos agentes. `None` = sem processo aberto.
@@ -950,6 +998,12 @@ pub async fn thread_goal_action(
 ) -> Result<Option<store::ThreadGoal>, String> {
     let row = thread(db, thread_id)?;
     let engine = engine_of(&row)?;
+    if let Some(error) = unsupported_capability_error(
+        &row.agent_id,
+        crate::harness::capability::Capability::Goal,
+    ) {
+        return Err(error);
+    }
     let capabilities = engine.capabilities();
     if !capabilities.persistent_goal {
         return Err("Objetivos persistentes estão disponíveis nas conversas Codex e Claude Code".into());
