@@ -92,7 +92,7 @@ describe("barrido de cuota", () => {
     expect(codex).toHaveBeenNthCalledWith(2, "cx", true);
     expect(discover).toHaveBeenNthCalledWith(1, "ag", false);
     expect(discover).toHaveBeenNthCalledWith(2, "ag", true);
-    expect(claude).toHaveBeenNthCalledWith(1, "cl", {}, false);
-    expect(claude).toHaveBeenNthCalledWith(2, "cl", {}, true);
+    expect(claude).toHaveBeenNthCalledWith(1, "cl", false);
+    expect(claude).toHaveBeenNthCalledWith(2, "cl", true);
   });
 });
