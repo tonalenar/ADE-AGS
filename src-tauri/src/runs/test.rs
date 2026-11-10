@@ -5086,6 +5086,65 @@ mod harness_fase1 {
         assert_eq!(node(&graph, "turn:filha:ft1").status, "interrupted");
     }
 
+    /// Um filho de chat e um run da Frota podem terminar primeiro. Só o evento final do próprio
+    /// turno do pai o torna terminal na projeção.
+    #[test]
+    fn filhos_de_chat_e_frota_terminam_antes_sem_fechar_o_turno_pai() {
+        let world = mundo(&["raiz"]);
+        child(&world, "filha", "raiz");
+        let (run_id, _) = delegar(&world, "raiz", &["tarefa"], None).unwrap();
+        {
+            let conn = world.db.lock().unwrap();
+            chat::upsert_run(
+                &conn,
+                "filha",
+                "filho-final",
+                "completed",
+                Some(2),
+                Some(3),
+                Some(1),
+            )
+            .unwrap();
+            conn.execute("UPDATE tasks SET status = 'done', ended_at = 4", [])
+                .unwrap();
+            conn.execute(
+                "UPDATE runs SET status = 'done', ended_at = 4 WHERE id = ?1",
+                [&run_id],
+            )
+            .unwrap();
+        }
+
+        let filhos_terminaram = graph(&world, "raiz");
+        assert_eq!(
+            node(&filhos_terminaram, "turn:filha:filho-final").status,
+            "completed"
+        );
+        assert_eq!(
+            node(&filhos_terminaram, &format!("run:{run_id}")).status,
+            "done"
+        );
+        assert_eq!(
+            node(&filhos_terminaram, "turn:raiz:t1").status,
+            "inProgress"
+        );
+        assert_eq!(ativos(&filhos_terminaram, "turn:raiz:t1"), 0);
+
+        // Este upsert representa o evento final do motor do próprio pai (result/turn/completed/etc.).
+        chat::upsert_run(
+            &world.db.lock().unwrap(),
+            "raiz",
+            "t1",
+            "completed",
+            Some(1),
+            Some(5),
+            Some(4),
+        )
+        .unwrap();
+        let pai_finalizou = graph(&world, "raiz");
+        assert_eq!(node(&pai_finalizou, "turn:raiz:t1").status, "completed");
+        assert_eq!(ativos(&pai_finalizou, "turn:raiz:t1"), 0);
+    }
+
     /// Teste 7: depois das duas varreduras de boot, o turno e a tarefa que rodava aparecem
     /// `interrupted`, a que esperava aparece cancelada, e nenhuma linha some.
     #[test]
