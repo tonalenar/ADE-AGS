@@ -1,5 +1,6 @@
 import { useChatStore } from "./store";
 import { useTabsStore } from "@/features/tabs/store";
+import { SNAPSHOT_DEFAULT_EVENT } from "@/features/recording/snapshotTargets";
 
 export const FILE_PICKER_COMMAND_EVENT = "ade:file-picker-toggle";
 export const COMPOSER_COMMAND_EVENT = "ade:composer-command";
@@ -134,11 +135,14 @@ export function isDesktopSnapshotTargetMounted(target: string | null): boolean {
   return desktopSnapshotButton(target) !== null;
 }
 
-/** Usa o mesmo botão do clique, para a captura, o registro pendente e o aviso seguirem um caminho só. */
+/**
+ * Pede a captura padrão (tela principal) ao mesmo botão do composer: a captura, o registro pendente e o aviso seguem
+ * o mesmo caminho. O evento, e não o clique, deixa a escolha do seletor de fora.
+ */
 export function takeDesktopSnapshot(target: string | null): boolean {
   const button = desktopSnapshotButton(target);
   if (!button) return false;
-  button.click();
+  button.dispatchEvent(new CustomEvent(SNAPSHOT_DEFAULT_EVENT));
   return true;
 }
 
