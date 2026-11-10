@@ -8,7 +8,7 @@ import { noticeDetail } from "./timelineModel";
 import type { TimelineItem } from "./types";
 
 /** Os códigos com frase própria no catálogo (`chat.timeline.notice.<código>`). */
-const KNOWN = ["resumeLost", "queueDropped", "optionIgnored", "toolOutcomeUnknown", "turnTimeout", "contextCleared", "autoCompact", "interrupted"];
+const KNOWN = ["resumeLost", "queueDropped", "optionIgnored", "toolOutcomeUnknown", "turnTimeout", "contextCleared", "autoCompact"];
 
 /**
  * Um aviso do app no fio: a sessão que não voltou (o agente recomeçou sem o histórico), a mensagem que saiu da

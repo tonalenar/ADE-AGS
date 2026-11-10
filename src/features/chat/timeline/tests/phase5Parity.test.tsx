@@ -15,7 +15,6 @@ vi.mock("react-i18next", () => ({
 
 import { ToolRow } from "@/features/chat/timeline/ConversationTimeline";
 import { NoticeRow } from "@/features/chat/timeline/NoticeRow";
-import { TurnEndNotice } from "@/features/chat/timeline/TurnEndNotice";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
 let root: Root | null = null;
@@ -107,49 +106,5 @@ describe("Fase 5 - Aviso resumeLost na timeline", () => {
     expect(noticeEl).not.toBeNull();
     expect(noticeEl!.textContent).toContain("chat.timeline.notice.resumeLost");
     expect(noticeEl!.textContent).toContain("thread not found");
-  });
-});
-
-describe("Fase 5 - Turno interrompido na timeline", () => {
-  it("aparece como aviso discreto na timeline com a razão quando vier no item", async () => {
-    await render(
-      <TurnEndNotice
-        end={{
-          durationMs: null,
-          interrupted: true,
-          error: null,
-          reason: "Cancelado pelo usuário antes de concluir",
-          files: [],
-        }}
-      />,
-    );
-
-    // Não deve ser um alerta de erro
-    expect(host.querySelector('[role="alert"]')).toBeNull();
-
-    // Deve ser um aviso discreto com role="status"
-    const noticeEl = host.querySelector('[role="status"]');
-    expect(noticeEl).not.toBeNull();
-    expect(noticeEl!.textContent).toContain("chat.timeline.interruptedByYou");
-    expect(noticeEl!.textContent).toContain("Cancelado pelo usuário antes de concluir");
-  });
-
-  it("aviso notice de interrupção na timeline aparece de forma discreta com a razão", async () => {
-    await render(
-      <NoticeRow
-        item={{
-          kind: "notice",
-          id: "n-int-1",
-          label: "interrupted",
-          text: "Operação interrompida a pedido do usuário",
-        }}
-      />,
-    );
-
-    expect(host.querySelector('[role="alert"]')).toBeNull();
-    const noticeEl = host.querySelector('[role="status"]');
-    expect(noticeEl).not.toBeNull();
-    expect(noticeEl!.textContent).toContain("chat.timeline.notice.interrupted");
-    expect(noticeEl!.textContent).toContain("Operação interrompida a pedido do usuário");
   });
 });

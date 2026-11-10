@@ -576,7 +576,7 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
           </p>
         </div>
       )}
-      {open && !unknownOutcome && tool.output && (
+      {open && tool.output && (
         <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-white/70">
           {tool.output}

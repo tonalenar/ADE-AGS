@@ -5232,7 +5232,6 @@
   "chat.timeline.notice.toolOutcomeUnknown": "A conversa parou com uma ferramenta sem resultado: ela pode ter rodado ou não. O agente foi avisado de conferir antes de repetir.",
   "chat.timeline.notice.turnTimeout": "TIMEOUT: o agente ficou sem responder com o turno aberto. Nada foi interrompido.",
   "chat.timeline.notice.resend": "Reenviar",
-  "chat.timeline.notice.interrupted": "Turno interrompido.",
   "accounts.chatPool.title": "Pool de contas no chat",
   "accounts.chatPool.hint": "Quando a conta de uma conversa esgota o limite, a conversa segue em outra conta do mesmo pool. Só vale para conversas abertas com «pool:Nome». A conversa nova começa sem o histórico interno do agente: o app manda um resumo das últimas falas e o pedido que ficou sem resposta.",
   "accounts.chatPool.mode.off": "Desligado",

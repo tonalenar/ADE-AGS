@@ -27,13 +27,12 @@ export interface TurnEnd {
   durationMs: number | null;
   interrupted: boolean;
   error: string | null;
-  reason?: string | null;
   files: ChangedFile[];
   /** O turno não acabou: chegou outra mensagem da pessoa no meio dele (steer, fila) e o trabalho segue no turno dela. */
   superseded?: boolean;
 }
 
-/** Verifica se a ferramenta teve desfecho desconhecido (`TOOL_OUTCOME_UNKNOWN`). */
+/** A ferramenta ficou sem desfecho conhecido: o backend a marcou com `TOOL_OUTCOME_UNKNOWN` (ver `conversa/turn.rs`). */
 export function isUnknownOutcome(tool: Pick<TimelineItem, "status" | "output">): boolean {
   return tool.status === "error" && typeof tool.output === "string" && tool.output.startsWith("TOOL_OUTCOME_UNKNOWN");
 }
@@ -149,14 +148,7 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
       // Sem a duração no arquivo, a conta é do prompt até o fim.
       const start = current.user?.at ?? current.startedAt;
       const durationMs = item.durationMs ?? (start !== undefined && item.at !== undefined ? item.at - start : null);
-      const isInterrupted = !!item.interrupted;
-      const text = item.text?.trim() || null;
-      const isProcessCrash = !!text && (text.includes("fechou no meio do turno") || text.includes("caiu"));
-      const error = !isInterrupted || isProcessCrash ? text : null;
-      const reason = (item as { reason?: string }).reason?.trim() || (isInterrupted && !isProcessCrash ? text : null);
-      const end: TurnEnd = { durationMs, interrupted: isInterrupted, error, files: changedFiles(tools) };
-      if (reason) end.reason = reason;
-      close(current, end);
+      close(current, { durationMs, interrupted: !!item.interrupted, error: item.text?.trim() || null, files: changedFiles(tools) });
       turn = null;
       tools = [];
     }
@@ -172,18 +164,7 @@ export function noticeDetail(item: TimelineItem): string | null {
   const text = item.text?.trim() ?? "";
   if (item.label === "resumeLost") {
     const at = text.indexOf("Motivo: ");
-    if (at >= 0) return text.slice(at + "Motivo: ".length).trim() || null;
-    const atReason = text.indexOf("Reason: ");
-    if (atReason >= 0) return text.slice(atReason + "Reason: ".length).trim() || null;
-    const atRazao = text.indexOf("Razão: ");
-    if (atRazao >= 0) return text.slice(atRazao + "Razão: ".length).trim() || null;
-    const defaultPt = "A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele.";
-    const defaultEn = "The previous session could not be resumed; the agent started over without its history.";
-    const defaultEs = "No se pudo retomar la sesión anterior; el agente empezó de nuevo sin su historial.";
-    if (text && text !== defaultPt && text !== defaultEn && text !== defaultEs && !text.startsWith("A sessão anterior não pôde ser retomada")) {
-      return text;
-    }
-    return null;
+    return at >= 0 ? text.slice(at + "Motivo: ".length).trim() || null : null;
   }
   return text || null;
 }
