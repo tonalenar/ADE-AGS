@@ -25,6 +25,18 @@ import {
   type AgentUpdateResult,
 } from "./updatePolicy";
 
+const DISMISSED_UPDATE_NOTICES_KEY = "agents.dismissedUpdateNotices";
+
+function readDismissedUpdateNotices(): Map<string, string> {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(DISMISSED_UPDATE_NOTICES_KEY) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    return new Map(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  } catch {
+    return new Map();
+  }
+}
+
 export function reasonText(t: TFunction, code: string | null): string {
   if (!code) return "";
   return t(`agents.update.reason.${code}`, { defaultValue: t("agents.update.reason.failed") });
@@ -129,7 +141,8 @@ export function AgentUpdateWatcher() {
   useEffect(() => {
     let cancelled = false;
     let running = false;
-    const notified = new Set<string>();
+    const dismissed = readDismissedUpdateNotices();
+    const notified = new Set([...dismissed].map(([agentId, version]) => `${agentId}@${version}`));
 
     const runUpdate = async (info: AgentUpdateInfo) => {
       const result = await agentUpdate(info.agentId);
@@ -159,16 +172,26 @@ export function AgentUpdateWatcher() {
         }
         for (const info of selectToastTargets(infos.filter((i) => !handled.has(i.agentId)), notified)) {
           notified.add(notifyKey(info));
+          let updateRun: Promise<unknown> | null = null;
           showBotToast({
             title: info.label,
             text: t("agents.update.available", { label: info.label, version: versionLine(info.currentVersion, info.latestVersion) }),
-            // sticky + versiones: el aviso se queda hasta que la persona decida (clic en Actualizar o ×)
+            // O aviso persiste mesmo se houver mais de três notificações ou clicarem em Atualizar.
             sticky: true,
+            keepOpenOnAction: true,
+            onDismiss: () => {
+              dismissed.set(info.agentId, info.latestVersion!);
+              try {
+                window.localStorage.setItem(DISMISSED_UPDATE_NOTICES_KEY, JSON.stringify(Object.fromEntries(dismissed)));
+              } catch {
+                // O aviso continua dispensado nesta sessão mesmo se o armazenamento local falhar.
+              }
+            },
             actionLabel: t("agents.update.action"),
             onAction: () => {
-              runAgentUpdate(t, info).catch(console.error);
+              if (updateRun) return;
+              updateRun = runAgentUpdate(t, info).catch(console.error).finally(() => { updateRun = null; });
             },
-            ms: 15000,
           });
         }
       } catch (err) {

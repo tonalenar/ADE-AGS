@@ -67,3 +67,19 @@ fn opcoes_informativas_saem_sem_iniciar_o_app() {
     }
     assert!(informational_output(["--headless".into()]).is_none());
 }
+
+#[test]
+fn a_versao_do_app_coincide_nos_manifestos_de_release() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let tauri: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("tauri.conf.json")).unwrap())
+            .unwrap();
+    let package: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("../package.json")).unwrap(),
+    )
+    .unwrap();
+    let cargo_version = env!("CARGO_PKG_VERSION");
+
+    assert_eq!(tauri["version"].as_str(), Some(cargo_version));
+    assert_eq!(package["version"].as_str(), Some(cargo_version));
+}

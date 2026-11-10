@@ -43,6 +43,7 @@ describe("aparelho físico", () => {
 
   it("a tela em pontos sai dos pixels: @3x no iPhone grande, @2x no pequeno e no iPad", () => {
     expect(physicalScreen({ w: 1290, h: 2796 }, "iphone")).toEqual({ width: 430, height: 932, family: "iphone" });
+    expect(physicalScreen({ w: 2796, h: 1290 }, "iphone")).toEqual({ width: 932, height: 430, family: "iphone" });
     expect(physicalScreen({ w: 750, h: 1334 }, "iphone")).toEqual({ width: 375, height: 667, family: "iphone" });
     expect(physicalScreen({ w: 1640, h: 2360 }, "ipad")).toEqual({ width: 820, height: 1180, family: "ipad" });
   });

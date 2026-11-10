@@ -4,7 +4,7 @@
 
 ## Regras
 - **O produto nunca depende de o Jev responder.** Se ele falhar, a função devolve `None` e a regra local segue. O modo sombra nunca altera o retorno.
-- **Uso durante tarefas.** Consultas normais ao Jev são permitidas sem confirmação individual quando ele estiver ativo e com saldo. Não faça novas chamadas se estiver desligado ou sem saldo. Bench real (`scripts/jev-bench.ts --real`), `jev-done-probe` e `jev-pilot-sim` ainda exigem OK explícito e um teto (`--max-real`, `--max-probes`), pois podem consumir muitas chamadas. Para testar lógica, use `--sim`, que é grátis. O "Testar conexão" e a atualização automática do modelo também fazem consultas.
+- **Cada consulta custa cota.** Em tarefas pedidas pelo usuário, agentes podem usar o Jev sem autorização adicional se ele estiver ativo, configurado e houver saldo; use-o quando ajudar na precisão ou no tempo, e prefira o caminho local quando for melhor. Se o Jev estiver indisponível, não interrompa a tarefa para pedir autorização. Bench real (`scripts/jev-bench.ts --real`), `jev-done-probe` e `jev-pilot-sim` continuam exigindo OK explícito e teto (`--max-real`, `--max-probes`). Para testar lógica, use `--sim`, que é grátis. O "Testar conexão" e a atualização automática do modelo também fazem consultas.
 - A cada medida, use **sementes novas**: uma semente já usada deixa de ser teste.
 - Ao ler a resposta, use a **probabilidade** do rótulo, não a `confidence`.
 - **Privacidade**:
@@ -64,7 +64,7 @@ Todos nascem **desligados**.
 | `memory_relevance` | quais memórias entram no briefing | **ajuda** (≤ 10 de 30; 160 caracteres por corpo) | BM25 |
 | `turn_routing` | destinatário de uma mensagem sem @ na aba Equipe | **sugere** um chip; a pessoa clica | sobreposição de palavras |
 | `browser_step` | próxima operação e elemento no piloto | **decide** (o agente pediu o `act`) | nenhuma (as guardas ficam no piloto) |
-| `browser_vision` | na foto: existe / caixa / número | **decide**, como reserva do piloto (só Jev, `jev-preview`) | nenhuma |
+| `browser_vision` | na foto: existe / caixa / número | **decide**, como reserva do piloto (só Jev, `jev-preview`; no iOS só quando OCR/texto não bastam) | nenhuma |
 
 - Os pontos que ajudam só consultam o provedor principal e gravam uma linha no log por consulta.
 - O Vigia em Rust (`missions/vigia.rs`) **não** chama o Jev; quem chama é o `vigia.ts`.
@@ -90,7 +90,7 @@ Todos nascem **desligados**.
   - provedor A × B e cada um contra o humano;
   - exportação em CSV.
 - **Concordância só onde há heurística.** `browser_step` e `browser_vision` decidem sem regra local: a coluna `heuristic` guarda metadados (`foto_enviada=true superficie=ios rotulos=23`), e comparar isso com a decisão daria sempre "discorda". O resumo (`shadowSummary`, `NO_HEURISTIC` em `decisionsModel.ts`) e o cartão do ponto deixam esses dois fora da concordância; erros e latência continuam contando. Antes, com o computer use em uso, o resumo mostrava 1% (2 de 199): numa cópia do banco em 2026-11-05, havia 203 linhas visuais e 4 do `delivery_gate`, com 2 iguais.
-- **`decisions.timeout_ms` (800) não vale para tudo.** Ele é o prazo dos pontos que ajudam (uma tentativa). O piloto usa o adaptativo (3×p95 + 400 ms, no mínimo 3 s sem amostras, teto 12 s). A visão usa no mínimo 8 s (`vision.rs`, `send`). Na mesma cópia do banco, não houve nenhum timeout: a visão chegou a 3,8 s e o `delivery_gate` ficou em no máximo 491 ms. Os 8 erros (4%) foram todos `falha_visual` antes do PR 290, a caixa com piso 0,85 que hoje é `unsure`.
+- **`decisions.timeout_ms` (800) não vale para tudo.** Ele é o prazo dos pontos que ajudam (uma tentativa). O piloto usa o adaptativo (3×p95 + 400 ms, no mínimo 3 s sem amostras, teto 12 s). A visão usa no mínimo 8 s (`vision.rs`, `send`). O `sim act` iOS tenta primeiro `browser_step` com OCR local e só usa `browser_vision` para ícones sem rótulo ou texto ambíguo; essa rota híbrida ainda não foi medida com Jev real. Na mesma cópia do banco, não houve nenhum timeout: a visão chegou a 3,8 s e o `delivery_gate` ficou em no máximo 491 ms. Os 8 erros (4%) foram todos `falha_visual` antes do PR 290, a caixa com piso 0,85 que hoje é `unsure`.
 - **Scorecard da limpeza**: apagar pelo diálogo vira uma rejeição humana, o que mede o recall e os falsos alarmes do Jev.
 - **Promover** um ponto de sombra para ativo exige concordância ≥ 90%, p95 aceitável e revisão das discordâncias (`docs/decisoes/LAYA_LOCAL.md`). Ainda não há interruptor para isso.
 

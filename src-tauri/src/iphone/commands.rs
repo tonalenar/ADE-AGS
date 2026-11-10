@@ -6,7 +6,7 @@
 //! espelha enquanto alguma tela está à vista; sem ninguém olhando por um tempo, para (ver `model::IDLE_GRACE`).
 
 use serde::Serialize;
-use tauri::{Runtime, Webview};
+use tauri::{Emitter, Runtime, Webview};
 
 use super::model::{self, PhysicalDevice};
 use crate::simulator::model::Place;
@@ -21,7 +21,7 @@ pub struct DeviceList {
 
 #[cfg(target_os = "macos")]
 pub(crate) mod mac {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
 
@@ -35,6 +35,8 @@ pub(crate) mod mac {
         /// Tela → (aparelho, à vista).
         screens: HashMap<String, (String, bool)>,
         sessions: HashMap<String, Session>,
+        /// A pessoa pausou todas as superfícies ADE deste aparelho; agentes não podem reabrir a sessão até reconectar.
+        disconnected: HashSet<String>,
         /// O IPv6 do aparelho no túnel, pela última lista (o helper o usa se o CoreDevice não disser).
         tunnels: HashMap<String, String>,
         /// `iphone` ou `ipad`, pela última lista (para a tela em pontos).
@@ -80,8 +82,11 @@ pub(crate) mod mac {
 
     /// A tela `id` passa a mostrar `device`: abre a sessão do aparelho, se for a primeira. Devolve os quadros e por
     /// onde mandar entrada.
-    pub fn open(app: &AppHandle, id: &str, device: &str, identifier: &str, visible: bool) -> (std::sync::Arc<super::super::native::view::Presenter>, session::InputTx) {
+    pub fn open(app: &AppHandle, id: &str, device: &str, identifier: &str, visible: bool) -> Result<(std::sync::Arc<super::super::native::view::Presenter>, session::InputTx), String> {
         let mut s = state().lock().unwrap_or_else(|e| e.into_inner());
+        if s.disconnected.contains(device) {
+            return Err("A sessão deste iPhone foi desconectada no painel da ADE. Reconecte o aparelho antes de abrir outra tela.".into());
+        }
         // A tela trocou de aparelho: o anterior pode ter ficado sem ninguém.
         if let Some((old, _)) = s.screens.insert(id.to_string(), (device.to_string(), visible)) {
             if old != device {
@@ -95,7 +100,7 @@ pub(crate) mod mac {
             .entry(device.to_string())
             .or_insert_with(|| session::start(app.clone(), device.to_string(), identifier.to_string(), tunnel, any));
         session.want(any);
-        (session.presenter.clone(), session.input())
+        Ok((session.presenter.clone(), session.input()))
     }
 
     /// O id da "tela" que um agente usa enquanto age (sem ninguém olhando, o aparelho também precisa espelhar para
@@ -108,13 +113,16 @@ pub(crate) mod mac {
     /// houver; `release` a solta (ela para sozinha depois de um tempo sem ninguém olhando).
     pub fn agent(app: &AppHandle, device: &str, wait: Duration) -> Result<(session::InputTx, session::Status, std::sync::Arc<super::super::native::view::Presenter>, String), String> {
         let identifier = model::physical_identifier(device).ok_or("Esse não é um aparelho físico do CoreDevice.")?.to_string();
+        if is_disconnected(device) {
+            return Err("A sessão deste iPhone foi desconectada no painel da ADE. Reconecte o aparelho no painel antes de pedir outra ação.".into());
+        }
         if let Some(why) = session::unavailable() {
             return Err(match why {
                 "xcode" => "Instale ou selecione o Xcode 27 neste Mac e tente de novo.".into(),
                 _ => "O helper do espelhamento não está disponível. Recompile a ADE com `bun run build:iphone-mirror` e tente de novo.".into(),
             });
         }
-        let (presenter, input) = open(app, &agent_screen(device), device, &identifier, true);
+        let (presenter, input) = open(app, &agent_screen(device), device, &identifier, true)?;
         let (waiter, family) = {
             let s = state().lock().unwrap_or_else(|e| e.into_inner());
             let session = s.sessions.get(device).ok_or("A sessão do aparelho não abriu.")?;
@@ -167,6 +175,26 @@ pub(crate) mod mac {
         state().lock().ok()?.sessions.get(device).map(Session::status)
     }
 
+    pub fn is_disconnected(device: &str) -> bool {
+        state().lock().is_ok_and(|s| s.disconnected.contains(device))
+    }
+
+    /// Para o stream compartilhado e bloqueia novas sessões até a pessoa reconectar no painel.
+    pub fn disconnect(device: &str) {
+        if let Ok(mut s) = state().lock() {
+            s.disconnected.insert(device.to_string());
+            if let Some(session) = s.sessions.remove(device) {
+                session.stop();
+            }
+        }
+    }
+
+    pub fn reconnect(device: &str) {
+        if let Ok(mut s) = state().lock() {
+            s.disconnected.remove(device);
+        }
+    }
+
     pub fn stop_all() {
         if let Ok(mut s) = state().lock() {
             for (_, session) in s.sessions.drain() {
@@ -205,13 +233,68 @@ pub fn iphone_devices() -> DeviceList {
     }
 }
 
+/// Pausa o espelhamento de todas as telas ADE deste iPhone, sem remover a confiança entre o Mac e o aparelho.
+#[tauri::command]
+pub fn iphone_mirror_disconnect(app: tauri::AppHandle, device: String) -> Result<(), String> {
+    model::physical_identifier(&device).ok_or("Esse não é um aparelho físico do CoreDevice.")?;
+    #[cfg(target_os = "macos")]
+    {
+        mac::disconnect(&device);
+        let _ = app.emit("iphone-mirror-session", serde_json::json!({ "device": device, "disconnected": true }));
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, device);
+        Err(ONLY_MAC.into())
+    }
+}
+
+/// Libera novamente o espelhamento deste iPhone; as superfícies visíveis o reabrem.
+#[tauri::command]
+pub fn iphone_mirror_connect(app: tauri::AppHandle, device: String) -> Result<(), String> {
+    model::physical_identifier(&device).ok_or("Esse não é um aparelho físico do CoreDevice.")?;
+    #[cfg(target_os = "macos")]
+    {
+        mac::reconnect(&device);
+        let _ = app.emit("iphone-mirror-session", serde_json::json!({ "device": device, "disconnected": false }));
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, device);
+        Err(ONLY_MAC.into())
+    }
+}
+
+/// Informa se a pessoa pausou a sessão ADE deste iPhone nesta execução do app.
+#[tauri::command]
+pub fn iphone_mirror_session_paused(device: String) -> Result<bool, String> {
+    model::physical_identifier(&device).ok_or("Esse não é um aparelho físico do CoreDevice.")?;
+    #[cfg(target_os = "macos")]
+    {
+        Ok(mac::is_disconnected(&device))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Err(ONLY_MAC.into())
+    }
+}
+
 /// Espelha o aparelho `device` (`device:<identificador>`) na tela `id`, no lugar `place`. Só ver.
 #[tauri::command]
 pub async fn iphone_mirror_attach<R: Runtime>(app: tauri::AppHandle, webview: Webview<R>, id: String, device: String, place: Place) -> Result<(), String> {
     let identifier = model::physical_identifier(&device).ok_or("Esse não é um aparelho físico do CoreDevice.")?.to_string();
     #[cfg(target_os = "macos")]
     {
-        let (presenter, input) = mac::open(&app, &id, &device, &identifier, place.visible.is_some());
+        if mac::is_disconnected(&device) {
+            return Ok(());
+        }
+        let (presenter, input) = match mac::open(&app, &id, &device, &identifier, place.visible.is_some()) {
+            Ok(opened) => opened,
+            Err(_) if mac::is_disconnected(&device) => return Ok(()),
+            Err(error) => return Err(error),
+        };
         let (tx, rx) = tokio::sync::oneshot::channel();
         webview
             .with_webview(move |platform| {

@@ -158,6 +158,7 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
     let detail = match action {
         "type" => "type".to_string(),
         "shot" => "shot".to_string(),
+        "open" => "open URL".to_string(),
         _ => format!("{action} {}", args.get("x").or(args.get("url")).or(args.get("key")).or(args.get("button")).or(args.get("package")).or(args.get("dir"))
             .map(|v| v.to_string()).unwrap_or_default()),
     };
@@ -166,13 +167,22 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
 }
 
 /// Uma ação de `ags device` num iPhone ou iPad físico (`device:<id>`). O alcance já foi conferido (corda no canvas, ou
-/// a chave do painel do chat); por ser o aparelho de verdade, tocar, deslizar, tecla e botão ainda perguntam à pessoa
-/// até ela dizer "sempre neste aparelho", e digitar texto pergunta sempre (`computer_use::ios::confirm_physical`).
+/// a chave do painel do chat); por ser o aparelho de verdade, ações que mudam o estado perguntam à pessoa até ela
+/// dizer "sempre neste aparelho", e digitar texto pergunta sempre (`computer_use::ios::confirm_physical`).
 #[allow(clippy::too_many_arguments)]
 fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, device: &str, args: &Value, action: &str, shots: std::path::PathBuf) -> Result<Value, String> {
     use crate::iphone::{model as phone, ops as po};
+    #[cfg(target_os = "macos")]
+    if crate::iphone::commands::mac::is_disconnected(device) {
+        return Err("A sessão deste iPhone foi desconectada no painel da ADE. Reconecte o aparelho antes de pedir outra ação.".into());
+    }
     if phone::agent_unsupported(action) {
-        return Err(format!("No iPhone físico `ags device {action}` ainda não existe: use tap, swipe, type, key, button e shot (pontos do iOS)."));
+        return Err(format!("No iPhone físico `ags device {action}` ainda não existe: use apps, launch, close, open, tap, swipe, type, key, button e shot."));
+    }
+    if action == "apps" {
+        let apps = po::apps(device)?;
+        activity(app, id, agent, "action", "apps");
+        return Ok(json!({ "device": who, "apps": apps }));
     }
     let db = super::shared::db(app)?.inner().clone();
     // Pergunta à pessoa, com a foto da tela e o ponto (em proporção) quando há um.
@@ -222,6 +232,36 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
             ask(&format!("Digitar {} caracteres no campo que estiver em foco", text.chars().count()), None)?;
             po::type_text(app, device, &text)?;
             json!({ "device": who, "typed": text.chars().count() })
+        }
+        "launch" => {
+            let bundle = arg_str(args, "package")?;
+            if asks(trusted) {
+                ask(&format!("Abrir o app {bundle}"), None)?;
+            }
+            po::launch(device, &bundle)?;
+            json!({ "device": who, "launched": bundle })
+        }
+        "close" => {
+            let bundle = arg_str(args, "package")?;
+            if asks(trusted) {
+                ask(&format!("Fechar o app {bundle}"), None)?;
+            }
+            let processes = po::close(device, &bundle)?;
+            json!({ "device": who, "closed": bundle, "terminatedProcesses": processes })
+        }
+        "open" => {
+            let raw_url = arg_str(args, "url")?;
+            let url = if raw_url.contains("://") || ["mailto:", "tel:", "sms:", "facetime:"].iter().any(|scheme| raw_url.starts_with(scheme)) {
+                raw_url
+            } else {
+                crate::simulator::model::normalize_url(&raw_url)?
+            };
+            if asks(trusted) {
+                let destination = url::Url::parse(&url).ok().and_then(|parsed| parsed.host_str().map(str::to_string));
+                ask(&destination.map(|host| format!("Abrir uma URL no domínio {host}")).unwrap_or_else(|| "Abrir uma URL no iPhone".into()), None)?;
+            }
+            po::open_url(device, &url)?;
+            json!({ "device": who, "opened": true })
         }
         "key" => {
             let key = arg_str(args, "key")?;
