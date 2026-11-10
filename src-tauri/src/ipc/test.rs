@@ -455,10 +455,13 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     // As conversas do modo chat (`chat_*`) são só das abas: uma tarefa da frota não abre conversa.
     let chat: Vec<String> = tab.iter().filter(|name| name.starts_with("chat_")).cloned().collect();
     assert!(!task.iter().any(|name| name.starts_with("chat_")));
+    assert!(!task.iter().any(|name| name == "harness_graph" || name == "delegate_agent"));
     // Os designs (`design_*`) também: abrir a tela de Design é coisa de aba.
     assert!(!task.iter().any(|name| name.starts_with("design_")));
-    let tab_without_chat: Vec<_> = tab.iter().filter(|name| !name.starts_with("chat_") && !name.starts_with("design_") && !name.starts_with("device_") && *name != "sim_act" && *name != "desk_act").cloned().collect();
-    assert_eq!(task_without_memory, tab_without_chat);
+    let tab_without_chat: Vec<_> = tab.iter().filter(|name| !name.starts_with("chat_") && !name.starts_with("design_") && !name.starts_with("device_") && *name != "sim_act" && *name != "desk_act" && *name != "harness_graph" && *name != "delegate_agent").cloned().collect();
+    let task_only: Vec<_> = task_without_memory.iter().filter(|name| !tab_without_chat.contains(name)).collect();
+    let tab_only: Vec<_> = tab_without_chat.iter().filter(|name| !task_without_memory.contains(name)).collect();
+    assert_eq!(task_without_memory, tab_without_chat, "só na tarefa: {task_only:?}; só na aba: {tab_only:?}");
 
     // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece,
     // menos lo que saca datos de la máquina (subir un archivo, correr código en la página):
@@ -494,7 +497,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let devices: Vec<_> = tab.iter().filter(|name| name.starts_with("device_")).collect();
     assert_eq!(devices.len(), 3);
     assert!(!task.iter().any(|name| name.starts_with("device_")));
-    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1 + chat.len() + design + computer_use.len() + devices.len(), offered.len());
+    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1 + chat.len() + 2 + design + computer_use.len() + devices.len(), offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -1120,10 +1123,19 @@ fn a_ajuda_e_o_front_conhecem_os_comandos_do_chat() {
     // Cada tool `chat_*` do MCP nomeia um comando que o despachador atende.
     let dispatched = dispatched_commands();
     let chat_tools: Vec<&str> = include_str!("mcp.rs").split("ipc: \"").skip(1).filter_map(|r| r.split('"').next()).collect();
-    assert_eq!(chat_tools.len(), 7, "{chat_tools:?}");
-    for command in chat_tools {
+    assert_eq!(chat_tools.len(), 12, "{chat_tools:?}");
+    for command in chat_tools.iter().filter(|command| command.starts_with("chat.")) {
         assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
     }
+    let mcp = include_str!("mcp.rs");
+    assert!(mcp.contains("tool.ipc == \"harness.graph\""));
+    assert!(mcp.contains("send(\"run.harnessGraph\""));
+    assert!(dispatched.contains(&"run.harnessGraph".to_string()));
+    assert!(mcp.contains("tool.ipc == \"harness.delegate\""));
+    assert!(mcp.contains("name == \"delegate_task\""));
+    assert!(dispatched.contains(&"run.delegateTask".to_string()));
+    assert!(mcp.contains("send(\"chat.new\""));
+    assert!(dispatched.contains(&"chat.new".to_string()));
 }
 
 #[test]
