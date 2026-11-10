@@ -1,16 +1,11 @@
-import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { WindowLights } from "@/app/WindowLights";
 import { useUiStore } from "@/app/uiStore";
-import { usePendingMemoryStore } from "@/features/memory/pendingStore";
-import { badgeText, pendingTotal } from "@/features/settings/memoryBadge";
-import { useTabsStore } from "@/features/tabs/store";
 
-import { ChatBubbleIcon, ChevronLeftIcon, PullRequestIcon, SearchIcon, SettingsIcon, UsageIcon } from "./chatIcons";
+import { ChatBubbleIcon, PullRequestIcon, SettingsIcon, UsageIcon } from "./chatIcons";
 import { CHAT_SIDEBAR_W, FooterButton } from "./ChatSidebar";
-import { CHAT_SETTINGS_GROUPS, NEW_SETTINGS, settingsLabelKey, settingsMatch } from "./chatSettingsNav";
 import { CHAT_SPACES, spaceForPath, type ChatSpace } from "./chatSpaces";
 
 const rowCls = (current: boolean) => `w-full flex items-center gap-2 h-8 px-2 rounded-md text-[14px] text-left
@@ -26,84 +21,8 @@ function Aside({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/** De quanto em quanto tempo o selo da Memória relê as sugestões pendentes. */
-const PENDING_REFRESH_MS = 30_000;
-
-/** As sugestões de memória esperando o OK da pessoa, para o selo da seção Memória. */
-function usePendingMemory(): number {
-  const workspaceId = useTabsStore((s) => s.workspaceId);
-  const total = usePendingMemoryStore((s) => pendingTotal(s.counts));
-  useEffect(() => {
-    if (!workspaceId) return;
-    const load = () => { usePendingMemoryStore.getState().load(workspaceId).catch(() => undefined); };
-    load();
-    const timer = window.setInterval(load, PENDING_REFRESH_MS);
-    return () => window.clearInterval(timer);
-  }, [workspaceId]);
-  return workspaceId ? total : 0;
-}
-
-/**
- * A sidebar com as seções das Configurações e a busca, a mesma em todos os modos. No chat ela vem com
- * os semáforos da janela e o "Voltar ao chat" (`onBack`); nas abas e no canvas a tela já tem o X.
- */
-export function SettingsSidebar({ onBack }: { onBack?: () => void }) {
-  const { t } = useTranslation();
-  const section = useUiStore((s) => s.settingsSection);
-  const setSection = useUiStore((s) => s.setSettingsSection);
-  const pending = usePendingMemory();
-  const [filter, setFilter] = useState("");
-  const q = filter.trim().toLocaleLowerCase();
-  const groups = CHAT_SETTINGS_GROUPS
-    .map((g) => ({ ...g, items: g.items.filter((id) => settingsMatch(id, q, t)) }))
-    .filter((g) => g.items.length > 0);
-  return (
-    <Aside label={t("chat.settingsNav.label")}>
-      {onBack
-        ? <div data-tauri-drag-region className="h-[52px] shrink-0 flex items-center pl-5 select-none"><WindowLights /></div>
-        : <div className="h-3 shrink-0" />}
-      <div className="px-2 pb-2 flex flex-col">
-        {onBack && (
-          <button type="button" onClick={onBack}
-            className="flex items-center gap-2 h-8 px-2 rounded-md font-medium text-gray-500 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.05] hover:text-gray-900 dark:hover:text-white">
-            <ChevronLeftIcon className="w-4 h-4" />{t("chat.page.back")}
-          </button>
-        )}
-        <label className="flex items-center gap-2 h-8 px-2 rounded-md text-gray-500 dark:text-white/45 focus-within:ring-1 focus-within:ring-accent-500/70">
-          <SearchIcon className="w-4 h-4 shrink-0" />
-          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder={t("chat.settingsNav.search")} aria-label={t("chat.settingsNav.search")}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && groups[0]) setSection(groups[0].items[0]);
-              if (e.key === "Escape" && filter) { e.stopPropagation(); setFilter(""); }
-            }}
-            className="flex-1 min-w-0 bg-transparent outline-none text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-white/45" />
-        </label>
-      </div>
-      <nav aria-label={t("settings.title")} className="flex-1 min-h-0 cc-scroll-hidden px-2 flex flex-col gap-px">
-        {groups.length === 0 && <p className="px-2 py-3 text-[12px] text-gray-400 dark:text-white/35">{t("settings.searchEmpty")}</p>}
-        {groups.map((g) => (
-          <div key={g.titleKey} className="flex flex-col gap-px">
-            <div className="px-2 pt-3 pb-1 text-[12px] font-medium text-gray-400 dark:text-white/35">{t(g.titleKey)}</div>
-            {g.items.map((id) => (
-              <button key={id} type="button" onClick={() => setSection(id)} aria-current={section === id ? "page" : undefined} className={rowCls(section === id)}>
-                <span className="truncate">{t(settingsLabelKey(id))}</span>
-                {NEW_SETTINGS.has(id) && (
-                  <span className="ml-auto text-[10px] font-semibold uppercase tracking-[0.04em] text-accent-600 dark:text-accent-400">{t("chat.settingsNav.new")}</span>
-                )}
-                {id === "memory" && pending > 0 && (
-                  <span title={t("settings.memoryBadge", { count: pending })}
-                    className="ml-auto min-w-[18px] h-[18px] px-1 rounded-full bg-accent-600 text-white text-[10.5px] font-semibold leading-[18px] text-center">
-                    {badgeText(pending)}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
-        ))}
-      </nav>
-    </Aside>
-  );
-}
+/** A barra das Configurações mora em `features/settings` (menu agrupado, busca e páginas do T3). */
+export { SettingsSidebar } from "@/features/settings/SettingsSidebar";
 
 /** A sidebar das outras telas: Conversas, os Espaços e o rodapé de sempre (prancheta 6). */
 export function SpacesSidebar({ activeCount, onBack }: { activeCount: number; onBack: () => void }) {

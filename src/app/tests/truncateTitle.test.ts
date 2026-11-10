@@ -5,7 +5,10 @@ import { describe, expect, it } from "vitest";
 const SITES: Record<string, number[]> = {
   "src/features/sessions/SessionRow.tsx": [173, 265],
   "src/features/sessions/SessionsPage.tsx": [208, 216, 254],
-  "src/features/settings/SettingsPage.tsx": [248, 335, 339, 396],
+  "src/features/settings/SettingsPage.tsx": [20],
+  "src/features/settings/SettingsSidebar.tsx": [138, 139, 151],
+  "src/features/settings/SettingsPages.tsx": [298],
+  "src/features/settings/CustomAgentsSection.tsx": [93, 97],
   "src/features/settings/ShortcutsSection.tsx": [44],
   "src/features/tabs/wizard/AccountPickerStep.tsx": [143, 149],
   "src/features/tabs/wizard/AgentPickerStep.tsx": [79],
