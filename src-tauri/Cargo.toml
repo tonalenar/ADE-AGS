@@ -102,6 +102,9 @@ futures-util = "0.3"
 # webview el protocolo de assets sobre todo el disco. Ya venía en el árbol.
 base64 = "0.22"
 sha2 = "0.10"
+# AES-256-GCM do estado de cada site do preview (preview/site.rs). Já vinha no lock, via rustls;
+# aqui só ganha a declaração direta, sem crate nova.
+ring = "0.17"
 unicode-normalization = "0.1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }

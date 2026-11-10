@@ -51,7 +51,7 @@ Auditado diretamente no código-fonte da ADE:
 2. **Proxy de Preview e Jar de Cookies de Servidores Locais (macOS/Linux):**
    - [`src-tauri/src/preview/proxy.rs`](../../src-tauri/src/preview/proxy.rs#L1-L14): proxy reverso local no loopback (`127.0.0.1` / `localhost`) que atende servidores de desenvolvimento e injeta o script seletor (`picker.ts`).
    - [`src-tauri/src/preview/proxy.rs`](../../src-tauri/src/preview/proxy.rs#L1430-L1468): comando `preview_resolve` que mapeia URLs locais para instâncias de proxy em portas dedicadas.
-   - [`src-tauri/src/preview/site.rs`](../../src-tauri/src/preview/site.rs#L1-L24): preservação de cookies e armazenamento local por origem de servidores de desenvolvimento. **Atenção:** as linhas 250–258 lêem e gravam o arquivo JSON diretamente em texto plano no disco (`std::fs::read` e `serde_json::from_slice::<Saved>`).
+   - [`src-tauri/src/preview/site.rs`](../../src-tauri/src/preview/site.rs#L1-L24): preservação de cookies e armazenamento local por origem de servidores de desenvolvimento. **Corrigido:** o arquivo por origem é cifrado com AES-256-GCM e a chave fica no keyring do SO (seção 8).
 
 3. **MCP e Ponte de Comandos:**
    - [`src-tauri/src/ipc/mcp.rs`](../../src-tauri/src/ipc/mcp.rs#L240-L501): ferramentas `browser_*` expostas aos agentes para navegação, cliques, snapshots e console. Não há ferramentas para importação de credenciais (e não deve haver).
@@ -72,7 +72,7 @@ Auditado diretamente no código-fonte da ADE:
 1. **Ausência de Mecanismo de Importação de Sessões/Cookies:**
    - A ADE não possui extrator de cookies para nenhum navegador (Safari, Firefox, Zen, Helium).
    - O WebView2 no Windows cria apenas perfis vazios.
-   - O proxy local de preview grava cookies de servidores locais em arquivos JSON abertos em disco (`src-tauri/src/preview/site.rs` L250–258). Importar credenciais reais para essa estrutura violaria imediatamente a Regra de Ouro 2.3 de `AGENTS.md`.
+   - O proxy local de preview gravava cookies de servidores locais em arquivos JSON texto plano (`src-tauri/src/preview/site.rs`). Isso violava a Regra de Ouro 2.3 de `AGENTS.md`; foi corrigido antes de qualquer importação (seção 8).
 2. **Ausência de Registro como Navegador Padrão no macOS:**
    - O `src-tauri/tauri.conf.json` não declara `CFBundleURLTypes` para os esquemas `http` e `https`, nem declaração de tipo para arquivos `.html`.
    - O aplicativo não possui manipulador de deep links na inicialização ou em execução para receber URLs externas do sistema operacional.
@@ -139,7 +139,7 @@ flowchart TD
   - Cria um novo perfil gerenciado `profile-<UUID>` (`src-tauri/src/real_browser/mod.rs` L104–112).
   - Injeta os cookies diretamente no gerenciador interno `ICoreWebView2CookieManager` da instância do perfil, sem passar por arquivos JSON intermediários em disco.
 - **macOS / Linux (Proxy Local de Preview):**
-  - **Correção mandatória de segurança:** O `src-tauri/src/preview/site.rs` não pode salvar cookies de sessões importadas em JSON texto plano.
+  - **Correção mandatória de segurança:** O `src-tauri/src/preview/site.rs` não pode salvar cookies de sessões importadas em JSON texto plano. **Atendido**, ver seção 8.
   - Criação de um cofre local de cookies importados com chave de cifragem simétrica (AES-256-GCM) cuja chave-mestra reside exclusivamente no **Keyring do SO** (via `keyring-rs`), ou manutenção dos cookies importados exclusivamente em memória volátil durante a execução da ADE.
 
 ### Fatia 4: Registro como Navegador Padrão no macOS e Roteamento de Links
@@ -167,7 +167,7 @@ flowchart TD
 
 | Aspecto / Risco | Diretriz Mandatória | Mitigação Arquitetural na ADE |
 |---|---|---|
-| **Onde ficam os dados importados** | Proteção estrita | No Windows, ficam no diretório protegido do WebView2 (`portal-webview/profiles/<id>`). No macOS/Linux, se usados no proxy, os dados de autenticação são cifrados com chave mantida no **Keyring do SO** ou mantidos exclusivamente em memória. NUNCA em arquivos JSON texto plano (`AGENTS.md` L51). |
+| **Onde ficam os dados importados** | Proteção estrita | No Windows, ficam no diretório protegido do WebView2 (`portal-webview/profiles/<id>`). No macOS/Linux, o proxy cifra os dados de autenticação (AES-256-GCM) com chave mantida no **Keyring do SO**; sem keyring, ficam só em memória. NUNCA em arquivos JSON texto plano (`AGENTS.md` L51). |
 | **Consentimento e Revisão** | Cópia explícita | O usuário seleciona o navegador, revisa a lista de domínios e marca os cookies que deseja importar. Não há varredura ou importação silenciosa em segundo plano. |
 | **Keyring do SO** | Desbloqueio auditável | O prompt nativo de desbloqueio do chaveiro do sistema (Touch ID / Keychain no Mac; DPAPI / credenciais no Windows) é exibido pelo SO. |
 | **Limpeza e Destruição** | Remoção completa | Ao excluir um perfil na ADE (`real_browser_delete_profile`, `src-tauri/src/real_browser/mod.rs` L283–303), a pasta inteira é apagada e as chaves correspondentes no keyring são expurgadas. |
@@ -181,6 +181,7 @@ flowchart TD
    - Garantir que `checked_managed_profile_id` em `src-tauri/src/real_browser/mod.rs` continue rejeitando IDs com path traversal (`../`), caracteres inválidos ou IDs que não sigam `profile-<UUID>`.
 2. **Teste de Cifragem com Keyring Mockado (Rust):**
    - Simular exportação e importação de cookies: verificar que o payload salvo em disco (se houver) é ilegível sem a chave do keyring e que falha caso a chave seja revogada.
+   - **Implementado** em `src-tauri/src/preview/test.rs` (keyring falso injetável; ver seção 8).
 3. **Teste do Filtro de Domínios e Cookies Particionados (Vitest / Rust):**
    - Fornecer conjunto de teste contendo cookies de `github.com`, `google.com` e um cookie marcado com `Partitioned`.
    - Confirmar que o cookie particionado é descartado e que apenas o domínio selecionado é aceito.
@@ -198,4 +199,26 @@ flowchart TD
 
 1. **Registro do ADE AGS como Navegador Padrão no Sistema:** Requer confirmação expressa antes de registrar o bundle como manipulador de `http`/`https` no macOS, além da autorização da pessoa usuária nas preferências do sistema (`System Settings → Desktop & Dock`).
 2. **Solicitação de Full Disk Access (FDA) no macOS:** A leitura do Safari exige FDA no macOS. A ADE deve solicitar permissão e aguardar o OK antes de qualquer tentativa de acesso à pasta do Safari.
-3. **Migração do Modelo de Armazenamento do Proxy (`site.rs`):** A alteração do mecanismo de armazenamento de cookies no proxy para exigir integração com o Keyring do SO altera a persistência de cookies locais e exige validação explícita de impacto.
+3. **Migração do Modelo de Armazenamento do Proxy (`site.rs`):** A alteração do mecanismo de armazenamento de cookies no proxy para exigir integração com o Keyring do SO altera a persistência de cookies locais e exige validação explícita de impacto. **Autorizada pelo usuário e implementada** (seção 8).
+
+---
+
+## 8. Correção aplicada: estado do proxy cifrado (`site.rs`)
+
+**Achado:** o proxy de preview guardava as cookies, o `localStorage` e o `sessionStorage` de cada origem num JSON em texto plano, na pasta de dados da app. Uma sessão real aberta no preview ficava legível no disco, contra a regra "Segredos só no keyring do SO" (`AGENTS.md` §2.3).
+
+**Correção** (autorizada pelo usuário):
+- **Cifra:** AES-256-GCM pela crate `ring` 0.17.14, que já estava no `Cargo.lock` como dependência transitiva (rustls). Só a declaração direta foi acrescentada ao `src-tauri/Cargo.toml`; nenhuma crate nova entrou no build. Nonce aleatório de 96 bits a cada gravação. A origem (`esquema://host:porta`) entra como dado autenticado: um arquivo copiado para o nome de outro site não abre.
+- **Chave:** 256 bits aleatórios, uma por instância, guardados no keyring do SO com serviço `ade-ags.preview-state.<sha256 da pasta de dados>` e conta `state-key`. É o mesmo isolamento usado por `project_scripts`. Criada na primeira vez e nunca sobrescrita: um erro de leitura não cria chave nova, e uma chave ilegível não é pisada.
+- **Arquivo:** `<origem>-<hash>.enc`, com a marca `ADESITE1`, o nonce e o texto cifrado com etiqueta. Gravação atômica (temporário + `rename`) e permissão `0600`.
+- **Sem keyring** (indisponível ou negado): o site fica só em memória, nada é gravado e o motivo vai ao log. A tentativa acontece uma vez por execução; para tentar de novo, reinicie a app.
+- **Migração:** um `<origem>-<hash>.json` antigo é lido uma vez, regravado como `.enc` e só então apagado. Se a regravação falhar, o claro fica e a migração é tentada de novo na próxima abertura.
+- **Sem chave e com JSON antigo:** o arquivo em claro é lido para a execução e apagado, para não restar texto plano no disco. A sessão antiga não é lembrada depois.
+- **Ilegível:** um `.enc` que não abre (corrompido, adulterado ou copiado de outro site) é ignorado, como um arquivo roto. O navegador arranca igual.
+- **Log:** só motivos de falha (keyring indisponível, arquivo que não abre, migração que não se pôde gravar). Nenhum valor de cookie, de storage ou de chave.
+
+**Ponto a confirmar:** a regra "Nenhuma migração apaga dados do usuário" (`AGENTS.md` §2.3) é respeitada quando há chave, porque o claro só some depois da regravação cifrada. Sem chave, a sessão antiga em claro se perde. É cache de login de servidor de desenvolvimento, que se refaz com um novo login, mas é um desvio da regra que precisa de confirmação.
+
+**Testes:** em `src-tauri/src/preview/test.rs`, com keyring falso injetável e diretório temporário. O keyring real não é usado. Cobrem: nenhuma cookie nem valor de storage em claro no disco; reabrir devolve as mesmas sessões; migração do formato antigo; sobrante em claro se apaga sem pisar o cifrado; sem chave, nada em claro, nada gravado e o cifrado intacto; arquivo adulterado ou copiado de outro site ignorado; erro do keyring não cria chave nova; chave ilegível não é sobrescrita; sem keyring o site fica sem chave; nonce distinto a cada gravação; migração que falha preserva o claro.
+
+**Não verificado:** a integração com o keyring real (Keychain do macOS e Secret Service do Linux) não foi exercitada nesta máquina, para não tocar o keyring pessoal. Também não foi testado com o arquivo de um login real de dev server. A chave não é zerada ao sair da memória, porque o `ring` não faz isso.
