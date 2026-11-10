@@ -5075,6 +5075,31 @@ mod harness_fase1 {
         assert_eq!(count(&world, "harness_node"), nodes);
     }
 
+    /// Fase 4: a leitura do recibo da delegação passa pelo recibo unificado. Com a linha da tabela
+    /// antiga fora do caminho, a tabela nova sozinha ainda devolve o mesmo run e a mesma tarefa, e o
+    /// mesmo id com outro conteúdo ainda falha fechado.
+    #[test]
+    fn a_delegacao_repetida_le_o_recibo_unificado_e_nao_so_o_antigo() {
+        let world = mundo(&["raiz"]);
+        let first = delegar(&world, "raiz", &["a"], Some("req-u")).unwrap();
+        assert_eq!(count(&world, "harness_command_receipt"), 1, "a escrita dupla grava o recibo novo");
+        world.db.lock().unwrap().execute("DELETE FROM run_delegation_receipts", []).unwrap();
+        assert_eq!(delegar(&world, "raiz", &["a"], Some("req-u")).unwrap(), first, "o recibo novo basta");
+        assert_eq!((count(&world, "runs"), count(&world, "tasks")), (1, 1));
+        assert!(delegar(&world, "raiz", &["a", "b"], Some("req-u")).unwrap_err().contains("outro conteúdo"));
+        assert_eq!((count(&world, "runs"), count(&world, "tasks")), (1, 1));
+    }
+
+    /// O recibo gravado só na tabela antiga (antes da Fase 2) continua valendo.
+    #[test]
+    fn o_recibo_so_na_tabela_antiga_continua_valendo() {
+        let world = mundo(&["raiz"]);
+        let first = delegar(&world, "raiz", &["a"], Some("req-l")).unwrap();
+        world.db.lock().unwrap().execute("DELETE FROM harness_command_receipt", []).unwrap();
+        assert_eq!(delegar(&world, "raiz", &["a"], Some("req-l")).unwrap(), first);
+        assert_eq!((count(&world, "runs"), count(&world, "tasks")), (1, 1));
+    }
+
     /// Teste 5 (Frota): sem turno inequívoco o run não vira nó e fica na projeção antiga, sob a conversa.
     #[test]
     fn run_da_frota_sem_turno_ativo_inequivoco_nao_gera_no_e_segue_na_projecao_antiga() {

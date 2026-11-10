@@ -8,9 +8,10 @@
 //! da árvore de execução.
 //!
 //! A Fase 2 acrescenta `receipts` (recibos idempotentes de comando) e `effects` (fila de efeitos com
-//! lease), contrato §11.
+//! lease), contrato §11. A Fase 4 acrescenta `delegate` (delegação única com três destinos), contrato §12.
 
 pub mod capability;
+pub mod delegate;
 pub mod effects;
 pub mod identity;
 pub mod matrix;
@@ -22,3 +23,5 @@ pub mod store;
 mod test;
 #[cfg(test)]
 mod test_fase2;
+#[cfg(test)]
+mod test_fase4;
