@@ -115,6 +115,12 @@ export interface HarnessExecutionNode {
   createdAt: number;
   startedAt: number | null;
   endedAt: number | null;
+  /** Id estável em `harness_node`, só quando o turno já originou filhos. `id` segue sendo a chave de UI e de eventos. */
+  nodeId?: string | null;
+  /** O `harness_run` (um por turno que orquestra trabalho) a que o nó pertence. */
+  harnessRunId?: string | null;
+  /** Só no nó `turn`: o id do `chat_run`. É o valor que `runId` guarda nesse nó (nome ambíguo, mantido por compatibilidade). */
+  chatRunId?: string | null;
 }
 
 export interface HarnessExecutionGraph {

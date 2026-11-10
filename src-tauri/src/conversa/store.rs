@@ -190,6 +190,9 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     )?;
     // As sessões nativas guardadas de cada agente que já esteve na conversa (trocar de agente, `troca.rs`): aditiva.
     crate::runs::execution_log::migrate(conn)?;
+    // Identidade durável de turnos e filhos (`harness_run`, `harness_node`): aditiva, sem backfill.
+    // Fica depois de `chat_thread` e, no schema real, de `runs` e `tasks` (os gatilhos de limpeza).
+    crate::harness::store::migrate(conn)?;
     super::troca::migrate(conn)
 }
 
@@ -289,12 +292,23 @@ fn active_parent_turn_id(
     else {
         return Ok(None);
     };
+    active_turn_id(conn, parent_thread_id)
+}
+
+/// O turno em curso de uma conversa, só quando não há ambiguidade: exatamente um `inProgress`.
+/// Com zero (conversa ociosa) ou mais de um, devolve `None` e quem pergunta não liga nada a turno
+/// nenhum. É a regra única de "qual turno originou isto": a conversa filha e a delegação à Frota
+/// (`runs::orchestration`) a usam, para os dois filhos do mesmo turno caírem no mesmo `harness_run`.
+pub(crate) fn active_turn_id(
+    conn: &Connection,
+    thread_id: &str,
+) -> rusqlite::Result<Option<String>> {
     let mut statement = conn.prepare(
         "SELECT id FROM chat_run WHERE thread_id = ?1 AND status = 'inProgress'
          ORDER BY COALESCE(started_at, 0) DESC, id DESC LIMIT 2",
     )?;
     let turns = statement
-        .query_map([parent_thread_id], |row| row.get::<_, String>(0))?
+        .query_map([thread_id], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok((turns.len() == 1).then(|| turns[0].clone()))
 }
@@ -345,13 +359,51 @@ pub fn insert_thread_with_context(
     workspace_id: Option<&str>,
     now: i64,
 ) -> rusqlite::Result<ThreadRow> {
-    let parent_turn_id = active_parent_turn_id(conn, parent_ref)?;
-    conn.execute(
-        "INSERT INTO chat_thread (id, agent_id, cwd, workspace_id, title, model, effort, access, account_id, state, created_at, updated_at, parent_ref, is_side_chat, parent_turn_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active', ?10, ?10, ?11, ?12, ?13)",
-        params![id, agent_id, cwd, workspace_id, title, tuning.model, tuning.effort, tuning.access, account_id, now, parent_ref, parent_ref.is_some(), parent_turn_id],
-    )?;
-    thread(conn, id).map(|t| t.expect("acabou de entrar"))
+    // A conversa e o nó do harness entram juntos ou nenhum dos dois. Este INSERT não abre transação
+    // própria: o chamador pode estar numa (o caminho do `client_request_id`) ou não (o caminho sem
+    // recibo). Um SAVEPOINT serve aos dois sem aninhar transação, e não faz I/O além do banco, então
+    // cabe dentro do lock. Fora de transação, ele começa uma deferida e subiria o lock no primeiro
+    // INSERT (risco de BUSY), por isso abre antes uma `Immediate`, como `create_run_with_memory_snapshot`.
+    let own_tx = if conn.is_autocommit() {
+        Some(rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?)
+    } else {
+        None
+    };
+    conn.execute_batch("SAVEPOINT insert_thread_with_context")?;
+    let linked = (|| {
+        let parent_turn_id = active_parent_turn_id(conn, parent_ref)?;
+        conn.execute(
+            "INSERT INTO chat_thread (id, agent_id, cwd, workspace_id, title, model, effort, access, account_id, state, created_at, updated_at, parent_ref, is_side_chat, parent_turn_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'active', ?10, ?10, ?11, ?12, ?13)",
+            params![id, agent_id, cwd, workspace_id, title, tuning.model, tuning.effort, tuning.access, account_id, now, parent_ref, parent_ref.is_some(), parent_turn_id],
+        )?;
+        // Sem `parent_turn_id` (pai ocioso, ou origem que não é conversa estruturada) não há turno
+        // para pendurar: a conversa só aparece na projeção antiga.
+        if let (Some(parent_thread_id), Some(turn_id)) = (
+            parent_ref.and_then(|reference| reference.strip_prefix("thread:")),
+            parent_turn_id.as_deref(),
+        ) {
+            crate::harness::store::link_child_chat(conn, parent_thread_id, turn_id, id, now)?;
+        }
+        thread(conn, id).map(|t| t.expect("acabou de entrar"))
+    })();
+    match linked {
+        Ok(row) => {
+            conn.execute_batch("RELEASE insert_thread_with_context")?;
+            if let Some(tx) = own_tx {
+                tx.commit()?;
+            }
+            Ok(row)
+        }
+        Err(error) => {
+            // Desfaz só o que este INSERT fez; o resto da transação do chamador segue de pé. Sem
+            // transação própria, descartar `own_tx` desfaz tudo.
+            let _ = conn.execute_batch(
+                "ROLLBACK TO insert_thread_with_context; RELEASE insert_thread_with_context",
+            );
+            Err(error)
+        }
+    }
 }
 
 pub fn thread_workspace_id(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
