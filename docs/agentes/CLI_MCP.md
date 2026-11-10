@@ -27,6 +27,7 @@
 - **iPhone físico compartilhado com a ADE**: use `ags device list`/`shot`/ações ou MCP `device_list`/`device_shot`/`device_action`. `sim-use ios-device tap` pode aceitar e ignorar toques em apps comuns; não o trate como canal de controle. A confirmação e a confiança do aparelho são aplicadas pela ADE e não devem ser contornadas.
 - Limites: 256 conexões e 8 MB por request. O token é comparado em tempo constante.
 - `memory.*` e `swarm.*` exigem `ADE_SESSION` e que o processo seja descendente do PTY da aba (`terminal/session.rs::authorize`).
+- `approval.decide` e `approval.list` são recusados a **todo** chamador do IPC (`person_only_error`, antes de token de tarefa, PID e banco): o servidor não prova que quem chama não é agente. Decidir aprovação da Frota é só pela tela (`run_decide_approval`). Nenhum comando novo pode decidir, listar ou lembrar regra de aprovação pelo IPC; o teste `nenhum_caminho_do_ipc_decide_lista_nem_lembra_regra_de_aprovacao` cobra.
 - `memory.compact` e `workspace.restore` são negados a agentes (`AGENT_MAINTENANCE_DENIED`): só pela UI.
 - Conversa por protocolo (`thread:<id>`) também recebe `ADE_SESSION`, emitido por processo do motor e válido após `register_process` (`chat_team/env.rs`).
 - `ADE_TAB_ID` identifica quem chama, mas **não é segurança**.

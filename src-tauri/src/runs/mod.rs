@@ -1191,6 +1191,9 @@ pub fn run_pending_approvals() -> Vec<broker::PendingApproval> {
 ///
 /// Con `remember`, además deja escrita la regla exacta del pedido para su carpeta, y
 /// resuelve con ella lo que otros agentes de esa carpeta estuvieran esperando.
+///
+/// F-01: este comando Tauri (a tela) é o ÚNICO caminho que decide. O IPC (`ags`, MCP) recusa
+/// `approval.decide`/`approval.list` sempre, porque não prova que quem chama não é um agente.
 #[tauri::command]
 pub fn run_decide_approval(
     app: AppHandle,
@@ -1199,19 +1202,16 @@ pub fn run_decide_approval(
     remember: bool,
     db: tauri::State<DbConnection>,
 ) -> Result<bool, String> {
-    decide_approval(&app, &db, &approval_id, allow, remember)
+    let decided = decide_from_screen(&db, &approval_id, allow, remember);
+    // Avisa sempre, também quando o pedido já não existe: a consola se corrige sozinha.
+    supervisor::notify_approvals(&app);
+    decided
 }
 
-/// Lo mismo, para quien no es un comando de Tauri (la CLI: `ags approval decide`).
-pub(crate) fn decide_approval(
-    app: &AppHandle,
-    db: &DbConnection,
-    approval_id: &str,
-    allow: bool,
-    remember: bool,
-) -> Result<bool, String> {
+/// O núcleo de `run_decide_approval`, sem o `AppHandle`. **Privado de propósito**: nada fora
+/// de `runs` (o IPC, o MCP) consegue chamá-lo, nem o `broker`, que também é privado.
+fn decide_from_screen(db: &DbConnection, approval_id: &str, allow: bool, remember: bool) -> Result<bool, String> {
     let Some(pending) = broker::get(approval_id) else {
-        supervisor::notify_approvals(app);
         return Ok(false);
     };
 
@@ -1227,13 +1227,7 @@ pub(crate) fn decide_approval(
     if let Some(cwd) = remembered_in {
         broker::release_matching(db, &cwd);
     }
-    supervisor::notify_approvals(app);
     Ok(decided)
-}
-
-/// Los pedidos de permiso que esperan a una persona. Para la CLI (`ags approval list`).
-pub(crate) fn pending_approvals() -> Vec<broker::PendingApproval> {
-    broker::pending()
 }
 
 /// Guarda la regla exacta de un pedido. Devuelve la carpeta en la que quedó.
