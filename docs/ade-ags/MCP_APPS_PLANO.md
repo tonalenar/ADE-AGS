@@ -101,7 +101,7 @@ flowchart TD
 ```
 
 ### Fatia 1: Reconhecimento do Contrato MCP Apps e Parser de Respostas de Ferramentas
-- **Escopo:** Extensão no parser de respostas de chamadas MCP para identificar payloads de MCP Apps (`application/vnd.mcp.app+html` ou formato ext-apps).
+- **Escopo:** Extensão no parser de respostas de chamadas MCP para identificar payloads de MCP Apps. O MIME da spec 2026-01-26 é `text/html;profile=mcp-app`, com URI `ui://` em `contents[].uri` (não `application/vnd.mcp.app+html`).
 - **Alterações:** Mapeamento em `src-tauri/src/ipc/mcp.rs` ou nas conversas estruturadas (`src/features/chat/structured/`) para encapsular o HTML do app junto ao `tool_use_id`.
 - **Comportamento:** Se o provedor ou versão não suportar MCP Apps, fallback limpo para a visualização padrão de tool call.
 
@@ -176,7 +176,39 @@ flowchart TD
 
 ---
 
-## 7. O que Exige OK Explícito do Usuário Antes de Implementar
+## 7. Fundação segura (fatia entregue)
+
+O desenho original deste plano (seção 4) previa o parser no Rust primeiro e, na fatia 2, um contêiner que já aceitaria `https:` em imagens. A fatia autorizada foi outra: **só o contêiner e o ciclo de vida**, sem o app chamar ferramenta, postar mensagem ou abrir tela cheia. O campo citado na fatia 1 original (`application/vnd.mcp.app+html`) **não é** o da spec estável.
+
+### Campo do ext-apps (spec 2026-01-26, `specification/2026-01-26/apps.mdx`)
+
+O HTML não vem num MIME `application/vnd…`. O `resources/read` devolve `contents[]` com:
+
+- `uri` — obrigatório começar com `ui://` (exemplo da spec: `ui://weather-server/dashboard-template`);
+- `mimeType` — obrigatório `text/html;profile=mcp-app`;
+- `text` ou `blob` — o HTML, em texto ou base64;
+- `_meta.ui.csp` — domínios que o host poderia abrir. **Esta fatia ignora**: a CSP fica a da prévia visual, sem rede.
+
+A ferramenta aponta o recurso em `_meta.ui.resourceUri` (o formato plano `_meta["ui/resourceUri"]` está deprecado). Sem o HTML no resultado, o host da spec faria `resources/read`. Aqui isso **não** acontece: buscar o recurso seria chamada de ferramenta, e esta fatia recusa qualquer pedido.
+
+No resultado que a timeline já guarda em `tool.output`, o mesmo objeto aparece como recurso embutido do MCP (`content[].type === "resource"` → `content[].resource`). A spec adiou esse encaixe; a ADE reconhece os dois formatos quando o JSON está no texto do resultado.
+
+### O que a fatia faz
+
+- `parseMcpAppResource` acha o recurso. A linha da ferramenta (`ToolRow`) mostra o app no lugar do `<pre>` do resultado.
+- Contêiner: iframe `srcdoc`, `sandbox="allow-scripts"` (a constante `DESIGN_SANDBOX`, sem `allow-same-origin`), `referrerpolicy="no-referrer"`. CSP reaproveitada de `isolatedFrame.ts` (`ISOLATED_FRAME_CSP`, a mesma da prévia visual: `connect-src 'none'`, `navigate-to 'none'`, sem `https:`). `<meta http-equiv>` e `<base>` saem com `stripUnsafeHead` de `srcdoc.ts`. O tema entra como variáveis CSS via `appThemeDeclarations()`.
+- Navegação: o script do srcdoc cancela clique em link externo, submit e `window.open`, e avisa `navigate-away`. O host desmonta o iframe e mostra que o app parou. Âncora (`#`) fica na página.
+- Qualquer JSON-RPC com `id` (`tools/call`, `ui/message`, `ui/request-display-mode`, `ui/initialize`, …) volta erro `-32601` com a mensagem `não suportado ainda`, e o método entra no registro da sessão. Notificação sem `id` só é registrada. Erro do app não sobe para a timeline (`McpAppBoundary` e `try/catch` na ponte).
+- `close()` tira o listener de `message`. Esta fatia não arma timer no host. O documento do iframe some com o quadro, e os timers de lá vão junto.
+
+### O que falta
+
+- O canal da timeline (`src-tauri/src/canal/timeline.rs`, `result_text`) ainda só junta blocos `text` e corta em 4.000 caracteres. Um recurso que não esteja nesse texto não aparece. Não houve mudança de schema.
+- `resources/read` a partir de `_meta.ui.resourceUri`, com o agente da conversa vivo.
+- Aprovar ferramenta (inclusive só leitura), mensagem na thread, nota de contexto e tela cheia com a guarda de 5 segundos. A CSP declarada pelo servidor (`connectDomains` / `resourceDomains`) continua fechada.
+- Rede externa, mesmo CDN pública, continua desligada.
+
+## 8. O que Exige OK Explícito do Usuário Antes de Implementar
 
 1. **Aprovação da Política de Ferramentas Read-Only:** Decidir se ferramentas marcadas no servidor MCP como somente leitura podem de fato ser disparadas pelo app sem caixa de confirmação ou se a política padrão da ADE deve manter aprovação para tudo.
 2. **Definição de Conectividade de Rede para Recursos de Apps:** Definir se a CSP do app MCP aceitará scripts externos de CDNs públicas confiáveis (como no T3 Code) ou se a ADE exigirá empacotamento estritamente local/autocontido (`connect-src 'none'` total).
