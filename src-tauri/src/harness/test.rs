@@ -1,5 +1,6 @@
 //! Testes do contrato de capabilities. Sem relógio e sem processo: só a tabela, o código e o doc.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::conversa::api::{Engine, MidTurnBehavior};
@@ -8,6 +9,58 @@ use super::capability::{Capability, Claim, Proof, Scope, Support, Surface};
 use super::matrix::{find, matrix};
 
 const DOC: &str = include_str!("../../../docs/ade-ags/HARNESS_CONTRATO.md");
+const PROVIDER_COMPARISON_BASELINE: &str = include_str!("provider_comparisons.baseline.json");
+
+const PROVIDER_IDS: [&str; 8] = ["claude-code", "codex", "opencode", "antigravity", "cursor", "gemini-cli", "kimi-code", "hermes"];
+
+fn source_provider_comparisons(path: &Path, root: &Path, found: &mut BTreeMap<String, BTreeMap<String, usize>>) {
+    let entries = std::fs::read_dir(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    for entry in entries {
+        let entry = entry.unwrap();
+        let file = entry.path();
+        if file.is_dir() {
+            source_provider_comparisons(&file, root, found);
+            continue;
+        }
+        let relative = file.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+        if relative == "src-tauri/src/agents/adapter.rs" || relative == "src-tauri/src/agents/registry.rs" {
+            continue;
+        }
+        if relative.contains("/tests/") || relative.contains("/__tests__/") || file.file_name().and_then(|name| name.to_str()).is_some_and(|name| name == "test.rs" || name.ends_with("_test.rs") || name.ends_with(".test.ts") || name.ends_with(".test.tsx")) {
+            continue;
+        }
+        let rust = file.extension().and_then(|ext| ext.to_str()) == Some("rs") && relative.starts_with("src-tauri/src/");
+        let typescript = matches!(file.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx")) && relative.starts_with("src/");
+        if !rust && !typescript {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).unwrap_or_else(|error| panic!("{}: {error}", file.display()));
+        for line in source.lines().map(str::trim) {
+            if !line.contains("==") || !["agent_id", "agentId", "provider"].iter().any(|name| line.contains(name)) {
+                continue;
+            }
+            if !PROVIDER_IDS.iter().any(|provider| line.contains(&format!("\"{provider}\"")) || line.contains(&format!("'{provider}'"))) {
+                continue;
+            }
+            *found.entry(relative.clone()).or_default().entry(line.to_owned()).or_default() += 1;
+        }
+    }
+}
+
+#[test]
+fn comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro() {
+    let root = repo_root();
+    let mut actual = BTreeMap::new();
+    source_provider_comparisons(&root.join("src-tauri/src"), &root, &mut actual);
+    source_provider_comparisons(&root.join("src"), &root, &mut actual);
+    let baseline: BTreeMap<String, Vec<String>> = serde_json::from_str(PROVIDER_COMPARISON_BASELINE).unwrap();
+    for (file, lines) in actual {
+        for (line, count) in lines {
+            let allowed = baseline.get(&file).map(|known| known.iter().filter(|known_line| **known_line == line).count()).unwrap_or_default();
+            assert!(count <= allowed, "nova comparação de provider fora de adapter/registro em {file}: {line}");
+        }
+    }
+}
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
