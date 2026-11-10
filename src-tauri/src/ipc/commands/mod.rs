@@ -24,6 +24,7 @@ pub mod simulators;
 pub mod pool;
 mod browser;
 pub mod canal;
+mod delegate;
 mod dispatch;
 mod events;
 mod missions;

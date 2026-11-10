@@ -1184,6 +1184,127 @@ fn a_conversa_nova_pelo_mcp_abre_na_pasta_de_quem_pede() {
     assert_eq!(sent[0].1["cwd"], "/outra");
 }
 
+// ── `delegate_agent`: os três destinos (Fase 4, contrato §12) ───────────────────
+
+fn delegate_call(args: serde_json::Value) -> serde_json::Value {
+    json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "delegate_agent", "arguments": args } })
+}
+
+fn delegate_ctx(tab: Option<&str>) -> McpContext {
+    McpContext::Cwd { cwd: "/meu/projeto".into(), tab: tab.map(str::to_string), mission: None, role: None }
+}
+
+fn delegate_reply(command: &str, _: &serde_json::Value) -> Result<serde_json::Value, String> {
+    Ok(match command {
+        "chat.new" => json!({ "thread": { "id": "filha" }, "firstMessage": "accepted" }),
+        _ => json!({ "ok": true }),
+    })
+}
+
+#[test]
+fn delegate_agent_antigo_sem_target_envia_o_mesmo_que_o_destino_novo() {
+    let ctx = delegate_ctx(Some("thread:pai"));
+    let chat_old = json!({ "execution": "chat", "task": "faça", "client_request_id": "r1", "agent": "codex", "context": "trecho" });
+    let chat_new = json!({ "target": "provider_chat", "task": "faça", "client_request_id": "r1", "agent": "codex", "context": "trecho" });
+    let (out_old, sent_old) = mcp_session(&ctx, &[delegate_call(chat_old)], delegate_reply);
+    let (out_new, sent_new) = mcp_session(&ctx, &[delegate_call(chat_new)], delegate_reply);
+    assert_eq!(sent_old[0].0, "chat.new");
+    assert_eq!(sent_old, sent_new, "target=provider_chat é o mesmo que execution=chat");
+    assert_eq!(out_old[0]["result"], out_new[0]["result"]);
+    assert_eq!(sent_old[0].1["text"], "faça");
+    assert_eq!(sent_old[0].1["client_request_id"], "r1");
+    assert_eq!(sent_old[0].1["parent_ref"], "thread:pai");
+
+    let fleet_old = json!({ "execution": "fleet", "task": "faça", "client_request_id": "r2", "complexity": "hard", "isolate": false });
+    let fleet_new = json!({ "target": "fleet_task", "task": "faça", "client_request_id": "r2", "complexity": "hard", "isolate": false });
+    let (_, sent_old) = mcp_session(&ctx, &[delegate_call(fleet_old)], delegate_reply);
+    let (_, sent_new) = mcp_session(&ctx, &[delegate_call(fleet_new)], delegate_reply);
+    assert_eq!(sent_old[0].0, "run.delegateTask");
+    assert_eq!(sent_old, sent_new);
+    assert_eq!(sent_old[0].1["args"]["client_request_id"], "r2");
+    assert_eq!(sent_old[0].1["args"]["complexity"], "hard");
+}
+
+#[test]
+fn delegate_agent_recusa_destino_ausente_ou_em_conflito_sem_enviar_nada() {
+    let ctx = delegate_ctx(Some("thread:pai"));
+    for (args, fragment) in [
+        (json!({ "task": "x", "client_request_id": "r" }), "execution precisa ser 'chat' ou 'fleet'"),
+        (json!({ "execution": "agent", "task": "x", "client_request_id": "r" }), "execution precisa ser 'chat' ou 'fleet'"),
+        (json!({ "target": "sessao", "task": "x", "client_request_id": "r" }), "invalid_target"),
+        (json!({ "target": "fleet_task", "execution": "chat", "task": "x", "client_request_id": "r" }), "target_conflict"),
+        (json!({ "target": "provider_chat", "task": "x" }), "client_request_id é obrigatório"),
+    ] {
+        let (out, sent) = mcp_session(&ctx, &[delegate_call(args.clone())], delegate_reply);
+        assert!(sent.is_empty(), "{args}: nada pode sair");
+        assert_eq!(out[0]["result"]["isError"], true, "{args}");
+        let text = out[0]["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains(fragment), "{args}: {text}");
+    }
+}
+
+#[test]
+fn delegate_agent_para_sessao_conectada_vai_ao_backend_com_a_aba_real() {
+    let ctx = delegate_ctx(Some("thread:pai"));
+    // O modelo não escolhe o remetente: o `from` dele é descartado.
+    let args = json!({
+        "target": "connected_session", "to": "Codex · Backend", "task": "rode os testes", "client_request_id": "s1",
+        "constraints": "sem rede", "expecting": "um diff", "policy": "ask", "when_busy": "queue", "mode": "async",
+        "from": "tab:de-outro", "agent": "ignorado", "isolate": true,
+    });
+    let (out, sent) = mcp_session(&ctx, &[delegate_call(args)], |_, _| Ok(json!({ "delegated": true, "messageId": 7 })));
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].0, "harness.delegate");
+    let payload = &sent[0].1;
+    assert_eq!(payload["from"], "thread:pai");
+    assert_eq!(payload["to"], "Codex · Backend");
+    assert_eq!(payload["task"], "rode os testes");
+    assert_eq!(payload["client_request_id"], "s1");
+    assert_eq!((payload["constraints"].clone(), payload["when_busy"].clone(), payload["policy"].clone()), (json!("sem rede"), json!("queue"), json!("ask")));
+    assert!(payload.get("agent").is_none() && payload.get("isolate").is_none(), "campos de outro destino não vão: {payload}");
+    assert_eq!(out[0]["result"].get("isError"), None);
+    assert!(out[0]["result"]["content"][0]["text"].as_str().unwrap().contains("\"messageId\":7"));
+}
+
+#[test]
+fn delegate_agent_para_sessao_sem_aba_falha_antes_de_chamar_o_backend() {
+    let (out, sent) = mcp_session(
+        &delegate_ctx(None),
+        &[delegate_call(json!({ "target": "connected_session", "to": "x", "task": "y", "client_request_id": "s1" }))],
+        delegate_reply,
+    );
+    assert!(sent.is_empty());
+    assert_eq!(out[0]["result"]["isError"], true);
+}
+
+#[test]
+fn o_erro_do_backend_para_a_sessao_chega_com_o_codigo_estavel() {
+    let ctx = delegate_ctx(Some("thread:pai"));
+    let args = json!({ "target": "connected_session", "to": "x", "task": "y", "client_request_id": "s1" });
+    let (out, _) = mcp_session(&ctx, &[delegate_call(args)], |_, _| Err("session_busy: Codex está no meio de um turno".into()));
+    assert_eq!(out[0]["result"]["isError"], true);
+    assert!(out[0]["result"]["content"][0]["text"].as_str().unwrap().starts_with("session_busy:"));
+}
+
+#[test]
+fn o_esquema_do_delegate_agent_declara_os_tres_destinos_e_mantem_o_antigo() {
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (out, _) = mcp_session(&delegate_ctx(Some("thread:pai")), &[list], |_, _| Ok(json!({})));
+    let tool = out[0]["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "delegate_agent").unwrap().clone();
+    let props = &tool["inputSchema"]["properties"];
+    let targets: Vec<&str> = props["target"]["enum"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(targets, ["provider_chat", "fleet_task", "connected_session"]);
+    let legacy: Vec<&str> = props["execution"]["enum"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(legacy, ["chat", "fleet"], "execution continua aceito");
+    for field in ["to", "constraints", "expecting", "policy", "when_busy"] {
+        assert!(props.get(field).is_some(), "falta {field}");
+    }
+    assert_eq!(props["policy"]["enum"], json!(["read", "ask"]), "o teto nunca passa de ask");
+    let required: Vec<&str> = tool["inputSchema"]["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(required, ["task", "client_request_id"]);
+    assert!(dispatched_commands().contains(&"harness.delegate".to_string()), "ninguém atende harness.delegate");
+}
+
 #[test]
 fn o_envio_do_chat_pelo_mcp_carimba_o_chamador_real_e_repassa_o_id() {
     let call = |args: serde_json::Value| json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "chat_send", "arguments": args } });

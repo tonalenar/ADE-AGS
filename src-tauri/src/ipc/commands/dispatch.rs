@@ -145,6 +145,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.connect" => peer_connect(app, args),
         "peer.disconnect" => peer_disconnect(app, args),
         "peer.role" => peer_role(app, args),
+        // Delegar a uma sessão já conectada, com recibo (ver `delegate`).
+        "harness.delegate" => super::delegate::delegate_session(app, args),
         "team.list" => super::team::team_list(app, args),
         "team.candidates" => super::team::team_candidates(app, args),
         "team.create" => super::team::team_create(app, args),
