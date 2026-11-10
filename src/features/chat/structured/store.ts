@@ -10,6 +10,10 @@ import type { ThreadGoal } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
 import { unsnoozeConversation } from "../shelf";
 import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
+import { addLogFailure, dismissLogFailure, parseLogFailure, type LogFailure } from "./logFailureModel";
+
+/** O sinal da janela quando uma gravação do log de execução falha de vez (ver `runs/execution_log.rs`). */
+const LOG_FAILED_EVENT = "cc-harness-log-failed";
 
 /**
  * As conversas por protocolo, ao vivo: a lista (do banco) e, por conversa aberta, a timeline, os
@@ -23,9 +27,27 @@ interface StructuredState {
   goalNotices: Record<string, string | null>;
   /** As conversas cuja timeline já foi lida do banco. */
   hydrated: Record<string, boolean>;
+  /** Falhas de gravação do log, por conversa, até a pessoa dispensá-las. Não entram no chat. */
+  logFailures: Record<string, LogFailure[]>;
 }
 
-export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {} }));
+export const useStructured = create<StructuredState>(() => ({ threads: [], live: {}, goals: {}, goalNotices: {}, hydrated: {}, logFailures: {} }));
+
+/** Um sinal de falha do log entra na conversa afetada, sem repetir o mesmo aviso. Sinal sem conversa é ignorado. */
+export function recordLogFailure(raw: unknown): void {
+  const failure = parseLogFailure(raw);
+  if (!failure) return;
+  useStructured.setState((s) => ({
+    logFailures: { ...s.logFailures, [failure.threadId]: addLogFailure(s.logFailures[failure.threadId] ?? [], failure) },
+  }));
+}
+
+/** A pessoa dispensou o aviso: sai da conversa. A falha continua no banco; só o aviso some desta janela. */
+export function dismissThreadLogFailure(threadId: string, key: string): void {
+  useStructured.setState((s) => ({
+    logFailures: { ...s.logFailures, [threadId]: dismissLogFailure(s.logFailures[threadId] ?? [], key) },
+  }));
+}
 
 const liveOf = (id: string) => useStructured.getState().live[id] ?? EMPTY_LIVE;
 
@@ -74,6 +96,7 @@ export function startStructured(): void {
   if (started) return;
   started = true;
   void reloadThreads();
+  void listen<unknown>(LOG_FAILED_EVENT, (e) => recordLogFailure(e.payload));
   void listen<ThreadEvent | { type: "created"; threadId: string; thread: ThreadRow }>("cc-chat-thread", (e) => {
     const event = e.payload;
     if (event.type === "delta") {

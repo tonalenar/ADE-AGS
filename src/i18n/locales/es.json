@@ -5665,5 +5665,8 @@
   "chat.harness.eventPhase.inProgress": "en curso",
   "chat.harness.eventPhase.persisted": "registrado",
   "chat.harness.eventSequence": "evento n.º {{sequence}}",
-  "chat.harness.activity": "Actividad de la conversación"
+  "chat.harness.activity": "Actividad de la conversación",
+  "chat.logFailure.message": "Falló una escritura del registro de esta conversación ({{reason}}). Es posible que falte un evento en el historial.",
+  "chat.logFailure.noReason": "sin motivo indicado",
+  "chat.logFailure.dismiss": "Descartar aviso"
 }

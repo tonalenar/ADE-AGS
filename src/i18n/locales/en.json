@@ -5665,5 +5665,8 @@
   "chat.harness.eventPhase.inProgress": "in progress",
   "chat.harness.eventPhase.persisted": "recorded",
   "chat.harness.eventSequence": "event #{{sequence}}",
-  "chat.harness.activity": "Conversation activity"
+  "chat.harness.activity": "Conversation activity",
+  "chat.logFailure.message": "A log write for this conversation failed ({{reason}}). An event may be missing from the history.",
+  "chat.logFailure.noReason": "no reason given",
+  "chat.logFailure.dismiss": "Dismiss notice"
 }

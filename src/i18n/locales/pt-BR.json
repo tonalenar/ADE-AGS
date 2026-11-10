@@ -5665,5 +5665,8 @@
   "chat.harness.eventPhase.inProgress": "em andamento",
   "chat.harness.eventPhase.persisted": "registrado",
   "chat.harness.eventSequence": "evento nº {{sequence}}",
-  "chat.harness.activity": "Atividade da conversa"
+  "chat.harness.activity": "Atividade da conversa",
+  "chat.logFailure.message": "Uma gravação do log desta conversa falhou ({{reason}}). Um evento pode não aparecer no histórico.",
+  "chat.logFailure.noReason": "motivo não informado",
+  "chat.logFailure.dismiss": "Dispensar aviso"
 }

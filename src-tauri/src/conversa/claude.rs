@@ -26,6 +26,7 @@ use crate::canal::timeline::{Item, ItemKind};
 use crate::database::DbConnection;
 
 use super::claude_map::{self, Mapper, Out, Pending, Start};
+use super::codex_parar::{StopAction, StopGate};
 use super::events::emit;
 use super::{memoria, permission, resume, store, turn};
 use crate::ai_memory::tabs::TabInjection;
@@ -49,6 +50,8 @@ pub struct Session {
     remote: Mutex<Option<String>>,
     /// O turno em andamento (o id é do app: o Claude não numera os turnos).
     turn: Mutex<Option<String>>,
+    /// O Parar que chega antes de o turno mostrar que roda (ver `codex_parar`). Trava antes da do `turn`.
+    stop: Mutex<StopGate>,
     /// Os `tool_use` que lançaram uma tarefa em segundo plano (`is_backgrounded`), pelo id. O desfecho deles vem pelo
     /// canal de tarefas (`task_notification`, `stop_task`), não por `tool_result`: com o processo vivo, o fim do turno
     /// não os marca (ver `finish_turn`).
@@ -83,6 +86,74 @@ impl Session {
         if let Ok(mut t) = self.turn.lock() {
             *t = turn;
         }
+    }
+
+    /// O guarda do Parar. Envenenado só se alguém panicou com a trava: o estado é trivial, segue com ele.
+    fn gate<T>(&self, f: impl FnOnce(&mut StopGate) -> T) -> T {
+        let mut gate = self.stop.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut gate)
+    }
+
+    /// O turno em andamento; sem um, abre outro com id novo, já sob o guarda do Parar. Devolve o id e se este
+    /// chamador o abriu. O id existe antes de a mensagem sair: um Parar que chegar a partir daqui já vê o turno e
+    /// fica pendente, em vez de achar a conversa sem turno com a mensagem a caminho.
+    pub(super) fn ensure_turn(&self) -> (String, bool) {
+        self.gate(|gate| {
+            if let Some(turn) = self.turn() {
+                return (turn, false);
+            }
+            let turn = uuid::Uuid::new_v4().to_string();
+            gate.begin_turn();
+            self.set_turn(Some(turn.clone()));
+            (turn, true)
+        })
+    }
+
+    /// Escreve a mensagem da pessoa. Se ela abre um turno, o id já existe antes da escrita (ver `ensure_turn`). Uma
+    /// escrita que falha desfaz a abertura: a mensagem não saiu, e o Parar pendente nela morre junto. Devolve o id do
+    /// turno e se este envio o abriu.
+    pub(super) fn send_message(&self, message: &Value) -> Result<(String, bool), String> {
+        let (turn, opened) = self.ensure_turn();
+        match self.send(message) {
+            Ok(()) => Ok((turn, opened)),
+            Err(error) => {
+                if opened {
+                    self.gate(|gate| {
+                        gate.on_completed(&turn);
+                        if self.turn().as_deref() == Some(turn.as_str()) {
+                            self.set_turn(None);
+                        }
+                    });
+                }
+                Err(error)
+            }
+        }
+    }
+
+    /// O turno acabou (o `result`, ou o processo caiu): tira o turno e o Parar pendente dele. Devolve o id, se havia um.
+    pub(super) fn close_turn(&self) -> Option<String> {
+        self.gate(|gate| {
+            let turn = self.turn()?;
+            gate.on_completed(&turn);
+            self.set_turn(None);
+            Some(turn)
+        })
+    }
+
+    /// Um aviso do turno chegou: o Claude está rodando a mensagem. O Parar que esperava por isso sai agora, como o
+    /// `turn/started` do Codex. Um Parar que já saiu não se repete.
+    pub(super) fn confirm_turn(&self) {
+        let Some(turn) = self.turn() else { return };
+        if self.gate(|gate| gate.on_started(&turn)) {
+            self.send_control("interrupt");
+        }
+    }
+
+    /// Escreve um `control_request` sem esperar a resposta. Quem pediu o Parar já recebeu `Deferred`; a resposta chega
+    /// sem pedido pendente e o laço de leitura a descarta.
+    fn send_control(&self, subtype: &str) {
+        let id = format!("ags-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        let _ = self.send(&json!({ "type": "control_request", "request_id": id, "request": { "subtype": subtype } }));
     }
 
     fn send(&self, msg: &Value) -> Result<(), String> {
@@ -282,6 +353,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         alive: AtomicBool::new(true),
         remote: Mutex::new(None),
         turn: Mutex::new(None),
+        stop: Mutex::new(StopGate::default()),
         background: Mutex::new(HashSet::new()),
         stale: AtomicBool::new(false),
         auto_compacting: AtomicBool::new(false),
@@ -339,6 +411,7 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
 
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     let killed = !session.alive.swap(false, Ordering::SeqCst);
+    session.gate(StopGate::reset);
     let waiting: Vec<Reply> = session.pending.lock().map(|mut p| p.drain().map(|(_, r)| r).collect()).unwrap_or_default();
     for reply in waiting {
         let _ = reply.send(Err("O processo do Claude fechou".into()));
@@ -359,8 +432,7 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     for id in expired {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
     }
-    if let Some(turn) = session.turn() {
-        session.set_turn(None);
+    if let Some(turn) = session.close_turn() {
         session.auto_compacting.store(false, Ordering::SeqCst);
         let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
         let (result, message) = turn::dropped(killed, tail.as_deref(), "Claude");
@@ -403,6 +475,11 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
             for out in outs {
                 on_out(app, db, session, out);
             }
+            // Depois das saídas: a linha que abre um turno sem envio (o Claude começou sozinho) abre o turno aqui,
+            // e só então o aviso dele vale para o Parar que estiver pendente.
+            if is_turn_line(&msg) {
+                session.confirm_turn();
+            }
         }
     }
 }
@@ -410,16 +487,19 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
 /// Começa um turno (a pessoa mandou uma mensagem, ou o Claude seguiu sozinho com uma que estava
 /// na fila). Devolve o id.
 fn begin_turn(app: &AppHandle, db: &DbConnection, session: &Session) -> String {
-    if let Some(turn) = session.turn() {
-        return turn;
+    let (turn, opened) = session.ensure_turn();
+    if opened {
+        open_turn_rows(app, db, session, &turn);
     }
-    let id = uuid::Uuid::new_v4().to_string();
-    session.set_turn(Some(id.clone()));
+    turn
+}
+
+/// O que a conversa grava e mostra quando um turno abre: a linha do turno em andamento e a fase.
+fn open_turn_rows(app: &AppHandle, db: &DbConnection, session: &Session, turn: &str) {
     if let Ok(conn) = db.lock() {
-        let _ = store::upsert_run(&conn, &session.thread_id, &id, "inProgress", Some(crate::util::now_ts_ms()), None, None);
+        let _ = store::upsert_run(&conn, &session.thread_id, turn, "inProgress", Some(crate::util::now_ts_ms()), None, None);
     }
-    emit(app, &session.thread_id, "phase", json!({ "phase": "working", "turnId": id }));
-    id
+    emit(app, &session.thread_id, "phase", json!({ "phase": "working", "turnId": turn }));
 }
 
 fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: Option<&str>, items: Vec<Item>) {
@@ -524,8 +604,7 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
         }
         Out::SubItem { parent, item } => emit(app, thread_id, "taskItem", json!({ "parentToolUseId": parent, "item": item })),
         Out::Done(result) => {
-            let Some(turn) = session.turn() else { return };
-            session.set_turn(None);
+            let Some(turn) = session.close_turn() else { return };
             session.auto_compacting.store(false, Ordering::SeqCst);
             if let Ok(mut asks) = session.asks.lock() {
                 asks.clear();
@@ -614,8 +693,11 @@ fn resolve_rpc(app: &AppHandle, db: &DbConnection, session: &Session, request_id
 /// Manda a mensagem da pessoa. Sem turno em andamento, começa um; com turno, o Claude a recebe
 /// no meio dele (ou logo depois, na fila).
 pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, images: Vec<Value>) -> Result<(), String> {
-    session.send(&claude_map::user_message_with(text, images))?;
-    let turn = begin_turn(app, db, session);
+    // O turno, se a mensagem o abre, existe antes da escrita (ver `Session::ensure_turn`): nenhum Parar vê a conversa sem turno.
+    let (turn, opened) = session.send_message(&claude_map::user_message_with(text, images))?;
+    if opened {
+        open_turn_rows(app, db, session, &turn);
+    }
     let item = Item { text: Some(super::handoff::clip_user(text, 20_000)), ..Item::new(ItemKind::User, format!("u:{}", uuid::Uuid::new_v4()), Some(crate::util::now_ts_ms())) };
     save_items(app, db, &session.thread_id, Some(&turn), vec![item]);
     Ok(())
@@ -631,12 +713,61 @@ pub fn send_auto_compact(app: &AppHandle, db: &DbConnection, session: &Arc<Sessi
     Ok(())
 }
 
-/// Para o turno em andamento.
-pub async fn interrupt(session: &Session) -> Result<(), String> {
-    if session.turn().is_none() {
-        return Ok(());
+/// Para o turno em andamento. Enquanto o Claude não mostrou que o turno roda, o Parar fica pendente (`Deferred`) e sai
+/// no primeiro aviso do turno (`confirm_turn`). Quando sai, espera a resposta do `control_request`, como antes.
+pub async fn interrupt(session: &Session) -> Result<StopAction, String> {
+    let action = session.gate(|gate| gate.request_stop(session.turn().as_deref()));
+    if let StopAction::Send(_) = action {
+        session.control("interrupt", json!({})).await?;
     }
-    session.control("interrupt", json!({})).await.map(|_| ())
+    Ok(action)
+}
+
+/// Uma linha que só o turno em andamento produz: o Claude está rodando a mensagem. Não contam o `init`, o
+/// `commands_changed` nem o `rate_limit_event`, e o `result` é o fim do turno (ver `Session::close_turn`).
+pub(super) fn is_turn_line(msg: &Value) -> bool {
+    match msg.get("type").and_then(Value::as_str) {
+        Some("stream_event" | "assistant" | "user") => true,
+        Some("system") => msg.get("subtype").and_then(Value::as_str) == Some("status"),
+        _ => false,
+    }
+}
+
+/// Uma sessão sem processo para os testes do Parar: o que ela escreveria no stdio chega ao receptor. A conversa aponta
+/// para ela, como em produção, para que `api::interrupt` a encontre.
+#[cfg(test)]
+pub(crate) fn session_for_test(thread_id: &str) -> (Arc<Session>, mpsc::UnboundedReceiver<String>) {
+    let (tx, rx) = mpsc::unbounded_channel::<String>();
+    let session = Arc::new(Session {
+        thread_id: thread_id.to_string(),
+        tx,
+        pending: Mutex::new(HashMap::new()),
+        next: AtomicU64::new(1),
+        alive: AtomicBool::new(true),
+        remote: Mutex::new(Some("remoto-1".to_string())),
+        turn: Mutex::new(None),
+        stop: Mutex::new(StopGate::default()),
+        background: Mutex::new(HashSet::new()),
+        stale: AtomicBool::new(false),
+        auto_compacting: AtomicBool::new(false),
+        mapper: Mutex::new(Mapper::default()),
+        asks: Mutex::new(HashMap::new()),
+        stderr: Mutex::new(VecDeque::new()),
+        child: Mutex::new(None),
+        _memory: TabInjection::default(),
+    });
+    if let Ok(mut map) = sessions().lock() {
+        map.insert(thread_id.to_string(), session.clone());
+    }
+    (session, rx)
+}
+
+/// Responde ao pedido de controle `request_id` da sessão de teste, como o laço de leitura faria com a resposta do Claude.
+#[cfg(test)]
+pub(crate) fn respond_for_test(session: &Session, request_id: &str) {
+    if let Some(reply) = session.pending.lock().ok().and_then(|mut p| p.remove(request_id)) {
+        let _ = reply.send(Ok(Value::Null));
+    }
 }
 
 /// Responde ao `can_use_tool` (`rpc_id` como está em `chat_request`). A troca de modo que vem

@@ -1196,24 +1196,62 @@ pub async fn stop_with_request(
 /// O corpo do Parar: manda a interrupção se há turno. Sem turno, fecha no banco o que ficou aberto e avisa a tela.
 /// Devolve o que aconteceu (`Sent`, `Pending` ou `NoTurn`).
 async fn stop_now(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Interrupted, String> {
-    // Sem turno nenhum (Codex vivo, mas parado e sem `turn/start` a caminho) também fecha o que ficou aberto no banco.
-    let interrupted = if live_turn(thread_id).is_some() { interrupt(thread_id).await? } else { Interrupted::NoTurn };
+    let interrupted = interrupt_if_live(thread_id).await?;
     if interrupted != Interrupted::NoTurn {
         return Ok(interrupted);
     }
+    // Sem turno nenhum (Codex vivo, mas parado e sem `turn/start` a caminho) também fecha o que ficou aberto no banco.
     let now = crate::util::now_ts_ms();
-    // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
-    let ends: Vec<Item> = {
+    let ends = {
         let conn = db.lock().map_err(db_err)?;
-        let closed = store::close_orphan_runs(&conn, Some(thread_id), now, STOPPED_ORPHAN).map_err(db_err)?;
-        let ids: Vec<String> = closed.iter().map(|(_, run)| format!("end:{run}")).collect();
-        if ids.is_empty() { Vec::new() } else { store::items(&conn, thread_id).map_err(db_err)?.into_iter().filter(|i| ids.contains(&i.id)).collect() }
+        close_idle_orphans(&conn, thread_id, now)?
     };
+    let Some(ends) = ends else {
+        // Um turno começou entre a decisão e o fechamento: o Parar é registrado nele, e nada do banco foi fechado.
+        return interrupt_if_live(thread_id).await;
+    };
+    // O fim gravado vai à janela como está no banco (só o turno da ponta da timeline o ganha).
     for end in ends {
         super::events::emit(app, thread_id, "item", json!({ "item": end }));
     }
     super::events::emit(app, thread_id, "phase", json!({ "phase": "idle" }));
     Ok(Interrupted::NoTurn)
+}
+
+/// O Parar quando há um agente vivo; sem agente, não há turno para parar.
+async fn interrupt_if_live(thread_id: &str) -> Result<Interrupted, String> {
+    if live_turn(thread_id).is_some() { interrupt(thread_id).await } else { Ok(Interrupted::NoTurn) }
+}
+
+/// Há um turno rodando ou abrindo nesta conversa. O Codex abre com `starting` antes de ter o id do turno.
+fn turn_busy(thread_id: &str) -> bool {
+    live_turn(thread_id).is_some_and(|turn| turn.is_some()) || codex::get(thread_id).is_some_and(|session| session.opening())
+}
+
+/// Fecha no banco os turnos órfãos da conversa e devolve os fins gravados, para a tela. `None` quando há turno rodando
+/// ou abrindo agora: nada é fechado. A checagem e o fechamento correm sob o lock do banco. Um envio que abre um turno
+/// marca o guarda antes de gravar a linha dele (`Session::ensure_turn`), e não pode ser fechado pelo Parar que chegou
+/// um instante antes.
+pub(super) fn close_idle_orphans(conn: &rusqlite::Connection, thread_id: &str, now: i64) -> Result<Option<Vec<Item>>, String> {
+    if turn_busy(thread_id) {
+        return Ok(None);
+    }
+    let closed = store::close_orphan_runs(conn, Some(thread_id), now, STOPPED_ORPHAN).map_err(db_err)?;
+    let ids: Vec<String> = closed.iter().map(|(_, run)| format!("end:{run}")).collect();
+    if ids.is_empty() {
+        return Ok(Some(Vec::new()));
+    }
+    let items = store::items(conn, thread_id).map_err(db_err)?;
+    Ok(Some(items.into_iter().filter(|i| ids.contains(&i.id)).collect()))
+}
+
+/// O que o Parar fez, conforme o guarda do motor (`codex_parar`).
+fn interrupted_of(action: codex::StopAction) -> Interrupted {
+    match action {
+        codex::StopAction::Send(_) => Interrupted::Sent,
+        codex::StopAction::Deferred => Interrupted::Pending,
+        codex::StopAction::NoTurn => Interrupted::NoTurn,
+    }
 }
 
 /// Quem pode parar a conversa `target` (contrato §3.3 regra 9). Sem `caller_scope` é a pessoa, e para qualquer
@@ -1248,26 +1286,21 @@ pub const STOPPED_ORPHAN: &str = "O turno foi parado: o agente já não estava r
 pub enum Interrupted {
     /// Mandou a parada ao agente.
     Sent,
-    /// O turno do Codex ainda não abriu: a parada sai no `turn/started` (ver `codex_parar`).
+    /// O turno ainda não mostrou que roda: a parada sai no primeiro aviso dele (Codex: `turn/started`; Claude e OpenCode:
+    /// o primeiro aviso do turno), ver `codex_parar`.
     Pending,
     /// Não havia turno para parar.
     NoTurn,
 }
 
-/// Para o turno em andamento.
+/// Para o turno em andamento. O motor decide com o guarda do Parar (`codex_parar`): o que chega antes de o turno mostrar
+/// que roda fica pendente e sai depois; o que chega com o turno rodando sai na hora.
 pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
-    // Claude e OpenCode respondem ok mesmo sem turno e não mandam nada: isso não é uma parada enviada.
     if let Some(session) = claude::get(thread_id) {
-        if session.turn().is_none() {
-            return Ok(Interrupted::NoTurn);
-        }
-        return claude::interrupt(&session).await.map(|_| Interrupted::Sent);
+        return claude::interrupt(&session).await.map(interrupted_of);
     }
     if let Some(session) = opencode::get(thread_id) {
-        if session.turn().is_none() {
-            return Ok(Interrupted::NoTurn);
-        }
-        return opencode::interrupt(&session).await.map(|_| Interrupted::Sent);
+        return opencode::interrupt(&session).await.map(interrupted_of);
     }
     if agy::get(thread_id).is_some() {
         agy::interrupt(thread_id);
@@ -1278,11 +1311,7 @@ pub async fn interrupt(thread_id: &str) -> Result<Interrupted, String> {
         return Ok(Interrupted::Sent);
     }
     let Some(session) = codex::get(thread_id) else { return Ok(Interrupted::NoTurn) };
-    Ok(match session.stop().await? {
-        codex::StopAction::Send(_) => Interrupted::Sent,
-        codex::StopAction::Deferred => Interrupted::Pending,
-        codex::StopAction::NoTurn => Interrupted::NoTurn,
-    })
+    session.stop().await.map(interrupted_of)
 }
 
 /// O motivo de não parar uma tarefa só: o motor não tem como (só o Claude Code tem `stop_task`).

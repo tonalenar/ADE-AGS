@@ -71,6 +71,8 @@ mod test_bancada;
 #[cfg(test)]
 mod test_codex_parar;
 #[cfg(test)]
+mod test_parar_turno;
+#[cfg(test)]
 mod test_memoria;
 #[cfg(test)]
 mod test_motores;
