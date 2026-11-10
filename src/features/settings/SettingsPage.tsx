@@ -6,6 +6,7 @@ import { useAgentsStore } from "@/features/agents/store";
 import { useSkillsStore } from "@/features/skills/store";
 import { SettingsSidebar } from "@/features/settings/SettingsSidebar";
 import { SettingsPageBody } from "@/features/settings/SettingsPages";
+import { RestoreDeviceDefaultsButton } from "@/features/settings/RestoreDeviceDefaultsButton";
 import { SETTINGS_PAGE_LABEL_KEYS, settingsPageDescKey, type SettingsPageId } from "@/features/settings/settingsNav";
 import { useSettingsTargetStore } from "@/features/settings/settingsTarget";
 
@@ -80,11 +81,12 @@ export function SettingsPage() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* O caminho ("Configurações / página") fica fora do chat: lá o cabeçalho da conversa já o mostra. */}
-        {!chat && (
-          <header className="flex h-12 shrink-0 items-center gap-3 border-b border-gray-200 px-5 dark:border-white/[0.08]">
-            <SettingsBreadcrumb page={section} />
-          </header>
-        )}
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-gray-200 px-5 dark:border-white/[0.08]">
+          {!chat && <SettingsBreadcrumb page={section} />}
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <RestoreDeviceDefaultsButton />
+          </div>
+        </header>
 
         <main ref={scrollRef} className="cc-scroll min-w-0 flex-1 px-6 sm:px-12 pt-4 pb-12">
           <div className={`${section === "decisions" ? "max-w-[1040px]" : "max-w-[736px]"} mx-auto flex flex-col gap-7`}>
