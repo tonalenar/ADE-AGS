@@ -20,6 +20,7 @@ pub mod delegate;
 pub mod effects;
 pub mod identity;
 pub mod matrix;
+pub mod presence;
 pub mod receipts;
 pub mod recovery;
 pub mod state;
@@ -31,3 +32,5 @@ mod test;
 mod test_fase2;
 #[cfg(test)]
 mod test_fase4;
+#[cfg(test)]
+mod test_boot;

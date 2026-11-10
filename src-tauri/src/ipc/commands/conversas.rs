@@ -232,31 +232,16 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
         parent_ref: parent_ref.clone(),
     };
     if let Some(identity) = child_request_identity(args, parent_ref.as_deref(), &cwd)? {
-        let outcome = api::create_child(&db, input, &identity)?;
+        // Modo async: o acompanhamento entra na mesma transação que cria a conversa (§12.9).
+        let async_delivery = arg_str_opt(args, "harness_delivery").as_deref() == Some("async");
+        let outcome = if async_delivery {
+            api::create_child_async(&db, input, &identity)?
+        } else {
+            api::create_child(&db, input, &identity)?
+        };
         let row = outcome.thread;
         if !outcome.reused {
             api::announce(app, &row);
-        }
-        // `delegate_agent` em modo async: o resultado desta conversa filha chega ao pai quando ela terminar (§12.9).
-        // Idempotente: a repetição do mesmo `client_request_id` também cura uma queda entre criar e registrar.
-        if arg_str_opt(args, "harness_delivery").as_deref() == Some("async") {
-            if let Some(parent_ref) = parent_ref.as_deref() {
-                let conn = db.lock().map_err(|error| error.to_string())?;
-                crate::harness::child_delivery::register(
-                    &conn,
-                    &crate::harness::child_delivery::WatchSpec {
-                        kind: crate::harness::delegate::Target::ProviderChat,
-                        child_ref: &row.id,
-                        parent_ref,
-                        title: &row.title,
-                        agent_id: &row.agent_id,
-                        parent_turn_id: row.parent_turn_id.as_deref(),
-                        session_id: None,
-                        message_id: None,
-                    },
-                    crate::util::now_ts_ms(),
-                )?;
-            }
         }
         match api::claim_child_delivery(&db, &identity)? {
             api::ChildDeliveryClaim::Claimed { thread_id } => {

@@ -927,9 +927,21 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 
 ### 13. Fase 5: recuperação e reconciliação
 
-Ao abrir o ADE, `app::housekeeping` toma `harness_recovery_lease` no mesmo SQLite antes de reconciliar recibos/efeitos, turnos órfãos, tarefas da Frota, permissões e provisionamentos. A migração aditiva do lease fica em `harness::store::migrate`; `database/schema.rs` e `user_version` não mudam.
+Ao abrir o ADE, `app::housekeeping` toma `harness_recovery_lease` no mesmo SQLite antes de reconciliar recibos/efeitos, intenções de filho, turnos órfãos, tarefas da Frota, permissões e provisionamentos. A migração aditiva do lease e da presença fica em `harness::store::migrate`; `database/schema.rs` e `user_version` não mudam. A reconciliação das intenções (`reconcile_intentions`, §12.9) roda nesse lease mesmo quando outra instância já está aberta; as varreduras que interrompem trabalho continuam de fora nesse caso.
 
-O lease é uma linha singleton (`id = 1`) com `owner` e `lease_until`. A tomada faz `UPDATE` condicional numa transação `Immediate`, aceitando somente linha livre ou vencida. O instante de referência é argumento das funções; o boot injeta `util::now_ts_ms()`. A rotina libera por comparação do dono ao terminar; se o processo cair, outra instância pode tomar depois de cinco minutos. Um segundo boot que encontrar lease válido adia toda a reconciliação. O lease protege o conjunto de sweeps, enquanto o mutex Rust do banco fica livre durante cada operação que não precisa dele.
+O lease é uma linha singleton (`id = 1`) com `owner` e `lease_until`. A tomada faz `UPDATE` condicional numa transação `Immediate`, aceitando somente linha livre ou vencida. O instante de referência é argumento das funções; o boot injeta `util::now_ts_ms()`. A rotina libera por comparação do dono ao terminar; se o processo cair, outra instância pode tomar depois de cinco minutos. Um segundo boot que encontrar lease válido adia toda a reconciliação. O lease protege o conjunto de sweeps, enquanto o mutex Rust do banco fica livre durante cada operação que não precisa dele. O lease **não** diz de quem é o turno: só impede duas varreduras ao mesmo tempo.
+
+### 13.1 Presença da instância
+
+Cada processo vivo grava uma linha em `harness_instance` (`id`, `pid`, `beat_at`, `valid_until`). O id é um UUID deste processo, armado em `presence::start` antes dos turnos (`app::run::start_ui`). O primeiro batimento é síncrono; um laço renova a cada 30 s (`HEARTBEAT_EVERY_MS`), sem olhar trabalho nem fila. A validade é três batimentos (`PRESENCE_TTL_MS` = 90 s): um atraso do laço não parece morte. `valid_until > agora` é presença válida. O `agora` das funções é argumento; o laço injeta `util::now_ts_ms()`.
+
+O dono do que está em execução é uma coluna aditiva e anulável: `chat_run.owner_instance`, `tasks.owner_instance`, `mission_member_state.owner_instance` e `chat_team_provision.owner_instance` (esta no `migrate` do módulo do time). Entra quando o turno abre (`upsert_run` em `inProgress`), quando a tarefa é criada ou passa a `running` (`create_task`, `mark_running`) e quando um integrante entra em `provisioning`. Sem id de processo armado (os testes que não sobem o laço), a coluna fica vazia.
+
+`conversa::store::sweep_orphans`, `runs::sweep_orphans` e as reconciliações de integrante pulam a linha cujo dono tem presença válida. Dono vazio ou só espaços é dado antigo: a varredura marca como antes. Presença vencida é instância morta: o turno vira `interrupted` e a tarefa `running`/`ready` vira `failed`, como hoje. Pedido de chat de um turno protegido não expira. O Parar de uma conversa (`close_orphan_runs` com conversa dada) não consulta presença: ele fecha o turno de propósito.
+
+O handshake em arquivo (`other_instance_alive`) continua: se ele vê outra instância, o boot não varre. Isso protege dado antigo sem dono. Se o handshake falha e a outra instância está no mesmo banco, a presença é o que segura o trabalho dela. Uma queda só aparece para a varredura depois que `valid_until` vence (até 90 s depois do último batimento).
+
+Testes: `harness::test_boot` com duas conexões no mesmo arquivo temporário e o tempo injetado. A instância B não marca o turno nem a tarefa de A; marca o da presença vencida e o sem dono.
 
 Decisões da reconciliação de efeitos:
 
@@ -1136,18 +1148,20 @@ Os erros de delegação voltam como texto `"<código>: <mensagem>"` (`isError` n
 
 ## 12.9 Entrega assíncrona e persistente do resultado do filho (Fase 4, o que ficou aberto)
 
-**Objetivo:** um filho delegado com `mode = async` (conversa filha, tarefa da Frota ou sessão conectada) termina, e o resultado chega ao pai **mesmo que o app feche no meio**, como dado não confiável, limitado, **uma única vez**. Código: `harness/child_delivery.rs` (tudo em SQL sobre `&Connection`, sem relógio nem app), o laço em `ipc/commands/child_delivery.rs`, o registro nos três pontos de delegação (`ipc/commands/conversas.rs::chat_new`, `runs/orchestration.rs::delegate_task`, `ipc/commands/delegate.rs`) e a projeção em `runs/harness.rs`. Testes: `harness/child_delivery/test.rs`.
+**Objetivo:** um filho delegado com `mode = async` (conversa filha, tarefa da Frota ou sessão conectada) termina, e o resultado chega ao pai **mesmo que o app feche no meio**, como dado não confiável, limitado, **uma única vez**. Código: `harness/child_delivery.rs` (tudo em SQL sobre `&Connection`, sem relógio nem app), o laço em `ipc/commands/child_delivery.rs`, o registro nos três pontos de delegação (`ipc/commands/conversas.rs::chat_new`, `runs/orchestration.rs::delegate_task`, `ipc/commands/delegate.rs`) e a projeção em `runs/harness.rs`. Testes: `harness/child_delivery/test.rs` e `harness/test_boot.rs`.
 
 ### 12.9.1 O desenho em quatro peças
 
 | Peça | O que é | Onde |
 |---|---|---|
-| Acompanhamento | uma linha por filho delegado em `async`, gravada na delegação: tipo, filho, pai (`thread:<id>` ou `tab:<id>`), título, agente, turno de origem do pai, e (sessão) a mensagem de delegação | `harness_child_watch` (aditiva, criada por `child_delivery::migrate`, chamada de `harness::store::migrate`) |
+| Acompanhamento | uma linha por filho delegado em `async`, gravada **na mesma transação** que cria o filho: tipo, filho, pai (`thread:<id>` ou `tab:<id>`), título, agente, turno de origem do pai, e (sessão) a mensagem de delegação. Estado `watching`. Se a criação sai do SQLite (processo ou aba), a linha nasce antes, em `intended`, e o boot a promove ou cancela | `harness_child_watch` (aditiva, criada por `child_delivery::migrate`, chamada de `harness::store::migrate`) |
 | Efeito | o **fim** vira um efeito `child_result`, `retry_safe = 1`, `max_attempts = 5`, lease de 60 s, chave `child_result:<tipo>:<filho>` | `harness_effect` (Fase 2) |
 | Recibo | `kind = child_result`, `caller_key = <pai>`, `request_id = <tipo>:<filho>`; fica `accepted` quando entregue e `retryable` quando o pai estava fechado | `harness_command_receipt` (Fase 2) |
 | Aviso | uma mensagem `notice` (raw) do pai para ele mesmo na fila durável, `client_id` próprio | `peer_queue` (a mesma fila e o mesmo entregador do vigia do chat) |
 
 `mode = wait` **não** registra nada: o pai já recebe o resultado na própria chamada, e um segundo aviso seria duplicata. Sem registro, um filho que termina nunca gera entrega.
+
+**A mesma transação, ou uma intenção.** `chat_new` em modo async (`create_child_async`) grava o acompanhamento no mesmo `COMMIT` da conversa e do recibo. `delegate_task` grava no mesmo `COMMIT` da tarefa (`plan_tasks_watched`). Desfazer a transação desfaz os dois; não fica filho sem acompanhamento. A sessão conectada (`ipc/commands/delegate.rs`) manda a mensagem para uma aba ou um processo antes de saber o `message_id`: a linha nasce `intended` **antes** do envio e, com a mensagem aceita, passa a `watching` (`activate`). No boot, dentro do lease do §13 e **antes** das varreduras, `reconcile_intentions`: intenção cujo filho existe (conversa, tarefa ou mensagem `delegate:<pedido>` que não foi recusa) vira `watching`, e o id da mensagem entra na linha; intenção sem filho vira `cancelled` e não gera entrega. `settle` só olha `watching`.
 
 O resultado **não é copiado** para tabela nenhuma do harness. Na hora de entregar (e de desenhar o painel), `inspect` lê o registro nativo do filho (a fala do agente em `chat_item`, `tasks.result`, a resposta na fila). O efeito e o recibo guardam só ids e o canal (`peer:<id>`); um teste confere que o texto do agente nunca aparece neles.
 
@@ -1212,11 +1226,12 @@ A projeção (`runs/harness.rs`) lê `harness_child_watch` dos pais da linhagem 
 - Rust: fim de cada tipo gera exatamente uma entrega; rodar de novo não entrega outra; turno em andamento não é fim; só o primeiro turno conta; queda entre o fim e a entrega, e com o efeito reclamado (lease vivo e vencido), entrega uma vez; mensagem já na fila com a mesma chave conta por referência; resultado cortado e marcado; texto hostil não fecha nem abre o envelope nem cria linhas; o texto do agente não vai ao efeito nem ao recibo; pai fechado, apagado ou aba inexistente não recebe e nada fica na fila; sessão por resposta, por turno com a chave do vigia, e turno anterior à delegação não conta; `mode = wait` (sem registro) não entrega; a projeção mostra a sessão com tipo, agente, estado, origem e resultado marcado.
 - Vitest: `connected_session` aparece na árvore, com os campos acima, sem botão e sem comando de parada.
 - Sem relógio real (o `agora` é um número) e sem processo real.
+- `harness::test_boot`: duas conexões no mesmo SQLite temporário. Intenção com filho (conversa, tarefa, mensagem de sessão) vira acompanhamento e a entrega sai uma vez; intenção sem filho é cancelada. Rollback da transação que cria a conversa e o acompanhamento não deixa nenhum dos dois. `create_child_async` já grava `watching`. Presença válida de A impede B de marcar o turno e a tarefa; presença vencida e dono vazio são marcados. O prazo vence em `valid_until`, não um milissegundo antes.
 
 **Não verificado**
 - Nenhum provider, sessão ou terminal real: o "pai" é uma conversa do banco em memória, e a fila é a tabela. A cola do laço (`ipc/commands/child_delivery.rs`), o registro em `chat_new`/`delegate_task`/`delegate.rs` e a chamada do `housekeeping` **não têm teste de ponta a ponta** (dependem de `AppHandle`).
 - O consumidor da fila digitando o aviso no pai (conversa livre, terminal em silêncio) é o de sempre e não foi exercitado aqui.
-- **Janela entre criar e registrar:** se o app cair depois de criar o filho e antes de registrar o acompanhamento, esse filho não entrega sozinho. A repetição do mesmo `client_request_id` (o que o agente faz quando perde a resposta) registra de novo. Para a sessão, a resposta dela segue pelo canal normal.
+- Queda entre criar o filho e gravar o acompanhamento: a conversa e a tarefa da Frota nascem na mesma transação, então ou os dois existem ou nenhum. A sessão deixa `intended`; o boot entrega se a mensagem existe e cancela se não existe (`harness::test_boot`, duas conexões no mesmo arquivo, `agora` injetado).
 - Sessão de **terminal** que termina sem responder não tem fim observável (não há como o ADE provar). Sessão delegada por um terminal-pai não aparece no painel.
 - Corrida entre o vigia e a entrega do mesmo fim na mesma instância: coberta pela chave comum; não testada com dois laços reais.
 - Sem captura de tela do nó novo; sem medição de desempenho (a projeção ganhou, por sessão, uma a três leituras).

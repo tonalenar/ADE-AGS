@@ -8,6 +8,10 @@ use crate::database::DbConnection;
 /// Restaura la ventana que el usuario va a ver y deja el resto para después del
 /// primer cuadro. Skills, barrido y adjuntos van a un hilo: no bloquean ese cuadro.
 fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
+    // Presença no SQLite antes de qualquer turno: o boot da outra instância não marca o que é desta.
+    if let Some(db) = app.try_state::<DbConnection>() {
+        crate::harness::presence::start(db.inner().clone());
+    }
     // O instante do boot: o que foi armado antes dele espera a pessoa retomar (ver `missions::automation`).
     crate::missions::automation::mark_boot();
     // Antes dos terminais restaurados: o `open` do PATH e o chamariz já existem

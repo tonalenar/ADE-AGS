@@ -745,13 +745,20 @@ pub fn upsert_run(
     completed_at: Option<i64>,
     duration_ms: Option<i64>,
 ) -> rusqlite::Result<()> {
+    // Dono só quando o turno abre e esta instância já publicou o id. Fechar o turno não apaga o dono.
+    let owner = (status == "inProgress").then(crate::harness::presence::current_id).flatten();
     conn.execute(
-        "INSERT INTO chat_run (id, thread_id, status, started_at, completed_at, duration_ms) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+        "INSERT INTO chat_run (id, thread_id, status, started_at, completed_at, duration_ms, owner_instance)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT(thread_id, id) DO UPDATE SET status = excluded.status,
             started_at = COALESCE(chat_run.started_at, excluded.started_at),
             completed_at = COALESCE(excluded.completed_at, chat_run.completed_at),
-            duration_ms = COALESCE(excluded.duration_ms, chat_run.duration_ms)",
-        params![run_id, thread_id, status, started_at, completed_at, duration_ms],
+            duration_ms = COALESCE(excluded.duration_ms, chat_run.duration_ms),
+            owner_instance = CASE
+                WHEN excluded.status = 'inProgress' THEN COALESCE(chat_run.owner_instance, excluded.owner_instance)
+                ELSE chat_run.owner_instance
+            END",
+        params![run_id, thread_id, status, started_at, completed_at, duration_ms, owner],
     )
     .map(|_| ())
 }
@@ -1030,15 +1037,28 @@ pub struct Sweep {
 /// Nunca apaga linha nem reenvia ações ao provider. Idempotente.
 pub fn sweep_orphans(conn: &Connection, now: i64) -> rusqlite::Result<Sweep> {
     let tx = conn.unchecked_transaction()?;
-    let runs = close_orphan_runs(
+    let runs = close_orphan_runs_inner(
         &tx,
         None,
         now,
         "O processo do ADE foi fechado ou caiu antes de o turno terminar.",
+        true,
     )?;
+    // Pedido de um turno que outra instância ainda conduz não expira.
     let orphans: Vec<String> = {
-        let mut stmt = tx.prepare("SELECT id FROM chat_request WHERE state = 'pending'")?;
-        stmt.query_map([], |r| r.get(0))?
+        let mut stmt = tx.prepare(
+            "SELECT id FROM chat_request WHERE state = 'pending'
+             AND thread_id NOT IN (
+                SELECT thread_id FROM chat_run
+                WHERE status = 'inProgress'
+                  AND owner_instance IS NOT NULL AND TRIM(owner_instance) != ''
+                  AND EXISTS (
+                    SELECT 1 FROM harness_instance h
+                    WHERE h.id = chat_run.owner_instance AND h.valid_until > ?1
+                  )
+             )",
+        )?;
+        stmt.query_map([now], |r| r.get(0))?
             .collect::<Result<_, _>>()?
     };
     for id in &orphans {
@@ -1071,7 +1091,31 @@ pub fn close_orphan_runs(
     now: i64,
     reason: &str,
 ) -> rusqlite::Result<Vec<(String, String)>> {
-    let runs: Vec<(String, String)> = {
+    close_orphan_runs_inner(conn, thread, now, reason, false)
+}
+
+fn close_orphan_runs_inner(
+    conn: &Connection,
+    thread: Option<&str>,
+    now: i64,
+    reason: &str,
+    protect_live: bool,
+) -> rusqlite::Result<Vec<(String, String)>> {
+    let runs: Vec<(String, String)> = if protect_live {
+        let mut stmt = conn.prepare(
+            "SELECT thread_id, id FROM chat_run
+             WHERE status = 'inProgress' AND (?1 IS NULL OR thread_id = ?1)
+               AND NOT (
+                 owner_instance IS NOT NULL AND TRIM(owner_instance) != ''
+                 AND EXISTS (
+                   SELECT 1 FROM harness_instance h
+                   WHERE h.id = chat_run.owner_instance AND h.valid_until > ?2
+                 )
+               )",
+        )?;
+        stmt.query_map(params![thread, now], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?
+    } else {
         let mut stmt = conn.prepare("SELECT thread_id, id FROM chat_run WHERE status = 'inProgress' AND (?1 IS NULL OR thread_id = ?1)")?;
         stmt.query_map(params![thread], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<Result<_, _>>()?

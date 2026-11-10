@@ -262,7 +262,7 @@ pub struct NewThread {
 }
 
 pub fn create(db: &DbConnection, input: NewThread) -> Result<ThreadRow, String> {
-    create_inner(db, input, None).map(|outcome| outcome.thread)
+    create_inner(db, input, None, false).map(|outcome| outcome.thread)
 }
 
 /// Identidade estável de um pedido de conversa filha feito pelo harness.
@@ -292,7 +292,17 @@ pub fn create_child(
     input: NewThread,
     identity: &ChildRequestIdentity,
 ) -> Result<ChildThreadOutcome, String> {
-    create_inner(db, input, Some(identity))
+    create_inner(db, input, Some(identity), false)
+}
+
+/// Como [`create_child`], e o acompanhamento do resultado (`harness_child_watch`) entra na **mesma**
+/// transação que grava a conversa e o recibo. Uma queda no meio não deixa filha sem entrega.
+pub fn create_child_async(
+    db: &DbConnection,
+    input: NewThread,
+    identity: &ChildRequestIdentity,
+) -> Result<ChildThreadOutcome, String> {
+    create_inner(db, input, Some(identity), true)
 }
 
 fn existing_child_outcome(
@@ -322,10 +332,14 @@ fn create_inner(
     db: &DbConnection,
     input: NewThread,
     identity: Option<&ChildRequestIdentity>,
+    async_watch: bool,
 ) -> Result<ChildThreadOutcome, String> {
     if let Some(identity) = identity {
         let conn = db.lock().map_err(db_err)?;
         if let Some(outcome) = existing_child_outcome(&conn, identity)? {
+            if async_watch {
+                register_chat_watch(&conn, &outcome.thread)?;
+            }
             return Ok(outcome);
         }
     }
@@ -391,6 +405,9 @@ fn create_inner(
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(db_err)?;
             if let Some(outcome) = existing_child_outcome(&tx, identity)? {
+                if async_watch {
+                    register_chat_watch(&tx, &outcome.thread)?;
+                }
                 tx.commit().map_err(db_err)?;
                 (outcome.thread, false)
             } else {
@@ -429,6 +446,9 @@ fn create_inner(
                     now,
                 )
                 .map_err(db_err)?;
+                if async_watch {
+                    register_chat_watch(&tx, &row)?;
+                }
                 tx.commit().map_err(db_err)?;
                 (row, true)
             }
@@ -477,6 +497,26 @@ fn create_inner(
         thread: row,
         reused: !created,
     })
+}
+
+/// O acompanhamento da conversa filha, na conexão ou na transação de quem está criando.
+fn register_chat_watch(conn: &rusqlite::Connection, row: &ThreadRow) -> Result<(), String> {
+    let Some(parent_ref) = row.parent_ref.as_deref() else { return Ok(()) };
+    crate::harness::child_delivery::register(
+        conn,
+        &crate::harness::child_delivery::WatchSpec {
+            kind: crate::harness::delegate::Target::ProviderChat,
+            child_ref: &row.id,
+            parent_ref,
+            title: &row.title,
+            agent_id: &row.agent_id,
+            parent_turn_id: row.parent_turn_id.as_deref(),
+            session_id: None,
+            message_id: None,
+        },
+        crate::util::now_ts_ms(),
+    )?;
+    Ok(())
 }
 
 fn validate_workspace(conn: &rusqlite::Connection, workspace_id: Option<&str>) -> Result<(), String> {

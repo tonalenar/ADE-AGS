@@ -68,6 +68,8 @@ pub(crate) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     super::receipts::migrate(conn)?;
     super::effects::migrate(conn)?;
     super::recovery::migrate(conn)?;
+    // Fase 5: presença da instância e dono de turno/tarefa (contrato §13).
+    super::presence::migrate(conn)?;
     // Fase 4: acompanhamento dos filhos delegados em modo assíncrono (contrato §12.9).
     super::child_delivery::migrate(conn)?;
     Ok(())

@@ -37,6 +37,8 @@ const KEY_PREFIX: &str = "harness-child-";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WatchState {
+    /// Gravado antes do filho existir (o caminho que cria processo ou aba fora da transação).
+    Intended,
     /// O filho ainda não terminou (ou o fim ainda não é observável).
     Watching,
     /// O fim foi visto e o efeito de entrega existe.
@@ -47,25 +49,31 @@ pub enum WatchState {
     ParentClosed,
     /// O filho foi apagado antes de terminar: não há o que entregar.
     ChildGone,
+    /// Intenção que o boot não encontrou: o filho não chegou a existir.
+    Cancelled,
 }
 
 impl WatchState {
     pub fn as_str(self) -> &'static str {
         match self {
+            WatchState::Intended => "intended",
             WatchState::Watching => "watching",
             WatchState::Ended => "ended",
             WatchState::Delivered => "delivered",
             WatchState::ParentClosed => "parent_closed",
             WatchState::ChildGone => "child_gone",
+            WatchState::Cancelled => "cancelled",
         }
     }
 
     pub fn parse(raw: &str) -> WatchState {
         match raw {
+            "intended" => WatchState::Intended,
             "ended" => WatchState::Ended,
             "delivered" => WatchState::Delivered,
             "parent_closed" => WatchState::ParentClosed,
             "child_gone" => WatchState::ChildGone,
+            "cancelled" => WatchState::Cancelled,
             _ => WatchState::Watching,
         }
     }
@@ -191,8 +199,17 @@ fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Watch> {
     })
 }
 
-/// Registra o filho. Idempotente: a segunda vez (repetição do mesmo `client_request_id`) não muda nada.
-/// Devolve `true` quando criou a linha.
+/// O que o boot fez com as intenções deixadas por uma queda entre criar o filho e ativar o acompanhamento.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct IntentionReport {
+    /// O filho existia: a intenção virou acompanhamento ativo (`watching`).
+    pub activated: usize,
+    /// O filho não existia: a intenção foi cancelada e não gera entrega.
+    pub cancelled: usize,
+}
+
+/// Registra o filho já ativo. Idempotente: a segunda vez (repetição do mesmo `client_request_id`) não muda nada.
+/// Devolve `true` quando criou a linha. Cabe dentro da transação de quem cria o filho.
 pub fn register(conn: &Connection, spec: &WatchSpec, now: i64) -> Result<bool, String> {
     Ok(conn
         .execute(
@@ -213,6 +230,126 @@ pub fn register(conn: &Connection, spec: &WatchSpec, now: i64) -> Result<bool, S
         )
         .map_err(db_err)?
         > 0)
+}
+
+/// Grava a intenção **antes** de criar o filho, quando a criação sai do SQLite (processo ou aba).
+/// Idempotente: não rebaixa um acompanhamento que já está ativo.
+pub fn intend(conn: &Connection, spec: &WatchSpec, now: i64) -> Result<bool, String> {
+    Ok(conn
+        .execute(
+            "INSERT OR IGNORE INTO harness_child_watch
+             (child_kind, child_ref, parent_ref, title, agent_id, parent_turn_id, session_id, message_id, state, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 'intended', ?9, ?9)",
+            params![
+                spec.kind.as_str(),
+                spec.child_ref,
+                spec.parent_ref,
+                spec.title,
+                spec.agent_id,
+                spec.parent_turn_id,
+                spec.session_id,
+                spec.message_id,
+                now
+            ],
+        )
+        .map_err(db_err)?
+        > 0)
+}
+
+/// Promove uma intenção a acompanhamento ativo, preenchendo o que só existe depois do filho
+/// (o id da mensagem da sessão). Se a linha não existe, registra já em `watching`.
+/// Devolve `true` quando criou ou promoveu.
+pub fn activate(conn: &Connection, spec: &WatchSpec, now: i64) -> Result<bool, String> {
+    let promoted = conn
+        .execute(
+            "UPDATE harness_child_watch
+             SET state = 'watching',
+                 message_id = COALESCE(?1, message_id),
+                 parent_turn_id = COALESCE(?2, parent_turn_id),
+                 session_id = COALESCE(?3, session_id),
+                 updated_at = ?4
+             WHERE child_kind = ?5 AND child_ref = ?6 AND state = 'intended'",
+            params![
+                spec.message_id,
+                spec.parent_turn_id,
+                spec.session_id,
+                now,
+                spec.kind.as_str(),
+                spec.child_ref
+            ],
+        )
+        .map_err(db_err)?;
+    if promoted > 0 {
+        return Ok(true);
+    }
+    if watch(conn, spec.kind, spec.child_ref)?.is_some() {
+        return Ok(false);
+    }
+    register(conn, spec, now)
+}
+
+/// No boot: intenção com filho vira ativa; intenção sem filho é cancelada. Não entrega nada.
+pub fn reconcile_intentions(conn: &Connection, now: i64) -> Result<IntentionReport, String> {
+    let intended: Vec<Watch> = {
+        let mut stmt = conn
+            .prepare(&format!("SELECT {COLUMNS} FROM harness_child_watch WHERE state = 'intended' ORDER BY created_at, child_ref"))
+            .map_err(db_err)?;
+        stmt.query_map([], from_row).map_err(db_err)?.collect::<Result<_, _>>().map_err(db_err)?
+    };
+    let mut report = IntentionReport::default();
+    for watch in intended {
+        match child_of_intention(conn, &watch)? {
+            Some(message_id) => {
+                let spec = WatchSpec {
+                    kind: watch.kind,
+                    child_ref: &watch.child_ref,
+                    parent_ref: &watch.parent_ref,
+                    title: &watch.title,
+                    agent_id: &watch.agent_id,
+                    parent_turn_id: watch.parent_turn_id.as_deref(),
+                    session_id: watch.session_id.as_deref(),
+                    message_id: message_id.or(watch.message_id),
+                };
+                activate(conn, &spec, now)?;
+                report.activated += 1;
+            }
+            None => {
+                set_watch(conn, &watch, WatchState::Cancelled, None, None, now)?;
+                report.cancelled += 1;
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// `Some(message_id)` quando o filho da intenção existe. A mensagem só vale para sessão conectada.
+fn child_of_intention(conn: &Connection, watch: &Watch) -> Result<Option<Option<i64>>, String> {
+    if watch.kind == Target::ConnectedSession {
+        return delegation_message(conn, &watch.child_ref).map(|id| id.map(Some));
+    }
+    let sql = if watch.kind == Target::FleetTask {
+        "SELECT EXISTS(SELECT 1 FROM tasks WHERE id = ?1)"
+    } else {
+        "SELECT EXISTS(SELECT 1 FROM chat_thread WHERE id = ?1)"
+    };
+    let exists: bool = conn.query_row(sql, [&watch.child_ref], |row| row.get(0)).map_err(db_err)?;
+    Ok(if exists { Some(None) } else { None })
+}
+
+/// A mensagem `delegate:<pedido>` que a sessão recebeu, se não foi recusa.
+fn delegation_message(conn: &Connection, child_ref: &str) -> Result<Option<i64>, String> {
+    let Some((_, request_id)) = child_ref.rsplit_once('#') else { return Ok(None) };
+    if request_id.is_empty() {
+        return Ok(None);
+    }
+    let client_id = format!("delegate:{request_id}");
+    conn.query_row(
+        "SELECT id FROM peer_messages WHERE client_id = ?1 AND state != 'refused' ORDER BY id LIMIT 1",
+        [client_id],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(db_err)
 }
 
 pub fn watch(conn: &Connection, kind: Target, child_ref: &str) -> Result<Option<Watch>, String> {
