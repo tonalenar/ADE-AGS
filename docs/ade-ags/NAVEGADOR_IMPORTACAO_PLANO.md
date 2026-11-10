@@ -225,3 +225,65 @@ flowchart TD
 
 
 > **Ajuste na integração (2026-11-10):** sem chave do keyring, o arquivo anterior em claro **não é apagado**. Fica intacto, é usado só em memória e é migrado na próxima abertura com chave, porque nenhuma migração apaga dados da pessoa (AGENTS.md §2.3). Nada novo é gravado em claro. Um arquivo anterior que não se entende também é ignorado, sem ser apagado.
+
+---
+
+## 9. Fatia 1 da 7.3: importação de cookies do Firefox (entregue)
+
+Primeira fatia da importação, só para o Firefox. Módulo novo: `src-tauri/src/preview/importer/` (`mod.rs`, `firefox.rs`, `test.rs`). Ele fica em `preview/` porque grava no estado cifrado do preview, e não em `real_browser/`.
+
+### 9.1 O que a fatia faz
+
+- **Leitor do `cookies.sqlite`** (`firefox.rs`). Os perfis vêm do `profiles.ini`; o id aceito é só o que o arquivo declara, então o caminho nunca vem da interface. O `cookies.sqlite` e o `-wal`, se existir, são copiados para uma pasta temporária privada (`0700`, arquivos `0600`), e **só a cópia é aberta**, em modo somente leitura. A pasta é apagada ao sair, mesmo com erro. O original não recebe nada: nem `-wal`, nem `-shm`, nem bloqueio. Os testes comparam bytes e lista de arquivos antes e depois.
+- **Bloqueio conferido antes e depois da cópia.** Os arquivos são `parent.lock` e `.parentlock`, nos dois sistemas. Em Unix, `fcntl(F_GETLK)` sobre um descritor só de leitura: consulta quem segura a trava e não cria nem solta nenhuma. No Windows, abertura sem compartilhamento (falha com o código 32 se o Firefox tem o arquivo). Firefox aberto recusa com `browser-running`; bloqueio que não pode ser conferido recusa com `lock-unknown`. Se o Firefox abrir durante a cópia, a leitura é descartada.
+- **Cookies fora da entrada:** particionados (`partitionKey` em `originAttributes`, ou `isPartitionedAttributeSet` quando a coluna existe), de outro contêiner (`userContextId` diferente de 0), de navegação privada e de primeira parte isolada (`firstPartyDomain`). Ficam de fora e são **só contados** (`ignored`). Vencidos são descartados. `expiry` em milissegundos é convertido.
+- **Revisão** (`browser_import_review`): devolve o nome do perfil, os domínios com a contagem e o número de ignorados. **Nenhum valor** sai do backend. Antes de ler qualquer cookie, a revisão confere a chave do keyring.
+- **Gravação** (`browser_import_apply`): só os domínios marcados entram. Uma origem por vez, pelo `Site::import_cookies` (novo, em `site.rs`). Ele reusa `store_cookie` (mesmas regras de um `Set-Cookie`, mesmo limite do frasco) e `save_now` (AES-256-GCM, chave no keyring). Cookie seguro vai para `https://<domínio>`; cookie não seguro vai para `http://` e `https://`, porque o navegador o manda para os dois.
+- **Sem chave do keyring, ou sem pasta de estado,** a importação é recusada **antes** de ler o perfil, com a razão (`no-state-key` ou `no-state-dir`). Nada é gravado em claro.
+- **Tela:** Configurações → Geral → Preferências, logo abaixo de "Busca e links do navegador" (`BrowserImportSetting.tsx`). O fluxo é: escolher o perfil → aviso para fechar o Firefox → revisar os domínios (checkboxes nativos, operáveis pelo teclado) → marcar → confirmar, com o aviso de cópia única.
+- **Erros com código estável** (`no-state-key`, `browser-running`, `lock-unknown`, `write-failed` e outros). A interface traduz cada um nos três catálogos. O `detail` é técnico e nunca tem valores.
+
+### 9.2 Decisões desta fatia
+
+- **Não existe uma seção "Navegador" em Configurações.** O menu vem de `src/features/chat/chatSettingsNav.ts`, que outro integrante estava editando. O fluxo ficou ao lado da configuração de busca do navegador, que já é a configuração do preview. Criar a seção exige mexer em `chatSettingsNav.ts` e em `uiStore.ts`; fica para uma fatia própria.
+- **Containers e partições ficam de fora**, mesmo quando o usuário quer tudo. Uma sessão de outro contêiner é outra identidade, e misturá-la no preview confundiria os logins.
+- **Subdomínios não são cobertos.** O estado do preview é por origem, não por domínio. Um cookie de `.github.com` entra só em `https://github.com`.
+
+### 9.3 Fora desta fatia (documentado, não implementado)
+
+- **Chromium** (Chrome, Edge, Brave e outros). No Windows a cifra é App-Bound Encryption, amarrada ao app. A ADE não contorna isso (regra 4 da seção 5). No macOS a chave fica no Keychain. Nada disso foi implementado.
+- **Safari.** Exige Full Disk Access. Nenhuma solicitação de FDA foi feita.
+- **Zen e Helium.** Não implementados.
+- **Perfis `profile-<UUID>` do WebView2 (Windows).** A importação atual só alcança o proxy de preview. Os perfis do WebView2 continuam sem importação.
+- **Cookies de `localhost` com porta.** O Firefox não guarda a porta, e a chave do preview tem porta. Por isso eles não chegam aos servidores de desenvolvimento nesta fatia.
+- **Cookies particionados (CHIPS)** ficam de fora por regra desta fatia (seção 4, Fatia 2: "pular obrigatoriamente cookies particionados"). O preview guarda cookies por origem, sem a chave de partição, então não os modela.
+
+### 9.4 Riscos e pontos a confirmar
+
+- **Gravação parcial:** a importação grava uma origem por vez. Se a gravação falhar na segunda, a primeira já ficou gravada, cifrada. A resposta traz `write-failed`, e nada em claro é escrito.
+- **Cópia temporária:** fica na pasta temporária privada do usuário enquanto a leitura roda. Se a app for encerrada no meio da leitura, a cópia pode sobrar até o sistema limpar a pasta. Não há varredura na próxima abertura.
+- **Lista de arquivos de bloqueio:** veio da pesquisa sobre o Firefox e da implementação do importador do Chromium (que usa `fcntl` com `F_SETLK` e trata `EAGAIN`/`EACCES` como trava em uso). Não foi conferida contra um Firefox aberto.
+
+### 9.5 Verificação
+
+- **Rust:** 19 testes em `src-tauri/src/preview/importer/test.rs`. Fixtures sintéticas em diretório temporário e keyring falso. Antes da implementação, os 19 falharam: o esqueleto dos módulos tinha `todo!()`. Depois, os 19 passam. Eles cobrem:
+  - o original não muda (bytes e arquivos, inclusive com `-wal` presente);
+  - Firefox aberto é recusado antes de copiar;
+  - bloqueio que não pode ser conferido é recusado;
+  - abrir durante a cópia descarta a leitura;
+  - a revisão não tem valor de cookie;
+  - só os domínios marcados entram, cada um na sua origem;
+  - particionados e de outro contêiner ficam de fora;
+  - sessão, expiração, `SameSite` e normalização de domínio;
+  - o WAL é lido;
+  - sem chave, a importação é recusada antes de ler;
+  - no disco, só arquivos `ADESITE1` cifrados, e a cópia temporária é apagada.
+- **Vitest:** `browserImportModel.test.ts` (lógica pura) e `browserImportSetting.test.tsx` (fluxo de revisão em DOM: marcar só o que foi marcado, cancelar, recusa com o Firefox aberto, sem perfil). Com `catalog.test.ts`, são 16 testes.
+- **Checagens:** `tsc --noEmit`, `check:i18n`, `check:test-lint` (sem violação nova), `check:babel` e `check:fingerprint` passam.
+
+### 9.6 Não verificado
+
+- **Contra um Firefox real.** Nenhum perfil desta máquina foi lido, por regra de privacidade. Falta um teste manual: abrir o Firefox, tentar a importação e confirmar a recusa.
+- **A detecção de bloqueio entre processos.** Em POSIX, um processo não vê as próprias travas, então o caso "Firefox aberto" é testado pela injeção do conferidor de bloqueio. A leitura real de `F_GETLK` só foi exercitada sem outro dono da trava.
+- **Windows.** O caminho com `share_mode(0)` não foi compilado nem executado aqui.
+- **Keyring real.** Os testes usam um keyring falso; o do sistema não foi tocado.

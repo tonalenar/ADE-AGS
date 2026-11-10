@@ -144,3 +144,47 @@ export const previewCookies = (proxyOrigin: string) =>
  *  El storage vivo lo vacía la página (`storage clear`). */
 export const previewForgetSite = (proxyOrigin: string) =>
   invoke<void>("preview_forget_site", { proxyOrigin });
+
+/* ── Importação de cookies de um perfil do Firefox (`src-tauri/src/preview/importer`) ──
+ * Nada daqui leva valores de cookie: a revisão traz só domínios e contagens. */
+
+/** Um perfil do Firefox: id e nome. O caminho fica no backend. */
+export interface BrowserImportProfile {
+  id: string;
+  name: string;
+}
+
+/** Um domínio com cookies importáveis e quantos são. */
+export interface BrowserImportDomain {
+  domain: string;
+  cookies: number;
+}
+
+export interface BrowserImportReview {
+  profileName: string;
+  domains: BrowserImportDomain[];
+  /** Cookies particionados ou de outro contêiner, que ficaram de fora. */
+  ignored: number;
+}
+
+export interface BrowserImportOutcome {
+  domains: BrowserImportDomain[];
+  cookies: number;
+}
+
+/** Por que a importação parou. `code` é estável; `detail` é técnico e nunca tem valores. */
+export interface BrowserImportFailure {
+  code: string;
+  detail: string | null;
+}
+
+/** Os perfis do Firefox deste computador. Só lê o `profiles.ini`. */
+export const browserImportProfiles = () => invoke<BrowserImportProfile[]>("browser_import_profiles");
+
+/** A revisão de um perfil: domínios e contagens. Recusa se o Firefox estiver aberto ou sem chave. */
+export const browserImportReview = (profileId: string) =>
+  invoke<BrowserImportReview>("browser_import_review", { profileId });
+
+/** Grava só os domínios marcados, como cópia única, no estado cifrado do preview. */
+export const browserImportApply = (profileId: string, domains: string[]) =>
+  invoke<BrowserImportOutcome>("browser_import_apply", { profileId, domains });
