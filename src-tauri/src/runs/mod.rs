@@ -85,14 +85,17 @@ pub fn run_list_runs(
     store::list_runs(&conn, &workspace_id)
 }
 
-/// Um snapshot único de conversas, turnos e tarefas descendentes da conversa estruturada.
+/// Um snapshot de conversas, turnos e tarefas descendentes da conversa estruturada. Com `after_cursor` (o
+/// `cursor` da resposta anterior), os eventos voltam só como delta; sem ele, ou com um cursor que o banco
+/// não reconhece, voltam inteiros com `reset`. Os nós voltam sempre atuais.
 #[tauri::command]
 pub fn run_list_harness_graph(
     thread_id: String,
+    after_cursor: Option<i64>,
     db: tauri::State<DbConnection>,
 ) -> Result<HarnessExecutionGraph, String> {
     let conn = db.lock().map_err(|error| error.to_string())?;
-    harness::thread_execution_graph(&conn, &thread_id)
+    harness::thread_execution_graph_since(&conn, &thread_id, after_cursor)
 }
 
 /// Lê os eventos normalizados de uma tentativa da Frota sob demanda.
