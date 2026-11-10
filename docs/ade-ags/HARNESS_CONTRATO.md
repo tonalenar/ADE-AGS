@@ -836,6 +836,7 @@ O efeito **não guarda o payload**. O texto de uma mensagem, o prompt e qualquer
 - **Lease vencido** (`running` com `lease_until <= agora`): o dono pode ter morrido antes **ou depois** de o efeito sair. O `claim` não decide sozinho:
   - `retry_safe = 1` → reclama e conta a tentativa;
   - `retry_safe = 0` → não reclama. O efeito vai a `failed` com `outcome_unknown = 1` e o recibo a `unknown`, **a menos que** `recover_expired` receba a capability do adapter que prova o desfecho (`Applied` → `completed`, `NotApplied` → `pending`, `Unknown` → `failed` + `outcome_unknown`).
+- `recover_expired` (boot ou worker) só pergunta ao adapter pelos efeitos `retry_safe = 0`; um `retry_safe = 1` de lease vencido volta a `pending` sem prova (ou a `failed`, se as tentativas acabaram).
 - `max_attempts` limita as reclamações: ao estourar, `failed`.
 - **Erro sanitizado** (`last_error`): só código curto e mensagem do próprio ADE. Passa por `sanitize_error`: uma linha, até 200 caracteres, sem controles, com tokens de aparência de segredo (`sk-…`, `ghp_…`, `Bearer …`, `chave=valor` de token/senha, sequências longas de base64/hex) trocados por `[redigido]`. O chamador **não** passa mensagem de provider nem texto do agente: o `chat_send` grava só `not_sent` ou `outcome_unknown`.
 
@@ -874,7 +875,9 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 - Chave: `kind = chat_send`, `caller_key = chat-send:<hash do escopo do chamador>` (aba/conversa do MCP; `ui` e `cli` nos outros casos), `request_id`. O hash do payload cobre conversa, texto e imagens.
 - **Sem o id, o caminho é o de antes**, sem recibo e sem efeito.
 - Com o id: `accepted` devolve o recibo sem enviar; `submitting` e `unknown` devolvem o recibo com aviso e **não** enviam; `prepared` e `retryable` reclamam o efeito e enviam uma vez.
-- Resposta: `{ requestId, deliveryState, replayed }`. O MCP e a CLI acrescentam `sent` (só `true` quando **esta** chamada enviou).
+- Resposta: `{ requestId, deliveryState, replayed, sent, note? }`; `sent` só é `true` quando **esta** chamada enviou. O comando Tauri devolve `null` sem o id (como antes) e o recibo com ele; a CLI e o MCP devolvem `{ sent, receipt, next }`.
+- O escopo do MCP (`caller_scope`) é carimbado por `scoped_chat_payload` (`tab:<id>`, `cwd:<pasta>` ou `task:<id>`); um valor mandado pelo modelo é descartado.
+- Um erro `NotSent`/`Unknown` do provider volta como erro, como sempre, e o recibo fica `retryable`/`unknown`. A mensagem do provider **não** é gravada (só `not_sent` e `outcome_unknown`).
 
 ### 11.8 Ordem de migração dos comandos
 
@@ -895,3 +898,20 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 - Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id` ainda: as colunas existem (aditivas) e ficam `NULL` até `queue_chat_event` migrar.
 - Interrupt, spawn, resposta a pedido e cancelamento não usam a fila.
 - Nenhum provider real foi executado.
+
+### 11.10 Fase 2, primeira fatia: o que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes: 32 testes de `harness::test_fase2` contra esqueletos `unimplemented!()` (31 falharam, 1 passou por não depender do código). Depois da implementação, os 32 passam.
+- 13 testes de `conversa::send_receipt_test` (reenvio idêntico não reenvia; payload diferente falha fechado; `NotSent` → `retryable` e a repetição envia uma vez; `Unknown` nunca repete; queda entre aceitar e reclamar é recuperável; lease vivo devolve `submitting`; lease vencido vira `unknown`; o dono lento ainda conclui; a mensagem do provider não vai ao banco) e 4 de contrato do MCP e da CLI em `ipc/test.rs`.
+- Claim concorrente: duas conexões em threads no mesmo arquivo SQLite temporário (WAL), 40 efeitos disputados por `claim` e 30 por `claim_next`; cada efeito teve exatamente um dono. O `agora` é sempre injetado.
+- `cd src-tauri && cargo test --lib --bin ags`: 2685 + 52 testes, 0 falhas, 29 ignorados (os de sempre). Sem warning novo.
+- `node scripts/fingerprint.mjs`: ok (`schema-sqlite 96507e01a45b`, `protocolo-ipc 1959c50fc9d7`; nenhum reconhecimento foi necessário, o protocolo IPC não mudou).
+- `bunx tsc --noEmit` e `bun run check:test-lint` (sem violação nova).
+
+**Não verificado**
+- Nenhum provider real foi executado: o `execute` dos testes é um contador. O caminho `send_with_request` com `AppHandle` não tem teste de ponta a ponta.
+- O recibo e o efeito rodam em transações separadas (aceitar, reclamar, concluir); a atomicidade de cada passo é por construção e por teste de estado, não por injeção de falha no meio do commit.
+- Desempenho: `harness_effect` não tem consulta medida; o índice `(state, lease_until)` não foi exercitado com volume.
+- Ainda não existe comando de boot que chame `recover_expired`: um efeito `running` de provider só vira `unknown` quando a repetição do comando chega ao `claim` (§11.9).
+- Teste visual e a UI: `chatThreadSendOnce` existe em `ipc.ts`, mas nenhuma tela o chama ainda.
