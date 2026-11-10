@@ -33,6 +33,7 @@ import { withDrafts } from "../timeline/streaming";
 import type { RequestRow, ThreadRow } from "./ipc";
 import { EMPTY_LIVE, isLocalAcpAgent, isPlanExit, menuAccess, questionOf, togglePlan } from "./model";
 import { AgentSwitchDialog } from "./AgentSwitchDialog";
+import { LogFailureNotice } from "./LogFailureNotice";
 import { answerRequest, autoCompactThreadOnReturn, clearThreadContext, compactThread, hydrateThread, interruptThread, retuneThread, runThreadGoalAction, sendToThread, switchThreadAgent, useStructured } from "./store";
 import { lacksApproval, switchableAgents } from "./switchModel";
 import { showBotToast } from "@/shared/brand/botToastStore";
@@ -177,6 +178,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           </div>
         )}
         {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
+        <LogFailureNotice threadId={thread.id} />
         {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd} quoteKey={card.tabId} quoteThreadId={thread.id} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
           turnActive={working} forceSend={!!request}
