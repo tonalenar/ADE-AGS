@@ -15,6 +15,7 @@
 
 pub mod capability;
 pub mod child_delivery;
+pub mod command;
 pub mod commands;
 pub mod delegate;
 pub mod effects;
@@ -29,5 +30,7 @@ pub mod store;
 mod test;
 #[cfg(test)]
 mod test_fase2;
+#[cfg(test)]
+mod test_command;
 #[cfg(test)]
 mod test_fase4;
