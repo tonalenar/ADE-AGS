@@ -382,6 +382,15 @@ pub async fn read_turn<S: Source>(mapper: &mut Mapper, source: &mut S, mut apply
     done
 }
 
+/// Pura: o stderr do `cursor-agent` diz que a sessão de `--resume` não existe? Só vale junto com «nenhuma linha do
+/// stdout chegou» (ver `resume::run_turn_resuming`). **A frase exata do CLI não foi capturada** (nenhuma fixture
+/// recusa a sessão): o critério é conservador, uma linha que cite «chat», «session» ou «conversation» colado a um
+/// marcador de inexistência (o `--resume` do Cursor recebe um «chatId»). «file not found», «model not found» e
+/// «not logged in» não casam.
+pub fn session_refused(stderr: &[String]) -> bool {
+    stderr.iter().any(|line| super::resume::says_session_missing(line, &["chat", "session", "conversation"]))
+}
+
 /// O erro de um turno que acabou sem `result`: a última linha com texto do stderr. Pura.
 pub fn error_from_stderr(tail: &[String]) -> String {
     let text = tail.iter().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().to_string());

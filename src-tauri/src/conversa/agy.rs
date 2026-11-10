@@ -24,6 +24,7 @@ use crate::database::DbConnection;
 use super::agy_map::{self as map, Mapper, Out};
 use super::claude_map::TurnResult;
 use super::events::emit;
+use super::resume::{run_turn_resuming, Observed, TurnAttempt};
 use super::{store, turn};
 
 /// Linhas finais do stderr guardadas para explicar um processo que fechou sem `result`.
@@ -216,20 +217,49 @@ async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tu
     }
 }
 
-/// Roda o processo do turno. `Ok(Some)` = o `result` chegou; `Ok(None)` = o processo acabou sem ele
-/// (parado de propósito); `Err` = não subiu, ou caiu com erro.
+/// O turno com a retomada guardada: um processo por turno, então o prompt sai junto com o `--conversation`. Só cai
+/// numa conversa nova com PROVA de que o `agy` recusou a conversa antes de o turno começar (nenhuma linha do stdout e
+/// o stderr de conversa inexistente: `agy_map::session_refused`); qualquer outro erro falha o turno e mantém o id.
+/// Ver `resume::run_turn_resuming`.
 async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) -> Result<Option<TurnResult>, String> {
+    let remote = session.conversation.lock().ok().and_then(|c| c.clone());
+    run_turn_resuming(
+        remote.as_deref(),
+        map::session_refused,
+        |conversation| {
+            let conversation = conversation.map(str::to_string);
+            async move {
+                let mut seen = Observed::default();
+                let result = run_process(app, db, session, turn_id, text, conversation.as_deref(), &mut seen).await;
+                TurnAttempt { result, began: seen.began, stderr: seen.stderr }
+            }
+        },
+        || {
+            if let Ok(mut c) = session.conversation.lock() {
+                *c = None;
+            }
+            if let Ok(conn) = db.lock() {
+                let _ = store::clear_remote_id(&conn, &session.thread_id);
+            }
+        },
+        |code, notice| turn::save_notice(app, db, &session.thread_id, code, notice),
+    )
+    .await
+}
+
+/// Roda o processo do turno. `Ok(Some)` = o `result` chegou; `Ok(None)` = o processo acabou sem ele
+/// (parado de propósito); `Err` = não subiu, ou caiu com erro. `seen` recebe o que o processo mostrou.
+async fn run_process(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str, conversation: Option<&str>, seen: &mut Observed) -> Result<Option<TurnResult>, String> {
     let thread_id = session.thread_id.as_str();
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
-    let conversation = session.conversation.lock().ok().and_then(|c| c.clone());
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
     let name = crate::agents::agent_command("antigravity").unwrap_or("agy");
     let program = crate::util::find_program(name).ok_or("Não achei o Antigravity (agy) no PATH")?;
     let conversation_mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "antigravity");
-    let mut args = map::launch_args(&row, text, conversation.as_deref());
+    let mut args = map::launch_args(&row, text, conversation);
     if let Some(mcp) = conversation_mcp.as_ref() {
         args.extend(mcp.antigravity_args.iter().cloned());
     }
@@ -279,6 +309,8 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
     let mut done: Option<TurnResult> = None;
     let mut lines = BufReader::new(stdout).lines();
     while let Ok(Some(line)) = lines.next_line().await {
+        // Qualquer linha (mesmo ilegível) prova que o processo aceitou a sessão e o turno começou.
+        seen.began = true;
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
         for out in mapper.feed(&value, crate::util::now_ts_ms()) {
             match out {
@@ -299,10 +331,11 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
     if let Some(task) = stderr_task {
         let _ = tokio::time::timeout(std::time::Duration::from_secs(2), task).await;
     }
+    let lines = tail.lock().map(|t| t.clone()).unwrap_or_default();
+    seen.stderr = lines.clone();
     if done.is_some() || session.killed.load(Ordering::SeqCst) {
         return Ok(done);
     }
-    let lines = tail.lock().map(|t| t.clone()).unwrap_or_default();
     let code = status.map(|s| s.code().unwrap_or(-1));
     // Saiu sem `result` e sem ninguém parar: o erro é o do stderr.
     Err(if code == Some(0) && lines.is_empty() { "O Antigravity terminou sem responder".into() } else { map::error_from_stderr(&lines) })
