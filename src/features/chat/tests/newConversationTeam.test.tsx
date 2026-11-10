@@ -22,9 +22,10 @@ vi.mock("../AccessMenu", () => ({ AccessMenu: () => null }));
 vi.mock("../ComposerColumn", () => ({ useColumnGutter: () => ({ ref: () => undefined, style: {} }) }));
 // O composer de verdade tem editor, anexos e menus: aqui só importa o que a tela passa a ele e o que ele devolve.
 vi.mock("../ChatComposer", () => ({
-  ChatComposer: (p: { controls: React.ReactNode; placeholder: string; onSubmit: (text: string) => Promise<boolean> }) => (
+  ChatComposer: (p: { controls: React.ReactNode | ((ctx: { text: string; hasExtraContext: boolean; attachments: never[]; hasQuotes: boolean }) => React.ReactNode); placeholder: string; onSubmit: (text: string) => Promise<boolean> }) => (
     <div>
-      <div data-testid="controls">{p.controls}</div>
+      {/* Como o de verdade, `controls` pode ser uma função que lê o rascunho (texto, anexos, citações). */}
+      <div data-testid="controls">{typeof p.controls === "function" ? p.controls({ text: "", hasExtraContext: false, attachments: [], hasQuotes: false }) : p.controls}</div>
       <div data-testid="placeholder">{p.placeholder}</div>
       <button type="button" data-testid="send" onClick={async () => { launch.submitted.push(await p.onSubmit("monte o painel")); }} />
     </div>
