@@ -40,6 +40,8 @@ pub(crate) mod supervisor;
 mod test;
 #[cfg(test)]
 mod opencode_models_test;
+#[cfg(test)]
+mod execution_log_test;
 pub(crate) mod types;
 pub(crate) mod worktrees;
 
