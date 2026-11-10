@@ -1,3 +1,5 @@
+import { DESKTOP_OS } from "@/app/platform";
+import { presentDeviceTool, shouldProbeDevices, type DeviceKind, type DeviceToolId } from "./deviceDemand";
 import { observeForegroundApp } from "./foregroundApp";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -41,11 +43,16 @@ import { usePopover } from "./usePopover";
  */
 
 const ctlCls = "hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white";
-const ibCls = `w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-500 dark:text-white/50 ${ctlCls} disabled:opacity-40 disabled:pointer-events-none`;
+const ibCls = `w-8 h-8 inline-flex items-center justify-center rounded-lg text-gray-500 dark:text-white/50 ${ctlCls} disabled:opacity-40`;
 const popCls = "absolute z-50 rounded-xl p-1.5 text-chat-note bg-white dark:bg-surface-raised shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]";
 const itemCls = "w-full h-8 px-2 rounded-md flex items-center gap-2 text-left text-gray-800 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-40";
 const fieldCls = "h-8 min-w-0 px-2.5 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.04] text-chat-note text-gray-900 dark:text-white outline-none focus:border-accent-500";
 const okCls = "text-emerald-700 dark:text-emerald-400";
+
+/** O botão fica na tela. Fora do host ou do tipo de aparelho, ele aparece desligado e o título diz a razão. */
+function deviceAction(kind: DeviceKind, id: DeviceToolId, ready: boolean, action: string, t: (key: string) => string) {
+  return presentDeviceTool(DESKTOP_OS, kind, id, ready, action, t);
+}
 
 /**
  * A barra de cima. Cada peça fica numa linha só (`whitespace-nowrap`) e as secundárias somem conforme a largura DO
@@ -181,7 +188,8 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
   const [landscape, setLandscape] = useState(false);
   const [dark, setDark] = useState<boolean | null>(null);
   const { ref, size } = useBoxSize();
-  useEffect(() => { void refreshDevices(); }, []);
+  const probeSimulator = shouldProbeDevices(true, DESKTOP_OS, "ios-simulator");
+  useEffect(() => { if (probeSimulator) void refreshDevices(); }, [probeSimulator]);
 
   const current = devices.find((d) => d.udid === picked) ?? devices.find((d) => d.state === "booted") ?? devices[0] ?? null;
   const udid = current?.udid ?? null;
@@ -232,9 +240,9 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
         {current && <StatusDot on={booted} label={booting ? t("simulator.booting") : booted ? t("chat.devices.on") : t("chat.devices.off")} />}
         <span className="flex-1" />
         {booted && bundle && <span className="hidden @[34rem]:block min-w-0 max-w-[45%] font-mono text-chat-code text-gray-500 dark:text-white/50 truncate" title={bundle}>{bundle}</span>}
-        <button type="button" disabled={!booted || !bundle} title={t("chat.devices.relaunch")} aria-label={t("chat.devices.relaunch")}
+        <button type="button" disabled={deviceAction("ios-simulator", "relaunch", booted && !!bundle, t("chat.devices.relaunch"), t).disabled} title={deviceAction("ios-simulator", "relaunch", booted && !!bundle, t("chat.devices.relaunch"), t).label} aria-label={deviceAction("ios-simulator", "relaunch", booted && !!bundle, t("chat.devices.relaunch"), t).label}
           onClick={() => udid && bundle && run(simulatorRelaunch(udid, bundle).then(() => setAppRevision((n) => n + 1)))}
-          className={`shrink-0 h-7 px-2 inline-flex items-center gap-1.5 rounded-[7px] text-chat-note border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white/85 ${ctlCls} disabled:opacity-40 disabled:pointer-events-none`}>
+          className={`shrink-0 h-7 px-2 inline-flex items-center gap-1.5 rounded-[7px] text-chat-note border border-gray-200 dark:border-white/10 text-gray-800 dark:text-white/85 ${ctlCls} disabled:opacity-40`}>
           <ReloadIcon className="w-3.5 h-3.5" />
           <span className="hidden @[30rem]:inline">{t("chat.devices.relaunch")}</span>
         </button>
@@ -243,13 +251,13 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
       <div className="flex-1 min-h-0 flex bg-gray-100 dark:bg-white/[0.02]">
         <div ref={ref} className="flex-1 min-w-0 flex items-center justify-center p-5">
           {error ? <p className="text-chat-note text-gray-500 dark:text-white/45">{error}</p> : !current ? (
-            <p className="max-w-[260px] text-center text-chat-note text-gray-500 dark:text-white/45">{loaded ? t("chat.devices.noIos") : t("chat.panel.loading")}</p>
+            <p className="max-w-[260px] text-center text-chat-note text-gray-500 dark:text-white/45">{!probeSimulator ? t("chat.devices.unsupported.iosHost") : loaded ? t("chat.devices.noIos") : t("chat.panel.loading")}</p>
           ) : frame.outerW > 0 && (
             <div className="shrink-0 box-border bg-gray-900 shadow-[0_0_0_2px_rgba(58,58,60,1),0_24px_48px_-20px_rgba(0,0,0,0.45)]"
               style={{ width: frame.outerW, height: frame.outerH, padding: frame.pad, borderRadius: frame.outerRadius }}>
               <div className={`relative h-full w-full overflow-hidden ${booted ? "bg-black" : "bg-gray-100 dark:bg-black"}`} style={{ borderRadius: frame.screenRadius }}>
                 {booted ? (
-                  <SimulatorScreen screenId="chat-devices" udid={current.udid} radius={frame.screenRadius} onError={fail} />
+                  <SimulatorScreen screenId="chat-devices" udid={current.udid} radius={frame.screenRadius} onError={fail} engaged={probeSimulator} />
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center gap-2.5 px-5 text-center">
                     <span className="text-chat-heading font-semibold text-gray-900 dark:text-white">{current.name}</span>
@@ -257,8 +265,9 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
                       {booting ? t("simulator.booting") : `${current.runtime} · ${t("simulator.offHint")}`}
                     </span>
                     {!booting && (
-                      <button type="button" onClick={() => void boot()}
-                        className="h-8 rounded-lg bg-accent-600 px-4 text-chat-note font-medium text-white hover:bg-accent-700">{t("simulator.boot")}</button>
+                      <button type="button" disabled={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).disabled}
+                        title={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).label} onClick={() => void boot()}
+                        className="h-8 rounded-lg bg-accent-600 px-4 text-chat-note font-medium text-white hover:bg-accent-700 disabled:opacity-40">{t("simulator.boot")}</button>
                     )}
                   </div>
                 )}
@@ -268,26 +277,26 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
         </div>
 
         <DeviceNav label={t("chat.devices.controls")}>
-          <NavButton label={t("chat.devices.home")} disabled={!booted} onClick={() => udid && run(simulatorButton(udid, "home"))}><HomeIcon className="w-[17px] h-[17px]" /></NavButton>
-          <NavButton label={t("chat.devices.rotate")} disabled={!booted}
+          <NavButton label={deviceAction("ios-simulator", "home", booted, t("chat.devices.home"), t).label} disabled={deviceAction("ios-simulator", "home", booted, t("chat.devices.home"), t).disabled} onClick={() => udid && run(simulatorButton(udid, "home"))}><HomeIcon className="w-[17px] h-[17px]" /></NavButton>
+          <NavButton label={deviceAction("ios-simulator", "rotate", booted, t("chat.devices.rotate"), t).label} disabled={deviceAction("ios-simulator", "rotate", booted, t("chat.devices.rotate"), t).disabled}
             onClick={() => udid && simulatorRotate(udid, landscape ? "right" : "left").then((o) => setLandscape(o.startsWith("landscape"))).catch(fail)}>
             <RotateIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <NavButton label={t("chat.devices.shotToChat")} disabled={!booted} onClick={() => udid && simulatorScreenshot(udid).then((p) => sendShotToChat(p, t, composerTarget)).catch(fail)}>
+          <NavButton label={deviceAction("ios-simulator", "screenshot", booted, t("chat.devices.shotToChat"), t).label} disabled={deviceAction("ios-simulator", "screenshot", booted, t("chat.devices.shotToChat"), t).disabled} onClick={() => udid && simulatorScreenshot(udid).then((p) => sendShotToChat(p, t, composerTarget)).catch(fail)}>
             <CameraIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          {udid && <ScreenRecordButton kind="simulator" target={udid} composerTarget={composerTarget} label={current?.name ?? udid} disabled={!booted} className={ibCls} />}
-          <NavButton label={dark ? t("chat.devices.appearanceLight") : t("chat.devices.appearanceDark")} disabled={!booted || dark === null}
+          {udid && <ScreenRecordButton kind="simulator" target={udid} composerTarget={composerTarget} label={current?.name ?? udid} disabled={!booted || !probeSimulator} className={ibCls} />}
+          <NavButton label={deviceAction("ios-simulator", "appearance", booted && dark !== null, dark ? t("chat.devices.appearanceLight") : t("chat.devices.appearanceDark"), t).label} disabled={deviceAction("ios-simulator", "appearance", booted && dark !== null, dark ? t("chat.devices.appearanceLight") : t("chat.devices.appearanceDark"), t).disabled}
             onClick={() => udid && simulatorAppearance(udid, dark ? "light" : "dark").then((a) => setDark(a === "dark")).catch(fail)}>
             <ContrastIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <NavButton label={t("chat.devices.location")} disabled={!booted} pop={(close) => udid && <LocationPop udid={udid} onDone={close} onError={fail} />}>
+          <NavButton label={deviceAction("ios-simulator", "location", booted, t("chat.devices.location"), t).label} disabled={deviceAction("ios-simulator", "location", booted, t("chat.devices.location"), t).disabled} pop={(close) => udid && <LocationPop udid={udid} onDone={close} onError={fail} />}>
             <PinIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <NavButton label={t("chat.devices.faceId")} disabled={!booted} pop={() => udid && <FaceIdPop udid={udid} onError={fail} />}>
+          <NavButton label={deviceAction("ios-simulator", "biometric", booted, t("chat.devices.faceId"), t).label} disabled={deviceAction("ios-simulator", "biometric", booted, t("chat.devices.faceId"), t).disabled} pop={() => udid && <FaceIdPop udid={udid} onError={fail} />}>
             <FaceIdIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <NavButton label={t("chat.devices.keyboard")} disabled={!booted} pop={(close) => udid && <TypePop udid={udid} onDone={close} onError={fail} />}>
+          <NavButton label={deviceAction("ios-simulator", "keyboard", booted, t("chat.devices.keyboard"), t).label} disabled={deviceAction("ios-simulator", "keyboard", booted, t("chat.devices.keyboard"), t).disabled} pop={(close) => udid && <TypePop udid={udid} onDone={close} onError={fail} />}>
             <KeyboardIcon className="w-[17px] h-[17px]" />
           </NavButton>
           <span className="flex-1" />
@@ -309,14 +318,20 @@ function IosPicker({ devices, current, loaded, physical }: { devices: SimDevice[
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
   const real = useIphoneStore((s) => (physical ? s.devices.find((d) => d.id === physical) : undefined));
-  useEffect(() => (open ? watchPhysical() : undefined), [open]);
+  const probePhysical = shouldProbeDevices(open, DESKTOP_OS, "ios-physical");
+  const probeSimulator = shouldProbeDevices(true, DESKTOP_OS, "ios-simulator");
+  useEffect(() => (probePhysical ? watchPhysical() : undefined), [probePhysical]);
+  useEffect(() => {
+    if (!open || probePhysical) return;
+    useIphoneStore.setState({ loaded: true, unavailable: "platform" });
+  }, [open, probePhysical]);
   const groups: [string, SimDevice[]][] = [
     [t("simulator.group.iphone"), devices.filter((d) => d.family === "iphone")],
     [t("simulator.group.ipad"), devices.filter((d) => d.family === "ipad")],
   ];
   return (
     <div ref={ref} className="relative min-w-0 shrink">
-      <button type="button" onClick={() => { if (!open) void refreshDevices(); setOpen(!open); }} aria-haspopup="listbox" aria-expanded={open} aria-label={t("simulator.pick")}
+      <button type="button" onClick={() => { if (!open && probeSimulator) void refreshDevices(); setOpen(!open); }} aria-haspopup="listbox" aria-expanded={open} aria-label={t("simulator.pick")}
         className={`inline-flex max-w-full items-center gap-2 h-[30px] px-2.5 rounded-lg border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white ${ctlCls}`}>
         <PhoneIcon className="w-3.5 h-3.5 shrink-0" />
         <span className="truncate">{physical ? (real?.name ?? t("simulator.pick"))
@@ -422,23 +437,23 @@ function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevic
   };
   return (
     <div className="flex flex-col">
-      {booted && <button type="button" onClick={() => { simulatorButton(device.udid, "lock").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.lock")}</button>}
+      {booted && <button type="button" disabled={deviceAction("ios-simulator", "lock", true, t("simulator.lock"), t).disabled} title={deviceAction("ios-simulator", "lock", true, t("simulator.lock"), t).label} onClick={() => { simulatorButton(device.udid, "lock").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.lock")}</button>}
       {booted && (
         <form className="flex items-center gap-1.5 px-1 py-1" onSubmit={(e) => { e.preventDefault(); if (url.trim()) simulatorOpenUrl(device.udid, url.trim()).then(onDone).catch(onError); }}>
           <input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t("chat.devices.openUrl")} aria-label={t("chat.devices.openUrl")} className={`${fieldCls} flex-1`} />
         </form>
       )}
-      {booted && <button type="button" onClick={() => { simulatorClipboard(device.udid, "toDevice").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToDevice")}</button>}
-      {booted && <button type="button" onClick={() => { simulatorClipboard(device.udid, "toMac").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToMac")}</button>}
+      {booted && <button type="button" disabled={deviceAction("ios-simulator", "clipboard", true, t("simulator.clipboardToDevice"), t).disabled} title={deviceAction("ios-simulator", "clipboard", true, t("simulator.clipboardToDevice"), t).label} onClick={() => { simulatorClipboard(device.udid, "toDevice").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToDevice")}</button>}
+      {booted && <button type="button" disabled={deviceAction("ios-simulator", "clipboard", true, t("simulator.clipboardToMac"), t).disabled} title={deviceAction("ios-simulator", "clipboard", true, t("simulator.clipboardToMac"), t).label} onClick={() => { simulatorClipboard(device.udid, "toMac").then(onDone).catch(onError); }} className={itemCls}>{t("simulator.clipboardToMac")}</button>}
       <button type="button" onClick={toggleLight} className={itemCls} title={t("simulator.light")}>
         <span className="w-4 shrink-0">{light && <CheckIcon className="w-3.5 h-3.5" />}</span>{t("simulator.lightShort")}
       </button>
       <div className="my-1 h-px bg-gray-200 dark:bg-white/[0.08]" />
       {booted ? (
-        <button type="button" onClick={() => { simulatorShutdown(device.udid).then(() => { setDeviceState(device.udid, "shutdown"); onDone(); }).catch(onError); }}
+        <button type="button" disabled={deviceAction("ios-simulator", "boot", true, t("simulator.shutdown"), t).disabled} title={deviceAction("ios-simulator", "boot", true, t("simulator.shutdown"), t).label} onClick={() => { simulatorShutdown(device.udid).then(() => { setDeviceState(device.udid, "shutdown"); onDone(); }).catch(onError); }}
           className={`${itemCls} text-red-600 dark:text-red-400`}>{t("simulator.shutdown")}</button>
       ) : (
-        <button type="button" onClick={onBoot} className={itemCls}>{t("simulator.boot")}</button>
+        <button type="button" disabled={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).disabled} title={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).label} onClick={onBoot} className={itemCls}>{t("simulator.boot")}</button>
       )}
     </div>
   );
@@ -537,6 +552,7 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
   const avds = list?.avds ?? [];
 
   const dims = deviceFrame("android", frame ? { w: frame.width, h: frame.height } : { w: 1080, h: 2424 }, { w: size.w - 40, h: size.h - 40 });
+  const androidAction = (id: DeviceToolId, ready: boolean, action: string) => deviceAction("android", id, ready, action, t);
 
   return (
     <div className="h-full flex flex-col">
@@ -578,24 +594,25 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
                 {list && !list.adb ? t("canvas.device.noAdb") : chosen ? problem ?? t("chat.panel.loading") : t("canvas.device.empty")}
               </p>
               {!chosen && avds.map((a) => (
-                <button key={a} type="button" onClick={() => startAvd(a)}
-                  className="h-8 rounded-lg bg-accent-600 px-4 text-chat-note font-medium text-white hover:bg-accent-700">{t("chat.devices.startAvd", { name: a })}</button>
+                <button key={a} type="button" disabled={androidAction("startAvd", true, t("chat.devices.startAvd", { name: a })).disabled}
+                  title={androidAction("startAvd", true, t("chat.devices.startAvd", { name: a })).label} onClick={() => startAvd(a)}
+                  className="h-8 rounded-lg bg-accent-600 px-4 text-chat-note font-medium text-white hover:bg-accent-700 disabled:opacity-40">{t("chat.devices.startAvd", { name: a })}</button>
               ))}
             </div>
           )}
         </div>
 
         <DeviceNav label={t("chat.devices.controls")}>
-          <NavButton label={t("canvas.device.back")} disabled={!chosen} onClick={() => press("back")}><BackTriangleIcon className="w-[17px] h-[17px]" /></NavButton>
-          <NavButton label={t("canvas.device.home")} disabled={!chosen} onClick={() => press("home")}><CircleIcon className="w-[17px] h-[17px]" /></NavButton>
-          <NavButton label={t("canvas.device.recents")} disabled={!chosen} onClick={() => press("recents")}><SquareIcon className="w-[17px] h-[17px]" /></NavButton>
+          <NavButton {...androidAction("back", !!chosen, t("canvas.device.back"))} onClick={() => press("back")}><BackTriangleIcon className="w-[17px] h-[17px]" /></NavButton>
+          <NavButton {...androidAction("home", !!chosen, t("canvas.device.home"))} onClick={() => press("home")}><CircleIcon className="w-[17px] h-[17px]" /></NavButton>
+          <NavButton {...androidAction("recents", !!chosen, t("canvas.device.recents"))} onClick={() => press("recents")}><SquareIcon className="w-[17px] h-[17px]" /></NavButton>
           <span aria-hidden="true" className="w-5 h-px my-1 bg-gray-200 dark:bg-white/[0.08]" />
-          <NavButton label={t("chat.devices.rotate")} disabled={!chosen} onClick={() => chosen && androidRotate(chosen).catch(fail)}><RotateIcon className="w-[17px] h-[17px]" /></NavButton>
-          <NavButton label={t("chat.devices.shotToChat")} disabled={!chosen} onClick={() => chosen && androidScreenshot(chosen).then((p) => sendShotToChat(p, t, composerTarget)).catch(fail)}>
+          <NavButton {...androidAction("rotate", !!chosen, t("chat.devices.rotate"))} onClick={() => chosen && androidRotate(chosen).catch(fail)}><RotateIcon className="w-[17px] h-[17px]" /></NavButton>
+          <NavButton {...androidAction("screenshot", !!chosen, t("chat.devices.shotToChat"))} onClick={() => chosen && androidScreenshot(chosen).then((p) => sendShotToChat(p, t, composerTarget)).catch(fail)}>
             <CameraIcon className="w-[17px] h-[17px]" />
           </NavButton>
           {chosen && <ScreenRecordButton kind="android" target={chosen} composerTarget={composerTarget} label={info?.model || chosen} disabled={!ready.some((device) => device.serial === chosen)} className={ibCls} />}
-          <NavButton label={t("chat.devices.volume")} disabled={!chosen} pop={() => (
+          <NavButton {...androidAction("volume", !!chosen, t("chat.devices.volume"))} pop={() => (
             <div className="flex flex-col">
               <PopTitle>{t("chat.devices.volume")}</PopTitle>
               <button type="button" onClick={() => press("volume_up")} className={itemCls}>{t("chat.devices.volumeUp")}</button>
@@ -605,13 +622,13 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
           )}>
             <VolumeIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <NavButton label={t("chat.devices.logcat")} disabled={!chosen} wide pop={() => chosen && <LogcatPop serial={chosen} onError={fail} />}>
+          <NavButton {...androidAction("logcat", !!chosen, t("chat.devices.logcat"))} wide pop={() => chosen && <LogcatPop serial={chosen} onError={fail} />}>
             <LogIcon className="w-[17px] h-[17px]" />
           </NavButton>
           <span className="flex-1" />
           <NavButton anchor="bottom" label={t("chat.devices.more")} pop={(close) => (
             <div className="flex flex-col">
-              {chosen && <button type="button" onClick={() => { press("power"); close(); }} className={itemCls}>{t("chat.devices.power")}</button>}
+              {chosen && <button type="button" disabled={androidAction("power", true, t("chat.devices.power")).disabled} title={androidAction("power", true, t("chat.devices.power")).label} onClick={() => { press("power"); close(); }} className={itemCls}>{t("chat.devices.power")}</button>}
               {avds.length > 0 && <PopTitle>{t("canvas.device.emulator")}</PopTitle>}
               {avds.map((a) => (
                 <button key={a} type="button" onClick={() => { startAvd(a); close(); }} className={itemCls}>{t("chat.devices.startAvd", { name: a })}</button>

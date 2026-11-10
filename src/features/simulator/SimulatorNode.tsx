@@ -5,7 +5,7 @@ import { Position } from "@xyflow/react";
 
 import { CordPort } from "@/features/canvas/cords";
 import { isNoteId, isPortalId, neighbors, type CanvasPortal } from "@/features/canvas/board";
-import { canvasActions, useActiveBoardKey, useCanvasStore } from "@/features/canvas/store";
+import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { AlertaToast } from "@/shared/ui/alerts";
 
@@ -14,6 +14,9 @@ import {
   SIMULATOR_ORIENTATION_EVENT, simulatorBoot, simulatorButton, simulatorClipboard, simulatorOrientation, simulatorPriority, simulatorRotate, simulatorScreenshot,
   simulatorShutdown, type SimDevice, type SimOrientationEvent,
 } from "./ipc";
+import { useChatShell } from "@/app/uiStore";
+import { DESKTOP_OS } from "@/app/platform";
+import { canvasDeviceEngaged, shouldProbeDevices } from "@/features/chat/deviceDemand";
 import { canTouch, frameLayout, isPhysicalId, physicalScreen } from "@/features/iphone/model";
 import { iphoneMirrorConnect, iphoneMirrorDisconnect } from "@/features/iphone/ipc";
 import { DeviceFrame, screenRadiusOf } from "@/features/iphone/DeviceFrame";
@@ -61,22 +64,26 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
   const [landscape, setLandscape] = useState(false);
   const [physicalSearching, setPhysicalSearching] = useState(false);
   const [physicalSessionBusy, setPhysicalSessionBusy] = useState(false);
+  const surfaceOpen = canvasDeviceEngaged(useWorkMode(), useChatShell());
+  const probeSimulator = shouldProbeDevices(surfaceOpen, DESKTOP_OS, "ios-simulator");
+  const probePhysical = shouldProbeDevices(surfaceOpen, DESKTOP_OS, "ios-physical");
 
   useEffect(() => {
+    if (!probeSimulator) return;
     listenActivity();
     if (!loaded) {
       syncSimulatorPrefs();
       void refreshDevices();
     }
-  }, [loaded]);
+  }, [loaded, probeSimulator]);
 
   // O nó pode mostrar um iPhone ou iPad físico (`device:<id>`): só ver, sem os controles do simulador.
   const physicalId = isPhysicalId(portal.udid) ? portal.udid : null;
   const physical = useIphoneStore((s) => (physicalId ? s.devices.find((d) => d.id === physicalId) : undefined));
-  const mirror = useMirrorStatus(physicalId);
+  const mirror = useMirrorStatus(probePhysical ? physicalId : null);
   const disconnected = useIphoneStore((s) => (physicalId ? s.disconnectedDevices.includes(physicalId) : false));
   const physicalLoaded = useIphoneStore((s) => s.loaded);
-  useEffect(() => { if (physicalId) void refreshPhysical(); }, [physicalId]);
+  useEffect(() => { if (probePhysical && physicalId) void refreshPhysical(); }, [physicalId, probePhysical]);
   const current = physicalId ? undefined : deviceByUdid(devices, portal.udid);
   const booted = current?.state === "booted";
   // A moldura deita com o iOS: a orientação vem do backend ao ligar e a cada giro (de qualquer tela ou agente).
@@ -90,6 +97,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       setLandscape(false);
       return;
     }
+    if (!probeSimulator) return;
     let alive = true;
     simulatorOrientation(udid).then((o) => alive && turnRef.current(isLandscape(o))).catch(() => undefined);
     const off = listen<SimOrientationEvent>(SIMULATOR_ORIENTATION_EVENT, (e) => {
@@ -99,7 +107,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       alive = false;
       void off.then((f) => f());
     };
-  }, [portal.udid, booted]);
+  }, [portal.udid, booted, probeSimulator]);
   const previousPhysicalLayout = useRef<{ id: string; width: number; height: number; scale: number } | null>(null);
   const priorLayout = previousPhysicalLayout.current;
   const physicalQuarterTurn = !!physicalId && priorLayout?.id === physicalId
@@ -204,7 +212,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
       const next = screenOf(deviceByUdid(devices, udid));
       resize(next, clampScale(next, scale), chat, { udid, name: deviceByUdid(devices, udid)?.name ?? portal.name });
     },
-    onOpenPicker: () => void refreshDevices(),
+    onOpenPicker: () => { if (shouldProbeDevices(true, DESKTOP_OS, "ios-simulator")) void refreshDevices(); },
     onSearchPhysical: () => { void searchPhysical(); },
     onTogglePhysicalSession: () => { void togglePhysicalSession(); },
     onButton: (name: "home" | "lock") => { if (portal.udid) simulatorButton(portal.udid, name).catch(fail); },
@@ -285,7 +293,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
               <DeviceFrame device={physicalId} name={portal.name} layout={frameLayout(physical?.model ?? "", physical?.family ?? "iphone")}
                 screen={{ width: Math.round(phone.screenW), height: Math.round(phone.screenH) }} enabled={!disconnected && canTouch(mirror)}>
                 <PhysicalMirror screenId={id} device={physicalId} known={!physicalLoaded || !!physical} status={mirror}
-                  radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW))} onError={fail} />
+                  radius={screenRadiusOf(frameLayout(physical?.model ?? "", physical?.family ?? "iphone"), Math.round(phone.screenW))} onError={fail} engaged={probePhysical} />
               </DeviceFrame>
             </div>
           ) : (
@@ -298,7 +306,7 @@ export const SimulatorNode = memo(function SimulatorNode({ id, portal, selected 
             }}>
             <div className="nodrag nowheel nopan relative h-full w-full overflow-hidden bg-black" style={{ borderRadius: phone.screenRadius }}>
               {booted && portal.udid && !booting ? (
-                <SimulatorScreen screenId={id} udid={portal.udid} radius={phone.screenRadius} onError={fail} />
+                <SimulatorScreen screenId={id} udid={portal.udid} radius={phone.screenRadius} onError={fail} engaged={probeSimulator} />
               ) : (
                 <div className="flex h-full flex-col items-center justify-center gap-3 px-4 text-center">
                   {paused && !booting && <span aria-hidden className="text-[22px] text-accent-300">☾</span>}

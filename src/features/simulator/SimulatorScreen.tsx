@@ -1,7 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { boxOf, clippingAncestors, COVER_MS, coversOf } from "@/features/browser/nativeSurface";
 import { placeOf, type Box } from "@/features/browser/realBrowser";
+
+import { mirrorShouldAttach } from "@/features/chat/deviceDemand";
 
 import { simulatorAttach, simulatorDetach, simulatorPlace, type SimPlace } from "./ipc";
 
@@ -46,33 +48,43 @@ const SIMULATOR_API: NativeScreenApi = { attach: simulatorAttach, place: simulat
  *
  * Só manda algo quando o lugar muda: com o canvas parado, nada vai ao backend.
  */
-export function SimulatorScreen({ screenId, udid, radius, onError }: {
+export function SimulatorScreen({ screenId, udid, radius, onError, engaged = true }: {
   /** Único por tela aberta (o id do nó, ou o da aba). */
   screenId: string;
   udid: string;
   /** Raio dos cantos da tela em px de layout (o zoom do canvas é aplicado aqui). */
   radius: number;
   onError: (message: string) => void;
+  /** A superfície está aberta. Fechada, a view fica no lugar e a sessão não começa. */
+  engaged?: boolean;
 }) {
-  return <NativeScreen api={SIMULATOR_API} screenId={screenId} target={udid} radius={radius} onError={onError} />;
+  return <NativeScreen api={SIMULATOR_API} screenId={screenId} target={udid} radius={radius} onError={onError} engaged={engaged} />;
 }
 
 /** A medição de `SimulatorScreen`, para qualquer tela nativa (o iPhone físico usa a mesma). */
-export function NativeScreen({ api, screenId, target, radius, onError }: {
+export function NativeScreen({ api, screenId, target, radius, onError, engaged = true }: {
   api: NativeScreenApi;
   screenId: string;
   /** O aparelho: o UDID do simulador ou o id do aparelho físico. */
   target: string;
   radius: number;
   onError: (message: string) => void;
+  /** Liga a sessão na primeira vez em que a superfície abre. Continua montada se ela fechar. */
+  engaged?: boolean;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const latest = useRef({ radius, onError });
   latest.current = { radius, onError };
+  // A primeira abertura liga a sessão. Fechar a superfície não volta este estado: o efeito não
+  // desmonta a NSView, e a medição avisa que ela saiu de vista.
+  const [opened, setOpened] = useState(() => mirrorShouldAttach(false, engaged));
+  useEffect(() => {
+    if (mirrorShouldAttach(opened, engaged)) setOpened(true);
+  }, [engaged, opened]);
 
   useEffect(() => {
     const el = box.current;
-    if (!el) return;
+    if (!el || !opened) return;
     let attached = false;
     let closed = false;
     let sent: SimPlace | null = null;
@@ -137,7 +149,7 @@ export function NativeScreen({ api, screenId, target, radius, onError }: {
       cancelAnimationFrame(frame);
       api.detach(screenId).catch(() => undefined);
     };
-  }, [api, screenId, target]);
+  }, [api, screenId, target, opened]);
 
   return <div ref={box} data-simulator-screen className="absolute inset-0" />;
 }
