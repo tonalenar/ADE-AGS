@@ -380,7 +380,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       setStashBusy(false);
     }
   };
-  const usePromptStashAction = () => {
+  const runPromptStashAction = () => {
     if (editingQueueId) return;
     if (hasStashContent) {
       void saveCurrentPrompt();
@@ -775,7 +775,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
             if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "s") {
               e.preventDefault();
               e.stopPropagation();
-              usePromptStashAction();
+              runPromptStashAction();
               return;
             }
             if (stashMenuOpen && e.key === "Escape") {
