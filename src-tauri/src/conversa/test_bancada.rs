@@ -688,4 +688,59 @@ mod replay_protocolo {
         depois.as_object_mut().unwrap().remove("expected");
         assert_eq!(antes, depois);
     }
+
+    fn gravada(id: &str) -> Value {
+        let texto = std::fs::read_to_string(pasta().join(format!("{id}.json"))).unwrap();
+        serde_json::from_str(&texto).unwrap()
+    }
+
+    fn outs(fixture: &Value) -> Vec<&Value> {
+        fixture["transcript"].as_array().unwrap().iter().filter(|e| e.get("out").is_some()).map(|e| &e["out"]).collect()
+    }
+
+    /// Os frames decisivos ficam no transcript. O snapshot só vê o que o motor produz.
+    #[test]
+    fn as_fixtures_gravadas_guardam_os_frames_que_a_captura_decidiu() {
+        let ferramenta = gravada("claude-steer-ferramenta");
+        let results: Vec<&Value> = outs(&ferramenta).into_iter().filter(|o| o["type"] == "result").collect();
+        assert_eq!(results.len(), 1, "um único result");
+        assert_eq!(results[0]["result"], "STEER_OK");
+        assert!(ferramenta["transcript"].as_array().unwrap().iter().any(|e| e.get("in").and_then(|v| v.pointer("/message/content/0/text")).and_then(Value::as_str).is_some_and(|t| t.contains("MENSAGEM_STEER"))));
+
+        let sem = gravada("claude-steer-sem-ferramenta");
+        let results: Vec<&Value> = outs(&sem).into_iter().filter(|o| o["type"] == "result").collect();
+        assert_eq!(results.len(), 2);
+        assert!(!results[0]["result"].as_str().unwrap().contains("STEER_OK"));
+        assert!(results[0]["result"].as_str().unwrap().contains("1\n2\n3"));
+        assert_eq!(results[1]["result"], "STEER_OK");
+        let steer_ms = sem["transcript"].as_array().unwrap().iter().find_map(|e| {
+            e.get("in").and_then(|v| v.pointer("/message/content/0/text")).and_then(Value::as_str).filter(|t| t.contains("MENSAGEM_STEER")).map(|_| e["atMs"].as_u64().unwrap())
+        }).unwrap();
+        assert_eq!(steer_ms, 1974);
+
+        let real = gravada("codex-interrompido-real");
+        assert!(outs(&real).iter().any(|o| o["method"] == "turn/completed" && o.pointer("/params/turn/status").and_then(Value::as_str) == Some("interrupted")));
+        assert!(real["transcript"].as_array().unwrap().iter().any(|e| e.get("in").and_then(|v| v.get("method")).and_then(Value::as_str) == Some("turn/interrupt")));
+
+        let antes = gravada("codex-interrupt-antes-do-started");
+        let ordem: Vec<&str> = antes["transcript"].as_array().unwrap().iter().filter_map(|e| {
+            let body = e.get("out").or_else(|| e.get("in"))?;
+            if body.get("error").and_then(|err| err.get("code")).and_then(Value::as_i64) == Some(-32600) {
+                return Some("erro");
+            }
+            match body.get("method").and_then(Value::as_str) {
+                Some("turn/started") => Some("started"),
+                Some("turn/completed") => Some("completed"),
+                Some("turn/interrupt") => Some("interrupt"),
+                _ => None,
+            }
+        }).collect();
+        assert!(ordem.windows(4).any(|w| w == ["interrupt", "erro", "started", "completed"]), "{ordem:?}");
+
+        for id in ["cursor-queda", "antigravity-queda"] {
+            let f = gravada(id);
+            assert!(outs(&f).iter().all(|o| o.get("type") != Some(&Value::String("result".into())) && o.get("event") != Some(&Value::String("result".into()))), "{id}");
+            assert!(f["transcript"].as_array().unwrap().iter().any(|e| e.get("close").is_some()), "{id}");
+        }
+    }
 }

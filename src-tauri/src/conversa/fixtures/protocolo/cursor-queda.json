@@ -1,0 +1,233 @@
+{
+  "agent": "cursor",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": true,
+    "deltas": [
+      [
+        "cursor:bancada:r1",
+        "The"
+      ],
+      [
+        "cursor:bancada:r1",
+        " user"
+      ],
+      [
+        "cursor:bancada:r1",
+        " wants"
+      ],
+      [
+        "cursor:bancada:r1",
+        " me to read teste.tx"
+      ],
+      [
+        "cursor:bancada:r1",
+        "t and then write numbers from 1 to 40, one per line."
+      ],
+      [
+        "cursor:bancada:t2",
+        "V"
+      ],
+      [
+        "cursor:bancada:t2",
+        "ou"
+      ],
+      [
+        "cursor:bancada:t2",
+        " ler"
+      ]
+    ],
+    "filhos": [],
+    "fim": {
+      "durationMs": null,
+      "error": "O Cursor terminou sem responder",
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000009235,
+        "id": "cursor:bancada:r1",
+        "kind": "reasoning",
+        "text": "The user wants me to read teste.txt and then write numbers from 1 to 40, one per line."
+      },
+      {
+        "at": 1790000009455,
+        "id": "cursor:bancada:t2",
+        "kind": "assistant",
+        "text": "Vou ler"
+      }
+    ],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "reasoning",
+      "assistant"
+    ]
+  },
+  "format": "ade-replay",
+  "id": "cursor-queda",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "cursor-agent 2026.11.05-86047df, modelo grok-4.7-low, captura de 2026-11-09. SIGKILL no meio da fala parcial, sem result e sem mensagem de interrupt no protocolo. O atMs é o da captura. O close da captura é code -9; a fixture registra o fechamento sem stderr.",
+    "kind": "recorded",
+    "recordedAt": 1794270868
+  },
+  "protocol": "cursor-stream",
+  "title": "Kill do Cursor no meio da fala, sem result",
+  "transcript": [
+    {
+      "atMs": 4920,
+      "out": {
+        "apiKeySource": "login",
+        "cwd": "{{cwd}}",
+        "model": "Grok 4.7 256K Low",
+        "permissionMode": "default",
+        "session_id": "{{session:1}}",
+        "subtype": "init",
+        "type": "system"
+      }
+    },
+    {
+      "atMs": 4921,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "Leia o arquivo teste.txt e depois escreva os numeros de 1 a 40, um por linha.",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        "session_id": "{{session:1}}",
+        "type": "user"
+      }
+    },
+    {
+      "atMs": 8261,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": "The",
+        "timestamp_ms": 1794268534285,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 8326,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " user",
+        "timestamp_ms": 1794268534351,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 8405,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " wants",
+        "timestamp_ms": 1794268534430,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 8672,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": " me to read teste.tx",
+        "timestamp_ms": 1794268534696,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9235,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "delta",
+        "text": "t and then write numbers from 1 to 40, one per line.",
+        "timestamp_ms": 1794268535259,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9235,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "completed",
+        "timestamp_ms": 1794268535260,
+        "type": "thinking"
+      }
+    },
+    {
+      "atMs": 9235,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "V",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268535260,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9235,
+      "in": {
+        "kill": "SIGKILL",
+        "pid": 21753,
+        "reason": "queda-sigkill"
+      }
+    },
+    {
+      "atMs": 9235,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": "ou",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268535260,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9236,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "text": " ler",
+              "type": "text"
+            }
+          ],
+          "role": "assistant"
+        },
+        "session_id": "{{session:1}}",
+        "timestamp_ms": 1794268535260,
+        "type": "assistant"
+      }
+    },
+    {
+      "atMs": 9455,
+      "close": {}
+    }
+  ],
+  "version": 2
+}

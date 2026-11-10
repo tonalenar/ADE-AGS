@@ -1,0 +1,26 @@
+{
+  "checks": [
+    {
+      "label": "a sessão é a do init",
+      "expect": {
+        "sessao": "{{session:1}}"
+      }
+    },
+    {
+      "label": "o Read completa e a resposta depois da ferramenta é STEER_OK",
+      "expect": {
+        "fim": "ok",
+        "ferramentas": [
+          "Read:done"
+        ],
+        "textoContem": "STEER_OK"
+      }
+    },
+    {
+      "label": "depois do result o stdout fica em silêncio, sem segundo turno",
+      "expect": {
+        "silencioMinMs": 100000
+      }
+    }
+  ]
+}

@@ -1,0 +1,779 @@
+{
+  "agent": "codex",
+  "expected": {
+    "aberturaFalhou": "O Codex não devolveu a thread",
+    "avisos": [],
+    "caiu": false,
+    "deltas": [
+      [
+        "{{session:6}}",
+        "O"
+      ],
+      [
+        "{{session:6}}",
+        "```"
+      ]
+    ],
+    "filhos": [],
+    "fim": {
+      "durationMs": 5019,
+      "error": null,
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000003343,
+        "id": "{{session:4}}",
+        "kind": "user",
+        "text": "Leia o arquivo teste.txt e mostre o conteudo."
+      },
+      {
+        "at": 1790000004896,
+        "durationMs": 0,
+        "id": "exec-{{session:5}}",
+        "kind": "tool",
+        "label": "/bin/zsh -lc 'cat teste.txt'",
+        "name": "Bash",
+        "output": "Linha 1 do arquivo de teste",
+        "status": "done",
+        "tool": "command"
+      },
+      {
+        "at": 1790000006410,
+        "id": "{{session:6}}",
+        "kind": "assistant",
+        "text": "O conteúdo de `teste.txt` é:\n\n```text\nLinha 1 do arquivo de teste\n```"
+      },
+      {
+        "at": 1790000006471,
+        "durationMs": 5019,
+        "id": "end:{{session:3}}",
+        "interrupted": false,
+        "kind": "turnEnd"
+      }
+    ],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": null,
+    "tipos": [
+      "user",
+      "tool",
+      "assistant",
+      "turnEnd"
+    ]
+  },
+  "format": "ade-replay",
+  "id": "codex-feliz",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "Codex CLI 0.167.0 (userAgent da resposta de initialize), modelo gpt-6-luna com effort low no turn/start, captura de 2026-11-09. Deltas item/agentMessage/delta repetidos ficaram em três (primeiro, meio e último); o item/completed guarda o texto. Listas de catálogo não havia além do que o servidor mandou. O close da captura é code 0.",
+    "kind": "recorded",
+    "recordedAt": 1794270814
+  },
+  "protocol": "codex-app-server",
+  "title": "Turno feliz do Codex com comando e turn/completed",
+  "transcript": [
+    {
+      "atMs": 457,
+      "out": {
+        "id": 1,
+        "result": {
+          "codexHome": "{{home}}",
+          "platformFamily": "unix",
+          "platformOs": "macos",
+          "userAgent": "ade-ags/0.167.0 (Mac OS 27.2.0; arm64) dumb (ade-ags; 0.1.0)"
+        }
+      }
+    },
+    {
+      "atMs": 457,
+      "out": {
+        "emittedAtMs": 1794267647220,
+        "method": "remoteControl/status/changed",
+        "params": {
+          "environmentId": null,
+          "installationId": "{{session:1}}",
+          "serverName": "host-exemplo",
+          "status": "disabled"
+        }
+      }
+    },
+    {
+      "atMs": 775,
+      "out": {
+        "emittedAtMs": 1794267647539,
+        "method": "account/updated",
+        "params": {
+          "authMode": "chatgpt",
+          "planType": "plus"
+        }
+      }
+    },
+    {
+      "atMs": 1428,
+      "out": {
+        "id": 2,
+        "result": {
+          "activePermissionProfile": null,
+          "approvalPolicy": "on-request",
+          "approvalsReviewer": "user",
+          "cwd": "{{cwd}}",
+          "disabledPluginIds": [],
+          "instructionSources": [],
+          "model": "gpt-6.1-sol",
+          "modelProvider": "openai",
+          "multiAgentMode": "explicitRequestOnly",
+          "reasoningEffort": null,
+          "runtimeWorkspaceRoots": [
+            "{{cwd}}"
+          ],
+          "sandbox": {
+            "excludeSlashTmp": false,
+            "excludeTmpdirEnvVar": false,
+            "networkAccess": false,
+            "type": "workspaceWrite",
+            "writableRoots": []
+          },
+          "serviceTier": "priority",
+          "thread": {
+            "agentNickname": null,
+            "agentRole": null,
+            "canAcceptDirectInput": true,
+            "cliVersion": "0.167.0",
+            "createdAt": 1794267648,
+            "cwd": "{{cwd}}",
+            "daybreakEnabled": null,
+            "environments": [
+              {
+                "cwd": "{{cwd}}",
+                "environmentId": "local",
+                "runtimeWorkspaceRoots": [
+                  "{{cwd}}"
+                ]
+              }
+            ],
+            "ephemeral": false,
+            "extra": null,
+            "forkedFromId": null,
+            "gitInfo": null,
+            "historyMode": "paginated",
+            "id": "{{session:2}}",
+            "model": "gpt-6.1-sol",
+            "modelProvider": "openai",
+            "name": null,
+            "originator": "ade-ags",
+            "parentThreadId": null,
+            "path": "{{home}}",
+            "preview": "",
+            "projectId": null,
+            "reasoningEffort": null,
+            "recencyAt": 1794267648,
+            "section": null,
+            "sectionEnteredAt": null,
+            "sessionId": "{{session:2}}",
+            "source": "vscode",
+            "status": {
+              "type": "idle"
+            },
+            "threadSource": null,
+            "turns": [],
+            "updatedAt": 1794267648
+          }
+        }
+      }
+    },
+    {
+      "atMs": 1428,
+      "out": {
+        "emittedAtMs": 1794267648190,
+        "method": "thread/started",
+        "params": {
+          "thread": {
+            "agentNickname": null,
+            "agentRole": null,
+            "canAcceptDirectInput": true,
+            "cliVersion": "0.167.0",
+            "createdAt": 1794267648,
+            "cwd": "{{cwd}}",
+            "daybreakEnabled": null,
+            "environments": [
+              {
+                "cwd": "{{cwd}}",
+                "environmentId": "local",
+                "runtimeWorkspaceRoots": [
+                  "{{cwd}}"
+                ]
+              }
+            ],
+            "ephemeral": false,
+            "extra": null,
+            "forkedFromId": null,
+            "gitInfo": null,
+            "historyMode": "paginated",
+            "id": "{{session:2}}",
+            "model": "gpt-6.1-sol",
+            "modelProvider": "openai",
+            "name": null,
+            "originator": "ade-ags",
+            "parentThreadId": null,
+            "path": "{{home}}",
+            "preview": "",
+            "projectId": null,
+            "reasoningEffort": null,
+            "recencyAt": 1794267648,
+            "section": null,
+            "sectionEnteredAt": null,
+            "sessionId": "{{session:2}}",
+            "source": "vscode",
+            "status": {
+              "type": "idle"
+            },
+            "threadSource": null,
+            "turns": [],
+            "updatedAt": 1794267648
+          }
+        }
+      }
+    },
+    {
+      "atMs": 1428,
+      "out": {
+        "emittedAtMs": 1794267648192,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "codex_apps",
+          "status": "starting",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 1428,
+      "out": {
+        "emittedAtMs": 1794267648192,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "node_repl",
+          "status": "starting",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 1429,
+      "out": {
+        "emittedAtMs": 1794267648192,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "rea",
+          "status": "starting",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 1429,
+      "out": {
+        "emittedAtMs": 1794267648192,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "cua_repl",
+          "status": "starting",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 1458,
+      "out": {
+        "id": 3,
+        "result": {
+          "turn": {
+            "completedAt": null,
+            "durationMs": null,
+            "error": null,
+            "id": "{{session:3}}",
+            "items": [],
+            "itemsView": "notLoaded",
+            "rootTurnId": "{{session:3}}",
+            "startedAt": null,
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 1665,
+      "out": {
+        "emittedAtMs": 1794267648429,
+        "method": "thread/status/changed",
+        "params": {
+          "status": {
+            "activeFlags": [],
+            "type": "active"
+          },
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 1665,
+      "out": {
+        "emittedAtMs": 1794267648429,
+        "method": "turn/started",
+        "params": {
+          "threadId": "{{session:2}}",
+          "turn": {
+            "completedAt": null,
+            "durationMs": null,
+            "error": null,
+            "id": "{{session:3}}",
+            "items": [],
+            "itemsView": "notLoaded",
+            "rootTurnId": "{{session:3}}",
+            "startedAt": 1794267648,
+            "status": "inProgress"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 1789,
+      "out": {
+        "emittedAtMs": 1794267648553,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "node_repl",
+          "status": "ready",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 1895,
+      "out": {
+        "emittedAtMs": 1794267648660,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "rea",
+          "status": "ready",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 2012,
+      "out": {
+        "emittedAtMs": 1794267648775,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "cua_repl",
+          "status": "ready",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 2256,
+      "out": {
+        "emittedAtMs": 1794267649021,
+        "method": "mcpServer/startupStatus/updated",
+        "params": {
+          "error": null,
+          "failureReason": null,
+          "name": "codex_apps",
+          "status": "ready",
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 3341,
+      "out": {
+        "emittedAtMs": 1794267650105,
+        "method": "item/started",
+        "params": {
+          "item": {
+            "clientId": null,
+            "completedAtMs": null,
+            "content": [
+              {
+                "text": "Leia o arquivo teste.txt e mostre o conteudo.",
+                "text_elements": [],
+                "type": "text"
+              }
+            ],
+            "id": "{{session:4}}",
+            "startedAtMs": 1794267650104,
+            "type": "userMessage"
+          },
+          "startedAtMs": 1794267650104,
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 3343,
+      "out": {
+        "emittedAtMs": 1794267650108,
+        "method": "item/completed",
+        "params": {
+          "completedAtMs": 1794267650105,
+          "item": {
+            "clientId": null,
+            "completedAtMs": 1794267650105,
+            "content": [
+              {
+                "text": "Leia o arquivo teste.txt e mostre o conteudo.",
+                "text_elements": [],
+                "type": "text"
+              }
+            ],
+            "id": "{{session:4}}",
+            "startedAtMs": 1794267650104,
+            "type": "userMessage"
+          },
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 4895,
+      "out": {
+        "emittedAtMs": 1794267651659,
+        "method": "item/started",
+        "params": {
+          "item": {
+            "aggregatedOutput": null,
+            "command": "/bin/zsh -lc 'cat teste.txt'",
+            "commandActions": [
+              {
+                "command": "cat teste.txt",
+                "name": "teste.txt",
+                "path": "{{cwd}}",
+                "type": "read"
+              }
+            ],
+            "completedAtMs": null,
+            "cwd": "{{cwd}}",
+            "durationMs": null,
+            "exitCode": null,
+            "id": "exec-{{session:5}}",
+            "pluginId": null,
+            "processId": "30910",
+            "scriptPath": null,
+            "source": "unifiedExecStartup",
+            "startedAtMs": 1794267651654,
+            "status": "inProgress",
+            "type": "commandExecution"
+          },
+          "startedAtMs": 1794267651654,
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 4896,
+      "out": {
+        "emittedAtMs": 1794267651661,
+        "method": "item/completed",
+        "params": {
+          "completedAtMs": 1794267651654,
+          "item": {
+            "aggregatedOutput": "Linha 1 do arquivo de teste\n",
+            "command": "/bin/zsh -lc 'cat teste.txt'",
+            "commandActions": [
+              {
+                "command": "cat teste.txt",
+                "name": "teste.txt",
+                "path": "{{cwd}}",
+                "type": "read"
+              }
+            ],
+            "completedAtMs": 1794267651654,
+            "cwd": "{{cwd}}",
+            "durationMs": 0,
+            "exitCode": 0,
+            "id": "exec-{{session:5}}",
+            "pluginId": null,
+            "processId": "30910",
+            "scriptPath": null,
+            "source": "unifiedExecStartup",
+            "startedAtMs": 1794267651654,
+            "status": "completed",
+            "type": "commandExecution"
+          },
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 4902,
+      "out": {
+        "emittedAtMs": 1794267651667,
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "{{session:2}}",
+          "tokenUsage": {
+            "last": {
+              "cacheWriteInputTokens": 0,
+              "cachedInputTokens": 12800,
+              "inputTokens": 20447,
+              "outputTokens": 28,
+              "reasoningOutputTokens": 0,
+              "totalTokens": 20475
+            },
+            "modelContextWindow": 258400,
+            "total": {
+              "cacheWriteInputTokens": 0,
+              "cachedInputTokens": 12800,
+              "inputTokens": 20447,
+              "outputTokens": 28,
+              "reasoningOutputTokens": 0,
+              "totalTokens": 20475
+            }
+          },
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 4902,
+      "out": {
+        "emittedAtMs": 1794267651667,
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "credits": {
+              "balance": "plan-exemplo",
+              "hasCredits": false,
+              "unlimited": false
+            },
+            "individualLimit": null,
+            "limitId": "plan-exemplo",
+            "limitName": null,
+            "normalModelSlug": null,
+            "planType": "plan-exemplo",
+            "primary": {
+              "resetsAt": 1893456000,
+              "usedPercent": 10,
+              "windowDurationMins": 300
+            },
+            "rateLimitReachedType": null,
+            "secondary": {
+              "resetsAt": 1893456000,
+              "usedPercent": 10,
+              "windowDurationMins": 300
+            },
+            "spendControlReached": null
+          }
+        }
+      }
+    },
+    {
+      "atMs": 6097,
+      "out": {
+        "emittedAtMs": 1794267652862,
+        "method": "item/started",
+        "params": {
+          "item": {
+            "completedAtMs": null,
+            "delivery": null,
+            "id": "{{session:6}}",
+            "memoryCitation": null,
+            "phase": "final_answer",
+            "questions": null,
+            "startedAtMs": 1794267652861,
+            "text": "",
+            "type": "agentMessage"
+          },
+          "startedAtMs": 1794267652861,
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 6098,
+      "out": {
+        "emittedAtMs": 1794267652862,
+        "method": "item/agentMessage/delta",
+        "params": {
+          "delta": "O",
+          "itemId": "{{session:6}}",
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 6337,
+      "out": {
+        "emittedAtMs": 1794267653101,
+        "method": "item/agentMessage/delta",
+        "params": {
+          "delta": "```",
+          "itemId": "{{session:6}}",
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 6410,
+      "out": {
+        "emittedAtMs": 1794267653175,
+        "method": "item/completed",
+        "params": {
+          "completedAtMs": 1794267653174,
+          "item": {
+            "completedAtMs": 1794267653174,
+            "delivery": null,
+            "id": "{{session:6}}",
+            "memoryCitation": null,
+            "phase": "final_answer",
+            "questions": null,
+            "startedAtMs": 1794267652861,
+            "text": "O conteúdo de `teste.txt` é:\n\n```text\nLinha 1 do arquivo de teste\n```",
+            "type": "agentMessage"
+          },
+          "threadId": "{{session:2}}",
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 6459,
+      "out": {
+        "emittedAtMs": 1794267653224,
+        "method": "thread/tokenUsage/updated",
+        "params": {
+          "threadId": "{{session:2}}",
+          "tokenUsage": {
+            "last": {
+              "cacheWriteInputTokens": 0,
+              "cachedInputTokens": 12800,
+              "inputTokens": 20506,
+              "outputTokens": 25,
+              "reasoningOutputTokens": 0,
+              "totalTokens": 20531
+            },
+            "modelContextWindow": 258400,
+            "total": {
+              "cacheWriteInputTokens": 0,
+              "cachedInputTokens": 25600,
+              "inputTokens": 40953,
+              "outputTokens": 53,
+              "reasoningOutputTokens": 0,
+              "totalTokens": 41006
+            }
+          },
+          "turnId": "{{session:3}}"
+        }
+      }
+    },
+    {
+      "atMs": 6459,
+      "out": {
+        "emittedAtMs": 1794267653224,
+        "method": "account/rateLimits/updated",
+        "params": {
+          "rateLimits": {
+            "credits": {
+              "balance": "plan-exemplo",
+              "hasCredits": false,
+              "unlimited": false
+            },
+            "individualLimit": null,
+            "limitId": "plan-exemplo",
+            "limitName": null,
+            "normalModelSlug": null,
+            "planType": "plan-exemplo",
+            "primary": {
+              "resetsAt": 1893456000,
+              "usedPercent": 10,
+              "windowDurationMins": 300
+            },
+            "rateLimitReachedType": null,
+            "secondary": {
+              "resetsAt": 1893456000,
+              "usedPercent": 10,
+              "windowDurationMins": 300
+            },
+            "spendControlReached": null
+          }
+        }
+      }
+    },
+    {
+      "atMs": 6471,
+      "out": {
+        "emittedAtMs": 1794267653236,
+        "method": "thread/status/changed",
+        "params": {
+          "status": {
+            "type": "idle"
+          },
+          "threadId": "{{session:2}}"
+        }
+      }
+    },
+    {
+      "atMs": 6471,
+      "out": {
+        "emittedAtMs": 1794267653236,
+        "method": "turn/completed",
+        "params": {
+          "threadId": "{{session:2}}",
+          "turn": {
+            "completedAt": 1794267653,
+            "durationMs": 5019,
+            "error": null,
+            "id": "{{session:3}}",
+            "items": [
+              {
+                "completedAtMs": 1794267653174,
+                "delivery": null,
+                "id": "{{session:6}}",
+                "memoryCitation": null,
+                "phase": "final_answer",
+                "questions": null,
+                "startedAtMs": 1794267652861,
+                "text": "O conteúdo de `teste.txt` é:\n\n```text\nLinha 1 do arquivo de teste\n```",
+                "type": "agentMessage"
+              }
+            ],
+            "itemsView": "summary",
+            "rootTurnId": "{{session:3}}",
+            "startedAt": 1794267648,
+            "status": "completed"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 6514,
+      "close": {}
+    }
+  ],
+  "version": 2
+}
