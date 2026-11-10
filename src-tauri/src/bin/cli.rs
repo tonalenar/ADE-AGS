@@ -321,8 +321,7 @@ MISSÕES (também sem interface: `ade-ags --headless`)
   mission apply <id>                          Leva o aceito para o projeto
   mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]
                                               Reavalia entrega no repo origin (só promove se PR mesclado e CI verde)
-  approval list                               Pedidos de permissão esperando
-  approval decide <id> --allow|--deny [--remember]
+  approval list|decide                        Recusado: decidir pedidos de permissão da Frota é só pela tela da ADE
 
 JANELAS
   window list                                 Janelas abertas
@@ -568,6 +567,13 @@ pub(crate) fn main() -> ExitCode {
     // Compactar e restaurar só rodam na interface. Recusar aqui também: um `ags`
     // antigo não é a barreira, o servidor é, mas a mensagem chega sem depender dele.
     if let Some(error) = ade_ags_lib::ipc::agent_maintenance_error(&command) {
+        println!("{}", json!({ "error": error }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    }
+
+    // Aprovações da Frota só se decidem na tela (F-01). O servidor também recusa: aqui a
+    // mensagem chega mesmo sem ele e sem abrir conexão.
+    if let Some(error) = ade_ags_lib::ipc::person_only_error(&command) {
         println!("{}", json!({ "error": error }));
         return ExitCode::from(EXIT_COMMAND_FAILED);
     }
@@ -1073,7 +1079,6 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" | "mission.startcheck" | "mission.redeliver" => &["mission"],
         "mission.cleanup" => &["mission"],
         "mission.accept" => &["mission", "task"],
-        "approval.decide" => &["approval"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.
         "peer.ask" | "peer.tell" => &["to", "text"],
         "fix.list" => &["scope"],

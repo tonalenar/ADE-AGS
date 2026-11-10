@@ -51,12 +51,7 @@ Um conflito sempre é abortado e devolvido com a lista de arquivos (código 1).
 Sem interface, um pedido de permissão espera e, ao vencer, é negado. Há duas saídas:
 
 - **Regras de permissão escritas antes** (`Bash(cargo test*)`, `Edit(src/**)`). É o recomendado para CI.
-- **Responder pela CLI:**
-
-  ```bash
-  ags approval list
-  ags approval decide <id> --allow [--remember]
-  ```
+- **Não há resposta pela CLI.** `ags approval list` e `ags approval decide` são recusados sempre (F-01, `docs/decisoes/HOST_REMOTO.md`): o servidor não prova que quem usa o token do IPC não é um agente. Só a pessoa decide, pela tela. Sem tela, o pedido vence e é negado: por isso as regras acima são o caminho do CI.
 
 ## Acompanhar
 

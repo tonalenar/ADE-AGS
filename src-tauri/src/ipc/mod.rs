@@ -33,6 +33,19 @@ pub const AGENT_MAINTENANCE_DENIED: &str = "Este comando altera dados de forma i
 pub fn agent_maintenance_error(command: &str) -> Option<&'static str> {
     matches!(command, "memory.compact" | "workspace.restore").then_some(AGENT_MAINTENANCE_DENIED)
 }
+/// F-01: decidir (ou listar) os pedidos de permissão da Frota é só da pessoa, na tela.
+///
+/// O servidor **não consegue provar** que quem chama o IPC não é um agente: o token está num
+/// arquivo legível pelo mesmo usuário, o PID do par só prova o que É descendente de um
+/// PTY/conversa da ADE (um `setsid`, duplo fork ou `open -a Terminal` sai da árvore), o TCP
+/// não traz PID e `ADE_TAB_ID`/`taskId` são declarados pelo chamador. Na dúvida, recusa
+/// sempre, para qualquer chamador, como `AGENT_MAINTENANCE_DENIED`. A tela decide por um comando
+/// Tauri próprio, que não passa pelo IPC.
+pub const APPROVAL_SCREEN_ONLY: &str = "Decidir ou listar pedidos de permissão da Frota é só da pessoa, pela tela da ADE AGS (painel de aprovações). O IPC não consegue provar que quem chama não é um agente, então recusa sempre. Para CI sem tela, escreva regras de permissão da pasta antes.";
+
+pub fn person_only_error(command: &str) -> Option<&'static str> {
+    matches!(command, "approval.decide" | "approval.list").then_some(APPROVAL_SCREEN_ONLY)
+}
 pub use server::{cleanup, export_instance_env, other_instance_alive, start};
 pub use transport::{exchange, ExchangeError};
 pub(crate) use transport::current_client_pid;

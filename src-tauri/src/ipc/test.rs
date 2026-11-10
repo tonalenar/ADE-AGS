@@ -351,6 +351,88 @@ fn comandos_de_manutencao_nao_rodam_no_terminal_do_agente() {
     assert!(super::agent_maintenance_error("memory.search").is_none());
 }
 
+// ── F-01: decidir aprovação da Frota é só da pessoa, na tela ─────────────────────
+
+/// Todos os arquivos de `src-tauri/src/ipc` (menos este de testes), com o caminho.
+fn fontes_do_ipc() -> Vec<(String, String)> {
+    fn andar(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                andar(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs") && path.file_name().is_some_and(|n| n != "test.rs") {
+                out.push((path.display().to_string(), std::fs::read_to_string(&path).unwrap()));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    andar(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ipc"), &mut out);
+    out
+}
+
+/// O servidor não consegue provar que quem chama o IPC não é um agente: o token está num
+/// arquivo legível pelo mesmo usuário, o PID do par só prova o que É descendente (um
+/// `setsid`/duplo fork/`open -a Terminal` sai da árvore) e o TCP não traz PID. Por isso a
+/// recusa não depende do chamador: vale para a conversa por protocolo (`thread:<id>`), para
+/// a aba de agente (`ADE_TAB_ID`), para o `ags mcp --task` da Frota, para o PID de um
+/// descendente do PTY, para o PID de fora e para o TCP sem PID.
+#[test]
+fn aprovacao_da_frota_so_se_decide_na_tela_qualquer_chamador_do_ipc_e_recusado() {
+    for command in ["approval.decide", "approval.list"] {
+        let error = super::person_only_error(command).unwrap_or_else(|| panic!("{command} passou pelo IPC"));
+        assert_eq!(error, super::APPROVAL_SCREEN_ONLY);
+        assert!(error.contains("tela"), "a mensagem tem que mandar decidir pela tela: {error}");
+    }
+    // O agente pede (`run.approve`, bloqueia até a pessoa decidir) e conversa com o time pelo
+    // canal próprio: nada disso é decidir a aprovação da Frota.
+    for command in ["run.approve", "peer.pending", "chat.pending", "user.ask", "approval.other"] {
+        assert!(super::person_only_error(command).is_none(), "{command} não deveria ser recusado por aqui");
+    }
+}
+
+#[test]
+fn o_despachador_recusa_a_decisao_antes_de_olhar_o_chamador_e_nao_tem_braco_para_ela() {
+    let dispatch = include_str!("commands/dispatch.rs");
+    let gate = dispatch.find("person_only_error(command)").expect("o despachador tem que chamar person_only_error");
+    // Antes do `match`, da checagem de tarefa e de qualquer acesso ao banco.
+    assert!(gate < dispatch.find("let result = match command").unwrap());
+    assert!(gate < dispatch.find("guard_task").unwrap());
+    assert!(!dispatch.contains("\"approval.decide\" =>") && !dispatch.contains("\"approval.list\" =>"));
+}
+
+#[test]
+fn nenhum_caminho_do_ipc_decide_lista_nem_lembra_regra_de_aprovacao() {
+    for (path, src) in fontes_do_ipc() {
+        for proibido in ["decide_approval", "pending_approvals", "approval_decide", "approval_list", "remember_rule", "release_matching"] {
+            assert!(!src.contains(proibido), "{path} chama {proibido}: decidir aprovação é só da tela");
+        }
+        if !path.ends_with("ipc/mod.rs") {
+            assert!(!src.contains("\"approval.decide\"") && !src.contains("\"approval.list\""), "{path} oferece approval.* pelo IPC");
+        }
+    }
+    // O MCP também não tem tool para isso.
+    assert!(!include_str!("mcp.rs").contains("approval_decide") && !include_str!("mcp.rs").contains("approval_list"));
+    assert!(!include_str!("../../../src/features/orchestrator/cliBridge.ts").contains("approval.decide"));
+}
+
+#[test]
+fn a_cli_explica_que_a_decisao_e_na_tela_e_nao_oferece_flags_para_decidir() {
+    let cli = include_str!("../bin/cli.rs");
+    let gate = cli.find("person_only_error(&command)").expect("a CLI tem que recusar antes de falar com o app");
+    assert!(gate < cli.find("validate_usage(&command").unwrap());
+    assert!(!cli.contains("\"approval.decide\" => &["), "sem posicional para um comando que não existe");
+    assert!(!cli.contains("approval decide <id> --allow"), "o USAGE não pode ensinar a decidir pela CLI");
+    assert!(cli.contains("approval list|decide") && cli.contains("só pela tela"));
+}
+
+#[test]
+fn a_skill_diz_que_so_a_pessoa_decide_na_tela() {
+    let skill = include_str!("../../../skills/ags-orchestrator/SKILL.md");
+    assert!(skill.contains("Fleet approvals are decided by the person on the ADE screen"));
+    assert!(!skill.contains("approval decide <id> --allow"));
+    assert!(!skill.contains("`approval list`, `approval decide`"));
+}
+
 /// Que `ags` nombre un comando que el backend ya no atiende no rompe nada en compilación
 /// —son dos tablas de strings, en archivos distintos— y solo se nota cuando alguien lo
 /// ejecuta y recibe "Comando desconocido". Este test es lo que ata las dos puntas.
