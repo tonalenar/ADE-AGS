@@ -396,10 +396,10 @@ Diferenças de significado:
 5. **Turno sem sinal de fim e processo vivo fica `running`.** Não há prazo de turno em nenhum motor de conversa. O harness não inventa um fim.
 6. **`waiting`.** Um nó está `waiting` enquanto tiver pedido de pergunta ou aprovação pendente que ele possui. O pai continua `running` e **enxerga o bloqueio**: a projeção sinaliza "precisa da pessoa" em quem tem descendente `waiting`. Quem decide é a pessoa, nunca o pai.
 7. **Filho termina antes do pai:** permitido e esperado. O resultado do filho chega ao pai como dado não confiável, e o pai não falha por causa dele.
-8. **Pai termina antes do filho:** permitido hoje para a Frota (o run da Frota sobrevive ao turno que o criou). O contrato distingue:
+8. **Pai termina antes do filho:** permitido. O filho da Frota continua vivo depois do fim do turno do pai, e o turno não espera. O contrato distingue:
    - run **terminal**: o root acabou;
    - run **assentado**: todos os nós são terminais.
-   A UI mostra "run concluído, N filhos ainda ativos". Isso confirma o comportamento atual; ver §8.
+   O nó de turno da projeção traz `activeChildren`: quantos filhos diretos ainda não são terminais. Filho direto é quem tem esse turno como `parentId` — a conversa filha ou o run da Frota. Um run da Frota conta uma vez, não cada tarefa. A conversa filha vale o estado do último turno dela (§3.2); sem turno, `pending`. `chat_thread.state` não entra. O mapa é `harness::state` (`interrupted`, `failed`, `cancelled`, `completed`, `skipped` e `handed_off` são terminais). Run legado sem nó e sem turno pai não entra. Não há coluna nem estado novo: a contagem é derivada na leitura e os outros nós omitem o campo. Quando o turno está terminal e a contagem é maior que zero, a árvore mostra "N filhos ativos" junto do status; o ponto de status continua o do turno. A mesma projeção chega à CLI (`run.harnessGraph`) e ao MCP (`harness_graph`), então o campo aparece lá sem comando novo. Decisão do usuário; o item 4 de §8 fica fechado.
 9. **Cancelamento.** Cancelar o root é parar o turno dele. Descendentes só são cancelados por ordem do pai ou da pessoa, com escopo verificado (Fase 4). Parar uma conversa filha interrompe o turno dela; cancelar na Frota age na subárvore do run, nunca no lead nem em filhos de chat (`runs/orchestration.rs:1278-1330`). Nunca se encerra o PTY original de uma sessão conectada.
 
 ### 3.4 Reinício do app
@@ -625,6 +625,7 @@ O run nasce **de forma preguiçosa**, no primeiro filho. Assim a Fase 1 não mex
 - `runs/harness.rs::thread_execution_graph` une os nós antigos (derivados) com `harness_node`. Nós com linha ganham o `id` estável; o `id` textual atual continua.
 - Mudança visível: o **run da Frota passa a aparecer sob o turno que o criou**, e não sob a conversa. A conversa filha já aparece sob o turno pai (`runs/harness.rs`, `parent_turn_id`).
 - Campos novos **opcionais** no grafo: `nodeId`, `harnessRunId` e `chatRunId` (só no nó de turno, com o mesmo valor de `runId`, que fica por compatibilidade até a UI migrar). Sem linha em `harness_node`, os três vêm `null`.
+- No nó de turno, `activeChildren`: filhos diretos não terminais (§3.3 regra 8). Os outros nós omitem o campo. O feed mostra "N filhos ativos" só com o turno terminal e a contagem maior que zero. CLI e MCP devolvem o mesmo JSON; não há comando novo.
 - O run ligado desce um nível na `depth` (e as tarefas com ele): o run sai de "filho da conversa" para "filho do turno". O pai só vale se o turno é da mesma conversa e está na árvore; senão o run fica sob a conversa, como antes.
 - `HarnessRunFeed.tsx` já monta a árvore por `parentId`; a mudança é só de tipos (`src/features/runs/types.ts`).
 
@@ -637,7 +638,7 @@ O run nasce **de forma preguiçosa**, no primeiro filho. Assim a Fase 1 não mex
 | `src-tauri/src/runs/orchestration.rs` | ligação do run e das tarefas na transação da delegação |
 | `src-tauri/src/runs/harness.rs` | união com `harness_node`; campos novos |
 | `src/features/runs/types.ts` | campos opcionais |
-| `src/features/chat/structured/HarnessRunFeed.tsx` | só se o teste visual pedir ajuste |
+| `src/features/chat/structured/HarnessRunFeed.tsx` | com o turno terminal e `activeChildren` > 0, o texto "N filhos ativos" junto do status |
 | `docs/ade-ags/HARNESS_CONTRATO.md`, `ROADMAP.md` | marcar a Fase 1 |
 
 Nada de `database/schema.rs` nem `ipc/protocol.rs`. Os testes da Fase 1 ficam nos `test.rs` dos três módulos (`harness/test.rs`, `conversa/test.rs`, `runs/test.rs`), em submódulos `fase1`/`harness_fase1`, para o filtro `cargo test --lib harness` pegá-los.
@@ -654,10 +655,12 @@ Nada de `database/schema.rs` nem `ipc/protocol.rs`. Os testes da Fase 1 ficam no
 8. Apagar a conversa remove só as linhas `harness_*`; `runs` e `tasks` ficam.
 9. A projeção sem nenhuma linha de harness mantém ids, pais e profundidade de antes. **Não havia teste de `thread_execution_graph` no commit base**, então este teste (`a_projecao_antiga_sem_linhas_de_harness_mantem_ids_pais_e_profundidade`) fixa a forma antiga; ele não foi rodado contra o código anterior à Fase 1.
 10. Visual (instância isolada, captura antes e depois): o run da Frota sob o turno. Não medido ainda.
+11. Turno terminal com run da Frota `running` conta 1 (várias tarefas continuam 1); conversa filha com último turno `inProgress` conta 1; os dois contam 2; filhos terminais contam 0; filho falho não muda o status do turno. O feed mostra "N filhos ativos" com 1 e com N, e não mostra com 0 nem com o turno em andamento.
 
 ### 7.5 O que fica de fora (e não se promete)
 
 - **Estado terminal gravado** pelo harness (Fase 3). A Fase 1 deriva do nativo.
+- Gravar o run como **assentado**. `activeChildren` só existe na leitura; não há coluna nem estado novo em Zustand.
 - Tentativas como nós (continuam projetadas), ferramenta, aprovação, pergunta e subagente nativo como nós.
 - `node_id` nos eventos, recibos unificados, evento transacional (Fase 2).
 - `ProviderSessionRef`, `ContextTransfer`, `connected_session` (Fases 3 e 4).
@@ -672,7 +675,7 @@ Só o que é decisão de produto ou de autorização.
 1. **Texto do «enviar agora» no Claude.** Enquanto o `steer` é `Unknown`, a tela promete "entra no turno em andamento". Manter a promessa, ou trocar para uma frase neutra ("vai para o Claude agora; ele a lê no meio ou logo depois do turno")? O comportamento não muda; muda a cópia nos três catálogos.
 2. **Capturas reais.** Provar `Unknown` e criar fixtures `recorded` gasta conta e cota. Autoriza capturas? De quais providers (Claude, Codex, OpenCode, Antigravity, Cursor) e com que teto de turnos? Sem isso, Antigravity e Cursor ficam sem replay.
 3. **Reconhecimento do fingerprint do schema.** O `schema-sqlite` está sem registro no commit base. Quem reconhece (o usuário, ou a fase que tocar o schema) e com qual motivo? Enquanto isso o passo de fingerprint do CI falha.
-4. **O filho da Frota sobrevive ao turno do pai.** É o comportamento de hoje, e o contrato o mantém: "run concluído, N filhos ainda ativos". Confirma, ou o turno do pai deve esperar os filhos da Frota?
+4. **O filho da Frota sobrevive ao turno do pai.** Decidido: continua vivo e o turno não espera. A árvore mostra "N filhos ativos" (§3.3 regra 8).
 
 ## 9. O que foi e o que não foi verificado
 
