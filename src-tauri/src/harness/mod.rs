@@ -15,6 +15,7 @@ pub mod effects;
 pub mod identity;
 pub mod matrix;
 pub mod receipts;
+pub mod recovery;
 pub mod state;
 pub mod store;
 

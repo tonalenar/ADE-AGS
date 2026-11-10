@@ -152,22 +152,9 @@ pub fn finish_db(conn: &DbConnection) -> SqlResult<()> {
 pub(crate) fn upgrade_schema(conn: &Connection, path: &std::path::Path) -> SqlResult<()> {
     backup_before_upgrade(conn, path)?;
     super::schema::migrate(conn)?;
-    // Não feche sessões de outra janela ADE que compartilha este mesmo banco.
-    if crate::ipc::other_instance_alive() {
-        eprintln!("[conversa] outra instância ADE ativa; reconciliação de turnos órfãos adiada");
-    } else {
-        match crate::conversa::store::sweep_orphans(conn, crate::util::now_ts_ms()) {
-            Ok(sweep) if sweep.runs + sweep.requests > 0 => eprintln!(
-                "[conversa] {} turno(s) e {} pedido(s) órfãos marcados no arranque",
-                sweep.runs,
-                sweep.requests
-            ),
-            Ok(_) => {}
-            Err(error) => {
-                eprintln!("[conversa] não consegui marcar os órfãos no arranque: {error}")
-            }
-        }
-    }
+    // A reconciliação de boot (chat, efeitos e Frota) roda em `app::housekeeping`, já com o
+    // lease SQLite do harness. Assim duas instâncias que abrem o mesmo arquivo não fazem o sweep
+    // simultaneamente durante a etapa de migração.
     super::seeds::seed_defaults(conn)?;
     super::queries::dedupe_session_history_once(conn)?;
 

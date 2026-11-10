@@ -45,6 +45,9 @@ pub struct HarnessExecutionNode {
     /// Derivado na leitura; os outros nós omitem o campo. Ver contrato §3.3 regra 8.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_children: Option<i64>,
+    /// Motivo persistido do evento `turn.interrupted`, quando houve sweep de boot.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interruption_reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -172,6 +175,17 @@ pub fn thread_execution_graph(
         .collect::<Vec<_>>();
     let attempts_by_task = load_fleet_attempts(conn, &task_ids)?;
     let events = execution_log::list_for_threads(conn, &thread_ids, 250)?;
+    let interruption_reasons: HashMap<String, String> = events
+        .iter()
+        .filter(|event| event.kind == "turn.interrupted")
+        .filter_map(|event| {
+            let reason = event
+                .payload
+                .get("reason")
+                .and_then(serde_json::Value::as_str)?;
+            Some((event.parent_node_id.clone()?, reason.to_string()))
+        })
+        .collect();
     // Nós com linha (`harness_node`): ganham o id estável e, no run da Frota, o pai durável. Quem não
     // tem linha (run sem turno ativo, conversa filha com o pai ocioso, dados anteriores à Fase 1)
     // segue só pela derivação acima. Nó cujo registro nativo sumiu nunca aparece: a árvore parte
@@ -218,6 +232,7 @@ pub fn thread_execution_graph(
                 harness_run_id: None,
                 chat_run_id: None,
                 active_children: None,
+            interruption_reason: None,
             created_at: thread.created_at,
             started_at: None,
             ended_at: (thread.state == "settled").then_some(thread.updated_at),
@@ -241,6 +256,12 @@ pub fn thread_execution_graph(
                 harness_run_id: None,
                 chat_run_id: Some(turn.id.clone()),
                 active_children: None,
+                interruption_reason: state::chat_interruption_reason(
+                    &turn.status,
+                    interruption_reasons
+                        .get(&format!("turn:{}:{}", turn.thread_id, turn.id))
+                        .map(String::as_str),
+                ),
                 created_at: turn.started_at.unwrap_or(thread.created_at),
                 started_at: turn.started_at,
                 ended_at: turn.ended_at,
@@ -276,6 +297,7 @@ pub fn thread_execution_graph(
                 harness_run_id: None,
                 chat_run_id: None,
                 active_children: None,
+                interruption_reason: None,
                 created_at: run.created_at,
                 started_at: Some(run.created_at),
                 ended_at: run.ended_at,
@@ -306,6 +328,7 @@ pub fn thread_execution_graph(
                     harness_run_id: None,
                     chat_run_id: None,
                 active_children: None,
+                interruption_reason: None,
                     created_at: task.created_at,
                     started_at: task.started_at,
                     ended_at: task.ended_at,
@@ -334,6 +357,7 @@ pub fn thread_execution_graph(
                         harness_run_id: None,
                         chat_run_id: None,
                 active_children: None,
+                    interruption_reason: None,
                         created_at: attempt.started_at,
                         started_at: Some(attempt.started_at),
                         ended_at: attempt.ended_at,

@@ -5248,6 +5248,33 @@ mod harness_fase1 {
         assert!(tasks.iter().all(|task| position(&format!("run:{run_id}")) < position(&task.id)));
     }
 
+    #[test]
+    fn turno_interrompido_expoe_na_projecao_a_razao_persistida_no_evento() {
+        let world = mundo(&["raiz"]);
+        {
+            let conn = world.db.lock().unwrap();
+            chat::close_orphan_runs(
+                &conn,
+                Some("raiz"),
+                20,
+                "O processo do ADE foi fechado ou caiu antes de o turno terminar.",
+            )
+            .unwrap();
+        }
+
+        let graph = graph(&world, "raiz");
+        let turn = node(&graph, "turn:raiz:t1");
+        assert_eq!(turn.status, "interrupted");
+        assert_eq!(
+            turn.interruption_reason.as_deref(),
+            Some("O processo do ADE foi fechado ou caiu antes de o turno terminar.")
+        );
+        assert!(graph.events.iter().any(|event| {
+            event.kind == "turn.interrupted"
+                && event.payload["reason"] == turn.interruption_reason.clone().unwrap()
+        }));
+    }
+
     /// Ajuste 3: o retry idempotente pelo recibo devolve o mesmo run e não cria nó novo, mesmo que o
     /// turno já tenha acabado e o do retry nem fosse ligar.
     #[test]

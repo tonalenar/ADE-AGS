@@ -586,7 +586,7 @@ fn no_arranque_o_turno_e_os_pedidos_orfaos_expiram_sem_apagar_nada() {
     // O turno que ficou aberto na ponta ganha o turnEnd durável; o do meio, não.
     let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("turnEnd do app que fechou");
     assert_eq!((end.id.as_str(), end.interrupted), ("end:r2", Some(true)));
-    assert!(end.text.as_deref().is_some_and(|t| t.contains("app foi fechado")), "{:?}", end.text);
+    assert!(end.text.as_deref().is_some_and(|t| t.contains("fechado ou caiu")), "{:?}", end.text);
     assert!(store::items(&conn, "t2").unwrap().iter().all(|i| i.kind != ItemKind::TurnEnd));
     assert_eq!(store::items(&conn, "t2").unwrap().len(), 2, "nenhuma linha apagada");
     // Rodar de novo não acha mais nada.

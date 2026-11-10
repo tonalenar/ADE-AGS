@@ -410,12 +410,12 @@ Diferenças de significado:
 
 ### 3.4 Reinício do app
 
-O que já acontece (e o contrato mantém):
-- **Conversa** (`conversa/store.rs::sweep_orphans`, chamado em `database/connection.rs:159`): turno `inProgress` vira `interrupted`; ferramentas sem resultado ganham `TOOL_OUTCOME_UNKNOWN`; pedidos `pending` viram `expired`; tudo numa transação. Nunca reenvia nada.
-- **Frota** (`runs/store.rs::sweep_orphans`, chamado em `app/housekeeping.rs:51`): `ready` e `running` viram `failed` com `SWEPT_RUNNING_ERROR`; `pending` vira `cancelled`; o status do run é recalculado. Não relança.
-- As duas varreduras só rodam se `ipc::other_instance_alive()` for falso. Isso é uma checagem, não um lock: a serialização entre instâncias é da Fase 5 e **não está provada**.
+O boot chama as reconciliações depois que a janela existe, em `app/housekeeping.rs`, sob o lease descrito no §13:
+- **Conversa** (`conversa/store.rs::sweep_orphans`): turno `inProgress` vira `interrupted`; ferramentas sem resultado ganham `TOOL_OUTCOME_UNKNOWN`; pedidos `pending` viram `expired`; tudo numa transação. Nunca reenvia nada.
+- **Frota** (`runs/store.rs::sweep_orphans`): `ready` e `running` viram `failed` com `SWEPT_RUNNING_ERROR`; `pending` vira `cancelled`; o status do run é recalculado. Não relança.
+- `ipc::other_instance_alive()` continua evitando sweep enquanto uma instância está ativa; a tomada condicional no SQLite fecha a corrida entre boots simultâneos.
 
-O que o contrato acrescenta (Fases 3 e 5, não agora):
+O que o contrato acrescenta:
 - Todo nó não terminal vira `interrupted` com `end_reason = app_closed` **na mesma transação** da varredura nativa. A reconciliação fica explícita: `end_source = reconciliation`.
 - `outcome_unknown = 1` quando havia ferramenta `Running`, ou envio em `submitting`/`unknown` (`chat_child_receipts.delivery_state`).
 - Nó `waiting` vira `interrupted`: o processo que esperava a resposta morreu e o pedido expirou. Não se retoma uma aprovação.
@@ -904,10 +904,36 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 
 ### 11.9 O que a fatia não faz
 
-- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` existe e é testado, mas **ainda não é chamado no boot**.
+- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13).
 - Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id` ainda: as colunas existem (aditivas) e ficam `NULL` até `queue_chat_event` migrar.
 - Interrupt, spawn, resposta a pedido e cancelamento não usam a fila.
 - Nenhum provider real foi executado.
+
+### 13. Fase 5: recuperação e reconciliação
+
+Ao abrir o ADE, `app::housekeeping` toma `harness_recovery_lease` no mesmo SQLite antes de reconciliar recibos/efeitos, turnos órfãos, tarefas da Frota, permissões e provisionamentos. A migração aditiva do lease fica em `harness::store::migrate`; `database/schema.rs` e `user_version` não mudam.
+
+O lease é uma linha singleton (`id = 1`) com `owner` e `lease_until`. A tomada faz `UPDATE` condicional numa transação `Immediate`, aceitando somente linha livre ou vencida. O instante de referência é argumento das funções; o boot injeta `util::now_ts_ms()`. A rotina libera por comparação do dono ao terminar; se o processo cair, outra instância pode tomar depois de cinco minutos. Um segundo boot que encontrar lease válido adia toda a reconciliação. O lease protege o conjunto de sweeps, enquanto o mutex Rust do banco fica livre durante cada operação que não precisa dele.
+
+Decisões da reconciliação de efeitos:
+
+- `pending` nunca reclamado continua na fila e o mesmo `client_request_id` pode reclamá-lo. A intenção e o efeito foram gravados juntos no passo 1 (§11.4).
+- `running` com lease ainda válido não é tocado. O pedido repetido retorna `submitting`; esperar evita concorrer com o dono que ainda pode estar enviando.
+- `running` com lease vencido e `retry_safe = 1` volta a `pending` (ou `failed` por tentativas esgotadas), porque repetir é idempotente.
+- `running` com lease vencido e `retry_safe = 0` é consultado pela capability de reconciliação. `chat_send` não tem capability que prove aceitação; portanto recebe `failed/outcome_unknown`, o recibo recebe `unknown` e nunca é executado de novo com aquele id. Nenhum texto ou payload do provider é persistido.
+- Os estados do recibo separam a conclusão do envio (`accepted`, `retryable`, `unknown`) do estado do turno e do trabalho posterior. `accepted` significa que o provider aceitou o envio; não significa que o turno terminou, nem que um diff ou checkpoint foi salvo.
+
+O sweep do turno grava `turn.interrupted` na mesma transação em que fecha `chat_run`; o evento guarda a razão legível “O processo do ADE foi fechado ou caiu antes de o turno terminar.” `runs::harness::thread_execution_graph` expõe essa razão em `interruptionReason` no nó do turno, além do evento. Registros antigos sem evento ficam sem razão. Estado de lease vencido fica no recibo/efeito, com `unknown` como motivo operacional; não é apresentado como conclusão do turno.
+
+| Fronteira de crash de `chat_send` | Estado recuperado | Repetição do mesmo id | Máximo de chamadas ao provider |
+|---|---|---|---:|
+| Antes do commit da intenção | Nenhuma linha | Cria intenção e envia | 1 |
+| Após o commit, antes do claim | `prepared` + `pending` preservados | Reclama e envia | 1 |
+| Durante o efeito, lease vivo | `submitting` + `running`; boot não toma o lease | Aguarda; depois do vencimento, sem capability, vira `unknown` | 1 |
+| Após o efeito, antes de concluir | `submitting` + `running`; desfecho externo não comprovável | Lease vencido vira `unknown`; não reenvia | 1 |
+| Dentro da conclusão, antes do recibo final | O passo 4 é uma transação: crash antes do commit reverte efeito e recibo; após o commit ambos ficam finais | Antes: lease vencido vira `unknown`; após: replay de `accepted` | 1 |
+
+Os testes usam fake de envio com contador e instantes numéricos. Não executam provider ou CLI real. A tabela é uma garantia por estado e atomicidade local; o intervalo entre aceitação remota e commit local permanece inerentemente ambíguo para providers sem consulta de idempotência.
 
 ### 11.10 Fase 2, primeira fatia: o que foi e o que não foi verificado
 
@@ -923,7 +949,7 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 - Nenhum provider real foi executado: o `execute` dos testes é um contador. O caminho `send_with_request` com `AppHandle` não tem teste de ponta a ponta.
 - O recibo e o efeito rodam em transações separadas (aceitar, reclamar, concluir); a atomicidade de cada passo é por construção e por teste de estado, não por injeção de falha no meio do commit.
 - Desempenho: `harness_effect` não tem consulta medida; o índice `(state, lease_until)` não foi exercitado com volume.
-- Ainda não existe comando de boot que chame `recover_expired`: um efeito `running` de provider só vira `unknown` quando a repetição do comando chega ao `claim` (§11.9).
+- Na fotografia da Fase 2, `recover_expired` ainda não era chamado no boot. A Fase 5 adiciona essa chamada sob o lease SQLite (§13).
 - Teste visual e a UI: `chatThreadSendOnce` existe em `ipc.ts`, mas nenhuma tela o chama ainda.
 
 ### 11.12 Retomada por turno do Cursor e do Antigravity: não repetir às cegas
