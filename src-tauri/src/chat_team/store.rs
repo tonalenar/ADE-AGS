@@ -117,6 +117,12 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         );
         CREATE INDEX IF NOT EXISTS idx_chat_team_provision_team ON chat_team_provision(team_id, state);",
     )?;
+    let has_owner = conn
+        .prepare("SELECT 1 FROM pragma_table_info('chat_team_provision') WHERE name = 'owner_instance'")?
+        .exists([])?;
+    if !has_owner {
+        conn.execute_batch("ALTER TABLE chat_team_provision ADD COLUMN owner_instance TEXT;")?;
+    }
     Ok(())
 }
 

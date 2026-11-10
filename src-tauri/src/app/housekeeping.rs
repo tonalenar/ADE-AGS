@@ -47,9 +47,11 @@ fn run(app: AppHandle) {
         .try_state::<DbConnection>()
         .map(|state| state.inner().clone())
     {
-        if crate::ipc::other_instance_alive() {
+        let other = crate::ipc::other_instance_alive();
+        if other {
             eprintln!("[ade-ags] hay otra instancia abierta: no se limpian sus tareas");
-        } else {
+        }
+        {
             let now = crate::util::now_ts_ms();
             let recovery = crate::harness::recovery::with_boot_lease(&db, now, || {
                 {
@@ -73,6 +75,12 @@ fn run(app: AppHandle) {
                         }
                         Ok(_) => {}
                         Err(error) => eprintln!("[harness] não foi possível reconciliar os efeitos: {error}"),
+                    }
+                    if let Err(error) = crate::harness::child_delivery::reconcile_intentions(&conn, now) {
+                        eprintln!("[harness] não foi possível reconciliar intenções de filho: {error}");
+                    }
+                    if other {
+                        return Ok(());
                     }
                     match crate::conversa::store::sweep_orphans(&conn, now) {
                         Ok(sweep) if sweep.runs + sweep.requests > 0 => eprintln!(

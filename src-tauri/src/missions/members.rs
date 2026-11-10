@@ -50,7 +50,7 @@ pub fn begin(conn: &Connection, mission_id: &str, name: &str, now: i64) -> Resul
         params![mission_id, name, now],
     )
     .map_err(err)?;
-    Ok(())
+    stamp_owner(conn, mission_id, name)
 }
 
 /// O nome já foi usado nesta missão (por alguém da equipe, ativo, falho ou que saiu)? Sem distinguir
@@ -79,6 +79,17 @@ pub fn begin_recruit(conn: &Connection, mission_id: &str, name: &str, now: i64) 
     conn.execute(
         "INSERT INTO mission_member_state (mission_id, name, state, created_at, updated_at) VALUES (?1, ?2, 'provisioning', ?3, ?3)",
         params![mission_id, name, now],
+    )
+    .map_err(err)?;
+    stamp_owner(conn, mission_id, name)
+}
+
+fn stamp_owner(conn: &Connection, mission_id: &str, name: &str) -> Result<(), String> {
+    let Some(owner) = crate::harness::presence::current_id() else { return Ok(()) };
+    conn.execute(
+        "UPDATE mission_member_state SET owner_instance = ?3
+         WHERE mission_id = ?1 AND name = ?2 AND state = 'provisioning' AND owner_instance IS NULL",
+        params![mission_id, name, owner],
     )
     .map_err(err)?;
     Ok(())
@@ -172,15 +183,18 @@ fn evidence(conn: &Connection, mission_id: &str, name: &str) -> Result<Evidence,
 /// Decide quem está em `provisioning` (de uma missão ou de todas). Devolve quantos mudaram.
 pub fn reconcile(conn: &Connection, mission_id: Option<&str>, boot: bool, now: i64) -> Result<usize, String> {
     let mut stmt = conn
-        .prepare("SELECT mission_id, name FROM mission_member_state WHERE state = 'provisioning' AND (?1 IS NULL OR mission_id = ?1)")
+        .prepare("SELECT mission_id, name, owner_instance FROM mission_member_state WHERE state = 'provisioning' AND (?1 IS NULL OR mission_id = ?1)")
         .map_err(err)?;
     let pending = stmt
-        .query_map([mission_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .query_map([mission_id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))
         .map_err(err)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(err)?;
     let mut changed = 0;
-    for (mission, name) in pending {
+    for (mission, name, owner) in pending {
+        if crate::harness::presence::owner_is_protected(conn, owner.as_deref(), now).unwrap_or(false) {
+            continue;
+        }
         let Some((state, failure)) = decide(&evidence(conn, &mission, &name)?, boot) else { continue };
         changed += conn
             .execute(
