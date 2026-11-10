@@ -21,6 +21,7 @@ import type { PendingApproval, Task } from "@/features/runs/types";
 import { useSquadsStore } from "@/features/squads/store";
 import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import type { Squad } from "@/features/squads/types";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { AutonomyPicker } from "./AutonomyPicker";
 import { BudgetBar } from "./BudgetBar";
@@ -588,7 +589,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
     pr ? { key: "pr", node: <>
       <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="14" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 12.3V7a2.5 2.5 0 0 0-2.5-2.5H9" /><path d="M10.4 3.2 9 4.5l1.4 1.3" /></svg>
       {prUrl(pr)
-        ? <a href={prUrl(pr)!} target="_blank" rel="noreferrer" className="font-medium text-accent-600 hover:underline dark:text-accent-400">{prLabel(pr)}</a>
+        ? <a href={prUrl(pr)!} target="_blank" rel="noreferrer" className="font-medium text-accent-600 hover:underline dark:text-accent-400"
+            onClick={(event) => { event.preventDefault(); openExternalUrl(prUrl(pr)!).catch(console.error); }}>{prLabel(pr)}</a>
         : <span className="font-medium text-accent-600 dark:text-accent-400">{prLabel(pr)}</span>}
     </> } : null,
     activeText ? { key: "time", node: <>

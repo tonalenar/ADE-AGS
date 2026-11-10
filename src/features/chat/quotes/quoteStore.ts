@@ -15,11 +15,16 @@ export function useQuotes(key: string | null | undefined): Quote[] {
   return useQuoteStore((s) => (key ? s.byKey[key] ?? NONE : NONE));
 }
 
-export function addQuoteFor(key: string, input: { text: string; comment: string }): void {
+export function addQuoteFor(key: string, input: { text: string; comment: string; originItemId?: string }): boolean {
+  let added = false;
   useQuoteStore.setState((s) => {
-    const next = addQuote(s.byKey[key] ?? [], input);
-    return next === (s.byKey[key] ?? []) ? s : { byKey: { ...s.byKey, [key]: next } };
+    const current = s.byKey[key] ?? [];
+    const next = addQuote(current, input);
+    if (next === current) return s;
+    added = true;
+    return { byKey: { ...s.byKey, [key]: next } };
   });
+  return added;
 }
 
 export function removeQuoteFor(key: string, id: string): void {

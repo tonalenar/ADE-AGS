@@ -1,11 +1,8 @@
 import type { AgentAccount } from "./types";
 
-/** The main account has no database row and must use the CLI's default profile. */
-export function accountLoginEnv(
-  accountId: string,
-  envFor: (id: string) => Promise<Record<string, string>>,
-): Promise<Record<string, string>> {
-  return accountId.startsWith("system:") ? Promise.resolve({}) : envFor(accountId);
+/** A conta do sistema não tem linha no banco e não deve virar um ID de perfil no IPC. */
+export function accountLoginAccountId(accountId: string): string | undefined {
+  return accountId.startsWith("system:") ? undefined : accountId;
 }
 
 export function accountLoginCommand(account: AgentAccount): string {

@@ -14,6 +14,8 @@ export interface Quote {
   id: string;
   text: string;
   comment: string;
+  /** ID da mensagem de origem, só no estado local do composer; nunca serializado no prompt. */
+  originItemId?: string;
 }
 
 export interface ParsedQuote {
@@ -30,12 +32,13 @@ export function clipQuote(raw: string): string {
 }
 
 /** Junta uma citação à lista: sem repetir a mesma, sem vazio, até o máximo. Pura. */
-export function addQuote(list: Quote[], input: { text: string; comment: string }): Quote[] {
+export function addQuote(list: Quote[], input: { text: string; comment: string; originItemId?: string }): Quote[] {
   const text = clipQuote(input.text);
   const comment = input.comment.trim();
+  const originItemId = input.originItemId?.trim() || undefined;
   if (!text || !comment || list.length >= MAX_QUOTES) return list;
-  if (list.some((q) => q.text === text && q.comment === comment)) return list;
-  return [...list, { id: `q-${Date.now().toString(36)}-${list.length}-${Math.random().toString(36).slice(2, 6)}`, text, comment }];
+  if (list.some((q) => q.text === text && q.comment === comment && q.originItemId === originItemId)) return list;
+  return [...list, { id: `q-${Date.now().toString(36)}-${list.length}-${Math.random().toString(36).slice(2, 6)}`, text, comment, ...(originItemId ? { originItemId } : {}) }];
 }
 
 const lines = (text: string, prefix: string) => text.split("\n").map((line) => `${prefix}${line}`);

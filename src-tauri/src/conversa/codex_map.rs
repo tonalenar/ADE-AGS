@@ -8,7 +8,7 @@
 use serde_json::{json, Value};
 
 use crate::canal::event::{clip, first_line};
-use crate::canal::timeline::{count_lines, plan_steps, Item, ItemKind, ToolKind, ToolStatus};
+use crate::canal::timeline::{count_lines, plan_steps, Item, ItemKind, ToolKind, ToolStatus, UsageBreakdown};
 
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;
@@ -199,6 +199,7 @@ pub fn plan_item(params: &Value, at: Option<i64>) -> Option<Item> {
 #[derive(Debug, Default)]
 pub struct TurnTokens {
     base: Option<(String, u64)>,
+    breakdown_base: Option<(String, UsageBreakdown)>,
 }
 
 impl TurnTokens {
@@ -214,6 +215,34 @@ impl TurnTokens {
         };
         total.saturating_sub(base)
     }
+
+    /// O detalhamento cumulativo do turno, quando o app-server traz as categorias nas duas pontas.
+    fn update_breakdown(&mut self, turn: &str, total: UsageBreakdown, last: UsageBreakdown) -> UsageBreakdown {
+        let base = match &self.breakdown_base {
+            Some((t, base)) if t == turn => *base,
+            _ => {
+                let base = total.subtract(&last);
+                self.breakdown_base = Some((turn.to_string(), base));
+                base
+            }
+        };
+        total.subtract(&base)
+    }
+}
+
+fn usage_breakdown(raw: &Value) -> Option<UsageBreakdown> {
+    let n = |key: &str| raw.get(key).and_then(Value::as_u64);
+    let input = n("inputTokens")?;
+    let cached = n("cachedInputTokens");
+    let reasoning = n("reasoningOutputTokens");
+    Some(UsageBreakdown {
+        input: Some(input.saturating_sub(cached.unwrap_or(0))),
+        output: n("outputTokens"),
+        cached,
+        cache_write: n("cacheWriteInputTokens"),
+        reasoning,
+        reasoning_in_output: reasoning.map(|_| true),
+    })
 }
 
 /// O item `usage` do turno (um por turno, trocado no lugar) a partir de um `thread/tokenUsage/updated`.
@@ -222,7 +251,16 @@ pub fn usage_item(tokens: &mut TurnTokens, params: &Value, at: Option<i64>) -> O
     let total = params.pointer("/tokenUsage/total/totalTokens").and_then(Value::as_u64)?;
     let last = params.pointer("/tokenUsage/last/totalTokens").and_then(Value::as_u64).unwrap_or(0);
     let n = tokens.update(turn, total, last);
-    (n > 0).then(|| Item::usage(format!("usage:{turn}"), at, n))
+    (n > 0).then(|| {
+        let mut item = Item::usage(format!("usage:{turn}"), at, n);
+        if let (Some(total), Some(last)) = (
+            params.pointer("/tokenUsage/total").and_then(usage_breakdown),
+            params.pointer("/tokenUsage/last").and_then(usage_breakdown),
+        ) {
+            item.usage_breakdown = Some(tokens.update_breakdown(turn, total, last));
+        }
+        item
+    })
 }
 
 /// O fim de um turno (`Turn` com status final). `None` enquanto está em andamento.

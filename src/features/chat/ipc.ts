@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { Timeline } from "./timeline/types";
+import type { ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
 
 /**
  * A conversa de uma aba como timeline, lida do transcript do agente (`ipc/commands/canal.rs`,
@@ -19,7 +20,8 @@ export interface WorkingDiff {
 export const scmWorkingDiff = (cwd: string) => invoke<WorkingDiff | null>("scm_working_diff", { cwd });
 
 /** Um worktree novo para uma conversa (`conversa.rs`): onde o agente roda e a branch criada. */
-export const chatNewWorktree = (cwd: string, title: string) => invoke<{ cwd: string; branch: string }>("chat_new_worktree", { cwd, title });
+export const chatNewWorktree = (cwd: string, title: string, agentId: string, submodules: ChatWorktreeSubmodules) =>
+  invoke<{ cwd: string; branch: string; submodules: "none" | "initialized" | "failed" }>("chat_new_worktree", { cwd, title, agentId, submodules });
 
 /**
  * O aviso do sistema de um pedido de permissão (`conversa/commands.rs`, `chat_permission_notify`):

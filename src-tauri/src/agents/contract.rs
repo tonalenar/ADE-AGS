@@ -53,7 +53,7 @@ fn codex() {
     assert_eq!(def.command, "codex");
     assert_eq!(def.resume, Some("resume {session}"));
     assert_eq!(def.sessions, SessionSource::CodexRollouts);
-    assert_eq!(def.mcp, McpStyle::None);
+    assert_eq!(def.mcp, McpStyle::CodexConfigOverrides);
     assert_eq!(def.skills_dir, Some(".agents/skills"));
 
     let profile = def.profile.expect("codex aísla cuentas");

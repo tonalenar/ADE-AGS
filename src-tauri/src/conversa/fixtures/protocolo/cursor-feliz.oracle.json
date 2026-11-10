@@ -1,0 +1,20 @@
+{
+  "checks": [
+    {
+      "label": "o init abre a sessão",
+      "expect": {
+        "sessao": "{{session:1}}"
+      }
+    },
+    {
+      "label": "o read fecha e o result success termina o turno",
+      "expect": {
+        "fim": "ok",
+        "ferramentas": [
+          "Read:done"
+        ],
+        "textoContem": "LINHA_TESTE"
+      }
+    }
+  ]
+}

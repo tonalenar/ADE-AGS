@@ -42,7 +42,7 @@ pub fn start(app: &tauri::AppHandle, task: Task, extras: supervisor::LaunchExtra
     tx.execute("INSERT INTO gemini_desktop_consults(id,cwd,prompt,status,created_at,updated_at) VALUES(?1,?2,?3,'queued',?4,?4)",
         rusqlite::params![id, super::tasks::workspace_key(&run.cwd), prompt, crate::util::now_ts()]).map_err(|e|e.to_string())?;
     tx.execute("INSERT INTO gemini_desktop_run_tasks(consult_id,task_id) VALUES(?1,?2)", rusqlite::params![id,task.id]).map_err(|e|e.to_string())?;
-    store::mark_running(&tx, &task.id, &id, "")?;
+    store::mark_running(&tx, &task.id, &id, &id, "")?;
     tx.commit().map_err(|e|e.to_string())?;
     drop(conn);
     supervisor::notify_changed(app, &task.id);
@@ -82,7 +82,9 @@ pub fn finish(conn: &Connection, id: &str, status: &str, response: Option<String
     let Some(task) = linked_task(conn,id)? else { return Ok(None) };
     if status == "working" { return Ok(None); }
     if status == "cancelled" {
-        conn.execute("UPDATE tasks SET status='cancelled',ended_at=?2 WHERE id=?1 AND status='running'", rusqlite::params![task.id,crate::util::now_ts()]).map_err(|e|e.to_string())?;
+        let ended_at = crate::util::now_ts();
+        conn.execute("UPDATE tasks SET status='cancelled',ended_at=?2 WHERE id=?1 AND status='running'", rusqlite::params![task.id,ended_at]).map_err(|e|e.to_string())?;
+        store::close_active_attempt(conn, &task.id, "cancelled", None, ended_at)?;
     } else {
         store::finish_task(conn,&task.id,&TaskOutcome { ok:status=="completed", result:response, error, ..Default::default() })?;
     }
@@ -123,7 +125,7 @@ mod tests {
         schema(&conn).unwrap();
         conn.execute("INSERT INTO gemini_desktop_consults VALUES('consult','/p','Review','queued',NULL,NULL,0,0)",[]).unwrap();
         conn.execute("INSERT INTO gemini_desktop_run_tasks VALUES('consult',?1,0)",[&task.id]).unwrap();
-        store::mark_running(&conn,&task.id,"consult","").unwrap();
+        store::mark_running(&conn,&task.id,"attempt-1","consult","").unwrap();
         (conn,task)
     }
     #[test]

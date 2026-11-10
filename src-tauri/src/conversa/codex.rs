@@ -22,6 +22,8 @@ use tokio::sync::{mpsc, oneshot};
 use crate::database::DbConnection;
 
 use super::events::emit;
+pub use super::codex_parar::StopAction;
+use super::codex_parar::StopGate;
 use super::{codex_map, permission, resume, store, turn};
 
 /// Quanto esperar a resposta de um pedido (abrir thread, começar turno). O turno em si não tem
@@ -69,6 +71,8 @@ pub struct Session {
     alive: AtomicBool,
     remote: Mutex<Option<String>>,
     turn: Mutex<Option<String>>,
+    /// O Parar que chega antes do `turn/started` (ver `codex_parar`).
+    stop: Mutex<StopGate>,
     /// A base para os tokens do turno (`codex_map::TurnTokens`).
     tokens: Mutex<codex_map::TurnTokens>,
     child: Mutex<Option<tokio::process::Child>>,
@@ -92,6 +96,64 @@ impl Session {
     pub(crate) fn set_turn(&self, turn: Option<String>) {
         if let Ok(mut t) = self.turn.lock() {
             *t = turn;
+        }
+    }
+
+    /// O `turn/started` chegou: o turno `id` está aberto. O Parar que esperava por ele sai agora.
+    pub(crate) fn turn_started(&self, id: &str) {
+        self.set_turn(Some(id.to_string()));
+        if self.gate(|g| g.on_started(id)) {
+            self.send_interrupt(id);
+        }
+    }
+
+    /// O `turn/completed` chegou: o turno `id` fechou, e o Parar pendente dele perde o sentido.
+    pub(crate) fn turn_completed(&self, id: &str) {
+        if self.turn().as_deref() == Some(id) {
+            self.set_turn(None);
+        }
+        self.gate(|g| g.on_completed(id));
+    }
+
+    /// O `turn/start` vai sair.
+    pub(crate) fn begin_start(&self) {
+        self.gate(StopGate::begin_start);
+    }
+
+    /// A resposta do `turn/start` chegou (`Some(id)`) ou o pedido falhou, ou o turno já acabou (`None`).
+    pub(crate) fn end_start(&self, turn: Option<&str>) {
+        self.gate(|g| g.end_start(turn));
+    }
+
+    fn gate<T>(&self, f: impl FnOnce(&mut StopGate) -> T) -> T {
+        // Envenenado só se alguém panicou com o lock: o estado é trivial, segue com o que há.
+        let mut gate = self.stop.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut gate)
+    }
+
+    /// Manda o `turn/interrupt` sem esperar a resposta (quem pediu foi o Parar que ficou pendente).
+    fn send_interrupt(&self, turn: &str) {
+        let Some(remote) = self.remote() else { return };
+        let id = self.next.fetch_add(1, Ordering::SeqCst);
+        let _ = self.send(&json!({ "id": id, "method": "turn/interrupt", "params": { "threadId": remote, "turnId": turn } }));
+    }
+
+    /// O Parar da pessoa. Com o turno aberto, manda o `turn/interrupt` e espera a resposta. Antes do
+    /// `turn/started` o Codex recusaria (`-32600`): o Parar fica pendente e sai no aviso (ver `codex_parar`).
+    pub async fn stop(&self) -> Result<StopAction, String> {
+        let action = self.gate(|g| g.request_stop(self.turn().as_deref()));
+        if let StopAction::Send(turn) = &action {
+            let remote = self.remote().ok_or("A conversa ainda não abriu no Codex")?;
+            self.request("turn/interrupt", json!({ "threadId": remote, "turnId": turn })).await?;
+        }
+        Ok(action)
+    }
+
+    /// Entrega a resposta do pedido `id` a quem espera por ela.
+    pub(crate) fn resolve(&self, id: u64, result: Result<Value, String>) {
+        let reply = self.pending.lock().ok().and_then(|mut p| p.remove(&id));
+        if let Some(reply) = reply {
+            let _ = reply.send(result);
         }
     }
 
@@ -156,6 +218,28 @@ impl Session {
 fn sessions() -> &'static Mutex<HashMap<String, Arc<Session>>> {
     static SESSIONS: OnceLock<Mutex<HashMap<String, Arc<Session>>>> = OnceLock::new();
     SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Uma sessão sem processo, para os testes: o que ela escreveria no stdio chega ao receptor.
+#[cfg(test)]
+pub(crate) fn session_for_test(thread_id: &str, remote: &str) -> (Arc<Session>, mpsc::UnboundedReceiver<String>) {
+    let (tx, rx) = mpsc::unbounded_channel::<String>();
+    let session = Arc::new(Session {
+        thread_id: thread_id.to_string(),
+        tx,
+        pending: Mutex::new(HashMap::new()),
+        next: AtomicU64::new(1),
+        alive: AtomicBool::new(true),
+        remote: Mutex::new(Some(remote.to_string())),
+        turn: Mutex::new(None),
+        stop: Mutex::new(StopGate::default()),
+        tokens: Mutex::new(codex_map::TurnTokens::default()),
+        child: Mutex::new(None),
+    });
+    if let Ok(mut map) = sessions().lock() {
+        map.insert(thread_id.to_string(), session.clone());
+    }
+    (session, rx)
 }
 
 /// A sessão viva de uma conversa, sem subir uma.
@@ -300,7 +384,11 @@ fn thread_id_of(result: &Value) -> Result<String, String> {
 
 fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<Arc<Session>, String> {
     let program = crate::util::find_program("codex").ok_or("Não achei o Codex CLI (codex) no PATH")?;
-    let mut cmd = crate::util::external_command(&program, &["app-server"]).map_err(|e| e.to_string())?;
+    let mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "codex");
+    let mut args = mcp.map(|mcp| mcp.codex_args).unwrap_or_default();
+    args.push("app-server".into());
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(crate::util::external_path(std::path::Path::new(&row.cwd)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -328,6 +416,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         alive: AtomicBool::new(true),
         remote: Mutex::new(None),
         turn: Mutex::new(None),
+        stop: Mutex::new(StopGate::default()),
         tokens: Mutex::new(codex_map::TurnTokens::default()),
         child: Mutex::new(Some(child)),
     });
@@ -369,6 +458,7 @@ async fn read_loop(app: AppHandle, db: DbConnection, session: Arc<Session>, stdo
 fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     // `kill` (fechar a conversa, trocar o acesso) já baixou `alive`: o fim por conta própria é queda.
     let killed = !session.alive.swap(false, Ordering::SeqCst);
+    session.gate(StopGate::reset);
     let waiting: Vec<Reply> = session.pending.lock().map(|mut p| p.drain().map(|(_, r)| r).collect()).unwrap_or_default();
     for reply in waiting {
         let _ = reply.send(Err(CLOSED.into()));
@@ -402,14 +492,11 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
     match (method, id) {
         (None, Some(id)) => {
             let Some(id) = id.as_u64() else { return };
-            let reply = session.pending.lock().ok().and_then(|mut p| p.remove(&id));
-            if let Some(reply) = reply {
-                let result = match msg.get("error") {
-                    Some(error) => Err(error.get("message").and_then(Value::as_str).unwrap_or("erro do Codex").to_string()),
-                    None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
-                };
-                let _ = reply.send(result);
-            }
+            let result = match msg.get("error") {
+                Some(error) => Err(error.get("message").and_then(Value::as_str).unwrap_or("erro do Codex").to_string()),
+                None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
+            };
+            session.resolve(id, result);
         }
         (Some(method), Some(rpc_id)) => on_request(app, db, session, &method, rpc_id, msg.get("params").unwrap_or(&Value::Null)),
         (Some(method), None) => on_notification(app, db, session, &method, msg.get("params").unwrap_or(&Value::Null)),
@@ -471,7 +558,7 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
         "turn/started" => {
             let turn = params.get("turn").unwrap_or(&Value::Null);
             let id = turn.get("id").and_then(Value::as_str).unwrap_or("");
-            session.set_turn(Some(id.to_string()));
+            session.turn_started(id);
             if let Ok(conn) = db.lock() {
                 let _ = store::upsert_run(&conn, thread_id, id, "inProgress", Some(crate::util::now_ts_ms()), None, None);
             }
@@ -481,9 +568,7 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
             let turn = params.get("turn").unwrap_or(&Value::Null);
             let id = turn.get("id").and_then(Value::as_str).unwrap_or("");
             let now = crate::util::now_ts_ms();
-            if session.turn().as_deref() == Some(id) {
-                session.set_turn(None);
-            }
+            session.turn_completed(id);
             let expired = db.lock().ok().map(|conn| {
                 let status = turn.get("status").and_then(Value::as_str).unwrap_or("completed");
                 let _ = store::upsert_run(&conn, thread_id, id, status, None, Some(now), turn.get("durationMs").and_then(Value::as_i64));
@@ -538,6 +623,22 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
                 }
                 emit(app, thread_id, "thread", json!({ "title": name.trim() }));
             }
+        }
+        "thread/goal/updated" => {
+            let native = params.get("goal").unwrap_or(&Value::Null);
+            if let (Some(objective), Some(status)) = (native.get("objective").and_then(Value::as_str), native.get("status").and_then(Value::as_str)) {
+                if let Ok(conn) = db.lock() {
+                    if let Ok(goal) = store::set_goal(&conn, thread_id, objective, status, native.get("updatedAt").and_then(Value::as_i64).unwrap_or_else(crate::util::now_ts_ms)) {
+                        emit(app, thread_id, "goal", json!({ "goal": goal }));
+                    }
+                }
+            }
+        }
+        "thread/goal/cleared" => {
+            if let Ok(conn) = db.lock() {
+                let _ = store::clear_goal(&conn, thread_id);
+            }
+            emit(app, thread_id, "goal", json!({ "goal": null }));
         }
         // Um erro que o Codex vai tentar de novo sozinho não aparece.
         "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {

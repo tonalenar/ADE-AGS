@@ -12,7 +12,7 @@ import { useChatStore } from "./store";
  * A aba "Design" do painel direito: a tela de Design (a mesma da rota `/design/:id`) com os designs da
  * pasta da conversa. Com mais de um, um seletor na barra; `ags design open` escolhe pelo store.
  */
-export function DesignPane({ cwd }: { cwd: string | null }) {
+export function DesignPane({ cwd, composerTarget }: { cwd: string | null; composerTarget?: string | null }) {
   const { t } = useTranslation();
   const [designs, setDesigns] = useState<Design[] | null>(null);
   const request = useChatStore((s) => s.designOpen);
@@ -47,6 +47,7 @@ export function DesignPane({ cwd }: { cwd: string | null }) {
   return (
     <div className="relative flex-1 min-h-0 flex flex-col">
       <DesignStudio key={current} designId={current} host="chat"
+        composerTarget={composerTarget}
         request={request && request.designId === current ? request : null}
         leading={picker}
         trailing={<OpenFullButton label={t("design.studio.openFull")} onClick={() => { window.location.hash = `#/design/${encodeURIComponent(current)}`; }} />} />

@@ -6,9 +6,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
-use super::bancada::{abrir, conferir, simular, tocar, Espera, Passo, Protocolo, Roteiro};
+use super::bancada::{abrir, conferir, rodar, simular, tocar, Espera, Evento, Passo, Protocolo, Roteiro, Saida, PRAZO_PEDIDO_MS};
 use super::pool::{decide, move_account, reset_at, Decision, Input, Mode};
 use super::resume::{open_resuming, Opened, ResumeFailure, RETRY_PAUSES};
 use crate::runs::failure::FailureKind;
@@ -209,6 +209,142 @@ fn uma_chave_errada_na_espera_nao_passa_calada() {
     assert!(serde_json::from_value::<Passo>(json!({ "passo": "stall", "segundos": 3 })).is_err());
 }
 
+/// B2 e B4: o snapshot e a espera passam a afirmar o tipo do item, o pedido que sobrou e (ainda vazio
+/// neste passo) o filho. O cancelamento do próprio agente tira o pedido dos pendentes sem apagá-lo da lista.
+#[test]
+fn o_snapshot_afirma_o_tipo_do_item_e_o_pedido_que_sobra() {
+    let uso = json!({ "type": "assistant", "message": { "id": "msg_1", "role": "assistant",
+        "usage": { "input_tokens": 4, "output_tokens": 6 },
+        "content": [{ "type": "text", "text": "Vou pedir." }] } });
+    let pedido = json!({ "type": "control_request", "request_id": "req_1", "request": {
+        "subtype": "can_use_tool", "tool_name": "Bash", "tool_use_id": "toolu_2", "input": { "command": "cargo test" },
+    } });
+    let linhas = |extra: Vec<Value>| {
+        let mut eventos = vec![
+            json!({ "type": "system", "subtype": "init", "session_id": "s1" }),
+            uso.clone(),
+            pedido.clone(),
+        ];
+        eventos.extend(extra);
+        let saidas: Vec<Saida> = eventos.into_iter().enumerate().map(|(i, v)| Saida { at_ms: i as u64 * 10, evento: Evento::Linha(v.to_string()) }).collect();
+        rodar(Protocolo::ClaudeStream, &saidas)
+    };
+    let aberto = linhas(vec![]);
+    let espera = Espera {
+        tipos: Some(vec!["usage".into(), "assistant".into()]),
+        filhos: Some(vec![]),
+        pedidos_pendentes: Some(vec!["command".into()]),
+        pedidos: Some(vec!["command".into()]),
+        ..Espera::default()
+    };
+    let falhas = conferir(&espera, &aberto, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.is_empty(), "{falhas:?}");
+    let snap = super::replay_protocolo::snapshot(&aberto);
+    assert_eq!(snap["tipos"], json!(["usage", "assistant"]));
+    assert_eq!(snap["filhos"], json!([]));
+    assert_eq!(snap["pedidosPendentes"], json!([{ "kind": "command", "title": "cargo test" }]));
+    assert_eq!(snap["pedidos"], snap["pedidosPendentes"], "sem cancelamento, o pedido ainda está pendente");
+
+    let cancelado = linhas(vec![json!({ "type": "control_cancel_request", "request_id": "req_1" })]);
+    let espera_cancelado = Espera { pedidos: Some(vec!["command".into()]), pedidos_pendentes: Some(vec![]), ..Espera::default() };
+    let falhas = conferir(&espera_cancelado, &cancelado, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.is_empty(), "{falhas:?}");
+    assert!(super::replay_protocolo::snapshot(&cancelado)["pedidosPendentes"].as_array().unwrap().is_empty());
+
+    let errado = Espera { pedidos_pendentes: Some(vec![]), ..espera.clone() };
+    let falhas = conferir(&errado, &aberto, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.iter().any(|e| e.contains("pedidosPendentes")), "{falhas:?}");
+}
+
+/// B3: a tarefa e o que o subagente faz iam para o chão. Ficam em `filhos`, fora da timeline do pai,
+/// e o filho pode aparecer antes de o turno do pai acabar.
+#[test]
+fn o_motor_guarda_a_tarefa_e_o_item_do_subagente() {
+    let eventos = vec![
+        json!({ "type": "system", "subtype": "init", "session_id": "s1" }),
+        json!({ "type": "system", "subtype": "task_started", "task_id": "af9", "tool_use_id": "toolu_agent",
+            "description": "Responder com ok", "task_type": "local_agent", "prompt": "Responda só ok." }),
+        json!({ "type": "assistant", "parent_tool_use_id": "toolu_agent",
+            "message": { "id": "msg_sub", "content": [{ "type": "text", "text": "ok" }] } }),
+        json!({ "type": "assistant", "message": { "id": "msg_pai", "content": [{ "type": "text", "text": "o pai segue" }] } }),
+    ];
+    let saidas: Vec<Saida> = eventos.into_iter().enumerate().map(|(i, v)| Saida { at_ms: i as u64 * 10, evento: Evento::Linha(v.to_string()) }).collect();
+    let r = rodar(Protocolo::ClaudeStream, &saidas);
+    assert!(r.fim.is_none(), "o turno do pai continua aberto");
+    assert_eq!(r.texto(), "o pai segue", "a fala do filho não entra na timeline: {}", r.texto());
+    assert_eq!(r.filhos_compactos(), ["task:af9:started", "subitem:toolu_agent:assistant"]);
+    let espera = Espera { filhos: Some(vec!["task:af9:started".into(), "subitem:toolu_agent:assistant".into()]), tipos: Some(vec!["assistant".into()]), ..Espera::default() };
+    let falhas = conferir(&espera, &r, Protocolo::ClaudeStream, &sem_placeholder);
+    assert!(falhas.is_empty(), "{falhas:?}");
+    let snap = super::replay_protocolo::snapshot(&r);
+    assert_eq!(snap["filhos"][0]["tipo"], "task");
+    assert_eq!(snap["filhos"][0]["task"]["taskId"], "af9");
+    assert_eq!(snap["filhos"][1]["parent"], "toolu_agent");
+    assert_eq!(snap["filhos"][1]["item"]["text"], "ok");
+    assert!(snap["itens"].as_array().unwrap().iter().all(|i| i["text"] != "ok"));
+}
+
+/// B1, parte do Antigravity: o leitor percorre o fluxo sem o prazo de abertura dos outros motores.
+/// As duas linhas são o mínimo que o mapeador já aceita nos testes dele. Não descrevem um turno real.
+#[test]
+fn o_agy_le_o_fluxo_sem_prazo_de_silencio() {
+    let init = json!({ "event": "init", "conversation_id": "cv-leitura" });
+    let result = json!({ "event": "result", "result": { "status": "SUCCESS", "response": "lido", "conversation_id": "cv-leitura" } });
+    let saidas = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: PRAZO_PEDIDO_MS + 5_000, evento: Evento::Linha(result.to_string()) },
+    ];
+    let r = rodar(Protocolo::AgyStream, &saidas);
+    assert_eq!(r.sessao(), Some("cv-leitura"));
+    assert_eq!(r.texto(), "lido");
+    assert!(r.fim.as_ref().is_some_and(|f| f.error.is_none() && !f.interrupted), "{:?}", r.fim);
+    assert!(r.silencio_max_ms > PRAZO_PEDIDO_MS, "o buraco de tempo não fecha o turno");
+    assert!(tocar(&Roteiro::new(Protocolo::AgyStream, vec![Passo::Sessao { id: "x".into() }])).is_err(), "o roteiro não sintetiza este protocolo");
+    assert_eq!(serde_json::from_value::<Protocolo>(json!("agy-stream")).unwrap(), Protocolo::AgyStream);
+}
+
+/// B6: o `read_turn` do Cursor, com o relógio do transcript. A linha cujo `atMs` passa de `quiet_after`
+/// não entra. Não é um turno do provider: o formato é o mínimo que o mapeador já lê nos testes dele.
+#[test]
+fn o_cursor_cala_quando_o_proximo_instante_passa_do_prazo() {
+    use crate::conversa::cursor_map::QUIET_AFTER_SPEECH;
+    let sid = "sessao-leitura";
+    let init = json!({ "type": "system", "subtype": "init", "session_id": sid });
+    let fala = |texto: &str| json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": texto }] }, "session_id": sid, "timestamp_ms": 1 });
+    let prazo = u64::try_from(QUIET_AFTER_SPEECH.as_millis()).unwrap();
+    let calado = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: 10, evento: Evento::Linha(fala("cedo").to_string()) },
+        Saida { at_ms: 10 + prazo + 1, evento: Evento::Linha(fala("tarde demais").to_string()) },
+    ];
+    let r = rodar(Protocolo::CursorStream, &calado);
+    assert_eq!(r.sessao(), Some(sid));
+    assert_eq!(r.texto(), "cedo");
+    assert!(!r.caiu && r.fim.as_ref().is_some_and(|f| f.error.is_none()), "a fala já tinha vindo: {:?}", r.fim);
+    assert!(r.silencio_max_ms > prazo);
+
+    let dentro = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: 10, evento: Evento::Linha(fala("um").to_string()) },
+        Saida { at_ms: 10 + prazo, evento: Evento::Linha(fala("dois").to_string()) },
+    ];
+    let r = rodar(Protocolo::CursorStream, &dentro);
+    assert_eq!(r.texto(), "umdois", "no limite do prazo a linha ainda entra: {}", r.texto());
+
+    let ferramenta = json!({ "type": "tool_call", "subtype": "started", "call_id": "sh1", "session_id": sid,
+        "tool_call": { "shellToolCall": { "args": { "command": "echo oi" } } } });
+    let pronta = json!({ "type": "tool_call", "subtype": "completed", "call_id": "sh1", "session_id": sid, "tool_call": {
+        "shellToolCall": { "args": { "command": "echo oi" }, "result": { "success": { "stdout": "oi", "exitCode": 0 } } } } });
+    let longa = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: 10, evento: Evento::Linha(ferramenta.to_string()) },
+        Saida { at_ms: 10 + prazo + 1, evento: Evento::Linha(pronta.to_string()) },
+    ];
+    let r = rodar(Protocolo::CursorStream, &longa);
+    assert_eq!(r.ferramentas(), ["Bash:done"], "ferramenta rodando não tem prazo: {:?}", r.ferramentas());
+    assert!(tocar(&Roteiro::new(Protocolo::CursorStream, vec![Passo::Sessao { id: "x".into() }])).is_err());
+}
+
 // ── A retomada (`resume.rs`) com sessões abertas pela bancada ─────────────────
 
 /// `open_resuming` com cada tentativa de retomada tocando o roteiro seguinte; a sessão nova é outro roteiro.
@@ -280,6 +416,8 @@ mod retomada {
                 Protocolo::ClaudeStream => "Claude",
                 Protocolo::CodexAppServer => "Codex",
                 Protocolo::Acp => "OpenCode",
+                Protocolo::AgyStream => "Antigravity",
+                Protocolo::CursorStream => "Cursor",
             }).as_str()), "{protocolo:?}");
             assert_eq!((novas, pausas), (1, RETRY_PAUSES.to_vec()), "{protocolo:?}");
         }
@@ -465,6 +603,54 @@ mod replay_protocolo {
         assert!(erro.contains("FerramentaNova") && erro.contains("não conhece"), "{erro}");
     }
 
+    /// B5: a lista é por protocolo. Os três primeiros continuam recusando qualquer `Other`.
+    /// agy e Cursor só deixam passar o nome da lista; o resto derruba a fixture. Os frames são o
+    /// mínimo para o mapeador emitir o item. Não afirmam o que o provider manda.
+    #[test]
+    fn a_lista_de_ferramentas_e_por_protocolo_e_nao_afrouxa_os_tres() {
+        let rodar = |protocol: &str, transcript: Value| {
+            let f = ler(&fixture(transcript, protocol)).unwrap();
+            tocar(&f, &oraculo(serde_json::json!([{ "label": "le", "expect": {} }])))
+        };
+        let codex = rodar("codex-app-server", serde_json::json!([
+            { "atMs": 0, "out": { "method": "item/completed", "params": { "item": { "id": "c", "type": "mcpToolCall", "server": "ags", "tool": "x", "status": "completed" } } } },
+        ]));
+        assert!(codex.unwrap_err().contains("ags.x"), "o Codex continua recusando Other");
+        let acp = rodar("acp", serde_json::json!([
+            { "atMs": 0, "out": { "jsonrpc": "2.0", "method": "session/update", "params": { "update": {
+                "sessionUpdate": "tool_call", "toolCallId": "c", "title": "FerramentaNova", "kind": "other", "status": "completed"
+            } } } },
+        ]));
+        assert!(acp.unwrap_err().contains("FerramentaNova"), "o ACP continua recusando Other");
+        let filho = rodar("claude-stream", serde_json::json!([
+            { "atMs": 0, "out": { "type": "assistant", "parent_tool_use_id": "pai", "message": { "id": "m", "content": [
+                { "type": "tool_use", "id": "t", "name": "FerramentaNova", "input": {} }
+            ] } } },
+        ]));
+        assert!(filho.unwrap_err().contains("FerramentaNova"), "o filho não fura o guard");
+
+        let negado = rodar("agy-stream", serde_json::json!([
+            { "atMs": 0, "out": { "event": "result", "result": { "status": "SUCCESS", "denied_actions": ["git push"] } } },
+        ]));
+        assert!(negado.is_ok(), "denied está na lista do agy: {negado:?}");
+        let solto = rodar("agy-stream", serde_json::json!([
+            { "atMs": 0, "out": { "event": "step_update", "step_update": { "step_index": 1, "state": "DONE", "step_type": "xyzzy", "tool_name": "xyzzy" } } },
+        ]));
+        assert!(solto.unwrap_err().contains("xyzzy"), "nome fora da lista do agy cai");
+
+        let mcp = rodar("cursor-stream", serde_json::json!([
+            { "atMs": 0, "out": { "type": "tool_call", "subtype": "started", "call_id": "c", "session_id": "s",
+                "tool_call": { "mcpToolCall": { "args": { "toolName": "mcp" } } } } },
+        ]));
+        assert!(mcp.is_ok(), "mcp está na lista do Cursor só para exercitar o guard: {mcp:?}");
+        let outro = rodar("cursor-stream", serde_json::json!([
+            { "atMs": 0, "out": { "type": "tool_call", "subtype": "started", "call_id": "c", "session_id": "s",
+                "tool_call": { "mcpToolCall": { "args": { "toolName": "xyzzy" } } } } },
+        ]));
+        let erro = outro.unwrap_err();
+        assert!(erro.contains("xyzzy") && erro.contains("fora da lista"), "{erro}");
+    }
+
     #[test]
     fn sem_oraculo_ou_com_formato_errado_nao_roda() {
         assert!(ler_oraculo("{\"checks\": []}").unwrap_err().contains("ao menos um"));
@@ -501,5 +687,60 @@ mod replay_protocolo {
         assert_eq!(depois["expected"], serde_json::json!({ "sessao": null }));
         depois.as_object_mut().unwrap().remove("expected");
         assert_eq!(antes, depois);
+    }
+
+    fn gravada(id: &str) -> Value {
+        let texto = std::fs::read_to_string(pasta().join(format!("{id}.json"))).unwrap();
+        serde_json::from_str(&texto).unwrap()
+    }
+
+    fn outs(fixture: &Value) -> Vec<&Value> {
+        fixture["transcript"].as_array().unwrap().iter().filter(|e| e.get("out").is_some()).map(|e| &e["out"]).collect()
+    }
+
+    /// Os frames decisivos ficam no transcript. O snapshot só vê o que o motor produz.
+    #[test]
+    fn as_fixtures_gravadas_guardam_os_frames_que_a_captura_decidiu() {
+        let ferramenta = gravada("claude-steer-ferramenta");
+        let results: Vec<&Value> = outs(&ferramenta).into_iter().filter(|o| o["type"] == "result").collect();
+        assert_eq!(results.len(), 1, "um único result");
+        assert_eq!(results[0]["result"], "STEER_OK");
+        assert!(ferramenta["transcript"].as_array().unwrap().iter().any(|e| e.get("in").and_then(|v| v.pointer("/message/content/0/text")).and_then(Value::as_str).is_some_and(|t| t.contains("MENSAGEM_STEER"))));
+
+        let sem = gravada("claude-steer-sem-ferramenta");
+        let results: Vec<&Value> = outs(&sem).into_iter().filter(|o| o["type"] == "result").collect();
+        assert_eq!(results.len(), 2);
+        assert!(!results[0]["result"].as_str().unwrap().contains("STEER_OK"));
+        assert!(results[0]["result"].as_str().unwrap().contains("1\n2\n3"));
+        assert_eq!(results[1]["result"], "STEER_OK");
+        let steer_ms = sem["transcript"].as_array().unwrap().iter().find_map(|e| {
+            e.get("in").and_then(|v| v.pointer("/message/content/0/text")).and_then(Value::as_str).filter(|t| t.contains("MENSAGEM_STEER")).map(|_| e["atMs"].as_u64().unwrap())
+        }).unwrap();
+        assert_eq!(steer_ms, 1974);
+
+        let real = gravada("codex-interrompido-real");
+        assert!(outs(&real).iter().any(|o| o["method"] == "turn/completed" && o.pointer("/params/turn/status").and_then(Value::as_str) == Some("interrupted")));
+        assert!(real["transcript"].as_array().unwrap().iter().any(|e| e.get("in").and_then(|v| v.get("method")).and_then(Value::as_str) == Some("turn/interrupt")));
+
+        let antes = gravada("codex-interrupt-antes-do-started");
+        let ordem: Vec<&str> = antes["transcript"].as_array().unwrap().iter().filter_map(|e| {
+            let body = e.get("out").or_else(|| e.get("in"))?;
+            if body.get("error").and_then(|err| err.get("code")).and_then(Value::as_i64) == Some(-32600) {
+                return Some("erro");
+            }
+            match body.get("method").and_then(Value::as_str) {
+                Some("turn/started") => Some("started"),
+                Some("turn/completed") => Some("completed"),
+                Some("turn/interrupt") => Some("interrupt"),
+                _ => None,
+            }
+        }).collect();
+        assert!(ordem.windows(4).any(|w| w == ["interrupt", "erro", "started", "completed"]), "{ordem:?}");
+
+        for id in ["cursor-queda", "antigravity-queda"] {
+            let f = gravada(id);
+            assert!(outs(&f).iter().all(|o| o.get("type") != Some(&Value::String("result".into())) && o.get("event") != Some(&Value::String("result".into()))), "{id}");
+            assert!(f["transcript"].as_array().unwrap().iter().any(|e| e.get("close").is_some()), "{id}");
+        }
     }
 }

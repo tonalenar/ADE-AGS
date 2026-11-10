@@ -3,6 +3,7 @@
 //! Cada módulo cubre un dominio; `app` es el que los ensambla y arranca Tauri.
 
 pub mod ai_memory;
+mod agent_secrets;
 mod accounts;
 mod agents;
 mod approval_audit;
@@ -39,6 +40,10 @@ mod orchestrator;
 mod peer_queue;
 mod android;
 mod pet;
+mod project_scripts;
+mod local_acp;
+mod prompt_stashes;
+mod project_chat_policy;
 mod prelaunch;
 mod preview;
 mod real_browser;
@@ -47,6 +52,7 @@ mod simulator;
 pub(crate) mod iphone;
 mod sim_host;
 mod routines;
+pub(crate) mod scheduled_tasks;
 mod runs;
 mod scm;
 mod session;
@@ -55,6 +61,10 @@ mod squads;
 mod sync;
 mod tab_checkpoints;
 mod terminal;
+mod screen_recording;
+mod voice_input;
+#[cfg_attr(not(test), allow(dead_code, reason = "contrato da Fase 0 do harness: ainda não ligado à UI, ao IPC nem ao MCP"))]
+mod harness;
 pub mod testspeed;
 pub use terminal::SESSION_ENV;
 mod updates;

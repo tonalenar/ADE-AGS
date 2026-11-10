@@ -12,6 +12,8 @@ export interface TabMcp {
   env: Record<string, string>;
   /** Lo que esta TUI le antepone al nombre de cada tool. */
   toolPrefix: string;
+  /** Argumentos MCP específicos e restritos ao processo desta TUI. */
+  launchArgs?: string[];
 }
 
 /**
@@ -37,7 +39,9 @@ const SERVER_NAME = "ags";
  * mande al agente a usar una: el nombre que lee tiene que ser el que puede escribir.
  */
 export function browserToolPrefix(agentId: string | null | undefined): string {
-  return agentId && agentDef(agentId)?.mcp === "opencodeConfig" ? `${SERVER_NAME}_` : "";
+  const style = agentId ? agentDef(agentId)?.mcp : undefined;
+  if (style === "opencodeConfig") return `${SERVER_NAME}_`;
+  return "";
 }
 
 const quote = (value: string) => (value.includes('"') ? `'${value}'` : `"${value}"`);
@@ -82,6 +86,8 @@ export function appendBrowserMcp(command: string, mcp: TabMcp): string {
 export interface BrowserLaunch {
   command: string;
   env: Record<string, string>;
+  /** Argumentos nativos adicionais para o backend, sem concatenação na linha de comando. */
+  args?: string[];
 }
 
 /**
@@ -104,12 +110,13 @@ export async function withBrowserMcp(
 ): Promise<BrowserLaunch> {
   try {
     const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd, tabId, agentId, missionId });
-    if (!mcp) return { command, env: {} };
+    if (!mcp) return { command, env: {}, args: [] };
     return {
       command: mcp.configPath ? appendBrowserMcp(command, mcp) : command,
       env: mcp.env ?? {},
+      args: mcp.launchArgs ?? [],
     };
   } catch {
-    return { command, env: {} };
+    return { command, env: {}, args: [] };
   }
 }

@@ -57,7 +57,7 @@ Ele roda agentes de código em **terminais reais (PTY)**, com arquivos, diff, gi
 
 ### 2.4 Decisões já tomadas pelo usuário
 - **Não trocar o modelo do Codex** (`gpt-6.1-sol`) nos squads, nem propor a troca. O laço de raciocínio vazio se trata por detecção no app (Vigia). Interromper o agente ou fixar a versão do Codex CLI só com OK.
-- **O Jev custa cota**: bench real, sondas e testes reais do piloto só com OK e com teto.
+- **Uso do Jev**: consultas normais durante tarefas são permitidas sem confirmação individual quando o Jev estiver ativo e com saldo. Bench real, sondas e testes reais do piloto ainda exigem OK explícito e um teto de chamadas.
 - Atualização das CLIs de agentes: nunca com terminal ou missão em uso.
 
 ### 2.5 Testes
@@ -100,7 +100,7 @@ Ele roda agentes de código em **terminais reais (PTY)**, com arquivos, diff, gi
 | Missões, equipes, frota, squads, andares | [docs/agentes/ORQUESTRACAO.md](docs/agentes/ORQUESTRACAO.md) | o lead delega em ~2 min; um worktree por integrante; `peer deliver` uma vez; política por papel |
 | Vigia (supervisor das equipes) e detectores de agente parado | [docs/agentes/VIGIA.md](docs/agentes/VIGIA.md) | nasce desligado; nunca escreve em terminal trabalhando; laço do Codex só avisa; limiares calibrados |
 | Memória persistente | [docs/agentes/MEMORIA.md](docs/agentes/MEMORIA.md) | a memória é a do ai-memory, lida pelo binário (`--json`), nunca pelo token; o SQLite antigo é só leitura; `UNTRUSTED DATA` |
-| Jev, Laya, modo sombra, piloto do navegador, bench | [docs/agentes/JEV.md](docs/agentes/JEV.md) | o produto nunca depende do Jev; probabilidade, não `confidence`; cota só com OK |
+| Jev, Laya, modo sombra, piloto do navegador, bench | [docs/agentes/JEV.md](docs/agentes/JEV.md) | uso normal permitido ativo/com saldo; bench, sondas e testes reais do piloto exigem OK e teto |
 | Termos do projeto | [docs/agentes/GLOSSARIO.md](docs/agentes/GLOSSARIO.md) | — |
 
 Para **usar** o app pela CLI (abrir abas, peers, portais, memória), siga a skill [`skills/ags-orchestrator/SKILL.md`](skills/ags-orchestrator/SKILL.md).

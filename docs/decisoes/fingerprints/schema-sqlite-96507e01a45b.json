@@ -1,0 +1,10 @@
+{
+  "alvo": "schema-sqlite",
+  "sha256": "96507e01a45b25201935708b73be4b172486f14b1d58a280888736e402f3d260",
+  "data": "2026-11-10",
+  "motivo": "Só adições: tabelas run_attempts, run_delegation_receipts e session_transcript_index_state, coluna runs.source_thread_id (ON DELETE SET NULL) e índices, todas com IF NOT EXISTS/has_column. Nada é apagado nem reescrito.",
+  "semPerdaDeDados": true,
+  "arquivos": [
+    "src-tauri/src/database/schema.rs"
+  ]
+}

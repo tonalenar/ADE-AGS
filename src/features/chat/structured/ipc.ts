@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { ChatAccess } from "../chatModel";
+import type { ChatAccess, ProviderRuntimeConfig } from "../chatModel";
 import type { TimelineItem } from "../timeline/types";
 
 /**
@@ -21,6 +21,9 @@ export interface ThreadRow {
   accountId: string | null;
   /** O ai-memory na abertura do processo: `on` ou `off:<código>`; `null` = o processo ainda não abriu. */
   memory?: string | null;
+  parentRef?: string | null;
+  parentTurnId?: string | null;
+  isSideChat?: boolean;
   state: "active" | "settled";
   createdAt: number;
   updatedAt: number;
@@ -45,16 +48,34 @@ export interface RequestRow {
   createdAt: number;
 }
 
+export interface MessageSearchHit {
+  threadId: string;
+  title: string;
+  agentId: string;
+  cwd: string;
+  itemId: string;
+  kind: "user" | "assistant";
+  excerpt: string;
+}
+
 export interface ThreadStatus {
   alive: boolean;
   working: boolean;
 }
 
+export interface ThreadGoal {
+  threadId: string;
+  objective: string;
+  status: "active" | "paused" | "blocked" | "usageLimited" | "budgetLimited" | "complete";
+  updatedAt: number;
+}
+
 export const chatThreads = () => invoke<ThreadRow[]>("chat_threads");
 
 export const chatThreadCreate = (input: {
-  agentId: string; cwd: string; title: string; model: string | null; effort: string | null; access: ThreadAccess; accountId: string | null;
-}) => invoke<ThreadRow>("chat_thread_create", input);
+  agentId: string; cwd: string; workspaceId?: string | null; title: string; model: string | null; effort: string | null; access: ThreadAccess; accountId: string | null; parentRef?: string | null;
+}) => invoke<ThreadRow>("chat_thread_create", { ...input, parentRef: input.parentRef ?? null });
+export const chatSideChatDelete = (threadId: string) => invoke<void>("chat_side_chat_delete", { threadId });
 
 /** `images`: caminhos de imagens para o motor que as recebe em linha (o Claude); o caminho já está no texto. */
 export const chatThreadSend = (threadId: string, text: string, images?: string[]) =>
@@ -63,8 +84,17 @@ export const chatThreadSend = (threadId: string, text: string, images?: string[]
 export const chatThreadSwitchAgent = (threadId: string, agentId: string, model: string | null, effort: string | null, access: ThreadAccess, accountId: string | null) =>
   invoke<ThreadRow>("chat_thread_switch_agent", { threadId, agentId, model, effort, access, accountId });
 export const chatThreadItems = (threadId: string) => invoke<TimelineItem[]>("chat_thread_items", { threadId });
+export const chatThreadSearch = (query: string, limit = 30) => invoke<MessageSearchHit[]>("chat_thread_search", { query, limit });
 export const chatThreadRequests = (threadId: string) => invoke<RequestRow[]>("chat_thread_requests", { threadId });
 export const chatThreadStatus = (threadId: string) => invoke<ThreadStatus>("chat_thread_status", { threadId });
+export const chatThreadProviderConfig = (threadId: string) => invoke<ProviderRuntimeConfig | null>("chat_thread_provider_config", { threadId });
+export const chatThreadGoalGet = (threadId: string) => invoke<ThreadGoal | null>("chat_thread_goal_get", { threadId });
+export const chatThreadGoalAction = (threadId: string, action: "show" | "set" | "pause" | "resume" | "clear", objective?: string) =>
+  invoke<ThreadGoal | null>("chat_thread_goal_action", { threadId, action, objective: objective ?? null });
+export const chatThreadCompactContext = (threadId: string, instructions?: string) => invoke<void>("chat_thread_compact_context", { threadId, instructions: instructions ?? null });
+export const chatThreadAutoCompactOnReturn = (threadId: string) => invoke<boolean>("chat_thread_auto_compact_on_return", { threadId });
+/** Reinicia a sessão do provedor e preserva a timeline da ADE. */
+export const chatThreadClearContext = (threadId: string) => invoke<void>("chat_thread_clear_context", { threadId });
 /** Reaplica a política do time e as regras da pessoa aos pedidos que esperam (o backend decide; ver `conversa::permission`). */
 export const chatRequestsSweep = () => invoke<number>("chat_requests_sweep");
 export const chatThreadInterrupt = (threadId: string) => invoke<void>("chat_thread_interrupt", { threadId });

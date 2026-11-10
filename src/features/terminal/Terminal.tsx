@@ -19,15 +19,16 @@ import { registerTerminal } from "@/features/terminal/terminalRegistry";
 import { ExcerptAction } from "@/features/terminal/ExcerptAction";
 import { decodeOsc52 } from "@/features/terminal/osc52";
 import { scrollbackEnd } from "@/features/terminal/scrollbackEnd";
-import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { installTerminalKeyHandler, type TerminalHistoryAction } from "@/features/terminal/terminalKeys";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { isLocalUrl } from "@/features/tabs/viewTabs";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { awaitSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { useAgentsStore } from "@/features/agents/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
-import { accountEnv as accountEnvFor } from "@/features/accounts/ipc";
+import { getSetting } from "@/shared/ipc/settings";
+import { CLAUDE_AUTO_COMPACT_WINDOW_ENV, CLAUDE_AUTO_COMPACT_WINDOWS_SETTING, claudeAutoCompactWindow } from "@/features/chat/claudeAutoCompact";
 import { resolvePrelaunch } from "@/features/prelaunch/ipc";
 import { reconcileTabSkills } from "@/features/skills/ipc";
 import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
@@ -40,12 +41,13 @@ import { clearPtyLaunch, ptyLaunchRequested, subscribePtyLaunch } from "./ptyLau
 import { decidePaste } from "./pasteDecision";
 import { formatPathsForAgent } from "./formatPathsForAgent";
 import { showBotToast } from "@/shared/brand/botToastStore";
+import { CUSTOM_THEME_CHANGED_EVENT } from "@/features/settings/themePreferences";
 import i18n from "@/i18n";
 import { createFitter } from "./fit";
 import { forgetTab, markInput, markOutput } from "./activity";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
 import { LOOKBACK_S, startSessionDiscovery } from "./sessionDiscovery";
-import { MARK_LINE, MIN_CONTRAST, TERMINAL_FONT, TERMINAL_THEMES, terminalFontSize } from "./theme";
+import { MARK_LINE, MIN_CONTRAST, TERMINAL_FONT, TERMINAL_THEMES, terminalFontSize, terminalThemeFor } from "./theme";
 
 interface TerminalProps {
   /** Id de la tab en el store — solo se usa para esperar (si aplica) a que sus symlinks
@@ -72,11 +74,9 @@ interface TerminalProps {
   openedAt?: number;
   /** Session id ya conocido de la tab. Si viene, no hace falta salir a descubrirlo. */
   knownSessionId?: string;
-  /** Variables de entorno extra para ESTE proceso, además de las que declare la TUI custom. */
+  /** Variables extra de este proceso; no inclui perfil nem credenciais de conta. */
   env?: Record<string, string> | null;
-  /** Cuenta (perfil) de la TUI con la que correr. Sus variables se resuelven acá adentro,
-   *  justo antes de spawnear: si se resolvieran arriba, un render que llegue tarde lanzaría
-   *  el proceso con la cuenta del sistema y ya no habría vuelta atrás. */
+  /** ID da conta; o backend confere o provedor e resolve o ambiente no momento do spawn. */
   accountId?: string;
   /** Comandos a ejecutar antes del agente, sin resolver todavía (ver el store `prelaunch`).
    *  Se resuelven acá adentro, justo antes de spawnear, por el mismo motivo que la cuenta. */
@@ -187,7 +187,7 @@ function TerminalImpl({
 
     // ── 1. Inicializar xterm.js ──────────────────────────────
     const term = new XTerm({
-      theme: TERMINAL_THEMES[themeRef.current],
+      theme: terminalThemeFor(themeRef.current),
       minimumContrastRatio: MIN_CONTRAST[themeRef.current],
       fontFamily: TERMINAL_FONT,
       fontSize: terminalFontSize(useTerminalPrefsStore.getState().zoom),
@@ -225,7 +225,7 @@ function TerminalImpl({
           event.preventDefault();
           if (!/^https?:\/\//i.test(uri)) return;
           if (cwd && isLocalUrl(uri)) useViewTabsStore.getState().openBrowser(cwd, uri);
-          else openUrl(uri).catch(console.error);
+          else openExternalUrl(uri).catch(console.error);
         },
       },
       vtExtensions: {
@@ -252,13 +252,12 @@ function TerminalImpl({
     }
 
     const fitAddon = new FitAddon();
-    // Un link a un servidor de esta máquina ("Local: http://localhost:5173") se abre en una
-    // tab de navegador, al lado del agente que lo levantó: es para probar lo que está
-    // haciendo. Cualquier otro va al navegador del sistema.
+    // Um link de servidor local abre no Browser ao lado do agente que o iniciou. Links
+    // externos respeitam a preferência de navegador da ADE.
     const webLinksAddon = new WebLinksAddon((event, uri) => {
       event.preventDefault();
       if (cwd && isLocalUrl(uri)) useViewTabsStore.getState().openBrowser(cwd, uri);
-      else openUrl(uri).catch(console.error);
+      else openExternalUrl(uri).catch(console.error);
     });
 
     term.loadAddon(fitAddon);
@@ -272,6 +271,16 @@ function TerminalImpl({
       browserPaste: agentId === "claude-code" || !!agentId?.startsWith("opencode"),
       getSelection: () => term.getSelection(),
       copy: (text) => { void navigator.clipboard.writeText(text).catch(console.error); },
+      isNormalBuffer: () => term.buffer.active.type === "normal",
+      onHistoryAction: (action: TerminalHistoryAction) => {
+        switch (action) {
+          case "previousPage": term.scrollPages(-1); break;
+          case "nextPage": term.scrollPages(1); break;
+          case "start": term.scrollToTop(); break;
+          case "latest": term.scrollToBottom(); break;
+          case "selectAll": term.selectAll(); break;
+        }
+      },
     });
     // O OpenCode captura o mouse e copia o que a pessoa seleciona por OSC 52 (só escrita; ver osc52.ts).
     if (agentId) {
@@ -452,21 +461,6 @@ function TerminalImpl({
         const resolvedCwd: string = cwd ?? (await homeDir());
         const startedAfter = Math.floor(Date.now() / 1000) - LOOKBACK_S;
 
-        // Si esta tab corre con una cuenta alternativa, sus variables se piden ahora: la
-        // cuenta pudo renombrarse o mudarse desde que la tab se guardó, y lo que importa es
-        // dónde vive AHORA. Si la cuenta ya no existe, se avisa y no se lanza nada — correr
-        // igual usaría la cuenta del sistema en silencio, que es lo contrario de lo pedido.
-        let accountEnv: Record<string, string> | null = null;
-        if (accountId) {
-          try {
-            accountEnv = await accountEnvFor(accountId);
-          } catch (e) {
-            term.write(`\r\n\x1b[31m${t("terminal.accountMissing", { error: e })}\x1b[0m\r\n`);
-            setStatus("exited");
-            return;
-          }
-        }
-
         // La cadena se resuelve tan tarde como la cuenta, y por lo mismo: un preset pudo
         // editarse o borrarse desde que la tab se guardó. Un preset que ya no existe
         // ABORTA el lanzamiento — arrancar sin el paso pedido dejaría al agente corriendo
@@ -479,6 +473,19 @@ function TerminalImpl({
             term.write(`\r\n\x1b[31m${t("terminal.prelaunchError", { error: e })}\x1b[0m\r\n`);
             setStatus("exited");
             return;
+          }
+        }
+
+        // Claude aplica este limite apenas ao processo desta TUI; não alteramos os arquivos
+        // de configuração da pessoa. A variável é o override de sessão documentado pelo CLI.
+        let claudeCompactEnv: Record<string, string> | null = null;
+        if (agentId === "claude-code") {
+          try {
+            const raw = await getSetting(CLAUDE_AUTO_COMPACT_WINDOWS_SETTING);
+            const window = claudeAutoCompactWindow(raw, accountId);
+            if (window !== null) claudeCompactEnv = { [CLAUDE_AUTO_COMPACT_WINDOW_ENV]: String(window) };
+          } catch {
+            // Sem a preferência da ADE, o Claude conserva a compactação automática nativa.
           }
         }
 
@@ -509,24 +516,29 @@ function TerminalImpl({
         const ptyId = await ptyCreate({
           command: browser.command,
           cwd: resolvedCwd,
+          agentId,
+          // El WebView sólo envía el identificador. El backend resuelve perfil y credencial
+          // desde la base/keyring justo al crear el proceso.
+          accountId: accountId && !accountId.startsWith("system:") ? accountId : undefined,
           cols: term.cols,
           rows: term.rows,
-          // Variables extra declaradas por la TUI custom, si esta tab corre una, más las
-          // que traiga esta terminal en particular (una cuenta alternativa apunta acá la
-          // variable de perfil de la TUI). Las de la terminal van últimas: son la decisión
-          // más específica, tomada para este proceso y no para la TUI en general.
-          env: mergeEnv(
+          // Conserva la precedencia anterior: entorno de la TUI custom y MCP del navegador,
+          // luego la cuenta resuelta por Rust, y al final los overrides de esta terminal.
+          envBeforeAccount: mergeEnv(
             agentId
               ? useAgentsStore.getState().customAgents.find((a) => a.id === agentId)?.env
               : undefined,
-            browser.env,
-            accountEnv,
+            browser.env
+          ),
+          env: mergeEnv(
+            claudeCompactEnv,
             env,
             // Quién es esta terminal. `ags peer ...` lo reenvía como `from`, y es contra
             // eso que el backend compara las conexiones del canvas.
             tabId ? { ADE_TAB_ID: tabId, ...(missionId ? { ADE_MISSION_ID: missionId } : {}) } : undefined
           ),
           prelaunch: resolvedPrelaunch,
+          extraArgs: browser.args ?? [],
           ...(peekContinuity(tabId) ? { aiMemoryContinuity: true } : {}),
           ...(scrubSecrets ? { scrubSecrets: true } : {}),
         });
@@ -693,8 +705,11 @@ function TerminalImpl({
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    term.options.theme = TERMINAL_THEMES[theme];
+    const apply = () => { term.options.theme = terminalThemeFor(theme); };
+    apply();
     term.options.minimumContrastRatio = MIN_CONTRAST[theme];
+    window.addEventListener(CUSTOM_THEME_CHANGED_EVENT, apply);
+    return () => window.removeEventListener(CUSTOM_THEME_CHANGED_EVENT, apply);
   }, [theme]);
 
   // El zoom de Configuración, en vivo y en todas las terminales abiertas. xterm vuelve a
@@ -725,7 +740,7 @@ function TerminalImpl({
     <div
       ref={rootRef}
       className="relative flex flex-col h-full w-full"
-      style={{ background: TERMINAL_THEMES[theme].background }}
+      style={{ background: `var(--ade-terminal-background, ${TERMINAL_THEMES[theme].background})` }}
     >
       <StatusBadge status={status} isDark={isDark} />
 

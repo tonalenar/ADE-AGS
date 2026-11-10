@@ -68,14 +68,14 @@ describe("qué TUI recibe el navegador y cómo nombra sus tools", () => {
     setAgentRegistry([
       entry("claude-code", "claudeFlags"),
       entry("opencode", "opencodeConfig"),
-      entry("codex", "none"),
+      entry("codex", "codexConfigOverrides"),
     ]);
   });
 
   it("lo reciben las TUIs con un formato verificado, no una sola", () => {
     expect(hasBrowserMcp("claude-code")).toBe(true);
     expect(hasBrowserMcp("opencode")).toBe(true);
-    expect(hasBrowserMcp("codex")).toBe(false);
+    expect(hasBrowserMcp("codex")).toBe(true);
     // Una TUI que el usuario agregó a mano: no está en el catálogo, no se le inventa nada.
     expect(hasBrowserMcp("mitui")).toBe(false);
     expect(hasBrowserMcp(null)).toBe(false);
@@ -138,13 +138,20 @@ describe("withBrowserMcp", () => {
   it("devuelve comando sin cambios y env vacío cuando tab_browser_mcp devuelve null", async () => {
     mockInvoke.mockResolvedValueOnce(null);
     const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code", "m-scope-456");
-    expect(result).toEqual({ command: "claude", env: {} });
+    expect(result).toEqual({ command: "claude", env: {}, args: [] });
+  });
+
+  it("repassa os launchArgs do backend como args nativos, sem concatená-los ao comando", async () => {
+    mockInvoke.mockResolvedValueOnce({ configPath: "", allowedTools: [], env: {}, toolPrefix: "", launchArgs: ["-c", "mcp_servers.ags.url=\"http://x\""] });
+    const result = await withBrowserMcp("codex", "/repo", "tab-1", "codex", null);
+    expect(result.command).toBe("codex");
+    expect(result.args).toEqual(["-c", "mcp_servers.ags.url=\"http://x\""]);
   });
 
   it("tolera errores de invoke y arranca la tab como siempre", async () => {
     mockInvoke.mockRejectedValueOnce(new Error("tauri error"));
     const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code", "m-scope-456");
-    expect(result).toEqual({ command: "claude", env: {} });
+    expect(result).toEqual({ command: "claude", env: {}, args: [] });
   });
 });
 

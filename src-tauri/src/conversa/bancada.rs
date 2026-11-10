@@ -13,14 +13,20 @@
 //! Sem processo, sem rede, sem cota e sem relógio de verdade: um silêncio de 61 s custa um número somado.
 //! O que a bancada não reproduz: o processo de verdade (pipes, `kill`), a escrita no stdin e as filas de envio.
 
-use serde::Deserialize;
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-use crate::canal::timeline::{Item, ToolKind};
+use crate::canal::timeline::{Item, ItemKind, ToolKind};
 use crate::runs::failure::{classify, FailureKind};
 
+use super::agy_map::{self, Out as AgyOut};
 use super::claude_map::{self, Out as ClaudeOut, TurnResult};
 use super::codex_map;
+use super::cursor_map::{self, Read as CursorRead};
 use super::opencode_map::{self, Out as AcpOut};
 use super::resume::{self, ResumeFailure};
 use super::turn;
@@ -49,6 +55,13 @@ pub enum Protocolo {
     /// Agent Client Protocol (`opencode acp`).
     #[serde(rename = "acp")]
     Acp,
+    /// `agy --print --output-format stream-json`. Laço simples, sem prazo de silêncio.
+    #[serde(rename = "agy-stream")]
+    AgyStream,
+    /// `cursor-agent -p --output-format stream-json`. O turno fecha no `result` ou quando o próximo
+    /// `atMs` passa de `Mapper::quiet_after` (relógio falso, sem espera real).
+    #[serde(rename = "cursor-stream")]
+    CursorStream,
 }
 
 impl Protocolo {
@@ -57,6 +70,8 @@ impl Protocolo {
             Protocolo::ClaudeStream => "Claude",
             Protocolo::CodexAppServer => "Codex",
             Protocolo::Acp => "OpenCode",
+            Protocolo::AgyStream => "Antigravity",
+            Protocolo::CursorStream => "Cursor",
         }
     }
 
@@ -66,6 +81,8 @@ impl Protocolo {
             Protocolo::ClaudeStream => "initialize",
             Protocolo::CodexAppServer => "thread/resume",
             Protocolo::Acp => "session/resume",
+            Protocolo::AgyStream => "init",
+            Protocolo::CursorStream => "system/init",
         }
     }
 }
@@ -390,6 +407,8 @@ impl Fake {
             (Passo::Fim, ClaudeStream) => self.linha(json!({ "type": "result", "subtype": "success", "is_error": false, "result": "pronto", "duration_ms": self.relogio })),
             (Passo::Fim, CodexAppServer) => self.fim_codex("completed", None),
             (Passo::Fim, Acp) => self.linha(json!({ "jsonrpc": "2.0", "id": ACP_PROMPT, "result": { "stopReason": "end_turn", "usage": { "totalTokens": 42 } } })),
+            // O replay lê um transcript. Sintetizar o fluxo aqui afirmaria um formato que a captura real ainda não confirmou.
+            (_, AgyStream | CursorStream) => return Err("o roteiro sintetizado não cobre Antigravity nem Cursor: use um transcript no replay".into()),
         }
         Ok(())
     }
@@ -408,8 +427,29 @@ fn pedacos_de(texto: &str, n: usize) -> Vec<String> {
 /// Um pedido do agente à pessoa (aprovação ou pergunta), como o chat mostraria.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Pedido {
+    /// O id do protocolo (`request_id` do Claude, o `id` JSON-RPC do Codex e do ACP). Não entra no snapshot.
+    pub id: String,
     pub kind: String,
     pub title: String,
+    /// Ainda sem resposta nem cancelamento quando a leitura parou. O `in` do transcript (a resposta da pessoa)
+    /// não é lido: o pedido só sai da lista se o próprio agente desistir (`control_cancel_request`,
+    /// `serverRequest/resolved`).
+    pub pendente: bool,
+}
+
+/// Evento de filho que o motor via e a timeline da conversa não guarda: a tarefa (`task`) ou o que o
+/// subagente fez dentro dela (`subitem`).
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Filho {
+    /// `task` ou `subitem`.
+    pub tipo: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub item: Option<Item>,
 }
 
 /// O que o motor de bancada viu.
@@ -424,6 +464,8 @@ pub struct Resultado {
     /// Os pedaços de texto que iriam só para a janela: `(item, pedaço)`.
     pub deltas: Vec<(String, String)>,
     pub pedidos: Vec<Pedido>,
+    /// Tarefas e itens de subagente, na ordem em que chegaram. A timeline (`itens`) não os inclui.
+    pub filhos: Vec<Filho>,
     /// O fim do turno, se houve.
     pub fim: Option<TurnResult>,
     /// O turno acabou porque o processo caiu.
@@ -483,9 +525,43 @@ impl Resultado {
             .collect()
     }
 
-    /// As ferramentas que o mapeador não reconheceu (`ToolKind::Other`): o guard das fixtures recusa.
-    pub fn ferramentas_desconhecidas(&self) -> Vec<String> {
-        self.itens.iter().filter(|i| i.tool == Some(ToolKind::Other)).map(|i| i.name.clone().unwrap_or_default()).collect()
+    /// Ferramentas `Other` fora da lista do protocolo, na timeline e nos filhos. Lista vazia recusa
+    /// todo `Other` (Claude, Codex e ACP, como antes).
+    pub fn ferramentas_recusadas(&self, protocolo: Protocolo) -> Vec<String> {
+        let aceitos = other_aceito(protocolo);
+        let mut nomes = Vec::new();
+        let mut ver = |item: &Item| {
+            if item.tool == Some(ToolKind::Other) {
+                let nome = item.name.clone().unwrap_or_default();
+                if !aceitos.iter().any(|aceito| *aceito == nome) {
+                    nomes.push(nome);
+                }
+            }
+        };
+        for item in &self.itens {
+            ver(item);
+        }
+        for filho in &self.filhos {
+            if let Some(item) = &filho.item {
+                ver(item);
+            }
+        }
+        nomes
+    }
+
+    /// O tipo de cada item da timeline, na ordem, como o JSON do snapshot (`assistant`, `tool`, `usage`…).
+    pub fn tipos(&self) -> Vec<String> {
+        self.itens.iter().map(|i| tipo_item(i.kind)).collect()
+    }
+
+    /// Os pedidos que ainda estavam pendentes quando a leitura parou.
+    pub fn pedidos_pendentes(&self) -> Vec<&Pedido> {
+        self.pedidos.iter().filter(|p| p.pendente).collect()
+    }
+
+    /// Os filhos numa linha que a [`Espera`] confere: `task:<id>:<op>` ou `subitem:<pai>:<tipo do item>`.
+    pub fn filhos_compactos(&self) -> Vec<String> {
+        self.filhos.iter().map(Filho::compacto).collect()
     }
 
     fn guardar(&mut self, item: Item) {
@@ -498,7 +574,10 @@ impl Resultado {
 
 /// Roda as saídas pelo que o motor do protocolo faz com elas.
 pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
-    let mut motor = Motor { protocolo, out: Resultado::default(), claude: claude_map::Mapper::default(), acp: opencode_map::Mapper::new("bancada"), turno: false };
+    if protocolo == Protocolo::CursorStream {
+        return rodar_cursor(saidas);
+    }
+    let mut motor = Motor { protocolo, out: Resultado::default(), claude: claude_map::Mapper::default(), acp: opencode_map::Mapper::new("bancada"), agy: agy_map::Mapper::new("bancada"), turno: false };
     let mut ultimo = 0u64;
     for saida in saidas {
         let silencio = saida.at_ms.saturating_sub(ultimo);
@@ -506,7 +585,8 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
         ultimo = saida.at_ms;
         motor.out.relogio_ms = saida.at_ms;
         // Abrindo, o silêncio maior que o prazo do pedido é o "não respondeu" do motor.
-        if motor.out.abertura.is_none() && silencio > PRAZO_PEDIDO_MS {
+        // O Antigravity não tem esse prazo: o processo é o turno e o laço só lê a próxima linha.
+        if protocolo != Protocolo::AgyStream && motor.out.abertura.is_none() && silencio > PRAZO_PEDIDO_MS {
             motor.out.abertura = Some(Err(format!("O {} não respondeu a {}", protocolo.nome(), protocolo.pedido_de_abertura())));
             return motor.out;
         }
@@ -529,6 +609,94 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
     motor.out
 }
 
+/// O Cursor pelo `read_turn` de verdade. A fonte devolve silêncio quando o próximo `atMs` passa de
+/// `quiet_after`; não há relógio de parede. O fim da lista é EOF (o processo acabou), não silêncio.
+fn rodar_cursor(saidas: &[Saida]) -> Resultado {
+    let mut motor = Motor {
+        protocolo: Protocolo::CursorStream,
+        out: Resultado::default(),
+        claude: claude_map::Mapper::default(),
+        acp: opencode_map::Mapper::new("bancada"),
+        agy: agy_map::Mapper::new("bancada"),
+        turno: true,
+    };
+    let agora = Arc::new(AtomicU64::new(0));
+    let mut fonte = FonteCursor { pendentes: saidas.iter().cloned().collect(), agora_ms: agora.clone(), ignoradas: 0, stderr: None, silencio_max_ms: 0 };
+    let mut mapper = cursor_map::Mapper::new("bancada");
+    let rt = tokio::runtime::Builder::new_current_thread().build().expect("runtime do cursor na bancada");
+    let done = rt.block_on(cursor_map::read_turn(
+        &mut mapper,
+        &mut fonte,
+        |outs| {
+            for out in outs {
+                match out {
+                    cursor_map::Out::Item(item) => motor.out.guardar(*item),
+                    cursor_map::Out::Delta { item_id, delta, .. } => motor.out.deltas.push((item_id, delta)),
+                    cursor_map::Out::Session(id) => motor.abriu(&id),
+                    cursor_map::Out::Done(_) => {}
+                }
+            }
+        },
+        || EPOCH_MS + agora.load(Ordering::Relaxed) as i64,
+    ));
+    motor.out.ignoradas = fonte.ignoradas;
+    motor.out.silencio_max_ms = fonte.silencio_max_ms;
+    motor.out.relogio_ms = agora.load(Ordering::Relaxed);
+    if let Some(result) = done {
+        motor.terminou(result);
+    } else {
+        let erro = fonte.stderr.as_deref().map(|s| cursor_map::error_from_stderr(&s.lines().map(str::to_string).collect::<Vec<_>>())).unwrap_or_else(|| "O Cursor terminou sem responder".into());
+        motor.terminou(TurnResult { interrupted: false, error: Some(erro), duration_ms: None });
+        motor.out.caiu = true;
+    }
+    motor.out
+}
+
+/// As linhas do transcript como a `Source` do `read_turn`. O `Fake` dos testes do mapeador devolve
+/// silêncio quando a lista acaba; aqui o silêncio é o próximo `atMs` além de `quiet_after`.
+struct FonteCursor {
+    pendentes: VecDeque<Saida>,
+    agora_ms: Arc<AtomicU64>,
+    ignoradas: usize,
+    stderr: Option<String>,
+    silencio_max_ms: u64,
+}
+
+impl cursor_map::Source for FonteCursor {
+    async fn next(&mut self, quiet: Option<std::time::Duration>) -> CursorRead {
+        loop {
+            let Some(proxima) = self.pendentes.front() else {
+                return CursorRead::Eof;
+            };
+            let agora = self.agora_ms.load(Ordering::Relaxed);
+            let espera = proxima.at_ms.saturating_sub(agora);
+            if let Some(limite) = quiet {
+                let limite_ms = u64::try_from(limite.as_millis()).unwrap_or(u64::MAX);
+                if espera > limite_ms {
+                    self.silencio_max_ms = self.silencio_max_ms.max(espera);
+                    return CursorRead::Quiet;
+                }
+            }
+            let saida = self.pendentes.pop_front().expect("a frente acabou de ser lida");
+            self.silencio_max_ms = self.silencio_max_ms.max(saida.at_ms.saturating_sub(agora));
+            self.agora_ms.store(saida.at_ms, Ordering::Relaxed);
+            match saida.evento {
+                Evento::Linha(line) => {
+                    if serde_json::from_str::<Value>(&line).is_err() {
+                        self.ignoradas += 1;
+                        continue;
+                    }
+                    return CursorRead::Line(line);
+                }
+                Evento::Fecha { stderr } => {
+                    self.stderr = stderr;
+                    return CursorRead::Eof;
+                }
+            }
+        }
+    }
+}
+
 /// Toca e roda.
 pub fn simular(roteiro: &Roteiro) -> Result<Resultado, String> {
     Ok(rodar(roteiro.protocolo, &tocar(roteiro)?))
@@ -548,6 +716,7 @@ struct Motor {
     out: Resultado,
     claude: claude_map::Mapper,
     acp: opencode_map::Mapper,
+    agy: agy_map::Mapper,
     /// Há um turno aberto (que o processo caindo fecharia como erro).
     turno: bool,
 }
@@ -593,24 +762,40 @@ impl Motor {
             Protocolo::ClaudeStream => self.claude(msg, now),
             Protocolo::CodexAppServer => self.codex(msg, now),
             Protocolo::Acp => self.acp(msg, now),
+            Protocolo::AgyStream => self.agy(msg, now),
+            // O Cursor sai antes, em `rodar_cursor` (`read_turn`). Este braço não roda.
+            Protocolo::CursorStream => {}
         }
     }
 
     /// `claude.rs`: `dispatch` + `on_out`.
     fn claude(&mut self, msg: Value, now: i64) {
-        if msg.get("type").and_then(Value::as_str) == Some("control_request") {
-            if let Some(ask) = msg.get("request").and_then(claude_map::ask_of) {
-                self.out.pedidos.push(Pedido { kind: ask.kind.to_string(), title: ask.title });
+        match msg.get("type").and_then(Value::as_str) {
+            Some("control_request") => {
+                if let Some(ask) = msg.get("request").and_then(claude_map::ask_of) {
+                    let id = msg.get("request_id").and_then(Value::as_str).unwrap_or("").to_string();
+                    self.pedir(id, ask.kind, ask.title);
+                }
+                return;
             }
-            return;
+            // O Claude desistiu do pedido: sai dos pendentes e continua na lista do que foi pedido.
+            Some("control_cancel_request") => {
+                if let Some(id) = msg.get("request_id").and_then(Value::as_str) {
+                    self.resolver(id);
+                }
+                return;
+            }
+            _ => {}
         }
         for out in self.claude.feed(&msg, now) {
             match out {
                 ClaudeOut::Session(id) => self.abriu(&id),
                 ClaudeOut::Item(item) => self.out.guardar(*item),
                 ClaudeOut::Delta { item_id, delta, .. } => self.out.deltas.push((item_id, delta)),
-                // As tarefas e o que o subagente faz só vão à janela: a bancada compara a timeline e o turno.
-                ClaudeOut::Mode(_) | ClaudeOut::Task(_) | ClaudeOut::SubItem { .. } => {}
+                ClaudeOut::Task(task) => self.out.filhos.push(Filho { tipo: "task".into(), parent: None, task: Some(task), item: None }),
+                ClaudeOut::SubItem { parent, item } => self.out.filhos.push(Filho { tipo: "subitem".into(), parent: Some(parent), task: None, item: Some(*item) }),
+                // O modo de permissão não entra na timeline nem no filho.
+                ClaudeOut::Mode(_) => {}
                 ClaudeOut::Done(result) => {
                     // O resultado antes do `init` é a abertura que falhou (o `--resume` de uma sessão que não existe).
                     if self.out.abertura.is_none() {
@@ -636,9 +821,9 @@ impl Motor {
                 },
             },
             (None, _) => {}
-            (Some(method), Some(_)) => {
+            (Some(method), Some(id)) => {
                 if let Some(ask) = codex_map::ask_of(method, &params) {
-                    self.out.pedidos.push(Pedido { kind: ask.kind.to_string(), title: ask.title });
+                    self.pedir(id_de(id), ask.kind, ask.title);
                 }
             }
             (Some(method), None) => match method {
@@ -664,6 +849,12 @@ impl Motor {
                 }
                 "error" if params.get("willRetry").and_then(Value::as_bool) != Some(true) => {
                     self.out.avisos.push(params.pointer("/error/message").and_then(Value::as_str).unwrap_or("erro do Codex").to_string());
+                }
+                // Resolvido do lado do Codex: o pendente some, como o `serverRequest/resolved` do motor.
+                "serverRequest/resolved" => {
+                    if let Some(id) = params.get("requestId").and_then(id_de_opt) {
+                        self.resolver(&id);
+                    }
                 }
                 _ => {}
             },
@@ -698,9 +889,9 @@ impl Motor {
                 self.terminou(fim);
             }
             (None, _) => {}
-            (Some("session/request_permission"), Some(_)) => {
+            (Some("session/request_permission"), Some(id)) => {
                 if let Some(ask) = msg.get("params").and_then(opencode_map::ask_of) {
-                    self.out.pedidos.push(Pedido { kind: ask.kind.to_string(), title: ask.title });
+                    self.pedir(id.to_string(), ask.kind, ask.title);
                 }
             }
             (Some("session/update"), None) => {
@@ -710,6 +901,33 @@ impl Motor {
                 }
             }
             _ => {}
+        }
+    }
+
+    fn pedir(&mut self, id: String, kind: &str, title: String) {
+        self.out.pedidos.push(Pedido { id, kind: kind.to_string(), title, pendente: true });
+    }
+
+    fn resolver(&mut self, id: &str) {
+        if id.is_empty() {
+            return;
+        }
+        for pedido in &mut self.out.pedidos {
+            if pedido.id == id {
+                pedido.pendente = false;
+            }
+        }
+    }
+
+    /// `agy.rs`: o laço lê cada linha e aplica o mapeador. Sem prazo.
+    fn agy(&mut self, msg: Value, now: i64) {
+        for out in self.agy.feed(&msg, now) {
+            match out {
+                AgyOut::Item(item) => self.out.guardar(*item),
+                AgyOut::Delta { item_id, delta, .. } => self.out.deltas.push((item_id, delta)),
+                AgyOut::Session(id) => self.abriu(&id),
+                AgyOut::Done(result) => self.terminou(result),
+            }
         }
     }
 
@@ -741,6 +959,12 @@ pub struct Espera {
     pub pedidos: Option<Vec<String>>,
     /// As ferramentas, em ordem, como `Nome:status`.
     pub ferramentas: Option<Vec<String>>,
+    /// O tipo de cada item da timeline, em ordem (`assistant`, `tool`, `usage`…).
+    pub tipos: Option<Vec<String>>,
+    /// Os filhos, em ordem: `task:<id>:<op>` ou `subitem:<pai>:<tipo do item>`.
+    pub filhos: Option<Vec<String>>,
+    /// Os tipos dos pedidos que ainda estavam pendentes no fim da leitura, em ordem.
+    pub pedidos_pendentes: Option<Vec<String>>,
     pub texto_contem: Option<String>,
     pub ignoradas: Option<usize>,
     pub silencio_min_ms: Option<u64>,
@@ -800,6 +1024,15 @@ pub fn conferir(espera: &Espera, r: &Resultado, protocolo: Protocolo, expand: &d
     if let Some(ferramentas) = &espera.ferramentas {
         igual("ferramentas", ferramentas.join(","), r.ferramentas().join(","));
     }
+    if let Some(tipos) = &espera.tipos {
+        igual("tipos", tipos.join(","), r.tipos().join(","));
+    }
+    if let Some(filhos) = &espera.filhos {
+        igual("filhos", filhos.join(","), r.filhos_compactos().join(","));
+    }
+    if let Some(pendentes) = &espera.pedidos_pendentes {
+        igual("pedidosPendentes", pendentes.join(","), r.pedidos_pendentes().iter().map(|p| p.kind.clone()).collect::<Vec<_>>().join(","));
+    }
     if let Some(parte) = &espera.texto_contem {
         let texto = r.texto();
         if !texto.contains(&expand(parte)) {
@@ -815,4 +1048,45 @@ pub fn conferir(espera: &Espera, r: &Resultado, protocolo: Protocolo, expand: &d
         igual("silencioMinMs", format!(">= {ms}"), r.silencio_max_ms.to_string());
     }
     erros
+}
+
+impl Filho {
+    fn compacto(&self) -> String {
+        match self.tipo.as_str() {
+            "task" => {
+                let id = self.task.as_ref().and_then(|t| t.get("taskId")).and_then(Value::as_str).unwrap_or("");
+                let op = self.task.as_ref().and_then(|t| t.get("op")).and_then(Value::as_str).unwrap_or("");
+                format!("task:{id}:{op}")
+            }
+            "subitem" => {
+                let tipo = self.item.as_ref().map(|i| tipo_item(i.kind)).unwrap_or_default();
+                format!("subitem:{}:{tipo}", self.parent.as_deref().unwrap_or(""))
+            }
+            outro => outro.to_string(),
+        }
+    }
+}
+
+/// O nome do tipo do item, o mesmo do JSON (`assistant`, `usage`, `turnEnd`…).
+fn tipo_item(kind: ItemKind) -> String {
+    serde_json::to_value(kind).ok().and_then(|v| v.as_str().map(str::to_string)).unwrap_or_default()
+}
+
+fn id_de(v: &Value) -> String {
+    id_de_opt(v).unwrap_or_default()
+}
+
+fn id_de_opt(v: &Value) -> Option<String> {
+    v.as_str().map(str::to_string).or_else(|| v.as_u64().map(|n| n.to_string())).or_else(|| v.as_i64().map(|n| n.to_string()))
+}
+
+/// Nomes de `ToolKind::Other` que o guard deixa passar. Vazio = qualquer Other reprova.
+/// Não é o catálogo do provider. `denied` é o nome que o `agy_map` grava na ação negada. `mcp` só
+/// existe para o teste do guard do Cursor ter um nome dentro da lista; a captura real é que acrescenta os outros.
+fn other_aceito(protocolo: Protocolo) -> &'static [&'static str] {
+    match protocolo {
+        Protocolo::ClaudeStream | Protocolo::CodexAppServer | Protocolo::Acp => &[],
+        Protocolo::AgyStream => &["denied"],
+        Protocolo::CursorStream => &["mcp"],
+    }
 }

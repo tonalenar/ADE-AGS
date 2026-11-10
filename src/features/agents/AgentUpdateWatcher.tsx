@@ -37,13 +37,14 @@ export function announceResult(t: TFunction, label: string, result: AgentUpdateR
       text: result.newVersion
         ? t("agents.update.done", { label, version: result.newVersion })
         : t("agents.update.doneNoVersion", { label }),
+      sticky: true,
     });
   } else {
     showBotToast({
       title: label,
       text: t("agents.update.failed", { label, error: reasonText(t, result.error) }),
       tone: "warning",
-      ms: 10000,
+      sticky: true,
     });
   }
 }
@@ -110,7 +111,7 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
   if (!outcome.appRestarting) useBotToastStore.getState().dismiss(progressId);
   if (!outcome.appRestarting) announceResult(t, info.label, outcome.result);
   if (outcome.reopened > 0) {
-    showBotToast({ title: info.label, text: t("agents.update.reopened", { label: info.label, count: outcome.reopened }), ms: 7000 });
+    showBotToast({ title: info.label, text: t("agents.update.reopened", { label: info.label, count: outcome.reopened }), sticky: true });
   }
   if (outcome.result.ok) detectAgents(true).then(setDetectedAgents).catch(() => {});
   return outcome.result;

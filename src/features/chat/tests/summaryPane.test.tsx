@@ -96,7 +96,13 @@ describe("o Resumo do painel", () => {
   it("o contexto sem tokens é 'não medido' e com tokens mostra os tokens, nunca uma porcentagem", async () => {
     await render();
     expect(host.textContent).toContain("chat.summary.notMeasured");
+    // `tokens` é o uso total do turno (entrada + saída): não é o contexto, e por isso continua «não medido».
     mocks.items = [{ kind: "usage", id: "u1", tokens: 88600 }];
+    await render();
+    expect(host.textContent).not.toContain("chat.summary.contextTokens");
+    expect(host.textContent).toContain("chat.summary.notMeasured");
+    // O contexto é a entrada que o agente informa (`contextTokens`), sem a saída.
+    mocks.items = [{ kind: "usage", id: "u1", tokens: 88600, contextTokens: 80000 }];
     await render();
     expect(host.textContent).toContain("chat.summary.contextTokens");
     expect(host.textContent).not.toContain("%");

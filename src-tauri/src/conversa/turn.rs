@@ -55,7 +55,7 @@ pub fn record_end(conn: &rusqlite::Connection, thread_id: &str, turn: &str, resu
     let expired = store::expire_requests(conn, thread_id).unwrap_or_default();
     // Um turno que caiu (ou foi interrompido) com ferramenta sem resultado: o desfecho dela é desconhecido.
     if result.interrupted || result.error.is_some() {
-        mark_unknown_outcomes(conn, thread_id, turn, now);
+        let _ = mark_unknown_outcomes(conn, thread_id, turn, now);
     }
     let _ = store::upsert_item(conn, thread_id, Some(turn), &claude_map::turn_end(turn, result, Some(now)));
     let _ = store::touch(conn, thread_id, now);
@@ -68,31 +68,46 @@ pub const TOOL_OUTCOME_UNKNOWN: &str = "TOOL_OUTCOME_UNKNOWN";
 /// As ferramentas do turno `turn` que ficaram sem resultado viram «desfecho desconhecido» (status de erro, com o
 /// código na saída) e a timeline ganha o aviso `toolOutcomeUnknown`, que o PRÓXIMO envio leva ao agente (ver
 /// [`crate::conversa::resume::unknown_outcome_note`]). Sem ferramenta pendente, nada muda.
-fn mark_unknown_outcomes(conn: &rusqlite::Connection, thread_id: &str, turn: &str, now: i64) {
+pub(crate) fn mark_unknown_outcomes(
+    conn: &rusqlite::Connection,
+    thread_id: &str,
+    turn: &str,
+    now: i64,
+) -> rusqlite::Result<()> {
     use crate::canal::timeline::{ItemKind, ToolStatus};
-    let Ok(mut stmt) = conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 AND run_id = ?2") else { return };
-    let Ok(rows) = stmt.query_map(rusqlite::params![thread_id, turn], |r| r.get::<_, String>(0)) else { return };
+    let mut stmt =
+        conn.prepare("SELECT body FROM chat_item WHERE thread_id = ?1 AND run_id = ?2")?;
+    let rows = stmt.query_map(rusqlite::params![thread_id, turn], |r| {
+        r.get::<_, String>(0)
+    })?;
     let pending: Vec<Item> = rows
         .filter_map(Result::ok)
         .filter_map(|body| serde_json::from_str::<Item>(&body).ok())
         .filter(|i| i.kind == ItemKind::Tool && i.status == Some(ToolStatus::Running))
         .collect();
     if pending.is_empty() {
-        return;
+        return Ok(());
     }
     let mut calls = Vec::new();
     for mut tool in pending {
         calls.push(tool_call_label(&tool));
         tool.status = Some(ToolStatus::Error);
-        tool.output = Some(format!("{TOOL_OUTCOME_UNKNOWN}: a conversa parou antes do resultado; a ferramenta pode ter rodado."));
-        let _ = store::upsert_item(conn, thread_id, Some(turn), &tool);
+        tool.output = Some(format!(
+            "{TOOL_OUTCOME_UNKNOWN}: a conversa parou antes do resultado; a ferramenta pode ter rodado."
+        ));
+        store::upsert_item(conn, thread_id, Some(turn), &tool)?;
     }
     let notice = Item {
         label: Some("toolOutcomeUnknown".into()),
         text: Some(unknown_outcome_text(&calls)),
-        ..Item::new(crate::canal::timeline::ItemKind::Notice, format!("n:toolOutcomeUnknown:{turn}"), Some(now))
+        ..Item::new(
+            crate::canal::timeline::ItemKind::Notice,
+            format!("n:toolOutcomeUnknown:{turn}"),
+            Some(now),
+        )
     };
-    let _ = store::upsert_item(conn, thread_id, Some(turn), &notice);
+    store::upsert_item(conn, thread_id, Some(turn), &notice)?;
+    Ok(())
 }
 
 /// Pura: «Bash git push», «Edit src/a.rs», só o nome se não houver mais.

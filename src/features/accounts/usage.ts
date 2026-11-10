@@ -169,9 +169,8 @@ export interface LiveUsage {
  */
 export const claudeLiveUsage = (
   accountKey: string,
-  env: Record<string, string>,
   force = false
-) => invoke<LiveUsage>("claude_live_usage", { accountKey, env, force });
+) => invoke<LiveUsage>("claude_live_usage", { accountKey, force });
 
 /**
  * La antigüedad de lo que se está mostrando, en piezas.

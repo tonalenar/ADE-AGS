@@ -15,6 +15,7 @@ const SWEPT: &str = "cc-runs-swept";
 
 static STARTED: AtomicBool = AtomicBool::new(false);
 static SWEEP_DONE: AtomicBool = AtomicBool::new(false);
+static SECRET_CLEANER_STARTED: AtomicBool = AtomicBool::new(false);
 
 pub fn spawn_housekeeping(app: AppHandle) {
     if STARTED.swap(true, Ordering::SeqCst) {
@@ -24,9 +25,20 @@ pub fn spawn_housekeeping(app: AppHandle) {
         .name("startup-housekeeping".into())
         .spawn(move || run(app))
         .expect("hilo de puesta a punto");
+    if !SECRET_CLEANER_STARTED.swap(true, Ordering::SeqCst) {
+        std::thread::Builder::new()
+            .name("agent-secret-expiry".into())
+            .spawn(|| loop {
+                crate::ipc::commands::cleanup_expired_agent_secrets();
+                std::thread::sleep(Duration::from_secs(15 * 60));
+            })
+            .expect("hilo de expiração de segredos");
+    }
 }
 
 fn run(app: AppHandle) {
+    crate::ipc::commands::cleanup_expired_agent_secrets();
+
     // Primero el barrido: es lo que la flota tiene que ver ya cerrado. El resto puede
     // seguir después del aviso.
     if let Some(db) = app

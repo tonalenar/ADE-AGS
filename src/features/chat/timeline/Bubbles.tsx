@@ -54,14 +54,14 @@ export function Collapsible({ children, innerClass = "" }: { children: React.Rea
  * A mensagem da pessoa: balão à direita. `sending` = ainda não voltou do agente; `queued` = o agente está num turno
  * e ela só entra no fio quando o turno dela começar (não é «enviando», é «na fila»).
  */
-export function PersonBubble({ text, sending = false, queued = false, at }: { text: string; sending?: boolean; queued?: boolean; at?: number }) {
+export function PersonBubble({ text, sending = false, queued = false, at, itemId, searchHit = false, composerTarget }: { text: string; sending?: boolean; queued?: boolean; at?: number; itemId?: string; searchHit?: boolean; composerTarget?: string | null }) {
   const { t } = useTranslation();
   // Os anexos (bloco `[Anexos]` do fim do texto) viram miniaturas ACIMA do texto, como no Claude Code.
   const { text: withQuoted, attachments } = useMemo(() => splitAttachmentBlock(text), [text]);
   // As citações («Comentar») viram cartões; o texto cru (`[Citação]`, `> trecho`) não aparece.
   const { text: body, quotes } = useMemo(() => splitQuotes(withQuoted), [withQuoted]);
   return (
-    <div className="group flex flex-col items-end gap-1" aria-busy={sending || undefined}>
+    <div data-chat-item-id={itemId} className={`group flex flex-col items-end gap-1 ${searchHit ? "rounded-2xl ring-2 ring-accent-500/60 ring-offset-2 ring-offset-white dark:ring-offset-surface-deep" : ""}`} aria-busy={sending || undefined}>
       {attachments.length > 0 && <AttachmentStrip items={attachments} className="justify-end max-w-[85%]" />}
       {quotes.length > 0 && <QuoteCards items={quotes.map((q, i) => ({ id: String(i), ...q }))} className="max-w-[85%] self-end w-full sm:w-auto" />}
       {body && (
@@ -70,7 +70,7 @@ export function PersonBubble({ text, sending = false, queued = false, at }: { te
       </div>
       )}
       {sending && <span className="px-2 text-chat-caption text-gray-400 dark:text-white/35">{t(queued ? "chat.timeline.queued" : "chat.timeline.sending")}</span>}
-      {!sending && <MessageActions text={body} at={at} editable align="end" />}
+      {!sending && <MessageActions text={body} at={at} editable align="end" composerTarget={composerTarget} />}
     </div>
   );
 }
@@ -80,7 +80,7 @@ export function PersonBubble({ text, sending = false, queued = false, at }: { te
  * põe acima do texto o logo e o nome de quem fala (na primeira fala depois da pessoa e quando a voz muda;
  * ver `speakers.ts`). `sender` é o nome de quem fala por `ags peer`.
  */
-export function AgentBubble({ agentId, command, label, sender, receipt = null, header = false, entering = false, caret = false, at, copyText, children }: {
+export function AgentBubble({ agentId, command, label, sender, receipt = null, header = false, entering = false, caret = false, at, copyText, itemId, searchHit = false, children }: {
   agentId: string;
   command?: string;
   label: string;
@@ -94,12 +94,14 @@ export function AgentBubble({ agentId, command, label, sender, receipt = null, h
   /** Quando a fala saiu e o texto que «Copiar» leva (sem os dois, não há ações sob a fala). */
   at?: number;
   copyText?: string;
+  itemId?: string;
+  searchHit?: boolean;
   children: React.ReactNode;
 }) {
   const Icon = agentIcon(agentId, command);
   const name = sender ?? label;
   return (
-    <div title={receipt ? `${name} · #${receipt}` : undefined} className={`group min-w-0 flex flex-col gap-1.5 ${entering ? "cc-msg-in" : ""}`}>
+    <div data-chat-item-id={itemId} title={receipt ? `${name} · #${receipt}` : undefined} className={`group min-w-0 flex flex-col gap-1.5 ${entering ? "cc-msg-in" : ""} ${searchHit ? "rounded-lg ring-2 ring-accent-500/60 ring-offset-2 ring-offset-white dark:ring-offset-surface-deep px-2 py-1" : ""}`}>
       {header && (
         <div className="flex items-center gap-2 text-chat-note font-semibold text-gray-700 dark:text-white/70">
           <span role="img" aria-label={name} title={name} className="shrink-0 w-5 h-5 flex items-center justify-center"><Icon className="w-5 h-5" /></span>

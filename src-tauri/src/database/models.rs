@@ -175,6 +175,47 @@ pub struct SessionHistoryEntry {
     pub activity: Option<String>,
 }
 
+/// Resultado da busca local numa transcrição TUI arquivada.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedMessageSearchHit {
+    pub history_id: String,
+    pub title: String,
+    pub agent_id: String,
+    pub agent_label: String,
+    pub cwd: String,
+    pub closed_at: i64,
+    pub turn_index: i64,
+    /// ID estável da mensagem OpenCode; ausente para fontes baseadas em ordinal.
+    pub source_id: Option<String>,
+    pub kind: String,
+    pub excerpt: String,
+    /// `true` quando a indexação parou em um limite de leitura por sessão.
+    pub partial: bool,
+    /// `true` quando esta mensagem foi cortada no limite de tamanho por turno.
+    pub turn_truncated: bool,
+}
+
+/// Corpo de uma fala arquivada, carregado só quando a pessoa abre o resultado.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ArchivedMessageTurn {
+    pub history_id: String,
+    pub workspace_id: String,
+    pub title: String,
+    pub agent_id: String,
+    pub agent_label: String,
+    pub cwd: String,
+    pub closed_at: i64,
+    pub turn_index: i64,
+    /// ID estável usado para validar a fala OpenCode aberta pela busca.
+    pub source_id: Option<String>,
+    pub kind: String,
+    pub text: String,
+    pub partial: bool,
+    pub turn_truncated: bool,
+}
+
 /// Rectángulo de una tarjeta en el canvas del historial. Se guarda como JSON en la base.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct BoxRect {

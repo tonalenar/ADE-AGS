@@ -80,11 +80,12 @@ export function draftProblem(input: DraftInput): string | null {
  * pedido do usuário, igual para todos. Claude Code recebe as quebras de linha; as outras TUIs
  * descartam os Enter de um pegado (ver `briefingFor`), então vai numa linha com " | ".
  */
-export function promptFor(agentId: string, prompt: string, entry: Pick<CompareEntry, "cwd" | "branch" | "root">): string {
+export function promptFor(agentId: string, prompt: string, entry: Pick<CompareEntry, "cwd" | "branch" | "root">, hasAttachments = false): string {
   const context = entry.root && entry.branch
     ? `[Comparação de modelos] Trabalhe somente nesta pasta: ${entry.cwd} (branch ${entry.branch}). Não faça push nem abra PR.`
     : "[Comparação de modelos] Pedido só de leitura: não edite arquivos nem rode comandos que mudem o projeto (outros agentes usam a mesma pasta).";
-  const text = `${context}\n\n${prompt.trim()}`;
+  const attachmentRule = hasAttachments ? "\nOs anexos são referências de entrada; não altere os arquivos de origem. Faça qualquer alteração permitida somente na pasta de trabalho informada." : "";
+  const text = `${context}${attachmentRule}\n\n${prompt.trim()}`;
   if (agentId === "claude-code") return text;
   return text.split("\n").map((l) => l.trim()).filter(Boolean).join(" | ");
 }

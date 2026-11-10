@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -6,7 +7,8 @@ import {
 } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
-import { PALETTE_SHORTCUT, shortcutForPath } from "@/app/shortcuts";
+import { paletteShortcutLabel, shortcutForPath } from "@/app/shortcuts";
+import { useShortcutPreferences } from "@/app/shortcutPrefs";
 import { AccountCircleIcon, CanvasGridIcon, MissionCheckIcon, PullRequestIcon, SquadPeopleIcon } from "@/app/icons";
 import { useRunsStore } from "@/features/runs/store";
 
@@ -117,6 +119,8 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
   const toggleRail = useUiStore((s) => s.toggleRail);
   // Permissões que um agente da frota está esperando: se veem de qualquer tela.
   const pendingApprovals = useRunsStore((s) => s.approvals.length);
+  const shortcutBindings = useShortcutPreferences((s) => s.bindings);
+  const paletteShortcut = useMemo(() => paletteShortcutLabel(), [shortcutBindings]);
 
   // `startsWith` e não `===`: senão /marketplace/registries não acende Marketplace.
   const on = (path: string) => pathname.startsWith(path) && path !== "/";
@@ -136,7 +140,7 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
         path={null}
         active={paletteOpen}
         expanded={expanded}
-        hint={PALETTE_SHORTCUT}
+        hint={paletteShortcut}
         onClick={() => setPaletteOpen(true)}
       >
         <SearchIcon className={icon} />

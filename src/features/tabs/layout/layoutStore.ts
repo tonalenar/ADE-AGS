@@ -307,6 +307,17 @@ export function splitGroup(groupId: string, side: SplitSide, key?: string | null
   if (fresh) activateItem(fresh);
 }
 
+/** Divide o grupo focado quando a superfície ativa é uma sessão de agente. */
+export function splitFocusedAgentGroup(side: SplitSide): void {
+  const layout = currentLayout();
+  const group = layout ? findGroup(layout, layout.focused) : undefined;
+  const active = group?.active;
+  if (!group || !active?.startsWith("a:")) return;
+  // O layout move a aba ativa quando há outras no grupo; com uma só, deixa a sessão onde
+  // está e cria um grupo vazio ao lado. Em nenhum caso duplica nem desmonta o terminal.
+  splitGroup(group.id, side, active);
+}
+
 export function moveItemTo(key: string, groupId: string, index?: number): void {
   updateCurrent((l) => moveItem(l, key, groupId, index));
   activateItem(key);

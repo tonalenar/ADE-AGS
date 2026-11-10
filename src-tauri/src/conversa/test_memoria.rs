@@ -33,6 +33,7 @@ fn row() -> ThreadRow {
     ThreadRow {
         id: "abc-123".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/p".into(), title: String::new(),
         model: Some("sonnet".into()), effort: None, access: "ask".into(), account_id: None, memory: None,
+        parent_ref: None, parent_turn_id: None, is_side_chat: false,
         state: "active".into(), created_at: 1, updated_at: 1,
     }
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, CheckCircleIcon, CopyIcon, Input } from "neogestify-ui-components";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { homeDir } from "@tauri-apps/api/path";
 
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { runInTerminal } from "@/features/graphify/send";
 import { SettingsSection } from "@/features/settings/SettingsSection";
 
@@ -195,7 +195,7 @@ export function SkillsShSection() {
           )}
           <p className="text-[10.5px] leading-relaxed text-gray-500 dark:text-white/40">
             {t("settings.skillssh.afterInstall")}{" "}
-            <Button variant="custom" onClick={() => openUrl(install.docsUrl)} className="cc-t text-accent-600 dark:text-accent-400 hover:underline inline-block">
+            <Button variant="custom" onClick={() => openExternalUrl(install.docsUrl)} className="cc-t text-accent-600 dark:text-accent-400 hover:underline inline-block">
               {t("settings.skillssh.docs")}
             </Button>
           </p>

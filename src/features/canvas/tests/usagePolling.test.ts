@@ -6,7 +6,6 @@ const codex = vi.fn();
 const discover = vi.fn();
 
 vi.mock("@/features/accounts/ipc", () => ({
-  accountEnv: vi.fn(async () => ({})),
   codexAccountUsage: (id: string, force?: boolean) => codex(id, force),
   discoverAntigravityAccount: (id: string, force?: boolean) => discover(id, force),
   antigravityCliUsage: vi.fn(async () => ({ installed: false, groups: [], fetchedAt: 0, cached: false })),
@@ -16,7 +15,7 @@ vi.mock("@/features/accounts/usage", async () => {
   const actual = await vi.importActual<typeof import("@/features/accounts/usage")>("@/features/accounts/usage");
   return {
     ...actual,
-    claudeLiveUsage: (id: string, env: Record<string, string>, force?: boolean) => claude(id, env, force),
+    claudeLiveUsage: (id: string, force?: boolean) => claude(id, force),
     agentAccountUsage: vi.fn(async () => ({ plan: { tier: null } })),
   };
 });
@@ -77,12 +76,12 @@ describe("barrido de cuota", () => {
     expect(discover).toHaveBeenCalledTimes(1);
     expect(discover).toHaveBeenCalledWith("ag", false);
     expect(claude).toHaveBeenCalledTimes(1);
-    expect(claude).toHaveBeenCalledWith("cl", {}, false);
+    expect(claude).toHaveBeenCalledWith("cl", false);
   });
 
   it("pide en vivo cuando el snapshot venció", async () => {
     const now = Math.floor(Date.now() / 1000);
-    claude.mockImplementation(async (_id: string, _env: unknown, force?: boolean) => live(force ? now : now - 10_000, !force));
+    claude.mockImplementation(async (_id: string, force?: boolean) => live(force ? now : now - 10_000, !force));
     codex.mockImplementation(async (_id: string, force?: boolean) => codexUsage(force ? now : now - 10_000));
     discover.mockImplementation(async (_id: string, force?: boolean) => ({
       accountId: "ag", projectId: "p", inferenceVerified: false, fetchedAt: force ? now : now - 10_000, models: [],
@@ -93,7 +92,7 @@ describe("barrido de cuota", () => {
     expect(codex).toHaveBeenNthCalledWith(2, "cx", true);
     expect(discover).toHaveBeenNthCalledWith(1, "ag", false);
     expect(discover).toHaveBeenNthCalledWith(2, "ag", true);
-    expect(claude).toHaveBeenNthCalledWith(1, "cl", {}, false);
-    expect(claude).toHaveBeenNthCalledWith(2, "cl", {}, true);
+    expect(claude).toHaveBeenNthCalledWith(1, "cl", false);
+    expect(claude).toHaveBeenNthCalledWith(2, "cl", true);
   });
 });

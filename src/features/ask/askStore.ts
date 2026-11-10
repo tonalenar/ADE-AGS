@@ -48,6 +48,8 @@ export interface UserQuestion {
   late?: boolean;
   /** Confirmação de uma ação do JEV: o diálogo mostra a foto, o ponto e botões de verdade. */
   review?: AskReview;
+  /** O campo é `password` e a resposta segue pelo canal de segredo, nunca pelo transcript. */
+  secret?: boolean;
   resolve: (answer: string | null) => void;
 }
 

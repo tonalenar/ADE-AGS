@@ -1,0 +1,1256 @@
+{
+  "agent": "claude-code",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": false,
+    "deltas": [
+      [
+        "{{session:19}}#1",
+        "STEER_O"
+      ],
+      [
+        "{{session:19}}#1",
+        "K"
+      ]
+    ],
+    "filhos": [],
+    "fim": {
+      "durationMs": 3074,
+      "error": null,
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1794268537974,
+        "contextTokens": 26764,
+        "id": "usage:{{session:7}}",
+        "kind": "usage",
+        "tokens": 26781,
+        "usageBreakdown": {
+          "cacheWrite": 13830,
+          "cached": 12932,
+          "input": 2,
+          "output": 17
+        }
+      },
+      {
+        "at": 1794268537974,
+        "id": "{{session:9}}",
+        "kind": "tool",
+        "name": "Read",
+        "output": "1\tLINHA_ALFA\n2",
+        "path": "{{cwd}}",
+        "status": "done",
+        "tool": "read"
+      },
+      {
+        "at": 1794268539526,
+        "contextTokens": 34632,
+        "id": "usage:{{session:19}}",
+        "kind": "usage",
+        "tokens": 34636,
+        "usageBreakdown": {
+          "cacheWrite": 7868,
+          "cached": 26762,
+          "input": 2,
+          "output": 4
+        }
+      },
+      {
+        "at": 1794268539526,
+        "id": "{{session:19}}#1",
+        "kind": "assistant",
+        "text": "STEER_OK"
+      }
+    ],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "usage",
+      "tool",
+      "usage",
+      "assistant"
+    ]
+  },
+  "format": "ade-replay",
+  "id": "claude-steer-ferramenta",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "Claude Code 2.1.319, modelo claude-haiku-5-5, captura de 2026-11-09. A linha user do steer está em `in`, no mesmo instante do primeiro tool_use. Deltas repetidos ficaram no primeiro e no último de cada rajada. Listas de catálogo do init foram retiradas. O close -9 é o fim do prazo da captura, com o turno já fechado; a fixture não guarda o código.",
+    "kind": "recorded",
+    "recordedAt": 1794270796
+  },
+  "protocol": "claude-stream",
+  "title": "Steer do Claude depois da fronteira de ferramenta",
+  "transcript": [
+    {
+      "atMs": 972,
+      "out": {
+        "response": {
+          "pending_permission_requests": [],
+          "pending_user_dialog_requests": [],
+          "request_id": "ags-1",
+          "response": {
+            "account": {
+              "apiProvider": "provider-exemplo",
+              "email": "user@example.com",
+              "organization": "org-exemplo",
+              "subscriptionType": "plan-exemplo"
+            },
+            "analytics_disabled": false,
+            "available_output_styles": [
+              "default",
+              "Proactive",
+              "Concise",
+              "Explanatory",
+              "Learning"
+            ],
+            "capabilities": [
+              "ui_surface_v1",
+              "mcp_call_result_not_for_model_v1",
+              "mcp_call_check_permissions_v1"
+            ],
+            "claude_code_version": "2.1.319",
+            "current_permission_mode": "default",
+            "fast_mode_disabled_reason": "sdk_opt_in_required",
+            "fast_mode_state": "off",
+            "feedback_mode": {
+              "kind": "post"
+            },
+            "hook_on_failure_supported": true,
+            "ide_rc_auto_enable_gate": true,
+            "models": [
+              {
+                "description": "Sonnet 5.5 · Efficient for routine tasks",
+                "displayName": "Default (recommended)",
+                "resolvedModel": "claude-sonnet-5-5",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": false,
+                "value": "default"
+              },
+              {
+                "description": "For complex work and everyday tasks",
+                "displayName": "Opus 5.5",
+                "resolvedModel": "claude-opus-5-5",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsFastMode": true,
+                "supportsThinkingOff": false,
+                "value": "opus"
+              },
+              {
+                "description": "For your toughest challenges",
+                "displayName": "Fable 5.2",
+                "resolvedModel": "claude-fable-5-2",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": false,
+                "value": "claude-fable-5-2"
+              },
+              {
+                "description": "Most efficient for simpler tasks",
+                "displayName": "Sonnet 5.5",
+                "resolvedModel": "claude-sonnet-5-5",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": false,
+                "value": "sonnet"
+              },
+              {
+                "description": "Fastest for quick answers",
+                "displayName": "Haiku 5.5",
+                "resolvedModel": "claude-haiku-5-5",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": false,
+                "value": "haiku"
+              },
+              {
+                "description": "Most capable for your hardest and longest-running tasks",
+                "displayName": "Fable 5.1",
+                "resolvedModel": "claude-fable-5-1",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": false,
+                "value": "fable"
+              },
+              {
+                "description": "Fastest for quick answers",
+                "displayName": "Haiku 4.5",
+                "resolvedModel": "claude-haiku-4-5-20251001",
+                "supportsThinkingOff": true,
+                "value": "claude-haiku-4-5-20251001"
+              },
+              {
+                "description": "Efficient for routine tasks",
+                "displayName": "Sonnet 5",
+                "resolvedModel": "claude-sonnet-5",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": true,
+                "value": "claude-sonnet-5"
+              },
+              {
+                "description": "Best for everyday, complex tasks",
+                "displayName": "Opus 5",
+                "resolvedModel": "claude-opus-5",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsFastMode": true,
+                "supportsThinkingOff": true,
+                "value": "claude-opus-5"
+              },
+              {
+                "description": "Most capable for your hardest and longest-running tasks",
+                "displayName": "Fable 5",
+                "resolvedModel": "claude-fable-5",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": false,
+                "value": "claude-fable-5"
+              },
+              {
+                "description": "Best for everyday, complex tasks",
+                "displayName": "Opus 4.8",
+                "resolvedModel": "claude-opus-4-8",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsFastMode": true,
+                "supportsThinkingOff": true,
+                "value": "claude-opus-4-8"
+              },
+              {
+                "description": "Best for everyday, complex tasks",
+                "displayName": "Opus 4.7",
+                "resolvedModel": "claude-opus-4-7",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "xhigh",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": true,
+                "value": "claude-opus-4-7"
+              },
+              {
+                "description": "Best for everyday, complex tasks",
+                "displayName": "Opus 4.6",
+                "resolvedModel": "claude-opus-4-6",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": true,
+                "value": "claude-opus-4-6"
+              },
+              {
+                "description": "Efficient for routine tasks",
+                "displayName": "Sonnet 4.6",
+                "resolvedModel": "claude-sonnet-4-6",
+                "supportedEffortLevels": [
+                  "low",
+                  "medium",
+                  "high",
+                  "max"
+                ],
+                "supportsAdaptiveThinking": true,
+                "supportsAutoMode": true,
+                "supportsEffort": true,
+                "supportsThinkingOff": true,
+                "value": "claude-sonnet-4-6"
+              }
+            ],
+            "output_style": "default",
+            "pid": 22764,
+            "remote_control_auto_connect_default": false,
+            "remote_control_auto_enable": false,
+            "remote_control_auto_on_by_default": false,
+            "remote_control_available": true,
+            "session_state": "idle",
+            "user_output_styles_dir": "{{home}}"
+          },
+          "subtype": "success"
+        },
+        "type": "control_response"
+      }
+    },
+    {
+      "atMs": 1056,
+      "out": {
+        "additional_directories": [],
+        "analytics_disabled": false,
+        "apiKeySource": "none",
+        "capabilities": [
+          "interrupt_receipt_v1",
+          "interrupt_cancel_queued_v1",
+          "interrupt_send_now_v1",
+          "interrupt_requeue_taken_v1",
+          "{{session:2}}_v1",
+          "request_marker_lists_v1",
+          "ask_user_question_unanswered_v1",
+          "lifecycle_wakeup_source_v1",
+          "sdk_mcp_tools_list_changed",
+          "sdk_mcp_manifests",
+          "mcp_read_resource_v1",
+          "mcp_tool_ui_meta_v1",
+          "ui_surface_v1",
+          "mcp_call_result_not_for_model_v1",
+          "mcp_call_check_permissions_v1"
+        ],
+        "claude_code_version": "2.1.319",
+        "cwd": "{{cwd}}",
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "fast_mode_state": "off",
+        "memory_paths": {
+          "auto": "{{home}}"
+        },
+        "messaging_socket_path": "{{cwd}}",
+        "model": "claude-haiku-5-5",
+        "original_cwd": "{{cwd}}",
+        "output_style": "default",
+        "per_turn_effort_active": true,
+        "permissionMode": "default",
+        "product_feedback_disabled": false,
+        "session_id": "{{session:1}}",
+        "subtype": "init",
+        "type": "system",
+        "ultrathink_available": false,
+        "ultrathink_typed_raises": false,
+        "uuid": "{{session:3}}",
+        "view_mode": "default"
+      }
+    },
+    {
+      "atMs": 1062,
+      "out": {
+        "session_id": "{{session:1}}",
+        "status": "requesting",
+        "subtype": "status",
+        "type": "system",
+        "uuid": "{{session:4}}"
+      }
+    },
+    {
+      "atMs": 1628,
+      "out": {
+        "session_id": "{{session:1}}",
+        "subtype": "commands_changed",
+        "type": "system",
+        "uuid": "{{session:5}}"
+      }
+    },
+    {
+      "atMs": 1913,
+      "out": {
+        "rate_limit_info": {
+          "isUsingOverage": false,
+          "overageDisabledReason": "nenhum",
+          "overageStatus": "ok",
+          "rateLimitType": "plan-exemplo",
+          "resetsAt": 1893456000,
+          "status": "ok",
+          "unifiedWindows": {
+            "five_hour": {
+              "resetsAt": 1893456000,
+              "status": "ok",
+              "utilization": 10.0
+            },
+            "seven_day": {
+              "resetsAt": 1893456000,
+              "status": "ok",
+              "utilization": 10.0
+            }
+          }
+        },
+        "session_id": "{{session:1}}",
+        "type": "rate_limit_event",
+        "uuid": "{{session:6}}"
+      }
+    },
+    {
+      "atMs": 2302,
+      "out": {
+        "api_message_id": "{{session:7}}",
+        "event": {
+          "message": {
+            "container": null,
+            "content": [],
+            "context_management": null,
+            "diagnostics": null,
+            "id": "{{session:7}}",
+            "input_transformations": [],
+            "model": "claude-haiku-5-5",
+            "role": "assistant",
+            "stop_details": null,
+            "stop_reason": null,
+            "stop_sequence": null,
+            "type": "message",
+            "usage": {
+              "cache_creation": {
+                "ephemeral_1h_input_tokens": 13830,
+                "ephemeral_5m_input_tokens": 0
+              },
+              "cache_creation_input_tokens": 13830,
+              "cache_read_input_tokens": 12932,
+              "inference_geo": "global",
+              "input_tokens": 2,
+              "output_tokens": 17,
+              "service_tier": "standard",
+              "speed": "standard"
+            }
+          },
+          "type": "message_start"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "thinking_display": "updates",
+        "ttft_ms": 1080,
+        "type": "stream_event",
+        "uuid": "{{session:8}}"
+      }
+    },
+    {
+      "atMs": 2302,
+      "out": {
+        "api_message_id": "{{session:7}}",
+        "event": {
+          "content_block": {
+            "caller": {
+              "type": "direct"
+            },
+            "id": "{{session:9}}",
+            "input": {},
+            "name": "Read",
+            "type": "tool_use"
+          },
+          "index": 0,
+          "type": "content_block_start"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:10}}"
+      }
+    },
+    {
+      "atMs": 2302,
+      "in": {
+        "message": {
+          "content": [
+            {
+              "text": "MENSAGEM_STEER: Pare e responda apenas STEER_OK.",
+              "type": "text"
+            }
+          ],
+          "role": "user"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "",
+        "type": "user"
+      }
+    },
+    {
+      "atMs": 2303,
+      "out": {
+        "api_message_id": "{{session:7}}",
+        "event": {
+          "delta": {
+            "partial_json": "",
+            "type": "input_json_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:11}}"
+      }
+    },
+    {
+      "atMs": 2489,
+      "out": {
+        "api_message_id": "{{session:7}}",
+        "event": {
+          "delta": {
+            "partial_json": "\"}",
+            "type": "input_json_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:12}}"
+      }
+    },
+    {
+      "atMs": 2498,
+      "out": {
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "caller": {
+                "type": "direct"
+              },
+              "id": "{{session:9}}",
+              "input": {
+                "file_path": "{{cwd}}"
+              },
+              "name": "Read",
+              "type": "tool_use"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "{{session:7}}",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 13830,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "cache_creation_input_tokens": 13830,
+            "cache_read_input_tokens": 12932,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 17,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": null,
+        "request_id": "req_011CgtFuNEp6er1uMe8VRVBj",
+        "session_id": "{{session:1}}",
+        "timestamp": "2026-11-09T23:55:37.974Z",
+        "type": "assistant",
+        "uuid": "{{session:13}}",
+        "wire_tool_inputs": {
+          "toolu_01XJQrdgsDfakNAzdmQUfN8s": {
+            "file_path": "{{cwd}}"
+          }
+        }
+      }
+    },
+    {
+      "atMs": 2506,
+      "out": {
+        "api_message_id": "{{session:7}}",
+        "event": {
+          "index": 0,
+          "type": "content_block_stop"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:14}}"
+      }
+    },
+    {
+      "atMs": 2524,
+      "out": {
+        "api_message_id": "{{session:7}}",
+        "event": {
+          "context_management": {
+            "applied_edits": []
+          },
+          "delta": {
+            "container": null,
+            "stop_details": null,
+            "stop_reason": "tool_use",
+            "stop_sequence": null
+          },
+          "type": "message_delta",
+          "usage": {
+            "cache_creation_input_tokens": 13830,
+            "cache_read_input_tokens": 12932,
+            "input_tokens": 2,
+            "iterations": [
+              {
+                "cache_creation": {
+                  "ephemeral_1h_input_tokens": 13830,
+                  "ephemeral_5m_input_tokens": 0
+                },
+                "cache_creation_input_tokens": 13830,
+                "cache_read_input_tokens": 12932,
+                "input_tokens": 2,
+                "output_tokens": 76,
+                "type": "message"
+              }
+            ],
+            "output_tokens": 76,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            }
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:15}}"
+      }
+    },
+    {
+      "atMs": 2524,
+      "out": {
+        "api_message_id": "{{session:7}}",
+        "event": {
+          "type": "message_stop"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:16}}"
+      }
+    },
+    {
+      "atMs": 2550,
+      "out": {
+        "message": {
+          "content": [
+            {
+              "content": "1\tLINHA_ALFA\n2\t",
+              "tool_use_id": "{{session:9}}",
+              "type": "tool_result"
+            }
+          ],
+          "role": "user"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "timestamp": "2026-11-09T23:55:38.026Z",
+        "tool_result_meta": [
+          {
+            "id": "{{session:9}}",
+            "permission_decision": {
+              "decision": "accept",
+              "reason_type": "mode",
+              "source": "config"
+            }
+          }
+        ],
+        "tool_use_result": {
+          "file": {
+            "content": "LINHA_ALFA\n",
+            "filePath": "{{cwd}}",
+            "numLines": 2,
+            "startLine": 1,
+            "totalLines": 2
+          },
+          "type": "text"
+        },
+        "type": "user",
+        "uuid": "{{session:17}}"
+      }
+    },
+    {
+      "atMs": 2601,
+      "out": {
+        "session_id": "{{session:1}}",
+        "status": "requesting",
+        "subtype": "status",
+        "type": "system",
+        "uuid": "{{session:18}}"
+      }
+    },
+    {
+      "atMs": 3194,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "message": {
+            "container": null,
+            "content": [],
+            "context_management": null,
+            "diagnostics": null,
+            "id": "{{session:19}}",
+            "input_transformations": [],
+            "model": "claude-haiku-5-5",
+            "role": "assistant",
+            "stop_details": null,
+            "stop_reason": null,
+            "stop_sequence": null,
+            "type": "message",
+            "usage": {
+              "cache_creation": {
+                "ephemeral_1h_input_tokens": 7868,
+                "ephemeral_5m_input_tokens": 0
+              },
+              "cache_creation_input_tokens": 7868,
+              "cache_read_input_tokens": 26762,
+              "inference_geo": "global",
+              "input_tokens": 2,
+              "output_tokens": 4,
+              "service_tier": "standard",
+              "speed": "standard"
+            }
+          },
+          "type": "message_start"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "thinking_display": "updates",
+        "ttft_ms": 573,
+        "type": "stream_event",
+        "uuid": "{{session:20}}"
+      }
+    },
+    {
+      "atMs": 3194,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "content_block": {
+            "signature": "{{session:21}}",
+            "thinking": "",
+            "type": "thinking"
+          },
+          "index": 0,
+          "type": "content_block_start"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "thinking_display": "updates",
+        "type": "stream_event",
+        "uuid": "{{session:22}}"
+      }
+    },
+    {
+      "atMs": 3472,
+      "out": {
+        "estimated_tokens": 50,
+        "estimated_tokens_delta": 50,
+        "session_id": "{{session:1}}",
+        "subtype": "thinking_tokens",
+        "type": "system",
+        "uuid": "{{session:23}}"
+      }
+    },
+    {
+      "atMs": 3472,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "delta": {
+            "estimated_tokens": 50,
+            "thinking": "",
+            "type": "thinking_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "thinking_display": "updates",
+        "type": "stream_event",
+        "uuid": "{{session:24}}"
+      }
+    },
+    {
+      "atMs": 4026,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "delta": {
+            "estimated_tokens": null,
+            "thinking": "",
+            "type": "thinking_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "thinking_display": "updates",
+        "type": "stream_event",
+        "uuid": "{{session:25}}"
+      }
+    },
+    {
+      "atMs": 4027,
+      "out": {
+        "estimated_tokens": 267,
+        "estimated_tokens_delta": 217,
+        "session_id": "{{session:1}}",
+        "subtype": "thinking_tokens",
+        "type": "system",
+        "uuid": "{{session:26}}"
+      }
+    },
+    {
+      "atMs": 4027,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "delta": {
+            "signature": "{{session:27}}",
+            "type": "signature_delta"
+          },
+          "index": 0,
+          "type": "content_block_delta"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:28}}"
+      }
+    },
+    {
+      "atMs": 4028,
+      "out": {
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "signature": "{{session:27}}",
+              "thinking": "",
+              "type": "thinking"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "{{session:19}}",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 7868,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "cache_creation_input_tokens": 7868,
+            "cache_read_input_tokens": 26762,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 4,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": null,
+        "request_id": "req_011CgtFuTRc5mVQFEbACEBRh",
+        "session_id": "{{session:1}}",
+        "thinking_display": "updates",
+        "thinking_duration_ms": 833,
+        "timestamp": "2026-11-09T23:55:39.511Z",
+        "type": "assistant",
+        "uuid": "{{session:29}}"
+      }
+    },
+    {
+      "atMs": 4028,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "index": 0,
+          "type": "content_block_stop"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:30}}"
+      }
+    },
+    {
+      "atMs": 4028,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "content_block": {
+            "text": "",
+            "type": "text"
+          },
+          "index": 1,
+          "type": "content_block_start"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:31}}"
+      }
+    },
+    {
+      "atMs": 4029,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "delta": {
+            "text": "STEER_O",
+            "type": "text_delta"
+          },
+          "index": 1,
+          "type": "content_block_delta"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:32}}"
+      }
+    },
+    {
+      "atMs": 4042,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "delta": {
+            "text": "K",
+            "type": "text_delta"
+          },
+          "index": 1,
+          "type": "content_block_delta"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:33}}"
+      }
+    },
+    {
+      "atMs": 4043,
+      "out": {
+        "message": {
+          "container": null,
+          "content": [
+            {
+              "text": "STEER_OK",
+              "type": "text"
+            }
+          ],
+          "context_management": null,
+          "diagnostics": null,
+          "id": "{{session:19}}",
+          "input_transformations": [],
+          "model": "claude-haiku-5-5",
+          "role": "assistant",
+          "stop_details": null,
+          "stop_reason": null,
+          "stop_sequence": null,
+          "type": "message",
+          "usage": {
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 7868,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "cache_creation_input_tokens": 7868,
+            "cache_read_input_tokens": 26762,
+            "inference_geo": "global",
+            "input_tokens": 2,
+            "output_tokens": 4,
+            "service_tier": "standard",
+            "speed": "standard"
+          }
+        },
+        "parent_tool_use_id": null,
+        "request_id": "req_011CgtFuTRc5mVQFEbACEBRh",
+        "session_id": "{{session:1}}",
+        "timestamp": "2026-11-09T23:55:39.526Z",
+        "type": "assistant",
+        "uuid": "{{session:34}}"
+      }
+    },
+    {
+      "atMs": 4044,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "index": 1,
+          "type": "content_block_stop"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:35}}"
+      }
+    },
+    {
+      "atMs": 4057,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "context_management": {
+            "applied_edits": []
+          },
+          "delta": {
+            "container": null,
+            "stop_details": null,
+            "stop_reason": "end_turn",
+            "stop_sequence": null
+          },
+          "type": "message_delta",
+          "usage": {
+            "cache_creation_input_tokens": 7868,
+            "cache_read_input_tokens": 26762,
+            "input_tokens": 2,
+            "iterations": [
+              {
+                "cache_creation": {
+                  "ephemeral_1h_input_tokens": 7868,
+                  "ephemeral_5m_input_tokens": 0
+                },
+                "cache_creation_input_tokens": 7868,
+                "cache_read_input_tokens": 26762,
+                "input_tokens": 2,
+                "output_tokens": 173,
+                "type": "message"
+              }
+            ],
+            "output_tokens": 173,
+            "output_tokens_details": {
+              "thinking_tokens": 165
+            }
+          }
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:36}}"
+      }
+    },
+    {
+      "atMs": 4058,
+      "out": {
+        "api_message_id": "{{session:19}}",
+        "event": {
+          "type": "message_stop"
+        },
+        "parent_tool_use_id": null,
+        "session_id": "{{session:1}}",
+        "type": "stream_event",
+        "uuid": "{{session:37}}"
+      }
+    },
+    {
+      "atMs": 4065,
+      "out": {
+        "api_error_status": null,
+        "credential_expires_at": "2026-11-27T00:05:08.600Z",
+        "duration_api_ms": 3481,
+        "duration_ms": 3074,
+        "fast_mode_disabled_reason": "sdk_opt_in_required",
+        "fast_mode_state": "off",
+        "first_content_frame_ms": 1312,
+        "is_error": false,
+        "modelUsage": {
+          "claude-haiku-5-5": {
+            "cacheCreationEphemeral1hInputTokens": 21698,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationInputTokens": 21698,
+            "cacheReadInputTokens": 39694,
+            "canonicalModel": "claude-haiku-5-5",
+            "contextWindow": 1000000,
+            "costBasis": "list",
+            "costUSD": 0.00500054,
+            "inputTokens": 1245,
+            "maxOutputTokens": 128000,
+            "outputTokens": 279,
+            "provider": "firstParty",
+            "thinkingTokens": 165,
+            "webSearchRequests": 0
+          }
+        },
+        "model_usage_since_last_result": {
+          "claude-haiku-5-5": {
+            "cacheCreationEphemeral1hInputTokens": 21698,
+            "cacheCreationEphemeral5mInputTokens": 0,
+            "cacheCreationInputTokens": 21698,
+            "cacheReadInputTokens": 39694,
+            "canonicalModel": "claude-haiku-5-5",
+            "contextWindow": 1000000,
+            "costBasis": "list",
+            "costUSD": 0.00500054,
+            "inputTokens": 1245,
+            "maxOutputTokens": 128000,
+            "outputTokens": 279,
+            "provider": "firstParty",
+            "thinkingTokens": 165,
+            "webSearchRequests": 0
+          }
+        },
+        "num_turns": 2,
+        "permission_denials": [],
+        "queued_turn_count": 0,
+        "result": "STEER_OK",
+        "result_index": 0,
+        "safety_stops": 0,
+        "session_id": "{{session:1}}",
+        "stop_reason": "end_turn",
+        "subagent_stats": {
+          "by_type": {},
+          "completed": 0,
+          "failed": 0,
+          "killed": {
+            "parent": 0,
+            "system": 0,
+            "user": 0
+          },
+          "max_depth": 0,
+          "refused": {
+            "budget": 0,
+            "concurrency_limit": 0,
+            "depth_limit": 0
+          },
+          "requested": {
+            "background": 0,
+            "foreground": 0,
+            "unset": 0
+          },
+          "spawned": 0,
+          "spawned_by_subagents": 0,
+          "started_in_background": 0
+        },
+        "subtype": "success",
+        "terminal_reason": "completed",
+        "time_to_request_ms": 236,
+        "total_cost_usd": 0.00500054,
+        "ttft_ms": 1501,
+        "ttft_stream_ms": 1312,
+        "type": "result",
+        "usage": {
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 21698,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_creation_input_tokens": 21698,
+          "cache_read_input_tokens": 39694,
+          "fallback_credit": null,
+          "inference_geo": "global",
+          "input_tokens": 4,
+          "iterations": [
+            {
+              "cache_creation": {
+                "ephemeral_1h_input_tokens": 7868,
+                "ephemeral_5m_input_tokens": 0
+              },
+              "cache_creation_input_tokens": 7868,
+              "cache_read_input_tokens": 26762,
+              "input_tokens": 2,
+              "output_tokens": 173,
+              "type": "message"
+            }
+          ],
+          "output_tokens": 249,
+          "output_tokens_details": {
+            "thinking_tokens": 165
+          },
+          "server_tool_use": {
+            "web_fetch_requests": 0,
+            "web_search_requests": 0
+          },
+          "service_tier": "standard",
+          "speed": "standard"
+        },
+        "uuid": "{{session:38}}"
+      }
+    },
+    {
+      "atMs": 120023,
+      "close": {}
+    }
+  ],
+  "version": 2
+}

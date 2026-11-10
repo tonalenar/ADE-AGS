@@ -11,7 +11,7 @@ use serde_json::Value;
 use super::event::{clip, first_line, EndReason, Event, Tokens};
 use super::repeat::call_key;
 
-fn tokens_of(v: &Value) -> Option<Tokens> {
+pub(crate) fn tokens_of(v: &Value) -> Option<Tokens> {
     let n = |key: &str| v.get(key).and_then(Value::as_u64).unwrap_or(0);
     v.get("input_tokens")?;
     let cached = n("cached_input_tokens");

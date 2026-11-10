@@ -1,5 +1,6 @@
 use super::containment::ProcessGroup;
 use portable_pty::{CommandBuilder, MasterPty, PtySize};
+use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -287,20 +288,71 @@ pub(super) const PARENT_SESSION_ENV: &[&str] = &[
     "CLAUDE_CODE_DISABLE_CRON",
 ];
 
-pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<CommandBuilder, String> {
-    if prelaunch.is_empty() {
-        return direct_launch(command);
+/// Retira marcadores que fariam um processo filho se passar pela sessão da ADE ou do Claude pai.
+pub(crate) fn scrub_app_child_env(cmd: &mut std::process::Command) {
+    for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
+        cmd.env_remove(var);
     }
-    // Um shell só: `conda activate`, `nvm use`, `set VAR=` e `cd` têm que valer para
-    // o agente. No Windows isso é um `.cmd` e um `cmd /C` dentro do ConPTY. A janela
-    // não abre porque `win_conpty` já passou `CREATE_NO_WINDOW`: o console é o PTY.
-    Ok(shell_running(launch_script(command, prelaunch)))
+    cmd.env_remove(super::SESSION_ENV);
+    cmd.env_remove("ADE_TAB_ID");
+}
+
+/// Aplica a mesma limpeza ao builder do PTY, preservando as variáveis adicionadas depois.
+pub(crate) fn scrub_pty_app_child_env(cmd: &mut CommandBuilder) {
+    for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
+        cmd.env_remove(var);
+    }
+    cmd.env_remove(super::SESSION_ENV);
+    cmd.env_remove("ADE_TAB_ID");
+}
+
+pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<CommandBuilder, String> {
+    build_launch_with_args(command, prelaunch, &[])
+}
+
+fn build_launch_with_args(command: &str, prelaunch: &[String], extra_args: &[String]) -> Result<CommandBuilder, String> {
+    if extra_args.is_empty() {
+        if prelaunch.is_empty() {
+            return direct_launch(command);
+        }
+        // Um shell só: `conda activate`, `nvm use`, `set VAR=` e `cd` valem para o agente.
+        return Ok(shell_running(launch_script(command, prelaunch)));
+    }
+    if !codex_stem(command) {
+        return Err("Argumentos MCP por sessão só podem ser aplicados ao Codex CLI.".into());
+    }
+    let mut parts = split_command(command);
+    if parts.is_empty() {
+        return Err("Comando do Codex ausente.".into());
+    }
+    parts.splice(1..1, extra_args.iter().cloned());
+    if prelaunch.is_empty() {
+        return direct_launch_parts(parts);
+    }
+    let command = shell_command_line(&parts);
+    Ok(shell_running(launch_script(&command, prelaunch)))
+}
+
+#[cfg(unix)]
+fn shell_command_line(parts: &[String]) -> String {
+    parts.iter().map(|part| format!("'{}'", part.replace('\'', "'\\''"))).collect::<Vec<_>>().join(" ")
+}
+
+#[cfg(windows)]
+fn shell_command_line(parts: &[String]) -> String {
+    // O launcher Windows grava um .cmd temporário; dobrar `%` evita expansão de variáveis
+    // em caminhos e overrides passados como argumentos do Codex.
+    let safe: Vec<String> = parts.iter().map(|part| part.replace('%', "%%")).collect();
+    crate::util::win_quote::quote_cmdline(&safe)
 }
 
 fn direct_launch(command: &str) -> Result<CommandBuilder, String> {
-    let parts = split_command(command);
+    direct_launch_parts(split_command(command))
+}
+
+fn direct_launch_parts(parts: Vec<String>) -> Result<CommandBuilder, String> {
     let mut parts = parts.iter().map(String::as_str);
-    let program = parts.next().unwrap_or(command);
+    let program = parts.next().ok_or("Comando do agente ausente.")?;
     #[cfg(windows)]
     {
         let path = crate::util::find_program(program).unwrap_or_else(|| std::path::PathBuf::from(program));
@@ -418,7 +470,7 @@ pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
     with_codex_identity(command, tab_id, None)
 }
 
-fn codex_stem(command: &str) -> bool {
+fn command_stem(command: &str) -> String {
     let trimmed = command.trim_start();
     let head_len = match trimmed.chars().next() {
         Some(q @ ('"' | '\'')) => trimmed[1..].find(q).map_or(trimmed.len(), |i| i + 2),
@@ -426,8 +478,11 @@ fn codex_stem(command: &str) -> bool {
     };
     let program = trimmed[..head_len].trim_matches(|c| c == '"' || c == '\'');
     let file = program.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
-    let stem = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file);
-    stem == "codex"
+    file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file).to_string()
+}
+
+fn codex_stem(command: &str) -> bool {
+    command_stem(command) == "codex"
 }
 
 /// Como [`with_codex_tab_id`], e aponta um perfil do Codex cujo arquivo (0600)
@@ -646,12 +701,17 @@ pub(crate) fn open_pty(size: PtySize) -> Result<portable_pty::PtyPair, String> {
 pub async fn pty_create(
     command: String,
     cwd: String,
+    agent_id: Option<String>,
+    // IDs de conta são a única informação de conta que cruza o IPC. Perfil e credencial
+    // são resolvidos aqui, a partir do banco desta instância e do keyring do SO.
+    account_id: Option<String>,
     cols: u16,
     rows: u16,
-    // `env`: variables extra a inyectar en el proceso — las declara la TUI custom que se
-    // está lanzando (ver `agents::CustomAgent::env`). Se aplican DESPUÉS de las de la app,
-    // así una TUI puede pisar `TERM`/`COLORTERM` si de verdad lo necesita.
+    // Overrides posteriores à conta, declarados para este processo.
     env: Option<std::collections::HashMap<String, String>>,
+    // Ambiente da TUI custom/MCP do navegador, aplicado antes da conta para preservar
+    // a precedência anterior do merge feito na interface.
+    env_before_account: Option<std::collections::HashMap<String, String>>,
     // `prelaunch`: comandos a ejecutar antes del agente, ya resueltos y en orden (ver el
     // módulo `prelaunch`). Vacío = se lanza igual que siempre, sin ningún intermediario.
     prelaunch: Option<Vec<String>>,
@@ -660,14 +720,100 @@ pub async fn pty_create(
     // Aba de integrante de missão que pediu: o ambiente herdado perde as credenciais de outros
     // serviços (ver `runs::sandbox::scrub_env`). Ausente = como sempre: aba da pessoa.
     scrub_secrets: Option<bool>,
+    // Overrides MCP somente do processo, usados pelo Codex TUI; nunca altera o config global.
+    extra_args: Option<Vec<String>>,
     app: AppHandle,
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
     let steps = prelaunch.unwrap_or_default();
+    let extra_args = extra_args.unwrap_or_default();
+    let env_after_account = env.unwrap_or_default();
+    // A política e a configuração MCP não precisam das credenciais: valide-as antes de
+    // abrir o keyring ou resolver qualquer segredo da conta.
+    let mut requested_env = env_before_account.clone().unwrap_or_default();
+    requested_env.extend(env_after_account.iter().map(|(name, value)| (name.clone(), value.clone())));
+    let tab_id = requested_env.get("ADE_TAB_ID").cloned().filter(|tab| !tab.is_empty());
+    // A política local de provedores também vale para abas abertas diretamente pelo ADE.
+    // Abas de missão continuam sob a política por papel da orquestração, nunca por provedor.
+    if requested_env.get("ADE_MISSION_ID").is_none()
+        && let Some(agent_id) = agent_id.as_deref()
+    {
+        let db = app.try_state::<crate::database::DbConnection>()
+            .ok_or("Não foi possível conferir a política local deste projeto.")?;
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        if let Some(tab_id) = tab_id.as_deref() {
+            let stored: Option<(String, String)> = conn
+                .query_row(
+                    "SELECT agent_id, cwd FROM tabs WHERE id = ?1",
+                    [tab_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .optional()
+                .map_err(|error| error.to_string())?;
+            if let Some((stored_agent_id, _stored_cwd)) = stored
+                && stored_agent_id != agent_id
+            {
+                return Err("O provedor da aba mudou antes de o terminal iniciar. Tente novamente.".into());
+            }
+        }
+        crate::project_chat_policy::ensure_agent_enabled(&conn, &cwd, agent_id)?;
+    }
+    if extra_args.len() > 8 || extra_args.iter().any(|arg| arg.len() > 8_192) {
+        return Err("Overrides de sessão excedem o limite permitido.".into());
+    }
+    if !extra_args.is_empty() {
+        if !codex_stem(&command) {
+            return Err("Argumentos MCP por sessão só podem ser aplicados ao Codex CLI.".into());
+        }
+        let tab = tab_id.as_deref().ok_or("Overrides MCP exigem uma aba identificada pela ADE.")?;
+        let executable = crate::ipc::install::source_binary(&app)
+            .ok_or("Não foi possível localizar o servidor MCP da ADE.")?;
+        let mission = requested_env.get("ADE_MISSION_ID").map(String::as_str);
+        let expected = crate::ipc::mcp::process_mcp_args_for_tab(
+            crate::agents::McpStyle::CodexConfigOverrides,
+            &executable.to_string_lossy(),
+            &cwd,
+            tab,
+            mission,
+        )
+        .ok_or("Não foi possível gerar a configuração MCP desta aba.")?;
+        if extra_args != expected {
+            return Err("Os argumentos MCP não correspondem à configuração preparada pela ADE.".into());
+        }
+    }
+    let mut env = env_before_account.unwrap_or_default();
+    let mut memory_env = env.clone();
+    if let Some(account_id) = account_id.as_deref() {
+        if account_id.starts_with("system:") {
+            return Err("A conta principal não usa um id de perfil no lançamento.".into());
+        }
+        let expected_agent_id = agent_id
+            .as_deref()
+            .ok_or("O provedor da conta não foi informado ao criar o terminal.")?;
+        let db = app.try_state::<crate::database::DbConnection>()
+            .ok_or("Não foi possível acessar as contas desta instância.")?;
+        let account_env = crate::accounts::env_for_account_for_agent(
+            &db,
+            account_id,
+            expected_agent_id,
+        )?;
+        // O ai-memory precisa do caminho do perfil para localizar a configuração do agente,
+        // mas não precisa das variáveis de autenticação lidas do keyring.
+        let credential_names = crate::agents::overriding_env(account_env.keys());
+        memory_env.extend(
+            account_env
+                .iter()
+                .filter(|(name, _)| !credential_names.contains(&name.as_str()))
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+        env.extend(account_env);
+    }
+    memory_env.extend(env_after_account.iter().map(|(name, value)| (name.clone(), value.clone())));
+    env.extend(env_after_account);
+    let env = (!env.is_empty()).then_some(env);
     let pair = open_pty(size)?;
 
-    let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned().filter(|tab| !tab.is_empty());
     // O token nasce aqui, não no ambiente que o frontend (ou um agente) mandou.
     // Só entra no registro depois que o processo existe. Um terminal restaurado
     // não passa por aqui: reanexa o PTY vivo e o processo conserva o token.
@@ -710,7 +856,7 @@ pub async fn pty_create(
         // `--version` do ai-memory e a escrita dos arquivos da aba bloqueiam. O guard de atualização
         // acima não atravessa um `.await`, então usa-se `block_in_place`: o runtime move as outras
         // tarefas desta thread enquanto o processo roda.
-        let (extras, cwd_path) = (env.clone().unwrap_or_default(), std::path::PathBuf::from(&cwd));
+        let (extras, cwd_path) = (memory_env, std::path::PathBuf::from(&cwd));
         let prepared = tokio::task::block_in_place(|| {
             crate::ai_memory::tabs::prepare_new_tab(&tab, agent, &dir, &home, &cwd_path, &argv, &extras)
         });
@@ -726,32 +872,34 @@ pub async fn pty_create(
         let native_program = argv.first().ok_or("Comando do agente ausente.")?;
         let executable = crate::util::path_env::find_program(native_program)
             .unwrap_or_else(|| std::path::PathBuf::from(native_program));
-        let wrapped = crate::ai_memory::continuation::argv(&binary, &executable, &argv, &memory.args)?;
+        let mut continuation_argv = argv.clone();
+        if !extra_args.is_empty() {
+            continuation_argv.splice(1..1, extra_args.iter().cloned());
+        }
+        let wrapped = crate::ai_memory::continuation::argv(&binary, &executable, &continuation_argv, &memory.args)?;
         // Mesmo caminho dos outros lançamentos: resolução do programa, regras do Windows e pré-comandos.
         build_launch(&crate::ai_memory::tabs::shell_args(&wrapped)?, &steps)?
     } else if steps.is_empty() {
-        let mut cmd = build_launch(&command, &steps)?;
+        let mut cmd = build_launch_with_args(&command, &steps, &extra_args)?;
         cmd.args(&memory.args);
         cmd
     } else {
         match crate::ai_memory::tabs::shell_args(&memory.args) {
-            Ok(args) => build_launch(&format!("{command} {args}"), &steps)?,
+            Ok(args) => build_launch_with_args(&format!("{command} {args}"), &steps, &extra_args)?,
             Err(_) => {
                 memory = Default::default();
                 if let (Some(tab), Some(dir)) = (tab_id.as_deref(), mcp_dir.as_deref()) {
                     crate::ai_memory::tabs::remove_owned_server(dir, tab);
                 }
                 eprintln!("[ade-ags] ai-memory omitido: argumentos incompatíveis com o prelaunch");
-                build_launch(&command, &steps)?
+                build_launch_with_args(&command, &steps, &extra_args)?
             }
         }
     };
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
-        cmd.env_remove(var);
-    }
+    scrub_pty_app_child_env(&mut cmd);
     // Antes da conta, do env da TUI e das `ADE_*`: o que vem depois disto fica.
     if scrub_secrets.unwrap_or(false) {
         crate::runs::sandbox::scrub_pty_env(&mut cmd);

@@ -8,6 +8,7 @@
  * 2. Uma palavra do título começa com a busca ("ses" acha "Abrir sessões").
  * 3. A busca aparece inteira em algum lugar do título ou das palavras-chave.
  * 4. As letras da busca aparecem em ordem no título ("mkt" acha "Marketplace").
+ * 5. A mesma busca aproximada também considera palavras-chave, como o caminho do arquivo.
  *
  * Acento e maiúscula não contam: quem digita "sessoes" quer "Sessões".
  */
@@ -34,6 +35,7 @@ export function score(item: Searchable, query: string): number {
   if (keywords.some((k) => k.startsWith(q))) return 50;
   if (keywords.some((k) => k.includes(q))) return 40;
   if (isSubsequence(q.replace(/\s+/g, ""), title)) return 20;
+  if (keywords.some((keyword) => isSubsequence(q.replace(/\s+/g, ""), keyword))) return 15;
   return 0;
 }
 

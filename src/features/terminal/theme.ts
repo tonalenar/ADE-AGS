@@ -1,3 +1,5 @@
+import { colorsForTheme, readThemePreferences } from "@/features/settings/themePreferences";
+
 /**
  * La fuente de la terminal. JetBrains Mono viene incluida con la app
  * (`@fontsource-variable/jetbrains-mono`, cargada en `main.tsx`): antes el stack pedía
@@ -116,6 +118,22 @@ export const TERMINAL_THEMES = {
     scrollbarSliderActiveBackground: "rgba(30, 30, 34, 0.55)",
   },
 } as const;
+
+/** A paleta personalizada muda os options do xterm em quente, sem mexer no PTY nem no scrollback. */
+export function terminalThemeFor(appearance: "light" | "dark") {
+  const preferences = readThemePreferences();
+  const active = preferences.themes.find((theme) => theme.id === preferences.activeThemeId);
+  const colors = active ? colorsForTheme(active, appearance) : null;
+  if (!colors) return TERMINAL_THEMES[appearance];
+  const base = TERMINAL_THEMES[appearance];
+  return {
+    ...base,
+    background: colors.terminalBackground ?? base.background,
+    foreground: colors.terminalForeground ?? base.foreground,
+    cursor: colors.terminalCursor ?? colors.focus ?? base.cursor,
+    selectionBackground: colors.terminalSelection ?? base.selectionBackground,
+  };
+}
 
 /**
  * Piso de contraste que xterm corrige en caliente, contra el fondo real de cada celda.

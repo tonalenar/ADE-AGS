@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "ADE AGS usa el micrófono solo cuando inicias el dictado en el composer.";
+"NSSpeechRecognitionUsageDescription" = "ADE AGS transcribe tu voz localmente e inserta el texto en el composer para que lo revises.";

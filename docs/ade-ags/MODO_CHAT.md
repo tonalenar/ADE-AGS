@@ -75,8 +75,14 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
   - Plano: `--permission-mode plan`, só no Claude.
   - Um modo que o agente não tem nunca dá mais permissão do que a pedida.
 - **Seletor (prancheta 3):**
-  - popover de 360×346, com favoritos (no `localStorage`), agentes, modelos com busca e a conta no rodapé;
-  - o esforço fica num menu à parte, ao lado do modelo.
+  - painel amplo de três colunas com trilho de agentes, favoritos (no `localStorage`), modelos com busca e raciocínio à direita; conta da conversa fica no rodapé;
+  - em conversas novas e por protocolo, o trilho permite escolher entre os agentes disponíveis; numa conversa por TUI ele fica no agente da sessão, porque trocar o executável do PTY não preserva a sessão. Nas conversas por protocolo, trocar de agente pede confirmação e só acontece entre turnos;
+  - esforço, modos de acesso e, quando o catálogo confirma suporte no modelo Codex, Standard/Fast ficam reunidos no painel; um esforço incompatível com o modelo selecionado é limpo;
+  - o painel reduz o esforço a um seletor compacto em janelas estreitas; `Configurações > Aparência` também permite escolher as famílias de fonte da interface e do código, inclusive um nome instalado localmente;
+  - o modo Plano continua como controle próprio, pois altera o lançamento ou o estado da conversa.
+- **Sugestões no composer (estilo T3):** `@` sugere agentes do time e arquivos com mudanças no Git, além de abrir o seletor de arquivo; `/` abre as superfícies e ações ADE; `$` sugere skills compatíveis e anexadas à conversa, com acesso à gestão de skills. Setas, Enter e Escape navegam o menu. As ações usam os painéis e serviços existentes da ADE.
+- **Contexto e objetivos:** `/compact` usa `thread/compact/start` no Codex estruturado e o comando nativo no Claude Code estruturado; nas TUIs, o comando segue para o CLI compatível. Claude Code aceita `/compact [instruções]`; Codex pelo app-server não aceita instruções customizadas. `/goal` do Codex é persistido pelo app-server e na ADE, com pausar/retomar; no Claude Code é encaminhado ao comando nativo, e o espelho local permanece até limpar porque o protocolo não informa conclusão confiável. `/autocompact` encaminha o ajuste nativo do Claude Code. `/clear` reinicia a sessão do provedor em conversas estruturadas, encerra o processo ocioso, limpa o objetivo ligado à sessão e conserva a timeline local; a ação aguarda o turno terminar e não passa com pedidos pendentes. Nas conversas estruturadas do Claude Code, Configurações permite ajustar o limite por perfil usando `--settings` apenas naquela sessão; isso não altera configurações globais nem as TUIs. O ajuste do limite ainda não se aplica às sessões TUI. Outros motores não mostram comandos sem suporte.
+- **Conversa lateral:** `/side` ou o painel “Pergunta lateral” cria uma conversa independente para as conversas por protocolo (Codex, Claude Code, OpenCode, Antigravity e Cursor). Ela recebe um recorte recente do histórico como contexto citado e começa em Supervisionado; não desmonta o PTY nem envia nada pela conversa principal. “Trazer à conversa” preenche o composer de origem sem enviar automaticamente. A lista lateral permite retomar ou remover conversas ociosas sem pedidos pendentes. Ainda não há vínculo persistente para conversas TUI.
 - **Painel direito (540 px):**
   - **Diff:** o `git diff HEAD` da pasta, pelo comando `scm_working_diff`, relido quando o agente trabalha;
   - **Arquivos:** o `FilesView`;
@@ -111,7 +117,7 @@ Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, s
 
 - **Backend (`src-tauri/src/conversa/`):**
   - `store.rs`: as tabelas `chat_thread`, `chat_run`, `chat_item` e `chat_request`. A migração é só aditiva, sem subir `user_version`.
-  - `codex.rs`: um processo `codex app-server` por conversa, com JSON por linha no stdio. Ele sobe na primeira mensagem e retoma a thread do Codex (`thread/resume`) depois de reabrir o app.
+  - `codex.rs`: um processo `codex app-server` por conversa, com JSON por linha no stdio e MCP `ags` configurado com overrides `-c` apenas nesse processo. Ele sobe na primeira mensagem e retoma a thread do Codex (`thread/resume`) depois de reabrir o app.
   - `codex_map.rs` (puro): os itens do Codex viram o mesmo `canal::timeline::Item` da timeline lida do transcript; o acesso vira política de aprovação e sandbox.
   - `commands.rs`: `chat_threads`, `chat_thread_create`, `chat_thread_send` (começa um turno ou entra no que está em andamento com `turn/steer`), `chat_thread_items`, `chat_thread_requests`, `chat_thread_status`, `chat_thread_interrupt`, `chat_request_answer`, `chat_thread_retune`, `chat_thread_rename` e `chat_thread_settle`.
   - Evento `cc-chat-thread`, com os tipos `item`, `delta`, `phase`, `request`, `requestResolved`, `thread`, `error` e `closed`.
@@ -125,7 +131,7 @@ Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, s
 
   Trocar o acesso fecha o processo; a próxima mensagem retoma a thread com o sandbox novo. Modelo e esforço valem no próximo turno.
 - **Front (`src/features/chat/structured/`):** o store ao vivo, os cartões (chave `thread:<id>`) e a `StructuredConversationView`. A tela usa a mesma `TimelineView`, o mesmo composer e os mesmos menus da conversa por TUI. Aprovações e perguntas se respondem nos botões do composer; parar interrompe o turno.
-- **CLI e MCP (etapa 5):** `ags chat list|new|send|wait|show|stop|pending|open|settle` (Codex e Claude Code) e as tools `chat_*` nas abas (handlers em `src-tauri/src/ipc/commands/conversas.rs`, sobre o mesmo `conversa::api` da tela).
+- **CLI e MCP:** `ags chat list|new|send|wait|show|stop|pending|open|settle` e as tools `chat_*` nas abas. Codex, Claude Code e OpenCode por protocolo também recebem o MCP local da ADE, escopado à pasta e à conversa; podem consultar `agent_roster` e delegar trabalho separável com `run_plan` ao scheduler da frota. Antigravity em `agy --print` recebe o MCP por configuração temporária em cada turno (não há uma sessão interativa persistente) e também pode delegar. O worker/modelo pode ser escolhido entre os disponíveis no roster, ou roteado pela ADE por complexidade. Essa integração não altera configuração global do provider nem cria um segundo scheduler. No Antigravity, tools que exigiriam aprovação interativa só podem executar em Acesso total.
   - Uma conversa aberta por agente começa **supervisionada** (`access: ask`).
   - `chat wait` dorme no barramento (`chat.changed`), sem polling, até o turno acabar ou o agente pedir algo à pessoa. `reply` é a última fala DEPOIS da última mensagem da pessoa; terminou sem fala nova (erro, interrompido, processo caído), `reply` vem `null` e `stopped` traz o motivo (lido do `turnEnd`).
   - Responder às aprovações e perguntas do agente da conversa **não** tem comando: é da pessoa, na tela.
@@ -141,7 +147,7 @@ Com o Claude Code, a conversa nova fala com o agente por `claude -p` em stream-j
   - **Mensagens:** o app manda `{type: "user", message}`; o Claude devolve `assistant` (um bloco por linha, com o mesmo `message.id`), `user` (os `tool_result`), `stream_event` (os pedaços do texto, com `api_message_id` e `index`) e `result` (o fim do turno). O texto em pedaços e o item final têm o mesmo id (`<message.id>#<index>`).
   - **Aprovações:** com `--permission-prompt-tool stdio`, o Claude manda o `control_request` `can_use_tool` e espera `{behavior: "allow" | "deny"}`. "Permitir na sessão" devolve as sugestões do próprio Claude (`permission_suggestions`), sempre com `destination: "session"`: nada vai para os settings do projeto. `AskUserQuestion` chega pelo mesmo pedido e responde com `updatedInput.answers`.
   - **Parar:** o `control_request` `interrupt`. O turno acaba com `result` (`terminal_reason: "aborted_*"`) e vira fim de turno interrompido.
-  - **Por que não a tool MCP da frota** (`--permission-prompt-tool mcp__ags__approve_tool_use`): ela passa pelo `ags mcp` e pelo broker, que servem tarefas desatendidas. Na conversa há alguém olhando, e o stdio já leva o pedido ao processo que mostra a tela, sem MCP, sem broker e sem tocar `ipc/`.
+  - **Aprovações não passam pela tool da frota** (`--permission-prompt-tool mcp__ags__approve_tool_use`): o Claude continua usando `--permission-prompt-tool stdio`, e o pedido chega à conversa por `control_request` para a pessoa responder na tela. O MCP `ags` adicional serve ferramentas locais de navegação, dispositivos, Git e orquestração; `run_plan` continua sujeito à política de autorização existente.
 - **Acesso** (`--permission-mode`):
 
   | No chat | Modo do Claude |
@@ -159,7 +165,7 @@ Com o Claude Code, a conversa nova fala com o agente por `claude -p` em stream-j
 - **Backend:** `conversa/claude.rs` (o processo, com o mesmo evento `cc-chat-thread` do Codex) e `conversa/claude_map.rs` (puro: linhas em itens, `can_use_tool` em pedido, respostas, flags). O `api.rs` escolhe o motor pelo agente da conversa (`Engine::Codex` / `Engine::Claude`). As ferramentas viram itens pelo mesmo `canal::timeline::claude_tool` da timeline lida do transcript; o `ExitPlanMode` vira o plano.
 - **Conta:** `accounts::env_for_account` (o `CLAUDE_CONFIG_DIR` da conta), como no Codex.
 
-- **Ainda não:** ACP do Gemini e do Kimi (o motor do OpenCode já fala ACP e serve de base); reverter turno; anexos de imagem; subagentes (`Task`) aparecem só como a ferramenta, sem o que fazem dentro.
+- **Ainda não:** ACP do Gemini e do Kimi; reverter turno; anexos de imagem; o detalhe interno das tarefas de subagentes `Task` nativos do Claude. A delegação entre provedores da ADE já pode ser feita via `agent_roster`/`run_plan` em conversas Codex, Claude Code e OpenCode, sem depender dos subagentes nativos de cada CLI.
 
 ### OpenCode por protocolo (ACP)
 
@@ -167,6 +173,7 @@ Com o OpenCode, a conversa nova fala por `opencode acp` (Agent Client Protocol: 
 
 - **Por que o ACP** (e não `opencode serve` ou `opencode run --format json`): é um protocolo bidirecional por stdio, como o `codex app-server`, sem porta nem servidor compartilhado; o `run --format json` é um processo por turno, sem permissão nem texto em pedaços (o fixture `runs/fixtures/opencode_stream.jsonl` só tem partes inteiras).
 - **Conferido sem gastar cota** (OpenCode 2.2.1): `initialize` e `session/new` reais. Eles mostram `loadSession`, `sessionCapabilities.resume`, `configOptions` (`model` com `provedor/modelo`, `effort` que muda com o modelo, `mode` com `build` e `plan`) e que o `OPENCODE_CONFIG_CONTENT` do ambiente vale para o `acp` (o modelo da config aparece no `session/new`). **Não conferido:** um turno real (texto, ferramentas, permissões); esses avisos seguem a especificação do ACP e estão no teste `e2e_opencode_acp_um_turno_real` (`#[ignore]`, `CC_E2E_OPENCODE_MODEL`).
+- A config passada ao ACP mescla o servidor MCP `ags` da ADE à política de acesso temporária já usada pelo chat, sem substituir o MCP do usuário gravado em arquivo. O processo recebe o escopo `thread:<id>`.
 - **Sessão:** `session/new` na primeira mensagem; depois de reabrir o app, `session/resume` (sem reenviar o histórico), com `session/load` de reserva (os avisos de replay são ignorados) e, se a sessão sumiu, uma nova (a timeline guardada continua). O id vai em `chat_thread.remote_id`.
 - **Mensagem e fila:** `session/prompt` responde só no fim (`stopReason`). O ACP não tem "entrar no turno": a mensagem que chega com o turno em andamento fica numa fila e começa o turno seguinte.
 - **Parar:** o aviso `session/cancel`; os pedidos de permissão em aberto respondem "cancelado".
@@ -220,6 +227,7 @@ PATH do shell de login e a pasta do instalador do Cursor).
   As perguntas do agente à pessoa (`interaction_query`) não travam: o `cursor-agent -p` as recusa sozinho.
 - **Parar sem agente vivo** (todos os motores, `api::stop`, também `ags chat stop`): fecha no banco o turno que ficou aberto
   daquela conversa, com o fim «o agente já não estava rodando», e a janela volta a ociosa. Antes, o Parar não fazia nada.
+- **Parar do Codex antes do `turn/started`** (`codex_parar.rs`): o app-server só aceita `turn/interrupt` depois do aviso e antes recusa com `-32600`, então o turno seguia rodando e o Parar sumia. Agora o Parar recebido entre o `turn/start` e o `turn/started` fica **pendente na sessão** e sai quando o aviso chega; se o turno acaba antes (ou o `turn/start` falha), a pendência é descartada. Sem turno aberto nem `turn/start` a caminho, o Parar cai no fechamento do turno órfão acima.
 
 ### Antigravity por protocolo (`agy --print` em stream-json)
 
@@ -467,6 +475,10 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   encolhe.
 - **Time na fileira do cabeçalho.** O Time é um ícone da fileira, com os demais (`ROW_CHOICES`). O ⋯ fica com Design,
   Emulador Android, Pull request e Maximizar o painel.
+- **Pull requests no chat.** Com uma pasta aberta, a entrada Pull request do ⋯ abre o Forge no painel lateral. A lista
+  mantém os filtros, atualização, criação e detalhe existentes. “Vinculados à branch” filtra pela branch de origem e
+  fica desativado sem branch; trocar de pasta ou branch limpa a seleção de PR aberto. A sessão reaproveita a conta do
+  Forge já conectado (`PullRequestPane`), sem credenciais próprias.
 - **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
   conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
   (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de

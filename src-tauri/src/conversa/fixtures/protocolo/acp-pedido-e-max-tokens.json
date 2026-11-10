@@ -18,6 +18,7 @@
         "o lib.rs."
       ]
     ],
+    "filhos": [],
     "fim": {
       "durationMs": null,
       "error": "O turno parou no limite de tokens do modelo",
@@ -52,7 +53,11 @@
         "at": 1790000000170,
         "id": "usage:bancada",
         "kind": "usage",
-        "tokens": 1000
+        "tokens": 1000,
+        "usageBreakdown": {
+          "input": 900,
+          "output": 100
+        }
       }
     ],
     "pedidos": [
@@ -61,7 +66,19 @@
         "title": "{{cwd}}/src/lib.rs"
       }
     ],
-    "sessao": "{{session:1}}"
+    "pedidosPendentes": [
+      {
+        "kind": "fileChange",
+        "title": "{{cwd}}/src/lib.rs"
+      }
+    ],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "reasoning",
+      "assistant",
+      "tool",
+      "usage"
+    ]
   },
   "format": "ade-replay",
   "id": "acp-pedido-e-max-tokens",

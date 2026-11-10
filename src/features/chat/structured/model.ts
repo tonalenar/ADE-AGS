@@ -1,9 +1,9 @@
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
-import { PROTOCOL_AGENTS, type ChatAccess, type ConversationCard } from "../chatModel";
+import { PROTOCOL_AGENTS, type ChatAccess, type ConversationCard, type ProviderRuntimeConfig, type ProviderSlashCommand } from "../chatModel";
 import { appendDeltas, type DeltaInput, type Draft, type DraftKind } from "../timeline/streaming";
 import type { TimelineItem } from "../timeline/types";
-import type { QuestionOption, RequestRow, ThreadAccess, ThreadRow } from "./ipc";
+import type { QuestionOption, RequestRow, ThreadAccess, ThreadGoal, ThreadRow } from "./ipc";
 
 /**
  * As conversas por protocolo (o Codex pelo `app-server`, o Claude Code pelo `claude -p` em
@@ -14,6 +14,15 @@ import type { QuestionOption, RequestRow, ThreadAccess, ThreadRow } from "./ipc"
 
 /** Os agentes que conversam por protocolo (espelho de `conversa::structured_agent`; a tabela é `PROTOCOL_AGENTS`). */
 export const STRUCTURED_AGENTS = new Set(Object.keys(PROTOCOL_AGENTS));
+export const LOCAL_ACP_PREFIX = "local-acp-";
+
+export function isLocalAcpAgent(agentId: string): boolean {
+  return agentId.startsWith(LOCAL_ACP_PREFIX);
+}
+
+export function isStructuredAgent(agentId: string): boolean {
+  return STRUCTURED_AGENTS.has(agentId) || isLocalAcpAgent(agentId);
+}
 
 /** O prefixo que separa um cartão de conversa por protocolo de um de aba (o `tabId` do cartão). */
 export const THREAD_PREFIX = "thread:";
@@ -32,7 +41,7 @@ export function folderName(cwd: string): string {
 /** Os cartões das conversas por protocolo ativas. Branch e worktree saem do painel, quando a pasta está nele. */
 export function threadCards(threads: ThreadRow[], groups: RepoGroup[], labelOf: (agentId: string) => string, selected: string | null): ConversationCard[] {
   const byCwd = new Map(groups.flatMap((g) => g.workspaces).map((w) => [w.cwd, w]));
-  return threads.filter((t) => t.state === "active").map((t) => {
+  return threads.filter((t) => t.state === "active" && !t.isSideChat).map((t) => {
     const ws = byCwd.get(t.cwd);
     return {
       tabId: threadKey(t.id),
@@ -57,9 +66,13 @@ export interface ThreadLive {
   /** O texto (e o raciocínio) do agente chegando, por item, antes do item completo. */
   drafts: Draft[];
   error: string | null;
+  /** Snapshot em memória dos comandos anunciados pela sessão ACP (não persistido no banco). */
+  providerCommands: ProviderSlashCommand[];
+  /** Modelos e níveis de raciocínio anunciados pela sessão ACP ativa (não persistidos no banco). */
+  providerConfig: ProviderRuntimeConfig | null;
 }
 
-export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", drafts: [], error: null };
+export const EMPTY_LIVE: ThreadLive = { items: [], requests: [], phase: "idle", drafts: [], error: null, providerCommands: [], providerConfig: null };
 
 /** Um evento `cc-chat-thread` (ver `conversa::codex`). */
 export type ThreadEvent =
@@ -71,6 +84,9 @@ export type ThreadEvent =
   | { type: "requestResolved"; threadId: string; id: string }
   /** O título mudou, ou o acesso (o Claude saiu do Plano, aceitou edições na sessão). */
   | { type: "thread"; threadId: string; title?: string; access?: ThreadAccess }
+  | { type: "goal"; threadId: string; goal: ThreadGoal | null }
+  | { type: "commands"; threadId: string; commands: ProviderSlashCommand[] }
+  | { type: "providerConfig"; threadId: string; config: ProviderRuntimeConfig }
   | { type: "error"; threadId: string; message: string }
   | { type: "closed"; threadId: string };
 
@@ -91,10 +107,14 @@ export function applyThreadEvent(live: ThreadLive, event: ThreadEvent): ThreadLi
       return { ...live, requests: [...live.requests.filter((r) => r.id !== event.request.id), event.request] };
     case "requestResolved":
       return { ...live, requests: live.requests.filter((r) => r.id !== event.id) };
+    case "commands":
+      return { ...live, providerCommands: event.commands };
+    case "providerConfig":
+      return { ...live, providerConfig: event.config };
     case "error":
       return { ...live, error: event.message };
     case "closed":
-      return { ...live, phase: "idle", drafts: [], requests: [] };
+      return { ...live, phase: "idle", drafts: [], requests: [], providerCommands: [] };
     default:
       return live;
   }

@@ -1,10 +1,11 @@
 //! Los comandos que usa la UI: cuentas, repos en la nube, clonar, PRs e issues.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
 use super::api::{
-    normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, Label, NewIssue, NewPull, NewRelease, Release,
+    normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, Label, NewIssue, NewPull, NewRelease, PullReviewDraft,
+    PullReviewAction, PullReviewRefs, PullReviewSubmission, PullReviewThreads, Release,
 };
 use super::credentials::{api_for, blocking, git_env_for_remote, git_env_for_url, target, RepoTarget};
 use super::oauth::{self, DeviceStart, Poll};
@@ -306,6 +307,223 @@ pub async fn forge_comment(app: AppHandle, cwd: String, number: u64, pr: bool, b
     }
     let (t, api) = repo_api(&app, &cwd).await?;
     api.comment(&t.path, number, pr, &body).await
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullReviewCommentInput {
+    pub id: String,
+    pub path: String,
+    pub body: String,
+    pub new_line: Option<u32>,
+    pub old_line: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PullReviewRequest {
+    pub head_sha: String,
+    pub base_sha: Option<String>,
+    pub start_sha: Option<String>,
+    #[serde(default = "default_pull_review_action")]
+    pub action: PullReviewAction,
+    #[serde(default)]
+    pub summary: String,
+    pub comments: Vec<PullReviewCommentInput>,
+}
+
+fn default_pull_review_action() -> PullReviewAction {
+    PullReviewAction::Comment
+}
+
+/// Publica apenas comentários que a pessoa salvou como rascunho em uma linha modificada.
+#[tauri::command]
+pub async fn forge_submit_pull_review(
+    app: AppHandle,
+    cwd: String,
+    number: u64,
+    request: PullReviewRequest,
+) -> Result<PullReviewSubmission, ForgeError> {
+    const MAX_COMMENTS: usize = 50;
+    const MAX_COMMENT_BYTES: usize = 8 * 1024;
+    const MAX_TOTAL_BYTES: usize = 256 * 1024;
+
+    if request.comments.len() > MAX_COMMENTS {
+        return Err(ForgeError::Api(format!("A revisão aceita até {MAX_COMMENTS} comentários de linha")));
+    }
+    if matches!(request.action, PullReviewAction::Comment) && request.comments.is_empty() {
+        return Err(ForgeError::Api("Adicione pelo menos um comentário de linha para enviar uma revisão de comentário".into()));
+    }
+    if request.summary.len() > MAX_COMMENT_BYTES {
+        return Err(ForgeError::Api("O resumo da revisão excede 8 KiB".into()));
+    }
+    if matches!(request.action, PullReviewAction::RequestChanges) && request.summary.trim().is_empty() {
+        return Err(ForgeError::Api("Inclua um resumo explicando as alterações solicitadas".into()));
+    }
+    let mut ids = std::collections::HashSet::new();
+    let mut total_bytes = request.summary.len();
+    for comment in &request.comments {
+        if comment.id.is_empty() || comment.id.len() > 80 || !ids.insert(comment.id.as_str()) {
+            return Err(ForgeError::Api("Há um id de rascunho inválido ou repetido".into()));
+        }
+        if comment.path.is_empty() || comment.path.len() > 4096 || comment.path.contains('\0') {
+            return Err(ForgeError::Api("Há um caminho de arquivo inválido no comentário".into()));
+        }
+        if comment.body.trim().is_empty() || comment.body.len() > MAX_COMMENT_BYTES {
+            return Err(ForgeError::Api("Os comentários precisam ter texto e podem usar até 8 KiB cada".into()));
+        }
+        if comment.new_line.is_none() && comment.old_line.is_none() {
+            return Err(ForgeError::Api("Cada comentário deve apontar para uma linha do diff".into()));
+        }
+        total_bytes = total_bytes.saturating_add(comment.body.len());
+    }
+    if total_bytes > MAX_TOTAL_BYTES {
+        return Err(ForgeError::Api("Os rascunhos da revisão excedem o limite total de 256 KiB".into()));
+    }
+
+    let (target, api) = repo_api(&app, &cwd).await?;
+    if api.kind() == super::provider::ForgeKind::Gitlab && matches!(request.action, PullReviewAction::RequestChanges) {
+        return Err(ForgeError::Unsupported("O GitLab não oferece a ação de solicitar alterações nesta API".into()));
+    }
+    let refs = PullReviewRefs { head_sha: request.head_sha, base_sha: request.base_sha, start_sha: request.start_sha };
+    if api.pull_review_refs(&target.path, number).await? != refs {
+        return Err(ForgeError::Api("O PR/MR recebeu novos commits desde a abertura da aba. Atualize o Código; nenhum comentário foi publicado.".into()));
+    }
+    let changed_files = if request.comments.is_empty() { Vec::new() } else { api.pull_files(&target.path, number).await? };
+    let mut drafts = Vec::with_capacity(request.comments.len());
+    for comment in request.comments {
+        let file = changed_files
+            .iter()
+            .find(|file| file.path == comment.path)
+            .ok_or_else(|| ForgeError::Api(format!("O arquivo {} não faz parte deste PR/MR", comment.path)))?;
+        let patch = file.patch.as_deref().ok_or_else(|| ForgeError::Api(format!("O diff de {} não está disponível para comentários de linha", comment.path)))?;
+        if !patch_contains_target(patch, comment.old_line, comment.new_line) {
+            return Err(ForgeError::Api(format!("A linha {} de {} não está em uma alteração do snapshot atual", comment.old_line.or(comment.new_line).unwrap_or_default(), comment.path)));
+        }
+        drafts.push(PullReviewDraft {
+            id: comment.id,
+            path: comment.path,
+            body: comment.body,
+            new_line: comment.new_line,
+            old_line: comment.old_line,
+            old_path: file.old_path.clone(),
+        });
+    }
+    api.submit_pull_review(&target.path, number, &refs, request.action, &request.summary, &drafts).await
+}
+
+fn valid_review_thread_id(value: &str, kind: ForgeKind) -> bool {
+    if value.is_empty() || value.len() > 256 { return false; }
+    match kind {
+        ForgeKind::Github => value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'+' | b'/' | b'=')),
+        ForgeKind::Gitlab => value.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.')),
+        ForgeKind::Gitea => value.parse::<u64>().is_ok_and(|id| id > 0),
+        ForgeKind::Other => false,
+    }
+}
+
+fn review_snapshot_is_current(current: &PullReviewRefs, expected_head: &str) -> Result<(), ForgeError> {
+    if current.head_sha == expected_head {
+        Ok(())
+    } else {
+        Err(ForgeError::Api("PR_HEAD_CHANGED: O PR/MR recebeu novos commits. Atualize o Código antes de interagir com as discussões.".into()))
+    }
+}
+
+/// Lê discussões de código na versão do diff mostrada pela aba.
+#[tauri::command]
+pub async fn forge_pull_review_threads(app: AppHandle, cwd: String, number: u64, head_sha: String) -> Result<PullReviewThreads, ForgeError> {
+    let (target, api) = repo_api(&app, &cwd).await?;
+    review_snapshot_is_current(&api.pull_review_refs(&target.path, number).await?, &head_sha)?;
+    api.pull_review_threads(&target.path, number).await
+}
+
+/// Responde à discussão que a pessoa escolheu. Não envia texto do agente implicitamente.
+#[tauri::command]
+pub async fn forge_reply_pull_review_thread(
+    app: AppHandle,
+    cwd: String,
+    number: u64,
+    head_sha: String,
+    reply_to_id: String,
+    body: String,
+) -> Result<(), ForgeError> {
+    const MAX_BODY_BYTES: usize = 8 * 1024;
+    if body.trim().is_empty() || body.len() > MAX_BODY_BYTES || body.contains('\0') {
+        return Err(ForgeError::Api("A resposta precisa ter texto e pode usar até 8 KiB".into()));
+    }
+    let (target, api) = repo_api(&app, &cwd).await?;
+    if !valid_review_thread_id(&reply_to_id, api.kind()) {
+        return Err(ForgeError::Api("O id da discussão é inválido".into()));
+    }
+    review_snapshot_is_current(&api.pull_review_refs(&target.path, number).await?, &head_sha)?;
+    api.reply_pull_review_thread(&target.path, number, &reply_to_id, body.trim()).await
+}
+
+/// Resolve ou reabre uma discussão escolhida pela pessoa na UI.
+#[tauri::command]
+pub async fn forge_set_pull_review_thread_resolved(
+    app: AppHandle,
+    cwd: String,
+    number: u64,
+    head_sha: String,
+    thread_id: String,
+    resolved: bool,
+) -> Result<(), ForgeError> {
+    let (target, api) = repo_api(&app, &cwd).await?;
+    if !valid_review_thread_id(&thread_id, api.kind()) {
+        return Err(ForgeError::Api("O id da discussão é inválido".into()));
+    }
+    review_snapshot_is_current(&api.pull_review_refs(&target.path, number).await?, &head_sha)?;
+    api.set_pull_review_thread_resolved(&target.path, number, &thread_id, resolved).await
+}
+
+fn patch_contains_target(patch: &str, old_target: Option<u32>, new_target: Option<u32>) -> bool {
+    let (mut old_line, mut new_line) = (None, None);
+    for raw in patch.lines() {
+        if raw.starts_with("@@") {
+            let mut fields = raw.split_whitespace();
+            if fields.next() != Some("@@") {
+                continue;
+            }
+            let Some(old) = fields.next().and_then(|value| value.strip_prefix('-')).and_then(|value| value.split(',').next()).and_then(|value| value.parse::<u32>().ok()) else {
+                old_line = None;
+                new_line = None;
+                continue;
+            };
+            let Some(new) = fields.next().and_then(|value| value.strip_prefix('+')).and_then(|value| value.split(',').next()).and_then(|value| value.parse::<u32>().ok()) else {
+                old_line = None;
+                new_line = None;
+                continue;
+            };
+            old_line = Some(old);
+            new_line = Some(new);
+            continue;
+        }
+        match raw.as_bytes().first().copied() {
+            Some(b'+') if !raw.starts_with("+++") => {
+                if old_target.is_none() && new_line == new_target {
+                    return true;
+                }
+                new_line = new_line.and_then(|line| line.checked_add(1));
+            }
+            Some(b'-') if !raw.starts_with("---") => {
+                if new_target.is_none() && old_line == old_target {
+                    return true;
+                }
+                old_line = old_line.and_then(|line| line.checked_add(1));
+            }
+            Some(b' ') => {
+                if old_target.is_some() && new_target.is_some() && old_line == old_target && new_line == new_target {
+                    return true;
+                }
+                old_line = old_line.and_then(|line| line.checked_add(1));
+                new_line = new_line.and_then(|line| line.checked_add(1));
+            }
+            _ => {}
+        }
+    }
+    false
 }
 
 #[tauri::command]

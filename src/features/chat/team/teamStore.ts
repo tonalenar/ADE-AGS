@@ -13,7 +13,7 @@ import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { chatCommand } from "../chatModel";
 import { addSurface, useChatStore } from "../store";
 import { chatThreadCreate } from "../structured/ipc";
-import { STRUCTURED_AGENTS, threadIdOf, threadKey } from "../structured/model";
+import { isLocalAcpAgent, isStructuredAgent, threadIdOf, threadKey } from "../structured/model";
 import { addPending, dropPending } from "../timeline/pending";
 import type { TimelineItem } from "../timeline/types";
 import { reloadThreads, sendToThread, settleThread, useStructured } from "../structured/store";
@@ -451,12 +451,15 @@ export async function spawnMember(input: NewMemberInput): Promise<SpawnedMember>
     close();
   };
   try {
-    const place = input.worktree ? await chatTeamWorktree(input.cwd, input.role) : null;
+    const place = input.worktree ? await chatTeamWorktree(input.cwd, input.role, agent.id) : null;
     if (place) chatTeamProvisionPlace(provision.id, place.root, place.branch).catch(() => {});
     const cwd = place?.cwd ?? input.cwd;
     const { access, plan } = conversationAccess(input.policy, agent.id);
-    if (input.structured && STRUCTURED_AGENTS.has(agent.id)) {
-      const row = await chatThreadCreate({ agentId: agent.id, cwd, title: label, model: input.model, effort: input.effort ?? null, access: plan ? "plan" : access, accountId: input.account ?? null });
+    if ((input.structured || agent.isStructured) && isStructuredAgent(agent.id)) {
+      const localAcp = isLocalAcpAgent(agent.id);
+      const row = await chatThreadCreate({ agentId: agent.id, cwd, workspaceId: useTabsStore.getState().workspaceId, title: label,
+        model: localAcp ? null : input.model, effort: localAcp ? null : input.effort ?? null,
+        access: localAcp ? "ask" : plan ? "plan" : access, accountId: localAcp ? null : input.account ?? null });
       await reloadThreads();
       const ref = threadKey(row.id);
       return { ref, label, place, provision: provision.id, close: closing(ref, () => settleThread(row.id, true)) };

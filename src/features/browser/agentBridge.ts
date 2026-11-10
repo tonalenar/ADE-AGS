@@ -18,6 +18,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, isLocalUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
+import { useChatStore } from "@/features/chat/store";
+import { useStructured } from "@/features/chat/structured/store";
 
 import {
   consoleForAgent, isFailed, mergeCookies, networkForAgent, requestRows, type CookieRow,
@@ -186,11 +188,20 @@ async function hostFor(
   // lo que marcó lo marcó en la tab que estaba mirando, que es la suya. Mandarlos a la del
   // agente devolvería siempre "no marcaste nada".
   const ofUser = request.op === "pick" || request.op === "marked";
-  // Sin saber quién pide (un agente viejo, sin el dato), se sigue usando el de siempre.
-  const browsers = owner && !ofUser
-    ? inFolder.filter((v) => v.owner?.id === owner.id || (portals.includes(v) && linkedToAgent(owner.id, v.id)))
-    : inFolder;
-  const slot = `${owner && !ofUser ? owner.id : "user"}\u0000${comparablePath(cwd)}`;
+  const chatViewId = owner && (owner.kind === "tab" || owner.kind === "thread")
+    ? useChatStore.getState().browser?.viewId
+    : undefined;
+  const chatView = chatViewId && owner
+    ? inFolder.find((v) => v.id === chatViewId && !!v.owner && v.owner.kind === owner.kind && v.owner.id === owner.id)
+    : undefined;
+  // `pick` e `marked` são para a página que a pessoa está vendo. Se ela está no painel da
+  // mesma conversa, os apontamentos pertencem à página compartilhada daquela sessão.
+  const browsers = owner && ofUser && chatView
+    ? [chatView]
+    : owner && !ofUser
+      ? inFolder.filter((v) => (v.owner && v.owner.kind === owner.kind && v.owner.id === owner.id) || (portals.includes(v) && linkedToAgent(owner.id, v.id)))
+      : inFolder;
+  const slot = `${owner && (!ofUser || chatView) ? owner.id : "user"}\u0000${comparablePath(cwd)}`;
 
   if (browsers.length === 0) {
     // La tab del agente es suya y no se cierra sola; pero el usuario puede cerrarla, y
@@ -229,7 +240,16 @@ async function hostFor(
   const withMarks = ofUser ? browsers.find((v) => hasMarks(hosts.get(v.id))) : undefined;
   // Para el agente manda LO SUYO, no lo que el usuario tenga activo: si el usuario abre su
   // propia tab del proyecto, el agente no debería empezar a escribir ahí.
-  const view = (owner && !ofUser ? remembered ?? active : withMarks ?? active ?? remembered) ?? browsers[browsers.length - 1];
+  // Quando a tab pedinte é a conversa visível no chat, o painel e o agente precisam operar
+  // a mesma página. Fora dela, permanece a tab lembrada do agente para não roubar foco nem
+  // misturar sessões paralelas.
+  const sharedChatView = chatView ? browsers.find((v) => v.id === chatView.id) : undefined;
+  // O painel pode ainda estar publicando o retângulo na primeira renderização; uma tab
+  // própria recém-aberta no chat também deve vencer um portal ligado ao mesmo agente.
+  const chatOwnedView = owner && !ofUser
+    ? browsers.find((v) => !portals.includes(v) && v.owner?.kind === owner.kind && v.owner.id === owner.id)
+    : undefined;
+  const view = (owner && !ofUser ? sharedChatView ?? chatOwnedView ?? remembered ?? active : withMarks ?? active ?? remembered) ?? browsers[browsers.length - 1];
   lastUsed.set(slot, view.id);
   // Lo que tenga cargado AHORA, haya navegado el agente o el usuario: los dos usan esta
   // página, y al reabrirla tiene que volver a la última.
@@ -410,8 +430,12 @@ async function markedBatchText(fallback: BrowserHost, batch: SentBatch, prefix: 
  * les pone prefijo.
  */
 function askerPrefix(owner: ViewOwner | null): string {
-  if (owner?.kind !== "tab") return "";
-  return browserToolPrefix(useTabsStore.getState().tabs.find((tab) => tab.id === owner.id)?.agentId);
+  if (owner?.kind === "tab") return browserToolPrefix(useTabsStore.getState().tabs.find((tab) => tab.id === owner.id)?.agentId);
+  if (owner?.kind === "thread") {
+    const threadId = owner.id.startsWith("thread:") ? owner.id.slice("thread:".length) : owner.id;
+    return browserToolPrefix(useStructured.getState().threads.find((thread) => thread.id === threadId)?.agentId);
+  }
+  return "";
 }
 
 /** Las reglas simuladas, para que el agente sepa qué está fingiendo la página. */

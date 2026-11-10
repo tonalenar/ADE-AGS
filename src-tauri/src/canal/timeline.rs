@@ -14,7 +14,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::event::{clip, first_line, parse_ts_ms};
+use super::event::{clip, first_line, parse_ts_ms, Tokens};
 
 /// Quanto do fim do transcript vira timeline. O começo de conversas longas fica de fora (e a
 /// timeline diz que foi cortada).
@@ -90,6 +90,69 @@ pub struct Question {
     pub options: Vec<String>,
 }
 
+/// Categorias de uso que o provedor expõe. Cache e raciocínio podem ser subconjuntos de outras
+/// categorias; `reasoning_in_output` registra essa diferença para a UI não somar duas vezes.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageBreakdown {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache_write: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_in_output: Option<bool>,
+}
+
+impl UsageBreakdown {
+    fn is_empty(&self) -> bool {
+        self.input.is_none() && self.output.is_none() && self.cached.is_none()
+            && self.cache_write.is_none() && self.reasoning.is_none()
+    }
+
+    pub(crate) fn from_claude(usage: Option<&Value>) -> Option<Self> {
+        let usage = usage?;
+        let n = |key: &str| usage.get(key).and_then(Value::as_u64);
+        let details = Self {
+            input: n("input_tokens"),
+            output: n("output_tokens"),
+            cached: n("cache_read_input_tokens"),
+            cache_write: n("cache_creation_input_tokens"),
+            ..Self::default()
+        };
+        (!details.is_empty()).then_some(details)
+    }
+
+    pub(crate) fn from_codex(tokens: Tokens, usage: &Value) -> Self {
+        let reasoning = usage.get("reasoning_output_tokens").and_then(Value::as_u64);
+        Self {
+            input: Some(tokens.input),
+            output: usage.get("output_tokens").and_then(Value::as_u64),
+            cached: usage.get("cached_input_tokens").and_then(Value::as_u64),
+            cache_write: usage.get("cache_write_input_tokens").and_then(Value::as_u64),
+            reasoning,
+            reasoning_in_output: reasoning.map(|_| true),
+        }
+    }
+
+    pub(crate) fn subtract(&self, other: &Self) -> Self {
+        let sub = |current: Option<u64>, base: Option<u64>| current.zip(base).map(|(n, b)| n.saturating_sub(b));
+        Self {
+            input: sub(self.input, other.input),
+            output: sub(self.output, other.output),
+            cached: sub(self.cached, other.cached),
+            cache_write: sub(self.cache_write, other.cache_write),
+            reasoning: sub(self.reasoning, other.reasoning),
+            reasoning_in_output: self.reasoning_in_output.or(other.reasoning_in_output),
+        }
+    }
+}
+
 /// Um item da timeline. Os campos que não valem para o tipo ficam de fora do JSON.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,13 +198,23 @@ pub struct Item {
     /// Os tokens de um item `usage`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tokens: Option<u64>,
+    /// A divisão que o provedor informou para este registro, quando disponível.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_breakdown: Option<UsageBreakdown>,
+    /// Entrada de contexto do Claude nesta chamada, sem tokens de saída. Ausente nos demais motores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_tokens: Option<u64>,
+    /// Evita repetir a compactação automática ao reabrir a mesma ponta de contexto.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_compact_attempted: Option<bool>,
 }
 
 impl Item {
     pub(crate) fn new(kind: ItemKind, id: String, at: Option<i64>) -> Item {
         Item {
             kind, id, at, text: None, name: None, tool: None, label: None, path: None, added: None, removed: None,
-            status: None, output: None, question: None, interrupted: None, duration_ms: None, plan: None, tokens: None,
+            status: None, output: None, question: None, interrupted: None, duration_ms: None, plan: None, tokens: None, usage_breakdown: None,
+            context_tokens: None, auto_compact_attempted: None,
         }
     }
 
@@ -188,6 +261,15 @@ pub fn claude_tokens(usage: Option<&Value>) -> Option<u64> {
     let usage = usage?;
     let n = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
     let total = n("input_tokens") + n("cache_creation_input_tokens") + n("cache_read_input_tokens") + n("output_tokens");
+    (total > 0).then_some(total)
+}
+
+/// Entrada enviada ao modelo, incluindo cache lido e criado, sem a resposta gerada. `None` quando
+/// o CLI não informou uso de entrada para esta mensagem.
+pub fn claude_context_tokens(usage: Option<&Value>) -> Option<u64> {
+    let usage = usage?;
+    let n = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+    let total = n("input_tokens").saturating_add(n("cache_creation_input_tokens")).saturating_add(n("cache_read_input_tokens"));
     (total > 0).then_some(total)
 }
 
@@ -329,10 +411,15 @@ impl Builder {
         ) {
             match self.usage_of.get(message_id) {
                 // A última linha da mensagem traz a saída completa.
-                Some(&index) => self.items[index].tokens = Some(tokens),
+                Some(&index) => {
+                    self.items[index].tokens = Some(tokens);
+                    self.items[index].usage_breakdown = UsageBreakdown::from_claude(line.pointer("/message/usage"));
+                }
                 None => {
                     self.usage_of.insert(message_id.to_string(), self.items.len());
-                    self.items.push(Item::usage(format!("usage:{message_id}"), at, tokens));
+                    let mut item = Item::usage(format!("usage:{message_id}"), at, tokens);
+                    item.usage_breakdown = UsageBreakdown::from_claude(line.pointer("/message/usage"));
+                    self.items.push(item);
                 }
             }
         }
@@ -400,7 +487,11 @@ impl Builder {
                     {
                         self.codex_total = total;
                         let id = self.next_id(None);
-                        self.items.push(Item::usage(id, at, last));
+                        let mut item = Item::usage(id, at, last);
+                        item.usage_breakdown = info
+                            .and_then(|i| i.pointer("/last_token_usage"))
+                            .and_then(|usage| super::codex::tokens_of(usage).map(|tokens| UsageBreakdown::from_codex(tokens, usage)));
+                        self.items.push(item);
                     }
                 }
                 "task_complete" | "turn_aborted" => {

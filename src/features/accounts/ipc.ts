@@ -31,10 +31,6 @@ export const accountHealth = (accountId: string) => invoke<AccountHealth>("accou
 export const deleteAccount = (id: string, deleteFiles: boolean) =>
   invoke<void>("delete_agent_account", { id, deleteFiles });
 
-/** Variables con las que hay que lanzar un proceso para que corra con esta cuenta. */
-export const accountEnv = (accountId: string) =>
-  invoke<Record<string, string>>("agent_account_env", { accountId });
-
 export type AntigravityOAuthAccount = { id: string; name: string; email: string; connected: boolean };
 export type AntigravityOAuthConfig = { clientId: string | null; configured: boolean };
 export type AntigravityOAuthProgress =

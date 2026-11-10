@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 
 use crate::canal::event::{clip, first_line};
-use crate::canal::timeline::{claude_tool, Item, ItemKind, ToolKind, ToolStatus};
+use crate::canal::timeline::{claude_tool, Item, ItemKind, ToolKind, ToolStatus, UsageBreakdown};
 
 use super::claude_map::TurnResult;
 use super::codex_map::DeltaKind;
@@ -225,7 +225,9 @@ impl Mapper {
             out.push(Out::Item(Box::new(item)));
         }
         if let Some(tokens) = usage_tokens(result.get("usage")) {
-            out.push(Out::Item(Box::new(Item::usage(format!("usage:{}", self.turn), at, tokens))));
+            let mut item = Item::usage(format!("usage:{}", self.turn), at, tokens);
+            item.usage_breakdown = usage_breakdown(result.get("usage"));
+            out.push(Out::Item(Box::new(item)));
         }
         let duration_ms = result.get("duration_seconds").and_then(Value::as_f64).map(|s| (s * 1000.0) as i64);
         let interrupted = reason == Some("interrupted");
@@ -270,6 +272,25 @@ fn usage_tokens(usage: Option<&Value>) -> Option<u64> {
     let n = |key: &str| usage.get(key).and_then(Value::as_u64);
     let total = n("total_tokens").filter(|t| *t > 0).unwrap_or_else(|| n("input_tokens").unwrap_or(0) + n("output_tokens").unwrap_or(0) + n("thinking_tokens").unwrap_or(0));
     (total > 0).then_some(total)
+}
+
+/// O detalhamento que o Antigravity expõe, sem inferir dados ausentes.
+fn usage_breakdown(usage: Option<&Value>) -> Option<UsageBreakdown> {
+    let usage = usage?;
+    let n = |key: &str| usage.get(key).and_then(Value::as_u64);
+    let reasoning = n("thinking_tokens");
+    let breakdown = UsageBreakdown {
+        input: n("input_tokens"),
+        output: n("output_tokens"),
+        cached: n("cache_read_tokens"),
+        cache_write: n("cache_write_tokens"),
+        reasoning,
+        // O total de fallback é input + output + thinking; nessa forma o raciocínio é separado.
+        reasoning_in_output: reasoning.map(|_| false),
+    };
+    (breakdown.input.is_some() || breakdown.output.is_some() || breakdown.cached.is_some()
+        || breakdown.cache_write.is_some() || breakdown.reasoning.is_some())
+        .then_some(breakdown)
 }
 
 /// Uma ação negada (`denied_actions`) em uma linha: o texto, ou o primeiro campo que diga o quê.

@@ -31,7 +31,8 @@ const mount = () => act(async () => {
   root.render(<AgentModelPicker agents={AGENTS} value={{ agentId: "claude-code", model: null, effort: null, account: null }} onChange={() => undefined} />);
 });
 const openPicker = () => act(async () => { (host.querySelector("button[aria-haspopup=dialog]") as HTMLElement).click(); });
-const accountOptions = () => [...host.querySelectorAll("select[aria-label='chat.picker.account'] option")].map((o) => o.textContent);
+// O popover do seletor sai por portal no <body>, para o composer não o cortar: as consultas dele partem de lá.
+const accountOptions = () => [...document.body.querySelectorAll("select[aria-label='chat.picker.account'] option")].map((o) => o.textContent);
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });

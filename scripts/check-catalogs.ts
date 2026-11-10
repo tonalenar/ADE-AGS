@@ -46,6 +46,9 @@ export function mcpTools(mcp: string, git: string): ToolFamily[] {
   const field = /name: "([a-z_]+)"/g;
   const orchestration = names(rustBlock(mcp, "ORCHESTRATION_TOOLS"), field);
   const ask = mcp.match(/pub const ASK_TOOL: &str = "([a-z_]+)";/)?.[1];
+  const secrets = ["SECRET_REQUEST_TOOL", "SECRET_RUN_TOOL", "SECRET_REVOKE_TOOL"]
+    .map((constant) => mcp.match(new RegExp(`pub const ${constant}: &str = "([a-z_]+)";`))?.[1])
+    .filter((name): name is string => Boolean(name));
   const approve = mcp.match(/pub const TOOL_NAME: &str = "([a-z_]+)";/)?.[1];
   if (!ask || !approve) throw new Error("não achei ASK_TOOL/TOOL_NAME em mcp.rs");
   return [
@@ -59,6 +62,7 @@ export function mcpTools(mcp: string, git: string): ToolFamily[] {
     { family: "Computer use", pt: "Computer use", who: "interactive sessions (`--cwd`); the app checks the caller's tab or conversation", tools: names(rustBlock(mcp, "COMPUTER_USE_TOOLS"), field) },
     { family: "Devices", pt: "Dispositivos", who: "interactive sessions (`--cwd`); caller reach is checked and fleet tasks are refused", tools: names(rustBlock(mcp, "DEVICE_TOOLS"), field) },
     { family: "Questions to the person", pt: "Perguntas à pessoa", who: "every session (team members get `refused`, see above)", tools: [ask] },
+    { family: "Temporary secrets", pt: "Segredos temporários", who: "interactive tabs (`--tab`), never headless fleet tasks", tools: secrets },
     { family: "Permission", pt: "Permissão", who: "fleet tasks only (`--task`)", tools: [approve] },
   ].filter((f) => f.tools.length > 0);
 }

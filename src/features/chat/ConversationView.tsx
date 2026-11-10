@@ -1,19 +1,22 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { DESKTOP_OS } from "@/app/platform";
 import { readTuning } from "@/features/canvas/tabTuning";
 import { useTabsStore } from "@/features/tabs/store";
+import type { AgentInfo } from "@/features/tabs/types";
 import { sendKeysToTab } from "@/features/terminal/terminalRegistry";
 
-import { AccessMenu } from "./AccessMenu";
 import { turnLive } from "./activityModel";
-import { AgentModelPicker, EffortMenu } from "./AgentModelPicker";
-import { retuneConversationTab, sendToConversation } from "./chatActions";
+import { AgentModelPicker } from "./AgentModelPicker";
+import { ProjectScriptsMenu } from "./ProjectScriptsMenu";
+import { newConversationLocal, retuneConversationTab, sendToConversation, startConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
-import { accessModesFor, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
+import { accessModesFor, extractSlashCommand, hasTimeline, planSupported, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { messageFor } from "./attachments/send";
 import { ChatComposer } from "./ChatComposer";
+import { useChatPrefs } from "./chatPrefs";
+import { ComposerAssistMenu } from "./ComposerAssistMenu";
 import { ChatFrame } from "./ChatFrame";
 import { ComposerColumn } from "./ComposerColumn";
 import { ActivityLine } from "./LiveActivity";
@@ -21,13 +24,17 @@ import { useChatLive } from "./liveStore";
 import { ContextStrip } from "./NewConversation";
 import { PermissionCard } from "./permissions/PermissionCard";
 import { usePendingAsks } from "./permissions/permissionsStore";
+import { unsnoozeConversation } from "./shelf";
 import { queueOrSend } from "./queueRunner";
-import { setChatSlot, setTerminalOpen, unqueueMessage, useChatStore, type QueuedMessage } from "./store";
-import { TeamMentionMenu, useTeamComposer } from "./team/TeamComposer";
+import { clearTabSearchJump, setChatSlot, setTerminalOpen, unqueueMessage, updateQueuedMessage, useChatStore, type QueuedMessage } from "./store";
+import { AgentSwitchDialog } from "./structured/AgentSwitchDialog";
+import { useTeamComposer } from "./team/TeamComposer";
 import { TeamThreadFeed } from "./team/TeamThreadFeed";
 import { TimelineView } from "./timeline/ConversationTimeline";
 import { addPending, usePending } from "./timeline/pending";
+import { buildTuiAgentHandoff } from "./timeline/tuiAgentHandoff";
 import { useConversationTimeline } from "./timeline/useConversationTimeline";
+import { showBotToast } from "@/shared/brand/botToastStore";
 
 /** A tecla da fila como a pessoa a digita (⌘⏎ no macOS). */
 /** A fila vazia, estável (o seletor do store não devolve um array novo a cada render). */
@@ -35,18 +42,19 @@ export const NO_QUEUE: QueuedMessage[] = [];
 
 export const QUEUE_KEY = DESKTOP_OS === "macos" ? "⌘⏎" : "Ctrl+⏎";
 
+interface TuiSwitchTarget {
+  agent: AgentInfo;
+  model: string | null;
+  effort: string | null;
+  account: string | null;
+  handoff: string | null;
+}
+
 /** O contêiner contra o qual o retângulo é medido: a casca do chat cobre a mesma área que as abas. */
 export const CHAT_SHELL_ATTR = "data-chat-shell";
 
-/** Os agentes cuja conversa vira timeline (o canal lê o transcript deles; ver `canal::supported`). */
-const TIMELINE_AGENTS = new Set(["claude-code", "codex"]);
-
 /** A altura da gaveta do terminal (a padrão do T3 Code). */
 const DRAWER_H = 280;
-
-export function hasTimeline(agentId: string): boolean {
-  return TIMELINE_AGENTS.has(agentId);
-}
 
 /** A gaveta do terminal está aberta nesta conversa? Sem timeline, o terminal é o corpo: sempre. */
 export function useTerminalOpen(card: ConversationCard): boolean {
@@ -73,12 +81,19 @@ function rectIn(el: HTMLElement | null) {
  */
 export function ConversationView({ card, cards = [] }: { card: ConversationCard; cards?: ConversationCard[] }) {
   const { t } = useTranslation();
+  const followUpBehavior = useChatPrefs().followUpBehavior;
   const timeline = hasTimeline(card.agentId);
   const terminalOpen = useTerminalOpen(card);
   const slotRef = useRef<HTMLDivElement>(null);
   const command = useTabsStore((s) => s.tabs.find((tab) => tab.id === card.tabId)?.command ?? "");
+  const detectedAgents = useTabsStore((s) => s.detectedAgents);
   const agentInfo = useTabsStore((s) => s.detectedAgents.find((a) => a.id === card.agentId))
     ?? { id: card.agentId, label: card.agentLabel, command: "", available: true };
+  const switchableAgents = useMemo(() => {
+    const available = detectedAgents.filter((candidate) => candidate.available && candidate.id !== "bash");
+    const current = available.find((candidate) => candidate.id === card.agentId) ?? agentInfo;
+    return [current, ...available.filter((candidate) => candidate.id !== card.agentId)];
+  }, [detectedAgents, card.agentId, agentInfo]);
   const tuning = useMemo(() => readTuning(card.agentId, command), [card.agentId, command]);
   const access = useMemo(() => readAccess(card.agentId, command), [card.agentId, command]);
   const working = useChatLive((s) => s.phase[card.tabId] === "working");
@@ -89,20 +104,27 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const queue = useChatStore((s) => s.queues[card.tabId]) ?? NO_QUEUE;
   const { timeline: read, loaded, phase } = useConversationTimeline(card.tabId);
   const items = useMemo(() => read?.items ?? [], [read]);
+  const quoteSourceIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
+  const promptHistory = useMemo(() => items.flatMap((item) => item.kind === "user" && item.text?.trim() ? [item.text] : []), [items]);
   const live = useMemo(() => turnLive(items, !!approval), [items, approval]);
   // O que a pessoa acabou de enviar aparece já, até o transcript devolver a mensagem.
   const pending = usePending(card.tabId, items);
+  const searchTarget = useChatStore((s) => s.tabSearchTarget?.tabId === card.tabId ? s.tabSearchTarget : null);
   const busy = working || phase === "working";
+  const [switchTo, setSwitchTo] = useState<TuiSwitchTarget | null>(null);
+  const [switching, setSwitching] = useState(false);
+  const [switchError, setSwitchError] = useState<string | null>(null);
   // Orquestrador de um time: "Time | Só o orquestrador", o @agente e o resumo do time (prancheta 15).
   const team = useTeamComposer(card, cards);
   // Trocar reinicia o agente (retomando a sessão): nunca no meio de um turno.
   const locked = busy || !!approval;
-  const retune = (patch: Partial<{ model: string | null; effort: string | null; access: ChatAccess; plan: boolean }>) =>
+  const retune = (patch: Partial<{ model: string | null; effort: string | null; access: ChatAccess; plan: boolean; fastMode: boolean }>) =>
     retuneConversationTab(card.tabId, {
       model: patch.model !== undefined ? patch.model : tuning.model,
       effort: patch.effort !== undefined ? patch.effort : tuning.effort,
       access: patch.access ?? access.access,
       plan: patch.plan ?? access.plan,
+      fastMode: patch.fastMode ?? tuning.fast,
     });
 
   const measure = useCallback(() => setChatSlot(rectIn(slotRef.current)), []);
@@ -121,11 +143,26 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
 
   const controls = (
     <div title={locked ? t("chat.composer.lockedWhileWorking") : t("chat.composer.retuneHint")} className="flex min-w-0 flex-wrap items-center justify-end gap-x-0.5 gap-y-1">
-      <AgentModelPicker agents={[agentInfo]} showAccount={false} disabled={locked}
+      <AgentModelPicker agents={switchableAgents} showAccount={false} disabled={locked}
         value={{ agentId: card.agentId, model: tuning.model, effort: tuning.effort, account: null }}
-        onChange={(v) => retune({ model: v.model })} />
-      <EffortMenu agentId={card.agentId} model={tuning.model} account={null} value={tuning.effort} disabled={locked}
-        onChange={(effort) => retune({ effort })} />
+        permission={{ value: access.plan ? "ask" : access.access, modes: accessModesFor(card.agentId), onChange: locked ? undefined : (next) => retune({ access: next, plan: false }) }}
+        speed={card.agentId === "codex" ? { fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) } : undefined}
+        onChange={(v) => {
+          if (v.agentId && v.agentId !== card.agentId) {
+            const target = switchableAgents.find((candidate) => candidate.id === v.agentId);
+            if (!target) return;
+            setSwitchError(null);
+            setSwitchTo({
+              agent: target,
+              model: v.model,
+              effort: v.effort,
+              account: v.account,
+              handoff: timeline ? buildTuiAgentHandoff(items, card.agentLabel, target.label) : null,
+            });
+            return;
+          }
+          retune({ model: v.model, effort: v.effort });
+        }} />
       {planSupported(card.agentId) && (
         <button type="button" disabled={locked} onClick={() => retune({ plan: !access.plan })} aria-pressed={access.plan}
           title={access.plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
@@ -141,31 +178,96 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
     <ComposerColumn>
       {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
       {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
-      <ChatComposer cwd={card.cwd} quoteKey={card.tabId}
-        placeholder={approval ? t("chat.composer.redirect") : busy ? t("chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
+      <ChatComposer cwd={card.cwd} quoteKey={card.tabId} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
+        turnActive={busy} forceSend={!!approval}
+        placeholder={approval ? t("chat.composer.redirect") : busy ? t(followUpBehavior === "queue" ? "chat.composer.queueHintQueue" : "chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}
         onSubmit={(text, attachments) => {
+          const planCommand = extractSlashCommand(text, "plan");
+          if (planCommand.found && text.trim().toLowerCase() === "/plan" && attachments.length === 0) {
+            if (locked) {
+              showBotToast({ title: t("chat.plan.label"), text: t("chat.composer.lockedWhileWorking"), tone: "info", ms: 6000 });
+              return false;
+            }
+            if (!planSupported(card.agentId)) {
+              showBotToast({ title: t("chat.plan.label"), text: t("chat.plan.unsupported"), tone: "info", ms: 6000 });
+              return false;
+            }
+            retune({ plan: !access.plan });
+            return;
+          }
           const prepared = team && text.trim() ? team.prepare(text, { key: card.tabId, items }, attachments) : { text, onSent: () => undefined };
           if (prepared === null) return;
           // Os anexos vão como `@caminho` no fim do texto (a TUI os lê pelo caminho).
           const sent = messageFor(card.tabId, prepared.text, attachments).text;
+          if (sent.trim()) unsnoozeConversation(card.tabId);
           if (timeline && sent.trim()) addPending(card.tabId, sent.trim(), items);
           sendToConversation(card.tabId, sent);
           // Numa aba não há resposta do backend a esperar: o resumo do time conta como entregue ao enviar.
           prepared.onSent();
         }}
+        onSendAndNewThread={newConversationLocal}
         onQueue={(text, attachments) => {
+          const planCommand = extractSlashCommand(text, "plan");
+          if (planCommand.found && text.trim().toLowerCase() === "/plan" && attachments.length === 0) {
+            if (locked) {
+              showBotToast({ title: t("chat.plan.label"), text: t("chat.composer.lockedWhileWorking"), tone: "info", ms: 6000 });
+              return false;
+            }
+            if (!planSupported(card.agentId)) {
+              showBotToast({ title: t("chat.plan.label"), text: t("chat.plan.unsupported"), tone: "info", ms: 6000 });
+              return false;
+            }
+            retune({ plan: !access.plan });
+            return true;
+          }
           const prepared = team ? team.prepare(text, { key: card.tabId, items }, attachments) : { text, onSent: () => undefined };
-          if (prepared !== null) { queueOrSend(card.tabId, messageFor(card.tabId, prepared.text, attachments).text); prepared.onSent(); }
-        }} queue={queue} onUnqueue={(id) => unqueueMessage(card.tabId, id)}
+          if (prepared !== null) {
+            const queued = messageFor(card.tabId, prepared.text, attachments).text;
+            if (queued.trim()) unsnoozeConversation(card.tabId);
+            queueOrSend(card.tabId, queued);
+            prepared.onSent();
+          }
+          return prepared !== null;
+        }} queue={queue} onUnqueue={(id) => unqueueMessage(card.tabId, id)} onUpdateQueued={(id, text) => updateQueuedMessage(card.tabId, id, text)}
         onStop={busy && !approval ? () => sendKeysToTab(card.tabId, "\u001b") : null}
         leading={team?.controls}
-        addon={team ? (ctx) => <TeamMentionMenu conversation={card} cards={cards} {...ctx} /> : undefined}
+        addon={(context) => <ComposerAssistMenu cwd={card.cwd} agentId={card.agentId} conversationKey={card.tabId}
+          teamOptions={team?.mentions} onPlan={!locked && planSupported(card.agentId) ? () => retune({ plan: !access.plan }) : undefined}
+          context={context} />}
         controls={controls} />
       <ContextStrip branch={card.branch} worktree={card.isWorktree}>
-        <AccessMenu value={access.plan ? "ask" : access.access} available={accessModesFor(card.agentId)}
-          onChange={locked ? undefined : (next) => retune({ access: next, plan: false })} />
+        <ProjectScriptsMenu key={card.tabId} cwd={card.cwd} owner={{
+          kind: card.tabId.startsWith("thread:") ? "thread" : "tab",
+          id: card.tabId,
+          label: card.agentLabel,
+        }} />
       </ContextStrip>
     </ComposerColumn>
+  );
+
+  const switchDialog = switchTo && (
+    <AgentSwitchDialog from={card.agentLabel} to={switchTo.agent.label} busy={switching} error={switchError}
+      mode="newTui" hasContext={!!switchTo.handoff}
+      onClose={() => setSwitchTo(null)}
+      onConfirm={() => {
+        setSwitching(true);
+        const targetAccess = accessModesFor(switchTo.agent.id).includes(access.access) ? access.access : "ask";
+        void startConversation({
+          cwd: card.cwd,
+          agent: switchTo.agent,
+          prompt: switchTo.handoff ?? "",
+          title: card.title,
+          account: switchTo.account ?? undefined,
+          model: switchTo.model,
+          effort: switchTo.effort,
+          access: targetAccess,
+          plan: access.plan && planSupported(switchTo.agent.id),
+          fastMode: false,
+        }).catch((error: unknown) => {
+          setSwitchError(String(error));
+          setSwitching(false);
+        });
+      }} />
   );
 
   if (!timeline) {
@@ -184,6 +286,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
         {/* Sem timeline, o pedido fica logo acima do composer (o terminal mostra o mesmo diálogo). */}
         {approval && <ComposerColumn><PermissionCard ask={approval} terminal /></ComposerColumn>}
         {composer}
+        {switchDialog}
       </div>
     );
   }
@@ -195,6 +298,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
         working={busy || approval !== null} approval={null} live
         approvalCard={approval ? <PermissionCard ask={approval} terminal /> : null}
         agentLabel={card.agentLabel} agentId={card.agentId} pending={pending} onOpenTerminal={() => setTerminalOpen(card.tabId, true)}
+        conversationKey={`tab:${card.tabId}`} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearTabSearchJump}
         after={<TeamThreadFeed conversation={card} cards={cards} />} />
     )} />
       {terminalOpen && (
@@ -203,6 +307,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           <div ref={slotRef} data-chat-terminal={card.tabId} className="h-full" />
         </section>
       )}
+      {switchDialog}
     </div>
   );
 }

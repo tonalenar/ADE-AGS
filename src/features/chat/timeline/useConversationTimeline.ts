@@ -25,6 +25,10 @@ export function useConversationTimeline(tabId: string): State {
   const again = useRef(false);
 
   useEffect(() => {
+    if (!tabId) {
+      setState({ timeline: null, loaded: true, phase: null });
+      return;
+    }
     let alive = true;
     const load = () => {
       if (inFlight.current) {

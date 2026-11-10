@@ -37,7 +37,7 @@ import type { DraftMember } from "../teamDraft";
 import type { TeamView } from "../ipc";
 
 const spec = (over: Partial<LeadSpec> = {}): LeadSpec => ({
-  agent: { id: "claude-code", label: "Claude Code", command: "claude", available: true } as never, cwd: "/repo", title: "Montar o painel", model: null, effort: null,
+  agent: { id: "claude-code", label: "Claude Code", command: "claude", available: true } as never, cwd: "/repo", workspaceId: "workspace", title: "Montar o painel", model: null, effort: null,
   access: "ask", plan: false, accountId: null, account: undefined, viaProtocol: false, ...over,
 });
 const member: DraftMember = { id: "d1", kind: "new", agent: { id: "codex", label: "Codex", command: "codex", available: true } as never, role: "qa", policy: "read", subagent: false, model: null, effort: null, worktree: true };

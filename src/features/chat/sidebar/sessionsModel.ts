@@ -21,11 +21,15 @@ export interface SectionOptions {
   folder: string | null;
   /** Os ids fixados, na ordem em que foram fixados. */
   pinned: string[];
+  /** Conversas arquivadas localmente; continuam abertas e só saem da lista ativa. */
+  archived?: string[];
   snoozed: string[];
   /** Os integrantes de time, que aparecem indentados sob o orquestrador e não na lista. */
   nested: Set<string>;
   /** Os ids das seções recolhidas. */
   collapsed: string[];
+  /** Ordem definida pela pessoa nas seções de projeto; ids novos entram antes dos já ordenados. */
+  orderBySection?: Record<string, string[]>;
 }
 
 /**
@@ -39,6 +43,7 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
     (!opts.folder || c.project === opts.folder)
     && (!q || `${c.title} ${c.project} ${c.agentLabel}`.toLowerCase().includes(q))
     && !opts.snoozed.includes(c.tabId)
+    && !opts.archived?.includes(c.tabId)
     && !opts.nested.has(c.tabId));
   const byId = new Map(shown.map((c) => [c.tabId, c]));
   const pinnedCards = opts.pinned.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
@@ -53,8 +58,20 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
     byProject.set(c.project, [...(byProject.get(c.project) ?? []), c]);
   }
   const newest = (items: ConversationCard[]) => Math.max(...items.map((c) => c.openedAt));
+  const ordered = (items: ConversationCard[], sectionId: string) => {
+    const saved = opts.orderBySection?.[sectionId] ?? [];
+    if (saved.length === 0) return [...items].sort((a, b) => b.openedAt - a.openedAt);
+    const rank = new Map(saved.map((id, index) => [id, index]));
+    return [...items].sort((a, b) => {
+      const ai = rank.get(a.tabId), bi = rank.get(b.tabId);
+      if (ai === undefined && bi !== undefined) return -1;
+      if (ai !== undefined && bi === undefined) return 1;
+      if (ai !== undefined && bi !== undefined && ai !== bi) return ai - bi;
+      return b.openedAt - a.openedAt;
+    });
+  };
   const projects = [...byProject.entries()]
-    .map(([project, items]) => ({ project, items: [...items].sort((a, b) => b.openedAt - a.openedAt) }))
+    .map(([project, items]) => ({ project, items: ordered(items, projectSectionId(project)) }))
     .sort((a, b) => newest(b.items) - newest(a.items));
   for (const { project, items } of projects) {
     const id = projectSectionId(project);
@@ -85,6 +102,30 @@ export function cleanTitle(raw: string): string | null {
 /** Põe no fim se não estava, tira se estava. Pura. */
 export function toggleIn(list: string[], id: string): string[] {
   return list.includes(id) ? list.filter((x) => x !== id) : [...list, id];
+}
+
+/** Move um id uma posição sem passar das pontas. Pura. */
+export function moveByOne(ids: string[], id: string, delta: -1 | 1): string[] {
+  const from = ids.indexOf(id);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= ids.length) return ids;
+  const next = [...ids];
+  [next[from], next[to]] = [next[to]!, next[from]!];
+  return next;
+}
+
+/** Reordena o trecho visível, mantendo no lugar os ids ocultos por outras prateleiras. Pura. */
+export function moveVisibleByOne(allIds: string[], visibleIds: string[], id: string, delta: -1 | 1): string[] {
+  const nextVisible = moveByOne(visibleIds, id, delta);
+  if (nextVisible === visibleIds) return allIds;
+  const visible = new Set(visibleIds);
+  const next = [...allIds];
+  for (const visibleId of visibleIds) if (!next.includes(visibleId)) next.push(visibleId);
+  let at = 0;
+  for (let index = 0; index < next.length; index++) {
+    if (visible.has(next[index]!)) next[index] = nextVisible[at++]!;
+  }
+  return next;
 }
 
 /** Quantas conversas estão rodando e quantas ainda estão iniciando (o resumo que o painel de workspaces mostrava). Pura. */

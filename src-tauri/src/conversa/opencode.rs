@@ -11,7 +11,7 @@
 //! Emite o mesmo evento `cc-chat-thread` dos outros motores. O OpenCode não aceita uma mensagem no
 //! meio do turno: a que chega nessa hora fica numa fila e começa o turno seguinte.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -38,12 +38,16 @@ type Reply = oneshot::Sender<Result<Value, String>>;
 
 pub struct Session {
     thread_id: String,
+    agent_id: String,
+    provider_label: String,
     tx: mpsc::UnboundedSender<String>,
     pending: Mutex<HashMap<u64, Reply>>,
     next: AtomicU64,
     alive: AtomicBool,
     /// O id da sessão no OpenCode.
     remote: Mutex<Option<String>>,
+    /// Snapshot ACP em memória para reexibir opções após navegação ou recarga da janela.
+    provider_config: Mutex<Value>,
     /// O turno em andamento (o id é do app) e a fila do que chegou durante ele. Só entram no fio (item `User`)
     /// quando o turno delas começa; se a fila é descartada, cada uma vira um aviso «não enviada».
     lane: turn::Lane,
@@ -70,6 +74,10 @@ impl Session {
         self.remote.lock().ok().and_then(|r| r.clone())
     }
 
+    fn config_snapshot(&self) -> Value {
+        self.provider_config.lock().map(|config| config.clone()).unwrap_or(Value::Null)
+    }
+
     pub fn turn(&self) -> Option<String> {
         self.lane.turn()
     }
@@ -85,13 +93,13 @@ impl Session {
     }
 
     fn send(&self, msg: &Value) -> Result<(), String> {
-        self.tx.send(msg.to_string()).map_err(|_| "O processo do OpenCode fechou".to_string())
+        self.tx.send(msg.to_string()).map_err(|_| format!("O processo de {} fechou", self.provider_label))
     }
 
     /// Um pedido ao OpenCode, esperando a resposta. `timeout` `None` = sem prazo (o turno).
     async fn request(&self, method: &str, params: Value, timeout: Option<Duration>) -> Result<Value, String> {
         if !self.alive() {
-            return Err("O processo do OpenCode fechou".into());
+            return Err(format!("O processo de {} fechou", self.provider_label));
         }
         let id = self.next.fetch_add(1, Ordering::SeqCst);
         let (tx, rx) = oneshot::channel();
@@ -105,12 +113,12 @@ impl Session {
         };
         match waited {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err("O processo do OpenCode fechou".into()),
+            Ok(Err(_)) => Err(format!("O processo de {} fechou", self.provider_label)),
             Err(_) => {
                 if let Ok(mut pending) = self.pending.lock() {
                     pending.remove(&id);
                 }
-                Err(format!("O OpenCode não respondeu a {method}"))
+                Err(format!("{} não respondeu a {method}", self.provider_label))
             }
         }
     }
@@ -155,6 +163,12 @@ pub fn get(thread_id: &str) -> Option<Arc<Session>> {
     sessions().lock().ok()?.get(thread_id).filter(|s| s.alive()).cloned()
 }
 
+/// Configuração anunciada pela sessão ACP local ativa, se houver.
+pub fn provider_config(thread_id: &str) -> Option<Value> {
+    let session = get(thread_id).filter(|s| crate::local_acp::is_local_acp_id(&s.agent_id))?;
+    Some(map::provider_config(&session.config_snapshot()))
+}
+
 /// Encerra a sessão de uma conversa, se houver.
 pub fn close(thread_id: &str) {
     let session = sessions().lock().ok().and_then(|mut m| m.remove(thread_id));
@@ -171,25 +185,39 @@ pub fn close(thread_id: &str) {
 /// que a tela mostra.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
     if let Some(s) = get(thread_id) {
+        if crate::local_acp::is_local_acp_id(&s.agent_id) {
+            emit(app, thread_id, "providerConfig", json!({ "config": map::provider_config(&s.config_snapshot()) }));
+        }
         return Ok(s);
     }
     // Uma trava por conversa: um OpenCode lento a abrir não segura o início das outras.
     let gate = resume::start_gate("opencode", thread_id);
     let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
+        if crate::local_acp::is_local_acp_id(&s.agent_id) {
+            emit(app, thread_id, "providerConfig", json!({ "config": map::provider_config(&s.config_snapshot()) }));
+        }
         return Ok(s);
     }
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
-    let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
+    let local_config = if crate::local_acp::is_local_acp_id(&row.agent_id) {
+        Some(crate::local_acp::get_config(db, &row.agent_id).await?)
+    } else {
+        None
+    };
+    if local_config.is_some() && row.access != "ask" {
+        return Err("Agentes ACP locais aceitam somente o modo Supervisionado".into());
+    }
+    let env = if local_config.is_some() { None } else { row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a)) };
 
     let fresh = || {
-        let (env, row) = (env.clone(), &row);
+        let (env, row, local_config) = (env.clone(), &row, local_config.clone());
         async move {
-            let session = spawn(app, db, row, env)?;
-            match open_session(&session, row, None).await {
+            let session = spawn(app, db, row, env, local_config)?;
+            match open_session(app, &session, row, None).await {
                 Ok((remote, ignored)) => Ok((session, remote, ignored)),
                 Err(e) => {
                     session.kill();
@@ -202,10 +230,10 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
         Some(remote) => {
             resume::open_resuming(
                 || {
-                    let (env, row, remote) = (env.clone(), &row, remote.clone());
+                    let (env, row, remote, local_config) = (env.clone(), &row, remote.clone(), local_config.clone());
                     async move {
-                        let session = spawn(app, db, row, env).map_err(|e| resume::classify(&e))?;
-                        match open_session(&session, row, Some(&remote)).await {
+                        let session = spawn(app, db, row, env, local_config).map_err(|e| resume::classify(&e))?;
+                        match open_session(app, &session, row, Some(&remote)).await {
                             Ok((remote, ignored)) => Ok((session, remote, ignored)),
                             Err(failure) => {
                                 session.kill();
@@ -243,16 +271,37 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
 /// `initialize`, a sessão (nova, ou a retomada) e as opções da conversa. Devolve o id da sessão e os avisos do
 /// que o OpenCode não aplicou. Com `resume`, qualquer recusa do OpenCode à sessão guardada é `Gone`; os erros ao
 /// aplicar modelo e modo são `Fatal` (a sessão existe: trocá-la por outra não os resolveria).
-async fn open_session(session: &Session, row: &store::ThreadRow, resume: Option<&str>) -> Result<(String, Vec<String>), resume::ResumeFailure> {
+async fn open_session(app: &AppHandle, session: &Session, row: &store::ThreadRow, resume: Option<&str>) -> Result<(String, Vec<String>), resume::ResumeFailure> {
     use resume::ResumeFailure as Failure;
-    session.request("initialize", map::initialize_params(), Some(REQUEST_TIMEOUT)).await.map_err(|e| resume::classify(&e))?;
+    let initialized = session.request("initialize", map::initialize_params(), Some(REQUEST_TIMEOUT)).await.map_err(|e| resume::classify(&e))?;
     let cwd = row.cwd.as_str();
+    let mcp_servers = if crate::local_acp::is_local_acp_id(&row.agent_id) { local_acp_mcp_servers(app, row) } else { json!([]) };
     let (remote, mut config) = match resume {
         Some(remote) => {
             // `session/resume` não reenvia o histórico; `session/load` sim (ignorado enquanto carrega).
-            let resumed = session.request("session/resume", map::resume_params(remote, cwd), Some(REQUEST_TIMEOUT)).await;
+            let local = crate::local_acp::is_local_acp_id(&row.agent_id);
+            let supports_resume = initialized.pointer("/agentCapabilities/sessionCapabilities/resume").and_then(Value::as_bool).unwrap_or(false);
+            let supports_load = initialized.pointer("/agentCapabilities/loadSession").and_then(Value::as_bool).unwrap_or(false);
+            if local && !supports_resume && !supports_load {
+                return Err(Failure::Gone("Este agente ACP não anuncia retomada de sessões".into()));
+            }
+            let resumed = if local && !supports_resume {
+                session.quiet.store(true, Ordering::SeqCst);
+                let loaded = session.request("session/load", map::resume_params_with_mcp(remote, cwd, mcp_servers.clone()), Some(REQUEST_TIMEOUT)).await;
+                session.quiet.store(false, Ordering::SeqCst);
+                loaded
+            } else {
+                session.request("session/resume", if local { map::resume_params_with_mcp(remote, cwd, mcp_servers.clone()) } else { map::resume_params(remote, cwd) }, Some(REQUEST_TIMEOUT)).await
+            };
             let found = match resumed {
                 Ok(result) => result,
+                Err(error) if local && supports_resume && supports_load => {
+                    session.quiet.store(true, Ordering::SeqCst);
+                    let loaded = session.request("session/load", map::resume_params_with_mcp(remote, cwd, mcp_servers.clone()), Some(REQUEST_TIMEOUT)).await;
+                    session.quiet.store(false, Ordering::SeqCst);
+                    loaded.map_err(|_| resume::classify(&error))?
+                }
+                Err(error) if local => return Err(resume::classify(&error)),
                 // Sem resposta a tempo ou com o processo caído, o `load` não adianta: a classe do erro decide.
                 Err(e) if !matches!(resume::classify(&e), Failure::Gone(_) | Failure::Transient(_)) || !session.alive() => return Err(resume::classify(&e)),
                 Err(first) => {
@@ -266,13 +315,37 @@ async fn open_session(session: &Session, row: &store::ThreadRow, resume: Option<
             (remote.to_string(), found)
         }
         None => {
-            let result = session.request("session/new", map::new_session_params(cwd), Some(REQUEST_TIMEOUT)).await.map_err(Failure::Fatal)?;
-            let id = result.get("sessionId").and_then(Value::as_str).ok_or_else(|| Failure::Fatal("O OpenCode não devolveu a sessão".into()))?.to_string();
+            let params = if crate::local_acp::is_local_acp_id(&row.agent_id) {
+                map::new_session_params_with_mcp(cwd, mcp_servers)
+            } else {
+                map::new_session_params(cwd)
+            };
+            let result = session.request("session/new", params, Some(REQUEST_TIMEOUT)).await.map_err(Failure::Fatal)?;
+            let id = result.get("sessionId").and_then(Value::as_str).ok_or_else(|| Failure::Fatal(format!("{} não devolveu a sessão ACP", session.provider_label)))?.to_string();
             (id, result)
         }
     };
     let ignored = apply_options(session, &remote, row, &mut config).await.map_err(Failure::Fatal)?;
+    if crate::local_acp::is_local_acp_id(&row.agent_id) {
+        if let Ok(mut snapshot) = session.provider_config.lock() {
+            *snapshot = config.clone();
+        }
+        emit(app, &session.thread_id, "providerConfig", json!({ "config": map::provider_config(&config) }));
+    }
     Ok((remote, ignored))
+}
+
+/// O servidor MCP da ADE no formato padrão ACP. Ausência do binário não bloqueia o chat; ela só
+/// significa que o provider não recebe as ferramentas `ags` nesta sessão.
+fn local_acp_mcp_servers(app: &AppHandle, row: &store::ThreadRow) -> Value {
+    let Some(ags) = crate::ipc::install::source_binary(app) else { return json!([]) };
+    let tab = format!("thread:{}", row.id);
+    json!([{
+        "name": "ags",
+        "command": ags.to_string_lossy(),
+        "args": ["mcp", "--cwd", row.cwd, "--tab", tab],
+        "env": []
+    }])
 }
 
 /// O que fazer com uma opção da sessão (`model`, `effort`, `mode`), dada a configuração que o OpenCode mostra.
@@ -314,6 +387,25 @@ async fn set_option(session: &Session, remote: &str, config: &mut Value, id: &st
 /// porque rodar com um modo diferente do mostrado é pior que não rodar. O esforço que o modelo não oferece fica
 /// no padrão do OpenCode, mas o aviso vai para a timeline (devolvido). Outro erro do esforço também falha.
 async fn apply_options(session: &Session, remote: &str, row: &store::ThreadRow, config: &mut Value) -> Result<Vec<String>, String> {
+    if crate::local_acp::is_local_acp_id(&row.agent_id) {
+        if row.access != "ask" {
+            return Err("Agentes ACP locais aceitam somente o modo Supervisionado".into());
+        }
+        for (category, fallback_ids, want) in [
+            ("model", &["model"][..], row.model.as_deref()),
+            ("thought_level", &["effort", "reasoning_effort"][..], row.effort.as_deref()),
+        ] {
+            let Some(want) = want.filter(|value| !value.is_empty()) else { continue };
+            let Some((id, _, values)) = map::config_option_for_category(config, category, fallback_ids) else {
+                return Err(format!("O agente ACP não anunciou uma opção selecionável para {category}; a escolha não foi aplicada"));
+            };
+            if !values.iter().any(|value| value == want) {
+                return Err(format!("A opção {want} não está mais disponível no agente ACP ({id})"));
+            }
+            set_option(session, remote, config, &id, want).await?;
+        }
+        return Ok(Vec::new());
+    }
     let mut ignored = Vec::new();
     if let Some(model) = row.model.as_deref().filter(|m| !m.is_empty()) {
         set_option(session, remote, config, "model", model).await?;
@@ -338,10 +430,40 @@ async fn apply_options(session: &Session, remote: &str, row: &store::ThreadRow, 
     Ok(ignored)
 }
 
-fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<Arc<Session>, String> {
-    let name = crate::agents::agent_command("opencode").unwrap_or("opencode");
-    let program = crate::util::find_program(name).ok_or("Não achei o OpenCode (opencode) no PATH")?;
-    let mut cmd = crate::util::external_command(&program, &["acp"]).map_err(|e| e.to_string())?;
+fn merge_config(target: &mut Value, incoming: Value) {
+    if let (Some(target), Some(incoming)) = (target.as_object_mut(), incoming.as_object()) {
+        for (key, value) in incoming {
+            if let Some(current) = target.get_mut(key) {
+                merge_config(current, value.clone());
+            } else {
+                target.insert(key.clone(), value.clone());
+            }
+        }
+    } else {
+        *target = incoming;
+    }
+}
+
+fn spawn(
+    app: &AppHandle,
+    db: &DbConnection,
+    row: &store::ThreadRow,
+    env: Option<HashMap<String, String>>,
+    local_config: Option<crate::local_acp::LocalAcpConfig>,
+) -> Result<Arc<Session>, String> {
+    let (program, args, provider_label) = match local_config {
+        Some(config) => {
+            let program = crate::util::find_program(&config.command)
+                .ok_or_else(|| format!("Não encontrei o executável configurado para {}", config.label))?;
+            (program, config.args, config.label)
+        }
+        None => {
+            let name = crate::agents::agent_command("opencode").unwrap_or("opencode");
+            let program = crate::util::find_program(name).ok_or("Não achei o OpenCode (opencode) no PATH")?;
+            (program, vec!["acp".into()], "OpenCode".into())
+        }
+    };
+    let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(crate::util::external_path(std::path::Path::new(&row.cwd)))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -349,12 +471,28 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     if let Some(env) = env {
         cmd.envs(env);
     }
-    cmd.envs(map::launch_env(row));
+    if !crate::local_acp::is_local_acp_id(&row.agent_id) {
+        let mut launch_env: HashMap<String, String> = map::launch_env(row).into_iter().collect();
+        if let Some(mcp) = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "opencode") {
+            for (key, value) in mcp.tab.env {
+                if key == "OPENCODE_CONFIG_CONTENT" {
+                    let current = launch_env.get(&key).ok_or("Falta a configuração do OpenCode")?;
+                    let mut base: Value = serde_json::from_str(current).map_err(|_| "Config OpenCode inválida")?;
+                    let overlay: Value = serde_json::from_str(&value).map_err(|_| "Config MCP da ADE inválida")?;
+                    merge_config(&mut base, overlay);
+                    launch_env.insert(key, base.to_string());
+                } else {
+                    launch_env.insert(key, value);
+                }
+            }
+        }
+        cmd.envs(launch_env);
+    }
     // Quem a conversa é para o `ags` (`thread:<id>`), para ela delegar e responder num time (`chat_team`).
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
-    let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o OpenCode: {e}"))?;
+    let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir {}: {e}", provider_label))?;
     crate::chat_team::env::register_process(&row.id, child.id());
     super::memoria::record_unsupported(app, db, row);
     let stdin = child.stdin.take().ok_or("sem stdin")?;
@@ -364,11 +502,14 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     let (tx, rx) = mpsc::unbounded_channel::<String>();
     let session = Arc::new(Session {
         thread_id: row.id.clone(),
+        agent_id: row.agent_id.clone(),
+        provider_label,
         tx,
         pending: Mutex::new(HashMap::new()),
         next: AtomicU64::new(1),
         alive: AtomicBool::new(true),
         remote: Mutex::new(None),
+        provider_config: Mutex::new(Value::Null),
         lane: turn::Lane::default(),
         started: Mutex::new(None),
         stale: AtomicBool::new(false),
@@ -421,7 +562,7 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     let killed = !session.alive.swap(false, Ordering::SeqCst);
     let waiting: Vec<Reply> = session.pending.lock().map(|mut p| p.drain().map(|(_, r)| r).collect()).unwrap_or_default();
     for reply in waiting {
-        let _ = reply.send(Err("O processo do OpenCode fechou".into()));
+        let _ = reply.send(Err(format!("O processo de {} fechou", session.provider_label)));
     }
     let registered = sessions().lock().is_ok_and(|mut map| {
         let mine = map.get(&session.thread_id).is_some_and(|s| Arc::ptr_eq(s, session));
@@ -444,7 +585,7 @@ fn closed(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) {
     }
     if let Some(turn_id) = session.take_turn() {
         let tail = session.stderr.lock().ok().and_then(|t| turn::stderr_reason(t.iter()));
-        let (result, message) = turn::dropped(killed, tail.as_deref(), "OpenCode");
+        let (result, message) = turn::dropped(killed, tail.as_deref(), &session.provider_label);
         turn::finish(app, db, thread_id, &turn_id, &result);
         if let Some(message) = message {
             emit(app, thread_id, "error", json!({ "message": message }));
@@ -464,7 +605,7 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
             let reply = session.pending.lock().ok().and_then(|mut p| p.remove(&id));
             if let Some(reply) = reply {
                 let result = match msg.get("error") {
-                    Some(error) => Err(error.get("message").and_then(Value::as_str).unwrap_or("erro do OpenCode").to_string()),
+                    Some(error) => Err(error.get("message").and_then(Value::as_str).unwrap_or("erro do agente ACP").to_string()),
                     None => Ok(msg.get("result").cloned().unwrap_or(Value::Null)),
                 };
                 let _ = reply.send(result);
@@ -476,16 +617,74 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
             _ => session.refuse(&rpc_id),
         },
         (Some(method), None) => {
-            if method == "session/update" && !session.quiet.load(Ordering::SeqCst) {
+            if method == "session/update" {
                 let update = msg.pointer("/params/update").cloned().unwrap_or(Value::Null);
-                let outs = session.mapper.lock().map(|mut m| m.feed(&update, crate::util::now_ts_ms())).unwrap_or_default();
-                for out in outs {
-                    on_out(app, db, session, out);
+                if let Some(commands) = provider_commands(&update) {
+                    // A lista ACP é um snapshot completo. Ela também precisa passar durante
+                    // session/load, quando os outros eventos da timeline ficam silenciados.
+                    emit(app, &session.thread_id, "commands", json!({ "commands": commands }));
+                } else if crate::local_acp::is_local_acp_id(&session.agent_id)
+                    && update.get("sessionUpdate").and_then(Value::as_str) == Some("config_option_update")
+                {
+                    // O ACP envia a configuração completa, inclusive opções dependentes do modelo novo.
+                    let config = json!({ "configOptions": update.get("configOptions").cloned().unwrap_or(Value::Null) });
+                    if let Ok(mut snapshot) = session.provider_config.lock() {
+                        *snapshot = config.clone();
+                    }
+                    emit(app, &session.thread_id, "providerConfig", json!({ "config": map::provider_config(&config) }));
+                } else if !session.quiet.load(Ordering::SeqCst) {
+                    let outs = session
+                        .mapper
+                        .lock()
+                        .map(|mut m| m.feed(&update, crate::util::now_ts_ms()))
+                        .unwrap_or_default();
+                    for out in outs {
+                        on_out(app, db, session, out);
+                    }
                 }
             }
         }
         (None, None) => {}
     }
+}
+
+/// Valida metadados não confiáveis do ACP e limita o tamanho do snapshot enviado à janela.
+/// O nome vira apenas texto do prompt quando a pessoa seleciona o comando; nunca é executado no shell.
+fn provider_commands(update: &Value) -> Option<Vec<Value>> {
+    if update.get("sessionUpdate").and_then(Value::as_str) != Some("available_commands_update") {
+        return None;
+    }
+    let commands = update.get("availableCommands")?.as_array()?;
+    let mut seen = HashSet::new();
+    let mut result = Vec::new();
+    for command in commands.iter().take(256) {
+        let Some(name) = command.get("name").and_then(Value::as_str).map(str::trim) else {
+            continue;
+        };
+        if name.is_empty()
+            || name.chars().count() > 80
+            || !name.chars().all(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            || !seen.insert(name.to_lowercase())
+        {
+            continue;
+        }
+        let description = command
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .chars()
+            .take(500)
+            .collect::<String>();
+        let input_hint = command
+            .pointer("/input/hint")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.chars().take(200).collect::<String>());
+        result.push(json!({ "name": name, "description": description, "inputHint": input_hint }));
+    }
+    Some(result)
 }
 
 fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) {
@@ -500,7 +699,7 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
             emit(app, thread_id, "delta", json!({ "itemId": item_id, "delta": delta, "kind": kind.as_str() }));
         }
         Out::Mode(mode) => {
-            if !session.alive() {
+            if !session.alive() || crate::local_acp::is_local_acp_id(&session.agent_id) {
                 return;
             }
             let current = db.lock().ok().and_then(|conn| store::thread(&conn, thread_id).ok().flatten()).map(|r| r.access);
@@ -513,6 +712,7 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
         }
     }
 }
+
 
 fn on_permission(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, rpc_id: Value, params: &Value) {
     let Some(ask) = map::ask_of(params) else {
@@ -552,7 +752,7 @@ fn on_permission(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, rpc
 /// acabar. A decisão é uma só, sob a trava da sessão; a mensagem da fila só entra no fio quando o turno dela começa.
 pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str) -> Result<(), String> {
     if !session.alive() {
-        return Err("O processo do OpenCode fechou".into());
+        return Err(format!("O processo de {} fechou", session.provider_label));
     }
     let turn_id = match session.lane.admit(text) {
         turn::Admitted::Queued => return Ok(()),
@@ -565,7 +765,7 @@ pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tex
 fn start_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, turn_id: String, save: bool) -> Result<(), String> {
     let Some(remote) = session.remote() else {
         session.take_turn();
-        return Err("A conversa ainda não abriu no OpenCode".into());
+        return Err(format!("A conversa ainda não abriu no agente ACP {}", session.provider_label));
     };
     if let Ok(mut started) = session.started.lock() {
         *started = Some(Instant::now());
@@ -649,7 +849,7 @@ pub fn answer(session: &Session, rpc_id: &Value, item_id: Option<&str>, options:
         a.len() != before
     });
     if known != Some(true) {
-        return Err("O OpenCode já não espera esta resposta".into());
+        return Err(format!("{} já não espera esta resposta", session.provider_label));
     }
     let result = map::answer_of(options, choice);
     if !matches!(choice, "allow" | "allowSession")

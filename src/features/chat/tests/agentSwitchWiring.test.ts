@@ -13,7 +13,7 @@ describe("a conversa por protocolo liga a troca de agente ao seletor", () => {
 
   it("escolher OUTRO agente abre a confirmação (nada muda antes); o mesmo agente só troca o modelo", () => {
     expect(view).toMatch(/if \(v\.agentId && v\.agentId !== thread\.agentId\) \{ setSwitchError\(null\); setSwitchTo\(/);
-    expect(view).toMatch(/retuneThread\(thread\.id, v\.model, thread\.effort, thread\.access\);/);
+    expect(view).toMatch(/retuneThread\(thread\.id, v\.model, v\.effort, thread\.access\);/);
   });
 
   it("confirmar chama a troca com o acesso atual (o backend corrige o que o agente novo não tem)", () => {
@@ -23,5 +23,22 @@ describe("a conversa por protocolo liga a troca de agente ao seletor", () => {
   it("o comando existe no backend e está registrado", () => {
     expect(read("../structured/ipc.ts")).toContain('invoke<ThreadRow>("chat_thread_switch_agent"');
     expect(read("../../../../src-tauri/src/app/run.rs")).toContain("crate::conversa::chat_thread_switch_agent");
+  });
+});
+
+describe("a TUI abre uma nova sessão ao trocar de provedor", () => {
+  const view = read("../ConversationView.tsx");
+
+  it("lista TUIs instaladas e prepara handoff somente a partir da timeline disponível", () => {
+    expect(view).toContain("const available = detectedAgents.filter((candidate) => candidate.available && candidate.id !== \"bash\")");
+    expect(view).toContain("handoff: timeline ? buildTuiAgentHandoff(items, card.agentLabel, target.label) : null");
+  });
+
+  it("pede confirmação e abre outra aba sem reiniciar nem fechar a sessão de origem", () => {
+    expect(view).toContain('mode="newTui" hasContext={!!switchTo.handoff}');
+    expect(view).toContain("startConversation({");
+    expect(view).toContain("agent: switchTo.agent,");
+    expect(view).not.toContain("closeTab(card.tabId)");
+    expect(view).not.toContain("restartAgent(card.tabId)");
   });
 });

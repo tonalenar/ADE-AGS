@@ -8,9 +8,9 @@
 //! literalmente, un directorio: se apunta la variable a otro lado y la TUI arranca como si
 //! fuera una instalación nueva, sin tocar la del sistema.
 //!
-//! Cada cuenta vive en `<datos de la app>/accounts/<agente>/<nombre>`, y lanzar una tab con
-//! esa cuenta es pasarle esa variable al PTY — algo que `pty_create` ya sabía hacer para
-//! las TUIs custom.
+//! Cada conta vive em `<dados da app>/accounts/<agente>/<nome>`. O frontend envia somente o
+//! id da conta ao `pty_create`; o backend resolve o perfil e qualquer credencial no keyring
+//! imediatamente antes de criar o processo, sem devolver o ambiente ao WebView.
 //!
 //! ## Por qué no symlinks
 //!
@@ -22,10 +22,10 @@
 //!
 //! ## Qué NO hace este módulo
 //!
-//! No lee, no copia y no escribe credenciales. El login lo hace la TUI, en su terminal,
-//! como si la hubieras abierto a mano; acá solo se crea el directorio vacío y se apunta la
-//! variable. Lo único que se lee de adentro es el campo con el mail de la cuenta, para
-//! poder mostrar "trabajo → vos@empresa.com" en vez de un nombre suelto.
+//! O login do perfil fica no diretório da TUI. Credenciais de API key ficam no keyring do
+//! SO e só são carregadas pelo backend para o processo escolhido; não voltam pelo IPC. O
+//! módulo também lê o marcador de login e, para Claude, o email em `.claude.json` para
+//! mostrar uma identidade reconhecível.
 
 
 mod commands;

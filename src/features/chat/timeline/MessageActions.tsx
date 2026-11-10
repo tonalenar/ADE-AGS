@@ -12,7 +12,7 @@ import { relativeTime } from "./messageTime";
  * nem apaga nada). Bifurcar, fixar e ler em voz alta ainda não existem no ADE: ficam para outra rodada. A hora é
  * calculada quando a linha aparece (mouse ou foco), sem relógio rodando.
  */
-export function MessageActions({ text, at, editable = false, align = "start" }: { text: string; at?: number; editable?: boolean; align?: "start" | "end" }) {
+export function MessageActions({ text, at, editable = false, align = "start", composerTarget }: { text: string; at?: number; editable?: boolean; align?: "start" | "end"; composerTarget?: string | null }) {
   const { t, i18n } = useTranslation();
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
@@ -38,7 +38,7 @@ export function MessageActions({ text, at, editable = false, align = "start" }: 
         </button>
       )}
       {editable && text.trim() && (
-        <button type="button" onClick={() => insertIntoComposer(text)} aria-label={t("chat.message.edit")} title={t("chat.message.editHint")} className={button}>
+        <button type="button" onClick={() => insertIntoComposer(text, composerTarget)} aria-label={t("chat.message.edit")} title={t("chat.message.editHint")} className={button}>
           <UndoIcon className="w-4 h-4" />
         </button>
       )}

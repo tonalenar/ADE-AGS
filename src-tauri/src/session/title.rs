@@ -2,7 +2,7 @@ use serde::Serialize;
 use crate::agents::SessionSource;
 use serde_json::Value;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -599,7 +599,7 @@ pub(super) fn gemini_meta(path: &Path) -> Option<GeminiMeta> {
 /// Una sesión de sub-agente no es la conversación de la tab: reanudarla con `--resume`
 /// no devuelve al usuario a su charla. `kind` ausente se trata como principal, que es el
 /// comportamiento de las versiones que todavía no escribían el campo.
-pub(super) fn gemini_is_main_session(path: &Path) -> bool {
+pub(crate) fn gemini_is_main_session(path: &Path) -> bool {
     match gemini_meta(path) {
         Some(m) => m.kind.as_deref() != Some("subagent"),
         None => false,
@@ -1090,6 +1090,87 @@ pub(super) fn kimi_wire_file(dir: &Path) -> Option<PathBuf> {
     wire.is_file().then_some(wire)
 }
 
+/// Resolve uma sessão Kimi pelo índice oficial, sem reconstruir o hash do workspace.
+/// O arquivo de índice é dado local e pode conter caminhos adulterados; por isso a
+/// resolução exige pasta de trabalho compatível e mantém o transcript dentro de `sessions/`.
+pub(crate) fn kimi_wire_file_for_search(session_id: &str, cwd: &str) -> Option<PathBuf> {
+    const MAX_INDEX_BYTES: u64 = 16 * 1024 * 1024;
+
+    if session_id.is_empty() || session_id.len() > 128 || cwd.trim().is_empty() {
+        return None;
+    }
+    let sessions_root = kimi_root(None).canonicalize().ok()?;
+    let data_root = sessions_root.parent()?;
+    let index_path = data_root.join("session_index.jsonl").canonicalize().ok()?;
+    if index_path.parent() != Some(data_root) {
+        return None;
+    }
+    let metadata = fs::metadata(&index_path).ok()?;
+    if metadata.len() > MAX_INDEX_BYTES {
+        return None;
+    }
+    let mut index_file = fs::File::open(index_path).ok()?;
+    let mut index = String::new();
+    index_file
+        .by_ref()
+        .take(MAX_INDEX_BYTES + 1)
+        .read_to_string(&mut index)
+        .ok()?;
+    if index.len() as u64 > MAX_INDEX_BYTES {
+        return None;
+    }
+    let mut resolved: Option<PathBuf> = None;
+    let mut matching_entries = 0usize;
+    for line in index.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        // Um registro quebrado impede saber se existe outra entrada para o mesmo ID.
+        let record = serde_json::from_str::<Value>(line).ok()?;
+        if record.get("sessionId").and_then(Value::as_str) != Some(session_id) {
+            continue;
+        }
+        matching_entries = matching_entries.saturating_add(1);
+        if matching_entries > 1 {
+            return None;
+        }
+        let work_dir = record.get("workDir").and_then(Value::as_str)?;
+        if !kimi_same_work_dir(work_dir, cwd) {
+            return None;
+        }
+        let session_dir = record.get("sessionDir").and_then(Value::as_str)?;
+        let path = Path::new(session_dir);
+        if !path.is_absolute() {
+            return None;
+        }
+        let path = path.canonicalize().ok()?;
+        if !path.starts_with(&sessions_root)
+            || path.file_name().and_then(|name| name.to_str()) != Some(session_id)
+            || path.parent().and_then(Path::parent) != Some(sessions_root.as_path())
+        {
+            return None;
+        }
+        resolved = Some(path);
+    }
+    if matching_entries != 1 {
+        return None;
+    }
+    let session_dir = resolved?;
+    let wire = kimi_wire_file(&session_dir)?.canonicalize().ok()?;
+    // Também impede que um `wire.jsonl` simbólico escape do diretório autorizado.
+    wire.starts_with(&session_dir).then_some(wire)
+}
+
+fn kimi_same_work_dir(indexed: &str, expected: &str) -> bool {
+    if !Path::new(indexed).is_absolute() || !Path::new(expected).is_absolute() {
+        return false;
+    }
+    match (Path::new(indexed).canonicalize(), Path::new(expected).canonicalize()) {
+        (Ok(indexed), Ok(expected)) => indexed == expected,
+        _ => hermes_same_dir(indexed, expected),
+    }
+}
+
 /// Título de una sesión de Kimi. A diferencia del resto de los agentes no hay que deducirlo
 /// del primer mensaje: Kimi lo guarda en `state.json` (y el usuario puede fijarlo a mano con
 /// `/title`). `lastPrompt` es el respaldo cuando todavía no le puso título.
@@ -1108,10 +1189,6 @@ pub(super) fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
     fallback_result(fallback)
 }
 
-// ── TUIs personalizadas ───────────────────────────────────────────────
-
-/// Archivo de sesión más reciente de una TUI custom: el más nuevo bajo la carpeta que el
-/// usuario declaró, buscando tanto `.jsonl` como `.json` (las dos formas que usan los CLIs
 // ── Hermes Agent ──────────────────────────────────────────────────────────────────────────────────────────────
 //
 // As sessões vivem no SQLite `<home>/state.db` (tabela `sessions`: `id`, `source`, `cwd`, `started_at` em segundos com
@@ -1137,7 +1214,7 @@ pub(super) fn hermes_home(profile: Option<&Path>) -> PathBuf {
 }
 
 /// O banco do Hermes só para leitura (ele é quem escreve). `None` = sem banco ainda.
-fn hermes_db(home: &Path) -> Option<rusqlite::Connection> {
+pub(super) fn hermes_db(home: &Path) -> Option<rusqlite::Connection> {
     let path = home.join("state.db");
     if !path.exists() {
         return None;
@@ -1221,6 +1298,10 @@ pub(super) fn hermes_title(home: &Path, session_id: &str, fallback: &str) -> Ses
         .unwrap_or_else(|| fallback_result(fallback))
 }
 
+// ── TUIs personalizadas ───────────────────────────────────────────────
+
+/// Archivo de sesión más reciente de una TUI custom: el más nuevo bajo la carpeta que el
+/// usuario declaró, buscando tanto `.jsonl` como `.json` (las dos formas que usan los CLIs
 /// conocidos). A diferencia de las TUIs de fábrica no se filtra por cwd — no hay forma
 /// genérica de saber cómo esa TUI mapea un proyecto a una carpeta — así que el filtro por
 /// `after` (el momento en que arrancó ESTE proceso) es lo único que evita agarrar la
@@ -1303,6 +1384,17 @@ pub fn session_file_for(
     profile: Option<&Path>,
     db: &tauri::State<crate::database::DbConnection>,
 ) -> Option<PathBuf> {
+    session_file_for_db(agent_id, cwd, session_id, profile, db.inner())
+}
+
+/// Resolución por ID que también pueden usar los trabajos en segundo plano.
+pub(crate) fn session_file_for_db(
+    agent_id: &str,
+    cwd: &str,
+    session_id: Option<&str>,
+    profile: Option<&Path>,
+    db: &crate::database::DbConnection,
+) -> Option<PathBuf> {
     match source_of(agent_id) {
         SessionSource::ClaudeProjects => claude_session_file(cwd, session_id, None, profile),
         SessionSource::GeminiTmp => {
@@ -1312,7 +1404,10 @@ pub fn session_file_for(
                 None => gemini_session_file_in(&home, cwd, None),
             }
         }
-        SessionSource::CodexRollouts => codex_session_file(cwd, None, profile),
+        SessionSource::CodexRollouts => match session_id {
+            Some(id) => codex_session_file_by_id(id, profile),
+            None => codex_session_file(cwd, None, profile),
+        },
         // OpenCode no expone un archivo de sesión legible; su transcripción se pide con
         // `opencode export <id>` y la maneja `export::opencode_transcript` aparte.
         SessionSource::ProcessQuery => None,

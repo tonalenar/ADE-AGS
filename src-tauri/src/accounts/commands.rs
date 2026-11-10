@@ -1,15 +1,14 @@
 //! Los comandos que invoca el frontend para administrar cuentas.
 
 use crate::database::DbConnection;
-use std::collections::HashMap;
 use tauri::AppHandle;
 
 use super::profiles::{spec_for, PROFILES};
 use crate::util::now_ts;
 
 use super::store::{
-    accounts_root, env_for_account, row_to_account, validate_name, AccountCapableAgent, AccountKind,
-    AccountRow, AgentAccount, ACCOUNT_COLUMNS,
+    accounts_root, row_to_account, validate_name, AccountCapableAgent, AccountKind, AccountRow,
+    AgentAccount, ACCOUNT_COLUMNS,
 };
 
 /// TUIs que pueden tener varias cuentas, marcando cuáles están instaladas.
@@ -240,14 +239,6 @@ pub fn delete_agent_account(
         }
     }
     Ok(())
-}
-
-#[tauri::command]
-pub fn agent_account_env(
-    account_id: String,
-    db: tauri::State<DbConnection>,
-) -> Result<HashMap<String, String>, String> {
-    env_for_account(&db, &account_id).ok_or_else(|| "Cuenta no encontrada".to_string())
 }
 
 /// La cuenta PRINCIPAL de cada TUI instalada: la que usa cuando no se le apunta la variable

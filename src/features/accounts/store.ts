@@ -16,8 +16,6 @@ interface AccountsState {
   health: Record<string, AccountHealth | "checking">;
   checkHealth: (accountId: string) => Promise<AccountHealth>;
   remove: (id: string, deleteFiles: boolean) => Promise<void>;
-  /** Variables con las que hay que lanzar un proceso para que corra con esta cuenta. */
-  envFor: (accountId: string) => Promise<Record<string, string>>;
 }
 
 export const useAccountsStore = create<AccountsState>()((set, get) => ({
@@ -66,6 +64,4 @@ export const useAccountsStore = create<AccountsState>()((set, get) => ({
     await ipc.deleteAccount(id, deleteFiles);
     await get().load();
   },
-
-  envFor: (accountId) => ipc.accountEnv(accountId),
 }));

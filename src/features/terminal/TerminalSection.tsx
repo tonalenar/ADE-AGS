@@ -5,6 +5,7 @@ import {
   TERMINAL_FONT, TERMINAL_THEMES, TERMINAL_ZOOM, terminalFontSize,
 } from "@/features/terminal/theme";
 import { SettingsSection } from "@/features/settings/SettingsSection";
+import { DESKTOP_OS } from "@/app/platform";
 
 /**
  * El zoom del texto. Se aplica en vivo a todas las terminales abiertas, pero están detrás
@@ -59,6 +60,8 @@ function ZoomSetting() {
 
 export function TerminalSection() {
   const { t } = useTranslation();
+  const jumpKeys = DESKTOP_OS === "macos" ? "⌘+Shift+Home/End" : "Ctrl+Shift+Home/End";
+  const selectAllKeys = DESKTOP_OS === "macos" ? "⌘+A" : "Ctrl+Shift+A";
   const inputMarks = useTerminalPrefsStore((s) => s.inputMarks);
   const setInputMarks = useTerminalPrefsStore((s) => s.setInputMarks);
   const gpuRenderer = useTerminalPrefsStore((s) => s.gpuRenderer);
@@ -68,6 +71,10 @@ export function TerminalSection() {
     <SettingsSection title={t("settings.terminal")} description={t("settings.terminal.desc")}>
 
       <ZoomSetting />
+
+      <p className="text-[11px] text-gray-400 dark:text-white/40">
+        {t("settings.terminal.historyKeys", { jump: jumpKeys, selectAll: selectAllKeys })}
+      </p>
 
       <div className="h-4" />
 

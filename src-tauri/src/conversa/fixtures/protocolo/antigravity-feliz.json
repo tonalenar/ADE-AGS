@@ -1,0 +1,236 @@
+{
+  "agent": "antigravity",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": false,
+    "deltas": [
+      [
+        "agy:bancada:3",
+        "O"
+      ],
+      [
+        "agy:bancada:3",
+        " conteúdo do arquivo [teste.txt](fi"
+      ],
+      [
+        "agy:bancada:3",
+        "le://{{cwd}} é:\n\n```text\nLinha 1 do arquivo de teste\n```\n"
+      ]
+    ],
+    "filhos": [],
+    "fim": {
+      "durationMs": 6801,
+      "error": null,
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [
+      {
+        "at": 1790000009701,
+        "id": "agy:bancada:2",
+        "kind": "tool",
+        "name": "Read",
+        "output": "1 lines, 28 bytes",
+        "path": "{{cwd}}",
+        "status": "done",
+        "tool": "read"
+      },
+      {
+        "at": 1790000011828,
+        "id": "agy:bancada:3",
+        "kind": "assistant",
+        "text": "O conteúdo do arquivo [teste.txt](file://{{cwd}} é:\n\n```text\nLinha 1 do arquivo de teste\n```"
+      },
+      {
+        "at": 1790000011848,
+        "id": "usage:bancada",
+        "kind": "usage",
+        "tokens": 17917,
+        "usageBreakdown": {
+          "cached": 0,
+          "input": 17845,
+          "output": 72,
+          "reasoning": 0,
+          "reasoningInOutput": false
+        }
+      }
+    ],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": "{{session:1}}",
+    "tipos": [
+      "tool",
+      "assistant",
+      "usage"
+    ]
+  },
+  "format": "ade-replay",
+  "id": "antigravity-feliz",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "Antigravity 1.5.3, modelo gemini-3.8-flash-low, captura de 2026-11-09. A lista de tools do init foi retirada. O atMs é o da captura. O close da captura é code 0.",
+    "kind": "recorded",
+    "recordedAt": 1794270841
+  },
+  "protocol": "agy-stream",
+  "title": "Turno feliz do Antigravity com ferramenta e result",
+  "transcript": [
+    {
+      "atMs": 5016,
+      "out": {
+        "conversation_id": "{{session:1}}",
+        "event": "init",
+        "init": {
+          "cwd": "{{cwd}}",
+          "model": "gemini-3.8-flash-low",
+          "permission_mode": "request-review"
+        }
+      }
+    },
+    {
+      "atMs": 6726,
+      "out": {
+        "event": "step_update",
+        "step_update": {
+          "conversation_id": "{{session:1}}",
+          "state": "DONE",
+          "step_index": 0,
+          "step_type": "user_input"
+        }
+      }
+    },
+    {
+      "atMs": 9675,
+      "out": {
+        "event": "step_update",
+        "step_update": {
+          "conversation_id": "{{session:1}}",
+          "duration_seconds": 2.956988,
+          "state": "DONE",
+          "step_index": 1,
+          "step_type": "agent_response",
+          "usage": {
+            "cache_read_tokens": 0,
+            "input_tokens": 8861,
+            "output_tokens": 30,
+            "thinking_tokens": 0,
+            "total_tokens": 8891
+          }
+        }
+      }
+    },
+    {
+      "atMs": 9676,
+      "out": {
+        "event": "step_update",
+        "step_update": {
+          "conversation_id": "{{session:1}}",
+          "state": "ACTIVE",
+          "step_index": 2,
+          "step_type": "tool",
+          "tool_info": {
+            "name": "read_file",
+            "parameters": {
+              "Path": "{{cwd}}"
+            }
+          },
+          "tool_name": "read_file"
+        }
+      }
+    },
+    {
+      "atMs": 9701,
+      "out": {
+        "event": "step_update",
+        "step_update": {
+          "conversation_id": "{{session:1}}",
+          "duration_seconds": 0.031873,
+          "state": "DONE",
+          "step_index": 2,
+          "step_type": "tool",
+          "tool_info": {
+            "name": "read_file",
+            "output": "1 lines, 28 bytes",
+            "parameters": {
+              "Path": "{{cwd}}"
+            }
+          },
+          "tool_name": "read_file"
+        }
+      }
+    },
+    {
+      "atMs": 11637,
+      "out": {
+        "event": "step_update",
+        "step_update": {
+          "conversation_id": "{{session:1}}",
+          "state": "ACTIVE",
+          "step_index": 3,
+          "step_type": "agent_response",
+          "text_delta": "O"
+        }
+      }
+    },
+    {
+      "atMs": 11798,
+      "out": {
+        "event": "step_update",
+        "step_update": {
+          "conversation_id": "{{session:1}}",
+          "state": "ACTIVE",
+          "step_index": 3,
+          "step_type": "agent_response",
+          "text_delta": " conteúdo do arquivo [teste.txt](fi"
+        }
+      }
+    },
+    {
+      "atMs": 11828,
+      "out": {
+        "event": "step_update",
+        "step_update": {
+          "conversation_id": "{{session:1}}",
+          "duration_seconds": 2.134364,
+          "state": "DONE",
+          "step_index": 3,
+          "step_type": "agent_response",
+          "text_delta": "le://{{cwd}} é:\n\n```text\nLinha 1 do arquivo de teste\n```\n",
+          "usage": {
+            "cache_read_tokens": 0,
+            "input_tokens": 8984,
+            "output_tokens": 42,
+            "thinking_tokens": 0,
+            "total_tokens": 9026
+          }
+        }
+      }
+    },
+    {
+      "atMs": 11848,
+      "out": {
+        "event": "result",
+        "result": {
+          "conversation_id": "{{session:1}}",
+          "duration_seconds": 6.801096,
+          "num_turns": 1,
+          "response": "O conteúdo do arquivo [teste.txt](file://{{cwd}} é:\n\n```text\nLinha 1 do arquivo de teste\n```\n",
+          "status": "SUCCESS",
+          "usage": {
+            "cache_read_tokens": 0,
+            "input_tokens": 17845,
+            "output_tokens": 72,
+            "thinking_tokens": 0,
+            "total_tokens": 17917
+          }
+        }
+      }
+    },
+    {
+      "atMs": 12565,
+      "close": {}
+    }
+  ],
+  "version": 2
+}

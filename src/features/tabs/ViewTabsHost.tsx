@@ -11,6 +11,7 @@ const GeminiDesktopTab = lazy(() => import("@/features/desktopApps/GeminiDesktop
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { setChatBrowserFloatRect, useChatStore } from "@/features/chat/store";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
 import { useChatShell } from "@/app/uiStore";
@@ -41,6 +42,8 @@ export function ViewTabsHost() {
     useViewTabsStore.getState().showTerminal();
   }, [mode, boardKey, desktop, activeViewId]);
   const keepMountedIds = useViewTabsStore((s) => s.keepMountedIds);
+  const floating = useChatStore((s) => s.browserFloating);
+  const chatBrowser = useChatStore((s) => s.browser);
   const pathname = useLocation().pathname;
   // O chat não é uma rota: com ele na tela, a vista que ele mostra (o navegador do painel) conta como na tela.
   const chatOn = useChatShell();
@@ -53,9 +56,13 @@ export function ViewTabsHost() {
   const boardCwd = boardKey?.split("|").slice(1).join("|").split("#m:")[0];
   // No chat só aparece o navegador do painel direito (nunca o Gemini Desktop do canvas).
   const chat = chatOn;
-  const placementOf = (view: ViewTab) => view.kind === "desktop" && mode === "canvas" && !chat
-    ? (desktopRect && !activeViewId && boardCwd === comparablePath(view.cwd) ? { groupId: "canvas", rect: desktopRect } : undefined)
-    : visible.get(viewKey(view.id));
+  const floatingBrowserId = chatOn && floating ? chatBrowser?.viewId ?? null : null;
+  const placementOf = (view: ViewTab) => {
+    if (view.kind === "browser" && view.id === floatingBrowserId && isPageRoute(pathname)) return undefined;
+    return view.kind === "desktop" && mode === "canvas" && !chat
+      ? (desktopRect && !activeViewId && boardCwd === comparablePath(view.cwd) ? { groupId: "canvas", rect: desktopRect } : undefined)
+      : visible.get(viewKey(view.id));
+  };
 
   const [seen, setSeen] = useState<Set<string>>(new Set());
   const visibleIds = views.filter((v) => placementOf(v) !== undefined).map((v) => v.id);
@@ -88,6 +95,7 @@ export function ViewTabsHost() {
         const key = viewKey(view.id);
         const placement = placementOf(view);
         const shown = placement !== undefined;
+        const floatingPreview = view.kind === "browser" && view.id === floatingBrowserId;
         if (!shown && !seen.has(view.id) && !keepMountedIds.includes(view.id)) return null;
         if (placement) lastRect.current.set(key, placement.rect);
         const focused = key === focusedItem && onWorkspace;
@@ -97,15 +105,18 @@ export function ViewTabsHost() {
             data-view-key={key}
             style={{
               ...placeStyle(lastRect.current.get(key) ?? null),
+              ...(floatingPreview ? { zIndex: 30 } : {}),
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
+            className={floatingPreview ? "resize flex flex-col overflow-hidden rounded-xl border border-gray-200 dark:border-white/12 bg-white dark:bg-surface shadow-2xl" : undefined}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
           >
+            {floatingPreview && <BrowserFloatGrip />}
             <Suspense fallback={null}>
               {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
               {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
-              {view.kind === "browser" && <BrowserTab view={view} active={focused} />}
+              {view.kind === "browser" && <BrowserTab view={view} active={focused} floatingPreview={floatingPreview} />}
               {view.kind === "desktop" && <GeminiDesktopTab view={view} active={shown && onWorkspace} canvas={mode === "canvas"} />}
             </Suspense>
           </div>
@@ -113,4 +124,43 @@ export function ViewTabsHost() {
       })}
     </div>
   );
+}
+
+/** Faixa estreita para mover o mini preview sem interceptar os controles da página. */
+function BrowserFloatGrip() {
+  const drag = useRef<{ pointerId: number; x: number; y: number; rect: Rect } | null>(null);
+  const begin = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    const state = useChatStore.getState();
+    const rect = state.browserFloatRect ?? state.browser?.rect;
+    if (!state.browserFloating || !rect) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, rect };
+  };
+  const move = (event: React.PointerEvent<HTMLDivElement>) => {
+    const start = drag.current;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const shell = event.currentTarget.closest<HTMLElement>("[data-chat-shell]");
+    const main = shell?.querySelector<HTMLElement>("main");
+    if (!shell || !main) return;
+    const shellRect = shell.getBoundingClientRect();
+    const mainRect = main.getBoundingClientRect();
+    const minLeft = Math.round(mainRect.left - shellRect.left + 8);
+    const minTop = Math.round(mainRect.top - shellRect.top + 8);
+    const maxLeft = Math.round(mainRect.right - shellRect.left - start.rect.width - 8);
+    const maxTop = Math.round(mainRect.bottom - shellRect.top - start.rect.height - 8);
+    const left = Math.max(minLeft, Math.min(maxLeft, start.rect.left + event.clientX - start.x));
+    const top = Math.max(minTop, Math.min(maxTop, start.rect.top + event.clientY - start.y));
+    setChatBrowserFloatRect({ ...start.rect, left: Math.round(left), top: Math.round(top) });
+  };
+  const end = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (drag.current?.pointerId !== event.pointerId) return;
+    drag.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+  return <div aria-hidden="true" onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+    className="h-3 shrink-0 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none bg-white dark:bg-surface">
+    <span className="w-9 h-1 rounded-full bg-gray-300 dark:bg-white/20" />
+  </div>;
 }

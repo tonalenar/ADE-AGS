@@ -154,7 +154,8 @@ describe("grafo estático do entry (onda 4)", () => {
   it("tema no construtor, fitOnce espera fontsReady antes do pty, e a home não espera a fonte", () => {
     const terminal = readFileSync(TERMINAL, "utf8");
     const ctorAt = terminal.indexOf("new XTerm(");
-    const themeAt = terminal.indexOf("theme: TERMINAL_THEMES");
+    // O tema vem de `terminalThemeFor` (tema do app + tema personalizado), que parte de TERMINAL_THEMES.
+    const themeAt = terminal.indexOf("theme: terminalThemeFor(");
     const fitAt = terminal.indexOf("await fitOnce()");
     const ptyAt = terminal.indexOf("ptyCreate(");
     expect(ctorAt).toBeGreaterThan(0);

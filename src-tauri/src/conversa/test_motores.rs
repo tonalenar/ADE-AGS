@@ -17,6 +17,7 @@ fn row(agent: &str, access: &str) -> ThreadRow {
     ThreadRow {
         id: "t".into(), agent_id: agent.into(), remote_id: None, cwd: "/p".into(), title: String::new(),
         model: Some("anthropic/claude-sonnet-5-5".into()), effort: Some("high".into()), access: access.into(), account_id: None, memory: None,
+        parent_ref: None, parent_turn_id: None, is_side_chat: false,
         state: "active".into(), created_at: 1, updated_at: 1,
     }
 }
@@ -529,7 +530,7 @@ fn o_roteamento_aceita_os_quatro_agentes() {
 fn criar_e_trocar_com_os_agentes_novos() {
     let db = Arc::new(Mutex::new(crate::database::test_db()));
     let input = |agent: &str, access: &str| NewThread {
-        agent_id: agent.into(), cwd: "/p".into(), title: "T".into(), model: Some("m".into()), effort: None, access: access.into(), account_id: None,
+        agent_id: agent.into(), cwd: "/p".into(), workspace_id: None, title: "T".into(), model: Some("m".into()), effort: None, access: access.into(), account_id: None, parent_ref: None,
     };
     let opencode = api::create(&db, input("opencode", "plan")).unwrap();
     assert_eq!((opencode.agent_id.as_str(), opencode.access.as_str()), ("opencode", "plan"));

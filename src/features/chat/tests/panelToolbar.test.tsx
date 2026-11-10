@@ -106,12 +106,14 @@ describe("a fileira de ícones (no cabeçalho principal)", () => {
     expect(useChatStore.getState().panel).toBeNull();
   });
 
-  it("o ⋯ abre Design, Android e PR com as mesmas teclas; o Time fica na fileira", async () => {
+  it("o ⋯ abre Design, Android, PR e Pergunta lateral com as mesmas teclas; o Time fica na fileira", async () => {
     await mountToolbar();
     await click(host.querySelector("[aria-label='chat.panel.more']"));
     const items = [...host.querySelectorAll("[role=menuitem]")];
     const wide = items.filter((e) => !e.closest("li")?.className.includes("@min-[36rem]/main:hidden"));
-    expect(wide.map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "P"]);
+    expect(wide.map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "P", "Q"]);
+    // A Pergunta lateral (Q) só vale com uma conversa aberta: sem ela a linha fica esmaecida e a tecla não a aciona.
+    expect(host.querySelector("[role=menuitem][aria-keyshortcuts='Q']")?.getAttribute("aria-disabled")).toBe("true");
     // Na conversa estreita, Diff, Navegador e Arquivos saem da fileira e aparecem aqui (só nela: a classe os esconde na larga).
     const compact = items.filter((e) => e.closest("li")?.className.includes("@min-[36rem]/main:hidden"));
     expect(compact.map((e) => e.textContent)).toEqual(expect.arrayContaining([expect.stringContaining("chat.panel.open.diff"), expect.stringContaining("chat.panel.open.browser"), expect.stringContaining("chat.panel.open.files")]));

@@ -294,11 +294,16 @@ fn complete(text: &str) -> bool {
 pub async fn claude_live_usage(
     // `account_key`: con qué cuenta se preguntó. Es la clave de la caché.
     account_key: String,
-    env: HashMap<String, String>,
     // `force`: volver a preguntar aunque haya algo guardado. Es el botón de refrescar.
     force: bool,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<LiveUsage, String> {
+    // Valida la propiedad sin devolver credenciales al WebView. La TUI de sondeo recibe su
+    // entorno desde el keyring aquí en el backend, sólo cuando hace falta una consulta real.
+    let system_account = account_key == "system:claude-code";
+    if !system_account && crate::accounts::agent_id_for_account(&db, &account_key).as_deref() != Some("claude-code") {
+        return Err("Conta Claude não encontrada".into());
+    }
     // Sin `force` se devuelve lo guardado TAL CUAL, viejo o no. Quien decide si hace falta
     // volver a preguntar es la UI, que para eso recibe `fetchedAt`: así al abrir la app el
     // panel muestra el último dato al instante y se actualiza después, en vez de dejar al
@@ -331,6 +336,14 @@ pub async fn claude_live_usage(
     if !crate::agents::command_exists(command) {
         return Ok(LiveUsage::failed("accounts.plan.problem.notInstalled"));
     }
+
+    let env = if system_account {
+        HashMap::new()
+    } else if let Some(env) = crate::accounts::env_for_account(&db, &account_key) {
+        env
+    } else {
+        return Ok(LiveUsage::failed("accounts.plan.problem.configUnavailable"));
+    };
 
     // El sondeo se abre SIEMPRE en la misma carpeta: una vacía de la app, que la app
     // pre-aprueba en la config de esta cuenta antes de arrancar. Ver `trust.rs`: dependía

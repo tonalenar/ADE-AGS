@@ -256,6 +256,58 @@ pub(super) fn team_list(app: &AppHandle, args: &Value) -> Result<Value, String> 
     Ok(json!({ "team": describe_team(&view, &tabs), "you": you }))
 }
 
+/// As sessões abertas que o orquestrador pode ligar ao time sem pedir à pessoa que escolha no painel.
+/// A lista não cria acesso: `team.link` volta a resolver o destino e confere o escopo antes de gravar a corda.
+pub(super) fn team_candidates(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = peers::caller(args)?;
+    let db = db(app)?;
+    let team = led_team(&db, &from)?;
+    let me = me_of(app, &from)?;
+    let list = candidates(app, &db, &me, &team)?;
+    let candidates: Vec<Value> = list
+        .iter()
+        .map(|candidate| {
+            let member = team
+                .members
+                .iter()
+                .find(|member| member.member == candidate.id);
+            let protocol_thread = model::thread_id_of(&candidate.id);
+            let transport = if protocol_thread.is_some() {
+                "conversation"
+            } else if candidate.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+                "gemini_desktop"
+            } else {
+                "pty"
+            };
+            let working = protocol_thread
+                .as_deref()
+                .map(|thread| crate::conversa::api::status(thread).working)
+                .unwrap_or_else(|| crate::canal::busy(&candidate.id));
+            json!({
+                "id": candidate.id,
+                "name": candidate.name,
+                "agent": candidate.agent,
+                "agentId": candidate.agent_id,
+                "transport": transport,
+                "working": working,
+                "sameWorkspace": candidate.cwd == me.cwd,
+                "linked": member.is_some(),
+                "canLink": member.is_none(),
+                "canMessage": member.is_some(),
+                "role": member.map(|member| member.role.clone()),
+                "policy": member.map(|member| member.policy),
+                "subagent": member.map(|member| member.subagent),
+            })
+        })
+        .collect();
+    Ok(json!({
+        "teamId": team.team.id,
+        "teamTitle": team.team.title,
+        "candidates": candidates,
+        "note": "Para uma sessão sem linked=true, ligue-a primeiro com team_link. O backend revalida o id, o escopo e o papel ao executar essa ação.",
+    }))
+}
+
 /// `ags team create [--title ...]`: um orquestrador do canvas (coroa dada pela pessoa) vira o
 /// orquestrador de um time do modo chat. Quem já está ligado a ele por corda entra junto, com o papel
 /// do canvas e supervisionado.

@@ -16,6 +16,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { appConfirm } from "@/shared/ui/appConfirm";
 import { AlertaToast } from "@/shared/ui/alerts";
+import { tuiMessage } from "@/features/chat/attachments/send";
+import type { Attachment } from "@/features/chat/attachments/attachModel";
 
 import { compareAttach, compareFinish, compareKeep, comparePrepare, compareRemove } from "./ipc";
 import { draftProblem, hardBlocked, pickLabel, pickSlug, picksToRemove, promptFor, riskyRemovals, uniquePicks } from "./model";
@@ -26,6 +28,7 @@ export interface StartInput {
   cwd: string;
   title: string;
   prompt: string;
+  attachments?: Attachment[];
   isolate: boolean;
   isRepo: boolean;
   picks: PickDraft[];
@@ -43,6 +46,7 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
   const agents = input.picks.map((p) => detectedAgents.find((a) => a.id === p.agentId && a.available)!);
   const slugs = uniquePicks(input.picks.map(pickSlug));
   const picks = input.picks.map((p, i) => ({ pick: slugs[i], label: pickLabel(p, agents[i].label), agentId: p.agentId }));
+  const attachments = input.attachments ?? [];
 
   const prepared = await comparePrepare({ cwd: input.cwd, title: input.title, picks, isolate: input.isolate });
   const cmp = prepared.comparison;
@@ -78,7 +82,8 @@ export async function startComparison(input: StartInput): Promise<Comparison> {
 
   for (const { entry, tabId } of opened) {
     setPending(tabId, true);
-    sendWhenReady(tabId, promptFor(entry.agentId, input.prompt, entry), {
+    const request = tuiMessage(entry.agentId, input.prompt, attachments);
+    sendWhenReady(tabId, promptFor(entry.agentId, request, entry, attachments.length > 0), {
       onSent: () => setPending(tabId, false),
       // A TUI não abriu a tempo: o pedido não foi colado. Some o "iniciando" e o usuário vê o terminal.
       onStalled: () => setPending(tabId, false),

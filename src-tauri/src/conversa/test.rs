@@ -32,6 +32,37 @@ fn um_item_novo_vai_para_o_fim_e_o_atualizado_fica_no_lugar() {
 }
 
 #[test]
+fn a_busca_local_indexa_falas_com_prefixo_sem_acento_e_atualiza_o_indice() {
+    let conn = crate::database::test_db();
+    thread(&conn, "t1");
+    let user = crate::canal::timeline::Item {
+        text: Some("O coração azul apareceu no painel".into()),
+        ..crate::canal::timeline::Item::new(ItemKind::User, "u1".into(), Some(1))
+    };
+    let agent = crate::canal::timeline::Item {
+        text: Some("A resposta menciona uma luz verde".into()),
+        ..crate::canal::timeline::Item::new(ItemKind::Assistant, "a1".into(), Some(2))
+    };
+    let tool = crate::canal::timeline::Item {
+        text: Some("o coração não deve indexar saída de ferramenta".into()),
+        ..crate::canal::timeline::Item::new(ItemKind::Tool, "tool1".into(), Some(3))
+    };
+    store::upsert_item(&conn, "t1", None, &user).unwrap();
+    store::upsert_item(&conn, "t1", None, &agent).unwrap();
+    store::upsert_item(&conn, "t1", None, &tool).unwrap();
+
+    let hits = store::search_messages(&conn, "\"coracao\"*", "coracao", 30).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert_eq!((hits[0].thread_id.as_str(), hits[0].item_id.as_str(), hits[0].kind.as_str()), ("t1", "u1", "user"));
+    assert!(hits[0].excerpt.contains("coração"));
+
+    let changed = crate::canal::timeline::Item { text: Some("Agora prefiro violeta".into()), ..user };
+    store::upsert_item(&conn, "t1", None, &changed).unwrap();
+    assert!(store::search_messages(&conn, "\"coracao\"*", "coracao", 30).unwrap().is_empty());
+    assert_eq!(store::search_messages(&conn, "\"violeta\"*", "violeta", 30).unwrap()[0].item_id, "u1");
+}
+
+#[test]
 fn a_conversa_guarda_o_id_do_codex_e_a_troca_de_acesso() {
     let conn = crate::database::test_db();
     thread(&conn, "t1");
@@ -250,6 +281,7 @@ mod claude {
         ThreadRow {
             id: "t".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/p".into(), title: String::new(),
             model: Some("haiku".into()), effort: Some("low".into()), access: access.into(), account_id: None, memory: None,
+            parent_ref: None, parent_turn_id: None, is_side_chat: false,
             state: "active".into(), created_at: 1, updated_at: 1,
         }
     }
@@ -473,7 +505,7 @@ mod claude {
     fn criar_e_trocar_respeitam_o_que_cada_agente_aceita() {
         let db = Arc::new(Mutex::new(crate::database::test_db()));
         let input = |agent: &str, access: &str| NewThread {
-            agent_id: agent.into(), cwd: "/p".into(), title: "T".into(), model: None, effort: None, access: access.into(), account_id: None,
+            agent_id: agent.into(), cwd: "/p".into(), workspace_id: None, title: "T".into(), model: None, effort: None, access: access.into(), account_id: None, parent_ref: None,
         };
         let claude = api::create(&db, input("claude-code", "plan")).unwrap();
         assert_eq!((claude.agent_id.as_str(), claude.access.as_str()), ("claude-code", "plan"));
@@ -553,7 +585,7 @@ fn no_arranque_o_turno_e_os_pedidos_orfaos_expiram_sem_apagar_nada() {
     assert_eq!(expired, "expired", "o pedido continua na tabela, só expirado");
     // O turno que ficou aberto na ponta ganha o turnEnd durável; o do meio, não.
     let end = store::items(&conn, "t1").unwrap().into_iter().find(|i| i.kind == ItemKind::TurnEnd).expect("turnEnd do app que fechou");
-    assert_eq!((end.id.as_str(), end.interrupted), ("end:r2", Some(false)));
+    assert_eq!((end.id.as_str(), end.interrupted), ("end:r2", Some(true)));
     assert!(end.text.as_deref().is_some_and(|t| t.contains("app foi fechado")), "{:?}", end.text);
     assert!(store::items(&conn, "t2").unwrap().iter().all(|i| i.kind != ItemKind::TurnEnd));
     assert_eq!(store::items(&conn, "t2").unwrap().len(), 2, "nenhuma linha apagada");
@@ -1539,5 +1571,179 @@ mod desfecho_desconhecido {
         assert_eq!(StopReason::classify("failed", Some("O modelo recusou o pedido"), false), StopReason::Refusal);
         let names: Vec<_> = [StopReason::Completed, StopReason::Aborted, StopReason::Error, StopReason::MaxTokens, StopReason::Refusal, StopReason::Timeout].iter().map(|r| r.as_str()).collect();
         assert_eq!(names, ["completed", "aborted", "error", "max-tokens", "refusal", "timeout"]);
+    }
+}
+
+// ── Fase 1 do harness: o filho de chat entra no `harness_run` do turno que o criou ─────────
+
+mod harness_fase1 {
+    use std::sync::{Arc, Mutex};
+
+    use rusqlite::Connection;
+
+    use crate::conversa::api::{self, ChildRequestIdentity, NewThread};
+    use crate::conversa::store::{self, Tuning};
+    use crate::database::DbConnection;
+
+    fn tuning() -> Tuning {
+        Tuning { model: None, effort: None, access: "ask".into() }
+    }
+
+    fn input(parent_ref: Option<&str>) -> NewThread {
+        NewThread {
+            agent_id: "codex".into(), cwd: "/p".into(), workspace_id: None, title: "filha".into(), model: None,
+            effort: None, access: "ask".into(), account_id: None, parent_ref: parent_ref.map(str::to_string),
+        }
+    }
+
+    fn identity(request: &str) -> ChildRequestIdentity {
+        ChildRequestIdentity { caller_key: "thread:raiz".into(), request_id: request.into(), request_hash: format!("hash-{request}") }
+    }
+
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row.get(0)).unwrap()
+    }
+
+    /// Uma conversa raiz com o turno `t1` em curso.
+    fn raiz_com_turno() -> DbConnection {
+        let db: DbConnection = Arc::new(Mutex::new(crate::database::test_db()));
+        {
+            let conn = db.lock().unwrap();
+            store::insert_thread(&conn, "raiz", "codex", "/p", "R", &tuning(), None, 1).unwrap();
+            store::upsert_run(&conn, "raiz", "t1", "inProgress", Some(1), None, None).unwrap();
+        }
+        db
+    }
+
+    /// Teste 2: com turno pai ativo nascem o run, a raiz e o `child_chat`; repetir o pedido (mesmo
+    /// `client_request_id`) devolve a mesma conversa e não duplica nada.
+    #[test]
+    fn a_conversa_filha_com_turno_ativo_gera_run_raiz_e_filho_e_repetir_nao_duplica() {
+        let db = raiz_com_turno();
+        let first = api::create_child(&db, input(Some("thread:raiz")), &identity("a")).unwrap();
+        assert!(!first.reused);
+        let again = api::create_child(&db, input(Some("thread:raiz")), &identity("a")).unwrap();
+        assert!(again.reused);
+        assert_eq!(again.thread.id, first.thread.id);
+
+        let conn = db.lock().unwrap();
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (1, 2));
+        let (kind, source_ref, legacy_ref, parent_kind): (String, String, String, String) = conn
+            .query_row(
+                "SELECT n.kind, n.source_ref, n.legacy_ref, p.kind FROM harness_node n
+                 JOIN harness_node p ON p.id = n.parent_id WHERE n.kind = 'child_chat'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(kind, "child_chat");
+        assert_eq!(source_ref, first.thread.id);
+        assert_eq!(legacy_ref, format!("thread:{}", first.thread.id));
+        assert_eq!(parent_kind, "root_agent");
+        let root: String = conn.query_row("SELECT legacy_ref FROM harness_node WHERE kind = 'root_agent'", [], |row| row.get(0)).unwrap();
+        assert_eq!(root, "turn:raiz:t1");
+
+        // Um segundo filho do mesmo turno cai no mesmo run.
+        drop(conn);
+        api::create_child(&db, input(Some("thread:raiz")), &identity("b")).unwrap();
+        let conn = db.lock().unwrap();
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (1, 3));
+    }
+
+    /// Teste 5 (chat): sem turno inequívoco ou sem origem estruturada não há run, e a conversa só
+    /// aparece pela projeção antiga.
+    #[test]
+    fn filho_sem_turno_pai_inequivoco_nao_gera_no() {
+        let db = raiz_com_turno();
+        // Origem que não é conversa estruturada (aba TUI).
+        api::create(&db, input(Some("tab:abc"))).unwrap();
+        // Sem origem nenhuma.
+        api::create(&db, input(None)).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            // Pai ocioso: o turno acabou.
+            store::upsert_run(&conn, "raiz", "t1", "completed", Some(1), Some(2), Some(1)).unwrap();
+        }
+        let idle = api::create(&db, input(Some("thread:raiz"))).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            // Ambíguo: dois turnos em curso.
+            store::upsert_run(&conn, "raiz", "t2", "inProgress", Some(3), None, None).unwrap();
+            store::upsert_run(&conn, "raiz", "t3", "inProgress", Some(4), None, None).unwrap();
+        }
+        let ambiguous = api::create(&db, input(Some("thread:raiz"))).unwrap();
+        let conn = db.lock().unwrap();
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (0, 0));
+        assert_eq!(store::thread(&conn, &idle.id).unwrap().unwrap().parent_turn_id, None);
+        assert_eq!(store::thread(&conn, &ambiguous.id).unwrap().unwrap().parent_turn_id, None);
+    }
+
+    /// Faz a ligação do nó falhar: já existe um nó com o `legacy_ref` que a conversa `c` ganharia.
+    fn colidir_o_no_de(conn: &Connection, child: &str) {
+        let root = crate::harness::store::ensure_run(conn, "raiz", "t1", 1).unwrap();
+        conn.execute(
+            "INSERT INTO harness_node (id, run_id, parent_id, kind, source_kind, source_ref, legacy_ref, created_at)
+             VALUES ('intruso', ?1, NULL, 'child_chat', 'chat_thread', 'outra-origem', ?2, 1)",
+            rusqlite::params![root.run_id, format!("thread:{child}")],
+        )
+        .unwrap();
+    }
+
+    /// Ajuste 1: a conversa e o nó entram na mesma transação. Se a ligação falha, a conversa não
+    /// fica sem o nó: o INSERT inteiro é desfeito e o erro sobe.
+    #[test]
+    fn se_a_ligacao_falha_a_conversa_nao_e_criada() {
+        let conn = crate::database::test_db();
+        store::insert_thread(&conn, "raiz", "codex", "/p", "R", &tuning(), None, 1).unwrap();
+        store::upsert_run(&conn, "raiz", "t1", "inProgress", Some(1), None, None).unwrap();
+        colidir_o_no_de(&conn, "c");
+        let nodes_before = count(&conn, "harness_node");
+        let result = store::insert_thread_with_parent(&conn, "c", "codex", "/p", "C", &tuning(), None, Some("thread:raiz"), 2);
+        assert!(result.is_err(), "a falha da ligação sobe");
+        assert!(store::thread(&conn, "c").unwrap().is_none(), "a conversa não ficou sem o nó");
+        assert_eq!(count(&conn, "harness_node"), nodes_before);
+        assert!(conn.is_autocommit(), "a transação própria foi encerrada");
+    }
+
+    /// Ajuste 1, caminho com recibo: o chamador já está numa transação. A falha desfaz só o INSERT da
+    /// conversa (SAVEPOINT); o que o chamador fez antes continua e ele ainda consegue confirmar.
+    #[test]
+    fn dentro_de_uma_transacao_do_chamador_a_falha_desfaz_so_a_conversa() {
+        let conn = crate::database::test_db();
+        store::insert_thread(&conn, "raiz", "codex", "/p", "R", &tuning(), None, 1).unwrap();
+        store::upsert_run(&conn, "raiz", "t1", "inProgress", Some(1), None, None).unwrap();
+        colidir_o_no_de(&conn, "c");
+        let tx = conn.unchecked_transaction().unwrap();
+        store::insert_thread(&tx, "antes", "codex", "/p", "A", &tuning(), None, 1).unwrap();
+        assert!(store::insert_thread_with_parent(&tx, "c", "codex", "/p", "C", &tuning(), None, Some("thread:raiz"), 2).is_err());
+        assert!(store::thread(&tx, "c").unwrap().is_none());
+        assert!(store::thread(&tx, "antes").unwrap().is_some(), "o trabalho anterior do chamador fica");
+        // O chamador segue: uma conversa que liga normalmente entra na mesma transação.
+        store::insert_thread_with_parent(&tx, "d", "codex", "/p", "D", &tuning(), None, Some("thread:raiz"), 3).unwrap();
+        tx.commit().unwrap();
+        assert!(store::thread(&conn, "antes").unwrap().is_some() && store::thread(&conn, "d").unwrap().is_some());
+        let nodes: Vec<String> = conn
+            .prepare("SELECT legacy_ref FROM harness_node WHERE kind = 'child_chat' ORDER BY legacy_ref")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(nodes, ["thread:c", "thread:d"], "o intruso do teste e o nó de `d`; nenhum nó de `c`");
+    }
+
+    /// Ajuste 1: desfazer a transação do chamador desfaz a conversa e o nó juntos.
+    #[test]
+    fn desfazer_a_transacao_do_chamador_desfaz_a_conversa_e_o_no() {
+        let conn = crate::database::test_db();
+        store::insert_thread(&conn, "raiz", "codex", "/p", "R", &tuning(), None, 1).unwrap();
+        store::upsert_run(&conn, "raiz", "t1", "inProgress", Some(1), None, None).unwrap();
+        {
+            let tx = conn.unchecked_transaction().unwrap();
+            store::insert_thread_with_parent(&tx, "c", "codex", "/p", "C", &tuning(), None, Some("thread:raiz"), 2).unwrap();
+            assert_eq!(count(&tx, "harness_node"), 2);
+        }
+        assert!(store::thread(&conn, "c").unwrap().is_none());
+        assert_eq!((count(&conn, "harness_run"), count(&conn, "harness_node")), (0, 0));
     }
 }

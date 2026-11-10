@@ -1,13 +1,21 @@
 /** Comandos de los agentes headless. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Assignment, Complexity, Fact, PendingApproval, PermissionRule, Roster, Run, Task, Tiers } from "./types";
+import type { AgentEvent, Assignment, Complexity, Fact, HarnessExecutionGraph, PendingApproval, PermissionRule, Roster, Run, Task, Tiers } from "./types";
 
 export const listTasks = (workspaceId: string) =>
   invoke<Task[]>("run_list_tasks", { workspaceId });
 
 export const listRuns = (workspaceId: string) =>
   invoke<Run[]>("run_list_runs", { workspaceId });
+
+/** Snapshot único das conversas, turnos e tarefas do lineage estruturado. */
+export const listHarnessExecutionGraph = (threadId: string) =>
+  invoke<HarnessExecutionGraph>("run_list_harness_graph", { threadId });
+
+/** Lê o trecho normalizado mais recente do JSONL de uma tentativa, só quando solicitado. */
+export const readAttemptEvents = (attemptId: string) =>
+  invoke<AgentEvent[]>("run_read_attempt_events", { attemptId });
 
 export const listFacts = (runId: string) => invoke<Fact[]>("run_list_facts", { runId });
 

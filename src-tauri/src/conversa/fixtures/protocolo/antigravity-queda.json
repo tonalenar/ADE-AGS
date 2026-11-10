@@ -1,0 +1,50 @@
+{
+  "agent": "antigravity",
+  "expected": {
+    "aberturaFalhou": null,
+    "avisos": [],
+    "caiu": true,
+    "deltas": [],
+    "filhos": [],
+    "fim": {
+      "durationMs": null,
+      "error": "O processo do Antigravity fechou no meio do turno",
+      "interrupted": false
+    },
+    "ignoradas": 0,
+    "itens": [],
+    "pedidos": [],
+    "pedidosPendentes": [],
+    "sessao": "{{session:1}}",
+    "tipos": []
+  },
+  "format": "ade-replay",
+  "id": "antigravity-queda",
+  "kind": "protocolo",
+  "origin": {
+    "basis": "Antigravity 1.5.3, modelo gemini-3.8-flash-low, captura de 2026-11-09. Kill SIGKILL logo depois do init, sem result e sem frame de interrupt. A lista de tools do init foi retirada. O close da captura é code -9; a fixture só registra o fechamento, sem stderr.",
+    "kind": "recorded",
+    "recordedAt": 1794270850
+  },
+  "protocol": "agy-stream",
+  "title": "Kill do Antigravity depois do init, sem result",
+  "transcript": [
+    {
+      "atMs": 2748,
+      "out": {
+        "conversation_id": "{{session:1}}",
+        "event": "init",
+        "init": {
+          "cwd": "{{cwd}}",
+          "model": "gemini-3.8-flash-low",
+          "permission_mode": "request-review"
+        }
+      }
+    },
+    {
+      "atMs": 2776,
+      "close": {}
+    }
+  ],
+  "version": 2
+}

@@ -25,6 +25,7 @@ export interface StructuredSnapshot {
   stale: boolean;
   tools: { id: string; name: string; summary: string; sinceMs: number }[];
   question: { id: string; text: string; options: string[]; sinceMs: number } | null;
+  approval?: { id: string; name: string; summary: string; sinceMs: number } | null;
   endsWithQuestion: boolean;
   /** Quando o turno atual começou e quando o último acabou (ms; o `TabState` do canal). */
   turnStartedAt?: number | null;
@@ -40,6 +41,13 @@ type StateEvent = StructuredSnapshot | { tabId: string; removed: true };
 
 const states = new Map<string, StructuredSnapshot>();
 let started = false;
+const listeners = new Set<(tabId: string, snapshot: StructuredSnapshot | null) => void>();
+
+function publishStateEvent(event: StateEvent): void {
+  applyStateEvent(states, event);
+  const snapshot = "removed" in event ? null : event;
+  for (const listener of listeners) listener(event.tabId, snapshot);
+}
 
 /** Aplica um evento ao mapa. Pura no mapa recebido (exportada para os testes). */
 export function applyStateEvent(map: Map<string, StructuredSnapshot>, event: StateEvent): void {
@@ -53,12 +61,22 @@ export function startStructuredState(): void {
   started = true;
   try {
     invoke<StructuredSnapshot[]>("structured_state_all")
-      .then((all) => all.forEach((s) => { if (!states.has(s.tabId)) states.set(s.tabId, s); }))
+      .then((all) => all.forEach((s) => {
+        if (!states.has(s.tabId)) publishStateEvent(s);
+      }))
       .catch(() => undefined);
-    listen<StateEvent>("cc-structured-state", (e) => applyStateEvent(states, e.payload)).catch(() => undefined);
+    listen<StateEvent>("cc-structured-state", (e) => publishStateEvent(e.payload)).catch(() => undefined);
   } catch {
     // fora do app (testes): sem canal, decide a tela
   }
+}
+
+/** Observa snapshots novos sem manter um hook React montado por aba. */
+export function subscribeStructuredState(listener: (tabId: string, snapshot: StructuredSnapshot | null) => void): () => void {
+  listeners.add(listener);
+  startStructuredState();
+  for (const snapshot of states.values()) listener(snapshot.tabId, snapshot);
+  return () => listeners.delete(listener);
 }
 
 export function structuredOf(tabId: string): StructuredSnapshot | undefined {

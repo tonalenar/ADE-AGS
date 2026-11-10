@@ -26,6 +26,16 @@ export function PanelIcon({ className }: IconProps) {
   );
 }
 
+/** Janela pequena sobre o chat: também serve para indicar que a prévia pode voltar ao painel. */
+export function FloatPreviewIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <rect x="12.5" y="11.5" width="7" height="5.5" rx="1" />
+    </svg>
+  );
+}
+
 /** Rama de git: el nodo que se separa y vuelve. */
 export function BranchIcon({ className }: IconProps) {
   return (

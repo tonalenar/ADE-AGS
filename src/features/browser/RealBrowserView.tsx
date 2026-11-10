@@ -12,13 +12,15 @@ import { placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace
  * `url` só vale na abertura: depois quem navega é `realBrowserNavigate` (a barra, os botões, os agentes). A URL que
  * a página informa vai para `onUrl` e nunca volta como navegação.
  */
-export function RealBrowserView({ viewId, url, zoom, script, onUrl, onTitle, onLoading, onHistory, onError }: {
+export function RealBrowserView({ viewId, url, zoom, script, profileId = "default", onUrl, onTitle, onLoading, onHistory, onError }: {
   viewId: string;
   url: string;
   /** O zoom da página (1 = 100%), o mesmo dos botões de zoom do navegador. */
   zoom: number;
   /** O piloto dos agentes, injetado em cada documento (ver `real_browser_open`). */
   script?: string;
+  /** Perfil isolado, compartilhado somente entre vistas que escolherem o mesmo id. */
+  profileId?: string;
   onUrl: (url: string) => void;
   onTitle?: (title: string) => void;
   onLoading?: (loading: boolean) => void;
@@ -68,7 +70,7 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onTitle, onL
     };
 
     sent = measure();
-    realBrowserOpen(viewId, url || "about:blank", sent, script)
+    realBrowserOpen(viewId, url || "about:blank", sent, script, profileId)
       .then(() => {
         if (closed) realBrowserClose(viewId).catch(() => undefined);
         opened = true;
@@ -91,7 +93,7 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onTitle, onL
       offs.forEach((p) => p.then((off) => off()));
       realBrowserClose(viewId).catch(() => undefined);
     };
-  }, [viewId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewId, profileId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <div ref={box} data-real-browser className="relative flex-1 h-full min-h-0 bg-white" />;
 }

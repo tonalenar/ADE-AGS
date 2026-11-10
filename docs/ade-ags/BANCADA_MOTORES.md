@@ -26,7 +26,7 @@ O fake **não é um binário**: os motores (`claude.rs`, `codex.rs`, `opencode.r
    - pula a linha que não é JSON;
    - passa o resto por `claude_map::Mapper`, `codex_map::{items_of, delta_of, ask_of, turn_end}` ou `opencode_map::Mapper`;
    - fecha o turno de um processo que caiu com `turn::dropped` + `turn::stderr_reason` (no Codex, sem o stderr, como o `codex.rs`).
-3. O `Resultado` traz a sessão, a timeline (o item atualizado fica no lugar, como no banco), os pedaços, os pedidos, o fim do turno, as linhas puladas e o maior silêncio. Traz também as classes de erro que o resto do app usa:
+3. O `Resultado` traz a sessão, a timeline (o item atualizado fica no lugar, como no banco), os pedaços, os pedidos, os filhos (`Task` e `SubItem`, fora da timeline), o fim do turno, as linhas puladas e o maior silêncio. Traz também as classes de erro que o resto do app usa:
    - `classe()`: `runs::failure::classify`;
    - `classe_para_o_pool()`: o filtro do `pool::after_turn` (interrupção não conta);
    - `falha_de_retomada()`: `resume::classify`, com a recusa do Codex como `Gone`, como em `codex::resume_failure`.
@@ -48,6 +48,8 @@ O fake **não é um binário**: os motores (`claude.rs`, `codex.rs`, `opencode.r
 | `maxTokens` | — | `stop_reason: max_tokens` (sintetizado) | `failed` com `max_output_tokens` (sintetizado) | `stopReason: max_tokens` |
 | `interrompido` | — | `terminal_reason: aborted_by_user` | `interrupted` | `stopReason: cancelled` |
 | `fim` | — | `result` sem erro | `completed` | `end_turn` |
+
+`agy-stream` e `cursor-stream` não entram nesta tabela. O roteiro sintetizado recusa os dois: o replay lê um transcript. O agy usa o laço do `agy.rs` (uma linha JSON por vez, sem prazo). O Cursor usa o `read_turn` do motor: se o próximo `atMs` passa de `quiet_after`, a fonte devolve silêncio e o turno fecha, sem relógio de parede. O fim da lista é EOF. Os frames de verdade vêm da captura, não daqui.
 
 Um silêncio maior que `PRAZO_PEDIDO_MS` (60 s) **antes** da sessão abrir vira o "não respondeu" do motor, que a retomada trata como prazo. Silêncio no meio do turno só fica medido em `silencio_max_ms`, porque os motores não têm prazo de turno: quem trata o agente parado é o Vigia.
 
@@ -77,6 +79,9 @@ As chaves do `espera` (as mesmas dos `checks` do oráculo do replay) são estas.
 | `sessao` | o id aberto (aceita `{{session:N}}`) |
 | `pedidos` | os tipos, em ordem (`command`, `fileChange`, `question`) |
 | `ferramentas` | `Nome:status`, em ordem (`Bash:done`, `Edit:error`) |
+| `tipos` | o tipo de cada item da timeline, em ordem (`assistant`, `tool`, `usage`) |
+| `filhos` | eventos de filho, em ordem: `task:<id>:<op>` ou `subitem:<pai>:<tipo do item>` |
+| `pedidosPendentes` | os tipos dos pedidos que ainda estavam sem resposta nem cancelamento no fim da leitura |
 | `textoContem` | trecho da fala do agente |
 | `ignoradas` | quantas linhas não eram JSON |
 | `silencioMinMs` | o maior silêncio foi pelo menos isto |
@@ -143,7 +148,7 @@ O v1 ([REPLAY_TESTES.md](./REPLAY_TESTES.md)) toca bytes de PTY nos detectores d
 |---|---|
 | `transcript[]` | em ordem de `atMs`. Cada entrada tem exatamente um destes: `out` (linha do agente), `raw` (linha que não é JSON), `in` (o que o app mandou; só documenta, o motor não lê) ou `close` (o processo fechou) |
 | placeholders | `{{session:N}}` (uuid com o N dentro), `{{cwd}}`, `{{home}}`. Outro tipo é erro |
-| `expected` | o snapshot: sessão, itens, deltas, pedidos, fim, queda, avisos, linhas puladas. Gravado com os placeholders de volta no lugar |
+| `expected` | o snapshot: sessão, itens, `tipos`, deltas, pedidos, `pedidosPendentes`, `filhos`, fim, queda, avisos, linhas puladas. Gravado com os placeholders de volta no lugar |
 
 ### Modos (`ADE_REPLAY_MODE`)
 
@@ -163,7 +168,18 @@ ADE_REPLAY_MODE=record ADE_REPLAY_SOURCE=/caminho/saida.jsonl ADE_REPLAY_ID=clau
 No `record`:
 - os uuids viram `{{session:N}}`, na ordem em que aparecem;
 - o `ADE_REPLAY_CWD` vira `{{cwd}}`, e o `HOME` vira `{{home}}`;
-- um texto que parece ter segredo (`memory::agent::looks_like_secret`) não é salvo.
+- um texto que parece ter segredo (`memory::agent::looks_like_secret`) não é salvo;
+- cada linha ganha `atMs` de 10 em 10. Para o Claude, o Codex, o ACP e o agy isso não muda o fim do turno.
+
+Para gravar o Cursor ou o Antigravity, o protocolo é `cursor-stream` ou `agy-stream` e o agente é `cursor` ou `antigravity`. O `.jsonl` é o stdout, uma linha por evento, capturado à mão. Não use estes testes para chamar a CLI.
+
+```
+ADE_REPLAY_MODE=record ADE_REPLAY_SOURCE=/caminho/saida.jsonl ADE_REPLAY_ID=cursor-x \
+  ADE_REPLAY_PROTOCOL=cursor-stream ADE_REPLAY_AGENT=cursor ADE_REPLAY_CWD=/caminho/do/projeto \
+  cargo test --lib gravar_fixture_de_protocolo
+```
+
+O `record` do Cursor deixa as linhas a 10 ms uma da outra, intervalo menor que qualquer `quiet_after`. Assim o silêncio não dispara. Antes do `refresh`, ajuste o `atMs` pelo `timestamp_ms` da linha (a diferença para a primeira). Sem esse ajuste, a fixture não prova o fim de turno por prazo. O agy não tem esse prazo: o `atMs` de 10 em 10 serve.
 
 O `.jsonl` vem de rodar o agente à mão, com a cota e a conta da pessoa, fora dos testes: os testes nunca chamam um agente de verdade. Leia a fixture inteira antes de commitar.
 
@@ -173,17 +189,22 @@ A fixture é recusada quando:
 - tem um placeholder de tipo desconhecido;
 - não tem oráculo, ou o oráculo não tem nenhum check;
 - uma entrada tem mais de um tipo ou está fora de ordem;
-- **a timeline tem uma ferramenta que o mapeador não conhece** (`ToolKind::Other`, o `UNKNOWN_TOOL` do deepseek-harness). Mapeie a ferramenta em `canal::timeline` antes de gravar.
+- **a timeline (ou um filho) tem uma ferramenta `Other` fora da lista do protocolo.** Claude, Codex e ACP não aceitam nenhum `Other`. O agy aceita o nome `denied` (a ação negada que o mapeador grava assim). O Cursor aceita, por enquanto, só o nome `mcp`, que existe para o guard ter o que deixar passar; não é um catálogo do provider. Um nome novo derruba a fixture até entrar na lista. Mapeie a ferramenta em `canal::timeline` antes de gravar, quando ela for uma ferramenta de verdade.
 
 ### Fixtures atuais
 
-Todas sintetizadas.
+Três sintetizadas e onze `recorded` (captura de 2026-11-09). O oráculo de cada `recorded` foi escrito à mão a partir dos frames.
 
 | id | Cobre |
 |---|---|
 | `claude-ferramenta-aprovacao-e-cota` | `Read` e `Bash`, linha cortada, aprovação, cota com hora de renovação |
 | `codex-comando-falha-e-queda` | `thread/resume`, comando com saída ≠ 0, `error` com `willRetry`, aprovação de arquivo, queda com stderr |
 | `acp-pedido-e-max-tokens` | raciocínio, fala em pedaços, `request_permission` de edição, diff, `max_tokens` |
+| `claude-feliz`, `claude-interrompido` | turno com `Read` e `result`; interrupt com `result` `aborted_streaming` |
+| `claude-steer-ferramenta`, `claude-steer-sem-ferramenta` | steer depois da ferramenta (`STEER_OK` no mesmo turno); steer no texto (segundo turno) |
+| `codex-feliz`, `codex-interrompido-real`, `codex-interrupt-antes-do-started` | turno com comando; interrupt depois de `turn/started`; `-32600` antes de `turn/started` |
+| `antigravity-feliz`, `antigravity-queda` | `read_file` e `result`; kill sem `result` |
+| `cursor-feliz`, `cursor-queda` | `readToolCall` e `result`; kill sem `result` |
 
 ## 3. Mock de `invoke` (front)
 

@@ -19,7 +19,7 @@ use super::types::{role, Task};
 
 /// Lo que se le contesta a un lead que intenta tocar el workspace.
 pub const LEAD_DENIED: &str = "Lead tasks cannot modify the workspace directly. \
-Delegate implementation to a worker using run_plan/task_add.";
+Delegate implementation to a worker using delegate_task or run_plan/task_add.";
 
 /// Si la tarea coordina y no puede modificar el workspace.
 pub fn is_coordinator(task: &Task) -> bool {

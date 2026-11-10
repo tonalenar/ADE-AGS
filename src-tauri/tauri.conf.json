@@ -56,6 +56,9 @@
     ],
     "resources": {
       "binaries": "binaries/",
+      "infoplist/pt-BR.lproj/InfoPlist.strings": "pt-BR.lproj/InfoPlist.strings",
+      "infoplist/en.lproj/InfoPlist.strings": "en.lproj/InfoPlist.strings",
+      "infoplist/es.lproj/InfoPlist.strings": "es.lproj/InfoPlist.strings",
       "../skills/ags-orchestrator": "skills/ags-orchestrator/",
       "../skills/jev-sim-use": "skills/jev-sim-use/",
       "../skills/agent-desktop": "skills/agent-desktop/"

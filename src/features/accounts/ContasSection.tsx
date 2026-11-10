@@ -10,7 +10,7 @@ import { AccountsManager, type AccountsSection } from "./AccountsManager";
 import { AddAccountDialog } from "./AddAccountDialog";
 import { meterTone } from "./meter";
 import { PoolsSection } from "./PoolsSection";
-import { accountEnv, codexAccountUsage } from "./ipc";
+import { codexAccountUsage } from "./ipc";
 import { useAccountsStore } from "./store";
 import type { AgentAccount } from "./types";
 import { agentAccountUsage, claudeLiveUsage, formatRemaining, humanPlan } from "./usage";
@@ -31,8 +31,7 @@ async function fetchInfo(account: AgentAccount, force: boolean, t: Translate): P
   if (account.agentId === "claude-code") {
     const usage = await agentAccountUsage(account.agentId, realId(account)).catch(() => null);
     if (usage) plan = humanPlan(usage.plan.tier);
-    const env = realId(account) ? await accountEnv(account.id) : {};
-    const live = await claudeLiveUsage(account.id, env, force);
+    const live = await claudeLiveUsage(account.id, force);
     if (live.available && live.session) meters.push({ key: "session", label: `${name} · ${t("accounts.plan.session")}`, percent: live.session.percent, resets: live.session.resets });
     if (live.available && live.week) meters.push({ key: "week", label: `${name} · ${t("accounts.plan.week")}`, percent: live.week.percent, resets: live.week.resets });
   } else if (account.agentId === "codex") {

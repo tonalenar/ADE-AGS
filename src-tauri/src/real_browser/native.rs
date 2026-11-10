@@ -10,6 +10,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde_json::{json, Value};
 use tauri::AppHandle;
@@ -44,8 +45,8 @@ struct Portal {
 thread_local! {
     /// Só na thread da interface (os objetos COM do WebView2 não saem dela).
     static PORTALS: RefCell<HashMap<String, Portal>> = RefCell::new(HashMap::new());
-    /// O ambiente do WebView2 dos Portais (um navegador para todos, na pasta deles).
-    static ENVIRONMENT: RefCell<Option<ICoreWebView2Environment>> = const { RefCell::new(None) };
+    /// Um ambiente do WebView2 por perfil. Cada ambiente usa sua própria pasta de dados e cookies.
+    static ENVIRONMENTS: RefCell<HashMap<PathBuf, ICoreWebView2Environment>> = RefCell::new(HashMap::new());
 }
 
 /// Roda `f` na thread da interface com o Portal `id`, e devolve o resultado.
@@ -70,8 +71,8 @@ fn with_portal_now(app: &AppHandle, id: &str, f: impl FnOnce(&Portal) + Send + '
     }));
 }
 
-/// As opções do ambiente iguais às do wry no WebView do app: o WebView2 recusa (`0x8007139F`) dois ambientes com
-/// opções diferentes na mesma pasta, e `WEBVIEW2_USER_DATA_FOLDER` (uma instância isolada) põe todos na mesma.
+/// As opções do ambiente iguais às do wry no WebView do app. O WebView2 recusa (`0x8007139F`) dois ambientes com
+/// opções diferentes na mesma pasta; os ambientes daqui são armazenados em cache pelo caminho do perfil.
 fn options(args: &str) -> ICoreWebView2EnvironmentOptions {
     use windows::Win32::Globalization::{GetUserDefaultUILanguage, LCIDToLocaleName, LOCALE_ALLOW_NEUTRAL_NAMES, MAX_LOCALE_NAME};
     let options = CoreWebView2EnvironmentOptions::default();
@@ -136,13 +137,14 @@ pub async fn create(app: &AppHandle, parent: isize, id: &str, profile: std::path
             unsafe { env.CreateCoreWebView2Controller(host, &handler) }.map_err(|e| e.message())
         };
         // `start` leva o `done`: se não chegar a rodar, o canal fecha e quem espera recebe o erro.
-        if let Some(env) = ENVIRONMENT.with(|e| e.borrow().clone()) {
+        let profile_key = profile.clone();
+        if let Some(env) = ENVIRONMENTS.with(|e| e.borrow().get(&profile_key).cloned()) {
             let _ = start(env);
             return;
         }
         let handler = CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(move |result, env| {
             if let (Ok(()), Some(env)) = (result, env) {
-                ENVIRONMENT.with(|e| *e.borrow_mut() = Some(env.clone()));
+                ENVIRONMENTS.with(|e| { e.borrow_mut().insert(profile_key.clone(), env.clone()); });
                 let _ = start(env);
             }
             Ok(())
@@ -344,4 +346,16 @@ pub fn close(app: &AppHandle, id: &str) {
             }
         }
     });
+}
+
+/// Solta o ambiente COM associado ao perfil na thread da interface antes da limpeza da pasta.
+pub async fn release_profile(app: &AppHandle, profile: &std::path::Path) -> Result<(), String> {
+    let profile = profile.to_path_buf();
+    let (done, wait) = oneshot::channel();
+    app.run_on_main_thread(move || {
+        ENVIRONMENTS.with(|environments| drop(environments.borrow_mut().remove(&profile)));
+        let _ = done.send(());
+    })
+    .map_err(|error| error.to_string())?;
+    wait.await.map_err(|_| "A interface não respondeu ao liberar o perfil do navegador.".to_string())
 }

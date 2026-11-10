@@ -1,4 +1,7 @@
+import { useSyncExternalStore } from "react";
+
 import type { ChatAccess } from "./chatModel";
+import type { ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
 
 /**
  * A última escolha do composer: pasta, agente, modelo, esforço, conta e permissão. Preferência
@@ -14,19 +17,31 @@ export interface ChatPrefs {
   access: ChatAccess;
   /** Começar no modo Plano. */
   plan: boolean;
+  /** Fast do Codex para conversas novas (ignorado por outros agentes e pelo motor por protocolo). */
+  fastMode: boolean;
   /** Abrir a conversa num worktree novo em vez do checkout atual. */
   worktree: boolean;
+  /** Submódulos em novos worktrees; null herda do projeto/t3.json e depois usa none. */
+  worktreeSubmodules: ChatWorktreeSubmodules | null;
   /** Os agentes que falam por protocolo (o Codex) conversam sem TUI. Desligado = sempre pela TUI. */
   structured: boolean;
   /** A largura da conversa: 736 px como no T3, larga ou a área inteira. */
   width: ChatWidth;
+  /** Ação padrão para mensagens enviadas enquanto o agente está trabalhando. */
+  followUpBehavior: FollowUpBehavior;
+  /** Mostrar skills no autocomplete do comando `/`; o seletor `$` continua disponível. */
+  showSkillsInSlashMenu: boolean;
 }
 
 export type ChatWidth = "normal" | "wide" | "full";
+export type FollowUpBehavior = "steer" | "queue";
 
 const KEY = "cc-chat-prefs";
 
-export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, worktree: false, structured: true, width: "normal" };
+export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true };
+
+const listeners = new Set<() => void>();
+let snapshot: ChatPrefs | null = null;
 
 const str = (v: unknown) => (typeof v === "string" && v.length > 0 ? v : null);
 
@@ -42,9 +57,13 @@ export function parseChatPrefs(raw: unknown): ChatPrefs {
     accountId: str(o.accountId),
     access: o.access === "ask" || o.access === "edits" || o.access === "full" ? o.access : "safe",
     plan: o.plan === true,
+    fastMode: o.fastMode === true,
     worktree: o.worktree === true,
+    worktreeSubmodules: o.worktreeSubmodules === "recursive" || o.worktreeSubmodules === "top-level" || o.worktreeSubmodules === "none" ? o.worktreeSubmodules : null,
     structured: o.structured !== false,
     width: o.width === "wide" || o.width === "full" ? o.width : "normal",
+    followUpBehavior: o.followUpBehavior === "queue" ? "queue" : "steer",
+    showSkillsInSlashMenu: o.showSkillsInSlashMenu !== false,
   };
 }
 
@@ -63,4 +82,20 @@ export function saveChatPrefs(prefs: ChatPrefs): void {
   } catch {
     /* não lembrar a escolha não impede usar */
   }
+  snapshot = parseChatPrefs(prefs);
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function getSnapshot(): ChatPrefs {
+  return snapshot ??= loadChatPrefs();
+}
+
+/** Preferências do chat reativas, para mudanças nas Configurações refletirem em conversas abertas. */
+export function useChatPrefs(): ChatPrefs {
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

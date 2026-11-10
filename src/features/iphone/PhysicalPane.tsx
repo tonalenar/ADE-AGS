@@ -65,7 +65,7 @@ function KeyboardButton({ device, name, ready }: { device: string; name: string;
  * início, alternador de apps, foto e o "⋯"; à direita, teclado e zoom. O aparelho vai para os agentes como o
  * simulador: só com a chave, e cada ação deles pergunta à pessoa até ela dizer "sempre neste aparelho".
  */
-export function PhysicalPane({ device, picker }: { device: string; picker: ReactNode }) {
+export function PhysicalPane({ device, picker, composerTarget }: { device: string; picker: ReactNode; composerTarget?: string | null }) {
   const { t } = useTranslation();
   const devices = useIphoneStore((s) => s.devices);
   const loaded = useIphoneStore((s) => s.loaded);
@@ -113,7 +113,7 @@ export function PhysicalPane({ device, picker }: { device: string; picker: React
               <DeviceFrame device={device} name={name} layout={layout} screen={screen} enabled={ready}>
                 <PhysicalMirror screenId="chat-devices-physical" device={device} known={!missing} status={status} radius={screenRadiusOf(layout, screen.width)} onError={fail} />
               </DeviceFrame>
-              <DeviceBar device={device} name={name} status={status} ready={ready} />
+              <DeviceBar device={device} name={name} status={status} ready={ready} composerTarget={composerTarget} />
             </div>
           )}
         </div>

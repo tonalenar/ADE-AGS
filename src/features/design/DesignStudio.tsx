@@ -68,13 +68,15 @@ const session = () => { try { return window.sessionStorage; } catch { return nul
  * comentários ancorados, o modo focado (protótipo clicável) e o cursor do agente. A mesma tela serve a
  * aba Design do painel do chat (`host="chat"`) e a rota de tela cheia `/design/:id` (`host="page"`).
  */
-export function DesignStudio({ designId, host, request, leading, trailing, padRight }: {
+export function DesignStudio({ designId, host, request, leading, trailing, padRight, composerTarget }: {
   designId: string;
   host: "chat" | "page";
   request?: StudioRequest | null;
   leading?: ReactNode;
   trailing?: ReactNode;
   padRight?: boolean;
+  /** O composer de destino quando o Design Studio está aberto no painel do chat. */
+  composerTarget?: string | null;
 }) {
   const { t } = useTranslation();
   const { detail, error, loading, reload } = useDesignDetail(designId);
@@ -446,7 +448,7 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
       designTitle: detail.design.title, designId: detail.design.id, boardTitle: board?.title ?? boardId, boardId, anchor,
     });
     if (host === "chat") {
-      insertIntoComposer(text);
+      insertIntoComposer(text, composerTarget);
       AlertaToast(t("canvas.design.title"), t("design.comments.addedToComposer"), "success", 3500);
       return;
     }
@@ -460,7 +462,7 @@ export function DesignStudio({ designId, host, request, leading, trailing, padRi
       return;
     }
     copy(text, t("design.comments.copied"));
-  }, [detail, boardById, host, owner, t, fail, copy]);
+  }, [detail, boardById, host, owner, composerTarget, t, fail, copy]);
 
   // ---------- comentários da página ----------
   const pageComments = useMemo(() => {

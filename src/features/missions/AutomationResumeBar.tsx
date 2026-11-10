@@ -9,7 +9,7 @@ export function pausedNames(missions: readonly { title: string }[], vigia: Recor
 }
 
 /**
- * "Automação pausada desde que o app reabriu": o que estava armado antes (missão, time, rotina) não volta
+ * "Automação pausada desde que o app reabriu": o que estava armado antes (missão, time, rotina ou tarefa agendada) não volta
  * sozinho. Só a pessoa retoma, por este botão. `compact` = visual do QG do bot.
  */
 export function AutomationResumeBar({ compact = false }: { compact?: boolean }) {
@@ -20,6 +20,7 @@ export function AutomationResumeBar({ compact = false }: { compact?: boolean }) 
   if (!hasPaused(state)) return null;
   const names = pausedNames(state.status?.missions ?? [], state.vigia);
   const routines = state.status?.routines ?? [];
+  const scheduledTasks = state.status?.scheduledTasks ?? [];
   const fixRounds = state.status?.interruptedFixRounds ?? 0;
   const shell = compact
     ? "ags-hq__detail"
@@ -34,6 +35,7 @@ export function AutomationResumeBar({ compact = false }: { compact?: boolean }) 
       <ul className="mt-1 flex flex-col gap-0.5">
         {names.length > 0 && <li className={line}>{t("automation.paused.teams", { names: names.join(", ") })}</li>}
         {routines.length > 0 && <li className={line}>{t("automation.paused.routines", { names: routines.map((r) => r.name).join(", ") })}</li>}
+        {scheduledTasks.length > 0 && <li className={line}>{t("automation.paused.scheduledTasks", { names: scheduledTasks.map((task) => task.name).join(", ") })}</li>}
         {fixRounds > 0 && <li className={line}>{t("automation.paused.fixRounds", { count: fixRounds })}</li>}
       </ul>
       <button

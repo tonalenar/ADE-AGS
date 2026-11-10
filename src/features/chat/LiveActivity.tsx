@@ -76,11 +76,12 @@ function tail(text: string, max: number): string {
 }
 
 /** O plano do turno: "Plano · 2 de 4", o passo atual em destaque e os concluídos riscados. */
-export function PlanCard({ plan }: { plan: PlanStep[] }) {
+export function PlanCard({ plan, itemId, searchHit = false }: { plan: PlanStep[]; itemId?: string; searchHit?: boolean }) {
   const { t } = useTranslation();
   const { done, total, current } = planProgress(plan);
   return (
-    <section aria-label={t("chat.plan.label")} className="rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-sunken px-3.5 py-2.5">
+    <section data-chat-item-id={itemId} aria-label={t("chat.plan.label")}
+      className={`rounded-xl border border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-sunken px-3.5 py-2.5 ${searchHit ? "ring-2 ring-accent-500/60 ring-offset-2 ring-offset-white dark:ring-offset-surface-deep" : ""}`}>
       <div className="mb-1.5 text-chat-caption font-medium text-gray-500 dark:text-white/45">{t("chat.plan.progress", { done, total })}</div>
       <ol className="m-0 p-0 list-none">
         {plan.map((step, i) => {

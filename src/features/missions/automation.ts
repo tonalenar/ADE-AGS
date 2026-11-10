@@ -16,6 +16,8 @@ export interface AutomationStatus {
   resumedAt: number | null;
   missions: { id: string; title: string }[];
   routines: { id: string; name: string }[];
+  /** Tarefas que estavam ativas antes do último boot e seguem pausadas. */
+  scheduledTasks?: { id: string; name: string }[];
   interruptedFixRounds: number;
 }
 

@@ -2,10 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { fillSplashTexts, showSplashStep, splashTexts } from "./view";
+import { readAppearanceMode, resolveAppearanceMode } from "@/features/settings/appearanceMode";
 
 // A janelinha de abertura. Tema e idioma vêm do mesmo `localStorage` que o app usa (mesma origem), e
 // a janela só aparece depois de pintada com eles: nasce escondida para não piscar branca.
-const theme = localStorage.getItem("theme") || "dark";
+const mode = readAppearanceMode();
+const theme = resolveAppearanceMode(mode, window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false);
+localStorage.setItem("theme", theme);
 document.documentElement.classList.toggle("dark", theme === "dark");
 fillSplashTexts(splashTexts(localStorage.getItem("language"), navigator.language));
 

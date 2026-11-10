@@ -1,6 +1,7 @@
 import { agentSearchPath } from "@/features/agents/ipc";
 import { runInTerminal, sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { SHELL_AGENT_ID, type AgentInfo } from "@/features/tabs/types";
 
 import { findShellTab } from "./codeRun";
@@ -68,6 +69,19 @@ export async function openChatTerminal(cwd: string): Promise<{ tabId: string; re
   openShellPanel();
   const tabId = await ensureShellTab(cwd);
   return { tabId, reused: before.has(tabId) };
+}
+
+/** Executa uma ação de projeto num PTY novo para não digitar num shell ou numa TUI existentes. */
+export async function runProjectScript(cwd: string, name: string, commandText: string): Promise<string> {
+  const command = await loginShellCommand();
+  const tabs = useTabsStore.getState();
+  const base: AgentInfo = tabs.detectedAgents.find((agent) => agent.id === SHELL_AGENT_ID)
+    ?? { id: SHELL_AGENT_ID, label: "Terminal", command: SHELL_AGENT_ID, available: true };
+  const agent: AgentInfo = command ? { ...base, label: "Terminal", command } : base;
+  const tabId = tabs.addTab({ cwd, agent, title: name, titleIsCustom: true });
+  useViewTabsStore.getState().showTerminal();
+  sendWhenReady(tabId, commandText);
+  return tabId;
 }
 
 /**

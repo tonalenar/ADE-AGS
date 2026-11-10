@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, CheckCircleIcon, Input } from "neogestify-ui-components";
-import { openUrl } from "@tauri-apps/plugin-opener";
 
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { graphifyRequirements, type GraphifyRequirement, type GraphifyRun } from "./ipc";
 
 /**
@@ -75,7 +75,7 @@ export function RequirementsBlock({ onRun, running }: {
                 {item.version ?? t("settings.graphify.req.missing")}
               </span>
               <Button variant="custom"
-                onClick={() => openUrl(item.docsUrl)}
+                onClick={() => openExternalUrl(item.docsUrl)}
                 className="cc-t shrink-0 text-[10.5px] text-accent-600 dark:text-accent-400 hover:underline inline-block"
               >
                 {t("settings.graphify.req.docs")}

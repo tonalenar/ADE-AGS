@@ -73,13 +73,15 @@ export function ForgeErrorView({ error, target }: { error: ForgeError; target: R
  * Los PRs o los issues de un repo, con su filtro de estado. Un click abre su pantalla
  * (`onOpen`); "Nuevo" crea uno y lo abre.
  */
-export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, onOpen }: {
+export function ForgeItemsView({ cwd, target, what, branch, filter, linkedBranch, onFilter, onOpen }: {
   cwd: string;
   target: RepoTarget;
   what: "pulls" | "issues";
   /** La rama actual: de ahí sale un PR nuevo. */
   branch: string | null;
   filter: ItemFilter;
+  /** Só mostra pull requests cuja branch de origem coincide com a branch em foco. `undefined` = todos. */
+  linkedBranch?: string | null;
   onFilter: (f: ItemFilter) => void;
   onOpen: (item: ForgeItem) => void;
 }) {
@@ -88,6 +90,9 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, on
   const [error, setError] = useState<ForgeError | null>(null);
   const [creating, setCreating] = useState(false);
   const pr = what === "pulls";
+  const shownItems = !pr || linkedBranch === undefined
+    ? items
+    : items?.filter((item) => linkedBranch !== null && item.sourceBranch === linkedBranch) ?? null;
 
   const load = useCallback(async () => {
     setError(null);
@@ -143,17 +148,17 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, on
       <div className="flex-1 min-h-0 cc-scroll">
         {error ? (
           <ForgeErrorView error={error} target={target} />
-        ) : items === null ? (
+        ) : shownItems === null ? (
           <div className="flex flex-col gap-3 px-5 py-4">
             {[80, 60, 70, 55].map((w, i) => <Skeleton key={i} variant="text" height={14} width={`${w}%`} />)}
           </div>
-        ) : items.length === 0 ? (
+        ) : shownItems.length === 0 ? (
           <EmptyState
             className="m-auto pt-16"
             icon={<Icon className="w-8 h-8" />}
-            title={t(pr ? "forge.pr.none" : "forge.issue.none")}
+            title={linkedBranch !== undefined ? t("forge.pr.linkedNone", { branch: linkedBranch ?? "" }) : t(pr ? "forge.pr.none" : "forge.issue.none")}
           />
-        ) : items.map((item) => (
+        ) : shownItems.map((item) => (
           <Button variant="custom"
             key={item.number}
             onClick={() => onOpen(item)}

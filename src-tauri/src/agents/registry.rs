@@ -119,6 +119,8 @@ pub enum McpStyle {
     /// põe ali só `mcp_servers.ags`, e o resto (modelo, provedores, os outros MCP dele) continua o dele. As tools chegam como
     /// `mcp__ags__browser_click`, a mesma convenção do Claude Code. (Verificado no código do Hermes 0.21.5.)
     HermesManaged,
+    /// Codex CLI: overrides `-c` por processo, sem gravar em `CODEX_HOME/config.toml`.
+    CodexConfigOverrides,
     /// Todavía no se verificó cómo enchufárselo. La tab arranca igual, sin las tools.
     None,
 }
@@ -289,7 +291,7 @@ pub const AGENTS: &[AgentDef] = &[
         assign_id_prefix: "",
         sessions: SessionSource::CodexRollouts,
         models: ModelSource::CodexAppServer,
-        mcp: McpStyle::None,
+        mcp: McpStyle::CodexConfigOverrides,
     },
     AgentDef {
         id: "opencode",

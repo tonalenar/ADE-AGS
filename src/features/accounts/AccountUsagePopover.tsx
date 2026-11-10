@@ -8,7 +8,7 @@ import {
   agentAccountUsage, claudeLiveUsage, formatAgo, isUsageFresh, planLabel,
   type AccountUsage, type LiveUsage,
 } from "./usage";
-import { accountEnv, codexAccountUsage } from "./ipc";
+import { codexAccountUsage } from "./ipc";
 import type { AgentAccount, CodexUsage, QuotaWindow } from "./types";
 import { accountProblemKey, accountProblemText } from "./problem";
 
@@ -136,8 +136,7 @@ export function AccountUsagePopover({ account, onLogin }: { account: AgentAccoun
     let stale = false;
 
     const ask = async (force: boolean) => {
-      const env = realAccountId(account) ? await accountEnv(account.id) : {};
-      return claudeLiveUsage(account.id, env, force);
+      return claudeLiveUsage(account.id, force);
     };
     const asFailure = (problem: string): LiveUsage => ({
       available: false, session: null, week: null, weekModels: [],

@@ -1,0 +1,17 @@
+{
+  "checks": [
+    {
+      "label": "o init abre a sessão",
+      "expect": {
+        "sessao": "{{session:1}}"
+      }
+    },
+    {
+      "label": "EOF sem result é queda, não interrupt de protocolo",
+      "expect": {
+        "fim": "caiu",
+        "erroContem": "Cursor terminou sem responder"
+      }
+    }
+  ]
+}

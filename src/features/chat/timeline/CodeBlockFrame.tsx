@@ -3,8 +3,9 @@ import { useTranslation } from "react-i18next";
 
 import type { CodeBlock } from "@/shared/ui/Markdown";
 
-import { CheckIcon, CopyIcon, PlayIcon } from "../chatIcons";
+import { CheckIcon, CopyIcon, EyeIcon, PlayIcon } from "../chatIcons";
 import { codeLang, runnableCommand } from "../codeRun";
+import { VisualReplyPreview } from "./VisualReplyPreview";
 
 /**
  * Quem pode rodar um comando no terminal da conversa aberta (a casca do chat, com a pasta dela). Ausente = o bloco
@@ -25,7 +26,10 @@ export function renderChatCodeBlock(block: CodeBlock): React.ReactNode {
 function CodeBlockFrame({ code, className, pre }: CodeBlock) {
   const { t } = useTranslation();
   const run = useContext(RunCodeContext);
-  const command = runnableCommand(codeLang(className), code);
+  const language = codeLang(className);
+  const command = runnableCommand(language, code);
+  const canPreview = (language === "html" || language === "htm") && code.length <= 300_000;
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
@@ -41,6 +45,11 @@ function CodeBlockFrame({ code, className, pre }: CodeBlock) {
     <div data-code-block="" className="my-2 flex items-start rounded-lg border border-gray-200 dark:border-white/8 bg-gray-100 dark:bg-black/30">
       <div className="min-w-0 flex-1">{pre}</div>
       <div className="shrink-0 flex items-center gap-0.5 p-1.5">
+        {canPreview && (
+          <button type="button" onClick={() => setPreviewOpen(true)} aria-label={t("chat.visualReply.open")} title={t("chat.visualReply.open")} className={button}>
+            <EyeIcon className="w-4 h-4" />
+          </button>
+        )}
         {run && command && (
           <button type="button" onClick={() => run(command)} aria-label={t("chat.code.run")} title={t("chat.code.runHint")} className={button}>
             <PlayIcon className="w-4 h-4" />
@@ -50,6 +59,7 @@ function CodeBlockFrame({ code, className, pre }: CodeBlock) {
           {copied ? <CheckIcon className="w-4 h-4" /> : <CopyIcon className="w-4 h-4" />}
         </button>
       </div>
+      {previewOpen && <VisualReplyPreview html={code} onClose={() => setPreviewOpen(false)} />}
     </div>
   );
 }

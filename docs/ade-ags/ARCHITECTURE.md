@@ -61,14 +61,14 @@ A tabela única de fábrica é `src-tauri/src/agents/registry.rs`, struct `Agent
 | `resume` | Template com `{session}` |
 | `sessions` | Enum `SessionSource` que escolhe o algoritmo em `session/title.rs` |
 | `models` | Aliases fixos (Claude), `opencode models --verbose`, ou `Unknown` |
-| `mcp` | `ClaudeFlags`, `OpencodeConfig` ou `None` |
+| `mcp` | `ClaudeFlags`, `OpencodeConfig`, `HermesManaged`, `CodexConfigOverrides` ou `None` |
 
 Agentes de fábrica hoje:
 
 | id | binário | contas | resume | sessões | MCP da app | frota headless |
 |---|---|---|---|---|---|---|
 | `claude-code` | `claude` | `CLAUDE_CONFIG_DIR` | `--resume {session}` | `ClaudeProjects` | flags `--mcp-config` | sim |
-| `codex` | `codex` | `CODEX_HOME` | `resume {session}` (subcomando) | `CodexRollouts` | não | sim |
+| `codex` | `codex` | `CODEX_HOME` | `resume {session}` (subcomando) | `CodexRollouts` | overrides `-c` no processo da TUI | sim |
 | `opencode` | `opencode` | `XDG_DATA_HOME` | `--session {session}` | pergunta ao processo | `OPENCODE_CONFIG_CONTENT` | sim |
 | `gemini-cli` | `gemini` | não | `--resume {session}` | `GeminiTmp` em `~/.gemini` | não | sim, sem broker MCP |
 | `kimi-code` | `kimi` | não | `--session {session}` | `KimiSessions` | não | sim |
@@ -84,9 +84,9 @@ Claude, Codex e OpenCode usam esse diretório. Gemini e Kimi ignoram o argumento
 
 ## Contas
 
-Módulo `accounts/`. Uma conta é um diretório. A tab recebe uma variável de ambiente. Não há symlink do "perfil ativo": duas tabs vivas não podem dividir o mesmo arquivo de credencial.
+Módulo `accounts/`. Uma conta é um diretório. A tab envia ao backend só o ID da conta, que resolve o diretório e prepara o ambiente do processo. Não há symlink do "perfil ativo": duas tabs vivas não podem dividir o mesmo arquivo de credencial.
 
-A app cria o diretório vazio em `<app data>/accounts/<agente>/<nome>` e não lê, não copia e não grava o segredo. O login acontece no terminal do próprio agente. O que se lê do disco é só o marcador de "está logado" e, para o Claude, o email em `.claude.json` → `oauthAccount.emailAddress`.
+A app cria o diretório vazio em `<app data>/accounts/<agente>/<nome>`. O login de perfil acontece no terminal do próprio agente; uma API key do Claude fica só no keyring. O backend carrega perfil e credencial para o PTY na hora do spawn e não devolve o ambiente ao WebView. O que se lê do perfil é só o marcador de "está logado" e, para o Claude, o email em `.claude.json` → `oauthAccount.emailAddress`.
 
 | Agente | Variável | Diretório padrão quando a variável não está setada | Marcador de login | Onde o marcador da conta do sistema é lido |
 |---|---|---|---|---|
@@ -96,7 +96,7 @@ A app cria o diretório vazio em `<app data>/accounts/<agente>/<nome>` e não l�
 
 `default_dir()` em `profiles.rs` tem braços só para `XDG_DATA_HOME` e `CODEX_HOME`. Qualquer outra variável cai em `~/.claude`. Ligar Gemini sem um braço próprio faria a conta do sistema apontar para a pasta do Claude.
 
-A conta do sistema não é uma linha em `agent_accounts`. O id sintético é `system:<agent>`. As contas criadas na app são linhas. `env_for_account` devolve o mapa que o PTY e a frota já sabem injetar.
+A conta do sistema não é uma linha em `agent_accounts`. O id sintético é `system:<agent>`. As contas criadas na app são linhas. Para uma aba, o WebView envia somente o id da conta; o backend confere se ela pertence ao provedor e injeta perfil/credenciais no PTY. A frota também resolve o ambiente no backend. Segredos do keyring nunca voltam pelo IPC.
 
 Credenciais de git do forge usam o keyring do SO (`keyring` com `windows-native`), não um arquivo de token da ADE.
 
@@ -110,11 +110,11 @@ A skill `skills/ags-orchestrator` vem no bundle e se instala sozinha.
 
 ## MCP
 
-Hoje não há um gerenciador de servidores MCP do usuário. O que existe é o servidor MCP **da app**, nome `ade-ags`, implementado em `ipc/mcp.rs` e exposto por `ags mcp` em stdio.
+Hoje não há um gerenciador de servidores MCP de terceiros. O que existe é o servidor MCP **da app**, nome `ags`, implementado em `ipc/mcp.rs` e exposto por `ags mcp` em stdio.
 
 Ele dá ao agente da tab: browser do projeto, orquestração da frota, conta git, pergunta ao usuário. Numa tarefa de frota ele também é o prompt de permissão (`approve_tool_use`). Se a app não responde, a resposta é não.
 
-Só Claude (`--mcp-config` + `--strict-mcp-config`) e OpenCode (`OPENCODE_CONFIG_CONTENT`, merge) recebem esse servidor. Gemini, Codex e Kimi sobem sem essas tools. O README descreve isolamento de MCP por tab como trabalho futuro (fase 11).
+Claude Code (`--mcp-config` + `--strict-mcp-config`), Codex TUI (overrides `-c` só no processo), OpenCode (`OPENCODE_CONFIG_CONTENT`, merge) e Hermes (configuração gerenciada) recebem esse servidor. Gemini, Kimi e agentes customizados ainda iniciam sem MCP da ADE na TUI. Conversas por protocolo Codex, Claude Code e OpenCode recebem a ponte por configuração da sessão; Antigravity recebe arquivos temporários por turno. A ADE não altera configurações globais. Segue planejado um gerenciador para servidores MCP de terceiros.
 
 ## Orquestrador, frota e CLI
 

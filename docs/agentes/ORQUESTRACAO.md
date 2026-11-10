@@ -5,6 +5,7 @@
 ## Regras para quem está numa equipe
 - **Orquestrador**:
   - delegue a cada integrante por `ags peer tell --file`, em ~2 min, **antes** de explorar o código;
+  - conversas por protocolo com MCP da ADE também podem consultar `agent_roster`, delegar uma tarefa com `delegate_task` ou declarar um DAG com `run_plan`; escolha qualquer agente/modelo disponível quando isso ajudar a paralelizar trabalho separável, pelo scheduler da Frota. `client_request_id` torna retries idempotentes quando a resposta se perde; `delegate_task.context` transfere só o trecho escolhido pelo pai, limitado a 16 KiB e marcado como dado não confiável. `task_cancel` interrompe a tarefa e cancela, na mesma operação, os descendentes ativos daquela ramificação. Essas chamadas criam tarefas headless da Frota, não threads nativas filhas do provider. Em Antigravity, o MCP da conversa usa uma configuração temporária por turno e ações protegidas só passam em Acesso total, porque `agy --print` não abre aprovação interativa;
   - avise o QA a cada entrega recebida;
   - recrute só quando o trabalho for paralelizável, e prefira um role existente;
   - junte as branches dos membros na sua, e só você faz push e abre **um** PR.
@@ -157,6 +158,12 @@ Tudo em detalhe — estado, limiares, textos, comandos, testes, histórico e pon
 - **Headless** (`ade-ags --headless`, `ags mission run --wait`; `docs/ade-ags/HEADLESS.md`):
   - aprovação pendente vence o prazo e é negada;
   - uma instância por banco.
+
+## Conversas filhas nativas do harness
+
+Em uma conversa estruturada, `chat_providers` lista os providers compatíveis com conversas nativas e suas capacidades do runtime; `chat_new` pode abrir uma segunda sessão em qualquer um deles, incluindo um ACP local cadastrado. A lista é separada de `agent_roster`, que descreve executores headless da Frota. A sessão filha recebe um ID ADE próprio e um `parent_ref`; a UI a mostra no painel lateral da conversa de origem. Sem `agent`, mantém o provider do pai. Recebe só o prompt e o `context` explicitamente selecionado, marcado como dado não confiável; não recebe o histórico inteiro. A conversa começa em Supervisionado, mesmo se a chamada incluir outra opção de acesso.
+
+O agente orquestrador pode seguir a filha com `chat_wait`/`chat_show` e interromper com `chat_stop`. `chat_compact` e `chat_goal` expõem compactação e objetivos persistentes somente nos providers que os suportam; consulte `chat_providers.capabilities` antes de chamá-los. Use `delegate_task`/`run_plan` quando precisar de um executor headless, roteamento por complexidade, DAG, worktree isolado, orçamento ou cancelamento de descendentes. As duas superfícies ainda têm modelos de execução separados: conversa filha não entra no grafo `runs/tasks`, não tem retry idempotente próprio e não encaminha automaticamente perguntas/aprovações ao pai. Essa é a próxima parte do harness comum; não trate uma conversa filha como uma task da Frota.
 
 ## Rodadas de correção
 Arquivo: `runs/fixrounds.rs`.

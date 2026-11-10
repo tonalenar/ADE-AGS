@@ -1,6 +1,9 @@
 import type { Terminal } from "@xterm/xterm";
 
+import { DESKTOP_OS, type DesktopOs } from "@/app/platform";
 import { keyName } from "@/shared/keyboard";
+
+export type TerminalHistoryAction = "previousPage" | "nextPage" | "start" | "latest" | "selectAll";
 
 /**
  * Lo que la terminal decide sobre el teclado ANTES que xterm.
@@ -81,15 +84,47 @@ export interface TerminalKeyOptions {
    */
   getSelection?: () => string;
   copy?: (text: string) => void;
+  /** Histórico do buffer normal; as telas alternativas continuam controlando essas teclas. */
+  isNormalBuffer?: () => boolean;
+  onHistoryAction?: (action: TerminalHistoryAction) => void;
+  platform?: DesktopOs;
 }
 
 function isCtrlV(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">): boolean {
   return event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "v";
 }
 
-function isCopyKey(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">): boolean {
-  if (!event.ctrlKey || event.altKey || event.metaKey) return false;
+function isCopyKey(
+  event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">,
+  platform: DesktopOs,
+): boolean {
+  if (event.altKey) return false;
+  if (platform === "macos" && event.metaKey && !event.ctrlKey) return event.key.toLowerCase() === "c";
+  if (!event.ctrlKey || event.metaKey) return false;
   return event.key.toLowerCase() === "c" || event.key === "Insert";
+}
+
+function historyAction(
+  event: KeyLike,
+  platform: DesktopOs,
+): TerminalHistoryAction | null {
+  if (event.altKey || event.isComposing) return null;
+  if (event.shiftKey && !event.ctrlKey && !event.metaKey) {
+    if (event.key === "PageUp") return "previousPage";
+    if (event.key === "PageDown") return "nextPage";
+  }
+  if (!event.shiftKey) {
+    if (platform === "macos" && event.metaKey && !event.ctrlKey && event.key.toLowerCase() === "a") return "selectAll";
+    return null;
+  }
+  const modifier = platform === "macos"
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+  if (!modifier) return null;
+  if (event.key === "Home") return "start";
+  if (event.key === "End") return "latest";
+  if (platform !== "macos" && event.key.toLowerCase() === "a") return "selectAll";
+  return null;
 }
 
 /**
@@ -101,9 +136,13 @@ export function createTerminalKeyHandler(
   options: TerminalKeyOptions = {},
 ): (event: KeyLike) => boolean {
   let deadPending = false;
+  const historyKeysDown = new Set<string>();
+  const platform = options.platform ?? DESKTOP_OS;
 
   return (event) => {
-    if (options.getSelection && options.copy && event.type === "keydown" && isCopyKey(event)) {
+    if (event.type === "keyup" && historyKeysDown.delete(event.code)) return false;
+
+    if (options.getSelection && options.copy && event.type === "keydown" && isCopyKey(event, platform)) {
       const text = options.getSelection();
       if (text) {
         event.preventDefault();
@@ -118,6 +157,16 @@ export function createTerminalKeyHandler(
     // El soltar de una tecla que xterm no vio apretarse tampoco le sirve.
     if (event.type === "keyup") return !COMPOSE_KEYS.has(event.key);
     if (event.type !== "keydown") return true;
+
+    if (options.onHistoryAction && options.isNormalBuffer?.()) {
+      const action = historyAction(event, platform);
+      if (action) {
+        event.preventDefault();
+        options.onHistoryAction(action);
+        if (event.code) historyKeysDown.add(event.code);
+        return false;
+      }
+    }
 
     if (keyName(event) === "Tab" && !event.ctrlKey && !event.metaKey && !event.altKey) {
       event.preventDefault();

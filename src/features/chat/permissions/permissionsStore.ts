@@ -10,6 +10,7 @@ import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { sendToConversation } from "../chatActions";
 import { chatPermissionNotify } from "../ipc";
 import { useChatLive } from "../liveStore";
+import { unsnoozeConversation } from "../shelf";
 import { EMPTY_LIVE } from "../structured/model";
 import { answerRequest, sendToThread, useStructured } from "../structured/store";
 import { teamVerdictForAsk } from "../team/teamPermissions";
@@ -41,6 +42,9 @@ export const usePermissions = create<PermissionsState>(() => ({
   rules: [], rulesLoaded: false, inboxOpen: false, filter: "all", selected: null, tui: [], answered: {},
 }));
 
+/** A primeira leitura da TUI define o baseline; só um prompt novo depois dela acorda a conversa. */
+let tuiPromptsInitialized = false;
+
 export function setInboxOpen(open: boolean): void {
   usePermissions.setState({ inboxOpen: open });
 }
@@ -59,11 +63,20 @@ export function selectAsk(id: string | null): void {
 
 /** Os diálogos das TUIs da última leitura. Esquece os "respondidos" que já saíram da tela. */
 export function setTuiPrompts(tui: TerminalPromptItem[]): void {
+  const previous = usePermissions.getState().tui;
+  const known = new Set(previous.map((p) => `tui:${p.tabId}:${p.prompt.signature}`));
+  const current = new Set(tui.map((p) => `tui:${p.tabId}:${p.prompt.signature}`));
+  const isInitialSnapshot = !tuiPromptsInitialized;
+  tuiPromptsInitialized = true;
+  const newlyRequested = isInitialSnapshot ? [] : tui.filter((p) => !known.has(`tui:${p.tabId}:${p.prompt.signature}`));
+  const answeredInTui = previous.filter((p) => !current.has(`tui:${p.tabId}:${p.prompt.signature}`));
   usePermissions.setState((s) => {
     const live = new Set(tui.map((p) => `tui:${p.tabId}:${p.prompt.signature}`));
     const answered = Object.fromEntries(Object.keys(s.answered).filter((id) => !id.startsWith("tui:") || live.has(id)).map((id) => [id, true as const]));
     return { tui, answered };
   });
+  for (const prompt of newlyRequested) unsnoozeConversation(prompt.tabId);
+  for (const prompt of answeredInTui) unsnoozeConversation(prompt.tabId);
 }
 
 /** Lê as regras do banco (a fonte da verdade, também do backend). */
@@ -108,6 +121,7 @@ const REPLY_DELAY_MS = 400;
 export function answerAsk(ask: PendingAsk, decision: AskDecision, reply?: string): void {
   const text = reply?.trim();
   const ref = ask.ref;
+  if (ask.conversation) unsnoozeConversation(ask.conversation);
   usePermissions.setState((s) => ({ answered: { ...s.answered, [ask.id]: true }, selected: s.selected === ask.id ? null : s.selected }));
   if (ref.source === "thread") {
     answerRequest(ref.threadId, ref.requestId, decision);

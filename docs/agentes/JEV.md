@@ -4,7 +4,7 @@
 
 ## Regras
 - **O produto nunca depende de o Jev responder.** Se ele falhar, a função devolve `None` e a regra local segue. O modo sombra nunca altera o retorno.
-- **Cada consulta custa cota.** Não rode o bench real (`scripts/jev-bench.ts --real`), o `jev-done-probe` nem o `jev-pilot-sim` sem o OK do usuário, e informe sempre o teto (`--max-real`, `--max-probes`). Para testar lógica, use `--sim`, que é grátis. O "Testar conexão" e a atualização automática do modelo também fazem consultas.
+- **Uso durante tarefas.** Consultas normais ao Jev são permitidas sem confirmação individual quando ele estiver ativo e com saldo. Não faça novas chamadas se estiver desligado ou sem saldo. Bench real (`scripts/jev-bench.ts --real`), `jev-done-probe` e `jev-pilot-sim` ainda exigem OK explícito e um teto (`--max-real`, `--max-probes`), pois podem consumir muitas chamadas. Para testar lógica, use `--sim`, que é grátis. O "Testar conexão" e a atualização automática do modelo também fazem consultas.
 - A cada medida, use **sementes novas**: uma semente já usada deixa de ser teste.
 - Ao ler a resposta, use a **probabilidade** do rótulo, não a `confidence`.
 - **Privacidade**:

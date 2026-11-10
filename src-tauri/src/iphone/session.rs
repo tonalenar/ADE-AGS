@@ -494,6 +494,15 @@ impl Worker {
                                 }
                                 match Decoder::new(params, Box::new(Sink(self.presenter.clone()))) {
                                     Ok(d) => {
+                                        let display = model::display_for_video_orientation(
+                                            self.link.display,
+                                            d.coded_dimensions(),
+                                        );
+                                        if display != self.link.display {
+                                            self.link.display = display;
+                                            self.presenter.set_display(display);
+                                            self.emit();
+                                        }
                                         decoder = Some(d);
                                         gate.on_new_decoder(&unit, ms(now));
                                     }

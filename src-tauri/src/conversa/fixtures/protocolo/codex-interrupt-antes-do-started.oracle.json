@@ -1,0 +1,17 @@
+{
+  "checks": [
+    {
+      "label": "a resposta de id 1 é o initialize e não traz thread.id; a bancada recusa a abertura e o id da thread fica só na resposta de id 2",
+      "expect": {
+        "retomada": "gone"
+      }
+    },
+    {
+      "label": "o turno segue até turn/completed completed",
+      "expect": {
+        "fim": "ok",
+        "textoContem": "1... 2... 3..."
+      }
+    }
+  ]
+}

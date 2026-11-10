@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   AnimateSpin, ArrowLeftIcon, ArrowRightIcon, Badge, Button, CheckIcon, ChevronDownIcon, ChevronRightIcon,
 } from "neogestify-ui-components";
@@ -10,6 +9,7 @@ import { getRoster } from "@/features/runs/ipc";
 import type { Roster } from "@/features/runs/types";
 import { openNewAgentWith } from "@/features/tabs/tabActions";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { forgePullFiles, reviewGuideGet } from "./ipc";
 import {
@@ -269,7 +269,7 @@ function GuideTour({ entry, item, cwd, workspaces }: { entry: GuideEntry; item: 
   };
 
   const openOnHost = (f: GuideStopFile) => {
-    void hostFileUrl(item.webUrl, f.path, f.lines).then((url) => openUrl(url)).catch(console.error);
+    void hostFileUrl(item.webUrl, f.path, f.lines).then(openExternalUrl).catch(console.error);
   };
 
   const ask = () => openNewAgentWith({

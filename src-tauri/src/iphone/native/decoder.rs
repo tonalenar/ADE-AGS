@@ -24,6 +24,13 @@ pub struct CMTime {
     epoch: i64,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CMVideoDimensions {
+    width: i32,
+    height: i32,
+}
+
 type OutputCallback = unsafe extern "C" fn(
     refcon: *mut c_void,
     source_frame: *mut c_void,
@@ -49,6 +56,7 @@ unsafe extern "C" {
 
 #[link(name = "CoreMedia", kind = "framework")]
 unsafe extern "C" {
+    fn CMVideoFormatDescriptionGetDimensions(description: *const c_void) -> CMVideoDimensions;
     fn CMVideoFormatDescriptionCreateFromHEVCParameterSets(
         allocator: CFTypeRef,
         count: usize,
@@ -215,6 +223,16 @@ impl Decoder {
         // SAFETY: chave e valor constantes.
         unsafe { VTSessionSetProperty(session, kVTDecompressionPropertyKey_RealTime, kCFBooleanTrue) };
         Ok(Decoder { session, format, params: params.clone(), ctx })
+    }
+
+    /// Dimensões do fluxo HEVC negociado, usadas para acompanhar a rotação física sem esperar uma nova conexão.
+    pub fn coded_dimensions(&self) -> (u32, u32) {
+        // SAFETY: `format` é o CMVideoFormatDescription criado e retido por este decodificador.
+        let dimensions = unsafe { CMVideoFormatDescriptionGetDimensions(self.format) };
+        (
+            dimensions.width.max(0) as u32,
+            dimensions.height.max(0) as u32,
+        )
     }
 
     /// Os parâmetros com que nasceu: se o aparelho mandar outros (girou, mudou a resolução), refaça.

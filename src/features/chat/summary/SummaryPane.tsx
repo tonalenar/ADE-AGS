@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "neogestify-ui-components";
 
 import { hasBrowserMcp } from "@/features/browser/tabMcp";
@@ -13,6 +12,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { homeDir } from "@/shared/ipc/window";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import type { ConversationCard } from "../chatModel";
@@ -32,12 +32,14 @@ import { connectorsOf, contextOf, diffTotals, filesFromHandoffs, memoryConnector
 const EMPTY_ITEMS: TimelineItem[] = [];
 
 /** Os itens da conversa: da timeline da aba (TUI) ou dos eventos da conversa por protocolo. */
-function useConversationItems(conversation: ConversationCard | null): TimelineItem[] {
+function useConversationTimelineData(conversation: ConversationCard | null): { items: TimelineItem[]; truncated: boolean } {
   const tabId = conversation?.tabId ?? "";
   const thread = threadIdOf(tabId);
   const tui = useConversationTimeline(thread ? "" : tabId);
   const structured = useStructured((s) => (thread ? s.live[thread]?.items : undefined));
-  return (thread ? structured : tui.timeline?.items) ?? EMPTY_ITEMS;
+  return thread
+    ? { items: structured ?? EMPTY_ITEMS, truncated: false }
+    : { items: tui.timeline?.items ?? EMPTY_ITEMS, truncated: tui.timeline?.truncated ?? false };
 }
 
 /**
@@ -55,15 +57,17 @@ export function SummaryPane({ conversation, cwd, tabId, inCard = false }: {
   // A aba da conversa (TUI): tem sessão e config, e os cartões de Contexto e Conectores leem o disco. A
   // conversa por protocolo não tem aba: esses dois cartões usam o que o app recebe dos eventos.
   const tab = useTabsStore((s) => s.tabs.find((x) => x.id === conversation?.tabId) ?? null);
+  const timeline = useConversationTimelineData(conversation);
   if (!conversation || !cwd) return <p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.summary.none")}</p>;
   return (
     <SectionsInOneCard.Provider value={inCard}>
     <div className={inCard ? "flex-1 min-h-0 cc-scroll-hidden py-1 flex flex-col" : "flex-1 min-h-0 cc-scroll-hidden p-3 flex flex-col gap-3"}>
       <EnvironmentCard conversation={conversation} cwd={cwd} />
-      {tab ? <ContextSection tab={tab} flat /> : <ThreadContextCard conversation={conversation} />}
+      {tab ? <ContextSection tab={tab} flat /> : <ThreadContextCard items={timeline.items} />}
+      <UsageCard items={timeline.items} truncated={timeline.truncated} />
       <LimitsCard conversation={conversation} />
       {tab ? <ConnectorsSection tab={tab} flat /> : <ThreadConnectorsCard conversation={conversation} />}
-      <OutputsCard conversation={conversation} cwd={cwd} />
+      <OutputsCard conversation={conversation} cwd={cwd} items={timeline.items} />
       <ChangesCard conversation={conversation} cwd={cwd} tabId={tabId} />
     </div>
     </SectionsInOneCard.Provider>
@@ -102,15 +106,71 @@ function FolderGlyph() {
 }
 
 /** Conversa por protocolo: sem aba, o contexto é o que o agente informa (tokens); nunca uma porcentagem inventada. */
-function ThreadContextCard({ conversation }: { conversation: ConversationCard }) {
+function ThreadContextCard({ items }: { items: TimelineItem[] }) {
   const { t, i18n } = useTranslation();
-  const items = useConversationItems(conversation);
-  const tokens = useMemo(() => items.reduce((n, i) => (i.kind === "usage" && typeof i.tokens === "number" ? n + i.tokens : n), 0), [items]);
-  const ctx = contextOf(tokens > 0 ? tokens : null);
+  const contextTokens = useMemo(() => [...items].reverse().find((item) => item.kind === "usage" && typeof item.contextTokens === "number" && item.contextTokens > 0)?.contextTokens ?? null, [items]);
+  const ctx = contextOf(contextTokens);
   return (
     <Section id="context" title={t("sidePanel.context.title")} defaultOpen={false} flat
       aside={<span className="text-[11px] text-gray-500 dark:text-white/45 tabular-nums">{ctx.measured ? t("chat.summary.contextTokens", { tokens: shortTokens(ctx.tokens ?? 0, i18n.language) }) : t("chat.summary.notMeasured")}</span>}>
-      <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.contextHint")}</span></Row>
+      <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.contextThreadHint")}</span></Row>
+    </Section>
+  );
+}
+
+/** Soma os totais/categorias que a timeline recebeu; não estima custo nem completa dados ausentes. */
+function UsageCard({ items, truncated }: { items: TimelineItem[]; truncated: boolean }) {
+  const { t, i18n } = useTranslation();
+  const usage = useMemo(() => {
+    const total = {
+      tokens: 0, records: 0, detailedRecords: 0,
+      input: 0, inputRecords: 0, output: 0, outputRecords: 0,
+      cached: 0, cachedRecords: 0, cacheWrite: 0, cacheWriteRecords: 0,
+      reasoning: 0, reasoningRecords: 0, reasoningSemantics: "none" as "none" | "included" | "separate" | "mixed" | "unknown",
+    };
+    for (const item of items) {
+      if (item.kind !== "usage" || typeof item.tokens !== "number" || item.tokens <= 0) continue;
+      total.tokens += item.tokens;
+      total.records += 1;
+      const detail = item.usageBreakdown;
+      if (!detail) continue;
+      const hasDetail = [detail.input, detail.output, detail.cached, detail.cacheWrite, detail.reasoning]
+        .some((value) => typeof value === "number");
+      if (!hasDetail) continue;
+      total.detailedRecords += 1;
+      if (typeof detail.input === "number") { total.input += detail.input; total.inputRecords += 1; }
+      if (typeof detail.output === "number") { total.output += detail.output; total.outputRecords += 1; }
+      if (typeof detail.cached === "number") { total.cached += detail.cached; total.cachedRecords += 1; }
+      if (typeof detail.cacheWrite === "number") { total.cacheWrite += detail.cacheWrite; total.cacheWriteRecords += 1; }
+      if (typeof detail.reasoning === "number") {
+        total.reasoning += detail.reasoning;
+        total.reasoningRecords += 1;
+        const semantics = detail.reasoningInOutput === true ? "included" : detail.reasoningInOutput === false ? "separate" : "unknown";
+        if (total.reasoningSemantics === "none") total.reasoningSemantics = semantics;
+        else if (total.reasoningSemantics !== semantics) total.reasoningSemantics = "mixed";
+      }
+    }
+    return total;
+  }, [items]);
+  return (
+    <Section id="usage" title={t("chat.summary.usage.title")} defaultOpen={false} flat
+      aside={<span className="text-[11px] text-gray-500 dark:text-white/45 tabular-nums">{usage.records ? t("chat.summary.usage.records", { count: usage.records }) : t("chat.summary.notMeasured")}</span>}>
+      {usage.records > 0 ? (
+        <>
+          <Row>{t("chat.summary.usage.total", { tokens: shortTokens(usage.tokens, i18n.language) })}</Row>
+          {usage.detailedRecords > 0 && <>
+            <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.usage.breakdownCoverage", { count: usage.detailedRecords, total: usage.records })}</span></Row>
+            {usage.inputRecords > 0 && <Row>{t("chat.summary.usage.input", { tokens: shortTokens(usage.input, i18n.language) })}</Row>}
+            {usage.outputRecords > 0 && <Row>{t("chat.summary.usage.output", { tokens: shortTokens(usage.output, i18n.language) })}</Row>}
+            {usage.cachedRecords > 0 && <Row>{t("chat.summary.usage.cached", { tokens: shortTokens(usage.cached, i18n.language) })}</Row>}
+            {usage.cacheWriteRecords > 0 && <Row>{t("chat.summary.usage.cacheWrite", { tokens: shortTokens(usage.cacheWrite, i18n.language) })}</Row>}
+            {usage.reasoningRecords > 0 && <Row>{t(usage.reasoningSemantics === "included" ? "chat.summary.usage.reasoningIncluded" : usage.reasoningSemantics === "separate" ? "chat.summary.usage.reasoningSeparate" : "chat.summary.usage.reasoning", { tokens: shortTokens(usage.reasoning, i18n.language) })}</Row>}
+            <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.usage.breakdownMayOverlap")}</span></Row>
+          </>}
+          <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.usage.costUnavailable")}</span></Row>
+        </>
+      ) : <Row><span className="text-gray-500 dark:text-white/45">{t("chat.summary.usage.empty")}</span></Row>}
+      {truncated && <Row><span className="text-amber-700 dark:text-amber-300">{t("chat.summary.usage.partial")}</span></Row>}
     </Section>
   );
 }
@@ -161,10 +221,9 @@ function useTeamFiles(conversation: ConversationCard): OutputFile[] {
   return useMemo(() => filesFromHandoffs(handoffs), [handoffs]);
 }
 
-function OutputsCard({ conversation, cwd }: { conversation: ConversationCard; cwd: string }) {
+function OutputsCard({ conversation, cwd, items }: { conversation: ConversationCard; cwd: string; items: TimelineItem[] }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const items = useConversationItems(conversation);
   const own = useMemo(() => outputsFromItems(items), [items]);
   const delivered = useTeamFiles(conversation);
   const outputs = useMemo(() => [...own, ...delivered.filter((d) => !own.some((o) => o.path === d.path))], [own, delivered]);
@@ -232,7 +291,7 @@ function ChangesCard({ conversation, cwd, tabId }: { conversation: ConversationC
                   )}
                 </span>
               </span>
-              <button type="button" onClick={() => { openUrl(pull.webUrl).catch(console.error); }} aria-label={t("chat.summary.pullOpen")} title={t("chat.summary.pullOpen")}
+              <button type="button" onClick={() => { openExternalUrl(pull.webUrl).catch(console.error); }} aria-label={t("chat.summary.pullOpen")} title={t("chat.summary.pullOpen")}
                 className="shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10">
                 <MoreHorizontalIcon className="w-4 h-4" />
               </button>

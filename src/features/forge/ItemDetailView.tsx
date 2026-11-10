@@ -1,9 +1,8 @@
 import { PopupSelect } from "@/shared/ui/PopupSelect";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { openUrl } from "@tauri-apps/plugin-opener";
-import { AddIcon, ArrowLeftIcon, Badge, Button, Skeleton, TextArea } from "neogestify-ui-components";
+import { AddIcon, ArrowLeftIcon, Badge, Button, CopyIcon, Skeleton, TextArea } from "neogestify-ui-components";
 
 import { BranchIcon, ExternalIcon, IssueIcon, PullRequestIcon, SendIcon } from "@/app/icons";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -13,12 +12,15 @@ import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
 import { Markdown } from "@/shared/ui/Markdown";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 
 import { itemPrompt } from "./agentPrompt";
 import { forgeCheckoutPull, forgeComment, forgeImage, forgeItem, forgeMergePull, resolveForgeImage } from "./ipc";
 import { forgeErrorOf, type ForgeItem, type ForgeItemDetail } from "./types";
 import { ReviewGuidePanel } from "./ReviewGuidePanel";
+import { PullRequestCodeTab } from "./PullRequestCodeTab";
+import { SelectionComment } from "@/features/chat/quotes/SelectionComment";
 
 type MergeMethod = "merge" | "squash" | "rebase";
 
@@ -33,7 +35,7 @@ function when(iso: string | null): string {
  * que se puede hacer sin salir de la app — comentar, traer el PR como rama local para
  * probarlo, fusionarlo.
  */
-export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }: {
+export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged, quoteKey = null }: {
   cwd: string;
   /** Las carpetas abiertas de este repo (checkout y worktrees): sus agentes son a los que
    *  se le puede pasar el issue. */
@@ -42,6 +44,8 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
   pr: boolean;
   onBack: () => void;
   onChanged: () => void;
+  /** Presente quando o detalhe é aberto no painel da conversa; null no Forge independente. */
+  quoteKey?: string | null;
 }) {
   const { t } = useTranslation();
   const [detail, setDetail] = useState<ForgeItemDetail | null>(null);
@@ -51,7 +55,11 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
   const [note, setNote] = useState("");
   const [merging, setMerging] = useState(false);
   const [method, setMethod] = useState<MergeMethod>("merge");
+  const [section, setSection] = useState<"conversation" | "code">("conversation");
+  const [codeOpened, setCodeOpened] = useState(false);
   const [agentMenu, setAgentMenu] = useState<{ x: number; y: number } | null>(null);
+  const quoteRoot = useRef<HTMLDivElement>(null);
+  const codeTabHost = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const allTabs = useTabsStore((s) => s.tabs);
   const agents = useMemo(
@@ -79,6 +87,18 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
     } finally {
       setBusy(null);
     }
+  };
+
+  const copyPullRequestNumber = () => {
+    setError("");
+    setNote("");
+    if (!navigator.clipboard?.writeText) {
+      setError(t("forge.pr.copyNumberFailed"));
+      return;
+    }
+    void navigator.clipboard.writeText(String(item.number))
+      .then(() => setNote(t("forge.pr.numberCopied")))
+      .catch(() => setError(t("forge.pr.copyNumberFailed")));
   };
 
   const shown = detail ?? { ...item, body: null, thread: [] };
@@ -131,7 +151,7 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
   ];
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
+    <div ref={quoteRoot} className="flex flex-col flex-1 min-h-0">
       {/* ── barra: volver, título, acciones ─────────────────────────── */}
       <div className="flex items-center gap-2 h-11 shrink-0 px-4 border-b border-gray-200 dark:border-white/8">
         <Button variant="custom"
@@ -155,11 +175,18 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
           <SendIcon className="w-3 h-3" />
           {t("forge.agent.send")}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => openUrl(item.webUrl).catch(console.error)}
+        <Button size="sm" variant="outline" onClick={() => openExternalUrl(item.webUrl).catch(console.error)}
           className="flex items-center gap-1.5">
           <ExternalIcon className="w-3 h-3" />
           {t("forge.openWeb")}
         </Button>
+        {pr && (
+          <Button size="sm" variant="outline" data-ade-pr-copy-number="true" onClick={copyPullRequestNumber}
+            className="flex items-center gap-1.5">
+            <CopyIcon className="w-3 h-3" />
+            {t("forge.pr.copyNumber")}
+          </Button>
+        )}
         {pr && shown.state === "open" && (
           <Button size="sm" variant="outline" disabled={!!busy}
             onClick={() => act("checkout", async () => {
@@ -201,6 +228,29 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
             </div>
           </div>
 
+          {pr && (
+            <div role="tablist" aria-label={t("forge.pr.sections")} className="flex items-center gap-1 border-b border-gray-200 dark:border-white/8">
+              {(["conversation", "code"] as const).map((next) => (
+                <button
+                  key={next}
+                  type="button"
+                  role="tab"
+                  aria-selected={section === next}
+                  onClick={() => {
+                    setSection(next);
+                    if (next === "code") {
+                      setCodeOpened(true);
+                      requestAnimationFrame(() => codeTabHost.current?.querySelector<HTMLElement>("[data-ade-diff-search-root]")?.focus());
+                    }
+                  }}
+                  className={`border-b-2 px-3 py-2 text-[12px] ${section === next ? "border-accent-500 text-gray-900 dark:text-white" : "border-transparent text-gray-500 hover:text-gray-800 dark:text-white/50 dark:hover:text-white/80"}`}
+                >
+                  {t(next === "conversation" ? "forge.pr.conversation" : "forge.pr.code")}
+                </button>
+              ))}
+            </div>
+          )}
+
           {merging && (
             <div className="flex items-end gap-2 p-3 rounded-lg bg-violet-50 dark:bg-violet-500/10
               border border-violet-200 dark:border-violet-500/25">
@@ -233,6 +283,13 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
           {note && <p className="text-[12px] text-emerald-600 dark:text-emerald-400">{note}</p>}
           {error && <p className="text-[12px] text-red-500 dark:text-red-400 break-words">{error}</p>}
 
+          {pr && codeOpened && (
+            <div ref={codeTabHost} className={section === "code" ? "block" : "hidden"}>
+              <PullRequestCodeTab key={`${cwd}:${item.number}`} cwd={cwd} item={item} />
+            </div>
+          )}
+
+          <div className={!pr || section === "conversation" ? "flex flex-col gap-4" : "hidden"}>
           {/* ── guia de revisão por IA (só PRs; nunca publica nada no GitHub) ── */}
           {pr && <ReviewGuidePanel cwd={cwd} item={shown} workspaces={workspaces} />}
 
@@ -248,7 +305,9 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
                   {[90, 70, 80].map((w, i) => <Skeleton key={i} variant="text" height={12} width={`${w}%`} />)}
                 </div>
               ) : shown.body ? (
-                <Markdown content={shown.body} loadImage={loadImage} />
+                <div data-quotable="" data-quote-source={t("chat.panel.pr.descriptionSource", { number: item.number })}>
+                  <Markdown content={shown.body} loadImage={loadImage} />
+                </div>
               ) : (
                 <p className="text-gray-400 dark:text-white/35 italic">{t("forge.noDescription")}</p>
               )}
@@ -261,7 +320,11 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
                 border-b border-gray-200 dark:border-white/8">
                 @{c.author ?? "?"}{c.createdAt && ` · ${when(c.createdAt)}`}
               </div>
-              <div className="px-4 py-3 text-[13px]"><Markdown content={c.body} loadImage={loadImage} /></div>
+              <div className="px-4 py-3 text-[13px]">
+                <div data-quotable="" data-quote-source={t("chat.panel.pr.commentSource", { number: item.number, author: c.author ?? "?" })}>
+                  <Markdown content={c.body} loadImage={loadImage} />
+                </div>
+              </div>
             </div>
           ))}
 
@@ -287,11 +350,13 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
               </Button>
             </div>
           </div>
+          </div>
         </div>
       </div>
       {agentMenu && (
         <ContextMenu x={agentMenu.x} y={agentMenu.y} onClose={() => setAgentMenu(null)} items={agentItems()} />
       )}
+      {quoteKey && <SelectionComment container={() => quoteRoot.current} quoteKey={quoteKey} />}
     </div>
   );
 }

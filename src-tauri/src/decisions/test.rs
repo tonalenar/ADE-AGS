@@ -833,6 +833,7 @@ fn fleet_run(budget: Option<f64>, spent: f64) -> Run {
         created_at: 0,
         ended_at: None,
         mission_id: None,
+        source_thread_id: None,
         squad_id: None,
         squad_name: None,
         squad_members: Vec::new(),

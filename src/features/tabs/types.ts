@@ -19,6 +19,8 @@ export interface AgentInfo {
   /** Dónde se encontró el binario. Ausente = no está (o es una custom, que no se detecta). */
   path?: string | null;
   isCustom?: boolean;
+  /** Este agente inicia uma conversa pelo protocolo ACP, sem terminal TUI. */
+  isStructured?: boolean;
 }
 
 export interface Tab {

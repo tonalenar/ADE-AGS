@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Button } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
@@ -12,6 +12,7 @@ import type { ForgeItem } from "@/features/forge/types";
 import { useRunsStore } from "@/features/runs/store";
 import type { Tab } from "@/features/tabs/types";
 import { homeDir } from "@/shared/ipc/window";
+import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { ConnectorsSection, ContextSection } from "./AgentSections";
 import { CARD, Row, Section } from "./Section";
@@ -136,7 +137,7 @@ export function SessionPanel({ tab, repo }: { tab: Tab | null; repo: RepoInfo | 
             {pulls?.map((pr) => (
               <Row key={pr.number} title={pr.title}
                 icon={<PullRequestIcon className={`w-3.5 h-3.5 ${PR_STATE[pr.state] ?? ""}`} />}
-                onClick={() => { openUrl(pr.webUrl).catch(console.error); }}>
+                onClick={() => { openExternalUrl(pr.webUrl).catch(console.error); }}>
                 <span className="block truncate">{pr.title}</span>
                 <span className="block text-[11px] text-gray-400 dark:text-white/35 tabular-nums">
                   #{pr.number}

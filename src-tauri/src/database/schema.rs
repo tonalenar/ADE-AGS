@@ -864,6 +864,32 @@ pub fn migrate(conn: &Connection) -> SqlResult<()> {
          );
          CREATE INDEX IF NOT EXISTS idx_usage_events_account ON usage_events(account_key, created_at);",
     )?;
+    // Uma linha por processo iniciado para uma task. Diferente do contador operacional
+    // `tasks.attempt`, não reinicia quando a task é rerouteada; os arquivos de eventos
+    // também são exclusivos por tentativa. A cascata só remove esse histórico quando a
+    // própria task é explicitamente removida.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS run_attempts (
+             id          TEXT PRIMARY KEY,
+             task_id     TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+             run_id      TEXT NOT NULL,
+             attempt     INTEGER NOT NULL,
+             agent_id    TEXT NOT NULL,
+             model       TEXT,
+             session_id  TEXT NOT NULL,
+             events_path TEXT NOT NULL,
+             status      TEXT NOT NULL DEFAULT 'running',
+             result      TEXT,
+             error       TEXT,
+             tokens_in   INTEGER,
+             tokens_out  INTEGER,
+             cost_usd    REAL,
+             started_at  INTEGER NOT NULL,
+             ended_at    INTEGER,
+             UNIQUE(task_id, attempt)
+         );
+         CREATE INDEX IF NOT EXISTS idx_run_attempts_run ON run_attempts(run_id, task_id, attempt);",
+    )?;
     // Índices de las consultas que corren en cada evento de la flota y en cada guardado:
     // la lista de runs de un workspace (`ORDER BY created_at DESC`), las tasks de un run en
     // orden, y buscar el historial de una sesión por su id. Sin ellos son recorridos enteros
@@ -1328,6 +1354,61 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     // As conversas do modo chat que falam com o agente por protocolo (`conversa`): só aditiva, sem
     // subir user_version.
     crate::conversa::migrate(conn)?;
+    // Runs iniciados por conversa estruturada mantêm a origem para a lineage sobreviver ao restart.
+    // O SET NULL preserva o histórico da Frota caso a pessoa apague uma conversa lateral.
+    if !has_column(conn, "runs", "source_thread_id") {
+        conn.execute_batch(
+            "ALTER TABLE runs ADD COLUMN source_thread_id TEXT
+             REFERENCES chat_thread(id) ON DELETE SET NULL;",
+        )?;
+    }
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_runs_source_thread ON runs(source_thread_id);")?;
+    // Recibos de delegação do MCP. A intenção e os IDs ficam gravados na mesma transação
+    // que cria o run/tasks, para uma repetição após perda da resposta não lançar trabalho duplicado.
+    // Sem FK de propósito: o recibo preserva a identidade da solicitação mesmo se a pessoa
+    // limpar depois o run correspondente.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS run_delegation_receipts (
+            caller_key TEXT NOT NULL,
+            request_id TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            run_id TEXT NOT NULL,
+            task_keys_json TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            PRIMARY KEY (caller_key, request_id)
+        );",
+    )?;
+    // Só metadados de indexação persistem. O conteúdo das falas fica num FTS em memória,
+    // pois transcrições podem conter segredos e não devem ser copiadas para o banco.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS session_transcript_index_state (
+            history_id TEXT PRIMARY KEY REFERENCES session_history(id) ON DELETE CASCADE,
+            indexed_closed_at INTEGER NOT NULL,
+            index_version INTEGER NOT NULL DEFAULT 1,
+            loaded_run_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL,
+            partial INTEGER NOT NULL DEFAULT 0,
+            retry_after INTEGER NOT NULL DEFAULT 0
+        );",
+    )?;
+    // Limpa o cache FTS persistente da primeira iteração desta funcionalidade. A tabela
+    // continha apenas dados derivados criados pelo ADE; os arquivos originais do agente não
+    // são tocados. `DROP IF EXISTS` também é inofensivo nas próximas aberturas.
+    conn.execute_batch(
+        "DROP TRIGGER IF EXISTS session_transcript_history_delete;
+         DROP TABLE IF EXISTS session_transcript_fts;",
+    )?;
+    for (column, definition) in [
+        ("index_version", "INTEGER NOT NULL DEFAULT 1"),
+        ("loaded_run_id", "TEXT NOT NULL DEFAULT ''"),
+        ("retry_after", "INTEGER NOT NULL DEFAULT 0"),
+    ] {
+        if !has_column(conn, "session_transcript_index_state", column) {
+            conn.execute_batch(&format!(
+                "ALTER TABLE session_transcript_index_state ADD COLUMN {column} {definition};"
+            ))?;
+        }
+    }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

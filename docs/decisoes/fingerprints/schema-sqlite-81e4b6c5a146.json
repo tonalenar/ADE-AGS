@@ -1,0 +1,10 @@
+{
+  "alvo": "schema-sqlite",
+  "sha256": "81e4b6c5a146ff1a47490e0402b65d0ef2c6a72fdf7188ff58d86dd488be721f",
+  "data": "2026-11-09",
+  "motivo": "vinculo opcional dos runs a conversas estruturadas",
+  "semPerdaDeDados": true,
+  "arquivos": [
+    "src-tauri/src/database/schema.rs"
+  ]
+}

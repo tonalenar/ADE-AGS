@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { NativeScreen, type NativeScreenApi } from "@/features/simulator/SimulatorScreen";
@@ -128,13 +129,30 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
   const { t } = useTranslation();
   const state = status?.state ?? "connecting";
   const note = !known && state !== "live" ? t("iphone.screen.notFound") : t(`iphone.screen.${state}`);
+  const [resumeAttempt, setResumeAttempt] = useState(0);
+  const [resumePending, setResumePending] = useState(false);
+  useEffect(() => {
+    if (state !== "paused") setResumePending(false);
+  }, [state]);
+  const activeScreenId = resumeAttempt === 0 ? screenId : `${screenId}:resume:${resumeAttempt}`;
+
   return (
     <>
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center">
-        <span className="text-[12.5px] leading-snug text-white/70">{note}</span>
-        {status?.error && state !== "live" && <span className="line-clamp-3 text-[11px] leading-snug text-white/45">{status.error}</span>}
+      <div data-over-webview={state === "paused" ? "" : undefined} className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center">
+        {state === "paused" ? (
+          <>
+            <span className="max-w-[280px] text-[12.5px] leading-snug text-white/75">{t("iphone.screen.pausedBody")}</span>
+            <button type="button" disabled={resumePending} onClick={() => { setResumePending(true); setResumeAttempt((attempt) => attempt + 1); }}
+              className="rounded-lg bg-white/12 px-3 py-1.5 text-[11.5px] font-medium text-white hover:bg-white/20 disabled:opacity-60">
+              {t(resumePending ? "iphone.screen.resuming" : "iphone.screen.resume")}
+            </button>
+          </>
+        ) : (
+          <span className="text-[12.5px] leading-snug text-white/70">{note}</span>
+        )}
+        {status?.error && state !== "live" && state !== "paused" && <span className="line-clamp-3 text-[11px] leading-snug text-white/45">{status.error}</span>}
       </div>
-      <NativeScreen api={MIRROR_API} screenId={screenId} target={device} radius={radius} onError={onError} />
+      <NativeScreen key={activeScreenId} api={MIRROR_API} screenId={activeScreenId} target={device} radius={radius} onError={onError} />
     </>
   );
 }

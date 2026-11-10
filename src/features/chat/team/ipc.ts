@@ -202,7 +202,8 @@ export const chatTeamHandoff = (teamId: string, id: number) => invoke<TeamHandof
 export const chatTeamNotice = (teamId: string) => invoke<string>("chat_team_notice", { teamId });
 
 /** Um worktree `team/<papel>` para um integrante novo (a partir do último commit da pasta). */
-export const chatTeamWorktree = (cwd: string, role: string) => invoke<{ cwd: string; branch: string; root: string }>("chat_team_worktree", { cwd, role });
+export const chatTeamWorktree = (cwd: string, role: string, agentId: string) =>
+  invoke<{ cwd: string; branch: string; root: string }>("chat_team_worktree", { cwd, role, agentId });
 
 /** As delegações em andamento do time com escopos de escrita sobrepostos (`Escopo:` na delegação). Só aviso. */
 export const chatTeamOverlaps = (teamId: string) =>
