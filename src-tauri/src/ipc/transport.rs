@@ -12,14 +12,13 @@
 //!   e a sessão cai no fallback explícito do token (`ancestry_required`).
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
 
 use tauri::AppHandle;
 
 use super::protocol::Handshake;
-use super::server::{self, MAX_CONNECTIONS};
+use super::intake::{self, Slots};
+use super::server;
 
 /// Erro de ida e volta com a app. `retryable` é o mesmo critério da CLI:
 /// a app ainda pode aparecer; um protocolo divergente, não.
@@ -187,12 +186,12 @@ pub(super) fn start_credential_server(
     app: AppHandle,
     token: String,
     endpoint: String,
-    open: Arc<AtomicUsize>,
+    slots: std::sync::Arc<Slots>,
 ) -> Result<(), String> {
     #[cfg(unix)]
     {
         let listener = bind_unix(&endpoint)?;
-        std::thread::spawn(move || accept_unix(listener, app, token, open));
+        std::thread::spawn(move || accept_unix(listener, app, token, slots));
         Ok(())
     }
     #[cfg(windows)]
@@ -200,13 +199,13 @@ pub(super) fn start_credential_server(
         // HANDLE é `*mut c_void` (não é Send): atravessa a thread como inteiro e volta lá dentro.
         let first = create_pipe(&endpoint)? as usize;
         std::thread::spawn(move || {
-            accept_windows(first as windows_sys::Win32::Foundation::HANDLE, endpoint, app, token, open)
+            accept_windows(first as windows_sys::Win32::Foundation::HANDLE, endpoint, app, token, slots)
         });
         Ok(())
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (app, token, endpoint, open);
+        let _ = (app, token, endpoint, slots);
         Err("sem transporte de credencial nesta plataforma".into())
     }
 }
@@ -241,26 +240,21 @@ fn bind_unix(endpoint: &str) -> Result<std::os::unix::net::UnixListener, String>
 }
 
 #[cfg(unix)]
-fn accept_unix(listener: std::os::unix::net::UnixListener, app: AppHandle, token: String, open: Arc<AtomicUsize>) {
+fn accept_unix(listener: std::os::unix::net::UnixListener, app: AppHandle, token: String, slots: std::sync::Arc<Slots>) {
     for incoming in listener.incoming() {
         let Ok(stream) = incoming else { continue };
-        if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-            open.fetch_sub(1, Ordering::SeqCst);
+        // Vagas só deste canal (F-03): o TCP cheio não tira a vaga de quem fala pelo socket de credencial.
+        let Some(slot) = slots.try_acquire() else {
             drop(stream);
             continue;
-        }
+        };
         let client_pid = peer_pid(&stream).ok();
         let app = app.clone();
         let token = token.to_string();
-        let open = open.clone();
         std::thread::spawn(move || {
-            let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
-            let Ok(writer) = stream.try_clone() else {
-                open.fetch_sub(1, Ordering::SeqCst);
-                return;
-            };
-            server::handle_connection(stream, writer, &app, &token, client_pid);
-            open.fetch_sub(1, Ordering::SeqCst);
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(intake::READ_TIMEOUT_SECS)));
+            let Ok(writer) = stream.try_clone() else { return };
+            server::handle_connection(stream, writer, &app, &token, client_pid, slot);
         });
     }
 }
@@ -300,7 +294,7 @@ fn accept_windows(
     endpoint: String,
     app: AppHandle,
     token: String,
-    open: Arc<AtomicUsize>,
+    slots: std::sync::Arc<Slots>,
 ) {
     use std::os::windows::io::{FromRawHandle, RawHandle};
     use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_PIPE_CONNECTED};
@@ -325,21 +319,17 @@ fn accept_windows(
         } else {
             None
         };
-        if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-            open.fetch_sub(1, Ordering::SeqCst);
-            unsafe { CloseHandle(pipe) };
-        } else {
-            let file = unsafe { std::fs::File::from_raw_handle(pipe as RawHandle) };
-            if let Ok(writer) = file.try_clone() {
-                let app = app.clone();
-                let token = token.clone();
-                let open = open.clone();
-                std::thread::spawn(move || {
-                    server::handle_connection(file, writer, &app, &token, client_pid);
-                    open.fetch_sub(1, Ordering::SeqCst);
-                });
-            } else {
-                open.fetch_sub(1, Ordering::SeqCst);
+        match slots.try_acquire() {
+            None => unsafe { CloseHandle(pipe) },
+            Some(slot) => {
+                let file = unsafe { std::fs::File::from_raw_handle(pipe as RawHandle) };
+                if let Ok(writer) = file.try_clone() {
+                    let app = app.clone();
+                    let token = token.clone();
+                    std::thread::spawn(move || {
+                        server::handle_connection(file, writer, &app, &token, client_pid, slot);
+                    });
+                }
             }
         }
         match create_pipe(&endpoint) {

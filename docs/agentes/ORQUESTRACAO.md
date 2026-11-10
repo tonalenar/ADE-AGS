@@ -139,7 +139,7 @@ Tudo em detalhe — estado, limiares, textos, comandos, testes, histórico e pon
 - **Broker** (`approve_tool_use`; só o Claude Code consulta):
   - ordem: política do papel → regras da pasta (`Bash(cargo test*)`, `Edit(src/**)`) → fila esperando uma pessoa;
   - **timeout de 3.600 s ou cancelamento = negar**;
-  - decisão por `ags approval decide <id> --allow [--remember]`.
+  - decisão **só pela tela** (comando Tauri `run_decide_approval`). `approval.decide` e `approval.list` pelo IPC são recusados para todo chamador (F-01): agente nunca aprova nem lista pedido de outro, e `--remember` nunca vem do IPC.
 - **Handoff estruturado** (`runs/handoff.rs`, `docs/ade-ags/HANDOFF_STRUCTURED.md`):
   - JSON v1 `{version, summary, changed_files, tests, decisions, risks, next_steps, artifacts}`, até 32 KiB;
   - caminhos relativos e sem `..`; campo desconhecido é rejeitado;

@@ -1,0 +1,9 @@
+{
+  "alvo": "protocolo-ipc",
+  "sha256": "8db93c4670888e64b054fff16ffecd2132b128862a7acd6d77f65cd05da94e15",
+  "data": "2026-11-10",
+  "motivo": "F-07: AGS_HANDSHAKE só vale para <pid>.json vivo em ipc/ (validação na CLI, sem mudar o formato do handshake nem PROTOCOL_VERSION); F-02/F-03 mudam o servidor, não o cabo",
+  "arquivos": [
+    "src-tauri/src/ipc/protocol.rs"
+  ]
+}

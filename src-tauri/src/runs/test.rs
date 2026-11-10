@@ -6159,3 +6159,71 @@ mod harness_fase6 {
         assert!(raiz.get("outcomeUnknown").is_none(), "o campo só sai quando é verdadeiro");
     }
 }
+
+// ── F-01: a tela é o único caminho que decide ───────────────────────────────
+
+fn banco_compartilhado(conn: Connection) -> crate::database::DbConnection {
+    std::sync::Arc::new(std::sync::Mutex::new(conn))
+}
+
+/// Pede uma permissão numa thread e devolve o handle quando o pedido já está na fila.
+fn pedido_na_fila(id: &'static str, task: String) -> std::thread::JoinHandle<broker::Verdict> {
+    let esperando = std::thread::spawn(move || {
+        broker::ask(id, &task, "Bash", serde_json::json!({"command": "cargo test"}), Duration::from_secs(5))
+    });
+    while broker::pending().is_empty() {
+        std::thread::yield_now();
+    }
+    esperando
+}
+
+/// O caminho da tela (`run_decide_approval`) segue decidindo e, com `remember`, grava a regra
+/// exata na pasta da tarefa.
+#[test]
+fn a_tela_decide_o_pedido_e_lembra_a_regra_exata() {
+    let _serial = con_broker_limpio();
+    let conn = test_db();
+    let run = run_en(&conn);
+    let task = tarea(&conn, &run);
+    let db = banco_compartilhado(conn);
+
+    let esperando = pedido_na_fila("ap-tela", task);
+    assert!(super::decide_from_screen(&db, "ap-tela", true, true).unwrap());
+    let verdict = esperando.join().unwrap();
+    assert!(verdict.allow);
+    assert_eq!(verdict.by, broker::DecidedBy::User);
+
+    let regras = store::list_rules(&db.lock().unwrap(), "/tmp/proy").unwrap();
+    assert_eq!(regras.len(), 1);
+    assert_eq!(regras[0].pattern, "Bash(cargo test)");
+    assert!(regras[0].allow);
+}
+
+/// Negar sem `remember` não deixa regra, e um id que não espera mais devolve `false`.
+#[test]
+fn a_tela_nega_sem_lembrar_e_avisa_quando_o_pedido_ja_nao_espera() {
+    let _serial = con_broker_limpio();
+    let conn = test_db();
+    let run = run_en(&conn);
+    let task = tarea(&conn, &run);
+    let db = banco_compartilhado(conn);
+
+    let esperando = pedido_na_fila("ap-nega", task);
+    assert!(super::decide_from_screen(&db, "ap-nega", false, false).unwrap());
+    assert!(!esperando.join().unwrap().allow);
+    assert!(store::list_rules(&db.lock().unwrap(), "/tmp/proy").unwrap().is_empty());
+
+    assert!(!super::decide_from_screen(&db, "ap-nega", true, true).unwrap());
+    assert!(!super::decide_from_screen(&db, "nao-existe", true, true).unwrap());
+}
+
+/// O IPC não tem como decidir: a função que decide não é visível fora de `runs`, e o comando
+/// da tela é o único que a chama.
+#[test]
+fn so_o_comando_da_tela_chama_a_decisao() {
+    let mod_rs = include_str!("mod.rs");
+    assert!(mod_rs.contains("\nfn decide_from_screen("), "tem que ser privada, não pub(crate)");
+    assert!(!mod_rs.contains("pub(crate) fn decide_approval") && !mod_rs.contains("pub(crate) fn pending_approvals"));
+    let chamadas: Vec<&str> = mod_rs.lines().filter(|l| l.contains("decide_from_screen(") && !l.contains("fn decide_from_screen")).collect();
+    assert_eq!(chamadas.len(), 1, "{chamadas:?}");
+}

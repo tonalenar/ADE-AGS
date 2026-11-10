@@ -351,6 +351,10 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         }
     }
     group.adopt(&child);
+    // F-02: o `taskId` dos pedidos desta tarefa passa a ser provado por este PID (o do agente e seus descendentes).
+    if let Some(pid) = child.id() {
+        crate::terminal::register_task_process(&task.id, pid);
+    }
     let marked_running = match db.lock() {
         Ok(conn) => store::mark_running(&conn, &task.id, &attempt_id, &session_id, &events_path.to_string_lossy()),
         Err(error) => Err(error.to_string()),
@@ -360,10 +364,12 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         Ok(false) => {
             // `task_cancel` pode marcar a tarefa enquanto o processo ainda está sendo criado.
             // Não deixe esse processo sobreviver a uma tarefa que já saiu de `ready`.
+            crate::terminal::release_task_process(&task.id);
             group.kill_all();
             return Ok(());
         }
         Err(error) => {
+            crate::terminal::release_task_process(&task.id);
             group.kill_all();
             return Err(error);
         }
@@ -380,12 +386,14 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     match still_running {
         Ok(true) => {}
         Ok(false) => {
+            crate::terminal::release_task_process(&task.id);
             if let Some(mut group) = live().remove(&task.id) {
                 group.kill_all();
             }
             return Ok(());
         }
         Err(error) => {
+            crate::terminal::release_task_process(&task.id);
             if let Some(mut group) = live().remove(&task.id) {
                 group.kill_all();
             }
@@ -496,6 +504,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         // Sacarlo del registro corre el `Drop` del grupo, que barre lo que el agente
         // hubiera dejado atrás (un `cargo test` a medias, un server levantado).
         live().remove(&task_id);
+        crate::terminal::release_task_process(&task_id);
         // Un pedido de permiso sin proceso que lo espere no lo va a contestar nadie:
         // dejarlo en la cola lo mostraría en la consola para siempre.
         super::broker::drop_task(&task_id);

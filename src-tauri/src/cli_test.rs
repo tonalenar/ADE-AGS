@@ -725,8 +725,9 @@ fn conversa_chama_sim_e_desk_so_com_a_aba_thread_e_sem_sessao_mesmo_com_flag_for
 fn tab_create_leva_quem_chama_para_achar_o_terminal_do_chat() {
     // A conversa do chat (`ADE_TAB_ID=thread:<id>`) pede um shell: o app precisa saber de qual conversa é o painel.
     assert!(takes_caller("tab.create"));
-    // O resto do grupo `tab` segue sem `from`: o id da aba já diz o destino.
-    assert!(!takes_caller("tab.send"));
+    // `tab send` também leva a identidade (F-09): o servidor a prova antes de escrever. O resto do grupo `tab` segue sem
+    // `from`: o id da aba já diz o destino.
+    assert!(takes_caller("tab.send"));
     assert!(!takes_caller("tab.output"));
     let mut args = json!({ "agent": "bash" });
     caller_from("tab.create", &mut args, Some("thread:abc".into()), None);
@@ -734,4 +735,25 @@ fn tab_create_leva_quem_chama_para_achar_o_terminal_do_chat() {
     let args = parse("tab.create", &["--agent", "bash", "--in-chat", "--initprompt", "supabase login"]).unwrap();
     assert_eq!(args["inChat"], true);
     assert_eq!(args["initprompt"], "supabase login");
+}
+
+/// F-09, `peer.answer` e `fix.decide`: o servidor só confia no que o app injetou no terminal. Um `--from`, `--session` ou
+/// `--taskId` à mão é descartado; sem ambiente, o pedido segue sem identidade e o servidor decide (a pessoa, fora do ADE).
+#[test]
+fn comandos_que_exigem_prova_levam_so_a_identidade_do_ambiente() {
+    for command in ["peer.answer", "tab.send", "tab.create", "fix.decide"] {
+        assert!(takes_caller(command), "{command} não leva quem chama");
+        let mut args = json!({ "from": "forjada", "session": "forjada", "taskId": "outra-tarefa", "mission": "m" });
+        caller_from(command, &mut args, Some("real-tab".into()), Some("pty-token".into()));
+        assert_eq!(args["from"], "real-tab", "{command}");
+        assert_eq!(args["session"], "pty-token", "{command}");
+        assert!(args.get("taskId").is_none() && args.get("mission").is_none(), "{command}");
+        let mut sem_ambiente = json!({ "from": "forjada", "session": "forjada" });
+        caller_from(command, &mut sem_ambiente, None, None);
+        assert!(sem_ambiente.get("from").is_none() && sem_ambiente.get("session").is_none(), "{command}: sobrou identidade declarada");
+    }
+    // Quem só lê continua sem a exigência.
+    let mut lista = json!({ "scope": "mission:m" });
+    caller_from("fix.list", &mut lista, Some("real-tab".into()), Some("pty-token".into()));
+    assert_eq!(lista["from"], "real-tab");
 }

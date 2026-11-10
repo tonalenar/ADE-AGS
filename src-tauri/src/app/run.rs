@@ -76,9 +76,6 @@ pub fn run() {
         Ok(ready) => ready,
         Err(error) => super::fatal::exit_with_startup_error(&error.to_string()),
     };
-    // El hilo espera `db_is_ready`: no checkpointa mientras el splash corre el
-    // `VACUUM INTO` y la migración. Después mira el `-wal` cada 30 s, fuera del purge.
-    crate::database::spawn_wal_maintenance(db_conn.clone());
     // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
     // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
     super::rendering::configure(&db_conn);
@@ -90,6 +87,11 @@ pub fn run() {
     // Que cada agente que lance esta instancia hable con ELLA y no con otra que esté abierta
     // (ver `ipc::protocol::HANDSHAKE_ENV`). También toca el entorno: antes del primer hilo.
     crate::ipc::export_instance_env();
+    // F-08: só agora, com todo `set_var` já feito, nasce o primeiro thread (o do checkpoint do WAL). Antes ele corria
+    // junto com as chamadas acima, que o SAFETY delas diz executarem com um thread só.
+    // El hilo espera `db_is_ready`: no checkpointa mientras el splash corre el
+    // `VACUUM INTO` y la migración. Después mira el `-wal` cada 30 s, fuera del purge.
+    crate::database::spawn_wal_maintenance(db_conn.clone());
     crate::notifier::initialize_identity();
     super::signals::cleanup_on_signals();
 

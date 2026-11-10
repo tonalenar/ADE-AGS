@@ -86,6 +86,15 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
     if let Some(error) = crate::ipc::agent_maintenance_error(command) {
         return Response::err(error);
     }
+    // F-01: antes de olhar token de tarefa, PID ou banco. Não depende de quem chama.
+    if let Some(error) = crate::ipc::person_only_error(command) {
+        return Response::err(error);
+    }
+    // F-02: o `taskId` é declarado pelo chamador. Só vale se o PID do outro lado é o do agente da tarefa; vale para
+    // todos os comandos, inclusive `run.approve`.
+    if let Some(error) = crate::ipc::guard::task_proof_error(args, crate::ipc::current_client_pid()) {
+        return Response::err(error);
+    }
     if command != "run.approve" && args.get("taskId").and_then(Value::as_str).is_some() {
         use tauri::Manager;
         let Some(db) = app.try_state::<crate::database::DbConnection>() else {
@@ -343,8 +352,6 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "mission.accept" => missions::mission_accept(app, args),
         "mission.apply" => missions::mission_apply(app, args),
         "mission.redeliver" => missions::mission_redeliver(app, args),
-        "approval.list" => missions::approval_list(app),
-        "approval.decide" => missions::approval_decide(app, args),
         other => Err(format!("Comando desconhecido: {other}")),
     };
 

@@ -1,4 +1,4 @@
-//! `ags mission …` y `ags approval …`: correr misiones sin la interfaz.
+//! `ags mission …` y memoria/swarm: correr misiones sin la interfaz.
 //!
 //! Es lo que hace posible el modo headless (`ade-ags --headless`): un script o un
 //! pipeline de CI crea la misión, la arranca, espera a que termine y sale con código 1 si
@@ -551,25 +551,8 @@ pub(super) fn mission_redeliver(app: &AppHandle, args: &Value) -> Result<Value, 
     Ok(json!(outcome))
 }
 
-pub(super) fn approval_list(_app: &AppHandle) -> Result<Value, String> {
-    Ok(json!(crate::runs::pending_approvals()))
-}
-
-/// `ags approval decide <id> --allow|--deny [--remember]`.
-pub(super) fn approval_decide(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let id = arg_str(args, "approval")?;
-    let allow = match (args.get("allow").is_some(), args.get("deny").is_some()) {
-        (true, false) => true,
-        (false, true) => false,
-        _ => return Err("decí --allow o --deny".into()),
-    };
-    let remember = args.get("remember").and_then(Value::as_bool).unwrap_or(false);
-    let decided = crate::runs::decide_approval(app, &db(app)?, &id, allow, remember)?;
-    if !decided {
-        return Err("esse pedido não está mais esperando (venceu ou a tarefa foi cancelada)".into());
-    }
-    Ok(json!({ "id": id, "allow": allow, "remembered": remember }))
-}
+// `approval.list`/`approval.decide` não existem aqui (F-01): só a pessoa, pela tela.
+// Ver `ipc::person_only_error`.
 
 #[cfg(test)]
 mod memory_time_tests {

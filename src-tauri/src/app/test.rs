@@ -83,3 +83,28 @@ fn a_versao_do_app_coincide_nos_manifestos_de_release() {
     assert_eq!(tauri["version"].as_str(), Some(cargo_version));
     assert_eq!(package["version"].as_str(), Some(cargo_version));
 }
+
+/// F-08 (HOST_REMOTO.md): `set_var` só é seguro com um thread. Nada que crie thread pode vir antes das
+/// chamadas que mexem no ambiente do processo, em `run()`.
+#[test]
+fn nenhum_thread_nasce_antes_das_chamadas_que_mexem_no_ambiente() {
+    let run = include_str!("run.rs");
+    let corpo = &run[run.find("pub fn run()").expect("run() mudou de forma")..];
+    let pos = |trecho: &str| corpo.find(trecho).unwrap_or_else(|| panic!("run() deixou de chamar {trecho}"));
+    let ultima_mexida_no_ambiente = [
+        "super::rendering::configure(&db_conn)",
+        "super::rendering::configure_scrollbars()",
+        "crate::util::path_env::configure()",
+        "crate::ipc::export_instance_env()",
+    ]
+    .into_iter()
+    .map(pos)
+    .max()
+    .unwrap();
+    for criador_de_thread in ["crate::database::spawn_wal_maintenance(", "super::signals::cleanup_on_signals()"] {
+        assert!(
+            pos(criador_de_thread) > ultima_mexida_no_ambiente,
+            "{criador_de_thread} cria um thread antes de a última chamada que faz set_var terminar"
+        );
+    }
+}
