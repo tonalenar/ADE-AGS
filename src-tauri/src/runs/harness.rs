@@ -394,12 +394,14 @@ fn last_turn<'a>(nodes: &'a [HarnessExecutionNode], thread_id: &str) -> Option<&
 
 fn direct_child_is_active(nodes: &[HarnessExecutionNode], child: &HarnessExecutionNode) -> bool {
     match child.kind.as_str() {
-        // Sem turno a filha é `pending`. `inProgress` com pedido pendente vira `waiting`, que também
+        // Sem turno a filha nunca rodou (ex.: conversa lateral aberta e não usada): contar deixaria
+        // "1 filho ativo" para sempre. `inProgress` com pedido pendente vira `waiting`, que também
         // não é terminal: a contagem não precisa ler `chat_request`.
-        "thread" => match child.thread_id.as_deref().and_then(|id| last_turn(nodes, id)) {
-            Some(turn) => !state::from_chat_run(&turn.status, false).state.is_terminal(),
-            None => true,
-        },
+        "thread" => child
+            .thread_id
+            .as_deref()
+            .and_then(|id| last_turn(nodes, id))
+            .is_some_and(|turn| !state::from_chat_run(&turn.status, false).state.is_terminal()),
         "fleetRun" => !state::from_fleet_run(&child.status).state.is_terminal(),
         _ => false,
     }

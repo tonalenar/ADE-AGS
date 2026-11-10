@@ -5238,7 +5238,7 @@ mod harness_fase1 {
 
     /// Sem turno a filha é `pending`. Com o último turno concluído, `chat_thread.state = active` não a mantém.
     #[test]
-    fn conversa_filha_sem_turno_e_pendente_e_o_estado_da_thread_nao_e_execucao() {
+    fn conversa_filha_que_nunca_rodou_nao_conta_como_ativa_e_o_estado_da_thread_nao_e_execucao() {
         let world = mundo(&["raiz"]);
         child(&world, "filha", "raiz");
         {
@@ -5249,7 +5249,7 @@ mod harness_fase1 {
         let sem_turno = graph(&world, "raiz");
         assert_eq!(node(&sem_turno, "thread:filha").parent_id.as_deref(), Some("turn:raiz:t1"));
         assert!(sem_turno.nodes.iter().all(|node| node.kind != "turn" || node.thread_id.as_deref() != Some("filha")));
-        assert_eq!(ativos(&sem_turno, "turn:raiz:t1"), 1, "sem turno a filha conta como pending");
+        assert_eq!(ativos(&sem_turno, "turn:raiz:t1"), 0, "conversa sem nenhum turno não está trabalhando");
 
         chat::upsert_run(&world.db.lock().unwrap(), "filha", "ft", "completed", Some(3), Some(4), Some(1)).unwrap();
         let concluida = graph(&world, "raiz");
