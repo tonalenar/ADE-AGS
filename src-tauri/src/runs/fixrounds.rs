@@ -924,6 +924,14 @@ pub fn run_fix_list(scope: String, db: tauri::State<crate::database::DbConnectio
 }
 
 pub fn cli(app: &tauri::AppHandle, command: &str, args: &Value) -> Result<Value, String> {
+    // `fix.decide` gasta rodada e define o destino da entrega: só o orquestrador da missão (provado) ou a pessoa, pela tela.
+    if command == "fix.decide" {
+        let clean = |key: &str| args.get(key).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
+        let caller = crate::terminal::classify_caller(clean("session"), clean("from"), crate::ipc::current_client_pid())?;
+        if let Some(error) = crate::ipc::guard::fix_decide_error(&crate::canvas::load_boards(), &caller, arg(args, "scope")?) {
+            return Err(error);
+        }
+    }
     let db = app.try_state::<crate::database::DbConnection>().ok_or("a base não está disponível")?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     if let Some(task_id) = args.get("taskId").and_then(Value::as_str) {

@@ -9,7 +9,10 @@ import { AlertaToast } from "@/shared/ui/alerts";
 
 import { PHONE_MIN, type CanvasPortal } from "./board";
 import { NOTE_HEADER_H } from "./geometry";
-import { canvasActions, useActiveBoardKey } from "./store";
+import { useChatShell } from "@/app/uiStore";
+import { canvasDeviceEngaged } from "@/features/chat/deviceDemand";
+
+import { canvasActions, useActiveBoardKey, useWorkMode } from "./store";
 
 interface AndroidDevice {
   serial: string;
@@ -75,6 +78,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
 }) {
   const { t } = useTranslation();
   const key = useActiveBoardKey();
+  const surfaceOpen = canvasDeviceEngaged(useWorkMode(), useChatShell());
   const [armed, setArmed] = useState(false);
   const [list, setList] = useState<AndroidList | null>(null);
   const [frame, setFrame] = useState<Frame | null>(null);
@@ -91,8 +95,9 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
     return () => window.clearTimeout(timer);
   }, [armed]);
 
-  // Qué hay conectado: se mira cada pocos segundos (un emulador tarda en aparecer).
+  // A lista e os quadros esperam o canvas na tela. Com o chat por cima, o nó continua montado e não consulta o adb.
   useEffect(() => {
+    if (!surfaceOpen) return;
     let alive = true;
     const load = () => invoke<AndroidList>("android_list").then((l) => alive && setList(l)).catch(() => undefined);
     void load();
@@ -101,7 +106,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       alive = false;
       window.clearInterval(timer);
     };
-  }, []);
+  }, [surfaceOpen]);
 
   // El dispositivo que se ve: el elegido si está listo, o el único que haya.
   const ready = (list?.devices ?? []).filter((d) => d.state === "device");
@@ -115,6 +120,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       setFrame(null);
       return;
     }
+    if (!surfaceOpen) return;
     let alive = true;
     let timer: number | undefined;
     const tick = async () => {
@@ -136,7 +142,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       alive = false;
       window.clearTimeout(timer);
     };
-  }, [chosen]);
+  }, [chosen, surfaceOpen]);
 
   const fail = (e: unknown) => AlertaToast(portal.name, String(e), "error", 5000);
 

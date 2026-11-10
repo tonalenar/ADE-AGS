@@ -70,7 +70,7 @@ export interface ComposerControlsContext {
  * o clipe os põem numa fileira de miniaturas acima do texto; o bloco (miniaturas + texto) cresce até 40%
  * da janela e depois rola por dentro, sem barra, com o enviar sempre à vista. Enviar só com anexos vale.
  */
-export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false }: {
+export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, stopUnavailableReason = null, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false }: {
   placeholder: string;
   /** Logo depois do anexar, à esquerda (o segmentado "Time | Só o orquestrador", prancheta 15). */
   leading?: React.ReactNode;
@@ -86,6 +86,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   onSendAndNewThread?: (() => void) | null;
   /** O agente está trabalhando: o botão vira Parar (com a caixa vazia). */
   onStop?: (() => void) | null;
+  stopUnavailableReason?: string | null;
   /** Põe a mensagem na fila da conversa (sai quando o turno acabar). */
   onQueue?: ((text: string, attachments: Attachment[]) => boolean | void) | null;
   /** As mensagens esperando a vez (aparecem acima da caixa, com editar e tirar). */
@@ -421,7 +422,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   const extras = attachments.list.length + quotes.length;
   const controlsContent = typeof controls === "function" ? controls({ text, hasExtraContext: extras > 0, attachments: attachments.list, hasQuotes: quotes.length > 0 }) : controls;
   const canSend = canSubmit(text, extras, disabled || !!editingQueueId || stashRestoring, busy);
-  const stopping = !editingQueueId && !stashRestoring && !!onStop && text.trim().length === 0 && extras === 0;
+  const stopping = !editingQueueId && !stashRestoring && (!!onStop || !!stopUnavailableReason) && text.trim().length === 0 && extras === 0;
   // O que se solta na janela chega aqui (o ouvinte nativo está no ChatShell).
   useEffect(() => registerDropSink({ addPaths: (paths) => {
     if (stashRestoringRef.current) { setStashStatus(t("chat.stash.retryAttachment")); return; }
@@ -863,8 +864,8 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         <div data-composer-right className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-0.5">
         <div data-composer-controls className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">{controlsContent}</div>
         {stopping ? (
-          <button type="button" onClick={() => onStop?.()} aria-label={t("chat.composer.stop")} title={t("chat.composer.stop")}
-            className="ml-1 w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-red-600/90 text-white hover:bg-red-600">
+          <button type="button" onClick={() => onStop?.()} disabled={!onStop} aria-label={t("chat.composer.stop")} title={stopUnavailableReason ?? t("chat.composer.stop")}
+            className="ml-1 w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-red-600/90 text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-45">
             <StopIcon className="w-2.5 h-2.5" />
           </button>
         ) : (

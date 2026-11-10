@@ -18,16 +18,22 @@
 //! navegador; acá se guarda una copia que el runtime manda cuando cambia, y que repone la
 //! primera página de cada origen después de arrancar la app si el motor la perdió.
 //!
-//! Todo va a un archivo por origen en la carpeta de datos de la app. Las cookies de sesión
+//! Cada origem tem um arquivo na pasta de dados da app, cifrado com AES-256-GCM; a chave é uma
+//! por instância e fica no keyring do SO (ver `SealKey`). Sem keyring, o site fica só em memória
+//! e nada é gravado em claro. Las cookies de sesión
 //! (sin vencimiento) también se guardan: son las que usa un login de desarrollo típico, y
 //! perderlas al cerrar la app es justo lo que esto viene a evitar.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex, RwLock};
+use std::sync::{Arc, LazyLock, Mutex, OnceLock, RwLock};
 use std::time::Duration;
 
+use base64::Engine as _;
+use ring::aead::{Aad, LessSafeKey, Nonce, UnboundKey, AES_256_GCM, NONCE_LEN};
+use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use super::log::{parse_set_cookie, SetCookie};
 
@@ -45,6 +51,150 @@ pub(crate) fn state_dir() -> Option<PathBuf> {
     STATE_DIR.read().ok().and_then(|d| d.clone())
 }
 
+/// Cifra o estado de cada site: AES-256-GCM, com uma chave de 256 bits por instância. O arquivo
+/// de um site só abre com ela e com o próprio origem (um arquivo copiado para outro site não abre).
+pub(crate) struct SealKey(LessSafeKey);
+
+/// A conta do keyring onde fica a chave, dentro do serviço da instância.
+const KEY_ACCOUNT: &str = "state-key";
+/// Tamanho da chave AES-256, em bytes.
+const KEY_BYTES: usize = 32;
+/// Marca no começo de cada arquivo cifrado: formato e versão.
+const MAGIC: &[u8] = b"ADESITE1";
+
+/// Onde fica a chave: na app é o keyring do SO (`OsKeyStore`); nos testes, um keyring falso.
+pub(crate) trait KeyStore {
+    /// `Ok(None)` quando ainda não há chave guardada. Qualquer outra falha é `Err`.
+    fn read_key(&self) -> Result<Option<String>, String>;
+    fn write_key(&self, value: &str) -> Result<(), String>;
+}
+
+/// O keyring do SO, com o serviço separado pela pasta de dados da instância (como
+/// `project_scripts`): uma build isolada não lê nem troca a chave da ADE.
+struct OsKeyStore {
+    service: String,
+}
+
+impl KeyStore for OsKeyStore {
+    fn read_key(&self) -> Result<Option<String>, String> {
+        let entry = keyring::Entry::new(&self.service, KEY_ACCOUNT)
+            .map_err(|e| format!("o chaveiro do sistema não está disponível ({e})"))?;
+        match entry.get_password() {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(e) => Err(format!("não foi possível ler a chave no chaveiro ({e})")),
+        }
+    }
+
+    fn write_key(&self, value: &str) -> Result<(), String> {
+        keyring::Entry::new(&self.service, KEY_ACCOUNT)
+            .and_then(|entry| entry.set_password(value))
+            .map_err(|e| format!("não foi possível guardar a chave no chaveiro ({e})"))
+    }
+}
+
+impl SealKey {
+    /// A chave guardada em `store`; se não houver nenhuma, cria uma e a guarda. Um erro ao ler não
+    /// cria outra (taparia a que existe), e uma chave guardada que não se entende não é sobrescrita.
+    pub(crate) fn load_or_create(store: &dyn KeyStore) -> Result<Self, String> {
+        match store.read_key()? {
+            Some(encoded) => {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(encoded.trim())
+                    .ok()
+                    .filter(|b| b.len() == KEY_BYTES)
+                    .ok_or_else(|| "a chave guardada no chaveiro é inválida".to_string())?;
+                Self::from_bytes(&bytes)
+            }
+            None => {
+                let mut bytes = [0u8; KEY_BYTES];
+                SystemRandom::new()
+                    .fill(&mut bytes)
+                    .map_err(|_| "não foi possível gerar a chave".to_string())?;
+                store.write_key(&base64::engine::general_purpose::STANDARD.encode(bytes))?;
+                Self::from_bytes(&bytes)
+            }
+        }
+    }
+
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        UnboundKey::new(&AES_256_GCM, bytes)
+            .map(|key| Self(LessSafeKey::new(key)))
+            .map_err(|_| "a chave AES-256 é inválida".to_string())
+    }
+
+    /// `MAGIC || nonce || texto cifrado e etiqueta`. O nonce é aleatório a cada gravação.
+    pub(crate) fn seal(&self, origin: &str, plain: &[u8]) -> Result<Vec<u8>, String> {
+        let mut nonce = [0u8; NONCE_LEN];
+        SystemRandom::new()
+            .fill(&mut nonce)
+            .map_err(|_| "não foi possível gerar o nonce".to_string())?;
+        let mut body = plain.to_vec();
+        self.0
+            .seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::from(aad(origin).as_slice()), &mut body)
+            .map_err(|_| "não foi possível cifrar o estado do site".to_string())?;
+        let mut out = Vec::with_capacity(MAGIC.len() + NONCE_LEN + body.len());
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&nonce);
+        out.extend_from_slice(&body);
+        Ok(out)
+    }
+
+    /// O que `seal` gravou, ou `None` se não abre: corrompido, adulterado, de outra chave ou de outro site.
+    pub(crate) fn open(&self, origin: &str, sealed: &[u8]) -> Option<Vec<u8>> {
+        let rest = sealed.strip_prefix(MAGIC)?;
+        if rest.len() < NONCE_LEN {
+            return None;
+        }
+        let (nonce, cipher) = rest.split_at(NONCE_LEN);
+        let nonce = Nonce::try_assume_unique_for_key(nonce).ok()?;
+        let mut buf = cipher.to_vec();
+        let plain = self.0.open_in_place(nonce, Aad::from(aad(origin).as_slice()), &mut buf).ok()?;
+        Some(plain.to_vec())
+    }
+}
+
+/// O que se autentica junto com o texto: a marca do formato e o origem do site.
+fn aad(origin: &str) -> Vec<u8> {
+    [MAGIC, origin.as_bytes()].concat()
+}
+
+/// A chave desta instância, pedida ao keyring na primeira vez e reutilizada depois.
+static STATE_KEY: OnceLock<Option<Arc<SealKey>>> = OnceLock::new();
+
+/// A chave para um site novo. Só toca o keyring quando há pasta de estado (ou seja, na app).
+fn os_state_key() -> Option<Arc<SealKey>> {
+    STATE_KEY
+        .get_or_init(|| {
+            let Some(home) = crate::util::datadir::ags_home() else {
+                eprintln!("[preview] sem pasta de dados: o estado dos sites fica só em memória");
+                return None;
+            };
+            key_from(&OsKeyStore { service: service_for(&home) })
+        })
+        .clone()
+}
+
+/// A chave que sai de `store`, ou `None` (com o motivo no log) se não houver como tê-la.
+pub(crate) fn key_from(store: &dyn KeyStore) -> Option<Arc<SealKey>> {
+    match SealKey::load_or_create(store) {
+        Ok(key) => Some(Arc::new(key)),
+        Err(e) => {
+            eprintln!("[preview] {e}; o estado dos sites fica só em memória");
+            None
+        }
+    }
+}
+
+/// O serviço do keyring de uma pasta de dados: o mesmo critério de `project_scripts`.
+fn service_for(data_dir: &Path) -> String {
+    let hash: String = Sha256::digest(data_dir.to_string_lossy().as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    format!("ade-ags.preview-state.{hash}")
+}
+
 /// Los sitios abiertos, uno por origen. Un origen tiene UN frasco aunque lo usen varios:
 /// el proxy de su propia pestaña y los pedidos que le hacen otras páginas (su API, llamada
 /// desde el front). Con dos instancias, cada una guardaba su versión en el mismo archivo y
@@ -58,7 +208,10 @@ pub(crate) fn site_for(origin: &str) -> Arc<Site> {
     if let Some(site) = sites.get(origin) {
         return site.clone();
     }
-    let site = Site::open(origin, state_dir().as_deref());
+    // La clave solo se pide al keyring cuando hay carpeta de estado (en la app): los tests nunca la piden.
+    let dir = state_dir();
+    let key = dir.as_ref().and_then(|_| os_state_key());
+    let site = Site::open(origin, dir.as_deref(), key);
     site.spawn_saver();
     sites.insert(origin.to_string(), site.clone());
     site
@@ -140,22 +293,39 @@ struct Inner {
     dirty: bool,
 }
 
+/// Dónde y con qué se guarda un site. Sin eso (sin carpeta o sin clave) vive solo en memoria.
+struct Persist {
+    file: PathBuf,
+    key: Arc<SealKey>,
+}
+
 pub struct Site {
     inner: Mutex<Inner>,
-    file: Option<PathBuf>,
+    origin: String,
+    persist: Option<Persist>,
     wake: tokio::sync::Notify,
 }
 
-/// `http://localhost:5173` → `http_localhost_5173-<hash>.json`. Legible para quien busque
-/// el de un sitio, y con el hash para que `a-b` y `a_b` no terminen en el mismo archivo.
-pub(crate) fn file_name(origin: &str) -> String {
+/// El nombre base de un site: `http://localhost:5173` → `http_localhost_5173-<hash>`. Legible
+/// para quien busque el archivo de un site, y con el hash para que `a-b` y `a_b` no choquen.
+fn stem(origin: &str) -> String {
     let readable: String = origin
         .replace("://", "_")
         .chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '_' })
         .collect();
     let hash = origin.bytes().fold(0x811c_9dc5_u32, |h, b| (h ^ b as u32).wrapping_mul(0x0100_0193));
-    format!("{readable}-{hash:08x}.json")
+    format!("{readable}-{hash:08x}")
+}
+
+/// El archivo cifrado de `origin`: el formato actual.
+pub(crate) fn file_name(origin: &str) -> String {
+    format!("{}.enc", stem(origin))
+}
+
+/// El archivo en claro del formato anterior: solo se lee para migrarlo.
+pub(crate) fn legacy_file_name(origin: &str) -> String {
+    format!("{}.json", stem(origin))
 }
 
 /// El path por defecto de una cookie sin `Path`: el "directorio" de la URL que la puso
@@ -244,22 +414,24 @@ fn join(cookies: &[&SetCookie]) -> String {
 }
 
 impl Site {
-    /// El estado de `origin`, leído de su archivo si hay. Un archivo roto se ignora: se
-    /// pierde la sesión guardada, pero el navegador arranca igual.
-    pub fn open(origin: &str, dir: Option<&Path>) -> Arc<Self> {
+    /// El estado de `origin`, leído de su archivo si hay (ver `load`). Sin `key` no se lee ni se
+    /// escribe nada: el site vive solo en memoria, y el navegador arranca igual.
+    pub(crate) fn open(origin: &str, dir: Option<&Path>, key: Option<Arc<SealKey>>) -> Arc<Self> {
         let file = dir.map(|d| d.join(file_name(origin)));
-        let mut saved = file
-            .as_deref()
-            .and_then(|f| std::fs::read(f).ok())
-            .and_then(|bytes| serde_json::from_slice::<Saved>(&bytes).ok())
-            .unwrap_or_default();
+        let legacy = dir.map(|d| d.join(legacy_file_name(origin)));
+        let mut saved = load(origin, file.as_deref(), legacy.as_deref(), key.as_deref());
         saved.origin = origin.to_string();
         let now = now_secs();
         saved.cookies.retain(|c| alive(c, now));
         let restore_pending = saved.local.is_some() || saved.session.is_some();
+        let persist = match (file, key) {
+            (Some(file), Some(key)) => Some(Persist { file, key }),
+            _ => None,
+        };
         Arc::new(Self {
             inner: Mutex::new(Inner { saved, version: 1, restore_pending, dirty: false }),
-            file,
+            origin: origin.to_string(),
+            persist,
             wake: tokio::sync::Notify::new(),
         })
     }
@@ -419,20 +591,22 @@ impl Site {
     /// Si hay cambios que todavía no llegaron al archivo (el guardador espera un momento
     /// para juntar cambios seguidos).
     pub fn is_dirty(&self) -> bool {
-        self.file.is_some() && self.with(|inner| inner.dirty).unwrap_or(false)
+        self.persist.is_some() && self.with(|inner| inner.dirty).unwrap_or(false)
     }
 
     /// Escribe el archivo ya, si hay algo pendiente. Es lo que hace el guardador después de
     /// cada cambio; los tests lo llaman directo.
     pub fn save_now(&self) -> Result<(), String> {
-        let (Some(file), Some(bytes)) = (self.file.as_deref(), self.pending_bytes()) else { return Ok(()) };
-        write_private(file, &bytes)
+        let Some(persist) = self.persist.as_ref() else { return Ok(()) };
+        let Some(bytes) = self.pending_bytes() else { return Ok(()) };
+        let sealed = persist.key.seal(&self.origin, &bytes)?;
+        write_private(&persist.file, &sealed)
     }
 
     /// Guarda en segundo plano lo que vaya cambiando, agrupando los cambios seguidos. Vive
     /// lo que vive la app, igual que el proxy dueño del sitio.
     pub fn spawn_saver(self: &Arc<Self>) {
-        if self.file.is_none() {
+        if self.persist.is_none() {
             return;
         }
         let site = self.clone();
@@ -451,6 +625,62 @@ impl Site {
     }
 }
 
+/// Lo guardado de un site al abrirlo. El archivo cifrado manda. Si no hay (o no abre), el del
+/// formato anterior se lee: con clave queda cifrado en su lugar y el claro se borra. Sin clave el
+/// claro **se queda como está** (ninguna migración borra datos de la persona, AGENTS.md §2.3): se
+/// usa en memoria, no se escribe nada nuevo en claro, y se migra cuando haya clave. Un archivo que
+/// no abre se ignora, como uno roto, y tampoco se borra.
+fn load(origin: &str, file: Option<&Path>, legacy: Option<&Path>, key: Option<&SealKey>) -> Saved {
+    let sealed = match (file, key) {
+        (Some(file), Some(key)) => {
+            let bytes = std::fs::read(file).ok();
+            let plain = bytes.as_deref().and_then(|b| key.open(origin, b));
+            if bytes.is_some() && plain.is_none() {
+                eprintln!("[preview] un estado guardado no abre (corrupto o de otra clave) y se ignora");
+            }
+            plain.and_then(|p| serde_json::from_slice::<Saved>(&p).ok())
+        }
+        _ => None,
+    };
+    let Some(legacy) = legacy.filter(|l| l.exists()) else {
+        return sealed.unwrap_or_default();
+    };
+    if let Some(saved) = sealed {
+        // El cifrado ya existe y vale: el claro sobró de una migración que no llegó a borrarlo.
+        remove_legacy(legacy);
+        return saved;
+    }
+    let Some(saved) = std::fs::read(legacy).ok().and_then(|b| serde_json::from_slice::<Saved>(&b).ok()) else {
+        // Un claro que no se entiende se ignora como antes; no se borra: es de la persona.
+        return Saved::default();
+    };
+    match (file, key) {
+        (Some(file), Some(key)) => {
+            let migrated = serde_json::to_vec(&saved)
+                .map_err(|e| e.to_string())
+                .and_then(|plain| key.seal(origin, &plain))
+                .and_then(|sealed| write_private(file, &sealed));
+            match migrated {
+                Ok(()) => remove_legacy(legacy),
+                Err(e) => eprintln!("[preview] no se pudo pasar el estado anterior al formato cifrado ({e}); queda como está"),
+            }
+        }
+        // Sin clave no hay dónde guardarlo cifrado: el claro anterior queda intacto (no se borra
+        // dato de la persona) y se migra en la próxima apertura con clave. Nada nuevo va en claro.
+        _ => eprintln!("[preview] sin clave del keyring: el estado anterior en claro queda como está hasta poder cifrarlo"),
+    }
+    saved
+}
+
+/// Borra el archivo en claro del formato anterior. Si no se puede, se avisa: no se lo deja callado.
+fn remove_legacy(path: &Path) {
+    if let Err(e) = std::fs::remove_file(path) {
+        if e.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("[preview] no se pudo borrar un archivo en claro del formato anterior: {e}");
+        }
+    }
+}
+
 fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -465,7 +695,7 @@ fn write_private(file: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
     let dir = file.parent().ok_or("el archivo no tiene carpeta")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
-    let tmp = file.with_extension("json.tmp");
+    let tmp = file.with_extension("enc.tmp");
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
     #[cfg(unix)]

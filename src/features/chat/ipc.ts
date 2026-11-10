@@ -3,6 +3,15 @@ import { invoke } from "@tauri-apps/api/core";
 import type { Timeline } from "./timeline/types";
 import type { ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
 
+export interface HarnessCapabilityMatrixRow {
+  surface: "chat" | "fleet" | "tui";
+  provider: string;
+  cells: { capability: string; claim: { support: "supported" | "unsupported" | "unknown"; note: string; missing: string } }[];
+}
+
+/** A matriz compartilhada de capabilities (`src-tauri/src/ipc/commands/harness.rs`). */
+export const harnessCapabilityMatrix = () => invoke<HarnessCapabilityMatrixRow[]>("harness_capability_matrix");
+
 /**
  * A conversa de uma aba como timeline, lida do transcript do agente (`ipc/commands/canal.rs`,
  * `conversation_timeline`). `null` = a aba não tem canal (agente sem transcript ou sessão sem

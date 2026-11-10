@@ -11,8 +11,10 @@
 
 pub mod bridge;
 pub mod cancel;
+pub(crate) mod guard;
 pub(crate) mod commands;
 pub mod install;
+mod intake;
 pub mod mcp;
 pub mod protocol;
 mod server;
@@ -23,6 +25,7 @@ mod test;
 
 pub use commands::routine::start_scheduler as start_routine_scheduler;
 pub use commands::chat_watch::start as start_chat_watch;
+pub use commands::child_delivery::{pump_now as pump_child_delivery, start as start_child_delivery};
 pub use commands::peer_queue::start_resume as start_peer_queue;
 pub use commands::canal::start as start_canal;
 

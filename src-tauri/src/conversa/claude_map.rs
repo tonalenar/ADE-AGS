@@ -147,12 +147,25 @@ pub struct TurnResult {
     pub duration_ms: Option<i64>,
 }
 
+/// Resultado de ferramenta que chegou antes do `tool_use` com o mesmo id. Não vira item
+/// sozinho: só fecha a ferramenta quando o uso correspondente aparecer.
+struct EarlyResult {
+    /// A meta da linha marcou a permissão como algo diferente de `accept`.
+    meta_denied: bool,
+    error: bool,
+    output: Option<String>,
+}
+
 /// Lê a saída do Claude linha a linha. Guarda o que precisa para dar ids estáveis (o texto que
 /// chega em pedaços e o item final têm o mesmo id) e para fechar as ferramentas.
 #[derive(Default)]
 pub struct Mapper {
     /// As ferramentas abertas, para atualizar quando chega o resultado.
     tools: HashMap<String, Item>,
+    /// `tool_result` que chegou antes do `tool_use` do mesmo id.
+    early: HashMap<String, EarlyResult>,
+    /// Ids já fechados. Um resultado repetido depois disso não inventa outro item.
+    closed: HashSet<String>,
     /// Quantos blocos de cada mensagem já chegaram (o `index` do bloco na mensagem).
     blocks: HashMap<String, usize>,
     /// As ferramentas que a pessoa negou.
@@ -262,7 +275,12 @@ impl Mapper {
                     let name = str_of(block, "name").unwrap_or("");
                     let input = block.get("input").cloned().unwrap_or(Value::Null);
                     let item = tool_item(id, name, &input, at);
-                    self.tools.insert(id.to_string(), item.clone());
+                    let item = if let Some(pending) = self.early.remove(id) {
+                        self.finish_tool(item, pending)
+                    } else {
+                        self.tools.insert(id.to_string(), item.clone());
+                        item
+                    };
                     out.push(Out::Item(Box::new(item)));
                 }
                 _ => {}
@@ -286,22 +304,37 @@ impl Mapper {
                 Some("text") => self.interrupted |= str_of(block, "text").is_some_and(|t| t.starts_with(INTERRUPTED)),
                 Some("tool_result") => {
                     let Some(id) = str_of(block, "tool_use_id") else { continue };
-                    let Some(mut item) = self.tools.remove(id) else { continue };
-                    let denied = self.denied.remove(id) || meta.get(id).is_some_and(|d| *d != "accept");
-                    let error = block.get("is_error").and_then(Value::as_bool) == Some(true);
-                    item.status = Some(if denied { ToolStatus::Denied } else if error { ToolStatus::Error } else { ToolStatus::Done });
-                    if let Some(output) = result_text(block.get("content")).filter(|o| !o.trim().is_empty()) {
-                        // O plano já está no item; o "ok" do Claude não acrescenta nada.
-                        if item.name.as_deref() != Some("ExitPlanMode") || denied || error {
-                            item.output = Some(clip(&output, OUTPUT_MAX));
-                        }
+                    let pending = EarlyResult {
+                        meta_denied: meta.get(id).is_some_and(|d| *d != "accept"),
+                        error: block.get("is_error").and_then(Value::as_bool) == Some(true),
+                        output: result_text(block.get("content")).filter(|o| !o.trim().is_empty()),
+                    };
+                    if let Some(item) = self.tools.remove(id) {
+                        out.push(Out::Item(Box::new(self.finish_tool(item, pending))));
+                    } else if !self.closed.contains(id) {
+                        // Chegou antes do uso: guarda pelo id e não inventa item.
+                        self.early.insert(id.to_string(), pending);
                     }
-                    out.push(Out::Item(Box::new(item)));
                 }
                 _ => {}
             }
         }
         out
+    }
+
+    /// Aplica o resultado guardado (ou o que acabou de chegar) na ferramenta já conhecida.
+    fn finish_tool(&mut self, mut item: Item, pending: EarlyResult) -> Item {
+        let denied = self.denied.remove(&item.id) || pending.meta_denied;
+        let error = pending.error;
+        item.status = Some(if denied { ToolStatus::Denied } else if error { ToolStatus::Error } else { ToolStatus::Done });
+        if let Some(output) = pending.output {
+            // O plano já está no item; o "ok" do Claude não acrescenta nada.
+            if item.name.as_deref() != Some("ExitPlanMode") || denied || error {
+                item.output = Some(clip(&output, OUTPUT_MAX));
+            }
+        }
+        self.closed.insert(item.id.clone());
+        item
     }
 }
 

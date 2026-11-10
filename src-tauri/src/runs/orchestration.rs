@@ -506,6 +506,31 @@ fn delegate_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<
         let conn = db.lock().map_err(|e| e.to_string())?;
         let run = store::run_by_id(&conn, &run_id)?.ok_or("o run da delegação se perdeu")?;
         let task = store::task_in_run(&conn, &run_id, &key)?.ok_or("a tarefa da delegação se perdeu")?;
+        // Modo async, pedido por uma conversa ou aba (não por outra tarefa, que já recebe pelo run): o resultado chega
+        // ao pai quando a tarefa terminar (contrato §12.9). Idempotente na repetição do mesmo `client_request_id`.
+        if mode == "async" && requesting.task.is_none() {
+            let parent_ref = match (&run.source_thread_id, payload.get("tabId").and_then(Value::as_str)) {
+                (Some(thread_id), _) => Some(format!("thread:{thread_id}")),
+                (None, Some(tab)) if !tab.trim().is_empty() => Some(crate::harness::child_delivery::parent_ref_of_caller(tab)),
+                _ => None,
+            };
+            if let Some(parent_ref) = parent_ref {
+                crate::harness::child_delivery::register(
+                    &conn,
+                    &crate::harness::child_delivery::WatchSpec {
+                        kind: crate::harness::delegate::Target::FleetTask,
+                        child_ref: &task.id,
+                        parent_ref: &parent_ref,
+                        title: &task.title,
+                        agent_id: &task.agent_id,
+                        parent_turn_id: None,
+                        session_id: None,
+                        message_id: None,
+                    },
+                    crate::util::now_ts_ms(),
+                )?;
+            }
+        }
         (task.id, board(&conn, &run)?, run.source_thread_id)
     };
     if let Some(thread_id) = source_thread_id {

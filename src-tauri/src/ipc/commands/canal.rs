@@ -383,7 +383,10 @@ pub(crate) fn dialog_keys(answer: &str) -> Result<&'static str, String> {
 
 /// `ags peer answer <id> <resposta> [--enter]`. Só o orquestrador do integrante responde.
 pub(super) fn peer_answer(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let from = caller(args)?;
+    // Quem responde é a aba provada (token de sessão + PID, ou o PID do motor da conversa), nunca o `from` declarado:
+    // digitar no diálogo de outro agente é uma decisão do papel de orquestrador, e o papel só vale para quem prova a aba.
+    let clean = |key: &str| arg_str_opt(args, key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let from = crate::terminal::authorize_actor(clean("session").as_deref(), clean("from").as_deref(), crate::ipc::current_client_pid())?;
     let raw_id = arg_str(args, "id")?;
     let id: i64 = raw_id.trim().trim_start_matches('#').parse().map_err(|_| "Use o número da pendência: `ags peer answer 12 1`.".to_string())?;
     let answer = arg_str_opt(args, "text").filter(|t| !t.trim().is_empty()).ok_or("Falta a resposta: `ags peer answer <id> <resposta>`.")?;

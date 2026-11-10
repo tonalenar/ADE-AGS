@@ -210,7 +210,7 @@ Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta
 | # | Inventário | Afirmação | O que o código mostra | Efeito na matriz |
 |---|---|---|---|---|
 | D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:285`, `opencode.rs:231`. Cursor e Antigravity **não** usam `open_resuming` e não devem: têm um processo por turno e o prompt sai junto com `--resume`/`--conversation`. Usam `resume::run_turn_resuming` (`cursor.rs:243-267`, `agy.rs:224-248`, `resume.rs:176-199`), que só recai numa sessão nova com prova de recusa antes do turno (§11.12) | Inventário errado no ponto. A célula de `resume` de cursor e agy cita o guarda e os testes dele |
-| D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7. Depois da Fase 3, as células de Claude (`tool_events`) e de Codex (`turn_completion`) citam a correção; o estado delas não muda |
+| D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7. Corrigido depois da Fase 3 para OpenCode, Antigravity e Cursor (o fim normal também marca); as células `tool_events` desses motores citam a correção. As de Claude (`tool_events`) e de Codex (`turn_completion`) seguem citando a correção anterior; o estado delas não muda |
 | D3 | UI `chatModel.ts:74-80` × inventário | A UI anuncia `midTurn: steer` para o Claude; o inventário diz `unknown` | O Claude só escreve a linha `user` no stdin com o turno aberto (`claude.rs:570-578`) e não observa o desfecho. O comentário da própria UI admite "ou logo depois" (`chatModel.ts:66-67`) | `chat/claude-code` `steer` = `Unknown`; decisão em §1.8 |
 | D4 | `claude-codex` §2.1 #9-#11, §2.2 #9-#11 | `child_spawn`/`child_result` `supported` pela rota do ADE (`chat_new`, `chat_wait`) e `child_stop` pela rota nativa (`stop_task`) | Duas rotas misturadas na mesma capability | Separadas (§1.5). Claude: `child_spawn` fica `S` (nativo observado: `tarefas.rs:1-20`), `child_result` vira `U` (o resumo só vai à janela; o log só guarda id, título e status, `execution_log.rs:228-230`), `child_stop` fica `S`. Codex: `child_spawn` `S`, `child_result` `U`, `child_stop` `U` |
 | D5 | `antigravity-t3` §1.1 | `child_spawn` e `child_result` = `unknown` | O adapter só mapeia o **nome** da ferramenta para um cartão `Task` (`agy_map.rs:331-334`), igual ao Cursor (`cursor_map.rs:298-300`), que o inventário do Cursor marcou `unsupported`. O inventário do agy afirma que o CLI tem subagente nativo sem citar prova | `Unsupported` nos dois, pela mesma regra (sem caminho no ADE). Não prova que o agy não tenha subagente |
@@ -224,8 +224,8 @@ Conferido e **mantido** dos inventários: `Engine::of(...) != Some(Engine::Claud
 
 ### 1.7 `mark_unknown_outcomes` por motor (resolve D2)
 
-A função marca como "desfecho desconhecido" as ferramentas `Running` de um turno (`conversa/turn.rs:70-80`, que chama `mark_unknown_outcomes_except`; as exceções vêm do motor). Quem a chama:
-- `turn::record_end`, quando `result.interrupted || result.error.is_some()` (`turn.rs:59-61`): os motores de `turn::finish` (OpenCode, Antigravity, Cursor e a queda do Codex);
+A função marca como "desfecho desconhecido" as ferramentas `Running` de um turno (`conversa/turn.rs:82-111`, que chama `mark_unknown_outcomes_except`; as exceções vêm do motor). Quem a chama:
+- `turn::record_end`, em **qualquer** fim: normal, interrompido ou com erro (`turn.rs:67-74`). A lista de exceções é vazia nos motores de `turn::finish` (OpenCode, Antigravity, Cursor e a queda do Codex), pelo critério abaixo;
 - `claude::gravar_fim`, em **qualquer** fim do turno do Claude (`claude.rs:455-471`), com as exceções da regra abaixo;
 - `codex::gravar_fim`, no `turn/completed`, com **qualquer** `status` (`codex.rs:539-549`);
 - `close_orphan_runs`, no boot, só para turnos ainda `inProgress` (`conversa/store.rs:1068-1082`).
@@ -234,17 +234,27 @@ A função marca como "desfecho desconhecido" as ferramentas `Running` de um tur
 |---|---|---|---|
 | Claude | `Out::Done` → `finish_turn` (`claude.rs:440-453`) → `gravar_fim`: **marca** em `result` normal, interrompido ou com erro, **exceto** as tarefas em segundo plano com o processo vivo | `closed()` → `finish_turn` (`claude.rs:368`), sem exceção: **marca tudo** | marca |
 | Codex | `turn/completed` → `gravar_fim` (`codex.rs:539-549`): **marca em qualquer `status`**. Não roda `pool::after_turn`, como antes | `closed()` → `turn::finish` (`codex.rs:480`): marca (queda é erro; fechar de propósito é interrupção) | marca |
-| OpenCode | `turn::finish` (`opencode.rs:814`): marca se interrompido ou com erro. **Não** marca no fim normal | `turn::finish` (`opencode.rs:589`): marca | marca |
-| Antigravity | `turn::finish` (`agy.rs:213`): idem | idem (EOF sem `result` vira erro) | marca |
-| Cursor | `turn::finish` (`cursor.rs:225`): idem | idem | marca |
+| OpenCode | `turn::finish` (`opencode.rs:814`): **marca em qualquer fim** (normal, interrompido ou com erro), sem exceção (critério abaixo) | `turn::finish` (`opencode.rs:589`): marca | marca |
+| Antigravity | `turn::finish` (`agy.rs:214`): **marca em qualquer fim**, como o OpenCode | idem (EOF sem `result` vira erro) | marca |
+| Cursor | `turn::finish` (`cursor.rs:233`): **marca em qualquer fim**, como o OpenCode | idem | marca |
 
 **Exceção das tarefas em segundo plano (Claude).** O evento `task` de começo com `is_backgrounded: true` diz qual `tool_use` a lançou (`tool_use_id`). `tarefa_em_segundo_plano` (`claude.rs:473-480`) guarda esse id em `Session.background`. Com o processo vivo, o fim do turno não marca esse item: o desfecho dele vem pelo canal de tarefas (`task_notification`, ou o `stop_task` que encerra a tarefa). A exceção vale para a tarefa viva e para a já encerrada, porque nos dois casos o desfecho já chega pelo canal. Se o processo cai ou é fechado, nenhuma exceção vale: o canal morre com ele, e o item fica marcado. O Codex não precisa dessa exceção: `collabAgentToolCall` e `subAgentActivity` não viram item da timeline, só vão ao painel de tarefas.
 
+**Exceções por motor (critério).** Uma ferramenta só fica de fora da marcação se o motor garante que ela segue depois do fim do turno pelo próprio canal. Só o Claude tem esse canal (a tarefa em segundo plano com o processo vivo, acima). Para OpenCode/ACP, Antigravity e Cursor a lista de exceções é vazia, com estas citações do `record_end` (`turn.rs:56-74`):
+- **OpenCode (ACP):** `session/prompt` só responde no fim do turno (`opencode_map.rs:10-11`), e o mapeador não tem tarefa em segundo plano (nenhuma ocorrência de `background` em `opencode_map.rs`). Um `tool_call` sem atualização final nessa hora não tem quem o feche depois (`opencode.rs:789-826`).
+- **Antigravity:** o `result` é o último evento, e cada turno é um processo (`agy.rs:214`, `agy_map.rs:195-242`). O mapeador também não tem tarefa em segundo plano.
+- **Cursor:** o turno fecha no `result`, que o `cursor-agent` só manda depois dos shells em segundo plano (`cursor_map.rs:13-15`), ou por silêncio, que não vence com ferramenta `Running` (`cursor_map.rs:155-158`). Um sinal depois do fim de uma chamada desfaz esse fim (`cursor_map.rs:126-127`), então o turno segue até o `result`.
+- **Codex:** `collabAgentToolCall` e `subAgentActivity` não viram item da timeline (ver acima): lista vazia, como antes.
+
+**Prova (derivada, não captura real).** `replay_derivado_agy_fim_normal_marca_ferramenta_sem_resultado` e `replay_derivado_cursor_fim_normal_marca_ferramenta_sem_resultado` cortam o frame que fecha a ferramenta em `antigravity-feliz` e `cursor-feliz` (capturas `recorded`). `replay_derivado_acp_fim_normal_marca_ferramenta_sem_resultado` usa uma sequência ACP sintetizada, porque não há captura real de ACP. O controle `replay_derivado_fim_normal_com_ferramenta_concluida_fica_intacta` mostra que a ferramenta concluída não é marcada. Esses testes provam o que o código faz com essa entrada, o mesmo limite de `claude-tool-sem-resultado`: não provam que a CLI real produz `tool_use` sem desfecho num fim normal (em `conversa/test_bancada.rs`).
+
 Lacunas reais, em ordem de risco:
-1. **OpenCode, Antigravity e Cursor, no fim normal**: não marcam quando o turno acaba **sem erro** (`turn::finish` → `record_end`, `turn.rs:59-61`, só age em erro ou interrupção). Claude e Codex foram corrigidos nesta fase. Para os três, a decisão falta (§8): a premissa de que "os outros motores já marcam no fim normal" não se confirma no código.
+1. **Resolvida nesta correção (fecha o que a Fase 3 deixou aberto)**: OpenCode, Antigravity e Cursor marcam também no fim normal, pelo `record_end` (`turn.rs:67-74`), com a lista de exceções vazia (critério acima). Antes, `turn::finish` só agia em erro ou interrupção.
 2. Não há captura real que mostre `tool_use` sem `tool_result` num fim normal do Claude, nem `commandExecution` `inProgress` no `turn/completed` do Codex. As fixtures `claude-tool-sem-resultado` e `codex-tool-sem-resultado` são sintetizadas: provam o que o código faz com essa entrada, não que a CLI real a produz.
 3. Tarefa em segundo plano que acaba sem `tool_result` continua `Running` na timeline: o ADE sabe que a tarefa acabou, mas não fecha o item. Já era assim e não muda aqui.
-4. Os itens marcados por `record_end` (OpenCode, Antigravity, Cursor e a queda do Codex) não são emitidos à janela: a tela só os vê ao recarregar. Gap antigo, fora desta fase.
+4. **Resolvida nesta correção**: `turn::finish` emite à janela os itens que `record_end` marcou (`turn.rs:43-54`), como Claude e Codex já faziam. Antes, a tela só os via ao recarregar.
+
+**O que foi e o que não foi verificado nesta correção.** Verificado: `cargo test --lib conversa`, com os testes derivados novos (três falhavam antes da correção e passam depois; o controle já passava) e o teste de que `record_end` devolve à janela o que marcou. Não verificado: o comportamento real da CLI de OpenCode, Antigravity e Cursor quando uma ferramenta termina sem desfecho num fim normal; a emissão de fato à janela (só pela leitura de `turn::finish`, sem teste de janela); a tela.
 
 ### 1.8 Conflito do `steer` do Claude: decisão
 
@@ -533,19 +543,19 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 
 | Cenário | Claude | Codex | OpenCode (ACP) | Antigravity | Cursor | Como |
 |---|---|---|---|---|---|---|
-| **P0** ferramenta sem resultado ao fim | **feito** (§1.7): fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` (`gravar_fim`) | **feito**: fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` (`gravar_fim`) | fixture `acp-tool-sem-resultado` | `requer captura real` | `requer captura real` | Claude e Codex marcam no fim (a fixture fixa a entrada; o teste de banco, o efeito). OpenCode, Antigravity e Cursor ainda não marcam no fim normal (§1.7, lacuna 1) |
+| **P0** ferramenta sem resultado ao fim | **feito** (§1.7): fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` (`gravar_fim`) | **feito**: fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` (`gravar_fim`) | **feito** (§1.7): sequência ACP sintetizada, sem arquivo de fixture (`replay_derivado_acp_fim_normal_marca_ferramenta_sem_resultado`); não há captura real de ACP | derivado de `antigravity-feliz` (`replay_derivado_agy_fim_normal_marca_ferramenta_sem_resultado`); `requer captura real` da CLI | derivado de `cursor-feliz` (`replay_derivado_cursor_fim_normal_marca_ferramenta_sem_resultado`); `requer captura real` da CLI | Claude e Codex marcam no fim (a fixture fixa a entrada; o teste de banco, o efeito). OpenCode, Antigravity e Cursor marcam também no fim normal (§1.7); as provas deles são derivadas, e a CLI real só se prova com captura |
 | **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | **gravada** `antigravity-queda` (kill sem `result`) | **gravada** `cursor-queda` (kill sem `result`) | bancada |
 | **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste do guarda `run_turn_resuming` com fakes (`test.rs:779-901`): recusa antes do turno → turno novo com aviso; o resto não repete | idem (`--resume`, mesmo guarda) | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
 | **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
 | **P1** interrupção | **gravada** `claude-interrompido` | **gravada** `codex-interrompido-real` (e `codex-interrupt-antes-do-started`: `-32600` antes de `turn/started`; o ADE segura o Parar e o manda no aviso: `codex_parar.rs`, `test_codex_parar.rs`) | fixture `acp-interrompido` | o kill gravado não separa interrupt de queda | o interrupt é kill, sem mensagem; ver `cursor-queda` | bancada |
 | **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
-| **P1** frames fora de ordem | derivada `claude-feliz` (**quarentena**: `tool_result` antes de `tool_use` é descartado, `claude_map.rs:287-289`) | derivada `codex-feliz`: `turn/started` logo após resposta de `turn/start` | `requer captura real` | derivada `antigravity-feliz`: DONE da ferramenta depois do texto | derivada `cursor-feliz`: conclusão de ferramenta depois do texto | bancada; só reordena quadros registrados |
+| **P1** frames fora de ordem | derivada `claude-feliz`: `tool_result` antes de `tool_use` fica guardado e fecha a ferramenta (`Read:done`) | derivada `codex-feliz`: `turn/started` logo após resposta de `turn/start` | `requer captura real` | derivada `antigravity-feliz`: DONE da ferramenta depois do texto | derivada `cursor-feliz`: conclusão de ferramenta depois do texto | bancada; só reordena quadros registrados |
 | **P0** stream parcial (texto/ferramenta) | derivada `claude-feliz`, corte no `tool_use` | derivada `codex-feliz`, corte em `agentMessage/delta` | `requer captura real` | derivada `antigravity-feliz`, corte no delta de texto | derivada `cursor-feliz`, corte no início da ferramenta | bancada; oráculo exige turno `aberto` |
 | **P0** processo ocioso sem frame final | derivada `claude-feliz`, sem `result` | derivada `codex-feliz`, conserva `thread/status: idle` e remove `turn/completed` | `requer captura real` | derivada `antigravity-feliz`, sem `result` | derivada `cursor-feliz`, sem `result` | bancada; oráculo exige turno `aberto` |
 | **P2** turno feliz | **gravada** `claude-feliz` | **gravada** `codex-feliz` | fixture de base | **gravada** `antigravity-feliz` | **gravada** `cursor-feliz` | bancada |
 | **P2** filho termina antes do pai | bancada pronta (B2 e B3 resolvidos); requer fixture | bancada pronta (B2 e B3 resolvidos); requer fixture | sem frame de filho (o ACP só tem o cartão `think`) | `requer captura real` | `requer captura real` | bancada |
 
-Contagem da grade (11 cenários × 5 motores = 55 células): **11 com fixture exata** (a queda sintetizada do Codex, as duas ferramentas sem resultado sintetizadas de Claude e Codex, mais oito recorded: feliz de Claude, Codex, Antigravity e Cursor; interrupção de Claude e Codex; EOF de Antigravity e Cursor), **3 parciais** (pedido em Claude, Codex e ACP), **11 variantes derivadas aprovadas** (três fora de ordem, quatro cortes parciais e quatro processos ociosos), **1 variante derivada em quarentena** (Claude fora de ordem; o resultado anterior a `tool_use` é descartado), **29 sem fixture**. As variantes derivadas não contam como capturas independentes. O steer do Claude (`claude-steer-ferramenta` e `claude-steer-sem-ferramenta`) não é linha desta grade.
+Contagem da grade (11 cenários × 5 motores = 55 células): **11 com fixture exata** (a queda sintetizada do Codex, as duas ferramentas sem resultado sintetizadas de Claude e Codex, mais oito recorded: feliz de Claude, Codex, Antigravity e Cursor; interrupção de Claude e Codex; EOF de Antigravity e Cursor), **3 parciais** (pedido em Claude, Codex e ACP), **12 variantes derivadas aprovadas** (quatro fora de ordem, quatro cortes parciais e quatro processos ociosos), **29 sem fixture**. As variantes derivadas não contam como capturas independentes. O steer do Claude (`claude-steer-ferramenta` e `claude-steer-sem-ferramenta`) não é linha desta grade.
 
 ### 5.4 O que exige captura real (nunca sintetizar)
 
@@ -582,14 +592,14 @@ grep -rn --include='*.ts' --include='*.tsx' -E "['\"](codex|claude-code|claude|o
 
 **Reprodução em 10/11/2026, antes desta migração:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**. O comando acima reproduz esses totais brutos. Os subtotais por papel na tabela são a classificação da auditoria de 09/11 e ainda não foram recontados linha a linha; portanto não descrevem essa reprodução atual.
 
-**Depois desta rodada:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**. O total bruto se manteve: o mapeamento `Engine` → id do registro foi centralizado no `CHAT_ENGINE_REGISTRY`, que também é usado por `Engine::of`, sem duplicar os cinco nomes. As decisões de `steer`, `compact` e `goal` passaram a ler as células da matriz.
+**Depois desta rodada:** Rust **306 linhas em 57 arquivos**; TS/TSX **176 linhas em 55 arquivos**. No TypeScript saíram sete linhas brutas líquidas, incluindo gates que agora consultam a matriz e comparações de provider que foram para o registro de compatibilidade. Rust ficou no mesmo total bruto: duas comparações migraram (`approval` e `child_stop`) e duas linhas do teste inline de `chat providers` contêm o provider serializado; `troca.rs` deixou de ser contado como arquivo. O guard reduziu de **112 para 102 comparações**. `steer`, `interrupt`, `compact`, `goal`, `approval` e `child_stop` migraram parcialmente; `start` também chega ao seletor.
 
 Ressalvas: a contagem é bruta. Inclui testes inline dentro de arquivos de produção (`runs/oneshot.rs`, `runs/plan.rs`, `ipc/commands/pool.rs`) e falsos positivos de paginação (`"cursor"` em `ipc/mcp.rs:1011` e `:1044`, `runs/orchestration.rs:234`, `runs/model_discovery.rs:731`). A classificação por arquivo é por leitura do papel do arquivo, não linha a linha. O número "98" do inventário `tui-acp-frota` não é reprodutível e não deve ser citado.
 
 ### 6.2 Fonte única proposta
 
 - **Uma só fonte:** `harness::matrix` (esta Fase 0) para o que cada provider promete, e o registro de agentes (`agents/registry.rs`) para o que ele **é** (comando, MCP, retomada, sessões). O descritor não duplica o registro: aponta para ele. `harness_capability_matrix` expõe a matriz inteira ao frontend pelo Tauri; `harness::matrix::supports` é a consulta tipada no backend.
-- **Quem consome:** `Engine::capabilities()` (`conversa/api.rs`) deriva `steer`, `compact` e `goal` da matriz; `Unknown` preserva a disponibilidade legada e só `Unsupported` bloqueia. A leitura da lista `PROTOCOL_AGENTS` (`chatModel.ts:74-80`) do backend (via `ags chat providers` e comando Tauri) ainda falta.
+- **Quem consome:** `Engine::capabilities()` (`conversa/api.rs`) deriva `steer`, `compact` e `goal` da matriz; `Unknown` preserva a disponibilidade legada e só `Unsupported` bloqueia. `harness_capability_matrix` fornece a matriz ao frontend; o seletor e o compositor estruturado consultam uma store única. `ags chat providers` agora inclui `harnessCapabilities` para cada provider nativo e para o ACP local.
 - **Regra de saída (Fase 3):** nenhuma comparação `agent_id == "<nome>"` decide capability fora do adapter e do registro. Um teste de lint com baseline (mesma ideia do `check:test-lint`) falha quando o número de ocorrências do grupo "migrar" cresce.
 - A fonte inclui o escopo por **sessão**: o ACP local lê `agentCapabilities`; o Claude só marca `steer` quando houver captura.
 
@@ -603,10 +613,10 @@ Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
 
 | Capability afetada | Onde |
 |---|---|
-| `child_stop` | `conversa/api.rs:1132` (pendente) |
-| `compact`, `goal` | `conversa/api.rs` (compact e goal derivados da matriz; `chat_goal` MCP bloqueia Unsupported); textos ainda listam Codex/Claude; `ComposerAssistMenu.tsx:301-304`, `StructuredConversationView.tsx:156-197` pendentes |
-| `steer` | `conversa/api.rs` deriva a semântica do turno; `chatModel.ts:74-85` pendente |
-| `approval` | `conversa/troca.rs:114`, `chat/structured/switchModel.ts:19-21` |
+| `child_stop` | `conversa/api.rs` consulta `ChildStop` antes do `stop_task`; a matriz confirma Claude `Supported` e Codex `Unsupported` |
+| `compact`, `goal` | `conversa/api.rs` e `chat.providers` usam a matriz; o composer estruturado desabilita `Unsupported` com a nota. A matriz da TUI contradiz a oferta legada de `/compact` para Codex/Claude e `/goal` para Claude; essas exceções ficaram centralizadas no registro de compatibilidade e precisam de decisão sobre o contrato antes da migração. `autocompact` fica no registro porque a matriz Chat não descreve essa sintaxe nativa.
+| `steer`, `interrupt` | `conversa/api.rs` e a escolha de envio/parada no compositor estruturado usam a matriz; `PROTOCOL_AGENTS` ainda informa acesso e Plano, que não são capabilities da matriz. |
+| `approval` | `conversa/troca.rs` e `chat/structured/switchModel.ts` consultam `Approval`; ACP local mantém sua regra própria enquanto a célula é `Unknown`. |
 | `usage` | `chat_team/watch_db.rs:257`, `chat/summary/LimitsCard.tsx:27-33` |
 | `resume` | `conversa/codex.rs:268`, `opencode.rs:194`, `tabs/continuity.ts:24` |
 | `ags_mcp` | `ipc/mcp.rs:2905`, `:2922`; `agents/adapter.rs:55`, `:93` (o flag que contradiz o registro) |
@@ -614,15 +624,15 @@ Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
 
 ### 6.4 Ordem de migração e estado
 
-1. **Parcial:** `harness::matrix::supports` lê o estado da matriz e `harness_capability_matrix` expõe-a pelo Tauri; ainda falta adicioná-la ao `ags chat providers`.
-2. **Pendente:** trocar `PROTOCOL_AGENTS` por leitura do backend; manter um teste de paridade até remover a cópia.
-3. **Parcial:** `Engine::capabilities()` deriva `steer`, `compact` e `goal`; o MCP `chat_goal` agora recebe erro explícito quando `goal` é `Unsupported`. Faltam `troca.rs`, `switchModel.ts`, `ComposerAssistMenu.tsx`, `StructuredConversationView.tsx`, `teamModel.ts` e `watch_db.rs`, além dos outros comportamentos em `api.rs`.
+1. **Concluído:** `harness::matrix::supports` consulta a matriz; `harness_capability_matrix` expõe-a pelo Tauri e `ags chat providers` inclui a coluna `harnessCapabilities`.
+2. **Pendente:** substituir a cópia de modos de acesso e Plano em `PROTOCOL_AGENTS` exige uma fonte Tauri para `EngineCapabilities`; essas opções não correspondem às 18 células atuais da matriz. Manter teste de paridade até haver contrato comum.
+3. **Parcial:** `Engine::capabilities()` deriva `steer`, `compact` e `goal`; o MCP `chat_goal` recusa `Unsupported`; o gate de `stop_task` consulta `ChildStop`. Frontend consulta `steer`, `interrupt`, `compact`, `goal`, `approval` e `start`. Faltam `teamModel.ts`, `watch_db.rs` e outros comportamentos em `api.rs`; Plano não tem célula na matriz. As células TUI de `/compact` e `/goal` divergem dos comandos legados oferecidos; `autocompact` continua na compatibilidade Claude, pois a matriz Chat não descreve essa sintaxe nativa. `pause/resume` de goal também fica no registro do Codex: a matriz não tem uma capability separada para essas ações.
 4. **Pendente:** migrar Frota e orquestração (`supervisor.rs`, `mcp.rs`, `oneshot.rs`, `plan.rs`, `roster.rs`).
 5. **Pendente:** contas, uso e limites continuam no registro, não no descritor de execução.
-6. **Parcial:** `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro` lê Rust e TS/TSX e aplica baseline por arquivo e expressão. Remove-se a linha do baseline junto com cada migração; o baseline atual contém 112 comparações legadas. A comparação guarda `agent_id`, `agentId`, `agent` ou `provider` com igualdade textual a um provider conhecido; padrões mais indiretos ainda precisam ser cobertos.
+6. **Parcial:** `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro` lê Rust e TS/TSX e aplica baseline por arquivo e expressão. Remove-se a linha do baseline junto com cada migração; o baseline caiu de 112 para **102** comparações. A comparação guarda `agent_id`, `agentId`, `agent` ou `provider` com igualdade textual a um provider conhecido; padrões mais indiretos ainda precisam ser cobertos.
 7. **Pendente:** trocar os `unreachable!` (`api.rs:840`, `:953`, `:989`) por erro de capability, para uma flag ligada sem implementação não derrubar o processo.
 
-**Faltam para a Fase 0:** a UI ainda não consome o comando Tauri para desabilitar ações indisponíveis; indisponibilidade no MCP para as demais capabilities `Unsupported`; migração dos pontos restantes acima e recontagem dos subtotais por papel. O único ponto de indisponibilidade fechado nesta rodada é `chat_goal` no MCP, coberto por teste: `goal` Unsupported devolve erro com provider e estado da matriz. `Unknown` não é bloqueado.
+**Faltam para a Fase 0:** migração dos pontos restantes acima; a UI ainda não trata Plano pela matriz porque não há essa capability; decidir as divergências TUI de `/compact` e `/goal`; aplicar indisponibilidade no MCP às demais tools/capabilities `Unsupported`; ampliar o teste de guarda para padrões mais indiretos; e recontar os subtotais por papel. O seletor preserva providers `Unknown`; no composer estruturado, `Unsupported` fica desabilitado com a nota da célula. `Unknown` não é bloqueado.
 
 ## 7. Fatia vertical da Fase 1
 
@@ -682,7 +692,7 @@ Nada de `database/schema.rs` nem `ipc/protocol.rs`. Os testes da Fase 1 ficam no
 - `node_id` nos eventos, recibos unificados, evento transacional (Fase 2).
 - `ProviderSessionRef`, `ContextTransfer`, `connected_session` (Fases 3 e 4).
 - **Recuperação:** nenhuma. Depois do reinício a árvore mostra o que as duas varreduras já produzem hoje (interrompido e `failed`/`cancelled`). Não há replay de evento, cursor, retomada de sessão nem relançamento.
-- Leitura do descritor pela UI, IPC ou MCP; correção da lacuna de §1.7; migração dos 149 pontos por nome.
+- Leitura do descritor pela UI, IPC ou MCP; correção das lacunas 1 e 4 de §1.7 (feita depois da Fase 3; as lacunas 2 e 3 seguem abertas); migração dos 149 pontos por nome.
 - Run da Frota fora de conversa, sessões de TUI e filhos criados com o pai ocioso.
 
 ## 8. Decisões em aberto para o usuário
@@ -902,17 +912,17 @@ Lease do chat_send: 120 s, mais que o prazo de um `turn/start` do Codex. Um reen
 | 1 | `chat_send` | **entregue** (esta fatia) | evento e `causation_event_id` |
 | 2 | `fleet_delegate` | leitura unificada e escrita dupla; **a leitura de `orchestration.rs` passa por `receipts::lookup` desde a Fase 4 (§12.5)** | `begin` no lugar do `INSERT` da delegação |
 | 3 | `chat_new` | leitura unificada (esta fatia) | mover `claim_child_delivery` para `receipts`/`effects` |
-| 4 | `chat_interrupt` (`api::stop`) | próxima fatia | efeito `chat_interrupt`; a capability `interrupt` já existe na matriz |
+| 4 | `chat_interrupt` (`api::stop`) | **entregue** (segunda fatia, §11.11) | evento e `causation_event_id` (§11.9) |
 | 5 | `request_answer` (`answer.rs`) | próxima fatia | o recibo guarda o `request_id` do pedido; responder duas vezes não reenvia ao provider |
 | 6 | `task_cancel` (Frota) | próxima fatia | subárvore cancelada uma vez; efeito de filesystem `retry_safe` |
-| 7 | `queue_chat_event`/`queue_fleet_event` | depois dos comandos | gravar o evento na transação do passo 1; trocar o `stderr` por um sinal recuperável; só então a UI publica depois do commit |
+| 7 | `queue_chat_event`/`queue_fleet_event` | **parcial** (segunda fatia, §11.11): `stderr` trocado por sinal recuperável, e conclusão só depois da tentativa | gravar o evento na transação do passo 1 (depende de `chat_send` e `chat_interrupt` migrarem o evento) |
 | 8 | worker contínuo | Fase 5, se a prova pedir | `claim_next` em laço, `recover_expired` no boot |
 
-### 11.9 O que a fatia não faz
+### 11.9 O que as fatias ainda não fazem
 
-- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13).
-- Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id` ainda: as colunas existem (aditivas) e ficam `NULL` até `queue_chat_event` migrar.
-- Interrupt, spawn, resposta a pedido e cancelamento não usam a fila.
+- Não há worker em segundo plano: quem aceita o comando também reclama e executa o efeito (o claim com lease já impede dois donos). `recover_expired` roda no boot sob o lease do harness (§13). O replay das falhas de gravação (§11.11) roda na primeira vez que a fila é usada no processo, não no boot.
+- Nenhum recibo guarda `event_sequence` nem efeito guarda `causation_event_id`. As colunas existem (aditivas) e ficam `NULL`: o desenho (§11.4) pede o evento gravado na transação do passo 1, o que exige um tipo de evento novo na projeção (`runs/harness.rs`), que está em outra frente. Essa migração fica para `chat_send` e `chat_interrupt` (§11.8, itens 1, 4 e 7).
+- Spawn, resposta a pedido e cancelamento não usam recibo nem fila de efeitos. O Parar usa desde a segunda fatia (§11.11).
 - Nenhum provider real foi executado.
 
 ### 13. Fase 5: recuperação e reconciliação
@@ -958,6 +968,63 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 - Na fotografia da Fase 2, `recover_expired` ainda não era chamado no boot. A Fase 5 adiciona essa chamada sob o lease SQLite (§13).
 - Teste visual e a UI: `chatThreadSendOnce` existe em `ipc.ts`, mas nenhuma tela o chama ainda.
 
+### 11.11 Fase 2, segunda fatia: Parar idempotente e falha de gravação visível
+
+**Objetivo:** o Parar (`chat_interrupt`, §11.8 item 4) ganha recibo e efeito como o envio. E uma falha de gravação do log de execução (§11.8 item 7) deixa de ir só ao `stderr`: vira um sinal que a janela e o harness veem e que pode ser regravado.
+
+**Parar com `client_request_id`** (`conversa/stop_receipt.rs`, `api::stop_with_request`)
+
+- Entradas: `chat_thread_interrupt` (Tauri, `client_request_id` opcional), `ags chat stop <id> --client-request-id` (CLI) e `chat_stop` (MCP, `client_request_id` ou `clientRequestId`). Sem o id, o caminho é o de sempre: sem recibo e sem efeito. O comando Tauri devolve `null`; a CLI e o MCP devolvem `{ stopped: true }`.
+- Chave: `kind = chat_interrupt`, `caller_key = chat-interrupt:<hash do escopo>`, `request_id`. O hash do payload cobre só a conversa, e o escopo é o de quem chamou (`ui`, `cli`, aba ou conversa do MCP).
+- Efeito `chat_interrupt`: `retry_safe = 0` (é o provider), `max_attempts = 3`, lease de 30 s.
+- Desfecho, guardado em `result_json.outcome`:
+
+| Desfecho | Quando | `sent` | Recibo |
+|---|---|---|---|
+| `sent` | o motor mandou a interrupção nesta chamada | `true` | `accepted` |
+| `deferred` | Codex com o `turn/start` ainda sem resposta: o Parar fica pendente em `codex_parar` e sai no `turn/started` | `false` | `accepted` |
+| `no_turn` | não há turno: nada vai ao agente; o que ficou aberto no banco é fechado, como antes | `false` | `accepted` |
+| erro do motor | o motor não disse se a parada chegou | `false` | `unknown`, e o erro volta à chamada |
+
+- Repetição com o mesmo id: devolve o recibo gravado (`replayed = true`, `sent = false`) e não chama o motor. Lease vivo: `submitting`. Recibo `unknown`: nunca se repete às cegas, porque a interrupção pode ter chegado. O mesmo id com outra conversa falha fechado.
+- Claude e OpenCode respondem ok à interrupção mesmo sem turno. Antes, isso contava como `sent`; agora, sem turno, o desfecho é `no_turn` (`api::interrupt`). Agy e cursor não mudaram: têm um processo por turno.
+
+**Falha de gravação do log** (`runs/execution_log.rs`)
+
+- A fila tenta gravar até 3 vezes (`PERSIST_ATTEMPTS`), sem dormir: a espera pelo lock já vem do `busy_timeout`. Falha de chave estrangeira não se repete: a conversa do evento foi apagada, não há onde gravar e não conta como perda.
+- Falha de vez: uma linha em `harness_log_failure`, criada no `migrate()` do módulo (aditiva): `scope`, `thread_id`, `task_id`, `attempt_id`, `event_kind`, `payload_json`, `last_error`, `attempts`, `created_at`, `resolved_at`. O erro passa por `sanitize_error`. O payload é o compactado do log, sem texto de agente. A Frota não guarda payload, então a falha dela não é repetida.
+- Sinal: a janela recebe `cc-harness-log-failed` e o barramento publica `harness.log_failed`. Os dois trazem `scope`, `threadId` ou `taskId`, `eventType`, `error`, `attempts` e `failureId`.
+- Ordem (§11.4): fase, pedido e fechamento saem à janela (`cc-chat-thread`) e ao barramento (`chat.changed`) só depois da tentativa de gravação. `chat.changed` leva `logged`, que vira `false` quando a gravação falhou, para quem espera (`ags chat wait`) saber que o log não tem o evento. Itens e tarefas continuam saindo na hora, sem esperar a fila.
+- Replay: na primeira vez que o processo enfileira algo, a fila repete as falhas de conversa abertas (até 200 por vez): regrava o evento e marca `resolved_at`. Uma repetição que falha de novo soma tentativas e fica aberta. Roda uma vez por processo; não há worker nem relógio.
+- Se a fila já caiu, o trabalho roda no chamador (`send_or_handle`): o evento não se perde.
+
+**O que muda para quem chama**
+
+- Tela: `chat_thread_interrupt` aceita `client_request_id` e devolve o recibo quando há id. A UI não foi alterada e continua chamando sem o id.
+- CLI e MCP: `ags chat stop` e `chat_stop` documentam o id; a skill sobe para 1.68.0.
+- Nenhuma tela mostra o aviso `cc-harness-log-failed` nem `logged: false` ainda. O sinal existe; a apresentação não.
+
+**`event_sequence` e `causation_event_id`:** continuam `NULL`, pelo motivo de §11.9.
+
+**O que foi verificado**
+
+- Testes primeiro, com esqueleto que falha por `unimplemented!`: 9 em `conversa::stop_receipt_test`, 3 contratos em `ipc/test.rs` (CLI, comando Tauri e schema do MCP) e 10 em `runs::execution_log_test`. Os 22 falharam com o esqueleto. O guarda de encaminhamento do MCP já passava antes e continuou passando.
+- Depois da implementação, os 22 passam.
+- `cd src-tauri && cargo test --lib --bin ags`: 2828 passaram, 0 falharam, 30 ignorados. Linha de base do mesmo HEAD: 2804 passaram, 1 falhou, 30 ignorados. A falha da linha de base era de OCR local (`computer_use::capture`); no pós-mudança ela não aconteceu, e rodada isolada passa.
+- Avisos do build: 21 antes e 21 depois, com os mesmos arquivos.
+- `node scripts/fingerprint.mjs`: ok (`schema-sqlite 96507e01a45b`, `protocolo-ipc 1959c50fc9d7`; nenhum reconhecimento). O `database/schema.rs` e o `ipc/protocol.rs` não mudaram.
+- `bun run check:test-lint`: ok, 40 violações antigas no baseline e nenhuma nova.
+- `bun run check:catalogs`: ok (a skill e a ajuda da CLI batem com o código).
+
+**O que não foi verificado**
+
+- Nenhum provider real nem CLI real foi executado. Os testes usam um motor de mentira que conta as chamadas.
+- Claude e OpenCode sem turno (`no_turn`): o caminho foi lido no código, sem teste com sessão viva.
+- Corrida entre um Parar e o primeiro envio de Claude ou OpenCode: a parada pode fechar, no banco, um turno que acabou de abrir. O Codex já tem essa proteção (`starting`); os outros motores ainda não. Fica para uma fatia própria.
+- Falha de gravação com lock real do SQLite não foi provada: a injeção de falha é uma closure.
+- Replay só roda na primeira fila do processo, não no boot (§13). Falhas da Frota não são repetidas.
+- Desempenho não medido. `ags test affected` e `cargo clippy` não foram rodados.
+
 ### 11.12 Retomada por turno do Cursor e do Antigravity: não repetir às cegas
 
 O Cursor (`--resume <id>`) e o Antigravity (`--conversation <id>`) sobem **um processo por turno**, e o prompt sai junto com o id. Por isso **não** usam `resume::open_resuming`, que abre a sessão antes de qualquer mensagem sair e pode repeti-la: aqui, repetir é rodar o prompt de novo depois de o agente ter editado arquivos ou rodado comandos. A tentativa que envolveu o turno inteiro em `open_resuming` foi rejeitada por isso (retentativa em erro transitório, e um `not found` genérico, de uma ferramenta, virando "sessão perdida").
@@ -984,7 +1051,7 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 
 ## 12. Fase 4: delegação única (`delegate_agent` com três destinos)
 
-**Objetivo:** o orquestrador escolhe **onde** o trabalho vai, de forma explícita, e a mesma pergunta repetida nunca vira prompt duplicado em nenhum dos três caminhos. Núcleo de backend; a entrega durável do resultado ao pai e a UI ficam fora (§12.8).
+**Objetivo:** o orquestrador escolhe **onde** o trabalho vai, de forma explícita, e a mesma pergunta repetida nunca vira prompt duplicado em nenhum dos três caminhos. Núcleo de backend. A entrega durável do resultado ao pai e a `connected_session` no painel fecharam depois, em §12.9.
 
 Código: `harness/delegate.rs` (decisão, recibo e classificação, provados sem o app), `ipc/commands/delegate.rs` (cola com o app: comando IPC `team.delegate`, na CLI `ags team delegate`), `ipc/commands/team.rs` (descoberta e leitura das sessões), `ipc/mcp.rs` (esquema e roteamento), `runs/orchestration.rs` (leitura do recibo da Frota). Testes: `harness/test_fase4.rs`, `ipc/test.rs` e `runs/test.rs`.
 
@@ -1063,8 +1130,96 @@ Os erros de delegação voltam como texto `"<código>: <mensagem>"` (`isError` n
 - Sem worker nem boot: um `submitting` deixado por uma queda só vira `unknown` quando a repetição chega (§12.4).
 - Sessões de outra pasta ligadas pela pessoa só valem se aparecerem entre os integrantes; a descoberta não as mostra se estiverem fechadas.
 - Um integrante que a pessoa elevou para `edits` ou `full` não recebe delegação até a pessoa baixar a política (§12.3, item 5): é a leitura literal de "nunca converter um vínculo em Acesso total". Se a pessoa quiser delegar a integrante elevado, é decisão dela.
-- Entrega durável do resultado ao pai, `ProviderSessionRef` e `ContextTransfer` (§2.2): Fase 4 restante.
+- ~~Entrega durável do resultado ao pai~~ **fechada em §12.9** (modo `async` dos três destinos). Continua aberto: `ProviderSessionRef` e `ContextTransfer` (§2.2).
+- ~~`connected_session` fora do painel~~ **fechado em §12.9.6**: a projeção e a árvore mostram a sessão conectada.
 - Desempenho não medido.
+
+## 12.9 Entrega assíncrona e persistente do resultado do filho (Fase 4, o que ficou aberto)
+
+**Objetivo:** um filho delegado com `mode = async` (conversa filha, tarefa da Frota ou sessão conectada) termina, e o resultado chega ao pai **mesmo que o app feche no meio**, como dado não confiável, limitado, **uma única vez**. Código: `harness/child_delivery.rs` (tudo em SQL sobre `&Connection`, sem relógio nem app), o laço em `ipc/commands/child_delivery.rs`, o registro nos três pontos de delegação (`ipc/commands/conversas.rs::chat_new`, `runs/orchestration.rs::delegate_task`, `ipc/commands/delegate.rs`) e a projeção em `runs/harness.rs`. Testes: `harness/child_delivery/test.rs`.
+
+### 12.9.1 O desenho em quatro peças
+
+| Peça | O que é | Onde |
+|---|---|---|
+| Acompanhamento | uma linha por filho delegado em `async`, gravada na delegação: tipo, filho, pai (`thread:<id>` ou `tab:<id>`), título, agente, turno de origem do pai, e (sessão) a mensagem de delegação | `harness_child_watch` (aditiva, criada por `child_delivery::migrate`, chamada de `harness::store::migrate`) |
+| Efeito | o **fim** vira um efeito `child_result`, `retry_safe = 1`, `max_attempts = 5`, lease de 60 s, chave `child_result:<tipo>:<filho>` | `harness_effect` (Fase 2) |
+| Recibo | `kind = child_result`, `caller_key = <pai>`, `request_id = <tipo>:<filho>`; fica `accepted` quando entregue e `retryable` quando o pai estava fechado | `harness_command_receipt` (Fase 2) |
+| Aviso | uma mensagem `notice` (raw) do pai para ele mesmo na fila durável, `client_id` próprio | `peer_queue` (a mesma fila e o mesmo entregador do vigia do chat) |
+
+`mode = wait` **não** registra nada: o pai já recebe o resultado na própria chamada, e um segundo aviso seria duplicata. Sem registro, um filho que termina nunca gera entrega.
+
+O resultado **não é copiado** para tabela nenhuma do harness. Na hora de entregar (e de desenhar o painel), `inspect` lê o registro nativo do filho (a fala do agente em `chat_item`, `tasks.result`, a resposta na fila). O efeito e o recibo guardam só ids e o canal (`peer:<id>`); um teste confere que o texto do agente nunca aparece neles.
+
+### 12.9.2 O que conta como "fim" de cada tipo de filho
+
+| Tipo | Fim | Resultado |
+|---|---|---|
+| `provider_chat` | o **primeiro** turno (`chat_run`) da conversa filha chegou a estado terminal (`completed`, `failed`, `interrupted`; status desconhecido vira `interrupted` com `outcomeUnknown`). Turno em andamento, mesmo esperando pergunta ou aprovação, não é fim. Os turnos seguintes são pedidos explícitos do pai (que usa `chat_wait`) e não geram entrega | a última fala do agente nesse turno |
+| `fleet_task` | `tasks.status` terminal pelo mesmo mapa de `harness::state::from_task` (`done`, `failed`, `cancelled`, `skipped`, `handed_off`; a tarefa varrida no boot é `interrupted`, nunca `failed`) | `tasks.result`; sem ele, o erro gravado em tarefa que falhou |
+| `connected_session` (terminal ou Gemini Desktop) | **a resposta da sessão ao pai** (`peer tell`/`handoff`/`ask` da sessão para o pai, depois da mensagem de delegação). Sem resposta não há fim observável: o nó segue `running` e nada é entregue | o texto da resposta |
+| `connected_session` (conversa `thread:<id>`) | a resposta acima, **ou** o primeiro turno aberto pela delegação terminou (até 10 s antes da mensagem, como o vigia) sem resposta | a resposta, ou a última fala do agente no turno |
+
+Registro nativo apagado antes do fim (a pessoa apagou a conversa ou a tarefa): `child_gone`, nada é entregue.
+
+### 12.9.3 Onde o resultado aparece no pai, e por que assim
+
+**Mensagem enfileirada para o próximo turno do pai, não item de timeline nem `steer`.** A fila durável tem um consumidor por destino, em ordem, que só digita com o pai livre (conversa sem turno aberto; terminal em silêncio). Assim o aviso:
+- **nunca interrompe um turno em andamento** (o contrário de um `steer`, que entraria no meio do raciocínio do pai);
+- **sobrevive ao app fechar** (a fila é uma tabela) e chega quando o pai estiver livre depois de reabrir;
+- é **dado, não ordem**: leva o cabeçalho `[Resultado de filho delegado via ADE AGS]`, o desfecho, e o texto do filho dentro de `<untrusted_data source="child:<tipo>:<filho>">…</untrusted_data>`, numa linha só (o texto do filho não cria linhas novas nem fecha ou abre o envelope: `</untrusted_data` e `<untrusted_data` dentro do texto viram `…-data`).
+
+Um item de timeline sozinho não acordaria o agente pai, que não leria o resultado. O painel (§12.9.6) mostra o mesmo resultado, marcado, em qualquer caso.
+
+**Limite:** até 1000 caracteres do resultado entram no aviso (a mensagem inteira fica abaixo de 1500, o limite em que a fila passa o texto por arquivo). Passou disso: `truncated="true"` no envelope e a frase "resultado cortado em 1000 caracteres; leia o resto em `chat_show <id>` / `task_result <id>`". O painel corta em 500, como antes.
+
+### 12.9.4 Exatamente uma entrega, mesmo com queda no meio
+
+1. **`settle`** (puro): para cada acompanhamento `watching` cujo filho terminou, numa transação: `receipts::begin`, `effects::enqueue` (a chave de dedupe impede o segundo efeito) e acompanhamento → `ended`.
+2. **`deliver`**: `effects::claim_next(kind = child_result)`; por efeito, **uma transação só**: `peer_queue::admit` do aviso (com `client_id` próprio) + acompanhamento `delivered` + recibo `accepted` + efeito `completed`. Falhou algo: a transação desfaz, o efeito volta a `pending` (`NotApplied`), e a passada para (a próxima, por evento ou no boot, tenta de novo; passadas as 5 tentativas, `failed`).
+3. A chave do aviso é `harness-child-<tipo>-<filho>`; a fila reconhece o mesmo `client_id` do mesmo remetente como repetição (nunca volta, nem depois de entregue: há tombstone).
+
+| Ponto da queda | Estado deixado | O que acontece depois |
+|---|---|---|
+| antes de `settle` | acompanhamento `watching` | a próxima passada vê o fim e cria o efeito |
+| entre `settle` e `deliver` | efeito `pending`, nada na fila | o boot (ou o próximo evento) entrega, uma vez |
+| com o efeito reclamado (`running`) | lease de 60 s | enquanto vive, ninguém toca; vencido, `recover_expired` (boot) o devolve a `pending` (é `retry_safe`) e a entrega acontece uma vez |
+| dentro da transação de entrega | nada gravado (SQLite desfaz) | idem: refaz a entrega, que ainda não existia |
+| depois da transação | `delivered`, efeito `completed`, aviso na fila | nada a refazer; a fila entrega quando o pai estiver livre |
+| aviso já na fila por outra via (versão anterior, vigia) | — | `admit` devolve repetição: conta como entregue por referência (`delivered_via = peer:<id>`), sem segunda mensagem |
+
+`recover_expired` roda no boot dentro do lease SQLite da Fase 5 (§13); logo depois das varreduras, `housekeeping` chama `pump` uma vez, o que entrega o resultado de um filho que terminou (ou foi varrido como `interrupted`) com o app fechado. O laço em `ipc/commands/child_delivery.rs` dorme no barramento (`chat.changed`, `task.changed`, `peer.message`), sem polling; só acorda o entregador da fila de cada destino depois de soltar o lock do banco.
+
+**Sessão conectada: sem segunda cópia.** A resposta da sessão **já é** uma mensagem na fila do pai: a entrega só marca `delivered` com `delivered_via = peer:<id>` (nenhum aviso novo). Quando o fim é o turno da conversa da sessão sem resposta, o aviso usa **a mesma chave do «terminou» do vigia do chat** (`chat_team::watch::end_key`): o primeiro que chegar entra na fila e o outro é reconhecido como repetição. Nunca saem dois avisos do mesmo fim.
+
+### 12.9.5 Pai fechado
+
+Decidido no momento de entregar, não antes: `thread:<id>` com `state = 'active'` (a mesma regra do vigia) ou `tab:<id>` com a aba ainda existente. Caso contrário:
+- **nada é enfileirado** (um destino sem consumidor só geraria um aviso de falha expirado);
+- acompanhamento → `parent_closed`, efeito → `cancelled` (não fica pendente nem tenta de novo), recibo → `retryable` (nada chegou ao pai);
+- o resultado continua legível onde sempre esteve: `chat_show` / `chat_wait` (conversa filha), `task_result` (Frota), a conversa ou a aba da sessão, e o nó da árvore se o pai for aberto de novo.
+
+Não há reentrega se o pai "reabrir": a decisão é terminal. Se a pessoa quiser o resultado, ele está no registro do filho.
+
+### 12.9.6 O painel mostra `connected_session`
+
+A projeção (`runs/harness.rs`) lê `harness_child_watch` dos pais da linhagem e emite um nó por sessão conectada acompanhada: `kind = connectedSession`, `id = session:<sessão>#<client_request_id>`, `childType = connected_session`, `title` (o nome pedido), `agentId`, `executionStatus` (`running` sem resposta; o desfecho depois), `origin` (`turn` com o `turnNodeId` **gravado** na delegação, ou `conversation`), `result` (`{ text ≤ 500, truncated, untrusted: true }`) e `outcomeUnknown`. Filho do turno de origem (ou da conversa), conta em `activeChildren` enquanto corre. Só leitura: o nó não tem botão de abrir nem de parar (o painel nunca encerra uma sessão). No front: `HarnessExecutionKind` ganhou `connectedSession`, `HarnessChildType` ganhou `connected_session`, e o rótulo `chat.harness.childType.connected_session` está nos três catálogos; o bloco do resultado é o mesmo da Fase 4, marcado como dado não confiável. Sessão delegada por um **terminal** (`tab:<id>`) não aparece: a árvore parte de uma conversa.
+
+### 12.9.7 O que foi e o que não foi verificado
+
+**Verificado**
+- Testes escritos antes: 37 em Rust (`harness::child_delivery::test`) contra um esqueleto `todo!()`: todos falharam. Depois da implementação, passam. No vitest, `harnessConnectedSession.test.tsx`: o teste do rótulo e o do catálogo falharam antes da tela; os outros dois são guarda.
+- Rust: fim de cada tipo gera exatamente uma entrega; rodar de novo não entrega outra; turno em andamento não é fim; só o primeiro turno conta; queda entre o fim e a entrega, e com o efeito reclamado (lease vivo e vencido), entrega uma vez; mensagem já na fila com a mesma chave conta por referência; resultado cortado e marcado; texto hostil não fecha nem abre o envelope nem cria linhas; o texto do agente não vai ao efeito nem ao recibo; pai fechado, apagado ou aba inexistente não recebe e nada fica na fila; sessão por resposta, por turno com a chave do vigia, e turno anterior à delegação não conta; `mode = wait` (sem registro) não entrega; a projeção mostra a sessão com tipo, agente, estado, origem e resultado marcado.
+- Vitest: `connected_session` aparece na árvore, com os campos acima, sem botão e sem comando de parada.
+- Sem relógio real (o `agora` é um número) e sem processo real.
+
+**Não verificado**
+- Nenhum provider, sessão ou terminal real: o "pai" é uma conversa do banco em memória, e a fila é a tabela. A cola do laço (`ipc/commands/child_delivery.rs`), o registro em `chat_new`/`delegate_task`/`delegate.rs` e a chamada do `housekeeping` **não têm teste de ponta a ponta** (dependem de `AppHandle`).
+- O consumidor da fila digitando o aviso no pai (conversa livre, terminal em silêncio) é o de sempre e não foi exercitado aqui.
+- **Janela entre criar e registrar:** se o app cair depois de criar o filho e antes de registrar o acompanhamento, esse filho não entrega sozinho. A repetição do mesmo `client_request_id` (o que o agente faz quando perde a resposta) registra de novo. Para a sessão, a resposta dela segue pelo canal normal.
+- Sessão de **terminal** que termina sem responder não tem fim observável (não há como o ADE provar). Sessão delegada por um terminal-pai não aparece no painel.
+- Corrida entre o vigia e a entrega do mesmo fim na mesma instância: coberta pela chave comum; não testada com dois laços reais.
+- Sem captura de tela do nó novo; sem medição de desempenho (a projeção ganhou, por sessão, uma a três leituras).
 
 ## 12.x Entrega de resultado e painel (Fase 4)
 
@@ -1076,7 +1231,7 @@ Campos novos e opcionais: os nós que não são filhos de agente seguem sem eles
 
 | Campo | Em quais nós | O que é |
 |---|---|---|
-| `childType` | conversa filha (`provider_chat`) e tarefa da Frota (`fleet_task`) | o tipo do agente filho. `connected_session` não existe no ADE, então não sai |
+| `childType` | conversa filha (`provider_chat`), tarefa da Frota (`fleet_task`) e sessão conectada (`connected_session`, desde §12.9.6) | o tipo do agente filho |
 | `executionStatus` | conversa filha (estado do último turno), run e tarefa | o estado do §3.1; vira `waiting` quando há pergunta ou aprovação pendente |
 | `result` | conversa filha (última fala do agente no último turno) e tarefa (`tasks.result`) | `{ text, truncated, untrusted: true }`; `text` tem no máximo 500 caracteres |
 | `blocked` | conversa filha e tarefa | `{ kind: question \| approval, count }`: os pedidos pendentes do próprio filho |
@@ -1102,7 +1257,7 @@ Campos novos e opcionais: os nós que não são filhos de agente seguem sem eles
 | MCP `chat_stop` (`chat.stop`) | a pessoa (sem `caller_scope`), ou a conversa ou aba que criou a filha (`parent_ref` = `thread:<pai>` ou `tab:<aba>`) | só o turno da filha. Tarefa da Frota e pasta, sem conversa de origem, não param conversa nenhuma |
 | CLI `ags chat stop` | a pessoa (a CLI não recebe `caller_scope`) | a conversa indicada |
 
-O escopo do MCP vem da sessão: `scoped_chat_payload` carimba `caller_scope` em `chat.send` e em `chat.stop`, e o modelo não escolhe esse campo. **Nunca se encerra o PTY de uma sessão conectada só por deixar de observá-la.** O ADE ainda não tem `connected_session`, então não há PTY de sessão conectada a proteger hoje. O painel só larga os próprios listeners ao desmontar, e um teste confere que desmontar não envia comando de parada nem seleciona conversa.
+O escopo do MCP vem da sessão: `scoped_chat_payload` carimba `caller_scope` em `chat.send` e em `chat.stop`, e o modelo não escolhe esse campo. **Nunca se encerra o PTY de uma sessão conectada só por deixar de observá-la.** A sessão conectada aparece no painel (§12.9.6) sem nenhum botão de abrir ou parar: o nó é só leitura. O painel só larga os próprios listeners ao desmontar, e um teste confere que desmontar não envia comando de parada nem seleciona conversa.
 
 Lacuna conhecida: a CLI `ags chat stop` roda com a identidade da pessoa. Um agente que chame a CLI pela própria terminal ainda não é barrado. Fechar isso depende de a CLI ser da pessoa, e isso não foi verificado.
 
@@ -1123,7 +1278,7 @@ Lacuna conhecida: a CLI `ags chat stop` roda com a identidade da pessoa. Um agen
 - Ponta a ponta: nenhum provider real foi executado. Pergunta, aprovação e resposta foram gravadas direto nas tabelas nos testes; nenhum adapter emitiu um pedido real.
 - Concorrência: a leitura da projeção e a decisão da pessoa correm em transações separadas; não há teste de corrida entre elas.
 - Desempenho: a projeção ganhou uma consulta por conversa filha (último turno) e lotes para pedidos e aprovações. Não medido.
-- O `connected_session` não existe no código. A regra de não encerrar PTY de sessão conectada fica registrada, sem teste contra um caso real.
+- `connected_session` no painel: ver §12.9.6. A regra de não encerrar PTY de sessão conectada vale para o painel (sem botão), sem teste contra um PTY real.
 
 ## 14. Fase 6: painel do harness e relação sinal/ruído
 

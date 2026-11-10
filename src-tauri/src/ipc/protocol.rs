@@ -68,8 +68,71 @@ pub fn client_handshake_path() -> PathBuf {
     std::env::var_os(HANDSHAKE_ENV)
         .or_else(|| std::env::var_os("CONTROLCODE_HANDSHAKE"))
         .map(PathBuf::from)
-        .filter(|p| p.is_file())
+        // F-07: só um handshake de instância viva do ADE; senão cai no global, como se a variável não existisse.
+        .filter(|p| env_handshake_is_trusted(p, &env_handshake_roots(), &pid_alive))
         .unwrap_or_else(|| global_handshake_for_client(handshake_path()))
+}
+
+/// F-07: o handshake apontado por `AGS_HANDSHAKE` só vale se for de uma instância do ADE: um `<pid>.json` direto em
+/// `ipc/` (da pasta de dados ou do nome antigo), cujo PID é o do arquivo e está vivo. Quem define o ambiente do agente
+/// não consegue mandar a CLI falar com um listener escolhido por ele.
+pub(crate) fn env_handshake_is_trusted(path: &std::path::Path, roots: &[PathBuf], alive: &dyn Fn(u32) -> bool) -> bool {
+    // `canonicalize` resolve links: um link dentro de `ipc/` que aponta para fora não vale.
+    let Ok(real) = std::fs::canonicalize(path) else { return false };
+    let Some(dir) = real.parent() else { return false };
+    if !roots.iter().filter_map(|root| std::fs::canonicalize(root).ok()).any(|root| root == dir) {
+        return false;
+    }
+    if real.extension().is_none_or(|ext| ext != "json") {
+        return false;
+    }
+    let Some(pid) = real.file_stem().and_then(|stem| stem.to_str()).and_then(|stem| stem.parse::<u32>().ok()) else {
+        return false;
+    };
+    let Some(handshake) = std::fs::read_to_string(&real).ok().and_then(|text| serde_json::from_str::<Handshake>(&text).ok()) else {
+        return false;
+    };
+    handshake.pid == pid && alive(pid)
+}
+
+/// As pastas de instâncias do ADE em que um `AGS_HANDSHAKE` pode apontar: a atual e a do nome antigo (uma app velha ainda
+/// aberta exporta `CONTROLCODE_HANDSHAKE` para lá).
+fn env_handshake_roots() -> Vec<PathBuf> {
+    let mut roots = vec![handshake_path().with_file_name("ipc")];
+    roots.extend(dirs::home_dir().map(|home| home.join(".controlcode").join("ipc")));
+    roots
+}
+
+/// O processo existe? `kill(pid, 0)` no Unix (EPERM também conta: existe, é de outro usuário); `OpenProcess` no Windows.
+fn pid_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        // SAFETY: sinal 0 não entrega nada, só consulta.
+        let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+        rc == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+        const STILL_ACTIVE: u32 = 259;
+        // SAFETY: o handle é fechado aqui mesmo.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+            if handle.is_null() {
+                return false;
+            }
+            let mut code = 0u32;
+            let ok = GetExitCodeProcess(handle, &mut code) != 0;
+            CloseHandle(handle);
+            ok && code == STILL_ACTIVE
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        true
+    }
 }
 
 /// Dónde buscar el handshake global desde la CLI. En el sandbox de Codex para Windows el

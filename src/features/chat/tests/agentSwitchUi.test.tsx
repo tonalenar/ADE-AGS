@@ -87,12 +87,11 @@ describe("a confirmação da troca", () => {
 
 describe("o Antigravity não tem tela de aprovação", () => {
   it("só ele, e só no acesso Supervisionado", () => {
-    expect(lacksApproval("antigravity", "ask")).toBe(true);
-    expect(lacksApproval("antigravity", "edits")).toBe(false);
-    expect(lacksApproval("cursor", "ask")).toBe(true);
-    expect(lacksApproval("cursor", "full")).toBe(false);
-    expect(lacksApproval("codex", "ask")).toBe(false);
-    expect(lacksApproval("claude-code", "ask")).toBe(false);
+    expect(lacksApproval("unsupported", "ask")).toBe(true);
+    expect(lacksApproval("unsupported", "edits")).toBe(false);
+    expect(lacksApproval("supported", "ask")).toBe(false);
+    expect(lacksApproval("unknown", "ask")).toBe(false);
+    expect(lacksApproval("unknown", "ask", true)).toBe(true);
   });
 
   it("a confirmação avisa antes de trocar, e o aviso do fio repete depois", async () => {

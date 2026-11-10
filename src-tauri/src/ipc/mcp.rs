@@ -2037,7 +2037,7 @@ fn chat_schemas() -> Vec<Value> {
                 "result_schema": { "type": "object", "description": "Fleet only: optional JSON Schema the final result must satisfy." },
                 "write_scopes": { "type": "array", "items": { "type": "string" }, "description": "Fleet only: path prefixes the task expects to modify." },
                 "role": { "type": "string", "description": "Fleet only: optional ADE functional role." },
-                "mode": { "type": "string", "enum": ["async", "wait"], "description": "async returns the id (default); wait returns the result to the parent." },
+                "mode": { "type": "string", "enum": ["async", "wait"], "description": "async returns the id (default) and, when the child ends, its result arrives later as a queued notice marked untrusted (it never interrupts a turn in progress); wait returns the result to the parent." },
                 "timeout_s": { "type": "integer", "minimum": 10, "maximum": 1800, "description": "Maximum wait for mode=wait; default 300 seconds." }
             }, "required": ["task", "client_request_id"] },
         }),
@@ -2069,8 +2069,12 @@ fn chat_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "chat_stop",
-            "description": "Interrupt the conversation's running turn.",
-            "inputSchema": { "type": "object", "properties": { "thread": thread.clone() }, "required": ["thread"] },
+            "description": "Interrupt the conversation's running turn. Pass a stable client_request_id when retrying after a lost response: repeating it returns the recorded receipt (`receipt.outcome`: sent, deferred or no_turn) and never interrupts the agent again. `no_turn` means there was no running turn, so nothing was sent.",
+            "inputSchema": { "type": "object", "properties": {
+                "thread": thread.clone(),
+                "client_request_id": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Stable caller-generated id for safe retries after a lost response. Reusing it with another conversation is rejected." },
+                "clientRequestId": { "type": "string", "minLength": 1, "maxLength": 128, "description": "Alias for client_request_id." }
+            }, "required": ["thread"] },
         }),
         json!({
             "name": "chat_pending",
@@ -2130,6 +2134,10 @@ fn scoped_chat_payload(
     }
     // Uma conversa filha de thread usa a mesma pasta e a linhagem do chamador real. O modelo
     // não escolhe o parent_ref nem pode mudar o cwd do pai: ambos vêm do escopo da sessão.
+    if command == "chat.new" {
+        // Só `delegate_agent` (async) liga a entrega do resultado; o modelo não a escolhe pelo `chat_new`.
+        args.remove("harness_delivery");
+    }
     if let (McpContext::Cwd { cwd, tab, .. }, "chat.new") = (context, command) {
         args.remove("parent_ref");
         if let Some(tab) = tab.as_deref().filter(|tab| !tab.trim().is_empty()) {
@@ -2247,7 +2255,11 @@ where
             chat_args.insert(key.to_string(), value.clone());
         }
     }
-    let payload = scoped_chat_payload(context, "chat.new", chat_args);
+    let mut payload = scoped_chat_payload(context, "chat.new", chat_args);
+    // Só a delegação em modo async pede que o resultado chegue ao pai quando o filho terminar (contrato §12.9).
+    if mode == "async" {
+        payload["harness_delivery"] = json!("async");
+    }
     let created = match send("chat.new", payload) {
         Ok(data) => data,
         Err(error) => {

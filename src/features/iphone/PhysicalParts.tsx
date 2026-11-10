@@ -117,7 +117,7 @@ export function MirrorStatusLine({ status, className = "" }: { status: MirrorSta
  * com o estado por baixo. A view fica transparente até o primeiro quadro e quando a conexão some, então o texto
  * daqui aparece nessas horas; ligado, o vídeo cobre tudo. Só ver: o clique na tela não vai para o aparelho.
  */
-export function PhysicalMirror({ screenId, device, known, status, radius, onError, pausedAction }: {
+export function PhysicalMirror({ screenId, device, known, status, radius, onError, pausedAction, engaged = true }: {
   screenId: string;
   device: string;
   /** O aparelho está na lista do CoreDevice agora. */
@@ -126,6 +126,8 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
   radius: number;
   onError: (message: string) => void;
   pausedAction?: ReactNode;
+  /** A superfície está aberta. Fechada, a view fica no lugar e o espelho não começa. */
+  engaged?: boolean;
 }) {
   const { t } = useTranslation();
   const disconnected = useIphoneStore((s) => s.disconnectedDevices.includes(device));
@@ -163,7 +165,7 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
         )}
         {status?.error && state !== "live" && state !== "paused" && <span className="line-clamp-3 text-[11px] leading-snug text-white/45">{status.error}</span>}
       </div>
-      <NativeScreen key={activeScreenId} api={MIRROR_API} screenId={activeScreenId} target={device} radius={radius} onError={onError} />
+      <NativeScreen key={activeScreenId} api={MIRROR_API} screenId={activeScreenId} target={device} radius={radius} onError={onError} engaged={engaged} />
     </>
   );
 }

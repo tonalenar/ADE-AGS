@@ -38,30 +38,39 @@ pub fn save_items(app: &AppHandle, db: &DbConnection, thread_id: &str, run_id: O
     }
 }
 
-/// Fecha o turno: o status e a duração no banco, os pedidos pendentes expiram e o fim do turno
-/// entra na timeline.
+/// Fecha o turno: o status e a duração no banco, os pedidos pendentes expiram, as ferramentas sem desfecho viram
+/// «desfecho desconhecido» e o fim do turno entra na timeline. A janela recebe o que o banco mudou.
 pub fn finish(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, result: &TurnResult) {
     let now = crate::util::now_ts_ms();
-    let expired = db.lock().ok().map(|conn| record_end(&conn, thread_id, turn, result, now));
-    for id in expired.unwrap_or_default() {
+    let (expired, marked) = db.lock().ok().map(|conn| record_end(&conn, thread_id, turn, result, now)).unwrap_or_default();
+    for id in expired {
         emit(app, thread_id, "requestResolved", json!({ "id": id }));
+    }
+    for item in marked {
+        emit(app, thread_id, "item", json!({ "item": item }));
     }
     emit(app, thread_id, "item", json!({ "item": claude_map::turn_end(turn, result, Some(now)) }));
     super::pool::after_turn(app, db, thread_id, result);
 }
 
-/// A parte do `finish` que mexe no banco: o status do turno, os pedidos pendentes expirados (devolve os
-/// ids) e o `turnEnd` na timeline, com o erro no texto. Separada para testar sem a janela.
-pub fn record_end(conn: &rusqlite::Connection, thread_id: &str, turn: &str, result: &TurnResult, now: i64) -> Vec<String> {
+/// A parte do `finish` que mexe no banco: o status do turno, os pedidos pendentes expirados (devolve os ids), as
+/// ferramentas sem desfecho marcadas (devolve o que mudou, para a janela) e o `turnEnd` na timeline, com o erro no
+/// texto. Separada para testar sem a janela.
+///
+/// A marcação vale em **qualquer** fim: normal, interrompido ou com erro. A lista de exceções é vazia porque nenhum
+/// destes motores tem ferramenta que siga depois do fim do turno (critério no `HARNESS_CONTRATO.md` §1.7):
+/// - OpenCode (ACP): `session/prompt` só responde no fim do turno (`opencode_map.rs:10-11`); uma ferramenta sem
+///   atualização final nessa hora não tem canal que a feche depois (`opencode.rs:789-826`).
+/// - Antigravity: o `result` é o último evento, e cada turno é um processo (`agy.rs:214`, `agy_map.rs:195-242`).
+/// - Cursor: o turno fecha no `result`, que o `cursor-agent` só manda depois dos shells em segundo plano
+///   (`cursor_map.rs:13-15`), ou por silêncio, que não vence com ferramenta `Running` (`cursor_map.rs:155-158`).
+pub fn record_end(conn: &rusqlite::Connection, thread_id: &str, turn: &str, result: &TurnResult, now: i64) -> (Vec<String>, Vec<Item>) {
     let _ = store::upsert_run(conn, thread_id, turn, claude_map::run_status(result), None, Some(now), result.duration_ms);
     let expired = store::expire_requests(conn, thread_id).unwrap_or_default();
-    // Um turno que caiu (ou foi interrompido) com ferramenta sem resultado: o desfecho dela é desconhecido.
-    if result.interrupted || result.error.is_some() {
-        let _ = mark_unknown_outcomes(conn, thread_id, turn, now);
-    }
+    let marked = mark_unknown_outcomes_except(conn, thread_id, turn, now, &HashSet::new()).unwrap_or_default();
     let _ = store::upsert_item(conn, thread_id, Some(turn), &claude_map::turn_end(turn, result, Some(now)));
     let _ = store::touch(conn, thread_id, now);
-    expired
+    (expired, marked)
 }
 
 /// O código do aviso de ferramenta interrompida, na timeline e na nota ao agente.

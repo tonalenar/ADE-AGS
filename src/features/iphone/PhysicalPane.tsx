@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
+import { DESKTOP_OS } from "@/app/platform";
 import { KeyboardIcon } from "@/features/chat/chatIcons";
+import { presentDeviceTool, shouldProbeDevices } from "@/features/chat/deviceDemand";
 import { setDeviceControl, setPanelDevice, useChatStore } from "@/features/chat/store";
 import { usePopover } from "@/features/chat/usePopover";
 import { ChatSwitch } from "@/features/settings/SettingsSection";
@@ -28,7 +30,7 @@ function useBoxSize() {
   return { ref, size };
 }
 
-const ibCls = "w-8 h-8 inline-flex items-center justify-center rounded-lg text-[12px] font-medium text-gray-500 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white disabled:opacity-40 disabled:pointer-events-none";
+const ibCls = "w-8 h-8 inline-flex items-center justify-center rounded-lg text-[12px] font-medium text-gray-500 dark:text-white/50 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white disabled:opacity-40";
 const fieldCls = "h-8 min-w-0 px-2.5 rounded-lg border border-gray-200 dark:border-white/10 bg-white dark:bg-white/[0.04] text-chat-note text-gray-900 dark:text-white outline-none focus:border-accent-500";
 
 function SessionToggleIcon({ resume }: { resume: boolean }) {
@@ -42,13 +44,13 @@ function SessionToggleIcon({ resume }: { resume: boolean }) {
 }
 
 /** Digitar no aparelho por um campo (o teclado do Mac também digita direto com a tela em foco). */
-function KeyboardButton({ device, name, ready }: { device: string; name: string; ready: boolean }) {
+function KeyboardButton({ device, name, ready, title }: { device: string; name: string; ready: boolean; title: string }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
   const [text, setText] = useState("");
   return (
     <div ref={ref} className="relative">
-      <button type="button" aria-label={t("iphone.keyboard")} title={t("iphone.keyboard")} aria-expanded={open} disabled={!ready}
+      <button type="button" aria-label={title} title={title} aria-expanded={open} disabled={!ready}
         onClick={() => setOpen(!open)} className={`${ibCls} ${open ? "bg-gray-100 dark:bg-white/[0.06] text-gray-900 dark:text-white" : ""}`}>
         <KeyboardIcon className="w-[17px] h-[17px]" />
       </button>
@@ -80,13 +82,20 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
   const devices = useIphoneStore((s) => s.devices);
   const loaded = useIphoneStore((s) => s.loaded);
   const disconnected = useIphoneStore((s) => s.disconnectedDevices.includes(device));
-  const status = useMirrorStatus(device);
+  const probe = shouldProbeDevices(true, DESKTOP_OS, "ios-physical");
+  const status = useMirrorStatus(probe ? device : null);
   const control = useChatStore((s) => s.deviceControl);
   const current = devices.find((d) => d.id === device);
   const anyReady = devices.some(isReady);
-  // Sem o aparelho escolhido por perto, a lista fica em dia para o estado vazio.
-  usePhysicalDevices(loaded && !current);
-  useEffect(() => { void refreshPhysical(); }, []);
+  // Sem o aparelho escolhido por perto, a lista fica em dia para o estado vazio. Fora do macOS não há busca.
+  usePhysicalDevices(probe && loaded && !current);
+  useEffect(() => {
+    if (!probe) {
+      useIphoneStore.setState({ loaded: true, unavailable: "platform" });
+      return;
+    }
+    void refreshPhysical();
+  }, [probe]);
   const name = current?.name ?? t("iphone.section.devices");
   useEffect(() => { setPanelDevice("ios", device, current?.name ?? null); }, [device, current?.name]);
   const { ref, size } = useBoxSize();
@@ -133,6 +142,9 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
   const scale = zoom === "fit" ? fit : zoom;
   const screen = { width: Math.round(points.width * scale), height: Math.round(points.height * scale) };
   const missing = loaded && !current;
+  const searchAction = presentDeviceTool(DESKTOP_OS, "ios-physical", "wifiSearch", !searching, t("iphone.search"), t);
+  const sessionAction = presentDeviceTool(DESKTOP_OS, "ios-physical", "sessionPause", !sessionBusy, t(disconnected ? "iphone.session.connect" : "iphone.session.disconnect"), t);
+  const keyboardAction = presentDeviceTool(DESKTOP_OS, "ios-physical", "keyboard", ready, t("iphone.keyboard"), t);
 
   return (
     <div className="h-full flex flex-col">
@@ -143,12 +155,12 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
             ? <span className="shrink-0 rounded-full bg-gray-100 px-2 py-1 text-chat-caption font-medium text-gray-600 dark:bg-white/[0.08] dark:text-white/65">{t("iphone.status.paused")}</span>
             : <MirrorStatusLine status={status} className="max-w-[10rem] text-gray-600 dark:text-white/60" />)}
           {current && <span className="hidden @[30rem]:inline-flex"><TransportBadge transport={current.transport} tone="panel" /></span>}
-          <button type="button" className={`${ibCls} shrink-0`} title={t("iphone.search")} aria-label={t("iphone.search")} disabled={searching}
+          <button type="button" className={`${ibCls} shrink-0`} title={searchAction.label} aria-label={searchAction.label} disabled={searchAction.disabled}
             onClick={() => { void searchDevices(); }}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className={`h-[16px] w-[16px] ${searching ? "animate-spin" : ""}`} aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.9-4M4 4v4h4M4 13a8 8 0 0 0 14.9 4M20 20v-4h-4" /></svg>
           </button>
-          <button type="button" className={`${ibCls} shrink-0 ${disconnected ? "text-accent-600 dark:text-accent-400" : ""}`} title={t(disconnected ? "iphone.session.connect" : "iphone.session.disconnect")}
-            aria-label={t(disconnected ? "iphone.session.connect" : "iphone.session.disconnect")} disabled={sessionBusy} onClick={() => { void toggleSession(); }}>
+          <button type="button" className={`${ibCls} shrink-0 ${disconnected ? "text-accent-600 dark:text-accent-400" : ""}`} title={sessionAction.label}
+            aria-label={sessionAction.label} disabled={sessionAction.disabled} onClick={() => { void toggleSession(); }}>
             <SessionToggleIcon resume={disconnected} />
           </button>
         </div>
@@ -161,7 +173,7 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
           ) : size.w > 0 && (
             <div className="flex min-h-full min-w-full w-max flex-col items-center justify-center gap-4 px-6 py-5">
               <DeviceFrame device={device} name={name} layout={layout} screen={screen} enabled={ready}>
-                <PhysicalMirror screenId="chat-devices-physical" device={device} known={!missing} status={status} radius={screenRadiusOf(layout, screen.width)} onError={fail}
+                <PhysicalMirror screenId="chat-devices-physical" device={device} known={!missing} status={status} radius={screenRadiusOf(layout, screen.width)} onError={fail} engaged={probe}
                   pausedAction={<button type="button" className="rounded-lg bg-accent-600 px-4 py-2 text-chat-note font-semibold text-white shadow-sm transition-colors hover:bg-accent-500 disabled:cursor-wait disabled:opacity-60" disabled={sessionBusy} onClick={() => { void toggleSession(); }}>
                     {t("iphone.session.connect")}
                   </button>} />
@@ -172,7 +184,7 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
         </div>
 
         <nav aria-label={t("iphone.controls")} className="w-[52px] shrink-0 flex flex-col items-center gap-1 py-3 border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep">
-          <KeyboardButton device={device} name={name} ready={ready} />
+          <KeyboardButton device={device} name={name} ready={!keyboardAction.disabled} title={keyboardAction.label} />
           <span aria-hidden="true" className="w-5 h-px my-1 bg-gray-200 dark:bg-white/[0.08]" />
           <button type="button" className={ibCls} title={t("iphone.zoom.in")} aria-label={t("iphone.zoom.in")} onClick={() => setZoom(stepZoom(scale, 1))}>+</button>
           <button type="button" className={ibCls} title={t("iphone.zoom.out")} aria-label={t("iphone.zoom.out")} onClick={() => setZoom(stepZoom(scale, -1))}>−</button>

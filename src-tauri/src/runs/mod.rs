@@ -40,6 +40,8 @@ pub(crate) mod supervisor;
 mod test;
 #[cfg(test)]
 mod opencode_models_test;
+#[cfg(test)]
+mod execution_log_test;
 pub(crate) mod types;
 pub(crate) mod worktrees;
 
@@ -51,6 +53,8 @@ pub(crate) use routing::Complexity;
 pub use store::sweep_orphans;
 pub use types::{Fact, Run, Task};
 pub use harness::HarnessExecutionGraph;
+#[cfg(test)]
+pub(crate) use harness::thread_execution_graph;
 
 use std::time::Duration;
 

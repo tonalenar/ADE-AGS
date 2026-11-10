@@ -94,6 +94,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
             api::Engine::Cursor => "cursor",
         };
         let def = crate::agents::agent_def(agent_id)?;
+        let harness_capabilities = harness_capabilities(agent_id);
         Some(json!({
             "id": agent_id,
             "label": def.label,
@@ -102,6 +103,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
             "configured": true,
             "commandAvailable": crate::agents::command_exists(def.command),
             "capabilities": engine.capabilities(),
+            "harnessCapabilities": harness_capabilities,
         }))
     })
     .collect();
@@ -114,6 +116,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
         capabilities["plan"] = json!(false);
         capabilities["persistentGoal"] = json!(false);
         capabilities["goalPauseResume"] = json!(false);
+        let harness_capabilities = harness_capabilities("local-acp");
         providers.push(json!({
             "id": provider.id,
             "label": provider.label,
@@ -122,6 +125,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
             "configured": true,
             "commandAvailable": null,
             "capabilities": capabilities,
+            "harnessCapabilities": harness_capabilities,
         }));
     }
 
@@ -135,6 +139,11 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
         })
     });
     Ok(json!({ "providers": providers }))
+}
+
+fn harness_capabilities(provider: &str) -> Option<Value> {
+    crate::harness::matrix::find(crate::harness::capability::Surface::Chat, provider)
+        .and_then(|matrix| serde_json::to_value(matrix).ok())
 }
 
 pub(super) fn chat_compact(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -228,6 +237,27 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
         if !outcome.reused {
             api::announce(app, &row);
         }
+        // `delegate_agent` em modo async: o resultado desta conversa filha chega ao pai quando ela terminar (§12.9).
+        // Idempotente: a repetição do mesmo `client_request_id` também cura uma queda entre criar e registrar.
+        if arg_str_opt(args, "harness_delivery").as_deref() == Some("async") {
+            if let Some(parent_ref) = parent_ref.as_deref() {
+                let conn = db.lock().map_err(|error| error.to_string())?;
+                crate::harness::child_delivery::register(
+                    &conn,
+                    &crate::harness::child_delivery::WatchSpec {
+                        kind: crate::harness::delegate::Target::ProviderChat,
+                        child_ref: &row.id,
+                        parent_ref,
+                        title: &row.title,
+                        agent_id: &row.agent_id,
+                        parent_turn_id: row.parent_turn_id.as_deref(),
+                        session_id: None,
+                        message_id: None,
+                    },
+                    crate::util::now_ts_ms(),
+                )?;
+            }
+        }
         match api::claim_child_delivery(&db, &identity)? {
             api::ChildDeliveryClaim::Claimed { thread_id } => {
                 let send = tauri::async_runtime::block_on(api::send_mode(
@@ -318,6 +348,8 @@ fn child_request_identity(
     if let Some(object) = normalized.as_object_mut() {
         object.remove("client_request_id");
         object.remove("clientRequestId");
+        // Não muda o que a criação pede: o mesmo id com ou sem a entrega assíncrona é o mesmo pedido.
+        object.remove("harness_delivery");
     }
     let bytes = serde_json::to_vec(&normalized).map_err(|error| error.to_string())?;
     let request_hash = format!("{:x}", Sha256::digest(bytes));
@@ -414,12 +446,20 @@ pub(super) fn chat_stop(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let thread = thread_arg(args)?;
     let db = db(app)?;
     // O escopo de quem para vem da sessão do MCP (`caller_scope`). Sem ele, quem para é a pessoa.
+    let scope = arg_str_opt(args, "caller_scope");
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        api::check_stop_scope(&conn, arg_str_opt(args, "caller_scope").as_deref(), &thread)?;
+        api::check_stop_scope(&conn, scope.as_deref(), &thread)?;
     }
-    tauri::async_runtime::block_on(api::stop(app, &db, &thread))?;
-    Ok(json!({ "stopped": true }))
+    // Sem `client_request_id`, o caminho é o de sempre: sem recibo e sem efeito.
+    let Some(request_id) = send_request_id(args)? else {
+        tauri::async_runtime::block_on(api::stop(app, &db, &thread))?;
+        return Ok(json!({ "stopped": true }));
+    };
+    // Com o id, o Parar tem recibo: repetir não manda outra interrupção (contrato §11.11).
+    let scope = scope.unwrap_or_else(|| "cli".into());
+    let receipt = tauri::async_runtime::block_on(api::stop_with_request(app, &db, &thread, &scope, &request_id))?;
+    Ok(json!({ "stopped": true, "sent": receipt.sent, "receipt": receipt, "next": format!("ags chat wait {thread}") }))
 }
 
 /// O que os agentes das conversas esperam da pessoa (de uma conversa, ou de todas).
@@ -479,5 +519,15 @@ mod test {
         done.insert(4, item(ItemKind::Assistant, "a2", "B feito"));
         assert_eq!(reply_since_last_user(&done).as_deref(), Some("B feito"));
         assert_eq!(reply_since_last_user(&[item(ItemKind::Assistant, "a0", "só fala")]).as_deref(), Some("só fala"));
+    }
+
+    #[test]
+    fn provider_chat_expoe_a_matriz_do_mesmo_provider_e_superficie() {
+        let exposed = harness_capabilities("opencode").unwrap();
+        assert_eq!(exposed["surface"], "chat");
+        assert_eq!(exposed["provider"], "opencode");
+        assert_eq!(exposed["cells"][2]["capability"], "steer");
+        assert_eq!(exposed["cells"][2]["claim"]["support"], "unsupported");
+        assert_eq!(exposed["cells"][2]["claim"]["note"], "o `session/prompt` não aceita entrada no turno; o «enviar agora» interrompe e reenvia");
     }
 }

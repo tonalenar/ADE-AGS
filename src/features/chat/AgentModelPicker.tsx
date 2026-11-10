@@ -11,6 +11,7 @@ import type { Roster, RosterModel } from "@/features/runs/types";
 import { modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
 import type { AgentInfo } from "@/features/tabs/types";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
+import { matrixProviderForAgent, readHarnessCapability, useHarnessCapability, type HarnessSurface } from "./harnessCapabilities";
 
 import { CheckIcon, SearchIcon, StarIcon, ZapIcon } from "./chatIcons";
 import { AccessMenu } from "./AccessMenu";
@@ -151,7 +152,7 @@ interface Row {
  * Seletor no estilo T3 Code: trilho de agentes/favoritos, busca e catálogo no centro, ajuste de
  * raciocínio à direita e controles da ADE no rodapé. A área ampla mantém os nomes e opções legíveis.
  */
-export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, accountSlot = null, permission, speed, onCompare, compareDisabled = false, disabled = false, placement = "above", providerConfig }: {
+export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAccount = true, accountSlot = null, permission, speed, onCompare, compareDisabled = false, disabled = false, placement = "above", providerConfig, harnessSurface = "tui" }: {
   agents: AgentInfo[];
   value: AgentModelValue;
   onChange: (next: AgentModelValue) => void;
@@ -177,6 +178,8 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   placement?: "above" | "below";
   /** Configuração anunciada pela sessão ACP do agente desta conversa. */
   providerConfig?: ProviderRuntimeConfig | null;
+  /** Superfície em que a seleção vai iniciar ou trocar o agente. */
+  harnessSurface?: HarnessSurface;
 }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
@@ -188,6 +191,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const [comparePicks, setComparePicks] = useState<PickerComparePick[]>([]);
   const agent = agents.find((a) => a.id === value.agentId) ?? agents[0] ?? null;
   const tabAgent = tab === "fav" ? agent : agents.find((a) => a.id === tab) ?? agent;
+  useHarnessCapability(harnessSurface, matrixProviderForAgent(tabAgent?.id), "start");
   const pools = usePools(tabAgent?.id ?? null);
   const current = pickerCatalogOf(roster, agent?.id ?? null, value.account, value.agentId, providerConfig);
   const modelLabel = value.model ? current.find((m) => m.id === value.model)?.label || value.model : t("chat.model.default");
@@ -441,6 +445,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                 const showGroup = !!group && (i === 0 || prevGroup !== group || !rows[i - 1].model?.includes("/"));
                 const RIcon = agentIcon(r.agent.id, r.agent.command);
                 const selected = r.agent.id === agent.id && r.model === value.model;
+                const startAvailability = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "start");
                 const fav = !!r.model && favorites.includes(favKey(r.agent.id, r.model));
                 const compareIndex = comparePicks.findIndex((pick) => pick.agentId === r.agent.id && pick.model === r.model);
                 return (
@@ -448,7 +453,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                   {showGroup && <div className="px-3 pt-3 pb-1.5 text-chat-caption font-medium uppercase tracking-wide text-gray-500 dark:text-white/45">{group}</div>}
                   <div
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg ${selected ? "bg-gray-200/60 dark:bg-white/10" : "hover:bg-gray-200/40 dark:hover:bg-white/[0.06]"}`}>
-                    <button type="button" role="option" aria-selected={selected} tabIndex={-1}
+                    <button type="button" role="option" aria-selected={selected} aria-disabled={!startAvailability.available || undefined} disabled={!startAvailability.available} title={!startAvailability.available ? startAvailability.reason ?? undefined : undefined} tabIndex={-1}
                       onClick={(event) => {
                         if (onCompare && event.shiftKey) {
                           toggleComparePick(r);
@@ -468,7 +473,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                         }
                         setOpen(false);
                       }}
-                      className="flex-1 min-w-0 flex flex-col items-start text-left">
+                      className="flex-1 min-w-0 flex flex-col items-start text-left disabled:cursor-not-allowed disabled:opacity-45">
                       <span className="w-full truncate text-[15px] leading-5 text-gray-900 dark:text-white">{r.label}</span>
                       <span className="flex items-center gap-1.5 text-chat-caption text-gray-500 dark:text-white/45">
                         <RIcon className="w-3 h-3" />{r.agent.label}

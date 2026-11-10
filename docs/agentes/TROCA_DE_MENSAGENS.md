@@ -3,7 +3,7 @@
 > Parte do guia de agentes. Índice e regras de ouro: [`AGENTS.md`](../../AGENTS.md). Orquestração (que usa estes canais): [ORQUESTRACAO.md](ORQUESTRACAO.md).
 
 ## Regras
-- **O canvas é a autorização.** Um agente só fala com quem está conectado a ele. Não use `tab send` para contornar isso.
+- **O canvas é a autorização.** Um agente só fala com quem está conectado a ele. Não use `tab send` para contornar isso. O servidor impõe: `tab send` de um agente do ADE só chega em si, nas abas conectadas a ele e nas que ele abriu; o resto é recusado.
 - **Prefira `peer tell`** (assíncrono) e encerre o turno. Use `peer ask` só quando a resposta bloqueia o seu trabalho.
 - Para pedir algo, use o envelope: `ags peer tell X --task "..." --constraints "..." --expecting "..."`. O retorno do `tell` manda encerrar o turno: a resposta chega depois, como mensagem separada; não responda por ele.
 - **Quem recebe um `ask` não copia a resposta por `peer tell`** (o fim do turno volta sozinho) **e não manda aviso de prontidão, ciência ou progresso sem ser pedido**: só fala para entregar o resultado (uma vez), pedir o que o bloqueia ou responder a uma pergunta. Os briefings dos integrantes (`chat_team/model.rs::MESSAGE_RULES` e `agentRole.ts::MESSAGE_RULES`, a mesma frase) e o rodapé do `ask` a uma conversa dizem isso.

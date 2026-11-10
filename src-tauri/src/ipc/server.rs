@@ -2,8 +2,7 @@
 //!
 //! Ver `protocol.rs` para el formato del mensaje y el modelo de autorización.
 
-use std::io::{BufRead, BufReader, Read, Write};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::io::{BufReader, Read, Write};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::Path;
 use std::time::Duration;
@@ -11,20 +10,13 @@ use tauri::AppHandle;
 use uuid::Uuid;
 
 use super::commands;
+use super::intake::{self, Intake, Slot, Slots};
 use super::protocol::{
     handshake_path, instance_handshake_path, Handshake, Request, Response, HANDSHAKE_ENV, PROTOCOL_VERSION,
 };
 
 /// Cada cuánto se revisa que los handshakes sigan apuntando a esta instancia.
 const WATCH_EVERY: Duration = Duration::from_secs(3);
-
-/// Conexiones atendidas a la vez. Holgado: cada agente con un `run_await` o un permiso
-/// pendiente ocupa una mientras espera, y una flota grande tiene decenas.
-pub(super) const MAX_CONNECTIONS: usize = 256;
-
-/// El tamaño máximo de una request. La más grande legítima es un handoff o una memoria,
-/// que ya tienen sus propios topes muy por debajo de esto.
-pub(super) const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Compara el token sin cortar en el primer byte distinto, para que el tiempo de respuesta
 /// no diga cuántos caracteres se acertaron.
@@ -67,8 +59,9 @@ fn try_start(app: AppHandle) -> Result<(), String> {
 
     let pid = std::process::id();
     let endpoint = super::protocol::credential_endpoint(pid);
-    let open = std::sync::Arc::new(AtomicUsize::new(0));
-    let socket = match super::transport::start_credential_server(app.clone(), token.clone(), endpoint.clone(), open.clone()) {
+    // Cada canal com as suas vagas (F-03): quem enche o TCP não tira vaga do canal de credencial.
+    let tcp_slots = Slots::new();
+    let socket = match super::transport::start_credential_server(app.clone(), token.clone(), endpoint.clone(), Slots::new()) {
         Ok(()) => Some(endpoint),
         Err(error) => {
             eprintln!("[ade-ags] socket de credencial indisponível: {error}");
@@ -91,26 +84,21 @@ fn try_start(app: AppHandle) -> Result<(), String> {
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
             // Cualquier proceso local puede conectarse, con token o sin él: sin tope, abrir
-            // conexiones sin mandar nada crea un thread por cada una.
-            if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
-                open.fetch_sub(1, Ordering::SeqCst);
+            // conexiones sin mandar nada crea un thread por cada una. Também há teto para as que ainda não
+            // provaram o token (`intake::MAX_UNAUTHENTICATED`).
+            let Some(slot) = tcp_slots.try_acquire() else {
                 drop(stream);
                 continue;
-            }
+            };
             let app = app.clone();
             let token = token.clone();
-            let open = open.clone();
             // Un cliente lento (o que abre la conexión y no manda nada) no debe bloquear
             // a los demás, así que cada conexión se atiende en su propio thread.
             std::thread::spawn(move || {
-                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
-                let Ok(writer) = stream.try_clone() else {
-                    open.fetch_sub(1, Ordering::SeqCst);
-                    return;
-                };
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(intake::READ_TIMEOUT_SECS)));
+                let Ok(writer) = stream.try_clone() else { return };
                 // TCP não entrega PID. Memória e swarm fecham sem ele.
-                handle_connection(stream, writer, &app, &token, None);
-                open.fetch_sub(1, Ordering::SeqCst);
+                handle_connection(stream, writer, &app, &token, None, slot);
             });
         }
     });
@@ -123,25 +111,57 @@ fn try_start(app: AppHandle) -> Result<(), String> {
 ///
 /// Se escribe aparte y se renombra: la CLI lo lee en cada llamada, y con una escritura en
 /// el lugar podía leerlo a medio escribir y tomarlo por corrupto.
-fn write_handshake(path: &Path, handshake: &Handshake) -> Result<(), String> {
+pub(super) fn write_handshake(path: &Path, handshake: &Handshake) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        create_private_dir(parent)?;
     }
     let json = serde_json::to_string_pretty(handshake).map_err(|e| e.to_string())?;
     let tmp = path.with_extension(format!("tmp-{}", handshake.pid));
-    std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| e.to_string())?;
+    // F-05: o temporário nasce já 0600 e exclusivo (`create_new` = O_EXCL, que também não segue um link plantado no
+    // nome previsível). Um sobrado de uma queda é apagado antes: `remove_file` tira o link, não o alvo dele.
+    let _ = std::fs::remove_file(&tmp);
+    let written = create_private_file(&tmp).and_then(|mut file| {
+        file.write_all(json.as_bytes())?;
+        file.flush()
+    });
+    if let Err(error) = written {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error.to_string());
     }
-
     std::fs::rename(&tmp, path).map_err(|e| {
         let _ = std::fs::remove_file(&tmp);
         e.to_string()
     })
+}
+
+/// Cria o arquivo novo, só do dono desde o primeiro instante (sem janela entre escrever e dar `chmod`).
+fn create_private_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+/// As pastas que o handshake cria nascem `0700`. Uma `ipc/` que já existia (versão antiga, `0755`) é fechada também:
+/// ela é nossa e só guarda handshakes e sockets. A pasta de dados que já existia não é mexida.
+fn create_private_dir(dir: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir).map_err(|e| e.to_string())?;
+        if dir.file_name().is_some_and(|name| name == "ipc") {
+            std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())
+    }
 }
 
 /// Publicação inicial e manutenção compartilham a política de posse do global.
@@ -247,21 +267,24 @@ pub(super) fn handle_connection(
     app: &AppHandle,
     expected_token: &str,
     client_pid: Option<u32>,
+    slot: Slot,
 ) {
+    let mut slot = slot;
     let mut reader = BufReader::new(reader);
 
-    let mut line = String::new();
-    // Con tope: sin él, una "línea" que nunca termina se acumula en memoria entera.
-    if (&mut reader).take(MAX_REQUEST_BYTES).read_line(&mut line).is_err() || line.trim().is_empty() {
-        return;
-    }
-    if !line.ends_with('\n') && line.len() as u64 >= MAX_REQUEST_BYTES {
-        let response = Response::err(format!("Request demasiado grande (máximo {MAX_REQUEST_BYTES} bytes)"));
-        if let Ok(json) = serde_json::to_string(&response) {
-            let _ = writeln!(writer, "{json}");
+    // F-03: a leitura é limitada antes do token (janela pequena, prazo total) e só depois lê o resto do pedido.
+    let started = std::time::Instant::now();
+    let mut now_ms = || started.elapsed().as_millis() as u64;
+    let line = match intake::read_request(&mut reader, expected_token, &mut now_ms, &mut || slot.authenticated()) {
+        Intake::Line(line) => line,
+        Intake::Closed => return,
+        Intake::Refused(message) => {
+            if let Ok(json) = serde_json::to_string(&Response::err(message)) {
+                let _ = writeln!(writer, "{json}");
+            }
+            return;
         }
-        return;
-    }
+    };
 
     let mut command = String::new();
     let response = match serde_json::from_str::<Request>(&line) {

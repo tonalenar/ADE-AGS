@@ -97,7 +97,7 @@ export interface Run {
 }
 
 /** Identidade de execução comum projetada sobre conversas, turnos e tarefas persistidos pela ADE. */
-export type HarnessExecutionKind = "thread" | "turn" | "fleetRun" | "fleetTask" | "fleetAttempt";
+export type HarnessExecutionKind = "thread" | "turn" | "fleetRun" | "fleetTask" | "fleetAttempt" | "connectedSession";
 
 export interface HarnessExecutionNode {
   id: string;
@@ -123,7 +123,7 @@ export interface HarnessExecutionNode {
   chatRunId?: string | null;
   /** Só no nó `turn`: filhos diretos ainda não terminais (conversa filha ou run da Frota). Ausente nos outros nós. */
   activeChildren?: number | null;
-  /** Só nos agentes filhos. O ADE ainda não tem `connected_session`, então esse tipo não aparece. */
+  /** Só nos agentes filhos: conversa filha, tarefa da Frota ou sessão conectada. */
   childType?: HarnessChildType | null;
   /** Estado de execução (contrato §3.1) dos filhos e do run. Em conversa filha, `status` segue sendo `thread.state`. */
   executionStatus?: string | null;
@@ -141,8 +141,8 @@ export interface HarnessExecutionNode {
   outcomeUnknown?: boolean | null;
 }
 
-/** Só agentes filhos: uma conversa filha ou uma tarefa da Frota. */
-export type HarnessChildType = "provider_chat" | "fleet_task";
+/** Só agentes filhos: uma conversa filha, uma tarefa da Frota ou uma sessão já aberta e ligada ao time. */
+export type HarnessChildType = "provider_chat" | "fleet_task" | "connected_session";
 
 /** A entrega de um filho. `untrusted` é sempre verdadeiro: é o que um agente escreveu, dado e não instrução. */
 export interface HarnessNodeResult {

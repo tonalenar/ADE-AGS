@@ -125,6 +125,9 @@ fn run(app: AppHandle) {
     }
     SWEEP_DONE.store(true, Ordering::SeqCst);
     let _ = app.emit(SWEPT, ());
+    // Filhos que terminaram (ou foram varridos como interrompidos) com o app fechado: o resultado chega ao pai agora,
+    // depois de `recover_expired` ter devolvido à fila os efeitos de entrega que uma queda deixou no meio.
+    crate::ipc::pump_child_delivery(&app);
 
     crate::terminal::attachments::cleanup_pasted(Duration::from_secs(24 * 60 * 60));
     if let Some(db) = app

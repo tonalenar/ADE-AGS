@@ -1438,6 +1438,46 @@ fn a_ajuda_do_chat_send_fala_do_client_request_id() {
 }
 
 #[test]
+fn a_tool_chat_stop_anuncia_o_client_request_id() {
+    let ctx = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
+    let (out, _) = mcp_session(&ctx, &[list], |_, _| Ok(json!({})));
+    let tools = out[0]["result"]["tools"].as_array().unwrap();
+    let stop = tools.iter().find(|t| t["name"] == "chat_stop").expect("chat_stop");
+    let props = &stop["inputSchema"]["properties"];
+    assert_eq!(props["client_request_id"]["maxLength"], 128);
+    assert!(props.get("clientRequestId").is_some());
+    let required: Vec<&str> = stop["inputSchema"]["required"].as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(required, ["thread"], "o id é opcional: sem ele o Parar é o de sempre");
+}
+
+#[test]
+fn o_parar_pelo_mcp_carimba_o_chamador_real_e_repassa_o_id() {
+    let call = |args: serde_json::Value| json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "chat_stop", "arguments": args } });
+    let ctx = McpContext::Cwd { cwd: "/meu/projeto".into(), tab: Some("tab-7".into()), mission: None, role: None };
+    let args = json!({ "thread": "t1", "client_request_id": "s1", "caller_scope": "tab:de-outro" });
+    let (_, sent) = mcp_session(&ctx, &[call(args)], |_, _| Ok(json!({ "stopped": true })));
+    assert_eq!(sent[0].0, "chat.stop");
+    assert_eq!(sent[0].1["caller_scope"], "tab:tab-7", "o escopo vem da sessão, não do modelo");
+    assert_eq!(sent[0].1["client_request_id"], "s1");
+}
+
+#[test]
+fn a_ajuda_do_chat_stop_fala_do_client_request_id() {
+    let cli = include_str!("../bin/cli.rs");
+    let at = cli.find("chat stop <id>").expect("chat stop na ajuda");
+    assert!(cli[at..].lines().nth(1).is_some_and(|l| l.contains("--client-request-id")), "a linha seguinte de `chat stop` documenta o flag");
+}
+
+#[test]
+fn o_comando_tauri_do_parar_recebe_o_client_request_id() {
+    let commands = include_str!("../conversa/commands.rs");
+    let at = commands.find("fn chat_thread_interrupt").expect("o comando Tauri do Parar");
+    let signature = commands[at..].lines().next().unwrap_or_default();
+    assert!(signature.contains("client_request_id: Option<String>"), "o Parar do Tauri não recebe o id: {signature}");
+}
+
+#[test]
 fn as_tools_do_chat_dizem_se_leem_ou_escrevem() {
     assert_eq!(super::mcp::annotations("chat_show")["readOnlyHint"], true);
     assert_eq!(super::mcp::annotations("chat_wait")["readOnlyHint"], true);
@@ -1732,25 +1772,468 @@ fn uma_linha_http_nao_vira_pedido_do_ipc() {
 
 #[test]
 fn os_limites_do_canal_ficam_no_codigo() {
-    // Sem estes limites, um cliente local sem token segura um slot e um buffer sem tamanho nem prazo (HOST_REMOTO.md, F-03).
+    // Sem estes limites, um cliente local sem token segura uma vaga e um buffer sem tamanho nem prazo (HOST_REMOTO.md, F-03).
+    let intake = include_str!("intake.rs");
+    assert!(intake.contains("const MAX_CONNECTIONS: usize = 256;"), "o teto de conexões sumiu");
+    assert!(intake.contains("const MAX_UNAUTHENTICATED: usize = 32;"), "o teto de conexões sem token sumiu");
+    assert!(intake.contains("const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;"), "o teto de tamanho do pedido sumiu");
+    assert!(intake.contains("const TOKEN_WINDOW: usize = 1024;"), "a janela do token sumiu");
+    assert!(intake.contains("const TOKEN_DEADLINE_MS: u64 = 5_000;") && intake.contains("const REQUEST_DEADLINE_MS: u64 = 30_000;"), "os prazos totais sumiram");
     let server = include_str!("server.rs");
-    assert!(server.contains("const MAX_CONNECTIONS: usize = 256;"), "o teto de conexões sumiu");
-    assert!(server.contains("const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;"), "o teto de tamanho do pedido sumiu");
-    assert!(server.contains("(&mut reader).take(MAX_REQUEST_BYTES)"), "a leitura do pedido não tem teto");
-    assert!(server.contains("set_read_timeout(Some(std::time::Duration::from_secs(30)))"), "a conexão TCP não tem prazo de leitura");
-    assert_eq!(server.matches(">= MAX_CONNECTIONS").count(), 1, "o teto de conexões do TCP saiu do lugar");
+    assert!(server.contains("intake::READ_TIMEOUT_SECS"), "a conexão TCP não tem prazo de leitura");
+    assert!(server.contains("try_acquire()"), "o TCP deixou de respeitar o teto");
     let transport = include_str!("transport.rs");
-    assert!(transport.contains(">= MAX_CONNECTIONS"), "o canal de credencial deixou de respeitar o teto");
-    assert!(transport.contains("set_read_timeout(Some(Duration::from_secs(30)))"), "o canal de credencial não tem prazo de leitura");
+    assert!(transport.contains("try_acquire()"), "o canal de credencial deixou de respeitar o teto");
+    assert!(transport.contains("intake::READ_TIMEOUT_SECS"), "o canal de credencial não tem prazo de leitura");
 }
 
 #[test]
 fn o_handshake_e_o_socket_de_credencial_continuam_so_do_usuario() {
     // Quem lê o token lê todo o IPC: o arquivo que o guarda e o socket de credencial ficam em 0600.
     let server = include_str!("server.rs");
-    assert!(server.contains("std::fs::Permissions::from_mode(0o600)"), "o handshake deixou de ser 0600");
+    assert!(server.contains("options.mode(0o600)"), "o handshake deixou de ser 0600");
     let transport = include_str!("transport.rs");
     assert!(transport.contains("std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))"), "o socket de credencial deixou de ser 0600");
     // Named pipe do Windows: sem essa flag, um cliente remoto pela rede (SMB) alcança o pipe.
     assert!(transport.contains("PIPE_REJECT_REMOTE_CLIENTS"), "o named pipe aceita clientes remotos");
+}
+
+// ── F-02, F-09, peer.answer e fix.decide: prova do que o servidor consegue verificar ──────────
+
+mod provas {
+    use super::json;
+    use crate::canvas::{Board, Boards};
+    use crate::terminal::Caller;
+
+    /// Um quadro com conexões `(a, b)`, orquestradores e nós. `chave` decide se é de missão (`#m:`).
+    fn quadro(chave: &str, arestas: &[(&str, &str)], orquestradores: &[&str], nos: &[&str]) -> Boards {
+        let edges: Vec<_> = arestas.iter().enumerate().map(|(i, (a, b))| json!({ "id": format!("e{i}"), "a": a, "b": b })).collect();
+        let nodes: serde_json::Map<String, serde_json::Value> = nos.iter().map(|n| (n.to_string(), json!({}))).collect();
+        let board: Board = serde_json::from_value(json!({ "edges": edges, "orchestrators": orquestradores, "nodes": nodes })).unwrap();
+        Boards::from([(chave.to_string(), board)])
+    }
+
+    fn aba(id: &str) -> Caller {
+        Caller::Tab(id.to_string())
+    }
+
+    // F-02
+
+    #[test]
+    fn um_task_id_sem_o_processo_da_tarefa_e_recusado_e_sem_task_id_nada_muda() {
+        // Nada declarado: nada a provar.
+        assert!(super::super::guard::task_proof_error(&json!({ "cwd": "/x" }), None).is_none());
+        assert!(super::super::guard::task_proof_error(&json!({ "taskId": "" }), None).is_none());
+        if !crate::terminal::ancestry_required() {
+            return;
+        }
+        // Declarada, mas sem processo registrado para ela (id inventado) e sem PID (TCP): recusa.
+        let recusa = super::super::guard::task_proof_error(&json!({ "taskId": "tarefa-inventada" }), Some(1)).unwrap();
+        assert!(recusa.contains("tarefa"), "{recusa}");
+        assert!(super::super::guard::task_proof_error(&json!({ "taskId": "tarefa-inventada" }), None).is_some());
+    }
+
+    #[test]
+    fn o_despachador_prova_o_task_id_antes_de_olhar_a_politica_da_tarefa_ou_o_banco() {
+        let dispatch = include_str!("commands/dispatch.rs");
+        let prova = dispatch.find("crate::ipc::guard::task_proof_error(args").expect("o despachador não prova o taskId");
+        let politica = dispatch.find("guard_task(&conn, args.get(\"taskId\")").expect("a política da tarefa mudou de forma");
+        let banco = dispatch.find("try_state::<crate::database::DbConnection>()").expect("o banco mudou de forma");
+        assert!(prova < politica && prova < banco, "o taskId é usado antes de ser provado");
+        // `run.approve` também: a exceção dele era só da política (o broker cria a espera).
+        assert!(!dispatch[prova - 60..prova].contains("command !="), "a prova do taskId ficou condicionada ao comando (run.approve fora?)");
+    }
+
+    #[test]
+    fn o_supervisor_registra_o_processo_da_tarefa_e_o_libera_ao_sair() {
+        let supervisor = include_str!("../runs/supervisor.rs");
+        assert!(supervisor.contains("register_task_process(&task.id"), "o supervisor não registra o PID do agente");
+        assert!(supervisor.contains("release_task_process(&task_id)"), "o PID da tarefa nunca é liberado");
+        // Registrado antes de a tarefa virar `running`: o MCP do agente já pode estar chamando.
+        assert!(supervisor.find("register_task_process(&task.id").unwrap() < supervisor.find("store::mark_running(").unwrap());
+    }
+
+    // F-09: tab.send
+
+    #[test]
+    fn a_pessoa_no_proprio_terminal_continua_escrevendo_em_qualquer_aba() {
+        let quadros = Boards::new();
+        assert!(super::super::guard::tab_send_error(&quadros, &Caller::Outside, "qualquer", None).is_none());
+    }
+
+    #[test]
+    fn um_agente_do_ade_nao_escreve_em_aba_fora_do_alcance_dele() {
+        let quadros = quadro("/repo", &[("lead", "membro")], &["lead"], &["lead", "membro"]);
+        let recusa = super::super::guard::tab_send_error(&quadros, &aba("membro"), "aba-da-pessoa", None).unwrap();
+        assert!(recusa.contains("aba-da-pessoa"), "{recusa}");
+        // Nem a que está num quadro sem ligação com ele.
+        let outro = quadro("/outro", &[("x", "y")], &[], &["x", "y"]);
+        assert!(super::super::guard::tab_send_error(&outro, &aba("membro"), "y", None).is_some());
+    }
+
+    #[test]
+    fn um_agente_escreve_em_si_nos_vizinhos_no_time_e_nas_abas_que_ele_abriu() {
+        let quadros = quadro("/repo", &[("lead", "m1"), ("lead", "m2")], &["lead"], &["lead", "m1", "m2"]);
+        let ok = |de: &str, para: &str, abriu: Option<&str>| super::super::guard::tab_send_error(&quadros, &aba(de), para, abriu).is_none();
+        assert!(ok("m1", "m1", None), "a si mesma");
+        assert!(ok("m1", "lead", None), "o vizinho direto");
+        assert!(ok("m1", "m2", None), "o outro integrante da estrela");
+        assert!(ok("lead", "m2", None), "o orquestrador alcança o time");
+        assert!(ok("solo", "terminal-que-abri", Some("solo")), "a aba que o próprio agente abriu");
+        assert!(!ok("solo", "terminal-de-outro", Some("outro")), "a aba aberta por outro agente");
+    }
+
+    #[test]
+    fn quem_abriu_a_aba_fica_registrado_so_com_prova() {
+        let (quem, aba_id) = (format!("abridor-{}", uuid::Uuid::new_v4()), format!("aba-{}", uuid::Uuid::new_v4()));
+        assert_eq!(super::super::guard::opened_by(&aba_id), None);
+        super::super::guard::record_opened_tab(&quem, &aba_id);
+        assert_eq!(super::super::guard::opened_by(&aba_id).as_deref(), Some(quem.as_str()));
+    }
+
+    #[test]
+    fn o_tab_send_prova_quem_chama_antes_de_tocar_o_terminal() {
+        let tabs = include_str!("commands/tabs.rs");
+        let inicio = tabs.find("pub(super) fn tab_send(").expect("tab_send mudou de forma");
+        let corpo = &tabs[inicio..];
+        let prova = corpo.find("crate::terminal::classify_caller").expect("tab_send não prova quem chama");
+        let escreve = corpo.find("pty_id_for_tab(").expect("tab_send mudou de forma");
+        let regra = corpo.find("tab_send_error(").expect("tab_send não aplica o escopo");
+        assert!(prova < escreve && regra < escreve, "tab_send escreve antes de provar quem chama e o escopo");
+        // A aba que o agente abre passa a ser lembrada (só com identidade provada).
+        assert!(tabs.contains("record_opened_tab("), "tab_create não registra quem abriu a aba");
+        // O token de sessão nunca atravessa a ponte para a interface.
+        assert!(tabs.contains("forwarded.as_object_mut()") || tabs.contains("remove(\"session\")"), "o ADE_SESSION vai para a ponte do front");
+    }
+
+    // peer.answer
+
+    #[test]
+    fn peer_answer_responde_como_a_aba_provada_e_nunca_como_a_declarada() {
+        let canal = include_str!("commands/canal.rs");
+        let inicio = canal.find("pub(super) fn peer_answer(").expect("peer_answer mudou de forma");
+        let corpo = &canal[inicio..];
+        let prova = corpo.find("crate::terminal::authorize_actor").expect("peer_answer não prova quem chama");
+        let efeito = corpo.find("write_to_pty").expect("peer_answer mudou de forma");
+        assert!(prova < corpo.find("let item =").unwrap() && prova < efeito, "peer_answer age antes de provar quem chama");
+        assert!(!corpo[..efeito].contains("let from = caller(args)?"), "peer_answer ainda confia no `from` declarado");
+    }
+
+    // fix.decide
+
+    #[test]
+    fn so_o_orquestrador_da_missao_decide_a_correcao_e_a_pessoa_pela_tela() {
+        let quadros = quadro("/repo#m:m1", &[("lead", "dev")], &["lead"], &["lead", "dev"]);
+        let escopo = crate::runs::fixrounds::scope_mission("m1");
+        let erro = |c: Caller, esc: &str| super::super::guard::fix_decide_error(&quadros, &c, esc);
+        assert!(erro(aba("lead"), &escopo).is_none(), "o orquestrador da missão decide");
+        assert!(erro(aba("dev"), &escopo).unwrap().contains("orquestrador"), "um integrante não decide");
+        assert!(erro(Caller::Outside, &escopo).unwrap().contains("tela"), "sem prova de papel, só pela tela");
+        // Orquestrador de outra missão, ou escopo da Frota (`run:`): pela tela.
+        let outra = quadro("/repo#m:m2", &[], &["lead"], &["lead"]);
+        assert!(super::super::guard::fix_decide_error(&outra, &aba("lead"), &escopo).is_some());
+        assert!(erro(aba("lead"), &crate::runs::fixrounds::scope_run("r1")).unwrap().contains("tela"));
+    }
+
+    #[test]
+    fn o_fix_decide_do_ipc_aplica_a_regra_antes_de_decidir() {
+        let fix = include_str!("../runs/fixrounds.rs");
+        let inicio = fix.find("pub fn cli(").expect("fixrounds::cli mudou de forma");
+        let corpo = &fix[inicio..];
+        let regra = corpo.find("fix_decide_error(").expect("fix.decide não aplica a regra do papel");
+        let decide = corpo.find("decide(&conn, scope").expect("fix.decide mudou de forma");
+        assert!(regra < decide, "fix.decide decide antes de checar o papel");
+        assert!(corpo.contains("crate::terminal::classify_caller"), "fix.decide não prova quem chama");
+    }
+
+    // A CLI manda a sessão (e só a do ambiente) para quem precisa de prova.
+
+    #[test]
+    fn a_cli_manda_a_sessao_do_ambiente_nos_comandos_que_exigem_prova() {
+        let cli = include_str!("../bin/cli.rs");
+        for comando in ["peer.answer", "tab.send", "tab.create", "fix.decide"] {
+            assert!(cli.contains(&format!("\"{comando}\"")), "{comando} não está entre os que mandam a sessão");
+        }
+        assert!(cli.contains("const GROUPS: [&str; 20]") && cli.contains("\"fix.\""), "o grupo fix. não leva quem chama");
+    }
+}
+
+// ── F-03: limites antes da autenticação ──────────────────────────────────────────────────────
+
+mod entrada {
+    use super::super::intake::{read_request, Intake, Slots, MAX_REQUEST_BYTES, TOKEN_DEADLINE_MS, REQUEST_DEADLINE_MS, TOKEN_WINDOW};
+    use std::cell::Cell;
+    use std::io::{BufReader, Read};
+    use std::rc::Rc;
+
+    const TOKEN: &str = "0e6f2c1a-3c2b-4e7d-9a53-1f0d5b8c7a21";
+
+    /// Um cliente lento: entrega `chunk` bytes por leitura e cada leitura gasta `tick_ms` do relógio de mentira.
+    struct Gotejando {
+        dados: Vec<u8>,
+        pos: usize,
+        chunk: usize,
+        tick_ms: u64,
+        relogio: Rc<Cell<u64>>,
+        lidos: Rc<Cell<usize>>,
+    }
+
+    impl Read for Gotejando {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            self.relogio.set(self.relogio.get() + self.tick_ms);
+            let n = self.chunk.min(buf.len()).min(self.dados.len() - self.pos);
+            buf[..n].copy_from_slice(&self.dados[self.pos..self.pos + n]);
+            self.pos += n;
+            self.lidos.set(self.lidos.get() + n);
+            Ok(n)
+        }
+    }
+
+    struct Cena {
+        relogio: Rc<Cell<u64>>,
+        lidos: Rc<Cell<usize>>,
+        autenticou: Cell<u32>,
+    }
+
+    fn ler(dados: Vec<u8>, chunk: usize, tick_ms: u64) -> (Intake, Cena) {
+        let cena = Cena { relogio: Rc::new(Cell::new(0)), lidos: Rc::new(Cell::new(0)), autenticou: Cell::new(0) };
+        let origem = Gotejando { dados, pos: 0, chunk, tick_ms, relogio: cena.relogio.clone(), lidos: cena.lidos.clone() };
+        let mut leitor = BufReader::with_capacity(chunk.max(16), origem);
+        let relogio = cena.relogio.clone();
+        let mut agora = move || relogio.get();
+        let mut marca = || cena.autenticou.set(cena.autenticou.get() + 1);
+        let resultado = read_request(&mut leitor, TOKEN, &mut agora, &mut marca);
+        (resultado, cena)
+    }
+
+    fn pedido(token: &str, args: &str) -> Vec<u8> {
+        format!("{{\"token\":\"{token}\",\"command\":\"tab.list\",\"args\":{args}}}\n").into_bytes()
+    }
+
+    #[test]
+    fn token_errado_e_recusado_depois_de_ler_so_o_comeco_do_pedido() {
+        let mut dados = format!("{{\"token\":\"errado\",\"command\":\"x\",\"args\":\"").into_bytes();
+        dados.extend(std::iter::repeat_n(b'a', 4 * 1024 * 1024));
+        let (resultado, cena) = ler(dados, 256, 0);
+        assert!(matches!(&resultado, Intake::Refused(m) if m.contains("Token inválido")), "{resultado:?}");
+        assert!(cena.lidos.get() <= 2 * TOKEN_WINDOW, "leu {} bytes de um cliente sem token válido", cena.lidos.get());
+        assert_eq!(cena.autenticou.get(), 0, "a vaga sem autenticação foi liberada sem token");
+    }
+
+    #[test]
+    fn token_fora_dos_primeiros_bytes_nao_vale() {
+        let enchimento = "a".repeat(TOKEN_WINDOW + 200);
+        let dados = format!("{{\"command\":\"x\",\"args\":\"{enchimento}\",\"token\":\"{TOKEN}\"}}\n").into_bytes();
+        let (resultado, cena) = ler(dados, 512, 0);
+        assert!(matches!(resultado, Intake::Refused(_)), "{resultado:?}");
+        assert!(cena.lidos.get() <= 2 * TOKEN_WINDOW);
+    }
+
+    #[test]
+    fn com_o_token_certo_o_pedido_e_lido_inteiro_ate_o_teto() {
+        let grande = format!("{{\"x\":\"{}\"}}", "b".repeat(300_000));
+        let dados = pedido(TOKEN, &grande);
+        let esperado = String::from_utf8(dados.clone()).unwrap();
+        let (resultado, cena) = ler(dados, 4096, 0);
+        assert_eq!(resultado, Intake::Line(esperado));
+        assert_eq!(cena.autenticou.get(), 1, "a vaga sem autenticação tem que ser liberada uma vez só");
+        // Passou do teto: recusa com a mensagem de tamanho.
+        let mut enorme = format!("{{\"token\":\"{TOKEN}\",\"command\":\"x\",\"args\":\"").into_bytes();
+        enorme.extend(std::iter::repeat_n(b'c', MAX_REQUEST_BYTES as usize + 10));
+        let (resultado, _) = ler(enorme, 64 * 1024, 0);
+        assert!(matches!(&resultado, Intake::Refused(m) if m.contains("demasiado grande")), "{resultado:?}");
+    }
+
+    #[test]
+    fn um_byte_por_vez_nao_segura_a_vaga_alem_do_prazo_total() {
+        // Antes da autenticação: 1 s por leitura, nunca chega ao token (que só termina depois do prazo).
+        let (resultado, cena) = ler(pedido(TOKEN, "{}"), 1, 1_000);
+        assert!(matches!(resultado, Intake::Closed | Intake::Refused(_)), "{resultado:?}");
+        assert!(cena.relogio.get() <= TOKEN_DEADLINE_MS + 2_000, "segurou a conexão por {} ms", cena.relogio.get());
+        // Depois do token: o resto também tem prazo total (não é por leitura).
+        let (resultado, cena) = ler(pedido(TOKEN, &format!("\"{}\"", "d".repeat(200_000))), 512, 1_000);
+        assert!(matches!(resultado, Intake::Closed | Intake::Refused(_)), "{resultado:?}");
+        assert!(cena.relogio.get() <= REQUEST_DEADLINE_MS + 2_000, "segurou a conexão por {} ms", cena.relogio.get());
+    }
+
+    #[test]
+    fn linha_em_branco_ou_fim_da_conexao_nao_respondem_nada() {
+        assert_eq!(ler(b"\n".to_vec(), 16, 0).0, Intake::Closed);
+        assert_eq!(ler(Vec::new(), 16, 0).0, Intake::Closed);
+    }
+
+    #[test]
+    fn cada_canal_tem_as_proprias_vagas_e_as_sem_autenticacao_tem_teto() {
+        let tcp = Slots::with_limits(8, 3);
+        let credencial = Slots::with_limits(8, 3);
+        let seguradas: Vec<_> = (0..3).map(|_| tcp.try_acquire().expect("dentro do teto")).collect();
+        assert!(tcp.try_acquire().is_none(), "uma 4ª conexão sem autenticação no mesmo canal");
+        // O canal de credencial não paga pelo TCP.
+        let mut autenticadas: Vec<_> = (0..3).map(|_| credencial.try_acquire().expect("o outro canal está livre")).collect();
+        // Quem autentica libera a vaga "sem autenticação" mas continua ocupando uma conexão.
+        for vaga in autenticadas.iter_mut() {
+            vaga.authenticated();
+        }
+        let mais: Vec<_> = (0..5)
+            .map(|_| {
+                let mut vaga = credencial.try_acquire().expect("as autenticadas abrem espaço");
+                vaga.authenticated();
+                vaga
+            })
+            .collect();
+        assert!(credencial.try_acquire().is_none(), "o teto de conexões abertas vale");
+        drop(mais);
+        drop(autenticadas);
+        assert!(credencial.try_acquire().is_some(), "soltar a vaga devolve o espaço");
+        drop(seguradas);
+        assert!(tcp.try_acquire().is_some());
+    }
+
+    #[test]
+    fn o_servidor_e_o_canal_de_credencial_usam_a_entrada_com_limites() {
+        let server = include_str!("server.rs");
+        let transport = include_str!("transport.rs");
+        assert!(server.contains("intake::read_request("), "handle_connection não lê o pedido pela entrada limitada");
+        assert!(!server.contains(".take(MAX_REQUEST_BYTES).read_line("), "sobrou a leitura de 8 MiB antes do token");
+        // Cada canal com as suas vagas: dois `Slots::new()` em `try_start`, um para cada canal, e nada de contador solto.
+        assert_eq!(server.matches("Slots::new()").count(), 2, "o TCP e o canal de credencial deixaram de ter vagas próprias");
+        for fonte in [server, transport] {
+            assert!(!fonte.contains("AtomicUsize"), "sobrou um contador de conexões fora do `intake`");
+        }
+    }
+
+}
+
+// ── F-05 e F-07: o arquivo do handshake ──────────────────────────────────────────────────────
+
+mod arquivo_do_handshake {
+    use super::super::protocol::{env_handshake_is_trusted, Handshake, PROTOCOL_VERSION};
+    use std::path::{Path, PathBuf};
+
+    fn pasta_de_teste(rotulo: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("ags-{rotulo}-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn handshake(pid: u32) -> Handshake {
+        Handshake { port: 4242, token: "token-de-teste".into(), pid, protocol: PROTOCOL_VERSION, socket: None }
+    }
+
+    fn escreve(path: &Path, pid: u32) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, serde_json::to_string(&handshake(pid)).unwrap()).unwrap();
+    }
+
+    // F-05
+
+    #[cfg(unix)]
+    #[test]
+    fn o_handshake_nasce_0600_e_nao_segue_um_link_plantado_no_temporario() {
+        use std::os::unix::fs::PermissionsExt;
+        let raiz = pasta_de_teste("hs-link");
+        let alvo = raiz.join("alvo.txt");
+        std::fs::write(&alvo, "intocado").unwrap();
+        let path = raiz.join("ipc").join("42.json");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        // O temporário tem nome previsível (`<pid>.tmp-<pid>`): alguém com acesso à pasta planta um link ali.
+        std::os::unix::fs::symlink(&alvo, raiz.join("ipc").join("42.tmp-42")).unwrap();
+        super::super::server::write_handshake(&path, &handshake(42)).unwrap();
+        assert_eq!(std::fs::read_to_string(&alvo).unwrap(), "intocado", "o handshake foi escrito através do link");
+        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        assert!(std::fs::read_to_string(&path).unwrap().contains("token-de-teste"));
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn as_pastas_que_o_handshake_cria_sao_so_do_dono() {
+        use std::os::unix::fs::PermissionsExt;
+        let raiz = pasta_de_teste("hs-pasta");
+        let path = raiz.join("dados").join("ipc").join("7.json");
+        super::super::server::write_handshake(&path, &handshake(7)).unwrap();
+        for dir in [raiz.join("dados"), raiz.join("dados").join("ipc")] {
+            assert_eq!(std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777, 0o700, "{}", dir.display());
+        }
+        // Uma pasta `ipc` que já existia (de uma versão antiga, 0755) também fecha.
+        let antiga = raiz.join("antiga").join("ipc");
+        std::fs::create_dir_all(&antiga).unwrap();
+        std::fs::set_permissions(&antiga, std::fs::Permissions::from_mode(0o755)).unwrap();
+        super::super::server::write_handshake(&antiga.join("8.json"), &handshake(8)).unwrap();
+        assert_eq!(std::fs::metadata(&antiga).unwrap().permissions().mode() & 0o777, 0o700);
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
+    fn o_handshake_e_criado_ja_com_o_modo_e_sem_escrever_antes_do_chmod() {
+        let server = include_str!("server.rs");
+        let inicio = server.find("pub(super) fn write_handshake(").unwrap();
+        let corpo = &server[inicio..inicio + server[inicio..].find("\n}\n").unwrap()];
+        assert!(server.contains("create_new(true)") && server.contains("options.mode(0o600)"), "o temporário não nasce 0600 de forma atômica");
+        assert!(corpo.contains("create_private_file(&tmp)"), "write_handshake não usa a criação atômica");
+        assert!(!corpo.contains("std::fs::write(") && !corpo.contains("set_permissions(&tmp"), "o handshake é escrito com a permissão padrão antes do chmod");
+    }
+
+    // F-07
+
+    #[test]
+    fn so_um_pid_json_vivo_dentro_de_ipc_vale_como_handshake_do_ambiente() {
+        let raiz = pasta_de_teste("hs-env");
+        let ipc = raiz.join("ipc");
+        let roots = [ipc.clone()];
+        let vivo = |pid: u32| pid == 4242;
+        let confia = |p: &Path| env_handshake_is_trusted(p, &roots, &vivo);
+
+        let bom = ipc.join("4242.json");
+        escreve(&bom, 4242);
+        assert!(confia(&bom), "o handshake de uma instância viva foi recusado");
+
+        // Fora da pasta das instâncias: um listener escolhido por quem definiu o ambiente.
+        let fora = raiz.join("fora").join("4242.json");
+        escreve(&fora, 4242);
+        assert!(!confia(&fora), "caminho fora de ipc/");
+        // Subpasta de ipc/ não é ipc/.
+        let fundo = ipc.join("sub").join("4242.json");
+        escreve(&fundo, 4242);
+        assert!(!confia(&fundo), "subpasta de ipc/");
+        // O nome do arquivo tem que ser o PID que está dentro dele.
+        let nome = ipc.join("nome.json");
+        escreve(&nome, 4242);
+        assert!(!confia(&nome), "nome que não é um PID");
+        let trocado = ipc.join("9999.json");
+        escreve(&trocado, 4242);
+        assert!(!confia(&trocado), "PID do nome diferente do PID do arquivo");
+        // PID morto: sobra de uma instância que já saiu.
+        let morto = ipc.join("5555.json");
+        escreve(&morto, 5555);
+        assert!(!confia(&morto), "instância morta");
+        // Lixo e arquivo ausente.
+        let lixo = ipc.join("6666.json");
+        std::fs::write(&lixo, "não é json").unwrap();
+        assert!(!confia(&lixo));
+        assert!(!confia(&ipc.join("1.json")));
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn um_link_dentro_de_ipc_que_aponta_para_fora_nao_vale() {
+        let raiz = pasta_de_teste("hs-env-link");
+        let ipc = raiz.join("ipc");
+        let alheio = raiz.join("alheio").join("4242.json");
+        escreve(&alheio, 4242);
+        std::fs::create_dir_all(&ipc).unwrap();
+        std::os::unix::fs::symlink(&alheio, ipc.join("4242.json")).unwrap();
+        assert!(!env_handshake_is_trusted(&ipc.join("4242.json"), &[ipc.clone()], &|_| true), "o link para fora foi aceito");
+        let _ = std::fs::remove_dir_all(&raiz);
+    }
+
+    #[test]
+    fn a_cli_so_usa_o_handshake_do_ambiente_depois_de_validar() {
+        let protocolo = include_str!("protocol.rs");
+        let inicio = protocolo.find("pub fn client_handshake_path()").unwrap();
+        let corpo = &protocolo[inicio..inicio + protocolo[inicio..].find("\n}\n").unwrap()];
+        assert!(corpo.contains("env_handshake_is_trusted("), "AGS_HANDSHAKE é aceito sem validar a origem");
+        assert!(!corpo.contains(".filter(|p| p.is_file())"), "sobrou o filtro antigo (só existe)");
+    }
 }

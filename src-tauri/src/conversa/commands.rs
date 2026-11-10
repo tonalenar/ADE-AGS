@@ -124,9 +124,15 @@ pub async fn chat_thread_clear_context(
     api::clear_context(&app, &db, &thread_id).await
 }
 
+/// O Parar da tela. Sem `client_request_id`, o caminho é o de sempre e a resposta é `null`; com ele, devolve o recibo
+/// (contrato §11.11): repetir o id não manda outra interrupção.
 #[tauri::command]
-pub async fn chat_thread_interrupt(app: AppHandle, db: State<'_, DbConnection>, thread_id: String) -> Result<(), String> {
-    api::stop(&app, &db, &thread_id).await
+pub async fn chat_thread_interrupt(app: AppHandle, db: State<'_, DbConnection>, thread_id: String, client_request_id: Option<String>) -> Result<Option<super::stop_receipt::StopReceipt>, String> {
+    let db = db.inner().clone();
+    match client_request_id {
+        Some(request_id) => api::stop_with_request(&app, &db, &thread_id, "ui", &request_id).await.map(Some),
+        None => api::stop(&app, &db, &thread_id).await.map(|()| None),
+    }
 }
 
 /// Para uma tarefa em segundo plano (um shell ou um subagente do Claude Code), sem parar o turno.

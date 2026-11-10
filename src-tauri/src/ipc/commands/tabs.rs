@@ -120,6 +120,10 @@ pub(super) fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String>
 
     // Los ids resueltos reemplazan a los nombres antes de cruzar el puente.
     let mut forwarded = args.clone();
+    // O ADE_SESSION é segredo da aba: serve à prova no servidor e nunca atravessa a ponte para a interface.
+    if let Some(map) = forwarded.as_object_mut() {
+        map.remove("session");
+    }
     if let Some(requested) = skill_names(args) {
         let ids = resolve_skill_ids(app, &requested)?;
         forwarded["skills"] = json!(ids);
@@ -147,6 +151,7 @@ pub(super) fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String>
     }
 
     let created = bridge_call(app, "tab.create", &forwarded)?;
+    remember_opener(args, &created);
 
     let Some(prompt) = prompt else { return Ok(created) };
     let tab_id = created
@@ -165,6 +170,22 @@ pub(super) fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String>
     // que poder enterarse de que quizá la TUI no estaba escuchando todavía.
     out["promptWaitedForReady"] = json!(ready);
     Ok(out)
+}
+
+/// Quem chama, provado (token + PID, ou o PID do motor de uma conversa). `None` se a prova falha ou não há identidade.
+fn verified_caller_tab(args: &Value) -> Option<String> {
+    let clean = |key: &str| arg_str_opt(args, key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    match crate::terminal::classify_caller(clean("session").as_deref(), clean("from").as_deref(), crate::ipc::current_client_pid()) {
+        Ok(crate::terminal::Caller::Tab(tab)) => Some(tab),
+        _ => None,
+    }
+}
+
+/// F-09: guarda que esta aba foi aberta por quem chamou (só com identidade provada), para ele poder escrever nela depois.
+fn remember_opener(args: &Value, created: &Value) {
+    if let (Some(opener), Some(tab)) = (verified_caller_tab(args), created.get("tabId").and_then(Value::as_str)) {
+        crate::ipc::guard::record_opened_tab(&opener, tab);
+    }
 }
 
 /// De quem é o terminal do painel do chat que um `tab create` pede: da conversa por protocolo
@@ -239,6 +260,7 @@ fn chat_terminal_create(app: &AppHandle, args: &Value, target: &ChatTerminal) ->
         .and_then(|v| v.as_str())
         .ok_or("O terminal do chat abriu, mas não devolveu o id dele")?
         .to_string();
+    remember_opener(args, &created);
     chat_shells().lock().unwrap_or_else(|e| e.into_inner()).insert(tab_id.clone());
     let Some(command) = init_prompt(args) else { return Ok(created) };
     let pty_id = wait_for_pty(app, &tab_id, None)?;
@@ -746,6 +768,18 @@ pub(super) fn tab_output(app: &AppHandle, args: &Value) -> Result<Value, String>
 pub(super) fn tab_send(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let tab_id = arg_str(args, "tab")?;
     let text = arg_str(args, "text")?;
+    // F-09: quem chama é provado antes de qualquer escrita. A pessoa no terminal dela segue livre; um agente do ADE só
+    // escreve em si, nas abas do canvas que o alcançam e nas que ele abriu.
+    let clean = |key: &str| arg_str_opt(args, key).map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let caller = crate::terminal::classify_caller(clean("session").as_deref(), clean("from").as_deref(), crate::ipc::current_client_pid())?;
+    let opened_by = crate::ipc::guard::opened_by(&tab_id);
+    if let Some(error) = crate::ipc::guard::tab_send_error(&crate::canvas::load_boards(), &caller, &tab_id, opened_by.as_deref()) {
+        return Err(error);
+    }
+    let from_tab = match &caller {
+        crate::terminal::Caller::Tab(tab) => tab.clone(),
+        crate::terminal::Caller::Outside => String::new(),
+    };
     let pty_id = pty_id_for_tab(app, &tab_id, arg_str_opt(args, "window").as_deref())?;
 
     // Por defecto se manda Enter al final: "send" en una TUI interactiva casi siempre
@@ -760,7 +794,7 @@ pub(super) fn tab_send(app: &AppHandle, args: &Value) -> Result<Value, String> {
             SubmitStyle::Prompt => submit_prompt(pty_id, &text)?,
         }
         let _ = app.emit("cc-peer-message", json!({ "kind": "ask",
-            "fromTabId": arg_str_opt(args, "from").unwrap_or_default(), "toTabId": tab_id,
+            "fromTabId": from_tab, "toTabId": tab_id,
             "atMs": crate::util::now_ts_ms() }));
     }
 

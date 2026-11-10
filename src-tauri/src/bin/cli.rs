@@ -64,6 +64,9 @@ TABS
                                               assim a conversa segue com
                                               uma tab que já está aberta
                                               (num shell vai a linha crua, uma vez só)
+                                              Um agente do ADE só escreve em si, nas abas conectadas
+                                              a ele no canvas e nas que ele mesmo abriu (`tab create`);
+                                              em outra, recusa. A pessoa, em terminal próprio, escreve em qualquer
 
 AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peers                                       Quem está conectado a você
@@ -97,6 +100,7 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer pending [--all]                        Aprovações e perguntas dos integrantes que esperam resposta
   peer answer <id> <resposta> [--enter]       Responde uma pendência (só orquestradores): num diálogo, o número
                                               da opção, y, n ou esc; numa pergunta de fim de turno, o texto
+                                              (a ADE prova que você é o orquestrador pelo ambiente do terminal; sem ele, recusa)
   ci watch <PR>                               Segue o CI do PR em segundo plano e cola o resultado
                                               no seu terminal quando terminar (no lugar de gh pr checks --watch)
   notify \"mensagem\"                           Avisa o usuário (aviso na tela; barra de tarefas)
@@ -137,8 +141,8 @@ TIME DO MODO CHAT — uma conversa orquestra outras (abas ou conversas por proto
 
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
   fix list <escopo>                           Entregas e quantas rodadas cada uma usou
-  fix decide <escopo> <trabalho> <ação>       accept | extra | abort
-              [--task <id>]                   escopo: run:<id> ou mission:<id>
+  fix decide <escopo> <trabalho> <ação>       accept | extra | abort — só o orquestrador da missão (mission:<id>),
+              [--task <id>]                   provado pelo terminal dele; run:<id> e a pessoa, pela tela
 
 POOLS DE CONTAS — repartir entre várias contas de uma TUI com uma estratégia
   pools                                       Os pools criados, com suas contas e sua estratégia
@@ -279,6 +283,7 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
   chat wait <id> [--timeout 600]              Espera o turno acabar ou o agente pedir algo à pessoa
   chat show <id> [--last 20]                  A timeline, a última resposta e o que está pendente
   chat stop <id>                              Interrompe o turno em andamento
+           [--client-request-id <id>]          Permite repetir o Parar sem interromper outra vez: devolve o recibo (`receipt`)
   chat pending [<id>]                         Aprovações e perguntas esperando a pessoa (só ela responde, na tela) e quem respondeu
                                               as últimas (`decided`: a pessoa, a política do time ou uma regra dela)
   chat open <id>                              Mostra a conversa na tela do modo chat
@@ -887,8 +892,8 @@ impl CliError {
 /// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); comandos `run.*` recebem `tabId`,
 /// que preserva o escopo da conversa ao criar ou consultar tarefas da Frota. Pura.
 fn takes_caller(command: &str) -> bool {
-    const GROUPS: [&str; 19] = ["peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events.", "secret.", "run."];
-    command == "tab.create" || GROUPS.iter().any(|g| command.starts_with(g))
+    const GROUPS: [&str; 20] = ["fix.", "peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events.", "secret.", "run."];
+    command == "tab.create" || command == "tab.send" || GROUPS.iter().any(|g| command.starts_with(g))
 }
 
 fn with_caller(command: &str, mut parsed: Value) -> Value {
@@ -917,7 +922,10 @@ fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: 
         }
         return;
     }
-    if command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") || command.starts_with("desk.") || command.starts_with("secret.") {
+    // `peer.answer`, `tab.send`, `tab.create` e `fix.decide`: o servidor prova a identidade (F-09, `fix.decide`), então
+    // ela vem só do ambiente que o app injetou no PTY.
+    let proven = matches!(command, "peer.answer" | "tab.send" | "tab.create" | "fix.decide");
+    if proven || command.starts_with("memory.") || command.starts_with("swarm.") || command.starts_with("sim.") || command.starts_with("desk.") || command.starts_with("secret.") {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");

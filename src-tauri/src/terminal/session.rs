@@ -65,6 +65,8 @@ struct Sessions {
     conversations: HashMap<String, u32>,
     /// Token já entregue ao ambiente de uma conversa (`thread_env`) que espera o PID do motor para virar sessão.
     pending: HashMap<String, String>,
+    /// Tarefas da Frota: o PID do processo do agente, registrado pelo supervisor ao lançá-lo (F-02).
+    task_roots: HashMap<String, u32>,
 }
 
 fn registry() -> MutexGuard<'static, Sessions> {
@@ -74,6 +76,7 @@ fn registry() -> MutexGuard<'static, Sessions> {
             by_tab: HashMap::new(),
             conversations: HashMap::new(),
             pending: HashMap::new(),
+            task_roots: HashMap::new(),
         })
     });
     REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
@@ -208,6 +211,91 @@ pub fn authorize_actor(session: Option<&str>, claimed_tab: Option<&str>, client_
         (true, Some(_)) => Err(ERR_ANCESTRY.into()),
         _ => Err(ERR_NO_PID.into()),
     }
+}
+
+const ERR_TASK_UNKNOWN: &str = "Esta tarefa não tem um processo registrado no ADE AGS (ela já terminou, não é da Frota ou o id está errado). \
+O `taskId` só vale para quem é o próprio agente da tarefa.";
+const ERR_TASK_ANCESTRY: &str = "O processo que chamou não pertence a esta tarefa: o `taskId` só vale para o agente que o app lançou para ela \
+e os processos que ele mesmo abriu (o `ags mcp` dele). O comando foi recusado.";
+const ERR_STRIPPED: &str = "Este processo roda dentro de um terminal ou conversa do ADE AGS, mas chamou sem a identidade dele (sem ADE_SESSION e sem ADE_TAB_ID: \
+`env -i`, sandbox ou ambiente limpo). O comando foi recusado: rode o `ags` com o ambiente que o app deu ao terminal do agente.";
+
+/// O processo do agente de uma tarefa da Frota. O supervisor registra o PID ao lançá-lo; o `taskId` de um pedido só
+/// vale se o cliente do IPC for ele ou um descendente (F-02). Substitui o registro anterior da mesma tarefa.
+pub fn register_task_process(task_id: &str, root_pid: u32) {
+    if root_pid > 0 {
+        registry().task_roots.insert(task_id.to_string(), root_pid);
+    }
+}
+
+pub fn release_task_process(task_id: &str) {
+    registry().task_roots.remove(task_id);
+}
+
+/// O pedido que declara `task_id` vem mesmo do agente dessa tarefa? PID do cliente do canal de credencial (kernel) contra o
+/// PID registrado. Sem PID (TCP) ou sem processo registrado, recusa. Nos Unix sem API de PID fica só o `taskId` declarado
+/// (o mesmo fallback explícito de [`authorize`]).
+pub fn authorize_task(task_id: &str, client_pid: Option<u32>) -> Result<(), String> {
+    authorize_task_with(task_id, client_pid, parent_pid)
+}
+
+fn authorize_task_with(task_id: &str, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<(), String> {
+    if !ancestry_required() {
+        return Ok(());
+    }
+    let Some(root) = registry().task_roots.get(task_id).copied() else {
+        return Err(ERR_TASK_UNKNOWN.into());
+    };
+    let Some(client) = client_pid.filter(|pid| *pid > 0) else {
+        return Err(ERR_NO_PID.into());
+    };
+    if descends_from(client, root, parent) { Ok(()) } else { Err(ERR_TASK_ANCESTRY.into()) }
+}
+
+/// Quem chama, depois de o servidor provar o que pôde (F-09, `peer.answer`, `fix.decide`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Caller {
+    /// Terminal de aba ou conversa por protocolo, provado por token e PID (ou, numa conversa, só pelo PID).
+    Tab(String),
+    /// Sem identidade do ADE e fora de todo processo do ADE: a pessoa num terminal próprio. Não prova que não
+    /// seja um agente que se destacou da árvore (`setsid`, duplo fork): quem exige prova de papel recusa.
+    Outside,
+}
+
+/// Classifica quem chama. Identidade declarada (`ADE_SESSION` ou `ADE_TAB_ID`) tem de ser provada ([`authorize_actor`]); sem
+/// nenhuma, o cliente tem de estar fora de toda árvore de processos do ADE (PTYs, conversas, tarefas): quem está dentro e
+/// chamou sem identidade apagou o ambiente de propósito (ou por sandbox) e é recusado. Sem PID do cliente não há como saber.
+pub fn classify_caller(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>) -> Result<Caller, String> {
+    classify_caller_with(session, from, client_pid, parent_pid)
+}
+
+fn classify_caller_with(session: Option<&str>, from: Option<&str>, client_pid: Option<u32>, parent: impl FnMut(u32) -> Option<u32>) -> Result<Caller, String> {
+    let declared = |value: Option<&str>| value.map(str::trim).is_some_and(|v| !v.is_empty());
+    if declared(session) || declared(from) {
+        return authorize_actor(session, from, client_pid).map(Caller::Tab);
+    }
+    if !ancestry_required() {
+        return Ok(Caller::Outside);
+    }
+    let Some(client) = client_pid.filter(|pid| *pid > 0) else {
+        return Err(ERR_NO_PID.into());
+    };
+    if inside_an_ade_process(client, parent) { Err(ERR_STRIPPED.into()) } else { Ok(Caller::Outside) }
+}
+
+/// `pid` é (ou descende de) o processo de algum PTY, conversa ou tarefa registrados.
+fn inside_an_ade_process(pid: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
+    let roots: Vec<u32> = {
+        let sessions = registry();
+        sessions
+            .by_token
+            .values()
+            .map(|bound| bound.root_pid)
+            .chain(sessions.conversations.values().copied())
+            .chain(sessions.task_roots.values().copied())
+            .collect()
+    };
+    roots.into_iter().any(|root| descends_from(pid, root, &mut parent))
 }
 
 /// `client` é `root` ou um descendente, segundo `parent`. Para no init,
@@ -452,5 +540,100 @@ mod tests {
         assert!(ERR_MISSING.contains("sessão do terminal ausente"));
         assert!(ERR_UNKNOWN.contains("não é reconhecida"));
         assert!(ERR_ANCESTRY.contains("não pertence"));
+    }
+
+    // ── F-02: `taskId` provado pelo PID, não declarado ──────────────────────────────────────
+
+    fn task_id(label: &str) -> String {
+        format!("{label}-{}", uuid::Uuid::new_v4())
+    }
+
+    #[test]
+    fn taskid_so_vale_para_o_processo_que_o_supervisor_lancou_e_seus_descendentes() {
+        if !ancestry_required() {
+            return;
+        }
+        let task = task_id("tarefa");
+        register_task_process(&task, 100);
+        let parents = HashMap::from([(300, 200), (200, 100), (900, 800)]);
+        let parent = |pid: u32| parents.get(&pid).copied();
+        // O próprio agente e o MCP que ele lançou (neto) provam a tarefa.
+        assert!(authorize_task_with(&task, Some(100), parent).is_ok());
+        assert!(authorize_task_with(&task, Some(300), parent).is_ok());
+        // Um processo de outra árvore (outra tarefa, uma aba, a pessoa) não prova nada, mesmo com o token certo.
+        let intruso = authorize_task_with(&task, Some(900), parent).unwrap_err();
+        assert!(intruso.contains("não pertence"), "{intruso}");
+        release_task_process(&task);
+    }
+
+    #[test]
+    fn taskid_sem_pid_do_cliente_ou_sem_processo_registrado_e_recusado() {
+        if !ancestry_required() {
+            return;
+        }
+        let task = task_id("tarefa");
+        register_task_process(&task, 100);
+        assert!(authorize_task_with(&task, None, |_| None).unwrap_err().contains("PID"), "o TCP não traz PID");
+        // Um id inventado (ou de uma tarefa que já saiu) não tem processo: não há como provar.
+        let inventado = task_id("inventada");
+        assert!(authorize_task_with(&inventado, Some(100), |_| None).unwrap_err().contains("não tem um processo"));
+        release_task_process(&task);
+        assert!(authorize_task_with(&task, Some(100), |_| None).is_err(), "depois de liberada a tarefa não se prova mais");
+    }
+
+    #[test]
+    fn o_processo_de_uma_tarefa_nao_prova_outra_tarefa() {
+        if !ancestry_required() {
+            return;
+        }
+        let (a, b) = (task_id("a"), task_id("b"));
+        register_task_process(&a, 100);
+        register_task_process(&b, 500);
+        assert!(authorize_task_with(&a, Some(100), |_| None).is_ok());
+        assert!(authorize_task_with(&b, Some(100), |_| None).is_err(), "a tarefa A agiu como a tarefa B");
+        release_task_process(&a);
+        release_task_process(&b);
+    }
+
+    // ── Quem chama (F-09, peer.answer, fix.decide) ──────────────────────────────────────────
+
+    #[test]
+    fn quem_chama_de_um_terminal_provado_e_a_aba() {
+        let issued = Issued::new("quem");
+        let caller = classify_caller(Some(&issued.token), Some(&issued.tab), Some(std::process::id()));
+        assert_eq!(caller.unwrap(), Caller::Tab(issued.tab.clone()));
+    }
+
+    #[test]
+    fn identidade_declarada_sem_prova_e_recusada() {
+        let issued = Issued::new("falsa");
+        // ADE_TAB_ID sem sessão: declarado, não provado.
+        assert!(classify_caller(None, Some(&issued.tab), Some(std::process::id())).is_err());
+        // Sessão de outra aba com a identidade de uma terceira.
+        assert!(classify_caller(Some(&issued.token), Some("outra-aba"), Some(std::process::id())).is_err());
+    }
+
+    #[test]
+    fn sem_identidade_dentro_de_um_processo_do_ade_e_agente_que_apagou_o_ambiente_e_e_recusado() {
+        if !ancestry_required() {
+            return;
+        }
+        let issued = Issued::new("env-i");
+        // `env -i ags …` dentro do terminal: sem ADE_TAB_ID nem ADE_SESSION, mas o PID descende do PTY.
+        let refused = classify_caller(None, None, Some(std::process::id())).unwrap_err();
+        assert!(refused.contains("sem a identidade dele"), "{refused}");
+        drop(issued);
+    }
+
+    #[test]
+    fn sem_identidade_e_fora_de_todo_processo_do_ade_e_a_pessoa_no_proprio_terminal() {
+        if !ancestry_required() {
+            return;
+        }
+        // PID 1 nunca descende de PTY nenhum.
+        assert_eq!(classify_caller(None, None, Some(1)).unwrap(), Caller::Outside);
+        assert_eq!(classify_caller(Some(" "), Some(""), Some(1)).unwrap(), Caller::Outside, "campos vazios não são identidade");
+        // Sem PID (TCP) não dá para saber de que lado está: recusa.
+        assert!(classify_caller(None, None, None).is_err());
     }
 }

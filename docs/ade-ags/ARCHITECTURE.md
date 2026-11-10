@@ -132,6 +132,8 @@ A frota já lança Gemini, Codex, OpenCode e Kimi em modo headless, não só o C
 
 `preview/` é um proxy HTTP local na frente do dev server. Injeta o seletor de elementos e deixa o WebSocket de hot reload passar. A tab de browser marca um elemento e manda ao agente o componente, o seletor e o HTML. As tools `browser_*` saem pelo mesmo MCP `ade-ags`.
 
+O estado de cada site do preview (cookies, `localStorage` e `sessionStorage`) fica em `preview/site.rs`, num arquivo por origem cifrado com AES-256-GCM. A chave é uma por instância e vive no keyring do SO. Sem keyring, o estado fica só em memória e nada é gravado em claro. Detalhes na seção 8 de [NAVEGADOR_IMPORTACAO_PLANO.md](./NAVEGADOR_IMPORTACAO_PLANO.md).
+
 ## Git
 
 `scm/` chama o `git` do usuário. `explorer/` marca status no tree. `forge/` detecta o host (GitHub, GitLab, Bitbucket, Azure, Codeberg), guarda conta no keyring e expõe tools. Worktrees de missão são os da frota, não um worktree por "missão ADE" ainda.

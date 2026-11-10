@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 
 import { PhysicalSection, MirrorStatusLine } from "@/features/iphone/PhysicalParts";
 import { PhysicalMenu, useDeviceActions } from "@/features/iphone/PhysicalControls";
+import { DESKTOP_OS } from "@/app/platform";
+import { presentDeviceTool } from "@/features/chat/deviceDemand";
 import { canTouch, statusView, type MirrorStatus, type PhysicalDevice } from "@/features/iphone/model";
 import { watchPhysical } from "@/features/iphone/store";
 
@@ -179,6 +181,13 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
   const tone = physical ? statusView(physical.status).tone : null;
   const dot: SimDevice["state"] | "error" = physical?.disconnected ? "shutdown" : tone === "ok" ? "booted" : tone === "wait" ? "booting" : tone === "off" ? (physical?.status?.state === "paused" ? "shutdown" : "error") : state;
 
+  const search = presentDeviceTool(DESKTOP_OS, "ios-physical", "wifiSearch", !physical?.searching, t("iphone.search"), t);
+  const session = presentDeviceTool(DESKTOP_OS, "ios-physical", "sessionPause", !physical?.sessionBusy, t(physical?.disconnected ? "iphone.session.connect" : "iphone.session.disconnect"), t);
+  const simHome = presentDeviceTool(DESKTOP_OS, "ios-simulator", "home", on, t("simulator.home"), t);
+  const simLock = presentDeviceTool(DESKTOP_OS, "ios-simulator", "lock", on, t("simulator.lock"), t);
+  const simRotate = presentDeviceTool(DESKTOP_OS, "ios-simulator", "rotate", on, t("simulator.rotate"), t);
+  const simShot = presentDeviceTool(DESKTOP_OS, "ios-simulator", "screenshot", on, t("simulator.shot"), t);
+
   const zoom = (
     <>
       <button type="button" className={button} onClick={() => actions.onScale(-1)} title={t("simulator.smaller")} aria-label={t("simulator.smaller")}>−</button>
@@ -205,13 +214,13 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
             ? <span className="ml-1.5 shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10.5px] text-white/70" title={t("iphone.session.paused")}>{t("iphone.status.paused")}</span>
             : <MirrorStatusLine status={physical.status} className="ml-1.5 min-w-0 shrink text-[11px] text-white/70" />}
           <span className="flex-1" />
-          <button type="button" className={button} title={t("iphone.search")} aria-label={t("iphone.search")} disabled={physical.searching}
+          <button type="button" className={button} title={search.label} aria-label={search.label} disabled={search.disabled}
             onClick={actions.onSearchPhysical}>
             <span className={physical.searching ? "animate-spin" : ""}>{ICONS.refresh}</span>
           </button>
-          <button type="button" className={button} title={t(physical.disconnected ? "iphone.session.connect" : "iphone.session.disconnect")}
-            aria-label={t(physical.disconnected ? "iphone.session.connect" : "iphone.session.disconnect")} aria-pressed={physical.disconnected}
-            disabled={physical.sessionBusy} onClick={actions.onTogglePhysicalSession}>
+          <button type="button" className={button} title={session.label}
+            aria-label={session.label} aria-pressed={physical.disconnected}
+            disabled={session.disabled} onClick={actions.onTogglePhysicalSession}>
             {physical.disconnected ? ICONS.reconnect : ICONS.disconnect}
           </button>
           <PhysicalHome device={physical.id} name={label} ready={!physical.disconnected && canTouch(physical.status)} />
@@ -219,10 +228,10 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
       ) : full ? <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-white/12" /> : <span className="flex-1" />}
       {!physical && (
         <>
-        <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("home")} title={t("simulator.home")} aria-label={t("simulator.home")}>{ICONS.home}</button>
-        <button type="button" className={button} disabled={!on} onClick={() => actions.onButton("lock")} title={t("simulator.lock")} aria-label={t("simulator.lock")}>{ICONS.lock}</button>
-        <button type="button" className={button} disabled={!on} onClick={actions.onRotate} title={t("simulator.rotate")} aria-label={t("simulator.rotate")}>{ICONS.rotate}</button>
-        <button type="button" className={button} disabled={!on} onClick={actions.onShot} title={t("simulator.shot")} aria-label={t("simulator.shot")}>{ICONS.shot}</button>
+        <button type="button" className={button} disabled={simHome.disabled} onClick={() => actions.onButton("home")} title={simHome.label} aria-label={simHome.label}>{ICONS.home}</button>
+        <button type="button" className={button} disabled={simLock.disabled} onClick={() => actions.onButton("lock")} title={simLock.label} aria-label={simLock.label}>{ICONS.lock}</button>
+        <button type="button" className={button} disabled={simRotate.disabled} onClick={actions.onRotate} title={simRotate.label} aria-label={simRotate.label}>{ICONS.rotate}</button>
+        <button type="button" className={button} disabled={simShot.disabled} onClick={actions.onShot} title={simShot.label} aria-label={simShot.label}>{ICONS.shot}</button>
         </>
       )}
       {full && (
