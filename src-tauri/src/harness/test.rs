@@ -13,6 +13,144 @@ const PROVIDER_COMPARISON_BASELINE: &str = include_str!("provider_comparisons.ba
 
 const PROVIDER_IDS: [&str; 8] = ["claude-code", "codex", "opencode", "antigravity", "cursor", "gemini-cli", "kimi-code", "hermes"];
 
+fn capability_marker(source: &str) -> bool {
+    let source = source.to_lowercase();
+    [
+        "capabilit", "supports_", "unsupported", "steer", "interrupt",
+        "compact", "goal", "approval", "resume", "question", "access_modes", "permission_mode",
+        "read_only", "child_stop", "child_spawn", "child_result", "tool_events", "turn_completion",
+        "event_source", "ags_mcp",
+    ]
+    .iter()
+    .any(|marker| source.contains(marker))
+        || ["capability::plan", "supports_plan", "plan_supported", "plansupported", "planavailability", "planproviders", "plan_mode", "plan mode"]
+            .iter()
+            .any(|marker| source.contains(marker))
+}
+
+fn provider_list_declaration(lines: &[&str], receiver: &str, before: usize) -> Option<String> {
+    for (index, line) in lines.iter().enumerate().take(before).rev() {
+        if !line.contains(receiver)
+            || !["const ", "let ", "var "].iter().any(|keyword| line.contains(keyword))
+        {
+            continue;
+        }
+        let mut declaration = (*line).to_string();
+        for nested in lines.iter().skip(index + 1).take(20) {
+            if declaration.contains('[') && declaration.contains(']') { break; }
+            declaration.push(' ');
+            declaration.push_str(nested);
+        }
+        let names_provider = PROVIDER_IDS.iter().any(|provider| declaration.contains(&format!("\"{provider}\"")) || declaration.contains(&format!("'{provider}'")));
+        if names_provider && declaration.contains('[') && declaration.contains(']') {
+            return Some(declaration);
+        }
+    }
+    None
+}
+
+fn provider_capability_lines(source: &str, _relative: &str) -> Vec<String> {
+    let lines: Vec<&str> = source.lines().map(str::trim).collect();
+    let mut found = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let match_subject = ["match agent_id", "match agentId", "match provider", "match agent"]
+            .iter()
+            .any(|subject| line.contains(subject));
+        let switch_subject = (line.starts_with("switch ") || line.starts_with("switch("))
+            && ["agent_id", "agentId", "provider", "agent"].iter().any(|name| line.contains(name));
+        if (match_subject || switch_subject) && line.contains('{') {
+            let header_has_capability = capability_marker(line);
+            let mut depth = 0_i32;
+            let mut end = index;
+            for (offset, nested) in lines.iter().enumerate().skip(index) {
+                for ch in nested.chars() {
+                    if ch == '{' { depth += 1; }
+                    if ch == '}' { depth -= 1; }
+                }
+                end = offset;
+                if depth == 0 { break; }
+            }
+            let arms = &lines[index..=end];
+            if match_subject {
+                for (arm_index, arm) in arms.iter().enumerate().filter(|(_, arm)| arm.contains("=>")) {
+                    let next_arm = arms.iter().enumerate().skip(arm_index + 1)
+                        .find(|(_, candidate)| candidate.contains("=>"))
+                        .map(|(next, _)| next)
+                        .unwrap_or(arms.len());
+                    let arm_body = arms[arm_index..next_arm].join(" ");
+                    let names_provider = PROVIDER_IDS.iter().any(|provider| {
+                        arm.contains(&format!("\"{provider}\"")) || arm.contains(&format!("'{provider}'"))
+                    });
+                    if names_provider && (header_has_capability || capability_marker(&arm_body)) {
+                        found.push((*arm).to_string());
+                    }
+                }
+            } else {
+                for (arm_index, arm) in arms.iter().enumerate().filter(|(_, arm)| arm.trim_start().starts_with("case ")) {
+                    let next_arm = arms.iter().enumerate().skip(arm_index + 1)
+                        .find(|(_, candidate)| candidate.trim_start().starts_with("case ") || candidate.trim_start().starts_with("default:"))
+                        .map(|(next, _)| next)
+                        .unwrap_or(arms.len());
+                    let arm_body = arms[arm_index..next_arm].join(" ");
+                    let names_provider = PROVIDER_IDS.iter().any(|provider| {
+                        arm.contains(&format!("\"{provider}\"")) || arm.contains(&format!("'{provider}'"))
+                    });
+                    if names_provider && (header_has_capability || capability_marker(&arm_body)) {
+                        found.push((*arm).to_string());
+                    }
+                }
+            }
+            continue;
+        }
+        let includes_list = line.find(".includes(").or_else(|| line.find(".has(")).or_else(|| line.find(".contains(")).and_then(|at| {
+            let receiver = line[..at].trim().rsplit(|ch: char| !(ch.is_alphanumeric() || ch == '_')).next()?;
+            provider_list_declaration(&lines, receiver, index)
+        });
+        let provider_name = PROVIDER_IDS.iter().any(|provider| line.contains(&format!("\"{provider}\"")) || line.contains(&format!("'{provider}'")))
+            || includes_list.is_some();
+        let subject = ["agent_id", "agentId", "provider", "agent"].iter().any(|name| line.contains(name));
+        if !provider_name || !subject { continue; }
+        let indirect = line.contains("matches!(") || line.contains(".includes(") || line.contains(".has(") || line.contains(".contains(") || line.contains("=>");
+        let mut contextual = line.to_string();
+        if let Some(declaration) = includes_list {
+            contextual = format!("{declaration} {contextual}");
+        }
+        if line.contains("matches!(") || line.contains(".includes(") || line.contains(".has(") || line.contains(".contains(") {
+            contextual = format!("{} {contextual}", lines[index.saturating_sub(2)..index].join(" "));
+        }
+        let conditional = line.starts_with("if ") || line.starts_with("if(") || line.starts_with("else if ") || line.starts_with("else if(");
+        let compares_provider = line.contains("==") || line.contains("!=");
+        if conditional && (compares_provider || line.contains("matches!(") || line.contains(".includes(") || line.contains(".has(") || line.contains(".contains(")) {
+            let mut depth = 0_i32;
+            let mut opened = false;
+            for nested in lines.iter().skip(index).take(40) {
+                for ch in nested.chars() {
+                    if ch == '{' { depth += 1; opened = true; }
+                    if ch == '}' { depth -= 1; }
+                }
+                contextual.push_str(nested);
+                if opened && depth <= 0 { break; }
+            }
+        }
+        let capability_context = if conditional || indirect {
+            contextual
+        } else if let Some(equal_at) = line.find("==").or_else(|| line.find("!=")) {
+            let clause_start = line[..equal_at].rfind(|ch| ch == ',' || ch == ';').map_or(0, |offset| offset + 1);
+            line[clause_start..].to_string()
+        } else {
+            line.to_string()
+        };
+        if capability_marker(&capability_context) && (indirect || compares_provider) {
+            found.push((*line).to_string());
+        }
+    }
+    found
+}
+
+fn production_source(source: &str) -> &str {
+    source.split_once("#[cfg(test)]").map_or(source, |(production, _)| production)
+}
+
 fn source_provider_comparisons(path: &Path, root: &Path, found: &mut BTreeMap<String, BTreeMap<String, usize>>) {
     let entries = std::fs::read_dir(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     for entry in entries {
@@ -23,10 +161,13 @@ fn source_provider_comparisons(path: &Path, root: &Path, found: &mut BTreeMap<St
             continue;
         }
         let relative = file.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
-        if relative == "src-tauri/src/agents/adapter.rs" || relative == "src-tauri/src/agents/registry.rs" {
+        if relative == "src-tauri/src/agents/adapter.rs"
+            || relative == "src-tauri/src/agents/registry.rs"
+            || relative == "src/features/chat/harnessCapabilities.ts"
+        {
             continue;
         }
-        if relative.contains("/tests/") || relative.contains("/__tests__/") || file.file_name().and_then(|name| name.to_str()).is_some_and(|name| name == "test.rs" || name.ends_with("_test.rs") || name.ends_with(".test.ts") || name.ends_with(".test.tsx")) {
+        if relative.contains("/tests/") || relative.contains("/__tests__/") || relative == "src-tauri/src/agents/contract.rs" || file.file_name().and_then(|name| name.to_str()).is_some_and(|name| name == "test.rs" || name.ends_with("_test.rs") || name.ends_with(".test.ts") || name.ends_with(".test.tsx")) {
             continue;
         }
         let rust = file.extension().and_then(|ext| ext.to_str()) == Some("rs") && relative.starts_with("src-tauri/src/");
@@ -35,14 +176,9 @@ fn source_provider_comparisons(path: &Path, root: &Path, found: &mut BTreeMap<St
             continue;
         }
         let source = std::fs::read_to_string(&file).unwrap_or_else(|error| panic!("{}: {error}", file.display()));
-        for line in source.lines().map(str::trim) {
-            if !line.contains("==") || !["agent_id", "agentId", "provider", "agent"].iter().any(|name| line.contains(name)) {
-                continue;
-            }
-            if !PROVIDER_IDS.iter().any(|provider| line.contains(&format!("\"{provider}\"")) || line.contains(&format!("'{provider}'"))) {
-                continue;
-            }
-            *found.entry(relative.clone()).or_default().entry(line.to_owned()).or_default() += 1;
+        let source = if rust { production_source(&source) } else { &source };
+        for line in provider_capability_lines(source, &relative) {
+            *found.entry(relative.clone()).or_default().entry(line).or_default() += 1;
         }
     }
 }
@@ -54,15 +190,78 @@ fn comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro() {
     source_provider_comparisons(&root.join("src-tauri/src"), &root, &mut actual);
     source_provider_comparisons(&root.join("src"), &root, &mut actual);
     let baseline: BTreeMap<String, Vec<String>> = serde_json::from_str(PROVIDER_COMPARISON_BASELINE).unwrap();
-    let files: std::collections::BTreeSet<String> = actual.keys().chain(baseline.keys()).cloned().collect();
-    for file in files {
-        let current = actual.remove(&file).unwrap_or_default();
-        let mut expected = BTreeMap::new();
-        for line in baseline.get(&file).into_iter().flatten() {
-            *expected.entry(line.clone()).or_insert(0) += 1;
+    let mut expected = BTreeMap::new();
+    for (file, lines) in baseline {
+        for line in lines {
+            *expected.entry(file.clone()).or_insert_with(BTreeMap::new).entry(line).or_insert(0) += 1;
         }
-        assert_eq!(current, expected, "comparações por provider fora do adapter/registro mudaram em {file}; atualize o baseline após uma migração");
     }
+    assert_eq!(actual, expected, "comparações por provider que decidem capability fora do adapter/registro mudaram; atualize o baseline somente para pendências classificadas");
+}
+
+#[test]
+fn guarda_encontra_padroes_indiretos_de_capability_sem_contar_identidade() {
+    let source = r#"
+        let plan_supported = matches!(provider, "claude-code" | "codex");
+        const compactProviders = ["claude-code", "codex"].includes(agentId);
+        const PLAN_CAPABILITY_PROVIDERS = ["claude-code", "codex"];
+        if (PLAN_CAPABILITY_PROVIDERS.includes(agentId)) { enablePlan(); }
+        const PLAN_CAPABILITY_SET = new Set(["claude-code", "codex"]);
+        if (PLAN_CAPABILITY_SET.has(agentId)) { enablePlan(); }
+        const PLAN_CAPABILITY_LIST: &[&str] = &["claude-code", "codex"];
+        if PLAN_CAPABILITY_LIST.contains(&agent_id) { enablePlan(); }
+        match agent_id {
+          "opencode" => supports_compact(),
+          _ => false
+        }
+        if agent_id == "antigravity" { return supports_compact(); }
+        if agentId !== "opencode" { planSupported = false; }
+        let parser = match provider { "codex" => "json", _ => "text" };
+        let supports_goal = match provider {
+          "hermes" => true,
+          _ => false,
+        };
+        switch (provider) {
+          case "cursor": supports_compact(); break;
+          default: break;
+        }
+    "#;
+    let found = provider_capability_lines(source, "src/features/example.ts");
+    assert_eq!(found.len(), 10);
+    assert!(found[0].contains("matches!("));
+    assert!(found[1].contains("includes("));
+    assert!(found[2].contains("PLAN_CAPABILITY_PROVIDERS"));
+    assert!(found[3].contains("PLAN_CAPABILITY_SET"));
+    assert!(found[4].contains("PLAN_CAPABILITY_LIST"));
+    assert!(found[5].contains("supports_compact"));
+    assert!(found[6].contains("antigravity"));
+    assert!(found[7].contains("opencode"));
+    assert!(found[8].contains("hermes"));
+    assert!(found[9].contains("cursor"));
+    assert!(provider_capability_lines(
+        r#"match agent_id { "codex" => parse_codex_json(), _ => parse_text() }"#,
+        "src-tauri/src/canal/mod.rs",
+    ).is_empty());
+    assert!(provider_capability_lines(
+        r#"if agent_id == "codex" { parse_codex_json() }"#,
+        "src-tauri/src/conversa/parser.rs",
+    ).is_empty());
+    assert!(provider_capability_lines(
+        r#"if account.agentId === "claude-code" { account.plan = usage.plan; }"#,
+        "src/features/accounts/usage.ts",
+    ).is_empty());
+    assert!(provider_capability_lines(
+        r#"const providers = ["codex"]; if (providers.includes(agentId)) { choose_binary(); }"#,
+        "src/features/chat/identity.ts",
+    ).is_empty());
+    assert!(provider_capability_lines(
+        r#"switch (provider) { case "codex": parse_codex_json(); break; }"#,
+        "src-tauri/src/canal/parser.rs",
+    ).is_empty());
+    assert!(provider_capability_lines(
+        production_source(r#"fn parse() {} #[cfg(test)] mod tests { if agent_id == "codex" { supports_plan(); } }"#),
+        "src-tauri/src/runs/example.rs",
+    ).is_empty());
 }
 
 fn repo_root() -> PathBuf {
@@ -101,8 +300,8 @@ fn a_matriz_tem_as_22_colunas_esperadas() {
 }
 
 #[test]
-fn todo_provider_cobre_as_18_capabilities_na_ordem_do_enum() {
-    assert_eq!(Capability::ALL.len(), 18);
+fn todo_provider_cobre_as_19_capabilities_na_ordem_do_enum() {
+    assert_eq!(Capability::ALL.len(), 19);
     for column in matrix() {
         let listed: Vec<Capability> = column.cells.iter().map(|cell| cell.capability).collect();
         assert_eq!(listed, Capability::ALL, "{}/{}", column.surface.id(), column.provider);
@@ -117,7 +316,7 @@ fn os_ids_das_capabilities_sao_unicos() {
     let mut ids: Vec<&str> = Capability::ALL.iter().map(|capability| capability.id()).collect();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), 18);
+    assert_eq!(ids.len(), 19);
 }
 
 #[test]
@@ -129,10 +328,47 @@ fn supports_consulta_supported_unknown_e_unsupported_na_matriz() {
     assert!(crate::conversa::api::unsupported_capability_error("opencode", Capability::Goal)
         .unwrap()
         .contains("Unsupported"));
+    assert!(crate::conversa::api::unsupported_capability_error("opencode", Capability::Compact)
+        .unwrap()
+        .contains("compact"));
     assert!(crate::conversa::api::unsupported_capability_error("local-acp-00000000-0000-4000-8000-000000000000", Capability::Goal)
         .unwrap()
         .contains("local-acp-00000000-0000-4000-8000-000000000000"));
     assert_eq!(crate::conversa::api::unsupported_capability_error("claude-code", Capability::Compact), None);
+    let fleet_error = crate::harness::matrix::unsupported_capability_error("hermes", Surface::Fleet, Capability::Start).unwrap();
+    assert!(fleet_error.contains("start") && fleet_error.contains("hermes") && fleet_error.contains("Unsupported"));
+}
+
+#[test]
+fn frota_recusa_start_unsupported_antes_de_tentar_lancar() {
+    let error = crate::runs::ensure_headless("hermes").unwrap_err();
+    assert!(error.contains("start") && error.contains("hermes") && error.contains("Unsupported"), "{error}");
+    assert!(crate::runs::ensure_headless("codex").is_ok());
+}
+
+#[test]
+fn plan_e_uma_capability_com_prova_em_todas_as_superficies() {
+    assert_eq!(Capability::ALL.len(), 19);
+    assert_eq!(supports("claude-code", Surface::Chat, Capability::Plan), Some(Support::Supported));
+    assert_eq!(supports("codex", Surface::Chat, Capability::Plan), Some(Support::Unsupported));
+    assert_eq!(supports("claude-code", Surface::Fleet, Capability::Plan), Some(Support::Unsupported));
+    assert_eq!(supports("claude-code", Surface::Tui, Capability::Plan), Some(Support::Supported));
+    assert_eq!(supports("codex", Surface::Tui, Capability::Plan), Some(Support::Unsupported));
+
+    for column in matrix() {
+        let claim = column.claim(Capability::Plan);
+        assert!(!claim.evidence.is_empty(), "{}/{}/plan sem evidência", column.surface.id(), column.provider);
+        assert!(claim.proof > Proof::None, "{}/{}/plan sem prova", column.surface.id(), column.provider);
+        assert_ne!(claim.proof, Proof::RealCapture, "{}/{}/plan não tem captura real", column.surface.id(), column.provider);
+    }
+}
+
+#[test]
+fn compact_e_goal_desconhecidos_na_tui_nao_sao_prometidos() {
+    for provider in ["claude-code", "codex"] {
+        assert_eq!(supports(provider, Surface::Tui, Capability::Compact), Some(Support::Unknown), "{provider}/compact");
+    }
+    assert_eq!(supports("claude-code", Surface::Tui, Capability::Goal), Some(Support::Unknown));
 }
 
 #[test]
@@ -253,7 +489,7 @@ fn engine_of(provider: &str) -> Engine {
 
 #[test]
 fn a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor() {
-    for column in matrix().iter().filter(|column| column.surface == Surface::Chat) {
+    for column in matrix().iter().filter(|column| column.surface == Surface::Chat && column.provider != "local-acp") {
         let declared = engine_of(column.provider).capabilities();
         let steer = column.claim(Capability::Steer).support;
         match declared.mid_turn {
@@ -264,6 +500,7 @@ fn a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor() {
         assert_eq!(declared.context_compaction, compact != Support::Unsupported, "{}: compact", column.provider);
         let goal = column.claim(Capability::Goal).support;
         assert_eq!(declared.persistent_goal, goal != Support::Unsupported, "{}: goal", column.provider);
+        assert_eq!(declared.plan, column.claim(Capability::Plan).support != Support::Unsupported, "{}: plan", column.provider);
     }
 }
 

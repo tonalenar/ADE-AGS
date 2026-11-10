@@ -1,11 +1,11 @@
-//! A tabela estática da matriz capability × provider/superfície (22 colunas × 18 capabilities).
+//! A tabela estática da matriz capability × provider/superfície (22 colunas × 19 capabilities).
 //!
 //! Mantida à mão: cada célula cita o código, o teste ou a fixture que a sustenta. Onde não há prova
 //! (`Unknown`), diz o que falta provar. O doc `docs/ade-ags/HARNESS_CONTRATO.md` §1 explica e espelha a
 //! contagem; um teste confere que os dois concordam. Onde a matriz corrige um inventário de colega, o doc
 //! registra a divergência.
 //!
-//! Quem muda uma célula atualiza o doc. `conversa::api` lê `steer`, `compact`, `goal` e `child_stop`;
+//! Quem muda uma célula atualiza o doc. `conversa::api` lê `steer`, `compact`, `goal`, `plan` e `child_stop`;
 //! `conversa::troca` consulta `approval`; o Tauri entrega a matriz ao front, que a compartilha entre o composer e o seletor.
 
 use super::capability::{Capability, Cell, Claim, Proof, ProviderMatrix, Scope, Support, Surface};
@@ -62,6 +62,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::Resume, Scope::Session, Proof::Test, &["src-tauri/src/conversa/claude.rs:168-220", "src-tauri/src/conversa/resume.rs:44-102", "src-tauri/src/conversa/test.rs:715"], "preguiçosa (na próxima mensagem); `Gone` abre sessão nova com aviso `resumeLost`"),
             unk(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:821-839", "src-tauri/src/conversa/api.rs:846-910", "src-tauri/src/conversa/claude_map.rs:91-96"], "captura real do `claude -p` recebendo `/compact` como linha `user` e do evento que marca a conclusão", "`/compact` vai como texto de usuário, sem ack nem evento de compactação"),
             unk(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/conversa/api.rs:914-1003", "src-tauri/src/conversa/store.rs:460-503"], "evento do Claude com o status do objetivo e prova de que `/goal` como linha `user` é executado", "`/goal` vai como texto e o espelho `chat_thread_goal` não reflete o estado real"),
+            sup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/conversa/claude_map.rs"], "o adapter do chat inicia no modo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa; não prova que o Claude não tenha o recurso"),
             unsup(Capability::Rollback, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa; a Frota e as abas só restauram arquivos"),
             sup(Capability::Usage, Scope::Session, Proof::Test, &["src-tauri/src/conversa/claude_map.rs:232-243", "src-tauri/src/conversa/test.rs:301"], "tokens por mensagem e contexto medido; custo não é calculado"),
@@ -87,6 +88,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/conversa/codex.rs:331-351", "src-tauri/src/conversa/codex.rs:355-361"], "qualquer recusa de `thread/resume` vira `Gone` e abre thread nova com aviso"),
             sup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:812-819", "src-tauri/src/conversa/api.rs:808-810"], "`thread/compact/start` com resposta de aceite; o efeito não é observado e não há item de compactação na timeline"),
             sup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/conversa/api.rs:1005-1031", "src-tauri/src/conversa/api.rs:931-946", "src-tauri/src/conversa/codex.rs:638-653"], "`thread/goal/*` sincroniza `chat_thread_goal`; único motor com estado de objetivo nativo"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/conversa/api.rs"], "o adapter do chat não oferece modo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa"),
             unsup(Capability::Rollback, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa"),
             sup(Capability::Usage, Scope::Session, Proof::Test, &["src-tauri/src/conversa/codex_map.rs:249-264", "src-tauri/src/conversa/codex_map.rs:199-231", "src-tauri/src/conversa/test.rs:226"], "a base do turno vem do primeiro aviso; se ele se perde a contagem do turno sai errada"),
@@ -112,6 +114,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unk(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode.rs:229-251", "src-tauri/src/conversa/opencode.rs:288-315", "src-tauri/src/conversa/bancada.rs:44"], "replay que case o id que o ADE enviou: a captura de handshake tem `-32602` no id 2 e a sessão nova no id 4, e a bancada só lê o id 2; também falta um turno de modelo", "a captura vê `session/resume` e `session/load`, mas o replay não a ingere; sessão inexistente responde `-32602`, e com `mcpServers: []` a sessão nova devolve `configOptions`"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:94-101", "src-tauri/src/conversa/api.rs:808-809"], "`context_compaction=false`; comandos que o OpenCode anuncia vão como texto"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/conversa/api.rs:94-101"], "`persistent_goal=false`"),
+            sup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode_map.rs"], "o adapter do chat inicia no modo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa ACP"),
             unsup(Capability::Rollback, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa ACP"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode_map.rs:497-519", "src-tauri/src/conversa/opencode.rs:805-810"], "lê `usage` da resposta do `session/prompt` quando vem; cobertura por provider não medida"),
@@ -137,6 +140,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::Resume, Scope::Session, Proof::Test, &["src-tauri/src/conversa/agy.rs:224-248", "src-tauri/src/conversa/agy_map.rs:61-63", "src-tauri/src/conversa/agy_map.rs:376-389", "src-tauri/src/conversa/resume.rs:176-199", "src-tauri/src/conversa/test.rs:779-901", "src-tauri/src/conversa/test_motores.rs:333-345", "src-tauri/src/conversa/test_motores.rs:465-489"], "`--conversation <remote_id>` no turno seguinte (um processo por turno). Só cai numa conversa nova, com aviso `resumeLost`, quando o processo saiu sem NENHUMA linha de stdout e o stderr diz que a conversa não existe (`agy_map::session_refused`); a frase exata do CLI não foi capturada, o critério é conservador. Erro depois de eventos, erro sem a frase e erro transitório falham o turno, sem repetir, com o id mantido. Provado por teste com fakes, sem processo real"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:103-111", "src-tauri/src/conversa/agy_map.rs:249-250"], "`context_compaction=false`; o step «compaction» é ignorado"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/conversa/api.rs:103-111"], "`persistent_goal=false`"),
+            sup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/conversa/agy_map.rs"], "o adapter do chat inicia no modo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/conversa/agy_map.rs:248-250"], "o step «checkpoint» do stream é descartado pelo adapter"),
             unsup(Capability::Rollback, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa"),
             sup(Capability::Usage, Scope::Session, Proof::Test, &["src-tauri/src/conversa/agy_map.rs:227-231", "src-tauri/src/conversa/agy_map.rs:270-294", "src-tauri/src/conversa/test_motores.rs:347-377"], "tokens do objeto `usage` do `result`"),
@@ -162,6 +166,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::Resume, Scope::Session, Proof::Test, &["src-tauri/src/conversa/cursor.rs:243-267", "src-tauri/src/conversa/cursor_map.rs:71-84", "src-tauri/src/conversa/cursor_map.rs:390-392", "src-tauri/src/conversa/resume.rs:176-199", "src-tauri/src/conversa/test.rs:779-901", "src-tauri/src/conversa/test_motores.rs:608-622", "src-tauri/src/conversa/test_motores.rs:907-920"], "`--resume <session_id>` no turno seguinte (um processo por turno). Só cai numa conversa nova, com aviso `resumeLost`, quando o processo saiu sem NENHUMA linha de stdout e o stderr diz que o chat ou a sessão não existe (`cursor_map::session_refused`); a frase exata do CLI não foi capturada, o critério é conservador. Erro depois de eventos, erro sem a frase e erro transitório falham o turno, sem repetir, com o id mantido. Provado por teste com fakes, sem processo real"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:112-120", "src-tauri/src/conversa/api.rs:808-809"], "`context_compaction=false`"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/conversa/api.rs:112-120"], "`persistent_goal=false`"),
+            sup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/conversa/cursor_map.rs"], "o adapter do chat inicia no modo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa; `runs/checkpoints.rs` é da Frota"),
             unsup(Capability::Rollback, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa"),
             unsup(Capability::Usage, Scope::Model, Proof::Code, &["src-tauri/src/conversa/cursor_map.rs:125-135", "src-tauri/src/conversa/cursor_map.rs:155-165"], "os frames `usage` só decidem o fim da chamada; nenhum item `Usage` é gravado, embora o dado esteja no stream"),
@@ -187,6 +192,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unk(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode.rs:283-287", "src-tauri/src/local_acp.rs:50-54"], "o descritor de sessão precisa ler `agentCapabilities` do `initialize`; sem isso a instância não promete retomada", "só tenta se o ACP anunciar `resume` ou `loadSession`; senão erro `Gone`"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/conversa/api.rs:136"], "herda `Engine::OpenCode`: `context_compaction=false`"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/ipc/commands/conversas.rs:110-115"], "`persistent_goal=false`"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/ipc/commands/conversas.rs"], "o adapter do chat não oferece modo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa ACP"),
             unsup(Capability::Rollback, Scope::Session, Proof::None, &[], "sem caminho no ADE para a conversa ACP"),
             unk(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode_map.rs:497-519"], "captura de um agente ACP local real com a resposta do `session/prompt`", "depende de o agente mandar `usage` na resposta"),
@@ -212,6 +218,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática da tarefa: o boot marca `failed` e não relança (`store.rs:1256-1300`). Há tensão com a definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual e não retomada da tarefa pós-reinício"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:281-283", "src-tauri/src/runs/supervisor.rs:507-510", "src-tauri/src/runs/checkpoints.rs:113-135"], "ref oculta `refs/controlcode/checkpoints/<id>`; só arquivos; o lead não tira foto"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/runs/checkpoints.rs:136-151"], "destrutivo na pasta da tarefa (`reset --hard`); só arquivos, a sessão do provider não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/runs/agents.rs:249-265", "src-tauri/src/runs/agents.rs:210"], "custo, tokens e cota"),
@@ -237,6 +244,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática da tarefa: o boot marca `failed` e não relança (`store.rs:1256-1300`). Há tensão com a definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual e não retomada da tarefa pós-reinício"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:281-283", "src-tauri/src/runs/supervisor.rs:507-510", "src-tauri/src/runs/checkpoints.rs:113-135"], "ref oculta `refs/controlcode/checkpoints/<id>`; só arquivos; o lead não tira foto"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/runs/checkpoints.rs:136-151"], "destrutivo na pasta da tarefa (`reset --hard`); só arquivos, a sessão do provider não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:592-600"], "tokens, sem custo"),
@@ -262,6 +270,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática da tarefa: o boot marca `failed` e não relança (`store.rs:1256-1300`). Há tensão com a definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual e não retomada da tarefa pós-reinício"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:281-283", "src-tauri/src/runs/supervisor.rs:507-510", "src-tauri/src/runs/checkpoints.rs:113-135"], "ref oculta `refs/controlcode/checkpoints/<id>`; só arquivos; o lead não tira foto"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/runs/checkpoints.rs:136-151"], "destrutivo na pasta da tarefa (`reset --hard`); só arquivos, a sessão do provider não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:475-479"], "tokens, sem custo"),
@@ -287,6 +296,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática da tarefa: o boot marca `failed` e não relança (`store.rs:1256-1300`). Há tensão com a definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual e não retomada da tarefa pós-reinício"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:281-283", "src-tauri/src/runs/supervisor.rs:507-510", "src-tauri/src/runs/checkpoints.rs:113-135"], "ref oculta `refs/controlcode/checkpoints/<id>`; só arquivos; o lead não tira foto"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/runs/checkpoints.rs:136-151"], "destrutivo na pasta da tarefa (`reset --hard`); só arquivos, a sessão do provider não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:296-309"], "tokens e custo"),
@@ -312,6 +322,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática da tarefa: o boot marca `failed` e não relança (`store.rs:1256-1300`). Há tensão com a definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual e não retomada da tarefa pós-reinício"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:281-283", "src-tauri/src/runs/supervisor.rs:507-510", "src-tauri/src/runs/checkpoints.rs:113-135"], "ref oculta `refs/controlcode/checkpoints/<id>`; só arquivos; o lead não tira foto"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/runs/checkpoints.rs:136-151"], "destrutivo na pasta da tarefa (`reset --hard`); só arquivos, a sessão do provider não volta"),
             unsup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:658-697"], "não lê uso"),
@@ -337,6 +348,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática: o boot marca `failed` e não relança; a retomada manual por aba é outro caminho"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/agents/adapter.rs:190-196"], "sem headless"),
             unsup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/agents/adapter.rs:190-196"], "sem headless"),
             unsup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/agents/adapter.rs:190-196"], "sem headless"),
@@ -362,6 +374,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática da tarefa: o boot marca `failed` e não relança (`store.rs:1256-1300`). Há tensão com a definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual e não retomada da tarefa pós-reinício"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/runs/supervisor.rs:281-283", "src-tauri/src/runs/supervisor.rs:507-510", "src-tauri/src/runs/checkpoints.rs:113-135"], "ref oculta `refs/controlcode/checkpoints/<id>`; só arquivos; o lead não tira foto"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/runs/checkpoints.rs:136-151"], "destrutivo na pasta da tarefa (`reset --hard`); só arquivos, a sessão do provider não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/runs/antigravity.rs:207-209"], "tokens, sem custo"),
@@ -387,6 +400,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/runs/store.rs:1256-1300", "src-tauri/src/runs/mod.rs:1116-1157"], "sem retomada automática: o boot marca `failed` e não relança; a retomada manual por aba é outro caminho"),
             unsup(Capability::Compact, Scope::Model, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de compactação na Frota"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src-tauri/src/runs/adapters.rs:253-270"], "nenhum caminho de objetivo persistente na Frota"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src-tauri/src/runs/plan.rs"], "`run_plan` compõe tarefas do ADE; o lançamento headless não tem modo nativo Plano"),
             unsup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/agents/adapter.rs:190-196"], "sem headless"),
             unsup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/agents/adapter.rs:190-196"], "sem headless"),
             unsup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/agents/adapter.rs:219-225"], "sem headless"),
@@ -410,8 +424,9 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::ChildResult, Scope::Session, Proof::Code, &["src-tauri/src/canal/claude.rs:83-84"], "o canal descarta linhas de subagente (`isSidechain`) de propósito; não há eventos de filho"),
             unsup(Capability::ChildStop, Scope::Session, Proof::Code, &["src-tauri/src/canal/claude.rs:83-84"], "o canal descarta linhas de subagente (`isSidechain`) de propósito; não há eventos de filho"),
             sup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:247", "src/features/sessions/agentResume.ts:53-58"], "id atribuído pelo app; sem id válido a TUI recomeça do zero sem aviso"),
-            sup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/terminal/Terminal.tsx:478-487"], "só a janela de auto-compact por env; não há pedido de `/compact` do ADE na TUI"),
-            unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unk(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "captura real mostrando `/compact` executado na TUI e evento observável de conclusão", "a TUI oferece `/compact`, mas a matriz não prova execução nem conclusão"),
+            unk(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "captura real mostrando `/goal` executado na TUI e o estado persistente retornado", "a TUI oferece `/goal`, mas não há evento de retorno que prove o objetivo persistente"),
+            sup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "o composer TUI inicia com a flag `--permission-mode plan`"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/usage/terminal.rs:284-292", "src-tauri/src/usage/live.rs:304-333"], "lê o transcript"),
@@ -437,6 +452,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:261", "src-tauri/src/session/title.rs:1400-1406", "src-tauri/src/session/title.rs:1526-1533"], "`--resume`; o id da sessão é descoberto pelo cabeçalho do arquivo em `session/title.rs`"),
             unsup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx:301-304"], "`/compact` do ADE só existe em conversa estruturada"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "a TUI não declara flag de modo Plano para este adapter"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             unsup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/usage/terminal.rs:284-292"], "sem leitor de uso para esta CLI"),
@@ -460,8 +476,9 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::ChildResult, Scope::Session, Proof::Code, &["src-tauri/src/canal/codex.rs"], "o transcript é lido mas o canal não trata eventos de filho nem subagentes"),
             unsup(Capability::ChildStop, Scope::Session, Proof::Code, &["src-tauri/src/canal/codex.rs"], "o transcript é lido mas o canal não trata eventos de filho nem subagentes"),
             sup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:288", "src-tauri/src/session/title.rs:1407-1410", "src-tauri/src/session/title.rs:1534-1540"], "`resume`; o id da sessão é descoberto pelo cabeçalho `session_meta` do rollout em `session/title.rs`"),
-            unsup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx:301-304"], "`/compact` do ADE só existe em conversa estruturada"),
+            unk(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "captura real mostrando `/compact` executado na TUI do Codex", "o comando aparece na TUI, mas a matriz não prova que ele seja executado"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "a TUI não declara flag de modo Plano para este adapter"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/usage/terminal.rs:284-292", "src-tauri/src/usage/terminal.rs:307-320"], "lê o transcript"),
@@ -487,6 +504,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:321"], "id atribuído pelo app"),
             unsup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx:301-304"], "`/compact` do ADE só existe em conversa estruturada"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "a TUI não declara flag de modo Plano para este adapter"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             sup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/usage/terminal.rs:284-292", "src-tauri/src/usage/terminal.rs:307-320"], "lê o transcript"),
@@ -512,6 +530,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unk(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:330-340", "src-tauri/src/session/title.rs:1540-1556"], "verificar a flag de retomada do Kimi e se ele informa o id da sessão", "a flag de retomada não foi verificada e o id é descoberto por cwd e janela de tempo"),
             unsup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx:301-304"], "`/compact` do ADE só existe em conversa estruturada"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "a TUI não declara flag de modo Plano para este adapter"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             unsup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/usage/terminal.rs:284-292"], "sem leitor de uso para esta CLI"),
@@ -537,6 +556,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:348", "src-tauri/src/agents/registry.rs:359"], "verificado na versão 0.21.5"),
             unsup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx:301-304"], "`/compact` do ADE só existe em conversa estruturada"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "a TUI não declara flag de modo Plano para este adapter"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             unsup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/usage/terminal.rs:284-292"], "sem leitor de uso para esta CLI"),
@@ -562,6 +582,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:379"], "a TUI não tem retomada no registro"),
             unsup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx:301-304"], "`/compact` do ADE só existe em conversa estruturada"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "a TUI não declara flag de modo Plano para este adapter"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             unk(Capability::Usage, Scope::Session, Proof::Code, &["src/features/canvas/usageStore.ts:114-131"], "uma fonte de uso por sessão do Antigravity na TUI", "há medidores por conta, não por sessão"),
@@ -587,6 +608,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             unsup(Capability::Resume, Scope::Session, Proof::Code, &["src-tauri/src/agents/registry.rs:398"], "a TUI não tem retomada no registro (`resume: None`)"),
             unsup(Capability::Compact, Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx:301-304"], "`/compact` do ADE só existe em conversa estruturada"),
             unsup(Capability::Goal, Scope::Session, Proof::Code, &["src/features/chat/structured/StructuredConversationView.tsx:156-197"], "`/goal` só existe em conversa estruturada"),
+            unsup(Capability::Plan, Scope::Session, Proof::Code, &["src/features/chat/chatModel.ts"], "a TUI não declara flag de modo Plano para este adapter"),
             sup(Capability::Checkpoint, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/mod.rs:1-27", "src-tauri/src/ipc/commands/tabs.rs:485", "docs/ade-ags/CHECKPOINTS_ABAS.md:28-36"], "foto dos arquivos da pasta a cada mensagem que chega ao agente; só abas de agente"),
             sup(Capability::Rollback, Scope::Session, Proof::Code, &["src-tauri/src/tab_checkpoints/git.rs:328-392", "docs/ade-ags/CHECKPOINTS_ABAS.md:44"], "restaura só os arquivos que diferem, sem `reset`; a conversa do agente não volta"),
             unsup(Capability::Usage, Scope::Session, Proof::Code, &["src-tauri/src/usage/terminal.rs:284-292"], "sem leitor de uso para esta CLI"),
@@ -610,4 +632,16 @@ pub fn find(surface: Surface, provider: &str) -> Option<&'static ProviderMatrix>
 /// equivale a suporte nem a ausência de caminho.
 pub fn supports(provider: &str, surface: Surface, capability: Capability) -> Option<Support> {
     find(surface, provider).map(|column| column.claim(capability).support)
+}
+
+/// Erro estável para comandos que não podem executar uma capability `Unsupported`.
+pub fn unsupported_capability_error(provider: &str, surface: Surface, capability: Capability) -> Option<String> {
+    let matrix_provider = if crate::local_acp::is_local_acp_id(provider) { "local-acp" } else { provider };
+    (supports(matrix_provider, surface, capability) == Some(Support::Unsupported)).then(|| {
+        format!(
+            "Capability '{}' não está disponível para '{}' nesta superfície: a matriz marca Unsupported",
+            capability.id(),
+            provider,
+        )
+    })
 }
