@@ -160,28 +160,35 @@ fn aad(origin: &str) -> Vec<u8> {
 }
 
 /// A chave desta instância, pedida ao keyring na primeira vez e reutilizada depois.
-static STATE_KEY: OnceLock<Option<Arc<SealKey>>> = OnceLock::new();
+static STATE_KEY: OnceLock<Result<Arc<SealKey>, String>> = OnceLock::new();
 
-/// A chave para um site novo. Só toca o keyring quando há pasta de estado (ou seja, na app).
-fn os_state_key() -> Option<Arc<SealKey>> {
+/// A chave para um site novo. Só toca o keyring quando há pasta de estado (ou seja, na app). Sem
+/// ela, o erro é o mesmo em todos os pedidos e traz a razão, para quem precisa mostrá-la (importação).
+pub(crate) fn os_state_key() -> Result<Arc<SealKey>, String> {
     STATE_KEY
         .get_or_init(|| {
             let Some(home) = crate::util::datadir::ags_home() else {
                 eprintln!("[preview] sem pasta de dados: o estado dos sites fica só em memória");
-                return None;
+                return Err("não há pasta de dados da ADE".to_string());
             };
-            key_from(&OsKeyStore { service: service_for(&home) })
+            key_result_from(&OsKeyStore { service: service_for(&home) })
         })
         .clone()
 }
 
 /// A chave que sai de `store`, ou `None` (com o motivo no log) se não houver como tê-la.
+#[cfg(test)]
 pub(crate) fn key_from(store: &dyn KeyStore) -> Option<Arc<SealKey>> {
+    key_result_from(store).ok()
+}
+
+/// Como `key_from`, mas com a razão quando não há chave (o log recebe a mesma).
+pub(crate) fn key_result_from(store: &dyn KeyStore) -> Result<Arc<SealKey>, String> {
     match SealKey::load_or_create(store) {
-        Ok(key) => Some(Arc::new(key)),
+        Ok(key) => Ok(Arc::new(key)),
         Err(e) => {
             eprintln!("[preview] {e}; o estado dos sites fica só em memória");
-            None
+            Err(e)
         }
     }
 }
@@ -210,7 +217,7 @@ pub(crate) fn site_for(origin: &str) -> Arc<Site> {
     }
     // La clave solo se pide al keyring cuando hay carpeta de estado (en la app): los tests nunca la piden.
     let dir = state_dir();
-    let key = dir.as_ref().and_then(|_| os_state_key());
+    let key = dir.as_ref().and_then(|_| os_state_key().ok());
     let site = Site::open(origin, dir.as_deref(), key);
     site.spawn_saver();
     sites.insert(origin.to_string(), site.clone());
@@ -601,6 +608,30 @@ impl Site {
         let Some(bytes) = self.pending_bytes() else { return Ok(()) };
         let sealed = persist.key.seal(&self.origin, &bytes)?;
         write_private(&persist.file, &sealed)
+    }
+
+    /// Guarda cookies importadas de outro navegador (ver `preview::importer`) e grava já, cifrado.
+    /// Entram com as mesmas regras de um `Set-Cookie` (`store_cookie`): caminho, limite do frasco e o
+    /// que já existia. Sem arquivo (sem chave do keyring) a importação é recusada antes de tocar no frasco.
+    pub(crate) fn import_cookies(&self, cookies: Vec<SetCookie>, now_ms: i64) -> Result<usize, String> {
+        if self.persist.is_none() {
+            return Err("sem chave do keyring: nada foi gravado".to_string());
+        }
+        let count = cookies.len();
+        self.with(|inner| {
+            let mut any = false;
+            for cookie in cookies {
+                let path = cookie.path.clone().unwrap_or_else(|| "/".to_string());
+                any |= store_cookie(&mut inner.saved.cookies, cookie, &path, false, now_ms / 1000);
+            }
+            if any {
+                inner.version += 1;
+                self.changed(inner);
+            }
+        })
+        .ok_or_else(|| "o estado do site está travado".to_string())?;
+        self.save_now()?;
+        Ok(count)
     }
 
     /// Guarda en segundo plano lo que vaya cambiando, agrupando los cambios seguidos. Vive

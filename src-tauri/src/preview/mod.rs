@@ -13,6 +13,7 @@
 
 pub(crate) mod capture;
 mod cors;
+mod importer;
 mod log;
 mod mocks;
 mod proxy;
@@ -23,5 +24,6 @@ mod snapshot;
 mod test;
 
 pub use capture::*;
+pub use importer::*;
 pub use proxy::*;
 pub use site::set_state_dir;
