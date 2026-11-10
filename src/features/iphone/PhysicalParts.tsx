@@ -129,6 +129,13 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
 }) {
   const { t } = useTranslation();
   const disconnected = useIphoneStore((s) => s.disconnectedDevices.includes(device));
+  const state = status?.state ?? "connecting";
+  // Todos os hooks antes do retorno do aparelho desconectado: a ordem não pode mudar entre renders.
+  const [resumeAttempt, setResumeAttempt] = useState(0);
+  const [resumePending, setResumePending] = useState(false);
+  useEffect(() => {
+    if (state !== "paused") setResumePending(false);
+  }, [state]);
   if (disconnected) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black px-6 text-center">
@@ -137,13 +144,7 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
       </div>
     );
   }
-  const state = status?.state ?? "connecting";
   const note = !known && state !== "live" ? t("iphone.screen.notFound") : t(`iphone.screen.${state}`);
-  const [resumeAttempt, setResumeAttempt] = useState(0);
-  const [resumePending, setResumePending] = useState(false);
-  useEffect(() => {
-    if (state !== "paused") setResumePending(false);
-  }, [state]);
   const activeScreenId = resumeAttempt === 0 ? screenId : `${screenId}:resume:${resumeAttempt}`;
 
   return (
