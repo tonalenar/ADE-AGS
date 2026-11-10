@@ -412,6 +412,7 @@ pub fn run() {
             crate::conversa::chat_thread_goal_get,
             crate::conversa::chat_thread_goal_action,
             crate::conversa::chat_thread_compact_context,
+            crate::harness::commands::harness_capability_matrix,
             crate::conversa::chat_thread_auto_compact_on_return,
             crate::conversa::chat_thread_clear_context,
             crate::conversa::chat_thread_interrupt,

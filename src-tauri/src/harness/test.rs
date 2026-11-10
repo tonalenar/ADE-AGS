@@ -1,13 +1,69 @@
 //! Testes do contrato de capabilities. Sem relógio e sem processo: só a tabela, o código e o doc.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::conversa::api::{Engine, MidTurnBehavior};
 
 use super::capability::{Capability, Claim, Proof, Scope, Support, Surface};
-use super::matrix::{find, matrix};
+use super::matrix::{find, matrix, supports};
 
 const DOC: &str = include_str!("../../../docs/ade-ags/HARNESS_CONTRATO.md");
+const PROVIDER_COMPARISON_BASELINE: &str = include_str!("provider_comparisons.baseline.json");
+
+const PROVIDER_IDS: [&str; 8] = ["claude-code", "codex", "opencode", "antigravity", "cursor", "gemini-cli", "kimi-code", "hermes"];
+
+fn source_provider_comparisons(path: &Path, root: &Path, found: &mut BTreeMap<String, BTreeMap<String, usize>>) {
+    let entries = std::fs::read_dir(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+    for entry in entries {
+        let entry = entry.unwrap();
+        let file = entry.path();
+        if file.is_dir() {
+            source_provider_comparisons(&file, root, found);
+            continue;
+        }
+        let relative = file.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+        if relative == "src-tauri/src/agents/adapter.rs" || relative == "src-tauri/src/agents/registry.rs" {
+            continue;
+        }
+        if relative.contains("/tests/") || relative.contains("/__tests__/") || file.file_name().and_then(|name| name.to_str()).is_some_and(|name| name == "test.rs" || name.ends_with("_test.rs") || name.ends_with(".test.ts") || name.ends_with(".test.tsx")) {
+            continue;
+        }
+        let rust = file.extension().and_then(|ext| ext.to_str()) == Some("rs") && relative.starts_with("src-tauri/src/");
+        let typescript = matches!(file.extension().and_then(|ext| ext.to_str()), Some("ts" | "tsx")) && relative.starts_with("src/");
+        if !rust && !typescript {
+            continue;
+        }
+        let source = std::fs::read_to_string(&file).unwrap_or_else(|error| panic!("{}: {error}", file.display()));
+        for line in source.lines().map(str::trim) {
+            if !line.contains("==") || !["agent_id", "agentId", "provider", "agent"].iter().any(|name| line.contains(name)) {
+                continue;
+            }
+            if !PROVIDER_IDS.iter().any(|provider| line.contains(&format!("\"{provider}\"")) || line.contains(&format!("'{provider}'"))) {
+                continue;
+            }
+            *found.entry(relative.clone()).or_default().entry(line.to_owned()).or_default() += 1;
+        }
+    }
+}
+
+#[test]
+fn comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro() {
+    let root = repo_root();
+    let mut actual = BTreeMap::new();
+    source_provider_comparisons(&root.join("src-tauri/src"), &root, &mut actual);
+    source_provider_comparisons(&root.join("src"), &root, &mut actual);
+    let baseline: BTreeMap<String, Vec<String>> = serde_json::from_str(PROVIDER_COMPARISON_BASELINE).unwrap();
+    let files: std::collections::BTreeSet<String> = actual.keys().chain(baseline.keys()).cloned().collect();
+    for file in files {
+        let current = actual.remove(&file).unwrap_or_default();
+        let mut expected = BTreeMap::new();
+        for line in baseline.get(&file).into_iter().flatten() {
+            *expected.entry(line.clone()).or_insert(0) += 1;
+        }
+        assert_eq!(current, expected, "comparações por provider fora do adapter/registro mudaram em {file}; atualize o baseline após uma migração");
+    }
+}
 
 fn repo_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
@@ -62,6 +118,28 @@ fn os_ids_das_capabilities_sao_unicos() {
     ids.sort_unstable();
     ids.dedup();
     assert_eq!(ids.len(), 18);
+}
+
+#[test]
+fn supports_consulta_supported_unknown_e_unsupported_na_matriz() {
+    assert_eq!(supports("claude-code", Surface::Chat, Capability::Steer), Some(Support::Supported));
+    assert_eq!(supports("opencode", Surface::Chat, Capability::Steer), Some(Support::Unsupported));
+    assert_eq!(supports("claude-code", Surface::Chat, Capability::Compact), Some(Support::Unknown));
+    assert_eq!(supports("inexistente", Surface::Chat, Capability::Steer), None);
+    assert!(crate::conversa::api::unsupported_capability_error("opencode", Capability::Goal)
+        .unwrap()
+        .contains("Unsupported"));
+    assert!(crate::conversa::api::unsupported_capability_error("local-acp-00000000-0000-4000-8000-000000000000", Capability::Goal)
+        .unwrap()
+        .contains("local-acp-00000000-0000-4000-8000-000000000000"));
+    assert_eq!(crate::conversa::api::unsupported_capability_error("claude-code", Capability::Compact), None);
+}
+
+#[test]
+fn comando_tauri_expoe_a_matriz_sem_duplicar_o_catalogo() {
+    let exposed = super::commands::harness_capability_matrix();
+    assert_eq!(exposed.as_slice(), matrix());
+    assert!(serde_json::to_value(exposed).is_ok());
 }
 
 #[test]
