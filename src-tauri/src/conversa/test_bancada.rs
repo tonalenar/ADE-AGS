@@ -905,6 +905,138 @@ mod replay_protocolo {
         }
     }
 
+    /// Corta da captura o frame que fecha a ferramenta. O resto fica como está: a variante só tira um frame.
+    fn cortar(saidas: &mut Vec<Saida>, predicado: impl Fn(&Value) -> bool) {
+        let index = saidas
+            .iter()
+            .position(|saida| quadro(saida).is_some_and(|out| predicado(&out)))
+            .expect("frame da captura ausente");
+        saidas.remove(index);
+    }
+
+    /// ACP não tem captura real: esta sequência segue o formato de `acp-pedido-e-max-tokens` (sintetizada) e acaba com
+    /// `stopReason: end_turn`, que é um fim normal. `status` é o da ferramenta: `in_progress` (sem desfecho) ou `completed`.
+    fn acp_turno(status: &str) -> Vec<Saida> {
+        let transcript = serde_json::json!([
+            { "atMs": 30, "out": { "id": 1, "jsonrpc": "2.0", "result": { "protocolVersion": 1 } } },
+            { "atMs": 90, "out": { "id": 2, "jsonrpc": "2.0", "result": { "sessionId": "{{session:1}}" } } },
+            { "atMs": 110, "out": { "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": "{{session:1}}", "update": { "content": { "text": "Vou editar o lib.rs.", "type": "text" }, "sessionUpdate": "agent_message_chunk" } } } },
+            { "atMs": 160, "out": { "jsonrpc": "2.0", "method": "session/update", "params": { "sessionId": "{{session:1}}", "update": { "content": [{ "newText": "fn b() {}\n", "oldText": "fn a() {}\n", "path": "{{cwd}}/src/lib.rs", "type": "diff" }], "kind": "edit", "sessionUpdate": "tool_call", "status": status, "title": "edit", "toolCallId": "e1" } } } },
+            { "atMs": 170, "out": { "id": 3, "jsonrpc": "2.0", "result": { "stopReason": "end_turn", "usage": { "inputTokens": 900, "outputTokens": 100 } } } }
+        ]);
+        saidas(&ler(&fixture(transcript, "acp")).unwrap())
+    }
+
+    /// O que a timeline guarda depois de o turno da bancada acabar: os itens como o `chat_item` os gravaria, o
+    /// `record_end` do fim e a timeline lida de volta. Sem janela e sem relógio: o `now` é fixo.
+    fn fechar_no_banco(provider: &str, resultado: &bancada::Resultado) -> Vec<crate::canal::timeline::Item> {
+        use super::super::{store, turn};
+        let conn = crate::database::test_db();
+        let tuning = store::Tuning { model: None, effort: None, access: "ask".into() };
+        store::insert_thread(&conn, "t1", provider, "/tmp/p", "Título", &tuning, None, 1).unwrap();
+        store::upsert_run(&conn, "t1", "bancada", "inProgress", Some(1), None, None).unwrap();
+        for item in &resultado.itens {
+            store::upsert_item(&conn, "t1", Some("bancada"), item).unwrap();
+        }
+        let fim = resultado.fim.as_ref().expect("o turno acabou");
+        let _ = turn::record_end(&conn, "t1", "bancada", fim, 50);
+        store::items(&conn, "t1").unwrap()
+    }
+
+    fn assert_fim_normal(resultado: &bancada::Resultado) {
+        assert!(
+            resultado.fim.as_ref().is_some_and(|fim| !fim.interrupted && fim.error.is_none()),
+            "o turno tem de acabar sem erro: {:?}",
+            resultado.fim
+        );
+    }
+
+    /// Ferramenta sem desfecho num fim normal: vira erro com o código na saída, e o aviso `toolOutcomeUnknown` vai à timeline.
+    fn afirma_desfecho_desconhecido(timeline: &[crate::canal::timeline::Item], nome: &str) {
+        use crate::canal::timeline::{ItemKind, ToolStatus};
+        let ferramentas: Vec<_> = timeline.iter().filter(|i| i.kind == ItemKind::Tool).collect();
+        assert_eq!(ferramentas.len(), 1, "{timeline:?}");
+        let tool = ferramentas[0];
+        assert_eq!(tool.name.as_deref(), Some(nome), "{tool:?}");
+        assert_eq!(tool.status, Some(ToolStatus::Error), "a ferramenta não pode ficar `running` depois do fim: {tool:?}");
+        assert!(
+            tool.output.as_deref().is_some_and(|o| o.starts_with(super::super::turn::TOOL_OUTCOME_UNKNOWN)),
+            "{tool:?}"
+        );
+        assert!(
+            timeline.iter().any(|i| i.kind == ItemKind::Notice && i.label.as_deref() == Some("toolOutcomeUnknown")),
+            "o aviso toolOutcomeUnknown vai à timeline"
+        );
+    }
+
+    /// Ferramenta concluída antes do fim: o fim normal não a marca e não gera aviso.
+    fn afirma_intacto(timeline: &[crate::canal::timeline::Item], nome: &str) {
+        use crate::canal::timeline::{ItemKind, ToolStatus};
+        let ferramentas: Vec<_> = timeline.iter().filter(|i| i.kind == ItemKind::Tool).collect();
+        assert_eq!(ferramentas.len(), 1, "{timeline:?}");
+        let tool = ferramentas[0];
+        assert_eq!(tool.name.as_deref(), Some(nome), "{tool:?}");
+        assert_eq!(tool.status, Some(ToolStatus::Done), "{tool:?}");
+        assert!(!tool.output.as_deref().unwrap_or("").starts_with(super::super::turn::TOOL_OUTCOME_UNKNOWN), "{tool:?}");
+        assert!(
+            !timeline.iter().any(|i| i.kind == ItemKind::Notice && i.label.as_deref() == Some("toolOutcomeUnknown")),
+            "sem ferramenta pendente não há aviso"
+        );
+    }
+
+    /// Variante derivada de `antigravity-feliz`: some o DONE do `read_file` (passo 2). A ferramenta fica ACTIVE e o
+    /// `result` SUCCESS chega mesmo assim, então o fim é normal e a ferramenta não tem desfecho.
+    #[test]
+    fn replay_derivado_agy_fim_normal_marca_ferramenta_sem_resultado() {
+        let mut saidas = captura("antigravity-feliz");
+        cortar(&mut saidas, |out| {
+            out["event"] == "step_update"
+                && out.pointer("/step_update/step_index") == Some(&Value::from(2))
+                && out.pointer("/step_update/state") == Some(&Value::String("DONE".into()))
+        });
+        let resultado = bancada::rodar(Protocolo::AgyStream, &saidas);
+        assert_fim_normal(&resultado);
+        assert_eq!(resultado.ferramentas(), ["Read:running"]);
+        afirma_desfecho_desconhecido(&fechar_no_banco("antigravity", &resultado), "Read");
+    }
+
+    /// Variante derivada de `cursor-feliz`: some o `completed` da leitura. O silêncio não fecha o turno com ferramenta
+    /// `running`, então o fim é o `result`, normal, e a ferramenta continua sem desfecho.
+    #[test]
+    fn replay_derivado_cursor_fim_normal_marca_ferramenta_sem_resultado() {
+        let mut saidas = captura("cursor-feliz");
+        cortar(&mut saidas, |out| out["type"] == "tool_call" && out["subtype"] == "completed");
+        let resultado = bancada::rodar(Protocolo::CursorStream, &saidas);
+        assert_fim_normal(&resultado);
+        assert_eq!(resultado.ferramentas(), ["Read:running"]);
+        afirma_desfecho_desconhecido(&fechar_no_banco("cursor", &resultado), "Read");
+    }
+
+    /// ACP sintetizado (não há captura real de ACP): a ferramenta fica `in_progress` quando o `session/prompt` responde
+    /// `end_turn`.
+    #[test]
+    fn replay_derivado_acp_fim_normal_marca_ferramenta_sem_resultado() {
+        let resultado = bancada::rodar(Protocolo::Acp, &acp_turno("in_progress"));
+        assert_fim_normal(&resultado);
+        assert_eq!(resultado.ferramentas(), ["Edit:running"]);
+        afirma_desfecho_desconhecido(&fechar_no_banco("opencode", &resultado), "Edit");
+    }
+
+    /// Controle: com a ferramenta concluída antes do fim, o fim normal não marca nada, nos três motores.
+    #[test]
+    fn replay_derivado_fim_normal_com_ferramenta_concluida_fica_intacta() {
+        let casos = [
+            ("antigravity", bancada::rodar(Protocolo::AgyStream, &captura("antigravity-feliz")), "Read"),
+            ("cursor", bancada::rodar(Protocolo::CursorStream, &captura("cursor-feliz")), "Read"),
+            ("opencode", bancada::rodar(Protocolo::Acp, &acp_turno("completed")), "Edit"),
+        ];
+        for (provider, resultado, nome) in casos {
+            assert_fim_normal(&resultado);
+            assert_eq!(resultado.ferramentas(), [format!("{nome}:done")]);
+            afirma_intacto(&fechar_no_banco(provider, &resultado), nome);
+        }
+    }
+
     /// Os frames decisivos ficam no transcript. O snapshot só vê o que o motor produz.
     #[test]
     fn as_fixtures_gravadas_guardam_os_frames_que_a_captura_decidiu() {
