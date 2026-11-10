@@ -13,6 +13,10 @@
 //! Sem processo, sem rede, sem cota e sem relógio de verdade: um silêncio de 61 s custa um número somado.
 //! O que a bancada não reproduz: o processo de verdade (pipes, `kill`), a escrita no stdin e as filas de envio.
 
+use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -22,6 +26,7 @@ use crate::runs::failure::{classify, FailureKind};
 use super::agy_map::{self, Out as AgyOut};
 use super::claude_map::{self, Out as ClaudeOut, TurnResult};
 use super::codex_map;
+use super::cursor_map::{self, Read as CursorRead};
 use super::opencode_map::{self, Out as AcpOut};
 use super::resume::{self, ResumeFailure};
 use super::turn;
@@ -53,6 +58,10 @@ pub enum Protocolo {
     /// `agy --print --output-format stream-json`. Laço simples, sem prazo de silêncio.
     #[serde(rename = "agy-stream")]
     AgyStream,
+    /// `cursor-agent -p --output-format stream-json`. O turno fecha no `result` ou quando o próximo
+    /// `atMs` passa de `Mapper::quiet_after` (relógio falso, sem espera real).
+    #[serde(rename = "cursor-stream")]
+    CursorStream,
 }
 
 impl Protocolo {
@@ -62,6 +71,7 @@ impl Protocolo {
             Protocolo::CodexAppServer => "Codex",
             Protocolo::Acp => "OpenCode",
             Protocolo::AgyStream => "Antigravity",
+            Protocolo::CursorStream => "Cursor",
         }
     }
 
@@ -72,6 +82,7 @@ impl Protocolo {
             Protocolo::CodexAppServer => "thread/resume",
             Protocolo::Acp => "session/resume",
             Protocolo::AgyStream => "init",
+            Protocolo::CursorStream => "system/init",
         }
     }
 }
@@ -397,7 +408,7 @@ impl Fake {
             (Passo::Fim, CodexAppServer) => self.fim_codex("completed", None),
             (Passo::Fim, Acp) => self.linha(json!({ "jsonrpc": "2.0", "id": ACP_PROMPT, "result": { "stopReason": "end_turn", "usage": { "totalTokens": 42 } } })),
             // O replay lê um transcript. Sintetizar o fluxo aqui afirmaria um formato que a captura real ainda não confirmou.
-            (_, AgyStream) => return Err("o roteiro sintetizado não cobre o Antigravity: use um transcript no replay".into()),
+            (_, AgyStream | CursorStream) => return Err("o roteiro sintetizado não cobre Antigravity nem Cursor: use um transcript no replay".into()),
         }
         Ok(())
     }
@@ -544,6 +555,9 @@ impl Resultado {
 
 /// Roda as saídas pelo que o motor do protocolo faz com elas.
 pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
+    if protocolo == Protocolo::CursorStream {
+        return rodar_cursor(saidas);
+    }
     let mut motor = Motor { protocolo, out: Resultado::default(), claude: claude_map::Mapper::default(), acp: opencode_map::Mapper::new("bancada"), agy: agy_map::Mapper::new("bancada"), turno: false };
     let mut ultimo = 0u64;
     for saida in saidas {
@@ -574,6 +588,94 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
         }
     }
     motor.out
+}
+
+/// O Cursor pelo `read_turn` de verdade. A fonte devolve silêncio quando o próximo `atMs` passa de
+/// `quiet_after`; não há relógio de parede. O fim da lista é EOF (o processo acabou), não silêncio.
+fn rodar_cursor(saidas: &[Saida]) -> Resultado {
+    let mut motor = Motor {
+        protocolo: Protocolo::CursorStream,
+        out: Resultado::default(),
+        claude: claude_map::Mapper::default(),
+        acp: opencode_map::Mapper::new("bancada"),
+        agy: agy_map::Mapper::new("bancada"),
+        turno: true,
+    };
+    let agora = Arc::new(AtomicU64::new(0));
+    let mut fonte = FonteCursor { pendentes: saidas.iter().cloned().collect(), agora_ms: agora.clone(), ignoradas: 0, stderr: None, silencio_max_ms: 0 };
+    let mut mapper = cursor_map::Mapper::new("bancada");
+    let rt = tokio::runtime::Builder::new_current_thread().build().expect("runtime do cursor na bancada");
+    let done = rt.block_on(cursor_map::read_turn(
+        &mut mapper,
+        &mut fonte,
+        |outs| {
+            for out in outs {
+                match out {
+                    cursor_map::Out::Item(item) => motor.out.guardar(*item),
+                    cursor_map::Out::Delta { item_id, delta, .. } => motor.out.deltas.push((item_id, delta)),
+                    cursor_map::Out::Session(id) => motor.abriu(&id),
+                    cursor_map::Out::Done(_) => {}
+                }
+            }
+        },
+        || EPOCH_MS + agora.load(Ordering::Relaxed) as i64,
+    ));
+    motor.out.ignoradas = fonte.ignoradas;
+    motor.out.silencio_max_ms = fonte.silencio_max_ms;
+    motor.out.relogio_ms = agora.load(Ordering::Relaxed);
+    if let Some(result) = done {
+        motor.terminou(result);
+    } else {
+        let erro = fonte.stderr.as_deref().map(|s| cursor_map::error_from_stderr(&s.lines().map(str::to_string).collect::<Vec<_>>())).unwrap_or_else(|| "O Cursor terminou sem responder".into());
+        motor.terminou(TurnResult { interrupted: false, error: Some(erro), duration_ms: None });
+        motor.out.caiu = true;
+    }
+    motor.out
+}
+
+/// As linhas do transcript como a `Source` do `read_turn`. O `Fake` dos testes do mapeador devolve
+/// silêncio quando a lista acaba; aqui o silêncio é o próximo `atMs` além de `quiet_after`.
+struct FonteCursor {
+    pendentes: VecDeque<Saida>,
+    agora_ms: Arc<AtomicU64>,
+    ignoradas: usize,
+    stderr: Option<String>,
+    silencio_max_ms: u64,
+}
+
+impl cursor_map::Source for FonteCursor {
+    async fn next(&mut self, quiet: Option<std::time::Duration>) -> CursorRead {
+        loop {
+            let Some(proxima) = self.pendentes.front() else {
+                return CursorRead::Eof;
+            };
+            let agora = self.agora_ms.load(Ordering::Relaxed);
+            let espera = proxima.at_ms.saturating_sub(agora);
+            if let Some(limite) = quiet {
+                let limite_ms = u64::try_from(limite.as_millis()).unwrap_or(u64::MAX);
+                if espera > limite_ms {
+                    self.silencio_max_ms = self.silencio_max_ms.max(espera);
+                    return CursorRead::Quiet;
+                }
+            }
+            let saida = self.pendentes.pop_front().expect("a frente acabou de ser lida");
+            self.silencio_max_ms = self.silencio_max_ms.max(saida.at_ms.saturating_sub(agora));
+            self.agora_ms.store(saida.at_ms, Ordering::Relaxed);
+            match saida.evento {
+                Evento::Linha(line) => {
+                    if serde_json::from_str::<Value>(&line).is_err() {
+                        self.ignoradas += 1;
+                        continue;
+                    }
+                    return CursorRead::Line(line);
+                }
+                Evento::Fecha { stderr } => {
+                    self.stderr = stderr;
+                    return CursorRead::Eof;
+                }
+            }
+        }
+    }
 }
 
 /// Toca e roda.
@@ -642,6 +744,8 @@ impl Motor {
             Protocolo::CodexAppServer => self.codex(msg, now),
             Protocolo::Acp => self.acp(msg, now),
             Protocolo::AgyStream => self.agy(msg, now),
+            // O Cursor sai antes, em `rodar_cursor` (`read_turn`). Este braço não roda.
+            Protocolo::CursorStream => {}
         }
     }
 

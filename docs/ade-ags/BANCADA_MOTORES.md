@@ -49,7 +49,7 @@ O fake **não é um binário**: os motores (`claude.rs`, `codex.rs`, `opencode.r
 | `interrompido` | — | `terminal_reason: aborted_by_user` | `interrupted` | `stopReason: cancelled` |
 | `fim` | — | `result` sem erro | `completed` | `end_turn` |
 
-`agy-stream` não entra nesta tabela. O roteiro sintetizado recusa esse protocolo: o replay lê um transcript pelo laço do `agy.rs` (uma linha JSON por vez, sem prazo de silêncio). Os frames de verdade vêm da captura, não daqui.
+`agy-stream` e `cursor-stream` não entram nesta tabela. O roteiro sintetizado recusa os dois: o replay lê um transcript. O agy usa o laço do `agy.rs` (uma linha JSON por vez, sem prazo). O Cursor usa o `read_turn` do motor: se o próximo `atMs` passa de `quiet_after`, a fonte devolve silêncio e o turno fecha, sem relógio de parede. O fim da lista é EOF. Os frames de verdade vêm da captura, não daqui.
 
 Um silêncio maior que `PRAZO_PEDIDO_MS` (60 s) **antes** da sessão abrir vira o "não respondeu" do motor, que a retomada trata como prazo. Silêncio no meio do turno só fica medido em `silencio_max_ms`, porque os motores não têm prazo de turno: quem trata o agente parado é o Vigia.
 
@@ -168,7 +168,18 @@ ADE_REPLAY_MODE=record ADE_REPLAY_SOURCE=/caminho/saida.jsonl ADE_REPLAY_ID=clau
 No `record`:
 - os uuids viram `{{session:N}}`, na ordem em que aparecem;
 - o `ADE_REPLAY_CWD` vira `{{cwd}}`, e o `HOME` vira `{{home}}`;
-- um texto que parece ter segredo (`memory::agent::looks_like_secret`) não é salvo.
+- um texto que parece ter segredo (`memory::agent::looks_like_secret`) não é salvo;
+- cada linha ganha `atMs` de 10 em 10. Para o Claude, o Codex, o ACP e o agy isso não muda o fim do turno.
+
+Para gravar o Cursor ou o Antigravity, o protocolo é `cursor-stream` ou `agy-stream` e o agente é `cursor` ou `antigravity`. O `.jsonl` é o stdout, uma linha por evento, capturado à mão. Não use estes testes para chamar a CLI.
+
+```
+ADE_REPLAY_MODE=record ADE_REPLAY_SOURCE=/caminho/saida.jsonl ADE_REPLAY_ID=cursor-x \
+  ADE_REPLAY_PROTOCOL=cursor-stream ADE_REPLAY_AGENT=cursor ADE_REPLAY_CWD=/caminho/do/projeto \
+  cargo test --lib gravar_fixture_de_protocolo
+```
+
+O `record` do Cursor deixa as linhas a 10 ms uma da outra, intervalo menor que qualquer `quiet_after`. Assim o silêncio não dispara. Antes do `refresh`, ajuste o `atMs` pelo `timestamp_ms` da linha (a diferença para a primeira). Sem esse ajuste, a fixture não prova o fim de turno por prazo. O agy não tem esse prazo: o `atMs` de 10 em 10 serve.
 
 O `.jsonl` vem de rodar o agente à mão, com a cota e a conta da pessoa, fora dos testes: os testes nunca chamam um agente de verdade. Leia a fixture inteira antes de commitar.
 

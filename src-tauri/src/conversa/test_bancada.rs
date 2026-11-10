@@ -303,6 +303,48 @@ fn o_agy_le_o_fluxo_sem_prazo_de_silencio() {
     assert_eq!(serde_json::from_value::<Protocolo>(json!("agy-stream")).unwrap(), Protocolo::AgyStream);
 }
 
+/// B6: o `read_turn` do Cursor, com o relógio do transcript. A linha cujo `atMs` passa de `quiet_after`
+/// não entra. Não é um turno do provider: o formato é o mínimo que o mapeador já lê nos testes dele.
+#[test]
+fn o_cursor_cala_quando_o_proximo_instante_passa_do_prazo() {
+    use crate::conversa::cursor_map::QUIET_AFTER_SPEECH;
+    let sid = "sessao-leitura";
+    let init = json!({ "type": "system", "subtype": "init", "session_id": sid });
+    let fala = |texto: &str| json!({ "type": "assistant", "message": { "role": "assistant", "content": [{ "type": "text", "text": texto }] }, "session_id": sid, "timestamp_ms": 1 });
+    let prazo = u64::try_from(QUIET_AFTER_SPEECH.as_millis()).unwrap();
+    let calado = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: 10, evento: Evento::Linha(fala("cedo").to_string()) },
+        Saida { at_ms: 10 + prazo + 1, evento: Evento::Linha(fala("tarde demais").to_string()) },
+    ];
+    let r = rodar(Protocolo::CursorStream, &calado);
+    assert_eq!(r.sessao(), Some(sid));
+    assert_eq!(r.texto(), "cedo");
+    assert!(!r.caiu && r.fim.as_ref().is_some_and(|f| f.error.is_none()), "a fala já tinha vindo: {:?}", r.fim);
+    assert!(r.silencio_max_ms > prazo);
+
+    let dentro = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: 10, evento: Evento::Linha(fala("um").to_string()) },
+        Saida { at_ms: 10 + prazo, evento: Evento::Linha(fala("dois").to_string()) },
+    ];
+    let r = rodar(Protocolo::CursorStream, &dentro);
+    assert_eq!(r.texto(), "umdois", "no limite do prazo a linha ainda entra: {}", r.texto());
+
+    let ferramenta = json!({ "type": "tool_call", "subtype": "started", "call_id": "sh1", "session_id": sid,
+        "tool_call": { "shellToolCall": { "args": { "command": "echo oi" } } } });
+    let pronta = json!({ "type": "tool_call", "subtype": "completed", "call_id": "sh1", "session_id": sid, "tool_call": {
+        "shellToolCall": { "args": { "command": "echo oi" }, "result": { "success": { "stdout": "oi", "exitCode": 0 } } } } });
+    let longa = vec![
+        Saida { at_ms: 0, evento: Evento::Linha(init.to_string()) },
+        Saida { at_ms: 10, evento: Evento::Linha(ferramenta.to_string()) },
+        Saida { at_ms: 10 + prazo + 1, evento: Evento::Linha(pronta.to_string()) },
+    ];
+    let r = rodar(Protocolo::CursorStream, &longa);
+    assert_eq!(r.ferramentas(), ["Bash:done"], "ferramenta rodando não tem prazo: {:?}", r.ferramentas());
+    assert!(tocar(&Roteiro::new(Protocolo::CursorStream, vec![Passo::Sessao { id: "x".into() }])).is_err());
+}
+
 // ── A retomada (`resume.rs`) com sessões abertas pela bancada ─────────────────
 
 /// `open_resuming` com cada tentativa de retomada tocando o roteiro seguinte; a sessão nova é outro roteiro.
@@ -375,6 +417,7 @@ mod retomada {
                 Protocolo::CodexAppServer => "Codex",
                 Protocolo::Acp => "OpenCode",
                 Protocolo::AgyStream => "Antigravity",
+                Protocolo::CursorStream => "Cursor",
             }).as_str()), "{protocolo:?}");
             assert_eq!((novas, pausas), (1, RETRY_PAUSES.to_vec()), "{protocolo:?}");
         }
