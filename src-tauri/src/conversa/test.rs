@@ -351,6 +351,25 @@ mod claude {
     }
 
     #[test]
+    fn o_resultado_que_chega_antes_do_tool_use_fecha_a_ferramenta_sem_inventar_item() {
+        let mut m = Mapper::default();
+        let cedo = m.feed(&json!({ "type": "user", "message": { "content": [
+            { "tool_use_id": "toolu_cedo", "type": "tool_result", "content": "linha 1" },
+            { "tool_use_id": "toolu_outro", "type": "tool_result", "content": "nao", "is_error": true }
+        ] } }), 1);
+        assert!(cedo.is_empty(), "sem tool_use não há item: {cedo:?}");
+        let tool = items(m.feed(&assistant("msg_c", json!({ "type": "tool_use", "id": "toolu_cedo", "name": "Read", "input": { "file_path": "/p/a.ts" } })), 2));
+        assert_eq!(tool.len(), 1);
+        assert_eq!(
+            (tool[0].id.as_str(), tool[0].status, tool[0].output.as_deref(), tool[0].path.as_deref()),
+            ("toolu_cedo", Some(ToolStatus::Done), Some("linha 1"), Some("/p/a.ts"))
+        );
+        m.deny("toolu_outro");
+        let negado = items(m.feed(&assistant("msg_d", json!({ "type": "tool_use", "id": "toolu_outro", "name": "Bash", "input": { "command": "false" } })), 3));
+        assert_eq!((negado.len(), negado[0].status, negado[0].output.as_deref()), (1, Some(ToolStatus::Denied), Some("nao")));
+    }
+
+    #[test]
     fn a_ferramenta_negada_aparece_como_negada() {
         let mut m = Mapper::default();
         m.feed(&assistant("msg_1", json!({ "type": "tool_use", "id": "toolu_2", "name": "Bash", "input": { "command": "rm -rf build" } })), 1);
