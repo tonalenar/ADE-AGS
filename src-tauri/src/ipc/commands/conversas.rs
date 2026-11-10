@@ -94,6 +94,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
             api::Engine::Cursor => "cursor",
         };
         let def = crate::agents::agent_def(agent_id)?;
+        let harness_capabilities = harness_capabilities(agent_id);
         Some(json!({
             "id": agent_id,
             "label": def.label,
@@ -102,6 +103,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
             "configured": true,
             "commandAvailable": crate::agents::command_exists(def.command),
             "capabilities": engine.capabilities(),
+            "harnessCapabilities": harness_capabilities,
         }))
     })
     .collect();
@@ -114,6 +116,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
         capabilities["plan"] = json!(false);
         capabilities["persistentGoal"] = json!(false);
         capabilities["goalPauseResume"] = json!(false);
+        let harness_capabilities = harness_capabilities("local-acp");
         providers.push(json!({
             "id": provider.id,
             "label": provider.label,
@@ -122,6 +125,7 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
             "configured": true,
             "commandAvailable": null,
             "capabilities": capabilities,
+            "harnessCapabilities": harness_capabilities,
         }));
     }
 
@@ -135,6 +139,11 @@ pub(super) fn chat_providers(app: &AppHandle, _args: &Value) -> Result<Value, St
         })
     });
     Ok(json!({ "providers": providers }))
+}
+
+fn harness_capabilities(provider: &str) -> Option<Value> {
+    crate::harness::matrix::find(crate::harness::capability::Surface::Chat, provider)
+        .and_then(|matrix| serde_json::to_value(matrix).ok())
 }
 
 pub(super) fn chat_compact(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -479,5 +488,15 @@ mod test {
         done.insert(4, item(ItemKind::Assistant, "a2", "B feito"));
         assert_eq!(reply_since_last_user(&done).as_deref(), Some("B feito"));
         assert_eq!(reply_since_last_user(&[item(ItemKind::Assistant, "a0", "só fala")]).as_deref(), Some("só fala"));
+    }
+
+    #[test]
+    fn provider_chat_expoe_a_matriz_do_mesmo_provider_e_superficie() {
+        let exposed = harness_capabilities("opencode").unwrap();
+        assert_eq!(exposed["surface"], "chat");
+        assert_eq!(exposed["provider"], "opencode");
+        assert_eq!(exposed["cells"][2]["capability"], "steer");
+        assert_eq!(exposed["cells"][2]["claim"]["support"], "unsupported");
+        assert_eq!(exposed["cells"][2]["claim"]["note"], "o `session/prompt` não aceita entrada no turno; o «enviar agora» interrompe e reenvia");
     }
 }

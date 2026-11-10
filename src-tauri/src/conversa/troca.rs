@@ -111,7 +111,12 @@ pub fn apply_switch(conn: &Connection, thread_id: &str, new: &Switch, now: i64) 
     )
     .map_err(db_err)?;
     let updated = store::thread(conn, thread_id).map_err(db_err)?.ok_or("Conversa não encontrada")?;
-    let no_approval = (matches!(new.agent_id.as_str(), "antigravity" | "cursor") || local_acp) && access == "ask";
+    let approval_unsupported = crate::harness::matrix::supports(
+        &new.agent_id,
+        crate::harness::capability::Surface::Chat,
+        crate::harness::capability::Capability::Approval,
+    ) == Some(crate::harness::capability::Support::Unsupported);
+    let no_approval = (approval_unsupported || local_acp) && access == "ask";
     Ok(Applied { row: updated, strategy, from_agent: row.agent_id, to_agent: new.agent_id.clone(), from_label: None, to_label: None, access_changed, no_approval })
 }
 

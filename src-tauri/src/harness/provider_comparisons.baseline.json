@@ -12,9 +12,6 @@
     "} else if agent_id == \"kimi-code\" {",
     "if agent_id == \"gemini-cli\" && !crate::session::gemini_is_main_session(&path) {"
   ],
-  "src-tauri/src/conversa/troca.rs": [
-    "let no_approval = (matches!(new.agent_id.as_str(), \"antigravity\" | \"cursor\") || local_acp) && access == \"ask\";"
-  ],
   "src-tauri/src/agents/updates.rs": [
     "if agent.id == \"claude-code\" {",
     "result.new_version=if agent_id==\"claude-code\" {OfficialExecutor.execute(FixedCommand {program:\"claude\",args:&[\"--version\"]},CHECK_TIMEOUT).ok().and_then(|s|super::version_line(s.as_bytes(),&[]))} else if info.install.as_deref()==Some(\"bun\") {"

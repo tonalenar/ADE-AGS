@@ -582,14 +582,14 @@ grep -rn --include='*.ts' --include='*.tsx' -E "['\"](codex|claude-code|claude|o
 
 **Reprodução em 10/11/2026, antes desta migração:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**. O comando acima reproduz esses totais brutos. Os subtotais por papel na tabela são a classificação da auditoria de 09/11 e ainda não foram recontados linha a linha; portanto não descrevem essa reprodução atual.
 
-**Depois desta rodada:** Rust **306 linhas em 58 arquivos**; TS/TSX **183 linhas em 55 arquivos**. O total bruto se manteve: o mapeamento `Engine` → id do registro foi centralizado no `CHAT_ENGINE_REGISTRY`, que também é usado por `Engine::of`, sem duplicar os cinco nomes. As decisões de `steer`, `compact` e `goal` passaram a ler as células da matriz.
+**Depois desta rodada:** Rust **306 linhas em 57 arquivos**; TS/TSX **176 linhas em 55 arquivos**. No TypeScript saíram sete linhas brutas líquidas, incluindo gates que agora consultam a matriz e comparações de provider que foram para o registro de compatibilidade. Rust ficou no mesmo total bruto: duas comparações migraram (`approval` e `child_stop`) e duas linhas do teste inline de `chat providers` contêm o provider serializado; `troca.rs` deixou de ser contado como arquivo. O guard reduziu de **112 para 102 comparações**. `steer`, `interrupt`, `compact`, `goal`, `approval` e `child_stop` migraram parcialmente; `start` também chega ao seletor.
 
 Ressalvas: a contagem é bruta. Inclui testes inline dentro de arquivos de produção (`runs/oneshot.rs`, `runs/plan.rs`, `ipc/commands/pool.rs`) e falsos positivos de paginação (`"cursor"` em `ipc/mcp.rs:1011` e `:1044`, `runs/orchestration.rs:234`, `runs/model_discovery.rs:731`). A classificação por arquivo é por leitura do papel do arquivo, não linha a linha. O número "98" do inventário `tui-acp-frota` não é reprodutível e não deve ser citado.
 
 ### 6.2 Fonte única proposta
 
 - **Uma só fonte:** `harness::matrix` (esta Fase 0) para o que cada provider promete, e o registro de agentes (`agents/registry.rs`) para o que ele **é** (comando, MCP, retomada, sessões). O descritor não duplica o registro: aponta para ele. `harness_capability_matrix` expõe a matriz inteira ao frontend pelo Tauri; `harness::matrix::supports` é a consulta tipada no backend.
-- **Quem consome:** `Engine::capabilities()` (`conversa/api.rs`) deriva `steer`, `compact` e `goal` da matriz; `Unknown` preserva a disponibilidade legada e só `Unsupported` bloqueia. A leitura da lista `PROTOCOL_AGENTS` (`chatModel.ts:74-80`) do backend (via `ags chat providers` e comando Tauri) ainda falta.
+- **Quem consome:** `Engine::capabilities()` (`conversa/api.rs`) deriva `steer`, `compact` e `goal` da matriz; `Unknown` preserva a disponibilidade legada e só `Unsupported` bloqueia. `harness_capability_matrix` fornece a matriz ao frontend; o seletor e o compositor estruturado consultam uma store única. `ags chat providers` agora inclui `harnessCapabilities` para cada provider nativo e para o ACP local.
 - **Regra de saída (Fase 3):** nenhuma comparação `agent_id == "<nome>"` decide capability fora do adapter e do registro. Um teste de lint com baseline (mesma ideia do `check:test-lint`) falha quando o número de ocorrências do grupo "migrar" cresce.
 - A fonte inclui o escopo por **sessão**: o ACP local lê `agentCapabilities`; o Claude só marca `steer` quando houver captura.
 
@@ -603,10 +603,10 @@ Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
 
 | Capability afetada | Onde |
 |---|---|
-| `child_stop` | `conversa/api.rs:1132` (pendente) |
-| `compact`, `goal` | `conversa/api.rs` (compact e goal derivados da matriz; `chat_goal` MCP bloqueia Unsupported); textos ainda listam Codex/Claude; `ComposerAssistMenu.tsx:301-304`, `StructuredConversationView.tsx:156-197` pendentes |
-| `steer` | `conversa/api.rs` deriva a semântica do turno; `chatModel.ts:74-85` pendente |
-| `approval` | `conversa/troca.rs:114`, `chat/structured/switchModel.ts:19-21` |
+| `child_stop` | `conversa/api.rs` consulta `ChildStop` antes do `stop_task`; a matriz confirma Claude `Supported` e Codex `Unsupported` |
+| `compact`, `goal` | `conversa/api.rs` e `chat.providers` usam a matriz; o composer estruturado desabilita `Unsupported` com a nota. A matriz da TUI contradiz a oferta legada de `/compact` para Codex/Claude e `/goal` para Claude; essas exceções ficaram centralizadas no registro de compatibilidade e precisam de decisão sobre o contrato antes da migração. `autocompact` fica no registro porque a matriz Chat não descreve essa sintaxe nativa.
+| `steer`, `interrupt` | `conversa/api.rs` e a escolha de envio/parada no compositor estruturado usam a matriz; `PROTOCOL_AGENTS` ainda informa acesso e Plano, que não são capabilities da matriz. |
+| `approval` | `conversa/troca.rs` e `chat/structured/switchModel.ts` consultam `Approval`; ACP local mantém sua regra própria enquanto a célula é `Unknown`. |
 | `usage` | `chat_team/watch_db.rs:257`, `chat/summary/LimitsCard.tsx:27-33` |
 | `resume` | `conversa/codex.rs:268`, `opencode.rs:194`, `tabs/continuity.ts:24` |
 | `ags_mcp` | `ipc/mcp.rs:2905`, `:2922`; `agents/adapter.rs:55`, `:93` (o flag que contradiz o registro) |
@@ -614,15 +614,15 @@ Os pontos que **decidem uma das 18 capabilities** (os de maior valor):
 
 ### 6.4 Ordem de migração e estado
 
-1. **Parcial:** `harness::matrix::supports` lê o estado da matriz e `harness_capability_matrix` expõe-a pelo Tauri; ainda falta adicioná-la ao `ags chat providers`.
-2. **Pendente:** trocar `PROTOCOL_AGENTS` por leitura do backend; manter um teste de paridade até remover a cópia.
-3. **Parcial:** `Engine::capabilities()` deriva `steer`, `compact` e `goal`; o MCP `chat_goal` agora recebe erro explícito quando `goal` é `Unsupported`. Faltam `troca.rs`, `switchModel.ts`, `ComposerAssistMenu.tsx`, `StructuredConversationView.tsx`, `teamModel.ts` e `watch_db.rs`, além dos outros comportamentos em `api.rs`.
+1. **Concluído:** `harness::matrix::supports` consulta a matriz; `harness_capability_matrix` expõe-a pelo Tauri e `ags chat providers` inclui a coluna `harnessCapabilities`.
+2. **Pendente:** substituir a cópia de modos de acesso e Plano em `PROTOCOL_AGENTS` exige uma fonte Tauri para `EngineCapabilities`; essas opções não correspondem às 18 células atuais da matriz. Manter teste de paridade até haver contrato comum.
+3. **Parcial:** `Engine::capabilities()` deriva `steer`, `compact` e `goal`; o MCP `chat_goal` recusa `Unsupported`; o gate de `stop_task` consulta `ChildStop`. Frontend consulta `steer`, `interrupt`, `compact`, `goal`, `approval` e `start`. Faltam `teamModel.ts`, `watch_db.rs` e outros comportamentos em `api.rs`; Plano não tem célula na matriz. As células TUI de `/compact` e `/goal` divergem dos comandos legados oferecidos; `autocompact` continua na compatibilidade Claude, pois a matriz Chat não descreve essa sintaxe nativa. `pause/resume` de goal também fica no registro do Codex: a matriz não tem uma capability separada para essas ações.
 4. **Pendente:** migrar Frota e orquestração (`supervisor.rs`, `mcp.rs`, `oneshot.rs`, `plan.rs`, `roster.rs`).
 5. **Pendente:** contas, uso e limites continuam no registro, não no descritor de execução.
-6. **Parcial:** `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro` lê Rust e TS/TSX e aplica baseline por arquivo e expressão. Remove-se a linha do baseline junto com cada migração; o baseline atual contém 112 comparações legadas. A comparação guarda `agent_id`, `agentId`, `agent` ou `provider` com igualdade textual a um provider conhecido; padrões mais indiretos ainda precisam ser cobertos.
+6. **Parcial:** `comparacoes_de_provider_nao_crescem_fora_do_adapter_e_registro` lê Rust e TS/TSX e aplica baseline por arquivo e expressão. Remove-se a linha do baseline junto com cada migração; o baseline caiu de 112 para **102** comparações. A comparação guarda `agent_id`, `agentId`, `agent` ou `provider` com igualdade textual a um provider conhecido; padrões mais indiretos ainda precisam ser cobertos.
 7. **Pendente:** trocar os `unreachable!` (`api.rs:840`, `:953`, `:989`) por erro de capability, para uma flag ligada sem implementação não derrubar o processo.
 
-**Faltam para a Fase 0:** a UI ainda não consome o comando Tauri para desabilitar ações indisponíveis; indisponibilidade no MCP para as demais capabilities `Unsupported`; migração dos pontos restantes acima e recontagem dos subtotais por papel. O único ponto de indisponibilidade fechado nesta rodada é `chat_goal` no MCP, coberto por teste: `goal` Unsupported devolve erro com provider e estado da matriz. `Unknown` não é bloqueado.
+**Faltam para a Fase 0:** migração dos pontos restantes acima; a UI ainda não trata Plano pela matriz porque não há essa capability; decidir as divergências TUI de `/compact` e `/goal`; aplicar indisponibilidade no MCP às demais tools/capabilities `Unsupported`; ampliar o teste de guarda para padrões mais indiretos; e recontar os subtotais por papel. O seletor preserva providers `Unknown`; no composer estruturado, `Unsupported` fica desabilitado com a nota da célula. `Unknown` não é bloqueado.
 
 ## 7. Fatia vertical da Fase 1
 

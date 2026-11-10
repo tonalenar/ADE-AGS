@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.67.0
+version: 1.67.1
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1196,7 +1196,8 @@ same thread and text returns the recorded `receipt` (`deliveryState`, `replayed`
 message again; the same id with different content is rejected. `deliveryState: "unknown"` means the message may
 have reached the agent: inspect the conversation (`chat_show`) before sending another. Without the id nothing changes.
 `chat_compact` supports Codex and Claude Code; `chat_goal` supports Codex and Claude Code, with
-pause/resume available only for Codex. Read `chat_providers.capabilities` before using them.
+pause/resume available only for Codex. Read `chat_providers.harnessCapabilities` for the matrix and
+`chat_providers.capabilities` for runtime controls before using them.
 Pass only the excerpt needed for the task in `context`; ADE marks it as untrusted and
 does not copy the parent's history. Child conversations always start supervised. Use
 `chat_wait`/`chat_show` to get the answer and `chat_stop` to interrupt it. `chat_stop` only works on a child conversation that the calling conversation created; ADE refuses any other thread, and the person can stop any. For headless-only
