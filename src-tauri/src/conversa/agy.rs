@@ -25,6 +25,7 @@ use super::agy_map::{self as map, Mapper, Out};
 use super::claude_map::TurnResult;
 use super::events::emit;
 use super::{store, turn};
+pub use super::resume::drive_resuming;
 
 /// Linhas finais do stderr guardadas para explicar um processo que fechou sem `result`.
 const STDERR_TAIL: usize = 20;
@@ -216,20 +217,49 @@ async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tu
     }
 }
 
+async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) -> Result<Option<TurnResult>, String> {
+    let remote = session.conversation.lock().ok().and_then(|c| c.clone());
+    let fresh = || {
+        let (app, db, session) = (app, db, session);
+        async move {
+            if let Ok(mut c) = session.conversation.lock() {
+                *c = None;
+            }
+            drive_process(app, db, session, turn_id, text, None).await
+        }
+    };
+    drive_resuming(
+        remote.as_deref(),
+        || {
+            let (app, db, session, remote) = (app, db, session, remote.clone());
+            async move {
+                drive_process(app, db, session, turn_id, text, remote.as_deref())
+                    .await
+                    .map_err(|e| super::resume::classify(&e))
+            }
+        },
+        fresh,
+        tokio::time::sleep,
+        |code, notice| {
+            turn::save_notice(app, db, &session.thread_id, code, notice);
+        },
+    )
+    .await
+}
+
 /// Roda o processo do turno. `Ok(Some)` = o `result` chegou; `Ok(None)` = o processo acabou sem ele
 /// (parado de propósito); `Err` = não subiu, ou caiu com erro.
-async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) -> Result<Option<TurnResult>, String> {
+async fn drive_process(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str, conversation: Option<&str>) -> Result<Option<TurnResult>, String> {
     let thread_id = session.thread_id.as_str();
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
     };
-    let conversation = session.conversation.lock().ok().and_then(|c| c.clone());
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
     let name = crate::agents::agent_command("antigravity").unwrap_or("agy");
     let program = crate::util::find_program(name).ok_or("Não achei o Antigravity (agy) no PATH")?;
     let conversation_mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "antigravity");
-    let mut args = map::launch_args(&row, text, conversation.as_deref());
+    let mut args = map::launch_args(&row, text, conversation);
     if let Some(mcp) = conversation_mcp.as_ref() {
         args.extend(mcp.antigravity_args.iter().cloned());
     }

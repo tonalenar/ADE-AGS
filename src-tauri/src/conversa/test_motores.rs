@@ -512,6 +512,71 @@ mod agy {
         }
         assert!(done && said.contains("OK"), "resposta: {said}");
     }
+
+    #[test]
+    fn a_retomada_que_funciona_nao_abre_sessao_nova_nem_emite_aviso() {
+        use std::cell::RefCell;
+        use crate::conversa::agy::drive_resuming;
+
+        let fresh_calls = RefCell::new(0usize);
+        let avisos = RefCell::new(Vec::new());
+
+        let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(drive_resuming(
+            Some("conv-123"),
+            || async {
+                Ok(Some(TurnResult { interrupted: false, error: None, duration_ms: Some(150) }))
+            },
+            || async {
+                *fresh_calls.borrow_mut() += 1;
+                Ok(Some(TurnResult { interrupted: false, error: None, duration_ms: Some(250) }))
+            },
+            |_| async {},
+            |code, text| {
+                avisos.borrow_mut().push((code.to_string(), text.to_string()));
+            },
+        ));
+
+        assert!(out.is_ok());
+        let res = out.unwrap().unwrap();
+        assert_eq!(res.duration_ms, Some(150), "devolveu o resultado da retomada");
+        assert_eq!(*fresh_calls.borrow(), 0, "não abriu sessão nova");
+        assert!(avisos.borrow().is_empty(), "nenhum aviso emitido");
+    }
+
+    #[test]
+    fn a_retomada_que_falha_cai_na_sessao_nova_e_emite_aviso_resume_lost() {
+        use std::cell::RefCell;
+        use crate::conversa::agy::drive_resuming;
+        use crate::conversa::resume::ResumeFailure;
+
+        let fresh_calls = RefCell::new(0usize);
+        let avisos = RefCell::new(Vec::new());
+
+        let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(drive_resuming(
+            Some("conv-sumiu"),
+            || async {
+                Err(ResumeFailure::Gone("No conversation found with session ID: conv-sumiu".into()))
+            },
+            || async {
+                *fresh_calls.borrow_mut() += 1;
+                Ok(Some(TurnResult { interrupted: false, error: None, duration_ms: Some(350) }))
+            },
+            |_| async {},
+            |code, text| {
+                avisos.borrow_mut().push((code.to_string(), text.to_string()));
+            },
+        ));
+
+        assert!(out.is_ok());
+        let res = out.unwrap().unwrap();
+        assert_eq!(res.duration_ms, Some(350), "devolveu o resultado da sessão nova");
+        assert_eq!(*fresh_calls.borrow(), 1, "abriu sessão nova");
+        let emitidos = avisos.into_inner();
+        assert_eq!(emitidos.len(), 1, "emitiu o aviso");
+        assert_eq!(emitidos[0].0, "resumeLost");
+        assert!(emitidos[0].1.contains("A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele."));
+        assert!(emitidos[0].1.contains("Motivo: No conversation found with session ID: conv-sumiu"));
+    }
 }
 
 #[test]
@@ -876,5 +941,72 @@ mod cursor {
         let tail = vec!["aviso qualquer".to_string(), "Error: not logged in. Run `cursor-agent login`".to_string(), "  ".to_string()];
         assert_eq!(error_from_stderr(&tail), "Error: not logged in. Run `cursor-agent login`");
         assert_eq!(error_from_stderr(&[]), "O Cursor terminou sem responder");
+    }
+
+    #[test]
+    fn a_retomada_que_funciona_nao_abre_sessao_nova_nem_emite_aviso() {
+        use std::cell::RefCell;
+        use crate::conversa::cursor::drive_resuming;
+        use crate::conversa::claude_map::TurnResult;
+
+        let fresh_calls = RefCell::new(0usize);
+        let avisos = RefCell::new(Vec::new());
+
+        let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(drive_resuming(
+            Some("cursor-123"),
+            || async {
+                Ok(Some(TurnResult { interrupted: false, error: None, duration_ms: Some(100) }))
+            },
+            || async {
+                *fresh_calls.borrow_mut() += 1;
+                Ok(Some(TurnResult { interrupted: false, error: None, duration_ms: Some(200) }))
+            },
+            |_| async {},
+            |code, text| {
+                avisos.borrow_mut().push((code.to_string(), text.to_string()));
+            },
+        ));
+
+        assert!(out.is_ok());
+        let res = out.unwrap().unwrap();
+        assert_eq!(res.duration_ms, Some(100), "devolveu o resultado da retomada");
+        assert_eq!(*fresh_calls.borrow(), 0, "não abriu sessão nova");
+        assert!(avisos.borrow().is_empty(), "nenhum aviso emitido");
+    }
+
+    #[test]
+    fn a_retomada_que_falha_cai_na_sessao_nova_e_emite_aviso_resume_lost() {
+        use std::cell::RefCell;
+        use crate::conversa::cursor::drive_resuming;
+        use crate::conversa::resume::ResumeFailure;
+        use crate::conversa::claude_map::TurnResult;
+
+        let fresh_calls = RefCell::new(0usize);
+        let avisos = RefCell::new(Vec::new());
+
+        let out = tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(drive_resuming(
+            Some("cursor-sumiu"),
+            || async {
+                Err(ResumeFailure::Gone("Session not found: cursor-sumiu".into()))
+            },
+            || async {
+                *fresh_calls.borrow_mut() += 1;
+                Ok(Some(TurnResult { interrupted: false, error: None, duration_ms: Some(300) }))
+            },
+            |_| async {},
+            |code, text| {
+                avisos.borrow_mut().push((code.to_string(), text.to_string()));
+            },
+        ));
+
+        assert!(out.is_ok());
+        let res = out.unwrap().unwrap();
+        assert_eq!(res.duration_ms, Some(300), "devolveu o resultado da sessão nova");
+        assert_eq!(*fresh_calls.borrow(), 1, "abriu sessão nova");
+        let emitidos = avisos.into_inner();
+        assert_eq!(emitidos.len(), 1, "emitiu o aviso");
+        assert_eq!(emitidos[0].0, "resumeLost");
+        assert!(emitidos[0].1.contains("A sessão anterior não pôde ser retomada; o agente recomeçou sem o histórico dele."));
+        assert!(emitidos[0].1.contains("Motivo: Session not found: cursor-sumiu"));
     }
 }

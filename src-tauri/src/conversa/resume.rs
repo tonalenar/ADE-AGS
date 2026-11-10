@@ -153,3 +153,32 @@ pub fn with_note(note: Option<&str>, text: &str) -> String {
         None => text.to_string(),
     }
 }
+
+/// Roda a execução de uma sessão que pode ter id anterior: retoma e, se falhar por sessão perdida
+/// ou transitória persistente, abre sessão nova (`fresh`) e emite o aviso `resumeLost`.
+pub async fn drive_resuming<T, R, RF, N, NF, P, PF, W>(
+    remote: Option<&str>,
+    resume: R,
+    mut fresh: N,
+    pause: P,
+    mut emit_notice: W,
+) -> Result<T, String>
+where
+    R: FnMut() -> RF,
+    RF: Future<Output = Result<T, ResumeFailure>>,
+    N: FnMut() -> NF,
+    NF: Future<Output = Result<T, String>>,
+    P: FnMut(Duration) -> PF,
+    PF: Future<Output = ()>,
+    W: FnMut(&str, &str),
+{
+    let opened = match remote {
+        Some(_) => open_resuming(resume, &mut fresh, pause).await?,
+        None => Opened { session: fresh().await?, lost: None },
+    };
+    if let Some(reason) = opened.lost {
+        emit_notice("resumeLost", &lost_notice(&reason));
+    }
+    Ok(opened.session)
+}
+
