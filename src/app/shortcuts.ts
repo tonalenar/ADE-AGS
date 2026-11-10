@@ -107,6 +107,8 @@ export type ShortcutAction =
   | { kind: "copyPullRequestNumber" }
   /** Inicia ou encerra o ditado no composer que está com foco. */
   | { kind: "toggleDictation" }
+  /** Captura o display principal e anexa ao composer visível, pelo mesmo botão de câmera. */
+  | { kind: "takeSnapshot" }
   /** Abre a conversa na posição visível da sidebar, como no T3 Code. */
   | { kind: "quickThread"; index: number }
   /** Traz à frente o workspace aberto seguinte/anterior, sem criar nem fechar janelas. */
@@ -207,7 +209,8 @@ export const SHORTCUTS: Shortcut[] = [
     display: `${DESKTOP_OS === "macos" ? "Cmd" : "Ctrl"}+${index + 1}`,
     labelKey: `shortcuts.quickPalette${index + 1}`,
   })),
-  ...(DESKTOP_OS === "macos" ? [{ id: "composer.dictation", key: "d", meta: true, shift: true, action: { kind: "toggleDictation" } as const, when: "composerFocus && isDesktop", display: "Cmd+Shift+D", labelKey: "shortcuts.dictation" }] : []),
+  ...(DESKTOP_OS === "macos" ? [{ id: "composer.dictation", key: "d", ctrl: false, meta: true, shift: true, action: { kind: "toggleDictation" } as const, when: "composerFocus && isDesktop", display: "Cmd+Shift+D", labelKey: "shortcuts.dictation" }] : []),
+  ...(DESKTOP_OS === "macos" ? [{ id: "composer.snapshot", key: "s", ctrl: false, meta: true, shift: true, action: { kind: "takeSnapshot" } as const, when: "chatShell && snapshotAvailable && isDesktop && !terminalFocus && !previewFocus && !commandPaletteOpen", display: "Cmd+Shift+S", labelKey: "shortcuts.composerSnapshot" }] : []),
   { id: "rightPanel.new", key: "t", ctrl: DESKTOP_OS !== "macos", meta: DESKTOP_OS === "macos", action: { kind: "newPanelSurface" }, when: "rightPanelOpen && !terminalFocus && !previewFocus && !modelPickerOpen && !commandPaletteOpen && isDesktop", display: DESKTOP_OS === "macos" ? "Cmd+T" : "Ctrl+T", labelKey: "shortcuts.panelNewSurface" },
   { id: "sidebar.toggle", key: "", ctrl: false, shift: false, alt: false, meta: false, action: { kind: "toggleChatSidebar" }, when: "chatShell && !terminalFocus && !previewFocus && !editableFocus && !modelPickerOpen && !commandPaletteOpen && isDesktop", display: "", labelKey: "shortcuts.toggleChatSidebar" },
   { id: "rightPanel.toggle", key: "", ctrl: false, shift: false, alt: false, meta: false, action: { kind: "toggleRightPanel" }, when: "!terminalFocus && !previewFocus && !editableFocus && !modelPickerOpen && !commandPaletteOpen && isDesktop", display: "", labelKey: "shortcuts.toggleRightPanel" },

@@ -16,7 +16,7 @@ import { newConversation, newConversationLocal, newConversationWithoutProject, s
 import { useBotToastStore } from "@/shared/brand/botToastStore";
 import { findInActiveTimeline } from "@/features/chat/timeline/findModel";
 import { runStoredProjectScript } from "@/features/chat/projectScriptRunner";
-import { activeComposerCommandTarget, isAgentModelPickerTargetMounted, isComposerCommandAvailable, isFilePickerTargetMounted, isPromptStashTargetMounted, runComposerCommand, toggleAgentModelPicker, toggleFilePicker as toggleComposerFilePicker, togglePromptStash } from "@/features/chat/composerCommands";
+import { activeComposerCommandTarget, isAgentModelPickerTargetMounted, isComposerCommandAvailable, isFilePickerTargetMounted, isPromptStashTargetMounted, runComposerCommand, takeDesktopSnapshot, toggleAgentModelPicker, toggleFilePicker as toggleComposerFilePicker, togglePromptStash } from "@/features/chat/composerCommands";
 import { activePreviewViewId, canToggleBrowserPreview, runPreviewCommand, toggleBrowserPreview } from "@/features/browser/commands";
 import { copyVisiblePullRequestNumber, isPullRequestCopyAvailable } from "@/features/forge/pullRequestCommands";
 import { selectedConversationPinTarget, toggleSelectedConversationPinned } from "@/features/chat/selectedConversationCommands";
@@ -187,6 +187,12 @@ export function useGlobalShortcuts() {
 
       if (shortcut.action.kind === "togglePromptStash") {
         togglePromptStash(activeComposerCommandTarget());
+        return;
+      }
+
+      if (shortcut.action.kind === "takeSnapshot") {
+        // O `when` já exige o botão montado no composer visível; aqui só reaproveitamos o clique.
+        takeDesktopSnapshot(activeComposerCommandTarget());
         return;
       }
 

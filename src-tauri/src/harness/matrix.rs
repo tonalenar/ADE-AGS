@@ -5,9 +5,10 @@
 //! contagem; um teste confere que os dois concordam. Onde a matriz corrige um inventário de colega, o doc
 //! registra a divergência.
 //!
-//! Quem muda uma célula atualiza o doc. A UI, o IPC e o MCP ainda não leem esta tabela.
+//! Quem muda uma célula atualiza o doc. `conversa::api` lê as células de `steer`, `compact` e `goal`;
+//! a UI e os demais comandos ainda não consomem a matriz.
 
-use super::capability::{Capability, Cell, Claim, Proof, ProviderMatrix, Scope, Surface};
+use super::capability::{Capability, Cell, Claim, Proof, ProviderMatrix, Scope, Support, Surface};
 
 const fn sup(capability: Capability, scope: Scope, proof: Proof, evidence: &'static [&'static str], note: &'static str) -> Cell {
     Cell { capability, claim: Claim::supported(scope, proof, evidence, note) }
@@ -603,4 +604,10 @@ pub fn matrix() -> &'static [ProviderMatrix] {
 /// A coluna de um provider numa superfície.
 pub fn find(surface: Surface, provider: &str) -> Option<&'static ProviderMatrix> {
     MATRIX.iter().find(|column| column.surface == surface && column.provider == provider)
+}
+
+/// Estado da matriz para a capability pedida. `Unknown` é preservado para o chamador decidir; não
+/// equivale a suporte nem a ausência de caminho.
+pub fn supports(provider: &str, surface: Surface, capability: Capability) -> Option<Support> {
+    find(surface, provider).map(|column| column.claim(capability).support)
 }

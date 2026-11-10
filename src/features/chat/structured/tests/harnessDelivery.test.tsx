@@ -148,8 +148,11 @@ describe("entrega, bloqueio e origem dos filhos no painel", () => {
     expect(mocks.navigate).toHaveBeenCalledWith("/fleet");
   });
 
-  it("a entrega aparece num bloco marcado como dado não confiável, e avisa que foi resumida", async () => {
+  it("a entrega só aparece com o nó aberto, num bloco marcado como dado não confiável, e avisa que foi resumida", async () => {
     await open(graph());
+    // Fase 6: o cartão resumido não leva texto de agente; a entrega abre com o nó.
+    expect(host.querySelector(`[aria-label="${RESULT_LABEL}"]`)).toBeNull();
+    await act(async () => { host.querySelector<HTMLElement>('[data-node-id="task:k1"] > div')?.click(); });
     const region = host.querySelector<HTMLElement>(`[aria-label="${RESULT_LABEL}"]`);
     expect(region).not.toBeNull();
     expect(region?.textContent).toContain("resposta longa do testador");

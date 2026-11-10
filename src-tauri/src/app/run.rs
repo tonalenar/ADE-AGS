@@ -412,6 +412,7 @@ pub fn run() {
             crate::conversa::chat_thread_goal_get,
             crate::conversa::chat_thread_goal_action,
             crate::conversa::chat_thread_compact_context,
+            crate::harness::commands::harness_capability_matrix,
             crate::conversa::chat_thread_auto_compact_on_return,
             crate::conversa::chat_thread_clear_context,
             crate::conversa::chat_thread_interrupt,
@@ -474,6 +475,7 @@ pub fn run() {
             crate::scm::scm_create_tag,
             crate::scm::scm_push_tag,
             crate::scm::scm_delete_tag,
+            crate::scm::scm_worktrees,
             // Cuentas de git (GitHub, GitLab, Gitea…): repos, clonar, PRs e issues
             crate::forge::forge_kinds,
             crate::forge::forge_oauth_available,

@@ -1568,3 +1568,107 @@ fn o_terminal_do_chat_tem_quem_o_atenda_nos_dois_lados() {
     assert!(skill.contains("### Interactive commands from a chat conversation"), "a skill não ensina o terminal do chat");
     assert!(skill.contains("--in-chat"), "a skill não mostra --in-chat");
 }
+
+// ── Guardas da superfície de rede do IPC (ver docs/decisoes/HOST_REMOTO.md) ──
+//
+// Estes testes leem o código, como os de contrato acima: não provam o comportamento de rede,
+// provam que as frases que dão essa garantia continuam no código. Trocar o bind por
+// `0.0.0.0`, tirar a checagem do token ou o teto de conexões faz um deles falhar.
+
+/// Os arquivos de topo de `src/ipc` (sem o `test.rs`), lidos do disco. Um arquivo novo entra sozinho.
+fn fontes_de_producao_do_ipc() -> Vec<(String, String)> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/ipc");
+    let mut fontes: Vec<(String, String)> = std::fs::read_dir(&dir)
+        .expect("src/ipc tem que existir")
+        .flatten()
+        .map(|entrada| entrada.path())
+        .filter(|caminho| caminho.extension().and_then(|ext| ext.to_str()) == Some("rs"))
+        .filter(|caminho| caminho.file_name().and_then(|nome| nome.to_str()) != Some("test.rs"))
+        .map(|caminho| {
+            let nome = caminho.file_name().and_then(|n| n.to_str()).unwrap_or_default().to_string();
+            (nome, std::fs::read_to_string(&caminho).expect("arquivo do ipc legível"))
+        })
+        .collect();
+    fontes.sort();
+    fontes
+}
+
+#[test]
+fn o_ipc_so_escuta_em_loopback() {
+    // Um único listener TCP, em 127.0.0.1 com porta efêmera. Qualquer outro endereço abriria o IPC à rede local.
+    let server = include_str!("server.rs");
+    assert_eq!(server.matches("TcpListener::bind(").count(), 1, "o IPC tem que ter um único bind TCP");
+    assert!(server.contains("TcpListener::bind(SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0))"), "o bind do IPC saiu de 127.0.0.1 com porta 0");
+    for (nome, fonte) in fontes_de_producao_do_ipc() {
+        for proibido in ["0.0.0.0", "UNSPECIFIED", "[::]", "UdpSocket::bind("] {
+            assert!(!fonte.contains(proibido), "{nome} usa {proibido}: o IPC não pode escutar fora do loopback");
+        }
+        if nome != "server.rs" {
+            assert!(!fonte.contains("TcpListener::bind("), "{nome} abre um listener TCP fora do servidor do IPC");
+        }
+    }
+    // O cliente também só fala com o loopback: a porta vem do handshake, o endereço é fixo.
+    let transport = include_str!("transport.rs");
+    assert!(transport.contains("SocketAddrV4::new(Ipv4Addr::LOCALHOST, handshake.port)"), "a CLI deixou de conectar só em 127.0.0.1");
+}
+
+#[test]
+fn o_pedido_sem_token_valido_e_recusado_antes_do_despacho() {
+    let server = include_str!("server.rs");
+    let checagem = server.find("token_matches(&req.token, expected_token)").expect("o servidor deixou de comparar o token");
+    let despacho = server.find("commands::dispatch(app, &req.command, &req.args)").expect("o despacho mudou de forma");
+    assert!(checagem < despacho, "um comando roda antes da checagem do token");
+    assert!(server.contains("Token inválido"), "o pedido sem token válido não recebe a recusa");
+    // Um token novo a cada início, do gerador aleatório do uuid (não do PID nem do relógio).
+    assert!(server.contains("let token = Uuid::new_v4().to_string();"), "o token deixou de ser um UUID v4 por processo");
+}
+
+#[test]
+fn um_token_de_outra_instancia_nao_vale_aqui() {
+    use super::server::token_matches;
+    let este = uuid::Uuid::new_v4().to_string();
+    let outro = uuid::Uuid::new_v4().to_string();
+    assert!(token_matches(&este, &este));
+    assert!(!token_matches(&outro, &este), "o token de outra instância foi aceito");
+    assert!(!token_matches(&format!("{este}x"), &este), "a comparação do token deixou de ser exata");
+}
+
+#[test]
+fn uma_linha_http_nao_vira_pedido_do_ipc() {
+    // O IPC não confere `Host` nem `Origin` (HOST_REMOTO.md, F-06). O que mantém uma página do navegador
+    // de fora é o formato: a primeira linha de um pedido HTTP não é JSON e o servidor recusa antes de
+    // qualquer comando. Se este listener um dia aceitar HTTP, a checagem de `util::loopback_trust` tem
+    // que entrar junto com a rota.
+    for linha in ["GET / HTTP/1.1", "POST /ipc HTTP/1.1", "OPTIONS / HTTP/1.1", "Host: 127.0.0.1:1"] {
+        assert!(serde_json::from_str::<Request>(linha).is_err(), "{linha:?} virou pedido do IPC");
+    }
+    let server = include_str!("server.rs");
+    let leitura = server.find("serde_json::from_str::<Request>(&line)").expect("o parse do pedido mudou de forma");
+    let checagem = server.find("token_matches(&req.token, expected_token)").expect("o servidor deixou de comparar o token");
+    assert!(leitura < checagem, "o token é conferido antes de o pedido ser lido");
+}
+
+#[test]
+fn os_limites_do_canal_ficam_no_codigo() {
+    // Sem estes limites, um cliente local sem token segura um slot e um buffer sem tamanho nem prazo (HOST_REMOTO.md, F-03).
+    let server = include_str!("server.rs");
+    assert!(server.contains("const MAX_CONNECTIONS: usize = 256;"), "o teto de conexões sumiu");
+    assert!(server.contains("const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;"), "o teto de tamanho do pedido sumiu");
+    assert!(server.contains("(&mut reader).take(MAX_REQUEST_BYTES)"), "a leitura do pedido não tem teto");
+    assert!(server.contains("set_read_timeout(Some(std::time::Duration::from_secs(30)))"), "a conexão TCP não tem prazo de leitura");
+    assert_eq!(server.matches(">= MAX_CONNECTIONS").count(), 1, "o teto de conexões do TCP saiu do lugar");
+    let transport = include_str!("transport.rs");
+    assert!(transport.contains(">= MAX_CONNECTIONS"), "o canal de credencial deixou de respeitar o teto");
+    assert!(transport.contains("set_read_timeout(Some(Duration::from_secs(30)))"), "o canal de credencial não tem prazo de leitura");
+}
+
+#[test]
+fn o_handshake_e_o_socket_de_credencial_continuam_so_do_usuario() {
+    // Quem lê o token lê todo o IPC: o arquivo que o guarda e o socket de credencial ficam em 0600.
+    let server = include_str!("server.rs");
+    assert!(server.contains("std::fs::Permissions::from_mode(0o600)"), "o handshake deixou de ser 0600");
+    let transport = include_str!("transport.rs");
+    assert!(transport.contains("std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))"), "o socket de credencial deixou de ser 0600");
+    // Named pipe do Windows: sem essa flag, um cliente remoto pela rede (SMB) alcança o pipe.
+    assert!(transport.contains("PIPE_REJECT_REMOTE_CLIENTS"), "o named pipe aceita clientes remotos");
+}

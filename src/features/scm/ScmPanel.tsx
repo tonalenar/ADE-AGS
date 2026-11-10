@@ -17,7 +17,9 @@ import { BranchMenu } from "./BranchMenu";
 import { CommitGraph } from "./CommitGraph";
 import { CreateTagDialog } from "./CreateTagDialog";
 import { GraphBranchFilter, logRefs, useGraphRefs, useGraphRefsLabel } from "./GraphBranchFilter";
+import { scmHeadline } from "./headline";
 import { TagsSection } from "./TagsSection";
+import { ScmWorktreesSection } from "./WorktreesSection";
 import {
   scmCheckout, scmCommit, scmDiscard, scmFetch, scmInit, scmLog, scmPull, scmPush, scmStage, scmStatus, scmUnstage,
 } from "./ipc";
@@ -26,6 +28,16 @@ import { isScmError, type Commit, type Provider, type ScmEntry, type ScmError, t
 /** Cada cuánto se vuelve a leer el estado mientras el panel está a la vista. Los agentes
  *  escriben archivos todo el tiempo; sin esto la lista quedaría vieja enseguida. */
 const POLL_MS = 4000;
+
+function branchHeadline(status: ScmStatus, t: (key: string, options?: Record<string, unknown>) => string): string {
+  const headline = scmHeadline(status);
+  if (headline.kind === "branch") return headline.branch;
+  if (headline.kind === "initial") {
+    return headline.branch ? t("scm.initialBranch", { branch: headline.branch }) : t("scm.noCommits");
+  }
+  if (headline.kind === "detached") return t("scm.detached", { head: headline.head });
+  return t("scm.noCommits");
+}
 
 /** Cuántos commits trae el historial por vez. */
 const LOG_PAGE = 50;
@@ -340,7 +352,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
         >
           <BranchIcon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-white/45" />
           <span className="truncate font-mono text-[11.5px] font-semibold text-gray-800 dark:text-gray-200">
-            {status.branch ?? (status.head ? t("scm.detached", { head: status.head }) : t("scm.noCommits"))}
+            {branchHeadline(status, t)}
           </span>
           <ChevronDownIcon className="w-2.5 h-2.5 shrink-0 text-gray-400" />
         </Button>
@@ -564,6 +576,8 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             )}
           </div>
         )}
+
+        <ScmWorktreesSection root={status.root} />
 
         <TagsSection
           root={status.root}
