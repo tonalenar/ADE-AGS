@@ -119,6 +119,29 @@ export function promptStashTargetLabel(target: string | null): string | null {
   return promptStashButton(target)?.getAttribute("aria-label") ?? null;
 }
 
+function desktopSnapshotButton(target: string | null): HTMLButtonElement | null {
+  if (!target || typeof document === "undefined" || typeof window === "undefined") return null;
+  for (const composer of document.querySelectorAll<HTMLTextAreaElement>("[data-chat-composer-target]")) {
+    if (composer.dataset.chatComposerTarget !== target || composer.disabled || !visible(composer)) continue;
+    const button = composer.closest("form")?.querySelector<HTMLButtonElement>("[data-chat-desktop-snapshot]");
+    if (button && !button.disabled && visible(button)) return button;
+  }
+  return null;
+}
+
+/** Confirma que o SnapShot pode agir no composer visível: macOS, botão montado e habilitado. */
+export function isDesktopSnapshotTargetMounted(target: string | null): boolean {
+  return desktopSnapshotButton(target) !== null;
+}
+
+/** Usa o mesmo botão do clique, para a captura, o registro pendente e o aviso seguirem um caminho só. */
+export function takeDesktopSnapshot(target: string | null): boolean {
+  const button = desktopSnapshotButton(target);
+  if (!button) return false;
+  button.click();
+  return true;
+}
+
 /** Confirma que o seletor de agente da conversa ativa está montado e visível. */
 export function isAgentModelPickerTargetMounted(target: string | null): boolean {
   return agentModelPickerButton(target) !== null;

@@ -15,6 +15,7 @@ export const SHORTCUT_WHEN_CONTEXTS = [
   "projectSearchOpen",
   "filePickerAvailable",
   "promptStashAvailable",
+  "snapshotAvailable",
   "composerAlternateAvailable",
   "composerBackgroundAvailable",
   "composerSendAndNewThreadAvailable",

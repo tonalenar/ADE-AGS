@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { MAX_PENDING_CAPTURES, rememberPendingCapture } from "@/features/chat/attachments/pendingCaptures";
 import { attachToComposer } from "@/features/chat/store";
 import { AlertaToast } from "@/shared/ui/alerts";
 
@@ -36,7 +37,9 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
       if (recording) {
         const path = await screenRecordingStop(id);
         const destination = composerTargetsByRecording.has(id) ? composerTargetsByRecording.get(id) : composerTarget;
+        const { dropped } = rememberPendingCapture({ path, target: destination, kind: "recording" });
         attachToComposer([path], destination);
+        if (dropped) void AlertaToast(t("screenRecording.title"), t("screenRecording.pendingDropped", { max: MAX_PENDING_CAPTURES }), "warning", 6000);
         composerTargetsByRecording.delete(id);
         setRecording(false);
         void AlertaToast(t("screenRecording.title"), t("screenRecording.attached"), "success", 3000);
