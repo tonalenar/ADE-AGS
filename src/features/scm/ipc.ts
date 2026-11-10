@@ -1,7 +1,7 @@
 /** Control de versiones. Ver `src-tauri/src/scm/commands.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { Branch, Commit, Compare, ScmEntry, ScmStatus, Tag, WorkingFiles } from "./types";
+import type { Branch, Commit, Compare, ScmEntry, ScmStatus, ScmWorktree, Tag, WorkingFiles } from "./types";
 
 /** `null` = la carpeta no está en un repo. */
 export const scmStatus = (cwd: string) => invoke<ScmStatus | null>("scm_status", { cwd });
@@ -44,3 +44,5 @@ export const scmCreateTag = (root: string, name: string, target: string | null, 
 export const scmPushTag = (root: string, name: string) => invoke<void>("scm_push_tag", { root, name });
 /** Borra el tag LOCAL; el del remoto no se toca. */
 export const scmDeleteTag = (root: string, name: string) => invoke<void>("scm_delete_tag", { root, name });
+/** Worktrees já abertos neste repo (`scm/commands.rs`, `scm_worktrees`). Só leitura. */
+export const scmWorktrees = (root: string) => invoke<ScmWorktree[]>("scm_worktrees", { root });

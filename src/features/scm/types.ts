@@ -92,6 +92,13 @@ export interface WorkingFiles {
   truncated: boolean;
 }
 
+/** Um worktree já aberto. `branch` ausente = HEAD solto. */
+export interface ScmWorktree {
+  path: string;
+  branch: string | null;
+  current: boolean;
+}
+
 export interface Tag {
   name: string;
   /** El commit al que apunta (corto). */
