@@ -2172,3 +2172,38 @@ fn a_descricao_do_comando_do_claude_vem_limitada_e_sem_commands_nao_ha_lista() {
     assert!(out[0]["inputHint"].is_null());
     assert!(super::claude_map::initialize_commands(&json!({})).is_empty());
 }
+
+/// O `skills/list` do Codex vira a lista do `/`: só as habilitadas, do cwd da conversa, sem repetir.
+mod comandos_codex {
+    use serde_json::json;
+
+    use super::super::codex_map::skills_list_commands;
+
+    #[test]
+    fn skills_list_vira_comandos_so_das_habilitadas_do_cwd_sem_repetir() {
+        let response = json!({"data": [
+            {"cwd": "/outro", "skills": [{"name": "de-outro", "description": "Outro cwd", "path": "/outro/SKILL.md", "enabled": true}], "errors": []},
+            {"cwd": "/projeto", "skills": [
+                {"name": "deploy", "description": "Publica o app", "path": "/projeto/.agents/skills/deploy/SKILL.md", "enabled": true, "scope": "repo", "interface": {"displayName": "Deploy"}},
+                {"name": "desligada", "description": "Desligada na config", "path": "/p/d/SKILL.md", "enabled": false},
+                {"name": "Deploy", "description": "Repetida sem diferenciar caixa", "path": "/p/x/SKILL.md", "enabled": true},
+                {"name": "nome com espaço", "description": "Não cabe no composer", "path": "/p/e/SKILL.md", "enabled": true}
+            ], "errors": []}
+        ]});
+
+        let commands = skills_list_commands(&response, "/projeto");
+
+        assert_eq!(commands, vec![json!({"name": "deploy", "description": "Publica o app", "inputHint": null, "kind": "skill"})]);
+    }
+
+    #[test]
+    fn descricao_vazia_cai_para_a_curta_e_cwd_que_nao_bate_usa_as_entradas_que_vieram() {
+        let response = json!({"data": [
+            {"cwd": "/projeto/", "skills": [{"name": "resumo", "description": "", "shortDescription": "Curta", "enabled": true}], "errors": []}
+        ]});
+
+        let commands = skills_list_commands(&response, "/projeto");
+
+        assert_eq!(commands, vec![json!({"name": "resumo", "description": "Curta", "inputHint": null, "kind": "skill"})]);
+    }
+}

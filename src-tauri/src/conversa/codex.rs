@@ -309,10 +309,24 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     if let Ok(mut map) = sessions().lock() {
         map.insert(thread_id.to_string(), session.clone());
     }
+    announce_skills(app, &session, thread_id, &row.cwd);
     if let Some(reason) = opened.lost {
         turn::save_notice(app, db, thread_id, "resumeLost", &resume::lost_notice(&reason));
     }
     Ok(session)
+}
+
+/// Pede ao app-server os skills que valem para o cwd e manda a lista ao composer (`commands`). Só leitura, em
+/// segundo plano: a conversa não espera por isso. Se falhar, a varredura do disco cobre o intervalo.
+fn announce_skills(app: &AppHandle, session: &Arc<Session>, thread_id: &str, cwd: &str) {
+    let (app, session) = (app.clone(), Arc::clone(session));
+    let (thread_id, cwd) = (thread_id.to_string(), cwd.to_string());
+    tauri::async_runtime::spawn(async move {
+        if let Ok(response) = session.request("skills/list", json!({ "cwds": [cwd] })).await {
+            let commands = codex_map::skills_list_commands(&response, &cwd);
+            emit(&app, &thread_id, "commands", json!({ "commands": commands }));
+        }
+    });
 }
 
 /// Um processo novo com o `initialize` feito. Fecha o processo se o `initialize` falha.

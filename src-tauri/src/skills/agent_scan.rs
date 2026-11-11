@@ -12,6 +12,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -373,14 +374,6 @@ fn resolve_dir(value: &str, cwd: Option<&Path>) -> PathBuf {
     }
 }
 
-/// `CLAUDE_CONFIG_DIR` quando está definido, senão `~/.claude`: a mesma pasta que o CLI usa.
-fn claude_config_dir(cwd: Option<&Path>) -> Option<PathBuf> {
-    match std::env::var("CLAUDE_CONFIG_DIR").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()) {
-        Some(value) => Some(resolve_dir(&value, cwd)),
-        None => dirs::home_dir().map(|home| home.join(".claude")),
-    }
-}
-
 /// O arquivo de política da máquina (MDM), onde o Claude o procura em cada sistema.
 fn managed_settings_path() -> Option<PathBuf> {
     if cfg!(target_os = "macos") {
@@ -392,21 +385,125 @@ fn managed_settings_path() -> Option<PathBuf> {
     }
 }
 
-/// Skills que o agente acha no disco, para o menu do `/`. Só o `claude-code` tem varredura: outro agente
-/// recebe lista vazia. Roda numa thread de bloqueio, porque são leituras de disco.
-#[tauri::command]
-pub async fn agent_skills_scan(cwd: Option<String>, agent_id: String) -> Result<Vec<AgentSkill>, String> {
-    if agent_id != "claude-code" {
-        return Ok(Vec::new());
+/// O que a varredura lê do ambiente. A conta da aba (`account`) manda nas variáveis que ela define; o resto
+/// vem do processo da ADE (`process`), que é o ambiente que o agente herda. Sem conta, vale só o processo.
+pub struct SkillEnv<'a> {
+    pub account: Option<&'a HashMap<String, String>>,
+    pub process: &'a dyn Fn(&str) -> Option<String>,
+    pub cwd: Option<&'a Path>,
+    pub managed_settings: Option<&'a Path>,
+}
+
+impl SkillEnv<'_> {
+    /// Valor de uma variável: a conta da aba primeiro, depois o processo da ADE. Vazio conta como ausente.
+    fn var(&self, name: &str) -> Option<String> {
+        self.account
+            .and_then(|vars| vars.get(name).cloned())
+            .or_else(|| (self.process)(name))
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
     }
+
+    /// O `HOME` que o agente vê: o da conta, se ela trouxer um; senão o do usuário.
+    fn home(&self) -> Option<PathBuf> {
+        self.var("HOME").map(PathBuf::from).or_else(dirs::home_dir)
+    }
+}
+
+/// Skills que um agente acha no disco para o menu do `/`. Só metadados. Só o Claude e o Codex têm varredura:
+/// nos outros não há jeito confirmado de o usuário invocar uma skill achada no disco com `/nome` ou `$nome`
+/// (a matriz marca `comandos` como `Unknown` neles), então o menu não mostra nada.
+pub fn scan_agent_skills(agent_id: &str, env: &SkillEnv<'_>) -> Vec<AgentSkill> {
+    match agent_id {
+        "claude-code" => claude_skills(env),
+        "codex" => codex_skills(env),
+        _ => Vec::new(),
+    }
+}
+
+/// Claude: `CLAUDE_CONFIG_DIR` (da conta, se houver) ou `~/.claude`, mais os plugins do cache.
+fn claude_skills(env: &SkillEnv<'_>) -> Vec<AgentSkill> {
+    let config_dir = env.var("CLAUDE_CONFIG_DIR").map(|v| resolve_dir(&v, env.cwd)).or_else(|| env.home().map(|h| h.join(".claude")));
+    let Some(config_dir) = config_dir else { return Vec::new() };
+    let plugins_dir = env
+        .var("CLAUDE_CODE_PLUGIN_CACHE_DIR")
+        .map(|v| resolve_dir(&v, env.cwd))
+        .unwrap_or_else(|| config_dir.join("plugins"));
+    scan_claude_skills(&config_dir, &plugins_dir, env.cwd, env.managed_settings)
+}
+
+/// Codex: as `.agents/skills` do cwd até a raiz do repositório (a mais próxima primeiro), depois a do usuário
+/// (`~/.agents/skills`) e a de `CODEX_HOME/skills`. O primeiro nome vence, como no Codex.
+fn codex_skills(env: &SkillEnv<'_>) -> Vec<AgentSkill> {
+    let overrides = HashMap::new();
+    let mut found = BTreeMap::new();
+    for dir in env.cwd.map(repo_chain).unwrap_or_default() {
+        scan_root(&dir.join(".agents").join("skills"), None, AgentSkillScope::Project, &overrides, &mut found);
+    }
+    if let Some(home) = env.home() {
+        scan_root(&home.join(".agents").join("skills"), None, AgentSkillScope::User, &overrides, &mut found);
+    }
+    let codex_home = env.var("CODEX_HOME").map(|v| resolve_dir(&v, env.cwd)).or_else(|| env.home().map(|h| h.join(".codex")));
+    if let Some(codex_home) = codex_home {
+        scan_root(&codex_home.join("skills"), None, AgentSkillScope::User, &overrides, &mut found);
+    }
+    found.into_values().collect()
+}
+
+/// O cwd e as pastas acima dele até a raiz do repositório (a que tem `.git`). Fora de um repositório, só o
+/// cwd: o Codex não procura além da raiz do projeto.
+fn repo_chain(cwd: &Path) -> Vec<PathBuf> {
+    let mut chain = Vec::new();
+    for dir in cwd.ancestors() {
+        chain.push(dir.to_path_buf());
+        if dir.join(".git").exists() {
+            return chain;
+        }
+    }
+    vec![cwd.to_path_buf()]
+}
+
+/// O ambiente da conta da aba (`chat_thread.account_id` → `agent_accounts`), só com o diretório do provedor.
+/// Não usa `accounts::env_for_account`: ele também lê o keyring das contas com chave, e a varredura não precisa
+/// de segredo. `None` quando a aba não tem conta, a conta é de outro provedor ou não existe mais.
+pub fn account_env_for_thread(conn: &Connection, thread_id: &str, agent_id: &str) -> Option<HashMap<String, String>> {
+    let account_id: Option<String> = conn.query_row("SELECT account_id FROM chat_thread WHERE id = ?1", [thread_id], |row| row.get(0)).ok()?;
+    let (account_agent, dir): (String, String) = conn
+        .query_row("SELECT agent_id, dir FROM agent_accounts WHERE id = ?1", [account_id?], |row| Ok((row.get(0)?, row.get(1)?)))
+        .ok()?;
+    if account_agent != agent_id {
+        return None;
+    }
+    crate::agents::adapter_for(agent_id)?.account_env(&dir)
+}
+
+/// Skills que o agente acha no disco, para o menu do `/`. `thread_id` diz a conta da aba: a varredura lê o
+/// diretório dela, e não o do processo da ADE. Roda numa thread de bloqueio, porque são leituras de disco.
+#[tauri::command]
+pub async fn agent_skills_scan(
+    db: tauri::State<'_, crate::database::DbConnection>,
+    cwd: Option<String>,
+    agent_id: String,
+    thread_id: Option<String>,
+) -> Result<Vec<AgentSkill>, String> {
+    let account = match thread_id.as_deref() {
+        Some(id) => {
+            let conn = db.lock().map_err(|_| "Não foi possível acessar o banco local.".to_string())?;
+            account_env_for_thread(&conn, id, &agent_id)
+        }
+        None => None,
+    };
     tauri::async_runtime::spawn_blocking(move || -> Result<Vec<AgentSkill>, String> {
         let cwd = cwd.map(PathBuf::from);
-        let config_dir = claude_config_dir(cwd.as_deref()).ok_or("Não achei a pasta de configuração do Claude")?;
-        let plugins_dir = match std::env::var("CLAUDE_CODE_PLUGIN_CACHE_DIR").ok().filter(|v| !v.trim().is_empty()) {
-            Some(value) => resolve_dir(value.trim(), cwd.as_deref()),
-            None => config_dir.join("plugins"),
+        let process = |name: &str| std::env::var(name).ok();
+        let managed = managed_settings_path();
+        let env = SkillEnv {
+            account: account.as_ref(),
+            process: &process,
+            cwd: cwd.as_deref(),
+            managed_settings: managed.as_deref(),
         };
-        Ok(scan_claude_skills(&config_dir, &plugins_dir, cwd.as_deref(), managed_settings_path().as_deref()))
+        Ok(scan_agent_skills(&agent_id, &env))
     })
     .await
     .map_err(|e| e.to_string())?

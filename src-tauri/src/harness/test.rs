@@ -275,6 +275,7 @@ fn every_claim() -> Vec<(String, Claim)> {
             claims.push((format!("{}/{}/{}", column.surface.id(), column.provider, cell.capability.id()), cell.claim));
         }
         claims.push((format!("{}/{}/ags_mcp", column.surface.id(), column.provider), column.ags_mcp));
+        claims.push((format!("{}/{}/comandos", column.surface.id(), column.provider), column.comandos));
     }
     claims
 }
@@ -775,4 +776,42 @@ mod fase1 {
         assert_eq!(state(from_fleet_run("done")), NodeState::Completed);
         assert!(NodeState::Cancelled.is_terminal() && !NodeState::Waiting.is_terminal());
     }
+}
+
+#[test]
+fn comandos_do_chat_declara_so_as_fontes_que_existem() {
+    // A lista do `/` vem do protocolo (initialize, skills/list, ACP) ou da varredura de pastas. Onde nada disso
+    // está confirmado a célula é Unknown; fora do chat não há composer, então é Unsupported.
+    let chat_with = |support: Support| -> Vec<&'static str> {
+        matrix().iter().filter(|column| column.surface == Surface::Chat && column.comandos.support == support).map(|column| column.provider).collect()
+    };
+    assert_eq!(chat_with(Support::Supported), ["claude-code", "codex", "opencode", "local-acp"]);
+    assert_eq!(chat_with(Support::Unknown), ["antigravity", "cursor"]);
+    assert!(
+        matrix().iter().filter(|column| column.surface != Surface::Chat).all(|column| column.comandos.support == Support::Unsupported),
+        "fora do chat não há composer, então o menu do `/` não existe"
+    );
+}
+
+#[test]
+fn comandos_do_doc_concorda_com_a_matriz() {
+    let start = DOC.find("<!-- comandos:inicio -->").expect("marca de início da tabela de comandos no doc");
+    let end = DOC.find("<!-- comandos:fim -->").expect("marca de fim da tabela de comandos no doc");
+    let mut seen = 0;
+    for line in DOC[start..end].lines() {
+        let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(str::trim).collect();
+        let [surface, provider, support] = cells.as_slice() else { continue };
+        if !surface.eq_ignore_ascii_case("chat") {
+            continue;
+        }
+        let column = find(Surface::Chat, provider).unwrap_or_else(|| panic!("o doc lista {provider}, que não está na matriz"));
+        let declared = match column.comandos.support {
+            Support::Supported => "Supported",
+            Support::Unknown => "Unknown",
+            Support::Unsupported => "Unsupported",
+        };
+        assert_eq!(*support, declared, "chat/{provider}: comandos do doc e da matriz divergem");
+        seen += 1;
+    }
+    assert_eq!(seen, 6, "o doc lista as 6 colunas de chat");
 }

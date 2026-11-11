@@ -222,6 +222,9 @@ pub struct ProviderMatrix {
     /// Fora das 19: o agente consegue chamar as ferramentas `ags` (MCP do ADE) e, assim, criar filhos que o
     /// ADE controla (chat filho, tarefa da Frota)? Decide a delegação, não o filho nativo.
     pub ags_mcp: Claim,
+    /// Fora das 19, como `ags_mcp`: o menu do `/` lista comandos e skills que o agente aceita? A célula diz de
+    /// onde vem a lista (nativa do protocolo ou varredura de pastas) e, quando não há, o que falta provar.
+    pub comandos: Claim,
 }
 
 /// Contagem por estado, para o doc e para os testes.
