@@ -675,8 +675,10 @@ function ProjectDefaultsMenu({ agents, hasDefaults, projectFields, currentDefaul
 }
 
 /** A faixa embaixo do composer: o workspace e a branch. Agente, modelo e acesso ficam juntos no seletor. */
-export function ContextStrip({ branch, workspace, worktree = false, children }: {
+export function ContextStrip({ branch, workspace, worktree = false, showContext = true, children }: {
   branch: string | null;
+  /** Mostra o workspace e a branch. Desligado (o contexto do composer), sobra só o que `children` traz. */
+  showContext?: boolean;
   /** O seletor de workspace (conversa nova); sem ele, só o rótulo. */
   workspace?: React.ReactNode;
   /** A conversa roda num worktree. */
@@ -686,14 +688,14 @@ export function ContextStrip({ branch, workspace, worktree = false, children }: 
   const { t } = useTranslation();
   return (
     <div className="flex flex-nowrap items-center gap-0.5 px-3 pt-1.5 text-chat-note text-gray-500 dark:text-white/45">
-      {workspace ?? (
+      {showContext && (workspace ?? (
         <span title={worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")} className="flex shrink-0 items-center gap-1.5 h-7 px-1.5 whitespace-nowrap">
           {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
           {/* Coluna estreita (`ComposerColumn`): só o ícone, numa linha com o branch e o acesso. */}
           <span className="@max-[28rem]/composer:sr-only">{worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")}</span>
         </span>
-      )}
-      {branch && <span className="flex min-w-0 items-center gap-1.5 h-7 px-1.5 font-mono text-[11.5px]" title={branch}><BranchIcon className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{branch}</span></span>}
+      ))}
+      {showContext && branch && <span className="flex min-w-0 items-center gap-1.5 h-7 px-1.5 font-mono text-[11.5px]" title={branch}><BranchIcon className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{branch}</span></span>}
       <span className="flex-1" />
       {children && <span className="flex shrink-0 items-center">{children}</span>}
     </div>

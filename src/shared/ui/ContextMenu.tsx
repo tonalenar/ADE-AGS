@@ -112,7 +112,7 @@ export function ContextMenu({ x, y, items, onClose }: {
         zIndex: 10000,
       }}
       className="cc-pop min-w-52 p-1 rounded-lg border overflow-hidden
-        bg-white/80 dark:bg-surface-raised/80 backdrop-blur-xl
+        cc-glass backdrop-blur-xl
         border-gray-200 dark:border-white/[0.08]
         shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]
         text-gray-800 dark:text-white

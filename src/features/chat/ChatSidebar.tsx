@@ -1,3 +1,5 @@
+import { formatTimestamp } from "@/shared/timeFormat";
+import { readDisplayPrefs } from "@/features/settings/displayPreferences";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -775,7 +777,7 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
               {snoozed.map((c) => (
                 <SlimRow key={c.tabId} name={c.project} title={c.title} agentId={c.agentId}
                   subtitle={typeof snoozedUntil?.[c.tabId] === "number"
-                    ? t("chat.sidebar.snoozeAt", { time: new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(snoozedUntil[c.tabId]!) })
+                    ? t("chat.sidebar.snoozeAt", { time: formatTimestamp(snoozedUntil[c.tabId]!, readDisplayPrefs().timeFormat, undefined, Date.now()) })
                     : undefined}
                   onOpen={() => { unsnoozeConversation(c.tabId); openCard(c.tabId); onOpened?.(); }}
                   onMenu={(x, y) => setMenu({ x, y, items: [

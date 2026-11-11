@@ -220,7 +220,7 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
           onKeyDown={onKeyDown}
           style={{ position: "fixed", inset: "auto", margin: 0, border: 0, left: pos.left, top: pos.top, minWidth: pos.minWidth, maxHeight: pos.maxHeight, zIndex: 10050, color: "inherit" }}
           className="cc-scroll overflow-y-auto p-1.5 rounded-xl text-[13px]
-            bg-white/90 dark:bg-[#2a2a2d]/90 backdrop-blur-xl
+            cc-glass backdrop-blur-xl
             shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_10px_30px_rgba(0,0,0,0.18)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.12),0_10px_30px_rgba(0,0,0,0.55)]"
         >
           {options.map((o, i) => {

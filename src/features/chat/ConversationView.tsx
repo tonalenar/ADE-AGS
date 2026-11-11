@@ -1,3 +1,4 @@
+import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -83,6 +84,8 @@ function rectIn(el: HTMLElement | null) {
 export function ConversationView({ card, cards = [] }: { card: ConversationCard; cards?: ConversationCard[] }) {
   const { t } = useTranslation();
   const followUpBehavior = useChatPrefs().followUpBehavior;
+  // "Contexto do composer": a branch e o worktree só ficam abaixo do composer se a preferência pedir.
+  const composerContext = useDisplayPrefs().composerContext;
   const planCapability = useHarnessCapability("tui", matrixProviderForAgent(card.agentId), "plan");
   const hasPlan = planCapability.support === "supported";
   const timeline = hasTimeline(card.agentId);
@@ -239,7 +242,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           teamOptions={team?.mentions} onPlan={!locked && hasPlan ? () => retune({ plan: !access.plan }) : undefined}
           context={context} />}
         controls={controls} />
-      <ContextStrip branch={card.branch} worktree={card.isWorktree}>
+      <ContextStrip branch={card.branch} worktree={card.isWorktree} showContext={composerContext}>
         <ProjectScriptsMenu key={card.tabId} cwd={card.cwd} owner={{
           kind: card.tabId.startsWith("thread:") ? "thread" : "tab",
           id: card.tabId,
