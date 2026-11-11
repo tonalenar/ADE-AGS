@@ -18,10 +18,11 @@ import { CommitGraph } from "./CommitGraph";
 import { CreateTagDialog } from "./CreateTagDialog";
 import { GraphBranchFilter, logRefs, useGraphRefs, useGraphRefsLabel } from "./GraphBranchFilter";
 import { scmHeadline } from "./headline";
+import { readCommitWritingPreferences } from "./writingStyle";
 import { TagsSection } from "./TagsSection";
 import { ScmWorktreesSection } from "./WorktreesSection";
 import {
-  scmCheckout, scmCommit, scmDiscard, scmFetch, scmInit, scmLog, scmPull, scmPush, scmStage, scmStatus, scmUnstage,
+  scmCheckout, scmCommit, scmDiscard, scmFetch, scmGenerateCommitMessage, scmInit, scmLog, scmPull, scmPush, scmStage, scmStatus, scmUnstage,
 } from "./ipc";
 import { isScmError, type Commit, type Provider, type ScmEntry, type ScmError, type ScmStatus } from "./types";
 
@@ -441,6 +442,15 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
         )}
 
         <div className="flex flex-col gap-1.5 px-2.5 pt-2.5 pb-2">
+          <Button size="sm" variant="custom" disabled={!!busy || stagedCount === 0 || status.conflicted.length > 0}
+            onClick={() => run("generateMessage", async () => {
+              const preferences = readCommitWritingPreferences();
+              const suggestion = await scmGenerateCommitMessage(status.root, preferences.mode, preferences.language, preferences.customInstructions);
+              setMessage(suggestion);
+            })}
+            className="self-end h-6 px-2 rounded-md text-[11px] font-medium text-accent-700 dark:text-accent-300 hover:bg-accent-500/10 disabled:opacity-40">
+            {busy === "generateMessage" ? t("scm.generatingMessage") : t("scm.generateMessage")}
+          </Button>
           <TextArea
             value={message}
             onChange={(e) => setMessage(e.target.value)}

@@ -9,6 +9,7 @@
 //! sin cuenta sigue usando lo que git ya tenga configurado — credential helper, agente SSH.
 
 mod commands;
+mod commit_message;
 mod git;
 mod parse;
 mod remote;

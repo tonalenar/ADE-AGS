@@ -47,5 +47,7 @@ describe("barra das Configurações (a mesma em todos os modos)", () => {
     expect(settingsMatch("general", "idioma", t)).toBe(true);
     expect(settingsMatch("devices", "ios", t)).toBe(true);
     expect(settingsMatch("devices", "idioma", t)).toBe(false);
+    expect(settingsMatch("sourceControl", "commit", t)).toBe(true);
+    expect(settingsMatch("sourceControl", "mensagem de commit", t)).toBe(true);
   });
 });

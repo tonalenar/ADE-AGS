@@ -31,6 +31,7 @@ import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
 import { DevicesSection } from "@/features/settings/DevicesSection";
 import { WorktreesSection } from "@/features/settings/WorktreesSection";
+import { SourceControlSettings } from "@/features/settings/SourceControlSettings";
 import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
 import { ClaudeAutoCompactSetting } from "@/features/chat/ClaudeAutoCompactSetting";
 import { SnoozeOptionsSetting } from "@/features/chat/SnoozeOptionsSetting";
@@ -155,6 +156,7 @@ export function SettingsPage() {
     decisions: t("settings.decisions"),
     devices: t("settings.devices"),
     worktrees: t("settings.worktrees"),
+    sourceControl: t("settings.sourceControl"),
     permissions: t("settings.permissions"),
     advanced: t("settings.advanced"),
   };
@@ -244,6 +246,8 @@ export function SettingsPage() {
           )}
 
           {section === "accounts" && <ContasSection />}
+
+          {section === "sourceControl" && <SourceControlSettings />}
 
           {section === "agents" && (
             <>

@@ -13,6 +13,8 @@ export const scmDiscard = (root: string, tracked: string[], untracked: string[])
   invoke<void>("scm_discard", { root, tracked, untracked });
 export const scmCommit = (root: string, message: string, stageAll: boolean) =>
   invoke<void>("scm_commit", { root, message, stageAll });
+export const scmGenerateCommitMessage = (root: string, style: string, language: string, customInstructions: string) =>
+  invoke<string>("scm_generate_commit_message", { root, style, language, customInstructions });
 export const scmBranches = (root: string) => invoke<Branch[]>("scm_branches", { root });
 export const scmCheckout = (root: string, name: string, create: boolean, remote: boolean) =>
   invoke<void>("scm_checkout", { root, name, create, remote });
