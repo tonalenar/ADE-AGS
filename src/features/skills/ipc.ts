@@ -2,6 +2,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type {
+  AgentSkillScan,
   SkillFrontmatterInput,
   SkillPreview,
   SkillSummary,
@@ -97,3 +98,10 @@ export const setSkillAlwaysOn = (skillId: string, on: boolean) =>
 export const skillsDir = () => invoke<string>("get_skills_dir");
 
 export const setSkillsDir = (path: string) => invoke<void>("set_skills_dir", { path });
+
+/**
+ * Skills que o agente acha no disco para o menu do `/` (`skills/agent_scan.rs`). Só lê metadados. `threadId` é a
+ * conversa: a varredura lê a pasta da conta dela, não a do processo da ADE.
+ */
+export const agentSkillsScan = (cwd: string | null, agentId: string, threadId: string | null = null) =>
+  invoke<AgentSkillScan[]>("agent_skills_scan", { cwd, agentId, threadId });

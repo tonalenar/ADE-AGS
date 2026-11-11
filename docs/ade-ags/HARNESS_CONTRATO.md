@@ -296,6 +296,29 @@ Lacunas reais, em ordem de risco:
 - Um teste (`o_steer_do_claude_fica_unknown_ate_haver_captura_real`) fixa o texto da observação. Outro (`a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor`) amarra a tabela a `Engine::capabilities()`: `mid_turn = Steer` exige `steer != Unsupported`; `Interrupt` exige `Unsupported`; o mesmo para `compact` e `goal`.
 - A cópia da tela, que promete só "entra no turno em andamento", continua decisão de produto (§8): a captura sem ferramenta mostra o outro destino.
 
+### 1.9 Comandos e skills no `/` (`comandos`)
+
+Linha fora das 19, como `ags_mcp` (não entra na contagem da §1.3). Diz se o menu do `/` do chat lista comandos e skills que o agente **aceita**, e de onde vem a lista. Quando a célula é `Unknown` ou `Unsupported`, o menu não mostra skill nenhuma daquele agente.
+
+<!-- comandos:inicio -->
+| Superfície | Provider | `comandos` |
+|---|---|---|
+| chat | claude-code | Supported |
+| chat | codex | Supported |
+| chat | opencode | Supported |
+| chat | antigravity | Supported |
+| chat | cursor | Supported |
+| chat | local-acp | Supported |
+| fleet, tui | (todos) | Unsupported |
+<!-- comandos:fim -->
+
+- **Fonte nativa do protocolo:** Claude (`initialize.commands`), Codex (`skills/list`) e OpenCode/local-acp (ACP `available_commands_update`). Quando Antigravity estiver numa sessão ACP, o evento alimenta a lista; o adapter Antigravity `agy --print` não abre ACP.
+- **Varredura de pastas** (`skills/agent_scan.rs`): Claude (`CLAUDE_CONFIG_DIR`, `.claude/skills`, plugins), Codex (`.agents/skills`, `~/.agents/skills`, `CODEX_HOME/skills`), Cursor (`.cursor/skills` e `.agents/skills`, globais e do projeto) e Antigravity (`GEMINI_HOME/config/skills`, `GEMINI_HOME/antigravity-cli/skills`, mais `.agents/skills` só do projeto). Cursor e Antigravity respeitam limites de bytes/entradas e leem somente o frontmatter; nada é executado e o corpo não é lido. Antigravity ignora `~/.agents/skills`.
+- **Conta da aba:** a varredura usa a conta associada à conversa (`chat_thread.account_id` → `agent_accounts.dir`); Cursor e Antigravity tratam esse diretório como `HOME`. Não lê o keyring nem secrets. Sem conta associada, usam o `HOME` do processo.
+- **Fora do chat (Fleet e TUI):** não há composer estruturado, então não há menu.
+- **Inserção:** `/nome` para Claude, Antigravity, OpenCode e local-acp; `$nome` para Codex e Cursor. O Cursor recebe `/nome` no envio para skills conhecidas. O Claude também recebe a última menção conhecida do texto como `/nome` inicial e o restante como argumento.
+- **Provas e limites:** fixture ACP gravada, árvores temporárias sintéticas e vitest. Cursor e Antigravity não foram testados com agente real nesta rodada; comandos nativos do Antigravity ACP dependem de uma sessão ACP que anuncie `available_commands_update`.
+
 ## 2. Modelo de identidade
 
 ### 2.1 O que existe hoje

@@ -737,6 +737,7 @@ pub fn run() {
             crate::skills::create_skill,
             crate::skills::fork_skill,
             crate::skills::list_skills,
+            crate::skills::agent_skills_scan,
             crate::skills::get_skill_detail,
             crate::skills::update_skill_content,
             crate::skills::delete_skill,

@@ -225,6 +225,9 @@ pub struct ProviderMatrix {
     /// Fora das 19: a conversa nasce como cópia da sessão nativa de outra num ponto estável (fork nativo do
     /// provider)? Hoje só a pergunta lateral usa (`conversa::fork`). `Unsupported` = cai no recorte do histórico.
     pub fork: Claim,
+    /// Fora das 19, como `ags_mcp`: o menu do `/` lista comandos e skills que o agente aceita? A célula diz de
+    /// onde vem a lista (nativa do protocolo ou varredura de pastas) e, quando não há, o que falta provar.
+    pub comandos: Claim,
 }
 
 /// Contagem por estado, para o doc e para os testes.

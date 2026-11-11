@@ -64,3 +64,16 @@ export interface SkillPreview {
   /** Campos sugeridos que no vinieron en el frontmatter — completarlos es opcional. */
   missing: string[];
 }
+
+/**
+ * Skill que o agente acha no disco (ver `skills/agent_scan.rs`): só metadados do SKILL.md.
+ * `name` é o que vai depois da barra; `plugin` é o prefixo de plugin (`design` em `design:design-critique`).
+ */
+export interface AgentSkillScan {
+  name: string;
+  description: string | null;
+  displayName?: string | null;
+  userInvocationOnly?: boolean | null;
+  plugin: string | null;
+  scope: "user" | "project" | "plugin";
+}

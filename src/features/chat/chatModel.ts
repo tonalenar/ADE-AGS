@@ -162,11 +162,12 @@ export interface LaunchChoice {
   plan?: boolean;
 }
 
-/** Comando anunciado pela sessão ACP ativa do provedor. */
+/** Comando anunciado pela sessão ACP ativa do provedor. `kind: "skill"` quando o agente o anuncia como skill (Codex). */
 export interface ProviderSlashCommand {
   name: string;
   description: string;
   inputHint: string | null;
+  kind?: "skill" | "command";
 }
 
 /** Uma opção `select` que o provedor ACP anunciou para a sessão atual. */

@@ -70,6 +70,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/claude.rs:235-239", "src-tauri/src/ipc/mcp.rs:2826-2840"], "MCP `ags` injetado na conversa"),
         fork: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/conversa/fork.rs", "src-tauri/src/conversa/claude_map.rs", "src-tauri/src/conversa/fork_test.rs", "src-tauri/src/conversa/fork_portatil_test.rs"], "`--resume <sessão> --fork-session --session-id <nova>`: a sessão nova nasce como cópia da transcrição; a origem não é tocada. Com a origem no meio de um turno, `--resume-session-at <uuid>` corta a cópia na última mensagem do último turno concluído (`chat_run.end_uuid`); sem o uuid, a pergunta leva o contexto portátil"),
+        comandos: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/conversa/claude.rs:298-299", "src-tauri/src/conversa/claude_map.rs", "src-tauri/src/skills/agent_scan.rs", "src-tauri/src/skills/agent_scan_test.rs"], "lista nativa do `initialize.commands`; sem ela, varredura da `CLAUDE_CONFIG_DIR` da conta (usuário, projeto `.claude/skills`, plugins). `/nome` no início; `$nome` no meio vira `/nome` no envio"),
     },
     ProviderMatrix {
         surface: Surface::Chat,
@@ -97,6 +98,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/codex.rs:386-387", "src-tauri/src/ipc/mcp.rs:2900-2920"], "MCP `ags` por `-c mcp_servers.ags.*`"),
         fork: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/conversa/fork.rs", "src-tauri/src/conversa/codex.rs", "src-tauri/src/conversa/fork_test.rs"], "`thread/fork` com `lastTurnId` (inclusivo, turno concluído): o ponto estável é o último turno concluído, mesmo com a origem trabalhando"),
+        comandos: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/conversa/codex.rs", "src-tauri/src/conversa/codex_map.rs", "src-tauri/src/conversa/test.rs", "src-tauri/src/skills/agent_scan.rs", "src-tauri/src/skills/agent_scan_test.rs"], "`skills/list` do app-server para o cwd, só habilitados, em segundo plano; sem ele, varredura de `.agents/skills` do cwd até a raiz do repo, de `~/.agents/skills` e de `CODEX_HOME/skills` da conta. Insere `$nome`, que o Codex aceita no próprio texto"),
     },
     ProviderMatrix {
         surface: Surface::Chat,
@@ -124,6 +126,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/opencode.rs:474-489"], "MCP `ags` por configuração do OpenCode"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "sem fork nativo no ADE para este motor: a pergunta lateral leva o histórico como contexto portátil (`fork_portatil`, modo `portable`), avisado na tela"),
+        comandos: claim_sup(Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode.rs", "src-tauri/src/conversa/opencode_map.rs"], "lista nativa do ACP (`available_commands_update`). Sem varredura: o OpenCode carrega skills pela tool `skill` do modelo, e não há `/nome` confirmado para elas. Insere `/nome`"),
     },
     ProviderMatrix {
         surface: Surface::Chat,
@@ -151,6 +154,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/agy.rs:229-235", "src-tauri/src/ipc/mcp.rs:2922-2940"], "MCP `ags` por perfil de conversa"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "sem fork nativo no ADE para este motor: a pergunta lateral leva o histórico como contexto portátil (`fork_portatil`, modo `portable`), avisado na tela"),
+        comandos: claim_sup(Scope::Session, Proof::Fixture, &["src-tauri/src/conversa/opencode.rs::slash_command_tests", "src-tauri/src/conversa/fixtures/protocolo/antigravity-available-commands.json", "src-tauri/src/skills/agent_scan_test.rs::antigravity_varre_home_da_conta_e_agents_do_projeto_sem_agents_global", "src-tauri/src/skills/agent_scan_test.rs::varredura_de_provider_respeita_limites_de_entradas_e_bytes"], "usa `available_commands_update` quando a conversa ACP anuncia comandos; no `agy --print`, o fallback lê GEMINI_HOME da conta e `.agents/skills` do projeto. Só metadados; insere `/nome`"),
     },
     ProviderMatrix {
         surface: Surface::Chat,
@@ -178,6 +182,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/ipc/mcp.rs:2826-2840", "src-tauri/src/agents/registry.rs:403"], "`McpStyle::None`: a conversa abre sem as ferramentas `ags`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "sem fork nativo no ADE para este motor: a pergunta lateral leva o histórico como contexto portátil (`fork_portatil`, modo `portable`), avisado na tela"),
+        comandos: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/skills/agent_scan_test.rs::cursor_varre_skills_globais_e_do_projeto_so_com_metadados", "src-tauri/src/skills/agent_scan_test.rs::varredura_de_provider_respeita_limites_de_entradas_e_bytes", "src/features/chat/tests/agentSlashCodex.test.ts", "src/features/chat/tests/skillMentions.test.ts"], "varre `.cursor/skills` e `.agents/skills` globais e do projeto; lê somente frontmatter e limita bytes/entradas. O composer insere `$nome` e converte skills conhecidas para `/nome` no envio"),
     },
     ProviderMatrix {
         surface: Surface::Chat,
@@ -205,6 +210,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unk(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/opencode.rs:270-281", "src-tauri/src/conversa/opencode.rs:340-349"], "captura de um agente ACP local listando e chamando as ferramentas `ags`", "o `ags` entra em `mcpServers` no `session/new`; o agente pode ignorá-lo"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "sem fork nativo no ADE para este motor: a pergunta lateral leva o histórico como contexto portátil (`fork_portatil`, modo `portable`), avisado na tela"),
+        comandos: claim_sup(Scope::Session, Proof::Code, &["src-tauri/src/conversa/opencode.rs", "src-tauri/src/conversa/opencode_map.rs"], "a mesma lista ACP do OpenCode (`available_commands_update`); aparece o que o agente local anuncia"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -232,6 +238,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/runs/agents.rs:124-131"], "`--mcp-config`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -259,6 +266,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/runs/adapters.rs:529-549"], "não recebe MCP"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -286,6 +294,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/runs/adapters.rs:367-399"], "`-c mcp_servers.ags…`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -313,6 +322,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/runs/adapters.rs:179-242"], "`OPENCODE_CONFIG_CONTENT`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -340,6 +350,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/runs/adapters.rs:639-656"], "não recebe MCP"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -367,6 +378,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/adapter.rs:190-196"], "sem headless"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -394,6 +406,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unk(Scope::Instance, Proof::Code, &["src-tauri/src/runs/supervisor.rs:270-276", "src-tauri/src/agents/adapter.rs:232"], "inspeção do perfil gerado para uma tarefa real", "o adapter declara orquestração, mas o inventário não verificou as ferramentas no perfil da tarefa"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Fleet,
@@ -421,6 +434,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/adapter.rs:219-225"], "sem headless"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -448,6 +462,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:251"], "MCP `ags` por flags do Claude"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -475,6 +490,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:267"], "`McpStyle::None`: a TUI não recebe as ferramentas `ags`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -502,6 +518,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:294"], "MCP `ags` por overrides de config do Codex"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -529,6 +546,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:325"], "MCP `ags` por configuração do OpenCode"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -556,6 +574,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:345"], "`McpStyle::None`: a TUI não recebe as ferramentas `ags`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -583,6 +602,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unk(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:364", "src-tauri/src/agents/adapter.rs:190-196"], "listar as ferramentas `ags` visíveis numa sessão Hermes real", "tem MCP gerenciado, mas o adapter não declara orquestração"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -610,6 +630,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:384"], "`McpStyle::None`; o flag `Capabilities.mcp` do adapter contradiz o registro (`adapter.rs:93` e `:232`)"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
     ProviderMatrix {
         surface: Surface::Tui,
@@ -637,6 +658,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/agents/registry.rs:403"], "`McpStyle::None`: a TUI não recebe as ferramentas `ags`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "o fork é da conversa por protocolo (chat); esta superfície não forka"),
+        comandos: claim_unsup(Scope::Session, Proof::Code, &["src/features/chat/ComposerAssistMenu.tsx"], "sem conversa estruturada nesta superfície: o menu do `/` não existe aqui"),
     },
 ];
 

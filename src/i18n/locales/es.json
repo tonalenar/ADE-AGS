@@ -4335,6 +4335,8 @@
   "chat.composer.assist.group.provider": "Proveedor",
   "chat.composer.assist.group.skills": "Skills",
   "chat.composer.assist.group.pullRequests": "Pull requests",
+  "chat.composer.assist.skillScope.user": "Personal",
+  "chat.composer.assist.skillScope.project": "Proyecto",
   "chat.composer.assist.command.model": "Agente y modelo",
   "chat.composer.assist.command.modelDetail": "Abrir el selector de agente, modelo y razonamiento",
   "chat.composer.assist.command.terminal": "Terminal",

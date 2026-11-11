@@ -322,7 +322,12 @@ pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, fr
 async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>) -> Result<Arc<Session>, String> {
     let session = spawn(app, db, row, env, start)?;
     // O `--resume` de uma sessão que não existe fecha o processo antes de responder.
-    if let Err(e) = session.control("initialize", json!({})).await {
+    let init = session.control("initialize", json!({})).await;
+    if let Ok(response) = &init {
+        // Os comandos que o Claude anuncia viram a lista do composer, como o ACP faz com `available_commands_update`.
+        emit(app, &row.id, "commands", json!({ "commands": claude_map::initialize_commands(response) }));
+    }
+    if let Err(e) = init {
         // O que o processo escreveu antes de fechar diz se a sessão sumiu ("No conversation found…").
         let tail = session.stderr.lock().ok().map(|t| t.iter().rev().take(2).rev().cloned().collect::<Vec<_>>().join(" | ")).unwrap_or_default();
         session.kill();
