@@ -59,7 +59,7 @@ function useDismiss(open: boolean, close: () => void) {
 
 /** O seletor de aparelho: os físicos ("Aparelhos", pelo CoreDevice) e os do Xcode ("Simuladores"), com busca e o
  *  estado de cada um. `picked` = o id escolhido (UDID do simulador ou `device:<id>` do físico). */
-function DevicePicker({ devices, current, picked, state, label, onPick, onOpen }: {
+function DevicePicker({ devices, current, picked, state, label, onPick, onOpen, showStatusDot = true }: {
   devices: SimDevice[];
   current: SimDevice | undefined;
   picked: string | undefined;
@@ -67,6 +67,7 @@ function DevicePicker({ devices, current, picked, state, label, onPick, onOpen }
   label: string;
   onPick: (udid: string) => void;
   onOpen: () => void;
+  showStatusDot?: boolean;
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
@@ -86,7 +87,7 @@ function DevicePicker({ devices, current, picked, state, label, onPick, onOpen }
     <div ref={ref} className="relative min-w-0">
       <button type="button" onClick={() => { if (!open) onOpen(); setOpen(!open); }} title={t("simulator.pick")} aria-haspopup="listbox" aria-expanded={open}
         className="nodrag cc-t flex h-7 min-w-0 max-w-full items-center gap-2 rounded-full bg-white/8 pl-2.5 pr-2 text-[11.5px] text-white hover:bg-white/12">
-        <Dot state={state} />
+        {showStatusDot && <Dot state={state} />}
         <span className="truncate">{label}</span>
         <span aria-hidden className="text-[9px] opacity-50">▼</span>
       </button>
@@ -207,7 +208,7 @@ export function SimulatorBar({ full, devices, current, physical, state, scale, l
     <div className="ade-node-drag relative z-20 flex w-full items-center gap-0.5 rounded-full pl-1.5 pr-1 cursor-grab active:cursor-grabbing
       bg-surface/92 backdrop-blur-md ring-1 ring-white/10 shadow-[0_10px_30px_-10px_rgba(0,0,0,0.6)] ade-device-bar-in"
       style={{ height: SIM_BAR_H }}>
-      <DevicePicker devices={devices} current={current} picked={physical?.id ?? current?.udid} state={dot} label={label} onPick={actions.onPick} onOpen={actions.onOpenPicker} />
+      <DevicePicker devices={devices} current={current} picked={physical?.id ?? current?.udid} state={dot} label={label} onPick={actions.onPick} onOpen={actions.onOpenPicker} showStatusDot={!physical} />
       {physical ? (
         <>
           {physical.disconnected

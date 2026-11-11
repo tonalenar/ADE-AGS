@@ -117,7 +117,7 @@ export function MirrorStatusLine({ status, className = "" }: { status: MirrorSta
  * com o estado por baixo. A view fica transparente até o primeiro quadro e quando a conexão some, então o texto
  * daqui aparece nessas horas; ligado, o vídeo cobre tudo. Só ver: o clique na tela não vai para o aparelho.
  */
-export function PhysicalMirror({ screenId, device, known, status, radius, onError, pausedAction, engaged = true }: {
+export function PhysicalMirror({ screenId, device, known, status, radius, onError, pausedAction, engaged = true, showStatus = true }: {
   screenId: string;
   device: string;
   /** O aparelho está na lista do CoreDevice agora. */
@@ -128,6 +128,8 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
   pausedAction?: ReactNode;
   /** A superfície está aberta. Fechada, a view fica no lugar e o espelho não começa. */
   engaged?: boolean;
+  /** O painel lateral exibe o estado na barra única, sem duplicá-lo sobre a tela. */
+  showStatus?: boolean;
 }) {
   const { t } = useTranslation();
   const disconnected = useIphoneStore((s) => s.disconnectedDevices.includes(device));
@@ -141,7 +143,7 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
   if (disconnected) {
     return (
       <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-black px-6 text-center">
-        <p className="m-0 max-w-[28ch] text-[12.5px] leading-relaxed text-white/70">{t("iphone.session.paused")}</p>
+        {showStatus && <p className="m-0 max-w-[28ch] text-[12.5px] leading-relaxed text-white/70">{t("iphone.session.paused")}</p>}
         {pausedAction}
       </div>
     );
@@ -151,7 +153,7 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
 
   return (
     <>
-      <div data-over-webview={state === "paused" ? "" : undefined} className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center">
+      {showStatus && <div data-over-webview={state === "paused" ? "" : undefined} className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-5 text-center">
         {state === "paused" ? (
           <>
             <span className="max-w-[280px] text-[12.5px] leading-snug text-white/75">{t("iphone.screen.pausedBody")}</span>
@@ -164,7 +166,7 @@ export function PhysicalMirror({ screenId, device, known, status, radius, onErro
           <span className="text-[12.5px] leading-snug text-white/70">{note}</span>
         )}
         {status?.error && state !== "live" && state !== "paused" && <span className="line-clamp-3 text-[11px] leading-snug text-white/45">{status.error}</span>}
-      </div>
+      </div>}
       <NativeScreen key={activeScreenId} api={MIRROR_API} screenId={activeScreenId} target={device} radius={radius} onError={onError} engaged={engaged} />
     </>
   );
