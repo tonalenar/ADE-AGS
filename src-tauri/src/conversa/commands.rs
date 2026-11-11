@@ -54,13 +54,15 @@ pub async fn chat_thread_send(
     text: String,
     images: Option<Vec<String>>,
     client_request_id: Option<String>,
+    fast_mode: Option<bool>,
 ) -> Result<Option<super::send_receipt::SendReceipt>, String> {
     let db = db.inner().clone();
     let images = images.unwrap_or_default();
+    let fast_mode = fast_mode.unwrap_or(false);
     // Sem o id, o caminho é o de sempre e a resposta continua vazia (`null`).
     match client_request_id {
-        Some(request_id) => api::send_with_request(&app, &db, &thread_id, &text, &images, "ui", &request_id).await.map(Some),
-        None => api::send_with(&app, &db, &thread_id, &text, &images).await.map(|()| None),
+        Some(request_id) => api::send_with_request_and_fast_mode(&app, &db, &thread_id, &text, &images, "ui", &request_id, fast_mode).await.map(Some),
+        None => api::send_with_fast_mode(&app, &db, &thread_id, &text, &images, fast_mode).await.map(|()| None),
     }
 }
 

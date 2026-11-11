@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::claude_map::{launch_args, Start};
-use super::memoria::{config_id, prepare, Inputs, Memory};
+use super::memoria::{config_id, merge_session_settings, prepare, Inputs, Memory};
 use super::store::ThreadRow;
 
 struct Root(PathBuf);
@@ -87,6 +87,22 @@ fn a_conversa_nasce_com_os_hooks_e_o_mcp_do_ai_memory() {
     assert!(hooks["hooks"]["SessionStart"][0]["hooks"][0]["command"].as_str().unwrap().contains("hook --event session-start"));
     assert_eq!(memory.args.iter().filter(|a| *a == "--settings").count(), 1);
     assert_eq!(memory.args.iter().filter(|a| *a == "--mcp-config").count(), 1);
+}
+
+#[test]
+fn as_configuracoes_fast_da_sessao_somam_aos_hooks_temporarios() {
+    let root = Root::new();
+    let mut memory = run(&root, true, Some("/opt/ai-memory"), &claude_argv());
+    let settings = PathBuf::from(value_of(&memory.args, "--settings").unwrap());
+    merge_session_settings(&mut memory, &serde_json::json!({ "fastMode": true, "ultracode": true }))
+        .unwrap();
+    let merged: serde_json::Value = serde_json::from_slice(&fs::read(&settings).unwrap()).unwrap();
+    assert!(merged["hooks"]["SessionStart"].is_array());
+    assert_eq!(merged["fastMode"], true);
+    assert_eq!(merged["ultracode"], true);
+    assert_eq!(memory.args.iter().filter(|arg| *arg == "--settings").count(), 1);
+    drop(memory);
+    assert!(!settings.exists(), "o arquivo temporário combinado precisa seguir o ciclo de vida dos hooks");
 }
 
 #[test]

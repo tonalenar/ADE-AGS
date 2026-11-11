@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // `vi.mock` é içado para o topo do arquivo: os mocks que ele usa também precisam estar lá.
 const { chatThreadSend, agentSkillsScan } = vi.hoisted(() => ({
-  chatThreadSend: vi.fn(async (_id: string, _text: string, _images?: string[]) => undefined),
+  chatThreadSend: vi.fn(async (_id: string, _text: string, _images?: string[], _fastMode?: boolean) => undefined),
   agentSkillsScan: vi.fn(async (_cwd: string | null, _agentId: string, _threadId?: string | null) => [
     { name: "deploy", description: "Publica o app", plugin: null, scope: "user" as const },
   ]),
@@ -43,7 +43,7 @@ describe("sendToThread: $nome no envio", () => {
     await flush();
 
     expect(agentSkillsScan).toHaveBeenCalledWith("/projeto", "claude-code", "t1");
-    expect(chatThreadSend).toHaveBeenCalledWith("t1", "/deploy Use agora", undefined);
+    expect(chatThreadSend).toHaveBeenCalledWith("t1", "/deploy Use agora", undefined, false);
   });
 
   it("o Codex manda o texto como foi escrito, sem consultar a varredura", async () => {
@@ -53,7 +53,7 @@ describe("sendToThread: $nome no envio", () => {
     await flush();
 
     expect(agentSkillsScan).not.toHaveBeenCalled();
-    expect(chatThreadSend).toHaveBeenCalledWith("t1", "Use $deploy agora", undefined);
+    expect(chatThreadSend).toHaveBeenCalledWith("t1", "Use $deploy agora", undefined, false);
   });
 
   it("o Cursor transforma menção de skill conhecida em comando nativo no envio", async () => {
@@ -63,7 +63,7 @@ describe("sendToThread: $nome no envio", () => {
     await flush();
 
     expect(agentSkillsScan).toHaveBeenCalledWith("/projeto", "cursor", "t1");
-    expect(chatThreadSend).toHaveBeenCalledWith("t1", "Use /deploy agora", undefined);
+    expect(chatThreadSend).toHaveBeenCalledWith("t1", "Use /deploy agora", undefined, false);
   });
 
   it("texto sem cifrão vai direto, sem varredura", async () => {
@@ -73,6 +73,6 @@ describe("sendToThread: $nome no envio", () => {
     await flush();
 
     expect(agentSkillsScan).not.toHaveBeenCalled();
-    expect(chatThreadSend).toHaveBeenCalledWith("t1", "oi", undefined);
+    expect(chatThreadSend).toHaveBeenCalledWith("t1", "oi", undefined, false);
   });
 });

@@ -87,6 +87,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `rollback` | U | U | U | U | U | U |
 | `usage` | S | S | S | S | U | ? |
 | `event_source` | S | S | S | S | S | S |
+| `fast_mode` | S | S | U | U | U | U |
 | `ags_mcp` (extra) | S | S | S | S | U | ? |
 
 **Frota headless (`runs/`)**
@@ -112,6 +113,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `rollback` | S | S | S | S | S | U | S | U |
 | `usage` | S | S | S | S | U | U | S | U |
 | `event_source` | S | S | S | S | S | U | S | U |
+| `fast_mode` | S | U | S | U | U | U | U | U |
 | `ags_mcp` (extra) | S | U | S | S | U | U | ? | U |
 
 **TUI em PTY**
@@ -137,17 +139,20 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `rollback` | S | S | S | S | S | S | S | S |
 | `usage` | S | U | S | S | U | U | ? | U |
 | `event_source` | S | S | S | S | S | S | S | S |
+| `fast_mode` | S | U | S | U | U | U | U | U |
 | `ags_mcp` (extra) | S | U | S | S | U | ? | U | U |
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 20 capabilities = **440 células**: **171 `Supported`, 32 `Unknown`, 237 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 440): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`; `fork` (pergunta lateral) e `comandos` (menu do `/`, §1.9) também ficam fora das 440. O Fast é capability por superfície; a disponibilidade concreta continua dependendo do modelo no roster.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 20 capabilities = **440 células**: **173 `Supported`, 32 `Unknown`, 235 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 440): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`; `fork` (pergunta lateral) e `comandos` (menu do `/`, §1.9) também ficam fora das 440. Fast tem suporte em Chat para Claude e Codex; a disponibilidade concreta continua dependendo do modelo no roster.
+
+No chat estruturado, as preferências do composer chegam ao turno pelo IPC: Codex usa o nível `serviceTier` compartilhado com a Frota, e Claude abre a sessão com `fastMode` somado aos hooks temporários do ai-memory. Ultrathink e Ultracode já são resolvidos pelo catálogo e adapter comuns ao chat.
 
 <!-- contagem-matriz:inicio -->
 | Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
 |---|---|---:|---:|---:|---|
-| Chat | claude-code | 14 | 2 | 4 | Supported |
-| Chat | codex | 14 | 0 | 6 | Supported |
+| Chat | claude-code | 15 | 2 | 3 | Supported |
+| Chat | codex | 15 | 0 | 5 | Supported |
 | Chat | opencode | 9 | 1 | 10 | Supported |
 | Chat | antigravity | 9 | 0 | 11 | Supported |
 | Chat | cursor | 8 | 0 | 12 | Unsupported |
@@ -766,7 +771,7 @@ Só o que é decisão de produto ou de autorização.
 - `a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor` e o fixture de índices de `guarda_encontra_padroes_indiretos_de_capability_sem_contar_identidade` falharam em recortes anteriores por tratar o ACP local como OpenCode e por índices desatualizados; ambos foram corrigidos e passaram na suíte completa.
 
 **Não verificado**
-- Nenhum CLI real de agente foi executado. As células `plan` têm prova de código/tabela e nenhuma reivindica `RealCapture`; as capturas pendentes permanecem em §1.4.
+- Nenhum CLI real de agente foi executado nesta rodada. As células `plan` têm prova de código/tabela e nenhuma reivindica `RealCapture`; as capturas pendentes permanecem em §1.4.
 - Nenhum teste visual, build ou instalação foi feito. Também não houve push ou PR.
 - O T3 (`main` móvel) não foi relido: §2.6 repete o inventário `antigravity-t3.md`.
 - Desempenho de `thread_execution_graph` e de árvores profundas continua **não medido**.

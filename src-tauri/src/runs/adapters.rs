@@ -25,6 +25,11 @@ use super::activity::{text_line, tool_label};
 use super::agents::{HeadlessAgent, Launch, LaunchCtx};
 use super::types::{AgentEvent, TaskOutcome};
 
+/// O nível Fast do Codex, compartilhado pela Frota e pelas conversas estruturadas.
+pub(crate) fn codex_fast_service_tier(fast_mode: bool) -> Option<&'static str> {
+    fast_mode.then_some("fast")
+}
+
 /// Lo que se va juntando de una corrida para armar el resultado al final.
 #[derive(Default)]
 struct Tally {
@@ -388,10 +393,10 @@ impl HeadlessAgent for Codex {
         if let Some(effort) = ctx.reasoning_effort {
             args.extend(["-c".into(), format!("model_reasoning_effort=\"{effort}\"")]);
         }
-        if ctx.fast_mode {
+        if let Some(tier) = codex_fast_service_tier(ctx.fast_mode) {
             // codex-cli 0.160.1: -c accepts TOML overrides; the generated real
             // protocol schema includes config.service_tier. No account file is edited.
-            args.extend(["-c".into(), "service_tier=\"fast\"".into()]);
+            args.extend(["-c".into(), format!("service_tier=\"{tier}\"")]);
         }
         if let Some(path) = &ctx.mcp_config {
             // Override only this execution; never rewrite the account's config.toml.

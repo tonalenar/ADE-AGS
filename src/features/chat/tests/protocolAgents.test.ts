@@ -9,9 +9,9 @@ describe("agentes por protocolo (espelho de conversa::api::Engine)", () => {
     expect(STRUCTURED_AGENTS.has("gemini-cli")).toBe(false);
   });
 
-  it("Fast desconhecido conserva o caminho legado até a matriz carregar; raciocínio segue a TUI", () => {
-    expect(fastModeSupported("codex")).toBe(true);
-    expect(fastModeSupported("claude-code")).toBe(true);
+  it("Fast desconhecido não aparece antes de a matriz provar suporte; raciocínio segue a TUI", () => {
+    expect(fastModeSupported("codex", "chat")).toBe(false);
+    expect(fastModeSupported("claude-code", "chat")).toBe(false);
     expect(reasoningEffortSupported("antigravity")).toBe(true);
     expect(reasoningEffortSupported("opencode")).toBe(false);
   });

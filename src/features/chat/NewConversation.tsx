@@ -235,7 +235,8 @@ export function NewConversation({ projects, folder, onFolder }: {
   const mine = !!agent && prefs.agentId === agent.id;
   // Por protocolo (sem TUI) o agente tem os acessos e o Plano do motor dele; na TUI, os flags dela.
   const viaProtocol = !!agent && (isLocalAcpAgent(agent.id) || (prefs.structured && isStructuredAgent(agent.id)));
-  const planCapability = useHarnessCapability(viaProtocol ? "chat" : "tui", matrixProviderForAgent(agent?.id), "plan");
+  const fastSurface = viaProtocol ? "chat" : "tui";
+  const planCapability = useHarnessCapability(fastSurface, matrixProviderForAgent(agent?.id), "plan");
   const hasPlan = planCapability.support === "supported";
   const modes = agent ? accessModesFor(agent.id, viaProtocol) : ["ask" as const];
   const access = modes.includes(prefs.access) ? prefs.access : modes.includes("safe") ? "safe" : "ask";
@@ -246,7 +247,7 @@ export function NewConversation({ projects, folder, onFolder }: {
     effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null,
     access,
     plan,
-    fastMode: fastModeSupported(agent?.id) && !viaProtocol && prefs.fastMode,
+    fastMode: fastModeSupported(agent?.id, fastSurface) && prefs.fastMode,
     worktree: workspaceMode.worktree,
     worktreeSubmodules: worktreeSubmodules.mode,
     structured: isLocalAcpAgent(agent?.id ?? "") || prefs.structured,
@@ -466,7 +467,7 @@ export function NewConversation({ projects, folder, onFolder }: {
         setComposing(true); // a tela não troca no meio da criação, nem na primeira conversa de todas
         const result = await launchDraftTeam({
           agent, cwd, workspaceId, title: conversationTitle(launchPrompt) ?? project.name, model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null,
-          access, plan: launchPlan, fastMode: fastModeSupported(agent.id) && !viaProtocol && prefs.fastMode,
+          access, plan: launchPlan, fastMode: fastModeSupported(agent.id, fastSurface) && prefs.fastMode,
           accountId: mine && !isLocalAcpAgent(agent.id) ? prefs.accountId : null, account: mine && !isLocalAcpAgent(agent.id) ? prefs.accountId ?? undefined : undefined, viaProtocol,
         }, draftMembers, launchPrompt, draftTarget, attachments);
         if (!result.ok) {
@@ -485,7 +486,7 @@ export function NewConversation({ projects, folder, onFolder }: {
           agentId: agent.id, cwd, workspaceId, title: conversationTitle(launchPrompt) ?? project.name,
           model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null, access: launchPlan ? "plan" : access,
           accountId: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.accountId : null,
-        }, sent.text, sent.images, background);
+        }, sent.text, sent.images, background, fastModeSupported(agent.id, fastSurface) && prefs.fastMode);
         update({ cwd: project.cwd, agentId: agent.id });
         return true;
       }
@@ -499,7 +500,7 @@ export function NewConversation({ projects, folder, onFolder }: {
         account: mine ? prefs.accountId ?? undefined : undefined,
         access,
         plan: launchPlan,
-        fastMode: fastModeSupported(agent.id) && prefs.fastMode,
+        fastMode: fastModeSupported(agent.id, fastSurface) && prefs.fastMode,
         background,
       });
       update({ cwd: project.cwd, agentId: agent.id });
@@ -543,13 +544,13 @@ export function NewConversation({ projects, folder, onFolder }: {
           controls={({ text, attachments, hasQuotes }) => (
             <>
               {withTeam && <TeamTargetSwitch orchestrator={DRAFT_KEY} />}
-              <AgentModelPicker agents={projectAgents} showAccount={!isLocalAcpAgent(agent?.id ?? "")} disabled={!projectPolicyLoaded || projectPolicySaving}
+              <AgentModelPicker agents={projectAgents} harnessSurface={fastSurface} showAccount={!isLocalAcpAgent(agent?.id ?? "")} disabled={!projectPolicyLoaded || projectPolicySaving}
                 value={{ agentId: agent?.id ?? null, model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null, account: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.accountId : null }}
                 permission={{ value: access, modes, onChange: (next) => update({ access: next, plan: false }) }}
-                speed={!viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}
+                speed={{ fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) }}
                 onCompare={(picks) => openCompareDialog(project?.cwd ?? "", { prompt: text, picks, attachments })}
                 compareDisabled={hasQuotes}
-                onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId) ? prefs.fastMode : false })} />
+                onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId, fastSurface) ? prefs.fastMode : false })} />
               {agent && hasPlan && (
                 <button type="button" onClick={() => update({ plan: !prefs.plan })} aria-pressed={plan}
                   title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}

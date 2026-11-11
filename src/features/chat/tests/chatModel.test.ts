@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chatCommand, chatProjects, conversationCards, conversationTitle, TITLE_MAX } from "@/features/chat/chatModel";
+import { chatCommand, chatProjects, conversationCards, conversationTitle, stripChatFlags, TITLE_MAX } from "@/features/chat/chatModel";
 import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 
 function ws(cwd: string, patch: Partial<WorkspaceNode> = {}): WorkspaceNode {
@@ -36,6 +36,13 @@ describe("chatCommand", () => {
 
   it("supervisionado não acrescenta flag de permissão", () => {
     expect(chatCommand("claude-code", "claude", { model: null, effort: null, access: "ask" })).toBe("claude");
+  });
+
+  it("retuning remove settings Fast do chat sem apagar settings da pessoa", () => {
+    expect(stripChatFlags("claude --settings /p/settings.json --settings '{\"fastMode\":true}' --model opus"))
+      .toBe("claude --settings /p/settings.json");
+    expect(stripChatFlags("claude --settings '{\"theme\":\"dark\"}' --settings '{\"ultracode\":true}'"))
+      .toBe("claude --settings '{\"theme\":\"dark\"}'");
   });
 
   it("Codex usa -m e o esforço por -c, com o modo normal explícito", () => {

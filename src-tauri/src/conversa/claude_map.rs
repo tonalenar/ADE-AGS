@@ -116,6 +116,30 @@ pub fn launch_args_with_auto_compact(
     start: Start<'_>,
     auto_compact_window: Option<u32>,
 ) -> Vec<String> {
+    launch_args_with_options(row, start, auto_compact_window, false)
+}
+
+/// Argv do Claude com as configurações privadas desta sessão, sem editar arquivos da conta.
+pub fn launch_args_with_options(
+    row: &ThreadRow,
+    start: Start<'_>,
+    auto_compact_window: Option<u32>,
+    fast_mode: bool,
+) -> Vec<String> {
+    let (mut args, settings) = launch_args_for_session(row, start, auto_compact_window, fast_mode);
+    if settings.as_object().is_some_and(|settings| !settings.is_empty()) {
+        args.extend(["--settings".into(), settings.to_string()]);
+    }
+    args
+}
+
+/// Argumentos do processo e configurações a combinar com os hooks temporários do ai-memory.
+pub fn launch_args_for_session(
+    row: &ThreadRow,
+    start: Start<'_>,
+    auto_compact_window: Option<u32>,
+    fast_mode: bool,
+) -> (Vec<String>, Value) {
     let mut args: Vec<String> = [
         "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
         // Os pedidos de permissão vêm pelo próprio stdio (`can_use_tool`), não por uma tool MCP.
@@ -125,15 +149,15 @@ pub fn launch_args_with_auto_compact(
     .map(String::from)
     .to_vec();
     let mut settings = serde_json::Map::new();
+    if fast_mode {
+        settings.insert("fastMode".into(), json!(true));
+    }
     if let Some(window) = auto_compact_window.filter(|n| (100_000..=1_000_000).contains(n)) {
         settings.insert("autoCompactWindow".into(), json!(window));
     }
     let special_effort = row.effort.as_deref();
     if special_effort == Some("ultracode") {
         settings.insert("ultracode".into(), json!(true));
-    }
-    if !settings.is_empty() {
-        args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]);
     }
     match start {
         Start::New(id) => args.extend(["--session-id".into(), id.into()]),
@@ -153,7 +177,7 @@ pub fn launch_args_with_auto_compact(
     } else if special_effort == Some("ultracode") {
         args.extend(["--effort".into(), "xhigh".into()]);
     }
-    args
+    (args, Value::Object(settings))
 }
 
 /// A mensagem do usuário no formato do `--input-format stream-json`.
