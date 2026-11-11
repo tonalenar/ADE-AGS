@@ -11,20 +11,21 @@ import { comparablePath, type BrowserView, type ViewOwner, type ViewTab } from "
 import { scmWorkingFiles } from "@/features/scm/ipc";
 import type { WorkingFiles } from "@/features/scm/types";
 
-import { ChevronDownIcon, MaximizeIcon, PanelRightIcon } from "./chatIcons";
-import { choosePanel, ENTRY_ICON, onEntryKey, PanelToolbar } from "./PanelToolbar";
+import { ColumnTabBar, openSurface } from "./ColumnTabBar";
+import { browserScope, pickResource, shellScope, type ColumnTab } from "./columnTabs";
+import { SurfaceLauncher } from "./SurfaceMenu";
 import { devicesShare } from "./devicesIpc";
 import { sharedDevices } from "./devicesModel";
 import { useWorkingDiff } from "./useWorkingDiff";
-import { ensureShellTab } from "./shellTerminal";
+import { claimShellTab } from "./shellTerminal";
 import { CHAT_SHELL_ATTR } from "./ConversationView";
-import { isAvailable, keyLabel, PANEL_ENTRIES, type PanelAvailability, type PanelChoice } from "./panelMenu";
+import type { PanelAvailability } from "./panelMenu";
 import { hasTimeline, type ConversationCard } from "./chatModel";
 import { TeamPanel } from "./team/TeamPanel";
 import { SideChatPanel } from "./SideChatPanel";
 import { PROTOCOL_AGENTS } from "./chatModel";
 import { TasksPanel } from "./tasks/TasksPanel";
-import { clampPanelWidth, PANEL_W, setChatBrowser, setChatShell, setPanelWidth, togglePanelMaximized, toggleRightPanel, useChatStore } from "./store";
+import { clampPanelWidth, PANEL_W, setChatBrowser, setChatShell, setColumnTabResource, setPanelWidth, useChatStore } from "./store";
 
 // Design e os aparelhos puxam o canvas (`@xyflow/react`): ficam fora do grafo estático do entry.
 const DesignPane = lazy(() => import("./DesignPane").then((m) => ({ default: m.DesignPane })));
@@ -58,6 +59,8 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   const maximized = useChatStore((s) => s.panelMaximized);
   const panelWidth = useChatStore((s) => s.panelWidth);
   const panelFocus = useChatStore((s) => s.panelFocus);
+  // A aba à vista: o `panel` é a superfície dela (o `reconcileColumn` garante que existe uma aba para ele).
+  const activeTab = useChatStore((s) => s.columnTabs.find((tab) => tab.id === s.columnActive && tab.kind === s.panel) ?? null);
   const contentRef = useRef<HTMLDivElement>(null);
   useShareDevices();
   // O atalho do Time (e quem mais pedir) leva o foco para dentro do painel.
@@ -65,14 +68,12 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   // A gaveta do agente: só a conversa de TUI com timeline. As outras abrem a aba Terminal (um shell na pasta).
   const drawerTabId = tabId && conversation && hasTimeline(conversation.agentId) ? tabId : null;
   const composerTarget = conversation?.tabId ?? tabId ?? "new-conversation";
-  const drawerOn = useChatStore((s) => (drawerTabId ? s.terminalOpen[drawerTabId] ?? false : false));
   if (!panel) return null;
   // O painel de PR depende de uma pasta de repositório.
   const available: PanelAvailability = { terminal: !!conversation && !!cwd, pr: !!cwd, side: !!conversation && (!!PROTOCOL_AGENTS[conversation.agentId] || conversation.agentId.startsWith("local-acp-")) };
-  const choose = (id: PanelChoice) => choosePanel(id, drawerTabId, drawerOn);
   const empty = panel === "empty";
-  const headBtn = "w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10";
-  // Windows e Linux: os botões da janela moram no canto direito; o conteúdo cede a altura deles. No macOS não há nada a ceder.
+  const owner = browserOwnerOf(conversation);
+  // Windows e Linux: os botões da janela moram no canto direito da barra, que cede o lugar deles. No macOS não há nada a ceder.
   const winControls = DESKTOP_OS === "windows" || DESKTOP_OS === "linux";
   return (
     <aside aria-label={t("chat.panel.label")}
@@ -81,32 +82,22 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
       // inteiro) e painel cabem sem nada passar da borda da janela (com 360 px, o terminal e o simulador eram cortados).
       className={`${maximized ? "flex-1" : "shrink"} relative min-w-[280px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
       {!maximized && <ResizeHandle />}
-      {/* Sem faixa de cabeçalho: a fileira de ícones e o recolher moram no cabeçalho principal e cada superfície
-          começa no topo da coluna. Fica só uma região de arrasto fina (não cobre os botões da superfície). */}
-      <div data-tauri-drag-region aria-hidden="true" className="absolute inset-x-0 top-0 h-2 z-10" />
       {winControls && <div className="absolute top-0 right-0 z-20"><WindowControls /></div>}
-      {/* Maximizado, o cabeçalho principal some: a fileira, o restaurar e o recolher vêm para uma barra flutuante discreta. */}
-      {maximized && (
-        <div className={`absolute right-3 z-20 flex items-center gap-1 rounded-lg bg-white/95 dark:bg-surface-deep/95 p-0.5 shadow-[0_0_0_1px_rgba(24,24,27,0.08),0_8px_24px_-12px_rgba(0,0,0,0.4)] ${winControls ? "top-9" : "top-2"}`}>
-          <PanelToolbar drawerTabId={drawerTabId} terminalAvailable={available.terminal} prAvailable={available.pr} sideAvailable={available.side} />
-          <button type="button" onClick={togglePanelMaximized} aria-pressed aria-label={t("chat.panel.maximize")} title={t("chat.panel.maximize")} className={`${headBtn} bg-gray-100 dark:bg-white/10`}>
-            <MaximizeIcon className="w-[15px] h-[15px]" />
-          </button>
-          <button type="button" onClick={toggleRightPanel} aria-label={t("chat.panel.toggle")} title={t("chat.panel.toggle")} className={headBtn}>
-            <PanelRightIcon className="w-[15px] h-[15px]" />
-          </button>
-        </div>
-      )}
-      <div ref={contentRef} tabIndex={-1} className={`flex-1 min-h-0 flex flex-col outline-none ${winControls ? "pt-8" : ""}`}>
-        {empty && <SurfaceLauncher available={available} onChoose={choose} />}
+      {/* A barra de abas da coluna (como a do T3 Code): abas, "+", expandir, painel inferior e recolher. */}
+      <ColumnTabBar available={available} drawerTabId={drawerTabId} reserveWindowControls={winControls}
+        scopes={{ browser: browserScope(cwd ?? "", owner), shell: shellScope(cwd ?? "") }} />
+      <div ref={contentRef} tabIndex={-1} className="flex-1 min-h-0 flex flex-col outline-none">
+        {empty && <SurfaceLauncher available={available} onPick={openSurface} />}
         {panel === "diff" && <DiffView tabId={tabId} cwd={cwd} />}
-        {panel === "shell" && cwd && <ShellSurface cwd={cwd} />}
+        {/* O terminal e o navegador não são montados aqui: cada aba só reserva o espaço e publica o retângulo, e o
+            `TerminalPanel`/`ViewTabsHost` desenham o PTY/a página por cima. Trocar de aba troca quem publica; nada desmonta. */}
+        {panel === "shell" && cwd && activeTab && <ShellSurface cwd={cwd} tab={activeTab} />}
         {panel === "files" && cwd && <FilesView cwd={cwd} repo={null} title={project} />}
         {panel === "team" && <TeamPanel conversation={conversation} cards={cards} />}
         {panel === "side" && <SideChatPanel conversation={conversation} cards={cards} />}
         {panel === "tasks" && <TasksPanel conversation={conversation} />}
         {panel === "pr" && cwd && <Suspense fallback={<p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.panel.loading")}</p>}><PullRequestPane key={`${cwd}:${conversation?.branch ?? ""}`} cwd={cwd} branch={conversation?.branch ?? null} quoteKey={conversation?.tabId ?? null} /></Suspense>}
-        {panel === "browser" && <BrowserSurface cwd={cwd ?? ""} owner={browserOwnerOf(conversation)} />}
+        {panel === "browser" && activeTab && <BrowserSurface cwd={cwd ?? ""} owner={owner} tab={activeTab} />}
         {(panel === "design" || panel === "ios" || panel === "android") && (
           <Suspense fallback={<p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.panel.loading")}</p>}>
             {panel === "design" ? <DesignPane cwd={cwd} composerTarget={composerTarget} /> : panel === "ios" ? <IosPane composerTarget={composerTarget} /> : <AndroidPane composerTarget={composerTarget} />}
@@ -356,56 +347,6 @@ function DiffView({ tabId, cwd }: { tabId: string | null; cwd: string | null }) 
 }
 
 /**
- * As linhas do menu: ícone, nome e a tecla de atalho numa caixinha à direita; esmaecida a que não se
- * aplica. A tecla vale com o foco na lista (o estado vazio e o menu do "+").
- */
-function EntryList({ available, onChoose, active = null }: { available: PanelAvailability; onChoose: (id: PanelChoice) => void; active?: PanelChoice | null }) {
-  const { t } = useTranslation();
-  return (
-    <ul role="menu" className="list-none m-0 p-0 flex flex-col gap-0.5">
-      {PANEL_ENTRIES.map((entry) => {
-        const Icon = ENTRY_ICON[entry.id];
-        const on = isAvailable(entry.id, available);
-        return (
-          <li key={entry.id} role="none">
-            <button type="button" role="menuitem" disabled={!on} aria-disabled={!on} aria-keyshortcuts={keyLabel(entry)}
-              onClick={() => onChoose(entry.id)}
-              className={`w-full h-9 px-2.5 rounded-lg flex items-center gap-2.5 text-left text-chat-ui
-                ${on ? "text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.07]" : "text-gray-400 dark:text-white/30 cursor-default"}
-                ${active === entry.id ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
-              <Icon className="w-4 h-4 shrink-0" />
-              <span className="flex-1 truncate">{t(`chat.panel.open.${entry.id}`)}</span>
-              {entry.id === "browser" && <ChevronDownIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/35" />}
-              <kbd className="min-w-6 h-6 px-1.5 rounded-md inline-flex items-center justify-center font-sans text-chat-caption
-                bg-gray-100 dark:bg-white/[0.07] text-gray-500 dark:text-white/45">{keyLabel(entry)}</kbd>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/**
- * O estado vazio do painel (como o T3 Code): "Abrir uma superfície" e a lista com os atalhos. Pega o
- * foco ao aparecer, para as teclas valerem de cara. Some assim que uma superfície se abre.
- */
-function SurfaceLauncher({ available, onChoose }: { available: PanelAvailability; onChoose: (id: PanelChoice) => void }) {
-  const { t } = useTranslation();
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => { ref.current?.focus(); }, []);
-  return (
-    <div ref={ref} tabIndex={0} onKeyDown={(e) => onEntryKey(e, available, onChoose)} aria-label={t("chat.panel.empty.title")}
-      className="flex-1 min-h-0 flex items-center justify-center outline-none">
-      <div className="w-full max-w-[420px] px-6 pb-24">
-        <h2 className="m-0 mb-4 text-center text-chat-ui font-medium text-gray-900 dark:text-white">{t("chat.panel.empty.title")}</h2>
-        <EntryList available={available} onChoose={onChoose} />
-      </div>
-    </div>
-  );
-}
-
-/**
  * A aba Terminal: um shell de verdade (PTY) na pasta da conversa, o mesmo que o «Rodar» dos blocos de código usa. Como
  * o navegador, ele não é montado aqui: esta tela reserva o espaço e publica (`setChatShell`), e o `TerminalPanel`
  * desenha a aba de shell por cima. Fechar o painel ou trocar de conversa esconde o shell, sem matá-lo.
@@ -425,23 +366,27 @@ export function rectInShell(el: Element | null): { left: number; top: number; wi
   return { left: Math.round(r.left - b.left), top: Math.round(r.top - b.top), width: Math.round(r.width), height: Math.round(r.height) };
 }
 
-function ShellSurface({ cwd }: { cwd: string }) {
+function ShellSurface({ cwd, tab }: { cwd: string; tab: ColumnTab }) {
   const { t } = useTranslation();
   const slotRef = useRef<HTMLDivElement>(null);
-  const [tabId, setTabId] = useState<string | null>(null);
+  const scope = shellScope(cwd);
+  // O shell que esta aba mostra nesta pasta. Se ele foi fechado no modo Abas, a aba pega/cria outro.
+  const saved = tab.resources?.[scope] ?? null;
+  const tabId = useTabsStore((s) => (saved && s.tabs.some((x) => x.id === saved) ? saved : null));
   useEffect(() => {
+    if (tabId) return;
     let alive = true;
-    void ensureShellTab(cwd).then((id) => { if (alive) setTabId(id); });
+    // Os shells que as OUTRAS abas da coluna já mostram ficam de fora: cada aba é um terminal próprio.
+    const taken = new Set(useChatStore.getState().columnTabs.filter((x) => x.id !== tab.id).map((x) => x.resources?.[scope]).filter((x): x is string => !!x));
+    void claimShellTab(cwd, taken).then((id) => { if (alive) setColumnTabResource(tab.id, scope, id); });
     return () => { alive = false; };
-  }, [cwd]);
-  // A aba pode ser fechada no modo Abas: some do slot (e o próximo clique no >_ abre outra).
-  const alive = useTabsStore((s) => (tabId ? s.tabs.some((tab) => tab.id === tabId) : false));
+  }, [tabId, tab.id, scope, cwd]);
 
   const measure = useCallback(() => {
     const rect = rectInShell(slotRef.current);
-    if (!rect || !tabId || !alive) return setChatShell(null);
+    if (!rect || !tabId) return setChatShell(null);
     setChatShell({ tabId, rect });
-  }, [tabId, alive]);
+  }, [tabId]);
 
   useLayoutEffect(() => measure());
   useEffect(() => {
@@ -453,7 +398,8 @@ function ShellSurface({ cwd }: { cwd: string }) {
     if (base) observer.observe(base);
     return () => observer.disconnect();
   }, [measure]);
-  useEffect(() => () => setChatShell(null), []);
+  // Só tira o que ESTE slot publicou: ao trocar de uma aba de terminal para outra, o slot novo pode já ter publicado.
+  useEffect(() => () => { if (useChatStore.getState().shell?.tabId === tabId) setChatShell(null); }, [tabId]);
 
   return (
     <section aria-label={t("chat.shell.label")} className="flex-1 min-h-0 flex flex-col">
@@ -479,26 +425,39 @@ function browserOwnerOf(conversation: ConversationCard | null): ViewOwner | null
   return { kind: structured ? "thread" : "tab", id: conversation.tabId, label: conversation.agentLabel };
 }
 
-function chatBrowserView(views: readonly ViewTab[], cwd: string, owner: ViewOwner | null): BrowserView | undefined {
-  return views.find((view): view is BrowserView => view.kind === "browser"
+/** As páginas (ViewTabs de navegador) desta conversa/pasta: as candidatas a uma aba Navegador da coluna. */
+function browserCandidates(views: readonly ViewTab[], cwd: string, owner: ViewOwner | null): string[] {
+  return views.filter((view): view is BrowserView => view.kind === "browser"
     && comparablePath(view.cwd) === comparablePath(cwd)
-    && (owner ? view.owner?.kind === owner.kind && view.owner.id === owner.id : !view.owner));
+    && (owner ? view.owner?.kind === owner.kind && view.owner.id === owner.id : !view.owner)).map((view) => view.id);
 }
 
-function BrowserSurface({ cwd, owner }: { cwd: string; owner: ViewOwner | null }) {
+function BrowserSurface({ cwd, owner, tab }: { cwd: string; owner: ViewOwner | null; tab: ColumnTab }) {
   const slotRef = useRef<HTMLDivElement>(null);
   const floating = useChatStore((s) => s.browserFloating);
-  // Cada conversa mostra a própria página; a tela de conversa nova usa uma tab do usuário.
-  const existing = useViewTabsStore((s) => chatBrowserView(s.views, cwd, owner)?.id ?? null);
-  // Se a conversa muda, não pinte a página anterior enquanto o efeito prepara a nova tab.
-  const viewId = existing;
+  const scope = browserScope(cwd, owner);
+  // Cada aba mostra a própria página, e cada conversa as suas; a tela de conversa nova usa uma tab do usuário.
+  // Uma aba que pediu um perfil (submenu do Browser) não reaproveita página: nasce uma nova nesse perfil.
+  const pickView = (views: readonly ViewTab[], tabs: readonly ColumnTab[]) => {
+    const current = tabs.find((x) => x.id === tab.id) ?? tab;
+    const wantsNew = !!current.profileId && !current.resources?.[scope];
+    return pickResource(current, scope, wantsNew ? [] : browserCandidates(views, cwd, owner), tabs);
+  };
+  const columnTabs = useChatStore((s) => s.columnTabs);
+  const viewId = useViewTabsStore((s) => pickView(s.views, columnTabs));
 
   useEffect(() => {
     // Consulte o estado atual antes de criar: o efeito pode ser repetido no StrictMode ou
     // outro componente pode ter aberto a tab depois da primeira renderização.
-    const current = chatBrowserView(useViewTabsStore.getState().views, cwd, owner);
-    if (!current) useViewTabsStore.getState().openBrowser(cwd, "", { activate: false, owner: owner ?? undefined });
-  }, [cwd, owner?.kind, owner?.id, owner?.label, existing]);
+    const views = useViewTabsStore.getState().views;
+    const tabs = useChatStore.getState().columnTabs;
+    let id = pickView(views, tabs);
+    if (!id) {
+      id = useViewTabsStore.getState().openBrowser(cwd, "", { activate: false, owner: owner ?? undefined });
+      if (tab.profileId) useViewTabsStore.getState().updateView(id, { browserProfileId: tab.profileId });
+    }
+    setColumnTabResource(tab.id, scope, id);
+  }, [cwd, owner?.kind, owner?.id, owner?.label, tab.id, scope, viewId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const measure = useCallback(() => {
     if (floating) return;
@@ -519,8 +478,10 @@ function BrowserSurface({ cwd, owner }: { cwd: string; owner: ViewOwner | null }
   }, [measure]);
   useEffect(() => () => {
     // Ao destacar, o slot desmonta, mas o mesmo BrowserTab continua visível no retângulo flutuante.
-    if (!useChatStore.getState().browserFloating) setChatBrowser(null);
-  }, []);
+    // Só tira o que ESTE slot publicou: na troca entre duas abas de navegador o slot novo pode já ter publicado.
+    const state = useChatStore.getState();
+    if (!state.browserFloating && state.browser?.viewId === viewId) setChatBrowser(null);
+  }, [viewId]);
 
-  return <div ref={slotRef} className="flex-1 min-h-0" />;
+  return <div ref={slotRef} data-chat-browser-slot={viewId ?? ""} className="flex-1 min-h-0" />;
 }

@@ -13,7 +13,7 @@ import { DropOverlay } from "./attachments/DropOverlay";
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
-import { chatProjects, conversationCards, PROTOCOL_AGENTS, type ChatProject, type ConversationCard } from "./chatModel";
+import { chatProjects, conversationCards, type ChatProject, type ConversationCard } from "./chatModel";
 import { ProjectBadge } from "./ChatProjectBadge";
 import { useChatProjectIdentityList } from "./chatProjectIdentity";
 import { normalizeProjectPath } from "./chatProjectPrefs";
@@ -206,10 +206,11 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             {active && <ActiveLive cardKey={active.tabId} />}
             {/* O seletor fica aqui (não cabe no cabeçalho da barra lateral) e nunca encolhe: o breadcrumb é que cede. */}
             <ShellModeSwitch className="shrink-0" />
-            {/* A fileira de ícones do painel, como no Claude Code: Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e ⋯. */}
-            {/* O >_ alterna a gaveta do agente (TUI com timeline) ou abre a aba Terminal do painel (um shell na pasta). */}
-            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} prAvailable={!!(active?.cwd ?? folder)} sideAvailable={!!active && (!!PROTOCOL_AGENTS[active.agentId] || active.agentId.startsWith("local-acp-"))} />
-            <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
+            {/* O cabeçalho guarda só o que é da conversa (Resumo e Tarefas; com a coluna fechada, também o painel inferior).
+                As superfícies abrem pelo "+" da barra de abas da coluna direita, como no T3 Code. */}
+            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} />
+            {/* Com a coluna aberta, o recolher mora na barra dela (como no T3); aqui só o que a abre. */}
+            {!panelOpen && <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={false}><PanelRightIcon className="w-4 h-4" /></IconButton>}
             {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
             {!panelOpen && <WindowControls className="-mr-3" />}
           </header>

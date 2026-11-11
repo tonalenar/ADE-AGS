@@ -474,16 +474,33 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   `@container/studiobar`. Abaixo de 36rem, só Seleção e Mão ficam à vista, e o resto (Texto, Prancheta, Nota, desenho,
   formas, Comentar) vai para o menu de excesso (⋯). O seletor de página encolhe e trunca, e o grupo do zoom não
   encolhe.
-- **Time na fileira do cabeçalho.** O Time é um ícone da fileira, com os demais (`ROW_CHOICES`). O ⋯ fica com Design,
-  Emulador Android, Pull request e Maximizar o painel.
-- **Pull requests no chat.** Com uma pasta aberta, a entrada Pull request do ⋯ abre o Forge no painel lateral. A lista
+- **Barra de abas da coluna direita (estilo T3 Code).** A coluna tem a própria barra no topo (`ColumnTabBar.tsx`): as abas
+  abertas (ícone + nome, "×" e clique do meio fecham), o "+" com o menu **Abrir uma superfície** e, à direita, expandir,
+  painel inferior (a gaveta do terminal do agente) e recolher a coluna. Coluna vazia mostra "Abrir uma superfície" com a
+  mesma lista. O menu (`SurfaceMenu.tsx`, `panelMenu.ts`) tem uma letra por linha, valendo com o menu aberto: B Navegador
+  (submenu com os perfis, se houver mais de um), T Terminal, F Arquivos, D Diff, P Pull request, M Aparelho (submenu iOS e
+  Android), S Pergunta lateral, E Design, O Time. As letras são as do T3; E e O são do ADE. Navegador e terminal aceitam
+  várias abas (o "+" abre sempre uma nova); as demais superfícies têm uma só (abrir foca a que existe).
+- **Estado das abas** (`columnTabs.ts` puro + `useChatStore.columnTabs/columnActive`). `panel` continua sendo a superfície da
+  aba ativa (atalhos, comandos e `setRightPanel`/`addSurface` seguem iguais): um subscriber (`reconcileColumn`) cria/ativa a
+  aba que corresponde. As abas não persistem entre aberturas do app (só `panel`, como antes).
+- **Terminal e navegador não remontam ao trocar de aba.** Como antes, só o slot da aba ativa mede o espaço e publica
+  (`setChatBrowser`/`setChatShell`); `ViewTabsHost`/`TerminalPanel` mantêm as instâncias montadas e escondidas. Cada aba
+  guarda o recurso que mostra por escopo (conversa + pasta no navegador, pasta no shell), para que duas abas nunca mostrem
+  a mesma página/shell. **Fechar uma aba só tira o assento da barra: a página e o PTY continuam vivos** (o próximo "+"
+  reaproveita os que sobraram). A limpeza do slot só despublica o que ele mesmo publicou, para a troca entre duas abas do
+  mesmo tipo não apagar o slot novo.
+- **O que ficou no cabeçalho da conversa** (`PanelToolbar.tsx`): Resumo (o "thread details" do T3) e Tarefas; com a coluna
+  fechada, também o painel inferior e o abrir da coluna. Com ela aberta, esses dois moram na barra da coluna. Time, Diff,
+  Arquivos, Navegador e Aparelho saíram da fileira e abrem pelo "+" (a fileira e o ⋯ deixaram de existir). Com a coluna
+  maximizada, o cabeçalho some, então Resumo e Tarefas só voltam ao restaurar.
+- **Pull requests no chat.** Com uma pasta aberta, a entrada Pull request do menu "+" abre o Forge no painel lateral. A lista
   mantém os filtros, atualização, criação e detalhe existentes. “Vinculados à branch” filtra pela branch de origem e
   fica desativado sem branch; trocar de pasta ou branch limpa a seleção de PR aberto. A sessão reaproveita a conta do
   Forge já conectado (`PullRequestPane`), sem credenciais próprias.
-- **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
-  conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
-  (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de
-  fechar o painel.
+- **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Antes,
+  numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de fechar o painel; agora o cabeçalho só
+  leva Resumo e Tarefas, e as abas da coluna rolam na horizontal.
 - **A fala depois de trocar de agente.** A primeira mensagem depois da troca leva o resumo da conversa anterior na frente
   (até ~64 KB). A gravação cortava em 20 000 caracteres pelo fim: perdia a marca de fim do resumo e a fala da pessoa. A
   tela escondia o item, e o balão otimista ficava «Na fila» no fim da timeline até sumir. Agora `handoff::clip_user`
