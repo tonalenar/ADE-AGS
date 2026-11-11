@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
-import { useChatShell, useUiStore } from "@/app/uiStore";
+import { useUiStore } from "@/app/uiStore";
 import { useAgentsStore } from "@/features/agents/store";
 import { useSkillsStore } from "@/features/skills/store";
 import { SettingsSidebar } from "@/features/settings/SettingsSidebar";
@@ -63,8 +63,6 @@ function useScrollToTarget(section: SettingsPageId, container: React.RefObject<H
 export function SettingsPage() {
   const { t } = useTranslation();
   const section = useUiStore((s) => s.settingsSection);
-  // No chat a barra das seções é a da casca (`ChatShell`); fora dele a página a desenha.
-  const chat = useChatShell();
   const loadSkillsDir = useSkillsStore((s) => s.loadSkillsDir);
   const loadCustomAgents = useAgentsStore((s) => s.loadCustomAgents);
   const scrollRef = useRef<HTMLElement>(null);
@@ -77,14 +75,15 @@ export function SettingsPage() {
 
   return (
     <div className="@container flex h-full min-h-0 w-full bg-white dark:bg-surface-deep">
-      {!chat && <SettingsSidebar />}
+      <SettingsSidebar />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {/* O caminho ("Configurações / página") fica fora do chat: lá o cabeçalho da conversa já o mostra. */}
+        {/* Modal de Configurações (como no T3 Code): o caminho ("Configurações / página") fica no cabeçalho. */}
         <header className="flex h-12 shrink-0 items-center gap-3 border-b border-gray-200 px-5 dark:border-white/[0.08]">
-          {!chat && <SettingsBreadcrumb page={section} />}
+          <SettingsBreadcrumb page={section} />
+          {/* Como no T3 Code, o "restaurar" aparece só na página Geral. */}
           <div className="ml-auto flex shrink-0 items-center gap-1">
-            <RestoreDeviceDefaultsButton />
+            {section === "general" && <RestoreDeviceDefaultsButton />}
           </div>
         </header>
 

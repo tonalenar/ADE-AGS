@@ -135,15 +135,30 @@ describe("ajustes do aparelho (registro)", () => {
     expect(setSetting).toHaveBeenCalledWith("notifications.enabled", "true");
   });
 
-  it("a conversa volta ao padrão, mas a pasta da conversa nova fica como está", async () => {
-    saveChatPrefs({ ...DEFAULT_CHAT_PREFS, width: "wide", cwd: "/projetos/x" });
+  it("o comportamento da conversa volta ao padrão, mas a última escolha do composer fica como está (como o T3)", async () => {
+    saveChatPrefs({
+      ...DEFAULT_CHAT_PREFS,
+      width: "wide",
+      followUpBehavior: "queue",
+      cwd: "/projetos/x",
+      agentId: "codex",
+      model: "gpt-x",
+      effort: "high",
+      access: "full",
+    });
     const changed = await changedDeviceDefaults(DEVICE_DEFAULTS);
     expect(idsOf(changed)).toContain("chat");
 
     await restoreDeviceDefaults(changed.filter((item) => item.id === "chat"), { setTheme: () => undefined });
     const after = loadChatPrefs();
     expect(after.width).toBe(DEFAULT_CHAT_PREFS.width);
+    expect(after.followUpBehavior).toBe(DEFAULT_CHAT_PREFS.followUpBehavior);
+    // Escolhas do composer: o modelo, o agente, o esforço e a permissão continuam os mesmos.
     expect(after.cwd).toBe("/projetos/x");
+    expect(after.agentId).toBe("codex");
+    expect(after.model).toBe("gpt-x");
+    expect(after.effort).toBe("high");
+    expect(after.access).toBe("full");
   });
 
   it("o texto e as marcas do terminal voltam ao padrão", async () => {

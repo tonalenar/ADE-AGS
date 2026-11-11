@@ -33,6 +33,10 @@ import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { DevicesSection } from "@/features/settings/DevicesSection";
 import { WorktreesSection } from "@/features/settings/WorktreesSection";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
+import { InAppNoticesSetting } from "@/features/settings/InAppNoticesSetting";
+import { ConfirmationsSetting } from "@/features/settings/ConfirmationsSetting";
+import { SidebarSettings } from "@/features/settings/SidebarSettings";
+import { ScheduledTasksSection } from "@/features/settings/ScheduledTasksSection";
 import { AiMemoryTabsSetting } from "@/features/settings/AiMemoryTabsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
@@ -69,6 +73,7 @@ function GeneralPage() {
     persistLocale(localStorage, lang);
   };
   return (
+    <>
     <SettingsSection title={t("settings.general")} description={t("settings.general.desc")}>
       <SettingsGroup>
         <SettingsAnchor id="general-language">
@@ -79,8 +84,12 @@ function GeneralPage() {
           </SettingsRow>
         </SettingsAnchor>
         <SettingsAnchor id="general-notifications"><NotificationsSetting /></SettingsAnchor>
+        <SettingsAnchor id="general-in-app-notifications"><InAppNoticesSetting /></SettingsAnchor>
       </SettingsGroup>
     </SettingsSection>
+    <SettingsAnchor id="general-sidebar"><SidebarSettings /></SettingsAnchor>
+    <SettingsAnchor id="general-confirmations"><ConfirmationsSetting /></SettingsAnchor>
+    </>
   );
 }
 
@@ -177,6 +186,11 @@ function BrowserPage() {
 
 function DevicesPage() {
   return <SettingsAnchor id="devices-main"><DevicesSection /></SettingsAnchor>;
+}
+
+/** Rotinas e tarefas agendadas: os painéis do canvas, embutidos (ver `ScheduledTasksSection`). */
+function ScheduledPage() {
+  return <SettingsAnchor id="scheduled-main"><ScheduledTasksSection /></SettingsAnchor>;
 }
 
 function WorktreesPage() {
@@ -325,6 +339,7 @@ const PAGE_BODIES: Record<SettingsPageId, () => React.ReactElement> = {
   accounts: ProvidersPage,
   browser: BrowserPage,
   devices: DevicesPage,
+  scheduled: ScheduledPage,
   worktrees: WorktreesPage,
   environments: EnvironmentsPage,
   access: AccessPage,

@@ -21,6 +21,8 @@ import { addQuoteFor } from "./quotes/quoteStore";
 import { selectConversation } from "./unified/selectionActions";
 import { ArchiveIcon, BotIcon, BranchIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, DesignIcon, EyeIcon, FilterIcon, FolderPlusIcon, GlobeIcon, ListIcon, MoreHorizontalIcon, NewChatIcon, PenIcon, PlusIcon, PullRequestIcon, PushPinIcon, SearchIcon, SettingsIcon, SidebarIcon, UndoIcon, UsageIcon, UsersIcon, WarnIcon, WrenchIcon, XIcon } from "./chatIcons";
 import { type ChatProject, type ConversationCard } from "./chatModel";
+import { useConfirmPrefs, type ConfirmPrefs } from "@/features/settings/confirmPreferences";
+import { appConfirm } from "@/shared/ui/appConfirm";
 import { useLiveSummary } from "./liveSummary";
 import { useChatLive } from "./liveStore";
 import { INBOX_SHORTCUT } from "./permissions/PermissionCard";
@@ -29,7 +31,9 @@ import { toggleInbox, usePendingAsks } from "./permissions/permissionsStore";
 import { archiveConversation, expireSnoozed, moveConversation, moveConversationToSection, reopenSettled, restoreArchivedConversation, setCollapsed, setUnread, settleConversation, snoozeConversation, togglePinned, toggleSection, undoMoveConversation, unsnoozeConversation, useArchived, useShelf } from "./shelf";
 import { SnoozeDialog } from "./SnoozeDialog";
 import { addSurface, openArchivedMessagePreview, requestTabSearchJump, requestThreadSearchJump } from "./store";
-import { buildSections, cleanTitle, countStates, initialOf, stepFocus, toggleAllProjects, visibleIds, type SessionSection } from "./sidebar/sessionsModel";
+import { buildSections, cleanTitle, countStates, initialOf, stepFocus, toggleAllProjects, visibleIds, type SessionSection, type WorkingShelf } from "./sidebar/sessionsModel";
+import { noticeStatesOf } from "./noticeRules";
+import { useWorkingShelf } from "@/features/settings/sidebarPreferences";
 import { closeWorkspaceFolder, forgetWorkspaceFolder } from "./sidebar/workspaceActions";
 import { useAutoUnread } from "./sidebar/useAutoUnread";
 import { folderName, threadIdOf, threadKey } from "./structured/model";
@@ -124,6 +128,39 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   const snoozedUntil = useShelf((s) => s.snoozedUntil);
   const settled = useShelf((s) => s.settled);
   const pinned = useShelf((s) => s.pinned);
+  const confirmPrefs = useConfirmPrefs();
+  const workingShelfOn = useWorkingShelf();
+  // A seção Trabalhando e o último pedido seu: as fases vêm do canal (abas) e do protocolo, as mesmas que o aviso usa.
+  const tabPhase = useChatLive((s) => s.phase);
+  const tabQuestion = useChatLive((s) => s.question);
+  const tabAwaiting = useChatLive((s) => s.awaiting);
+  const tabTurn = useChatLive((s) => s.turn);
+  const threadLive = useStructured((s) => s.live);
+  const liveStates = useMemo(
+    () => noticeStatesOf(cards.map((c) => c.tabId), { phase: tabPhase, question: tabQuestion, awaiting: tabAwaiting }, threadLive),
+    [cards, tabPhase, tabQuestion, tabAwaiting, threadLive],
+  );
+  // Quem precisa de você (aprovação ou pergunta pendente) sobe; quem só trabalha vai para a seção Trabalhando.
+  const shelf = useMemo<WorkingShelf>(() => {
+    const needs: string[] = [];
+    const working: string[] = [];
+    for (const card of cards) {
+      const state = liveStates[card.tabId];
+      if (!state) continue;
+      if (state.awaiting || state.question) needs.push(card.tabId);
+      else if (state.phase === "working") working.push(card.tabId);
+    }
+    return { enabled: workingShelfOn, needs, working };
+  }, [cards, liveStates, workingShelfOn]);
+  // O canal guarda o começo do turno em milissegundos; a barra compara em segundos, como a hora da abertura.
+  const lastUserAt = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const card of cards) {
+      const started = tabTurn[card.tabId]?.startedAt;
+      if (started) out[card.tabId] = started / 1000;
+    }
+    return out;
+  }, [cards, tabTurn]);
   const orderBySection = useShelf((s) => s.orderBySection);
   const unread = useShelf((s) => s.unread);
   const collapsed = useShelf((s) => s.collapsed);
@@ -175,8 +212,8 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   // O time fica sob a conversa do orquestrador: os integrantes saem da lista e aparecem indentados (prancheta 15).
   const grouping = useTeamGrouping(cards);
   const sections = useMemo(
-    () => buildSections(cards, { query, folder, pinned, archived: archivedIds, snoozed: snoozedIds, nested: grouping.nested, collapsed, orderBySection }),
-    [cards, query, folder, pinned, archivedIds, snoozedIds, grouping.nested, collapsed, orderBySection],
+    () => buildSections(cards, { query, folder, pinned, archived: archivedIds, snoozed: snoozedIds, nested: grouping.nested, collapsed, orderBySection, lastUserAt, shelf }),
+    [cards, query, folder, pinned, archivedIds, snoozedIds, grouping.nested, collapsed, orderBySection, lastUserAt, shelf],
   );
 
   useEffect(() => {
@@ -305,12 +342,28 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     if (thread) void chatThreadRename(thread, title).then(() => reloadThreads()).catch(() => undefined);
     else useTabsStore.getState().renameTab(card.tabId, title);
   };
-  const settle = (card: ConversationCard) => {
+  /** Roda a ação já, ou depois de confirmar, se a preferência de Configurações → Geral → Confirmações pedir. */
+  const confirmFirst = (action: keyof ConfirmPrefs, run: () => void) => {
+    if (!confirmPrefs[action]) {
+      run();
+      return;
+    }
+    void appConfirm({
+      title: t(`chat.sidebar.confirm.${action}.title`),
+      lead: t(`chat.sidebar.confirm.${action}.lead`),
+      confirmLabel: t(`chat.sidebar.confirm.${action}.confirm`),
+      cancelLabel: t("btn.cancel"),
+      tone: action === "delete" ? "danger" : "warning",
+    }).then((ok) => {
+      if (ok) run();
+    });
+  };
+  const settle = (card: ConversationCard) => confirmFirst("delete", () => {
     const thread = threadIdOf(card.tabId);
     if (thread) settleThread(thread, true);
     else void settleConversation(card.tabId);
-  };
-  const archive = (card: ConversationCard) => {
+  });
+  const archive = (card: ConversationCard) => confirmFirst("archive", () => {
     archiveConversation(card.tabId);
     showBotToast({
       title: t("chat.sidebar.archivedToastTitle"),
@@ -320,7 +373,7 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
       undoable: true,
       ms: 5000,
     });
-  };
+  });
   const showUndo = (card: ConversationCard, message: string, onAction: () => void) => {
     showBotToast({
       title: t("chat.sidebar.actionToastTitle"),
@@ -333,7 +386,8 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   };
   const canDropInSection = (sourceId: string, target: SessionSection) => {
     const source = cards.find((item) => item.tabId === sourceId);
-    return !!source && !query.trim() && !folder && (target.kind === "pinned" || source.project === target.label);
+    // Com a seção Trabalhando ligada, a lista ativa não se reordena à mão: só as fixadas aceitam soltar.
+    return !!source && !query.trim() && !folder && (target.kind === "pinned" || (target.kind === "project" && !workingShelfOn && source.project === target.label));
   };
   const dropInSection = (sourceId: string, target: SessionSection, targetIndex: number) => {
     const source = cards.find((item) => item.tabId === sourceId);
@@ -351,12 +405,17 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     const section = sections.find((candidate) => candidate.items.some((item) => item.tabId === card.tabId));
     const sectionIds = section?.items.map((item) => item.tabId) ?? [];
     const index = sectionIds.indexOf(card.tabId);
-    const canMove = !!section && !query.trim() && !folder;
+    const canMove = !!section && !query.trim() && !folder && (section.kind === "pinned" || (section.kind === "project" && !workingShelfOn));
     return [
     { key: "pin", label: pinned.includes(card.tabId) ? t("chat.sidebar.unpin") : t("chat.sidebar.pin"), icon: <PushPinIcon className="w-4 h-4" />, onSelect: () => {
       const wasPinned = pinned.includes(card.tabId);
-      togglePinned(card.tabId);
-      showUndo(card, wasPinned ? "chat.sidebar.actionUnpinned" : "chat.sidebar.actionPinned", () => togglePinned(card.tabId));
+      const toggle = () => {
+        togglePinned(card.tabId);
+        showUndo(card, wasPinned ? "chat.sidebar.actionUnpinned" : "chat.sidebar.actionPinned", () => togglePinned(card.tabId));
+      };
+      // Fixar não pede nada; só desafixar passa pela confirmação.
+      if (wasPinned) confirmFirst("unpin", toggle);
+      else toggle();
     } },
     { key: "rename", label: t("chat.sidebar.rename"), icon: <PenIcon className="w-4 h-4" />, hint: "F2", onSelect: () => setRenaming(card.tabId) },
     { key: "read", label: unread.includes(card.tabId) ? t("chat.sidebar.markRead") : t("chat.sidebar.markUnread"), icon: <EyeIcon className="w-4 h-4" />, onSelect: () => {
@@ -845,7 +904,10 @@ function SectionBlock({ section, onMenu, onNew, children, dropActive = false, on
   projectCwd?: string;
 }) {
   const { t } = useTranslation();
-  const label = section.kind === "pinned" ? t("chat.sidebar.pinned") : section.label;
+  const label = section.kind === "pinned" ? t("chat.sidebar.pinned")
+    : section.kind === "needs" ? t("chat.sidebar.needsYou")
+      : section.kind === "working" ? t("chat.sidebar.workingSection")
+        : section.label;
   return (
     <section aria-label={label} onDragOver={onDragOver} onDrop={onDrop}
       className={`flex flex-col gap-0.5 rounded-lg ${dropActive ? "ring-1 ring-inset ring-accent-500/70" : ""}`}>

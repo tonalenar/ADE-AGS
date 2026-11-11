@@ -19,7 +19,7 @@ export interface SettingsNavGroup {
 /** A ordem do menu. Cada página aparece num grupo só (o teste de navegação confere). */
 export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
   { heading: null, pages: ["general", "appearance", "chat", "shortcuts"] },
-  { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices"] },
+  { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices", "scheduled"] },
   { heading: "settings.nav.code", pages: ["worktrees"] },
   { heading: "settings.nav.connections", pages: ["environments", "access"] },
   { heading: null, pages: ["maintenance", "labs"] },
@@ -35,6 +35,7 @@ export const SETTINGS_PAGE_LABEL_KEYS: Record<SettingsPageId, string> = {
   accounts: "settings.providers",
   browser: "settings.browser",
   devices: "settings.devices",
+  scheduled: "settings.scheduled",
   worktrees: "settings.worktrees",
   environments: "settings.environments",
   access: "settings.access",
@@ -77,6 +78,11 @@ export interface SettingsSearchItem {
 export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "general.language", page: "general", anchor: "general-language", titleKey: "settings.language" },
   { id: "general.notifications", page: "general", anchor: "general-notifications", titleKey: "settings.notifications.label" },
+  { id: "general.inAppNotifications", page: "general", anchor: "general-in-app-notifications", titleKey: "settings.inAppNotifications.label" },
+  { id: "general.sidebar.working", page: "general", anchor: "general-sidebar", titleKey: "settings.sidebar.working.label" },
+  { id: "general.confirm.unpin", page: "general", anchor: "general-confirmations", titleKey: "settings.confirm.unpin.label" },
+  { id: "general.confirm.archive", page: "general", anchor: "general-confirmations", titleKey: "settings.confirm.archive.label" },
+  { id: "general.confirm.delete", page: "general", anchor: "general-confirmations", titleKey: "settings.confirm.delete.label" },
 
   { id: "appearance.mode", page: "appearance", anchor: "appearance-mode", titleKey: "settings.item.theme" },
   // A composição de GPU não tem bloco próprio (só existe em Linux e some em outros sistemas): a busca rola até o grupo.
@@ -107,6 +113,9 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "devices.ios", page: "devices", anchor: "devices-main", titleKey: "settings.devices.ios" },
   { id: "devices.android", page: "devices", anchor: "devices-main", titleKey: "settings.devices.android" },
 
+  { id: "scheduled", page: "scheduled", anchor: "scheduled-main", titleKey: "settings.scheduled" },
+  { id: "scheduled.tasks", page: "scheduled", anchor: "scheduled-main", titleKey: "settings.scheduled.title", keywordKeys: ["settings.scheduled.desc"] },
+
   { id: "worktrees", page: "worktrees", anchor: "worktrees-main", titleKey: "settings.worktrees.where" },
 
   { id: "environments.sync", page: "environments", anchor: "environments-sync", titleKey: "settings.sync" },
@@ -132,6 +141,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { id: "orchestrator.mode", page: "orchestrator", tab: "orquestrador", anchor: "orchestrator-main", titleKey: "settings.orchestrator" },
   { id: "orchestrator.routing", page: "orchestrator", tab: "roteamento", anchor: "orchestrator-routing", titleKey: "settings.routing" },
+  { id: "orchestrator.fixRounds", page: "orchestrator", tab: "orquestrador", anchor: "orchestrator-main", titleKey: "settings.fixRounds.label", keywordKeys: ["settings.fixRounds.desc"] },
   { id: "orchestrator.prelaunch", page: "orchestrator", tab: "prelaunch", anchor: "orchestrator-prelaunch", titleKey: "settings.prelaunch" },
 
   { id: "skills.dir", page: "skills", anchor: "skills-dir", titleKey: "settings.skillsDir" },
