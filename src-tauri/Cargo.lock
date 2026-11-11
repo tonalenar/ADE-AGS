@@ -39,6 +39,7 @@ dependencies = [
  "ring",
  "rusqlite",
  "ruzstd",
+ "secret-service",
  "serde",
  "serde_json",
  "serde_yaml",

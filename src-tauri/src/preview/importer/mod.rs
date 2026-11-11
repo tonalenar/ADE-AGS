@@ -4,12 +4,14 @@
 //! Fluxo, sempre por clique da pessoa: `browser_import_sources` lista navegadores e perfis (só estrutura de
 //! pastas), `review_*` mostra domínios e contagens, e `apply_*` grava só os marcados, cifrados, pelo caminho
 //! de `site.rs`, no perfil de destino da ADE. Nenhum valor de cookie sai daqui, exceto para o `Site`.
-//! A chave do Chromium (Keychain no macOS, DPAPI no Windows) só é lida ao confirmar a gravação.
+//! A chave do Chromium (Keychain no macOS, DPAPI no Windows, Secret Service no Linux) só é lida ao confirmar a gravação.
 //! Ver `docs/ade-ags/NAVEGADOR_IMPORTACAO_PLANO.md`.
 
 mod chromium;
 mod copy;
 mod firefox;
+#[cfg(target_os = "linux")]
+mod libsecret;
 mod safari;
 mod sources;
 #[cfg(test)]
@@ -312,7 +314,10 @@ pub(crate) fn apply_source(
                         return Ok(Reading::default());
                     }
                     let keys = (env.keys)(source, env.ctx)?;
-                    Ok(chromium::decrypt(&snapshot, wanted, &keys, env.ctx.platform, now_secs))
+                    let reading = chromium::decrypt(&snapshot, wanted, &keys, env.ctx.platform, now_secs);
+                    // Linux: nada decifrou e havia `v11`: a razão é o cofre (ausente, indisponível), não "chave errada".
+                    let v11_error = reading.cookies.is_empty().then(|| chromium::v11_key_error(&snapshot, wanted, &keys, now_secs)).flatten();
+                    v11_error.map_or(Ok(reading), Err)
                 }
             }
         },
@@ -321,7 +326,8 @@ pub(crate) fn apply_source(
     )
 }
 
-/// A chave do Chromium neste sistema: Keychain no macOS (o macOS pede permissão), DPAPI no Windows.
+/// A chave do Chromium neste sistema: Keychain no macOS (o macOS pede permissão), DPAPI no Windows, `v10`
+/// padrão mais a senha do Secret Service (libsecret) no Linux.
 fn system_keys(source: &Source, ctx: &Context) -> Result<Keys, ImportError> {
     match ctx.platform {
         sources::Platform::Mac => {
@@ -335,9 +341,13 @@ fn system_keys(source: &Source, ctx: &Context) -> Result<Keys, ImportError> {
             let root = source.root(ctx).ok_or_else(|| ImportError::new("not-installed"))?;
             let local_state = std::fs::read_to_string(root.join("Local State")).map_err(|e| copy::read_error(&e))?;
             let wrapped = chromium::windows_wrapped_key(&local_state)?;
-            Ok(Keys { gcm_v10: Some(chromium::unwrap_dpapi(&wrapped)?), ..Keys::default() })
+            Ok(Keys::gcm(chromium::unwrap_dpapi(&wrapped)?))
         }
-        sources::Platform::Linux => Err(ImportError::new("unsupported-platform")),
+        sources::Platform::Linux => {
+            // O item da senha só se busca depois que a pessoa confirmou; sem aplicação no cofre, só o `v10`.
+            let secret = source.linux_secret.map(chromium::read_linux_secret);
+            chromium::linux_keys(secret)
+        }
     }
 }
 

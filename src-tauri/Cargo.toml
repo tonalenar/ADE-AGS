@@ -127,6 +127,10 @@ libc = "0.2"
 webkit2gtk = "2.0"
 # `png`: la captura llega como superficie de cairo y se escribe como PNG sin otro crate.
 cairo-rs = { version = "0.18", features = ["png"] }
+# Importação de sessões do Chromium no Linux (preview/importer/libsecret.rs): o `v11` guarda a senha no Secret
+# Service com o atributo `application`, que o `keyring` não busca (ele só casa `service` + `username`). É a
+# mesma biblioteca que o `keyring` já usa por baixo (já está no Cargo.lock, mesma versão e mesmos recursos).
+secret-service = { version = "4", features = ["rt-async-io-crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

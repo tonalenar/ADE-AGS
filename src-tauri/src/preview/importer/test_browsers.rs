@@ -88,7 +88,7 @@ fn chromium_sintetico(tag: &str, versao: i64, filas: &[FilaC]) -> (Context, Path
         .unwrap();
     }
     drop(conn);
-    let ctx = Context { platform: Platform::Mac, home: Some(base.join("home")), data: Some(base.join("data")), local: None, config: None };
+    let ctx = Context { platform: Platform::Mac, home: Some(base.join("home")), data: Some(base.join("data")), local: None, config: None, chrome_config: None };
     (ctx, db)
 }
 
@@ -327,7 +327,7 @@ fn o_cookies_antigo_serve_quando_nao_ha_network_cookies() {
     let raiz = base.join("data").join("Arc").join("User Data");
     std::fs::create_dir_all(raiz.join("Default")).unwrap();
     std::fs::write(raiz.join("Default").join("Cookies"), b"").unwrap();
-    let ctx = Context { platform: Platform::Mac, home: None, data: Some(base.join("data")), local: None, config: None };
+    let ctx = Context { platform: Platform::Mac, home: None, data: Some(base.join("data")), local: None, config: None, chrome_config: None };
     let fontes = sources::list(&ctx, &lugar("c-antigo-tmp"), &|_, _| Ok(false));
     let arc = fontes.iter().find(|f| f.id == "arc").unwrap();
     assert_eq!(arc.profiles.len(), 1, "sem Local State, a varredura acha a pasta com Cookies");
@@ -346,10 +346,10 @@ fn cifrar_gcm(claro: &[u8], chave: &[u8; 32]) -> Vec<u8> {
 #[test]
 fn windows_v10_decifra_com_aes_gcm_e_v20_amarrado_ao_app_nao() {
     let chave = [5u8; 32];
-    let keys = Keys { gcm_v10: Some(chave), ..Keys::default() };
+    let keys = Keys::gcm(chave);
     let dado = cifrar_gcm(&com_hash_do_dominio(".github.com", SEGREDO_GITHUB), &chave);
     assert_eq!(chromium::decrypt_value(&dado, &keys, ".github.com", 24, Platform::Windows).as_deref(), Some(SEGREDO_GITHUB));
-    let errada = Keys { gcm_v10: Some([6u8; 32]), ..Keys::default() };
+    let errada = Keys::gcm([6u8; 32]);
     assert_eq!(chromium::decrypt_value(&dado, &errada, ".github.com", 24, Platform::Windows), None, "chave errada: a etiqueta GCM não fecha");
     let v20 = [b"v20".as_slice(), &[1u8; 40]].concat();
     assert_eq!(chromium::decrypt_value(&v20, &keys, ".github.com", 24, Platform::Windows), None, "v20 é a cifra amarrada ao app");
@@ -371,7 +371,7 @@ fn local_state_do_windows_amarrado_ao_app_e_recusado_com_aviso_claro() {
 #[test]
 fn no_windows_os_chromium_de_cifra_amarrada_aparecem_como_app_bound_e_helium_segue_disponivel() {
     let base = lugar("w-lista");
-    let ctx = Context { platform: Platform::Windows, home: None, data: Some(base.join("Roaming")), local: Some(base.join("Local")), config: None };
+    let ctx = Context { platform: Platform::Windows, home: None, data: Some(base.join("Roaming")), local: Some(base.join("Local")), config: None, chrome_config: None };
     let fontes = sources::list(&ctx, &lugar("w-lista-tmp"), &|_, _| Ok(false));
     for id in ["chrome", "edge", "brave", "vivaldi", "opera"] {
         assert_eq!(fontes.iter().find(|f| f.id == id).unwrap().unavailable, Some("app-bound"), "{id}");
@@ -383,6 +383,309 @@ fn no_windows_os_chromium_de_cifra_amarrada_aparecem_como_app_bound_e_helium_seg
         revisar(&mundo, &ctx, "chrome", "Default").err().unwrap()
     };
     assert_eq!(revisao.code, "app-bound");
+}
+
+// ───────────────────────── Linux e Windows (fixtures por plataforma) ─────────────────────────
+
+/// Um navegador Chromium sintético com a pasta de dados no lugar que `segmentos` diz, a partir de `base`.
+fn chromium_em(base: &Path, segmentos: &[&str], versao: i64, filas: &[FilaC]) -> PathBuf {
+    let raiz = segmentos.iter().fold(base.to_path_buf(), |p, s| p.join(s));
+    let perfil = raiz.join("Default");
+    std::fs::create_dir_all(perfil.join("Network")).unwrap();
+    std::fs::write(raiz.join("Local State"), r#"{"profile":{"info_cache":{"Default":{"name":"Pessoa"}}}}"#).unwrap();
+    let db = perfil.join("Network").join("Cookies");
+    let conn = Connection::open(&db).unwrap();
+    conn.execute_batch(ESQUEMA_CHROMIUM).unwrap();
+    conn.execute("INSERT INTO meta (key, value) VALUES ('version', ?1)", params![versao.to_string()]).unwrap();
+    for f in filas {
+        conn.execute(
+            "INSERT INTO cookies (creation_utc, host_key, top_frame_site_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly, samesite) VALUES (0, ?1, ?2, ?3, ?4, ?5, '/', ?6, ?7, 1, ?8)",
+            params![f.host, f.top_frame, f.name, f.value, f.encrypted, f.expires, f.secure, f.same_site],
+        )
+        .unwrap();
+    }
+    db
+}
+
+fn contexto_linux(base: &Path) -> Context {
+    Context { platform: Platform::Linux, home: Some(base.join("home")), data: None, local: None, config: Some(base.join("config")), chrome_config: None }
+}
+
+/// Cifra como o Chromium no Linux: `v10`/`v11` + AES-128-CBC, IV de 16 espaços, com a chave dada.
+fn cifrar_linux(prefixo: &[u8; 3], claro: &[u8], chave: &[u8; 16]) -> Vec<u8> {
+    [prefixo.as_slice(), &cifrar_cbc(claro, chave)[3..]].concat()
+}
+
+const SENHA_DO_COFRE: &[u8] = b"senha-do-cofre-de-teste";
+
+fn cookie_linux(host: &'static str, nome: &'static str, valor: &str, prefixo: &[u8; 3], chave: &[u8; 16]) -> FilaC {
+    fila_c(host, nome, cifrar_linux(prefixo, &com_hash_do_dominio(host, valor), chave))
+}
+
+#[test]
+fn a_chave_do_linux_vem_da_senha_peanuts_com_uma_iteracao_e_a_do_cofre_abre_o_v11() {
+    let so_v10 = chromium::linux_keys(None).unwrap();
+    assert_eq!(so_v10.cbc_v10, Some(chromium::derive_cbc_key(b"peanuts", 1)));
+    assert_eq!(so_v10.cbc_empty, Some(chromium::derive_cbc_key(b"", 1)));
+    assert!(so_v10.cbc_v11.is_none() && so_v10.cbc_v11_error.is_none());
+    let com_cofre = chromium::linux_keys(Some(Ok(SENHA_DO_COFRE.to_vec()))).unwrap();
+    assert_eq!(com_cofre.cbc_v11, Some(chromium::derive_cbc_key(SENHA_DO_COFRE, 1)));
+    assert_ne!(com_cofre.cbc_v11, com_cofre.cbc_v10);
+}
+
+#[test]
+fn no_linux_v10_decifra_com_peanuts_e_v11_com_a_senha_do_cofre_ate_o_estado_cifrado() {
+    let base = lugar("l-chaves");
+    let peanuts = chromium::derive_cbc_key(b"peanuts", 1);
+    let cofre = chromium::derive_cbc_key(SENHA_DO_COFRE, 1);
+    let filas = [
+        cookie_linux(".github.com", "v10", SEGREDO_GITHUB, b"v10", &peanuts),
+        cookie_linux(".github.com", "v11", SEGREDO_GOOGLE, b"v11", &cofre),
+    ];
+    chromium_em(&base.join("config"), &["google-chrome"], 24, &filas);
+    let ctx = contexto_linux(&base);
+    let mundo = Mundo::novo("l-chaves-tmp");
+    let sitios = Sitios::nuevo(lugar("l-chaves-estado"));
+    let resultado = gravar(&mundo, &ctx, "chrome", "Default", &["github.com"], &sitios, &|| chromium::linux_keys(Some(Ok(SENHA_DO_COFRE.to_vec())))).unwrap();
+    assert_eq!((resultado.cookies, resultado.skipped), (2, 0));
+    let valores: Vec<String> = sitios.sitio("https://github.com").cookies(AHORA).into_iter().map(|c| c.value).collect();
+    assert!(valores.contains(&SEGREDO_GITHUB.to_string()) && valores.contains(&SEGREDO_GOOGLE.to_string()));
+    // Cookie seguro: só em https, nada em http.
+    assert!(sitios.sitio("http://github.com").cookies(AHORA).is_empty());
+}
+
+#[test]
+fn no_linux_a_senha_vazia_e_a_segunda_tentativa_do_v10_e_do_v11() {
+    let vazia = chromium::derive_cbc_key(b"", 1);
+    let keys = chromium::linux_keys(Some(Ok(SENHA_DO_COFRE.to_vec()))).unwrap();
+    for prefixo in [b"v10", b"v11"] {
+        let dado = cifrar_linux(prefixo, &com_hash_do_dominio(".github.com", SEGREDO_GITHUB), &vazia);
+        assert_eq!(chromium::decrypt_value(&dado, &keys, ".github.com", 24, Platform::Linux).as_deref(), Some(SEGREDO_GITHUB), "{prefixo:?}");
+    }
+    // Sem a segunda tentativa (macOS), a mesma linha não abre.
+    let mac = chromium::mac_keys(b"qualquer");
+    let dado = cifrar_linux(b"v10", &com_hash_do_dominio(".github.com", SEGREDO_GITHUB), &vazia);
+    assert_eq!(chromium::decrypt_value(&dado, &mac, ".github.com", 24, Platform::Mac), None);
+}
+
+#[test]
+fn no_linux_cofre_ausente_ou_indisponivel_nao_impede_o_v10_mas_o_motivo_aparece_se_so_havia_v11() {
+    let peanuts = chromium::derive_cbc_key(b"peanuts", 1);
+    let cofre = chromium::derive_cbc_key(SENHA_DO_COFRE, 1);
+    for motivo in ["keychain-item-missing", "keychain-unavailable"] {
+        // Há v10 e v11: o v10 importa e o v11 conta como pulado.
+        let base = lugar("l-sem-cofre");
+        let misto = [cookie_linux(".github.com", "a", SEGREDO_GITHUB, b"v10", &peanuts), cookie_linux(".github.com", "b", SEGREDO_GOOGLE, b"v11", &cofre)];
+        chromium_em(&base.join("config"), &["google-chrome"], 24, &misto);
+        let mundo = Mundo::novo("l-sem-cofre-tmp");
+        let sitios = Sitios::nuevo(lugar("l-sem-cofre-estado"));
+        let resultado = gravar(&mundo, &contexto_linux(&base), "chrome", "Default", &["github.com"], &sitios, &|| chromium::linux_keys(Some(Err(ImportError::new(motivo))))).unwrap();
+        assert_eq!((resultado.cookies, resultado.skipped), (1, 1), "{motivo}");
+
+        // Só v11: nada decifra e o erro é o do cofre, não um genérico "undecryptable".
+        let base = lugar("l-so-v11");
+        chromium_em(&base.join("config"), &["google-chrome"], 24, &[cookie_linux(".github.com", "b", SEGREDO_GOOGLE, b"v11", &cofre)]);
+        let mundo = Mundo::novo("l-so-v11-tmp");
+        let sitios = Sitios::nuevo(lugar("l-so-v11-estado"));
+        let erro = gravar(&mundo, &contexto_linux(&base), "chrome", "Default", &["github.com"], &sitios, &|| chromium::linux_keys(Some(Err(ImportError::new(motivo))))).err().unwrap();
+        assert_eq!(erro.code, motivo);
+        assert!(sitios.origenes().is_empty());
+    }
+}
+
+#[test]
+fn no_linux_recusa_ou_cancelamento_do_cofre_para_a_importacao_sem_gravar() {
+    assert_eq!(chromium::linux_keys(Some(Err(ImportError::new("needs-keychain-approval")))).err().unwrap().code, "needs-keychain-approval");
+    let base = lugar("l-recusa");
+    let peanuts = chromium::derive_cbc_key(b"peanuts", 1);
+    chromium_em(&base.join("config"), &["google-chrome"], 24, &[cookie_linux(".github.com", "a", SEGREDO_GITHUB, b"v10", &peanuts)]);
+    let mundo = Mundo::novo("l-recusa-tmp");
+    let sitios = Sitios::nuevo(lugar("l-recusa-estado"));
+    let erro = gravar(&mundo, &contexto_linux(&base), "chrome", "Default", &["github.com"], &sitios, &|| chromium::linux_keys(Some(Err(ImportError::new("needs-keychain-approval"))))).err().unwrap();
+    assert_eq!(erro.code, "needs-keychain-approval", "o v10 não vale como atalho: a pessoa negou o cofre");
+    assert!(sitios.origenes().is_empty());
+}
+
+#[test]
+fn a_revisao_no_linux_nao_pede_a_chave_nem_mostra_valores() {
+    let base = lugar("l-revisao");
+    let peanuts = chromium::derive_cbc_key(b"peanuts", 1);
+    chromium_em(&base.join("config"), &["BraveSoftware", "Brave-Browser"], 24, &[cookie_linux(".github.com", "a", SEGREDO_GITHUB, b"v10", &peanuts)]);
+    let mundo = Mundo::novo("l-revisao-tmp");
+    let revisao = revisar(&mundo, &contexto_linux(&base), "brave", "Default").unwrap();
+    assert_eq!(revisao.domains.iter().map(|d| (d.domain.as_str(), d.cookies)).collect::<Vec<_>>(), vec![("github.com", 1)]);
+    assert!(!format!("{revisao:?}").contains(SEGREDO_GITHUB));
+}
+
+#[test]
+fn no_linux_cada_navegador_chromium_tem_a_pasta_e_a_aplicacao_do_libsecret_do_t3() {
+    let base = lugar("l-lista");
+    let mut ctx = contexto_linux(&base);
+    // Chrome respeita o CHROME_CONFIG_HOME; os outros, o XDG_CONFIG_HOME (aqui, `config`).
+    ctx.chrome_config = Some(base.join("chrome-home"));
+    let casos: [(&str, &Path, &[&str], &str); 6] = [
+        ("chrome", &base.join("chrome-home"), &["google-chrome"], "chrome"),
+        ("edge", &base.join("config"), &["microsoft-edge"], "msedge"),
+        ("brave", &base.join("config"), &["BraveSoftware", "Brave-Browser"], "brave"),
+        ("vivaldi", &base.join("config"), &["vivaldi"], "chrome"),
+        ("opera", &base.join("config"), &["opera"], "opera"),
+        ("helium", &base.join("config"), &["net.imput.helium"], "chromium"),
+    ];
+    for (id, onde, segmentos, aplicacao) in casos {
+        chromium_em(onde, segmentos, 24, &[]);
+        let fonte = sources::find(id).unwrap();
+        assert_eq!(fonte.linux_secret, Some(aplicacao), "{id}");
+        assert_eq!(fonte.root(&ctx).unwrap(), segmentos.iter().fold(onde.to_path_buf(), |p, s| p.join(s)), "{id}");
+    }
+    let fontes = sources::list(&ctx, &lugar("l-lista-tmp"), &|_, _| Ok(false));
+    for (id, ..) in casos {
+        let info = fontes.iter().find(|f| f.id == id).unwrap_or_else(|| panic!("{id} some da lista"));
+        assert_eq!((info.unavailable, info.profiles.len()), (None, 1), "{id}");
+    }
+    assert!(fontes.iter().all(|f| f.id != "arc" && f.id != "safari"), "Arc e Safari não existem no Linux");
+    // Sem CHROME_CONFIG_HOME, o Chrome volta ao config comum.
+    ctx.chrome_config = None;
+    assert_eq!(sources::find("chrome").unwrap().root(&ctx).unwrap(), base.join("config").join("google-chrome"));
+    assert_eq!(sources::chrome_config_home(Some(PathBuf::from("relativo/fora"))), None);
+    assert_eq!(sources::chrome_config_home(Some(base.join("abs"))), Some(base.join("abs")));
+}
+
+fn firefox_em(raiz: &Path, perfil_relativo: &str, ini: bool) {
+    let perfil = raiz.join(perfil_relativo);
+    std::fs::create_dir_all(&perfil).unwrap();
+    if ini {
+        std::fs::write(raiz.join("profiles.ini"), format!("[Profile0]\nName=principal\nIsRelative=1\nPath={perfil_relativo}\n")).unwrap();
+    }
+    let conn = Connection::open(perfil.join("cookies.sqlite")).unwrap();
+    conn.execute_batch("CREATE TABLE moz_cookies (id INTEGER PRIMARY KEY, originAttributes TEXT NOT NULL DEFAULT '', name TEXT, value TEXT, host TEXT, path TEXT, expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER DEFAULT 0)").unwrap();
+    conn.execute("INSERT INTO moz_cookies (name, value, host, path, expiry, isSecure, isHttpOnly) VALUES ('sid', 'ff-valor', '.exemplo.com', '/', 0, 1, 1)", []).unwrap();
+}
+
+#[test]
+fn no_linux_firefox_e_zen_olham_snap_flatpak_e_o_dot_zen_alem_da_pasta_principal() {
+    let base = lugar("l-alt");
+    let casa = base.join("home");
+    firefox_em(&casa.join(".mozilla").join("firefox"), "aaa.default", true);
+    firefox_em(&casa.join("snap").join("firefox").join("common").join(".mozilla").join("firefox"), "bbb.default", true);
+    firefox_em(&base.join("config").join("zen"), "ccc.default", true);
+    firefox_em(&casa.join(".zen"), "ddd.default", true);
+    firefox_em(&casa.join(".var").join("app").join("app.zen_browser.zen").join("zen"), "eee.default", true);
+    let ctx = contexto_linux(&base);
+    let fontes = sources::list(&ctx, &lugar("l-alt-tmp"), &|_, _| Ok(false));
+    let nomes = |id: &str| fontes.iter().find(|f| f.id == id).unwrap().profiles.iter().map(|p| p.id.clone()).collect::<Vec<_>>();
+    // Os três `Profile0` não colidem: as raízes alternativas levam o prefixo.
+    assert_eq!(nomes("firefox"), vec!["Profile0", "alt1-Profile0"]);
+    assert_eq!(nomes("zen"), vec!["Profile0", "alt1-Profile0", "alt2-Profile0"]);
+    // Cada um lê o seu banco, e só o que a listagem produz vale.
+    let mundo = Mundo::novo("l-alt-tmp2");
+    let sitios = Sitios::nuevo(lugar("l-alt-estado"));
+    gravar(&mundo, &ctx, "firefox", "alt1-Profile0", &["exemplo.com"], &sitios, &|| panic!("Firefox não usa chave")).unwrap();
+    assert_eq!(sitios.sitio("https://exemplo.com").cookies(AHORA)[0].value, "ff-valor");
+    assert_eq!(revisar(&mundo, &ctx, "zen", "alt2-Profile0").unwrap().domains.len(), 1);
+    assert_eq!(revisar(&mundo, &ctx, "firefox", "alt9-Profile0").err().unwrap().code, "no-profile");
+}
+
+#[test]
+fn firefox_sem_profiles_ini_ou_com_ini_velho_varre_as_pastas_atras_de_um_banco() {
+    // Linux: as pastas ficam na raiz.
+    let base = lugar("l-varre");
+    firefox_em(&base.join("home").join(".mozilla").join("firefox"), "solto.default", false);
+    let fontes = sources::list(&contexto_linux(&base), &lugar("l-varre-tmp"), &|_, _| Ok(false));
+    let firefox = fontes.iter().find(|f| f.id == "firefox").unwrap();
+    assert_eq!(firefox.profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["solto.default"]);
+    // macOS: em `Profiles/`; o .ini declara um perfil sem banco, então a varredura assume.
+    let base = lugar("m-varre");
+    let raiz = base.join("data").join("Firefox");
+    firefox_em(&raiz, "Profiles/solto.default", false);
+    std::fs::write(raiz.join("profiles.ini"), "[Profile0]\nName=velho\nIsRelative=1\nPath=Profiles/inexistente\n").unwrap();
+    let ctx = Context { platform: Platform::Mac, home: None, data: Some(base.join("data")), local: None, config: None, chrome_config: None };
+    let fontes = sources::list(&ctx, &lugar("m-varre-tmp"), &|_, _| Ok(false));
+    assert_eq!(fontes.iter().find(|f| f.id == "firefox").unwrap().profiles.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(), vec!["solto.default"]);
+}
+
+fn contexto_windows(base: &Path) -> Context {
+    Context { platform: Platform::Windows, home: None, data: Some(base.join("Roaming")), local: Some(base.join("Local")), config: None, chrome_config: None }
+}
+
+#[test]
+fn no_windows_helium_importa_com_aes_gcm_e_a_trava_e_o_proprio_arquivo_de_cookies() {
+    let base = lugar("w-helium");
+    let chave = [8u8; 32];
+    let filas = [fila_c(".github.com", "sid", cifrar_gcm(&com_hash_do_dominio(".github.com", SEGREDO_GITHUB), &chave))];
+    let db = chromium_em(&base.join("Local"), &["imput", "Helium", "User Data"], 24, &filas);
+    let ctx = contexto_windows(&base);
+    let fonte = sources::find("helium").unwrap();
+    let entrada = sources::find_profile(fonte, &ctx, &lugar("w-helium-tmp0"), "Default").unwrap();
+    assert_eq!(entrada.cookie_db, db);
+    assert_eq!(entrada.lock_target, db, "no Windows o navegador trava o próprio arquivo de cookies");
+    let mundo = Mundo::novo("w-helium-tmp");
+    assert_eq!(revisar(&mundo, &ctx, "helium", "Default").unwrap().domains.len(), 1);
+    let sitios = Sitios::nuevo(lugar("w-helium-estado"));
+    let resultado = gravar(&mundo, &ctx, "helium", "Default", &["github.com"], &sitios, &|| Ok(Keys::gcm(chave))).unwrap();
+    assert_eq!(resultado.cookies, 1);
+    assert_eq!(sitios.sitio("https://github.com").cookies(AHORA)[0].value, SEGREDO_GITHUB);
+}
+
+#[test]
+fn no_windows_firefox_e_zen_ficam_em_appdata_roaming() {
+    let base = lugar("w-ff");
+    firefox_em(&base.join("Roaming").join("Mozilla").join("Firefox"), "Profiles/a.default", true);
+    firefox_em(&base.join("Roaming").join("zen"), "Profiles/b.default", true);
+    let fontes = sources::list(&contexto_windows(&base), &lugar("w-ff-tmp"), &|_, _| Ok(false));
+    for id in ["firefox", "zen"] {
+        let info = fontes.iter().find(|f| f.id == id).unwrap();
+        assert_eq!((info.unavailable, info.profiles.len()), (None, 1), "{id}");
+    }
+    // Helium sem instalação aparece, mas como não instalado; Chrome & co. seguem como app-bound.
+    assert_eq!(fontes.iter().find(|f| f.id == "helium").unwrap().unavailable, Some("not-installed"));
+}
+
+// Só compila no Linux: o mapa de erros do Secret Service (o resto do módulo precisa de um D-Bus de verdade).
+#[cfg(target_os = "linux")]
+#[test]
+fn erros_do_secret_service_viram_os_codigos_do_helper_do_t3() {
+    use secret_service::Error;
+    let codigo = |e: Error| super::libsecret::map_error(&e).code;
+    assert_eq!(codigo(Error::Locked), "needs-keychain-approval");
+    assert_eq!(codigo(Error::Prompt), "needs-keychain-approval", "desbloqueio cancelado");
+    assert_eq!(codigo(Error::NoResult), "keychain-item-missing");
+    assert_eq!(codigo(Error::Unavailable), "keychain-unavailable");
+    assert_eq!(codigo(Error::Crypto("falhou")), "keychain-unavailable");
+}
+
+// Só rodam no Windows (o CI do Windows só compila; rode `cargo test --lib importer` lá). Dados sintéticos.
+#[cfg(windows)]
+mod windows_real {
+    use super::*;
+
+    /// Embrulha uma chave sintética com o DPAPI do usuário atual (PowerShell), como o Chromium faz.
+    fn embrulhar(chave: &[u8; 32]) -> Vec<u8> {
+        use base64::Engine;
+        let script = "Add-Type -AssemblyName System.Security;$b=[Convert]::FromBase64String([Console]::In.ReadToEnd());[Console]::Out.Write([Convert]::ToBase64String([Security.Cryptography.ProtectedData]::Protect($b,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)))";
+        let mut comando = crate::util::spawn::hidden_command("powershell.exe");
+        comando.args(["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script]);
+        let entrada = base64::engine::general_purpose::STANDARD.encode(chave).into_bytes();
+        let saida = crate::util::spawn::output_with_input(&mut comando, Some(entrada), std::time::Duration::from_secs(30)).unwrap();
+        assert!(saida.status.success());
+        base64::engine::general_purpose::STANDARD.decode(String::from_utf8_lossy(&saida.stdout).trim()).unwrap()
+    }
+
+    #[test]
+    fn o_dpapi_do_usuario_atual_devolve_a_chave_sintetica() {
+        let chave = [0x42u8; 32];
+        assert_eq!(chromium::unwrap_dpapi(&embrulhar(&chave)).unwrap(), chave);
+        assert_eq!(chromium::unwrap_dpapi(&[1, 2, 3]).err().unwrap().code, "unreadable", "lixo não é aceito como chave");
+    }
+
+    #[test]
+    fn arquivo_de_cookies_travado_sem_compartilhamento_conta_como_navegador_aberto() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let db = lugar("w-trava").join("Cookies");
+        std::fs::write(&db, b"x").unwrap();
+        assert_eq!(chromium::profile_in_use(&db), Ok(false));
+        let _preso = std::fs::OpenOptions::new().read(true).share_mode(0).open(&db).unwrap();
+        assert_eq!(chromium::profile_in_use(&db), Ok(true));
+    }
 }
 
 // ───────────────────────── Safari ─────────────────────────
@@ -558,7 +861,7 @@ fn safari_sintetico(tag: &str, com_perfil_nomeado: bool) -> Context {
         conn.execute("INSERT INTO bookmarks (title, external_uuid, parent, type, subtype, deleted, order_index) VALUES ('Trabalho', ?1, 0, 1, 2, 0, 1)", params![uuid]).unwrap();
         conn.execute("INSERT INTO bookmarks (title, external_uuid, parent, type, subtype, deleted, order_index) VALUES ('Apagado', '11111111-2222-3333-4444-555555555555', 0, 1, 2, 1, 2)", []).unwrap();
     }
-    Context { platform: Platform::Mac, home: Some(base.join("home")), data: Some(base.join("data")), local: None, config: None }
+    Context { platform: Platform::Mac, home: Some(base.join("home")), data: Some(base.join("data")), local: None, config: None, chrome_config: None }
 }
 
 #[test]
@@ -576,7 +879,7 @@ fn a_listagem_do_safari_traz_o_perfil_padrao_e_os_nomeados_declarados() {
 #[test]
 fn sem_safari_instalado_a_fonte_aparece_como_nao_instalada() {
     let base = lugar("s-nada");
-    let ctx = Context { platform: Platform::Mac, home: Some(base), data: None, local: None, config: None };
+    let ctx = Context { platform: Platform::Mac, home: Some(base), data: None, local: None, config: None, chrome_config: None };
     let fontes = sources::list(&ctx, &lugar("s-nada-tmp"), &|_, _| Ok(false));
     assert_eq!(fontes.iter().find(|f| f.id == "safari").unwrap().unavailable, Some("not-installed"));
 }
@@ -616,7 +919,7 @@ fn zen_usa_o_formato_do_firefox_na_sua_pasta() {
     conn.execute_batch("CREATE TABLE moz_cookies (id INTEGER PRIMARY KEY, originAttributes TEXT NOT NULL DEFAULT '', name TEXT, value TEXT, host TEXT, path TEXT, expiry INTEGER, isSecure INTEGER, isHttpOnly INTEGER, sameSite INTEGER DEFAULT 0)").unwrap();
     conn.execute("INSERT INTO moz_cookies (name, value, host, path, expiry, isSecure, isHttpOnly) VALUES ('sid', 'zen-valor', '.exemplo.com', '/', 0, 1, 1)", []).unwrap();
     drop(conn);
-    let ctx = Context { platform: Platform::Mac, home: None, data: Some(base.join("data")), local: None, config: None };
+    let ctx = Context { platform: Platform::Mac, home: None, data: Some(base.join("data")), local: None, config: None, chrome_config: None };
     let mundo = Mundo::novo("z-zen-tmp");
     let revisao = revisar(&mundo, &ctx, "zen", "Profile0").unwrap();
     assert_eq!(revisao.profile_name, "Zen principal");

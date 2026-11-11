@@ -298,14 +298,14 @@ Autorizado pelo usuário: trazer a importação de **todos** os navegadores que 
 
 | Fonte | Motor | macOS | Windows | Linux |
 |---|---|---|---|---|
-| Chrome, Edge, Brave, Vivaldi | Chromium | sim | **não** (`app-bound`) | não oferecido |
-| Opera | Chromium | sim | **não** (`app-bound`) | não oferecido |
-| Arc | Chromium | sim | não existe | não oferecido |
-| Helium | Chromium | sim | sim (DPAPI, se o `Local State` não for amarrado ao app) | não oferecido |
+| Chrome, Edge, Brave, Vivaldi | Chromium | sim | **não** (`app-bound`) | sim (`v10` padrão + Secret Service) |
+| Opera | Chromium | sim | **não** (`app-bound`) | sim (`v10` padrão + Secret Service) |
+| Arc | Chromium | sim | não existe | não existe |
+| Helium | Chromium | sim | sim (DPAPI, se o `Local State` não for amarrado ao app) | sim (`v10` padrão + Secret Service) |
 | Safari | Safari | sim (Acesso Total ao Disco) | não existe | não existe |
 | Firefox, Zen | Firefox | sim | sim | sim |
 
-O Chromium no Linux não é oferecido: o `v11` guarda a senha no libsecret (atributos próprios, que o `keyring` não lê) e a ADE não implementou essa leitura. Os caminhos de cada fonte estão em `src-tauri/src/preview/importer/sources.rs`; a ADE só aceita um `id` de fonte e um `id` de perfil que a própria listagem produz (o caminho nunca vem da interface; nomes de pasta do `Local State` com `..` ou separador são rejeitados, e um `Path` relativo com `..` no `profiles.ini` é ignorado).
+No Linux, os caminhos e o atributo `application` do item do libsecret seguem o T3 Code (`Sources.ts`): Chrome `$CHROME_CONFIG_HOME` (se absoluto) ou `$XDG_CONFIG_HOME/google-chrome` (`chrome`); Edge `microsoft-edge` (`msedge`); Brave `BraveSoftware/Brave-Browser` (`brave`); Vivaldi `vivaldi` (`chrome`, o Vivaldi guarda a senha sob o nome do Chrome); Opera `opera` (`opera`); Helium `net.imput.helium` (`chromium`). O Firefox também olha `~/snap/firefox/common/.mozilla/firefox`; o Zen, `~/.zen` e o Flatpak `~/.var/app/app.zen_browser.zen/zen`. Perfis de instalações alternativas ganham o prefixo `altN-` no `id`, para não colidir com o `Profile0` da principal. Sem `profiles.ini` útil (ou sem nenhum perfil declarado com banco), o Firefox/Zen varre as pastas atrás de um `cookies.sqlite`, como o T3 (Linux: na raiz; macOS/Windows: em `Profiles/`). Os caminhos de cada fonte estão em `src-tauri/src/preview/importer/sources.rs`; a ADE só aceita um `id` de fonte e um `id` de perfil que a própria listagem produz (o caminho nunca vem da interface; nomes de pasta do `Local State` com `..` ou separador são rejeitados, e um `Path` relativo com `..` no `profiles.ini` é ignorado).
 
 ### 10.2 Fluxo e comandos
 
@@ -322,9 +322,10 @@ Configurações → Navegador → "Importar de outro navegador…" (`BrowserImpo
 - **macOS:** a senha vem do item "<Navegador> Safe Storage" do Keychain pelo Security framework (crate `keyring`, `get_secret`), no clique de confirmar. O macOS mostra o pedido de permissão em nome da ADE. A chave é derivada com PBKDF2-HMAC-SHA1 (`saltysalt`, 1003 iterações) e decifra `v10` (AES-128-CBC, IV de 16 espaços). A senha e a chave ficam só em memória e são zeradas ao soltar (melhor esforço, sem `unsafe`); nunca vão a log, arquivo ou ambiente.
 - **Esquema >= 24 (Chromium 127+):** o texto claro leva o SHA-256 do `host_key` na frente; sem o prefixo certo a linha é descartada. É o que também rejeita uma chave errada. O texto também precisa ser UTF-8 válido.
 - **Windows:** `v10` é AES-256-GCM (crate `ring`) com a chave do `Local State` desembrulhada pelo DPAPI do usuário (PowerShell oculto, entrada por `stdin`). Se o `Local State` tem `app_bound_encrypted_key`, a fonte é recusada com `app-bound`: a ADE não contorna a App-Bound Encryption. `v20` nunca é decifrado.
-- **`v11`** (Linux) e **`v20`** não são decifrados e contam como "puladas" no resultado. Se **nenhum** cookie marcado decifra, a importação falha com `undecryptable` (chave errada ou formato mais novo), sem gravar nada.
+- **Linux:** `v10` usa a senha padrão `peanuts` (PBKDF2-HMAC-SHA1, `saltysalt`, **1** iteração), sem consultar cofre nenhum. `v11` usa a senha do Secret Service, buscada pelo atributo `application` (`libsecret.rs`, crate `secret-service`, a mesma que o `keyring` usa por baixo; o `keyring` em si só casa `service` + `username` e não acha o item do Chromium). Como no helper do T3, a busca vale só o atributo `application` (itens do libgnome-keyring antigo não têm esquema) e um item trancado dispara o desbloqueio normal do desktop. Os dois tentam de novo com a chave de **senha vazia** (crbug.com/1195256). Falha do cofre que não seja recusa (sem Secret Service, item ausente) **não** impede o `v10`; recusa, cancelamento ou cofre trancado (`needs-keychain-approval`) parou a importação inteira, como no T3. Se nada decifra e havia `v11`, o erro devolvido é o do cofre (`keychain-item-missing`/`keychain-unavailable`), não um `undecryptable` genérico. A senha é zerada depois de derivar a chave. Como no T3, o cofre é consultado ao confirmar mesmo que as linhas marcadas sejam só `v10` (o pedido de desbloqueio pode aparecer sem necessidade).
+- **`v11` sem chave** (macOS) e **`v20`** não são decifrados e contam como "puladas" no resultado. Se **nenhum** cookie marcado decifra, a importação falha com `undecryptable` (chave errada ou formato mais novo), sem gravar nada.
 - **Particionados (CHIPS):** `top_frame_site_key` preenchido fica de fora e só é contado. Vencidos são descartados. `samesite` -1 (não especificado) não vira `None`.
-- Dependências: `aes 0.8` e `cbc 0.1` já estavam no `Cargo.lock` (Secret Service do `keyring`, no Linux): nenhuma crate nova no lock, mas passam a compilar também no macOS e no Windows. O PBKDF2 sai do `ring`.
+- Dependências: `aes 0.8` e `cbc 0.1` já estavam no `Cargo.lock` (Secret Service do `keyring`, no Linux): nenhuma crate nova no lock, mas passam a compilar também no macOS e no Windows. O PBKDF2 sai do `ring`. O `secret-service 4` (só `cfg(target_os = "linux")`) também já estava no lock, como dependência do `keyring`: a única mudança do `Cargo.lock` é a linha dele na lista do `ade-ags`.
 
 ### 10.4 Safari
 
@@ -350,14 +351,20 @@ Mesmo formato de `profiles.ini` e `cookies.sqlite` (seção 9), em pastas própr
 ### 10.7 Limites e riscos
 
 - **O destino ainda é o estado do preview.** Os cookies importados valem para o proxy de preview (por origem), como na seção 9, e **não** alcançam os perfis do WebView2 do Windows, que persistem cookies fora do chaveiro. Subdomínios continuam não cobertos (o estado é por origem).
-- **Linux:** só Firefox e Zen.
-- **Windows:** o caminho do DPAPI e a conferência de bloqueio por `share_mode(0)` não foram compilados nem executados nesta máquina. O Chromium com `app_bound_encrypted_key` (Chrome, Edge, Brave, Vivaldi, Opera) não é importável, como no T3.
+- **Linux:** o Firefox só é dado como aberto pelo `.parentlock` (`fcntl`); o T3 também lê o link simbólico `lock` (`ip:pid`). O `SingletonLock` do Chromium confere só o pid, não o host.
+- **Windows:** o T3 não importa Chromium além do Helium; a ADE mostra Chrome, Edge, Brave, Vivaldi e Opera como indisponíveis (`app-bound`) em vez de escondê-los. O caminho do DPAPI e a conferência de bloqueio por `share_mode(0)` só rodam no Windows (testes em `windows_real`, que o CI do Windows apenas compila). O Chromium com `app_bound_encrypted_key` (Chrome, Edge, Brave, Vivaldi, Opera) não é importável, como no T3.
 - **`SingletonLock`:** só o pid é conferido (não o nome do host), então um perfil em home compartilhado entre máquinas pode ser lido como fechado.
 - **Gravação parcial:** como na seção 9, uma origem por vez; se a gravação falhar na segunda, a primeira já ficou gravada, cifrada.
 
 ### 10.8 Verificação
 
-- **Rust:** `cargo test --lib importer`: 49 testes (os 19 do Firefox seguem passando + 30 novos em `test_browsers.rs`). Fixtures: banco de cookies do Chromium cifrado aqui com uma senha de teste (esquemas 23 e 24, `v10`, `v11`, `v20`, GCM do Windows), `Local State` sintético, `Cookies.binarycookies` montado byte a byte, `SafariTabs.db` sintético e Zen sintético. Nenhum perfil, cookie, Keychain ou chave real foi lido. Vetor público do OSCrypt (`peanuts`, 1 iteração → `fd621fe5…2778`) confere a derivação independente do código. Também passaram `cargo test --lib preview` (132) e `util::` (44, inclui o lint de spawn).
+- **Rust:** `cargo test --lib importer`: 49 testes (os 19 do Firefox seguem passando + 30 novos em `test_browsers.rs`); com Windows e Linux, 60 (11 novos: chaves `peanuts`/cofre/senha vazia, falha do cofre sem travar o `v10`, recusa do cofre, caminhos e aplicações por navegador, snap/Flatpak/`.zen`, varredura do Firefox, Helium no Windows de ponta a ponta). Fixtures: banco de cookies do Chromium cifrado aqui com uma senha de teste (esquemas 23 e 24, `v10`, `v11`, `v20`, GCM do Windows), `Local State` sintético, `Cookies.binarycookies` montado byte a byte, `SafariTabs.db` sintético e Zen sintético. Nenhum perfil, cookie, Keychain ou chave real foi lido. Vetor público do OSCrypt (`peanuts`, 1 iteração → `fd621fe5…2778`) confere a derivação independente do código. Também passaram `cargo test --lib preview` (132) e `util::` (44, inclui o lint de spawn).
 - **Vitest:** `browserImportModel.test.ts` e `browserImportSetting.test.tsx` (28 testes): nada é lido antes do clique, escolha de navegador/perfil/destino, aviso do Keychain só para Chromium, Safari sem Acesso Total ao Disco (abre o painel certo e libera ao verificar), navegador aberto, fonte desabilitada com motivo, recusas do backend.
 - **Checagens:** `tsc --noEmit`, `check:i18n`, `check:test-lint`, `check:babel`, `cargo clippy --lib` sem aviso novo no importador.
-- **Não verificado:** contra um Chrome/Safari/Firefox reais (por regra); o pedido real do Keychain e do TCC do macOS; o Windows; a captura visual da tela.
+- **Não verificado:** contra um Chrome/Safari/Firefox reais (por regra); o pedido real do Keychain e do TCC do macOS; o Windows e o Linux reais (o `secret-service` só foi compilado e testado no mapa de erros, sem D-Bus; o desbloqueio real do chaveiro e o DPAPI real ficam para o CI/teste manual); a captura visual da tela.
+
+### 10.9 Windows e Linux: o que roda onde
+
+- **macOS (esta máquina):** compila e roda tudo o que não depende do sistema: derivação das chaves, `decrypt_value` com `v10`/`v11`/senha vazia, `linux_keys`, erros do cofre, listagem de fontes com `Context` de Linux e de Windows, importação de ponta a ponta do Helium no Windows (AES-GCM) e do Chrome/Brave no Linux (fixtures cifradas aqui). `libsecret.rs` não é compilado no macOS pelo crate principal (é `cfg(target_os = "linux")`); foi compilado e teve o mapa de erros testado num crate descartável com a mesma dependência e as mesmas versões do `Cargo.lock`.
+- **CI Linux (ubuntu-22.04, roda os testes):** compila `libsecret.rs` com o `ade-ags` de verdade e roda `erros_do_secret_service_viram_os_codigos_do_helper_do_t3`. A leitura real do Secret Service (`read_chromium_secret`) não tem teste automático: precisa de um D-Bus com chaveiro, fica para teste manual.
+- **CI Windows (`cargo check`, não roda testes):** só prova que `unwrap_dpapi`, `profile_in_use` e o módulo de testes `windows_real` compilam. Os testes dele (DPAPI com chave sintética do próprio usuário e trava por `share_mode(0)`) rodam à mão no Windows com `cargo test --lib importer`. Nesta máquina não deu para `cargo check --target x86_64-pc-windows-gnu`: falta o `x86_64-w64-mingw32-gcc` (o `ring` precisa dele).

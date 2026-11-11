@@ -46,8 +46,10 @@ enum Base {
     Data,
     /// Windows: `%LOCALAPPDATA%`.
     Local,
-    /// Linux: `~/.config`.
+    /// Linux: `$XDG_CONFIG_HOME` ou `~/.config`.
     Config,
+    /// Linux: `$CHROME_CONFIG_HOME` se for um caminho absoluto; senão, o mesmo que `Config`. Só o Chrome o usa.
+    ChromeConfig,
     Home,
 }
 
@@ -67,6 +69,10 @@ pub(crate) struct Source {
     mac: Option<Location>,
     windows: Option<Location>,
     linux: Option<Location>,
+    /// Linux, Firefox/Zen: outras instalações (snap, Flatpak, `~/.zen`), olhadas depois da principal.
+    linux_alt: &'static [Location],
+    /// Linux, Chromium: o atributo `application` do item da senha no Secret Service (libsecret).
+    pub linux_secret: Option<&'static str>,
     /// No Windows, a cifra é amarrada ao app (Chrome 127+ e derivados): a ADE não contorna isso.
     pub windows_app_bound: bool,
 }
@@ -83,6 +89,8 @@ const fn chromium_source(
     keychain_account: &'static str,
     mac: Option<&'static [&'static str]>,
     windows: Option<&'static [&'static str]>,
+    linux: Option<Location>,
+    linux_secret: Option<&'static str>,
     app_bound: bool,
 ) -> Source {
     Source {
@@ -98,20 +106,23 @@ const fn chromium_source(
             Some(segments) => loc(Base::Local, segments),
             None => None,
         },
-        // O `v11` do Linux guarda a senha no libsecret, que a ADE não lê: o Chromium não é oferecido lá.
-        linux: None,
+        linux,
+        linux_alt: &[],
+        linux_secret,
         windows_app_bound: app_bound,
     }
 }
 
 pub(crate) static SOURCES: &[Source] = &[
-    chromium_source("chrome", "Chrome", "Chrome Safe Storage", "Chrome", Some(&["Google", "Chrome"]), Some(&["Google", "Chrome", "User Data"]), true),
-    chromium_source("edge", "Microsoft Edge", "Microsoft Edge Safe Storage", "Microsoft Edge", Some(&["Microsoft Edge"]), Some(&["Microsoft", "Edge", "User Data"]), true),
-    chromium_source("brave", "Brave", "Brave Safe Storage", "Brave", Some(&["BraveSoftware", "Brave-Browser"]), Some(&["BraveSoftware", "Brave-Browser", "User Data"]), true),
-    chromium_source("vivaldi", "Vivaldi", "Vivaldi Safe Storage", "Vivaldi", Some(&["Vivaldi"]), Some(&["Vivaldi", "User Data"]), true),
-    chromium_source("opera", "Opera", "Opera Safe Storage", "Opera", Some(&["com.operasoftware.Opera"]), None, true),
-    chromium_source("arc", "Arc", "Arc Safe Storage", "Arc", Some(&["Arc", "User Data"]), None, false),
-    chromium_source("helium", "Helium", "Helium Storage Key", "Helium", Some(&["net.imput.helium"]), Some(&["imput", "Helium", "User Data"]), false),
+    // Linux: caminhos e atributo `application` do libsecret como no T3 Code (`Sources.ts`). O Vivaldi guarda a
+    // senha sob o nome do Chrome e o Helium sob o do Chromium.
+    chromium_source("chrome", "Chrome", "Chrome Safe Storage", "Chrome", Some(&["Google", "Chrome"]), Some(&["Google", "Chrome", "User Data"]), loc(Base::ChromeConfig, &["google-chrome"]), Some("chrome"), true),
+    chromium_source("edge", "Microsoft Edge", "Microsoft Edge Safe Storage", "Microsoft Edge", Some(&["Microsoft Edge"]), Some(&["Microsoft", "Edge", "User Data"]), loc(Base::Config, &["microsoft-edge"]), Some("msedge"), true),
+    chromium_source("brave", "Brave", "Brave Safe Storage", "Brave", Some(&["BraveSoftware", "Brave-Browser"]), Some(&["BraveSoftware", "Brave-Browser", "User Data"]), loc(Base::Config, &["BraveSoftware", "Brave-Browser"]), Some("brave"), true),
+    chromium_source("vivaldi", "Vivaldi", "Vivaldi Safe Storage", "Vivaldi", Some(&["Vivaldi"]), Some(&["Vivaldi", "User Data"]), loc(Base::Config, &["vivaldi"]), Some("chrome"), true),
+    chromium_source("opera", "Opera", "Opera Safe Storage", "Opera", Some(&["com.operasoftware.Opera"]), None, loc(Base::Config, &["opera"]), Some("opera"), true),
+    chromium_source("arc", "Arc", "Arc Safe Storage", "Arc", Some(&["Arc", "User Data"]), None, None, None, false),
+    chromium_source("helium", "Helium", "Helium Storage Key", "Helium", Some(&["net.imput.helium"]), Some(&["imput", "Helium", "User Data"]), loc(Base::Config, &["net.imput.helium"]), Some("chromium"), false),
     Source {
         id: "safari",
         name: "Safari",
@@ -120,6 +131,8 @@ pub(crate) static SOURCES: &[Source] = &[
         mac: loc(Base::Home, &["Library", "Containers", "com.apple.Safari", "Data", "Library"]),
         windows: None,
         linux: None,
+        linux_alt: &[],
+        linux_secret: None,
         windows_app_bound: false,
     },
     Source {
@@ -130,6 +143,9 @@ pub(crate) static SOURCES: &[Source] = &[
         mac: loc(Base::Data, &["Firefox"]),
         windows: loc(Base::Data, &["Mozilla", "Firefox"]),
         linux: loc(Base::Home, &[".mozilla", "firefox"]),
+        // Firefox em pacote snap.
+        linux_alt: &[Location { base: Base::Home, segments: &["snap", "firefox", "common", ".mozilla", "firefox"] }],
+        linux_secret: None,
         windows_app_bound: false,
     },
     Source {
@@ -140,6 +156,12 @@ pub(crate) static SOURCES: &[Source] = &[
         mac: loc(Base::Data, &["zen"]),
         windows: loc(Base::Data, &["zen"]),
         linux: loc(Base::Config, &["zen"]),
+        // Instalações antigas em `~/.zen` e o Flatpak.
+        linux_alt: &[
+            Location { base: Base::Home, segments: &[".zen"] },
+            Location { base: Base::Home, segments: &[".var", "app", "app.zen_browser.zen", "zen"] },
+        ],
+        linux_secret: None,
         windows_app_bound: false,
     },
 ];
@@ -155,6 +177,8 @@ pub(crate) struct Context {
     pub data: Option<PathBuf>,
     pub local: Option<PathBuf>,
     pub config: Option<PathBuf>,
+    /// Linux: onde o Chrome guarda os dados (`$CHROME_CONFIG_HOME` absoluto, senão o mesmo de `config`).
+    pub chrome_config: Option<PathBuf>,
 }
 
 impl Context {
@@ -165,8 +189,14 @@ impl Context {
             data: dirs::data_dir(),
             local: dirs::data_local_dir(),
             config: dirs::config_dir(),
+            chrome_config: chrome_config_home(std::env::var_os("CHROME_CONFIG_HOME").map(PathBuf::from)).or_else(dirs::config_dir),
         }
     }
+}
+
+/// O `CHROME_CONFIG_HOME`, só se for um caminho absoluto (como no T3 Code); senão, quem chama volta ao `config`.
+pub(crate) fn chrome_config_home(value: Option<PathBuf>) -> Option<PathBuf> {
+    value.filter(|path| path.is_absolute())
 }
 
 /// Por que a fonte não pode ser importada agora. Códigos estáveis: a interface traduz.
@@ -211,14 +241,13 @@ impl Source {
 
     /// A pasta de dados do navegador neste sistema.
     pub(crate) fn root(&self, ctx: &Context) -> Option<PathBuf> {
-        let location = self.location(ctx.platform)?;
-        let base = match location.base {
-            Base::Data => ctx.data.as_ref(),
-            Base::Local => ctx.local.as_ref(),
-            Base::Config => ctx.config.as_ref(),
-            Base::Home => ctx.home.as_ref(),
-        }?;
-        Some(location.segments.iter().fold(base.clone(), |path, segment| path.join(segment)))
+        resolve(self.location(ctx.platform)?, ctx)
+    }
+
+    /// A pasta principal e, no Linux, as instalações alternativas (snap, Flatpak…), nessa ordem.
+    fn roots(&self, ctx: &Context) -> Vec<PathBuf> {
+        let alternates = if ctx.platform == Platform::Linux { self.linux_alt } else { &[] };
+        self.root(ctx).into_iter().chain(alternates.iter().filter_map(|location| resolve(*location, ctx))).collect()
     }
 
     /// Esta fonte pode ser importada neste sistema? `unsupported-platform` ou, no Windows, `app-bound`.
@@ -236,6 +265,17 @@ impl Source {
         }
         None
     }
+}
+
+fn resolve(location: Location, ctx: &Context) -> Option<PathBuf> {
+    let base = match location.base {
+        Base::Data => ctx.data.as_ref(),
+        Base::Local => ctx.local.as_ref(),
+        Base::Config => ctx.config.as_ref(),
+        Base::ChromeConfig => ctx.chrome_config.as_ref().or(ctx.config.as_ref()),
+        Base::Home => ctx.home.as_ref(),
+    }?;
+    Some(location.segments.iter().fold(base.clone(), |path, segment| path.join(segment)))
 }
 
 /// `true` se um nome de pasta de perfil é seguro: sem separador, `.`/`..` ou NUL. O nome vem do
@@ -291,13 +331,30 @@ fn unavailable_reason(source: &Source, entries: &[ProfileEntry], in_use: &dyn Fn
 
 /// Os perfis que têm um banco de cookies. Sem a pasta do navegador, a lista é vazia (e não é erro).
 pub(crate) fn profiles(source: &Source, ctx: &Context, tmp_root: &Path) -> Result<Vec<ProfileEntry>, ImportError> {
-    let Some(root) = source.root(ctx) else {
+    let roots = source.roots(ctx);
+    let Some(root) = roots.first() else {
         return Ok(Vec::new());
     };
     match source.engine {
-        Engine::Firefox => firefox_profiles(&root),
-        Engine::Chromium => chromium_profiles(&root, ctx.platform),
-        Engine::Safari => safari_profiles(&root, tmp_root),
+        Engine::Firefox => {
+            let mut entries: Vec<ProfileEntry> = Vec::new();
+            for (index, root) in roots.iter().enumerate() {
+                for mut entry in firefox_profiles(root, ctx.platform)? {
+                    // A mesma pasta nunca entra duas vezes; o `id` das instalações alternativas leva o prefixo da raiz
+                    // para não colidir com um `Profile0` da principal.
+                    if entries.iter().any(|e| e.dir == entry.dir) {
+                        continue;
+                    }
+                    if index > 0 {
+                        entry.id = format!("alt{index}-{}", entry.id);
+                    }
+                    entries.push(entry);
+                }
+            }
+            Ok(entries)
+        }
+        Engine::Chromium => chromium_profiles(root, ctx.platform),
+        Engine::Safari => safari_profiles(root, tmp_root),
     }
 }
 
@@ -306,11 +363,32 @@ pub(crate) fn find_profile(source: &Source, ctx: &Context, tmp_root: &Path, id: 
     profiles(source, ctx, tmp_root)?.into_iter().find(|p| p.id == id).ok_or_else(|| ImportError::new("no-profile"))
 }
 
-fn firefox_profiles(root: &Path) -> Result<Vec<ProfileEntry>, ImportError> {
-    Ok(firefox::profiles(root)?
+fn firefox_entry(id: String, name: String, dir: PathBuf) -> ProfileEntry {
+    ProfileEntry { lock_target: dir.clone(), cookie_db: dir.join("cookies.sqlite"), id, name, dir }
+}
+
+/// Os perfis que o `profiles.ini` declara e têm `cookies.sqlite`. Se nenhum tem (o `.ini` ficou velho ou nunca
+/// houve execução), varre as pastas atrás de um banco, como o T3 Code: no Linux as pastas ficam na raiz; no macOS
+/// e no Windows, em `Profiles/`.
+fn firefox_profiles(root: &Path, platform: Platform) -> Result<Vec<ProfileEntry>, ImportError> {
+    let declared: Vec<ProfileEntry> = firefox::profiles(root)?
         .into_iter()
         .filter(|p| p.dir.join("cookies.sqlite").is_file())
-        .map(|p| ProfileEntry { lock_target: p.dir.clone(), cookie_db: p.dir.join("cookies.sqlite"), id: p.id, name: p.name, dir: p.dir })
+        .map(|p| firefox_entry(p.id, p.name, p.dir))
+        .collect();
+    if !declared.is_empty() {
+        return Ok(declared);
+    }
+    let scan = if platform == Platform::Linux { root.to_path_buf() } else { root.join("Profiles") };
+    let mut names: Vec<String> = std::fs::read_dir(&scan)
+        .map(|entries| entries.filter_map(Result::ok).filter_map(|e| e.file_name().into_string().ok()).collect())
+        .unwrap_or_default();
+    names.sort();
+    Ok(names
+        .into_iter()
+        .filter(|name| safe_dir_name(name))
+        .map(|name| firefox_entry(name.clone(), name.clone(), scan.join(&name)))
+        .filter(|entry| entry.cookie_db.is_file())
         .collect())
 }
 

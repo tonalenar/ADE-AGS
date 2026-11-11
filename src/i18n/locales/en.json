@@ -426,7 +426,7 @@
   "settings.browserImport.error.noDomains": "None of the marked domains exist in the profile anymore.",
   "settings.browserImport.error.writeFailed": "Could not save the import. Nothing in plain text was written.",
   "settings.browserImport.error.needsFullDiskAccess": "Full Disk Access is needed to read Safari cookies. Open System Settings, turn it on for ADE AGS, then check again.",
-  "settings.browserImport.error.needsKeychainApproval": "The system keychain did not allow reading this browser's key. Allow it when macOS asks and try again. Nothing was written.",
+  "settings.browserImport.error.needsKeychainApproval": "The system keychain did not allow reading this browser's key. Allow it when the system asks (on Linux, that is the keyring unlock) and try again. Nothing was written.",
   "settings.browserImport.error.keychainItemMissing": "There is no encryption key for this browser in your keychain. Open that browser once, then try again.",
   "settings.browserImport.error.keychainUnavailable": "The system keyring could not be accessed. Make sure it is unlocked and try again.",
   "settings.browserImport.error.appBound": "This browser uses app-bound encryption, which ADE does not bypass. Its cookies cannot be imported.",

@@ -7,7 +7,10 @@
 //! Cifra (OSCrypt):
 //! - macOS: `v10` = AES-128-CBC, IV de 16 espaços, chave = PBKDF2-HMAC-SHA1(senha do Keychain, "saltysalt", 1003).
 //!   A senha vem do item "<Navegador> Safe Storage", lido só no clique (o macOS pede permissão).
-//! - Linux: o Chromium não é oferecido. O `v11` guarda a senha no libsecret, que a ADE não lê.
+//! - Linux: `v10` = AES-128-CBC com a senha padrão `peanuts` (PBKDF2, 1 iteração), usada quando o navegador não
+//!   tem cofre; `v11` = a mesma cifra com a senha do Secret Service (libsecret, atributo `application`), lida só
+//!   no clique de confirmar (`libsecret.rs`). Como no T3, os dois tentam também a chave de senha vazia
+//!   (crbug.com/1195256). Falha do cofre que não seja falta de aprovação não impede o `v10`.
 //! - Windows: `v10` = AES-256-GCM, chave do `Local State` protegida pelo DPAPI do usuário. Se o `Local State`
 //!   tem `app_bound_encrypted_key` (Chrome 127+, Edge e outros), a chave é amarrada ao app e **a ADE não
 //!   contorna isso**: a fonte fica indisponível com `app-bound`.
@@ -36,6 +39,10 @@ use super::sources::Platform;
 const AES_CBC_IV: [u8; 16] = [0x20; 16];
 const KEY_SALT: &[u8] = b"saltysalt";
 const MAC_ITERATIONS: u32 = 1003;
+/// No Linux o Chromium deriva a chave com uma única iteração.
+const LINUX_ITERATIONS: u32 = 1;
+/// A senha padrão do Chromium no Linux quando não há cofre (libsecret/KWallet).
+const LINUX_FALLBACK_PASSPHRASE: &[u8] = b"peanuts";
 const GCM_NONCE: usize = 12;
 const GCM_TAG: usize = 16;
 /// Microssegundos entre 1601-01-01 (época do WebKit) e 1970-01-01, em segundos.
@@ -47,13 +54,28 @@ const DOMAIN_BINDING_SCHEMA: i64 = 24;
 #[derive(Default)]
 pub(crate) struct Keys {
     pub cbc_v10: Option<[u8; 16]>,
+    /// Linux: a chave do `v11`, da senha do Secret Service.
+    pub cbc_v11: Option<[u8; 16]>,
+    /// Linux: por que o `v11` não tem chave (cofre ausente, item ausente…). Só vira erro se nada decifra.
+    pub cbc_v11_error: Option<ImportError>,
+    /// Linux: alguns clientes cifram com senha vazia; é a segunda tentativa de `v10` e `v11`.
+    pub cbc_empty: Option<[u8; 16]>,
     pub gcm_v10: Option<[u8; 32]>,
+}
+
+impl Keys {
+    /// As chaves do Windows: só a AES-GCM do `v10`. (`Keys` implementa `Drop`, então não aceita `..Default`.)
+    pub(crate) fn gcm(key: [u8; 32]) -> Self {
+        let mut keys = Keys::default();
+        keys.gcm_v10 = Some(key);
+        keys
+    }
 }
 
 impl Drop for Keys {
     fn drop(&mut self) {
         // Melhor esforço sem `unsafe`: zera e impede o compilador de descartar a escrita.
-        if let Some(key) = self.cbc_v10.as_mut() {
+        for key in [self.cbc_v10.as_mut(), self.cbc_v11.as_mut(), self.cbc_empty.as_mut()].into_iter().flatten() {
             key.fill(0);
             std::hint::black_box(&*key);
         }
@@ -74,7 +96,40 @@ pub(crate) fn derive_cbc_key(passphrase: &[u8], iterations: u32) -> [u8; 16] {
 
 /// As chaves do macOS a partir da senha do Keychain.
 pub(crate) fn mac_keys(secret: &[u8]) -> Keys {
-    Keys { cbc_v10: Some(derive_cbc_key(secret, MAC_ITERATIONS)), ..Keys::default() }
+    let mut keys = Keys::default();
+    keys.cbc_v10 = Some(derive_cbc_key(secret, MAC_ITERATIONS));
+    keys
+}
+
+/// As chaves do Linux. O `v10` usa sempre a senha padrão; a senha do Secret Service (`keyring`, lida só no
+/// clique) abre o `v11`. `keyring` é `None` se a fonte não tem aplicação no cofre.
+/// - cofre indisponível ou sem o item: o `v10` segue valendo e o motivo fica em `cbc_v11_error`;
+/// - recusa ou cancelamento (`needs-keychain-approval`): a pessoa não aprovou, então a importação para.
+pub(crate) fn linux_keys(keyring: Option<Result<Vec<u8>, ImportError>>) -> Result<Keys, ImportError> {
+    let mut keys = Keys::default();
+    keys.cbc_v10 = Some(derive_cbc_key(LINUX_FALLBACK_PASSPHRASE, LINUX_ITERATIONS));
+    keys.cbc_empty = Some(derive_cbc_key(b"", LINUX_ITERATIONS));
+    match keyring {
+        None => {}
+        Some(Ok(mut secret)) => {
+            keys.cbc_v11 = Some(derive_cbc_key(&secret, LINUX_ITERATIONS));
+            secret.fill(0);
+        }
+        Some(Err(error)) if error.code == "needs-keychain-approval" => return Err(error),
+        Some(Err(error)) => keys.cbc_v11_error = Some(error),
+    }
+    Ok(keys)
+}
+
+/// Lê a senha do Chromium no Secret Service do Linux (libsecret). Só no clique de confirmar.
+#[cfg(target_os = "linux")]
+pub(crate) fn read_linux_secret(application: &str) -> Result<Vec<u8>, ImportError> {
+    super::libsecret::read_chromium_secret(application)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub(crate) fn read_linux_secret(_application: &str) -> Result<Vec<u8>, ImportError> {
+    Err(ImportError::new("unsupported-platform"))
 }
 
 /// Lê a senha "<Navegador> Safe Storage" do Keychain do macOS (Security framework, via `keyring`).
@@ -372,18 +427,35 @@ pub(crate) fn decrypt_value(encrypted: &[u8], keys: &Keys, host_key: &str, schem
         return None;
     }
     let (prefix, payload) = encrypted.split_at(3);
+    // Cada versão tem a sua chave e, fora do Windows, a de senha vazia como segunda tentativa.
+    let cbc = |primary: Option<&[u8; 16]>| -> Option<Vec<u8>> {
+        let open = |key: &[u8; 16]| strip_domain_binding(decrypt_cbc(payload, key)?, host_key, schema_version);
+        open(primary?).or_else(|| keys.cbc_empty.as_ref().and_then(open))
+    };
     let plain = match (platform, prefix) {
-        (Platform::Windows, b"v10") => decrypt_gcm(payload, keys.gcm_v10.as_ref()?)?,
+        (Platform::Windows, b"v10") => strip_domain_binding(decrypt_gcm(payload, keys.gcm_v10.as_ref()?)?, host_key, schema_version)?,
         // `v20` no Windows é a cifra amarrada ao app: sem chave aqui, nunca contornada.
         (Platform::Windows, _) => return None,
-        (_, b"v10") => decrypt_cbc(payload, keys.cbc_v10.as_ref()?)?,
-        // `v11` é a senha do libsecret (Linux): sem chave aqui, nunca decifra.
-        (_, b"v11") => return None,
+        (_, b"v10") => cbc(keys.cbc_v10.as_ref())?,
+        // `v11` é a senha do Secret Service (Linux): sem ela (`cbc_v11` vazio), nunca decifra.
+        (_, b"v11") => cbc(keys.cbc_v11.as_ref())?,
         // Sem prefixo de versão, o Chromium guarda o texto claro no `encrypted_value`.
-        _ => encrypted.to_vec(),
+        _ => strip_domain_binding(encrypted.to_vec(), host_key, schema_version)?,
     };
-    let plain = strip_domain_binding(plain, host_key, schema_version)?;
     String::from_utf8(plain).ok()
+}
+
+/// Se a importação falhou porque a chave do `v11` não veio: o erro do cofre, quando nenhum cookie marcado
+/// decifrou e há ao menos um `v11` marcado. Sem isso, a pessoa veria só "não decifrou" sem saber o motivo.
+pub(crate) fn v11_key_error(snapshot: &Snapshot, wanted: &BTreeSet<String>, keys: &Keys, now_secs: i64) -> Option<ImportError> {
+    let error = keys.cbc_v11_error.as_ref()?;
+    snapshot
+        .rows
+        .iter()
+        .any(|row| {
+            row.encrypted.starts_with(b"v11") && matches!(judge(row, now_secs), Verdict::Keep { ref domain, .. } if wanted.contains(domain))
+        })
+        .then(|| error.clone())
 }
 
 fn decrypt_cbc(payload: &[u8], key: &[u8; 16]) -> Option<Vec<u8>> {

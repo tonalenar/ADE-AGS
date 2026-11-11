@@ -426,7 +426,7 @@
   "settings.browserImport.error.noDomains": "Nenhum dos domínios marcados existe mais no perfil.",
   "settings.browserImport.error.writeFailed": "Não foi possível gravar a importação. Nada em claro foi gravado.",
   "settings.browserImport.error.needsFullDiskAccess": "É preciso Acesso Total ao Disco para ler os cookies do Safari. Abra os Ajustes do Sistema, ative para o ADE AGS e verifique de novo.",
-  "settings.browserImport.error.needsKeychainApproval": "O chaveiro do sistema não deixou ler a chave deste navegador. Permita quando o macOS perguntar e tente de novo. Nada foi gravado.",
+  "settings.browserImport.error.needsKeychainApproval": "O chaveiro do sistema não deixou ler a chave deste navegador. Permita quando o sistema perguntar (no Linux, é o desbloqueio do chaveiro) e tente de novo. Nada foi gravado.",
   "settings.browserImport.error.keychainItemMissing": "Não há chave de criptografia deste navegador no seu chaveiro. Abra esse navegador uma vez e tente de novo.",
   "settings.browserImport.error.keychainUnavailable": "Não foi possível acessar o chaveiro do sistema. Confira se ele está desbloqueado e tente de novo.",
   "settings.browserImport.error.appBound": "Este navegador usa criptografia amarrada ao app, que a ADE não contorna. Os cookies dele não podem ser importados.",
