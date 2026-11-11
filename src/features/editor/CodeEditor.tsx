@@ -5,8 +5,10 @@ import { indentWithTab } from "@codemirror/commands";
 import { basicSetup } from "codemirror";
 import { useTheme } from "neogestify-ui-components";
 
+import { useDisplayPrefs } from "@/features/settings/displayPreferences";
+
 import { changeGutter, setBaseline, type ChangeGutterLabels } from "./changeGutter";
-import { editorTheme, languageFor } from "./codemirror";
+import { editorTheme, languageFor, wrapLines } from "./codemirror";
 
 /** Marca los cambios que no hizo el usuario (recargar desde disco): no ensucian la tab. */
 const External = Annotation.define<boolean>();
@@ -40,6 +42,12 @@ export function CodeEditor({ path, doc, onDirty, onSave, reveal, handleRef, base
   const viewRef = useRef<EditorView | null>(null);
   const themeSlot = useRef(new Compartment());
   const languageSlot = useRef(new Compartment());
+  // A quebra de linha segue a preferência de código, sem remontar o editor: o valor atual entra pela ref
+  // na criação, e as mudanças depois passam pelo `Compartment` (ver o efeito abaixo).
+  const wrapSlot = useRef(new Compartment());
+  const { codeWrap } = useDisplayPrefs();
+  const codeWrapRef = useRef(codeWrap);
+  codeWrapRef.current = codeWrap;
   const { theme } = useTheme();
   const callbacks = useRef({ onDirty, onSave });
   callbacks.current = { onDirty, onSave };
@@ -64,6 +72,7 @@ export function CodeEditor({ path, doc, onDirty, onSave, reveal, handleRef, base
           }])),
           themeSlot.current.of(editorTheme(theme === "dark")),
           languageSlot.current.of([]),
+          wrapSlot.current.of(wrapLines(codeWrapRef.current)),
           EditorView.updateListener.of((update) => {
             if (update.docChanged && !update.transactions.some((tr) => tr.annotation(External))) {
               callbacks.current.onDirty();
@@ -107,6 +116,10 @@ export function CodeEditor({ path, doc, onDirty, onSave, reveal, handleRef, base
   useEffect(() => {
     viewRef.current?.dispatch({ effects: themeSlot.current.reconfigure(editorTheme(theme === "dark")) });
   }, [theme]);
+
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: wrapSlot.current.reconfigure(wrapLines(codeWrap)) });
+  }, [codeWrap]);
 
   useEffect(() => {
     viewRef.current?.dispatch({ effects: setBaseline.of(baseline ?? null) });

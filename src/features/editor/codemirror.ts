@@ -66,6 +66,14 @@ export function editorTheme(isDark: boolean): Extension {
   return [base, isDark ? dark : light];
 }
 
+/**
+ * A quebra de linha do editor de arquivos: a mesma preferência de código (Aparência → Texto) que já quebra
+ * os blocos do chat e os diffs. Desligada, a extensão nem entra e o editor rola na horizontal. Pura.
+ */
+export function wrapLines(on: boolean): Extension {
+  return on ? EditorView.lineWrapping : [];
+}
+
 /** El soporte de lenguaje para un archivo. Se carga bajo demanda: son decenas de
  *  gramáticas y no tiene sentido meterlas todas en el arranque de la app. */
 export async function languageFor(path: string): Promise<Extension> {
