@@ -18,7 +18,8 @@ import { TERMINAL_FONT } from "@/features/terminal/theme";
 const FONT = TERMINAL_FONT;
 
 const base = EditorView.theme({
-  "&": { height: "100%", fontSize: "13px", backgroundColor: "transparent" },
+  // O mesmo tamanho do código no chat e nos diffs: segue a preferência de Tipografia.
+  "&": { height: "100%", fontSize: "var(--text-chat-code)", backgroundColor: "transparent" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: FONT, lineHeight: "1.6" },
   ".cm-gutters": { backgroundColor: "transparent", border: "none" },

@@ -92,6 +92,8 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "appearance.motion", page: "appearance", anchor: "appearance-motion", titleKey: "settings.motion.duration" },
   { id: "appearance.themes", page: "appearance", anchor: "appearance-themes", titleKey: "settings.themeCustom.title" },
   { id: "appearance.fonts", page: "appearance", anchor: "appearance-fonts", titleKey: "settings.typography" },
+  { id: "appearance.fontSizeInterface", page: "appearance", anchor: "appearance-fonts", titleKey: "settings.font.size.interface", keywordKeys: ["settings.font.size.interfaceHint"] },
+  { id: "appearance.fontSizeCode", page: "appearance", anchor: "appearance-fonts", titleKey: "settings.font.size.code", keywordKeys: ["settings.font.size.codeHint"] },
   { id: "appearance.contrast", page: "appearance", anchor: "appearance-interface", titleKey: "settings.contrast.label", keywordKeys: ["settings.contrast.hint"] },
   { id: "appearance.glass", page: "appearance", anchor: "appearance-interface", titleKey: "settings.glass.label", keywordKeys: ["settings.glass.hint"] },
   { id: "appearance.effort", page: "appearance", anchor: "appearance-interface", titleKey: "settings.effort.label", keywordKeys: ["settings.effort.hint"] },
