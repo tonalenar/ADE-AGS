@@ -16,6 +16,8 @@ O seletor ao lado da câmera lista a tela principal, as outras telas e as janela
 - **Outra tela:** `screencapture -D 2`. O manual do macOS (`man screencapture`) diz que `1` é a principal e `2` a secundária. Essa correspondência só vale com **exatamente duas telas**. Com três ou mais, o manual não diz a ordem das secundárias, e essas telas ficam bloqueadas com o motivo, em vez de um número chutado. Depois da captura, a ADE confere o tamanho da foto com o da tela escolhida, em pixels ou em pontos, na vertical ou na horizontal. Se não bater, a foto sai do disco e nada é anexado.
 - **Janela:** `screencapture -o -l <id da janela>`, sem a sombra da janela. A lista traz o app e, com a permissão, o título.
 - **Permissão:** outra tela e janelas exigem a **Gravação de Tela** autorizada. Sem ela, a lista mostra só os nomes dos apps, essas opções ficam bloqueadas e o grupo explica por quê. A tela principal segue como antes.
+- **Falha ao capturar:** a ADE preserva o código de saída e o `stderr` de `/usr/sbin/screencapture`. Quando o macOS retorna `could not create image from display`, o aviso mostra o caminho do painel Gravação de Tela e Áudio do Sistema. Se ADE AGS já estiver na lista e continuar falhando, remova-a e adicione-a novamente: uma troca de requisito de assinatura pode deixar a autorização TCC antiga associada à identidade anterior. Outros erros mostram o código e o diagnóstico do comando.
+- **Ajustes:** o backend exporta `open_privacy_settings` e o wrapper `openPrivacySettings("screen_capture")` para abrir esse painel. A integração do botão de câmera fica no branch que mantém o componente `DesktopSnapshotButton`.
 - **Limite conhecido:** com dois monitores de mesma resolução, a conferência pelo tamanho não distingue as telas, e a escolha depende só da numeração documentada.
 
 ### Metadados e legenda
@@ -93,6 +95,16 @@ A tabela acima é a auditoria da Fase 7.1, mantida como foi. Esta seção diz o 
 | Árvore de acessibilidade | Fora desta entrega | — | Exige a permissão de Acessibilidade, que o SnapShot não pede. |
 
 **Helper Swift.** O `build.rs` não compila Swift. O `snapshot/list.swift` entra no binário por `include_str!` e roda com `/usr/bin/swift -e`, como o `desk_input.swift` e o `screen_recording.swift` já faziam. Por isso `cargo build` não tem helper para compilar. A checagem de tipos foi feita com `swiftc -typecheck`, que não executa nada.
+
+### Permissões da build assinada no macOS
+
+`src-tauri/Entitlements.plist` declara somente `com.apple.security.device.audio-input`, ligado em `bundle.macOS.entitlements` no `tauri.conf.json`. A Apple exige o Audio Input entitlement para apps hardened que usam microfone ([documentação Apple](https://developer.apple.com/documentation/AVFoundation/requesting-authorization-to-capture-and-save-media)). O app usa o microfone para ditado; não há uso de câmera no código do produto. Não foram adicionados entitlements de câmera, JIT ou exceções de biblioteca. A configuração segue a seção de entitlements do [guia de bundle macOS do Tauri 2](https://v2.tauri.app/distribute/macos-application-bundle/).
+
+O helper do ditado consulta `AVCaptureDevice.authorizationStatus(for: .audio)` e, em `notDetermined`, chama `requestAccess(for: .audio)` antes de iniciar o `AVAudioEngine`. Se a autorização não for concedida, o erro orienta e oferece abrir o painel Microfone. A descrição `NSMicrophoneUsageDescription` permanece no `Info.plist`.
+
+Na comparação feita pelo shell local, `/usr/sbin/screencapture -x /tmp/ade-ags-screencapture-probe.png` terminou com código 1 e `could not create image from display`, sem PNG. O usuário também confirmou que, na ADE instalada, o seletor retorna `titles=false` embora ADE AGS esteja ligada em Gravação do Áudio do Sistema e da Tela; isso significa que `CGPreflightScreenCaptureAccess()` não reconhece a autorização. O conjunto reforça a hipótese de um requisito TCC antigo após a assinatura mudar de adhoc para `ADE AGS Local`, mas não a prova. Só nova build assinada e validação no app confirmarão a causa e a captura real. Não foi alterado TCC nem o app instalado.
+
+Os deep links atuais `Privacy_ScreenCapture`, `Privacy_Microphone` e `Privacy_SpeechRecognition` foram abertos e conferidos na interface do macOS 27.2. A conferência não alterou nenhum toggle nem o banco TCC.
 
 ### Validação das lacunas nativas
 

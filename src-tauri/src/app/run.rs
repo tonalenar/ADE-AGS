@@ -169,6 +169,7 @@ pub fn run() {
             crate::voice_input::voice_input_start,
             crate::voice_input::voice_input_stop,
             crate::voice_input::voice_input_cancel,
+            crate::privacy_settings::open_privacy_settings,
             crate::project_scripts::chat_project_script_get,
             crate::project_scripts::chat_project_script_save,
             crate::project_scripts::chat_project_script_delete,

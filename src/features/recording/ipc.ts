@@ -25,3 +25,7 @@ export const voiceInputStart = (locale: string, id: string) => invoke<string>("v
 export const voiceInputStop = (id: string) => invoke<string>("voice_input_stop", { id });
 
 export const voiceInputCancel = (id: string) => invoke<void>("voice_input_cancel", { id });
+
+/** Abre um dos painéis de privacidade de macOS permitidos pelo backend. */
+export type PrivacySettingsPane = "screen_capture" | "microphone" | "speech_recognition";
+export const openPrivacySettings = (pane: PrivacySettingsPane) => invoke<void>("open_privacy_settings", { pane });
