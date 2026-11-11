@@ -20,7 +20,7 @@ export interface SettingsNavGroup {
 export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
   { heading: null, pages: ["general", "appearance", "chat", "threads", "shortcuts"] },
   { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices", "scheduled", "usage"] },
-  { heading: "settings.nav.code", pages: ["projects", "diffs", "worktrees"] },
+  { heading: "settings.nav.code", pages: ["projects", "diffs", "sourceControl", "worktrees"] },
   { heading: "settings.nav.connections", pages: ["environments", "access"] },
   { heading: null, pages: ["maintenance", "storage", "diagnostics", "licenses", "labs"] },
   { heading: "settings.nav.ade", pages: ["memory", "decisions", "permissions", "terminal", "orchestrator", "skills", "cli"] },
@@ -38,6 +38,7 @@ export const SETTINGS_PAGE_LABEL_KEYS: Record<SettingsPageId, string> = {
   devices: "settings.devices",
   scheduled: "settings.scheduled",
   diffs: "settings.diffs",
+  sourceControl: "settings.sourceControl",
   projects: "settings.projects",
   worktrees: "settings.worktrees",
   environments: "settings.environments",
@@ -154,6 +155,10 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "projects.icon", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.icon", keywordKeys: ["settings.projects.icon.hint"] },
   { id: "projects.agents", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.agents", keywordKeys: ["settings.projects.agents.desc"] },
   { id: "projects.remove", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.remove" },
+
+  { id: "sourceControl.style", page: "sourceControl", anchor: "source-control-main", titleKey: "settings.sourceControl.style", keywordKeys: ["settings.sourceControl.style.hint", "settings.sourceControl.writing.title"] },
+  { id: "sourceControl.language", page: "sourceControl", anchor: "source-control-main", titleKey: "settings.sourceControl.language" },
+  { id: "sourceControl.instructions", page: "sourceControl", anchor: "source-control-main", titleKey: "settings.sourceControl.instructions", keywordKeys: ["settings.sourceControl.writing.desc"] },
 
   { id: "worktrees", page: "worktrees", anchor: "worktrees-main", titleKey: "settings.worktrees.where" },
 

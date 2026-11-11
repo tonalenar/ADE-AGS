@@ -56,6 +56,7 @@ import { DiffsSetting } from "@/features/settings/DiffsSetting";
 import { SettingsAnchor, SettingsGroup, SettingsRow, SettingsSection, SettingsSubTabs } from "@/features/settings/SettingsSection";
 import { CustomAgentsSection } from "@/features/settings/CustomAgentsSection";
 import { ProjectDetailSettings, ProjectListSetting, ProjectOrderSetting, ProjectScopeBar } from "@/features/settings/ProjectsSettings";
+import { SourceControlSettings } from "@/features/settings/SourceControlSettings";
 import { ThreadsSettings } from "@/features/settings/ThreadsSettings";
 import { ThreadsTextSettings } from "@/features/settings/ThreadsTextSettings";
 import { StorageSettings } from "@/features/settings/StorageSettings";
@@ -252,6 +253,11 @@ function ProjectsPage() {
   );
 }
 
+/** Controle de versão: a sugestão de mensagem de commit (estilo, idioma e instruções). */
+function SourceControlPage() {
+  return <SettingsAnchor id="source-control-main"><SourceControlSettings /></SettingsAnchor>;
+}
+
 function WorktreesPage() {
   return <SettingsAnchor id="worktrees-main"><WorktreesSection /></SettingsAnchor>;
 }
@@ -418,6 +424,7 @@ const PAGE_BODIES: Record<SettingsPageId, () => React.ReactElement> = {
   devices: DevicesPage,
   scheduled: ScheduledPage,
   diffs: DiffsPage,
+  sourceControl: SourceControlPage,
   projects: ProjectsPage,
   worktrees: WorktreesPage,
   environments: EnvironmentsPage,

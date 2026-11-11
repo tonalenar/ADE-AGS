@@ -498,6 +498,7 @@ pub fn run() {
             crate::scm::scm_unstage,
             crate::scm::scm_discard,
             crate::scm::scm_commit,
+            crate::scm::scm_generate_commit_message,
             crate::scm::scm_branches,
             crate::scm::scm_checkout,
             crate::scm::scm_fetch,
