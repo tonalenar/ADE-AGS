@@ -195,6 +195,7 @@ Achados:
   - o aparelho embaixo;
   - com a conversa aberta, o painel ao lado, com o mesmo topo e o mesmo pé do aparelho.
 - **Escala:** sai da altura gravada no `box`.
+- **Painel iOS do chat:** as ações do simulador ficam numa barra única abaixo da tela, com início, girar, captura, gravação, aparência, localização, Face ID, teclado, menu, zoom, ajustar, 1:1 e tela cheia. O zoom se ajusta novamente ao painel quando se escolhe Ajustar.
 - **Conversa:** o que a pessoa escreve vai, pela fila de cada terminal (`peer_queue::enqueue`), para todos os agentes ligados ao nó, com a foto da tela se ela quiser (`simulator_tell`). O que os agentes fazem e dizem (`ags device say`) chega pelo evento `simulator-activity`. A conversa fica só na memória.
 
 ## Agentes
