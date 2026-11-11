@@ -7,6 +7,7 @@ import {
   parseTargetValue,
   reconcileTarget,
   snapshotCaption,
+  stepIndex,
   targetOptions,
   targetValue,
   windowLabel,
@@ -91,6 +92,25 @@ describe("escolha que sai da lista", () => {
 
   it("enquanto a lista não chegou, mantém a escolha", () => {
     expect(reconcileTarget({ kind: "window", id: 101 }, null)).toEqual({ kind: "window", id: 101 });
+  });
+});
+
+describe("passo do foco no menu", () => {
+  it("anda para a frente e para trás e dá a volta nas pontas", () => {
+    expect(stepIndex(0, 3, 1)).toBe(1);
+    expect(stepIndex(2, 3, 1)).toBe(0);
+    expect(stepIndex(0, 3, -1)).toBe(2);
+    expect(stepIndex(1, 3, -1)).toBe(0);
+  });
+
+  it("sem nenhum item em foco, a seta para baixo vai ao primeiro e a para cima ao último", () => {
+    expect(stepIndex(-1, 3, 1)).toBe(0);
+    expect(stepIndex(-1, 3, -1)).toBe(2);
+  });
+
+  it("lista vazia não tem índice", () => {
+    expect(stepIndex(0, 0, 1)).toBe(-1);
+    expect(stepIndex(-1, 0, -1)).toBe(-1);
   });
 });
 

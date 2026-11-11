@@ -8,12 +8,12 @@ import { attachToComposer } from "@/features/chat/store";
 import { AlertaToast } from "@/shared/ui/alerts";
 
 import { DesktopSnapshotButton } from "../DesktopSnapshotButton";
-import { desktopScreenshot } from "../ipc";
+import { desktopScreenshot, desktopSnapshotTargets } from "../ipc";
 
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@/features/chat/store", () => ({ attachToComposer: vi.fn() }));
 vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: vi.fn() }));
-vi.mock("../ipc", () => ({ desktopScreenshot: vi.fn() }));
+vi.mock("../ipc", () => ({ desktopScreenshot: vi.fn(), desktopSnapshotTargets: vi.fn() }));
 
 const SHOT = "/Users/pessoa/Pictures/ADE AGS/ADE-AGS_SnapShot_teste.png";
 const MAC_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)";
@@ -25,9 +25,11 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.stubGlobal("navigator", { userAgent: MAC_UA });
   localStorage.clear();
+  sessionStorage.clear();
   vi.mocked(attachToComposer).mockReset();
   vi.mocked(AlertaToast).mockReset();
   vi.mocked(desktopScreenshot).mockReset().mockResolvedValue(SHOT);
+  vi.mocked(desktopSnapshotTargets).mockReset().mockResolvedValue({ titles: true, displays: [], windows: [] });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -41,13 +43,17 @@ afterEach(async () => {
 
 async function render(target: string | null): Promise<HTMLButtonElement | null> {
   await act(async () => { root.render(<DesktopSnapshotButton target={target} />); });
-  // O seletor de tela ou janela fica antes da câmera: a câmera é a que tem o atributo do atalho.
+  // A câmera é o botão com o atributo do atalho. O menu só existe depois do clique nela.
   return host.querySelector<HTMLButtonElement>("[data-chat-desktop-snapshot]");
 }
 
-/** Clica e deixa a promessa da captura terminar, sem relógio real. */
+/** Abre o menu da câmera, escolhe a tela principal e deixa a promessa da captura terminar, sem relógio real. */
 async function capture(button: HTMLButtonElement) {
   await act(async () => { button.click(); });
+  await act(async () => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  });
+  await act(async () => { host.querySelector<HTMLButtonElement>("[role=menuitem]")!.click(); });
   await act(async () => {
     for (let i = 0; i < 5; i++) await Promise.resolve();
   });
