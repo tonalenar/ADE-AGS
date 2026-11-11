@@ -158,7 +158,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/agy.rs:229-235", "src-tauri/src/ipc/mcp.rs:2922-2940"], "MCP `ags` por perfil de conversa"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "sem fork nativo no ADE para este motor: a pergunta lateral leva o histórico como contexto portátil (`fork_portatil`, modo `portable`), avisado na tela"),
-        comandos: claim_sup(Scope::Session, Proof::Fixture, &["src-tauri/src/conversa/opencode.rs::slash_command_tests", "src-tauri/src/conversa/fixtures/protocolo/antigravity-available-commands.json", "src-tauri/src/skills/agent_scan_test.rs::antigravity_varre_home_da_conta_e_agents_do_projeto_sem_agents_global", "src-tauri/src/skills/agent_scan_test.rs::varredura_de_provider_respeita_limites_de_entradas_e_bytes"], "usa `available_commands_update` quando a conversa ACP anuncia comandos; no `agy --print`, o fallback lê GEMINI_HOME da conta e `.agents/skills` do projeto. Só metadados; insere `/nome`"),
+        comandos: claim_sup(Scope::Session, Proof::Fixture, &["src-tauri/src/conversa/opencode.rs", "src-tauri/src/conversa/fixtures/acp/antigravity-available-commands.json", "src-tauri/src/skills/agent_scan_test.rs", "src-tauri/src/skills/agent_scan_test.rs"], "usa `available_commands_update` quando a conversa ACP anuncia comandos; no `agy --print`, o fallback lê GEMINI_HOME da conta e `.agents/skills` do projeto. Só metadados; insere `/nome`"),
     },
     ProviderMatrix {
         surface: Surface::Chat,
@@ -187,7 +187,7 @@ static MATRIX: [ProviderMatrix; 22] = [
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/ipc/mcp.rs:2826-2840", "src-tauri/src/agents/registry.rs:403"], "`McpStyle::None`: a conversa abre sem as ferramentas `ags`"),
         fork: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/fork.rs"], "sem fork nativo no ADE para este motor: a pergunta lateral leva o histórico como contexto portátil (`fork_portatil`, modo `portable`), avisado na tela"),
-        comandos: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/skills/agent_scan_test.rs::cursor_varre_skills_globais_e_do_projeto_so_com_metadados", "src-tauri/src/skills/agent_scan_test.rs::varredura_de_provider_respeita_limites_de_entradas_e_bytes", "src/features/chat/tests/agentSlashCodex.test.ts", "src/features/chat/tests/skillMentions.test.ts"], "varre `.cursor/skills` e `.agents/skills` globais e do projeto; lê somente frontmatter e limita bytes/entradas. O composer insere `$nome` e converte skills conhecidas para `/nome` no envio"),
+        comandos: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/skills/agent_scan_test.rs", "src-tauri/src/skills/agent_scan_test.rs", "src/features/chat/tests/agentSlashCodex.test.ts", "src/features/chat/tests/skillMentions.test.ts"], "varre `.cursor/skills` e `.agents/skills` globais e do projeto; lê somente frontmatter e limita bytes/entradas. O composer insere `$nome` e converte skills conhecidas para `/nome` no envio"),
     },
     ProviderMatrix {
         surface: Surface::Chat,

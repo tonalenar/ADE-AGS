@@ -189,6 +189,7 @@ mod tests {
             title: "tarefa".into(), model: Some("claude-opus-5-5".into()), effort: effort.map(str::to_string),
             access: "ask".into(), account_id: None, memory: None, parent_ref: None, parent_turn_id: None,
             is_side_chat: false, state: "active".into(), created_at: 1, updated_at: 1,
+            fork_mode: None, fork_reason: None,
         }
     }
 

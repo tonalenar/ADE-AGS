@@ -914,7 +914,7 @@ mod slash_command_tests {
 
     #[test]
     fn evento_acp_available_commands_do_antigravity_alimenta_o_menu() {
-        let event: serde_json::Value = serde_json::from_str(include_str!("fixtures/protocolo/antigravity-available-commands.json")).unwrap();
+        let event: serde_json::Value = serde_json::from_str(include_str!("fixtures/acp/antigravity-available-commands.json")).unwrap();
         let update = event.pointer("/params/update").unwrap();
         assert_eq!(provider_commands(update), Some(vec![
             json!({"name":"review","description":"Review changes","inputHint":"files or diff"}),
