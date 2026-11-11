@@ -542,7 +542,7 @@ O painel lista os subagentes e os comandos que o agente deixa rodando na convers
 
 | Motor | De onde vêm as tarefas | Parar uma tarefa só |
 |---|---|---|
-| Claude Code (`claude -p`, 2.1.318) | linhas `system` `task_started` (com `parent_task_id`, `tool_use_id`, `task_type` `local_bash`/`local_agent`), `task_progress`, `task_updated`, `task_notification` e `background_tasks_changed`; o que o subagente faz vem nas linhas com `parent_tool_use_id` (`taskItem`) | `control_request` `stop_task` (`chat_task_stop`). A saída do shell vem do `get_task_output`, que lê os últimos 8 KiB sem turno de modelo (`chat_task_output`) |
+| Claude Code (`claude -p`, 2.1.318) | linhas `system` `task_started` (com `parent_task_id`, `tool_use_id`, `task_type` `local_bash`/`local_agent`), `task_progress`, `task_updated`, `task_notification` e `background_tasks_changed`; o que o subagente faz vem nas linhas com `parent_tool_use_id` (`taskItem`) | `control_request` `stop_task` (`chat_task_stop`). Para shells, o detalhe acompanha o arquivo temporário `tasks/<id>.output` durante a execução e lê os últimos 8 KiB; usa o controle `get_task_output` (`chat_task_output`) quando não há raiz temporária disponível. |
 | Codex (`app-server` 0.166) | itens `collabAgentToolCall` (`spawnAgent` e os `agentsStates`) e `subAgentActivity` | não tem: o `turn/interrupt` pediria o turno da thread do subagente, que o app não acompanha. O botão fica desligado, com o motivo |
 | OpenCode, Cursor, Antigravity | a ferramenta `task` da timeline, que já está no banco | não tem. O botão fica desligado; o Parar do composer para o turno inteiro |
 | Conversa de TUI | — (o próprio `/tasks` da TUI) | — |
@@ -554,10 +554,8 @@ O painel lista os subagentes e os comandos que o agente deixa rodando na convers
   `settings` (`chat.tasks`), sem tabela nova e sem migração.
   - Ao reabrir o app, o que rodava volta como "interrompida", porque o processo do agente morre com o app.
   - O que o subagente fez fica só na memória.
-- **Conferido ao vivo** no Claude Code 2.1.318, com duas conversas mínimas com o haiku:
-  - os eventos chegam como descrito;
-  - `get_task_output` lê a saída no meio e no fim;
-  - `stop_task` mata só aquele shell (`task_updated` `killed` e depois `task_notification` `stopped`).
+- **Conferido ao vivo** no Claude Code 2.1.318, com duas conversas mínimas com o haiku: os eventos chegam como descrito e `stop_task` mata só aquele shell (`task_updated` `killed` e depois `task_notification` `stopped`).
+- A leitura do arquivo temporário é coberta por teste local; leitura ao vivo e atualização durante a execução não foram repetidas nesta alteração.
 - **Não conferido ao vivo:** o Codex (só os tipos gerados) e um subagente aninhado de verdade (`parent_task_id`).
 
 ## Como não derruba terminais

@@ -48,6 +48,7 @@ pub mod send_receipt;
 pub mod stop_receipt;
 pub mod store;
 pub mod tarefas;
+pub mod tarefas_saida;
 pub mod titulo;
 pub mod troca;
 pub mod turn;
@@ -74,6 +75,8 @@ mod replay_protocolo;
 mod troca_test;
 #[cfg(test)]
 mod tarefas_test;
+#[cfg(test)]
+mod tarefas_saida_test;
 #[cfg(test)]
 mod send_receipt_test;
 #[cfg(test)]
