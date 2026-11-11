@@ -99,6 +99,11 @@ pub fn reset_at(text: &str, now: i64, offset_secs: i64) -> i64 {
         .unwrap_or(now + WINDOW_SECS)
 }
 
+/// Como [`reset_at`], mas só quando a mensagem diz a hora; sem hora legível, `None` (não adivinha a janela de 5 h).
+pub fn reset_at_known(text: &str, now: i64, offset_secs: i64) -> Option<i64> {
+    clock_after_resets(text).map(|_| reset_at(text, now, offset_secs))
+}
+
 /// A hora do relógio depois de «resets» (`1:10pm`, `3pm`, `12am`), em 24 h. O fuso entre parênteses é ignorado:
 /// vale o do sistema, que é o da pessoa.
 fn clock_after_resets(text: &str) -> Option<(i64, i64)> {
@@ -211,7 +216,7 @@ pub fn bind(db: &DbConnection, thread: &str, pool_id: Option<&str>) -> Result<()
     crate::database::set_setting(db, &pool_key(thread), pool_id.unwrap_or(""))
 }
 
-fn bound(db: &DbConnection, thread: &str) -> Option<String> {
+pub(super) fn bound(db: &DbConnection, thread: &str) -> Option<String> {
     crate::database::get_setting(db, &pool_key(thread)).ok().flatten().filter(|id| !id.is_empty())
 }
 
@@ -237,6 +242,11 @@ pub struct Pending {
     /// Só em `join`: o pool a que a conversa passa a pertencer se a pessoa aceitar.
     #[serde(default)]
     pub pool_id: Option<String>,
+    /// Só em `fallback`: o agente e o modelo reserva do projeto que a conversa passa a usar se a pessoa aceitar.
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// O que o cartão «Limites de uso» mostra: o pool a que a conversa está ligada e a conta de origem se já trocou.
@@ -257,7 +267,12 @@ pub fn pending(db: &DbConnection, thread: &str) -> Option<Pending> {
     load(db, &pending_key(thread))
 }
 
-fn account_label(db: &DbConnection, id: Option<&str>) -> String {
+/// Guarda a pergunta que espera a pessoa (usada também pelo modelo reserva, `limite`).
+pub(super) fn set_pending(db: &DbConnection, thread: &str, pending: &Pending) {
+    save(db, &pending_key(thread), Some(pending));
+}
+
+pub(super) fn account_label(db: &DbConnection, id: Option<&str>) -> String {
     let Some(id) = id else { return "principal".into() };
     db.lock()
         .ok()
@@ -265,7 +280,7 @@ fn account_label(db: &DbConnection, id: Option<&str>) -> String {
         .unwrap_or_else(|| id.to_string())
 }
 
-fn local_offset() -> i64 {
+pub(super) fn local_offset() -> i64 {
     use chrono::Offset;
     chrono::Local::now().offset().fix().local_minus_utc() as i64
 }
@@ -288,7 +303,7 @@ fn pick_next(db: &DbConnection, agent_id: &str, pool_id: &str, current: &Option<
 }
 
 /// Anota a conta como esgotada até a hora de renovação (o ruteio da frota e o cartão passam a vê-la assim).
-fn mark_exhausted(db: &DbConnection, key: &str, resets_at: i64, now: i64) {
+pub(super) fn mark_exhausted(db: &DbConnection, key: &str, resets_at: i64, now: i64) {
     let mut quota = db.lock().ok().and_then(|conn| crate::runs::quota::load(&conn, key)).unwrap_or_default();
     quota.rejected = true;
     quota.rejected_until = Some(resets_at);
@@ -310,7 +325,7 @@ pub fn after_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, result: &
     tauri::async_runtime::spawn(async move { on_failure(&app, &db, &thread_id, &error).await });
 }
 
-fn last_request(db: &DbConnection, thread_id: &str) -> Option<String> {
+pub(super) fn last_request(db: &DbConnection, thread_id: &str) -> Option<String> {
     api::items(db, thread_id).ok().and_then(|items| items.iter().rev().find(|i| i.kind == crate::canal::timeline::ItemKind::User).and_then(|i| i.text.clone()))
 }
 
@@ -326,7 +341,7 @@ fn offer_join(app: &AppHandle, db: &DbConnection, thread_id: &str, error: &str) 
     let pools = crate::accounts::pools::load(db);
     let Some(pool) = offer_pool(&pools, &row.agent_id, &row.account_id) else { return };
     let from = account_label(db, row.account_id.as_deref());
-    save(db, &pending_key(thread_id), Some(&Pending { kind: "join".into(), to: None, to_label: pool.name.clone(), request: last_request(db, thread_id), pool_id: Some(pool.id.clone()) }));
+    save(db, &pending_key(thread_id), Some(&Pending { kind: "join".into(), to: None, to_label: pool.name.clone(), request: last_request(db, thread_id), pool_id: Some(pool.id.clone()), agent_id: None, model: None }));
     turn::save_notice(app, db, thread_id, "poolOffer", &format!("A conta {from} esgotou o limite e esta conversa não está num pool. Usar o pool «{}» e continuar em outra conta dele?", pool.name));
 }
 
@@ -361,7 +376,7 @@ async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: 
         }
         Decision::Ask { to } => {
             let to_label = account_label(db, to.as_deref());
-            save(db, &pending_key(thread_id), Some(&Pending { kind: "switch".into(), to, to_label: to_label.clone(), request, pool_id: None }));
+            save(db, &pending_key(thread_id), Some(&Pending { kind: "switch".into(), to, to_label: to_label.clone(), request, pool_id: None, agent_id: None, model: None }));
             turn::save_notice(app, db, thread_id, "poolAsk", &format!("A conta {from} esgotou o limite (renova {}). Continuar na conta {to_label}?", clock(resets_at)));
         }
         Decision::Switch { to } => {
@@ -372,7 +387,7 @@ async fn on_failure(app: &AppHandle, db: &DbConnection, thread_id: &str, error: 
     }
 }
 
-fn clock(epoch: i64) -> String {
+pub(super) fn clock(epoch: i64) -> String {
     use chrono::TimeZone;
     chrono::Local.timestamp_opt(epoch, 0).single().map(|t| t.format("%H:%M").to_string()).unwrap_or_default()
 }
@@ -414,6 +429,9 @@ pub(super) fn move_account(db: &DbConnection, thread_id: &str, from: &Option<Str
 pub async fn accept(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<(), String> {
     let pending = pending(db, thread_id).ok_or("Não há nada esperando resposta nesta conversa.")?;
     let now = crate::util::now_ts();
+    if pending.kind == "fallback" {
+        return super::limite::accept_fallback(app, db, thread_id, pending).await;
+    }
     if pending.kind == "join" {
         let pool_id = pending.pool_id.clone().ok_or("O aviso não guardou o pool.")?;
         let row = api::thread(db, thread_id)?;
@@ -467,7 +485,7 @@ pub fn before_send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &s
     }
     let label = account_label(db, switched.origin.as_deref());
     if mode == Mode::Ask {
-        save(db, &pending_key(thread_id), Some(&Pending { kind: "return".into(), to: switched.origin, to_label: label.clone(), request: None, pool_id: None }));
+        save(db, &pending_key(thread_id), Some(&Pending { kind: "return".into(), to: switched.origin, to_label: label.clone(), request: None, pool_id: None, agent_id: None, model: None }));
         turn::save_notice(app, db, thread_id, "poolReturnAsk", &format!("A conta {label} renovou. Voltar para ela?"));
         return text.to_string();
     }

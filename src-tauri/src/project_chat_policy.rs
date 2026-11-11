@@ -24,7 +24,7 @@ pub struct ProjectChatAgentPolicy {
     pub disabled_agent_ids: Vec<String>,
 }
 
-fn normalize_cwd(cwd: &str) -> Result<String, String> {
+pub(crate) fn normalize_cwd(cwd: &str) -> Result<String, String> {
     if cwd.trim().is_empty() || cwd.len() > MAX_PROJECT_PATH || cwd.contains('\0') {
         return Err("A pasta do projeto está inválida".into());
     }
@@ -41,7 +41,7 @@ fn normalize_cwd(cwd: &str) -> Result<String, String> {
     Ok(path.trim_end_matches('/').to_owned())
 }
 
-fn validate_agent_id(id: &str) -> Result<(), String> {
+pub(crate) fn validate_agent_id(id: &str) -> Result<(), String> {
     if id.is_empty()
         || id.len() > MAX_AGENT_ID
         || !id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
@@ -94,6 +94,22 @@ fn read_policy(conn: &Connection, cwd: &str) -> Result<Option<ProjectChatAgentPo
         }
         let (key, _) = alias_key(&current)?;
         let Some(parent) = read_setting(conn, &key)? else { return Ok(None) };
+        let parent = normalize_cwd(&parent)?;
+        if parent == current {
+            return Err("A política do projeto contém uma referência circular".into());
+        }
+        current = parent;
+    }
+    Err("A cadeia de projetos relacionados excede o limite permitido".into())
+}
+
+/// A pasta do projeto de um worktree temporário (segue os apelidos de `register_worktree_alias`); sem apelido,
+/// é a própria pasta normalizada. Os padrões por projeto (`project_chat_defaults`) usam a mesma raiz.
+pub(crate) fn project_root(conn: &Connection, cwd: &str) -> Result<String, String> {
+    let mut current = normalize_cwd(cwd)?;
+    for _ in 0..8 {
+        let (key, _) = alias_key(&current)?;
+        let Some(parent) = read_setting(conn, &key)? else { return Ok(current) };
         let parent = normalize_cwd(&parent)?;
         if parent == current {
             return Err("A política do projeto contém uma referência circular".into());

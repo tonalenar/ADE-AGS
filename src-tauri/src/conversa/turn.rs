@@ -50,7 +50,15 @@ pub fn finish(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, r
         emit(app, thread_id, "item", json!({ "item": item }));
     }
     emit(app, thread_id, "item", json!({ "item": claude_map::turn_end(turn, result, Some(now)) }));
+    after_turn_hooks(app, db, thread_id, result);
+}
+
+/// O que roda no fim de cada turno, nos motores todos: o pool de contas, o limite de uso (modelo reserva e retomada) e o
+/// título por modelo. Cada um só age no caso dele e volta na hora nos outros.
+pub fn after_turn_hooks(app: &AppHandle, db: &DbConnection, thread_id: &str, result: &TurnResult) {
     super::pool::after_turn(app, db, thread_id, result);
+    super::limite::after_turn(app, db, thread_id, result);
+    super::titulo::after_turn(app, db, thread_id, result);
 }
 
 /// A parte do `finish` que mexe no banco: o status do turno, os pedidos pendentes expirados (devolve os ids), as

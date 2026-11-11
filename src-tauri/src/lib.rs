@@ -43,6 +43,7 @@ mod pet;
 mod project_scripts;
 mod local_acp;
 mod prompt_stashes;
+mod project_chat_defaults;
 mod project_chat_policy;
 mod prelaunch;
 mod preview;
