@@ -407,8 +407,8 @@ export function ComposerAssistMenu({
       .map((entry): AssistItem => ({
         key: `agent-skill:${agentNameKey(entry.name)}`,
         group: "skills",
-        title: `/${entry.name}`,
-        detail: entry.description || undefined,
+        title: `${agentId === "cursor" ? "$" : "/"}${entry.name}`,
+        detail: [entry.displayName, entry.description].filter(Boolean).join(" · ") || undefined,
         badge: entry.plugin
           ?? (entry.scope === "user" ? t("chat.composer.assist.skillScope.user")
             : entry.scope === "project" ? t("chat.composer.assist.skillScope.project") : undefined),

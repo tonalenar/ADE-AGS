@@ -280,19 +280,18 @@ Linha fora das 19, como `ags_mcp` (não entra na contagem da §1.3). Diz se o me
 | chat | claude-code | Supported |
 | chat | codex | Supported |
 | chat | opencode | Supported |
-| chat | antigravity | Unknown |
-| chat | cursor | Unknown |
+| chat | antigravity | Supported |
+| chat | cursor | Supported |
 | chat | local-acp | Supported |
 | fleet, tui | (todos) | Unsupported |
 <!-- comandos:fim -->
 
-- **Fonte nativa do protocolo:** Claude (`initialize.commands`, `conversa/claude.rs`), Codex (`skills/list` do app-server para o cwd, só os habilitados, `conversa/codex.rs`) e OpenCode/local-acp (ACP `available_commands_update`).
-- **Varredura de pastas** (`skills/agent_scan.rs`), só onde o agente lê a pasta e a invocação foi verificada: Claude (`CLAUDE_CONFIG_DIR` da conta, `.claude/skills` do projeto, plugins) e Codex (`.agents/skills` do cwd até a raiz do repositório, `~/.agents/skills` e `CODEX_HOME/skills` da conta). Só metadados do frontmatter; nada é executado e o corpo não é lido.
-- **Conta da aba:** a varredura usa o diretório da conta da conversa (`chat_thread.account_id` → `agent_accounts.dir`), não o do processo da ADE. Não lê o keyring: a conta com chave não entra nessa leitura.
-- **Sem lista confirmada (`Unknown`):** Antigravity (o transporte `--print` não tem canal de comandos e a invocação de skill não foi capturada) e Cursor (`cursor-agent` não está instalado aqui; a doc oficial descreve o agente do IDE). Falta: captura real de cada um com a skill invocada.
+- **Fonte nativa do protocolo:** Claude (`initialize.commands`), Codex (`skills/list`) e OpenCode/local-acp (ACP `available_commands_update`). Quando Antigravity estiver numa sessão ACP, o evento alimenta a lista; o adapter Antigravity `agy --print` não abre ACP.
+- **Varredura de pastas** (`skills/agent_scan.rs`): Claude (`CLAUDE_CONFIG_DIR`, `.claude/skills`, plugins), Codex (`.agents/skills`, `~/.agents/skills`, `CODEX_HOME/skills`), Cursor (`.cursor/skills` e `.agents/skills`, globais e do projeto) e Antigravity (`GEMINI_HOME/config/skills`, `GEMINI_HOME/antigravity-cli/skills`, mais `.agents/skills` só do projeto). Cursor e Antigravity respeitam limites de bytes/entradas e leem somente o frontmatter; nada é executado e o corpo não é lido. Antigravity ignora `~/.agents/skills`.
+- **Conta da aba:** a varredura usa a conta associada à conversa (`chat_thread.account_id` → `agent_accounts.dir`); Cursor e Antigravity tratam esse diretório como `HOME`. Não lê o keyring nem secrets. Sem conta associada, usam o `HOME` do processo.
 - **Fora do chat (Fleet e TUI):** não há composer estruturado, então não há menu.
-- **Inserção:** `/nome` para Claude, OpenCode e local-acp; `$nome` para Codex, que aceita a menção no próprio texto. No envio, o Claude recebe `$nome` do meio do texto como `/nome` no início, com o resto como argumento (`src/features/chat/skillMentions.ts`, como o T3 em `ClaudeSkillDispatch`).
-- **Provas:** testes com fixtures inline (`conversa::test::comandos_codex`, `skills::agent_scan_test`, `harness::test::comandos_*`) e vitest (`skillMentions`, `agentSlashCodex`). Não verificado com agente real: nenhuma captura de `skills/list` nem de invocação `$nome` foi feita nesta rodada.
+- **Inserção:** `/nome` para Claude, Antigravity, OpenCode e local-acp; `$nome` para Codex e Cursor. O Cursor recebe `/nome` no envio para skills conhecidas. O Claude também recebe a última menção conhecida do texto como `/nome` inicial e o restante como argumento.
+- **Provas e limites:** fixture ACP gravada, árvores temporárias sintéticas e vitest. Cursor e Antigravity não foram testados com agente real nesta rodada; comandos nativos do Antigravity ACP dependem de uma sessão ACP que anuncie `available_commands_update`.
 
 ## 2. Modelo de identidade
 

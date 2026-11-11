@@ -11,6 +11,8 @@ export interface AgentSlashEntry {
   /** Nome como o agente o conhece, sem a barra: `design:design-critique`. */
   name: string;
   description: string;
+  displayName?: string;
+  userInvocationOnly?: boolean;
   inputHint: string | null;
   /** Prefixo de plugin (`design`), quando o nome tem `prefixo:`. */
   plugin: string | null;
@@ -20,7 +22,7 @@ export interface AgentSlashEntry {
 }
 
 /** Agentes cuja lista de skills a varredura do disco cobre (ver `agent_skills_scan`). */
-export const AGENTS_WITH_SKILL_SCAN: ReadonlySet<string> = new Set(["claude-code", "codex"]);
+export const AGENTS_WITH_SKILL_SCAN: ReadonlySet<string> = new Set(["claude-code", "codex", "cursor", "antigravity"]);
 
 /** Id da conversa por protocolo a partir da chave do composer (`thread:<id>`); abas e outras chaves dão `null`. */
 export function threadIdOfConversation(key: string | null): string | null {
@@ -68,6 +70,8 @@ export function buildAgentSlashEntries(input: {
       entries.push({
         name,
         description: command.description || skill?.description || "",
+        ...(skill?.displayName ? { displayName: skill.displayName } : {}),
+        ...(skill?.userInvocationOnly ? { userInvocationOnly: true } : {}),
         inputHint: command.inputHint,
         plugin: skill?.plugin ?? pluginOf(name),
         scope: skill?.scope ?? null,
@@ -82,6 +86,8 @@ export function buildAgentSlashEntries(input: {
       entries.push({
         name: skill.name,
         description: skill.description ?? "",
+        ...(skill.displayName ? { displayName: skill.displayName } : {}),
+        ...(skill.userInvocationOnly ? { userInvocationOnly: true } : {}),
         inputHint: null,
         plugin: skill.plugin ?? pluginOf(skill.name),
         scope: skill.scope,
@@ -127,9 +133,9 @@ export function searchAgentSlashEntries(entries: ReadonlyArray<AgentSlashEntry>,
 }
 
 /**
- * Texto que o composer insere ao escolher a entrada, com um espaço no fim. O Codex invoca a skill com `$nome`;
- * os outros agentes com `/nome`, como o Claude e o ACP esperam.
+ * Texto que o composer insere ao escolher a entrada, com um espaço no fim. O Codex e o Cursor usam `$nome`;
+ * os outros agentes recebem `/nome`.
  */
 export function agentSlashInvocation(entry: Pick<AgentSlashEntry, "name">, agentId?: string | null): string {
-  return agentId === "codex" ? `$${entry.name} ` : `/${entry.name} `;
+  return agentId === "codex" || agentId === "cursor" ? `$${entry.name} ` : `/${entry.name} `;
 }

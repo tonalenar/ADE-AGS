@@ -150,7 +150,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::EventSource, Scope::Instance, Proof::RealCapture, &["src-tauri/src/conversa/fixtures/protocolo/antigravity-feliz.json", "src-tauri/src/conversa/agy.rs:240"], "stdout linha a linha (`init`, `step_update`, `result`), lido na captura"),
         ],
         ags_mcp: claim_sup(Scope::Instance, Proof::Code, &["src-tauri/src/conversa/agy.rs:229-235", "src-tauri/src/ipc/mcp.rs:2922-2940"], "MCP `ags` por perfil de conversa"),
-        comandos: claim_unk(Scope::Session, Proof::Code, &["src-tauri/src/conversa/agy.rs", "src-tauri/src/conversa/agy_map.rs"], "captura do `agy` (stream-json, um processo por turno) com um comando ou skill anunciado e aceito com `/nome` ou `$nome`", "o transporte `--print` não tem canal de comandos e o init capturado não traz lista; as skills de `.agents/skills` existem, mas o menu não as mostra sem essa prova"),
+        comandos: claim_sup(Scope::Session, Proof::Fixture, &["src-tauri/src/conversa/opencode.rs::slash_command_tests", "src-tauri/src/conversa/fixtures/protocolo/antigravity-available-commands.json", "src-tauri/src/skills/agent_scan_test.rs::antigravity_varre_home_da_conta_e_agents_do_projeto_sem_agents_global", "src-tauri/src/skills/agent_scan_test.rs::varredura_de_provider_respeita_limites_de_entradas_e_bytes"], "usa `available_commands_update` quando a conversa ACP anuncia comandos; no `agy --print`, o fallback lê GEMINI_HOME da conta e `.agents/skills` do projeto. Só metadados; insere `/nome`"),
     },
     ProviderMatrix {
         surface: Surface::Chat,
@@ -177,7 +177,7 @@ static MATRIX: [ProviderMatrix; 22] = [
             sup(Capability::EventSource, Scope::Instance, Proof::RealCapture, &["src-tauri/src/conversa/fixtures/protocolo/cursor-feliz.json", "src-tauri/src/conversa/cursor.rs:35-52"], "JSON por linha no stdout, lido na captura; stderr só explica a queda"),
         ],
         ags_mcp: claim_unsup(Scope::Instance, Proof::Code, &["src-tauri/src/ipc/mcp.rs:2826-2840", "src-tauri/src/agents/registry.rs:403"], "`McpStyle::None`: a conversa abre sem as ferramentas `ags`"),
-        comandos: claim_unk(Scope::Session, Proof::Code, &["src-tauri/src/conversa/cursor.rs", "src-tauri/src/conversa/cursor_map.rs"], "captura do `cursor-agent` com uma skill de `.cursor/skills` invocada por `/nome`", "o `cursor-agent` não está instalado nesta máquina; a doc oficial descreve o agente do IDE, não o CLI, e o init capturado não traz lista"),
+        comandos: claim_sup(Scope::Session, Proof::Test, &["src-tauri/src/skills/agent_scan_test.rs::cursor_varre_skills_globais_e_do_projeto_so_com_metadados", "src-tauri/src/skills/agent_scan_test.rs::varredura_de_provider_respeita_limites_de_entradas_e_bytes", "src/features/chat/tests/agentSlashCodex.test.ts", "src/features/chat/tests/skillMentions.test.ts"], "varre `.cursor/skills` e `.agents/skills` globais e do projeto; lê somente frontmatter e limita bytes/entradas. O composer insere `$nome` e converte skills conhecidas para `/nome` no envio"),
     },
     ProviderMatrix {
         surface: Surface::Chat,

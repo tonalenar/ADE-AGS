@@ -56,6 +56,16 @@ describe("sendToThread: $nome no envio", () => {
     expect(chatThreadSend).toHaveBeenCalledWith("t1", "Use $deploy agora", undefined);
   });
 
+  it("o Cursor transforma menção de skill conhecida em comando nativo no envio", async () => {
+    useStructured.setState({ threads: [threadOf("cursor")] });
+
+    sendToThread("t1", "Use $deploy agora");
+    await flush();
+
+    expect(agentSkillsScan).toHaveBeenCalledWith("/projeto", "cursor", "t1");
+    expect(chatThreadSend).toHaveBeenCalledWith("t1", "Use /deploy agora", undefined);
+  });
+
   it("texto sem cifrão vai direto, sem varredura", async () => {
     useStructured.setState({ threads: [threadOf("claude-code")] });
 

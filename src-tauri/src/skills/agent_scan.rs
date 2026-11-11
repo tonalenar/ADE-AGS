@@ -1,11 +1,11 @@
-//! As skills que o Claude Code acha no disco, para o menu do `/` antes de o agente anunciar a lista.
+//! Skills que os providers acham no disco, para o menu do `/` antes de anunciarem a lista.
 //!
 //! Só metadados: o nome (a pasta, ou `plugin:pasta`) e a `description` do frontmatter do SKILL.md,
 //! mais as configurações que decidem se a skill entra (`enabledPlugins`, `skillOverrides`). Nada aqui
 //! executa código de skill, e o corpo do arquivo não é lido. Quando o agente informa a própria lista,
 //! ela manda no menu; esta varredura só cobre o intervalo até lá.
 //!
-//! A precedência é a do Claude: usuário, depois projeto, depois plugins. O primeiro nome vence.
+//! A precedência de cada provider é mantida por scanner; o primeiro nome encontrado vence.
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -20,6 +20,10 @@ use serde_json::Value;
 const FRONTMATTER_READ_MAX: u64 = 16 * 1024;
 const NAME_MAX: usize = 80;
 const DESCRIPTION_MAX: usize = 500;
+pub(super) const PROVIDER_SCAN_MAX_ENTRIES: usize = 10_000;
+pub(super) const PROVIDER_SCAN_MAX_BYTES: u64 = 8 * 1024 * 1024;
+const PROVIDER_SKILL_MAX_BYTES: u64 = 1024 * 1024;
+const PROVIDER_SCAN_MAX_DEPTH: usize = 10;
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -35,6 +39,8 @@ pub enum AgentSkillScope {
 pub struct AgentSkill {
     pub name: String,
     pub description: Option<String>,
+    pub display_name: Option<String>,
+    pub user_invocation_only: Option<bool>,
     pub plugin: Option<String>,
     pub scope: AgentSkillScope,
 }
@@ -56,6 +62,10 @@ fn is_name_part(part: &str) -> bool {
 struct Frontmatter {
     description: Option<String>,
     user_invocable: Option<bool>,
+    display_name: Option<String>,
+    user_invocation_only: Option<bool>,
+    cli_visible: Option<bool>,
+    name: Option<String>,
 }
 
 /// Lê o frontmatter do começo do arquivo. Sem `---` de abertura e de fechamento não há metadados:
@@ -88,7 +98,11 @@ fn parse_block(block: &[&str]) -> Frontmatter {
     if let Ok(serde_yaml::Value::Mapping(map)) = serde_yaml::from_str::<serde_yaml::Value>(&text) {
         return Frontmatter {
             description: map.get("description").and_then(yaml_text),
-            user_invocable: map.get("user-invocable").and_then(yaml_bool),
+            user_invocable: map.get("user-invocable").or_else(|| map.get("userInvocable")).and_then(yaml_bool),
+            display_name: map.get("displayName").or_else(|| map.get("display-name")).and_then(yaml_text),
+            user_invocation_only: map.get("userInvocationOnly").or_else(|| map.get("user-invocation-only")).and_then(yaml_bool),
+            cli_visible: map.get("cliVisible").or_else(|| map.get("cli-visible")).and_then(yaml_bool),
+            name: map.get("name").and_then(yaml_text),
         };
     }
     line_fallback(block)
@@ -132,7 +146,11 @@ fn line_fallback(block: &[&str]) -> Frontmatter {
         };
         match key.trim() {
             "description" => frontmatter.description = non_empty(value.trim()),
-            "user-invocable" => frontmatter.user_invocable = bool_of_text(&value),
+            "user-invocable" | "userInvocable" => frontmatter.user_invocable = bool_of_text(&value),
+            "displayName" | "display-name" => frontmatter.display_name = non_empty(value.trim()),
+            "userInvocationOnly" | "user-invocation-only" => frontmatter.user_invocation_only = bool_of_text(&value),
+            "cliVisible" | "cli-visible" => frontmatter.cli_visible = bool_of_text(&value),
+            "name" => frontmatter.name = non_empty(value.trim()),
             _ => {}
         }
     }
@@ -304,6 +322,8 @@ fn scan_root(
             AgentSkill {
                 name,
                 description: frontmatter.description.map(|d| d.chars().take(DESCRIPTION_MAX).collect()),
+                display_name: frontmatter.display_name,
+                user_invocation_only: frontmatter.user_invocation_only,
                 plugin: prefix.map(str::to_string),
                 scope,
             },
@@ -410,15 +430,192 @@ impl SkillEnv<'_> {
     }
 }
 
-/// Skills que um agente acha no disco para o menu do `/`. Só metadados. Só o Claude e o Codex têm varredura:
-/// nos outros não há jeito confirmado de o usuário invocar uma skill achada no disco com `/nome` ou `$nome`
-/// (a matriz marca `comandos` como `Unknown` neles), então o menu não mostra nada.
+/// Skills que um agente acha no disco para o menu do `/`. Só metadados.
 pub fn scan_agent_skills(agent_id: &str, env: &SkillEnv<'_>) -> Vec<AgentSkill> {
     match agent_id {
         "claude-code" => claude_skills(env),
         "codex" => codex_skills(env),
+        "cursor" => cursor_skills(env),
+        "antigravity" => antigravity_skills(env),
         _ => Vec::new(),
     }
+}
+
+#[derive(Default)]
+pub(super) struct ProviderScanBudget {
+    pub(super) entries: usize,
+    pub(super) bytes: u64,
+}
+
+/// Varredura limitada de uma árvore de skills: só abre SKILL.md e lê até o frontmatter.
+pub(super) fn scan_provider_root(
+    root: &Path,
+    scope: AgentSkillScope,
+    use_frontmatter_name: bool,
+    found: &mut BTreeMap<String, AgentSkill>,
+    budget: &mut ProviderScanBudget,
+) {
+    fn visit(
+        dir: &Path,
+        root: &Path,
+        scope: AgentSkillScope,
+        use_frontmatter_name: bool,
+        depth: usize,
+        found: &mut BTreeMap<String, AgentSkill>,
+        budget: &mut ProviderScanBudget,
+    ) {
+        if depth > PROVIDER_SCAN_MAX_DEPTH || budget.entries >= PROVIDER_SCAN_MAX_ENTRIES {
+            return;
+        }
+        let mut entries: Vec<_> = match fs::read_dir(dir) {
+            Ok(entries) => entries.filter_map(Result::ok).collect(),
+            Err(_) => return,
+        };
+        entries.sort_by_key(|entry| entry.file_name());
+        for entry in entries {
+            if budget.entries >= PROVIDER_SCAN_MAX_ENTRIES {
+                break;
+            }
+            budget.entries += 1;
+            let path = entry.path();
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            let is_symlink = kind.is_symlink();
+            if !kind.is_dir() && !(is_symlink && fs::metadata(&path).is_ok_and(|meta| meta.is_dir())) {
+                continue;
+            }
+            let skill_path = path.join("SKILL.md");
+            if let Ok(meta) = fs::metadata(&skill_path)
+                && meta.is_file()
+            {
+                let remaining = PROVIDER_SCAN_MAX_BYTES.saturating_sub(budget.bytes);
+                if meta.len() > PROVIDER_SKILL_MAX_BYTES || meta.len() > remaining {
+                    continue;
+                }
+                budget.bytes = budget.bytes.saturating_add(meta.len());
+                let frontmatter = read_frontmatter(&skill_path);
+                if frontmatter.user_invocable == Some(false)
+                    || frontmatter.cli_visible == Some(false)
+                {
+                    continue;
+                }
+                let folder_name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                let name = if use_frontmatter_name {
+                    frontmatter.name.as_deref().unwrap_or(folder_name)
+                } else {
+                    folder_name
+                }
+                .trim();
+                if !is_agent_command_name(name) || found.contains_key(name) {
+                    continue;
+                }
+                found.insert(
+                    name.to_string(),
+                    AgentSkill {
+                        name: name.to_string(),
+                        description: frontmatter
+                            .description
+                            .map(|value| value.chars().take(DESCRIPTION_MAX).collect()),
+                        display_name: frontmatter.display_name.or_else(|| {
+                            (!use_frontmatter_name)
+                                .then_some(frontmatter.name)
+                                .flatten()
+                        }),
+                        user_invocation_only: frontmatter.user_invocation_only,
+                        plugin: None,
+                        scope,
+                    },
+                );
+                // A skill directory is a leaf, matching the provider loaders.
+                continue;
+            }
+            if !is_symlink
+                && let Ok(canonical_root) = root.canonicalize()
+                && let Ok(canonical_path) = path.canonicalize()
+                && canonical_path.starts_with(canonical_root)
+            {
+                visit(
+                    &path,
+                    root,
+                    scope,
+                    use_frontmatter_name,
+                    depth + 1,
+                    found,
+                    budget,
+                );
+            }
+        }
+    }
+    visit(root, root, scope, use_frontmatter_name, 0, found, budget);
+}
+
+/// Cursor: projeto antes da conta, em `.cursor/skills` e `.agents/skills`.
+fn cursor_skills(env: &SkillEnv<'_>) -> Vec<AgentSkill> {
+    let mut found = BTreeMap::new();
+    let mut budget = ProviderScanBudget::default();
+    for dir in env.cwd.map(repo_chain).unwrap_or_default() {
+        for root in [dir.join(".cursor/skills"), dir.join(".agents/skills")] {
+            scan_provider_root(
+                &root,
+                AgentSkillScope::Project,
+                false,
+                &mut found,
+                &mut budget,
+            );
+        }
+    }
+    if let Some(home) = env.home() {
+        for root in [home.join(".cursor/skills"), home.join(".agents/skills")] {
+            scan_provider_root(&root, AgentSkillScope::User, false, &mut found, &mut budget);
+        }
+    }
+    found.into_values().collect()
+}
+
+/// Antigravity: skills do GEMINI_HOME (ou HOME/.gemini) e `.agents/skills` só do projeto.
+fn antigravity_skills(env: &SkillEnv<'_>) -> Vec<AgentSkill> {
+    let home = env.home();
+    let account_home = env.account.and_then(|account| account.get("HOME")).map(PathBuf::from);
+    let gemini_home = env.account.and_then(|account| account.get("GEMINI_HOME")).map(|value| resolve_dir(value, env.cwd))
+        .or_else(|| account_home.as_ref().map(|home| home.join(".gemini")))
+        .or_else(|| env.var("GEMINI_HOME").map(|value| resolve_dir(&value, env.cwd)))
+        .or_else(|| home.as_ref().map(|home| home.join(".gemini")));
+    let mut found = BTreeMap::new();
+    let mut budget = ProviderScanBudget::default();
+    if let Some(gemini_home) = gemini_home.as_ref() {
+        scan_provider_root(
+            &gemini_home.join("config/skills"),
+            AgentSkillScope::User,
+            true,
+            &mut found,
+            &mut budget,
+        );
+    }
+    if let Some(cwd) = env.cwd {
+        for dir in repo_chain(cwd) {
+            scan_provider_root(
+                &dir.join(".agents/skills"),
+                AgentSkillScope::Project,
+                true,
+                &mut found,
+                &mut budget,
+            );
+        }
+    }
+    if let Some(gemini_home) = gemini_home.as_ref() {
+        scan_provider_root(
+            &gemini_home.join("antigravity-cli/skills"),
+            AgentSkillScope::User,
+            true,
+            &mut found,
+            &mut budget,
+        );
+    }
+    found.into_values().collect()
 }
 
 /// Claude: `CLAUDE_CONFIG_DIR` (da conta, se houver) ou `~/.claude`, mais os plugins do cache.
@@ -473,6 +670,10 @@ pub fn account_env_for_thread(conn: &Connection, thread_id: &str, agent_id: &str
         .ok()?;
     if account_agent != agent_id {
         return None;
+    }
+    // Antigravity e Cursor usam HOME para suas skills globais; só passamos o diretório, nunca o keyring.
+    if matches!(agent_id, "antigravity" | "cursor") {
+        return Some(HashMap::from([("HOME".to_string(), dir)]));
     }
     crate::agents::adapter_for(agent_id)?.account_env(&dir)
 }

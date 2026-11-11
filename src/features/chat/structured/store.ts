@@ -194,8 +194,8 @@ export function sendToThread(id: string, text: string, onError?: (message: strin
     });
   };
   const row = useStructured.getState().threads.find((thread) => thread.id === id);
-  // `$nome` no meio do texto: o Claude só expande a skill com `/nome` no início. As skills vêm da varredura da conta.
-  if (row?.agentId === "claude-code" && text.includes("$")) {
+  // Claude e Cursor precisam receber `/nome`; no composer os dois usam a menção portátil `$nome`.
+  if ((row?.agentId === "claude-code" || row?.agentId === "cursor") && text.includes("$")) {
     void useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)
       .catch(() => [])
       .then((skills) => send(dispatchSkillMentions(row.agentId, text, skills.map((skill) => skill.name))));

@@ -1,4 +1,4 @@
-//! Varredura das skills que o Claude Code acha no disco. Só o frontmatter do SKILL.md é lido;
+//! Varredura das skills que os providers acham no disco. Só o frontmatter do SKILL.md é lido;
 //! nada aqui executa código de skill nem lê credenciais.
 
 use std::fs;
@@ -7,11 +7,11 @@ use std::path::{Path, PathBuf};
 use serde_json::json;
 use uuid::Uuid;
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use rusqlite::Connection;
 
-use super::agent_scan::{account_env_for_thread, scan_agent_skills, scan_claude_skills, AgentSkill, AgentSkillScope, SkillEnv};
+use super::agent_scan::{account_env_for_thread, scan_agent_skills, scan_claude_skills, scan_provider_root, AgentSkill, AgentSkillScope, ProviderScanBudget, SkillEnv, PROVIDER_SCAN_MAX_BYTES, PROVIDER_SCAN_MAX_ENTRIES};
 
 fn temp_dir(label: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("cc-agent-scan-{}-{}", label, Uuid::new_v4()));
@@ -245,10 +245,72 @@ fn agentes_sem_varredura_confirmada_nao_mostram_skill_no_menu() {
         skill(&project.join(folder), "deploy", "Publica o app");
     }
     let process = process_env(&[("HOME", root.join("home").as_path())]);
-    for agent in ["opencode", "cursor", "antigravity", "hermes", "gemini-cli", "kimi-code", "local-acp-x"] {
+    for agent in ["opencode", "hermes", "gemini-cli", "kimi-code", "local-acp-x"] {
         let env = SkillEnv { account: None, process: &process, cwd: Some(&project), managed_settings: None };
         assert!(scan_agent_skills(agent, &env).is_empty(), "{agent}: sem varredura confirmada, o menu não mostra skill");
     }
+}
+
+#[test]
+fn cursor_varre_skills_globais_e_do_projeto_so_com_metadados() {
+    let root = temp_dir("cursor-skills");
+    let home = root.join("home");
+    let project = root.join("projeto");
+    write(&project.join(".cursor/skills/revisar/SKILL.md"), "---\ndescription: Revisar código\ndisplayName: Revisão\nuserInvocationOnly: true\ncliVisible: true\n---\ncorpo que não deve ser executado\n");
+    write(&project.join(".agents/skills/privada/SKILL.md"), "---\ndescription: Oculta\nuserInvocable: false\n---\n");
+    write(&project.join(".agents/skills/invisivel/SKILL.md"), "---\ncliVisible: false\n---\n");
+    skill(&home.join(".agents/skills"), "global", "Skill global");
+    skill(&home.join(".cursor/skills"), "global-cursor", "Skill global do Cursor");
+    skill(&project.join(".agents/skills"), "do-projeto", "Skill do projeto");
+    let process = process_env(&[("HOME", home.as_path())]);
+    let env = SkillEnv { account: None, process: &process, cwd: Some(&project), managed_settings: None };
+
+    let found = scan_agent_skills("cursor", &env);
+
+    assert_eq!(names_of(&found), ["do-projeto", "global", "global-cursor", "revisar"]);
+    let revisar = found.iter().find(|skill| skill.name == "revisar").unwrap();
+    assert_eq!(revisar.description.as_deref(), Some("Revisar código"));
+    assert_eq!(revisar.display_name.as_deref(), Some("Revisão"));
+    assert_eq!(revisar.user_invocation_only, Some(true));
+    assert_eq!(found.iter().find(|skill| skill.name == "do-projeto").unwrap().scope, AgentSkillScope::Project);
+    assert_eq!(found.iter().find(|skill| skill.name == "global-cursor").unwrap().scope, AgentSkillScope::User);
+}
+
+#[test]
+fn antigravity_varre_home_da_conta_e_agents_do_projeto_sem_agents_global() {
+    let root = temp_dir("antigravity-skills");
+    let account_home = root.join("conta");
+    let process_home = root.join("processo");
+    let project = root.join("projeto");
+    skill(&account_home.join(".gemini/config/skills"), "da-config", "Config da conta");
+    skill(&account_home.join(".gemini/antigravity-cli/skills"), "da-cli", "CLI da conta");
+    skill(&process_home.join(".gemini/config/skills"), "do-processo", "Não usar");
+    skill(&account_home.join(".agents/skills"), "global-agents", "Ignorar no Antigravity");
+    skill(&project.join(".agents/skills"), "do-projeto", "Skill do projeto");
+    let account = account_env(&[("HOME", account_home.as_path())]);
+    let process = process_env(&[("HOME", process_home.as_path())]);
+    let env = SkillEnv { account: Some(&account), process: &process, cwd: Some(&project), managed_settings: None };
+
+    let found = scan_agent_skills("antigravity", &env);
+
+    assert_eq!(names_of(&found), ["da-cli", "da-config", "do-projeto"]);
+}
+
+#[test]
+fn varredura_de_provider_respeita_limites_de_entradas_e_bytes() {
+    let root = temp_dir("limite-provider");
+    skill(&root, "a", "Primeira");
+    skill(&root, "b", "Segunda");
+
+    let mut entries = BTreeMap::new();
+    let mut entry_budget = ProviderScanBudget { entries: PROVIDER_SCAN_MAX_ENTRIES - 1, bytes: 0 };
+    scan_provider_root(&root, AgentSkillScope::Project, false, &mut entries, &mut entry_budget);
+    assert_eq!(names_of(&entries.into_values().collect::<Vec<_>>()), ["a"]);
+
+    let mut bytes = BTreeMap::new();
+    let mut byte_budget = ProviderScanBudget { entries: 0, bytes: PROVIDER_SCAN_MAX_BYTES };
+    scan_provider_root(&root, AgentSkillScope::Project, false, &mut bytes, &mut byte_budget);
+    assert!(bytes.is_empty());
 }
 
 #[test]
@@ -258,12 +320,18 @@ fn a_conta_da_aba_so_vale_quando_e_do_mesmo_provedor_e_ainda_existe() {
         "CREATE TABLE chat_thread (id TEXT PRIMARY KEY, account_id TEXT);
          CREATE TABLE agent_accounts (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, dir TEXT NOT NULL, kind TEXT, base_url TEXT);
          INSERT INTO agent_accounts VALUES ('conta-1', 'claude-code', '/contas/claude-1', 'subscription', NULL);
-         INSERT INTO chat_thread VALUES ('aba-com-conta', 'conta-1'), ('aba-sem-conta', NULL);",
+         INSERT INTO agent_accounts VALUES ('conta-agy', 'antigravity', '/contas/agy-1', 'login', NULL);
+         INSERT INTO agent_accounts VALUES ('conta-cursor', 'cursor', '/contas/cursor-1', 'login', NULL);
+         INSERT INTO chat_thread VALUES ('aba-com-conta', 'conta-1'), ('aba-agy', 'conta-agy'), ('aba-cursor', 'conta-cursor'), ('aba-sem-conta', NULL);",
     )
     .unwrap();
 
     let env = account_env_for_thread(&conn, "aba-com-conta", "claude-code").expect("a conta do Claude");
     assert_eq!(env.get("CLAUDE_CONFIG_DIR").map(String::as_str), Some("/contas/claude-1"));
+    let agy = account_env_for_thread(&conn, "aba-agy", "antigravity").expect("HOME da conta Antigravity");
+    assert_eq!(agy.get("HOME").map(String::as_str), Some("/contas/agy-1"));
+    let cursor = account_env_for_thread(&conn, "aba-cursor", "cursor").expect("HOME da conta Cursor");
+    assert_eq!(cursor.get("HOME").map(String::as_str), Some("/contas/cursor-1"));
     assert!(account_env_for_thread(&conn, "aba-com-conta", "codex").is_none(), "conta de outro provedor não vale");
     assert!(account_env_for_thread(&conn, "aba-sem-conta", "claude-code").is_none());
     assert!(account_env_for_thread(&conn, "aba-inexistente", "claude-code").is_none());

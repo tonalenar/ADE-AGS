@@ -72,6 +72,8 @@ export interface SkillPreview {
 export interface AgentSkillScan {
   name: string;
   description: string | null;
+  displayName?: string | null;
+  userInvocationOnly?: boolean | null;
   plugin: string | null;
   scope: "user" | "project" | "plugin";
 }

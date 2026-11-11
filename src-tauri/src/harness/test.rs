@@ -780,13 +780,12 @@ mod fase1 {
 
 #[test]
 fn comandos_do_chat_declara_so_as_fontes_que_existem() {
-    // A lista do `/` vem do protocolo (initialize, skills/list, ACP) ou da varredura de pastas. Onde nada disso
-    // está confirmado a célula é Unknown; fora do chat não há composer, então é Unsupported.
+    // A lista do `/` vem do protocolo (initialize, skills/list, ACP) ou da varredura de pastas; fora do chat não há composer.
     let chat_with = |support: Support| -> Vec<&'static str> {
         matrix().iter().filter(|column| column.surface == Surface::Chat && column.comandos.support == support).map(|column| column.provider).collect()
     };
-    assert_eq!(chat_with(Support::Supported), ["claude-code", "codex", "opencode", "local-acp"]);
-    assert_eq!(chat_with(Support::Unknown), ["antigravity", "cursor"]);
+    assert_eq!(chat_with(Support::Supported), ["claude-code", "codex", "opencode", "antigravity", "cursor", "local-acp"]);
+    assert!(chat_with(Support::Unknown).is_empty());
     assert!(
         matrix().iter().filter(|column| column.surface != Surface::Chat).all(|column| column.comandos.support == Support::Unsupported),
         "fora do chat não há composer, então o menu do `/` não existe"

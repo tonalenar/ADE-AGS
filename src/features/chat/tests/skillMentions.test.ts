@@ -31,6 +31,10 @@ describe("dispatchSkillMentions: $nome no envio", () => {
     expect(dispatchSkillMentions("codex", "Use $deploy agora", ["deploy"])).toBe("Use $deploy agora");
   });
 
+  it("o Cursor converte só skills conhecidas de $nome para /nome no lugar", () => {
+    expect(dispatchSkillMentions("cursor", "Use $Deploy e $5", ["deploy"])).toBe("Use /deploy e $5");
+  });
+
   it("sem menção, nada muda", () => {
     expect(dispatchSkillMentions("claude-code", "oi", ["deploy"])).toBe("oi");
   });
