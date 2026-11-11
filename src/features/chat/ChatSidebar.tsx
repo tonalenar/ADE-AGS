@@ -36,6 +36,8 @@ import { noticeStatesOf } from "./noticeRules";
 import { useWorkingShelf } from "@/features/settings/sidebarPreferences";
 import { closeWorkspaceFolder, forgetWorkspaceFolder } from "./sidebar/workspaceActions";
 import { useAutoUnread } from "./sidebar/useAutoUnread";
+import { recordProjectsFirstSeen, useProjectOrderPrefs } from "./sidebar/projectOrderPrefs";
+import { useAutoSettle } from "./sidebar/useAutoSettle";
 import { folderName, threadIdOf, threadKey } from "./structured/model";
 import { chatThreadRename, chatThreadSearch, type MessageSearchHit } from "./structured/ipc";
 import { searchArchivedSessionMessages, type ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
@@ -161,6 +163,13 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     }
     return out;
   }, [cards, tabTurn]);
+  // Ordem dos projetos (Configurações → Projetos) e o concluir sozinho: as duas leem o que a barra já sabe.
+  const projectOrder = useProjectOrderPrefs();
+  const tabIds = useMemo(() => cards.map((c) => c.tabId), [cards]);
+  const busyIds = useMemo(() => [...shelf.needs, ...shelf.working], [shelf]);
+  const projectCwds = useMemo(() => [...new Set(cards.map((c) => c.cwd))], [cards]);
+  useAutoSettle({ tabIds, busy: busyIds, pinned, selectedId, lastUserAt });
+  useEffect(() => recordProjectsFirstSeen(projectCwds), [projectCwds]);
   const orderBySection = useShelf((s) => s.orderBySection);
   const unread = useShelf((s) => s.unread);
   const collapsed = useShelf((s) => s.collapsed);
@@ -212,8 +221,8 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   // O time fica sob a conversa do orquestrador: os integrantes saem da lista e aparecem indentados (prancheta 15).
   const grouping = useTeamGrouping(cards);
   const sections = useMemo(
-    () => buildSections(cards, { query, folder, pinned, archived: archivedIds, snoozed: snoozedIds, nested: grouping.nested, collapsed, orderBySection, lastUserAt, shelf }),
-    [cards, query, folder, pinned, archivedIds, snoozedIds, grouping.nested, collapsed, orderBySection, lastUserAt, shelf],
+    () => buildSections(cards, { query, folder, pinned, archived: archivedIds, snoozed: snoozedIds, nested: grouping.nested, collapsed, orderBySection, lastUserAt, shelf, projectOrder }),
+    [cards, query, folder, pinned, archivedIds, snoozedIds, grouping.nested, collapsed, orderBySection, lastUserAt, shelf, projectOrder],
   );
 
   useEffect(() => {

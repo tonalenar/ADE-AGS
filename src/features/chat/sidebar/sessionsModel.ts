@@ -4,6 +4,8 @@
  * renomear. Sem React e sem store.
  */
 import type { ConversationCard } from "../chatModel";
+import { normalizeProjectPath } from "../chatProjectPrefs";
+import { DEFAULT_PROJECT_ORDER_PREFS, orderProjects, type ProjectOrderPrefs } from "./projectOrder";
 
 export interface SessionSection {
   /** `pinned`, `needs`, `working` ou `project:<nome>` (é também o que se guarda para lembrar a seção recolhida). */
@@ -53,6 +55,8 @@ export interface SectionOptions {
   lastUserAt?: Record<string, number>;
   /** A seção Trabalhando. Sem ela (ou desligada), não há seção extra. */
   shelf?: WorkingShelf;
+  /** Como ordenar as seções de projeto (Configurações → Projetos). Sem ela, vale o último pedido seu. */
+  projectOrder?: ProjectOrderPrefs;
 }
 
 /**
@@ -109,9 +113,15 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
       return activity(b) - activity(a);
     });
   };
-  const projects = [...byProject.entries()]
-    .map(([project, items]) => ({ project, items: ordered(items, projectSectionId(project)) }))
-    .sort((a, b) => newest(b.items) - newest(a.items));
+  const projects = orderProjects(
+    [...byProject.entries()].map(([project, items]) => ({
+      project,
+      items: ordered(items, projectSectionId(project)),
+      key: normalizeProjectPath(items[0].cwd),
+      latest: newest(items),
+    })),
+    opts.projectOrder ?? DEFAULT_PROJECT_ORDER_PREFS,
+  ).map(({ project, items }) => ({ project, items }));
   for (const { project, items } of projects) {
     const id = projectSectionId(project);
     sections.push({ id, kind: "project", label: project, items, collapsed: opts.collapsed.includes(id) });
