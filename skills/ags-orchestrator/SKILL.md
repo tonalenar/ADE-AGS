@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.73.0
+version: 1.74.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -887,7 +887,7 @@ ags device shot Pixel                        # returns the path of a PNG you can
 
 ## HTML pages
 
-Publish a self-contained HTML page (a chart, a table, a diagram, a mockup) for the person to open in the **HTML pages** surface of the right panel. The page has no network access: inline every script, style and image (`data:` URLs), and do not put secrets in it.
+Publish a self-contained HTML page (a chart, a table, a diagram, a mockup) for the person to open in the **HTML pages** surface of the right panel. The page has no network access: inline every script and style, and do not put secrets in it. For an image, either inline it as a `data:` URL or name a local image file by its **absolute path** inside this project folder (in `src` or `url()`): the publish embeds it, so the page keeps working after the file moves. A path outside the project folder, a file that is not an image, or an image over 4 MiB makes the publish fail and say which one; nothing is published half-embedded.
 
 ```bash
 ags render publish --file report.html --title "Q3 sales"   # from a file (UTF-8 or UTF-16 with BOM)

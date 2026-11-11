@@ -241,7 +241,8 @@ PAPÉIS (para recrutar com --role)
 PÁGINAS HTML — as que esta aba publicou (a pessoa as vê na superfície Páginas HTML)
   render publish [--file <caminho>]           Publica uma página HTML completa (ou --title \"…\" para o nome na lista)
               [--title \"…\"] [--sem-mostrar]     · --sem-mostrar não abre a superfície sozinha (padrão: abre se a conversa está à vista)
-  render list                                 As páginas que esta aba publicou, da mais nova para a mais antiga
+              imagem local: caminho absoluto de arquivo dentro da pasta do projeto; é embutida na página (o resto: data: URL)
+  render list                                As páginas que esta aba publicou, da mais nova para a mais antiga
 
 NOTAS DO CANVAS — as conectadas a este terminal (orquestrador: as da equipe)
   design create <title> [--workspace <path>] [--mission-id <id>] [--owner-tab-id <id>]

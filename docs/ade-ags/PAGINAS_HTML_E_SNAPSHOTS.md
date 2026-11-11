@@ -45,7 +45,18 @@ Superfície (`src/features/renders/`): lista da mais nova para a mais antiga; ab
 
 **Diferença do T3, de propósito.** O T3 deixa a página carregar CDN pública. A ADE não: a página é offline, e o que ela precisa vai inline (scripts, estilos, imagens em `data:`). Liberar CDN é uma decisão de lista de hosts; fica para quando a pessoa quiser.
 
-Limites: 2 MiB por página; título com 120 caracteres. Imagens locais por caminho (que o T3 embute na publicação) não entram nesta fatia.
+**Imagens locais (embutidas na publicação, como o T3).** O agente pode citar uma imagem do projeto pelo caminho absoluto, num atributo (`src="/…/grafico.png"`) ou num `url(...)` de CSS. Na publicação, o `publish_in` troca o caminho por `data:image/…;base64,…` (`src-tauri/src/renders/images.rs`): a página guardada fica autocontida e continua funcionando depois que o arquivo original muda ou some. Não há protocolo, endpoint, porta nem mudança na CSP (que já aceita `img-src data:`): o quadro continua sem rede.
+
+Regras, todas no backend, antes de qualquer gravação:
+
+- **Só a pasta do projeto da aba que publica** (o `cwd` dela). É a diferença de propósito em relação ao T3, que aceita qualquer caminho absoluto. Caminho fora dela (incluindo `..` e link simbólico que sai) é recusado.
+- Nunca lê de dentro da pasta de dados da ADE nem da pasta das páginas.
+- O arquivo tem de ser arquivo comum, e os **bytes** têm de ser de imagem (PNG, JPEG, GIF, WebP, AVIF, BMP, ICO ou SVG). O nome não vale: um arquivo renomeado não entra. A imagem é relida e conferida depois da leitura.
+- Limites: 4 MiB por imagem e 12 MiB pela página já embutida. O HTML que o agente manda continua com 2 MiB.
+- Caminho relativo (`logo.png`) e endereço remoto (`https://…`, `//…`) ficam como estão, como antes.
+- Se **qualquer** caminho local é recusado, a publicação falha inteira e a mensagem diz quais e por quê; não sai página pela metade. A CLI e a tool MCP `render_publish` recebem o erro.
+
+Limites gerais: título com 120 caracteres. Desempenho com muitas imagens grandes: **não medido**.
 
 **Autorização (F-09).** `render.publish` e `render.list` são `escopo:chamador` em `ipc/authz.rs`: a aba só publica e lista as próprias. Apagar não é método de agente. A família MCP `render_publish` e `render_list` só se oferece a abas (`--tab`), porque a página precisa de dono. A contagem do Anexo A de `docs/decisoes/HOST_REMOTO.md` passou para 223 métodos.
 
@@ -63,7 +74,7 @@ Miniaturas: cada cartão lê o PNG inteiro (`readImage`, com cache por caminho).
 
 ## 4. Testes e verificação
 
-- Rust: `cargo test --lib --bin ags` com 3045 testes no lib e 54 no binário `ags` passando, zero falhas (29 ignorados já existiam com motivo). Novos: `renders::test` (7), `snapshot_gallery::test` (5), `cli_test` (flags de exibição e `--file`). Contratos de `ipc/test.rs`: contagem por classe (27/190/4/2) e tamanho de `GROUPS` (21).
+- Rust: `cargo test --lib --bin ags` com 3045 testes no lib e 54 no binário `ags` passando, zero falhas (29 ignorados já existiam com motivo). Novos: `renders::test` (7 da primeira fatia; 12 das imagens locais, que recusam caminho fora do projeto, link que sai, arquivo que não é imagem, imagem acima do limite e pasta de dados), `snapshot_gallery::test` (5), `cli_test` (flags de exibição e `--file`). Contratos de `ipc/test.rs`: contagem por classe (27/190/4/2) e tamanho de `GROUPS` (21).
 - Vitest: `renders/tests/model`, `snapshots/tests/model`, `chat/tests/deviceReveal`, `deviceFloatModel`, `deviceFloatStore`, `orchestrator/tests/catalogs`, e as pastas `chat`, `orchestrator`, `browser`, `tabs` e `canvas` (2172 testes passando, 1 falha corrigida no catálogo).
 - `bunx tsc --noEmit`, `bun run check:i18n`, `bun run check:test-lint` (sem violação nova), `bun run check:babel`, `bun run gen:catalogs` + `check:catalogs`, e `node scripts/fingerprint.mjs` (schema e protocolo IPC inalterados).
 - **Não verificado visualmente.** Nenhuma captura da instância isolada foi feita nesta fatia: o cartão flutuante, a lista de páginas e a galeria precisam de uma passada visual antes de virar PR.

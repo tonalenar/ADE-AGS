@@ -2355,7 +2355,7 @@ fn render_schemas() -> Vec<Value> {
         json!({ "name": name, "description": description, "inputSchema": { "type": "object", "properties": properties, "required": required } })
     };
     vec![
-        tool("render_publish", "Publish a self-contained HTML page (a chart, table, diagram or mockup) to the ADE AGS \"HTML pages\" surface, where the person can open it, reload it or open it in the system browser. The page has no network access: inline all scripts, styles and images (data: URLs). Do not put secrets in it.",
+        tool("render_publish", "Publish a self-contained HTML page (a chart, table, diagram or mockup) to the ADE AGS \"HTML pages\" surface, where the person can open it, reload it or open it in the system browser. The page has no network access: inline all scripts and styles. An image file inside this project folder can be named by its absolute path (in src or url()); it is embedded when the page is published. Other images must be data: URLs. Do not put secrets in it.",
             json!({
                 "html": { "type": "string", "description": "The complete HTML document (up to 2 MiB)." },
                 "title": { "type": "string", "description": "The name shown in the list (up to 120 characters)." },

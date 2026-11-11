@@ -70,8 +70,12 @@ pub fn is_valid_id(id: &str) -> bool {
 }
 
 /// Publica uma página em `dir`. `owner` é a aba de quem publicou e `cwd` a pasta dela; `now` vem de quem chama.
+/// As imagens locais embutidas vêm só da pasta `cwd` (ver `images.rs`), e a leitura delas fica fora do lock do índice.
 pub fn publish_in(dir: &Path, owner: &str, cwd: &str, title: &str, html: &str, now: i64) -> Result<RenderPage, String> {
     validate_html(html)?;
+    let projeto = Some(cwd).filter(|pasta| !pasta.trim().is_empty()).map(Path::new);
+    let protegidas: Vec<PathBuf> = [Some(dir.to_path_buf()), crate::util::datadir::ags_home()].into_iter().flatten().collect();
+    let html = super::images::embed(html, projeto, &protegidas, super::images::Limits::PADRAO)?;
     let _guard = INDEX_LOCK.lock().map_err(|_| "As páginas HTML estão travadas por outro processo.".to_string())?;
     let mut index = read_index(dir)?;
     let page = RenderPage {
