@@ -72,7 +72,7 @@ export interface ComposerControlsContext {
  * o clipe os põem numa fileira de miniaturas acima do texto; o bloco (miniaturas + texto) cresce até 40%
  * da janela e depois rola por dentro, sem barra, com o enviar sempre à vista. Enviar só com anexos vale.
  */
-export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, stopUnavailableReason = null, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false, compact = false }: {
+export function ChatComposer({ placeholder, controls, leading = null, addon, onSubmit, onBackgroundSubmit, onSendAndNewThread, onStop, stopUnavailableReason = null, onQueue, queue: waiting = [], onUnqueue, onUpdateQueued, promptHistory = [], cwd = null, disabled = false, autoFocus = false, quoteKey = null, composerTarget = quoteKey, quoteThreadId, quoteSourceIds, turnActive = false, forceSend = false }: {
   placeholder: string;
   /** Logo depois do anexar, à esquerda (o segmentado "Time | Só o orquestrador", prancheta 15). */
   leading?: React.ReactNode;
@@ -115,11 +115,6 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   turnActive?: boolean;
   /** Uma pergunta/aprovação espera resposta direta, independentemente da preferência. */
   forceSend?: boolean;
-  /**
-   * Layout compacto (a pergunta lateral): anexar e microfone à vista; arquivo, câmera e gravação vão para o
-   * «Mais ações». Sem ele, a barra é a de sempre.
-   */
-  compact?: boolean;
 }) {
   const { t } = useTranslation();
   // A leitura dos rascunhos roda uma vez ao montar; o `t` mais novo vale só para a mensagem de erro.
@@ -686,8 +681,8 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     restoreQueuedDraft(original, text);
   }, [editingQueueId, waiting, text]);
 
-  // Os botões secundários e o de voz: na barra normal ficam todos à vista; no compacto, o arquivo, a câmera e a gravação
-  // vão para o «Mais ações» e o microfone fica à vista. São os mesmos elementos nos dois layouts.
+  // Os botões secundários e o de voz. Como no T3 Code, o anexo, o rascunho guardado, a câmera e a gravação moram no «+»
+  // (`ComposerMoreActions`, sempre montado) e só o ditado fica à vista, ao lado do enviar.
   const stashButton = (
         <button type="button" data-chat-prompt-stash="" onClick={() => {
           if (hasStashContent) void saveCurrentPrompt();
@@ -863,34 +858,25 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       </label>
       </div>
       {/*
-        A linha de baixo fica numa linha só: o grupo da esquerda (anexar, "Time | Só o orquestrador") não encolhe, e
-        o da direita encolhe por dentro (o nome do modelo trunca; com a coluna estreita, os rótulos viram ícones com
+        A linha de baixo fica numa linha só, como a do T3 Code: o grupo da esquerda (o «+» com anexo, captura e gravação,
+        e o chip «Para quem» do time) não encolhe, e o da direita (controles, ditado, enviar) encolhe por dentro (o nome do modelo trunca; com a coluna estreita, os rótulos viram ícones com
         tooltip, ver `ComposerColumn`). Só numa coluna muito estreita (< 28rem) ela volta a quebrar, para nada passar
         da borda do cartão. O enviar é sempre o último, no canto.
       */}
       <div data-composer-row className="flex flex-nowrap @max-[28rem]/composer:flex-wrap items-center gap-x-1 gap-y-1 px-3 pb-2.5">
         <div data-composer-left className="flex shrink-0 items-center gap-0.5">
-        <button type="button" onClick={() => { void attach(); }} aria-label={t("chat.composer.attach")} title={t("chat.composer.attach")} disabled={disabled || stashRestoring}
-          className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white">
-          <PaperclipIcon className="w-4 h-4" />
-        </button>
-        {compact ? (
-          <>
-            {voiceButton}
-            <ComposerMoreActions>{stashButton}{snapshotButton}{recordButton}</ComposerMoreActions>
-          </>
-        ) : (
-          <>
-            {stashButton}
-            {snapshotButton}
-            {recordButton}
-            {voiceButton}
-          </>
-        )}
+        <ComposerMoreActions>
+          <button type="button" onClick={() => { void attach(); }} aria-label={t("chat.composer.attach")} title={t("chat.composer.attach")} disabled={disabled || stashRestoring}
+            className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40">
+            <PaperclipIcon className="w-4 h-4" />
+          </button>
+          {stashButton}{snapshotButton}{recordButton}
+        </ComposerMoreActions>
         {leading}
         </div>
         <div data-composer-right className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-0.5">
         <div data-composer-controls className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">{controlsContent}</div>
+        {voiceButton}
         {stopping ? (
           <button type="button" onClick={() => onStop?.()} disabled={!onStop} aria-label={t("chat.composer.stop")} title={stopUnavailableReason ?? t("chat.composer.stop")}
             className="ml-1 w-8 h-8 shrink-0 rounded-full flex items-center justify-center bg-red-600/90 text-white hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-45">

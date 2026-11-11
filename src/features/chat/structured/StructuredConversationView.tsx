@@ -279,7 +279,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             context={context} />}
           onStop={working && !request && interruptCapability.available ? () => interruptThread(thread.id) : null}
           stopUnavailableReason={working && !request && !interruptCapability.available ? interruptCapability.reason : null}
-          controls={controls} compact={!!side} />
+          controls={controls} />
         {isLocalAcpAgent(thread.agentId) &&<p className="mx-2 mt-2 mb-0 text-[11px] leading-4 text-amber-700 dark:text-amber-300">{t("chat.localAcp.permissionWarning")}</p>}
         {!side && <ContextStrip branch={card.branch} worktree={card.isWorktree} />}
       </ComposerColumn>

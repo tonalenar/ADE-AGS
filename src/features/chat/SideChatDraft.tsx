@@ -55,7 +55,7 @@ export function SideChatDraftView({ conversation, history, truncated, parentBusy
         composer={
           <ComposerColumn>
             {parentBusy && <ActivityLine live={turn} startedAt={null} />}
-            <ChatComposer compact cwd={conversation.cwd} quoteKey={null} composerTarget={`side-draft:${conversation.tabId}`} disabled={busy}
+            <ChatComposer cwd={conversation.cwd} quoteKey={null} composerTarget={`side-draft:${conversation.tabId}`} disabled={busy}
               placeholder={parentBusy ? t("chat.sideChat.busyHint") : t("chat.sideChat.placeholder")}
               onSubmit={(text, attachments) => onSubmit(text, attachments)}
               controls={

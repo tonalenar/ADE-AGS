@@ -69,7 +69,7 @@ describe("a linha de controles do composer", () => {
     expect((host.querySelector("[data-composer-left]") as HTMLElement).className).toContain("shrink-0");
   });
 
-  it("anexar e o segmentado ficam à esquerda; os controles à direita", async () => {
+  it("o «+» (com o anexar) e o chip do time ficam à esquerda; os controles à direita", async () => {
     await mount(<button type="button">modelo</button>, <button type="button">Time</button>);
     const left = host.querySelector("[data-composer-left]") as HTMLElement;
     expect(left.textContent).toContain("Time");
