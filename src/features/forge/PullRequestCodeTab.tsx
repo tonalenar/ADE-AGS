@@ -672,7 +672,7 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
                       const active = commentTarget && reviewTargetKey(commentTarget.path, commentTarget.oldLine, commentTarget.newLine) === locationKey;
                       return (
                         <div key={`${selectedPath}:${index}`}>
-                          <div data-old-line={line.oldLine ?? undefined} data-new-line={line.newLine ?? undefined} className={`grid min-w-max grid-cols-[3.25rem_3.25rem_1.75rem_minmax(0,1fr)] ${line.kind === "added" ? "bg-emerald-50/80 dark:bg-emerald-400/8" : line.kind === "removed" ? "bg-red-50/80 dark:bg-red-400/8" : line.kind === "meta" ? "bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-white/45" : ""}`}>
+                          <div data-old-line={line.oldLine ?? undefined} data-new-line={line.newLine ?? undefined} className={`grid min-w-max grid-cols-[3.25rem_3.25rem_1.75rem_minmax(0,1fr)] ${line.kind === "added" ? "bg-[var(--cc-diff-add-bg)]" : line.kind === "removed" ? "bg-[var(--cc-diff-del-bg)]" : line.kind === "meta" ? "bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-white/45" : ""}`}>
                             <span className="select-none pr-2 text-right font-mono text-gray-400 dark:text-white/30">{line.oldLine ?? ""}</span>
                             <span className="select-none pr-2 text-right font-mono text-gray-400 dark:text-white/30">{line.newLine ?? ""}</span>
                             {commentable ? (

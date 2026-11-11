@@ -116,6 +116,34 @@ export function ChatSwitch({ labelId, label, checked, disabled = false, onChange
   );
 }
 
+/**
+ * Marca um bloco da página para a busca achar e rolar até ele (`data-settings-anchor`). Não tem
+ * estilo: o bloco continua sendo o filho direto do grupo, então as linhas separadas por filete não mudam.
+ */
+export function SettingsAnchor({ id, children }: { id: string; children: React.ReactNode }) {
+  return <div data-settings-anchor={id}>{children}</div>;
+}
+
+/** Abas dentro de uma página que junta várias coisas (Provedores, Orquestrador): um segmentado. */
+export function SettingsSubTabs<T extends string>({ items, value, onChange }: {
+  items: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div role="tablist" className="self-start inline-flex max-w-full flex-wrap gap-0.5 p-0.5 rounded-lg bg-gray-100 dark:bg-white/[0.06]">
+      {items.map((it) => (
+        <button key={it.id} type="button" role="tab" aria-selected={value === it.id} onClick={() => onChange(it.id)}
+          className={`h-6 px-2.5 rounded-md text-[12px] font-medium ${value === it.id
+            ? "bg-white dark:bg-white/[0.12] text-gray-900 dark:text-white shadow-[0_1px_2px_rgba(0,0,0,0.08)]"
+            : "text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white"}`}>
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 /** O segmentado das Configurações (prancheta 5): opções numa faixa cinza, a escolhida em branco. */
 export function ChatSegmented<T extends string>({ label, options, value, onChange }: {
   label: string;

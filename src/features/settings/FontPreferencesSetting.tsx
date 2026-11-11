@@ -4,8 +4,10 @@ import { useTranslation } from "react-i18next";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 
 import { SettingsGroup, SettingsRow, SettingsSection } from "./SettingsSection";
+import { SliderRow } from "./SettingsSlider";
 import {
   DEFAULT_FONT_PREFERENCES,
+  FONT_SIZE_RANGE,
   readFontPreferences,
   saveFontPreferences,
   type CodeFont,
@@ -25,15 +27,42 @@ export function FontPreferencesSetting() {
     saveFontPreferences(next);
   };
 
+  // O tamanho base de cada área, em px. A janela escala os tokens de texto por ele (`fontScaleVars`).
+  const updateSize = (kind: FontKind, size: number) => {
+    const next = { ...preferences, sizes: { ...preferences.sizes, [kind]: size } };
+    setPreferences(next);
+    saveFontPreferences(next);
+  };
+
   return (
     <SettingsSection title={t("settings.typography")} description={t("settings.typography.desc")}>
       <SettingsGroup>
         <SettingsRow label={t("settings.font.interface")} hint={t("settings.font.interfaceHint")}>
           <FontControl kind="interface" value={preferences.interface} onChange={(patch) => update("interface", patch)} />
         </SettingsRow>
+        <SliderRow
+          id="ade-font-size-interface"
+          label={t("settings.font.size.interface")}
+          hint={t("settings.font.size.interfaceHint")}
+          min={FONT_SIZE_RANGE.interface.min}
+          max={FONT_SIZE_RANGE.interface.max}
+          value={preferences.sizes.interface}
+          format={(value) => `${value} px`}
+          onChange={(size) => updateSize("interface", size)}
+        />
         <SettingsRow label={t("settings.font.code")} hint={t("settings.font.codeHint")}>
           <FontControl kind="code" value={preferences.code} onChange={(patch) => update("code", patch)} />
         </SettingsRow>
+        <SliderRow
+          id="ade-font-size-code"
+          label={t("settings.font.size.code")}
+          hint={t("settings.font.size.codeHint")}
+          min={FONT_SIZE_RANGE.code.min}
+          max={FONT_SIZE_RANGE.code.max}
+          value={preferences.sizes.code}
+          format={(value) => `${value} px`}
+          onChange={(size) => updateSize("code", size)}
+        />
       </SettingsGroup>
     </SettingsSection>
   );

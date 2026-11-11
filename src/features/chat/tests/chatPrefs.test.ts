@@ -11,12 +11,19 @@ describe("parseChatPrefs", () => {
 
   it("guarda só o que serve", () => {
     expect(parseChatPrefs({ cwd: "/p", agentId: "codex", model: 3, effort: "", accountId: "a1", access: "ask", extra: true }))
-      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true });
+      .toEqual({ cwd: "/p", agentId: "codex", model: null, effort: null, accountId: "a1", access: "ask", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true, sendShortcut: "enter", toolCallVisibility: "showAll" });
   });
 
   it("aceita fila como comportamento padrão e descarta valores desconhecidos", () => {
     expect(parseChatPrefs({ followUpBehavior: "queue" }).followUpBehavior).toBe("queue");
     expect(parseChatPrefs({ followUpBehavior: "qualquer-coisa" }).followUpBehavior).toBe("steer");
+  });
+
+  it("envio e chamadas de ferramenta: os valores conhecidos passam e o resto volta ao padrão", () => {
+    expect(parseChatPrefs({ sendShortcut: "mod-enter" }).sendShortcut).toBe("mod-enter");
+    expect(parseChatPrefs({ sendShortcut: "shift" }).sendShortcut).toBe("enter");
+    expect(parseChatPrefs({ toolCallVisibility: "zen" }).toolCallVisibility).toBe("zen");
+    expect(parseChatPrefs({ toolCallVisibility: "tudo" }).toolCallVisibility).toBe("showAll");
   });
 
   it("permissão desconhecida cai no nível das missões (safe)", () => {

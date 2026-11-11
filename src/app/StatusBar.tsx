@@ -1,3 +1,4 @@
+import { EnvironmentPill } from "@/app/EnvironmentPill";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -72,6 +73,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
       bg-gray-100/80 dark:bg-surface-sunken/75
       border-t border-gray-200 dark:border-white/[0.08]
       text-[11px] tabular-nums text-gray-500 dark:text-white/50 select-none">
+      <EnvironmentPill />
 
       {/* O mascote é o indicador de humor da janela: repousa, trabalha ou chama você.
           Fica parado em repouso — algo se mexendo o tempo todo no canto do olho cansa. */}

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@/features/tabs/tabActions", () => ({ requestCloseItem: vi.fn() }));
 
 import { parseShelf } from "../shelf";
-import { buildSections, cleanTitle, countStates, initialOf, moveByOne, moveVisibleByOne, stepFocus, toggleAllProjects, toggleIn, visibleIds } from "../sidebar/sessionsModel";
+import { buildSections, cleanTitle, countStates, initialOf, moveByOne, moveVisibleByOne, NEEDS_ID, PINNED_ID, stepFocus, toggleAllProjects, toggleIn, visibleIds, WORKING_ID, type WorkingShelf } from "../sidebar/sessionsModel";
 import type { ConversationCard } from "../chatModel";
 
 const card = (id: string, project: string, openedAt: number, extra: Partial<ConversationCard> = {}): ConversationCard => ({
@@ -113,5 +113,57 @@ describe("contagem, avatar e expandir/recolher todos", () => {
     expect(toggleAllProjects(sections, [])).toEqual(["project:Outro", "project:ADE"]);
     expect(toggleAllProjects(sections, ["project:Outro", "project:ADE"])).toEqual([]);
     expect(toggleAllProjects(sections, ["pinned", "project:Outro"])).toEqual(["pinned", "project:Outro", "project:ADE"]);
+  });
+});
+
+describe("a seção Trabalhando e a ordem por último pedido", () => {
+  const cards = [card("a", "ADE", 3), card("b", "Outro", 5), card("c", "ADE", 1), card("d", "Outro", 2)];
+  const shelf = (over: Partial<WorkingShelf> = {}): WorkingShelf => ({ enabled: true, working: [], needs: [], ...over });
+  const idsOfSection = (sections: ReturnType<typeof buildSections>, id: string) =>
+    sections.find((s) => s.id === id)?.items.map((c) => c.tabId);
+
+  it("desligada, a lista é a de sempre: nenhuma seção extra", () => {
+    const sections = buildSections(cards, { ...base, shelf: { enabled: false, working: ["a"], needs: ["b"] } });
+    expect(sections.map((s) => s.kind)).toEqual(["project", "project"]);
+  });
+
+  it("ligada: quem precisa de você sobe logo abaixo das fixadas, e quem trabalha vai para o fim", () => {
+    const sections = buildSections(cards, { ...base, pinned: ["d"], shelf: shelf({ working: ["a"], needs: ["b"] }) });
+    expect(sections.map((s) => s.id)).toEqual([PINNED_ID, NEEDS_ID, "project:ADE", WORKING_ID]);
+    expect(idsOfSection(sections, NEEDS_ID)).toEqual(["b"]);
+    expect(idsOfSection(sections, WORKING_ID)).toEqual(["a"]);
+  });
+
+  it("uma conversa fixada que trabalha fica nas fixadas, não na seção Trabalhando", () => {
+    const sections = buildSections(cards, { ...base, pinned: ["a"], shelf: shelf({ working: ["a"] }) });
+    expect(sections[0]!.id).toBe(PINNED_ID);
+    expect(idsOfSection(sections, PINNED_ID)).toEqual(["a"]);
+    expect(sections.some((s) => s.id === WORKING_ID)).toBe(false);
+  });
+
+  it("quem está nas duas listas aparece só em 'precisam de você'", () => {
+    const sections = buildSections(cards, { ...base, shelf: shelf({ working: ["a"], needs: ["a"] }) });
+    expect(sections.some((s) => s.id === WORKING_ID)).toBe(false);
+    expect(idsOfSection(sections, NEEDS_ID)).toEqual(["a"]);
+  });
+
+  it("ligada, a ordem salva à mão não vale: vale o último pedido seu; desligada, a ordem salva vale", () => {
+    const saved = { "project:ADE": ["a", "c"] };
+    const lastUserAt = { a: 10, c: 50 };
+    const off = buildSections(cards, { ...base, orderBySection: saved, lastUserAt });
+    expect(idsOfSection(off, "project:ADE")).toEqual(["a", "c"]);
+    const on = buildSections(cards, { ...base, orderBySection: saved, lastUserAt, shelf: shelf() });
+    expect(idsOfSection(on, "project:ADE")).toEqual(["c", "a"]);
+  });
+
+  it("os projetos ordenam pelo último pedido seu, e sem ele pela abertura", () => {
+    expect(buildSections(cards, base).map((s) => s.id)).toEqual(["project:Outro", "project:ADE"]);
+    const byUser = { a: 90, b: 20, c: 80, d: 10 };
+    expect(buildSections(cards, { ...base, lastUserAt: byUser }).map((s) => s.id)).toEqual(["project:ADE", "project:Outro"]);
+  });
+
+  it("a seção Trabalhando põe primeiro quem recebeu o último pedido seu", () => {
+    const sections = buildSections(cards, { ...base, shelf: shelf({ working: ["a", "b"] }), lastUserAt: { a: 10, b: 40 } });
+    expect(idsOfSection(sections, WORKING_ID)).toEqual(["b", "a"]);
   });
 });

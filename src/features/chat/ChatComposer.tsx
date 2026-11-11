@@ -1,3 +1,4 @@
+import { enterKeyAction } from "./composerSendKey";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -120,6 +121,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   tRef.current = t;
   const eventTarget = composerTarget ?? quoteKey;
   const followUpBehavior = useChatPrefs().followUpBehavior;
+  const sendShortcut = useChatPrefs().sendShortcut;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const submitInFlightRef = useRef(false);
@@ -820,11 +822,13 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
                 return;
               }
             }
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+              // "Enviar com" (Configurações → Chat): a matriz de decisão está em `composerSendKey.ts`.
+              const action = enterKeyAction({ shortcut: sendShortcut, mod: e.metaKey || e.ctrlKey, shift: e.shiftKey, alt: e.altKey, multiline: text.includes("\n") });
+              if (action === "newline") return;
               e.preventDefault();
-              if (e.metaKey || e.ctrlKey) {
-                if (!e.altKey) submitForModifiedEnter();
-              } else submitForEnter();
+              if (action === "default") submitForEnter();
+              else if (action === "opposite") submitForModifiedEnter();
             }
           }}
           placeholder={placeholder}

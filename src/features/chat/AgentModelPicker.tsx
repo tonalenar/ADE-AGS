@@ -1,3 +1,4 @@
+import { EffortLevel } from "./EffortLevel";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -605,7 +606,7 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
     <div ref={ref} className="relative -ml-1.5">
       <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => !disabled && setOpen(!open)} disabled={disabled}
         className={`h-7 px-1.5 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/[0.07] ${open ? "bg-gray-100 dark:bg-white/[0.07]" : ""}`}>
-        {value ? label(value) : t("chat.effort.default")}
+        {value ? <EffortLevel value={value} efforts={efforts} label={label(value)} /> : t("chat.effort.default")}
       </button>
       {open && (
         <div role="menu" aria-label={t("chat.picker.effort")}

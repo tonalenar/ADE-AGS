@@ -3,9 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { SettingsToggleRow } from "@/features/settings/SettingsSection";
-
-/** La clave que lee `notifier.rs`. Prendido salvo que diga "false". */
-const NOTIFICATIONS_KEY = "notifications.enabled";
+import { NOTIFICATIONS_KEY } from "@/features/settings/notificationsPreference";
 
 /**
  * Avisos del sistema cuando una misión termina o falla, un agente espera una aprobación o

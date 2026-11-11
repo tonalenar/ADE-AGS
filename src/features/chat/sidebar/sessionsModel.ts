@@ -1,20 +1,36 @@
 /**
- * O modelo puro da barra de sessões (a mesma nos modos Chat, Abas e Canvas): as seções "Fixadas" e uma
- * por projeto, a ordem, a navegação por teclado e o título novo de um renomear. Sem React e sem store.
+ * O modelo puro da barra de sessões (a mesma nos modos Chat, Abas e Canvas): as seções "Fixadas", "Precisam
+ * de você", uma por projeto, a seção "Trabalhando", a ordem, a navegação por teclado e o título novo de um
+ * renomear. Sem React e sem store.
  */
 import type { ConversationCard } from "../chatModel";
 
 export interface SessionSection {
-  /** `pinned` ou `project:<nome>` (é também o que se guarda para lembrar a seção recolhida). */
+  /** `pinned`, `needs`, `working` ou `project:<nome>` (é também o que se guarda para lembrar a seção recolhida). */
   id: string;
-  kind: "pinned" | "project";
+  kind: "pinned" | "needs" | "working" | "project";
   label: string;
   items: ConversationCard[];
   collapsed: boolean;
 }
 
 export const PINNED_ID = "pinned";
+export const NEEDS_ID = "needs";
+export const WORKING_ID = "working";
 export const projectSectionId = (project: string) => `project:${project}`;
+
+/**
+ * A seção Trabalhando (Configurações → Geral → Barra lateral). Ligada, a seção vai ao fim da lista com as
+ * conversas que trabalham, e quem precisa de você (aprovação ou pergunta) sobe ao topo, logo abaixo das
+ * fixadas. Desligada, a lista é a de sempre.
+ */
+export interface WorkingShelf {
+  enabled: boolean;
+  /** Conversas trabalhando, sem pedido pendente seu. */
+  working: string[];
+  /** Conversas com aprovação ou pergunta pendente. */
+  needs: string[];
+}
 
 export interface SectionOptions {
   query: string;
@@ -30,15 +46,28 @@ export interface SectionOptions {
   collapsed: string[];
   /** Ordem definida pela pessoa nas seções de projeto; ids novos entram antes dos já ordenados. */
   orderBySection?: Record<string, string[]>;
+  /**
+   * Quando cada conversa recebeu o último pedido seu, em segundos. Ordena os projetos e a seção Trabalhando;
+   * sem ele, vale a hora da abertura. Quem entrega é a barra (o canal guarda o começo do turno).
+   */
+  lastUserAt?: Record<string, number>;
+  /** A seção Trabalhando. Sem ela (ou desligada), não há seção extra. */
+  shelf?: WorkingShelf;
 }
 
 /**
- * As seções da barra: Fixadas primeiro (se houver), depois um projeto por seção, o que tem a conversa
- * mais recente em cima e, dentro dele, a mais recente em cima. A busca, o filtro de pasta, as adiadas e
- * os integrantes aninhados ficam de fora; seção vazia some. Pura.
+ * As seções da barra: Fixadas primeiro (se houver); com a seção Trabalhando ligada, depois as que precisam de
+ * você; depois um projeto por seção, ordenado pelo último pedido seu (ou pela abertura, sem ele); e, no fim, a
+ * seção Trabalhando. Com ela ligada, a lista ativa segue a ordem de quando cada conversa voltou para você, e a
+ * ordem salva à mão não vale. A busca, o filtro de pasta, as adiadas e os integrantes aninhados ficam de fora;
+ * seção vazia some. Pura.
  */
 export function buildSections(cards: ConversationCard[], opts: SectionOptions): SessionSection[] {
   const q = opts.query.trim().toLowerCase();
+  const shelfOn = opts.shelf?.enabled === true;
+  const needsSet = new Set(shelfOn ? opts.shelf!.needs : []);
+  const workingSet = new Set(shelfOn ? opts.shelf!.working : []);
+  const activity = (c: ConversationCard) => opts.lastUserAt?.[c.tabId] ?? c.openedAt;
   const shown = cards.filter((c) =>
     (!opts.folder || c.project === opts.folder)
     && (!q || `${c.title} ${c.project} ${c.agentLabel}`.toLowerCase().includes(q))
@@ -48,26 +77,36 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
   const byId = new Map(shown.map((c) => [c.tabId, c]));
   const pinnedCards = opts.pinned.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
   const pinnedSet = new Set(pinnedCards.map((c) => c.tabId));
+  // Fixada fica na seção de fixadas, mesmo trabalhando: as outras duas seções da barra não a levam.
+  const outOfProjects = (c: ConversationCard) => pinnedSet.has(c.tabId) || needsSet.has(c.tabId) || workingSet.has(c.tabId);
+  const sortByActivity = (items: ConversationCard[]) => [...items].sort((a, b) => activity(b) - activity(a));
   const sections: SessionSection[] = [];
   if (pinnedCards.length > 0) {
     sections.push({ id: PINNED_ID, kind: "pinned", label: "", items: pinnedCards, collapsed: opts.collapsed.includes(PINNED_ID) });
   }
+  if (shelfOn) {
+    const needsCards = sortByActivity(shown.filter((c) => !pinnedSet.has(c.tabId) && needsSet.has(c.tabId)));
+    if (needsCards.length > 0) {
+      sections.push({ id: NEEDS_ID, kind: "needs", label: "", items: needsCards, collapsed: opts.collapsed.includes(NEEDS_ID) });
+    }
+  }
   const byProject = new Map<string, ConversationCard[]>();
   for (const c of shown) {
-    if (pinnedSet.has(c.tabId)) continue;
+    if (outOfProjects(c)) continue;
     byProject.set(c.project, [...(byProject.get(c.project) ?? []), c]);
   }
-  const newest = (items: ConversationCard[]) => Math.max(...items.map((c) => c.openedAt));
+  const newest = (items: ConversationCard[]) => Math.max(...items.map(activity));
+  // Com a seção ligada, a ordem da lista é a de quando cada conversa voltou para você; a ordem salva volta ao desligar.
   const ordered = (items: ConversationCard[], sectionId: string) => {
     const saved = opts.orderBySection?.[sectionId] ?? [];
-    if (saved.length === 0) return [...items].sort((a, b) => b.openedAt - a.openedAt);
+    if (shelfOn || saved.length === 0) return sortByActivity(items);
     const rank = new Map(saved.map((id, index) => [id, index]));
     return [...items].sort((a, b) => {
       const ai = rank.get(a.tabId), bi = rank.get(b.tabId);
       if (ai === undefined && bi !== undefined) return -1;
       if (ai !== undefined && bi === undefined) return 1;
       if (ai !== undefined && bi !== undefined && ai !== bi) return ai - bi;
-      return b.openedAt - a.openedAt;
+      return activity(b) - activity(a);
     });
   };
   const projects = [...byProject.entries()]
@@ -76,6 +115,12 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
   for (const { project, items } of projects) {
     const id = projectSectionId(project);
     sections.push({ id, kind: "project", label: project, items, collapsed: opts.collapsed.includes(id) });
+  }
+  if (shelfOn) {
+    const workingCards = sortByActivity(shown.filter((c) => !pinnedSet.has(c.tabId) && !needsSet.has(c.tabId) && workingSet.has(c.tabId)));
+    if (workingCards.length > 0) {
+      sections.push({ id: WORKING_ID, kind: "working", label: "", items: workingCards, collapsed: opts.collapsed.includes(WORKING_ID) });
+    }
   }
   return sections;
 }

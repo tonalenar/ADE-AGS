@@ -72,17 +72,17 @@
      tratamento contido, para não reabrir o gradiente azul→violeta do upstream.
    - `surface*` são os fundos do modo escuro, do mais fundo ao mais elevado. */
 @theme {
-  --color-gray-50: oklch(0.985 0 0);
-  --color-gray-100: oklch(0.967 0 0);
-  --color-gray-200: oklch(0.925 0.001 286);
-  --color-gray-300: oklch(0.87 0.002 286);
-  --color-gray-400: oklch(0.71 0.004 286);
-  --color-gray-500: oklch(0.555 0.005 286);
-  --color-gray-600: oklch(0.45 0.005 286);
-  --color-gray-700: oklch(0.37 0.004 286);
-  --color-gray-800: oklch(0.29 0.003 286);
-  --color-gray-900: oklch(0.215 0.002 286);
-  --color-gray-950: oklch(0.15 0.002 286);
+  --color-gray-50: color-mix(in oklab, oklch(0.985 0 0) var(--cc-contrast-base), var(--cc-contrast-bg));
+  --color-gray-100: color-mix(in oklab, oklch(0.967 0 0) var(--cc-contrast-base), var(--cc-contrast-bg));
+  --color-gray-200: color-mix(in oklab, oklch(0.925 0.001 286) var(--cc-contrast-base), var(--cc-contrast-bg));
+  --color-gray-300: color-mix(in oklab, color-mix(in oklab, oklch(0.87 0.002 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
+  --color-gray-400: color-mix(in oklab, color-mix(in oklab, oklch(0.71 0.004 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
+  --color-gray-500: color-mix(in oklab, color-mix(in oklab, oklch(0.555 0.005 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
+  --color-gray-600: color-mix(in oklab, color-mix(in oklab, oklch(0.45 0.005 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
+  --color-gray-700: color-mix(in oklab, color-mix(in oklab, oklch(0.37 0.004 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
+  --color-gray-800: color-mix(in oklab, color-mix(in oklab, oklch(0.29 0.003 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
+  --color-gray-900: color-mix(in oklab, color-mix(in oklab, oklch(0.215 0.002 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
+  --color-gray-950: color-mix(in oklab, color-mix(in oklab, oklch(0.15 0.002 286) var(--cc-contrast-base), var(--cc-contrast-bg)) 100%, var(--cc-contrast-target) var(--cc-contrast-boost));
 
   --color-accent-50: oklch(0.97 0.016 255);
   --color-accent-100: oklch(0.94 0.035 255);
@@ -127,20 +127,22 @@
      Cada `--text-chat-*` gera a classe `text-chat-*` com tamanho e altura de linha. */
   --font-chat: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
   --font-chat-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  --text-chat-prose: 15px;          /* a resposta do agente e as mensagens da pessoa (medido no Claude Code, ver `chatLook.ts`) */
-  --text-chat-prose--line-height: 21.5px;
-  --text-chat-ui: 14px;             /* o corpo da interface */
-  --text-chat-ui--line-height: 20px;
-  --text-chat-heading: 15px;        /* título de bloco */
-  --text-chat-heading--line-height: 20px;
-  --text-chat-title: 22px;
-  --text-chat-title--line-height: 28px;
-  --text-chat-code: 13px;
-  --text-chat-code--line-height: 19px;
-  --text-chat-note: 13px;
-  --text-chat-note--line-height: 17px;
-  --text-chat-caption: 12px;
-  --text-chat-caption--line-height: 16px;
+  /* Os tamanhos são o padrão multiplicado pela escala: Aparência → Tipografia grava `--cc-font-scale-ui`
+     (interface) e `--cc-font-scale-code` (código) na janela; sem elas, a escala é 1 e nada muda. */
+  --text-chat-prose: calc(15px * var(--cc-font-scale-ui, 1));          /* a resposta do agente e as mensagens da pessoa (medido no Claude Code, ver `chatLook.ts`) */
+  --text-chat-prose--line-height: calc(21.5px * var(--cc-font-scale-ui, 1));
+  --text-chat-ui: calc(14px * var(--cc-font-scale-ui, 1));             /* o corpo da interface */
+  --text-chat-ui--line-height: calc(20px * var(--cc-font-scale-ui, 1));
+  --text-chat-heading: calc(15px * var(--cc-font-scale-ui, 1));        /* título de bloco */
+  --text-chat-heading--line-height: calc(20px * var(--cc-font-scale-ui, 1));
+  --text-chat-title: calc(22px * var(--cc-font-scale-ui, 1));
+  --text-chat-title--line-height: calc(28px * var(--cc-font-scale-ui, 1));
+  --text-chat-code: calc(13px * var(--cc-font-scale-code, 1));
+  --text-chat-code--line-height: calc(19px * var(--cc-font-scale-code, 1));
+  --text-chat-note: calc(13px * var(--cc-font-scale-ui, 1));
+  --text-chat-note--line-height: calc(17px * var(--cc-font-scale-ui, 1));
+  --text-chat-caption: calc(12px * var(--cc-font-scale-ui, 1));
+  --text-chat-caption--line-height: calc(16px * var(--cc-font-scale-ui, 1));
 
   /* O brilho do mascote e do status "rodando": a única cor quente da marca. */
   --color-glow: oklch(0.82 0.12 75);
@@ -267,6 +269,84 @@ html.dark #root {
   scrollbar-gutter: stable;
   /* La rueda no se propaga al contenedor de atrás al llegar al final del scroll. */
   overscroll-behavior: contain;
+}
+
+/* ── Aparência fina (Configurações → Aparência e Diffs) ─────────────────────
+   Tudo abaixo tem o valor do padrão; o JS só troca as variáveis quando a pessoa mexe. */
+
+/* Contraste: o tom de base e o reforço que os degraus de cinza misturam (ver `@theme`). 100% é o
+   padrão e não muda nada. Os fundos vêm da casca; o alvo do reforço é o oposto do fundo. */
+:root {
+  --cc-contrast-base: 100%;
+  --cc-contrast-boost: 0%;
+  --cc-contrast-bg: #ffffff;
+  --cc-contrast-target: #000000;
+}
+html.dark {
+  --cc-contrast-bg: var(--color-surface);
+  --cc-contrast-target: #ffffff;
+}
+
+/* Vidro: o fundo dos menus e diálogos de vidro. A opacidade (`--cc-glass-alpha`) vem da preferência;
+   a 100% o vidro é sólido e o desfoque sai (`data-glass-solid`). */
+:root {
+  --cc-glass-alpha: 80%;
+  --cc-glass-surface: #ffffff;
+}
+html.dark {
+  --cc-glass-surface: var(--color-surface-raised);
+}
+.cc-glass {
+  background-color: color-mix(in srgb, var(--cc-glass-surface) var(--cc-glass-alpha), transparent);
+}
+html[data-glass-solid="on"] .cc-glass {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Suavização da fonte: ligada é o padrão (antialiasing do macOS, texto fino e cinza); desligada,
+   volta ao padrão do sistema. Só afeta o macOS: nos outros motores estas propriedades não existem. */
+html[data-font-smoothing="off"] {
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* Quebra de linha: blocos de código e `<pre>` dos diffs e das prévias quebram em vez de rolar. */
+html[data-code-wrap="on"] pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Matemática (KaTeX): uma fórmula larga rola na própria linha; o texto ao redor continua quebrando. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* Cores das adições e remoções: o esquema vermelho e verde (padrão) ou azul e laranja. */
+:root {
+  --cc-diff-add-fg: #15803d;
+  --cc-diff-add-bg: rgb(155 185 85 / 0.16);
+  --cc-diff-add-strong: rgb(156 204 44 / 0.25);
+  --cc-diff-del-fg: #b91c1c;
+  --cc-diff-del-bg: rgb(255 0 0 / 0.12);
+  --cc-diff-del-strong: rgb(255 0 0 / 0.22);
+}
+html.dark {
+  --cc-diff-add-fg: #86efac;
+  --cc-diff-del-fg: #fca5a5;
+}
+html[data-diff-colors="blue-orange"] {
+  --cc-diff-add-fg: #1d4ed8;
+  --cc-diff-add-bg: rgb(59 130 246 / 0.14);
+  --cc-diff-add-strong: rgb(59 130 246 / 0.26);
+  --cc-diff-del-fg: #c2410c;
+  --cc-diff-del-bg: rgb(249 115 22 / 0.14);
+  --cc-diff-del-strong: rgb(249 115 22 / 0.26);
+}
+html.dark[data-diff-colors="blue-orange"] {
+  --cc-diff-add-fg: #93c5fd;
+  --cc-diff-del-fg: #fdba74;
 }
 
 /* Color de las barras: el acento del tema, translúcido. Un solo lugar para todo el app
