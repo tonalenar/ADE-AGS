@@ -1,3 +1,5 @@
+import { applyToolCallVisibility } from "./toolCallVisibility";
+import { useChatPrefs } from "../chatPrefs";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -110,7 +112,9 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   onSearchTargetApplied?: (token: number) => void;
 }) {
   const { t } = useTranslation();
-  const turns = useMemo(() => timelineTurns(items), [items]);
+  // "Chamadas de ferramenta no chat" (Configurações → Chat): o fold mostra só o que o modo deixa.
+  const toolVisibility = useChatPrefs().toolCallVisibility;
+  const turns = useMemo(() => applyToolCallVisibility(timelineTurns(items), toolVisibility), [items, toolVisibility]);
   const width = useChatWidthClass();
   const startedAt = useMemo(() => openTurnStart(items), [items]);
 
@@ -312,7 +316,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         )}
         {turns.map((turn, i) => turn.notice
           ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
-          : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} />)}
+          : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />)}
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} composerTarget={quoteKey} /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
@@ -337,19 +341,21 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   );
 }
 
-function TurnView({ turn, latest, onOpenTerminal, searchTargetId, composerTarget }: { turn: Turn; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string }) {
+function TurnView({ turn, latest, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
   const { t } = useTranslation();
   // Os turnos antigos começam recolhidos; o último (ou o em aberto), aberto.
   const containsSearchTarget = !!searchTargetId && (turn.user?.id === searchTargetId || turn.final?.id === searchTargetId || turn.planItemId === searchTargetId || turn.body.some((row) => row.type === "assistant" && row.item.id === searchTargetId));
   const [open, setOpen] = useState(latest || turn.end === null || containsSearchTarget);
   useEffect(() => { if (containsSearchTarget) setOpen(true); }, [containsSearchTarget]);
   const foldable = turn.end !== null && turn.body.length > 0;
+  // No zen, um turno cujas ferramentas foram todas ocultas e que acabou bem não mostra o cabeçalho "Trabalhou por …".
+  const quiet = quietWhenEmpty && turn.body.length === 0 && turn.end !== null && !turn.end.superseded && endOutcome(turn.end) === "done";
   return (
     <>
       {turn.user && <UserMessage item={turn.user} searchHit={turn.user.id === searchTargetId} composerTarget={composerTarget} />}
       {turn.plan && (turn.end === null || turn.planItemId === searchTargetId) &&
         <PlanCard plan={turn.plan} itemId={turn.planItemId ?? undefined} searchHit={turn.planItemId === searchTargetId} />}
-      {turn.end && (
+      {turn.end && !quiet && (
         <button type="button" onClick={() => foldable && setOpen(!open)} aria-expanded={foldable ? open : undefined}
           className={`flex items-center gap-1.5 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
             ${foldable ? "hover:text-gray-800 dark:hover:text-white/75" : "cursor-default"}`}>

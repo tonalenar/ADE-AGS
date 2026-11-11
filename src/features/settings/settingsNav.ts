@@ -20,7 +20,7 @@ export interface SettingsNavGroup {
 export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
   { heading: null, pages: ["general", "appearance", "chat", "shortcuts"] },
   { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices", "scheduled"] },
-  { heading: "settings.nav.code", pages: ["worktrees"] },
+  { heading: "settings.nav.code", pages: ["diffs", "worktrees"] },
   { heading: "settings.nav.connections", pages: ["environments", "access"] },
   { heading: null, pages: ["maintenance", "labs"] },
   { heading: "settings.nav.ade", pages: ["memory", "decisions", "permissions", "terminal", "orchestrator", "skills", "cli"] },
@@ -36,6 +36,7 @@ export const SETTINGS_PAGE_LABEL_KEYS: Record<SettingsPageId, string> = {
   browser: "settings.browser",
   devices: "settings.devices",
   scheduled: "settings.scheduled",
+  diffs: "settings.diffs",
   worktrees: "settings.worktrees",
   environments: "settings.environments",
   access: "settings.access",
@@ -83,6 +84,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "general.confirm.unpin", page: "general", anchor: "general-confirmations", titleKey: "settings.confirm.unpin.label" },
   { id: "general.confirm.archive", page: "general", anchor: "general-confirmations", titleKey: "settings.confirm.archive.label" },
   { id: "general.confirm.delete", page: "general", anchor: "general-confirmations", titleKey: "settings.confirm.delete.label" },
+  { id: "general.timeFormat", page: "general", anchor: "general-display", titleKey: "settings.timeFormat.label", keywordKeys: ["settings.timeFormat.hint"] },
 
   { id: "appearance.mode", page: "appearance", anchor: "appearance-mode", titleKey: "settings.item.theme" },
   // A composição de GPU não tem bloco próprio (só existe em Linux e some em outros sistemas): a busca rola até o grupo.
@@ -90,6 +92,13 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "appearance.motion", page: "appearance", anchor: "appearance-motion", titleKey: "settings.motion.duration" },
   { id: "appearance.themes", page: "appearance", anchor: "appearance-themes", titleKey: "settings.themeCustom.title" },
   { id: "appearance.fonts", page: "appearance", anchor: "appearance-fonts", titleKey: "settings.typography" },
+  { id: "appearance.contrast", page: "appearance", anchor: "appearance-interface", titleKey: "settings.contrast.label", keywordKeys: ["settings.contrast.hint"] },
+  { id: "appearance.glass", page: "appearance", anchor: "appearance-interface", titleKey: "settings.glass.label", keywordKeys: ["settings.glass.hint"] },
+  { id: "appearance.effort", page: "appearance", anchor: "appearance-interface", titleKey: "settings.effort.label", keywordKeys: ["settings.effort.hint"] },
+  { id: "appearance.environment", page: "appearance", anchor: "appearance-interface", titleKey: "settings.envId.label", keywordKeys: ["settings.envId.hint"] },
+  { id: "appearance.composerContext", page: "appearance", anchor: "appearance-interface", titleKey: "settings.composerContext.label", keywordKeys: ["settings.composerContext.hint"] },
+  { id: "appearance.smoothing", page: "appearance", anchor: "appearance-text", titleKey: "settings.fontSmoothing.label", keywordKeys: ["settings.fontSmoothing.hint"] },
+  { id: "appearance.codeWrap", page: "appearance", anchor: "appearance-text", titleKey: "settings.codeWrap.label", keywordKeys: ["settings.codeWrap.hint"] },
 
   { id: "chat.open", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.onOpen" },
   { id: "chat.startMode", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.startMode" },
@@ -97,6 +106,8 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "chat.followUp", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.followUpBehavior" },
   { id: "chat.width", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.width" },
   { id: "chat.skills", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.showSkillsInSlashMenu" },
+  { id: "chat.sendShortcut", page: "chat", anchor: "chat-composer", titleKey: "chat.settings.sendShortcut", keywordKeys: ["chat.settings.sendShortcut.hint"] },
+  { id: "chat.toolCalls", page: "chat", anchor: "chat-activity", titleKey: "chat.settings.toolCalls.label", keywordKeys: ["chat.settings.toolCalls.hint"] },
   { id: "chat.compact", page: "chat", anchor: "chat-compact", titleKey: "chat.settings.claudeCompact.title" },
   { id: "chat.snooze", page: "chat", anchor: "chat-snooze", titleKey: "chat.settings.snooze.title" },
 
@@ -115,6 +126,10 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { id: "scheduled", page: "scheduled", anchor: "scheduled-main", titleKey: "settings.scheduled" },
   { id: "scheduled.tasks", page: "scheduled", anchor: "scheduled-main", titleKey: "settings.scheduled.title", keywordKeys: ["settings.scheduled.desc"] },
+
+  { id: "diffs.layout", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.layout.label", keywordKeys: ["settings.diffs.layout.hint"] },
+  { id: "diffs.colors", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.colors.label", keywordKeys: ["settings.diffs.colors.hint"] },
+  { id: "diffs.state", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.state.label", keywordKeys: ["settings.diffs.state.hint"] },
 
   { id: "worktrees", page: "worktrees", anchor: "worktrees-main", titleKey: "settings.worktrees.where" },
 

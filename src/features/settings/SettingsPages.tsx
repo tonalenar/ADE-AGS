@@ -21,6 +21,8 @@ import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
 import { TerminalSection } from "@/features/terminal/TerminalSection";
 import { PermissionsSection } from "@/features/chat/permissions/PermissionsSection";
 import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
+import { SendShortcutSetting } from "@/features/chat/SendShortcutSetting";
+import { ToolCallsSetting } from "@/features/chat/ToolCallsSetting";
 import { ClaudeAutoCompactSetting } from "@/features/chat/ClaudeAutoCompactSetting";
 import { SnoozeOptionsSetting } from "@/features/chat/SnoozeOptionsSetting";
 import { BrowserSearchSetting } from "@/features/browser/BrowserSearchSetting";
@@ -45,6 +47,10 @@ import { FontPreferencesSetting } from "@/features/settings/FontPreferencesSetti
 import { AppearanceModeSetting } from "@/features/settings/AppearanceModeSetting";
 import { ThemePreferencesSetting } from "@/features/settings/ThemePreferencesSetting";
 import { MotionPreferencesSetting } from "@/features/settings/MotionPreferencesSetting";
+import { AppearanceInterfaceSetting } from "@/features/settings/AppearanceInterfaceSetting";
+import { TextRenderingSetting } from "@/features/settings/TextRenderingSetting";
+import { TimeFormatSetting } from "@/features/settings/TimeFormatSetting";
+import { DiffsSetting } from "@/features/settings/DiffsSetting";
 import { SettingsAnchor, SettingsGroup, SettingsRow, SettingsSection, SettingsSubTabs } from "@/features/settings/SettingsSection";
 import { CustomAgentsSection } from "@/features/settings/CustomAgentsSection";
 import type { SettingsPageId } from "@/features/settings/settingsNav";
@@ -89,6 +95,7 @@ function GeneralPage() {
     </SettingsSection>
     <SettingsAnchor id="general-sidebar"><SidebarSettings /></SettingsAnchor>
     <SettingsAnchor id="general-confirmations"><ConfirmationsSetting /></SettingsAnchor>
+    <SettingsAnchor id="general-display"><TimeFormatSetting /></SettingsAnchor>
     </>
   );
 }
@@ -110,8 +117,10 @@ function AppearancePage() {
           <SettingsAnchor id="appearance-motion"><MotionPreferencesSetting /></SettingsAnchor>
         </SettingsGroup>
       </SettingsSection>
+      <SettingsAnchor id="appearance-interface"><AppearanceInterfaceSetting /></SettingsAnchor>
       <SettingsAnchor id="appearance-themes"><ThemePreferencesSetting /></SettingsAnchor>
       <SettingsAnchor id="appearance-fonts"><FontPreferencesSetting /></SettingsAnchor>
+      <SettingsAnchor id="appearance-text"><TextRenderingSetting /></SettingsAnchor>
     </>
   );
 }
@@ -120,6 +129,8 @@ function ChatSettingsPage() {
   return (
     <>
       <SettingsAnchor id="chat-mode"><ChatModeSetting /></SettingsAnchor>
+      <SettingsAnchor id="chat-composer"><SendShortcutSetting /></SettingsAnchor>
+      <SettingsAnchor id="chat-activity"><ToolCallsSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-compact"><ClaudeAutoCompactSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-snooze"><SnoozeOptionsSetting /></SettingsAnchor>
     </>
@@ -191,6 +202,11 @@ function DevicesPage() {
 /** Rotinas e tarefas agendadas: os painéis do canvas, embutidos (ver `ScheduledTasksSection`). */
 function ScheduledPage() {
   return <SettingsAnchor id="scheduled-main"><ScheduledTasksSection /></SettingsAnchor>;
+}
+
+/** Diffs (layout, cores e estado inicial dos trechos): o mesmo layout que o botão da barra do diff muda. */
+function DiffsPage() {
+  return <SettingsAnchor id="diffs-main"><DiffsSetting /></SettingsAnchor>;
 }
 
 function WorktreesPage() {
@@ -340,6 +356,7 @@ const PAGE_BODIES: Record<SettingsPageId, () => React.ReactElement> = {
   browser: BrowserPage,
   devices: DevicesPage,
   scheduled: ScheduledPage,
+  diffs: DiffsPage,
   worktrees: WorktreesPage,
   environments: EnvironmentsPage,
   access: AccessPage,

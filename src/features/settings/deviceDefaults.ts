@@ -3,6 +3,8 @@ import { TERMINAL_ZOOM } from "@/features/terminal/theme";
 import { DEFAULT_CHAT_PREFS, loadChatPrefs, saveChatPrefs, type ChatPrefs } from "@/features/chat/chatPrefs";
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { readAppearanceMode, setAppearanceMode } from "@/features/settings/appearanceMode";
+import { DEFAULT_DISPLAY_PREFS, readDisplayPrefs, saveDisplayPrefs } from "@/features/settings/displayPreferences";
+import { DEFAULT_DIFF_PREFS, readDiffPrefs, saveDiffPrefs } from "@/features/settings/diffPreferences";
 import { DEFAULT_FONT_PREFERENCES, readFontPreferences, saveFontPreferences } from "@/features/settings/fontPreferences";
 import { MOTION_DURATION, readMotionDuration, saveMotionDuration } from "@/features/settings/motionPreferences";
 import { NOTIFICATIONS_KEY } from "@/features/settings/notificationsPreference";
@@ -32,6 +34,8 @@ import { sameSettingValue, type DeviceDefault } from "@/features/settings/device
 function chatBehaviorOf(prefs: ChatPrefs) {
   return {
     followUpBehavior: prefs.followUpBehavior,
+    sendShortcut: prefs.sendShortcut,
+    toolCallVisibility: prefs.toolCallVisibility,
     width: prefs.width,
     showSkillsInSlashMenu: prefs.showSkillsInSlashMenu,
     worktree: prefs.worktree,
@@ -60,6 +64,15 @@ export const DEVICE_DEFAULTS: readonly DeviceDefault[] = [
     changed: () => !sameSettingValue(readFontPreferences(), DEFAULT_FONT_PREFERENCES),
     // `saveFontPreferences` também aplica o valor na janela.
     restore: () => saveFontPreferences(DEFAULT_FONT_PREFERENCES),
+  },
+  {
+    id: "display",
+    labelKey: "settings.restoreDefaults.item.display",
+    // Contraste, vidro, suavização, quebra de linha, esforço, selo do ambiente, contexto e formato de hora.
+    changed: () => !sameSettingValue(readDisplayPrefs(), DEFAULT_DISPLAY_PREFS),
+    restore: () => {
+      saveDisplayPrefs(DEFAULT_DISPLAY_PREFS);
+    },
   },
   {
     id: "customTheme",
@@ -105,6 +118,14 @@ export const DEVICE_DEFAULTS: readonly DeviceDefault[] = [
     changed: () => !sameSettingValue(chatBehaviorOf(loadChatPrefs()), chatBehaviorOf(DEFAULT_CHAT_PREFS)),
     restore: () => {
       saveChatPrefs({ ...loadChatPrefs(), ...chatBehaviorOf(DEFAULT_CHAT_PREFS) });
+    },
+  },
+  {
+    id: "diffs",
+    labelKey: "settings.restoreDefaults.item.diffs",
+    changed: () => !sameSettingValue(readDiffPrefs(), DEFAULT_DIFF_PREFS),
+    restore: () => {
+      saveDiffPrefs(DEFAULT_DIFF_PREFS);
     },
   },
   {
