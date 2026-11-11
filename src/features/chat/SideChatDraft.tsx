@@ -6,13 +6,13 @@ import { AgentModelPicker } from "./AgentModelPicker";
 import { ChatFrame } from "./ChatFrame";
 import { ChatComposer } from "./ChatComposer";
 import { ComposerColumn } from "./ComposerColumn";
-import { accessModesFor, type ConversationCard } from "./chatModel";
+import type { ChatAccess, ConversationCard } from "./chatModel";
 import { ActivityLine } from "./LiveActivity";
 import type { Attachment } from "./attachments/attachModel";
 import type { AgentInfo } from "@/features/tabs/types";
 import { TimelineView } from "./timeline/ConversationTimeline";
 import type { TimelineItem } from "./timeline/types";
-import type { SideChatDraft as Draft } from "./sideChatModel";
+import { sideChatAccessModes, sideChatInheritedAccess, type SideChatDraft as Draft } from "./sideChatModel";
 
 const NO_STREAMING: ReadonlySet<string> = new Set();
 
@@ -21,7 +21,7 @@ const NO_STREAMING: ReadonlySet<string> = new Set();
  * (só leitura), o estado de trabalho dela e o composer compacto com o modelo, o esforço e a permissão da pergunta.
  * A origem segue trabalhando: esta tela não a interrompe, e a pergunta só vira conversa quando é enviada.
  */
-export function SideChatDraftView({ conversation, history, truncated, parentBusy, agents, draft, busy, onDraftChange, onSubmit }: {
+export function SideChatDraftView({ conversation, history, truncated, parentBusy, agents, draft, originAccess, busy, onDraftChange, onSubmit }: {
   conversation: ConversationCard;
   /** O histórico da conversa de origem, já limitado. */
   history: TimelineItem[];
@@ -31,6 +31,8 @@ export function SideChatDraftView({ conversation, history, truncated, parentBusy
   /** Os agentes que a pergunta pode usar (o da origem primeiro). */
   agents: AgentInfo[];
   draft: Draft;
+  /** O modo de permissão da origem: o teto do seletor da pergunta (nunca oferece um modo acima dele). */
+  originAccess: ChatAccess | "plan" | null;
   busy: boolean;
   onDraftChange: (next: Draft) => void;
   /** `false` = não foi enviada: o texto e os anexos continuam no composer. */
@@ -38,7 +40,7 @@ export function SideChatDraftView({ conversation, history, truncated, parentBusy
 }) {
   const { t } = useTranslation();
   const turn = useMemo(() => turnLive(history, false), [history]);
-  const modes = accessModesFor(draft.agentId, true);
+  const modes = sideChatAccessModes(draft.agentId, originAccess);
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <ChatFrame
@@ -62,8 +64,9 @@ export function SideChatDraftView({ conversation, history, truncated, parentBusy
                   permission={{ value: draft.access, modes, onChange: (access) => onDraftChange({ ...draft, access }) }}
                   onChange={(next) => {
                     const agentId = next.agentId ?? draft.agentId;
-                    // A permissão da pergunta fica se o agente novo a oferece; senão volta a supervisionado.
-                    const access = accessModesFor(agentId, true).includes(draft.access) ? draft.access : "ask";
+                    // A permissão da pergunta fica se o agente novo a oferece dentro do teto da origem; senão volta ao
+                    // modo herdado dela para aquele agente.
+                    const access = sideChatAccessModes(agentId, originAccess).includes(draft.access) ? draft.access : sideChatInheritedAccess(agentId, originAccess);
                     onDraftChange({ agentId, model: next.model, effort: next.effort, access });
                   }} />
               } />

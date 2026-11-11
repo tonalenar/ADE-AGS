@@ -6,9 +6,9 @@ import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import { readTuning } from "@/features/canvas/tabTuning";
 import { useTabsStore } from "@/features/tabs/store";
 
-import { type ConversationCard } from "./chatModel";
+import { readAccess, type ConversationCard } from "./chatModel";
 import { chatSideChatDelete, chatThreadItems, type ThreadRow } from "./structured/ipc";
-import { createThread, settleThread, sendToThread, useStructured } from "./structured/store";
+import { createThread, forkSideChat, settleThread, sendToThread, useStructured } from "./structured/store";
 import { threadIdOf, threadKey } from "./structured/model";
 import { StructuredConversationView } from "./structured/StructuredConversationView";
 import { switchableAgents } from "./structured/switchModel";
@@ -19,7 +19,7 @@ import { useChatLive } from "./liveStore";
 import { insertIntoComposer } from "./store";
 import { conversationTimeline } from "./ipc";
 import type { TimelineItem } from "./timeline/types";
-import { canOpenSideChat, sideChatAccountFor, sideChatContext, sideChatDraftDefaults, sideChatHistory, sideChatParentReference, type SideChatDraft } from "./sideChatModel";
+import { canOpenSideChat, clampSideChatAccess, sideChatAccountFor, sideChatDraftDefaults, sideChatFirstMessage, sideChatForkReasonKey, sideChatHistory, sideChatParentReference, sideChatShowsExcerptNote, type SideChatDraft } from "./sideChatModel";
 import { NewChatIcon, SideChatIcon, XIcon } from "./chatIcons";
 
 function cardForThread(thread: ThreadRow, parent: ConversationCard, label: string): ConversationCard {
@@ -130,8 +130,9 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
     </div>;
   }
 
-  // O padrão de uma pergunta nova vem da origem: o agente, o modelo e o esforço (a permissão começa supervisionada).
-  const draftValue = draft ?? sideChatDraftDefaults(conversation.agentId, parentThread?.model ?? tuning?.model ?? null, parentThread?.effort ?? tuning?.effort ?? null);
+  // O padrão de uma pergunta nova vem da origem: o agente, o modelo, o esforço e a permissão (nunca acima da dela).
+  const originAccess = parentThread?.access ?? (tab ? readAccess(conversation.agentId, command).access : null);
+  const draftValue = draft ?? sideChatDraftDefaults(conversation.agentId, parentThread?.model ?? tuning?.model ?? null, parentThread?.effort ?? tuning?.effort ?? null, originAccess);
   const agents = switchableAgents(availableAgents, conversation.agentId, conversation.agentLabel);
 
   const create = async (question: string, attachments: Attachment[]) => {
@@ -145,13 +146,17 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
         title: question.trim().replace(/\s+/g, " ").slice(0, 72) || t("chat.sideChat.title"),
         model: draftValue.model,
         effort: draftValue.effort,
-        access: draftValue.access,
+        // A origem pode ter ficado mais cautelosa depois da escolha: a pergunta nunca passa do modo dela.
+        access: clampSideChatAccess(draftValue.agentId, originAccess, draftValue.access),
         accountId: sideChatAccountFor(draftValue.agentId, conversation.agentId, parentThread?.accountId ?? tab?.accountId ?? null),
         parentRef: ref,
       });
+      // A pergunta nasce como cópia da conversa de origem (fork nativo). Sem fork, a primeira mensagem leva o recorte
+      // do histórico e a tela avisa o motivo. A origem não é tocada em nenhum dos dois caminhos.
+      const fork = await forkSideChat(id);
       setSelectedId(id);
       setDraft(null);
-      const sent = messageFor(threadKey(id), sideChatContext(items, question), attachments);
+      const sent = messageFor(threadKey(id), sideChatFirstMessage(fork.mode, items, question), attachments);
       sendToThread(id, sent.text, (message) => setError(message), undefined, sent.images);
       return true;
     } catch (cause) {
@@ -233,12 +238,17 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
           ))}
         </nav>
       )}
+      {sideChatShowsExcerptNote(selected) && (
+        <p className="shrink-0 px-3 py-1.5 border-b border-gray-200 dark:border-white/[0.08] text-chat-caption text-gray-500 dark:text-white/45 break-words">
+          {t("chat.sideChat.forkNote", { reason: t(sideChatForkReasonKey(selected?.forkReason)) })}
+        </p>
+      )}
       {error && <p role="alert" className="shrink-0 px-3 py-2 text-chat-caption text-red-600 dark:text-red-400 break-words">{error}</p>}
       {selected && activeCard ? (
         <StructuredConversationView key={selected.id} card={activeCard} thread={selected} cards={cards} side={sideView} />
       ) : (
         <SideChatDraftView conversation={conversation} history={history.items} truncated={history.truncated} parentBusy={parentBusy}
-          agents={agents} draft={draftValue} busy={loading} onDraftChange={setDraft} onSubmit={create} />
+          agents={agents} draft={draftValue} originAccess={originAccess} busy={loading} onDraftChange={setDraft} onSubmit={create} />
       )}
     </div>
   );

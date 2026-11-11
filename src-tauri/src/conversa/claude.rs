@@ -290,6 +290,34 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     Ok(session)
 }
 
+/// Abre a sessão da conversa `thread_id` como **fork** da sessão `from` (a da conversa de origem): a pergunta lateral
+/// nasce como cópia dela. A origem não é tocada (outro processo, outra sessão), e o id novo é escolhido aqui. Falhou:
+/// nada muda na conversa (quem chama cai no recorte do histórico).
+pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, from: &str) -> Result<(), String> {
+    let gate = resume::start_gate("claude", thread_id);
+    let _guard = gate.lock().await;
+    if get(thread_id).is_some() {
+        return Err("A conversa já tem sessão".into());
+    }
+    let row = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
+    };
+    let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
+    let id = uuid::Uuid::new_v4().to_string();
+    let session = open(app, db, &row, env, Start::Fork { from, id: &id }).await?;
+    if let Ok(conn) = db.lock() {
+        let _ = store::set_remote_id(&conn, thread_id, &id);
+    }
+    if let Ok(mut r) = session.remote.lock() {
+        *r = Some(id);
+    }
+    if let Ok(mut map) = sessions().lock() {
+        map.insert(thread_id.to_string(), session);
+    }
+    Ok(())
+}
+
 async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>) -> Result<Arc<Session>, String> {
     let session = spawn(app, db, row, env, start)?;
     // O `--resume` de uma sessão que não existe fecha o processo antes de responder.

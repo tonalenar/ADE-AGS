@@ -174,6 +174,15 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_parent_turn_id {
         conn.execute_batch("ALTER TABLE chat_thread ADD COLUMN parent_turn_id TEXT;")?;
     }
+    // Como a pergunta lateral nasceu (fork nativo ou recorte) e por que caiu no recorte: aditivas, nulas nas antigas.
+    for column in ["fork_mode", "fork_reason"] {
+        let has = conn
+            .prepare("SELECT 1 FROM pragma_table_info('chat_thread') WHERE name = ?1")?
+            .exists([column])?;
+        if !has {
+            conn.execute_batch(&format!("ALTER TABLE chat_thread ADD COLUMN {column} TEXT;"))?;
+        }
+    }
     // Recibos de `chat_new`: uma repetição do harness recupera a mesma conversa e não reenvia
     // silenciosamente o primeiro prompt quando o resultado do envio ficou incerto.
     conn.execute_batch(
@@ -217,6 +226,11 @@ pub struct ThreadRow {
     pub parent_turn_id: Option<String>,
     /// Conversa lateral: fica fora da lista principal, acessível pelo painel da conversa de origem.
     pub is_side_chat: bool,
+    /// Como a pergunta lateral nasceu: `native` (cópia da sessão da origem, `conversa::fork`) ou `excerpt` (recorte do
+    /// histórico no primeiro envio). `None` = ainda não decidido, ou não é pergunta lateral.
+    pub fork_mode: Option<String>,
+    /// Só em `excerpt`: o código do motivo (`conversa::fork::Reason`), que a tela traduz.
+    pub fork_reason: Option<String>,
     pub state: String,
     pub created_at: i64,
     pub updated_at: i64,
@@ -261,7 +275,7 @@ pub struct Tuning {
     pub access: String,
 }
 
-const THREAD_COLS: &str = "id, agent_id, remote_id, cwd, title, model, effort, access, account_id, state, created_at, updated_at, memory, parent_ref, is_side_chat, parent_turn_id";
+const THREAD_COLS: &str = "id, agent_id, remote_id, cwd, title, model, effort, access, account_id, state, created_at, updated_at, memory, parent_ref, is_side_chat, parent_turn_id, fork_mode, fork_reason";
 
 fn thread_of(r: &rusqlite::Row) -> rusqlite::Result<ThreadRow> {
     Ok(ThreadRow {
@@ -281,6 +295,8 @@ fn thread_of(r: &rusqlite::Row) -> rusqlite::Result<ThreadRow> {
         parent_ref: r.get(13)?,
         is_side_chat: r.get::<_, i64>(14)? != 0,
         parent_turn_id: r.get(15)?,
+        fork_mode: r.get(16)?,
+        fork_reason: r.get(17)?,
     })
 }
 
@@ -568,6 +584,15 @@ pub fn delete_side_chat(conn: &Connection, id: &str) -> rusqlite::Result<bool> {
     .map(|n| n > 0)
 }
 
+/// Grava como a pergunta lateral nasceu (`native` ou `excerpt`) e, no recorte, o código do motivo.
+pub fn set_fork(conn: &Connection, id: &str, mode: &str, reason: Option<&str>) -> rusqlite::Result<()> {
+    conn.execute(
+        "UPDATE chat_thread SET fork_mode = ?2, fork_reason = ?3 WHERE id = ?1",
+        params![id, mode, reason],
+    )
+    .map(|_| ())
+}
+
 pub fn set_remote_id(conn: &Connection, id: &str, remote: &str) -> rusqlite::Result<()> {
     conn.execute(
         "UPDATE chat_thread SET remote_id = ?2 WHERE id = ?1",
@@ -761,6 +786,18 @@ pub fn upsert_run(
         params![run_id, thread_id, status, started_at, completed_at, duration_ms, owner],
     )
     .map(|_| ())
+}
+
+/// O último turno **terminado** da conversa (concluído, interrompido ou com erro): o ponto estável que o fork da
+/// pergunta lateral usa. Um turno em andamento nunca é o ponto.
+pub fn last_stable_turn(conn: &Connection, thread_id: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT id FROM chat_run WHERE thread_id = ?1 AND status != 'inProgress'
+         ORDER BY COALESCE(started_at, 0) DESC, rowid DESC LIMIT 1",
+        [thread_id],
+        |row| row.get(0),
+    )
+    .optional()
 }
 
 /// O status gravado de um turno (`inProgress`, `completed`, `interrupted`, `failed`), se houver.

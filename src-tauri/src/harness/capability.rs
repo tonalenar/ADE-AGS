@@ -222,6 +222,9 @@ pub struct ProviderMatrix {
     /// Fora das 19: o agente consegue chamar as ferramentas `ags` (MCP do ADE) e, assim, criar filhos que o
     /// ADE controla (chat filho, tarefa da Frota)? Decide a delegação, não o filho nativo.
     pub ags_mcp: Claim,
+    /// Fora das 19: a conversa nasce como cópia da sessão nativa de outra num ponto estável (fork nativo do
+    /// provider)? Hoje só a pergunta lateral usa (`conversa::fork`). `Unsupported` = cai no recorte do histórico.
+    pub fork: Claim,
 }
 
 /// Contagem por estado, para o doc e para os testes.

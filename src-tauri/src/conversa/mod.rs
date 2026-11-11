@@ -13,6 +13,7 @@
 //! - `turn`: abrir e fechar o turno no banco, comum aos motores mais novos;
 //! - `attach`: os anexos das mensagens (conferir caminhos, miniaturas e imagens em linha do Claude);
 //! - `handoff` e `troca`: trocar de agente na mesma conversa (resumo determinístico e a troca em si);
+//! - `fork`: a pergunta lateral nascendo como cópia (fork nativo) da conversa de origem, ou o recorte como alternativa;
 //! - `api`: o núcleo (criar, mandar, parar, responder, trocar), usado pela tela, pela CLI e pelo MCP;
 //! - `commands`: os comandos Tauri;
 //! - `worktree`: o worktree de uma conversa nova.
@@ -29,6 +30,7 @@ pub mod codex_map;
 pub mod codex_parar;
 pub mod envio;
 pub mod events;
+pub mod fork;
 pub mod handoff;
 pub mod memoria;
 pub mod commands;
@@ -50,6 +52,8 @@ pub mod worktree;
 mod attach_test;
 #[cfg(test)]
 mod bancada;
+#[cfg(test)]
+mod fork_test;
 #[cfg(test)]
 mod handoff_test;
 #[cfg(test)]

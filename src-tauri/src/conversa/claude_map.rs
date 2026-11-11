@@ -62,11 +62,15 @@ pub fn access_of_mode(mode: &str) -> Option<&'static str> {
     }
 }
 
-/// Como o processo abre a sessão do Claude: uma nova com o id escolhido pelo app, ou a retomada.
+/// Como o processo abre a sessão do Claude: uma nova com o id escolhido pelo app, a retomada, ou o fork de outra
+/// sessão (a pergunta lateral nasce como cópia da conversa de origem, ver `fork`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Start<'a> {
     New(&'a str),
     Resume(&'a str),
+    /// `--resume <from> --fork-session --session-id <id>`: o Claude copia a transcrição de `from` para a sessão nova
+    /// `id` (escolhida pelo app) e a origem não é tocada. `--session-id` com `--resume` só vale junto de `--fork-session`.
+    Fork { from: &'a str, id: &'a str },
 }
 
 /// Os argumentos do `claude` de uma conversa. Pura.
@@ -97,6 +101,7 @@ pub fn launch_args_with_auto_compact(
     match start {
         Start::New(id) => args.extend(["--session-id".into(), id.into()]),
         Start::Resume(id) => args.extend(["--resume".into(), id.into()]),
+        Start::Fork { from, id } => args.extend(["--resume".into(), from.into(), "--fork-session".into(), "--session-id".into(), id.into()]),
     }
     if let Some(model) = row.model.as_deref().filter(|m| !m.is_empty()) {
         args.extend(["--model".into(), model.into()]);

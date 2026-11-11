@@ -365,6 +365,56 @@ fn resume_failure(failure: RequestFailure) -> resume::ResumeFailure {
     }
 }
 
+/// Os parâmetros do `thread/fork`: a thread de origem, o ponto estável (`lastTurnId`, inclusivo, de um turno já
+/// terminado; sem ele, o fim da thread) e a configuração da thread nova (pasta, permissão, modelo). `excludeTurns`:
+/// a tela já tem o histórico. Pura.
+pub(super) fn fork_params(row: &store::ThreadRow, from: &str, last_turn_id: Option<&str>) -> Value {
+    let (approval, sandbox) = codex_map::access_policy(&row.access);
+    let mut params = json!({ "threadId": from, "cwd": row.cwd, "approvalPolicy": approval, "sandbox": sandbox, "excludeTurns": true });
+    if let Some(turn) = last_turn_id.filter(|t| !t.is_empty()) {
+        params["lastTurnId"] = json!(turn);
+    }
+    if let Some(model) = &row.model {
+        params["model"] = json!(model);
+    }
+    params
+}
+
+/// Abre a conversa `thread_id` como **fork** da thread `from` (a da conversa de origem) até `last_turn_id`: a
+/// pergunta lateral nasce como cópia dela num ponto estável. A origem não é tocada (o `thread/fork` lê a thread do
+/// disco e cria outra). Falhou: nada muda na conversa (quem chama cai no recorte do histórico).
+pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, from: &str, last_turn_id: Option<&str>) -> Result<(), String> {
+    let gate = resume::start_gate("codex", thread_id);
+    let _guard = gate.lock().await;
+    if get(thread_id).is_some() {
+        return Err("A conversa já tem sessão".into());
+    }
+    let row = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
+    };
+    let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
+    let session = started(app, db, &row, env).await?;
+    let result = session.request("thread/fork", fork_params(&row, from, last_turn_id)).await.inspect_err(|_| session.kill())?;
+    let id = match thread_id_of(&result) {
+        Ok(id) => id,
+        Err(e) => {
+            session.kill();
+            return Err(e);
+        }
+    };
+    if let Ok(conn) = db.lock() {
+        let _ = store::set_remote_id(&conn, thread_id, &id);
+    }
+    if let Ok(mut r) = session.remote.lock() {
+        *r = Some(id);
+    }
+    if let Ok(mut map) = sessions().lock() {
+        map.insert(thread_id.to_string(), session);
+    }
+    Ok(())
+}
+
 /// Um processo novo com uma thread nova.
 async fn open_fresh(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>) -> Result<(Arc<Session>, String), String> {
     let session = started(app, db, row, env).await?;

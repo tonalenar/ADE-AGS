@@ -3,8 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 
 import { setComposing, useChatStore } from "../store";
 import {
-  chatAccountSet, chatRequestAnswer, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
-  chatThreadSettle, chatThreads, chatThreadStatus, type ThreadAccess, type ThreadRow,
+  chatAccountSet, chatRequestAnswer, chatSideChatFork, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
+  chatThreadSettle, chatThreads, chatThreadStatus, type SideChatForkOutcome, type ThreadAccess, type ThreadRow,
 } from "./ipc";
 import type { ThreadGoal } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
@@ -178,6 +178,19 @@ export async function createThread(input: NewThread): Promise<string> {
   upsertThread(row);
   useStructured.setState((s) => ({ hydrated: { ...s.hydrated, [row.id]: true } }));
   return row.id;
+}
+
+/**
+ * Faz a pergunta lateral `id` nascer como cópia da conversa de origem (fork nativo do agente, num ponto estável) antes
+ * da primeira mensagem. Sem fork (motor sem suporte, origem em terminal, falha), devolve `excerpt` e o motivo: quem
+ * chama manda o recorte do histórico. Nunca lança: uma falha do comando é o recorte com o motivo `failed`.
+ */
+export async function forkSideChat(id: string): Promise<SideChatForkOutcome> {
+  const outcome = await chatSideChatFork(id).catch((): SideChatForkOutcome => ({ mode: "excerpt", reason: "failed" }));
+  useStructured.setState((s) => ({
+    threads: s.threads.map((row) => row.id === id ? { ...row, forkMode: outcome.mode, forkReason: outcome.reason } : row),
+  }));
+  return outcome;
 }
 
 /** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */

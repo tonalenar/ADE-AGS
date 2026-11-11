@@ -208,6 +208,16 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 
 Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta ou aviso. A entrega durável é da Fase 4.
 
+**`fork` (extra, fora das 19): a conversa nasce como cópia de outra.** Como `ags_mcp`, `ProviderMatrix::fork` não conta nas 418 células: só o chat usa (a pergunta lateral, `conversa/fork.rs`), e o contrato do motor (`EngineCapabilities::session_fork`) lê a matriz, como o `steer` e o `plan`. Um teste confere que os dois concordam.
+
+| Coluna | `fork` | Mecanismo | Ponto estável |
+|---|---|---|---|
+| chat/claude-code | `Supported` (prova: teste) | `--resume <sessão> --fork-session --session-id <nova>` (`claude_map::Start::Fork`) | o fim da sessão, só com a origem **ociosa**; no meio de um turno cai no recorte (`origin-working`): o ADE não guarda o uuid do último turno concluído para truncar com `--resume-session-at` |
+| chat/codex | `Supported` (prova: teste) | `thread/fork` com `threadId`, `lastTurnId`, `cwd`, `approvalPolicy`, `sandbox`, `model` e `excludeTurns` (`codex::fork_params`) | o último turno **terminado** (`chat_run.status != inProgress`), mesmo com a origem trabalhando; sem turno terminado, `no-stable-turn` |
+| demais colunas do chat, Frota e TUI | `Unsupported` | sem caminho no ADE | a pergunta lateral cai no recorte do histórico (`unsupported`) |
+
+Fallback explícito: o motivo (`unsupported`, `origin-terminal`, `origin-no-session`, `other-agent`, `other-account`, `origin-working`, `no-stable-turn`, `failed`) fica em `chat_thread.fork_reason` e a tela o mostra. O fork só vale com o mesmo agente e a mesma conta da origem. Nenhum dos dois caminhos toca a origem. A prova é de teste com fixtures (`conversa/fork_test.rs`); **nenhum fork foi exercitado com um agente real**, então a célula não alega `RealCapture`.
+
 **Retomada automática de tarefa na Frota × Hand-off manual para aba (`resume`).** O §1.1 define `resume` como: a sessão nativa volta depois de reiniciar o app. Na Frota, o boot do app faz varredura (`store.rs:1256-1300`) e marca tarefas `ready`/`running` como `failed`, não havendo relançamento ou retomada automática da tarefa (`Unsupported`). Há, contudo, uma tensão com essa definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual ao usuário em terminal interativo, e não retomada da tarefa depois de reiniciar o app.
 
 **Escopo das superfícies.** `checkpoint` e `rollback` valem **só para arquivos** na Frota (ref oculta, `runs/checkpoints.rs:113-151`) e nas abas de TUI (`tab_checkpoints/`). Nenhuma superfície volta a conversa do provider. Na conversa estruturada as duas são `Unsupported`.
