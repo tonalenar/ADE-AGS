@@ -24,7 +24,7 @@ import { setPanelPick, useIphoneStore, watchPhysical } from "@/features/iphone/s
 
 import {
   BackTriangleIcon, CameraIcon, CheckIcon, ChevronDownIcon, CircleIcon, ContrastIcon, FaceIdIcon, HomeIcon, KeyboardIcon,
-  LogIcon, MoreVerticalIcon, PhoneIcon, PinIcon, ReloadIcon, RotateIcon, SquareIcon, VolumeIcon,
+  ExpandIcon, FitIcon, LogIcon, MoreVerticalIcon, PhoneIcon, PowerIcon, ShrinkIcon, ZoomInIcon, ZoomOutIcon, PinIcon, ReloadIcon, RotateIcon, SquareIcon, VolumeIcon,
 } from "./chatIcons";
 import { mentionFor } from "./ChatComposer";
 import {
@@ -312,10 +312,8 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
             </div>
           )}
         </div>
-      </div>
 
-      <div className="shrink-0 border-t border-gray-200 bg-white px-2 py-2 dark:border-white/[0.08] dark:bg-surface-deep">
-        <nav role="toolbar" aria-label={t("chat.devices.controls")} className="flex max-w-full flex-wrap items-center justify-center gap-0.5 rounded-2xl">
+        <DeviceNav label={t("chat.devices.controls")}>
           <NavButton label={deviceAction("ios-simulator", "home", booted, t("chat.devices.home"), t).label} disabled={deviceAction("ios-simulator", "home", booted, t("chat.devices.home"), t).disabled} onClick={() => udid && run(simulatorButton(udid, "home"))}><HomeIcon className="w-[17px] h-[17px]" /></NavButton>
           <NavButton label={deviceAction("ios-simulator", "rotate", booted, t("chat.devices.rotate"), t).label} disabled={deviceAction("ios-simulator", "rotate", booted, t("chat.devices.rotate"), t).disabled}
             onClick={() => udid && simulatorRotate(udid, landscape ? "right" : "left").then((o) => setLandscape(o.startsWith("landscape"))).catch(fail)}>
@@ -338,22 +336,24 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
           <NavButton label={deviceAction("ios-simulator", "keyboard", booted, t("chat.devices.keyboard"), t).label} disabled={deviceAction("ios-simulator", "keyboard", booted, t("chat.devices.keyboard"), t).disabled} pop={(close) => udid && <TypePop udid={udid} onDone={close} onError={fail} />}>
             <KeyboardIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <span aria-hidden="true" className="mx-1 h-5 w-px bg-gray-200 dark:bg-white/10" />
-          <button type="button" className={ibCls} title={t("iphone.zoom.out")} aria-label={t("iphone.zoom.out")} onClick={() => scaleZoom(-1)}>−</button>
-          <span className="min-w-9 text-center font-mono text-[10.5px] tabular-nums text-gray-500 dark:text-white/50">{zoom === "actual" ? "1:1" : `${Math.round(zoom * 100)}%`}</span>
-          <button type="button" className={ibCls} title={t("iphone.zoom.in")} aria-label={t("iphone.zoom.in")} onClick={() => scaleZoom(1)}>+</button>
-          <button type="button" className={`${ibCls} ${zoom === 1 ? "bg-gray-100 dark:bg-white/[0.06] text-gray-900 dark:text-white" : ""}`} aria-pressed={zoom === 1} title={t("iphone.zoom.fit")} aria-label={t("iphone.zoom.fit")} onClick={() => setZoom(1)}>{t("iphone.zoom.fitShort")}</button>
-          <button type="button" className={`${ibCls} ${zoom === "actual" ? "bg-gray-100 dark:bg-white/[0.06] text-gray-900 dark:text-white" : ""}`} aria-pressed={zoom === "actual"} title={t("iphone.zoom.actual")} aria-label={t("iphone.zoom.actual")} onClick={() => setZoom("actual")}>1:1</button>
+          <span aria-hidden="true" className="w-5 h-px my-1 bg-gray-200 dark:bg-white/[0.08]" />
+          <button type="button" className={ibCls} title={t("iphone.zoom.in")} aria-label={t("iphone.zoom.in")} onClick={() => scaleZoom(1)}><ZoomInIcon className="w-[17px] h-[17px]" /></button>
+          <span className="text-center font-mono text-[10px] tabular-nums text-gray-500 dark:text-white/50">{zoom === "actual" ? "1:1" : `${Math.round(zoom * 100)}%`}</span>
+          <button type="button" className={ibCls} title={t("iphone.zoom.out")} aria-label={t("iphone.zoom.out")} onClick={() => scaleZoom(-1)}><ZoomOutIcon className="w-[17px] h-[17px]" /></button>
+          <button type="button" className={`${ibCls} ${zoom === 1 ? "bg-gray-100 dark:bg-white/[0.06] text-gray-900 dark:text-white" : ""}`} aria-pressed={zoom === 1} title={t("iphone.zoom.fit")} aria-label={t("iphone.zoom.fit")} onClick={() => setZoom(1)}><FitIcon className="w-[17px] h-[17px]" /></button>
+          <button type="button" className={`${ibCls} font-mono text-[10.5px] ${zoom === "actual" ? "bg-gray-100 dark:bg-white/[0.06] text-gray-900 dark:text-white" : ""}`} aria-pressed={zoom === "actual"} title={t("iphone.zoom.actual")} aria-label={t("iphone.zoom.actual")} onClick={() => setZoom("actual")}>1:1</button>
           <button type="button" className={ibCls} title={t(fullscreen ? "iphone.fullscreen.exit" : "iphone.fullscreen.enter")} aria-label={t(fullscreen ? "iphone.fullscreen.exit" : "iphone.fullscreen.enter")} aria-pressed={fullscreen} onClick={toggleFullscreen}>
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3" /></svg>
+            {fullscreen ? <ShrinkIcon className="w-[17px] h-[17px]" /> : <ExpandIcon className="w-[17px] h-[17px]" />}
           </button>
-          <NavButton label={t("chat.devices.more")} disabled={!current} pop={(close) => current && (
+          <span className="flex-1" />
+          <NavButton anchor="bottom" label={t("chat.devices.more")} disabled={!current} pop={(close) => current && (
             <IosMore device={current} booted={booted} onBoot={() => { close(); void boot(); }} onDone={close} onError={fail} />
           )}>
             <MoreVerticalIcon className="w-[17px] h-[17px]" />
           </NavButton>
-        </nav>
+        </DeviceNav>
       </div>
+
       <AgentControlFooter hint="ios" />
     </div>
   );
@@ -498,9 +498,9 @@ function IosMore({ device, booted, onBoot, onDone, onError }: { device: SimDevic
       <div className="my-1 h-px bg-gray-200 dark:bg-white/[0.08]" />
       {booted ? (
         <button type="button" disabled={deviceAction("ios-simulator", "boot", true, t("simulator.shutdown"), t).disabled} title={deviceAction("ios-simulator", "boot", true, t("simulator.shutdown"), t).label} onClick={() => { simulatorShutdown(device.udid).then(() => { setDeviceState(device.udid, "shutdown"); onDone(); }).catch(onError); }}
-          className={`${itemCls} text-red-600 dark:text-red-400`}>{t("simulator.shutdown")}</button>
+          className={`${itemCls} text-red-600 dark:text-red-400`}><PowerIcon className="w-4 h-4 shrink-0" />{t("simulator.shutdown")}</button>
       ) : (
-        <button type="button" disabled={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).disabled} title={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).label} onClick={onBoot} className={itemCls}>{t("simulator.boot")}</button>
+        <button type="button" disabled={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).disabled} title={deviceAction("ios-simulator", "boot", true, t("simulator.boot"), t).label} onClick={onBoot} className={itemCls}><PowerIcon className="w-4 h-4 shrink-0" />{t("simulator.boot")}</button>
       )}
     </div>
   );

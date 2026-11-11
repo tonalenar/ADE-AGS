@@ -63,4 +63,15 @@ describe("barra de controles físicos", () => {
     expect(host.textContent).toContain("iphone.gesture.controlCenter");
     expect(host.textContent).toContain("iphone.button.volumeUp");
   });
+
+  it("fica em coluna à direita do aparelho e o menu «mais» abre para a esquerda e para cima, sem sair da janela", () => {
+    render();
+    const bar = host.querySelector('[role="toolbar"]');
+    expect(bar?.getAttribute("aria-orientation")).toBe("vertical");
+    act(() => host.querySelector<HTMLButtonElement>('[aria-label="chat.devices.more"]')?.click());
+    const menu = host.querySelector('[role="menu"]');
+    expect(menu?.className).toContain("right-full");
+    expect(menu?.className).toContain("bottom-0");
+    expect(menu?.className).toContain("max-h-[calc(100vh-96px)]");
+  });
 });

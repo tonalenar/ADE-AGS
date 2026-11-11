@@ -29,19 +29,31 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
     setPressed(false);
     send(false);
   };
-  const thick = Math.max(3, Math.round(width * 0.012));
+  // O botão sai da borda só o que sai no aparelho (~0,9% da largura) e tem o mesmo metal do aro; a área de clique é
+  // maior que o desenho e avança um pouco sobre o aro, para não exigir mira de pixel.
+  const thick = Math.max(2.5, width * 0.009);
+  const grab = 6;
+  const along = b.side === "top" ? Math.max(14, Math.round(b.height * width)) : Math.max(12, Math.round(b.height * height));
+  const start = b.side === "top" ? Math.round(b.top * width) : Math.round(b.top * height);
   const pos = b.side === "top"
-    ? { top: -thick, left: Math.round(b.top * width), width: Math.max(12, Math.round(b.height * width)), height: thick + 1 }
-    : { top: Math.round(b.top * height), height: Math.max(10, Math.round(b.height * height)), width: thick + 1, [b.side]: -thick };
+    ? { top: -thick - 2, left: start, width: along, height: thick + 2 + grab }
+    : { top: start, height: along, width: thick + 2 + grab, [b.side]: -thick - 2 };
+  const visual = b.side === "top"
+    ? { top: 2, left: 0, right: 0, height: thick + 1, borderRadius: `${thick}px ${thick}px 0 0`, transform: pressed ? `translateY(${thick * 0.6}px)` : undefined }
+    : { top: 0, bottom: 0, width: thick + 1, [b.side]: 2, borderRadius: b.side === "left" ? `${thick}px 0 0 ${thick}px` : `0 ${thick}px ${thick}px 0`,
+      transform: pressed ? `translateX(${(b.side === "left" ? 1 : -1) * thick * 0.6}px)` : undefined };
   return (
     <>
-      <button type="button" aria-label={label} disabled={!enabled}
+      <button type="button" aria-label={label} title={label} disabled={!enabled}
         onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); setPressed(true); send(true); }}
         onPointerUp={release} onPointerCancel={release} onLostPointerCapture={release}
         onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-        className={`nodrag absolute z-10 rounded-[2px] transition-colors motion-reduce:transition-none ring-1 ring-black/40
-          ${pressed ? "bg-accent-500" : "bg-gray-400 dark:bg-surface-overlay hover:bg-gray-500 dark:hover:bg-gray-500"} disabled:opacity-60`}
-        style={pos} />
+        className="nodrag group absolute z-[2] cursor-pointer disabled:cursor-default focus-visible:outline-none" style={pos}>
+        <span aria-hidden="true" style={visual}
+          className={`absolute transition-[transform,filter] duration-100 motion-reduce:transition-none ${b.side === "top" ? "bg-gradient-to-b" : "bg-gradient-to-r"}
+            from-gray-400 via-gray-200 to-gray-400 dark:from-gray-600 dark:via-gray-400 dark:to-gray-600 shadow-[0_0_0_0.5px_rgba(0,0,0,0.25)]
+            group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-accent-500 ${pressed ? "brightness-90" : ""} group-disabled:opacity-70`} />
+      </button>
       {hover && (
         <span role="tooltip" className="pointer-events-none absolute z-20 w-max max-w-[calc(100%_-_24px)] whitespace-normal break-words rounded-md px-2 py-1 text-[11px] font-medium
           bg-gray-900 text-white dark:bg-surface-raised dark:ring-1 dark:ring-white/10 shadow-lg"
@@ -50,7 +62,7 @@ function SideButton({ b, device, name, height, width, enabled }: { b: FrameButto
           // buraco na camada (ver `browser/nativeSurface.ts::OVERLAYS`).
           style={b.side === "top"
             ? { top: thick + 8, left: "50%", transform: "translateX(-50%)" }
-            : { top: (pos.top as number) + (pos.height as number) / 2 - 12, ...(b.side === "left" ? { left: thick + 10 } : { right: thick + 10 }) }}>
+            : { top: start + along / 2 - 12, ...(b.side === "left" ? { left: thick + 10 } : { right: thick + 10 }) }}>
           {label}
         </span>
       )}
@@ -74,16 +86,18 @@ export function DeviceFrame({ device, name, layout, screen, enabled, children }:
   const pad = Math.round(screen.width * layout.bezel);
   const screenRadius = Math.round(screen.width * layout.radius);
   const outer = { width: screen.width + 2 * pad, height: screen.height + 2 * pad };
+  const rim = Math.max(2, Math.round(screen.width * 0.011));
   const island = { width: Math.round(screen.width * 0.29), height: Math.round(screen.width * 0.085), top: Math.round(screen.width * 0.027) };
   return (
     <div className="relative shrink-0" style={outer}>
       {layout.buttons.map((b) => (
         <SideButton key={`${b.side}-${b.button}`} b={b} device={device} name={name} height={outer.height} width={outer.width} enabled={enabled} />
       ))}
-      <div className="absolute inset-0 bg-gradient-to-br from-gray-300 via-gray-200 to-gray-400 dark:from-surface-overlay dark:via-surface-raised dark:to-surface-overlay
-        shadow-[0_24px_48px_-20px_rgba(0,0,0,0.45)] ring-1 ring-gray-400 dark:ring-white/10"
-        style={{ borderRadius: screenRadius + pad, padding: Math.max(2, Math.round(pad * 0.18)) }}>
-        <div className="h-full w-full bg-black" style={{ borderRadius: screenRadius + pad - Math.max(2, Math.round(pad * 0.18)), padding: pad - Math.max(2, Math.round(pad * 0.18)) }}>
+      {/* O aro de metal (fino, com brilho em cima e sombra embaixo), a borda preta e a tela. Os botões ficam por cima, encostados no aro. */}
+      <div className="absolute inset-0 z-[1] bg-gradient-to-b from-gray-200 via-gray-400 to-gray-300 dark:from-gray-500 dark:via-gray-700 dark:to-gray-600
+        shadow-[0_30px_60px_-24px_rgba(0,0,0,0.5),0_0_0_0.5px_rgba(0,0,0,0.35),inset_0_1px_0_rgba(255,255,255,0.6)]"
+        style={{ borderRadius: screenRadius + pad, padding: rim }}>
+        <div className="h-full w-full bg-black shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]" style={{ borderRadius: screenRadius + pad - rim, padding: pad - rim }}>
           <div className="relative h-full w-full overflow-hidden bg-black" style={{ borderRadius: screenRadius }}>
             {children}
             {layout.island && (

@@ -11,7 +11,7 @@ import { ConnectHint } from "./ConnectHint";
 import { DeviceBar } from "./DeviceBar";
 import { DeviceFrame, screenRadiusOf } from "./DeviceFrame";
 import { iphoneMirrorConnect, iphoneMirrorDisconnect } from "./ipc";
-import { canTouch, fitScale, frameLayout, isReady, physicalScreen } from "./model";
+import { canTouch, fitScale, frameLayout, isReady, physicalScreen, statusView } from "./model";
 import { PhysicalMirror } from "./PhysicalParts";
 import { refreshPhysical, setMirrorDisconnected, useIphoneStore, useMirrorStatus, usePhysicalDevices } from "./store";
 
@@ -60,6 +60,7 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
   const [fullscreen, setFullscreen] = useState(false);
   const fail = useCallback((e: unknown) => { void AlertaToast(name, String(e), "error", 5000); }, [name]);
   const ready = !disconnected && canTouch(status);
+  const view = statusView(status);
   const [zoom, setZoom] = useState<number | "fit">("fit");
   const [searching, setSearching] = useState(false);
   const [sessionBusy, setSessionBusy] = useState(false);
@@ -106,8 +107,8 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
   const family = current?.family ?? "iphone";
   const points = physicalScreen(status?.display ?? null, family);
   const layout = frameLayout(current?.model ?? "", family);
-  // A pílula e o respiro em volta ficam fora do espaço do aparelho.
-  const box = { w: size.w - 40, h: size.h - 112 };
+  // O respiro em volta fica fora do espaço do aparelho (a coluna de controles já está fora da área medida).
+  const box = { w: size.w - 48, h: size.h - 40 };
   const fit = fitScale(points, box, layout.bezel);
   const scale = zoom === "fit" ? fit : zoom;
   const screen = { width: Math.round(points.width * scale), height: Math.round(points.height * scale) };
@@ -117,6 +118,13 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
       <div className="@container shrink-0 border-b border-gray-200 dark:border-white/[0.08]">
         <div className="h-12 flex items-center gap-2 px-3 text-chat-note whitespace-nowrap">
           <div className="min-w-0 flex-1">{picker}</div>
+          {current && (
+            <span aria-hidden="true" className="hidden @[26rem]:inline-flex shrink-0 items-center gap-1.5 text-chat-caption text-gray-500 dark:text-white/50">
+              <span className={`h-2 w-2 rounded-full ${disconnected ? "bg-gray-400 dark:bg-white/35" : view.tone === "ok" ? "bg-emerald-500 dark:bg-emerald-400" : view.tone === "wait" ? "bg-amber-400" : "bg-gray-400 dark:bg-white/35"}`} />
+              {disconnected ? t("iphone.status.paused") : t(view.key)}
+              {!disconnected && status?.state === "live" && status.fps != null ? ` · ${t("iphone.status.fps", { count: status.fps })}` : ""}
+            </span>
+          )}
         </div>
       </div>
 
@@ -132,12 +140,9 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
             </div>
           )}
         </div>
-      </div>
-
-      <div className="shrink-0 border-t border-gray-200 bg-white px-2 py-2 dark:border-white/[0.08] dark:bg-surface-deep">
         <DeviceBar device={device} name={name} status={status} ready={ready} disconnected={disconnected} composerTarget={composerTarget}
-          zoom={zoom} onZoom={setZoom} onRefresh={() => { void searchDevices(); }} refreshing={searching}
-          onSession={() => { void toggleSession(); }} sessionBusy={sessionBusy} fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
+            zoom={zoom} onZoom={setZoom} onRefresh={() => { void searchDevices(); }} refreshing={searching}
+            onSession={() => { void toggleSession(); }} sessionBusy={sessionBusy} fullscreen={fullscreen} onFullscreen={toggleFullscreen} />
       </div>
 
       <div className="shrink-0 flex items-center gap-3 px-3.5 py-2.5 border-t border-gray-200 dark:border-white/[0.08] text-chat-note">

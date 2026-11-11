@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { MAX_PENDING_CAPTURES, rememberPendingCapture } from "@/features/chat/attachments/pendingCaptures";
+import { RecordIcon } from "@/features/chat/chatIcons";
 import { attachToComposer } from "@/features/chat/store";
 import { AlertaToast } from "@/shared/ui/alerts";
 
@@ -69,10 +70,7 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
     <button type="button" className={`${className} ${recording ? "text-red-600 bg-red-50 dark:text-red-400 dark:bg-red-500/10" : ""}`}
       disabled={disabled || busy} title={title} aria-label={title} aria-pressed={recording}
       onClick={() => { void toggle(); }}>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="h-[16px] w-[16px]" aria-hidden="true">
-        <circle cx="12" cy="12" r="8" />
-        <circle cx="12" cy="12" r="3.5" fill="currentColor" />
-      </svg>
+      <RecordIcon className="h-[17px] w-[17px]" />
       <span className="sr-only">{action}</span>
     </button>
   );
