@@ -2138,3 +2138,37 @@ mod harness_fase4 {
         assert!(check_stop_scope(&conn, Some("tab:thread:raiz"), "nao-existe").is_err());
     }
 }
+
+/// O `initialize` do Claude traz os comandos que o composer lista (nome, descrição e dica do argumento).
+#[test]
+fn os_comandos_do_initialize_do_claude_viram_a_lista_do_composer() {
+    let response = json!({
+        "commands": [
+            { "name": "design:design-critique", "description": "Critica o design de uma tela", "argumentHint": "<arquivo>" },
+            { "name": "compact", "description": "Compacta a conversa", "argumentHint": "" },
+            { "name": "nome com espaço", "description": "não é invocável", "argumentHint": "" },
+            { "name": "Compact", "description": "repetido em outra caixa", "argumentHint": "" },
+            { "name": "x".repeat(81), "description": "nome longo demais", "argumentHint": "" },
+            { "description": "sem nome" }
+        ]
+    });
+
+    let out = super::claude_map::initialize_commands(&response);
+
+    let names: Vec<&str> = out.iter().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(names, ["design:design-critique", "compact"]);
+    assert_eq!(out[0]["inputHint"], json!("<arquivo>"));
+    assert!(out[1]["inputHint"].is_null());
+}
+
+/// A descrição vem do agente como texto não confiável: entra limitada, e sem `commands` não há lista.
+#[test]
+fn a_descricao_do_comando_do_claude_vem_limitada_e_sem_commands_nao_ha_lista() {
+    let response = json!({ "commands": [{ "name": "cost", "description": "d".repeat(900), "argumentHint": null }] });
+
+    let out = super::claude_map::initialize_commands(&response);
+
+    assert_eq!(out[0]["description"].as_str().map(|d| d.chars().count()), Some(500));
+    assert!(out[0]["inputHint"].is_null());
+    assert!(super::claude_map::initialize_commands(&json!({})).is_empty());
+}

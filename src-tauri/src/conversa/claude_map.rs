@@ -21,15 +21,45 @@ use crate::canal::timeline::{app_resource_of, claude_context_tokens, claude_toke
 
 use super::codex_map::{Ask, DeltaKind};
 use super::store::ThreadRow;
+use crate::skills::is_agent_command_name;
 
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;
 const LABEL_MAX: usize = 200;
+/// Limites da lista de comandos que o `initialize` anuncia (o texto vem do agente, então não é confiável).
+const COMMANDS_MAX: usize = 256;
+const COMMAND_DESCRIPTION_MAX: usize = 500;
+const COMMAND_HINT_MAX: usize = 200;
 /// O texto que o Claude grava como fala do usuário quando o turno é interrompido.
 const INTERRUPTED: &str = "[Request interrupted by user";
 
 fn str_of<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
+}
+
+/// Os comandos que o `initialize` do Claude anuncia (`commands`), no formato da lista do composer:
+/// `name`, `description` e `inputHint`, como o ACP entrega. Nome que o composer não consegue inserir
+/// como `/nome`, repetido (sem diferenciar caixa) ou longo demais sai; descrição e dica são limitadas.
+/// Sem `commands`, a lista é vazia. Puro.
+pub fn initialize_commands(response: &Value) -> Vec<Value> {
+    let Some(commands) = response.get("commands").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for command in commands.iter().take(COMMANDS_MAX) {
+        let Some(name) = str_of(command, "name").map(str::trim) else { continue };
+        if !is_agent_command_name(name) || !seen.insert(name.to_lowercase()) {
+            continue;
+        }
+        let description: String = str_of(command, "description").unwrap_or("").trim().chars().take(COMMAND_DESCRIPTION_MAX).collect();
+        let hint = str_of(command, "argumentHint")
+            .map(str::trim)
+            .filter(|h| !h.is_empty())
+            .map(|h| h.chars().take(COMMAND_HINT_MAX).collect::<String>());
+        out.push(json!({ "name": name, "description": description, "inputHint": hint }));
+    }
+    out
 }
 
 /// O acesso do chat no `--permission-mode` do Claude.
