@@ -267,10 +267,15 @@ Fatia da paridade com as páginas de Configurações do T3 Code (referência em 
 | Projetos: nome, ícone, fixar, arquivar, remover | Código → Projetos; rótulo local por pasta (`chatProjectIdentity`). "Remover" tira só nome, ícone, fixação, arquivo e ordem; não apaga conversas nem arquivos | feito |
 | Projetos: agentes do projeto | a mesma política do backend (`chat_project_agent_policy_*`); não deixa desligar todos | feito |
 | Projetos: "Aplicando configurações para …" | seletor no topo da página. `openProjectSettings(cwd)` (`projectScope.ts`) é o ponto de entrada para o atalho "Padrões por projeto" do composer, ainda não ligado a ele | feito, atalho pendente |
+| Projetos: modelo, modelo reserva, workspace e permissões por projeto | o backend só guarda a política de agentes por projeto; os outros padrões não existem por projeto | fora (sem backend) |
+| Projetos: agrupar por checkout | a barra agrupa por nome de projeto, e não há um vínculo de checkout para agrupar | fora (pendente) |
 | Projetos: ordem (Último pedido, Criado em, Manual) | preferência do aparelho; o padrão mantém a ordem de antes. A ordem manual e a data de aparecimento sobrevivem a "Restaurar padrões" | feito |
 | Threads: concluir sozinho | desligado por padrão; conta dias sem pedido seu. Fixadas, conversas que trabalham ou esperam você e a aberta não entram. Só conversas estruturadas concluem | feito |
 | Threads: "PR mesclado" e "manter com PR" | o chat não tem PR ligado | fora (sem fluxo) |
-| Threads: instruções do título, streaming, modelo reserva, retomada após limite | o backend não gera título por modelo, não tem modelo reserva nem retomada automática depois do limite | fora (sem backend) |
+| Threads: instruções do título | o backend não gera título por modelo; o título vem do agente ou de renomear | fora (sem backend) |
+| Threads: streaming das respostas | o protocolo já transmite a resposta; não há modo sem streaming para escolher | fora (sem backend) |
+| Threads: modelo reserva e retomada após limite de uso | não há modelo reserva no chat nem retomada automática depois do limite | fora (sem backend) |
+| Threads: excluir conversas arquivadas | apagaria conversas e transcrições; precisa de fluxo próprio, com confirmação e a lista do que sai | fora (pendente) |
 | Worktrees: prefixo e nome do branch | o branch das conversas é `cc/<título>-<id>` por contrato; missões, frota e andares dependem disso | fora (contrato) |
 | Worktrees: local e regras de limpeza | exigem job de fundo e a regra de segurança do git por worktree | fora (pendente) |
 | Armazenamento | tamanho de banco, worktrees, capturas. Limpeza só de capturas com mais de 7 dias, mostrando tamanho e quantidade antes; banco e worktrees ficam como estão (`storage_usage.rs`) | feito |
