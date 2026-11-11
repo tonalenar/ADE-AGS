@@ -104,8 +104,9 @@ export function appTeamPort(spec: LeadSpec, prompt: string, target: ComposerTarg
     const options = team.members.map((m) => ({ ref: m.member, name: nameOfRef(m.member) ?? (m.label || m.agentId), agentId: m.agentId, role: m.role }));
     const routed = routeMessage(prompt, target, team, options, notice);
     // O anexo vai junto, para quem recebe a mensagem (o caminho no texto, em qualquer motor).
+    const isLeadTurn = routed.to === lead.ref;
     const sent = messageFor(routed.to, routed.text, attachments);
-    sendToMember(routed.to, sent.text, undefined, sent.images);
+    sendToMember(routed.to, sent.text, undefined, sent.images, isLeadTurn && spec.fastMode === true);
     if (!routed.direct && notice) markTold(team.id, rosterSignature(team));
     // A caixa de "para quem" da conversa já nasce como a pessoa deixou na tela de rascunho.
     setComposerTarget(lead.ref, target);

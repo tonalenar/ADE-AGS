@@ -41,6 +41,8 @@ type Reply = oneshot::Sender<Result<Value, String>>;
 
 pub struct Session {
     thread_id: String,
+    /// Modo Fast configurado na abertura do processo.
+    fast_mode: bool,
     tx: mpsc::UnboundedSender<String>,
     /// Os pedidos de controle do app esperando resposta, pelo `request_id`.
     pending: Mutex<HashMap<String, Reply>>,
@@ -237,14 +239,25 @@ pub fn close(thread_id: &str) {
 /// aviso de que o agente recomeçou sem o histórico (ver `resume`). O id da sessão anterior só é trocado depois de
 /// a nova abrir.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
-    if let Some(s) = get(thread_id) {
-        return Ok(s);
+    session_with_fast_mode(app, db, thread_id, false).await
+}
+
+/// Abre ou retoma a conversa com a preferência Fast isolada nesta execução.
+pub async fn session_with_fast_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, fast_mode: bool) -> Result<Arc<Session>, String> {
+    if let Some(session) = get(thread_id) {
+        if session.fast_mode == fast_mode || session.turn().is_some() {
+            return Ok(session);
+        }
+        close(thread_id);
     }
     // Uma trava por conversa: um Claude lento a abrir não segura o início das outras.
     let gate = resume::start_gate("claude", thread_id);
     let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
-        return Ok(s);
+        if s.fast_mode == fast_mode || s.turn().is_some() {
+            return Ok(s);
+        }
+        close(thread_id);
     }
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -257,7 +270,7 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
         let row = &row;
         async move {
             let id = uuid::Uuid::new_v4().to_string();
-            open(app, db, row, env, Start::New(&id)).await.map(|s| (s, id))
+            open(app, db, row, env, Start::New(&id), fast_mode).await.map(|s| (s, id))
         }
     };
     let opened = match row.remote_id.clone() {
@@ -265,7 +278,7 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
             resume::open_resuming(
                 || {
                     let (env, remote, row) = (env.clone(), remote.clone(), &row);
-                    async move { open(app, db, row, env, Start::Resume(&remote)).await.map(|s| (s, remote)).map_err(|e| resume::classify(&e)) }
+                    async move { open(app, db, row, env, Start::Resume(&remote), fast_mode).await.map(|s| (s, remote)).map_err(|e| resume::classify(&e)) }
                 },
                 fresh,
                 tokio::time::sleep,
@@ -306,7 +319,7 @@ pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, fr
     };
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
     let id = uuid::Uuid::new_v4().to_string();
-    let session = open(app, db, &row, env, Start::Fork { from, id: &id, at }).await?;
+    let session = open(app, db, &row, env, Start::Fork { from, id: &id, at }, false).await?;
     if let Ok(conn) = db.lock() {
         let _ = store::set_remote_id(&conn, thread_id, &id);
     }
@@ -319,8 +332,8 @@ pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, fr
     Ok(())
 }
 
-async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>) -> Result<Arc<Session>, String> {
-    let session = spawn(app, db, row, env, start)?;
+async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>, fast_mode: bool) -> Result<Arc<Session>, String> {
+    let session = spawn(app, db, row, env, start, fast_mode)?;
     // O `--resume` de uma sessão que não existe fecha o processo antes de responder.
     let init = session.control("initialize", json!({})).await;
     if let Ok(response) = &init {
@@ -336,11 +349,11 @@ async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: O
     Ok(session)
 }
 
-fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>) -> Result<Arc<Session>, String> {
+fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>, fast_mode: bool) -> Result<Arc<Session>, String> {
     let name = crate::agents::agent_command("claude-code").unwrap_or("claude");
     let program = crate::util::find_program(name).ok_or("Não achei o Claude Code (claude) no PATH")?;
     let auto_compact_window = auto_compact_window(db, row);
-    let mut args = claude_map::launch_args_with_auto_compact(row, start, auto_compact_window);
+    let (mut args, session_settings) = claude_map::launch_args_for_session(row, start, auto_compact_window, fast_mode);
     let mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "claude-code");
     if let Some(mcp) = mcp.as_ref() {
         if let Some(config) = mcp.tab.config_path.as_deref() {
@@ -352,7 +365,8 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     }
     // O ai-memory entra por processo, como nas abas: hooks e MCP só no nascimento (a troca de modelo ou de acesso, e a
     // retomada, abrem outro processo e passam por aqui de novo). Falhar aqui nunca impede a conversa de abrir.
-    let memory = memoria::for_thread(db, row, &program, &args, env.as_ref());
+    let mut memory = memoria::for_thread(db, row, &program, &args, env.as_ref());
+    memoria::merge_session_settings(&mut memory, &session_settings)?;
     args.extend(memory.args.iter().cloned());
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
@@ -381,6 +395,7 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
     let (tx, rx) = mpsc::unbounded_channel::<String>();
     let session = Arc::new(Session {
         thread_id: row.id.clone(),
+        fast_mode,
         tx,
         pending: Mutex::new(HashMap::new()),
         next: AtomicU64::new(1),
@@ -786,6 +801,7 @@ pub(crate) fn session_for_test(thread_id: &str) -> (Arc<Session>, mpsc::Unbounde
     let (tx, rx) = mpsc::unbounded_channel::<String>();
     let session = Arc::new(Session {
         thread_id: thread_id.to_string(),
+        fast_mode: false,
         tx,
         pending: Mutex::new(HashMap::new()),
         next: AtomicU64::new(1),

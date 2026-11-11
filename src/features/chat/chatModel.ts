@@ -2,7 +2,7 @@ import { withAutonomy } from "@/features/missions/autonomy";
 import { withModel } from "@/features/missions/modelFlags";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
-import { matrixProviderForAgent, readHarnessCapability } from "./harnessCapabilities";
+import { matrixProviderForAgent, readHarnessCapability, type HarnessSurface } from "./harnessCapabilities";
 
 /**
  * O modelo do modo chat, sem React: o que a sidebar lista, como uma conversa se chama e com que
@@ -48,9 +48,9 @@ export function reasoningEffortSupported(agentId: string | null): boolean {
   return agentId !== null && REASONING_EFFORT_AGENTS.has(agentId);
 }
 
-export function fastModeSupported(agentId: string | null | undefined): boolean {
+export function fastModeSupported(agentId: string | null | undefined, surface: HarnessSurface = "tui"): boolean {
   if (!agentId) return false;
-  return readHarnessCapability("tui", matrixProviderForAgent(agentId) ?? "", "fast_mode").available;
+  return readHarnessCapability(surface, matrixProviderForAgent(agentId) ?? "", "fast_mode").support === "supported";
 }
 
 /** Os flags de cada modo, por agente, conferidos no `--help` de cada CLI. Sem entrada = o agente não tem o modo. */

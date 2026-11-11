@@ -8,6 +8,7 @@ import { AgentModelPicker } from "../AgentModelPicker";
 import { ThreadAccountMenu } from "./ThreadAccountMenu";
 import { BotIcon } from "../chatIcons";
 import { accessModesFor, extractSlashCommand, midTurnOf, queueHintKey, type ConversationCard } from "../chatModel";
+import { fastModeForThread, saveFastModeForThread } from "../fastMode";
 import { goalPauseResumeAvailable, isLegacyGoalClearAlias, matrixProviderForAgent, useHarnessCapability } from "../harnessCapabilities";
 import { messageFor } from "../attachments/send";
 import { ChatComposer } from "../ChatComposer";
@@ -53,7 +54,9 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   /** A pergunta lateral: o histórico da conversa de origem (já limitado) e se o começo ficou de fora. */
   side?: { history: TimelineItem[]; truncated: boolean } }) {
   const { t } = useTranslation();
-  const followUpBehavior = useChatPrefs().followUpBehavior;
+  const chatPrefs = useChatPrefs();
+  const followUpBehavior = chatPrefs.followUpBehavior;
+  const [fastMode, setFastMode] = useState(() => fastModeForThread(thread));
   // Orquestrador de um time: "Time | Só o orquestrador", o @agente e o resumo do time (prancheta 15). A pergunta lateral não tem time.
   const teamOfThread = useTeamComposer(card, cards);
   const team = side ? null : teamOfThread;
@@ -70,6 +73,10 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   useEffect(() => {
     hydrateThread(thread.id);
   }, [thread.id, thread.agentId]);
+  const fastModeCapability = useHarnessCapability("chat", matrixProviderForAgent(thread.agentId), "fast_mode");
+  useEffect(() => {
+    setFastMode(fastModeForThread(thread));
+  }, [thread.id, thread.agentId, thread.cwd, chatPrefs.fastMode, fastModeCapability.support]);
 
   const request: RequestRow | null = live.requests[0] ?? null;
   const working = live.phase === "working";
@@ -147,6 +154,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
       {/* O trilho de agentes: escolher outro agente troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
       {/* A conta da conversa mora dentro do seletor de agente/modelo (no rodapé do popover), não solta no composer. */}
       <AgentModelPicker agents={switchable} harnessSurface="chat" showAccount={false} disabled={locked} providerConfig={live.providerConfig}
+        speed={{ fast: fastMode, onChange: (value) => { setFastMode(value); saveFastModeForThread(thread, value); } }}
         accountSlot={side || isLocalAcpAgent(thread.agentId) ? null : <ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
         permission={{ value: menuAccess(thread.access), modes: accessModesFor(thread.agentId, true), onChange: locked ? undefined : (next) => retuneThread(thread.id, thread.model, thread.effort, next) }}

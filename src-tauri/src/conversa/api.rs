@@ -639,15 +639,27 @@ pub async fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &st
 /// motores o caminho já está no texto (ver `attach`). Uma imagem que não cabe nos limites segue só
 /// pelo texto: nunca derruba a mensagem.
 pub async fn send_with(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), String> {
-    send_with_class(app, db, thread_id, text, images).await.map_err(String::from)
+    send_with_fast_mode(app, db, thread_id, text, images, false).await
+}
+
+/// Envia uma mensagem com a preferência Fast para o turno que ela iniciar.
+pub async fn send_with_fast_mode(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    text: &str,
+    images: &[String],
+    fast_mode: bool,
+) -> Result<(), String> {
+    send_with_class(app, db, thread_id, text, images, fast_mode).await.map_err(String::from)
 }
 
 /// Como [`send_with`], mas com a classe do erro (ver [`SendError`]): o envio com recibo precisa saber se a
 /// mensagem pode ter chegado.
-async fn send_with_class(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String]) -> Result<(), SendError> {
+async fn send_with_class(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, images: &[String], fast_mode: bool) -> Result<(), SendError> {
     // A conta original renovou (conversa que trocou pelo pool)? Volta antes de enviar, só com a conversa livre.
     let text = if status(thread_id).working { text.to_string() } else { super::pool::before_send(app, db, thread_id, text) };
-    send_mode(app, db, thread_id, &text, SendMode::SteerActive, images).await
+    send_mode_with_fast_mode(app, db, thread_id, &text, SendMode::SteerActive, images, fast_mode).await
 }
 
 /// O envio da pessoa com `client_request_id` (Fase 2, contrato §11.7): um reenvio idêntico devolve o recibo
@@ -662,12 +674,26 @@ pub async fn send_with_request(
     scope: &str,
     request_id: &str,
 ) -> Result<super::send_receipt::SendReceipt, String> {
+    send_with_request_and_fast_mode(app, db, thread_id, text, images, scope, request_id, false).await
+}
+
+/// Como [`send_with_request`], propagando o Fast escolhido no composer.
+pub async fn send_with_request_and_fast_mode(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    text: &str,
+    images: &[String],
+    scope: &str,
+    request_id: &str,
+    fast_mode: bool,
+) -> Result<super::send_receipt::SendReceipt, String> {
     let identity = super::send_receipt::identity(scope, request_id, thread_id, text, images)?;
     // A conversa precisa existir antes de a intenção ser gravada.
     thread(db, thread_id)?;
     let owner = format!("send:{}", uuid::Uuid::new_v4());
     super::send_receipt::run(db, &identity, thread_id, &owner, &crate::util::now_ts_ms, || {
-        send_with_class(app, db, thread_id, text, images)
+        send_with_class(app, db, thread_id, text, images, fast_mode)
     })
     .await
 }
@@ -706,6 +732,18 @@ pub(super) fn codex_error(failure: RequestFailure) -> SendError {
 /// de a mensagem chegar ao agente (a sessão não abre, o processo já fechou, o canal de escrita fechou) é
 /// `NotSent`; um pedido que saiu e perdeu a resposta é `Unknown`.
 pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
+    send_mode_with_fast_mode(app, db, thread_id, text, mode, images, false).await
+}
+
+async fn send_mode_with_fast_mode(
+    app: &AppHandle,
+    db: &DbConnection,
+    thread_id: &str,
+    text: &str,
+    mode: SendMode,
+    images: &[String],
+    fast_mode: bool,
+) -> Result<(), SendError> {
     // Uma mensagem nova (da pessoa, de um agente ou da fila) já continua a conversa: a retomada agendada depois do
     // limite não tem mais o que fazer. A retomada em si apaga o plano antes de enviar, então não se cancela sozinha.
     super::limite::cancel_resume(db, thread_id);
@@ -715,7 +753,7 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
     // Pergunta lateral recém-forkada: o contexto portátil (ou o digest da origem) vai na frente da primeira mensagem, com
     // a mesma regra: só sai da fila quando a mensagem foi de fato enviada.
     let (framed, carries_fork) = super::fork_portatil::before_send(db, thread_id, &framed);
-    let sent = send_framed(app, db, thread_id, &framed, mode, images).await;
+    let sent = send_framed(app, db, thread_id, &framed, mode, images, fast_mode).await;
     if sent.is_ok() {
         if carries_summary {
             super::troca::summary_sent(db, thread_id);
@@ -727,7 +765,7 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
     sent
 }
 
-async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
+async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String], fast_mode: bool) -> Result<(), SendError> {
     let gate = send_gate(thread_id);
     let _held = gate.lock().await;
     let row = {
@@ -770,7 +808,7 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
     // - Codex: ver o `RequestFailure` (saiu e perdeu a resposta = `Unknown`).
     match engine {
         Engine::Claude => {
-            let session = claude::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
+            let session = claude::session_with_fast_mode(app, db, thread_id, fast_mode).await.map_err(SendError::NotSent)?;
             let (blocks, _skipped) = super::attach::image_blocks(images);
             return claude::send_user(app, db, &session, text, blocks).map_err(SendError::NotSent);
         }
@@ -810,6 +848,7 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
     if let Some(effort) = &row.effort {
         params["effort"] = json!(effort);
     }
+    apply_codex_fast_mode(&mut params, fast_mode);
     session.begin_start();
     let started = match session.request_typed("turn/start", params).await {
         Ok(started) => started,
@@ -835,6 +874,15 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
         session.end_start(None);
     }
     Ok(())
+}
+
+/// Define o nível Fast no pedido de um turno, compartilhando a decisão com o adapter da Frota.
+pub(super) fn apply_codex_fast_mode(params: &mut Value, fast_mode: bool) {
+    if let Some(tier) = crate::runs::codex_fast_service_tier(fast_mode) {
+        params["serviceTier"] = json!(tier);
+    } else if let Some(object) = params.as_object_mut() {
+        object.remove("serviceTier");
+    }
 }
 
 pub fn items(db: &DbConnection, thread_id: &str) -> Result<Vec<Item>, String> {
