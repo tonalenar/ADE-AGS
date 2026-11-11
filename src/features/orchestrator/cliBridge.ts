@@ -17,7 +17,11 @@ import { getAutonomy } from "@/features/missions/autonomy";
 import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { isPageRoute } from "@/features/chat/chatRoutes";
 import { openThread, reloadThreads, useStructured } from "@/features/chat/structured/store";
-import { openDesignInPanel } from "@/features/chat/store";
+import { addSurface, openDesignInPanel } from "@/features/chat/store";
+import { conversationOnScreen } from "@/features/chat/conversationOnScreen";
+import { revealFromShowFlag } from "@/features/chat/deviceReveal";
+import { revealAgentDevice } from "@/features/chat/deviceRevealAgent";
+import { useRendersStore } from "@/features/renders/store";
 import { openChatTerminal } from "@/features/chat/shellTerminal";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import { designRoute, parseDesignOpen } from "@/features/design/openRoute";
@@ -387,6 +391,20 @@ async function handleNote(args: Record<string, unknown>) {
   throw new Error(`Operação de nota desconhecida: ${op}`);
 }
 /**
+ * Um agente publicou uma página HTML (`ags render publish`): a superfície Páginas HTML abre no painel com ela, se a
+ * conversa da aba que publicou está à vista. Fora disso a página só aparece na lista, quando a pessoa abrir a superfície.
+ */
+function handleRenderShow(args: Record<string, unknown>) {
+  const near = str(args, "near");
+  const id = str(args, "id");
+  if (!near || !id) throw new Error("Faltam near ou id");
+  if (!conversationOnScreen(near)) return { shown: false };
+  useRendersStore.getState().select(id);
+  addSurface("renders");
+  return { shown: true };
+}
+
+/**
  * Un agente creando un portal o manejándolo (`ags portal …`). El permiso ya lo verificó
  * el backend. `create` se guarda al instante: el comando siguiente busca el portal en el
  * archivo.
@@ -408,6 +426,16 @@ async function handlePortal(args: Record<string, unknown>) {
         : ios ? { kind: "ios" as const, udid: str(args, "udid"), size: nodeSize(DEFAULT_SCREEN, SIM_SCALE.initial, false) }
         : { size: { ...AGENT_PORTAL_SIZE } }),
     });
+    if (android || ios) {
+      // Um aparelho que o agente abriu aparece sobre a conversa (ou na aba do painel), como o navegador: por isso o canvas
+      // não vira o modo da conversa. O nó segue no canvas para quem quiser vê-lo lá.
+      await flushSave(key);
+      revealAgentDevice({
+        near, kind: android ? "android" : "ios", id: ios ? str(args, "udid") || null : null,
+        name: str(args, "name") || null, reveal: revealFromShowFlag(args.show),
+      });
+      return created;
+    }
     // O navegador só existe na tela se o canvas está à vista: quem pediu um navegador quer vê-lo.
     if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
     await flushSave(key);
@@ -532,6 +560,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.role": return handleRole(args);
     case "canvas.note": return handleNote(args);
     case "canvas.portal": return handlePortal(args);
+    case "render.show": return handleRenderShow(args);
     case "user.notify": return handleNotify(args);
     case "chat.open": return handleChatOpen(args);
     case "design.open": return handleDesignOpen(args);

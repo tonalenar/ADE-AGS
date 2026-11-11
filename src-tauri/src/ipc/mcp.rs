@@ -1259,6 +1259,8 @@ where
         chat(context, tool, args, send)
     } else if let Some(tool) = DESIGN_TOOLS.iter().find(|t| t.name == name) {
         design(context, tool, args, send)
+    } else if let Some(tool) = RENDER_TOOLS.iter().find(|t| t.name == name) {
+        render(context, tool, args, send)
     } else if name == ASK_TOOL {
         ask(context, args, send)
     } else if name == SECRET_REQUEST_TOOL {
@@ -1522,6 +1524,10 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         let read_only = allowed_powers.is_some_and(|powers| !powers.contains(&OrchestrationPower::Spawn));
         tools.extend(chat_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
         tools.extend(design_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
+        // As páginas HTML são da aba: sem aba (`--cwd` puro) não há dono para a página, então a família não se oferece.
+        if matches!(context, McpContext::Cwd { tab: Some(_), .. }) {
+            tools.extend(render_schemas().into_iter().filter(|t| !read_only || is_read_only(t["name"].as_str().unwrap_or(""))));
+        }
         // Como o navegador, o computer use vale para todo papel (QA testa no simulador).
         tools.extend(computer_use_schemas());
         tools.extend(device_schemas());
@@ -1583,6 +1589,7 @@ pub(crate) fn is_read_only(name: &str) -> bool {
         || name == TOOL_NAME
         || CHAT_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || DESIGN_TOOLS.iter().any(|t| t.name == name && t.read_only)
+        || RENDER_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || DEVICE_TOOLS.iter().any(|t| t.name == name && t.read_only)
         || TEAM_READ_ONLY.contains(&name)
 }
@@ -2329,6 +2336,53 @@ const DESIGN_TOOLS: &[DesignTool] = &[
     DesignTool { name: "design_comment_resolve", cli: "design.comment.resolve", read_only: false },
     DesignTool { name: "design_note_add", cli: "design.note.add", read_only: false },
 ];
+
+/// As páginas HTML da aba (`render.*`): publicar e listar as que esta aba publicou. Apagar é só pela tela da pessoa.
+struct RenderTool {
+    name: &'static str,
+    /// O comando do despachador (`render.*`).
+    cli: &'static str,
+    read_only: bool,
+}
+
+const RENDER_TOOLS: &[RenderTool] = &[
+    RenderTool { name: "render_publish", cli: "render.publish", read_only: false },
+    RenderTool { name: "render_list", cli: "render.list", read_only: true },
+];
+
+fn render_schemas() -> Vec<Value> {
+    let tool = |name: &str, description: &str, properties: Value, required: &[&str]| {
+        json!({ "name": name, "description": description, "inputSchema": { "type": "object", "properties": properties, "required": required } })
+    };
+    vec![
+        tool("render_publish", "Publish a self-contained HTML page (a chart, table, diagram or mockup) to the ADE AGS \"HTML pages\" surface, where the person can open it, reload it or open it in the system browser. The page has no network access: inline all scripts, styles and images (data: URLs). Do not put secrets in it.",
+            json!({
+                "html": { "type": "string", "description": "The complete HTML document (up to 2 MiB)." },
+                "title": { "type": "string", "description": "The name shown in the list (up to 120 characters)." },
+                "show": { "type": "boolean", "description": "false keeps the page out of the way (default: the surface opens if this tab's conversation is on screen)." }
+            }), &["html"]),
+        tool("render_list", "List the HTML pages this tab published, newest first.", json!({}), &[]),
+    ]
+}
+
+/// Uma página HTML da aba: o `from` é a aba desta sessão MCP, e o app prova quem chama pelo processo.
+fn render<F>(context: &McpContext, tool: &RenderTool, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let mut args = match arguments {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    args.remove("from");
+    if let McpContext::Cwd { tab: Some(tab), .. } = context {
+        args.insert("from".into(), json!(tab));
+    }
+    match send(tool.cli, Value::Object(args)) {
+        Ok(data) => content(data),
+        Err(e) => tool_error(&e),
+    }
+}
 
 fn design_schemas() -> Vec<Value> {
     let id = |what: &str| json!({ "type": "string", "description": format!("The {what} id, as design_get returns it.") });

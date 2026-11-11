@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 
-import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GlobeIcon, MaximizeIcon, MoreHorizontalIcon, PhoneIcon, PullRequestIcon, SideChatIcon, TerminalIcon, UsersIcon } from "./chatIcons";
+import { DesignIcon, DetailsIcon, DiffIcon, FilesIcon, FolderIcon, GalleryIcon, GlobeIcon, HtmlPageIcon, MaximizeIcon, MoreHorizontalIcon, PhoneIcon, PullRequestIcon, SideChatIcon, TerminalIcon, UsersIcon } from "./chatIcons";
 import { COMPACT_HIDDEN, entryForKey, isAvailable, keyLabel, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import { addSurface, setRightPanel, setTerminalOpen, toggleDiffPanel, togglePanelMaximized, toggleSummary, toggleSummaryPinned, useChatStore } from "./store";
 import { SUMMARY_ANCHOR_ATTR } from "./summary/SummaryPopover";
@@ -11,6 +11,7 @@ import { usePopover } from "./usePopover";
 export const ENTRY_ICON: Record<PanelChoice, (p: { className?: string }) => React.ReactElement> = {
   summary: DetailsIcon, browser: GlobeIcon, terminal: TerminalIcon, files: FilesIcon, diff: DiffIcon, design: DesignIcon,
   ios: PhoneIcon, android: PhoneIcon, team: UsersIcon, pr: PullRequestIcon, side: SideChatIcon,
+  renders: HtmlPageIcon, snapshots: GalleryIcon,
 };
 
 const ROW_ICON: Record<string, (p: { className?: string }) => React.ReactElement> = {
@@ -161,7 +162,7 @@ export function PanelToolbar({ drawerTabId, terminalAvailable, prAvailable = fal
       })}
       {/* As tarefas em segundo plano (como no Claude Code): sempre na fileira, nunca no ⋯. */}
       <TasksButton />
-      <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android" || panel === "pr" || panel === "side"} />
+      <MoreMenu available={available} onChoose={choose} active={panel === "design" || panel === "android" || panel === "pr" || panel === "side" || panel === "renders" || panel === "snapshots"} />
     </div>
   );
 }

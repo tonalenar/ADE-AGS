@@ -30,6 +30,9 @@ import { clampPanelWidth, PANEL_W, setChatBrowser, setChatShell, setPanelWidth, 
 const DesignPane = lazy(() => import("./DesignPane").then((m) => ({ default: m.DesignPane })));
 const IosPane = lazy(() => import("./DevicesPane").then((m) => ({ default: m.IosPane })));
 const AndroidPane = lazy(() => import("./DevicesPane").then((m) => ({ default: m.AndroidPane })));
+// As páginas HTML e a galeria de SnapShots só entram quando a pessoa abre a superfície.
+const RendersPanel = lazy(() => import("@/features/renders/RendersPanel").then((m) => ({ default: m.RendersPanel })));
+const SnapshotGallery = lazy(() => import("@/features/snapshots/SnapshotGallery").then((m) => ({ default: m.SnapshotGallery })));
 const PullRequestPane = lazy(() => import("./PullRequestPane").then((m) => ({ default: m.PullRequestPane })));
 
 const DIFF_FIND_MAX_RESULTS = 500;
@@ -110,6 +113,11 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
         {(panel === "design" || panel === "ios" || panel === "android") && (
           <Suspense fallback={<p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.panel.loading")}</p>}>
             {panel === "design" ? <DesignPane cwd={cwd} composerTarget={composerTarget} /> : panel === "ios" ? <IosPane composerTarget={composerTarget} /> : <AndroidPane composerTarget={composerTarget} />}
+          </Suspense>
+        )}
+        {(panel === "renders" || panel === "snapshots") && (
+          <Suspense fallback={<p className="p-4 text-chat-note text-gray-400 dark:text-white/40">{t("chat.panel.loading")}</p>}>
+            {panel === "renders" ? <RendersPanel /> : <SnapshotGallery composerTarget={composerTarget} />}
           </Suspense>
         )}
       </div>

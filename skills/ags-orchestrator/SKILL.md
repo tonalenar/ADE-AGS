@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.72.0
+version: 1.73.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -883,6 +883,19 @@ ags device shot Pixel                        # returns the path of a PNG you can
 ```
 
 - Read `tree` (or take a `shot`) before tapping; `tap --text` is safer than guessing coordinates.
+- A device you create next to the conversation shows **floating over the chat** when the person has "Mostrar prévia flutuante automaticamente" on (Settings → Browser), and in the device tab of the right panel when it is off. Pass `--mostrar` to float it anyway, or `--sem-mostrar` to keep it out of the way. Either way it stays yours to drive.
+
+## HTML pages
+
+Publish a self-contained HTML page (a chart, a table, a diagram, a mockup) for the person to open in the **HTML pages** surface of the right panel. The page has no network access: inline every script, style and image (`data:` URLs), and do not put secrets in it.
+
+```bash
+ags render publish --file report.html --title "Q3 sales"   # from a file (UTF-8 or UTF-16 with BOM)
+ags render publish --file chart.html --sem-mostrar         # publish without opening the surface
+ags render list                                            # the pages this tab published, newest first
+```
+
+The surface lists every page of the project, reloads one, opens it in the system browser, and deletes a page only when the person clicks delete. Agents cannot delete pages.
 - If more than one device is online, the user picks which one the node shows; with just one, it
   is used automatically.
 - Not available: installing or uninstalling apps, shell access, file transfer. There is no delete
@@ -1642,6 +1655,7 @@ flags of each command.
 | ROTINAS | `routines`, `routine create`, `routine`, `routine edit` |
 | ANDARES | `floors`, `floor create` |
 | PAPÉIS | `roles`, `role show`, `role create`, `role edit` |
+| PÁGINAS HTML | `render publish`, `render list` |
 | NOTAS DO CANVAS | `design create`, `design list`, `design delete`, `design page`, `design artboard`, `design update`, `design comment`, `design`, `design revert`, `design view`, `design open`, `design note`, `notes`, `note create`, `note read`, `note write`, `note edit` |
 | OBSERVAR TABS | `watch add`, `watch remove`, `watch list`, `watch wait` |
 | CONVERSAS DO MODO CHAT | `chat list`, `chat new`, `chat send`, `chat wait`, `chat show`, `chat stop`, `chat pending`, `chat open`, `chat settle` |
@@ -1671,6 +1685,7 @@ flags of each command.
 | Peers and team | interactive tabs (`--tab`) | `peer_ask`, `peer_tell`, `peer_deliver`, `peer_handoff`, `peer_receipt`, `team_list`, `team_candidates`, `team_create`, `team_link`, `team_unlink`, `team_role` |
 | Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_providers`, `harness_graph`, `chat_compact`, `chat_goal`, `chat_new`, `delegate_agent`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending` |
 | Designs | interactive sessions (`--cwd`) | `design_list`, `design_get`, `design_view`, `design_create`, `design_open`, `design_page_add`, `design_page_rename`, `design_page_delete`, `design_artboard_add`, `design_artboard_update`, `design_artboard_duplicate`, `design_artboard_delete`, `design_comment_add`, `design_comment_resolve`, `design_note_add` |
+| HTML pages | interactive tabs (`--tab`) | `render_publish`, `render_list` |
 | Computer use | interactive sessions (`--cwd`); the app checks the caller's tab or conversation | `sim_act`, `desk_act` |
 | Devices | interactive sessions (`--cwd`); caller reach is checked and fleet tasks are refused | `device_list`, `device_shot`, `device_action` |
 | Questions to the person | every session (team members get `refused`, see above) | `ask_user` |

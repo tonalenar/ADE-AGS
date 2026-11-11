@@ -31,7 +31,7 @@ const MAX_APP_CHARS: usize = 200;
 const MAX_WINDOWS: usize = 150;
 const MIN_WINDOW_SIDE: f64 = 50.0;
 const MAX_DISPLAY_NUMBER: u32 = 16;
-const PREFIX: &str = "ADE-AGS_SnapShot_";
+pub(crate) const PREFIX: &str = "ADE-AGS_SnapShot_";
 const SIDECAR_VERSION: u32 = 1;
 const PERMISSION_MSG: &str = "Para capturar outra tela ou uma janela, autorize a Gravação de Tela em Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema, e reabra a ADE.";
 const NUMBERING_MSG: &str = "Com três ou mais telas, o macOS não documenta a numeração do screencapture para as telas secundárias. A ADE não captura essas telas; a principal e, com duas telas, a secundária seguem disponíveis.";
@@ -351,7 +351,7 @@ pub fn read_info(png: &Path, dir: &Path) -> Option<SnapshotInfo> {
 }
 
 /// `Imagens/ADE AGS` do usuário: onde o SnapShot grava. Não cria pasta nenhuma.
-fn captures_dir() -> Result<PathBuf, String> {
+pub(crate) fn captures_dir() -> Result<PathBuf, String> {
     let base = dirs::picture_dir()
         .or_else(dirs::home_dir)
         .ok_or("Não encontrei a pasta Imagens deste usuário.")?;

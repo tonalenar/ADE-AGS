@@ -111,7 +111,7 @@ describe("a fileira de ícones (no cabeçalho principal)", () => {
     await click(host.querySelector("[aria-label='chat.panel.more']"));
     const items = [...host.querySelectorAll("[role=menuitem]")];
     const wide = items.filter((e) => !e.closest("li")?.className.includes("@min-[36rem]/main:hidden"));
-    expect(wide.map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "P", "Q"]);
+    expect(wide.map((e) => e.getAttribute("aria-keyshortcuts")).filter(Boolean)).toEqual(["S", "A", "P", "Q", "H", "G"]);
     // A Pergunta lateral (Q) só vale com uma conversa aberta: sem ela a linha fica esmaecida e a tecla não a aciona.
     expect(host.querySelector("[role=menuitem][aria-keyshortcuts='Q']")?.getAttribute("aria-disabled")).toBe("true");
     // Na conversa estreita, Diff, Navegador e Arquivos saem da fileira e aparecem aqui (só nela: a classe os esconde na larga).

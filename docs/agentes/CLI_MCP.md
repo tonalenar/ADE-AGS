@@ -39,7 +39,7 @@
 - A saída é sempre uma linha JSON no stdout; ajuda e erros de uso vão para o stderr.
 
 ## Grupos de comando
-`tab`, `peer(s)`, `portal(s)`/`open`, `say`/`recall`, `routine(s)`, `floor(s)`, `role(s)`, `note(s)`, `design`, `watch`, `events`, `mission`, `worktrees`, `approval`, `memory`, `swarm`, `window`, `workspace`, `run`, `browser run`, `agents`, `accounts`, `pool(s)`, `prelaunch`, `skills`/`skill`, `device(s)` (Android e iPhone/iPad físico vinculado), `ci watch`, `test` (roda local, sem o app), `app status`, `mcp`.
+`tab`, `peer(s)`, `portal(s)`/`open`, `say`/`recall`, `routine(s)`, `floor(s)`, `role(s)`, `note(s)`, `design`, `watch`, `events`, `mission`, `worktrees`, `approval`, `memory`, `swarm`, `window`, `workspace`, `run`, `browser run`, `agents`, `accounts`, `pool(s)`, `prelaunch`, `skills`/`skill`, `device(s)` (Android e iPhone/iPad físico vinculado), `render(s)` (páginas HTML da aba), `ci watch`, `test` (roda local, sem o app), `app status`, `mcp`.
 
 Flags globais: `--version` e `--json-args '{…}'`. Uma URL `http…` solta vira `portal.open`, porque o app define `BROWSER=ags`.
 
@@ -85,6 +85,7 @@ A tabela abaixo sai de `ipc/mcp.rs` e `forge/tools.rs`; o mesmo vale para a ajud
 | Peers and team | interactive tabs (`--tab`) | `peer_ask`, `peer_tell`, `peer_deliver`, `peer_handoff`, `peer_receipt`, `team_list`, `team_candidates`, `team_create`, `team_link`, `team_unlink`, `team_role` |
 | Chat-mode conversations | interactive sessions (`--cwd`) | `chat_list`, `chat_providers`, `harness_graph`, `chat_compact`, `chat_goal`, `chat_new`, `delegate_agent`, `chat_send`, `chat_wait`, `chat_show`, `chat_stop`, `chat_pending` |
 | Designs | interactive sessions (`--cwd`) | `design_list`, `design_get`, `design_view`, `design_create`, `design_open`, `design_page_add`, `design_page_rename`, `design_page_delete`, `design_artboard_add`, `design_artboard_update`, `design_artboard_duplicate`, `design_artboard_delete`, `design_comment_add`, `design_comment_resolve`, `design_note_add` |
+| HTML pages | interactive tabs (`--tab`) | `render_publish`, `render_list` |
 | Computer use | interactive sessions (`--cwd`); the app checks the caller's tab or conversation | `sim_act`, `desk_act` |
 | Devices | interactive sessions (`--cwd`); caller reach is checked and fleet tasks are refused | `device_list`, `device_shot`, `device_action` |
 | Questions to the person | every session (team members get `refused`, see above) | `ask_user` |

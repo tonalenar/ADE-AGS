@@ -592,6 +592,33 @@ fn peer_messages_from_a_file_land_in_the_text_field_without_shell_quotes() {
 }
 
 #[test]
+fn render_publish_le_o_arquivo_como_html_e_as_flags_de_exibicao_viram_show() {
+    // A página vai pelo campo `html`, lido do arquivo; `--sem-mostrar` vira `show: false` e o nome da flag some.
+    assert_eq!(text_field("render.publish"), "html");
+    let path = std::env::temp_dir().join(format!("ags-cli-render-{}.html", uuid::Uuid::new_v4()));
+    std::fs::write(&path, "<!doctype html><h1>Vendas</h1>").unwrap();
+    let file = path.to_string_lossy().into_owned();
+    let args = vec!["--file".to_string(), file, "--title".into(), "Vendas".into(), "--sem-mostrar".into()];
+    let parsed = inline_file(parse_flags(&args, positionals("render.publish")).unwrap(), "render.publish").unwrap();
+    let parsed = show_flags(parsed, "render.publish").unwrap();
+    assert_eq!(parsed["html"], "<!doctype html><h1>Vendas</h1>");
+    assert_eq!(parsed["title"], "Vendas");
+    assert_eq!(parsed["show"], false);
+    assert!(parsed.get("semMostrar").is_none());
+
+    // `--mostrar` vira `show: true` no aparelho; as duas juntas são erro, e não se escolhe uma no lugar da pessoa.
+    let mostrar = parse_flags(&["--mostrar".to_string()], positionals("device.create")).unwrap();
+    assert_eq!(show_flags(mostrar, "device.create").unwrap()["show"], true);
+    let both = parse_flags(&["--mostrar".to_string(), "--sem-mostrar".into()], positionals("device.create")).unwrap();
+    assert!(show_flags(both, "device.create").unwrap_err().contains("não os dois"));
+
+    // Comandos que não mostram nada na conversa não ganham o campo `show`.
+    let other = parse_flags(&["--mostrar".to_string()], positionals("note.list")).unwrap();
+    assert!(show_flags(other, "note.list").unwrap().get("show").is_none());
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn o_arquivo_perde_o_bom_do_powershell_e_o_resto_fica_intacto() {
     let text = "Linha 1: \"aspas\", ação, $HOME e `crase`";
     // UTF-8 com BOM (Set-Content -Encoding utf8 no PowerShell 5).

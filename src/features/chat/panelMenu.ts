@@ -18,7 +18,7 @@ export interface PanelEntry {
 /**
  * A ordem e as teclas. As do T3 ficam (B, T, F, D, P); o resto é do ADE: R de Resumo (a superfície padrão),
  * S de Design, I de iOS, A de Android e O de Orquestrador para o Time (o M do T3 é "Device", que aqui são o I e o A, e o T
- * já é do Terminal).
+ * já é do Terminal). H é Páginas HTML e G é a galeria de SnapShots.
  */
 export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "summary", key: SUMMARY_KEY },
@@ -32,6 +32,8 @@ export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "team", key: "o" },
   { id: "pr", key: "p" },
   { id: "side", key: "q" },
+  { id: "renders", key: "h" },
+  { id: "snapshots", key: "g" },
 ];
 
 /**

@@ -45,6 +45,8 @@ interface ChatState {
   browserFloating: boolean;
   /** Posição e tamanho do mini preview, relativos à casca do chat. */
   browserFloatRect: Rect | null;
+  /** Um aparelho (iOS ou Android) flutuando sobre a conversa, como o navegador: um preview por vez. `null` = nenhum. */
+  deviceFloat: DeviceKind | null;
   /** O terminal da aba Terminal do painel (uma aba de shell na pasta da conversa) e onde desenhá-lo, como o navegador. */
   shell: { tabId: string; rect: Rect } | null;
   /** A conversa por protocolo aberta (ver `structured/`); `null` = a da aba ativa. */
@@ -85,7 +87,7 @@ export interface DesignOpenRequest { designId: string; artboardId?: string | nul
 
 /** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
 export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty" | "tasks">;
-export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android", "pr", "side"];
+export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android", "pr", "side", "renders", "snapshots"];
 
 /**
  * As abas do painel direito. O Resumo não é uma delas: sem painel ele é a coluna fixa da conversa (`summaryPinned`),
@@ -93,13 +95,13 @@ export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios",
  * `team/TeamPanel.tsx`). `tasks`: as tarefas em segundo plano da conversa (`tasks/TasksPanel.tsx`; não volta sozinha ao
  * reabrir o app). `empty`: o estado vazio do T3.
  */
-export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "pr" | "side" | "empty";
+export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "pr" | "side" | "renders" | "snapshots" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
 
 const PANEL_KEY = "ags.chat.panel";
-const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team", "pr", "side"];
+const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team", "pr", "side", "renders", "snapshots"];
 
 /**
  * O painel lembrado: a superfície que estava à vista, ou `"none"` (a pessoa o fechou). Sem nada
@@ -181,7 +183,7 @@ function readControl(): boolean {
 const initialPanel = readPanel();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, browserFloating: false, browserFloatRect: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, browserFloating: false, browserFloatRect: null, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -374,8 +376,10 @@ export function openTeamPanelFocused(): void {
 
 /** Abre uma superfície no painel (e mostra). */
 export function addSurface(surface: Surface): void {
+  // Abrir a aba de um aparelho na coluna dispensa o flutuante dele: o mesmo aparelho não pode ter duas telas.
   useChatStore.setState((s) => ({ surfaces: s.surfaces.includes(surface) ? s.surfaces : [...s.surfaces, surface], panel: surface,
-    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null } : {}) }));
+    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+    deviceFloat: s.deviceFloat === surface ? null : s.deviceFloat }));
 }
 
 /** Fecha uma superfície; se era a que estava à vista, volta ao Diff. */
@@ -443,11 +447,35 @@ export function toggleChatBrowserFloating(): void {
   useChatStore.setState({
     browserFloating: true,
     browserFloatRect: null,
+    deviceFloat: null,
     panel: null,
     panelMaximized: false,
     lastPanel: "browser",
     summaryOpen: false,
   });
+}
+
+/**
+ * Faz um aparelho (iOS ou Android) flutuar sobre a conversa. Um preview por vez, como no T3: o navegador flutuante
+ * sai de cena (a página segue na aba dele) e a tela nativa dele é solta da conversa.
+ */
+export function openDeviceFloat(kind: DeviceKind): void {
+  const s = useChatStore.getState();
+  if (s.deviceFloat === kind) return;
+  if (s.browserFloating) setChatBrowser(null);
+  // O aparelho entra nas superfícies da conversa mesmo sem aba no painel: é isso que o deixa com os agentes (`sharedDevices`).
+  useChatStore.setState({
+    deviceFloat: kind,
+    browserFloating: false,
+    browserFloatRect: null,
+    summaryOpen: false,
+    surfaces: s.surfaces.includes(kind) ? s.surfaces : [...s.surfaces, kind],
+  });
+}
+
+/** Fecha o aparelho flutuante. O aparelho segue ligado: fechar a janela não o desliga. */
+export function closeDeviceFloat(): void {
+  if (useChatStore.getState().deviceFloat !== null) useChatStore.setState({ deviceFloat: null });
 }
 
 /** Publica o retângulo do mini preview sem trocar o id/página do navegador. */
