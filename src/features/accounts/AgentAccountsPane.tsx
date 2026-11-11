@@ -292,7 +292,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
     () => accounts.filter((a) => a.agentId === agent.agentId),
     [accounts, agent.agentId]
   );
-  const canAdd = accountFormMode(agent.agentId, agent.installed) !== "blocked";
+  const canAdd = accountFormMode(agent.agentId, agent.installed, true) !== "blocked";
   const system = useMemo(
     () => systemAccounts.filter((a) => a.agentId === agent.agentId),
     [systemAccounts, agent.agentId]

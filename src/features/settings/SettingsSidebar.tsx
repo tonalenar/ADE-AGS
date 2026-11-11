@@ -17,6 +17,7 @@ import {
   type SettingsSearchItem,
 } from "@/features/settings/settingsNav";
 import { useSettingsTargetStore } from "@/features/settings/settingsTarget";
+import { DESKTOP_OS } from "@/app/platform";
 import { useTabsStore } from "@/features/tabs/store";
 
 const rowCls = (current: boolean) => `w-full flex items-center gap-2 h-8 px-2 rounded-md text-[14px] text-left
@@ -104,7 +105,7 @@ export function SettingsSidebar({ onBack }: { onBack?: () => void }) {
   return (
     <aside aria-label={t("chat.settingsNav.label")} style={{ width: CHAT_SIDEBAR_W }}
       className="shrink-0 h-full flex flex-col text-[14px] bg-gray-50 dark:bg-black border-r border-gray-200 dark:border-white/[0.08]">
-      {onBack
+      {onBack || DESKTOP_OS === "macos"
         ? <div data-tauri-drag-region className="h-[52px] shrink-0 flex items-center pl-5 select-none"><WindowLights /></div>
         : <div className="h-3 shrink-0" />}
       <div className="px-2 pb-2 flex flex-col">

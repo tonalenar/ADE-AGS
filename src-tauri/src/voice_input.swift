@@ -151,6 +151,10 @@ if #available(macOS 27.0, *) {
     }
 }
 
+// O reconhecedor entrega os resultados na fila principal por padrão, e a thread principal fica
+// presa no `readLine` e no semáforo abaixo: o resultado nunca chegava e o ditado sempre estourava o prazo.
+recognizer.queue = OperationQueue()
+
 let completed = DispatchSemaphore(value: 0)
 let outcome = RecognitionOutcome()
 let recognitionTask = recognizer.recognitionTask(with: request) { result, error in
