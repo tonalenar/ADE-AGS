@@ -99,6 +99,7 @@ pub(super) fn parse_codex_model_page(raw: &str) -> Result<CodexModelPage, String
                 .and_then(Value::as_str)
                 .map(str::to_string),
             fast_supported: codex_fast_support(row),
+            aliases: Vec::new(),
             unavailable: None,
         });
     }
@@ -196,63 +197,179 @@ pub(super) fn discover_claude(
     program: &str,
     env: &HashMap<String, String>,
 ) -> Result<Vec<RosterModel>, String> {
-    let help = run_read_only(program, &["--help"], env).unwrap_or_default();
-    let mut candidates = HashMap::<String, (u8, RosterModel)>::new();
-
-    // This is the published catalog used by the installed CLI's /model picker,
-    // discovered in its publishedCatalog implementation (not the gateway catalog).
+    // Não se lê `claude --help`: a lista dele traz `fable`, `opus` e `sonnet` e deixa de fora `haiku`,
+    // que a CLI aceita mesmo assim. A versão decide o que a CLI instalada roda.
     let version = run_read_only(program, &["--version"], env).unwrap_or_default();
-    if let Some(document) = discover_claude_native_catalog() {
-        for model in parse_claude_native_catalog(&document, &version) {
-            candidates.insert(model.id.clone(), (4, model));
-        }
-    }
-
-    for alias in parse_claude_help_aliases(&help) {
-        insert_claude_model(
-            &mut candidates,
-            alias.clone(),
-            alias_label(&alias),
-            "claude_cli_alias",
-            1,
-        );
-    }
-
-    let config_dir = env
-        .get("CLAUDE_CONFIG_DIR")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from))
-        .or_else(|| dirs::home_dir().map(|home| home.join(".claude")));
-    if let Some(config_dir) = config_dir {
-        for path in claude_config_paths(&config_dir) {
-            let Ok(contents) = std::fs::read_to_string(path) else {
-                continue;
-            };
-            let Ok(value) = serde_json::from_str::<Value>(&contents) else {
-                continue;
-            };
-            collect_claude_config_models(&value, &mut candidates);
-        }
-    }
-
-    if let Some(base_url) = claude_gateway_base_url(env) {
-        if let Some(models) = discover_gateway_models(&base_url, env) {
-            enrich_claude_models(&mut candidates, models);
-        }
-    }
-
-    let mut models: Vec<_> = candidates.into_values().map(|(_, model)| model).collect();
-    models.sort_by(|left, right| {
-        left.label
-            .to_lowercase()
-            .cmp(&right.label.to_lowercase())
-            .then(left.id.cmp(&right.id))
-    });
+    let native = discover_claude_native_catalog();
+    let configs = claude_config_values(env);
+    let gateway = claude_gateway_base_url(env)
+        .and_then(|base| discover_gateway_models(&base, env))
+        .unwrap_or_default();
+    let models = claude_catalog_from_sources(&version, native.as_ref(), &configs, gateway);
     if models.is_empty() {
         Err("Claude model discovery is unavailable".into())
     } else {
         Ok(models)
     }
+}
+
+/// Os JSON de configuração do Claude da conta (ou do sistema): `CLAUDE_CONFIG_DIR`, senão `~/.claude`.
+fn claude_config_values(env: &HashMap<String, String>) -> Vec<Value> {
+    let config_dir = env
+        .get("CLAUDE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("CLAUDE_CONFIG_DIR").map(PathBuf::from))
+        .or_else(|| dirs::home_dir().map(|home| home.join(".claude")));
+    let Some(config_dir) = config_dir else {
+        return Vec::new();
+    };
+    claude_config_paths(&config_dir)
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .filter_map(|contents| serde_json::from_str::<Value>(&contents).ok())
+        .collect()
+}
+
+/// Famílias de alias da CLI do Claude: `opus` é o nome do Opus vigente, não um modelo. Nunca viram linha;
+/// a linha do modelo completo leva o alias em `aliases`.
+const CLAUDE_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
+
+/// Tabela embutida: o que a ADE mostra quando o catálogo nativo da CLI não responde (offline, rede bloqueada).
+/// Espelha os modelos vigentes de `surfaces.cc.model_selector_config` no catálogo publicado em 2026-11-10;
+/// `min_version` é o `min_claude_code_version` desse catálogo. Modelos antigos só aparecem pelo catálogo nativo.
+struct ClaudeBuiltin {
+    id: &'static str,
+    name: &'static str,
+    min_version: Option<&'static str>,
+}
+
+const CLAUDE_BUILTIN: [ClaudeBuiltin; 4] = [
+    ClaudeBuiltin { id: "claude-fable-5-2", name: "Claude Fable 5.2", min_version: Some("2.1.290") },
+    ClaudeBuiltin { id: "claude-opus-5-5", name: "Claude Opus 5.5", min_version: Some("2.1.280") },
+    ClaudeBuiltin { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", min_version: None },
+    ClaudeBuiltin { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", min_version: None },
+];
+const CLAUDE_BUILTIN_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+const CLAUDE_CONTEXT_TOKENS: u64 = 1_000_000;
+
+/// `claude-opus-5-5` → (`opus`, (5, 5)). Aceita id sem minor (`claude-opus-5`) e a data no fim (`-20251001`).
+fn claude_family(id: &str) -> Option<(&'static str, (u32, u32))> {
+    let mut parts = id.strip_prefix("claude-")?.split('-');
+    let family = parts.next().and_then(|name| CLAUDE_FAMILIES.iter().copied().find(|known| *known == name))?;
+    let major: u32 = parts.next()?.parse().ok()?;
+    let mut rest = parts.next();
+    let mut minor = 0;
+    if let Some(part) = rest {
+        if part.len() < 8 {
+            minor = part.parse().ok()?;
+            rest = parts.next();
+        }
+    }
+    match rest {
+        None => Some((family, (major, minor))),
+        // Depois da versão só pode vir a data de lançamento (`20251001`).
+        Some(date) if date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()) && parts.next().is_none() => {
+            Some((family, (major, minor)))
+        }
+        Some(_) => None,
+    }
+}
+
+/// Nome com versão para um id de família salvo: `claude-opus-4-1-20250805` → `Claude Opus 4.1`.
+fn claude_label_from_id(id: &str) -> Option<String> {
+    let (family, (major, minor)) = claude_family(id)?;
+    let version = if minor == 0 { major.to_string() } else { format!("{major}.{minor}") };
+    Some(format!("Claude {} {version}", alias_label(family)))
+}
+
+/// O nome do catálogo com a marca na frente e sem a descrição depois de ` · `: `Opus 5.5 · …` → `Claude Opus 5.5`.
+fn claude_display_name(name: &str) -> String {
+    let short = name.split(" · ").next().unwrap_or(name).trim();
+    if short.starts_with("Claude ") { short.to_string() } else { format!("Claude {short}") }
+}
+
+/// Sem versão conhecida (CLI sem `--version`), o catálogo embutido não corta nada: a própria CLI decide ao rodar.
+fn claude_runs_on(min_version: Option<&str>, cli_version: &str) -> bool {
+    match (min_version.and_then(version_numbers), version_numbers(cli_version)) {
+        (Some(minimum), Some(installed)) => installed >= minimum,
+        _ => true,
+    }
+}
+
+/// Modelo salvo na tarefa/configuração/histórico: o id completo vira linha com o nome da família;
+/// um alias de família nunca vira linha (quem vira linha é o id, que recebe o alias depois).
+pub(super) fn insert_saved_claude_model(models: &mut HashMap<String, (u8, RosterModel)>, id: String, source: &str, priority: u8) {
+    let label = claude_label_from_id(&id).unwrap_or_else(|| id.clone());
+    insert_claude_model(models, id, label, source, priority);
+}
+
+/// O catálogo do Claude a partir das fontes já lidas (função pura: o I/O fica em `discover_claude`).
+/// Base: o catálogo nativo da própria CLI; sem ele, a tabela embutida. Por cima: os ids salvos na configuração
+/// e o gateway, que só enriquecem ids já conhecidos e nunca criam modelo.
+pub(super) fn claude_catalog_from_sources(
+    cli_version: &str,
+    native: Option<&Value>,
+    configs: &[Value],
+    gateway: Vec<RosterModel>,
+) -> Vec<RosterModel> {
+    let mut candidates = HashMap::<String, (u8, RosterModel)>::new();
+    let native_models = native.map(|document| parse_claude_native_catalog(document, cli_version)).unwrap_or_default();
+    if native_models.is_empty() {
+        for builtin in CLAUDE_BUILTIN.iter().filter(|builtin| claude_runs_on(builtin.min_version, cli_version)) {
+            insert_claude_model(&mut candidates, builtin.id.into(), builtin.name.into(), "claude_builtin", 3);
+            if let Some((_, model)) = candidates.get_mut(builtin.id) {
+                model.reasoning_levels = Some(CLAUDE_BUILTIN_LEVELS.iter().map(|level| level.to_string()).collect());
+                model.default_reasoning = Some("medium".into());
+                model.context = Some(CLAUDE_CONTEXT_TOKENS);
+            }
+        }
+    } else {
+        for model in native_models {
+            candidates.insert(model.id.clone(), (4, model));
+        }
+    }
+    for config in configs {
+        collect_claude_config_models(config, &mut candidates);
+    }
+    enrich_claude_models(&mut candidates, gateway);
+    finish_claude_catalog(candidates)
+}
+
+/// Acabamento: nome com versão em cada linha da família, o alias na linha mais nova de cada família do catálogo
+/// (nunca nas salvas), e a ordem da lista.
+fn finish_claude_catalog(candidates: HashMap<String, (u8, RosterModel)>) -> Vec<RosterModel> {
+    let mut models: Vec<RosterModel> = candidates.into_values().map(|(_, model)| model).collect();
+    for model in &mut models {
+        if claude_family(&model.id).is_none() {
+            continue;
+        }
+        if is_claude_catalog_source(model) {
+            model.label = claude_display_name(&model.label);
+        } else if model.label == model.id {
+            if let Some(label) = claude_label_from_id(&model.id) {
+                model.label = label;
+            }
+        }
+    }
+    for family in CLAUDE_FAMILIES {
+        let newest = models
+            .iter()
+            .enumerate()
+            .filter(|(_, model)| is_claude_catalog_source(model) && claude_family(&model.id).is_some_and(|(name, _)| name == family))
+            .max_by_key(|(_, model)| (claude_family(&model.id).map(|(_, version)| version), std::cmp::Reverse(model.id.len())))
+            .map(|(index, _)| index);
+        if let Some(index) = newest {
+            models[index].aliases.push(family.into());
+        }
+    }
+    models.sort_by(|left, right| {
+        left.label.to_lowercase().cmp(&right.label.to_lowercase()).then(left.id.cmp(&right.id))
+    });
+    models
+}
+
+fn is_claude_catalog_source(model: &RosterModel) -> bool {
+    matches!(model.source.as_deref(), Some("native" | "native_more" | "claude_builtin"))
 }
 
 fn discover_claude_native_catalog() -> Option<Value> {
@@ -276,7 +393,9 @@ fn parse_claude_native_catalog(document: &Value, cli_version: &str) -> Vec<Roste
             .is_some_and(|minimum| installed < minimum) { continue; }
         let (Some(id), Some(label)) = (row.get("id").and_then(Value::as_str), row.get("name").and_then(Value::as_str)) else { continue; };
         let source = if row.get("section").and_then(Value::as_str) == Some("main") { "native" } else { "native_more" };
-        insert_claude_model(&mut models, id.into(), label.into(), source, 4);
+        // Modelo da família sai com o nome da marca e a versão (`Claude Opus 5.5`), como o resto do catálogo.
+        let label = if claude_family(id).is_some() { claude_display_name(label) } else { label.to_string() };
+        insert_claude_model(&mut models, id.into(), label, source, 4);
         if let Some((_, model)) = models.get_mut(id) {
             model.context = row.pointer("/runtime/max_input_tokens").and_then(Value::as_u64);
             model.reasoning_levels = Some(row.pointer("/thinking/effort_options").and_then(Value::as_array)
@@ -304,7 +423,7 @@ fn enrich_claude_models(
 ) {
     for metadata in gateway {
         if let Some((_, known)) = candidates.get_mut(&metadata.id) {
-            if !matches!(known.source.as_deref(), Some("native" | "native_more")) && metadata.label != metadata.id && safe_model_label(&metadata.label) {
+            if !is_claude_catalog_source(known) && metadata.label != metadata.id && safe_model_label(&metadata.label) {
                 known.label = metadata.label;
             }
             if metadata.context.is_some() {
@@ -325,50 +444,6 @@ fn run_read_only(program: &str, args: &[&str], env: &HashMap<String, String>) ->
         .status
         .success()
         .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn parse_claude_help_aliases(help: &str) -> Vec<String> {
-    // Parse only the help paragraph for --model; other options may also contain quoted
-    // values that are not model aliases. The CLI formats this paragraph across lines.
-    let Some(start) = help.find("--model") else {
-        return Vec::new();
-    };
-    let rest = &help[start..];
-    let end = rest.char_indices().find_map(|(at, ch)| {
-        (ch == '\n' && rest[at + 1..].trim_start().starts_with('-')).then_some(at)
-    }).unwrap_or(rest.len());
-    let section = &rest[..end];
-    let mut aliases = Vec::new();
-    let mut delimiter = None;
-    let mut current = String::new();
-    let mut previous = ' ';
-    for ch in section.chars() {
-        if matches!(ch, '\'' | '"' | '`') {
-            match delimiter {
-                Some(open) if open == ch => {
-                    let candidate = current.trim();
-                    if !candidate.is_empty()
-                        && candidate.chars().all(|c| {
-                            c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':')
-                        })
-                    {
-                        aliases.push(candidate.to_string());
-                    }
-                    current.clear();
-                    delimiter = None;
-                }
-                None if !previous.is_alphanumeric() => delimiter = Some(ch),
-                None => {},
-                _ => current.push(ch),
-            }
-        } else if delimiter.is_some() {
-            current.push(ch);
-        }
-        previous = ch;
-    }
-    aliases.sort();
-    aliases.dedup();
-    aliases
 }
 
 fn alias_label(id: &str) -> String {
@@ -399,7 +474,7 @@ fn collect_claude_config_models(value: &Value, output: &mut HashMap<String, (u8,
     if let Some(aliases) = value.get("modelAliases").and_then(Value::as_object) {
         for (alias, target) in aliases {
             insert_claude_model(output, alias.clone(), alias_label(alias), "claude_config", 2);
-            if let Some(id) = target.as_str() { insert_claude_model(output, id.into(), id.into(), "claude_config", 2); }
+            if let Some(id) = target.as_str() { insert_saved_claude_model(output, id.into(), "claude_config", 2); }
         }
     }
     fn picker(
@@ -417,13 +492,11 @@ fn collect_claude_config_models(value: &Value, output: &mut HashMap<String, (u8,
                     .find_map(|key| object.get(*key).and_then(Value::as_str))
                     .map(str::to_string);
                 if let Some(id) = model_id {
-                        insert_claude_model(
-                            output,
-                            id.clone(),
-                            label.unwrap_or(id),
-                            "claude_config",
-                            2,
-                        );
+                    // Sem nome na configuração, o id de família ganha o nome com versão, como no catálogo.
+                    match label {
+                        Some(label) => insert_claude_model(output, id, label, "claude_config", 2),
+                        None => insert_saved_claude_model(output, id, "claude_config", 2),
+                    }
                 }
                 // Only descend into documented model collections, never metadata/headers.
                 for key in ["options", "availableModels", "customModels", "models"] {
@@ -438,14 +511,14 @@ fn collect_claude_config_models(value: &Value, output: &mut HashMap<String, (u8,
                 }
             }
             Value::String(id) => {
-                insert_claude_model(output, id.clone(), id.clone(), "claude_config", 2);
+                insert_saved_claude_model(output, id.clone(), "claude_config", 2);
             }
             _ => {}
         }
     }
     for key in ["model", "modelId", "defaultModel"] {
         if let Some(id) = value.get(key).and_then(Value::as_str) {
-            insert_claude_model(output, id.into(), id.into(), "claude_config", 2);
+            insert_saved_claude_model(output, id.into(), "claude_config", 2);
         }
     }
     for key in ["availableModels", "modelPicker", "customModels", "customModelOptions", "modelOptions", "models"] {
@@ -461,7 +534,7 @@ fn collect_claude_config_models(value: &Value, output: &mut HashMap<String, (u8,
         "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "ANTHROPIC_SMALL_FAST_MODEL"] {
         if let Some(id) = value.get("env").and_then(|env| env.get(key)).and_then(Value::as_str) {
-            insert_claude_model(output, id.into(), id.into(), "claude_config", 2);
+            insert_saved_claude_model(output, id.into(), "claude_config", 2);
         }
     }
 }
@@ -489,7 +562,8 @@ pub(super) fn insert_claude_model(
     priority: u8,
 ) {
     let id = id.trim().to_string();
-    if !safe_model_id(&id) {
+    // Um alias de família nunca vira linha: a linha é o id completo, que recebe o alias em `aliases`.
+    if !safe_model_id(&id) || CLAUDE_FAMILIES.contains(&id.as_str()) {
         return;
     }
     let candidate = RosterModel {
@@ -509,6 +583,7 @@ pub(super) fn insert_claude_model(
         reasoning_levels: None,
         default_reasoning: None,
         fast_supported: None,
+        aliases: Vec::new(),
         unavailable: None,
     };
     match models.get(&id) {
@@ -630,6 +705,7 @@ fn parse_gateway_models(body: &[u8]) -> Option<Vec<RosterModel>> {
                     reasoning_levels: None,
                     default_reasoning: None,
         fast_supported: None,
+                    aliases: Vec::new(),
                     unavailable: None,
                 })
             })

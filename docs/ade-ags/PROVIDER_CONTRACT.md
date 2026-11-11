@@ -46,7 +46,7 @@ runtime           detecção, contas, sessões, MCP, roster, frota
 | `profile` | `Some` só com isolamento verificado. `None` = sem multi-conta |
 | `resume` | Argumentos com `{session}`. `None` = não reabre por id |
 | `sessions` | Qual parser de `session/title.rs` usar |
-| `models` | Lista fixa, pergunta ao CLI, ou `Unknown` |
+| `models` | Lista fixa, pergunta ao CLI, ou `Unknown`. No Claude: catálogo nativo da CLI, com tabela embutida quando ele não responde. Alias de família (`opus`, `haiku`…) nunca vira linha: vai em `aliases` da linha do modelo completo |
 | `mcp` | Como o servidor `ade-ags` entra. O nome do servidor não muda |
 
 A fila não ganha métodos. Ícone continua no React, escolhido pelo mesmo `id`.

@@ -47,7 +47,7 @@ A meta não era zerar `match`. Parser de formato continua com a estratégia dele
 |---|---|
 | `session/title.rs` ramos `ClaudeProjects`, `GeminiTmp`, `CodexRollouts`, `KimiSessions`, `ProcessQuery` | São parsers. A fase B já os fez account-aware. Mover o algoritmo para o trait reescreve o módulo |
 | `ipc/mcp.rs` ramos `ClaudeFlags`, `OpencodeConfig`, `HermesManaged` e `CodexConfigOverrides` | São os formatos verificados para entregar o servidor MCP da ADE sem substituir a configuração do usuário |
-| `runs/roster.rs` `ModelSource` | Claude é lista fixa, OpenCode é `opencode models`, o resto é `Unknown`. Não há catálogo universal de preço |
+| `runs/roster.rs` `ModelSource` | Claude vem do catálogo nativo da própria CLI (`surfaces.cc.model_selector_config`), com a tabela embutida em `model_discovery.rs` quando esse catálogo não responde; os aliases da família (`opus`, `haiku`…) viram `aliases` da linha, nunca linha. OpenCode é `opencode models`, o resto é `Unknown`. Não há catálogo universal de preço |
 | `HeadlessAgent::parse_line` | O dialeto do stream é o comportamento, e já está isolado por tipo. Um método a mais no `AgentAdapter` só encaminharia |
 
 Um segundo provider com `ProcessQuery` ainda cairia no parser de OpenCode. Hoje só OpenCode usa essa variante. O contrato avisa: parser novo, não reuso silencioso.

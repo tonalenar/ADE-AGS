@@ -284,6 +284,21 @@ fn reasoning_effort_validation_uses_provider_account_and_model_metadata() {
     assert!(super::roster::validate_effort(&roster, "codex", None, Some("manual/future"), None).is_ok());
 }
 
+// O esforço valida pelo alias que a tarefa salvou (`opus`), não só pelo id completo.
+#[test]
+fn reasoning_effort_validation_resolves_an_alias_to_its_model_row() {
+    let mut roster = roster_de_prueba();
+    let agent = agente(&mut roster, "claude-code");
+    let mut opus = agent.models[0].clone();
+    opus.id = "claude-opus-5-5".into();
+    opus.aliases = vec!["opus".into()];
+    opus.reasoning_levels = Some(vec!["low".into(), "high".into()]);
+    agent.models = vec![opus];
+    assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("opus"), Some("high")).is_ok());
+    assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("claude-opus-5-5"), Some("high")).is_ok());
+    assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("opus"), Some("max")).is_err());
+}
+
 /// Los flags sin los cuales esto no es un agente headless supervisado, sino un proceso
 /// suelto: sin `stream-json` no hay eventos y sin `--session-id` no se puede reabrir como
 /// tab.
@@ -2257,6 +2272,7 @@ fn modelo(id: &str, toolcall: bool) -> RosterModel {
         reasoning_levels: None,
         default_reasoning: None,
         fast_supported: None,
+        aliases: Vec::new(),
         unavailable: None,
     }
 }
