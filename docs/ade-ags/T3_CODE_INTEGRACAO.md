@@ -258,6 +258,33 @@ Essa fatia projeta o scheduler atual dentro do chat; ela não transforma tarefas
 
 Os primeiros recortes já centralizaram capacidades, lineage e leitura do grafo sem substituir os schedulers. O próximo recorte deve tornar o grafo de execução e seus eventos recuperáveis entre reinícios, com tentativas e efeitos externos reconciliáveis por runtime. A mudança não deve começar com uma reescrita dos processos nem com um servidor em background: a ADE ainda não tem o contrato de serviço/RPC necessário para separar host e cliente com segurança. Não declarar paridade total antes de percorrer as capacidades e o ciclo de recuperação por provider. O estado da auditoria atual e os pontos de entrada estão em `src-tauri/src/conversa/api.rs`, `src-tauri/src/conversa/store.rs`, `src-tauri/src/conversa/turn.rs`, `src-tauri/src/conversa/permission.rs`, `src-tauri/src/conversa/tarefas.rs`, `src-tauri/src/runs/` e `src-tauri/src/chat_team/`.
 
+## Configurações: Projetos, Threads, Armazenamento, Diagnóstico, Uso e Licenças
+
+Fatia da paridade com as páginas de Configurações do T3 Code (referência em `docs/user/project-settings.md`, `thread-sidebar.md`, `usage.md`, `open-source-licenses.md`, `source-control.md`). Preferências de aparelho ficam no `localStorage` e entram em "Restaurar padrões do aparelho"; o que mexe em arquivo ou banco tem confirmação e não roda sozinho.
+
+| Página T3 | Na ADE | Estado |
+|---|---|---|
+| Projetos: nome, ícone, fixar, arquivar, remover | Código → Projetos; rótulo local por pasta (`chatProjectIdentity`). "Remover" tira só nome, ícone, fixação, arquivo e ordem; não apaga conversas nem arquivos | feito |
+| Projetos: agentes do projeto | a mesma política do backend (`chat_project_agent_policy_*`); não deixa desligar todos | feito |
+| Projetos: "Aplicando configurações para …" | seletor no topo da página. `openProjectSettings(cwd)` (`projectScope.ts`) é o ponto de entrada para o atalho "Padrões por projeto" do composer, ainda não ligado a ele | feito, atalho pendente |
+| Projetos: ordem (Último pedido, Criado em, Manual) | preferência do aparelho; o padrão mantém a ordem de antes. A ordem manual e a data de aparecimento sobrevivem a "Restaurar padrões" | feito |
+| Threads: concluir sozinho | desligado por padrão; conta dias sem pedido seu. Fixadas, conversas que trabalham ou esperam você e a aberta não entram. Só conversas estruturadas concluem | feito |
+| Threads: "PR mesclado" e "manter com PR" | o chat não tem PR ligado | fora (sem fluxo) |
+| Threads: instruções do título, streaming, modelo reserva, retomada após limite | o backend não gera título por modelo, não tem modelo reserva nem retomada automática depois do limite | fora (sem backend) |
+| Worktrees: prefixo e nome do branch | o branch das conversas é `cc/<título>-<id>` por contrato; missões, frota e andares dependem disso | fora (contrato) |
+| Worktrees: local e regras de limpeza | exigem job de fundo e a regra de segurança do git por worktree | fora (pendente) |
+| Armazenamento | tamanho de banco, worktrees, capturas. Limpeza só de capturas com mais de 7 dias, mostrando tamanho e quantidade antes; banco e worktrees ficam como estão (`storage_usage.rs`) | feito |
+| Diagnóstico | versão, pasta de dados, tamanho do banco e terminais vivos, só leitura (`diagnostics.rs`) | feito |
+| Diagnóstico: sinais e traces | sinais enviam a processos (esta página não envia nada); não há arquivo de trace nesta versão | fora |
+| Uso: preços por modelo | preço definido pela pessoa vale mais que a tabela de lista; gravado em `usage-prices.json` na pasta de dados (`usage/pricing.rs`) | feito |
+| Uso: mapeamento de modelos e limites por assinatura | os limites já aparecem nos cartões de uso existentes; mapeamento de nomes fica pendente | fora (parcial) |
+| Licenças | `bun run licenses:gen` gera `licenses.generated.json` a partir do `bun.lock` e do `Cargo.lock` (`cargo metadata --offline`). Pacote não lido nesta máquina sai "não lida", sem chute | feito |
+| Controle de versão: atualizar sozinho | depende de buscar no remoto (rede) e mexe no checkout da pessoa | fora (rede) |
+| Controle de versão: método de mesclagem | fica no diálogo de PR do Forge, que fala com o GitHub | fora (rede) |
+| Controle de versão: estilo de mensagem de commit | a ADE não gera mensagem de commit, então não há o que ajustar | fora (sem fluxo) |
+
+Verificação: testes de modelo (ordem, concluir sozinho, lista de projetos, política de agentes, armazenamento, licenças e preços), testes de tela (preço por modelo e concluir sozinho), testes Rust de armazenamento, diagnóstico e preços. Não verificado visualmente nesta fatia.
+
 ## Ordem das próximas etapas
 
 1. **Aparência e atalhos:** temas T3/VS Code, criação de paletas ADE, controle de movimento, fontes e edição local dos atalhos globais existentes foram adicionados. Cada ação aceita até 20 regras contextuais independentes, com combinações reutilizáveis quando os contextos são disjuntos. `rightPanel.new` abre o seletor de superfícies com `⌘T`/`Ctrl+T` quando o painel está aberto e também aparece na paleta. `chat.find` abre a busca local da timeline com `⌘F`/`Ctrl+F`, navega entre as mensagens correspondentes e destaca a ativa; a pesquisa do protocolo cobre a timeline local completa e a TUI usa o trecho já carregado, até 4 MiB. O atalho do painel Time continua editável nas Configurações. Os IDs dos atalhos são visíveis e pesquisáveis nas Configurações; o caractere > na paleta limita a busca às ações da ADE. O inventário completo de comandos do T3 e a configuração de atalhos para todos eles ainda permanecem pendentes.

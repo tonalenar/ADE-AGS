@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 /** As seções da tela de Configurações (a barra lateral da prancheta 5). */
 /** As páginas da tela de Configurações. A ordem e os grupos do menu ficam em `features/settings/settingsNav.ts`. */
-export type SettingsSectionId = "general" | "appearance" | "chat" | "shortcuts" | "accounts" | "browser" | "devices" | "scheduled" | "worktrees" | "environments" | "access" | "maintenance" | "labs" | "memory" | "decisions" | "permissions" | "terminal" | "orchestrator" | "skills" | "cli";
+export type SettingsSectionId = "general" | "appearance" | "chat" | "threads" | "shortcuts" | "accounts" | "browser" | "devices" | "scheduled" | "usage" | "projects" | "worktrees" | "environments" | "access" | "maintenance" | "storage" | "diagnostics" | "licenses" | "labs" | "memory" | "decisions" | "permissions" | "terminal" | "orchestrator" | "skills" | "cli";
 
 /** O que a gaveta da direita mostra (abre pelos botões do canto de cima, ver `PanelButtons`). */
 export type ExplorerView = "files" | "search" | "scm";
