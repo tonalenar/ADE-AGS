@@ -4,7 +4,7 @@
  * Sin esto, un terminal de misión arrancaba con el modelo por defecto de cada TUI y el
  * Squad ("Sol 6.1, medio") se ignoraba. Los flags salen de `--help` de cada CLI:
  * Codex `-m` y `-c model_reasoning_effort=…`; Antigravity `--model` y `--effort`; Claude
- * Code `--model` y `--effort`; OpenCode solo `--model`. Otros agentes no reciben nada.
+ * Code usa `--effort`, `--settings` y el prompt `ultrathink`; OpenCode solo `--model`.
  */
 
 /** Ids de modelo y niveles de esfuerzo seguros para ir en una línea de comando. */
@@ -35,7 +35,7 @@ const CODEX_FAST_FLAGS = ["-c", "service_tier=fast"];
  */
 const CODEX_NORMAL_FLAGS = ["-c", "features.fast_mode=false"];
 
-/** El comando con el modelo, el esfuerzo y (solo Codex) el modo Fast pedidos. No repite lo que ya trae. Pura. */
+/** O comando com modelo, esforço e modos especiais pedidos. Não repete o que já existe. Pura. */
 export function withModel(
   agentId: string,
   command: string,
@@ -54,12 +54,23 @@ export function withModel(
     if (agentId === "codex" && !command.includes("model_reasoning_effort")) {
       parts.push("-c", `model_reasoning_effort=${cleanEffort}`);
     } else if ((agentId === "antigravity" || agentId === "claude-code") && !hasFlag(command, "--effort")) {
-      parts.push("--effort", cleanEffort);
+      if (agentId === "claude-code" && cleanEffort === "ultrathink") {
+        if (!command.includes("--append-system-prompt")) parts.push("--append-system-prompt", "Ultrathink:");
+      } else {
+        parts.push("--effort", agentId === "claude-code" && cleanEffort === "ultracode" ? "xhigh" : cleanEffort);
+      }
     }
   }
   if (agentId === "codex" && !command.includes("fast_mode") && !command.includes("service_tier")) {
     // Sem fast pedido, o modo normal é explícito: não depende do que a configuração global diz.
     parts.push(...(fast === true ? CODEX_FAST_FLAGS : CODEX_NORMAL_FLAGS));
+  }
+  if (agentId === "claude-code") {
+    const ultracode = cleanEffort === "ultracode";
+    if (fast === true || ultracode) {
+      const settings = JSON.stringify({ ...(ultracode ? { ultracode: true } : {}), ...(fast ? { fastMode: true } : {}) });
+      if (!command.includes("--settings")) parts.push("--settings", `'${settings}'`);
+    }
   }
   return parts.join(" ");
 }

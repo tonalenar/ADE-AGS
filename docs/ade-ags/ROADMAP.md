@@ -308,7 +308,7 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 
 ## Etapa 13 — Squad: subagente padrão e modo Fast (ponto 1: Fast)
 
-Implementado em `feat/etapa13-1-fast`: schema v30 (`fast_mode` em `squads`/`squad_members`), interruptor "Modo Fast" só para Codex na tela de Squad (pt-BR/en/es), `withModel`/`recruitCommand` com `-c service_tier=fast` e `ags peer recruit --fast`. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).
+Implementado em `feat/etapa13-1-fast`: schema v30 (`fast_mode` em `squads`/`squad_members`), primeiro interruptor Fast para Codex na tela de Squad, `withModel`/`recruitCommand` com `-c service_tier=fast` e `ags peer recruit --fast`. O catálogo e a matriz agora também habilitam Fast no Claude nas superfícies suportadas, com `--settings {"fastMode":true}` e bloqueio por modelo sem suporte. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md) e [HARNESS_CONTRATO.md](./HARNESS_CONTRATO.md).
 
 ### Etapa 13 — ponto 2 (subagente padrão do Squad)
 
@@ -415,7 +415,7 @@ Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs
 
 ## Etapa 17 - Fast headless (Backend)
 
-Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).
+Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode`, Codex usa `-c service_tier="fast"` e Claude usa `--settings {"fastMode":true}` quando o modelo oferece Fast. A matriz de capabilities decide as superfícies que entregam o modo. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md) e [HARNESS_CONTRATO.md](./HARNESS_CONTRATO.md).
 
 - Etapa 20 (UI): ver [ETAPA_20_POLIMENTO_UI.md](ETAPA_20_POLIMENTO_UI.md) — chat (Markdown, tamanho, trazer do terminal), navegador no Canvas, scrollbars, modal único de memória.
 

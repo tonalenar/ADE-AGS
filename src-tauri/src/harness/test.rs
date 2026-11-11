@@ -300,8 +300,8 @@ fn a_matriz_tem_as_22_colunas_esperadas() {
 }
 
 #[test]
-fn todo_provider_cobre_as_19_capabilities_na_ordem_do_enum() {
-    assert_eq!(Capability::ALL.len(), 19);
+fn todo_provider_cobre_as_20_capabilities_na_ordem_do_enum() {
+    assert_eq!(Capability::ALL.len(), 20);
     for column in matrix() {
         let listed: Vec<Capability> = column.cells.iter().map(|cell| cell.capability).collect();
         assert_eq!(listed, Capability::ALL, "{}/{}", column.surface.id(), column.provider);
@@ -316,7 +316,7 @@ fn os_ids_das_capabilities_sao_unicos() {
     let mut ids: Vec<&str> = Capability::ALL.iter().map(|capability| capability.id()).collect();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), 19);
+    assert_eq!(ids.len(), 20);
 }
 
 #[test]
@@ -348,7 +348,7 @@ fn frota_recusa_start_unsupported_antes_de_tentar_lancar() {
 
 #[test]
 fn plan_e_uma_capability_com_prova_em_todas_as_superficies() {
-    assert_eq!(Capability::ALL.len(), 19);
+    assert_eq!(Capability::ALL.len(), 20);
     assert_eq!(supports("claude-code", Surface::Chat, Capability::Plan), Some(Support::Supported));
     assert_eq!(supports("codex", Surface::Chat, Capability::Plan), Some(Support::Unsupported));
     assert_eq!(supports("claude-code", Surface::Fleet, Capability::Plan), Some(Support::Unsupported));
@@ -548,10 +548,10 @@ fn cada_provider_aparece_uma_vez_por_superficie() {
 
 #[test]
 fn escopos_de_instancia_so_nas_capabilities_que_o_adapter_decide_sozinho() {
-    // `Scope::Model` só faz sentido onde o modelo muda a resposta: compactar e uso.
+    // `Scope::Model` só faz sentido quando o modelo muda a resposta: compactar, uso ou Fast.
     for (key, claim) in every_claim() {
         if claim.scope == Scope::Model {
-            assert!(key.ends_with("/compact") || key.ends_with("/usage"), "{key}: escopo de modelo fora de compact e usage");
+            assert!(key.ends_with("/compact") || key.ends_with("/usage") || key.ends_with("/fast_mode"), "{key}: escopo de modelo sem variação por modelo");
         }
     }
 }

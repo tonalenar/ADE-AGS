@@ -520,7 +520,7 @@ export function NewConversation({ projects, folder, onFolder }: {
               <AgentModelPicker agents={projectAgents} showAccount={!isLocalAcpAgent(agent?.id ?? "")} disabled={!projectPolicyLoaded || projectPolicySaving}
                 value={{ agentId: agent?.id ?? null, model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null, account: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.accountId : null }}
                 permission={{ value: access, modes, onChange: (next) => update({ access: next, plan: false }) }}
-                speed={fastModeSupported(agent?.id) && !viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}
+                speed={!viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}
                 onCompare={(picks) => openCompareDialog(project?.cwd ?? "", { prompt: text, picks, attachments })}
                 compareDisabled={hasQuotes}
                 onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId) ? prefs.fastMode : false })} />

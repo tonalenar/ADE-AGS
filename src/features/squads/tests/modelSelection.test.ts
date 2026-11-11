@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { modelIsUnverified, modelSelectionMode, modelSelectionPatch, modelsForAccount } from "../modelSelection";
-import { claudeEffortLevels, fastModeSupport, findModel, reasoningOptions, withModelEffort } from "../modelSelection";
+import { claudeEffortLevels, effectiveModelForEffort, fastModeSupport, findModel, reasoningOptions, withModelEffort } from "../modelSelection";
 
 describe("Squad Fast mode support", () => {
   const catalog = [{ id: "luna", fastSupported: true }, { id: "plain", fastSupported: false }, { id: "silent" }];
@@ -77,5 +77,12 @@ describe("aliases de Claude no catálogo", () => {
     expect(claudeEffortLevels("custom/model", catalog)).toEqual([]);
     expect(claudeEffortLevels("opus", catalog)).toEqual(["low", "medium", "high", "xhigh", "max"]);
     expect(claudeEffortLevels(null, catalog)).toBeNull();
+  });
+  it("o esforço do modelo padrão Claude resolve para Opus, igual à rota do backend", () => {
+    expect(effectiveModelForEffort(null, catalog)).toBe("claude-opus-5-5");
+  });
+  it("preserva um esforço permitido ao mudar a seleção para o modelo padrão Claude", () => {
+    const defaults = [{ ...catalog[0]!, reasoningLevels: [...catalog[0]!.reasoningLevels, "ultracode"] }];
+    expect(withModelEffort({ model: null, complexity: null }, "ultracode", defaults).reasoningEffort).toBe("ultracode");
   });
 });

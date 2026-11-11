@@ -2,7 +2,7 @@ import { withAutonomy } from "@/features/missions/autonomy";
 import { withModel } from "@/features/missions/modelFlags";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
-import { readHarnessCapability } from "./harnessCapabilities";
+import { matrixProviderForAgent, readHarnessCapability } from "./harnessCapabilities";
 
 /**
  * O modelo do modo chat, sem React: o que a sidebar lista, como uma conversa se chama e com que
@@ -39,7 +39,6 @@ const TIMELINE_AGENTS = new Set(["claude-code", "codex"]);
 
 /** Flags específicos declarados pelo adapter de lançamento da TUI. */
 const REASONING_EFFORT_AGENTS = new Set(["claude-code", "codex", "antigravity"]);
-const FAST_MODE_AGENTS = new Set(["codex"]);
 
 export function hasTimeline(agentId: string): boolean {
   return TIMELINE_AGENTS.has(agentId);
@@ -50,7 +49,8 @@ export function reasoningEffortSupported(agentId: string | null): boolean {
 }
 
 export function fastModeSupported(agentId: string | null | undefined): boolean {
-  return !!agentId && FAST_MODE_AGENTS.has(agentId);
+  if (!agentId) return false;
+  return readHarnessCapability("tui", matrixProviderForAgent(agentId) ?? "", "fast_mode").available;
 }
 
 /** Os flags de cada modo, por agente, conferidos no `--help` de cada CLI. Sem entrada = o agente não tem o modo. */
@@ -156,7 +156,7 @@ export interface LaunchChoice {
   /** `null` = o esforço padrão da TUI. */
   effort: string | null;
   access: ChatAccess;
-  /** `service_tier=fast`; só tem efeito no Codex. */
+  /** Modo Fast do agente selecionado, quando a matriz e o modelo oferecem suporte. */
   fastMode?: boolean;
   /** Começa no modo Plano (onde o agente suporta). */
   plan?: boolean;
@@ -303,6 +303,8 @@ export function stripChatFlags(command: string): string {
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!;
     const next = parts[i + 1];
+    if (part === "--settings" && next && /"(?:fastMode|ultracode)"/.test(next)) { i += 1; continue; }
+    if (part === "--append-system-prompt" && next === "Ultrathink:") { i += 1; continue; }
     if (VALUED.has(part) && next !== undefined) { i += 1; continue; }
     if (BARE.has(part)) continue;
     if (part === "-c" && next && CONFIG_KEYS.test(next)) { i += 1; continue; }

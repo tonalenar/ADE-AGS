@@ -17,7 +17,7 @@ export interface ChatPrefs {
   access: ChatAccess;
   /** Começar no modo Plano. */
   plan: boolean;
-  /** Fast do Codex para conversas novas (ignorado por outros agentes e pelo motor por protocolo). */
+  /** Modo Fast para conversas TUI novas (ignorado se a matriz ou o modelo não oferecerem suporte). */
   fastMode: boolean;
   /** Abrir a conversa num worktree novo em vez do checkout atual. */
   worktree: boolean;

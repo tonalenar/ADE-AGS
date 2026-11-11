@@ -22,10 +22,10 @@ describe("recruitCommand", () => {
     expect(recruitCommand("codex", "codex", "ask", "x; rm -rf /", null)).toBe("codex -c features.fast_mode=false");
   });
 
-  it("--fast liga o service_tier só no Codex recrutado", () => {
+  it("--fast usa o mecanismo específico do Codex ou do Claude recrutado", () => {
     expect(recruitCommand("codex", "codex", "ask", "gpt-6-luna", "max", true)).toBe(
       "codex -m gpt-6-luna -c model_reasoning_effort=max -c service_tier=fast",
     );
-    expect(recruitCommand("claude-code", "claude", "ask", null, null, true)).toBe("claude");
+    expect(recruitCommand("claude-code", "claude", "ask", null, null, true)).toBe("claude --settings '{\"fastMode\":true}'");
   });
 });

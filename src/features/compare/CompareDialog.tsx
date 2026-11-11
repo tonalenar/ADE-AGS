@@ -162,9 +162,7 @@ export function CompareDialog({ initialCwd, initialPrompt = "", initialPicks: se
                   <ModelSelector roster={roster} agentId={pick.agentId} accountId={null} autoAccount allowComplexity={false}
                     model={pick.model} complexity={null} reasoningEffort={pick.effort} onRoster={setRoster}
                     onChange={(patch) => setPick(i, { model: patch.model, effort: patch.reasoningEffort ?? null })} />
-                  {pick.agentId === "codex" && (
-                    <FastSwitch checked={pick.fast} model={pick.model} catalog={catalog} onChange={(fast) => setPick(i, { fast })} />
-                  )}
+                  <FastSwitch agentId={pick.agentId} surface="tui" checked={pick.fast} model={pick.model} catalog={catalog} onChange={(fast) => setPick(i, { fast })} />
                 </div>
                 <Button variant="custom" disabled={picks.length <= 2} onClick={() => removePick(i)} aria-label={t("compare.removeModel")} title={t("compare.removeModel")}
                   className="cc-t h-7 px-2 rounded-md text-[12px] text-gray-500 hover:text-red-600 disabled:opacity-35">

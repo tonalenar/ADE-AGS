@@ -61,14 +61,22 @@ describe("withModel", () => {
       expect(withModel("codex", "codex", null, null, null)).toBe("codex -c features.fast_mode=false");
     });
 
-    it("solo Codex lo recibe: otros agentes ignoran Fast", () => {
-      for (const agent of ["claude-code", "antigravity", "gemini-cli", "opencode", "bash"]) {
+    it("Claude recibe Fast por settings y los agentes sem suporte seguem sem flags", () => {
+      expect(withModel("claude-code", "claude", null, null, true)).toBe("claude --settings '{\"fastMode\":true}'");
+      for (const agent of ["antigravity", "gemini-cli", "opencode", "bash"]) {
         expect(withModel(agent, "cmd", null, null, true)).toBe("cmd");
       }
     });
 
     it("no repite un service_tier que el comando ya trae", () => {
       expect(withModel("codex", "codex -c service_tier=default", null, null, true)).toBe("codex -c service_tier=default");
+    });
+
+    it("Claude entrega Ultrathink en el prompt e Ultracode em xhigh + settings", () => {
+      expect(withModel("claude-code", "claude", null, "ultrathink", false)).toBe("claude --append-system-prompt Ultrathink:");
+      expect(withModel("claude-code", "claude", "claude-opus-5-5", "ultracode", true)).toBe(
+        "claude --model claude-opus-5-5 --effort xhigh --settings '{\"ultracode\":true,\"fastMode\":true}'",
+      );
     });
   });
 });

@@ -16,7 +16,7 @@ const MODEL_FLAGS = new Set(["--model", "-m"]);
 const tokens = (command: string) => command.trim().split(/\s+/).filter(Boolean);
 
 /** Lê o que o comando da aba já fixa. Pura. */
-export function readTuning(agentId: string, command: string): TabTuning {
+export function readTuning(_agentId: string, command: string): TabTuning {
   const parts = tokens(command);
   let model: string | null = null;
   let effort: string | null = null;
@@ -26,12 +26,20 @@ export function readTuning(agentId: string, command: string): TabTuning {
     const next = parts[i + 1];
     if (MODEL_FLAGS.has(part) && next) model = next;
     if (part === "--effort" && next) effort = next;
+    if (part === "--append-system-prompt" && next === "Ultrathink:") effort = "ultrathink";
+    if (part === "--settings" && next) {
+      try {
+        const settings = JSON.parse(next.replace(/^'|'$/g, "")) as { fastMode?: unknown; ultracode?: unknown };
+        fast = settings.fastMode === true;
+        if (settings.ultracode === true) effort = "ultracode";
+      } catch { /* Outra forma de settings segue opaca para o seletor. */ }
+    }
     if (part === "-c" && next) {
       if (next.startsWith("model_reasoning_effort=")) effort = next.slice("model_reasoning_effort=".length);
       if (next === "service_tier=fast") fast = true;
     }
   }
-  return { model, effort, fast: agentId === "codex" && fast };
+  return { model, effort, fast };
 }
 
 /** Tira do comando os flags de esforço e de Fast (e só eles), sem mexer em mais nada. Pura. */
@@ -42,6 +50,8 @@ function withoutTuning(command: string): string {
     const part = parts[i]!;
     const next = parts[i + 1];
     if (part === "--effort" && next) { i += 1; continue; }
+    if (part === "--settings" && next && /"(?:fastMode|ultracode)"/.test(next)) { i += 1; continue; }
+    if (part === "--append-system-prompt" && next === "Ultrathink:") { i += 1; continue; }
     if (part === "-c" && next && /^(model_reasoning_effort|service_tier|features\.fast_mode)=/.test(next)) { i += 1; continue; }
     out.push(part);
   }
@@ -49,8 +59,7 @@ function withoutTuning(command: string): string {
 }
 
 /**
- * O comando com o esforço e o Fast novos. `effort: null` deixa o esforço padrão do agente; `fast` só vale no Codex
- * (os outros agentes ignoram). Mantém o modelo e todo o resto do comando. Pura.
+ * O comando com o esforço e o Fast novos. `effort: null` deixa o esforço padrão do agente. Mantém o modelo e o resto.
  */
 export function retune(agentId: string, command: string, change: { effort: string | null; fast: boolean }): string {
   return withModel(agentId, withoutTuning(command), null, change.effort, change.fast);

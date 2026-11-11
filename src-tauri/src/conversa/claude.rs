@@ -694,7 +694,12 @@ fn resolve_rpc(app: &AppHandle, db: &DbConnection, session: &Session, request_id
 /// no meio dele (ou logo depois, na fila).
 pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, images: Vec<Value>) -> Result<(), String> {
     // O turno, se a mensagem o abre, existe antes da escrita (ver `Session::ensure_turn`): nenhum Parar vê a conversa sem turno.
-    let (turn, opened) = session.send_message(&claude_map::user_message_with(text, images))?;
+    let effort = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        store::thread(&conn, &session.thread_id).map_err(|error| error.to_string())?.and_then(|row| row.effort)
+    };
+    let prompt = claude_map::prompt_with_effort(text, effort.as_deref());
+    let (turn, opened) = session.send_message(&claude_map::user_message_with(&prompt, images))?;
     if opened {
         open_turn_rows(app, db, session, &turn);
     }

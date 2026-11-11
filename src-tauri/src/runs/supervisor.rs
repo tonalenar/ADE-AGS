@@ -38,7 +38,11 @@ pub const TASK_CHANGED: &str = "cc-task-changed";
 /// keep the role policy; a change to an unsupported provider must not add Codex flags.
 pub(crate) fn fast_for_task(conn: &rusqlite::Connection, task: &Task) -> Result<bool, String> {
     use rusqlite::OptionalExtension;
-    if !crate::agents::adapter_for(&task.agent_id).is_some_and(|adapter| adapter.supports_fast_mode()) {
+    if crate::harness::matrix::supports(
+        &task.agent_id,
+        crate::harness::capability::Surface::Fleet,
+        crate::harness::capability::Capability::FastMode,
+    ) != Some(crate::harness::capability::Support::Supported) {
         return Ok(false);
     }
     let value = if task.role.as_deref() == Some(super::types::role::LEAD) {
@@ -101,7 +105,9 @@ pub(crate) fn prompt_to_stdin(program: &str, args: &mut Vec<String>, prompt: &st
         return false;
     }
     match args.iter().position(|a| a == "-p") {
-        Some(i) if args.get(i + 1).is_some_and(|a| a == prompt) => {
+        Some(i) if args.get(i + 1).is_some_and(|a| {
+            a == prompt || a.strip_prefix("Ultrathink:\n").is_some_and(|prefixed| prefixed == prompt)
+        }) => {
             args.remove(i + 1);
             true
         }
@@ -693,6 +699,14 @@ mod stdin_prompt_tests {
     fn prompt_grande_do_claude_vai_pelo_stdin_sem_perder_o_resto() {
         let big = "memória ".repeat(ARGV_LIMIT / 4);
         let mut a = args(&big);
+        assert!(prompt_to_stdin("claude", &mut a, &big));
+        assert_eq!(a, vec!["-p", "--output-format", "stream-json"]);
+    }
+
+    #[test]
+    fn prompt_ultrathink_grande_do_claude_tambem_vai_pelo_stdin() {
+        let big = "memória ".repeat(ARGV_LIMIT / 4);
+        let mut a = args(&format!("Ultrathink:\n{big}"));
         assert!(prompt_to_stdin("claude", &mut a, &big));
         assert_eq!(a, vec!["-p", "--output-format", "stream-json"]);
     }

@@ -341,7 +341,7 @@ fn reasoning_effort_survives_squad_edits_run_snapshots_and_task_history() {
 }
 
 #[test]
-fn fast_mode_roundtrips_for_codex_lead_and_member_and_defaults_off() {
+fn fast_mode_roundtrips_for_codex_and_claude_and_defaults_off() {
     let conn = test_db();
     let mut raw = input("Fast squad");
     raw.lead.agent_id = "codex".into();
@@ -356,23 +356,32 @@ fn fast_mode_roundtrips_for_codex_lead_and_member_and_defaults_off() {
     let again = store::get(&conn, &squad.id).unwrap().unwrap();
     assert!(again.lead.fast_mode && again.members[0].fast_mode);
 
+    let mut claude = input("Fast Claude squad");
+    claude.lead.agent_id = "claude-code".into();
+    claude.lead.model = Some("claude-opus-5-5".into());
+    claude.lead.fast_mode = true;
+    claude.members.clear();
+    let valid = store::validate(&conn, &claude).unwrap();
+    assert!(store::create(&conn, &valid).unwrap().lead.fast_mode);
+
     // Una Squad guardada sin tocar Fast queda desactivada.
     assert!(!create(&conn, "Plain squad").lead.fast_mode);
 }
 
 #[test]
-fn fast_mode_is_rejected_outside_codex() {
+fn fast_mode_is_rejected_when_the_fleet_matrix_does_not_support_it() {
     let conn = test_db();
     let mut lead = input("Lead fast");
-    lead.lead.fast_mode = true; // claude-code
+    lead.lead.agent_id = "opencode".into();
+    lead.lead.fast_mode = true;
     let error = store::validate(&conn, &lead).unwrap_err();
-    assert!(error.contains("lead") && error.contains("Codex"), "{error}");
+    assert!(error.contains("lead") && error.contains("Fast"), "{error}");
 
     let mut member_fast = input("Member fast");
-    member_fast.members = vec![member("backend", "claude-code")];
+    member_fast.members = vec![member("backend", "opencode")];
     member_fast.members[0].fast_mode = true;
     let error = store::validate(&conn, &member_fast).unwrap_err();
-    assert!(error.contains("backend") && error.contains("Codex"), "{error}");
+    assert!(error.contains("backend") && error.contains("Fast"), "{error}");
 }
 fn subagent(agent: &str, model: Option<&str>, effort: Option<&str>, fast: bool) -> super::SubagentDefault {
     super::SubagentDefault {
@@ -417,7 +426,12 @@ fn default_subagent_validation_rejects_bad_combinations() {
     assert!(check(subagent("no-such-agent", None, None, false)).contains("not registered"));
     assert!(check(subagent("codex", None, Some("max"), false)).contains("requires a specific model"));
     assert!(check(subagent("codex", Some("m"), Some("turbo"), false)).contains("Unknown reasoning effort"));
-    assert!(check(subagent("claude-code", None, None, true)).contains("Codex"));
+    let mut raw = input("Claude default effort");
+    raw.default_subagent = Some(subagent("claude-code", None, Some("ultrathink"), false));
+    assert!(store::validate(&conn, &raw).is_ok());
+    let mut raw = input("Claude Fast");
+    raw.default_subagent = Some(subagent("claude-code", None, None, true));
+    assert!(store::validate(&conn, &raw).is_ok());
     // Modelo vacío cuenta como "sin modelo": el esfuerzo sigue requiriéndolo.
     assert!(check(subagent("codex", Some("  "), Some("low"), false)).contains("requires a specific model"));
 }
@@ -481,7 +495,7 @@ fn extra_members_validation_rejects_bad_entries_with_their_position() {
     assert!(unknown.starts_with("extra #2:"), "{unknown}");
     let mut fast = extra(None, "opencode");
     fast.fast_mode = true;
-    assert!(check(fast).contains("Codex"));
+    assert!(check(fast).contains("não é suportado"));
     let mut effort = extra(None, "codex");
     effort.reasoning_effort = Some("max".into());
     assert!(check(effort).contains("requires a specific model"));

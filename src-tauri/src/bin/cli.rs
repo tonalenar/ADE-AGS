@@ -115,7 +115,7 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
               [--model <id>] [--effort <nível>] · com esse modelo e esforço (ex.: --model gpt-6.1-luna --effort max)
                                                 Sem eles, usa o subagente padrão do Squad da missão (se houver);
                                                 --model/--effort explícitos sempre vencem. Sem --agent, o do padrão
-              [--fast]                          · modo Fast do Codex (só --agent codex)
+              [--fast]                          · modo Fast se a capability TUI permitir (Codex/Claude Code)
               [--floor <andar>]                 · nesse andar (ou `ground`, o térreo)
                                                 Profundidade 1: um agente recrutado não recruta (a profundidade
                                                 gravada nunca desce). Até 12 recrutados abertos por orquestrador.

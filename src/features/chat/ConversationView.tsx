@@ -12,7 +12,7 @@ import { AgentModelPicker } from "./AgentModelPicker";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu";
 import { newConversationLocal, retuneConversationTab, sendToConversation, startConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
-import { accessModesFor, extractSlashCommand, fastModeSupported, hasTimeline, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
+import { accessModesFor, extractSlashCommand, hasTimeline, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { messageFor } from "./attachments/send";
 import { ChatComposer } from "./ChatComposer";
@@ -150,7 +150,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       <AgentModelPicker agents={switchableAgents} showAccount={false} disabled={locked}
         value={{ agentId: card.agentId, model: tuning.model, effort: tuning.effort, account: null }}
         permission={{ value: access.plan ? "ask" : access.access, modes: accessModesFor(card.agentId), onChange: locked ? undefined : (next) => retune({ access: next, plan: false }) }}
-        speed={fastModeSupported(card.agentId) ? { fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) } : undefined}
+        speed={{ fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) }}
         onChange={(v) => {
           if (v.agentId && v.agentId !== card.agentId) {
             const target = switchableAgents.find((candidate) => candidate.id === v.agentId);

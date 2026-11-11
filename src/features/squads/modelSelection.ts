@@ -47,6 +47,12 @@ export function findModel<T extends CatalogLike>(catalog: T[], model: string | n
   return catalog.find((entry) => entry.id === model) ?? catalog.find((entry) => entry.aliases?.includes(model));
 }
 
+/** Modelo efetivo para esforços quando a seleção usa o padrão e o catálogo declara um alias do modelo padrão. */
+export function effectiveModelForEffort(model: string | null, catalog: CatalogLike[]): string | null {
+  if (model !== null) return model;
+  return findModel(catalog, "opus")?.id ?? null;
+}
+
 export function modelIsUnverified(model: string | null, catalog: (CatalogLike & { source?: string | null })[]): boolean {
   if (model === null || model.trim().length === 0) return false;
   const entry = findModel(catalog, model.trim());
@@ -72,12 +78,13 @@ export function withModelEffort(
   effort: string | null,
   catalog: (CatalogLike & { reasoningLevels?: string[] | null })[],
 ) {
-  return { ...patch, reasoningEffort: effort && patch.complexity === null && reasoningOptions(patch.model, catalog).includes(effort) ? effort : null };
+  const effectiveModel = effectiveModelForEffort(patch.model, catalog);
+  return { ...patch, reasoningEffort: effort && patch.complexity === null && reasoningOptions(effectiveModel, catalog).includes(effort) ? effort : null };
 }
 
 /**
- * Si el modelo elegido ofrece el modo Fast de Codex según el catálogo. `unknown` = sin modelo
- * explícito (el de la TUI) o catálogo que no lo informa: no se avisa nada, solo `unsupported` avisa.
+ * Se o catálogo declara se o modelo oferece Fast. `unknown` = modelo ausente ou catálogo sem essa informação.
+ * Só `unsupported` desabilita o controle; `unknown` conserva o comportamento anterior.
  */
 export function fastModeSupport(
   model: string | null,

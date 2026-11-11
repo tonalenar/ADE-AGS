@@ -21,7 +21,7 @@ import { DEFAULT_EFFORTS, readTuning, retune, tuningChanged } from "./tabTuning"
 
 /**
  * Edita o que um terminal já aberto é: função (ou nenhuma, o orquestrador decide) e subagente; mostra a conta em uso e
- * deixa mudar o esforço e, no Codex, o modo Fast. Esforço e Fast ficam no comando do agente: mudar reinicia o agente
+ * deixa mudar o esforço e o modo Fast quando houver suporte. Esforço e Fast ficam no comando do agente: mudar reinicia o agente
  * e retoma a mesma conversa.
  */
 export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onClose, onSave }: {
@@ -85,7 +85,7 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
         if (!ok) return;
       }
       const { updateTab, restartAgent } = useTabsStore.getState();
-      updateTab(tab.id, { command: retune(tab.agentId, tab.command, { effort, fast: tab.agentId === "codex" && fast }) });
+      updateTab(tab.id, { command: retune(tab.agentId, tab.command, { effort, fast }) });
       restartAgent(tab.id);
     }
     onSave(choice);
@@ -125,7 +125,7 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
                 {efforts.map((level) => <option key={level} value={level}>{t(`models.effort.${level}`, { defaultValue: level })}</option>)}
               </PopupSelect>
             </label>
-            {tab.agentId === "codex" && <FastSwitch checked={fast} model={before.model} catalog={catalog} onChange={setFast} />}
+            <FastSwitch agentId={tab.agentId} surface="tui" checked={fast} model={before.model} catalog={catalog} onChange={setFast} />
             <p className="text-[11px] leading-[14px] text-gray-500 dark:text-white/50">{t("role.tuningHint")}</p>
           </div>
         )}

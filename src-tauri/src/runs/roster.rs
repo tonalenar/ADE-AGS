@@ -80,7 +80,7 @@ pub struct RosterModel {
     pub availability: ModelAvailability,
     pub reasoning_levels: Option<Vec<String>>,
     pub default_reasoning: Option<String>,
-    /// El modelo ofrece el modo Fast (`service_tier`): `None` = el catálogo no lo dice.
+    /// El modelo ofrece el modo Fast: `None` = el catálogo no lo dice.
     pub fast_supported: Option<bool>,
     /// Nombres de chamada que esta linha atende (Claude: `opus` = o Opus vigente). Vazio = nenhum. Só serve para
     /// mostrar e validar: o que vai para a CLI continua sendo o valor salvo.
@@ -359,10 +359,13 @@ pub(super) fn validate_effort(
             .ok_or("Reasoning effort cannot be verified for this account")?.models,
         None => &agent.models,
     };
-    let supported = find_model(models, model)
+    // T3 usa Opus 5.5 como modelo padrão do Claude. O roster de alguns fluxos antigos não
+    // materializa o modelo default na rota; validar pelo alias evita aceitar esforço às cegas.
+    let effective_model = model.or_else(|| (agent_id == "claude-code").then_some("opus"));
+    let supported = find_model(models, effective_model)
         .and_then(|entry| entry.reasoning_levels.as_ref())
         .is_some_and(|levels| levels.iter().any(|level| level == effort));
-    if supported && matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra") {
+    if supported && matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "ultrathink" | "ultracode") {
         Ok(())
     } else {
         Err("Reasoning effort is not supported by this provider/account/model. Select Automatic or a supported level.".into())

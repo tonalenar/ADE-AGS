@@ -99,7 +99,7 @@ fn reasoning_effort_is_per_execution_for_claude_and_codex() {
 }
 
 #[test]
-fn fast_is_execution_local_and_only_codex_receives_a_service_tier() {
+fn fast_is_execution_local_codex_uses_service_tier_and_claude_settings() {
     let mut ctx = ctx_sin_broker();
     let original = ctx.account_env.clone();
     ctx.fast_mode = true;
@@ -133,8 +133,10 @@ fn fast_is_execution_local_and_only_codex_receives_a_service_tier() {
             .windows(2)
             .any(|p| p[0] == "-c" && p[1] == "model_reasoning_effort=\"high\""));
     }
+    let claude_fast = claude().launch("fixture", Some("claude-opus-5-5"), None, &ctx);
+    assert!(claude_fast.args.windows(2).any(|p| p[0] == "--settings" && p[1] == r#"{"fastMode":true}"#));
+    assert_eq!(claude_fast.env.get("CLAUDE_CODE_EFFORT_LEVEL").map(String::as_str), Some("high"));
     for agent in [
-        "claude-code",
         "opencode",
         "gemini-cli",
         "kimi-code",
@@ -201,8 +203,11 @@ fn fast_snapshot_is_copied_for_lead_and_member_and_survives_squad_edits() {
         )
         .unwrap();
         assert!(super::supervisor::fast_for_task(&conn, &task).unwrap());
+        let mut claude_task = task.clone();
+        claude_task.agent_id = "claude-code".into();
+        assert!(super::supervisor::fast_for_task(&conn, &claude_task).unwrap());
         let mut unsupported = task.clone();
-        unsupported.agent_id = "claude-code".into();
+        unsupported.agent_id = "opencode".into();
         assert!(!super::supervisor::fast_for_task(&conn, &unsupported).unwrap());
         if functional.is_some() {
             let mut other = task.clone();
@@ -218,12 +223,11 @@ fn fast_snapshot_is_copied_for_lead_and_member_and_survives_squad_edits() {
 }
 
 #[test]
-fn fast_mode_e_refresh_de_cota_declarados_pelo_adapter() {
-    let codex = crate::agents::adapter_for("codex").unwrap();
-    let claude = crate::agents::adapter_for("claude-code").unwrap();
-    assert!(codex.supports_fast_mode());
+fn fast_mode_e_refresh_de_cota_seguem_capacidades_separadas() {
+    assert_eq!(crate::harness::matrix::supports("codex", crate::harness::capability::Surface::Fleet, crate::harness::capability::Capability::FastMode), Some(crate::harness::capability::Support::Supported));
     assert!(crate::runs::agents::adapter_for("codex").unwrap().refresh_account_usage_after_task());
-    assert!(!claude.supports_fast_mode());
+    assert_eq!(crate::harness::matrix::supports("claude-code", crate::harness::capability::Surface::Fleet, crate::harness::capability::Capability::FastMode), Some(crate::harness::capability::Support::Supported));
+    assert_eq!(crate::harness::matrix::supports("claude-code", crate::harness::capability::Surface::Tui, crate::harness::capability::Capability::FastMode), Some(crate::harness::capability::Support::Supported));
     assert!(!crate::runs::agents::adapter_for("claude-code").unwrap().refresh_account_usage_after_task());
 }
 
@@ -297,6 +301,41 @@ fn reasoning_effort_validation_resolves_an_alias_to_its_model_row() {
     assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("opus"), Some("high")).is_ok());
     assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("claude-opus-5-5"), Some("high")).is_ok());
     assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("opus"), Some("max")).is_err());
+}
+
+#[test]
+fn reasoning_effort_claude_modes_validate_against_the_model_and_default() {
+    let mut roster = roster_de_prueba();
+    let agent = agente(&mut roster, "claude-code");
+    let mut opus = agent.models[0].clone();
+    opus.id = "claude-opus-5-5".into();
+    opus.aliases = vec!["opus".into()];
+    opus.reasoning_levels = Some(vec!["low".into(), "high".into(), "xhigh".into(), "ultrathink".into(), "ultracode".into()]);
+    agent.models = vec![opus];
+
+    assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("opus"), Some("ultrathink")).is_ok());
+    assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("opus"), Some("ultracode")).is_ok());
+    // A seleção de modelo padrão do Claude é Opus (como no manifest T3), inclusive em rotas.
+    assert!(super::roster::validate_effort(&roster, "claude-code", None, None, Some("ultrathink")).is_ok());
+    assert!(super::roster::validate_effort(&roster, "claude-code", None, Some("opus"), Some("max")).is_err());
+}
+
+#[test]
+fn claude_effort_especial_vira_prompt_ou_settings_e_fast_mode_vira_settings() {
+    let mut ctx = ctx_sin_broker();
+    ctx.reasoning_effort = Some("ultrathink");
+    let launch = claude().launch("revise o diff", Some("claude-opus-5-5"), None, &ctx);
+    assert!(launch.args.iter().any(|arg| arg.starts_with("Ultrathink:\nrevise o diff")));
+    assert!(!launch.args.iter().any(|arg| arg == "--effort"));
+
+    ctx.reasoning_effort = Some("ultracode");
+    ctx.fast_mode = true;
+    let launch = claude().launch("revise o diff", Some("claude-opus-5-5"), None, &ctx);
+    let settings = launch.args.windows(2).find(|args| args[0] == "--settings").unwrap();
+    let settings: serde_json::Value = serde_json::from_str(&settings[1]).unwrap();
+    assert_eq!(settings, serde_json::json!({"ultracode": true, "fastMode": true}));
+    assert!(launch.args.windows(2).any(|args| args == ["--effort", "xhigh"]));
+    assert!(!launch.env.contains_key("CLAUDE_CODE_EFFORT_LEVEL"));
 }
 
 /// Los flags sin los cuales esto no es un agente headless supervisado, sino un proceso

@@ -246,8 +246,8 @@ struct ClaudeBuiltin {
 const CLAUDE_BUILTIN: [ClaudeBuiltin; 4] = [
     ClaudeBuiltin { id: "claude-fable-5-2", name: "Claude Fable 5.2", min_version: Some("2.1.290") },
     ClaudeBuiltin { id: "claude-opus-5-5", name: "Claude Opus 5.5", min_version: Some("2.1.280") },
-    ClaudeBuiltin { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", min_version: None },
-    ClaudeBuiltin { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", min_version: None },
+    ClaudeBuiltin { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", min_version: Some("2.1.284") },
+    ClaudeBuiltin { id: "claude-haiku-5-5", name: "Claude Haiku 5.5", min_version: Some("2.1.293") },
 ];
 const CLAUDE_BUILTIN_LEVELS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
 const CLAUDE_CONTEXT_TOKENS: u64 = 1_000_000;
@@ -350,6 +350,20 @@ fn finish_claude_catalog(candidates: HashMap<String, (u8, RosterModel)>) -> Vec<
                 model.label = label;
             }
         }
+        // Estes valores extras espelham os descritores do T3. Ultrathink é um prefixo de
+        // prompt; Ultracode mapeia para xhigh e ativa a orquestração multiagente.
+        if is_claude_catalog_source(model) {
+            let (family, version) = claude_family(&model.id).unwrap_or(("", (0, 0)));
+            let extras = claude_effort_options(family, version);
+            if let Some(levels) = model.reasoning_levels.as_mut() {
+                for effort in extras {
+                    if !levels.iter().any(|level| level == *effort) {
+                        levels.push(effort.to_string());
+                    }
+                }
+            }
+            model.fast_supported = Some(claude_fast_supported(family, version));
+        }
     }
     for family in CLAUDE_FAMILIES {
         let newest = models
@@ -366,6 +380,32 @@ fn finish_claude_catalog(candidates: HashMap<String, (u8, RosterModel)>) -> Vec<
         left.label.to_lowercase().cmp(&right.label.to_lowercase()).then(left.id.cmp(&right.id))
     });
     models
+}
+
+/// Valores especiais habilitados pelos perfis Claude do manifest T3, por família/versão.
+fn claude_effort_options(family: &str, version: (u32, u32)) -> &'static [&'static str] {
+    let fable_5 = family == "fable" && version.0 == 5;
+    let ultrathink = matches!(
+        (family, version),
+        ("opus", (5, 5) | (5, 0) | (4, 8) | (4, 7) | (4, 6))
+            | ("sonnet", (5, 0) | (5, 5) | (4, 6))
+            | ("haiku", (5, 5))
+    ) || fable_5;
+    let ultracode = matches!(
+        (family, version),
+        ("opus", (5, 5) | (5, 0) | (4, 8))
+            | ("sonnet", (5, 5))
+            | ("haiku", (5, 5))
+    ) || fable_5;
+    match (ultracode, ultrathink) {
+        (true, true) => &["ultracode", "ultrathink"],
+        (false, true) => &["ultrathink"],
+        _ => &[],
+    }
+}
+
+fn claude_fast_supported(family: &str, version: (u32, u32)) -> bool {
+    family == "opus" && matches!(version, (5, 5) | (5, 0) | (4, 8) | (4, 7) | (4, 6) | (4, 5))
 }
 
 fn is_claude_catalog_source(model: &RosterModel) -> bool {

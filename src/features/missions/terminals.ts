@@ -31,7 +31,7 @@ export interface TeamMember {
   /** Modelo y esfuerzo que el Squad eligió para este integrante; `null` = el de la TUI. */
   model?: string | null;
   effort?: string | null;
-  /** Modo Fast de Codex del Squad; solo Codex lo aplica. */
+  /** Modo Fast del Squad cuando la matriz y el modelo lo permiten. */
   fast?: boolean;
   accountId: string | null;
   /** O terminal nasce sem as credenciais herdadas da app (`KEY`/`TOKEN`/`SECRET`/`PASSWORD`, menos as
@@ -304,7 +304,7 @@ export function leadBriefing(
     '- `ags peer recruit "<nome>" --agent <id> --role <papel> [--model <id>] [--effort <nível>] [--fast]` — abre outro terminal já conectado a você quando a equipe não der conta (ex.: uma tarefa paralela, uma revisão independente).',
     `- Máximo de ${MAX_EXTRA_TERMINALS} terminais extras por missão; cada um custa memória e tokens. Só abra quando houver trabalho real para ele, dê a ele um nome e papel claros e feche (ou deixe encerrar) quando acabar.`,
     "- Use um agente que já esteja disponível (`ags peers` mostra a equipe) e não repita um papel que já está livre.",
-    "- `--fast` liga o modo Fast do Codex (só com `--agent codex`).",
+    "- `--fast` liga o modo Fast quando a capability TUI da matriz permite; Codex e Claude Code recebem configurações próprias do CLI.",
     ...(defaultSubagent === undefined ? [] : ["", ...subagentDefaultBriefing(defaultSubagent)]),
     "",
     "RESUMO AO FIM DE CADA TURNO:",

@@ -427,7 +427,7 @@ fn claude_catalog_without_native_shows_the_current_models_with_versions_and_effo
     assert_eq!(opus.label, "Claude Opus 5.5");
     assert_eq!(opus.aliases, ["opus"]);
     assert_eq!(opus.source.as_deref(), Some("claude_builtin"));
-    assert_eq!(opus.reasoning_levels.as_ref().unwrap(), &["low", "medium", "high", "xhigh", "max"]);
+    assert_eq!(opus.reasoning_levels.as_ref().unwrap(), &["low", "medium", "high", "xhigh", "max", "ultracode", "ultrathink"]);
     assert_eq!(opus.default_reasoning.as_deref(), Some("medium"));
     assert_eq!(opus.context, Some(1_000_000));
     // Nenhuma linha é alias cru.
@@ -459,9 +459,7 @@ fn claude_catalog_with_native_has_one_row_per_model_and_aliases_on_the_newest() 
 #[test]
 fn claude_builtins_respect_the_installed_cli_version() {
     let old = super::claude_catalog_from_sources("2.1.270 (Claude Code)", None, &[], vec![]);
-    let mut ids: Vec<_> = old.iter().map(|m| m.id.as_str()).collect();
-    ids.sort();
-    assert_eq!(ids, ["claude-haiku-5-5", "claude-sonnet-5-5"]);
+    assert!(old.is_empty());
     // Sem versão conhecida, nada é cortado.
     assert_eq!(super::claude_catalog_from_sources("", None, &[], vec![]).len(), 4);
 }
@@ -473,4 +471,24 @@ fn claude_label_from_id_reads_family_version_and_date() {
     assert_eq!(super::claude_label_from_id("claude-opus-5").as_deref(), Some("Claude Opus 5"));
     assert_eq!(super::claude_label_from_id("claude-opus-5-5-preview"), None);
     assert_eq!(super::claude_label_from_id("claude-code/spacexai/grok-build-0.1"), None);
+}
+
+#[test]
+fn claude_exposes_t3_ultrathink_ultracode_and_fast_only_on_supported_profiles() {
+    for (family, version) in [
+        ("fable", (5, 0)), ("fable", (5, 1)), ("fable", (5, 2)),
+        ("opus", (5, 0)), ("opus", (5, 5)), ("opus", (4, 8)),
+        ("sonnet", (5, 5)), ("haiku", (5, 5)),
+    ] {
+        assert_eq!(super::claude_effort_options(family, version), &["ultracode", "ultrathink"]);
+    }
+    for (family, version) in [("opus", (4, 6)), ("opus", (4, 7)), ("sonnet", (5, 0)), ("sonnet", (4, 6))] {
+        assert_eq!(super::claude_effort_options(family, version), &["ultrathink"]);
+    }
+    assert!(super::claude_effort_options("opus", (4, 5)).is_empty());
+    for version in [(5, 5), (5, 0), (4, 8), (4, 7), (4, 6), (4, 5)] {
+        assert!(super::claude_fast_supported("opus", version));
+    }
+    assert!(!super::claude_fast_supported("sonnet", (5, 5)));
+    assert!(!super::claude_fast_supported("haiku", (5, 5)));
 }

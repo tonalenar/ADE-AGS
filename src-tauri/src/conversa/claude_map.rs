@@ -88,11 +88,16 @@ pub fn launch_args_with_auto_compact(
     ]
     .map(String::from)
     .to_vec();
+    let mut settings = serde_json::Map::new();
     if let Some(window) = auto_compact_window.filter(|n| (100_000..=1_000_000).contains(n)) {
-        args.extend([
-            "--settings".into(),
-            json!({ "autoCompactWindow": window }).to_string(),
-        ]);
+        settings.insert("autoCompactWindow".into(), json!(window));
+    }
+    let special_effort = row.effort.as_deref();
+    if special_effort == Some("ultracode") {
+        settings.insert("ultracode".into(), json!(true));
+    }
+    if !settings.is_empty() {
+        args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]);
     }
     match start {
         Start::New(id) => args.extend(["--session-id".into(), id.into()]),
@@ -101,8 +106,10 @@ pub fn launch_args_with_auto_compact(
     if let Some(model) = row.model.as_deref().filter(|m| !m.is_empty()) {
         args.extend(["--model".into(), model.into()]);
     }
-    if let Some(effort) = row.effort.as_deref().filter(|e| !e.is_empty()) {
+    if let Some(effort) = special_effort.filter(|e| !e.is_empty() && !matches!(*e, "ultrathink" | "ultracode")) {
         args.extend(["--effort".into(), effort.into()]);
+    } else if special_effort == Some("ultracode") {
+        args.extend(["--effort".into(), "xhigh".into()]);
     }
     args
 }
@@ -117,6 +124,45 @@ pub fn user_message_with(text: &str, images: Vec<Value>) -> Value {
     let mut content = images;
     content.push(json!({ "type": "text", "text": text }));
     json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "session_id": "" })
+}
+
+/// T3 entrega Ultrathink como prefixo da mensagem, exceto comandos `/...` do Claude.
+pub fn prompt_with_effort(text: &str, effort: Option<&str>) -> String {
+    let trimmed = text.trim();
+    let command = trimmed.strip_prefix('/').and_then(|rest| rest.split_whitespace().next());
+    if trimmed.is_empty() || effort != Some("ultrathink") || command.is_some_and(|name| !name.contains('/')) {
+        return trimmed.to_string();
+    }
+    if trimmed.starts_with("Ultrathink:") { return trimmed.to_string(); }
+    format!("Ultrathink:\n{trimmed}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(effort: Option<&str>) -> ThreadRow {
+        ThreadRow {
+            id: "thread".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/tmp".into(),
+            title: "tarefa".into(), model: Some("claude-opus-5-5".into()), effort: effort.map(str::to_string),
+            access: "ask".into(), account_id: None, memory: None, parent_ref: None, parent_turn_id: None,
+            is_side_chat: false, state: "active".into(), created_at: 1, updated_at: 1,
+        }
+    }
+
+    #[test]
+    fn ultrathink_vira_prefixo_de_prompt_sem_interferir_em_comandos() {
+        assert_eq!(prompt_with_effort(" revisar isso ", Some("ultrathink")), "Ultrathink:\nrevisar isso");
+        assert_eq!(prompt_with_effort("/compact", Some("ultrathink")), "/compact");
+    }
+
+    #[test]
+    fn ultracode_entrega_xhigh_e_settings_da_cli() {
+        let args = launch_args(&row(Some("ultracode")), Start::New("sessao"));
+        assert!(args.windows(2).any(|pair| pair == ["--effort", "xhigh"]));
+        let settings = args.windows(2).find(|pair| pair[0] == "--settings").unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&settings[1]).unwrap(), json!({"ultracode": true}));
+    }
 }
 
 /// O que uma linha da saída significa para a conversa.

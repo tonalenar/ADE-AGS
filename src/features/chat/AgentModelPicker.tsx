@@ -8,14 +8,14 @@ import { DEFAULT_EFFORTS } from "@/features/canvas/tabTuning";
 import type { PickDraft } from "@/features/compare/types";
 import { getRoster, refreshRosterModels } from "@/features/runs/ipc";
 import type { Roster, RosterModel } from "@/features/runs/types";
-import { claudeEffortLevels, findModel, modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
+import { claudeEffortLevels, effectiveModelForEffort, findModel, modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
 import type { AgentInfo } from "@/features/tabs/types";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { matrixProviderForAgent, readHarnessCapability, useHarnessCapability, type HarnessSurface } from "./harnessCapabilities";
 
 import { CheckIcon, SearchIcon, StarIcon, ZapIcon } from "./chatIcons";
 import { AccessMenu } from "./AccessMenu";
-import { fastModeSupported, reasoningEffortSupported, type ChatAccess, type ProviderRuntimeConfig } from "./chatModel";
+import { reasoningEffortSupported, type ChatAccess, type ProviderRuntimeConfig } from "./chatModel";
 import { usePopover } from "./usePopover";
 
 const MAX_COMPARE_PICKS = 6;
@@ -112,7 +112,10 @@ function pickerCatalogOf(roster: Roster | null, agentId: string | null, account:
  * backend usa para aceitar o esforço: um modelo sem níveis não oferece esforço. O modelo padrão (sem linha) usa a lista padrão.
  */
 function effortChoices(agentId: string | null, model: string | null, catalog: RosterModel[]): string[] {
-  if (agentId === "claude-code") return claudeEffortLevels(model, catalog) ?? DEFAULT_EFFORTS;
+  if (agentId === "claude-code") {
+    const effectiveModel = effectiveModelForEffort(model, catalog);
+    return effectiveModel ? claudeEffortLevels(effectiveModel, catalog) ?? [] : [];
+  }
   const supported = reasoningOptions(model, catalog);
   return supported.length > 0 ? supported : DEFAULT_EFFORTS;
 }
@@ -173,7 +176,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   accountSlot?: React.ReactNode;
   /** O acesso da conversa, agrupado no mesmo painel de agente/modelo. */
   permission?: { value: ChatAccess; modes: ChatAccess[]; onChange?: (next: ChatAccess) => void };
-  /** Fast do Codex. Só aparece quando o catálogo confirma suporte para o modelo selecionado. */
+  /** Modo Fast. Só aparece quando a matriz e o catálogo confirmam suporte. */
   speed?: { fast: boolean; onChange: (fast: boolean) => void };
   /** Compara o texto atual com as escolhas feitas por Shift-clique. Só disponível ao criar conversa. */
   onCompare?: (picks: PickDraft[]) => void;
@@ -198,15 +201,22 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   const agent = agents.find((a) => a.id === value.agentId) ?? agents[0] ?? null;
   const tabAgent = tab === "fav" ? agent : agents.find((a) => a.id === tab) ?? agent;
   useHarnessCapability(harnessSurface, matrixProviderForAgent(tabAgent?.id), "start");
+  const fastCapability = useHarnessCapability(harnessSurface, matrixProviderForAgent(agent?.id), "fast_mode");
   const pools = usePools(tabAgent?.id ?? null);
   const current = pickerCatalogOf(roster, agent?.id ?? null, value.account, value.agentId, providerConfig);
   // O modelo salvo pode ser um alias (`opus`): a tela mostra a linha que ele resolve, com o nome e a versão dela.
-  const selectedModel = findModel(current, value.model) ?? null;
+  const selectedModel = findModel(current, value.model)
+    ?? (value.model === null ? findModel(current, "opus") : undefined)
+    ?? null;
   const modelLabel = value.model ? selectedModel?.label || value.model : t("chat.model.default");
   const efforts = agent ? effortsOf(agent.id, value.model, current, value.agentId, providerConfig) : [];
   const showReasoning = (!!permission || !!speed) && efforts.length > 0;
-  const showFast = !!speed && fastModeSupported(agent?.id) && selectedModel?.fastSupported === true;
+  const showFast = !!speed && fastCapability.support === "supported" && selectedModel?.fastSupported === true;
   const hasFooter = !!permission || !!speed || !!accountSlot || showAccount;
+
+  useEffect(() => {
+    if (speed?.fast && selectedModel?.fastSupported === false) speed.onChange(false);
+  }, [selectedModel?.fastSupported, speed?.fast, speed?.onChange]);
 
   useLayoutEffect(() => {
     if (!open) {
@@ -329,12 +339,14 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
     const catalog = pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig);
     const nextEfforts = effortsOf(r.agent.id, r.model, catalog, value.agentId, providerConfig);
     const effort = r.agent.id === agent?.id && (value.effort === null || nextEfforts.includes(value.effort)) ? value.effort : null;
-    const selected = r.model ? catalog.find((m) => m.id === r.model) : null;
+    const selected = findModel(catalog, r.model)
+      ?? (r.model === null ? findModel(catalog, "opus") : undefined);
+    const fastCapabilityAvailable = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "fast_mode").support === "supported";
     const pick: PickerComparePick = {
       agentId: r.agent.id,
       model: r.model,
       effort,
-      fast: fastModeSupported(r.agent.id) && speed?.fast === true && selected?.fastSupported === true,
+      fast: fastCapabilityAvailable && speed?.fast === true && selected?.fastSupported === true,
       account,
     };
     setComparePicks((current) => {
@@ -428,6 +440,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                   <option value="">{t("chat.effort.default")}</option>
                   {efforts.map((effort) => <option key={effort} value={effort}>{t(`chat.effort.${effort}`, { defaultValue: effort })}</option>)}
                 </PopupSelect>
+                {value.effort === "ultracode" && <span className="basis-full text-[10px] text-amber-700 dark:text-amber-300">{t("chat.picker.ultracodeWarning")}</span>}
               </div>
             )}
             <div role="listbox" aria-label={t("chat.picker.models")} tabIndex={0} onKeyDown={onModelListKeyDown} className="flex-1 min-h-0 cc-scroll-hidden p-2">
@@ -469,13 +482,16 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                         const sameAgent = r.agent.id === value.agentId;
                         const account = sameAgent ? value.account : null;
                         const providerModelChanged = sameAgent && r.agent.id.startsWith("local-acp-") && value.model !== r.model;
-                        const nextEfforts = effortsOf(r.agent.id, r.model, pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig), value.agentId, providerConfig);
+                        const nextCatalog = pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig);
+                        const nextEfforts = effortsOf(r.agent.id, r.model, nextCatalog, value.agentId, providerConfig);
                         const effort = !providerModelChanged && sameAgent && (value.effort === null || nextEfforts.includes(value.effort)) ? value.effort : null;
                         onChange({ agentId: r.agent.id, model: r.model, effort, account });
-                        const nextModel = r.model ? pickerCatalogOf(roster, r.agent.id, account, value.agentId, providerConfig).find((m) => m.id === r.model) : null;
+                        const nextModel = findModel(nextCatalog, r.model)
+                          ?? (r.model === null ? findModel(nextCatalog, "opus") : undefined);
+                        const fastAvailable = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "fast_mode").support === "supported";
                         // Ao escolher outro agente numa conversa aberta, a troca ainda vai passar
                         // por confirmação; não altere/reinicie o agente atual antes dela.
-                        if (sameAgent && speed?.fast && (!fastModeSupported(r.agent.id) || nextModel?.fastSupported !== true)) {
+                        if (sameAgent && speed?.fast && (!fastAvailable || nextModel?.fastSupported !== true)) {
                           speed.onChange(false);
                         }
                         setOpen(false);
@@ -532,11 +548,15 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                   <button key={effort ?? "default"} type="button" role="radio" aria-checked={(value.effort ?? null) === effort}
                     onClick={() => onChange({ ...value, effort })}
                     className="w-full min-h-11 px-3 rounded-lg flex items-center gap-2 text-left text-[15px] text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-white/[0.07]">
-                    <span className="flex-1">{effort ? t(`chat.effort.${effort}`, { defaultValue: effort }) : t("chat.effort.default")}</span>
+                    <span className="flex-1 flex flex-col">
+                      <span>{effort ? t(`chat.effort.${effort}`, { defaultValue: effort }) : t("chat.effort.default")}</span>
+                      {effort === "ultracode" && <span className="text-[11px] leading-4 text-gray-500 dark:text-white/45">{t("models.effort.ultracodeHint")}</span>}
+                    </span>
                     {(value.effort ?? null) === effort && <CheckIcon className="w-3.5 h-3.5 shrink-0" />}
                   </button>
                 ))}
               </div>
+              {value.effort === "ultracode" && <p role="note" className="px-3 pb-3 text-[11px] leading-4 text-amber-700 dark:text-amber-300">{t("chat.picker.ultracodeWarning")}</p>}
             </aside>
           )}
           </div>
@@ -629,11 +649,6 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
               {value === e && <CheckIcon className="w-3.5 h-3.5" />}
             </button>
           ))}
-          {fastModeSupported(agentId) && (
-            <div className="flex items-center gap-2 min-h-7 px-2 mt-1 pt-1 border-t border-gray-200 dark:border-white/10 text-chat-note text-gray-500 dark:text-white/45">
-              <ZapIcon className="w-3.5 h-3.5" /><span className="flex-1">{t("chat.picker.fast")}</span><span>{t("chat.picker.fastOff")}</span>
-            </div>
-          )}
         </div>
       )}
     </div>

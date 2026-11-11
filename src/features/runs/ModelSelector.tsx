@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "neogestify-ui-components";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
-import { modelIsUnverified, modelSelectionMode, modelSelectionPatch, modelsForAccount, reasoningOptions, withModelEffort, type ModelSelectionMode } from "@/features/squads/modelSelection";
+import { effectiveModelForEffort, findModel, modelIsUnverified, modelSelectionMode, modelSelectionPatch, modelsForAccount, reasoningOptions, withModelEffort, type ModelSelectionMode } from "@/features/squads/modelSelection";
 import { refreshRosterModels } from "./ipc";
 import type { Complexity, Roster } from "./types";
 
@@ -23,12 +23,13 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
   const agent = roster?.agents.find((entry) => entry.agentId === agentId);
   const catalog = modelsForAccount(agent, accountId, autoAccount);
   const mode = modelSelectionMode(model, complexity);
-  const selected = catalog.find((entry) => entry.id === model);
+  const selected = findModel(catalog, model);
   // "Manual" escolhido: o campo de texto fica, mesmo que o id digitado coincida com um do catálogo
   // (senão ele sumia no meio da digitação).
   const [manual, setManual] = useState(false);
   const pinned = manual ? undefined : selected;
-  const efforts = reasoningOptions(model, catalog);
+  const effortModel = effectiveModelForEffort(model, catalog);
+  const efforts = reasoningOptions(effortModel, catalog);
   const selectModel = (patch: { model: string | null; complexity: Complexity | null }) => onChange(withModelEffort(patch, reasoningEffort, catalog));
   const groups = [
     { label: t("models.native"), models: catalog.filter((entry) => entry.source === "native") },
@@ -75,12 +76,13 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
       </Button>
     </>}
     <label htmlFor={`${id}-effort`} className="text-[12px] font-medium text-gray-600 dark:text-gray-300">{t("models.effort")}</label>
-    <PopupSelect className="w-full" id={`${id}-effort`} value={reasoningEffort ?? ""} disabled={mode !== "specific"}
+    <PopupSelect className="w-full" id={`${id}-effort`} value={reasoningEffort ?? ""} disabled={mode !== "specific" && !(mode === "provider-default" && agentId === "claude-code" && effortModel !== null)}
       onChange={(event) => onChange({ model, complexity, reasoningEffort: event.target.value || null })}>
       <option value="">{t("models.effort.auto")}</option>
       {reasoningEffort && !efforts.includes(reasoningEffort) && <option value={reasoningEffort} disabled>{t(`models.effort.${reasoningEffort}`, { defaultValue: reasoningEffort })} · {t("squads.form.unverified")}</option>}
       {efforts.map((effort) => <option key={effort} value={effort}>{t(`models.effort.${effort}`, { defaultValue: effort })}</option>)}
     </PopupSelect>
+    {reasoningEffort === "ultracode" && <span role="note" className="text-[10px] leading-4 text-amber-700 dark:text-amber-300">{t("models.effort.ultracodeHint")}</span>}
     {mode === "specific" && selected?.reasoningLevels == null && <span className="text-[10px] text-gray-400">{t("models.effort.unknown")}</span>}
     {error && <span role="alert" className="text-[10px] text-red-600">{error}</span>}
   </div>;
