@@ -56,6 +56,8 @@ pub struct EngineCapabilities {
     pub automatic_compaction: bool,
     pub persistent_goal: bool,
     pub goal_pause_resume: bool,
+    /// A pergunta lateral pode nascer como fork nativo da sessão da origem (`conversa::fork`); sem isso, vale o recorte.
+    pub session_fork: bool,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +92,8 @@ impl Engine {
             )
                 .is_some_and(|support| support != crate::harness::capability::Support::Unsupported)
         };
+        let fork = crate::harness::matrix::find(crate::harness::capability::Surface::Chat, provider)
+            .is_some_and(|column| column.fork.promises());
         let mid_turn = if supported(crate::harness::capability::Capability::Steer) {
             MidTurnBehavior::Steer
         } else {
@@ -106,6 +110,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: true,
+                session_fork: fork,
             },
             Engine::Claude => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
@@ -115,6 +120,7 @@ impl Engine {
                 automatic_compaction: true,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
             Engine::OpenCode => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
@@ -124,6 +130,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
             Engine::Antigravity => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
@@ -133,6 +140,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
             Engine::Cursor => EngineCapabilities {
                 access_modes: &["ask", "full", "plan"],
@@ -142,6 +150,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
         }
     }
@@ -703,9 +712,17 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
     // Conversa que acabou de trocar de agente: o resumo do contexto vai na frente desta mensagem e só sai da fila
     // de pendências quando a mensagem foi de fato enviada (uma recusa não o perde).
     let (framed, carries_summary) = super::troca::before_send(db, thread_id, text);
+    // Pergunta lateral recém-forkada: o contexto portátil (ou o digest da origem) vai na frente da primeira mensagem, com
+    // a mesma regra: só sai da fila quando a mensagem foi de fato enviada.
+    let (framed, carries_fork) = super::fork_portatil::before_send(db, thread_id, &framed);
     let sent = send_framed(app, db, thread_id, &framed, mode, images).await;
-    if carries_summary && sent.is_ok() {
-        super::troca::summary_sent(db, thread_id);
+    if sent.is_ok() {
+        if carries_summary {
+            super::troca::summary_sent(db, thread_id);
+        }
+        if carries_fork {
+            super::fork_portatil::sent(db, thread_id);
+        }
     }
     sent
 }

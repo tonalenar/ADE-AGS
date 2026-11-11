@@ -17,7 +17,7 @@ fn row(agent: &str, access: &str) -> ThreadRow {
     ThreadRow {
         id: "t".into(), agent_id: agent.into(), remote_id: None, cwd: "/p".into(), title: String::new(),
         model: Some("anthropic/claude-sonnet-5-5".into()), effort: Some("high".into()), access: access.into(), account_id: None, memory: None,
-        parent_ref: None, parent_turn_id: None, is_side_chat: false,
+        parent_ref: None, parent_turn_id: None, is_side_chat: false, fork_mode: None, fork_reason: None,
         state: "active".into(), created_at: 1, updated_at: 1,
     }
 }

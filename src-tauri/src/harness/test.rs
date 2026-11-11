@@ -275,6 +275,7 @@ fn every_claim() -> Vec<(String, Claim)> {
             claims.push((format!("{}/{}/{}", column.surface.id(), column.provider, cell.capability.id()), cell.claim));
         }
         claims.push((format!("{}/{}/ags_mcp", column.surface.id(), column.provider), column.ags_mcp));
+        claims.push((format!("{}/{}/fork", column.surface.id(), column.provider), column.fork));
     }
     claims
 }
@@ -501,6 +502,15 @@ fn a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor() {
         let goal = column.claim(Capability::Goal).support;
         assert_eq!(declared.persistent_goal, goal != Support::Unsupported, "{}: goal", column.provider);
         assert_eq!(declared.plan, column.claim(Capability::Plan).support != Support::Unsupported, "{}: plan", column.provider);
+        assert_eq!(declared.session_fork, column.fork.promises(), "{}: fork", column.provider);
+    }
+}
+
+#[test]
+fn o_fork_da_pergunta_lateral_so_existe_no_chat_do_claude_e_do_codex() {
+    for column in matrix() {
+        let esperado = column.surface == Surface::Chat && matches!(column.provider, "claude-code" | "codex");
+        assert_eq!(column.fork.promises(), esperado, "{}/{}: fork", column.surface.id(), column.provider);
     }
 }
 

@@ -62,11 +62,17 @@ pub fn access_of_mode(mode: &str) -> Option<&'static str> {
     }
 }
 
-/// Como o processo abre a sessão do Claude: uma nova com o id escolhido pelo app, ou a retomada.
+/// Como o processo abre a sessão do Claude: uma nova com o id escolhido pelo app, a retomada, ou o fork de outra
+/// sessão (a pergunta lateral nasce como cópia da conversa de origem, ver `fork`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Start<'a> {
     New(&'a str),
     Resume(&'a str),
+    /// `--resume <from> --fork-session --session-id <id>`: o Claude copia a transcrição de `from` para a sessão nova
+    /// `id` (escolhida pelo app) e a origem não é tocada. `--session-id` com `--resume` só vale junto de `--fork-session`.
+    /// `at` = o uuid da última mensagem do agente num turno concluído (`--resume-session-at`, só em modo `-p`): a cópia
+    /// termina ali, e o que a origem escreve depois (um turno em andamento) não entra.
+    Fork { from: &'a str, id: &'a str, at: Option<&'a str> },
 }
 
 /// Os argumentos do `claude` de uma conversa. Pura.
@@ -97,6 +103,12 @@ pub fn launch_args_with_auto_compact(
     match start {
         Start::New(id) => args.extend(["--session-id".into(), id.into()]),
         Start::Resume(id) => args.extend(["--resume".into(), id.into()]),
+        Start::Fork { from, id, at } => {
+            args.extend(["--resume".into(), from.into(), "--fork-session".into(), "--session-id".into(), id.into()]);
+            if let Some(at) = at.filter(|uuid| !uuid.is_empty()) {
+                args.extend(["--resume-session-at".into(), at.into()]);
+            }
+        }
     }
     if let Some(model) = row.model.as_deref().filter(|m| !m.is_empty()) {
         args.extend(["--model".into(), model.into()]);
@@ -173,9 +185,17 @@ pub struct Mapper {
     /// As ferramentas que a pessoa negou.
     denied: HashSet<String>,
     interrupted: bool,
+    /// O `uuid` da última mensagem do agente do turno (a linha `assistant` do fio principal, nunca a de um subagente):
+    /// o ponto em que o fork da pergunta lateral corta a transcrição. `take_end_uuid` o entrega no fim do turno.
+    end_uuid: Option<String>,
 }
 
 impl Mapper {
+    /// O uuid da última mensagem do agente do turno que acabou, uma vez só (o próximo turno começa sem ele).
+    pub fn take_end_uuid(&mut self) -> Option<String> {
+        self.end_uuid.take()
+    }
+
     /// A pessoa negou esta ferramenta: o resultado dela aparece como negado.
     pub fn deny(&mut self, tool_use_id: &str) {
         self.denied.insert(tool_use_id.to_string());
@@ -197,7 +217,12 @@ impl Mapper {
         let at = Some(str_of(line, "timestamp").and_then(parse_ts_ms).unwrap_or(now));
         match str_of(line, "type").unwrap_or("") {
             "system" => self.system(line),
-            "assistant" => self.assistant(line, at),
+            "assistant" => {
+                if let Some(uuid) = str_of(line, "uuid").filter(|uuid| !uuid.is_empty()) {
+                    self.end_uuid = Some(uuid.to_string());
+                }
+                self.assistant(line, at)
+            }
             "user" => self.user(line),
             "stream_event" => delta_of(line).into_iter().collect(),
             "result" => {

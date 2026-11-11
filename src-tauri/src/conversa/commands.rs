@@ -32,6 +32,14 @@ pub fn chat_thread_create(
     api::create(&db, NewThread { agent_id, cwd, workspace_id, title, model, effort, access, account_id, parent_ref })
 }
 
+/// Faz a pergunta lateral nascer como cópia da conversa de origem (fork nativo) ou diz que cai no recorte, e por quê.
+/// Chamada depois de criar a pergunta e antes da primeira mensagem. A origem não é alterada nem interrompida.
+#[tauri::command]
+pub async fn chat_side_chat_fork(app: AppHandle, db: State<'_, DbConnection>, thread_id: String) -> Result<super::fork::Outcome, String> {
+    let db = db.inner().clone();
+    super::fork::fork_side_chat(&app, &db, &thread_id).await
+}
+
 #[tauri::command]
 pub async fn chat_side_chat_delete(db: State<'_, DbConnection>, thread_id: String) -> Result<(), String> {
     let db = db.inner().clone();

@@ -288,7 +288,7 @@ mod claude {
         ThreadRow {
             id: "t".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/p".into(), title: String::new(),
             model: Some("haiku".into()), effort: Some("low".into()), access: access.into(), account_id: None, memory: None,
-            parent_ref: None, parent_turn_id: None, is_side_chat: false,
+            parent_ref: None, parent_turn_id: None, is_side_chat: false, fork_mode: None, fork_reason: None,
             state: "active".into(), created_at: 1, updated_at: 1,
         }
     }
