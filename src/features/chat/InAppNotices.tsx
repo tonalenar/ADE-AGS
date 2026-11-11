@@ -26,6 +26,15 @@ const NOTICE_ICON = {
 const NOTICE_MS = 5000;
 
 /**
+ * Abre a conversa do aviso pela seleção única (`selectConversation`), que cobre a aba de TUI e a conversa por
+ * protocolo (`thread:<id>`). Carregada no clique, e não no import: o aviso não puxa o canvas para o entry da casca.
+ */
+export async function abrirConversaDoAviso(ref: string): Promise<void> {
+  const { selectConversation } = await import("@/features/chat/unified/selectionActions");
+  selectConversation(ref);
+}
+
+/**
  * Ouve as conversas e avisa, no canto, quando outra termina, falha ou pede a sua vez. Só com a janela em
  * foco: sem foco, o sistema cuida das missões (`notifier.rs`). A conversa à vista não avisa. Não desenha nada.
  *
@@ -53,7 +62,12 @@ export function InAppNotices() {
     const notices: ConversationNotice[] = noticesBetween(before, states, selectedRef);
     for (const notice of notices) {
       const title = conversations.find((c) => c.ref === notice.ref)?.title ?? "";
-      void AlertaToast(title, t(NOTICE_TEXT_KEY[notice.kind]), NOTICE_ICON[notice.kind], NOTICE_MS);
+      void AlertaToast(title, t(NOTICE_TEXT_KEY[notice.kind]), NOTICE_ICON[notice.kind], NOTICE_MS, "top-end", {
+        label: t("chat.inbox.open"),
+        onClick: () => {
+          abrirConversaDoAviso(notice.ref).catch((error: unknown) => console.error("[aviso] não foi possível abrir a conversa", error));
+        },
+      });
     }
   }, [states, selectedRef, enabled, conversations, t]);
 
