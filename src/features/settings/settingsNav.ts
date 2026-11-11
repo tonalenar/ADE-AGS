@@ -127,6 +127,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
 
   { id: "shortcuts", page: "shortcuts", anchor: "shortcuts-main", titleKey: "settings.shortcuts" },
 
+  { id: "providers.list", page: "accounts", tab: "provedores", anchor: "providers-list", titleKey: "providers.list", keywordKeys: ["providers.add"] },
   { id: "providers.accounts", page: "accounts", tab: "contas", anchor: "providers-accounts", titleKey: "settings.accounts" },
   { id: "providers.tuis", page: "accounts", tab: "tuis", anchor: "providers-tuis", titleKey: "settings.tuis" },
   { id: "providers.autoUpdate", page: "accounts", tab: "tuis", anchor: "providers-tuis", titleKey: "settings.agentUpdates.label" },

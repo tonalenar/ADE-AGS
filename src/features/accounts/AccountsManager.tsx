@@ -86,6 +86,7 @@ export function AccountsManager({ focus }: { focus?: AccountsSection | null }) {
   }, [section, shown]);
 
   const agent = section?.kind === "agent" ? shown.find((c) => c.agentId === section.id) : undefined;
+  const antigravityCapable = shown.some((c) => c.agentId === "antigravity");
 
   return (
     <div className="flex h-[560px] min-h-0 overflow-hidden rounded-xl bg-white shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-surface dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55)]">
@@ -113,10 +114,11 @@ export function AccountsManager({ focus }: { focus?: AccountsSection | null }) {
             );
           })}
 
-          <NavItem active={section?.kind === "agent" && section.id === "antigravity"}
+          {/* Com perfil por HOME (macOS) o Antigravity já está na lista acima; sem ele, fica o OAuth do app. */}
+          {!antigravityCapable && <NavItem active={section?.kind === "agent" && section.id === "antigravity"}
             onClick={() => setSection({ kind: "agent", id: "antigravity" })}
             icon={<UserIcon className="w-3.5 h-3.5" />} label="Antigravity" count={0}
-            title={t("accounts.antigravity.connect")} />
+            title={t("accounts.antigravity.connect")} />}
           <NavHeading>{t("accounts.group.git")}</NavHeading>
           {FORGE_KINDS.map((kind) => {
             const n = gitAccounts.filter((a) => a.kind === kind).length;
@@ -145,7 +147,7 @@ export function AccountsManager({ focus }: { focus?: AccountsSection | null }) {
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
         {section?.kind === "git" ? (
           <GitAccountsPane kind={section.id} />
-        ) : section?.kind === "agent" && section.id === "antigravity" ? (
+        ) : section?.kind === "agent" && section.id === "antigravity" && !antigravityCapable ? (
           <AntigravityAccountsPane />
         ) : agent ? (
           <AgentAccountsPane agent={agent} />

@@ -56,6 +56,9 @@ pub enum DefaultHome {
     /// `XDG_DATA_HOME` si está definida en el momento de leer; si no, `<home>/.local/share`.
     /// El marcador de OpenCode ya incluye el subdirectorio `opencode/`.
     XdgDataHome,
+    /// O próprio home do usuário. Antigravity guarda o login fora de `~/.gemini` (no macOS, no
+    /// Keychain do usuário, achado a partir do home), então a conta isolada é um HOME inteiro.
+    UserHome,
 }
 
 /// Desde dónde se lee el marcador de login de la cuenta del sistema.
@@ -92,6 +95,9 @@ pub struct ProfileDef {
     /// de la app (una API key en el entorno pasa por encima de la suscripción del perfil).
     /// Se sacan cuando el proceso corre con una cuenta de la app, no con la del sistema.
     pub overriding_env: &'static [&'static str],
+    /// Arquivos (relativos ao perfil) que, existindo e não vazios, provam o login. São
+    /// credenciais: só se olha se existem, **nunca se abrem**. Vazio = vale `marker`.
+    pub presence_markers: &'static [&'static str],
 }
 
 /// Cómo recibe una TUI el servidor MCP que le enchufa la app (el navegador y la
@@ -242,6 +248,7 @@ pub const AGENTS: &[AgentDef] = &[
                 "CLAUDE_CODE_USE_BEDROCK",
                 "CLAUDE_CODE_USE_VERTEX",
             ],
+            presence_markers: &[],
         }),
         resume: Some("--resume {session}"),
         assign_session: Some("--session-id {session}"),
@@ -284,6 +291,7 @@ pub const AGENTS: &[AgentDef] = &[
             // `codex exec` usa esta key antes que el login de CODEX_HOME. `OPENAI_API_KEY` no se
             // toca: es la que suelen necesitar los tests del propio proyecto.
             overriding_env: &["CODEX_API_KEY"],
+            presence_markers: &[],
         }),
         resume: Some("resume {session}"),
         // Codex 0.163: sem flag para escolher o id de uma sessão interativa nova (só `codex resume <id>`).
@@ -314,6 +322,7 @@ pub const AGENTS: &[AgentDef] = &[
             system_marker: SystemMarkerRoot::DefaultDir,
             // OpenCode suma las keys del entorno como providers extra; no reemplazan el login.
             overriding_env: &[],
+            presence_markers: &[],
         }),
         resume: Some("--session {session}"),
         // OpenCode 2.0.31: `--session <id>` «continua OU CRIA se não existir» (verificado: `opencode run -s ses_… ` listou a
@@ -374,8 +383,29 @@ pub const AGENTS: &[AgentDef] = &[
         // `<workspace>/.agents/skills/<nome>/SKILL.md`, a mesma pasta do Codex e do Gemini: sem isto
         // a skill `ags-orchestrator` nunca chegava ao Antigravity.
         skills_dir: Some(".agents/skills"),
-        // Native OS keyring account. Task config isolation does not isolate OAuth accounts.
-        profile: None,
+        // Contas por HOME isolado: no `agy` 1.5.5 (macOS) o login vem do Keychain achado a partir do HOME e
+        // um HOME sem `Library` volta a pedir login (verificado; `GEMINI_HOME` e as chaves de API por
+        // variável NÃO isolam nem autenticam o `agy`). Só no macOS: em Windows/Linux o cofre é outro e
+        // o isolamento não foi verificado. Ver `accounts/antigravity_home.rs`.
+        profile: if cfg!(target_os = "macos") {
+            Some(ProfileDef {
+                env_var: "HOME",
+                login_command: "agy",
+                marker: ".gemini/antigravity-acp/antigravity-oauth-token",
+                label_path: &[],
+                default_home: DefaultHome::UserHome,
+                system_marker: SystemMarkerRoot::DefaultDir,
+                // O `agy` aceita credencial por variável (as mesmas que `usage/agy.rs` limpa): apontaria
+                // para outra conta que não a do perfil.
+                overriding_env: &["JETSKI_OAUTH_TOKEN", "AGY_ADC_AUTH", "GEMINI_API_KEY"],
+                presence_markers: &[
+                    ".gemini/antigravity-acp/antigravity-oauth-token",
+                    ".gemini/antigravity-acp/acp_token.json",
+                ],
+            })
+        } else {
+            None
+        },
         resume: None,
         assign_session: None,
         assign_id_prefix: "",

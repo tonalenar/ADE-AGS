@@ -272,8 +272,26 @@ fn check_cli(agent_id: &str, env: &HashMap<String, String>) -> AccountHealth {
             Some(out) => parse_opencode_list(&String::from_utf8_lossy(&out.stdout)),
             None => AccountHealth::new(HealthStatus::Unknown, "could not run opencode"),
         },
+        // `agy models` não gasta tokens e só lista modelos com login válido.
+        "antigravity" => match run_cli(agent_id, &["models"], env) {
+            Some(out) => parse_antigravity_models(out.status.success(), &combined(&out)),
+            None => AccountHealth::new(HealthStatus::Unknown, "could not run agy"),
+        },
         other => AccountHealth::new(HealthStatus::Unknown, format!("no health check for {other}")),
     }
+}
+
+/// `agy models`: com login imprime "id<TAB>nome" por modelo; sem ele, "Please sign in…".
+pub(crate) fn parse_antigravity_models(success: bool, out: &str) -> AccountHealth {
+    if out.to_lowercase().contains("sign in") {
+        return AccountHealth::new(HealthStatus::NotLoggedIn, "Not signed in");
+    }
+    let models = out.lines().filter(|l| l.contains('\t')).count();
+    if success && models > 0 {
+        return AccountHealth::new(HealthStatus::Ok, format!("{models} models"));
+    }
+    let line = out.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("Fetching")).unwrap_or("no output");
+    AccountHealth::new(HealthStatus::Unknown, line.chars().take(120).collect::<String>())
 }
 
 pub(crate) fn combined(out: &std::process::Output) -> String {

@@ -249,6 +249,22 @@ impl AgentAdapter for Antigravity {
     fn headless(&self) -> Option<Box<dyn crate::runs::HeadlessAgent + Send + Sync>> {
         Some(Box::new(crate::runs::Antigravity::default()))
     }
+    /// As contas por HOME valem para terminais e conversas. A Frota roda o `agy` num home temporário
+    /// próprio (`runs/antigravity.rs`) e não aplica o da conta: oferecê-las ali atribuiria o gasto à
+    /// conta errada.
+    fn capabilities(&self) -> Capabilities {
+        let def = self.def();
+        Capabilities {
+            accounts: false,
+            sessions: def.sessions != SessionSource::None,
+            resume: def.resume.is_some(),
+            skills: def.skills_dir.is_some(),
+            mcp: def.mcp != McpStyle::None || self.has_task_mcp(),
+            models: !matches!(def.models, ModelSource::Unknown),
+            headless: self.has_headless(),
+            orchestration: self.supports_orchestration(),
+        }
+    }
 }
 static ANTIGRAVITY: Antigravity = Antigravity;
 static ADAPTERS: [&dyn AgentAdapter; 9] = [&CLAUDE, &GEMINI, &CODEX, &OPENCODE, &KIMI, &HERMES, &ANTIGRAVITY, &CURSOR, &BASH];

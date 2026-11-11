@@ -5,6 +5,7 @@ import type { AgentInfo } from "@/features/tabs/types";
 
 import { useAgentsStore } from "./store";
 import { useLocalAcpStore } from "./localAcpStore";
+import { useProvidersStore } from "@/features/providers/store";
 
 /**
  * Las TUIs que se pueden lanzar ahora mismo: las detectadas en el sistema más las que
@@ -23,6 +24,13 @@ export function useAvailableAgents({ includeLocalAcp = false }: { includeLocalAc
   const localProviders = useLocalAcpStore((s) => s.providers);
   const localProvidersLoaded = useLocalAcpStore((s) => s.loaded);
   const loadLocalProviders = useLocalAcpStore((s) => s.load);
+  // Provedores desligados em Configurações → Provedores não aparecem nos seletores de nova aba.
+  const disabledProviders = useProvidersStore((s) => s.disabled);
+  const providersLoaded = useProvidersStore((s) => s.loaded);
+  const loadProviders = useProvidersStore((s) => s.load);
+  useEffect(() => {
+    if (!providersLoaded) void loadProviders().catch(console.error);
+  }, [providersLoaded, loadProviders]);
 
   useEffect(() => {
     if (includeLocalAcp && !localProvidersLoaded) void loadLocalProviders().catch(console.error);
@@ -47,7 +55,7 @@ export function useAvailableAgents({ includeLocalAcp = false }: { includeLocalAc
           isCustom: true,
           isStructured: true,
         })) : []),
-      ].filter((a) => a.available),
-    [detectedAgents, customAgents, includeLocalAcp, localProviders]
+      ].filter((a) => a.available && !disabledProviders.includes(a.id)),
+    [detectedAgents, customAgents, includeLocalAcp, localProviders, disabledProviders]
   );
 }

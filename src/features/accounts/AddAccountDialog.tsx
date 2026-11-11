@@ -17,6 +17,8 @@ interface AddAccountDialogProps {
    *  vuelve a preguntar: ya lo elegiste al entrar ahí. */
   agentId: string;
   onClose: () => void;
+  /** Com qual forma de entrada o formulário abre (a página Providers já a escolheu). */
+  initialMode?: "login" | "api_key";
 }
 
 /**
@@ -32,7 +34,7 @@ interface AddAccountDialogProps {
  * versiones. Reimplementarlo significaría manejar credenciales acá adentro y romperse en la
  * próxima actualización de la TUI. Corriendo el login real, la app nunca ve una credencial.
  */
-export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
+export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: AddAccountDialogProps) {
   const { t } = useTranslation();
   const capable = useAccountsStore((s) => s.capable);
   const accounts = useAccountsStore((s) => s.accounts);
@@ -41,7 +43,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const checkHealth = useAccountsStore((s) => s.checkHealth);
   const load = useAccountsStore((s) => s.load);
   const [name, setName] = useState("");
-  const [mode, setMode] = useState<"login" | "api_key">("login");
+  const [mode, setMode] = useState<"login" | "api_key">(initialMode);
   const [apiKey, setApiKey] = useState("");
   const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,7 +54,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const agent = capable.find((c) => c.agentId === agentId);
   const seen = useTabsStore((s) => s.detectedAgents.some((a) => a.id === agentId && a.available));
   const taken = accounts.some((a) => a.agentId === agentId && a.name === name.trim());
-  const form = agent ? accountFormMode(agentId, programPresent(agent.installed, seen)) : "blocked";
+  const form = agent ? accountFormMode(agentId, programPresent(agent.installed, seen), true) : "blocked";
   const showKey = form === "api-key" || form === "both";
   const showLogin = form === "login" || form === "both";
   const usingKey = showKey && (form === "api-key" || mode === "api_key");

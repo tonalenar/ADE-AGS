@@ -41,4 +41,14 @@ describe("accountConnectOffer", () => {
     expect(accountConnectOffer("kimi-code", true)).toEqual({ kind: "found" });
     expect(accountConnectOffer("hermes", false)).toEqual({ kind: "program" });
   });
+
+  it("liga as contas do Antigravity como as dos outros quando o backend declara perfil", () => {
+    expect(accountConnectOffer("antigravity", true, true)).toEqual({ kind: "dialog" });
+    expect(accountFormMode("antigravity", true, true)).toBe("login");
+    // Perfil declarado, mas o `agy` não está na máquina: pede o programa em vez de abrir um login que não roda.
+    expect(accountConnectOffer("antigravity", false, true)).toEqual({ kind: "program" });
+    expect(accountFormMode("antigravity", false, true)).toBe("blocked");
+    // Sem perfil (Windows/Linux) nada muda: segue o OAuth do app.
+    expect(accountConnectOffer("antigravity", true, false)).toEqual({ kind: "oauth" });
+  });
 });

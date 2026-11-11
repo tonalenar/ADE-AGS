@@ -8,6 +8,7 @@ import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
+import { ProvidersSection } from "@/features/providers/ProvidersSection";
 import { ContasSection } from "@/features/accounts/ContasSection";
 import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { LocalAcpSection } from "@/features/agents/LocalAcpSection";
@@ -145,8 +146,8 @@ function ChatSettingsPage() {
   );
 }
 
-type ProvidersTab = "contas" | "tuis" | "acp";
-const PROVIDERS_TABS = ["contas", "tuis", "acp"] as const;
+type ProvidersTab = "provedores" | "contas" | "tuis" | "acp";
+const PROVIDERS_TABS = ["provedores", "contas", "tuis", "acp"] as const;
 
 type OrchestratorTab = "orquestrador" | "roteamento" | "prelaunch";
 const ORCHESTRATOR_TABS = ["orquestrador", "roteamento", "prelaunch"] as const;
@@ -161,15 +162,16 @@ function useTabFromTarget<T extends string>(page: SettingsPageId, tabs: readonly
   }, [target, page, tabs, setTab]);
 }
 
-/** Provedores e contas: as contas por agente, as TUIs (instaladas e as adicionadas à mão) e os agentes ACP. */
+/** Provedores e contas: a lista de provedores com login e liga/desliga (T3), as contas por agente, as TUIs (instaladas e as adicionadas à mão) e os agentes ACP. */
 function ProvidersPage() {
   const { t } = useTranslation();
-  const [tab, setTab] = useState<ProvidersTab>("contas");
+  const [tab, setTab] = useState<ProvidersTab>("provedores");
   useTabFromTarget("accounts", PROVIDERS_TABS, setTab);
   return (
     <>
       <SettingsSubTabs<ProvidersTab>
         items={[
+          { id: "provedores", label: t("settings.providers.tab") },
           { id: "contas", label: t("settings.accounts") },
           { id: "tuis", label: t("settings.tuis") },
           { id: "acp", label: t("settings.agents.acp.tab") },
@@ -177,6 +179,7 @@ function ProvidersPage() {
         value={tab}
         onChange={setTab}
       />
+      {tab === "provedores" && <SettingsAnchor id="providers-list"><ProvidersSection /></SettingsAnchor>}
       {tab === "contas" && <SettingsAnchor id="providers-accounts"><ContasSection /></SettingsAnchor>}
       {tab === "tuis" && (
         <SettingsAnchor id="providers-tuis">
