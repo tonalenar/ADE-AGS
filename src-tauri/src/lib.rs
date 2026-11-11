@@ -69,6 +69,8 @@ pub mod testspeed;
 pub use terminal::SESSION_ENV;
 mod updates;
 mod usage;
+mod storage_usage;
+mod diagnostics;
 pub mod util;
 mod window;
 
