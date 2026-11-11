@@ -117,7 +117,8 @@ export function buildSections(cards: ConversationCard[], opts: SectionOptions): 
     [...byProject.entries()].map(([project, items]) => ({
       project,
       items: ordered(items, projectSectionId(project)),
-      key: normalizeProjectPath(items[0].cwd),
+      // Agrupada por repositório, a identidade da seção é a raiz dele, e não a pasta da primeira conversa.
+      key: normalizeProjectPath(items[0].repoKey ?? items[0].cwd),
       latest: newest(items),
     })),
     opts.projectOrder ?? DEFAULT_PROJECT_ORDER_PREFS,

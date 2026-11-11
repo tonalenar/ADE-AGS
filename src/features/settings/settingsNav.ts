@@ -106,6 +106,9 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "chat.compact", page: "chat", anchor: "chat-compact", titleKey: "chat.settings.claudeCompact.title" },
 
   { id: "threads.autoSettle", page: "threads", anchor: "threads-auto-settle", titleKey: "settings.threads.autoSettle.title", keywordKeys: ["settings.threads.autoSettle.desc"] },
+  { id: "threads.title", page: "threads", anchor: "threads-text", titleKey: "settings.threads.title.title", keywordKeys: ["settings.threads.title.desc", "settings.threads.title.instructions"] },
+  { id: "threads.limit", page: "threads", anchor: "threads-text", titleKey: "settings.threads.limit.title", keywordKeys: ["settings.threads.limit.desc"] },
+  { id: "projects.defaults", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.defaults.title", keywordKeys: ["settings.projects.defaults.desc", "settings.projects.defaults.fallback"] },
   { id: "chat.snooze", page: "chat", anchor: "chat-snooze", titleKey: "chat.settings.snooze.title" },
 
   { id: "shortcuts", page: "shortcuts", anchor: "shortcuts-main", titleKey: "settings.shortcuts" },

@@ -28,6 +28,13 @@ import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { ChatSegmented, SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { buildProjectRows, iconValueOf, withAgentEnabled, type ProjectRow } from "@/features/settings/projectsSettingsModel";
 import { useProjectScopeStore } from "@/features/settings/projectScope";
+import { ProjectDefaultsSetting } from "@/features/settings/ProjectDefaultsSettings";
+import {
+  PROJECT_GROUPING_MODES,
+  saveProjectGrouping,
+  useProjectGrouping,
+  type ProjectGroupingMode,
+} from "@/features/chat/sidebar/projectGrouping";
 
 /**
  * Configurações → Projetos (no grupo Código, como no T3 Code). Aplica os ajustes a um projeto escolhido, no
@@ -80,8 +87,25 @@ export function ProjectOrderSetting() {
             options={PROJECT_ORDER_MODES.map((mode) => ({ value: mode, label: t(`settings.projects.order.${mode}`) }))}
           />
         </SettingsRow>
+        <ProjectGroupingRow />
       </SettingsGroup>
     </SettingsSection>
+  );
+}
+
+/** Como a barra junta os checkouts do mesmo repositório: uma seção por pasta (como era) ou uma por repositório. */
+function ProjectGroupingRow() {
+  const { t } = useTranslation();
+  const mode = useProjectGrouping();
+  return (
+    <SettingsRow label={t("settings.projects.grouping.title")} hint={t(`settings.projects.grouping.hint.${mode}`)}>
+      <ChatSegmented<ProjectGroupingMode>
+        label={t("settings.projects.grouping.title")}
+        value={mode}
+        onChange={(next) => saveProjectGrouping(next)}
+        options={PROJECT_GROUPING_MODES.map((option) => ({ value: option, label: t(`settings.projects.grouping.${option}`) }))}
+      />
+    </SettingsRow>
   );
 }
 
@@ -195,6 +219,7 @@ function ProjectDetail({ row, onForgotten }: { row: ProjectRow; onForgotten: () 
       <ProjectNameSetting row={row} />
       <ProjectIconSetting row={row} />
       <ProjectAgentsSetting row={row} />
+      <ProjectDefaultsSetting cwd={row.cwd} />
       <SettingsGroup>
         <SettingsRow label={t("settings.projects.remove")} hint={t("settings.projects.remove.hint")}>
           <SmallButton label={t("settings.projects.remove")} onClick={async () => {

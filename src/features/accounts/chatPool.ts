@@ -21,10 +21,13 @@ export const saveChatPoolMode = (mode: ChatPoolMode) => setSetting(CHAT_POOL_MOD
 
 /** O que espera a resposta da pessoa numa conversa («Continuar na conta B?», «Voltar à A?»). */
 export interface ChatPoolPending {
-  kind: "switch" | "return" | "join";
+  kind: "switch" | "return" | "join" | "fallback";
   to: string | null;
   toLabel: string;
   request: string | null;
+  /** Só em `fallback`: o agente e o modelo reserva do projeto. */
+  agentId?: string | null;
+  model?: string | null;
 }
 
 export const chatPoolPending = (threadId: string) => invoke<ChatPoolPending | null>("chat_pool_pending", { threadId });

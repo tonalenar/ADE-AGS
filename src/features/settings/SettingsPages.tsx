@@ -49,6 +49,7 @@ import { SettingsAnchor, SettingsGroup, SettingsRow, SettingsSection, SettingsSu
 import { CustomAgentsSection } from "@/features/settings/CustomAgentsSection";
 import { ProjectDetailSettings, ProjectListSetting, ProjectOrderSetting, ProjectScopeBar } from "@/features/settings/ProjectsSettings";
 import { ThreadsSettings } from "@/features/settings/ThreadsSettings";
+import { ThreadsTextSettings } from "@/features/settings/ThreadsTextSettings";
 import { StorageSettings } from "@/features/settings/StorageSettings";
 import { DiagnosticsSettings } from "@/features/settings/DiagnosticsSettings";
 import { LicensesSetting } from "@/features/settings/LicensesSetting";
@@ -199,9 +200,17 @@ function ScheduledPage() {
   return <SettingsAnchor id="scheduled-main"><ScheduledTasksSection /></SettingsAnchor>;
 }
 
-/** Conversas: hoje, o "Concluir sozinho" (uma preferência deste aparelho). */
+/**
+ * Conversas: o "Concluir sozinho" (uma preferência deste aparelho), o título gerado por modelo e a retomada depois do
+ * limite de uso (as duas, no backend e locais).
+ */
 function ThreadsPage() {
-  return <SettingsAnchor id="threads-auto-settle"><ThreadsSettings /></SettingsAnchor>;
+  return (
+    <>
+      <SettingsAnchor id="threads-auto-settle"><ThreadsSettings /></SettingsAnchor>
+      <SettingsAnchor id="threads-text"><ThreadsTextSettings /></SettingsAnchor>
+    </>
+  );
 }
 
 /**

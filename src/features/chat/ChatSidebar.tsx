@@ -40,6 +40,7 @@ import { recordProjectsFirstSeen, useProjectOrderPrefs } from "./sidebar/project
 import { useAutoSettle } from "./sidebar/useAutoSettle";
 import { folderName, threadIdOf, threadKey } from "./structured/model";
 import { chatThreadRename, chatThreadSearch, type MessageSearchHit } from "./structured/ipc";
+import { chatThreadRegenerateTitle } from "./threadTextIpc";
 import { searchArchivedSessionMessages, type ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
 import { reloadThreads, settleThread, startStructured, useStructured } from "./structured/store";
 import { invalidateSearchableTimeline, searchableTimeline, searchTuiConversation, type TuiMessageSearchHit } from "./timeline/search";
@@ -351,6 +352,16 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     if (thread) void chatThreadRename(thread, title).then(() => reloadThreads()).catch(() => undefined);
     else useTabsStore.getState().renameTab(card.tabId, title);
   };
+  // «Regerar título»: o modelo escreve de novo o título de uma conversa por protocolo. Uma por vez, e o erro aparece.
+  const [titling, setTitling] = useState<string[]>([]);
+  const regenerateTitle = (thread: string) => {
+    if (titling.includes(thread)) return;
+    setTitling((list) => [...list, thread]);
+    chatThreadRegenerateTitle(thread)
+      .then(() => reloadThreads())
+      .catch((cause: unknown) => showBotToast({ title: t("chat.sidebar.regenerateTitleFailed"), text: String(cause), tone: "error" }))
+      .finally(() => setTitling((list) => list.filter((id) => id !== thread)));
+  };
   /** Roda a ação já, ou depois de confirmar, se a preferência de Configurações → Geral → Confirmações pedir. */
   const confirmFirst = (action: keyof ConfirmPrefs, run: () => void) => {
     if (!confirmPrefs[action]) {
@@ -427,6 +438,8 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
       else toggle();
     } },
     { key: "rename", label: t("chat.sidebar.rename"), icon: <PenIcon className="w-4 h-4" />, hint: "F2", onSelect: () => setRenaming(card.tabId) },
+    ...(threadIdOf(card.tabId) ? [{ key: "regenerate-title", label: t("chat.sidebar.regenerateTitle"), icon: <PenIcon className="w-4 h-4" />, disabled: titling.includes(threadIdOf(card.tabId)!),
+      onSelect: () => regenerateTitle(threadIdOf(card.tabId)!) }] : []),
     { key: "read", label: unread.includes(card.tabId) ? t("chat.sidebar.markRead") : t("chat.sidebar.markUnread"), icon: <EyeIcon className="w-4 h-4" />, onSelect: () => {
       const wasUnread = unread.includes(card.tabId);
       setUnread(card.tabId, !wasUnread);

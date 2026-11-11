@@ -1,6 +1,11 @@
 import type { ChatAccess } from "./chatModel";
 import type { ChatPrefs } from "./chatPrefs";
 import type { ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
+import { commitProjectDefaults, getProjectDefaults, isEmptyDefaults } from "./projectDefaultsStore";
+import { normalizeProjectPath } from "./projectPath";
+import type { ProjectChatDefaultsDto } from "./projectChatDefaults";
+
+export { normalizeProjectPath };
 
 /** Preferências de conversa que podem ser definidas por projeto. Conta e aparência ficam fora. */
 export type ChatProjectDefaults = Pick<ChatPrefs,
@@ -42,14 +47,6 @@ type OverrideStoreState =
 
 const stringOrNull = (value: unknown): string | null | undefined =>
   value === null ? null : typeof value === "string" && value.length > 0 ? value : undefined;
-
-/** Normaliza separadores e barras finais sem alterar a grafia real do caminho. */
-export function normalizeProjectPath(cwd: string): string {
-  const path = cwd.replace(/\\/g, "/");
-  if (/^[A-Za-z]:\/$/.test(path)) return path;
-  const withoutTrailingSlashes = path.replace(/\/+$/, "");
-  return withoutTrailingSlashes || (path.startsWith("/") ? "/" : "");
-}
 
 /** Valida snapshots completos para compatibilidade com consumidores antigos da função. */
 export function parseChatProjectDefaults(raw: unknown): ChatProjectDefaults | null {
@@ -225,6 +222,67 @@ export function loadChatProjectSettings(cwd: string | null): ChatProjectPrefsSna
   };
 }
 
+/**
+ * O registro do banco que corresponde ao que o aparelho tem fixado para o projeto. O modelo só entra junto com o
+ * agente (o banco guarda o par). O modelo reserva não vem daqui: o composer não o edita, então fica como está no
+ * espelho.
+ */
+export function projectDefaultsDto(cwd: string): ProjectChatDefaultsDto {
+  const defaults = loadChatProjectSettings(cwd).defaults ?? {};
+  const current = getProjectDefaults(cwd);
+  return {
+    cwd: normalizeProjectPath(cwd),
+    primary: defaults.agentId ? { agentId: defaults.agentId, model: defaults.model ?? null } : null,
+    fallback: current?.fallback ?? null,
+    workspace: defaults.worktree === undefined ? null : defaults.worktree ? "worktree" : "local",
+    access: defaults.access ?? null,
+  };
+}
+
+/** Manda ao banco o que o aparelho tem fixado. Sem espera: a tela já mostra o valor, e o composer segue sem o banco. */
+function pushToBackend(cwd: string): void {
+  const dto = projectDefaultsDto(cwd);
+  // Nada fixado e nada no banco: não há o que mandar.
+  if (isEmptyDefaults(dto) && !getProjectDefaults(cwd)) return;
+  commitProjectDefaults(dto, { notify: false }).catch(() => undefined);
+}
+
+/** As pastas que têm padrões gravados neste aparelho (o formato novo e o antigo). */
+export function localProjectPaths(): string[] {
+  const paths = new Set<string>(Object.keys(readLegacyAll()));
+  const state = readOverridesState();
+  if (state.kind === "valid") for (const path of Object.keys(state.projects)) paths.add(path);
+  return [...paths];
+}
+
+/**
+ * Traz do banco o que o aparelho ainda não tem para o projeto (uma instalação nova, ou o localStorage limpo).
+ * Só preenche campo ausente: o que a pessoa fixou aqui, ou mandou herdar, não é tocado. Devolve se mudou algo.
+ */
+export function adoptBackendDefaults(dto: ProjectChatDefaultsDto): boolean {
+  const state = readOverridesState();
+  if (state.kind !== "missing" && state.kind !== "valid") return false;
+  const path = normalizeProjectPath(dto.cwd);
+  const entry = state.projects[path] ?? { values: {}, inherit: [] };
+  const legacy = readLegacyAll()[path] ?? {};
+  const has = (field: ChatProjectDefaultField) =>
+    entry.inherit.includes(field) || Object.prototype.hasOwnProperty.call(entry.values, field) || Object.prototype.hasOwnProperty.call(legacy, field);
+  const incoming: Partial<ChatProjectDefaults> = {};
+  if (dto.primary) {
+    incoming.agentId = dto.primary.agentId;
+    incoming.model = dto.primary.model;
+  }
+  if (dto.access) incoming.access = dto.access;
+  if (dto.workspace) incoming.worktree = dto.workspace === "worktree";
+  let changed = false;
+  for (const field of Object.keys(incoming) as ChatProjectDefaultField[]) {
+    if (has(field)) continue;
+    (entry.values as Record<string, unknown>)[field] = incoming[field];
+    changed = true;
+  }
+  return changed ? writeEntry(path, entry) : false;
+}
+
 export function loadChatProjectDefaults(cwd: string | null): Partial<ChatProjectDefaults> | null {
   return loadChatProjectSettings(cwd).defaults;
 }
@@ -242,7 +300,9 @@ export function saveChatProjectDefaults(cwd: string, prefs: ChatPrefs): boolean 
     worktreeSubmodules: prefs.worktreeSubmodules ?? "none",
     structured: prefs.structured,
   };
-  return writeEntry(cwd, { values: defaults, inherit: [] });
+  const saved = writeEntry(cwd, { values: defaults, inherit: [] });
+  if (saved) pushToBackend(cwd);
+  return saved;
 }
 
 export function saveChatProjectField<K extends ChatProjectDefaultField>(cwd: string, field: K, value: ChatProjectDefaults[K]): boolean {
@@ -251,7 +311,27 @@ export function saveChatProjectField<K extends ChatProjectDefaultField>(cwd: str
   const entry = state.projects[normalizeProjectPath(cwd)] ?? { values: {}, inherit: [] };
   entry.values[field] = value;
   entry.inherit = entry.inherit.filter((candidate) => candidate !== field);
-  return writeEntry(cwd, entry);
+  const saved = writeEntry(cwd, entry);
+  if (saved) pushToBackend(cwd);
+  return saved;
+}
+
+/**
+ * Fixa vários campos de uma vez (uma gravação local e um envio ao banco). A página Projetos grava o par agente e
+ * modelo assim, para o banco nunca ver o agente novo com o modelo velho.
+ */
+export function saveChatProjectFields(cwd: string, patch: Partial<ChatProjectDefaults>): boolean {
+  const state = readOverridesState();
+  if (state.kind !== "missing" && state.kind !== "valid") return false;
+  const entry = state.projects[normalizeProjectPath(cwd)] ?? { values: {}, inherit: [] };
+  for (const field of Object.keys(patch) as ChatProjectDefaultField[]) {
+    if (!isProjectField(field) || !isValidFieldValue(field, patch[field])) return false;
+    (entry.values as Record<string, unknown>)[field] = patch[field];
+    entry.inherit = entry.inherit.filter((candidate) => candidate !== field);
+  }
+  const saved = writeEntry(cwd, entry);
+  if (saved) pushToBackend(cwd);
+  return saved;
 }
 
 /** Remove o valor deste campo; snapshots legados são ignorados para ele e a máquina volta a valer. */
@@ -264,7 +344,9 @@ export function inheritChatProjectField(cwd: string, field: ChatProjectDefaultFi
   entry.inherit = hasLegacyValue
     ? [...new Set([...entry.inherit, field])]
     : entry.inherit.filter((candidate) => candidate !== field);
-  return writeEntry(cwd, entry);
+  const saved = writeEntry(cwd, entry);
+  if (saved) pushToBackend(cwd);
+  return saved;
 }
 
 /** Oculta primeiro qualquer snapshot antigo; só então tenta apagar o legado, sem perda em falha parcial. */
@@ -292,5 +374,6 @@ export function clearChatProjectDefaults(cwd: string): boolean {
   } catch {
     // Os marcadores já foram gravados; o legado continua armazenado, mas não afeta os defaults ativos.
   }
+  pushToBackend(cwd);
   return true;
 }

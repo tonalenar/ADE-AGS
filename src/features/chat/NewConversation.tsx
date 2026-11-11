@@ -38,6 +38,8 @@ import {
   type ChatProjectDefaults,
   type ChatProjectPrefsSnapshot,
 } from "./chatProjectPrefs";
+import { chatProjectDefaultsEffective } from "./projectChatDefaults";
+import { useProjectDefaultsVersion } from "./projectDefaultsStore";
 import { clearProjectChatAgentPolicy, getProjectChatAgentPolicy, saveProjectChatAgentPolicy, type ProjectChatAgentPolicy } from "./projectChatPolicy";
 import { loadOrMigrateChatThreadEnvMode, readT3WorkspacePrefs, resolveChatThreadEnvMode, resolveChatWorktreeSubmodules, type ChatThreadEnvMode, type ChatWorkspaceModeSource } from "./chatWorkspacePrefs";
 import { showBotToast } from "@/shared/brand/botToastStore";
@@ -123,6 +125,8 @@ export function NewConversation({ projects, folder, onFolder }: {
   };
 
   const cwd = folder ?? prefs.cwd ?? activeCwd ?? projects[0]?.cwd ?? null;
+  // Muda quando os padrões do projeto mudam por fora do composer (a carga do banco e a página Projetos).
+  const defaultsVersion = useProjectDefaultsVersion(cwd);
   const project: ChatProject | null = projects.find((p) => p.cwd === cwd) ?? (cwd ? { cwd, name: baseName(cwd), branch: null } : null);
   const inheritedWorkspaceMode = resolveChatThreadEnvMode({
     projectOverride: projectDefaults?.worktree ?? null,
@@ -204,7 +208,27 @@ export function NewConversation({ projects, folder, onFolder }: {
       .catch((cause: unknown) => { if (alive) setWorkspaceSettingsError(String(cause)); })
       .finally(() => { if (alive) setWorkspaceSettingsLoadedCwd(cwd); });
     return () => { alive = false; };
-  }, [cwd]);
+  }, [cwd, defaultsVersion]);
+  // O modelo reserva do projeto: se o agente principal está sem limite de uso, a conversa nova já abre no reserva.
+  // É só o ponto de partida desta tela (não grava nada); trocar de agente depois vale.
+  const [fallbackNotice, setFallbackNotice] = useState<{ agent: string; until: number | null } | null>(null);
+  const accountForFallback = prefs.accountId;
+  useEffect(() => {
+    let alive = true;
+    setFallbackNotice(null);
+    if (!cwd) return () => { alive = false; };
+    chatProjectDefaultsEffective(cwd, accountForFallback)
+      .then(({ selection }) => {
+        if (!alive || !selection?.usedFallback) return;
+        const chosen = agents.find((candidate) => candidate.id === selection.agentId);
+        if (!chosen) return;
+        setPrefs((previous) => ({ ...previous, agentId: selection.agentId, model: selection.model }));
+        setFallbackNotice({ agent: chosen.label, until: selection.limitedUntil });
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+    // `agents` entra só para esperar o catálogo carregar; mudar de agente à mão não refaz a escolha.
+  }, [cwd, defaultsVersion, accountForFallback, agents.length]);
   const agent = projectAgents.find((a) => a.id === prefs.agentId) ?? projectAgents.find((a) => a.id === PREFERRED_AGENT) ?? projectAgents[0] ?? null;
   const mine = !!agent && prefs.agentId === agent.id;
   // Por protocolo (sem TUI) o agente tem os acessos e o Plano do motor dele; na TUI, os flags dela.
@@ -568,6 +592,13 @@ export function NewConversation({ projects, folder, onFolder }: {
         {workspaceSettingsError && <p role="alert" className="mt-3 px-2 text-chat-note text-amber-700 dark:text-amber-300">{t("chat.workspace.configError")}</p>}
         {projectSettingsError && <p role="alert" className="mt-3 px-2 text-chat-note text-red-600 dark:text-red-400">{t(projectSettings.storageError ? "chat.projectDefaults.storageUnreadable" : "chat.projectDefaults.storageError")}</p>}
         {projectPolicyError && <p role="alert" className="mt-3 px-2 text-chat-note text-red-600 dark:text-red-400">{t("chat.projectDefaults.policyError", { error: projectPolicyError })}</p>}
+        {fallbackNotice && prefs.agentId === agents.find((candidate) => candidate.label === fallbackNotice.agent)?.id && (
+          <p role="status" className="mt-3 px-2 text-chat-note text-amber-700 dark:text-amber-300">
+            {fallbackNotice.until
+              ? t("chat.projectDefaults.fallbackActive", { agent: fallbackNotice.agent, time: new Date(fallbackNotice.until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })
+              : t("chat.projectDefaults.fallbackActiveNoTime", { agent: fallbackNotice.agent })}
+          </p>
+        )}
         {projectPolicyLoaded && agents.length > 0 && projectAgents.length === 0 && <p role="status" className="mt-3 px-2 text-chat-note text-amber-700 dark:text-amber-300">{t("chat.projectDefaults.noEnabledAgents")}</p>}
       </div>
     </section>

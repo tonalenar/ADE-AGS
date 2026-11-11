@@ -41,6 +41,8 @@ import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
 import { runInShell } from "./shellTerminal";
 import { startProjectScriptSettleWatcher } from "./projectScriptAutomation";
+import { syncProjectDefaults } from "./projectDefaultsSync";
+import { applyProjectGrouping, buildRepoIndex, useProjectGrouping } from "./sidebar/projectGrouping";
 import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
@@ -72,10 +74,12 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const localProvidersLoaded = useLocalAcpStore((s) => s.loaded);
   const loadLocalProviders = useLocalAcpStore((s) => s.load);
   useEffect(() => { if (!localProvidersLoaded) void loadLocalProviders().catch(console.error); }, [localProvidersLoaded, loadLocalProviders]);
+  const projectGrouping = useProjectGrouping();
   const cards = useMemo(() => {
     const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? localProviders.find((a) => a.id === id)?.label ?? id;
-    return [...threadCards(threads, groups, labelOf, selectedThread), ...conversationCards(groups)].sort((a, b) => b.openedAt - a.openedAt);
-  }, [groups, threads, detected, localProviders, selectedThread]);
+    const all = [...threadCards(threads, groups, labelOf, selectedThread), ...conversationCards(groups)].sort((a, b) => b.openedAt - a.openedAt);
+    return applyProjectGrouping(all, projectGrouping, buildRepoIndex(groups));
+  }, [groups, threads, detected, localProviders, selectedThread, projectGrouping]);
   const projects = useMemo(() => chatProjects(groups), [groups]);
   const projectIdentities = useChatProjectIdentityList();
   const knownProjects = useMemo(() => {
@@ -129,6 +133,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   useEffect(() => startStructured(), []);
   useEffect(() => startQueueRunner(), []);
   useEffect(() => startProjectScriptSettleWatcher(), []);
+  // Concilia os padrões por projeto do aparelho com os do banco (ver `projectDefaultsSync.ts`).
+  useEffect(() => { void syncProjectDefaults().catch(() => undefined); }, []);
   // Uma conversa nova esquece a aba lembrada do painel: a próxima abertura mostra o estado vazio.
   useEffect(() => { if (composing) forgetLastPanel(); }, [composing]);
   // A caixa de permissões e o painel direito dividem o lado direito: abrir um fecha o outro.

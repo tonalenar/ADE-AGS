@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { chatPoolAccept, chatPoolDismiss, chatPoolPending, type ChatPoolPending } from "@/features/accounts/chatPool";
+import { chatLimitResumeCancel, chatLimitResumeGet, type LimitResumePlan } from "@/features/chat/threadTextIpc";
 
 import { agentSwitchOf } from "./agentSwitch";
 import { noticeDetail } from "./timelineModel";
@@ -32,7 +33,8 @@ export function NoticeRow({ item, onResend, threadId }: { item: TimelineItem; on
     );
   }
   const code = item.label ?? "";
-  if (code.startsWith("pool")) return <PoolNotice item={item} threadId={threadId} />;
+  if (code.startsWith("pool") || code.startsWith("fallback")) return <PoolNotice item={item} threadId={threadId} />;
+  if (code.startsWith("limit")) return <LimitNotice item={item} threadId={threadId} />;
   const known = KNOWN.includes(code);
   const detail = noticeDetail(item);
   return (
@@ -59,7 +61,7 @@ export function NoticeRow({ item, onResend, threadId }: { item: TimelineItem; on
 function PoolNotice({ item, threadId }: { item: TimelineItem; threadId?: string }) {
   const { t } = useTranslation();
   const code = item.label ?? "";
-  const asks = code === "poolAsk" || code === "poolReturnAsk" || code === "poolOffer";
+  const asks = code === "poolAsk" || code === "poolReturnAsk" || code === "poolOffer" || code === "fallbackOffer";
   const [pending, setPending] = useState<ChatPoolPending | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -88,10 +90,47 @@ function PoolNotice({ item, threadId }: { item: TimelineItem; threadId?: string 
       {asks && pending && (
         <div className="flex gap-2">
           <button type="button" onClick={accept} className={button}>
-            {t(pending.kind === "return" ? "chat.timeline.notice.poolReturnAccept" : pending.kind === "join" ? "chat.timeline.notice.poolJoinAccept" : "chat.timeline.notice.poolAccept")}
+            {t(pending.kind === "return" ? "chat.timeline.notice.poolReturnAccept" : pending.kind === "join" ? "chat.timeline.notice.poolJoinAccept" : pending.kind === "fallback" ? "chat.timeline.notice.fallbackAccept" : "chat.timeline.notice.poolAccept")}
           </button>
           <button type="button" onClick={dismiss} className={button}>{t("chat.timeline.notice.poolDismiss")}</button>
         </div>
+      )}
+      {error && <p role="alert" className="m-0 text-red-600 dark:text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Os avisos do limite de uso (`conversa::limite`): a retomada agendada (com «Cancelar retomada» enquanto ela vale), a
+ * retomada que aconteceu e a que não deu. A frase com a hora vem do backend; o título e o botão, do catálogo.
+ */
+function LimitNotice({ item, threadId }: { item: TimelineItem; threadId?: string }) {
+  const { t } = useTranslation();
+  const code = item.label ?? "";
+  const [plan, setPlan] = useState<LimitResumePlan | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (code !== "limitResume" || !threadId) return;
+    let alive = true;
+    chatLimitResumeGet(threadId).then((p) => alive && setPlan(p), () => {});
+    return () => { alive = false; };
+  }, [code, threadId]);
+
+  const cancel = () => {
+    if (!threadId) return;
+    setPlan(null);
+    chatLimitResumeCancel(threadId).catch((e) => setError(String(e)));
+  };
+  return (
+    <div role="status" className="flex flex-col gap-1 px-1 text-chat-note text-amber-700 dark:text-amber-400">
+      <p className="m-0 font-medium">{t(`chat.timeline.notice.${code}`, { defaultValue: code })}</p>
+      {item.text && <p className="m-0 break-words text-gray-600 dark:text-white/60">{item.text}</p>}
+      {plan && (
+        <button type="button" onClick={cancel}
+          className="self-start h-6 px-2 rounded-md border border-gray-200 dark:border-white/10 text-gray-700 dark:text-white/70 hover:bg-gray-100 dark:hover:bg-white/[0.06]">
+          {t("chat.timeline.notice.limitResumeCancel")}
+        </button>
       )}
       {error && <p role="alert" className="m-0 text-red-600 dark:text-red-400">{error}</p>}
     </div>
