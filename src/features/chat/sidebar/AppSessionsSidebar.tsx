@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { applyProjectGrouping, buildRepoIndex, useProjectGrouping } from "./projectGrouping";
 import { useNavigate } from "react-router-dom";
 
 import { useUiStore } from "@/app/uiStore";
@@ -40,14 +41,16 @@ export function AppSessionsSidebar({ groups, width }: { groups: RepoGroup[]; wid
   useEffect(() => startStructured(), []);
   useEffect(() => startQueueRunner(), []);
   useEffect(() => { if (!localProvidersLoaded) void loadLocalProviders().catch(console.error); }, [localProvidersLoaded, loadLocalProviders]);
+  const projectGrouping = useProjectGrouping();
   const cards = useMemo(() => {
     const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? localProviders.find((a) => a.id === id)?.label ?? id;
     // Os terminais de uma missão entram na lista como as demais conversas: o espelho da missão (`origin =
     // "mission"`) os agrupa sob o orquestrador com o selo "MISSÃO" (ver `TeamSidebar`). A seção de missões
     // (acima) segue sendo a lista das missões, com criar, iniciar e encerrar.
-    return [...threadCards(threads, groups, labelOf, null), ...conversationCards(groups)]
+    const all = [...threadCards(threads, groups, labelOf, null), ...conversationCards(groups)]
       .sort((a, b) => b.openedAt - a.openedAt);
-  }, [groups, threads, detected, localProviders]);
+    return applyProjectGrouping(all, projectGrouping, buildRepoIndex(groups));
+  }, [groups, threads, detected, localProviders, projectGrouping]);
   const closed = useMemo(() => {
     const open = new Set(cards.map((c) => c.cwd));
     return groups.flatMap((g) => g.workspaces).filter((w) => w.closed && !open.has(w.cwd)).map((w): ChatProject => ({ cwd: w.cwd, name: w.title, branch: w.branch }));

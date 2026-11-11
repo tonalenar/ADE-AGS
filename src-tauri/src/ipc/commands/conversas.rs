@@ -209,7 +209,24 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
     }) {
         return Err("A referência da conversa de origem é inválida".into());
     }
-    let agent_id = arg_str_opt(args, "agent")
+    // Sem conversa de origem, o projeto pode fixar o agente e o modelo (e o reserva, se o principal está sem limite).
+    // O pedido explícito sempre vale; a permissão e o workspace do projeto NÃO valem aqui: conversa aberta por agente
+    // começa supervisionada (abaixo).
+    let (asked_agent, asked_model) = {
+        let (agent, model) = (arg_str_opt(args, "agent"), arg_str_opt(args, "model"));
+        if parent.is_some() {
+            (agent, model)
+        } else {
+            let (inherited_agent, inherited_model) =
+                crate::project_chat_defaults::inherit_for_open(&db, &cwd, agent.as_deref(), model.as_deref());
+            // Um agente do projeto que não conversa por protocolo não serve aqui: vale o padrão de sempre.
+            match inherited_agent {
+                Some(id) if agent.is_none() && !api::structured_agent(&id) => (None, model),
+                other => (other, inherited_model),
+            }
+        }
+    };
+    let agent_id = asked_agent
         .or_else(|| parent.as_ref().map(|thread| thread.agent_id.clone()))
         .unwrap_or_else(|| "codex".into());
     if let Some(error) = api::unsupported_capability_error(&agent_id, crate::harness::capability::Capability::Start) {
@@ -234,7 +251,7 @@ pub(super) fn chat_new(app: &AppHandle, args: &Value) -> Result<Value, String> {
         title: arg_str_opt(args, "title").unwrap_or_else(|| title_of(&task)),
         cwd: cwd.clone(),
         workspace_id: None,
-        model: arg_str_opt(args, "model").or(inherited_model),
+        model: asked_model.or(inherited_model),
         effort: arg_str_opt(args, "effort").or(inherited_effort),
         // Aberta por um agente, a conversa começa supervisionada: o que ela rodar, a pessoa aprova.
         // Conversas-filhas também começam supervisionadas, sem herdar uma elevação de acesso.

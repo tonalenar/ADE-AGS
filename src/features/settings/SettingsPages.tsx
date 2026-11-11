@@ -54,6 +54,13 @@ import { TimeFormatSetting } from "@/features/settings/TimeFormatSetting";
 import { DiffsSetting } from "@/features/settings/DiffsSetting";
 import { SettingsAnchor, SettingsGroup, SettingsRow, SettingsSection, SettingsSubTabs } from "@/features/settings/SettingsSection";
 import { CustomAgentsSection } from "@/features/settings/CustomAgentsSection";
+import { ProjectDetailSettings, ProjectListSetting, ProjectOrderSetting, ProjectScopeBar } from "@/features/settings/ProjectsSettings";
+import { ThreadsSettings } from "@/features/settings/ThreadsSettings";
+import { ThreadsTextSettings } from "@/features/settings/ThreadsTextSettings";
+import { StorageSettings } from "@/features/settings/StorageSettings";
+import { DiagnosticsSettings } from "@/features/settings/DiagnosticsSettings";
+import { LicensesSetting } from "@/features/settings/LicensesSetting";
+import { UsagePricesSettings } from "@/features/settings/UsagePricesSettings";
 import type { SettingsPageId } from "@/features/settings/settingsNav";
 import { useSettingsTargetStore } from "@/features/settings/settingsTarget";
 
@@ -214,6 +221,34 @@ function DiffsPage() {
   return <SettingsAnchor id="diffs-main"><DiffsSetting /></SettingsAnchor>;
 }
 
+/**
+ * Conversas: o "Concluir sozinho" (uma preferência deste aparelho), o título gerado por modelo e a retomada depois do
+ * limite de uso (as duas, no backend e locais).
+ */
+function ThreadsPage() {
+  return (
+    <>
+      <SettingsAnchor id="threads-auto-settle"><ThreadsSettings /></SettingsAnchor>
+      <SettingsAnchor id="threads-text"><ThreadsTextSettings /></SettingsAnchor>
+    </>
+  );
+}
+
+/**
+ * Projetos: o seletor "Aplicando configurações para …", a ordem da barra, a lista e os ajustes do projeto
+ * escolhido. Os blocos são os de `ProjectsSettings.tsx`; as âncoras ficam aqui para a busca achar.
+ */
+function ProjectsPage() {
+  return (
+    <>
+      <ProjectScopeBar />
+      <SettingsAnchor id="projects-order"><ProjectOrderSetting /></SettingsAnchor>
+      <SettingsAnchor id="projects-list"><ProjectListSetting /></SettingsAnchor>
+      <SettingsAnchor id="projects-detail"><ProjectDetailSettings /></SettingsAnchor>
+    </>
+  );
+}
+
 function WorktreesPage() {
   return <SettingsAnchor id="worktrees-main"><WorktreesSection /></SettingsAnchor>;
 }
@@ -240,6 +275,23 @@ function AccessPage() {
 
 function MaintenancePage() {
   return <SettingsAnchor id="maintenance-updates"><UpdatesSection /></SettingsAnchor>;
+}
+
+function StoragePage() {
+  return <SettingsAnchor id="storage-main"><StorageSettings /></SettingsAnchor>;
+}
+
+function DiagnosticsPage() {
+  return <SettingsAnchor id="diagnostics-main"><DiagnosticsSettings /></SettingsAnchor>;
+}
+
+function LicensesPage() {
+  return <SettingsAnchor id="licenses-main"><LicensesSetting /></SettingsAnchor>;
+}
+
+/** Uso e preços: os preços por modelo que a estimativa de custo usa (a tabela de lista fica como referência). */
+function UsagePage() {
+  return <SettingsAnchor id="usage-prices"><UsagePricesSettings /></SettingsAnchor>;
 }
 
 function LabsPage() {
@@ -356,16 +408,22 @@ const PAGE_BODIES: Record<SettingsPageId, () => React.ReactElement> = {
   general: GeneralPage,
   appearance: AppearancePage,
   chat: ChatSettingsPage,
+  threads: ThreadsPage,
   shortcuts: ShortcutsPage,
   accounts: ProvidersPage,
   browser: BrowserPage,
   devices: DevicesPage,
   scheduled: ScheduledPage,
   diffs: DiffsPage,
+  projects: ProjectsPage,
   worktrees: WorktreesPage,
   environments: EnvironmentsPage,
   access: AccessPage,
   maintenance: MaintenancePage,
+  storage: StoragePage,
+  diagnostics: DiagnosticsPage,
+  licenses: LicensesPage,
+  usage: UsagePage,
   labs: LabsPage,
   memory: MemoryPage,
   decisions: DecisionsPage,

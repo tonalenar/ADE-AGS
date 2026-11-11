@@ -20,7 +20,7 @@ mod live;
 mod mission;
 mod terminal;
 mod parse;
-mod pricing;
+pub(crate) mod pricing;
 mod screen;
 pub(crate) mod trust;
 mod types;

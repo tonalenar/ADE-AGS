@@ -259,6 +259,8 @@ export interface ConversationCard {
   starting: boolean;
   active: boolean;
   openedAt: number;
+  /** A raiz do repositório, quando a barra agrupa os checkouts dele numa seção só (ver `sidebar/projectGrouping`). */
+  repoKey?: string;
 }
 
 /**

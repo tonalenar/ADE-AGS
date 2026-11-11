@@ -11,6 +11,9 @@ import { NOTIFICATIONS_KEY } from "@/features/settings/notificationsPreference";
 import { readInAppNotices, saveInAppNotices } from "@/features/settings/inAppNoticesPreference";
 import { DEFAULT_CONFIRM_PREFS, loadConfirmPrefs, saveConfirmPrefs } from "@/features/settings/confirmPreferences";
 import { readWorkingShelf, saveWorkingShelf } from "@/features/settings/sidebarPreferences";
+import { readProjectOrderPrefs, saveProjectOrderMode } from "@/features/chat/sidebar/projectOrderPrefs";
+import { DEFAULT_AUTO_SETTLE } from "@/features/chat/sidebar/autoSettle";
+import { readAutoSettleChoice, saveAutoSettleChoice } from "@/features/chat/sidebar/autoSettlePrefs";
 import {
   applyThemePreferencesForCurrentAppearance,
   readThemePreferences,
@@ -103,6 +106,20 @@ export const DEVICE_DEFAULTS: readonly DeviceDefault[] = [
     // Ligada é o padrão: fora do padrão é quando está desligada.
     changed: () => !readWorkingShelf(),
     restore: () => saveWorkingShelf(true),
+  },
+  {
+    id: "projectOrder",
+    labelKey: "settings.projects.order.title",
+    // "Último pedido" é o padrão. A ordem manual e as datas de aparecimento ficam: voltar ao padrão de exibição
+    // não pode apagar a ordem que a pessoa montou.
+    changed: () => readProjectOrderPrefs().mode !== "activity",
+    restore: () => saveProjectOrderMode("activity"),
+  },
+  {
+    id: "autoSettle",
+    labelKey: "settings.threads.autoSettle.title",
+    changed: () => readAutoSettleChoice() !== DEFAULT_AUTO_SETTLE,
+    restore: () => saveAutoSettleChoice(DEFAULT_AUTO_SETTLE),
   },
   {
     id: "confirmations",

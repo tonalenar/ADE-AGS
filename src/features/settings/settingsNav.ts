@@ -18,11 +18,11 @@ export interface SettingsNavGroup {
 
 /** A ordem do menu. Cada página aparece num grupo só (o teste de navegação confere). */
 export const SETTINGS_NAV_GROUPS: readonly SettingsNavGroup[] = [
-  { heading: null, pages: ["general", "appearance", "chat", "shortcuts"] },
-  { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices", "scheduled"] },
-  { heading: "settings.nav.code", pages: ["diffs", "worktrees"] },
+  { heading: null, pages: ["general", "appearance", "chat", "threads", "shortcuts"] },
+  { heading: "settings.nav.agents", pages: ["accounts", "browser", "devices", "scheduled", "usage"] },
+  { heading: "settings.nav.code", pages: ["projects", "diffs", "worktrees"] },
   { heading: "settings.nav.connections", pages: ["environments", "access"] },
-  { heading: null, pages: ["maintenance", "labs"] },
+  { heading: null, pages: ["maintenance", "storage", "diagnostics", "licenses", "labs"] },
   { heading: "settings.nav.ade", pages: ["memory", "decisions", "permissions", "terminal", "orchestrator", "skills", "cli"] },
 ];
 
@@ -31,16 +31,22 @@ export const SETTINGS_PAGE_LABEL_KEYS: Record<SettingsPageId, string> = {
   general: "settings.general",
   appearance: "settings.appearance",
   chat: "settings.chat",
+  threads: "settings.threads",
   shortcuts: "settings.shortcuts",
   accounts: "settings.providers",
   browser: "settings.browser",
   devices: "settings.devices",
   scheduled: "settings.scheduled",
   diffs: "settings.diffs",
+  projects: "settings.projects",
   worktrees: "settings.worktrees",
   environments: "settings.environments",
   access: "settings.access",
   maintenance: "settings.maintenance",
+  storage: "settings.storage",
+  diagnostics: "settings.diagnostics",
+  licenses: "settings.licenses",
+  usage: "settings.usage",
   labs: "settings.labs",
   memory: "settings.memory",
   decisions: "settings.decisions",
@@ -112,6 +118,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "chat.sendShortcut", page: "chat", anchor: "chat-composer", titleKey: "chat.settings.sendShortcut", keywordKeys: ["chat.settings.sendShortcut.hint"] },
   { id: "chat.toolCalls", page: "chat", anchor: "chat-activity", titleKey: "chat.settings.toolCalls.label", keywordKeys: ["chat.settings.toolCalls.hint"] },
   { id: "chat.compact", page: "chat", anchor: "chat-compact", titleKey: "chat.settings.claudeCompact.title" },
+
+  { id: "threads.autoSettle", page: "threads", anchor: "threads-auto-settle", titleKey: "settings.threads.autoSettle.title", keywordKeys: ["settings.threads.autoSettle.desc"] },
+  { id: "threads.title", page: "threads", anchor: "threads-text", titleKey: "settings.threads.title.title", keywordKeys: ["settings.threads.title.desc", "settings.threads.title.instructions"] },
+  { id: "threads.limit", page: "threads", anchor: "threads-text", titleKey: "settings.threads.limit.title", keywordKeys: ["settings.threads.limit.desc"] },
+  { id: "projects.defaults", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.defaults.title", keywordKeys: ["settings.projects.defaults.desc", "settings.projects.defaults.fallback"] },
   { id: "chat.snooze", page: "chat", anchor: "chat-snooze", titleKey: "chat.settings.snooze.title" },
 
   { id: "shortcuts", page: "shortcuts", anchor: "shortcuts-main", titleKey: "settings.shortcuts" },
@@ -136,6 +147,12 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "diffs.colors", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.colors.label", keywordKeys: ["settings.diffs.colors.hint"] },
   { id: "diffs.state", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.state.label", keywordKeys: ["settings.diffs.state.hint"] },
   { id: "diffs.whitespace", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.whitespace.label", keywordKeys: ["settings.diffs.whitespace.hint"] },
+  { id: "projects", page: "projects", anchor: "projects-list", titleKey: "settings.projects.list.title" },
+  { id: "projects.order", page: "projects", anchor: "projects-order", titleKey: "settings.projects.order.title", keywordKeys: ["settings.projects.order.desc"] },
+  { id: "projects.name", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.name", keywordKeys: ["settings.projects.name.hint"] },
+  { id: "projects.icon", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.icon", keywordKeys: ["settings.projects.icon.hint"] },
+  { id: "projects.agents", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.agents", keywordKeys: ["settings.projects.agents.desc"] },
+  { id: "projects.remove", page: "projects", anchor: "projects-detail", titleKey: "settings.projects.remove" },
 
   { id: "worktrees", page: "worktrees", anchor: "worktrees-main", titleKey: "settings.worktrees.where" },
 
@@ -146,6 +163,11 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "access.network", page: "access", anchor: "access-network", titleKey: "settings.access.network.title" },
 
   { id: "maintenance.updates", page: "maintenance", anchor: "maintenance-updates", titleKey: "settings.updates" },
+  { id: "usage.prices", page: "usage", anchor: "usage-prices", titleKey: "settings.usage.prices.title", keywordKeys: ["settings.usage.prices.desc"] },
+  { id: "storage", page: "storage", anchor: "storage-main", titleKey: "settings.storage.title", keywordKeys: ["settings.storage.desc"] },
+  { id: "storage.clean", page: "storage", anchor: "storage-main", titleKey: "settings.storage.clean.title", keywordKeys: ["settings.storage.clean.note"] },
+  { id: "diagnostics", page: "diagnostics", anchor: "diagnostics-main", titleKey: "settings.diagnostics.title", keywordKeys: ["settings.diagnostics.desc"] },
+  { id: "licenses", page: "licenses", anchor: "licenses-main", titleKey: "settings.licenses.title", keywordKeys: ["settings.licenses.desc"] },
 
   { id: "labs.graphify", page: "labs", anchor: "labs-graphify", titleKey: "settings.graphify" },
 

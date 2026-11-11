@@ -30,6 +30,7 @@ pub mod codex_parar;
 pub mod envio;
 pub mod events;
 pub mod handoff;
+pub mod limite;
 pub mod memoria;
 pub mod commands;
 pub mod cursor;
@@ -43,6 +44,7 @@ pub mod send_receipt;
 pub mod stop_receipt;
 pub mod store;
 pub mod tarefas;
+pub mod titulo;
 pub mod troca;
 pub mod turn;
 pub mod worktree;
@@ -52,6 +54,10 @@ mod attach_test;
 mod bancada;
 #[cfg(test)]
 mod handoff_test;
+#[cfg(test)]
+mod limite_test;
+#[cfg(test)]
+mod titulo_test;
 #[cfg(test)]
 mod pool_test;
 #[cfg(test)]

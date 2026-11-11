@@ -43,6 +43,7 @@ mod pet;
 mod project_scripts;
 mod local_acp;
 mod prompt_stashes;
+mod project_chat_defaults;
 mod project_chat_policy;
 mod prelaunch;
 mod preview;
@@ -71,6 +72,8 @@ pub mod testspeed;
 pub use terminal::SESSION_ENV;
 mod updates;
 mod usage;
+mod storage_usage;
+mod diagnostics;
 pub mod util;
 mod window;
 

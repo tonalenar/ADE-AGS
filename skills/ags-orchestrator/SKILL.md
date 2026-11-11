@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.74.0
+version: 1.75.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1230,6 +1230,11 @@ ags chat goal <id> --action show    # read the persistent Codex/Claude goal
 ags chat goal <id> --action set --objective "..."
 ags chat open <id>                   # show it to the person in the chat screen
 ```
+
+Project defaults: when `--agent` and `--model` are omitted (and the chat has no parent), `chat new` starts
+with the agent and model the person set for that folder in Settings → Projects; if the project's main model is
+out of usage and a fallback is set, the fallback is used. Explicit `--agent`/`--model` always win. The project's
+permission and workspace defaults do not apply to chats opened by an agent: they still start supervised (`ask`).
 
 From a structured chat conversation, `chat_new` creates a provider-native child conversation
 linked to the parent and visible in its side-chat panel. Omit `agent` to keep the parent's
