@@ -145,13 +145,32 @@ export const previewCookies = (proxyOrigin: string) =>
 export const previewForgetSite = (proxyOrigin: string) =>
   invoke<void>("preview_forget_site", { proxyOrigin });
 
-/* ── Importação de cookies de um perfil do Firefox (`src-tauri/src/preview/importer`) ──
+/* ── Importação de cookies de outro navegador (`src-tauri/src/preview/importer`) ──
  * Nada daqui leva valores de cookie: a revisão traz só domínios e contagens. */
 
-/** Um perfil do Firefox: id e nome. O caminho fica no backend. */
+/** Um perfil do navegador de origem: id e nome. O caminho fica no backend. */
 export interface BrowserImportProfile {
   id: string;
   name: string;
+}
+
+export type BrowserImportEngine = "chromium" | "firefox" | "safari";
+
+/** Por que uma fonte não pode ser importada agora (códigos estáveis do backend). */
+export type BrowserImportUnavailable =
+  | "not-installed"
+  | "browser-running"
+  | "needs-full-disk-access"
+  | "app-bound"
+  | "unsupported-platform";
+
+/** Um navegador deste computador, com os perfis que têm cookies. */
+export interface BrowserImportSource {
+  id: string;
+  name: string;
+  engine: BrowserImportEngine;
+  profiles: BrowserImportProfile[];
+  unavailable: BrowserImportUnavailable | null;
 }
 
 /** Um domínio com cookies importáveis e quantos são. */
@@ -170,6 +189,8 @@ export interface BrowserImportReview {
 export interface BrowserImportOutcome {
   domains: BrowserImportDomain[];
   cookies: number;
+  /** Cookies dos domínios marcados que não puderam ser decifrados e ficaram de fora. */
+  skipped: number;
 }
 
 /** Por que a importação parou. `code` é estável; `detail` é técnico e nunca tem valores. */
@@ -178,13 +199,19 @@ export interface BrowserImportFailure {
   detail: string | null;
 }
 
-/** Os perfis do Firefox deste computador. Só lê o `profiles.ini`. */
-export const browserImportProfiles = () => invoke<BrowserImportProfile[]>("browser_import_profiles");
+/** Os navegadores deste computador e seus perfis. Só olha pastas: nenhum cookie, nenhuma chave. */
+export const browserImportSources = () => invoke<BrowserImportSource[]>("browser_import_sources");
 
-/** A revisão de um perfil: domínios e contagens. Recusa se o Firefox estiver aberto ou sem chave. */
-export const browserImportReview = (profileId: string) =>
-  invoke<BrowserImportReview>("browser_import_review", { profileId });
+/** A revisão de um perfil: domínios e contagens, sem pedir a chave. Recusa se o navegador estiver aberto. */
+export const browserImportReview = (sourceId: string, profileId: string) =>
+  invoke<BrowserImportReview>("browser_import_review", { sourceId, profileId });
 
-/** Grava só os domínios marcados, como cópia única, no estado cifrado do preview. */
-export const browserImportApply = (profileId: string, domains: string[]) =>
-  invoke<BrowserImportOutcome>("browser_import_apply", { profileId, domains });
+/** Grava só os domínios marcados, como cópia única, no estado cifrado do perfil de destino da ADE.
+ *  É aqui (e só aqui) que o macOS pode pedir permissão para ler a chave do Keychain. */
+export const browserImportApply = (sourceId: string, profileId: string, domains: string[], targetProfileId: string) =>
+  invoke<BrowserImportOutcome>("browser_import_apply", { sourceId, profileId, domains, targetProfileId });
+
+/** Abre Ajustes do Sistema → Privacidade → Acesso Total ao Disco (macOS), necessário para o Safari.
+ *  TODO(integração): trocar por `open_privacy_settings("full_disk_access")` quando o branch
+ *  `fix/fusao-permissoes-macos` ganhar esse painel; hoje ele só cobre captura de tela e voz. */
+export const browserImportOpenFullDiskAccess = () => invoke<void>("browser_import_open_full_disk_access");

@@ -249,11 +249,11 @@ Primeira fatia da importação, só para o Firefox. Módulo novo: `src-tauri/src
 - **Containers e partições ficam de fora**, mesmo quando o usuário quer tudo. Uma sessão de outro contêiner é outra identidade, e misturá-la no preview confundiria os logins.
 - **Subdomínios não são cobertos.** O estado do preview é por origem, não por domínio. Um cookie de `.github.com` entra só em `https://github.com`.
 
-### 9.3 Fora desta fatia (documentado, não implementado)
+### 9.3 Fora desta fatia (documentado; Chromium, Safari, Zen e Helium entraram na seção 10)
 
-- **Chromium** (Chrome, Edge, Brave e outros). No Windows a cifra é App-Bound Encryption, amarrada ao app. A ADE não contorna isso (regra 4 da seção 5). No macOS a chave fica no Keychain. Nada disso foi implementado.
-- **Safari.** Exige Full Disk Access. Nenhuma solicitação de FDA foi feita.
-- **Zen e Helium.** Não implementados.
+- **Chromium** (Chrome, Edge, Brave e outros). No Windows a cifra é App-Bound Encryption, amarrada ao app. A ADE não contorna isso (regra 4 da seção 5). No macOS a chave fica no Keychain. Implementado na seção 10.
+- **Safari.** Exige Full Disk Access. Implementado na seção 10.
+- **Zen e Helium.** Implementados na seção 10.
 - **Perfis `profile-<UUID>` do WebView2 (Windows).** A importação atual só alcança o proxy de preview. Os perfis do WebView2 continuam sem importação.
 - **Cookies de `localhost` com porta.** O Firefox não guarda a porta, e a chave do preview tem porta. Por isso eles não chegam aos servidores de desenvolvimento nesta fatia.
 - **Cookies particionados (CHIPS)** ficam de fora por regra desta fatia (seção 4, Fatia 2: "pular obrigatoriamente cookies particionados"). O preview guarda cookies por origem, sem a chave de partição, então não os modela.
@@ -287,3 +287,77 @@ Primeira fatia da importação, só para o Firefox. Módulo novo: `src-tauri/src
 - **A detecção de bloqueio entre processos.** Em POSIX, um processo não vê as próprias travas, então o caso "Firefox aberto" é testado pela injeção do conferidor de bloqueio. A leitura real de `F_GETLK` só foi exercitada sem outro dono da trava.
 - **Windows.** O caminho com `share_mode(0)` não foi compilado nem executado aqui.
 - **Keyring real.** Os testes usam um keyring falso; o do sistema não foi tocado.
+
+---
+
+## 10. Importação de todos os navegadores (entregue)
+
+Autorizado pelo usuário: trazer a importação de **todos** os navegadores que o T3 Code importa, incluindo Chrome e Safari, com o mesmo fluxo de UX (lista de navegadores e perfis, perfil de destino, avisos de permissão). Referência: `docs/user/browser-import.md` e `apps/desktop/src/preview/BrowserImport/` do T3, lidos como dado. O fluxo é o da seção 9, estendido; as regras de ouro seguem as mesmas.
+
+### 10.1 Fontes
+
+| Fonte | Motor | macOS | Windows | Linux |
+|---|---|---|---|---|
+| Chrome, Edge, Brave, Vivaldi | Chromium | sim | **não** (`app-bound`) | não oferecido |
+| Opera | Chromium | sim | **não** (`app-bound`) | não oferecido |
+| Arc | Chromium | sim | não existe | não oferecido |
+| Helium | Chromium | sim | sim (DPAPI, se o `Local State` não for amarrado ao app) | não oferecido |
+| Safari | Safari | sim (Acesso Total ao Disco) | não existe | não existe |
+| Firefox, Zen | Firefox | sim | sim | sim |
+
+O Chromium no Linux não é oferecido: o `v11` guarda a senha no libsecret (atributos próprios, que o `keyring` não lê) e a ADE não implementou essa leitura. Os caminhos de cada fonte estão em `src-tauri/src/preview/importer/sources.rs`; a ADE só aceita um `id` de fonte e um `id` de perfil que a própria listagem produz (o caminho nunca vem da interface; nomes de pasta do `Local State` com `..` ou separador são rejeitados, e um `Path` relativo com `..` no `profiles.ini` é ignorado).
+
+### 10.2 Fluxo e comandos
+
+Configurações → Navegador → "Importar de outro navegador…" (`BrowserImportSetting.tsx`):
+
+1. **Escolher** (`browser_import_sources`): lista navegadores e perfis (só estrutura de pastas; nenhum cookie, nenhuma chave). Cada fonte aparece com o motivo se não dá para importar: não instalado, aberto agora, precisa de Acesso Total ao Disco, criptografia amarrada ao app.
+2. **Configurar**: perfil de origem e **perfil de destino da ADE** (padrão compartilhado ou um perfil nomeado). O destino é validado no backend (`default` ou `profile-<uuid>`; nunca o anônimo nem perfis de agente).
+3. **Revisar** (`browser_import_review`): domínios e contagens, sem valores. **Não pede a chave** do Keychain.
+4. **Gravar** (`browser_import_apply`): só os domínios marcados, cifrados no estado do perfil de destino (`site_for_profile`). É aqui, e só aqui, que a chave do Chromium é lida, e só se há algo a decifrar para os domínios marcados.
+
+### 10.3 Chromium
+
+- **Leitura:** `Network/Cookies` (ou `Cookies`, no formato antigo) e os arquivos `-wal`/`-journal` são copiados para uma pasta temporária privada (`0700`/`0600`), e só a cópia é aberta, somente leitura. O navegador precisa estar fechado (macOS/Linux: `SingletonLock` com um pid vivo; Windows: o arquivo de cookies travado). O bloqueio é conferido antes e depois da cópia.
+- **macOS:** a senha vem do item "<Navegador> Safe Storage" do Keychain pelo Security framework (crate `keyring`, `get_secret`), no clique de confirmar. O macOS mostra o pedido de permissão em nome da ADE. A chave é derivada com PBKDF2-HMAC-SHA1 (`saltysalt`, 1003 iterações) e decifra `v10` (AES-128-CBC, IV de 16 espaços). A senha e a chave ficam só em memória e são zeradas ao soltar (melhor esforço, sem `unsafe`); nunca vão a log, arquivo ou ambiente.
+- **Esquema >= 24 (Chromium 127+):** o texto claro leva o SHA-256 do `host_key` na frente; sem o prefixo certo a linha é descartada. É o que também rejeita uma chave errada. O texto também precisa ser UTF-8 válido.
+- **Windows:** `v10` é AES-256-GCM (crate `ring`) com a chave do `Local State` desembrulhada pelo DPAPI do usuário (PowerShell oculto, entrada por `stdin`). Se o `Local State` tem `app_bound_encrypted_key`, a fonte é recusada com `app-bound`: a ADE não contorna a App-Bound Encryption. `v20` nunca é decifrado.
+- **`v11`** (Linux) e **`v20`** não são decifrados e contam como "puladas" no resultado. Se **nenhum** cookie marcado decifra, a importação falha com `undecryptable` (chave errada ou formato mais novo), sem gravar nada.
+- **Particionados (CHIPS):** `top_frame_site_key` preenchido fica de fora e só é contado. Vencidos são descartados. `samesite` -1 (não especificado) não vira `None`.
+- Dependências: `aes 0.8` e `cbc 0.1` já estavam no `Cargo.lock` (Secret Service do `keyring`, no Linux): nenhuma crate nova no lock, mas passam a compilar também no macOS e no Windows. O PBKDF2 sai do `ring`.
+
+### 10.4 Safari
+
+- Arquivo: `~/Library/Containers/com.apple.Safari/Data/Library/Cookies/Cookies.binarycookies` (perfil padrão) e `…/WebKit/WebsiteDataStore/<uuid>/Cookies/` (perfis nomeados do Safari 17+, lidos de `SafariTabs.db` por uma cópia).
+- **Acesso Total ao Disco:** o `stat` funciona sem a permissão, mas abrir o arquivo falha com `EPERM` (TCC). A ADE abre o arquivo só para saber (sem ler o conteúdo) e, se negado, mostra o passo com o texto do T3 adaptado e o botão "Abrir Ajustes do Sistema" (`browser_import_open_full_disk_access`, URL fixa do painel `Privacy_AllFiles`; nada vem da interface), mais "Verificar de novo". `EACCES` (permissão comum) **não** é confundido com falta de Acesso Total ao Disco.
+- **TODO de integração:** existe um comando `open_privacy_settings(pane)` no branch `fix/fusao-permissoes-macos`, mas o enum dele só cobre captura de tela e voz. Quando ele ganhar o painel de Acesso Total ao Disco, trocar `browserImportOpenFullDiskAccess` por ele e remover o comando local.
+- Parser: `parse_binary_cookies` lê só o buffer, com toda posição conferida (offsets que se cruzam ou apontam para o cabeçalho, páginas e registros truncados, rabo inválido são recusados; nunca lê além do buffer). O teste trunca o arquivo em cada tamanho e troca cada byte por `0xFF` para garantir que não há pânico. O SameSite do Safari não é documentado: entra como `Lax`, nunca `None`. Arquivo maior que 64 MiB é recusado.
+- O Safari grava o arquivo de forma atômica: não há bloqueio a conferir.
+
+### 10.5 Zen e Firefox
+
+Mesmo formato de `profiles.ini` e `cookies.sqlite` (seção 9), em pastas próprias (`zen`). O leitor é o mesmo.
+
+### 10.6 Garantias que os testes cobrem
+
+- A revisão **nunca pede a chave** (o provedor de chave de teste dá `panic!` se chamado) e nunca devolve valores.
+- A chave **não é pedida** se não há domínio marcado ou se o domínio não existe no banco (o Keychain nem é consultado).
+- Chave errada → `undecryptable`, nada gravado. Recusa do Keychain → `needs-keychain-approval`/`keychain-item-missing`, nada gravado.
+- O banco original não muda (bytes e arquivos); a cópia temporária é apagada; navegador aberto é recusado antes de copiar.
+- No disco, só `ADESITE1` cifrado, sem nenhum valor em claro.
+- O destino escolhido decide em qual jar cada origem cai; `incognito`, perfis de agente e ids malformados são recusados.
+
+### 10.7 Limites e riscos
+
+- **O destino ainda é o estado do preview.** Os cookies importados valem para o proxy de preview (por origem), como na seção 9, e **não** alcançam os perfis do WebView2 do Windows, que persistem cookies fora do chaveiro. Subdomínios continuam não cobertos (o estado é por origem).
+- **Linux:** só Firefox e Zen.
+- **Windows:** o caminho do DPAPI e a conferência de bloqueio por `share_mode(0)` não foram compilados nem executados nesta máquina. O Chromium com `app_bound_encrypted_key` (Chrome, Edge, Brave, Vivaldi, Opera) não é importável, como no T3.
+- **`SingletonLock`:** só o pid é conferido (não o nome do host), então um perfil em home compartilhado entre máquinas pode ser lido como fechado.
+- **Gravação parcial:** como na seção 9, uma origem por vez; se a gravação falhar na segunda, a primeira já ficou gravada, cifrada.
+
+### 10.8 Verificação
+
+- **Rust:** `cargo test --lib importer`: 49 testes (os 19 do Firefox seguem passando + 30 novos em `test_browsers.rs`). Fixtures: banco de cookies do Chromium cifrado aqui com uma senha de teste (esquemas 23 e 24, `v10`, `v11`, `v20`, GCM do Windows), `Local State` sintético, `Cookies.binarycookies` montado byte a byte, `SafariTabs.db` sintético e Zen sintético. Nenhum perfil, cookie, Keychain ou chave real foi lido. Vetor público do OSCrypt (`peanuts`, 1 iteração → `fd621fe5…2778`) confere a derivação independente do código. Também passaram `cargo test --lib preview` (132) e `util::` (44, inclui o lint de spawn).
+- **Vitest:** `browserImportModel.test.ts` e `browserImportSetting.test.tsx` (28 testes): nada é lido antes do clique, escolha de navegador/perfil/destino, aviso do Keychain só para Chromium, Safari sem Acesso Total ao Disco (abre o painel certo e libera ao verificar), navegador aberto, fonte desabilitada com motivo, recusas do backend.
+- **Checagens:** `tsc --noEmit`, `check:i18n`, `check:test-lint`, `check:babel`, `cargo clippy --lib` sem aviso novo no importador.
+- **Não verificado:** contra um Chrome/Safari/Firefox reais (por regra); o pedido real do Keychain e do TCC do macOS; o Windows; a captura visual da tela.
