@@ -12,6 +12,7 @@
 //! durante o I/O.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -50,6 +51,10 @@ pub struct Session {
     alive: AtomicBool,
     /// O id da sessão no Claude.
     remote: Mutex<Option<String>>,
+    /// Raiz temporária usada pelo Claude para os arquivos de saída das tarefas.
+    task_output_root: Option<PathBuf>,
+    /// Caminhos anunciados no fim da tarefa, limitados à raiz privada acima.
+    task_output_files: Mutex<HashMap<String, PathBuf>>,
     /// O turno em andamento (o id é do app: o Claude não numera os turnos).
     turn: Mutex<Option<String>>,
     /// O Parar que chega antes de o turno mostrar que roda (ver `codex_parar`). Trava antes da do `turn`.
@@ -78,6 +83,40 @@ impl Session {
 
     pub fn remote(&self) -> Option<String> {
         self.remote.lock().ok().and_then(|r| r.clone())
+    }
+
+    /// Lê a cauda que o Claude grava para um shell em segundo plano.
+    pub fn task_output(&self, task_id: &str) -> Option<Value> {
+        let root = self.task_output_root.as_deref()?;
+        let cached = self.task_output_files.lock().ok()?.get(task_id).cloned();
+        let path = cached.or_else(|| self.remote().and_then(|remote| super::tarefas_saida::find_task_output(root, &remote, task_id)));
+        let Some(path) = path else { return Some(json!({ "output": "", "total_bytes": 0, "truncated": false })) };
+        if let Ok(mut files) = self.task_output_files.lock() {
+            files.insert(task_id.to_string(), path.clone());
+        }
+        Some(super::tarefas_saida::read_task_output(&path).unwrap_or_else(|| json!({ "output": "", "total_bytes": 0, "truncated": false })))
+    }
+
+    /// Guarda o arquivo final informado pelo Claude, sem aceitar caminhos fora da árvore temporária da sessão.
+    fn remember_task_output(&self, msg: &Value) {
+        if msg.get("type").and_then(Value::as_str) != Some("system")
+            || msg.get("subtype").and_then(Value::as_str) != Some("task_notification")
+        {
+            return;
+        }
+        let (Some(root), Some(task_id), Some(raw_path)) = (
+            self.task_output_root.as_deref(),
+            msg.get("task_id").and_then(Value::as_str),
+            msg.get("output_file").and_then(Value::as_str),
+        ) else { return };
+        if !safe_task_component(task_id) { return; }
+        let path = Path::new(raw_path);
+        let (Ok(root), Ok(path)) = (root.canonicalize(), path.canonicalize()) else { return };
+        if path.starts_with(&root) {
+            if let Ok(mut files) = self.task_output_files.lock() {
+                files.insert(task_id.to_string(), path);
+            }
+        }
     }
 
     pub fn turn(&self) -> Option<String> {
@@ -354,6 +393,7 @@ async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: O
 }
 
 fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>, fast_mode: bool) -> Result<Arc<Session>, String> {
+    let task_output_root = claude_task_output_root(&row.cwd, env.as_ref());
     let name = crate::agents::agent_command("claude-code").unwrap_or("claude");
     let program = crate::util::find_program(name).ok_or("Não achei o Claude Code (claude) no PATH")?;
     let auto_compact_window = auto_compact_window(db, row);
@@ -405,6 +445,8 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         next: AtomicU64::new(1),
         alive: AtomicBool::new(true),
         remote: Mutex::new(None),
+        task_output_root,
+        task_output_files: Mutex::new(HashMap::new()),
         turn: Mutex::new(None),
         stop: Mutex::new(StopGate::default()),
         background: Mutex::new(HashSet::new()),
@@ -524,6 +566,7 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
             }
         }
         _ => {
+            session.remember_task_output(&msg);
             let outs = session.mapper.lock().map(|mut m| m.feed(&msg, crate::util::now_ts_ms())).unwrap_or_default();
             for out in outs {
                 on_out(app, db, session, out);
@@ -535,6 +578,30 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
             }
         }
     }
+}
+
+/// Espelha a raiz privada em que Claude Code 2.1 guarda os arquivos `tasks/<id>.output`.
+fn claude_task_output_root(cwd: &str, env: Option<&HashMap<String, String>>) -> Option<PathBuf> {
+    #[cfg(unix)]
+    // SAFETY: `getuid` não recebe ponteiros nem acessa memória do chamador.
+    let uid = unsafe { libc::getuid() };
+    #[cfg(not(unix))]
+    return None;
+    #[cfg(unix)]
+    {
+        let from_env = |key: &str| env.and_then(|values| values.get(key).cloned()).or_else(|| std::env::var(key).ok());
+        let base = from_env("CLAUDE_CODE_TMPDIR").filter(|v| !v.trim().is_empty()).or_else(|| {
+            if cfg!(target_os = "macos") { Some("/tmp".to_string()) }
+            else { from_env("TMPDIR").or_else(|| from_env("TMP")).or_else(|| from_env("TEMP")).or_else(|| Some("/tmp".to_string())) }
+        })?;
+        let base = PathBuf::from(base);
+        let base = if base.is_absolute() { base } else { Path::new(cwd).join(base) };
+        Some(base.join(format!("claude-{uid}")))
+    }
+}
+
+fn safe_task_component(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Começa um turno (a pessoa mandou uma mensagem, ou o Claude seguiu sozinho com uma que estava
@@ -811,6 +878,8 @@ pub(crate) fn session_for_test(thread_id: &str) -> (Arc<Session>, mpsc::Unbounde
         next: AtomicU64::new(1),
         alive: AtomicBool::new(true),
         remote: Mutex::new(Some("remoto-1".to_string())),
+        task_output_root: None,
+        task_output_files: Mutex::new(HashMap::new()),
         turn: Mutex::new(None),
         stop: Mutex::new(StopGate::default()),
         background: Mutex::new(HashSet::new()),

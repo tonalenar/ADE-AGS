@@ -1415,10 +1415,13 @@ pub async fn stop_task(db: &DbConnection, thread_id: &str, task_id: &str) -> Res
     session.control("stop_task", json!({ "task_id": task_id })).await.map(|_| ())
 }
 
-/// O fim da saída de um shell em segundo plano (os últimos 8 KiB, `get_task_output` do Claude Code):
-/// `{output, total_bytes, truncated}`. Só leitura, sem turno de modelo.
+/// A saída de um shell em segundo plano: cauda do arquivo temporário do Claude Code, ou o controle
+/// `get_task_output` quando não há raiz de arquivos disponível. Só leitura, sem turno de modelo.
 pub async fn task_output(db: &DbConnection, thread_id: &str, task_id: &str) -> Result<Value, String> {
     let session = claude_task_session(db, thread_id, task_id)?;
+    if let Some(output) = session.task_output(task_id) {
+        return Ok(output);
+    }
     session.control("get_task_output", json!({ "task_id": task_id })).await
 }
 
