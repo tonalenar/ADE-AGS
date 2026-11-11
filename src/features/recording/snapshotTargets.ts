@@ -1,5 +1,5 @@
 /**
- * Alvos do SnapShot do Mac (tela principal, outra tela e janela): o modelo puro do seletor e da legenda.
+ * Alvos do SnapShot do Mac (tela principal, outra tela e janela): o modelo puro do menu da câmera e da legenda.
  *
  * Espelha `computer_use::snapshot` (Rust). Só entram ids, nomes de app e títulos de janela, que o macOS entrega
  * com a Gravação de Tela autorizada; nenhum pixel passa por aqui.
@@ -69,7 +69,7 @@ export type SnapshotCaption =
   | { kind: "display"; number: number }
   | { kind: "window"; app: string; title: string | null };
 
-/** O valor de cada opção do seletor: `main`, `display:<id>` ou `window:<id>`. */
+/** O valor de cada item do menu: `main`, `display:<id>` ou `window:<id>`. */
 export function targetValue(target: SnapshotTarget): string {
   return target.kind === "main" ? "main" : `${target.kind}:${target.id}`;
 }
@@ -84,7 +84,7 @@ export function parseTargetValue(value: string): SnapshotTarget | null {
 }
 
 /**
- * As opções do seletor, na ordem em que aparecem: a tela principal, as outras telas e as janelas (na ordem da
+ * Os itens do menu, na ordem em que aparecem: a tela principal, as outras telas e as janelas (na ordem da
  * listagem, da frente para trás). Sem lista ainda, só a principal. Pura.
  */
 export function targetOptions(listing: SnapshotListing | null): TargetOption[] {
@@ -130,6 +130,16 @@ export function reconcileTarget(target: SnapshotTarget, listing: SnapshotListing
   if (target.kind === "main" || !listing) return target;
   const option = targetOptions(listing).find((candidate) => candidate.value === targetValue(target));
   return option && !option.disabled ? target : MAIN_TARGET;
+}
+
+/**
+ * O índice do próximo item numa lista circular de `length` itens, a partir de `current` (-1 quando nenhum tem o foco).
+ * É o que as setas do menu usam para passar pelos itens habilitados. Pura.
+ */
+export function stepIndex(current: number, length: number, delta: 1 | -1): number {
+  if (length <= 0) return -1;
+  if (current < 0) return delta === 1 ? 0 : length - 1;
+  return (current + delta + length) % length;
 }
 
 /** Só a foto que o SnapShot gravou conta: o nome tem o prefixo do app e a extensão PNG. Pura. */
