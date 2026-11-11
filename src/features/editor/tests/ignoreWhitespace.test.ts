@@ -57,7 +57,9 @@ describe("ignorar espaços em branco no diff", () => {
   it("acima do limite de linhas distintas, o diff compara o texto inteiro e o espaço aparece", () => {
     const lines = Array.from({ length: MAX_DISTINCT_LINES + 2 }, (_, i) => `linha ${i}`);
     const a = lines.join("\n");
-    const b = lines.map((line) => `${line} `).join("\n");
+    // Só a última linha ganha um espaço: o total de linhas distintas segue acima do limite
+    // (força o diff de texto inteiro) sem levar o Myers ao pior caso, que estourava o tempo no CI.
+    const b = [...lines.slice(0, -1), `${lines[lines.length - 1]} `].join("\n");
     expect(ignoreWhitespaceDiff(a, b).length).toBeGreaterThan(0);
   });
 });
