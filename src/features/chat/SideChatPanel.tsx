@@ -19,7 +19,7 @@ import { useChatLive } from "./liveStore";
 import { insertIntoComposer } from "./store";
 import { conversationTimeline } from "./ipc";
 import type { TimelineItem } from "./timeline/types";
-import { canOpenSideChat, clampSideChatAccess, sideChatAccountFor, sideChatDraftDefaults, sideChatFirstMessage, sideChatForkReasonKey, sideChatHistory, sideChatParentReference, sideChatShowsExcerptNote, type SideChatDraft } from "./sideChatModel";
+import { canOpenSideChat, clampSideChatAccess, sideChatAccountFor, sideChatDraftDefaults, sideChatFirstMessage, sideChatForkNote, sideChatHistory, sideChatParentReference, type SideChatDraft } from "./sideChatModel";
 import { NewChatIcon, SideChatIcon, XIcon } from "./chatIcons";
 
 function cardForThread(thread: ThreadRow, parent: ConversationCard, label: string): ConversationCard {
@@ -79,6 +79,8 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   const parentBusy = parentTuiBusy || parentStructuredBusy;
   const live = useStructured((s) => s.live);
   const selected = sideChats.find((row) => row.id === selectedId) ?? null;
+  /** O aviso do topo: o recorte ou o contexto portátil (a cópia nativa não avisa). */
+  const forkNote = sideChatForkNote(selected);
   const answerItems = useStructured((s) => selectedId ? s.live[selectedId]?.items : undefined) ?? [];
   const answer = [...answerItems].reverse().find((item) => item.kind === "assistant" && item.text?.trim())?.text?.trim() ?? "";
   const selectedWorking = selectedId ? live[selectedId]?.phase === "working" : false;
@@ -238,9 +240,9 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
           ))}
         </nav>
       )}
-      {sideChatShowsExcerptNote(selected) && (
+      {forkNote && (
         <p className="shrink-0 px-3 py-1.5 border-b border-gray-200 dark:border-white/[0.08] text-chat-caption text-gray-500 dark:text-white/45 break-words">
-          {t("chat.sideChat.forkNote", { reason: t(sideChatForkReasonKey(selected?.forkReason)) })}
+          {t(forkNote.noteKey, { reason: t(forkNote.reasonKey) })}
         </p>
       )}
       {error && <p role="alert" className="shrink-0 px-3 py-2 text-chat-caption text-red-600 dark:text-red-400 break-words">{error}</p>}

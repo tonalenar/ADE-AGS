@@ -1,5 +1,5 @@
-//! O fork da pergunta lateral (`fork`): os argumentos do CLI, o ponto estável, o recorte como alternativa e a origem
-//! intacta. Só fixtures e banco em memória: nenhum agente real roda aqui.
+//! O fork da pergunta lateral (`fork`): os argumentos do CLI, o ponto estável, o contexto portátil/recorte como alternativa
+//! e a origem intacta. Só fixtures e banco em memória: nenhum agente real roda aqui.
 
 use rusqlite::Connection;
 
@@ -30,7 +30,7 @@ fn run(conn: &Connection, id: &str, status: &str, started: i64) {
 }
 
 fn origin(agent: &str) -> Origin {
-    Origin { agent_id: agent.into(), account_id: None, remote_id: Some("sessao-origem".into()), working: false, last_stable_turn: Some("turno-3".into()) }
+    Origin { agent_id: agent.into(), account_id: None, remote_id: Some("sessao-origem".into()), working: false, last_stable_turn: Some("turno-3".into()), last_end_uuid: Some("uuid-turno-3".into()) }
 }
 
 // ---- argumentos do CLI -------------------------------------------------------------------------------------------
@@ -40,12 +40,14 @@ fn o_claude_forka_com_resume_fork_session_e_um_id_novo_escolhido_pelo_app() {
     let conn = conn();
     with_side_chat(&conn, "claude-code", "full", "safe");
     let side: ThreadRow = store::thread(&conn, "lateral").unwrap().unwrap();
-    let args = launch_args(&side, Start::Fork { from: "sessao-origem", id: "sessao-nova" });
+    let args = launch_args(&side, Start::Fork { from: "sessao-origem", id: "sessao-nova", at: None });
     let at = args.iter().position(|a| a == "--resume").expect("--resume");
     assert_eq!(&args[at..at + 5], ["--resume", "sessao-origem", "--fork-session", "--session-id", "sessao-nova"]);
     // só um `--session-id` (o da sessão nova) e a origem nunca vira o id da pergunta
     assert_eq!(args.iter().filter(|a| *a == "--session-id").count(), 1);
     assert!(!args.iter().any(|a| a == "--continue"));
+    // sem ponto de corte, a cópia é a sessão inteira
+    assert!(!args.iter().any(|a| a == "--resume-session-at"));
     // a pergunta abre com o ajuste DELA (permissão, modelo, esforço), não o da origem
     let mode = args.iter().position(|a| a == "--permission-mode").unwrap();
     assert_eq!(args[mode + 1], permission_mode("safe"));
@@ -97,14 +99,24 @@ fn sem_ponto_estavel_o_thread_fork_forka_o_fim_da_thread() {
 // ---- o plano -----------------------------------------------------------------------------------------------------
 
 #[test]
-fn claude_com_a_origem_ociosa_forka_a_sessao_dela() {
-    assert_eq!(plan("claude-code", None, Some(&origin("claude-code"))), Plan::Claude { from: "sessao-origem".into() });
+fn claude_com_a_origem_ociosa_forka_a_sessao_inteira() {
+    assert_eq!(plan("claude-code", None, Some(&origin("claude-code"))), Plan::Claude { from: "sessao-origem".into(), at: None });
 }
 
 #[test]
-fn claude_com_a_origem_no_meio_de_um_turno_cai_no_recorte_com_o_motivo() {
+fn claude_com_a_origem_no_meio_de_um_turno_corta_a_copia_no_ultimo_turno_concluido() {
     let working = Origin { working: true, ..origin("claude-code") };
-    assert_eq!(plan("claude-code", None, Some(&working)), Plan::Excerpt(Reason::OriginWorking));
+    assert_eq!(plan("claude-code", None, Some(&working)), Plan::Claude { from: "sessao-origem".into(), at: Some("uuid-turno-3".into()) });
+}
+
+#[test]
+fn claude_no_meio_de_um_turno_sem_o_uuid_do_ponto_estavel_leva_o_contexto_portatil() {
+    // primeiro turno: não há turno concluído
+    let first = Origin { working: true, last_stable_turn: None, last_end_uuid: None, ..origin("claude-code") };
+    assert_eq!(plan("claude-code", None, Some(&first)), Plan::Portable(Reason::NoStableTurn));
+    // há turnos, mas de antes de o app guardar o uuid: a cópia não sabe onde cortar
+    let old = Origin { working: true, last_end_uuid: None, ..origin("claude-code") };
+    assert_eq!(plan("claude-code", None, Some(&old)), Plan::Portable(Reason::OriginWorking));
 }
 
 #[test]
@@ -117,35 +129,42 @@ fn codex_forka_no_ultimo_turno_terminado_mesmo_com_a_origem_trabalhando() {
 #[test]
 fn codex_no_primeiro_turno_da_origem_nao_tem_ponto_estavel() {
     let first_turn = Origin { working: true, last_stable_turn: None, ..origin("codex") };
-    assert_eq!(plan("codex", None, Some(&first_turn)), Plan::Excerpt(Reason::NoStableTurn));
+    assert_eq!(plan("codex", None, Some(&first_turn)), Plan::Portable(Reason::NoStableTurn));
     // ociosa e sem turno registrado: forka o fim da thread
     let idle = Origin { last_stable_turn: None, ..origin("codex") };
     assert_eq!(plan("codex", None, Some(&idle)), Plan::Codex { from: "sessao-origem".into(), last_turn_id: None });
 }
 
 #[test]
-fn motor_sem_fork_nativo_cai_no_recorte() {
-    for agent in ["opencode", "antigravity", "cursor", "gemini-cli", "agente-que-nao-existe"] {
+fn motor_sem_fork_nativo_leva_o_contexto_portatil_e_agente_sem_motor_cai_no_recorte() {
+    for agent in ["opencode", "antigravity", "cursor"] {
+        assert_eq!(plan(agent, None, Some(&origin(agent))), Plan::Portable(Reason::Unsupported), "{agent}");
+    }
+    for agent in ["gemini-cli", "agente-que-nao-existe"] {
         assert_eq!(plan(agent, None, Some(&origin(agent))), Plan::Excerpt(Reason::Unsupported), "{agent}");
     }
 }
 
 #[test]
-fn fork_so_vale_para_o_mesmo_agente_e_a_mesma_conta_da_origem() {
-    assert_eq!(plan("codex", None, Some(&origin("claude-code"))), Plan::Excerpt(Reason::OtherAgent));
-    assert_eq!(plan("claude-code", Some("conta-b"), Some(&origin("claude-code"))), Plan::Excerpt(Reason::OtherAccount));
+fn a_sessao_so_abre_no_mesmo_agente_e_na_mesma_conta_da_origem_o_resto_leva_o_contexto_portatil() {
+    assert_eq!(plan("codex", None, Some(&origin("claude-code"))), Plan::Portable(Reason::OtherAgent));
+    // outro agente vale mesmo quando o motor da pergunta não tem fork nativo
+    assert_eq!(plan("opencode", None, Some(&origin("claude-code"))), Plan::Portable(Reason::OtherAgent));
+    assert_eq!(plan("claude-code", Some("conta-b"), Some(&origin("claude-code"))), Plan::Portable(Reason::OtherAccount));
     let other = Origin { account_id: Some("conta-a".into()), ..origin("claude-code") };
-    assert_eq!(plan("claude-code", None, Some(&other)), Plan::Excerpt(Reason::OtherAccount));
-    assert_eq!(plan("claude-code", Some("conta-a"), Some(&other)), Plan::Claude { from: "sessao-origem".into() });
+    assert_eq!(plan("claude-code", None, Some(&other)), Plan::Portable(Reason::OtherAccount));
+    assert_eq!(plan("claude-code", Some("conta-a"), Some(&other)), Plan::Claude { from: "sessao-origem".into(), at: None });
 }
 
 #[test]
-fn origem_sem_sessao_ou_que_e_terminal_cai_no_recorte() {
+fn origem_sem_sessao_leva_o_contexto_portatil_e_a_que_e_terminal_cai_no_recorte() {
     let no_session = Origin { remote_id: None, ..origin("claude-code") };
-    assert_eq!(plan("claude-code", None, Some(&no_session)), Plan::Excerpt(Reason::OriginNoSession));
+    assert_eq!(plan("claude-code", None, Some(&no_session)), Plan::Portable(Reason::OriginNoSession));
     let empty = Origin { remote_id: Some(String::new()), ..origin("claude-code") };
-    assert_eq!(plan("claude-code", None, Some(&empty)), Plan::Excerpt(Reason::OriginNoSession));
+    assert_eq!(plan("claude-code", None, Some(&empty)), Plan::Portable(Reason::OriginNoSession));
     assert_eq!(plan("claude-code", None, None), Plan::Excerpt(Reason::OriginTerminal));
+    // terminal de origem e motor sem fork: o motivo é o do motor
+    assert_eq!(plan("opencode", None, None), Plan::Excerpt(Reason::Unsupported));
 }
 
 #[test]
@@ -226,17 +245,17 @@ fn planejar_e_gravar_o_desfecho_nao_alteram_nem_interrompem_a_origem() {
 }
 
 #[test]
-fn falha_ao_abrir_o_fork_vira_o_recorte_avisado_e_a_origem_segue_intacta() {
+fn falha_ao_abrir_o_fork_vira_o_contexto_portatil_avisado_e_a_origem_segue_intacta() {
     let conn = conn();
     with_side_chat(&conn, "claude-code", "ask", "ask");
     let before = snapshot(&conn);
-    let planned = Plan::Claude { from: "sessao-origem".into() };
+    let planned = Plan::Claude { from: "sessao-origem".into(), at: None };
     let outcome = record(&conn, "lateral", &planned, Err("No conversation found with session ID".into())).unwrap();
-    assert_eq!(outcome, Outcome::excerpt(Reason::Failed));
+    assert_eq!(outcome, Outcome::portable(Reason::Failed));
     assert_eq!(snapshot(&conn), before);
     let side = store::thread(&conn, "lateral").unwrap().unwrap();
-    assert_eq!((side.fork_mode.as_deref(), side.fork_reason.as_deref()), (Some("excerpt"), Some("failed")));
-    // a pergunta segue sem sessão: o envio abre uma nova e leva o recorte
+    assert_eq!((side.fork_mode.as_deref(), side.fork_reason.as_deref()), (Some("portable"), Some("failed")));
+    // a pergunta segue sem sessão: o envio abre uma nova e leva o contexto portátil
     assert_eq!(side.remote_id, None);
 }
 
@@ -244,10 +263,13 @@ fn falha_ao_abrir_o_fork_vira_o_recorte_avisado_e_a_origem_segue_intacta() {
 fn o_recorte_grava_o_motivo_para_a_tela_avisar() {
     let conn = conn();
     with_side_chat(&conn, "opencode", "ask", "ask");
-    let outcome = record(&conn, "lateral", &Plan::Excerpt(Reason::Unsupported), Ok(())).unwrap();
-    assert_eq!((outcome.mode.as_str(), outcome.reason.as_deref()), ("excerpt", Some("unsupported")));
+    let outcome = record(&conn, "lateral", &Plan::Excerpt(Reason::OriginTerminal), Ok(())).unwrap();
+    assert_eq!((outcome.mode.as_str(), outcome.reason.as_deref()), ("excerpt", Some("origin-terminal")));
     let side = store::thread(&conn, "lateral").unwrap().unwrap();
-    assert_eq!((side.fork_mode.as_deref(), side.fork_reason.as_deref()), (Some("excerpt"), Some("unsupported")));
+    assert_eq!((side.fork_mode.as_deref(), side.fork_reason.as_deref()), (Some("excerpt"), Some("origin-terminal")));
+    // o contexto portátil também grava o motivo, com outro modo
+    let outcome = record(&conn, "lateral", &Plan::Portable(Reason::OtherAgent), Ok(())).unwrap();
+    assert_eq!((outcome.mode.as_str(), outcome.reason.as_deref()), ("portable", Some("other-agent")));
 }
 
 #[test]

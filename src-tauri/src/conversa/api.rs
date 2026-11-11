@@ -709,9 +709,17 @@ pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text
     // Conversa que acabou de trocar de agente: o resumo do contexto vai na frente desta mensagem e só sai da fila
     // de pendências quando a mensagem foi de fato enviada (uma recusa não o perde).
     let (framed, carries_summary) = super::troca::before_send(db, thread_id, text);
+    // Pergunta lateral recém-forkada: o contexto portátil (ou o digest da origem) vai na frente da primeira mensagem, com
+    // a mesma regra: só sai da fila quando a mensagem foi de fato enviada.
+    let (framed, carries_fork) = super::fork_portatil::before_send(db, thread_id, &framed);
     let sent = send_framed(app, db, thread_id, &framed, mode, images).await;
-    if carries_summary && sent.is_ok() {
-        super::troca::summary_sent(db, thread_id);
+    if sent.is_ok() {
+        if carries_summary {
+            super::troca::summary_sent(db, thread_id);
+        }
+        if carries_fork {
+            super::fork_portatil::sent(db, thread_id);
+        }
     }
     sent
 }

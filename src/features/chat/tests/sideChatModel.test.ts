@@ -5,7 +5,7 @@ import { readFileSync } from "node:fs";
 
 import {
   canOpenSideChat, clampSideChatAccess, SIDE_HISTORY_ID_PREFIX, SIDE_HISTORY_LIMIT, sideChatAccessCap, sideChatAccessModes, sideChatAccountFor, sideChatContext,
-  sideChatDraftDefaults, sideChatFirstMessage, sideChatForkReasonKey, sideChatHistory, sideChatInheritedAccess, sideChatParentReference, sideChatShowsExcerptNote,
+  sideChatDraftDefaults, sideChatFirstMessage, sideChatForkNote, sideChatForkReasonKey, sideChatHistory, sideChatInheritedAccess, sideChatParentReference, sideChatShowsExcerptNote,
 } from "../sideChatModel";
 import type { TimelineItem } from "../timeline/types";
 import { displayUserText } from "../timeline/userMessage";
@@ -120,11 +120,13 @@ describe("pergunta lateral: permissão herdada da origem", () => {
   });
 });
 
-describe("pergunta lateral: fork da sessão ou recorte", () => {
+describe("pergunta lateral: fork da sessão, contexto portátil ou recorte", () => {
   const items: TimelineItem[] = [item("user", "u1", "Veja este trecho."), item("assistant", "a1", "Certo.")];
 
-  it("com a sessão copiada a pergunta vai sozinha; sem cópia, leva o recorte do histórico", () => {
+  it("com a sessão copiada ou o contexto portátil a pergunta vai sozinha; sem fork, leva o recorte do histórico", () => {
     expect(sideChatFirstMessage("native", items, "  Resuma o risco.  ")).toBe("Resuma o risco.");
+    // o contexto portátil é posto pelo backend na frente do envio (conversa/fork_portatil.rs): a tela manda só a pergunta
+    expect(sideChatFirstMessage("portable", items, "  Resuma o risco.  ")).toBe("Resuma o risco.");
     const excerpt = sideChatFirstMessage("excerpt", items, "Resuma o risco.");
     expect(excerpt).toBe(sideChatContext(items, "Resuma o risco."));
     expect(excerpt).toContain("Usuário: Veja este trecho.");
@@ -139,13 +141,27 @@ describe("pergunta lateral: fork da sessão ou recorte", () => {
     expect(sideChatShowsExcerptNote(undefined)).toBe(false);
   });
 
+  it("o aviso do topo: recorte e contexto portátil avisam (com frases diferentes); a cópia nativa e as conversas antigas não", () => {
+    expect(sideChatForkNote({ forkMode: "excerpt", forkReason: "origin-terminal" })).toEqual({ noteKey: "chat.sideChat.forkNote", reasonKey: "chat.sideChat.forkReason.originTerminal" });
+    expect(sideChatForkNote({ forkMode: "portable", forkReason: "other-agent" })).toEqual({ noteKey: "chat.sideChat.portableNote", reasonKey: "chat.sideChat.forkReason.otherAgent" });
+    expect(sideChatForkNote({ forkMode: "portable", forkReason: "other-account" })?.reasonKey).toBe("chat.sideChat.forkReason.otherAccount");
+    // motivo desconhecido ou ausente cai em «falhou»
+    expect(sideChatForkNote({ forkMode: "portable", forkReason: null })?.reasonKey).toBe("chat.sideChat.forkReason.failed");
+    expect(sideChatForkNote({ forkMode: "native" })).toBeNull();
+    expect(sideChatForkNote({ forkMode: null })).toBeNull();
+    expect(sideChatForkNote({})).toBeNull();
+    expect(sideChatForkNote(undefined)).toBeNull();
+    // o contexto portátil não é «recorte»: a nota de recorte continua só para ele
+    expect(sideChatShowsExcerptNote({ forkMode: "portable" })).toBe(false);
+  });
+
   it("cada motivo do backend tem a sua frase, e um código desconhecido cai em «falhou»", () => {
     const codes = ["unsupported", "origin-terminal", "origin-no-session", "other-agent", "other-account", "origin-working", "no-stable-turn", "failed"];
     const keys = codes.map(sideChatForkReasonKey);
     expect(new Set(keys).size).toBe(codes.length);
     for (const locale of ["pt-BR", "en", "es"]) {
       const catalog = JSON.parse(readFileSync(new URL(`../../../i18n/locales/${locale}.json`, import.meta.url), "utf-8")) as Record<string, string>;
-      for (const key of [...keys, "chat.sideChat.forkNote"]) expect(catalog[key], `${locale}: ${key}`).toBeTruthy();
+      for (const key of [...keys, "chat.sideChat.forkNote", "chat.sideChat.portableNote"]) expect(catalog[key], `${locale}: ${key}`).toBeTruthy();
     }
     expect(sideChatForkReasonKey("codigo-novo")).toBe(sideChatForkReasonKey("failed"));
     expect(sideChatForkReasonKey(null)).toBe(sideChatForkReasonKey("failed"));
@@ -157,6 +173,7 @@ describe("pergunta lateral: fork da sessão ou recorte", () => {
     expect(panel.indexOf("sendToThread(id,")).toBeGreaterThan(panel.indexOf("await forkSideChat(id)"));
     expect(panel).toContain("sideChatFirstMessage(fork.mode, items, question)");
     expect(panel).toContain("clampSideChatAccess(draftValue.agentId, originAccess, draftValue.access)");
-    expect(panel).toContain("sideChatShowsExcerptNote(selected)");
+    expect(panel).toContain("sideChatForkNote(selected)");
+    expect(panel).toContain("t(forkNote.noteKey, { reason: t(forkNote.reasonKey) })");
   });
 });

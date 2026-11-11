@@ -31,6 +31,7 @@ pub mod codex_parar;
 pub mod envio;
 pub mod events;
 pub mod fork;
+pub mod fork_portatil;
 pub mod handoff;
 pub mod memoria;
 pub mod commands;
@@ -39,6 +40,7 @@ pub mod cursor_map;
 pub mod opencode;
 pub mod opencode_map;
 pub mod permission;
+pub mod redacao;
 pub mod pool;
 pub mod resume;
 pub mod send_receipt;
@@ -52,6 +54,8 @@ pub mod worktree;
 mod attach_test;
 #[cfg(test)]
 mod bancada;
+#[cfg(test)]
+mod fork_portatil_test;
 #[cfg(test)]
 mod fork_test;
 #[cfg(test)]

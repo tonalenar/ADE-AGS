@@ -103,15 +103,19 @@ export function sideChatDraftDefaults(agentId: string, model: string | null, eff
   return { agentId, model, effort, access: sideChatInheritedAccess(agentId, originAccess) };
 }
 
-/** Como a pergunta nasceu (`conversa::fork`): cópia da sessão da origem ou o recorte do histórico. */
-export type SideChatForkMode = "native" | "excerpt";
+/**
+ * Como a pergunta nasceu (`conversa::fork`): cópia da sessão da origem (`native`), histórico como contexto portátil
+ * (`portable`: outro agente ou conta, motor sem fork) ou o recorte que a própria tela monta (`excerpt`).
+ */
+export type SideChatForkMode = "native" | "portable" | "excerpt";
 
 /**
- * A primeira mensagem da pergunta lateral. Com a sessão copiada (`native`) o agente já sabe a conversa e a pergunta
- * vai sozinha; sem cópia (`excerpt`), leva o recorte do histórico da origem. Pura.
+ * A primeira mensagem da pergunta lateral. Com a sessão copiada (`native`) o agente já sabe a conversa; com o contexto
+ * portátil (`portable`) o backend o põe na frente do envio (formato do T3, sem segredos): nos dois a pergunta vai
+ * sozinha. Só sem fork (`excerpt`, origem em terminal) a tela leva o recorte do histórico. Pura.
  */
 export function sideChatFirstMessage(mode: SideChatForkMode, items: TimelineItem[], question: string): string {
-  return mode === "native" ? question.trim() : sideChatContext(items, question);
+  return mode === "excerpt" ? sideChatContext(items, question) : question.trim();
 }
 
 const FORK_REASON_KEYS: Record<string, string> = {
@@ -133,4 +137,17 @@ export function sideChatForkReasonKey(reason: string | null | undefined): string
 /** A pergunta lateral caiu no recorte e a tela precisa avisar. Conversas antigas (`forkMode` ausente) não avisam. */
 export function sideChatShowsExcerptNote(thread: { forkMode?: string | null } | null | undefined): boolean {
   return thread?.forkMode === "excerpt";
+}
+
+/**
+ * O aviso do topo da pergunta lateral: a chave da frase (`chat.sideChat.forkNote` para o recorte,
+ * `chat.sideChat.portableNote` para o contexto portátil) e a do motivo. A cópia nativa e as conversas antigas
+ * (`forkMode` ausente) não avisam (`null`). Pura.
+ */
+export function sideChatForkNote(thread: { forkMode?: string | null; forkReason?: string | null } | null | undefined): { noteKey: string; reasonKey: string } | null {
+  if (thread?.forkMode !== "excerpt" && thread?.forkMode !== "portable") return null;
+  return {
+    noteKey: thread.forkMode === "portable" ? "chat.sideChat.portableNote" : "chat.sideChat.forkNote",
+    reasonKey: sideChatForkReasonKey(thread.forkReason),
+  };
 }

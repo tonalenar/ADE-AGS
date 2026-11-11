@@ -293,7 +293,8 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
 /// Abre a sessão da conversa `thread_id` como **fork** da sessão `from` (a da conversa de origem): a pergunta lateral
 /// nasce como cópia dela. A origem não é tocada (outro processo, outra sessão), e o id novo é escolhido aqui. Falhou:
 /// nada muda na conversa (quem chama cai no recorte do histórico).
-pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, from: &str) -> Result<(), String> {
+/// `at`: o uuid do último turno concluído da origem, quando ela está no meio de outro turno (a cópia termina nele).
+pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, from: &str, at: Option<&str>) -> Result<(), String> {
     let gate = resume::start_gate("claude", thread_id);
     let _guard = gate.lock().await;
     if get(thread_id).is_some() {
@@ -305,7 +306,7 @@ pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, fr
     };
     let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
     let id = uuid::Uuid::new_v4().to_string();
-    let session = open(app, db, &row, env, Start::Fork { from, id: &id }).await?;
+    let session = open(app, db, &row, env, Start::Fork { from, id: &id, at }).await?;
     if let Ok(conn) = db.lock() {
         let _ = store::set_remote_id(&conn, thread_id, &id);
     }
@@ -639,7 +640,14 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
             }
             // Com o processo vivo, as tarefas em segundo plano seguem depois do fim do turno: o desfecho delas não é deste turno.
             let legit = session.background.lock().map(|background| background.clone()).unwrap_or_default();
+            // O uuid da última fala do agente neste turno: só um turno concluído o guarda (ponto estável do fork).
+            let end_uuid = session.mapper.lock().ok().and_then(|mut mapper| mapper.take_end_uuid());
             finish_turn(app, db, thread_id, &turn, &result, &legit);
+            if let Some(uuid) = end_uuid.filter(|_| claude_map::run_status(&result) == "completed")
+                && let Ok(conn) = db.lock()
+            {
+                let _ = store::set_run_end_uuid(&conn, thread_id, &turn, &uuid);
+            }
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
             if session.stale.load(Ordering::SeqCst) {
                 close(thread_id);

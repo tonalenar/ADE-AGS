@@ -183,6 +183,14 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             conn.execute_batch(&format!("ALTER TABLE chat_thread ADD COLUMN {column} TEXT;"))?;
         }
     }
+    // O uuid da última mensagem do agente num turno CONCLUÍDO do Claude: o ponto estável do fork da pergunta lateral
+    // (`--resume-session-at`, ver `fork`). Aditiva, nula nos turnos antigos e nos outros motores.
+    let has = conn
+        .prepare("SELECT 1 FROM pragma_table_info('chat_run') WHERE name = 'end_uuid'")?
+        .exists([])?;
+    if !has {
+        conn.execute_batch("ALTER TABLE chat_run ADD COLUMN end_uuid TEXT;")?;
+    }
     // Recibos de `chat_new`: uma repetição do harness recupera a mesma conversa e não reenvia
     // silenciosamente o primeiro prompt quando o resultado do envio ficou incerto.
     conn.execute_batch(
@@ -798,6 +806,34 @@ pub fn last_stable_turn(conn: &Connection, thread_id: &str) -> rusqlite::Result<
         |row| row.get(0),
     )
     .optional()
+}
+
+/// Guarda o uuid da última mensagem do agente num turno concluído do Claude (o ponto estável do fork).
+pub fn set_run_end_uuid(conn: &Connection, thread_id: &str, run_id: &str, uuid: &str) -> rusqlite::Result<()> {
+    conn.execute("UPDATE chat_run SET end_uuid = ?3 WHERE thread_id = ?1 AND id = ?2", params![thread_id, run_id, uuid]).map(|_| ())
+}
+
+/// O uuid do último turno **concluído** que o guardou: o ponto em que o fork do Claude corta a transcrição quando a
+/// origem está no meio de outro turno. Turnos interrompidos ou com erro nunca são o ponto (podem acabar numa
+/// ferramenta sem resultado).
+pub fn last_end_uuid(conn: &Connection, thread_id: &str) -> rusqlite::Result<Option<String>> {
+    conn.query_row(
+        "SELECT end_uuid FROM chat_run WHERE thread_id = ?1 AND status = 'completed' AND end_uuid IS NOT NULL AND end_uuid != ''
+         ORDER BY COALESCE(started_at, 0) DESC, rowid DESC LIMIT 1",
+        [thread_id],
+        |row| row.get(0),
+    )
+    .optional()
+}
+
+/// Os itens dos turnos em andamento da conversa, na ordem: o que a origem fez DEPOIS do ponto estável do fork.
+pub fn in_flight_items(conn: &Connection, thread_id: &str) -> rusqlite::Result<Vec<Item>> {
+    let mut stmt = conn.prepare(
+        "SELECT body FROM chat_item WHERE thread_id = ?1
+           AND run_id IN (SELECT id FROM chat_run WHERE thread_id = ?1 AND status = 'inProgress') ORDER BY seq",
+    )?;
+    let bodies: Vec<String> = stmt.query_map(params![thread_id], |r| r.get(0))?.collect::<Result<_, _>>()?;
+    Ok(bodies.iter().filter_map(|b| serde_json::from_str(b).ok()).collect())
 }
 
 /// O status gravado de um turno (`inProgress`, `completed`, `interrupted`, `failed`), se houver.
