@@ -44,6 +44,21 @@ fn pedido() -> MissionInput {
     }
 }
 
+#[test]
+fn mission_accepts_effort_for_the_claude_default_model() {
+    let database = db();
+    let conn = database.lock().unwrap();
+    let input = MissionInput {
+        lead_agent_id: Some("claude-code".into()),
+        lead_model: None,
+        reasoning_effort: Some("ultrathink".into()),
+        complexity: None,
+        ..pedido()
+    };
+    let result = store::validate(&conn, &input);
+    assert!(result.is_ok(), "{result:?}");
+}
+
 fn squad_para_mission(conn: &Connection) -> String {
     let input: SquadInput = serde_json::from_value(serde_json::json!({
         "name": "Mission Squad",

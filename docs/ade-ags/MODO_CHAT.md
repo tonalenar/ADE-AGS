@@ -77,7 +77,7 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 - **Seletor (prancheta 3):**
   - painel amplo de três colunas com trilho de agentes, favoritos (no `localStorage`), modelos com busca e raciocínio à direita; conta da conversa fica no rodapé;
   - em conversas novas e por protocolo, o trilho permite escolher entre os agentes disponíveis; numa conversa por TUI ele fica no agente da sessão, porque trocar o executável do PTY não preserva a sessão. Nas conversas por protocolo, trocar de agente pede confirmação e só acontece entre turnos;
-  - esforço, modos de acesso e, quando o catálogo confirma suporte no modelo Codex, Standard/Fast ficam reunidos no painel; um esforço incompatível com o modelo selecionado é limpo;
+  - esforço, modos de acesso e, quando a matriz e o catálogo confirmam suporte para a superfície e o modelo selecionados, Standard/Fast ficam reunidos no painel; um esforço incompatível com o modelo selecionado é limpo;
   - o painel reduz o esforço a um seletor compacto em janelas estreitas; `Configurações > Aparência` também permite escolher as famílias de fonte da interface e do código, inclusive um nome instalado localmente;
   - o modo Plano continua como controle próprio, pois altera o lançamento ou o estado da conversa.
 - **Sugestões no composer (estilo T3):** `@` sugere agentes do time e arquivos com mudanças no Git, além de abrir o seletor de arquivo; `/` abre as superfícies e ações ADE; `$` sugere skills compatíveis e anexadas à conversa, com acesso à gestão de skills. Setas, Enter e Escape navegam o menu. As ações usam os painéis e serviços existentes da ADE.

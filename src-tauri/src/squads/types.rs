@@ -39,7 +39,7 @@ pub struct SquadLeadInput {
     pub auto_account: bool,
     #[serde(default)]
     pub complexity: Option<Complexity>,
-    /// Modo Fast de Codex (`service_tier="fast"`). Solo vale con el agente `codex`.
+    /// Modo Fast cuando la superficie y el modelo ofrecen la capability.
     #[serde(default)]
     pub fast_mode: bool,
 }
@@ -97,7 +97,7 @@ pub struct SubagentDefault {
     pub model: Option<String>,
     #[serde(default)]
     pub reasoning_effort: Option<String>,
-    /// Modo Fast de Codex; solo vale con `agent_id = "codex"`.
+    /// Modo Fast cuando la superficie y el modelo ofrecen la capability.
     #[serde(default)]
     pub fast_mode: bool,
 }

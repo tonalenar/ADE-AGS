@@ -598,11 +598,14 @@ fn recruit_fast_flag(args: &Value) -> Result<bool, String> {
     }
 }
 
-/// O modo Fast é um `service_tier` de Codex: em outro agente é um erro claro, antes de abrir
-/// qualquer aba, em vez de um flag que não faria nada.
+/// Fast só segue quando a matriz comprova suporte na superfície TUI, antes de abrir a aba.
 fn check_fast_agent(fast: bool, agent: &str) -> Result<(), String> {
-    if fast && agent != "codex" {
-        return Err("--fast só existe para o Codex (--agent codex); outros agentes não têm esse modo.".into());
+    if fast && crate::harness::matrix::supports(
+        agent,
+        crate::harness::capability::Surface::Tui,
+        crate::harness::capability::Capability::FastMode,
+    ) != Some(crate::harness::capability::Support::Supported) {
+        return Err("--fast não é suportado por este agente na superfície TUI.".into());
     }
     Ok(())
 }
@@ -1784,7 +1787,7 @@ mod test {
     }
 
     #[test]
-    fn recruit_fast_flag_parses_and_only_codex_may_use_it() {
+    fn recruit_fast_flag_parses_and_uses_tui_capability_matrix() {
         assert!(!recruit_fast_flag(&json!({})).unwrap());
         assert!(recruit_fast_flag(&json!({ "fast": true })).unwrap());
         assert!(recruit_fast_flag(&json!({ "fast": "on" })).unwrap());
@@ -1793,7 +1796,8 @@ mod test {
         assert!(recruit_fast_flag(&json!({ "fast": 3 })).is_err());
         assert!(check_fast_agent(true, "codex").is_ok());
         assert!(check_fast_agent(false, "claude-code").is_ok());
-        assert!(check_fast_agent(true, "claude-code").unwrap_err().contains("Codex"));
+        assert!(check_fast_agent(true, "claude-code").is_ok());
+        assert!(check_fast_agent(true, "opencode").is_err());
     }
 
     #[test]

@@ -8,9 +8,13 @@ describe("ajuste de esforço e Fast de um terminal aberto", () => {
     expect(readTuning("codex", command)).toEqual({ model: "gpt-6.1-sol", effort: "high", fast: true });
   });
 
-  it("lê o esforço do Claude Code e ignora Fast fora do Codex", () => {
+  it("lê o esforço do Claude Code e os modos especiais", () => {
     expect(readTuning("claude-code", "claude --model opus --effort max")).toEqual({ model: "opus", effort: "max", fast: false });
     expect(readTuning("claude-code", "claude")).toEqual({ model: null, effort: null, fast: false });
+    const base = "claude --model claude-opus-5-5 --effort xhigh --settings '{\"ultracode\":true,\"fastMode\":true}'";
+    expect(readTuning("claude-code", base)).toEqual({ model: "claude-opus-5-5", effort: "ultracode", fast: true });
+    expect(retune("claude-code", base, { effort: "ultrathink", fast: false }))
+      .toBe("claude --model claude-opus-5-5 --append-system-prompt Ultrathink:");
   });
 
   it("troca o esforço sem duplicar flags e mantém o modelo", () => {

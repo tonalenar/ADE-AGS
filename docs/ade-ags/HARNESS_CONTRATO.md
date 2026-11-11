@@ -33,7 +33,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ## 1. Matriz capability × provider/superfície
 
-### 1.1 As 19 capabilities
+### 1.1 As 20 capabilities
 
 | Capability | Pergunta que a célula responde | O que **não** conta |
 |---|---|---|
@@ -56,12 +56,13 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `rollback` | Dá para voltar ao estado de uma foto? | reverter a conversa do provider (nenhuma superfície faz) |
 | `usage` | Há uso de tokens, custo ou limite por sessão? | medidor por conta |
 | `event_source` | Há fonte contínua de eventos que o ADE lê? | qualidade da fonte (vai na observação) |
+| `fast_mode` | O adapter entrega Fast quando a superfície e o modelo selecionados declaram suporte? | controle oferecido sem consultar a capability da matriz |
 
 **Escopo** (`instance`, `session`, `model`): onde o estado é decidido. A tabela estática traz o valor padrão por instância. O valor por sessão e por modelo é resolvido na execução (Fase 3). O caso mais claro é o ACP local: a retomada só existe se o agente anunciar `resume` ou `loadSession` no `initialize` (`conversa/opencode.rs:283-287`), então a coluna `local-acp` marca `Unknown` até o descritor de sessão ler `agentCapabilities`.
 
 ### 1.2 A matriz
 
-`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 19 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
+`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 20 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
 
 **Conversa estruturada (`conversa/`)**
 
@@ -140,34 +141,34 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 19 capabilities = **418 células**: **167 `Supported`, 32 `Unknown`, 219 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 418): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 20 capabilities = **440 células**: **171 `Supported`, 32 `Unknown`, 237 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 440): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`; `fork` (pergunta lateral) e `comandos` (menu do `/`, §1.9) também ficam fora das 440. O Fast é capability por superfície; a disponibilidade concreta continua dependendo do modelo no roster.
 
 <!-- contagem-matriz:inicio -->
 | Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
 |---|---|---:|---:|---:|---|
-| Chat | claude-code | 14 | 2 | 3 | Supported |
-| Chat | codex | 14 | 0 | 5 | Supported |
-| Chat | opencode | 9 | 1 | 9 | Supported |
-| Chat | antigravity | 9 | 0 | 10 | Supported |
-| Chat | cursor | 8 | 0 | 11 | Unsupported |
-| Chat | local-acp | 6 | 3 | 10 | Unknown |
-| Fleet | claude-code | 10 | 0 | 9 | Supported |
-| Fleet | gemini-cli | 8 | 0 | 11 | Unsupported |
-| Fleet | codex | 9 | 0 | 10 | Supported |
-| Fleet | opencode | 9 | 0 | 10 | Supported |
-| Fleet | kimi-code | 7 | 0 | 12 | Unsupported |
-| Fleet | hermes | 0 | 0 | 19 | Unsupported |
-| Fleet | antigravity | 8 | 2 | 9 | Unknown |
-| Fleet | cursor | 0 | 0 | 19 | Unsupported |
-| Tui | claude-code | 11 | 3 | 5 | Supported |
-| Tui | gemini-cli | 6 | 3 | 10 | Unsupported |
-| Tui | codex | 10 | 2 | 7 | Supported |
-| Tui | opencode | 8 | 2 | 9 | Supported |
-| Tui | kimi-code | 5 | 4 | 10 | Unsupported |
-| Tui | hermes | 6 | 3 | 10 | Unknown |
-| Tui | antigravity | 5 | 4 | 10 | Unsupported |
-| Tui | cursor | 5 | 3 | 11 | Unsupported |
-| **Total** | 22 colunas × 19 = 418 células | 167 | 32 | 219 | |
+| Chat | claude-code | 14 | 2 | 4 | Supported |
+| Chat | codex | 14 | 0 | 6 | Supported |
+| Chat | opencode | 9 | 1 | 10 | Supported |
+| Chat | antigravity | 9 | 0 | 11 | Supported |
+| Chat | cursor | 8 | 0 | 12 | Unsupported |
+| Chat | local-acp | 6 | 3 | 11 | Unknown |
+| Fleet | claude-code | 11 | 0 | 9 | Supported |
+| Fleet | gemini-cli | 8 | 0 | 12 | Unsupported |
+| Fleet | codex | 10 | 0 | 10 | Supported |
+| Fleet | opencode | 9 | 0 | 11 | Supported |
+| Fleet | kimi-code | 7 | 0 | 13 | Unsupported |
+| Fleet | hermes | 0 | 0 | 20 | Unsupported |
+| Fleet | antigravity | 8 | 2 | 10 | Unknown |
+| Fleet | cursor | 0 | 0 | 20 | Unsupported |
+| Tui | claude-code | 12 | 3 | 5 | Supported |
+| Tui | gemini-cli | 6 | 3 | 11 | Unsupported |
+| Tui | codex | 11 | 2 | 7 | Supported |
+| Tui | opencode | 8 | 2 | 10 | Supported |
+| Tui | kimi-code | 5 | 4 | 11 | Unsupported |
+| Tui | hermes | 6 | 3 | 11 | Unknown |
+| Tui | antigravity | 5 | 4 | 11 | Unsupported |
+| Tui | cursor | 5 | 3 | 12 | Unsupported |
+| **Total** | 22 colunas × 20 = 440 células | 171 | 32 | 237 | |
 <!-- contagem-matriz:fim -->
 
 Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
@@ -208,7 +209,7 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 
 Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta ou aviso. A entrega durável é da Fase 4.
 
-**`fork` (extra, fora das 19): a conversa nasce como cópia de outra.** Como `ags_mcp`, `ProviderMatrix::fork` não conta nas 418 células: só o chat usa (a pergunta lateral, `conversa/fork.rs`), e o contrato do motor (`EngineCapabilities::session_fork`) lê a matriz, como o `steer` e o `plan`. Um teste confere que os dois concordam.
+**`fork` (extra, fora das 20): a conversa nasce como cópia de outra.** Como `ags_mcp`, `ProviderMatrix::fork` não conta nas 440 células: só o chat usa (a pergunta lateral, `conversa/fork.rs`), e o contrato do motor (`EngineCapabilities::session_fork`) lê a matriz, como o `steer` e o `plan`. Um teste confere que os dois concordam.
 
 | Coluna | `fork` | Mecanismo | Ponto estável |
 |---|---|---|---|
@@ -298,7 +299,7 @@ Lacunas reais, em ordem de risco:
 
 ### 1.9 Comandos e skills no `/` (`comandos`)
 
-Linha fora das 19, como `ags_mcp` (não entra na contagem da §1.3). Diz se o menu do `/` do chat lista comandos e skills que o agente **aceita**, e de onde vem a lista. Quando a célula é `Unknown` ou `Unsupported`, o menu não mostra skill nenhuma daquele agente.
+Linha fora das 20, como `ags_mcp` (não entra na contagem da §1.3). Diz se o menu do `/` do chat lista comandos e skills que o agente **aceita**, e de onde vem a lista. Quando a célula é `Unknown` ou `Unsupported`, o menu não mostra skill nenhuma daquele agente.
 
 <!-- comandos:inicio -->
 | Superfície | Provider | `comandos` |
@@ -670,7 +671,7 @@ O guarda anterior tinha baseline de **102 comparações diretas**. O guarda ampl
 
 **Fechado nesta rodada:** nenhuma capability é inferida por comparação de nome fora do adapter/registro. O guarda indireto passa com baseline vazio (**0**); as comparações de identidade que restam escolhem implementação, parser, executável, conta ou apresentação, sem declarar suporte.
 
-**Plano e prova.** `plan` é uma das 19 capabilities em cada coluna. As 22 células de `plan` têm evidência não vazia e prova diferente de `None`, conferidas por teste. Nenhuma delas afirma `RealCapture`; a prova é de código/tabela. O compositor consulta a matriz e só oferece a ação Plano quando a célula é `Supported`.
+**Plano e prova.** `plan` é uma das 20 capabilities em cada coluna. As 22 células de `plan` têm evidência não vazia e prova diferente de `None`, conferidas por teste. Nenhuma delas afirma `RealCapture`; a prova é de código/tabela. O compositor consulta a matriz e só oferece a ação Plano quando a célula é `Supported`.
 
 **Divergência da TUI.** O composer legado ainda aceita `/compact` de Claude/Codex e `/goal` de Claude, mas o contrato não tem captura que prove execução e resposta observável. As três células ficam `Unknown`; a disponibilidade legada não reclassifica a matriz como `Supported`. `Unknown` significa que o ADE não promete o efeito. O seletor de Plano não usa esse fallback.
 
@@ -752,7 +753,7 @@ Só o que é decisão de produto ou de autorização.
 
 **Verificado nesta rodada**
 - `cd src-tauri && cargo test --lib --bin ags`: biblioteca **2.933 aprovados, 0 falhas, 29 ignorados**; binário `ags`: **53 aprovados, 0 falhas**.
-- `cargo test --lib --bin ags harness::test::`: **28 aprovados, 0 falhas**. Confere as 22 colunas e 19 capabilities, todas as provas e citações, a contagem documentada, os estados `Unknown` da TUI, as provas de `plan` e o guarda de padrões indiretos.
+- `cargo test --lib --bin ags harness::test::`: **28 aprovados, 0 falhas**. Confere as 22 colunas e 20 capabilities, todas as provas e citações, a contagem documentada, os estados `Unknown` da TUI, as provas de `plan` e o guarda de padrões indiretos.
 - `bunx tsc --noEmit`: passou.
 - `bun run check:i18n`: passou; 0 chaves ausentes ou divergentes.
 - `bun run check:test-lint`: passou; 40 violações antigas no baseline e nenhuma nova.
@@ -812,7 +813,7 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `tui/cursor`: `resume` corrigido para `registry.rs:398`.
 
 4. **Contrato e documentação**:
-   - §1.2 e §1.3: na auditoria original, a matriz tinha 18 capabilities e 163 `Supported`, 29 `Unknown` e 204 `Unsupported`; a extensão `plan` e a contagem atual de 19 capabilities estão em §1.3.
+   - §1.2 e §1.3: na auditoria original, a matriz tinha 18 capabilities e 163 `Supported`, 29 `Unknown` e 204 `Unsupported`; a extensão `plan` elevou a matriz para 19 capabilities naquela revisão; `fast_mode` agora eleva o total atual para 20 em §1.3.
    - §1.5: documentada a tensão entre retomada automática de tarefa na Frota e hand-off manual.
    - §1.7: citação de `close_orphan_runs` corrigida para `conversa/store.rs:1068-1082`.
    - §3.2: citação do Codex corrigida para `codex.rs:573-574` e frase de `SWEPT_RUNNING_ERROR` corrigida para esclarecer que `end_reason` não existe na projeção atual.

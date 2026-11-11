@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use super::{
     CodexModelPage, collect_codex_pages, discover_codex, insert_claude_model,
-    parse_claude_help_aliases, parse_codex_model_page,
+    parse_codex_model_page,
 };
 use crate::runs::roster::{ModelAvailability, RosterModel};
 
@@ -142,20 +142,13 @@ fn response_reader_skips_invalid_and_unrelated_notifications() {
     assert_eq!(result["ok"], true);
 }
 
+/// Um alias de família (`haiku`, `opus`…) é uma forma de chamar um modelo, não um modelo: nunca vira linha
+/// do catálogo, nem com label "Haiku" nem cru. A linha é o id completo, que leva o alias.
 #[test]
-fn claude_help_parser_reads_aliases_from_model_option_and_deduplicates() {
-    let help =
-        "--model <model> alias for latest (e.g. 'fable', 'opus', or 'sonnet')\n  --other <value>";
-    assert_eq!(
-        parse_claude_help_aliases(help),
-        vec!["fable", "opus", "sonnet"]
-    );
-}
-
-#[test]
-fn claude_catalog_merge_keeps_aliases_and_full_model_ids_separate() {
+fn claude_alias_is_never_a_catalog_row() {
     let mut models = HashMap::<String, (u8, RosterModel)>::new();
     insert_claude_model(&mut models, "sonnet".into(), "Sonnet".into(), "cli", 1);
+    insert_claude_model(&mut models, "haiku".into(), "haiku".into(), "claude_config", 2);
     insert_claude_model(
         &mut models,
         "claude-sonnet-5".into(),
@@ -170,9 +163,28 @@ fn claude_catalog_merge_keeps_aliases_and_full_model_ids_separate() {
         "legacy",
         0,
     );
-    assert_eq!(models.len(), 2);
+    let mut ids: Vec<_> = models.keys().map(String::as_str).collect();
+    ids.sort();
+    assert_eq!(ids, ["claude-sonnet-5"]);
     assert_eq!(models["claude-sonnet-5"].1.label, "Claude Sonnet 5");
-    assert_eq!(models["sonnet"].1.availability, ModelAvailability::Unknown);
+}
+
+#[test]
+fn claude_config_alias_is_not_a_raw_row_but_the_full_id_is() {
+    let config = serde_json::json!({"model": "haiku", "modelAliases": {"opus": "claude-opus-5-5"}});
+    let mut catalog = HashMap::new();
+    super::collect_claude_config_models(&config, &mut catalog);
+    assert!(!catalog.contains_key("haiku"), "alias cru virou linha: {:?}", catalog.keys().collect::<Vec<_>>());
+    assert!(!catalog.contains_key("opus"));
+    assert!(catalog.contains_key("claude-opus-5-5"));
+}
+
+/// Um id completo salvo sem nome de catálogo ganha o nome com versão, como o catálogo nativo dá.
+#[test]
+fn claude_config_model_id_gets_its_version_label() {
+    let mut catalog = HashMap::new();
+    super::collect_claude_config_models(&serde_json::json!({"model": "claude-opus-4-6"}), &mut catalog);
+    assert_eq!(catalog["claude-opus-4-6"].1.label, "Claude Opus 4.6");
 }
 
 #[test]
@@ -263,16 +275,10 @@ fn claude_config_ignores_unrelated_options_and_sensitive_model_metadata() {
 }
 
 #[test]
-fn claude_help_handles_apostrophes_and_next_short_option() {
-    let help = "--model <model> alias (e.g. 'sonnet') or a model's full name ('claude-custom-5')\n  -n, --name <name> 'not-model'";
-    assert_eq!(parse_claude_help_aliases(help), ["claude-custom-5", "sonnet"]);
-}
-
-#[test]
 fn claude_global_gateway_enriches_known_ids_without_becoming_the_catalog() {
     let mut catalog = HashMap::new();
-    for id in super::parse_claude_help_aliases("--model <model> alias 'sonnet' or 'claude-fable-5'\n  --next") {
-        insert_claude_model(&mut catalog, id.clone(), id, "claude_cli_help", 1);
+    for id in ["claude-sonnet-5", "claude-fable-5"] {
+        insert_claude_model(&mut catalog, id.into(), id.into(), "claude_cli_help", 1);
     }
     super::collect_claude_config_models(&serde_json::json!({
         "model": "claude-code/spacexai/grok-build-0.1",
@@ -290,7 +296,7 @@ fn claude_global_gateway_enriches_known_ids_without_becoming_the_catalog() {
     ]}"#).unwrap();
     super::enrich_claude_models(&mut catalog, gateway);
     assert_eq!(catalog.len(), 4);
-    assert!(catalog.contains_key("sonnet"));
+    assert!(catalog.contains_key("claude-sonnet-5"));
     assert!(catalog.contains_key("claude-fable-5"));
     assert_eq!(catalog["minimax-m2.5-free"].1.label, "MiniMax M2.5 Free");
     assert_eq!(catalog["minimax-m2.5-free"].1.source.as_deref(), Some("claude_config"));
@@ -311,8 +317,7 @@ fn gateway_alone_cannot_create_claude_models() {
 #[ignore = "requires installed Claude Code; read-only help/config/gateway discovery"]
 fn claude_real_model_discovery() {
     let env = HashMap::new();
-    let help = super::run_read_only("claude", &["--help"], &env).unwrap();
-    eprintln!("CLI model IDs/aliases: {:?}", super::parse_claude_help_aliases(&help));
+    eprintln!("Native catalog reachable: {}", super::discover_claude_native_catalog().is_some());
     eprintln!("Gateway configured: {}", super::claude_gateway_base_url(&env).is_some());
     let mut configured = HashMap::new();
     let dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(std::path::PathBuf::from)
@@ -376,7 +381,7 @@ fn claude_native_catalog_separates_main_more_and_model_specific_effort() {
     let models = super::parse_claude_native_catalog(&document, "2.1.280 (Claude Code)");
     assert_eq!(models.len(), 3);
     let opus = models.iter().find(|m| m.id == "claude-opus-5-5").unwrap();
-    assert_eq!(opus.label, "Opus 5.5");
+    assert_eq!(opus.label, "Claude Opus 5.5");
     assert_eq!(opus.source.as_deref(), Some("native"));
     assert_eq!(opus.reasoning_levels.as_ref().unwrap(), &["low", "medium", "high", "xhigh", "max"]);
     assert_eq!(opus.default_reasoning.as_deref(), Some("high"));
@@ -386,7 +391,7 @@ fn claude_native_catalog_separates_main_more_and_model_specific_effort() {
     super::collect_claude_config_models(&serde_json::json!({"model":"minimax-m2.5-free"}), &mut catalog);
     super::enrich_claude_models(&mut catalog, super::parse_gateway_models(br#"{"data":[{"id":"gemini"},{"id":"claude-opus-5-5","name":"Gateway label"},{"id":"minimax-m2.5-free","name":"MiniMax"}]}"#).unwrap());
     assert_eq!(catalog.len(), 4);
-    assert_eq!(catalog["claude-opus-5-5"].1.label, "Opus 5.5");
+    assert_eq!(catalog["claude-opus-5-5"].1.label, "Claude Opus 5.5");
     assert_eq!(catalog["minimax-m2.5-free"].1.source.as_deref(), Some("claude_config"));
     assert_eq!(catalog["minimax-m2.5-free"].1.label, "MiniMax");
     assert!(super::parse_claude_native_catalog(&document, "unknown").is_empty());
@@ -410,4 +415,80 @@ fn codex_model_reports_fast_support_only_from_catalog_tiers() {
     assert_eq!(by_id("tier-model"), Some(true));
     assert_eq!(by_id("slow-model"), Some(false));
     assert_eq!(by_id("silent-model"), None);
+}
+
+#[test]
+fn claude_catalog_without_native_shows_the_current_models_with_versions_and_efforts() {
+    let models = super::claude_catalog_from_sources("2.1.322 (Claude Code)", None, &[], vec![]);
+    let mut ids: Vec<_> = models.iter().map(|m| m.id.as_str()).collect();
+    ids.sort();
+    assert_eq!(ids, ["claude-fable-5-2", "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"]);
+    let opus = models.iter().find(|m| m.id == "claude-opus-5-5").unwrap();
+    assert_eq!(opus.label, "Claude Opus 5.5");
+    assert_eq!(opus.aliases, ["opus"]);
+    assert_eq!(opus.source.as_deref(), Some("claude_builtin"));
+    assert_eq!(opus.reasoning_levels.as_ref().unwrap(), &["low", "medium", "high", "xhigh", "max", "ultracode", "ultrathink"]);
+    assert_eq!(opus.default_reasoning.as_deref(), Some("medium"));
+    assert_eq!(opus.context, Some(1_000_000));
+    // Nenhuma linha é alias cru.
+    assert!(models.iter().all(|m| !["opus", "sonnet", "haiku", "fable"].contains(&m.id.as_str())));
+}
+
+#[test]
+fn claude_catalog_with_native_has_one_row_per_model_and_aliases_on_the_newest() {
+    let document = serde_json::json!({ "surfaces": { "cc": { "model_selector_config": [{ "id": "cc", "models": [
+        {"id": "claude-opus-5-5", "name": "Opus 5.5", "section": "main", "thinking": {"effort_options": [{"id":"low"},{"id":"high"}]}, "runtime": {"default_effort": "high"}},
+        {"id": "claude-opus-4-6", "name": "Opus 4.6", "section": "overflow"},
+        {"id": "claude-haiku-4-5-20251001", "name": "Haiku 4.5", "section": "overflow", "thinking": {"type": "none"}},
+        {"id": "claude-haiku-5-5", "name": "Haiku 5.5", "section": "main"}
+    ] }] } } });
+    let config = serde_json::json!({ "model": "haiku", "availableModels": ["claude-opus-5-5"] });
+    let models = super::claude_catalog_from_sources("2.1.322 (Claude Code)", Some(&document), &[config], vec![]);
+    assert_eq!(models.len(), 4, "{:?}", models.iter().map(|m| &m.id).collect::<Vec<_>>());
+    assert!(models.iter().all(|m| m.id != "haiku" && m.id != "opus"));
+    let by_id = |id: &str| models.iter().find(|m| m.id == id).unwrap();
+    assert_eq!(by_id("claude-opus-5-5").label, "Claude Opus 5.5");
+    assert_eq!(by_id("claude-opus-5-5").aliases, ["opus"]);
+    assert!(by_id("claude-opus-4-6").aliases.is_empty());
+    assert_eq!(by_id("claude-haiku-5-5").aliases, ["haiku"]);
+    assert_eq!(by_id("claude-haiku-4-5-20251001").label, "Claude Haiku 4.5");
+    assert!(by_id("claude-haiku-4-5-20251001").aliases.is_empty());
+    assert_eq!(by_id("claude-haiku-4-5-20251001").reasoning_levels.as_ref().unwrap().len(), 0);
+}
+
+#[test]
+fn claude_builtins_respect_the_installed_cli_version() {
+    let old = super::claude_catalog_from_sources("2.1.270 (Claude Code)", None, &[], vec![]);
+    assert!(old.is_empty());
+    // Sem versão conhecida, nada é cortado.
+    assert_eq!(super::claude_catalog_from_sources("", None, &[], vec![]).len(), 4);
+}
+
+#[test]
+fn claude_label_from_id_reads_family_version_and_date() {
+    assert_eq!(super::claude_label_from_id("claude-opus-4-1-20250805").as_deref(), Some("Claude Opus 4.1"));
+    assert_eq!(super::claude_label_from_id("claude-haiku-4-5").as_deref(), Some("Claude Haiku 4.5"));
+    assert_eq!(super::claude_label_from_id("claude-opus-5").as_deref(), Some("Claude Opus 5"));
+    assert_eq!(super::claude_label_from_id("claude-opus-5-5-preview"), None);
+    assert_eq!(super::claude_label_from_id("claude-code/spacexai/grok-build-0.1"), None);
+}
+
+#[test]
+fn claude_exposes_t3_ultrathink_ultracode_and_fast_only_on_supported_profiles() {
+    for (family, version) in [
+        ("fable", (5, 0)), ("fable", (5, 1)), ("fable", (5, 2)),
+        ("opus", (5, 0)), ("opus", (5, 5)), ("opus", (4, 8)),
+        ("sonnet", (5, 5)), ("haiku", (5, 5)),
+    ] {
+        assert_eq!(super::claude_effort_options(family, version), &["ultracode", "ultrathink"]);
+    }
+    for (family, version) in [("opus", (4, 6)), ("opus", (4, 7)), ("sonnet", (5, 0)), ("sonnet", (4, 6))] {
+        assert_eq!(super::claude_effort_options(family, version), &["ultrathink"]);
+    }
+    assert!(super::claude_effort_options("opus", (4, 5)).is_empty());
+    for version in [(5, 5), (5, 0), (4, 8), (4, 7), (4, 6), (4, 5)] {
+        assert!(super::claude_fast_supported("opus", version));
+    }
+    assert!(!super::claude_fast_supported("sonnet", (5, 5)));
+    assert!(!super::claude_fast_supported("haiku", (5, 5)));
 }

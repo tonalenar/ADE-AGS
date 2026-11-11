@@ -36,7 +36,6 @@ fn claude_code() {
     assert!(caps.accounts);
     assert!(agent.supports_api_key_account());
     assert!(agent.supports_custom_api_base_url());
-    assert!(!agent.supports_fast_mode());
     assert!(caps.sessions);
     assert!(caps.resume);
     assert!(caps.skills);
@@ -72,7 +71,6 @@ fn codex() {
     assert!(caps.accounts);
     assert!(agent.supports_api_key_account());
     assert!(!agent.supports_custom_api_base_url());
-    assert!(agent.supports_fast_mode());
     assert!(caps.sessions);
     assert!(caps.resume);
     assert!(caps.skills);

@@ -94,7 +94,12 @@ fn blank_to_none(value: &Option<String>) -> Option<String> {
 /// Revisa un pedido sin tocar la base. Junta todos los errores: corregir de a uno por
 /// intento es peor que ver la lista entera.
 pub fn validate(conn: &Connection, input: &MissionInput) -> Result<Valid, String> {
-    crate::squads::store::validate_effort_input(input.lead_model.as_deref(), input.complexity, input.reasoning_effort.as_deref())?;
+    crate::squads::store::validate_effort_input(
+        input.lead_agent_id.as_deref(),
+        input.lead_model.as_deref(),
+        input.complexity,
+        input.reasoning_effort.as_deref(),
+    )?;
     if input.squad_id.is_some() && input.reasoning_effort.is_some() { return Err("Mission cannot override Squad effort".into()); }
     let mut errors = Vec::new();
     let title = input.title.trim().to_string();

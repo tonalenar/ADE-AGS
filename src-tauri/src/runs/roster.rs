@@ -80,8 +80,11 @@ pub struct RosterModel {
     pub availability: ModelAvailability,
     pub reasoning_levels: Option<Vec<String>>,
     pub default_reasoning: Option<String>,
-    /// El modelo ofrece el modo Fast (`service_tier`): `None` = el catálogo no lo dice.
+    /// El modelo ofrece el modo Fast: `None` = el catálogo no lo dice.
     pub fast_supported: Option<bool>,
+    /// Nombres de chamada que esta linha atende (Claude: `opus` = o Opus vigente). Vazio = nenhum. Só serve para
+    /// mostrar e validar: o que vai para a CLI continua sendo o valor salvo.
+    pub aliases: Vec<String>,
     /// Por qué no se puede usar aunque la TUI lo liste (un modelo de Ollama sin descargar).
     pub unavailable: Option<String>,
 }
@@ -256,6 +259,7 @@ pub fn opencode_roster_models(
                 reasoning_levels: None,
                 default_reasoning: None,
         fast_supported: None,
+                aliases: Vec::new(),
                 unavailable,
             }
         })
@@ -336,6 +340,15 @@ pub fn refresh_models(db: &DbConnection, agent_id: &str, account_id: Option<&str
     snapshot(db, false)
 }
 
+/// A linha de um modelo salvo: pelo id completo ou pelo alias que ela atende (`opus` → `claude-opus-5-5`).
+pub(super) fn find_model<'a>(models: &'a [RosterModel], model: Option<&str>) -> Option<&'a RosterModel> {
+    let model = model?;
+    models
+        .iter()
+        .find(|entry| entry.id == model)
+        .or_else(|| models.iter().find(|entry| entry.aliases.iter().any(|alias| alias == model)))
+}
+
 pub(super) fn validate_effort(
     roster: &Roster, agent_id: &str, account_id: Option<&str>, model: Option<&str>, effort: Option<&str>,
 ) -> Result<(), String> {
@@ -346,10 +359,13 @@ pub(super) fn validate_effort(
             .ok_or("Reasoning effort cannot be verified for this account")?.models,
         None => &agent.models,
     };
-    let supported = models.iter().find(|entry| Some(entry.id.as_str()) == model)
+    // T3 usa Opus 5.5 como modelo padrão do Claude. O roster de alguns fluxos antigos não
+    // materializa o modelo default na rota; validar pelo alias evita aceitar esforço às cegas.
+    let effective_model = model.or_else(|| (agent_id == "claude-code").then_some("opus"));
+    let supported = find_model(models, effective_model)
         .and_then(|entry| entry.reasoning_levels.as_ref())
         .is_some_and(|levels| levels.iter().any(|level| level == effort));
-    if supported && matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra") {
+    if supported && matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "ultrathink" | "ultracode") {
         Ok(())
     } else {
         Err("Reasoning effort is not supported by this provider/account/model. Select Automatic or a supported level.".into())
@@ -386,6 +402,7 @@ fn discover_catalog(
                 reasoning_levels: None,
                 default_reasoning: None,
         fast_supported: None,
+                aliases: Vec::new(),
                 unavailable: None,
             })
             .collect()),
@@ -432,7 +449,7 @@ fn catalogue_model(id: &str, label: &str, source: &str, availability: ModelAvail
     RosterModel {
         id: id.into(), label: label.into(), toolcall: None, local: false,
         cost_in: None, cost_out: None, context: None, source: Some(source.into()),
-        availability, reasoning_levels: None, default_reasoning: None, fast_supported: None, unavailable: None,
+        availability, reasoning_levels: None, default_reasoning: None, fast_supported: None, aliases: Vec::new(), unavailable: None,
     }
 }
 
@@ -483,8 +500,7 @@ fn gemini_catalogue() -> Vec<RosterModel> {
     // https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/config/models.ts
     // These are provider IDs/aliases, not proof of access by the current account.
     [
-        ("auto", "Gemini Auto"), ("pro", "Gemini Pro"),
-        ("flash", "Gemini Flash"), ("flash-lite", "Gemini Flash Lite"),
+        ("auto", "Gemini Auto"),
         ("gemini-2.5-pro", "Gemini 2.5 Pro"),
         ("gemini-3.5-flash", "Gemini 3.5 Flash"),
         ("gemini-3.8-flash", "Gemini 3.8 Flash"),
@@ -493,7 +509,22 @@ fn gemini_catalogue() -> Vec<RosterModel> {
         ("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview"),
         ("gemini-3-pro-preview", "Gemini 3 Pro Preview"),
         ("gemini-3-flash-preview", "Gemini 3 Flash Preview"),
-    ].into_iter().map(|(id, label)| catalogue_model(id, label, "provider_catalog", ModelAvailability::Unknown)).collect()
+    ]
+    .into_iter()
+    .map(|(id, label)| {
+        let mut model = catalogue_model(id, label, "provider_catalog", ModelAvailability::Unknown);
+        // `pro`, `flash` e `flash-lite` são aliases destes modelos concretos: o display da própria CLI resolve
+        // `pro` → gemini-3-pro-preview, `flash` → gemini-3-flash-preview e `flash-lite` → gemini-3.1-flash-lite.
+        // Viram `aliases` da linha, sem linha duplicada. `auto` é o roteamento da CLI, então segue como linha.
+        model.aliases = match id {
+            "gemini-3-pro-preview" => vec!["pro".into()],
+            "gemini-3-flash-preview" => vec!["flash".into()],
+            "gemini-3.1-flash-lite" => vec!["flash-lite".into()],
+            _ => Vec::new(),
+        };
+        model
+    })
+    .collect()
 }
 
 fn probed(refresh: bool, accounts: &[crate::accounts::AgentAccount]) -> Probed {
@@ -596,7 +627,7 @@ fn include_claude_history(
     let mut historical = HashMap::new();
     for row in rows {
         if let Some(id) = row.map_err(|error| error.to_string())? {
-            super::model_discovery::insert_claude_model(&mut historical, id.clone(), id, "ade_history", 0);
+            super::model_discovery::insert_saved_claude_model(&mut historical, id, "ade_history", 0);
         }
     }
     // Tiers have no account field; show only actually saved entries on the system catalog.
@@ -608,7 +639,7 @@ fn include_claude_history(
         if let Some(tiers) = saved.and_then(|raw| serde_json::from_str::<super::routing::Tiers>(&raw).ok()) {
             for entry in tiers.trivial.into_iter().chain(tiers.standard).chain(tiers.hard) {
                 if entry.agent_id == agent_id {
-                    super::model_discovery::insert_claude_model(&mut historical, entry.model.clone(), entry.model, "ade_history", 0);
+                    super::model_discovery::insert_saved_claude_model(&mut historical, entry.model, "ade_history", 0);
                 }
             }
         }
@@ -799,6 +830,19 @@ mod model_cache_tests {
         assert!(discover_catalog(agy, &HashMap::new(), false).models.is_empty());
     }
     #[test]
+    fn gemini_aliases_attach_to_their_model_row_instead_of_duplicating_it() {
+        let def = crate::agents::agent_def("gemini-cli").unwrap();
+        let catalog = discover_catalog(def, &HashMap::new(), false);
+        let ids: Vec<_> = catalog.models.iter().map(|m| m.id.as_str()).collect();
+        for alias in ["pro", "flash", "flash-lite"] {
+            assert!(!ids.contains(&alias), "alias cru virou linha: {alias}");
+        }
+        let flash = catalog.models.iter().find(|m| m.id == "gemini-3-flash-preview").unwrap();
+        assert_eq!(flash.aliases, ["flash"]);
+        // `auto` é o roteamento da própria CLI, não um modelo: continua como linha.
+        assert!(ids.contains(&"auto"));
+    }
+    #[test]
     fn claude_history_keeps_saved_ids_unverified_and_account_scoped() {
         let conn = crate::database::test_db();
         conn.execute("INSERT INTO squads (id, name, lead_agent_id, lead_model, lead_account_id, created_at, updated_at) VALUES ('a','A','claude-code','custom/old-a','account-a',0,0), ('b','B','claude-code','custom/old-b','account-b',0,0), ('s','System','claude-code','old-system',NULL,0,0)", []).unwrap();
@@ -815,12 +859,21 @@ mod model_cache_tests {
         assert_eq!(b[0].id, "custom/old-b");
         let mut system = vec![];
         include_claude_history(&conn, "claude-code", None, &mut system).unwrap();
-        assert_eq!(system.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), ["haiku", "old-system"]);
+        assert_eq!(system.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), ["old-system"]);
         include_claude_history(&conn, "claude-code", Some("account-a"), &mut a).unwrap();
         assert_eq!(a.len(), 1);
         let mut other = vec![];
         include_claude_history(&conn, "other-provider", None, &mut other).unwrap();
         assert!(other.is_empty());
+    }
+    #[test]
+    fn claude_history_skips_aliases_and_labels_saved_ids_like_the_catalog() {
+        let conn = crate::database::test_db();
+        conn.execute("INSERT INTO squads (id, name, lead_agent_id, lead_model, lead_account_id, created_at, updated_at) VALUES ('s','System','claude-code','claude-opus-4-6',NULL,0,0), ('h','Haiku','claude-code','haiku',NULL,0,0)", []).unwrap();
+        let mut system = vec![];
+        include_claude_history(&conn, "claude-code", None, &mut system).unwrap();
+        assert_eq!(system.iter().map(|model| model.id.as_str()).collect::<Vec<_>>(), ["claude-opus-4-6"]);
+        assert_eq!(system[0].label, "Claude Opus 4.6");
     }
     #[test]
     fn cache_isolates_accounts_and_providers_expires_and_refreshes_one_key() {

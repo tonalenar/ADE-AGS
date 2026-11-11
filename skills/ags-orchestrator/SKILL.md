@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.75.0
+version: 1.76.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -560,9 +560,9 @@ ags peer disconnect Backend Tests
 - **`--model` / `--effort`** pick the recruit's model and reasoning effort (e.g.
   `ags peer recruit Perf --agent codex --model gpt-6.1-luna --effort max`). Without them the agent
   opens with its TUI default. Do not ask the recruit to switch with `/model` afterwards.
-- **`--fast`** turns on Codex's Fast mode (`service_tier=fast`) for the recruit. Only with
-  `--agent codex`; any other agent is rejected. If the model does not offer Fast, the
-  Squad screen warns but the recruit still opens.
+- **`--fast`** turns on Fast for a recruit when the TUI capability matrix supports it.
+  Codex receives `-c service_tier=fast`; Claude Code receives `--settings '{"fastMode":true}'`.
+  Other agents are rejected. The Squad model catalog disables Fast for models that do not offer it.
 - **The Squad's default subagent.** When your mission runs under a Squad, the Squad can pin the
   LLM that recruits use (agent + model + effort + Fast), or be **Automatic**. Your briefing
   says which ("SUBAGENTE PADRÃO DO SQUAD"). With a default, `ags peer recruit Name --prompt ...`
