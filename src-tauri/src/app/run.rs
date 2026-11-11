@@ -558,10 +558,11 @@ pub fn run() {
             crate::preview::preview_add_mock,
             crate::preview::preview_list_mocks,
             crate::preview::preview_clear_mocks,
-            // Importação de cookies de um perfil do Firefox (ver `preview/importer`): só a revisão e a gravação cifrada.
-            crate::preview::browser_import_profiles,
+            // Importação de cookies de outro navegador (ver `preview/importer`): listar fontes, revisar e gravar cifrado no perfil de destino.
+            crate::preview::browser_import_sources,
             crate::preview::browser_import_review,
             crate::preview::browser_import_apply,
+            crate::preview::browser_import_open_full_disk_access,
             // Renderizado del WebView (texto nítido en Linux)
             crate::app::rendering_info,
             // Detección de agentes

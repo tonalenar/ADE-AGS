@@ -208,12 +208,8 @@ fn service_for(data_dir: &Path) -> String {
 /// la última en escribir se llevaba la sesión de la otra.
 static SITES: LazyLock<Mutex<HashMap<String, Arc<Site>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// El sitio de `origin`, abriéndolo (y empezando a guardarlo) la primera vez. Tiene que
-/// llamarse desde el runtime de tokio: el guardado corre ahí.
-pub(crate) fn site_for(origin: &str) -> Arc<Site> {
-    site_for_profile(origin, "default")
-}
-
+/// El sitio de `origin` dentro de un perfil del navegador, abriéndolo (y empezando a guardarlo) la
+/// primera vez. Tiene que llamarse desde el runtime de tokio: el guardado corre ahí.
 /// Jar do site dentro de um perfil do navegador. O perfil padrão conserva a identidade antiga
 /// para manter as sessões cifradas existentes; os demais perfis recebem outra identidade e arquivo.
 pub(crate) fn site_for_profile(origin: &str, profile_id: &str) -> Arc<Site> {
