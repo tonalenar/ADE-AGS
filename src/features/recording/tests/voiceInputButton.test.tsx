@@ -4,8 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AlertaToast } from "@/shared/ui/alerts";
+import { useBotToastStore } from "@/shared/brand/botToastStore";
 import { VoiceInputButton } from "../VoiceInputButton";
-import { voiceInputCancel, voiceInputStart, voiceInputStop } from "../ipc";
+import { openPrivacySettings, voiceInputCancel, voiceInputStart, voiceInputStop } from "../ipc";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -20,6 +21,7 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/shared/ui/alerts", () => ({ AlertaToast: vi.fn() }));
 vi.mock("../ipc", () => ({
+  openPrivacySettings: vi.fn(),
   voiceInputStart: vi.fn(),
   voiceInputStop: vi.fn(),
   voiceInputCancel: vi.fn(),
@@ -36,6 +38,8 @@ beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.stubGlobal("navigator", { userAgent: MAC_UA });
   vi.mocked(AlertaToast).mockReset();
+  useBotToastStore.setState({ toasts: [] });
+  vi.mocked(openPrivacySettings).mockReset().mockResolvedValue();
   vi.mocked(voiceInputStart).mockReset().mockResolvedValue("req-1");
   vi.mocked(voiceInputStop).mockReset().mockResolvedValue("Texto transcrito para revisão");
   vi.mocked(voiceInputCancel).mockReset().mockResolvedValue();
@@ -176,5 +180,31 @@ describe("VoiceInputButton - paridade de plataformas e acessibilidade", () => {
     });
     expect(status?.textContent).toContain("voiceInput.status.error");
     expect(AlertaToast).toHaveBeenCalledWith("voiceInput.title", "Error: Microfone desconectado", "error", 6000);
+  });
+
+  it("abre os Ajustes de Microfone quando o macOS nega o acesso", async () => {
+    vi.mocked(voiceInputStart).mockRejectedValueOnce("MICROPHONE_PERMISSION_REQUIRED: status=2");
+    const { button } = await renderButton();
+
+    await act(async () => { button?.click(); });
+
+    const toast = useBotToastStore.getState().toasts[0];
+    expect(toast.text).toBe("voiceInput.permissionMicrophone");
+    expect(toast.actionLabel).toBe("voiceInput.openMicrophoneSettings");
+    await act(async () => { toast.onAction?.(); await Promise.resolve(); });
+    expect(openPrivacySettings).toHaveBeenCalledWith("microphone");
+  });
+
+  it("abre Reconhecimento de Fala quando a autorização está ausente", async () => {
+    vi.mocked(voiceInputStart).mockRejectedValueOnce("SPEECH_RECOGNITION_PERMISSION_REQUIRED: denied");
+    const { button } = await renderButton();
+
+    await act(async () => { button?.click(); });
+
+    const toast = useBotToastStore.getState().toasts[0];
+    expect(toast.text).toBe("voiceInput.permissionSpeechRecognition");
+    expect(toast.actionLabel).toBe("voiceInput.openSpeechSettings");
+    await act(async () => { toast.onAction?.(); await Promise.resolve(); });
+    expect(openPrivacySettings).toHaveBeenCalledWith("speech_recognition");
   });
 });

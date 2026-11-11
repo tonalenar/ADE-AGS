@@ -46,6 +46,7 @@ mod prompt_stashes;
 mod project_chat_defaults;
 mod project_chat_policy;
 mod prelaunch;
+mod privacy_settings;
 mod preview;
 mod real_browser;
 mod roles;

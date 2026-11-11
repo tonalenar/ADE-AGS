@@ -26,7 +26,7 @@ O fluxo de ditado conecta a interface em React/TypeScript ao helper nativo por m
 | **Atalho de teclado** | [`src/app/shortcuts.ts:212-222`](../../src/app/shortcuts.ts#L212-L222) | Atalho `composer.dictation`: **Cmd+Shift+D** no macOS e **Ctrl+Shift+D** no Windows e Linux, sob o contexto `when: "composerFocus && isDesktop"`. |
 | **Despacho de atalhos** | [`src/app/useGlobalShortcuts.ts:238-241`](../../src/app/useGlobalShortcuts.ts#L238-L241) | Captura global do atalho `toggleDictation` emitindo o evento `ade:voice-input-toggle` na janela. |
 | **Paleta de comandos** | [`src/features/palette/CommandPalette.tsx:1024-1035`](../../src/features/palette/CommandPalette.tsx#L1024-L1035) | Ação `voiceInput.toggle` pesquisável por termos como "ditado", "voz", "microfone", exibindo subtítulo com a razão caso esteja indisponível. |
-| **Permissões do sistema** | [`src-tauri/Info.plist:5-6`](../../src-tauri/Info.plist#L5-L6) | Declaração de `NSMicrophoneUsageDescription` para consentimento de microfone pelo macOS. |
+| **Permissões do sistema** | [`src-tauri/Info.plist:5-8`](../../src-tauri/Info.plist#L5-L8), [`src-tauri/Entitlements.plist`](../../src-tauri/Entitlements.plist), [`src-tauri/src/privacy_settings.rs`](../../src-tauri/src/privacy_settings.rs) | Declarações de Microfone e Reconhecimento de Fala, entitlement `com.apple.security.device.audio-input` e comando com allowlist de painéis TCC. |
 
 ---
 
@@ -34,9 +34,9 @@ O fluxo de ditado conecta a interface em React/TypeScript ao helper nativo por m
 
 1. **Acionamento:** O usuário clica no botão com ícone de microfone ou pressiona o atalho de ditado (`Cmd+Shift+D` / `Ctrl+Shift+D`) com o composer focado.
 2. **Permissões do macOS:**
-   - **Microfone:** Verificado via `AVCaptureDevice.authorizationStatus(for: .audio)`. Caso esteja em `notDetermined`, exibe o diálogo nativo do sistema operacional.
-   - **Reconhecimento de Fala:** Verificado via `SFSpeechRecognizer.authorizationStatus()`.
-   - Se qualquer permissão for negada, o helper encerra com erro amigável orientando a pessoa a habilitar o acesso nos Ajustes do Sistema.
+   - **Microfone:** Verificado via `AVCaptureDevice.authorizationStatus(for: .audio)`. Caso esteja em `notDetermined`, chama `requestAccess(for: .audio)` para exibir o diálogo nativo. O app declara `com.apple.security.device.audio-input` na assinatura. Se negado, o aviso oferece abrir o painel Microfone.
+   - **Reconhecimento de Fala:** Verificado via `SFSpeechRecognizer.authorizationStatus()`. Se negado, o aviso oferece abrir o painel Reconhecimento de Fala.
+   - `open_privacy_settings` recebe somente `screen_capture`, `microphone` ou `speech_recognition`; o frontend usa o wrapper `openPrivacySettings` em `src/features/recording/ipc.ts`. Os deep links foram conferidos no macOS 27.2, sem alterar TCC.
 3. **Inicialização do Reconhecimento:**
    - O idioma segue a preferência configurada na ADE (`pt-BR`, `en-US` ou `es-ES`).
    - O helper valida se o recognizer suporta `supportsOnDeviceRecognition`. Se o idioma não tiver modelo local baixado no Mac, o processo é abortado imediatamente sem enviar áudio para a rede.
