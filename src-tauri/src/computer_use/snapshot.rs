@@ -33,7 +33,7 @@ const MIN_WINDOW_SIDE: f64 = 50.0;
 const MAX_DISPLAY_NUMBER: u32 = 16;
 pub(crate) const PREFIX: &str = "ADE-AGS_SnapShot_";
 const SIDECAR_VERSION: u32 = 1;
-const PERMISSION_MSG: &str = "Para capturar outra tela ou uma janela, autorize a Gravação de Tela em Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema, e reabra a ADE.";
+const PERMISSION_MSG: &str = "O preflight do macOS não detectou a Gravação de Tela. Confira Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema. Se ADE AGS já estiver habilitada, remova-a da lista e adicione-a novamente para renovar o requisito TCC após a troca da assinatura.";
 const NUMBERING_MSG: &str = "Com três ou mais telas, o macOS não documenta a numeração do screencapture para as telas secundárias. A ADE não captura essas telas; a principal e, com duas telas, a secundária seguem disponíveis.";
 const GONE_DISPLAY_MSG: &str = "Esta tela não está mais conectada. Atualize a lista e escolha de novo.";
 const GONE_WINDOW_MSG: &str = "Esta janela não está mais disponível. Atualize a lista e escolha de novo.";
@@ -390,6 +390,50 @@ fn write_sidecar(png: &Path, info: &SnapshotInfo) {
     }
 }
 
+fn capture_error(exit_code: Option<i32>, stderr: &str, output_exists: bool) -> String {
+    let diagnostic: String = stderr.trim().chars().take(500).collect();
+    if diagnostic.to_lowercase().contains("could not create image from display") {
+        let code = exit_code.map_or_else(|| "desconhecida".to_string(), |code| code.to_string());
+        return format!(
+            "O macOS não criou a captura da tela (screencapture saída {code}; stderr: {diagnostic}). O preflight de Gravação de Tela pode continuar falso mesmo com ADE AGS marcada. Confira Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema; remova ADE AGS da lista e adicione-a novamente para renovar a autorização TCC após a troca da assinatura."
+        );
+    }
+    if !output_exists && exit_code == Some(0) {
+        return "O screencapture terminou sem erro, mas não criou o arquivo PNG.".into();
+    }
+    let code = exit_code.map_or_else(|| "desconhecido".to_string(), |code| code.to_string());
+    if diagnostic.is_empty() {
+        format!("O screencapture falhou (código {code}) e não salvou a captura de tela.")
+    } else {
+        format!("O screencapture falhou (código {code}): {diagnostic}")
+    }
+}
+
+#[cfg(test)]
+mod capture_error_test {
+    use super::capture_error;
+
+    #[test]
+    fn identifica_a_falha_de_tela_do_screencapture_e_preserva_o_diagnostico() {
+        let error = capture_error(Some(1), "could not create image from display\n", false);
+        assert!(error.contains("screencapture saída 1"));
+        assert!(error.contains("could not create image from display"));
+        assert!(error.contains("remova ADE AGS da lista e adicione-a novamente"));
+    }
+
+    #[test]
+    fn diferencia_png_ausente_de_um_bloqueio_de_tela() {
+        assert_eq!(
+            capture_error(Some(0), "", false),
+            "O screencapture terminou sem erro, mas não criou o arquivo PNG."
+        );
+        assert_eq!(
+            capture_error(Some(2), "arquivo inválido", false),
+            "O screencapture falhou (código 2): arquivo inválido"
+        );
+    }
+}
+
 /// Executa o plano: `screencapture`, conferência do tamanho e JSON ao lado. Devolve o caminho do PNG.
 #[cfg(target_os = "macos")]
 fn capture(plan: &Plan) -> Result<String, String> {
@@ -405,8 +449,13 @@ fn capture(plan: &Plan) -> Result<String, String> {
     let result = crate::util::spawn::output(&mut command, Duration::from_secs(15))
         .map_err(|e| format!("Não consegui capturar a tela: {e}"))?;
     if !result.status.success() || !path.is_file() {
+        let error = capture_error(
+            result.status.code(),
+            &String::from_utf8_lossy(&result.stderr),
+            path.is_file(),
+        );
         let _ = std::fs::remove_file(&path);
-        return Err("O macOS não conseguiu salvar a captura de tela.".into());
+        return Err(error);
     }
     if let Plan::Display { pixels, points, .. } = plan {
         let confere = png_head_size(&path).is_some_and(|size| dims_match(size, &[*pixels, *points]));

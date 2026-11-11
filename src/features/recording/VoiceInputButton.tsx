@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next";
 
 import { osFromUserAgent } from "@/app/platform";
 import { StopIcon, XIcon, MicIcon } from "@/features/chat/chatIcons";
+import { showBotToast } from "@/shared/brand/botToastStore";
 import { AlertaToast } from "@/shared/ui/alerts";
 
-import { voiceInputCancel, voiceInputStart, voiceInputStop } from "./ipc";
+import { openPrivacySettings, voiceInputCancel, voiceInputStart, voiceInputStop } from "./ipc";
 
 /** Ditado no dispositivo: a transcrição vai ao rascunho para revisão e nunca envia a mensagem. */
 export function VoiceInputButton({ onTranscript, className = "", disabled = false, isComposerActive }: {
@@ -32,6 +33,40 @@ export function VoiceInputButton({ onTranscript, className = "", disabled = fals
 
   const resolvedLanguage = (i18n.resolvedLanguage ?? i18n.language).toLowerCase();
   const locale = resolvedLanguage.startsWith("es") ? "es-ES" : resolvedLanguage.startsWith("en") ? "en-US" : "pt-BR";
+
+  const showVoiceError = (error: unknown): string => {
+    const raw = String(error);
+    const permission = raw.includes("MICROPHONE_PERMISSION_REQUIRED:")
+      ? {
+          text: t("voiceInput.permissionMicrophone"),
+          actionLabel: t("voiceInput.openMicrophoneSettings"),
+          pane: "microphone" as const,
+        }
+      : raw.includes("SPEECH_RECOGNITION_PERMISSION_REQUIRED:")
+        ? {
+            text: t("voiceInput.permissionSpeechRecognition"),
+            actionLabel: t("voiceInput.openSpeechSettings"),
+            pane: "speech_recognition" as const,
+          }
+        : null;
+    if (!permission) {
+      void AlertaToast(t("voiceInput.title"), raw, "error", 6000);
+      return raw;
+    }
+    showBotToast({
+      title: t("voiceInput.title"),
+      text: permission.text,
+      tone: "error",
+      ms: 15_000,
+      actionLabel: permission.actionLabel,
+      onAction: () => {
+        void openPrivacySettings(permission.pane).catch((openError) => {
+          void AlertaToast(t("voiceInput.title"), String(openError), "error", 6000);
+        });
+      },
+    });
+    return permission.text;
+  };
 
   useEffect(() => () => {
     if (stopTimer.current !== null) window.clearTimeout(stopTimer.current);
@@ -65,8 +100,8 @@ export function VoiceInputButton({ onTranscript, className = "", disabled = fals
         activeSession.current = null;
         setSessionId(null);
         setPhase("idle");
-        setStatusAnnouncement(t("voiceInput.status.error", { error: String(error) }));
-        void AlertaToast(t("voiceInput.title"), String(error), "error", 6000);
+        const message = showVoiceError(error);
+        setStatusAnnouncement(t("voiceInput.status.error", { error: message }));
       }
     }
   };
@@ -95,8 +130,8 @@ export function VoiceInputButton({ onTranscript, className = "", disabled = fals
         }
       }
     } catch (error) {
-      setStatusAnnouncement(t("voiceInput.status.error", { error: String(error) }));
-      void AlertaToast(t("voiceInput.title"), String(error), "error", 6000);
+      const message = showVoiceError(error);
+      setStatusAnnouncement(t("voiceInput.status.error", { error: message }));
     } finally {
       activeSession.current = null;
       setSessionId(null);

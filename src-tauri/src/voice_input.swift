@@ -39,12 +39,14 @@ final class PermissionOutcome: @unchecked Sendable {
     }
 }
 
-func requestMicrophone() -> Bool {
+func requestMicrophone() -> AVAuthorizationStatus {
     switch AVCaptureDevice.authorizationStatus(for: .audio) {
     case .authorized:
-        return true
-    case .denied, .restricted:
-        return false
+        return .authorized
+    case .denied:
+        return .denied
+    case .restricted:
+        return .restricted
     case .notDetermined:
         let semaphore = DispatchSemaphore(value: 0)
         let outcome = PermissionOutcome()
@@ -53,9 +55,9 @@ func requestMicrophone() -> Bool {
             semaphore.signal()
         }
         semaphore.wait()
-        return outcome.get()
+        return outcome.get() ? .authorized : AVCaptureDevice.authorizationStatus(for: .audio)
     @unknown default:
-        return false
+        return AVCaptureDevice.authorizationStatus(for: .audio)
     }
 }
 
@@ -105,11 +107,12 @@ let localeIdentifier = CommandLine.arguments.last ?? "pt-BR"
 guard #available(macOS 10.15, *) else {
     failure("O ditado local exige macOS 10.15 ou posterior.")
 }
-guard requestMicrophone() else {
-    failure("A ADE precisa de permissão de Microfone para iniciar o ditado.")
+let microphoneStatus = requestMicrophone()
+guard microphoneStatus == .authorized else {
+    failure("MICROPHONE_PERMISSION_REQUIRED: status=\(microphoneStatus.rawValue)")
 }
 guard requestSpeechRecognition() else {
-    failure("A ADE precisa de permissão de Reconhecimento de Fala para transcrever.")
+    failure("SPEECH_RECOGNITION_PERMISSION_REQUIRED: O macOS precisa de autorização de Reconhecimento de Fala para transcrever.")
 }
 guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: localeIdentifier)) else {
     failure("O macOS não oferece reconhecimento para o idioma selecionado.")
