@@ -281,7 +281,7 @@ mod claude {
     use crate::canal::timeline::{ItemKind, ToolKind, ToolStatus};
     use crate::conversa::api::{self, Engine, NewThread};
     use crate::conversa::codex_map::DeltaKind;
-    use crate::conversa::claude_map::{access_of_mode, answer_of, ask_of, launch_args, permission_mode, Mapper, Out, Pending, Start, TurnResult};
+    use crate::conversa::claude_map::{access_of_mode, answer_of, ask_of, launch_args, launch_args_with_options, permission_mode, prompt_with_effort, Mapper, Out, Pending, Start, TurnResult};
     use crate::conversa::store::ThreadRow;
 
     fn row(access: &str) -> ThreadRow {
@@ -340,6 +340,28 @@ mod claude {
         assert!(joined.contains("--permission-prompt-tool stdio --permission-mode plan --session-id s-1 --model haiku --effort low"));
         let resumed = launch_args(&ThreadRow { model: None, effort: None, ..row("safe") }, Start::Resume("s-1")).join(" ");
         assert!(resumed.ends_with("--permission-mode auto --resume s-1"));
+    }
+
+    #[test]
+    fn fast_do_chat_chega_ao_codex_e_a_sessao_claude() {
+        let mut codex = json!({ "threadId": "remote", "input": [] });
+        api::apply_codex_fast_mode(&mut codex, Some(true));
+        assert_eq!(codex["serviceTier"], "fast");
+        // O nível do `turn/start` persiste nos turnos seguintes: desligar manda `null`, que limpa.
+        api::apply_codex_fast_mode(&mut codex, Some(false));
+        assert!(codex["serviceTier"].is_null() && codex.get("serviceTier").is_some());
+        // Envio interno (fila, retomada, comando) não mexe no nível da conversa.
+        api::apply_codex_fast_mode(&mut codex, None);
+        assert!(codex.get("serviceTier").is_none());
+
+        let row = row("safe");
+        let args = launch_args_with_options(&row, Start::New("s-fast"), Some(150_000), true);
+        let settings = args.iter().position(|arg| arg == "--settings").map(|index| &args[index + 1]).unwrap();
+        let settings: Value = serde_json::from_str(settings).unwrap();
+        assert_eq!(settings["fastMode"], true);
+        assert_eq!(settings["autoCompactWindow"], 150_000);
+        assert_eq!(prompt_with_effort("faça", Some("ultrathink")), "Ultrathink:\nfaça");
+        assert_eq!(prompt_with_effort("/compact", Some("ultrathink")), "/compact");
     }
 
     #[test]

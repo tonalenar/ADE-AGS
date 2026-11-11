@@ -3,7 +3,10 @@
 //! só no nascimento do processo. Ver `docs/ade-ags/AI_MEMORY_CONNECTOR.md`.
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
+
+use serde_json::Value;
 
 use super::store::ThreadRow;
 use crate::ai_memory::tabs::{enabled as tabs_enabled, prepare_new_tab_with, remove_owned_server, supported_binary, TabInjection, PROTECT_ENV, TABS_SETTING};
@@ -32,6 +35,25 @@ pub struct Inputs<'a> {
     pub home: &'a Path,
     pub argv: &'a [String],
     pub extras: &'a HashMap<String, String>,
+}
+
+/// Soma opções privadas da sessão aos hooks temporários; settings do usuário ficam intactos.
+pub fn merge_session_settings(memory: &mut Memory, settings: &Value) -> Result<(), String> {
+    let Some(additional) = settings.as_object().filter(|settings| !settings.is_empty()) else {
+        return Ok(());
+    };
+    if let Some(path) = memory.guard.settings_file.as_ref() {
+        let bytes = fs::read(path).map_err(|_| "Não consegui ler os hooks temporários do ai-memory".to_string())?;
+        let mut current: Value = serde_json::from_slice(&bytes)
+            .map_err(|_| "Os hooks temporários do ai-memory não são JSON válido".to_string())?;
+        let current = current.as_object_mut().ok_or("Os hooks temporários do ai-memory não são um objeto JSON")?;
+        current.extend(additional.iter().map(|(key, value)| (key.clone(), value.clone())));
+        fs::write(path, Value::Object(current.clone()).to_string())
+            .map_err(|_| "Não consegui atualizar os hooks temporários do ai-memory".to_string())?;
+    } else {
+        memory.args.extend(["--settings".into(), settings.to_string()]);
+    }
+    Ok(())
 }
 
 /// O nome (antes de `tab-`) do MCP e dos arquivos da conversa.

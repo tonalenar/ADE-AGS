@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { listen } from "@tauri-apps/api/event";
 
 import { setComposing, useChatStore } from "../store";
+import { fastModeForThread } from "../fastMode";
 import {
   chatAccountSet, chatRequestAnswer, chatSideChatFork, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
   chatThreadSettle, chatThreads, chatThreadStatus, type SideChatForkOutcome, type ThreadAccess, type ThreadRow,
@@ -167,10 +168,10 @@ export interface NewThread {
 }
 
 /** Cria a conversa, mostra e manda a primeira mensagem. */
-export async function startThread(input: NewThread, text: string, images?: string[], background = false): Promise<string> {
+export async function startThread(input: NewThread, text: string, images?: string[], background = false, fastMode?: boolean): Promise<string> {
   const id = await createThread(input);
   if (!background) openThread(id);
-  sendToThread(id, text, undefined, undefined, images);
+  sendToThread(id, text, undefined, undefined, images, fastMode);
   return id;
 }
 
@@ -196,17 +197,18 @@ export async function forkSideChat(id: string): Promise<SideChatForkOutcome> {
 }
 
 /** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
-export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[]): void {
+export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[], fastMode?: boolean): void {
+  const row = useStructured.getState().threads.find((thread) => thread.id === id);
+  const effectiveFastMode = fastMode ?? (row ? fastModeForThread(row) : false);
   if (text.trim() || images?.length) unsnoozeConversation(threadKey(id));
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
   const send = (outgoing: string) => {
     // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
-    chatThreadSend(id, outgoing, images).then(() => onSent?.(), (e) => {
+    chatThreadSend(id, outgoing, images, effectiveFastMode).then(() => onSent?.(), (e) => {
       onError?.(String(e));
       patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
     });
   };
-  const row = useStructured.getState().threads.find((thread) => thread.id === id);
   // Claude e Cursor precisam receber `/nome`; no composer os dois usam a menção portátil `$nome`.
   if ((row?.agentId === "claude-code" || row?.agentId === "cursor") && text.includes("$")) {
     void useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)

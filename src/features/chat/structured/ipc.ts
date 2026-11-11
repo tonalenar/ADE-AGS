@@ -89,8 +89,8 @@ export const chatSideChatFork = (threadId: string) => invoke<SideChatForkOutcome
 export const chatSideChatDelete = (threadId: string) => invoke<void>("chat_side_chat_delete", { threadId });
 
 /** `images`: caminhos de imagens para o motor que as recebe em linha (o Claude); o caminho já está no texto. */
-export const chatThreadSend = (threadId: string, text: string, images?: string[]) =>
-  invoke<void>("chat_thread_send", { threadId, text, images: images && images.length > 0 ? images : null });
+export const chatThreadSend = (threadId: string, text: string, images?: string[], fastMode = false) =>
+  invoke<void>("chat_thread_send", { threadId, text, images: images && images.length > 0 ? images : null, fastMode });
 
 /** O recibo de um envio com `clientRequestId` (contrato do harness §11.7). */
 export interface SendReceipt {

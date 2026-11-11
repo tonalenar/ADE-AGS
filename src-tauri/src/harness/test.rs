@@ -324,6 +324,9 @@ fn os_ids_das_capabilities_sao_unicos() {
 #[test]
 fn supports_consulta_supported_unknown_e_unsupported_na_matriz() {
     assert_eq!(supports("claude-code", Surface::Chat, Capability::Steer), Some(Support::Supported));
+    assert_eq!(supports("claude-code", Surface::Chat, Capability::FastMode), Some(Support::Supported));
+    assert_eq!(supports("codex", Surface::Chat, Capability::FastMode), Some(Support::Supported));
+    assert_eq!(supports("opencode", Surface::Chat, Capability::FastMode), Some(Support::Unsupported));
     assert_eq!(supports("opencode", Surface::Chat, Capability::Steer), Some(Support::Unsupported));
     assert_eq!(supports("claude-code", Surface::Chat, Capability::Compact), Some(Support::Unknown));
     assert_eq!(supports("inexistente", Surface::Chat, Capability::Steer), None);

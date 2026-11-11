@@ -18,6 +18,7 @@ Uma casca de conversas ao lado das abas e do canvas, ligada em Configurações �
 
 - **Conversas por TUI:** cada uma é uma aba de agente, lida do transcript numa timeline; o terminal fica numa gaveta, sem remontar.
 - **Conversas por protocolo:** o Codex (`codex app-server`) e o Claude Code (`claude -p` em stream-json, com o modo Plano) falam direto com o app, com aprovações e perguntas no chat.
+- **Fast e esforços especiais no chat:** o caminho estruturado passa Fast por turno: Codex recebe `serviceTier: fast`; Claude recebe `fastMode` em `--settings`, combinada com os hooks temporários do ai-memory. `ultracode` e `ultrathink` continuam vindo do catálogo e adapter já existentes. Fast só aparece nos modelos compatíveis. O usuário confirmou `fastMode` e `ultracode` no Claude Code 2.1.322; esta alteração não executou as CLIs.
 - **Projetos conhecidos na paleta:** `Ctrl+K` oferece “Nova conversa em …” para projetos locais conhecidos mesmo quando não há conversa aberta, mostra nome/ícone e caminho, e omite projetos arquivados.
 - **Telas:** Configurações, Espaços (Missões, Frota, Squads…), Design e Dispositivos abrem dentro do chat. As Configurações têm a mesma tela nova em todos os modos.
 - **CLI e MCP:** `ags chat …` e as tools `chat_*` (skill `ags-orchestrator` 1.55.0).

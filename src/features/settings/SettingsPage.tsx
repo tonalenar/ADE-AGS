@@ -79,7 +79,7 @@ export function SettingsPage() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Modal de Configurações (como no T3 Code): o caminho ("Configurações / página") fica no cabeçalho. */}
-        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-gray-200 px-5 dark:border-white/[0.08]">
+        <header className="flex h-12 shrink-0 items-center gap-3 border-b border-gray-200 pl-5 pr-12 dark:border-white/[0.08]">
           <SettingsBreadcrumb page={section} />
           {/* Como no T3 Code, o "restaurar" aparece só na página Geral. */}
           <div className="ml-auto flex shrink-0 items-center gap-1">

@@ -11,6 +11,7 @@
 
 mod activity;
 mod adapters;
+pub(crate) use adapters::codex_fast_service_tier;
 mod agents;
 mod antigravity;
 mod broker;

@@ -35,7 +35,7 @@ export function WindowControls({ className = "" }: { className?: string }) {
 const NATIVE_DX = 4;
 const NATIVE_DY = 1;
 
-/** Los lugares montados; el que está a la vista (con tamaño) manda. */
+/** Los lugares montados; el último que está a la vista (con tamaño) manda. */
 const slots = new Set<HTMLElement>();
 let frame = 0;
 let sent = "";
@@ -44,7 +44,8 @@ let sent = "";
 function placeLights() {
   cancelAnimationFrame(frame);
   frame = requestAnimationFrame(() => {
-    const shown = [...slots].map((el) => el.getBoundingClientRect()).find((r) => r.width > 0 && r.height > 0);
+    // O último lugar montado é a camada de cima (Configurações por cima do chat): ele manda.
+    const shown = [...slots].reverse().map((el) => el.getBoundingClientRect()).find((r) => r.width > 0 && r.height > 0);
     // Os nativos (macOS 27) ocupam 60×14; o lugar reservado tem 52×12: centraliza neles.
     const place = shown ? { x: Math.round(shown.left - NATIVE_DX), y: Math.round(shown.top - NATIVE_DY), visible: true } : { x: 0, y: 0, visible: false };
     const key = JSON.stringify(place);

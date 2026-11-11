@@ -325,10 +325,10 @@ export async function makeOrchestrator(conv: ConversationRef): Promise<TeamView>
  * Manda o texto à conversa: a aba (quando a TUI estiver pronta) ou a conversa por protocolo. `onSent`: o backend
  * aceitou (numa aba não há resposta a esperar: vale ao entregar à fila do terminal). `onError`: ele recusou.
  */
-export function sendToMember(ref: string, text: string, done?: { onSent?: () => void; onError?: (message: string) => void }, images?: string[]): void {
+export function sendToMember(ref: string, text: string, done?: { onSent?: () => void; onError?: (message: string) => void }, images?: string[], fastMode = false): void {
   const thread = threadIdOf(ref);
   if (thread) {
-    sendToThread(thread, text, done?.onError, done?.onSent, images);
+    sendToThread(thread, text, done?.onError, done?.onSent, images, fastMode);
     return;
   }
   sendWhenReady(ref, text);
