@@ -287,6 +287,11 @@ pub(super) fn device_create(app: &AppHandle, args: &Value) -> Result<Value, Stri
     if let Some(name) = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty()) {
         req["name"] = json!(name.trim());
     }
+    // `--mostrar` (true) força o flutuante sobre a conversa; `--sem-mostrar` (false) deixa o aparelho quieto. Sem a flag,
+    // vale a preferência "Auto-show floating preview" (decide o front, em `deviceRevealAgent.ts`).
+    if let Some(show) = args.get("show").and_then(Value::as_bool) {
+        req["show"] = json!(show);
+    }
     if let Some(avd) = arg_str_opt(args, "avd").filter(|n| !n.trim().is_empty()) {
         req["avd"] = json!(avd.trim());
     }

@@ -8,7 +8,7 @@ import { browserProfileIsReferenced, DEFAULT_BROWSER_PROFILE_ID, createBrowserPr
 import { realBrowserDeleteProfile } from "./realBrowser";
 import { ToolButton } from "./toolbarButtons";
 
-/** Seletor compacto dos perfis isolados do WebView2. */
+/** Seletor compacto dos perfis isolados do navegador da ADE. */
 export function BrowserProfilesControl({ profileId, agentProfile, onSelect }: {
   profileId: string;
   agentProfile?: BrowserProfile;
@@ -28,9 +28,12 @@ export function BrowserProfilesControl({ profileId, agentProfile, onSelect }: {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const allViews = useMemo(() => [...views, ...portalViews], [views, portalViews]);
-  const choices = useMemo(() => agentProfile
-    ? [profiles[0]!, agentProfile, ...profiles.slice(1)]
-    : profiles, [profiles, agentProfile]);
+  const choices = useMemo(() => {
+    const privateProfile: BrowserProfile = { id: "incognito", name: t("browser.profile.incognito") };
+    return agentProfile
+      ? [profiles[0]!, privateProfile, agentProfile, ...profiles.slice(1)]
+      : [profiles[0]!, privateProfile, ...profiles.slice(1)];
+  }, [profiles, agentProfile, t]);
   const current = choices.find((profile) => profile.id === profileId) ?? profiles[0]!;
   const label = current.id === DEFAULT_BROWSER_PROFILE_ID ? t("browser.profile.default") : current.name;
 

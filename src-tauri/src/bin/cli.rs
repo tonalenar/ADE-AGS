@@ -158,6 +158,7 @@ POOLS DE CONTAS — repartir entre várias contas de uma TUI com uma estratégia
 DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simulador iOS conectado a este terminal
   devices                                     Os que você controla, o que o adb vê, os emuladores (AVD) e os iPhones/iPads do Xcode
   device create [<nome>] [--avd <avd>]        Cria um ao seu lado, já conectado · --ios [\"iPhone 18 Pro Max\"] = simulador iOS
+              [--mostrar | --sem-mostrar]      · aparece sobre a conversa (padrão: segue \"Mostrar prévia flutuante automaticamente\")
   device start <dispositivo> [--avd <avd>]    Liga o emulador e espera terminar de iniciar
   device tap <dispositivo> --x N --y N        Toca · ou --text \"Entrar\" (procura o elemento na tela)
   device swipe <dispositivo> --dir up|down|left|right   · ou --x1 --y1 --x2 --y2 [--ms 300]
@@ -236,6 +237,12 @@ PAPÉIS (para recrutar com --role)
   role show <papel>                           As instruções dele
   role create <nome> \"instruções\"             Só orquestradores; também --file <caminho>
   role edit <papel> \"instruções\" [--name]     Só orquestradores; o catálogo não se edita
+
+PÁGINAS HTML — as que esta aba publicou (a pessoa as vê na superfície Páginas HTML)
+  render publish [--file <caminho>]           Publica uma página HTML completa (ou --title \"…\" para o nome na lista)
+              [--title \"…\"] [--sem-mostrar]     · --sem-mostrar não abre a superfície sozinha (padrão: abre se a conversa está à vista)
+              imagem local: caminho absoluto de arquivo dentro da pasta do projeto; é embutida na página (o resto: data: URL)
+  render list                                As páginas que esta aba publicou, da mais nova para a mais antiga
 
 NOTAS DO CANVAS — as conectadas a este terminal (orquestrador: as da equipe)
   design create <title> [--workspace <path>] [--mission-id <id>] [--owner-tab-id <id>]
@@ -460,6 +467,7 @@ FERRAMENTAS MCP (o que `ags mcp` oferece; gerado de ipc/mcp.rs e forge/tools.rs)
     design_page_rename, design_page_delete, design_artboard_add, design_artboard_update,
     design_artboard_duplicate, design_artboard_delete, design_comment_add, design_comment_resolve,
     design_note_add
+  Páginas HTML: render_publish, render_list
   Computer use: sim_act, desk_act
   Dispositivos: device_list, device_shot, device_action
   Perguntas à pessoa: ask_user
@@ -603,7 +611,7 @@ pub(crate) fn main() -> ExitCode {
     // `--file` se resuelve ACÁ y viaja como `--content`: el archivo es relativo al cwd de
     // quien escribió el comando, no al de la app, y la app puede estar corriendo desde
     // cualquier otro lado. Además evita que el backend tenga que abrir rutas arbitrarias.
-    let parsed = match inline_file(parsed, &command) {
+    let parsed = match inline_file(parsed, &command).and_then(|v| show_flags(v, &command)) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("{e}");
@@ -896,7 +904,7 @@ impl CliError {
 /// conversa do chat que pede um shell (`ADE_TAB_ID=thread:<id>`); comandos `run.*` recebem `tabId`,
 /// que preserva o escopo da conversa ao criar ou consultar tarefas da Frota. Pura.
 fn takes_caller(command: &str) -> bool {
-    const GROUPS: [&str; 20] = ["fix.", "peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events.", "secret.", "run."];
+    const GROUPS: [&str; 21] = ["fix.", "peer.", "team.", "note.", "portal.", "device.", "sim.", "desk.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm.", "events.", "secret.", "run.", "render."];
     command == "tab.create" || command == "tab.send" || GROUPS.iter().any(|g| command.starts_with(g))
 }
 
@@ -1321,6 +1329,29 @@ fn inline_file(args: Value, command: &str) -> Result<Value, String> {
     Ok(Value::Object(map))
 }
 
+/// `--mostrar` e `--sem-mostrar` viram o campo `show` (true ou false) que o app lê. Só valem para os comandos que
+/// mostram algo na conversa (aparelho e página HTML); nos outros as flags ficam como estão. Pura.
+fn show_flags(args: Value, command: &str) -> Result<Value, String> {
+    let Value::Object(mut map) = args else { return Ok(args) };
+    if !matches!(command, "device.create" | "render.publish") {
+        return Ok(Value::Object(map));
+    }
+    let mostrar = map.remove("mostrar").is_some();
+    let sem_mostrar = map.remove("semMostrar").is_some();
+    match (mostrar, sem_mostrar) {
+        (true, true) => Err("Use --mostrar ou --sem-mostrar, não os dois".to_string()),
+        (true, false) => {
+            map.insert("show".to_string(), Value::Bool(true));
+            Ok(Value::Object(map))
+        }
+        (false, true) => {
+            map.insert("show".to_string(), Value::Bool(false));
+            Ok(Value::Object(map))
+        }
+        (false, false) => Ok(Value::Object(map)),
+    }
+}
+
 /// O texto de um arquivo, sem a marca de ordem de bytes (BOM). O PowerShell 5 grava `utf8` com BOM e
 /// `Out-File` em UTF-16: o BOM chegava ao agente como um caractere invisível, e o Claude Code parava
 /// em "Removed 1 invisible character · review and press Enter to send" sem enviar a mensagem. Pura.
@@ -1347,6 +1378,10 @@ fn decode_text_file(bytes: &[u8]) -> Result<String, String> {
 /// `peer tell` antes mandaba el archivo como `content` y el backend lo rechazaba: por eso el
 /// nombre sale de los argumentos sueltos del comando y no de una lista fija.
 fn text_field(command: &str) -> &'static str {
+    // A página HTML vem de `--file` (ou de `--html`, que cai no mesmo campo): o app espera `html`.
+    if command == "render.publish" {
+        return "html";
+    }
     let positional = positionals(command);
     if positional.contains(&"text") {
         "text"

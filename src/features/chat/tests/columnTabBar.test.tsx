@@ -59,7 +59,7 @@ describe("a barra de abas da coluna", () => {
     expect(tabs()).toHaveLength(0);
     expect(q("[aria-label='chat.panel.empty.title'] h2")?.textContent).toBe("chat.panel.empty.title");
     const rows = [...host.querySelectorAll("[data-surface-list] > li")].map((li) => li.getAttribute("data-surface-row"));
-    expect(rows).toEqual(["browser", "terminal", "files", "diff", "pr", "ios", "side", "design", "team"]);
+    expect(rows).toEqual(["browser", "terminal", "files", "diff", "pr", "ios", "side", "design", "team", "renders", "snapshots"]);
   });
 
   it("clique do meio fecha a aba", async () => {
@@ -78,7 +78,7 @@ describe("o + e o menu de superfícies", () => {
     useChatStore.setState({ panel: "empty" });
     await mount();
     const menu = await openMenu();
-    expect([...menu.querySelectorAll("[role=menuitem][aria-keyshortcuts]")].map((e) => e.getAttribute("aria-keyshortcuts"))).toEqual(["B", "T", "F", "D", "P", "M", "S", "E", "O"]);
+    expect([...menu.querySelectorAll("[role=menuitem][aria-keyshortcuts]")].map((e) => e.getAttribute("aria-keyshortcuts"))).toEqual(["B", "T", "F", "D", "P", "M", "S", "E", "O", "H", "G"]);
     await pressKey(menu, "f");
     expect(useChatStore.getState().panel).toBe("files");
     expect(q("[data-surface-list]")).toBeNull();

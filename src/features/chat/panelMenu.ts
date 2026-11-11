@@ -18,8 +18,9 @@ export interface PanelEntry {
 /**
  * A ordem e as teclas do menu, as do T3 Code: B Browser, T Terminal, F Files, D Diff, P Pull request, M Device,
  * S Side chat. O que só o ADE tem fica com uma letra própria: E de Design, O de Orquestrador para o Time, R de Resumo
- * (o Resumo não é aba da coluna: é o botão do cabeçalho; a tecla vale no tooltip dele). O Android entra pelo submenu do
- * Device (M abre o iOS, que é o aparelho padrão); a tecla `a` dele só existe dentro do submenu.
+ * (o Resumo não é aba da coluna: é o botão do cabeçalho; a tecla vale no tooltip dele), H de Páginas HTML e G de galeria
+ * de SnapShots. O Android entra pelo submenu do Device (M abre o iOS, que é o aparelho padrão); a tecla `a` dele só existe
+ * dentro do submenu.
  */
 export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "summary", key: SUMMARY_KEY },
@@ -33,6 +34,8 @@ export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "side", key: "s" },
   { id: "design", key: "e" },
   { id: "team", key: "o" },
+  { id: "renders", key: "h" },
+  { id: "snapshots", key: "g" },
 ];
 
 /** As linhas do menu "Abrir uma superfície" (o "+" da barra e o estado vazio): sem o Resumo e sem o Android (submenu). */

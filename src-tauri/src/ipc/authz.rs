@@ -199,6 +199,8 @@ pub(crate) const METHODS: &[(&str, Class)] = &[
     ("note.create", CALLER),
     ("note.write", CALLER),
     ("note.edit", CALLER),
+    ("render.publish", CALLER),
+    ("render.list", CALLER),
     ("team.list", CALLER),
     ("team.candidates", CALLER),
     ("team.create", CALLER),

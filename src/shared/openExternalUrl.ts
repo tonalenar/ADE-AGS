@@ -25,12 +25,14 @@ function normalizeHttpUrl(raw: string): string | null {
 }
 
 /** Abre links HTTP(S) no destino configurado pela pessoa em Configurações. */
-export async function openExternalUrl(raw: string): Promise<void> {
+export async function openExternalUrl(raw: string, options: { modifier?: boolean } = {}): Promise<void> {
   const url = normalizeHttpUrl(raw.trim());
   // Conteúdo de Markdown, agentes e terminais é entrada não confiável. Só abrimos HTTP(S),
   // nunca esquemas como javascript:, file: ou data:.
   if (!url) return;
-  if (readBrowserSearchPreferences().linkTarget !== "app") {
+  const configured = readBrowserSearchPreferences().linkTarget;
+  const target = options.modifier ? (configured === "app" ? "system" : "app") : configured;
+  if (target !== "app") {
     await openSystemUrl(url);
     return;
   }

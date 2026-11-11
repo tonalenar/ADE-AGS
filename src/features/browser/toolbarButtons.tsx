@@ -41,7 +41,7 @@ export function ToolButton({ label, onClick, disabled, active, plain, children }
  *  qué hacían. `plain`: ver `ToolButton`. */
 export function ActionButton({ hint, onClick, disabled, active, plain, children }: {
   hint: string;
-  onClick: () => void;
+  onClick: (event: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   active?: boolean;
   plain?: boolean;

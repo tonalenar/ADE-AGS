@@ -11,6 +11,7 @@ O Vigia supervisiona as equipes em segundo plano, sem terminal próprio, e custa
 - "Entregou" e "parei de insistir" saem **uma vez só**. O contador de lembretes zera **só** com uma tarefa nova do Orquestrador; um "ok" não zera.
 - `taskAt` (tarefa recebida) só conta quando vem **do Orquestrador**.
 - **Laço do Codex: só avisa.** Não interrompe e não troca o modelo, por decisão do usuário (ver regra de ouro 2.4).
+- **Toast com "Abrir conversa"** (`vigiaToast.ts`): todo aviso do Vigia no globo leva o botão que abre a conversa de que ele fala (o integrante, ou o líder no fechamento antecipado e na decisão da pessoa). O `openConversation` é carregado no clique, para o Vigia não puxar o chat no import.
 - Jev no `delivery_gate`: aceita com **probabilidade ≥ 0,5**. Qualquer falha cai na regra local.
 - O prompt da camada 2 manda **ignorar a caixa de digitação** e as sugestões em cinza.
 - `startedAt` da missão vem em **segundos** e é convertido para ms (`missionStartMs`). Esse erro já causou o bug A1, em que o Vigia avisava "sem tarefa há 29 milhões de minutos".

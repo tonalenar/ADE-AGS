@@ -10,6 +10,7 @@ import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { AttachCwdContext } from "./attachments/AttachmentStrip";
 import { DropOverlay } from "./attachments/DropOverlay";
+import { DeviceFloatHost } from "./DeviceFloatCard";
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
@@ -247,6 +248,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
       {!page && <RightPanel tabId={activeThread ? null : active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""}
         conversation={active} cards={cards} />}
       <BrowserFloatHost hidden={!!page} />
+      <DeviceFloatHost hidden={!!page} />
       {!page && inboxOpen && <PermissionsInbox />}
       <PermissionsManager />
     </div>

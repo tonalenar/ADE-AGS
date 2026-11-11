@@ -4,14 +4,14 @@ import { useTranslation } from "react-i18next";
 import { DEFAULT_BROWSER_PROFILE_ID, readBrowserProfiles } from "@/features/browser/profiles";
 
 import type { ColumnKind } from "./columnTabs";
-import { ChevronRightIcon, DesignIcon, DetailsIcon, DiffIcon, FilesIcon, GlobeIcon, PhoneIcon, PullRequestIcon, SideChatIcon, TerminalIcon, UsersIcon } from "./chatIcons";
+import { ChevronRightIcon, DesignIcon, DetailsIcon, DiffIcon, FilesIcon, GalleryIcon, GlobeIcon, HtmlPageIcon, PhoneIcon, PullRequestIcon, SideChatIcon, TerminalIcon, UsersIcon } from "./chatIcons";
 import { entryForKey, isAvailable, keyLabel, MENU_ENTRIES, SUBMENU_OWNERS, type PanelAvailability, type PanelChoice } from "./panelMenu";
 import { TasksIcon } from "./tasks/taskIcons";
 
 /** O ícone de cada superfície: as linhas do menu e as abas da barra. */
 export const KIND_ICON: Record<ColumnKind, (p: { className?: string }) => React.ReactElement> = {
   diff: DiffIcon, shell: TerminalIcon, files: FilesIcon, browser: GlobeIcon, design: DesignIcon, ios: PhoneIcon, android: PhoneIcon,
-  team: UsersIcon, tasks: TasksIcon, pr: PullRequestIcon, side: SideChatIcon,
+  team: UsersIcon, tasks: TasksIcon, pr: PullRequestIcon, side: SideChatIcon, renders: HtmlPageIcon, snapshots: GalleryIcon,
 };
 
 /** O ícone de uma linha do menu (o terminal do menu é a aba `shell`). */

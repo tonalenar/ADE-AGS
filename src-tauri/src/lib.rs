@@ -53,6 +53,8 @@ pub(crate) mod iphone;
 mod sim_host;
 mod routines;
 pub(crate) mod scheduled_tasks;
+mod renders;
+mod snapshot_gallery;
 mod runs;
 mod scm;
 mod session;

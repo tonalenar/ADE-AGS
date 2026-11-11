@@ -43,8 +43,8 @@ describe("o atalho do painel Time", () => {
 });
 
 describe("as linhas do menu do + da coluna", () => {
-  it("seguem a ordem e as letras do T3 (B T F D P M S) e as do ADE (E, O); sem Resumo nem Android (submenu)", () => {
-    expect(MENU_ENTRIES.map((e) => `${e.id}:${e.key}`)).toEqual(["browser:b", "terminal:t", "files:f", "diff:d", "pr:p", "ios:m", "side:s", "design:e", "team:o"]);
+  it("seguem a ordem e as letras do T3 (B T F D P M S) e as do ADE (E, O, H, G); sem Resumo nem Android (submenu)", () => {
+    expect(MENU_ENTRIES.map((e) => `${e.id}:${e.key}`)).toEqual(["browser:b", "terminal:t", "files:f", "diff:d", "pr:p", "ios:m", "side:s", "design:e", "team:o", "renders:h", "snapshots:g"]);
   });
   it("o Android e o Resumo ficam fora do menu mas existem (o Resumo no cabeçalho, o Android no submenu do Device)", () => {
     expect(MENU_ENTRIES.some((e) => e.id === "android" || e.id === "summary")).toBe(false);

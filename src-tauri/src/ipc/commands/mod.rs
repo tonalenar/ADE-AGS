@@ -6,6 +6,7 @@ mod ask;
 mod agent_secrets;
 mod notes;
 mod notify;
+mod renders;
 mod floor;
 pub mod chat;
 pub mod chat_watch;

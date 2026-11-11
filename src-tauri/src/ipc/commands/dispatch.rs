@@ -19,6 +19,7 @@ use super::events::{events_since, events_wait};
 use super::missions;
 use super::notify::notify_send;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
+use super::renders::{render_list, render_publish};
 use super::devices::{device_action, device_create, device_list};
 use super::pool::{pool_create, pool_delete, pool_list};
 use super::portals::{portal_action, portal_close, portal_create, portal_list, portal_open};
@@ -192,6 +193,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "note.create" => note_create(app, args),
         "note.write" => note_write(app, args),
         "note.edit" => note_edit(app, args),
+        "render.publish" => render_publish(app, args),
+        "render.list" => render_list(app, args),
         // Los navegadores del canvas conectados con quien pide (ver `portals`).
         // Las pantallas Android del canvas (emulador o teléfono) conectadas con quien pide (ver `devices`).
         // Grupos de cuentas con una estrategia de reparto (ver `pool`).
