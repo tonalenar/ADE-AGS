@@ -41,10 +41,11 @@ describe("linha viva do turno", () => {
     expect(turnLive(items, true).activity).toEqual({ kind: "waiting" });
   });
 
-  it("o raciocínio e os tokens não entram no fio da conversa", () => {
+  it("os tokens não entram no fio da conversa; o raciocínio vira uma linha própria, fora das ferramentas", () => {
     const turns = timelineTurns(items);
     expect(turns).toHaveLength(2);
-    expect(turns[1]!.body.flatMap((r) => (r.type === "work" ? r.tools.map((t) => t.id) : [r.key]))).toEqual(["t1", "t2"]);
+    expect(turns[1]!.body.flatMap((r) => (r.type === "work" ? r.tools.map((t) => t.id) : [r.key]))).toEqual(["r1", "t1", "t2"]);
+    expect(turns[1]!.body.map((r) => r.type)).toEqual(["reasoning", "work"]);
   });
 
   it("o turno guarda o último plano publicado", () => {

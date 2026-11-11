@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Markdown } from "@/shared/ui/LazyMarkdown";
 
 import {
-  BotIcon, ChevronDownIcon, ChevronRightIcon, EyeIcon, FilePlusIcon, GlobeIcon, ListIcon, PenIcon, QuestionIcon, SearchIcon, ShieldIcon, TerminalIcon, WrenchIcon, XIcon,
+  BotIcon, BrainIcon, ChevronDownIcon, ChevronRightIcon, EyeIcon, FilePlusIcon, GlobeIcon, ListIcon, PenIcon, QuestionIcon, SearchIcon, ShieldIcon, TerminalIcon, WrenchIcon, XIcon,
 } from "../chatIcons";
 
 import { useChatWidthClass } from "../chatLook";
@@ -27,7 +27,7 @@ import { SelectionComment } from "../quotes/SelectionComment";
 import { voicesByItem } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
-import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
+import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
@@ -114,7 +114,10 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   const { t } = useTranslation();
   // "Chamadas de ferramenta no chat" (Configurações → Chat): o fold mostra só o que o modo deixa.
   const toolVisibility = useChatPrefs().toolCallVisibility;
-  const turns = useMemo(() => applyToolCallVisibility(timelineTurns(items), toolVisibility), [items, toolVisibility]);
+  const allTurns = useMemo(() => timelineTurns(items), [items]);
+  const turns = useMemo(() => applyToolCallVisibility(allTurns, toolVisibility), [allTurns, toolVisibility]);
+  // O «Pensando…» com brilho: só enquanto o agente trabalha, sem pedido de aprovação esperando (aí ninguém está pensando).
+  const thinkingKey = working && approval === null && !approvalCard ? thinkingTurnKey(allTurns) : null;
   const width = useChatWidthClass();
   const startedAt = useMemo(() => openTurnStart(items), [items]);
 
@@ -316,7 +319,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         )}
         {turns.map((turn, i) => turn.notice
           ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
-          : <TurnView key={turn.key} turn={turn} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />)}
+          : <TurnView key={turn.key} turn={turn} thinking={turn.key === thinkingKey} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />)}
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} composerTarget={quoteKey} /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
@@ -341,7 +344,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   );
 }
 
-function TurnView({ turn, latest, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
+function TurnView({ turn, thinking = false, latest, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */ thinking?: boolean; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
   const { t } = useTranslation();
   // Os turnos antigos começam recolhidos; o último (ou o em aberto), aberto.
   const containsSearchTarget = !!searchTargetId && (turn.user?.id === searchTargetId || turn.final?.id === searchTargetId || turn.planItemId === searchTargetId || turn.body.some((row) => row.type === "assistant" && row.item.id === searchTargetId));
@@ -374,6 +377,7 @@ function TurnView({ turn, latest, onOpenTerminal, searchTargetId, composerTarget
       {(open || turn.end === null) && turn.body.map((row, i) => (
         <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && i === turn.body.length - 1} searchTargetId={searchTargetId} />
       ))}
+      {thinking && <ThinkingRow />}
       {turn.final && <AgentText item={turn.final} searchHit={turn.final.id === searchTargetId} />}
       {turn.end && <TurnEndNotice end={turn.end} />}
       {turn.end && turn.end.files.length > 0 && <div><ChangedFilesCard files={turn.end.files} /></div>}
@@ -422,6 +426,8 @@ function BodyRowView({ row, onOpenTerminal, active = false, searchTargetId }: { 
   switch (row.type) {
     case "assistant":
       return <AgentText item={row.item} searchHit={row.item.id === searchTargetId} />;
+    case "reasoning":
+      return <ReasoningRow item={row.item} />;
     case "work":
       // Uma ferramenta só aparece como é; duas ou mais viram uma linha-resumo recolhida.
       return row.tools.length === 1
@@ -462,6 +468,53 @@ function BodyRowView({ row, onOpenTerminal, active = false, searchTargetId }: { 
         </div>
       );
   }
+}
+
+/** O resumo do raciocínio sem a marcação do markdown (os títulos em `**…**` do Codex) e numa linha só. */
+function flatThought(text: string): string {
+  return text.replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** Acima disso (ou com mais de um parágrafo) o resumo abre e fecha ao clicar; antes, cabe inteiro nas linhas. */
+const THOUGHT_CLAMP_CHARS = 240;
+
+/**
+ * O resumo do pensamento do agente, em cinza, com o ícone de cérebro (como o T3 Code). Recolhido mostra até 3 linhas;
+ * o clique abre o texto inteiro, em markdown. Chega aos poucos enquanto o agente pensa (o rascunho cresce no lugar).
+ */
+function ReasoningRow({ item }: { item: TimelineItem }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const text = (item.text ?? "").trim();
+  const flat = flatThought(text);
+  const expandable = flat.length > THOUGHT_CLAMP_CHARS || /\n\s*\n/.test(text);
+  const body = (
+    <>
+      <BrainIcon className="mt-[3px] w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+      {open
+        ? <div className="min-w-0 flex-1 text-chat-ui text-gray-500 dark:text-white/50"><Markdown content={text} tone="chat" renderCodeBlock={renderChatCodeBlock} /></div>
+        : <span className="min-w-0 flex-1 line-clamp-3 text-left text-chat-ui text-gray-500 dark:text-white/50">{flat}</span>}
+      {expandable && <ChevronRightIcon className={`mt-[3px] w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
+    </>
+  );
+  return (
+    <div data-reasoning data-chat-item-id={item.id} role="note" aria-label={t("chat.timeline.reasoning")} className="flex flex-col">
+      {expandable
+        ? <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-start gap-2.5 min-h-[26px] w-full text-left hover:text-gray-700 dark:hover:text-white/70">{body}</button>
+        : <div className="flex items-start gap-2.5 min-h-[26px]">{body}</div>}
+    </div>
+  );
+}
+
+/** «Pensando…» com o brilho passando, enquanto o modelo ainda pensa (o `cc-shimmer` para com `prefers-reduced-motion`). */
+function ThinkingRow() {
+  const { t } = useTranslation();
+  return (
+    <div data-thinking className="flex items-center gap-2.5 min-h-[26px] text-chat-ui">
+      <BrainIcon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+      <span className="cc-shimmer">{t("chat.live.thinking")}</span>
+    </div>
+  );
 }
 
 const VERB: Record<ToolKind, string> = {

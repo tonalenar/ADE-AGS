@@ -142,6 +142,9 @@ pub fn launch_args_for_session(
 ) -> (Vec<String>, Value) {
     let mut args: Vec<String> = [
         "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--include-partial-messages",
+        // Sem isso os modelos novos mandam o bloco `thinking` vazio e a timeline não tem o que mostrar (o T3 Code
+        // pede o mesmo: `thinking-display summarized`). Só pede o texto; não liga nem desliga o raciocínio.
+        "--thinking-display", "summarized",
         // Os pedidos de permissão vêm pelo próprio stdio (`can_use_tool`), não por uma tool MCP.
         "--permission-prompt-tool", "stdio",
         "--permission-mode", permission_mode(&row.access),

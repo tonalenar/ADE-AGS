@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changedFiles, endOutcome, fileName, formatDuration, noticeDetail, openTurnStart, timelineTurns } from "@/features/chat/timeline/timelineModel";
+import { changedFiles, endOutcome, fileName, formatDuration, noticeDetail, openTurnStart, thinkingTurnKey, timelineTurns } from "@/features/chat/timeline/timelineModel";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
 const user = (id: string, at?: number): TimelineItem => ({ kind: "user", id, at, text: `msg ${id}` });
@@ -131,5 +131,45 @@ describe("noticeDetail", () => {
     expect(noticeDetail({ kind: "notice", id: "n", label: "queueDropped", text: "e o lint?" })).toBe("e o lint?");
     expect(noticeDetail({ kind: "notice", id: "n", label: "optionIgnored", text: "O esforço \"ultra\" não existe" })).toBe("O esforço \"ultra\" não existe");
     expect(noticeDetail({ kind: "notice", id: "n", label: "algoNovo", text: "texto" })).toBe("texto");
+  });
+});
+
+const think = (id: string, text = "Vou deixar o controle mais fácil de achar"): TimelineItem => ({ kind: "reasoning", id, text });
+
+describe("o raciocínio do agente na timeline", () => {
+  it("vira uma linha do corpo, na ordem em que chegou, e não tira a resposta final do lugar", () => {
+    const [turn] = timelineTurns([user("u1", 1000), think("r1"), tool("t1"), think("r2", "Agora os testes"), say("a1"), end("e1", { durationMs: 10 })]);
+    expect(turn!.body.map((r) => r.type)).toEqual(["reasoning", "work", "reasoning"]);
+    expect(turn!.body[0]!.type === "reasoning" && turn!.body[0]!.item.text).toBe("Vou deixar o controle mais fácil de achar");
+    expect(turn!.final?.id).toBe("a1");
+  });
+
+  it("raciocínio no meio das ferramentas as separa em duas linhas de trabalho", () => {
+    const [turn] = timelineTurns([user("u1"), tool("t1"), think("r1"), tool("t2")]);
+    expect(turn!.body.map((r) => r.type)).toEqual(["work", "reasoning", "work"]);
+  });
+
+  it("raciocínio vazio (o provedor só mandou a assinatura) não vira linha", () => {
+    const [turn] = timelineTurns([user("u1"), think("r1", "   "), think("r2", "")]);
+    expect(turn!.body).toEqual([]);
+  });
+});
+
+describe("thinkingTurnKey: quando a timeline mostra o «Pensando…»", () => {
+  it("turno aberto sem nada ainda, ou cuja última linha é raciocínio, está pensando", () => {
+    expect(thinkingTurnKey(timelineTurns([user("u1")]))).toBe("u1");
+    expect(thinkingTurnKey(timelineTurns([user("u1"), tool("t1"), think("r1")]))).toBe("u1");
+  });
+
+  it("depois de uma ferramenta, de uma fala ou do fim do turno, não está mais", () => {
+    expect(thinkingTurnKey(timelineTurns([user("u1"), think("r1"), tool("t1")]))).toBeNull();
+    expect(thinkingTurnKey(timelineTurns([user("u1"), think("r1"), say("a1")]))).toBeNull();
+    expect(thinkingTurnKey(timelineTurns([user("u1"), think("r1"), end("e1")]))).toBeNull();
+    expect(thinkingTurnKey([])).toBeNull();
+  });
+
+  it("um aviso do app no fim não esconde o turno em andamento", () => {
+    const notice: TimelineItem = { kind: "notice", id: "n1", label: "optionIgnored", text: "x" };
+    expect(thinkingTurnKey(timelineTurns([user("u1"), think("r1"), notice]))).toBe("u1");
   });
 });

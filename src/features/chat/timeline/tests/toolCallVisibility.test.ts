@@ -102,3 +102,15 @@ describe("valores salvos de Chamadas de ferramenta", () => {
     expect(isToolCallVisibility("hidden")).toBe(false);
   });
 });
+
+describe("o raciocínio nos modos de chamadas de ferramenta", () => {
+  const reasoning = (id: string): BodyRow => ({ type: "reasoning", key: id, item: { kind: "reasoning", id, text: "pensando alto" } });
+  const body = turnWith([reasoning("r1"), work([tool("ler", "read", "done")])]);
+
+  it("fica em todos os modos, menos no zen (que mostra só as respostas finais)", () => {
+    for (const mode of ["showAll", "hideSuccessful", "hideAll"] as ToolCallVisibility[]) {
+      expect(applyToolCallVisibility([body], mode)[0]!.body.map((r) => r.type), mode).toContain("reasoning");
+    }
+    expect(applyToolCallVisibility([body], "zen")[0]!.body.map((r) => r.type)).toEqual([]);
+  });
+});

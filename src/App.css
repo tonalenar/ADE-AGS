@@ -1023,6 +1023,33 @@ button[class*="hover:bg-[var(--nui-danger-hover"]:not(:disabled):hover { backgro
   .cc-dot { animation: none; opacity: 0.8; }
 }
 
+/* O «Pensando…» da timeline: o texto cinza com uma faixa de brilho passando (como o T3 Code). O texto vira máscara
+   do gradiente (`background-clip: text`); as cores vêm dos tokens, claro e escuro. Com `prefers-reduced-motion`
+   a faixa não anda: fica o texto cinza, parado. */
+@keyframes cc-shimmer-slide {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+.cc-shimmer {
+  --cc-shimmer-base: var(--color-gray-500);
+  --cc-shimmer-peak: var(--color-gray-900);
+  color: var(--cc-shimmer-base);
+  background-image: linear-gradient(100deg, var(--cc-shimmer-base) 38%, var(--cc-shimmer-peak) 50%, var(--cc-shimmer-base) 62%);
+  background-size: 250% 100%;
+  background-repeat: no-repeat;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cc-shimmer-slide 2.2s linear infinite;
+}
+html.dark .cc-shimmer {
+  --cc-shimmer-base: color-mix(in srgb, var(--color-white) 45%, transparent);
+  --cc-shimmer-peak: var(--color-white);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-shimmer { animation: none; background-image: none; -webkit-text-fill-color: currentColor; }
+}
+
 /* ── Modo chat: balões das mensagens ────────────────────────────────────────
    `cc-bubble-fade`: o balão recolhido apaga o fim do texto com uma máscara (as últimas ~2 linhas),
    que funciona sobre qualquer fundo, claro ou escuro, sem cor fixa. `cc-msg-in`: a mensagem que

@@ -39,6 +39,9 @@ function rowsShown(rows: BodyRow[], mode: ToolCallVisibility): BodyRow[] {
     } else if (row.type === "assistant") {
       // Falas do meio do trabalho: o zen esconde; as outras não somem com as ferramentas.
       if (mode !== "zen") shown.push(row);
+    } else if (row.type === "reasoning") {
+      // O zen mostra só as respostas finais; nos outros modos o raciocínio não some com as ferramentas.
+      if (mode !== "zen") shown.push(row);
     } else {
       const tools = row.tools.filter((tool) => toolShown(tool, mode));
       if (tools.length === row.tools.length) shown.push(row);

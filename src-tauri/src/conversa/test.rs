@@ -343,6 +343,16 @@ mod claude {
     }
 
     #[test]
+    fn o_claude_pede_o_resumo_do_raciocinio_para_a_timeline_mostrar() {
+        // Sem `--thinking-display summarized` o Claude manda o bloco `thinking` vazio (modelos novos) e não há o que mostrar.
+        for start in [Start::New("s-1"), Start::Resume("s-1")] {
+            let args = launch_args(&row("safe"), start);
+            let at = args.iter().position(|a| a == "--thinking-display").expect("falta --thinking-display");
+            assert_eq!(args[at + 1], "summarized");
+        }
+    }
+
+    #[test]
     fn fast_do_chat_chega_ao_codex_e_a_sessao_claude() {
         let mut codex = json!({ "threadId": "remote", "input": [] });
         api::apply_codex_fast_mode(&mut codex, Some(true));
