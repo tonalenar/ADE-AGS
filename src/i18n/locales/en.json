@@ -4405,6 +4405,7 @@
   "chat.timeline.changedFiles_one": "{{count}} changed file",
   "chat.timeline.changedFiles_other": "{{count}} changed files",
   "chat.timeline.workingFor": "Working for {{duration}}",
+  "chat.timeline.reasoning": "Agent reasoning",
   "chat.timeline.working": "Working…",
   "chat.tool.read": "Read",
   "chat.tool.edit": "Edited",

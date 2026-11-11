@@ -15,6 +15,8 @@ export interface ChangedFile {
 
 export type BodyRow =
   | { type: "assistant"; key: string; item: TimelineItem }
+  /** O resumo do raciocínio que o agente expõe (o `thinking` do Claude, o `reasoning` do Codex), em cinza. */
+  | { type: "reasoning"; key: string; item: TimelineItem }
   /** Ferramentas em sequência (sem fala no meio). */
   | { type: "work"; key: string; tools: TimelineItem[] }
   /** Comandos `ags …` do time (peer, team, roles…): bastidor, uma linha só dentro do fold. */
@@ -107,8 +109,10 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
     }
   };
   for (const item of items) {
-    // Raciocínio e tokens alimentam a linha viva, não o fio da conversa.
-    if (item.kind === "reasoning" || item.kind === "usage") continue;
+    // Os tokens só alimentam a conta do turno. O raciocínio vira uma linha do corpo (abaixo).
+    if (item.kind === "usage") continue;
+    // Só a assinatura, sem texto (o provedor não mandou o resumo): nada a mostrar nem a abrir um turno.
+    if (item.kind === "reasoning" && !item.text?.trim()) continue;
     if (item.kind === "notice") {
       // Uma linha própria no fio; não mexe no turno em andamento.
       turns.push({ key: item.id, user: null, body: [], final: null, end: null, plan: null, notice: item });
@@ -130,6 +134,8 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
     turn = current;
     if (item.kind === "assistant") {
       current.body.push({ type: "assistant", key: item.id, item });
+    } else if (item.kind === "reasoning") {
+      current.body.push({ type: "reasoning", key: item.id, item });
     } else if (item.kind === "tool") {
       tools.push(item);
       if (item.tool === "todo" && item.plan && item.plan.length > 0) {
@@ -154,6 +160,18 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
     }
   }
   return turns;
+}
+
+/**
+ * A chave do turno em que o modelo ainda está pensando (a timeline desenha o «Pensando…» com brilho nele): o último
+ * turno de verdade, em aberto, sem nada depois do raciocínio (nem ferramenta, nem fala). `null` = ninguém pensando.
+ * Olha os turnos inteiros, antes de o modo de chamadas de ferramenta esconder linhas. Pura.
+ */
+export function thinkingTurnKey(turns: Turn[]): string | null {
+  const turn = [...turns].reverse().find((t) => !t.notice);
+  if (!turn || turn.end !== null) return null;
+  const last = turn.body[turn.body.length - 1];
+  return last === undefined || last.type === "reasoning" ? turn.key : null;
 }
 
 /**
