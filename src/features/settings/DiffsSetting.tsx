@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 
-import { ChatSegmented, SettingsGroup, SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
+import { ChatSegmented, SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import {
   saveDiffPrefs,
   useDiffPrefs,
@@ -52,6 +52,12 @@ export function DiffsSetting() {
             ]}
           />
         </SettingsRow>
+        <SettingsToggleRow
+          label={t("settings.diffs.whitespace.label")}
+          description={t("settings.diffs.whitespace.hint")}
+          checked={prefs.ignoreWhitespace}
+          onChange={(ignoreWhitespace) => saveDiffPrefs({ ...prefs, ignoreWhitespace })}
+        />
       </SettingsGroup>
     </SettingsSection>
   );

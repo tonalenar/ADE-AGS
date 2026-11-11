@@ -15,6 +15,7 @@ import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 
 import { diffBuildOptions } from "./diffBuildOptions";
 import { editorTheme, languageFor } from "./codemirror";
+import { diffConfigFor } from "./ignoreWhitespace";
 import { readFile } from "./ipc";
 
 /**
@@ -109,9 +110,11 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
       if (!host.current) return;
       handle.current?.destroy();
       const dark = themeRef.current === "dark";
-      // Layout, recolhimento e quebra de linha vêm de `diffBuildOptions` (as preferências).
-      const build = diffBuildOptions({ layout: diff.layout, filesCollapsed: diff.filesCollapsed }, codeWrap);
+      // Layout, recolhimento, quebra de linha e espaços vêm de `diffBuildOptions` (as preferências). Os
+      // espaços trocam o algoritmo de diff do merge (`diffConfig`); o texto que aparece não muda.
+      const build = diffBuildOptions({ layout: diff.layout, filesCollapsed: diff.filesCollapsed, ignoreWhitespace: diff.ignoreWhitespace }, codeWrap);
       const collapse = build.collapseUnchanged;
+      const diffConfig = diffConfigFor(build.ignoreWhitespace);
       const wrap: Extension = build.lineWrapping ? EditorView.lineWrapping : [];
       if (build.layout === "split") {
         const side = (slot: Compartment): Extension[] => [
@@ -131,6 +134,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
           highlightChanges: true,
           gutter: true,
           collapseUnchanged: collapse,
+          diffConfig,
         });
         // El contenedor del MergeView es el que scrollea (ver `naturalHeight`).
         merge.dom.style.height = "100%";
@@ -160,6 +164,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
               gutter: true,
               mergeControls: false,
               collapseUnchanged: collapse,
+              diffConfig,
             }),
             wrap,
           ],
@@ -174,7 +179,7 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
     } catch (e) {
       setError(isScmError(e) ? e.message : String(e));
     }
-  }, [view.root, view.path, view.staged, view.commit, view.origPath, abs, diff.layout, diff.filesCollapsed, codeWrap]);
+  }, [view.root, view.path, view.staged, view.commit, view.origPath, abs, diff.layout, diff.filesCollapsed, diff.ignoreWhitespace, codeWrap]);
 
   // Al volver a la tab se recalcula: lo que falta preparar cambia cada vez que un agente
   // escribe, y un diff viejo engaña más que uno ausente.
@@ -202,6 +207,16 @@ export function DiffTab({ view, active }: { view: DiffView; active: boolean }) {
             : t(view.staged ? "editor.diff.staged" : "editor.diff.unstaged")}
         </span>
         <div className="flex-1" />
+        {/* Espaços em branco: o mesmo ajuste de Configurações → Diffs, na barra como no T3 Code. */}
+        <div role="group" aria-label={t("settings.diffs.whitespace.label")} className="flex shrink-0 gap-px p-px rounded-md bg-gray-200 dark:bg-white/8">
+          <button type="button" aria-pressed={diff.ignoreWhitespace} title={t("settings.diffs.whitespace.label")}
+            onClick={() => saveDiffPrefs({ ...diff, ignoreWhitespace: !diff.ignoreWhitespace })}
+            className={`h-5 px-1.5 rounded text-[10.5px] ${diff.ignoreWhitespace
+              ? "bg-white text-gray-900 dark:bg-white/20 dark:text-white"
+              : "text-gray-500 dark:text-white/50 hover:text-gray-900 dark:hover:text-white"}`}>
+            {t("editor.diff.whitespace")}
+          </button>
+        </div>
         {/* O layout do diff: o mesmo ajuste de Configurações → Diffs. */}
         <div role="group" aria-label={t("settings.diffs.layout.label")} className="flex shrink-0 gap-px p-px rounded-md bg-gray-200 dark:bg-white/8">
           {(["stacked", "split"] as const).map((layout) => (

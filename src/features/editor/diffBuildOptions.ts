@@ -14,15 +14,18 @@ export interface DiffBuildOptions {
   /** Os trechos sem mudança recolhidos, ou `undefined` para mostrar o arquivo inteiro. */
   collapseUnchanged: { margin: number; minSize: number } | undefined;
   lineWrapping: boolean;
+  /** As mudanças que são só de espaço não entram no diff (o algoritmo está em `ignoreWhitespace.ts`). */
+  ignoreWhitespace: boolean;
 }
 
 export function diffBuildOptions(
-  prefs: { layout: DiffLayout; filesCollapsed: boolean },
+  prefs: { layout: DiffLayout; filesCollapsed: boolean; ignoreWhitespace: boolean },
   codeWrap: boolean,
 ): DiffBuildOptions {
   return {
     layout: prefs.layout,
     collapseUnchanged: prefs.filesCollapsed ? { ...COLLAPSE_MARGIN } : undefined,
     lineWrapping: codeWrap,
+    ignoreWhitespace: prefs.ignoreWhitespace,
   };
 }

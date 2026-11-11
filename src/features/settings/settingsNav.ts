@@ -133,6 +133,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "diffs.layout", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.layout.label", keywordKeys: ["settings.diffs.layout.hint"] },
   { id: "diffs.colors", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.colors.label", keywordKeys: ["settings.diffs.colors.hint"] },
   { id: "diffs.state", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.state.label", keywordKeys: ["settings.diffs.state.hint"] },
+  { id: "diffs.whitespace", page: "diffs", anchor: "diffs-main", titleKey: "settings.diffs.whitespace.label", keywordKeys: ["settings.diffs.whitespace.hint"] },
 
   { id: "worktrees", page: "worktrees", anchor: "worktrees-main", titleKey: "settings.worktrees.where" },
 

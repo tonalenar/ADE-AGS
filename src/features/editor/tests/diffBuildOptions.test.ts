@@ -9,15 +9,24 @@ describe("opções de montagem do diff", () => {
       layout: "stacked",
       collapseUnchanged: COLLAPSE_MARGIN,
       lineWrapping: false,
+      ignoreWhitespace: true,
     });
   });
 
   it("'Expandidos' desliga o recolhimento: o arquivo inteiro aparece", () => {
-    expect(diffBuildOptions({ layout: "stacked", filesCollapsed: false }, false).collapseUnchanged).toBeUndefined();
+    expect(diffBuildOptions({ layout: "stacked", filesCollapsed: false, ignoreWhitespace: true }, false).collapseUnchanged).toBeUndefined();
   });
 
   it("o layout lado a lado sai como pedido, e a quebra de linha segue a preferência do código", () => {
-    expect(diffBuildOptions({ layout: "split", filesCollapsed: true }, true)).toMatchObject({ layout: "split", lineWrapping: true });
+    expect(diffBuildOptions({ layout: "split", filesCollapsed: true, ignoreWhitespace: true }, true)).toMatchObject({ layout: "split", lineWrapping: true });
+  });
+
+  it("'Ignorar espaços' desligado sai como pedido, sem mexer no layout nem no recolhimento", () => {
+    expect(diffBuildOptions({ ...DEFAULT_DIFF_PREFS, ignoreWhitespace: false }, false)).toMatchObject({
+      layout: "stacked",
+      collapseUnchanged: COLLAPSE_MARGIN,
+      ignoreWhitespace: false,
+    });
   });
 
   it("a margem de recolhimento é a do T3: três linhas de cada lado, a partir de seis", () => {

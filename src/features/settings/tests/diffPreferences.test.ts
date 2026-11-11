@@ -4,7 +4,7 @@ import { DEFAULT_DIFF_PREFS, diffAttributes, parseDiffPrefs } from "@/features/s
 
 describe("preferências de diff: leitura tolerante", () => {
   it("o padrão segue o T3: empilhado, vermelho e verde, trechos recolhidos", () => {
-    expect(parseDiffPrefs(null)).toEqual({ layout: "stacked", colors: "red-green", filesCollapsed: true });
+    expect(parseDiffPrefs(null)).toEqual({ layout: "stacked", colors: "red-green", filesCollapsed: true, ignoreWhitespace: true });
     expect(DEFAULT_DIFF_PREFS).toEqual(parseDiffPrefs(undefined));
   });
 
@@ -19,6 +19,12 @@ describe("preferências de diff: leitura tolerante", () => {
     expect(parseDiffPrefs({}).filesCollapsed).toBe(true);
     expect(parseDiffPrefs({ filesCollapsed: false }).filesCollapsed).toBe(false);
     expect(parseDiffPrefs({ filesCollapsed: "nao" }).filesCollapsed).toBe(true);
+  });
+
+  it("ignorar espaços vem ligado, como no T3; só o `false` explícito desliga", () => {
+    expect(parseDiffPrefs({}).ignoreWhitespace).toBe(true);
+    expect(parseDiffPrefs({ ignoreWhitespace: false }).ignoreWhitespace).toBe(false);
+    expect(parseDiffPrefs({ ignoreWhitespace: "nao" }).ignoreWhitespace).toBe(true);
   });
 
   it("as cores viram o atributo que o CSS lê", () => {
