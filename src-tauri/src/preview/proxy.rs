@@ -49,7 +49,7 @@ use super::rewrite::{
     rewrite_origin_value, skip_request_header, skip_response_header, PICKER_PATH,
 };
 use super::site::{
-    open_sites, site_for, ScriptCookies, Site, StorageCopy, JAR_HEADER, MAX_SCRIPT_COOKIE_BYTES, MAX_STORAGE_BYTES, OWN_HEADER,
+    open_sites, site_for_profile, ScriptCookies, Site, StorageCopy, JAR_HEADER, MAX_SCRIPT_COOKIE_BYTES, MAX_STORAGE_BYTES, OWN_HEADER,
     SITE_COOKIE_PATH, SITE_STORAGE_PATH,
 };
 
@@ -79,6 +79,7 @@ static PROXIES: LazyLock<Mutex<HashMap<String, Proxy>>> = LazyLock::new(|| Mutex
 struct Ctx {
     /// `http://localhost:5173`, sin barra final.
     target_origin: String,
+    profile_id: String,
     target_host: String,
     target_port: u16,
     /// Lo que va en `Host`: con puerto si no es el de siempre.
@@ -866,7 +867,7 @@ async fn forward_foreign(req: Request<Incoming>, ctx: &Ctx, started: Instant) ->
         headers.insert(ORIGIN, origin);
         shown.push(Header::noted(ORIGIN.as_str(), ctx.target_origin.clone(), HeaderNote::Rewritten));
     }
-    let site = if same_origin { ctx.site.clone() } else { site_for(&foreign_origin) };
+    let site = if same_origin { ctx.site.clone() } else { site_for_profile(&foreign_origin, &ctx.profile_id) };
     let cookie = with_cookies.then(|| site.cookie_header_from(url.path(), now_ms() / 1000, cross_site)).flatten();
     if let Some(value) = cookie.as_deref().and_then(|c| HeaderValue::from_str(c).ok()) {
         headers.insert(COOKIE, value);
@@ -1302,7 +1303,7 @@ async fn bind_loopback(preferred: u16) -> Result<(Vec<TcpListener>, u16, bool), 
     Err("no se encontró un puerto libre para la vista previa".to_string())
 }
 
-async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
+async fn start_proxy(url: &reqwest::Url, profile_id: &str) -> Result<Proxy, String> {
     let target_origin = url.origin().ascii_serialization();
     let host = url.host_str().ok_or("la URL no tiene host")?.to_string();
     let port = url.port_or_known_default().ok_or("la URL no tiene puerto")?;
@@ -1332,7 +1333,7 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
 
     let log = Arc::new(ProxyLog::default());
     let mocks = Arc::new(Mocks::default());
-    let site = site_for(&target_origin);
+    let site = site_for_profile(&target_origin, profile_id);
     let ctx = Arc::new(Ctx {
         mocks: mocks.clone(),
         log: log.clone(),
@@ -1341,6 +1342,7 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
         proxy_origin: proxy_origin.clone(),
         proxy_port: local_port,
         target_origin,
+        profile_id: profile_id.to_string(),
         target_host: host,
         target_port: port,
         host_header,
@@ -1427,7 +1429,7 @@ async fn settle_redirects(start: reqwest::Url) -> reqwest::Url {
 /// Resuelve qué poner en el iframe para mostrar `url`, levantando su proxy si hace falta.
 /// `picker` es el script del selector ya compilado.
 #[tauri::command]
-pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarget, String> {
+pub async fn preview_resolve(url: String, picker: String, profile_id: Option<String>) -> Result<PreviewTarget, String> {
     // Uno vacío no pisa el que ya hay: una pestaña que se abre antes de que el script
     // termine de cargar no le puede sacar el selector a las demás.
     if !picker.is_empty() {
@@ -1441,15 +1443,23 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
     }
     let parsed = settle_redirects(parsed).await;
     let target_origin = parsed.origin().ascii_serialization();
+    let profile_id = profile_id.unwrap_or_else(|| "default".to_string());
+    let valid_profile = profile_id == "default" || profile_id == "incognito"
+        || (profile_id.starts_with("profile-") && profile_id.len() == 44)
+        || (profile_id.starts_with("agent-") && profile_id.len() <= 64);
+    if !valid_profile || !profile_id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-') {
+        return Err("perfil do navegador inválido".to_string());
+    }
+    let proxy_key = format!("{profile_id}\u{1f}{target_origin}");
 
     let proxy_origin = {
         let mut proxies = PROXIES.lock().await;
-        match proxies.get(&target_origin) {
+        match proxies.get(&proxy_key) {
             Some(proxy) => proxy.origin.clone(),
             None => {
-                let proxy = start_proxy(&parsed).await?;
+                let proxy = start_proxy(&parsed, &profile_id).await?;
                 let origin = proxy.origin.clone();
-                proxies.insert(target_origin.clone(), proxy);
+                proxies.insert(proxy_key, proxy);
                 origin
             }
         }

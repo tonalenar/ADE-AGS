@@ -246,6 +246,16 @@ export function PenIcon({ className }: IconProps) {
   );
 }
 
+/** Captura a página visível do navegador. */
+export function CameraIcon({ className }: IconProps) {
+  return (
+    <svg {...BASE} className={className}>
+      <path d="M4 7h3l1.5-2h7L17 7h3a1 1 0 011 1v10a1 1 0 01-1 1H4a1 1 0 01-1-1V8a1 1 0 011-1z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  );
+}
+
 /** Un resaltador: la punta ancha y la línea que deja. */
 export function HighlighterIcon({ className }: IconProps) {
   return (

@@ -45,8 +45,7 @@ import { FontPreferencesSetting } from "@/features/settings/FontPreferencesSetti
 import { AppearanceModeSetting } from "@/features/settings/AppearanceModeSetting";
 import { ThemePreferencesSetting } from "@/features/settings/ThemePreferencesSetting";
 import { MotionPreferencesSetting } from "@/features/settings/MotionPreferencesSetting";
-import { BrowserSearchSetting } from "@/features/browser/BrowserSearchSetting";
-import { BrowserImportSetting } from "@/features/browser/BrowserImportSetting";
+import { BrowserSettingsSection } from "@/features/browser/BrowserSettingsSection";
 import { useTabsStore } from "@/features/tabs/store";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
@@ -154,6 +153,7 @@ export function SettingsPage() {
     shortcuts: t("settings.shortcuts"),
     decisions: t("settings.decisions"),
     devices: t("settings.devices"),
+    browser: t("settings.browser"),
     worktrees: t("settings.worktrees"),
     permissions: t("settings.permissions"),
     advanced: t("settings.advanced"),
@@ -218,8 +218,6 @@ export function SettingsPage() {
                       <SandboxSetting />
                     </SettingsGroup>
                   </SettingsSection>
-                  <BrowserSearchSetting />
-                  <BrowserImportSetting />
                 </div>
               )}
               {generalTab === "sync" && <SyncSection />}
@@ -372,6 +370,7 @@ export function SettingsPage() {
 
           {section === "chat" && <><ChatModeSetting /><ClaudeAutoCompactSetting /><SnoozeOptionsSetting /></>}
           {section === "devices" && <DevicesSection />}
+          {section === "browser" && <BrowserSettingsSection />}
           {section === "worktrees" && <WorktreesSection />}
           {section === "permissions" && <PermissionsSection />}
           {section === "terminal" && <TerminalSection />}

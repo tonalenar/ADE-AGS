@@ -203,7 +203,7 @@ fn client() -> reqwest::Client {
 #[tokio::test(flavor = "multi_thread")]
 async fn el_html_llega_con_el_selector_y_sin_las_trabas_para_mostrarse() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), "window.__picker=1".into())
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), "window.__picker=1".into(), None)
         .await
         .unwrap();
     assert!(target.proxied_url.starts_with(&target.proxy_origin));
@@ -232,7 +232,7 @@ async fn el_html_llega_con_el_selector_y_sin_las_trabas_para_mostrarse() {
 #[tokio::test(flavor = "multi_thread")]
 async fn las_redirecciones_absolutas_vuelven_a_pasar_por_el_proxy() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let resp = client().get(format!("{}/login", target.proxy_origin)).send().await.unwrap();
     assert_eq!(resp.status(), 302);
     assert_eq!(
@@ -244,8 +244,8 @@ async fn las_redirecciones_absolutas_vuelven_a_pasar_por_el_proxy() {
 #[tokio::test(flavor = "multi_thread")]
 async fn el_mismo_origen_reusa_su_proxy() {
     let port = fake_dev_server().await;
-    let a = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
-    let b = preview_resolve(format!("http://127.0.0.1:{port}/otra?x=1#y"), String::new()).await.unwrap();
+    let a = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
+    let b = preview_resolve(format!("http://127.0.0.1:{port}/otra?x=1#y"), String::new(), None).await.unwrap();
     assert_eq!(a.proxy_origin, b.proxy_origin);
     assert_eq!(b.proxied_url, format!("{}/otra?x=1#y", b.proxy_origin));
 }
@@ -253,7 +253,7 @@ async fn el_mismo_origen_reusa_su_proxy() {
 #[tokio::test(flavor = "multi_thread")]
 async fn el_websocket_del_recargado_en_caliente_atraviesa_el_proxy() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let proxy_port: u16 = target.proxy_origin.rsplit(':').next().unwrap().parse().unwrap();
 
     let mut sock = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
@@ -281,7 +281,7 @@ async fn el_websocket_del_recargado_en_caliente_atraviesa_el_proxy() {
 #[tokio::test(flavor = "multi_thread")]
 async fn um_websocket_cross_site_nao_chega_ao_dev_server() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let proxy_port: u16 = target.proxy_origin.rsplit(':').next().unwrap().parse().unwrap();
 
     let mut sock = TcpStream::connect(("127.0.0.1", proxy_port)).await.unwrap();
@@ -472,7 +472,7 @@ fn pasado_el_presupuesto_se_sueltan_los_cuerpos_mas_viejos_y_no_el_ultimo() {
 #[tokio::test(flavor = "multi_thread")]
 async fn la_red_se_anota_solo_con_el_panel_de_debug_abierto() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let origin = target.proxy_origin.clone();
     let c = client();
     c.get(format!("{origin}/sesion")).send().await.unwrap();
@@ -505,7 +505,7 @@ fn own(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
 #[tokio::test(flavor = "multi_thread")]
 async fn las_cookies_las_guarda_el_proxy_y_no_el_navegador() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
     let c = client();
@@ -554,7 +554,7 @@ async fn las_cookies_las_guarda_el_proxy_y_no_el_navegador() {
 #[tokio::test(flavor = "multi_thread")]
 async fn document_cookie_lee_y_escribe_el_frasco_del_sitio() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let c = client();
     let at = |path: &str| format!("{}{path}", target.proxy_origin);
     c.get(at("/sesion")).send().await.unwrap();
@@ -590,8 +590,8 @@ async fn document_cookie_lee_y_escribe_el_frasco_del_sitio() {
 #[tokio::test(flavor = "multi_thread")]
 async fn cada_puerto_tiene_sus_propias_cookies() {
     let (a, b) = (fake_dev_server().await, fake_dev_server().await);
-    let pa = preview_resolve(format!("http://127.0.0.1:{a}/"), String::new()).await.unwrap().proxy_origin;
-    let pb = preview_resolve(format!("http://127.0.0.1:{b}/"), String::new()).await.unwrap().proxy_origin;
+    let pa = preview_resolve(format!("http://127.0.0.1:{a}/"), String::new(), None).await.unwrap().proxy_origin;
+    let pb = preview_resolve(format!("http://127.0.0.1:{b}/"), String::new(), None).await.unwrap().proxy_origin;
     let c = client();
     c.get(format!("{pa}/sesion")).send().await.unwrap();
     assert_eq!(c.get(format!("{pa}/eco")).send().await.unwrap().text().await.unwrap(), "tema=oscuro");
@@ -604,7 +604,7 @@ async fn cada_puerto_tiene_sus_propias_cookies() {
 #[tokio::test(flavor = "multi_thread")]
 async fn el_estado_del_sitio_no_se_le_da_a_cualquiera() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let c = client();
     c.get(format!("{}/sesion", target.proxy_origin)).send().await.unwrap();
     let url = format!("{}/__ags__/cookie?path=%2F", target.proxy_origin);
@@ -621,7 +621,7 @@ async fn el_estado_del_sitio_no_se_le_da_a_cualquiera() {
 #[tokio::test(flavor = "multi_thread")]
 async fn el_storage_se_guarda_y_se_repone_una_vez() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let c = client();
     let url = format!("{}/__ags__/storage", target.proxy_origin);
     // Recién abierto y sin nada guardado: no hay qué reponer.
@@ -644,7 +644,7 @@ async fn el_storage_se_guarda_y_se_repone_una_vez() {
 #[tokio::test(flavor = "multi_thread")]
 async fn el_detalle_trae_cabeceras_cuerpos_y_lo_que_cambio_la_vista_previa() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
 
@@ -693,7 +693,7 @@ async fn el_detalle_trae_cabeceras_cuerpos_y_lo_que_cambio_la_vista_previa() {
 async fn un_servidor_apagado_se_anota_como_conexion_rechazada() {
     // Un puerto que se abre y se cierra: nadie escucha ahí.
     let port = TcpListener::bind("127.0.0.1:0").await.unwrap().local_addr().unwrap().port();
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let resp = client().get(format!("{}/api", target.proxy_origin)).send().await.unwrap();
     assert_eq!(resp.status(), 502);
@@ -734,7 +734,7 @@ fn cada_servidor_tiene_siempre_el_mismo_puerto() {
 #[tokio::test(flavor = "multi_thread")]
 async fn un_servidor_abierto_como_localhost_se_ve_desde_localhost() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://localhost:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://localhost:{port}/"), String::new(), None).await.unwrap();
     assert!(target.proxy_origin.starts_with("http://localhost:"), "{}", target.proxy_origin);
     let proxy_port: u16 = target.proxy_origin.rsplit(':').next().unwrap().parse().unwrap();
     assert!((41_000..49_008).contains(&proxy_port), "{proxy_port}");
@@ -744,7 +744,7 @@ async fn un_servidor_abierto_como_localhost_se_ve_desde_localhost() {
     assert!(html.contains("<title>Hola</title>"), "{html}");
 
     // Otra ruta del mismo servidor usa el mismo proxy, con el mismo origen.
-    let again = preview_resolve(format!("http://localhost:{port}/otra"), String::new()).await.unwrap();
+    let again = preview_resolve(format!("http://localhost:{port}/otra"), String::new(), None).await.unwrap();
     assert_eq!(again.proxy_origin, target.proxy_origin);
 }
 
@@ -818,7 +818,7 @@ fn el_cuerpo_decide_el_tipo_y_una_regla_invalida_se_rechaza() {
 #[tokio::test(flavor = "multi_thread")]
 async fn una_regla_contesta_en_lugar_del_servidor_y_queda_anotada() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     preview_set_recording(target.proxy_origin.clone(), "panel".into(), true).await.unwrap();
     let before = preview_network(target.proxy_origin.clone(), 0).await.unwrap().next;
 
@@ -1401,7 +1401,7 @@ async fn fake_api(allowed: String) -> (u16, std::sync::Arc<std::sync::atomic::At
 async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
     use std::sync::atomic::Ordering;
     let page_port = fake_dev_server().await;
-    let page = preview_resolve(format!("http://127.0.0.1:{page_port}/"), String::new()).await.unwrap();
+    let page = preview_resolve(format!("http://127.0.0.1:{page_port}/"), String::new(), None).await.unwrap();
     let (api_port, hits) = fake_api(page.target_origin.clone()).await;
     let api = |path: &str| format!("http://127.0.0.1:{api_port}{path}");
     let c = client();
@@ -1474,7 +1474,7 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
 
     // Otro sitio abierto en el navegador (otro origen) no está autorizado por la API.
     let other_port = fake_dev_server().await;
-    let other = preview_resolve(format!("http://127.0.0.1:{other_port}/"), String::new()).await.unwrap();
+    let other = preview_resolve(format!("http://127.0.0.1:{other_port}/"), String::new(), None).await.unwrap();
     let blocked = fwd(&other.proxy_origin, &api("/me"), "include").send().await.unwrap();
     assert!(blocked.headers().get("x-ags-cors").is_some(), "{:?}", blocked.headers());
     assert!(!blocked.text().await.unwrap().contains("sid=abc"), "no puede leer la sesión");
@@ -1611,7 +1611,7 @@ fn un_post_sin_cuerpo_viaja_con_content_length_cero() {
 #[tokio::test(flavor = "multi_thread")]
 async fn el_proxy_pide_identity_al_servidor() {
     let port = fake_dev_server().await;
-    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new(), None).await.unwrap();
     let seen = client()
         .get(format!("{}/enc", target.proxy_origin))
         .header("accept-encoding", "gzip, deflate, br")
@@ -1674,7 +1674,7 @@ async fn el_proxy_marca_el_desafio_anti_robot_y_lo_quita_con_la_pagina_normal() 
     use super::proxy::challenge_in_progress;
     let port = fake_dev_server().await;
     let origin = format!("http://127.0.0.1:{port}");
-    let target = preview_resolve(format!("{origin}/"), String::new()).await.unwrap();
+    let target = preview_resolve(format!("{origin}/"), String::new(), None).await.unwrap();
     assert_eq!(challenge_in_progress(&origin), None);
     let res = client().get(format!("{}/waf", target.proxy_origin)).send().await.unwrap();
     assert_eq!(res.status().as_u16(), 202);

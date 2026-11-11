@@ -10,8 +10,8 @@ export interface PreviewTarget {
   targetOrigin: string;
 }
 
-export const previewResolve = (url: string, picker: string) =>
-  invoke<PreviewTarget>("preview_resolve", { url, picker });
+export const previewResolve = (url: string, picker: string, profileId = "default") =>
+  invoke<PreviewTarget>("preview_resolve", { url, picker, profileId });
 
 /** Servidores escuchando en los puertos típicos de desarrollo de esta máquina. */
 export const previewDetectServers = () => invoke<string[]>("preview_detect_servers");

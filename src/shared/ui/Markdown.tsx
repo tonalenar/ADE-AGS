@@ -195,7 +195,7 @@ export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock
     td: (p) => <td className="px-2 py-1 border-b border-gray-100 dark:border-white/5" {...p} />,
     a: ({ href, children }) => (
         <Button variant="custom"
-          onClick={() => { if (href) openExternalUrl(href).catch(console.error); }}
+          onClick={(event) => { if (href) openExternalUrl(href, { modifier: event.metaKey || event.ctrlKey }).catch(console.error); }}
           className="text-accent-600 dark:text-accent-400 hover:underline text-left inline-block"
         >
           {children}

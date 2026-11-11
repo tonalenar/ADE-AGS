@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, TrashIcon } from "neogestify-ui-components";
 
 import {
-  BugIcon, DevicesIcon, DotsIcon, ExternalIcon, FloatPreviewIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
+  BugIcon, CameraIcon, DevicesIcon, DotsIcon, ExternalIcon, FloatPreviewIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
 import { DESKTOP_OS } from "@/app/platform";
 import { setChatBrowserFloatRect, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
@@ -37,6 +37,7 @@ import { useDebugStore } from "./debugStore";
 import { DeviceBar } from "./DeviceBar";
 import { BrowserProfilesControl } from "./BrowserProfilesControl";
 import { browserProfileIdForOwner, DEFAULT_BROWSER_PROFILE_ID } from "./profiles";
+import { readBrowserPreferences } from "./browserPreferences";
 import { clearRecentBrowserPages, readRecentBrowserPages, rememberRecentBrowserPage, type RecentBrowserPage } from "./recentPages";
 import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
 import { PageChannel, type LoadState } from "./pageChannel";
@@ -133,12 +134,12 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
 
   const [address, setAddress] = useState(view.url);
   const [target, setTarget] = useState<PreviewTarget | null>(null);
-  const real = DESKTOP_OS === "windows" && !!view.realChrome;
   const agentProfile = view.owner ? {
     id: browserProfileIdForOwner(view.owner),
     name: t("browser.profile.agentSession", { name: view.owner.label }),
   } : undefined;
   const browserProfileId = view.browserProfileId ?? agentProfile?.id ?? DEFAULT_BROWSER_PROFILE_ID;
+  const real = DESKTOP_OS === "windows" && !!view.realChrome && browserProfileId !== "incognito";
   const realRef = useRef(real);
   realRef.current = real;
   const viewRealRef = useRef(view.realChrome);
@@ -152,7 +153,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const [agentId, setAgentId] = useState<string | null>(activeTabId);
   const [sent, setSent] = useState<{ tabId: string; title: string } | null>(null);
   const [servers, setServers] = useState<string[] | null>(null);
-  const [recentPages, setRecentPages] = useState<RecentBrowserPage[]>(() => readRecentBrowserPages(browserProfileId));
+  const [recentPages, setRecentPages] = useState<RecentBrowserPage[]>(() => browserProfileId === "incognito" ? [] : readRecentBrowserPages(browserProfileId));
   const [viewport, setViewportState] = useState<Viewport | null>(view.viewport ?? null);
   const [touch, setTouchState] = useState(view.touch ?? false);
   const [debugOpen, setDebugOpen] = useState(false);
@@ -164,9 +165,11 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const [docId, setDocId] = useState<string | null>(null);
   const [compact, setCompact] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [frozen, setFrozen] = useState<(FrozenPage & { url: string }) | null>(null);
   const [freezing, setFreezing] = useState(false);
   const [savingCapture, setSavingCapture] = useState(false);
+  const [visualRecording, setVisualRecording] = useState(false);
   const annotation = useAnnotationSession();
   const errors = useDebugStore((s) => currentCounts(s.logs[view.id] ?? EMPTY_LOG).errors);
 
@@ -176,13 +179,15 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   }, [active, floatingPreview, inChatPanel, view.id]);
 
   useEffect(() => {
-    setRecentPages(readRecentBrowserPages(browserProfileId));
+    setRecentPages(browserProfileId === "incognito" ? [] : readRecentBrowserPages(browserProfileId));
   }, [browserProfileId]);
 
   const rememberPage = useCallback((url: string, title: string) => {
+    if (browserProfileId === "incognito") return;
     setRecentPages(rememberRecentBrowserPage(browserProfileId, url, title));
   }, [browserProfileId]);
   const root = useRef<HTMLDivElement>(null);
+  const menuRoot = useRef<HTMLDivElement>(null);
   const column = useRef<HTMLDivElement>(null);
   const iframe = useRef<HTMLIFrameElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
@@ -192,6 +197,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const targetRef = useRef<PreviewTarget | null>(null);
   const shownUrl = useRef(view.url);
   const initialNavigation = useRef(false);
+  const lastProfileId = useRef(browserProfileId);
   const requestedUrl = useRef("");
   const viewportRef = useRef(viewport);
   const touchRef = useRef(touch);
@@ -200,6 +206,10 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const loadWaiters = useRef(new Set<() => void>());
   /** Lo señalado, para que un agente lo lea sin esperar a un render. */
   const marksRef = useRef<{ picks: PickedElement[]; captures: PendingCapture[]; note: string }>({ picks: [], captures: [], note: "" });
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordingStreamRef = useRef<MediaStream | null>(null);
+  const recordingChunksRef = useRef<Blob[]>([]);
+  const recordingTimerRef = useRef<number | null>(null);
 
   /** Quién espera a que la persona marque algo, cuando lo pidió un agente. */
   const pickWaiter = useRef<((element: PickedElement | null) => void) | null>(null);
@@ -236,6 +246,22 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const outside = (event: PointerEvent) => {
+      if (!menuRoot.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+    window.addEventListener("pointerdown", outside);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("pointerdown", outside);
+      window.removeEventListener("keydown", escape);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     if (!floatingPreview) return;
@@ -322,7 +348,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       return t("browser.invalidUrl");
     }
     requestedUrl.current = url;
-    if (DESKTOP_OS === "windows" && (realRef.current || shouldOpenInRealChrome(url, viewRealRef.current))) {
+    if (DESKTOP_OS === "windows" && browserProfileId !== "incognito"
+      && (realRef.current || shouldOpenInRealChrome(url, viewRealRef.current))) {
       // No navegador nativo só isto navega (como a barra do T3): a URL que a página informa nunca volta como
       // navegação. Ainda fechado, ele abre já nesta URL. Um site de fora liga o navegador nativo sozinho (ver
       // `shouldOpenInRealChrome`): a pessoa pode desligar no botão.
@@ -342,7 +369,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       return null;
     }
     try {
-      const resolved = await previewResolve(url, INJECTED);
+      const resolved = await previewResolve(url, INJECTED, browserProfileId);
       // La misma dirección otra vez es "recargá": el `src` no cambia y el iframe no se
       // enteraría.
       if (iframe.current && iframe.current.src === resolved.proxiedUrl) iframe.current.src = resolved.proxiedUrl;
@@ -360,7 +387,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       setError(String(e));
       return String(e);
     }
-  }, [t, updateView, view.id]);
+  }, [browserProfileId, t, updateView, view.id]);
 
   const reload = useCallback(() => {
     if (iframe.current && pageUrl.current) {
@@ -633,13 +660,16 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
         previewDetectServers().then(setServers).catch(() => setServers([]));
         addressRef.current?.focus();
       }
+    } else if (lastProfileId.current !== browserProfileId) {
+      lastProfileId.current = browserProfileId;
+      if (view.url && !isBlankUrl(view.url)) void go(view.url);
     } else if (view.url && !isBlankUrl(view.url)
       && view.url !== shownUrl.current && view.url !== requestedUrl.current) {
       // Links abertos pela ADE atualizam a URL da vista; só navegamos quando ela diverge
       // da página que já está na tela. A navegação feita dentro do site atualiza ambas.
       void go(view.url);
     }
-  }, [go, view.url]);
+  }, [browserProfileId, go, view.url]);
 
   // O que a página manda (o piloto e o selector), venha do iframe ou do Chrome real: `sendBack` responde pelo mesmo caminho.
   const onPageMessage = useRef<(msg: PageMessage, sendBack: (message: AppMessage) => void, display: (url: string) => string) => void>(() => undefined);
@@ -830,6 +860,114 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     }
   };
 
+  const captureScreenshot = async () => {
+    if ((!target && !real) || freezing || savingCapture || !column.current || (!real && !iframe.current)) return;
+    setFreezing(true);
+    setError(null);
+    try {
+      const canvas = real
+        ? (await realBrowserShot(view.id)).canvas
+        : (await freezePage(iframe.current!, column.current)).canvas;
+      const id = newMarkId("s");
+      const path = await previewSaveCapture(await canvasToPng(canvas), `usuario-${id}`);
+      setCaptures((prev) => [...prev, { id, path, url: shownUrl.current, thumb: thumbnail(canvas) }]);
+      setComposerOpen(true);
+      setSent(null);
+    } catch (cause) {
+      setError(t("browser.capture.failed", { error: String(cause) }));
+    } finally {
+      setFreezing(false);
+    }
+  };
+
+  const stopVisualRecording = () => {
+    if (recordingTimerRef.current !== null) {
+      window.clearTimeout(recordingTimerRef.current);
+      recordingTimerRef.current = null;
+    }
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    setVisualRecording(false);
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  };
+
+  const startVisualRecording = async () => {
+    if ((!target && !real) || !column.current || (!real && !iframe.current)) return;
+    try {
+      if (typeof MediaRecorder === "undefined") throw new Error("MediaRecorder indisponível neste sistema.");
+      const initial = real
+        ? (await realBrowserShot(view.id)).canvas
+        : (await freezePage(iframe.current!, column.current)).canvas;
+      const canvas = document.createElement("canvas");
+      canvas.width = initial.width;
+      canvas.height = initial.height;
+      const context = canvas.getContext("2d");
+      if (!context || typeof canvas.captureStream !== "function") throw new Error("Captura de vídeo indisponível neste sistema.");
+      context.drawImage(initial, 0, 0);
+      const fps = readBrowserPreferences().maxRecordingFps;
+      const stream = canvas.captureStream(fps);
+      recordingStreamRef.current = stream;
+      const mimeType = ["video/webm;codecs=vp9", "video/webm", "video/mp4"]
+        .find((candidate) => MediaRecorder.isTypeSupported(candidate));
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+      recordingChunksRef.current = [];
+      recorderRef.current = recorder;
+      recorder.ondataavailable = (event) => { if (event.data.size > 0) recordingChunksRef.current.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(recordingChunksRef.current, { type: recorder.mimeType || "video/webm" });
+        recordingChunksRef.current = [];
+        stream.getTracks().forEach((track) => track.stop());
+        if (recordingStreamRef.current === stream) recordingStreamRef.current = null;
+        if (blob.size === 0) return;
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `ade-browser-${Date.now()}.${blob.type.includes("mp4") ? "mp4" : "webm"}`;
+        link.click();
+        window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      };
+      recorder.start(500);
+      setVisualRecording(true);
+      setError(null);
+
+      const nextFrame = async () => {
+        if (recorderRef.current !== recorder || recorder.state !== "recording") return;
+        const startedAt = performance.now();
+        try {
+          const frame = real
+            ? (await realBrowserShot(view.id)).canvas
+            : (await freezePage(iframe.current!, column.current!)).canvas;
+          context.drawImage(frame, 0, 0, canvas.width, canvas.height);
+        } catch (cause) {
+          setError(String(cause));
+          stopVisualRecording();
+          return;
+        }
+        if (recorderRef.current === recorder && recorder.state === "recording") {
+          recordingTimerRef.current = window.setTimeout(() => { void nextFrame(); }, Math.max(0, 1000 / fps - (performance.now() - startedAt)));
+        }
+      };
+      void nextFrame();
+    } catch (cause) {
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+      recordingStreamRef.current = null;
+      setError(t("browser.recording.failed", { error: String(cause) }));
+    }
+  };
+
+  const toggleVisualRecording = () => {
+    if (visualRecording) stopVisualRecording();
+    else void startVisualRecording();
+  };
+
+  useEffect(() => () => {
+    if (recordingTimerRef.current !== null) window.clearTimeout(recordingTimerRef.current);
+    const recorder = recorderRef.current;
+    recorderRef.current = null;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+  }, []);
+
   const attachments = picks.length + captures.length;
 
   const send = () => {
@@ -903,8 +1041,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
         onFocus={(e) => e.target.select()}
         placeholder={t("browser.address")}
         spellCheck={false}
-        className="w-full h-8 px-3.5 rounded-full outline-none font-mono text-[12px]
-          bg-white dark:bg-white/6 border border-gray-300 dark:border-white/12
+        className="w-full h-7 px-3 rounded-lg outline-none font-mono text-[12px]
+          bg-white/80 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08]
           focus:border-accent-500 dark:focus:border-accent-400
           text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/35"
       />
@@ -927,6 +1065,10 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
         <PenIcon className="w-4 h-4" />
         {freezing ? t("browser.annotate.capturing") : t("browser.annotate.label")}
       </ActionButton>
+      <ActionButton plain hint={t(visualRecording ? "browser.recording.stop" : "browser.capture.screenshot")} disabled={(!target && !real) || freezing} active={visualRecording} onClick={() => visualRecording ? toggleVisualRecording() : void captureScreenshot()}>
+        <CameraIcon className={`w-4 h-4 ${visualRecording ? "text-red-600 dark:text-red-400" : ""}`} />
+        {visualRecording && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-600" />}
+      </ActionButton>
       <ActionButton
         hint={t("browser.composer")}
         active={composerOpen}
@@ -947,13 +1089,11 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   // Só ícones: com texto, os botões do Chrome real espremiam a barra de endereço a 21 px.
   const tabTools = (
     <>
-      {DESKTOP_OS === "windows" && real && (
-        <BrowserProfilesControl
-          profileId={browserProfileId}
-          agentProfile={agentProfile}
-          onSelect={(browserProfileId) => updateView(view.id, { browserProfileId })}
-        />
-      )}
+      <BrowserProfilesControl
+        profileId={browserProfileId}
+        agentProfile={agentProfile}
+        onSelect={(browserProfileId) => updateView(view.id, { browserProfileId })}
+      />
       {DESKTOP_OS === "windows" && (
         <ToolButton label={t("browser.real.hint")} active={real}
           onClick={() => updateView(view.id, { realChrome: !real })}>
@@ -994,6 +1134,22 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     </>
   );
 
+  const browserMenu = (
+    <div ref={menuRoot} className="relative shrink-0">
+      <ToolButton label={t("browser.menu")} active={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+        <DotsIcon className="w-4 h-4" />
+      </ToolButton>
+      {menuOpen && (
+        <div data-over-webview role="menu" aria-label={t("browser.menu")} className="absolute right-0 top-full z-[10000] mt-1 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-gray-900">
+          <button type="button" role="menuitem" onClick={() => { if (real) realBrowserHistory(view.id, 0).catch(console.error); else reload(); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-white/10">{t("browser.menu.hardReload")}</button>
+          <button type="button" role="menuitem" onClick={() => { setDebugOpen(true); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-white/10">{t("browser.menu.devTools")}</button>
+          <button type="button" role="menuitem" onClick={() => { setZoom(1); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-white/10">{t("browser.zoom.reset")}</button>
+          <button type="button" role="menuitem" disabled={(!target && !real) || freezing || savingCapture} onClick={() => { toggleVisualRecording(); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 disabled:opacity-45 dark:text-gray-100 dark:hover:bg-white/10">{t(visualRecording ? "browser.recording.stop" : "browser.recording.start")}</button>
+        </div>
+      )}
+    </div>
+  );
+
   // Con las acciones plegadas, lo que pide atención (algo esperando en el mensaje, errores
   // en la consola) se avisa en el botón que las despliega.
   const pendingAttention = !actionsOpen && (attachments > 0 || errors > 0);
@@ -1008,8 +1164,16 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     />
   ) : compact ? (
     <>
-      <div className="flex items-center gap-1 h-11 shrink-0 px-2 border-b border-gray-200 dark:border-white/7">
+      <div className="flex items-center gap-0.5 h-8 shrink-0 px-1.5">
+        {navButtons}
         {addressBar}
+        <ActionButton plain hint={t("browser.pick.label")} disabled={!target} active={picking} onClick={togglePicking}>
+          <PickIcon className="w-4 h-4 stroke-2" />
+        </ActionButton>
+        <ActionButton plain hint={t(visualRecording ? "browser.recording.stop" : "browser.capture.screenshot")} disabled={(!target && !real) || freezing} active={visualRecording} onClick={() => visualRecording ? toggleVisualRecording() : void captureScreenshot()}>
+          <CameraIcon className={`w-4 h-4 ${visualRecording ? "text-red-600 dark:text-red-400" : ""}`} />
+          {visualRecording && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-600" />}
+        </ActionButton>
         {inChatPanel && (
           <ToolButton label={t(browserFloating ? "browser.float.dock" : "browser.float.open")} active={browserFloating}
             onClick={toggleChatBrowserFloating}>
@@ -1031,16 +1195,18 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
           {pageActions}
           <ToolbarSeparator />
           {tabTools}
+          {browserMenu}
         </div>
       )}
     </>
   ) : (
-    <div className="flex items-center gap-1 h-11 shrink-0 px-2 border-b border-gray-200 dark:border-white/7">
+    <div className="flex items-center gap-0.5 h-8 shrink-0 px-1.5">
       {navButtons}
       {addressBar}
       {pageActions}
       <ToolbarSeparator />
       {tabTools}
+      {browserMenu}
     </div>
   );
 

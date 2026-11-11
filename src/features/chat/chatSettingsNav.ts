@@ -7,7 +7,7 @@ import type { SettingsSectionId } from "@/app/uiStore";
 export const CHAT_SETTINGS_GROUPS: { titleKey: string; items: SettingsSectionId[] }[] = [
   { titleKey: "chat.settingsNav.app", items: ["general", "appearance", "chat", "shortcuts"] },
   { titleKey: "chat.settingsNav.agents", items: ["agents", "accounts", "permissions", "memory", "decisions"] },
-  { titleKey: "chat.settingsNav.tools", items: ["terminal", "devices", "worktrees", "advanced"] },
+  { titleKey: "chat.settingsNav.tools", items: ["terminal", "devices", "browser", "worktrees", "advanced"] },
 ];
 
 /** As seções novas desta versão (o selo "Novo" da prancheta). */
@@ -33,6 +33,7 @@ export const SETTINGS_SEARCH: Record<SettingsSectionId, { keys: string[]; words?
   decisions: { keys: ["settings.decisions.provider"], words: ["laya", "jev"] },
   terminal: { keys: [] },
   devices: { keys: [], words: ["ios", "android", "simulador", "simulator"] },
+  browser: { keys: ["settings.browserSearch.title", "settings.browserImport.title"], words: ["navegador", "browser", "cookies", "busca"] },
   worktrees: { keys: [], words: ["git", "branch"] },
   permissions: { keys: ["chat.rules.title", "chat.rules.inbox"], words: ["aprovação", "approval", "sempre permitir", "regras", "rules"] },
   advanced: { keys: ["settings.cli", "settings.graphify"] },

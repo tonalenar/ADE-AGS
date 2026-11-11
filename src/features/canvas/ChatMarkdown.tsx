@@ -113,7 +113,7 @@ const COMPONENTS: Components = {
     if (!safe) return <span className="underline decoration-dotted">{children}</span>;
     return (
       <a href={safe} title={safe} rel="noreferrer noopener" className="text-accent-600 underline hover:text-accent-500 dark:text-accent-300"
-        onClick={(e) => { e.preventDefault(); openExternalUrl(safe).catch(console.error); }}>
+        onClick={(e) => { e.preventDefault(); openExternalUrl(safe, { modifier: e.metaKey || e.ctrlKey }).catch(console.error); }}>
         {children}
       </a>
     );
