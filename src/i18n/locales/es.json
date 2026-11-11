@@ -5777,6 +5777,8 @@
   "settings.fontSmoothing.hint": "Texto más fino y en grises, en lugar del predeterminado de macOS.",
   "settings.codeWrap.label": "Ajustar líneas largas de código",
   "settings.codeWrap.hint": "Ajusta las líneas largas en bloques de código y diffs por defecto.",
+  "settings.renderMath.label": "Renderizar matemáticas",
+  "settings.renderMath.hint": "Muestra fórmulas LaTeX entre $…$ y $$…$$ en el chat y en el Markdown. Los importes en dólares, como $5, siguen siendo texto.",
   "settings.display": "Visualización",
   "settings.timeFormat.label": "Formato de hora",
   "settings.timeFormat.hint": "Se aplica al chat, la barra lateral y la línea de tiempo.",

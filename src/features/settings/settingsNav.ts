@@ -99,6 +99,7 @@ export const SETTINGS_SEARCH_ITEMS: readonly SettingsSearchItem[] = [
   { id: "appearance.composerContext", page: "appearance", anchor: "appearance-interface", titleKey: "settings.composerContext.label", keywordKeys: ["settings.composerContext.hint"] },
   { id: "appearance.smoothing", page: "appearance", anchor: "appearance-text", titleKey: "settings.fontSmoothing.label", keywordKeys: ["settings.fontSmoothing.hint"] },
   { id: "appearance.codeWrap", page: "appearance", anchor: "appearance-text", titleKey: "settings.codeWrap.label", keywordKeys: ["settings.codeWrap.hint"] },
+  { id: "appearance.renderMath", page: "appearance", anchor: "appearance-text", titleKey: "settings.renderMath.label", keywordKeys: ["settings.renderMath.hint"] },
 
   { id: "chat.open", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.onOpen" },
   { id: "chat.startMode", page: "chat", anchor: "chat-mode", titleKey: "chat.settings.startMode" },

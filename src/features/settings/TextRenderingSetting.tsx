@@ -5,7 +5,8 @@ import { saveDisplayPrefs, useDisplayPrefs, type DisplayPrefs } from "@/features
 
 /**
  * A renderização do texto, na Aparência, abaixo das fontes: a suavização (texto mais fino e cinza) e a
- * quebra de linha dos blocos de código e diffs. Ambas viram atributos do `<html>` que `App.css` lê.
+ * quebra de linha dos blocos de código e diffs, e a matemática (lida pelo Markdown, não pelo CSS). A
+ * suavização e a quebra viram atributos do `<html>` que `App.css` lê.
  */
 export function TextRenderingSetting() {
   const { t } = useTranslation();
@@ -26,6 +27,12 @@ export function TextRenderingSetting() {
           description={t("settings.codeWrap.hint")}
           checked={prefs.codeWrap}
           onChange={(codeWrap) => update({ codeWrap })}
+        />
+        <SettingsToggleRow
+          label={t("settings.renderMath.label")}
+          description={t("settings.renderMath.hint")}
+          checked={prefs.renderMath}
+          onChange={(renderMath) => update({ renderMath })}
         />
       </SettingsGroup>
     </SettingsSection>

@@ -3,7 +3,7 @@ import { createPrefStore } from "@/features/settings/prefStore";
 
 /**
  * As preferências de exibição deste aparelho: o contraste, a opacidade do vidro, a suavização e a
- * quebra de linha do texto, o esforço no composer, a identificação do ambiente, o contexto do composer
+ * quebra de linha e a matemática do texto, o esforço no composer, a identificação do ambiente, o contexto do composer
  * e o formato de hora. Vão ao `localStorage` (um JSON só), como as outras do aparelho. Cada uma tem um
  * efeito real: as variáveis e atributos abaixo são lidos pelo CSS de `App.css`, e o resto pelas telas.
  */
@@ -21,6 +21,8 @@ export interface DisplayPrefs {
   fontSmoothing: boolean;
   /** Quebra as linhas longas dos blocos de código e dos diffs. */
   codeWrap: boolean;
+  /** Renderiza fórmulas LaTeX (`$…$`, `$$…$$`) no Markdown das conversas. Desligado é o padrão do T3. */
+  renderMath: boolean;
   /** O esforço no composer: o nome do nível (Alto) ou barras crescentes. */
   effortDisplay: EffortDisplay;
   environmentIdentification: EnvironmentIdentification;
@@ -39,6 +41,7 @@ export const DEFAULT_DISPLAY_PREFS: DisplayPrefs = {
   glassOpacity: GLASS_RANGE.default,
   fontSmoothing: true,
   codeWrap: false,
+  renderMath: false,
   effortDisplay: "label",
   environmentIdentification: "auto",
   composerContext: false,
@@ -59,6 +62,7 @@ export function parseDisplayPrefs(raw: unknown): DisplayPrefs {
     glassOpacity: clampInt(o.glassOpacity, GLASS_RANGE.min, GLASS_RANGE.max, GLASS_RANGE.default),
     fontSmoothing: o.fontSmoothing !== false,
     codeWrap: o.codeWrap === true,
+    renderMath: o.renderMath === true,
     effortDisplay: o.effortDisplay === "bars" ? "bars" : "label",
     environmentIdentification: o.environmentIdentification === "pill" || o.environmentIdentification === "none"
       ? o.environmentIdentification

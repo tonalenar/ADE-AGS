@@ -5777,6 +5777,8 @@
   "settings.fontSmoothing.hint": "Thinner grayscale text instead of the macOS default.",
   "settings.codeWrap.label": "Wrap long code lines",
   "settings.codeWrap.hint": "Wraps long lines in code blocks and diffs by default.",
+  "settings.renderMath.label": "Render math",
+  "settings.renderMath.hint": "Shows LaTeX formulas between $…$ and $$…$$ in chat and Markdown. Dollar amounts such as $5 stay text.",
   "settings.display": "Display",
   "settings.timeFormat.label": "Time format",
   "settings.timeFormat.hint": "Applies to chat, the sidebar and the timeline.",

@@ -315,6 +315,12 @@ html[data-code-wrap="on"] pre {
   overflow-wrap: anywhere;
 }
 
+/* Matemática (KaTeX): uma fórmula larga rola na própria linha; o texto ao redor continua quebrando. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 /* Cores das adições e remoções: o esquema vermelho e verde (padrão) ou azul e laranja. */
 :root {
   --cc-diff-add-fg: #15803d;
