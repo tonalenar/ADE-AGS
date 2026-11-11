@@ -1,7 +1,9 @@
 import { useSyncExternalStore } from "react";
 
 import type { ChatAccess } from "./chatModel";
+import { isSendShortcut, type SendShortcut } from "./composerSendKey";
 import type { ChatWorktreeSubmodules } from "./chatWorkspacePrefs";
+import { isToolCallVisibility, type ToolCallVisibility } from "./timeline/toolCallVisibility";
 
 /**
  * A última escolha do composer: pasta, agente, modelo, esforço, conta e permissão. Preferência
@@ -17,7 +19,7 @@ export interface ChatPrefs {
   access: ChatAccess;
   /** Começar no modo Plano. */
   plan: boolean;
-  /** Fast do Codex para conversas novas (ignorado por outros agentes e pelo motor por protocolo). */
+  /** Modo Fast para conversas TUI novas (ignorado se a matriz ou o modelo não oferecerem suporte). */
   fastMode: boolean;
   /** Abrir a conversa num worktree novo em vez do checkout atual. */
   worktree: boolean;
@@ -31,6 +33,10 @@ export interface ChatPrefs {
   followUpBehavior: FollowUpBehavior;
   /** Mostrar skills no autocomplete do comando `/`; o seletor `$` continua disponível. */
   showSkillsInSlashMenu: boolean;
+  /** Quando o Enter envia (ou quebra a linha): "Enviar com" no T3 Code. */
+  sendShortcut: SendShortcut;
+  /** Quais chamadas de ferramenta aparecem no fold "Trabalhou por …" da conversa. */
+  toolCallVisibility: ToolCallVisibility;
 }
 
 export type ChatWidth = "normal" | "wide" | "full";
@@ -38,7 +44,7 @@ export type FollowUpBehavior = "steer" | "queue";
 
 const KEY = "cc-chat-prefs";
 
-export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true };
+export const DEFAULT_CHAT_PREFS: ChatPrefs = { cwd: null, agentId: null, model: null, effort: null, accountId: null, access: "safe", plan: false, fastMode: false, worktree: false, worktreeSubmodules: null, structured: true, width: "normal", followUpBehavior: "steer", showSkillsInSlashMenu: true, sendShortcut: "enter", toolCallVisibility: "showAll" };
 
 const listeners = new Set<() => void>();
 let snapshot: ChatPrefs | null = null;
@@ -64,6 +70,8 @@ export function parseChatPrefs(raw: unknown): ChatPrefs {
     width: o.width === "wide" || o.width === "full" ? o.width : "normal",
     followUpBehavior: o.followUpBehavior === "queue" ? "queue" : "steer",
     showSkillsInSlashMenu: o.showSkillsInSlashMenu !== false,
+    sendShortcut: isSendShortcut(o.sendShortcut) ? o.sendShortcut : "enter",
+    toolCallVisibility: isToolCallVisibility(o.toolCallVisibility) ? o.toolCallVisibility : "showAll",
   };
 }
 

@@ -16,9 +16,11 @@ export interface PanelEntry {
 }
 
 /**
- * A ordem e as teclas. As do T3 ficam (B, T, F, D, P); o resto é do ADE: R de Resumo (a superfície padrão),
- * S de Design, I de iOS, A de Android e O de Orquestrador para o Time (o M do T3 é "Device", que aqui são o I e o A, e o T
- * já é do Terminal).
+ * A ordem e as teclas do menu, as do T3 Code: B Browser, T Terminal, F Files, D Diff, P Pull request, M Device,
+ * S Side chat. O que só o ADE tem fica com uma letra própria: E de Design, O de Orquestrador para o Time, R de Resumo
+ * (o Resumo não é aba da coluna: é o botão do cabeçalho; a tecla vale no tooltip dele), H de Páginas HTML e G de galeria
+ * de SnapShots. O Android entra pelo submenu do Device (M abre o iOS, que é o aparelho padrão); a tecla `a` dele só existe
+ * dentro do submenu.
  */
 export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "summary", key: SUMMARY_KEY },
@@ -26,29 +28,21 @@ export const PANEL_ENTRIES: PanelEntry[] = [
   { id: "terminal", key: "t" },
   { id: "files", key: "f" },
   { id: "diff", key: "d" },
-  { id: "design", key: "s" },
-  { id: "ios", key: "i" },
-  { id: "android", key: "a" },
-  { id: "team", key: "o" },
   { id: "pr", key: "p" },
-  { id: "side", key: "q" },
+  { id: "ios", key: "m" },
+  { id: "android", key: "a" },
+  { id: "side", key: "s" },
+  { id: "design", key: "e" },
+  { id: "team", key: "o" },
+  { id: "renders", key: "h" },
+  { id: "snapshots", key: "g" },
 ];
 
-/**
- * A fileira de ícones da barra do painel (como o painel do Claude Code): Resumo, Terminal, Diff,
- * Navegador, Aparelho (o simulador iOS) e Arquivos. O resto (Design, Android, Time, PR) fica no `⋯`.
- */
-/** Os ícones da fileira do cabeçalho. O Time fica à mostra com os demais (antes ficava escondido no ⋯). */
-export const ROW_CHOICES: PanelChoice[] = ["summary", "terminal", "diff", "browser", "ios", "files", "team"];
+/** As linhas do menu "Abrir uma superfície" (o "+" da barra e o estado vazio): sem o Resumo e sem o Android (submenu). */
+export const MENU_ENTRIES: PanelEntry[] = PANEL_ENTRIES.filter((e) => e.id !== "summary" && e.id !== "android");
 
-/** As linhas que sobram para o menu `⋯`, na ordem de `PANEL_ENTRIES`. */
-export const MORE_ENTRIES: PanelEntry[] = PANEL_ENTRIES.filter((e) => !ROW_CHOICES.includes(e.id));
-
-/**
- * Os ícones da fileira que vão para o ⋯ quando a conversa fica estreita (um painel aberto numa janela de ~1000 px):
- * sem isso o cabeçalho cortava o último ícone, o de fechar o painel. O que está à vista nunca sai da fileira.
- */
-export const COMPACT_HIDDEN: PanelChoice[] = ["diff", "browser", "files"];
+/** As linhas que têm submenu: o Browser lista os perfis (se houver mais de um) e o Device lista iOS e Android. */
+export const SUBMENU_OWNERS: PanelChoice[] = ["browser", "ios"];
 
 /** O terminal precisa de uma conversa com gaveta; PR depende da pasta do repositório. */
 export interface PanelAvailability {
@@ -68,7 +62,7 @@ export function isAvailable(id: PanelChoice, available: PanelAvailability): bool
 export function entryForKey(e: { key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean }, available: PanelAvailability): PanelEntry | null {
   if (e.ctrlKey || e.metaKey || e.altKey) return null;
   const key = e.key.toLowerCase();
-  const entry = PANEL_ENTRIES.find((x) => x.key === key);
+  const entry = MENU_ENTRIES.find((x) => x.key === key);
   return entry && isAvailable(entry.id, available) ? entry : null;
 }
 

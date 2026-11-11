@@ -24,6 +24,10 @@ export interface ThreadRow {
   parentRef?: string | null;
   parentTurnId?: string | null;
   isSideChat?: boolean;
+  /** Como a pergunta lateral nasceu: `native` (cópia da sessão da origem), `portable` (histórico como contexto portátil, outro agente/conta) ou `excerpt` (recorte). */
+  forkMode?: "native" | "portable" | "excerpt" | null;
+  /** Só em `portable` e `excerpt`: o código do motivo (`conversa::fork::Reason`). */
+  forkReason?: string | null;
   state: "active" | "settled";
   createdAt: number;
   updatedAt: number;
@@ -75,6 +79,13 @@ export const chatThreads = () => invoke<ThreadRow[]>("chat_threads");
 export const chatThreadCreate = (input: {
   agentId: string; cwd: string; workspaceId?: string | null; title: string; model: string | null; effort: string | null; access: ThreadAccess; accountId: string | null; parentRef?: string | null;
 }) => invoke<ThreadRow>("chat_thread_create", { ...input, parentRef: input.parentRef ?? null });
+/** O desfecho do fork da pergunta lateral (`chat_side_chat_fork`). */
+export interface SideChatForkOutcome {
+  mode: "native" | "portable" | "excerpt";
+  reason: string | null;
+}
+/** Faz a pergunta lateral nascer como cópia da conversa de origem, ou diz que cai no recorte e por quê. */
+export const chatSideChatFork = (threadId: string) => invoke<SideChatForkOutcome>("chat_side_chat_fork", { threadId });
 export const chatSideChatDelete = (threadId: string) => invoke<void>("chat_side_chat_delete", { threadId });
 
 /** `images`: caminhos de imagens para o motor que as recebe em linha (o Claude); o caminho já está no texto. */

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button } from "neogestify-ui-components";
 
 import { SettingsSection } from "@/features/settings/SettingsSection";
+import { findModel } from "@/features/squads/modelSelection";
 
 import { getRoster, getTiers, setTiers } from "./ipc";
 import { ModelSearch } from "./ModelSearch";
@@ -76,7 +77,7 @@ export function RoutingSection() {
   const pending = roster?.agents.filter((a) => a.installed && !a.launchable) ?? [];
   const labelOf = (ref: ModelRef) => {
     const agent = roster?.agents.find((a) => a.agentId === ref.agentId);
-    const model = agent?.models.find((m) => m.id === ref.model);
+    const model = findModel(agent?.models ?? [], ref.model);
     return { agent: agent?.label ?? ref.agentId, model: model?.label ?? ref.model };
   };
 

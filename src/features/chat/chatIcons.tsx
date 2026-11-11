@@ -104,3 +104,7 @@ export const UsersIcon = (p: IconProps) => <Svg {...p}><circle cx="9" cy="8" r="
 export const DiffIcon = (p: IconProps) => <Svg {...p}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z" /><path d="M14 3v6h6M9 13h6M9 17h6M12 10v0" /></Svg>;
 export const FilesIcon = (p: IconProps) => <Svg {...p}><path d="M15 2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V6Z" /><path d="M15 2v4h4M4 7v13a2 2 0 0 0 2 2h9" /></Svg>;
 export const DesignIcon = (p: IconProps) => <Svg {...p}><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.5-1.9-.3-1 .4-2.1 1.5-2.1H17a4 4 0 0 0 4-4c0-5-4-10-9-10Z" /><path d="M7.5 11h.01M11 7.5h.01M15.5 9h.01" /></Svg>;
+export const HtmlPageIcon = (p: IconProps) => <Svg {...p}><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5M10 13l-2 2 2 2M14 13l2 2-2 2" /></Svg>;
+export const GalleryIcon = (p: IconProps) => <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="m21 16-5-5-8 8" /></Svg>;
+export const ExternalIcon = (p: IconProps) => <Svg {...p}><path d="M14 4h6v6M20 4 11 13" /><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5" /></Svg>;
+export const TrashIcon = (p: IconProps) => <Svg {...p}><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></Svg>;

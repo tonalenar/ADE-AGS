@@ -147,9 +147,12 @@ impl HeadlessAgent for ClaudeCode {
         budget_usd: Option<f64>,
         ctx: &LaunchCtx,
     ) -> Launch {
+        let ultrathink = ctx.reasoning_effort == Some("ultrathink");
+        let ultracode = ctx.reasoning_effort == Some("ultracode");
+        let prompt = crate::conversa::claude_map::prompt_with_effort(prompt, ultrathink.then_some("ultrathink"));
         let mut args = vec![
             "-p".into(),
-            prompt.into(),
+            prompt,
             "--output-format".into(),
             "stream-json".into(),
             // Sin esto el stream sale recortado en las versiones que todavía lo piden.
@@ -213,6 +216,13 @@ impl HeadlessAgent for ClaudeCode {
             args.push("--model".into());
             args.push(m.into());
         }
+        if ultracode { args.extend(["--effort".into(), "xhigh".into()]); }
+        if ultracode || ctx.fast_mode {
+            let mut settings = serde_json::Map::new();
+            if ultracode { settings.insert("ultracode".into(), serde_json::Value::Bool(true)); }
+            if ctx.fast_mode { settings.insert("fastMode".into(), serde_json::Value::Bool(true)); }
+            args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]);
+        }
         if let Some(system) = &ctx.system_prompt {
             args.push("--append-system-prompt".into());
             args.push(system.clone());
@@ -239,7 +249,12 @@ impl HeadlessAgent for ClaudeCode {
             args,
             env: {
                 let mut env = ctx.account_env.clone();
-                if let Some(effort) = ctx.reasoning_effort { env.insert("CLAUDE_CODE_EFFORT_LEVEL".into(), effort.into()); }
+                match ctx.reasoning_effort {
+                    Some("ultracode") => {}
+                    Some("ultrathink") => {}
+                    Some(effort) => { env.insert("CLAUDE_CODE_EFFORT_LEVEL".into(), effort.into()); }
+                    None => {}
+                }
                 env
             },
         }

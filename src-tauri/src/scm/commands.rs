@@ -10,6 +10,7 @@ use std::{
 };
 
 use serde::Serialize;
+use tauri::Manager;
 
 use super::git::{network, repo_root, run, run_text, ScmError, COMMIT, LOCAL};
 use super::parse::{
@@ -165,6 +166,124 @@ pub async fn scm_commit(root: String, message: String, stage_all: bool) -> Resul
     })
     .await
 }
+
+/// Gera apenas uma sugestão editável com o agente local já roteado na ADE.
+/// Lê exclusivamente o índice e roda o agente pela trilha one-shot somente leitura.
+#[tauri::command]
+pub async fn scm_generate_commit_message(
+    app: tauri::AppHandle,
+    root: String,
+    style: String,
+    language: String,
+    custom_instructions: Option<String>,
+) -> Result<String, String> {
+    use crate::runs::{
+        oneshot::{OneShot, read_only_agents, run_read_only},
+        routing::{AccountChoice, Complexity, RouteRequest},
+    };
+
+    let db = app
+        .try_state::<crate::database::DbConnection>()
+        .ok_or_else(|| "o banco de dados não está disponível".to_string())?
+        .inner()
+        .clone();
+    let root = blocking(move || {
+        let root = repo_root(&root)
+            .ok_or_else(|| ScmError::Git("A pasta não contém um repositório Git".into()))?;
+        let raw = run_text(
+            &root,
+            &[
+                "diff",
+                "--cached",
+                "--no-color",
+                "--no-ext-diff",
+                "--find-renames",
+                "--unified=3",
+            ],
+            LOCAL,
+        )?;
+        let (diff, truncated) = super::commands::clip_diff(raw, 512 * 1024);
+        if diff.trim().is_empty() {
+            return Err(ScmError::Git(
+                "Prepare (stage) as mudanças antes de gerar a mensagem".into(),
+            ));
+        }
+        let diff = if truncated {
+            format!("{diff}\n[diff truncado pelo limite local de tamanho]")
+        } else {
+            diff
+        };
+        let history = run_text(&root, &["log", "-8", "--format=%s"], LOCAL).unwrap_or_default();
+        Ok((root, diff, history))
+    })
+    .await
+    .map_err(|e| format!("{e:?}"))?;
+    let (root, diff, history) = root;
+    let custom = custom_instructions.unwrap_or_default();
+    let prompt =
+        super::commit_message::build_prompt(&diff, &style, &language, Some(&custom), &history);
+
+    let route_db = db.clone();
+    let assignment = tauri::async_runtime::spawn_blocking(move || {
+        let eligible = read_only_agents();
+        let standard = RouteRequest {
+            agent_id: None,
+            model: None,
+            complexity: Some(Complexity::Standard),
+            account: AccountChoice::Auto,
+        };
+        if let Ok(assignment) = crate::runs::route_now(&route_db, &standard) {
+            if eligible.contains(&assignment.agent_id.as_str()) {
+                return Ok(assignment);
+            }
+        }
+        let mut failures = Vec::new();
+        for agent in eligible {
+            let req = RouteRequest {
+                agent_id: Some(agent.to_string()),
+                model: None,
+                complexity: None,
+                account: AccountChoice::Auto,
+            };
+            match crate::runs::route_now(&route_db, &req) {
+                Ok(assignment) => return Ok(assignment),
+                Err(error) => failures.push(format!("{agent}: {error}")),
+            }
+        }
+        Err(format!(
+            "Nenhum agente somente leitura está disponível ({})",
+            failures.join("; ")
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let agent_id = assignment.agent_id;
+    let model = assignment.model;
+    let account_id = assignment.account_id;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        run_read_only(
+            &db,
+            &OneShot {
+                agent_id: &agent_id,
+                account_id: account_id.as_deref(),
+                model: model.as_deref(),
+                cwd: &root,
+                prompt: &prompt,
+                timeout: std::time::Duration::from_secs(180),
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if !result.ok {
+        return Err(result
+            .error
+            .unwrap_or_else(|| "o agente não conseguiu sugerir uma mensagem".into()));
+    }
+    super::commit_message::clean_suggestion(&result.result.unwrap_or_default())
+}
+
 
 #[tauri::command]
 pub async fn scm_branches(root: String) -> Result<Vec<Branch>, ScmError> {

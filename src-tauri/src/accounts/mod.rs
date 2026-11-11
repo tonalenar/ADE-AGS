@@ -31,6 +31,7 @@
 mod commands;
 pub(crate) mod antigravity_oauth;
 pub(crate) mod antigravity_access;
+mod antigravity_home;
 mod health;
 pub mod pools;
 mod profiles;

@@ -21,15 +21,45 @@ use crate::canal::timeline::{app_resource_of, claude_context_tokens, claude_toke
 
 use super::codex_map::{Ask, DeltaKind};
 use super::store::ThreadRow;
+use crate::skills::is_agent_command_name;
 
 const TEXT_MAX: usize = 20_000;
 const OUTPUT_MAX: usize = 4_000;
 const LABEL_MAX: usize = 200;
+/// Limites da lista de comandos que o `initialize` anuncia (o texto vem do agente, então não é confiável).
+const COMMANDS_MAX: usize = 256;
+const COMMAND_DESCRIPTION_MAX: usize = 500;
+const COMMAND_HINT_MAX: usize = 200;
 /// O texto que o Claude grava como fala do usuário quando o turno é interrompido.
 const INTERRUPTED: &str = "[Request interrupted by user";
 
 fn str_of<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
     v.get(key).and_then(Value::as_str)
+}
+
+/// Os comandos que o `initialize` do Claude anuncia (`commands`), no formato da lista do composer:
+/// `name`, `description` e `inputHint`, como o ACP entrega. Nome que o composer não consegue inserir
+/// como `/nome`, repetido (sem diferenciar caixa) ou longo demais sai; descrição e dica são limitadas.
+/// Sem `commands`, a lista é vazia. Puro.
+pub fn initialize_commands(response: &Value) -> Vec<Value> {
+    let Some(commands) = response.get("commands").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for command in commands.iter().take(COMMANDS_MAX) {
+        let Some(name) = str_of(command, "name").map(str::trim) else { continue };
+        if !is_agent_command_name(name) || !seen.insert(name.to_lowercase()) {
+            continue;
+        }
+        let description: String = str_of(command, "description").unwrap_or("").trim().chars().take(COMMAND_DESCRIPTION_MAX).collect();
+        let hint = str_of(command, "argumentHint")
+            .map(str::trim)
+            .filter(|h| !h.is_empty())
+            .map(|h| h.chars().take(COMMAND_HINT_MAX).collect::<String>());
+        out.push(json!({ "name": name, "description": description, "inputHint": hint }));
+    }
+    out
 }
 
 /// O acesso do chat no `--permission-mode` do Claude.
@@ -62,11 +92,17 @@ pub fn access_of_mode(mode: &str) -> Option<&'static str> {
     }
 }
 
-/// Como o processo abre a sessão do Claude: uma nova com o id escolhido pelo app, ou a retomada.
+/// Como o processo abre a sessão do Claude: uma nova com o id escolhido pelo app, a retomada, ou o fork de outra
+/// sessão (a pergunta lateral nasce como cópia da conversa de origem, ver `fork`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Start<'a> {
     New(&'a str),
     Resume(&'a str),
+    /// `--resume <from> --fork-session --session-id <id>`: o Claude copia a transcrição de `from` para a sessão nova
+    /// `id` (escolhida pelo app) e a origem não é tocada. `--session-id` com `--resume` só vale junto de `--fork-session`.
+    /// `at` = o uuid da última mensagem do agente num turno concluído (`--resume-session-at`, só em modo `-p`): a cópia
+    /// termina ali, e o que a origem escreve depois (um turno em andamento) não entra.
+    Fork { from: &'a str, id: &'a str, at: Option<&'a str> },
 }
 
 /// Os argumentos do `claude` de uma conversa. Pura.
@@ -88,21 +124,34 @@ pub fn launch_args_with_auto_compact(
     ]
     .map(String::from)
     .to_vec();
+    let mut settings = serde_json::Map::new();
     if let Some(window) = auto_compact_window.filter(|n| (100_000..=1_000_000).contains(n)) {
-        args.extend([
-            "--settings".into(),
-            json!({ "autoCompactWindow": window }).to_string(),
-        ]);
+        settings.insert("autoCompactWindow".into(), json!(window));
+    }
+    let special_effort = row.effort.as_deref();
+    if special_effort == Some("ultracode") {
+        settings.insert("ultracode".into(), json!(true));
+    }
+    if !settings.is_empty() {
+        args.extend(["--settings".into(), serde_json::Value::Object(settings).to_string()]);
     }
     match start {
         Start::New(id) => args.extend(["--session-id".into(), id.into()]),
         Start::Resume(id) => args.extend(["--resume".into(), id.into()]),
+        Start::Fork { from, id, at } => {
+            args.extend(["--resume".into(), from.into(), "--fork-session".into(), "--session-id".into(), id.into()]);
+            if let Some(at) = at.filter(|uuid| !uuid.is_empty()) {
+                args.extend(["--resume-session-at".into(), at.into()]);
+            }
+        }
     }
     if let Some(model) = row.model.as_deref().filter(|m| !m.is_empty()) {
         args.extend(["--model".into(), model.into()]);
     }
-    if let Some(effort) = row.effort.as_deref().filter(|e| !e.is_empty()) {
+    if let Some(effort) = special_effort.filter(|e| !e.is_empty() && !matches!(*e, "ultrathink" | "ultracode")) {
         args.extend(["--effort".into(), effort.into()]);
+    } else if special_effort == Some("ultracode") {
+        args.extend(["--effort".into(), "xhigh".into()]);
     }
     args
 }
@@ -117,6 +166,46 @@ pub fn user_message_with(text: &str, images: Vec<Value>) -> Value {
     let mut content = images;
     content.push(json!({ "type": "text", "text": text }));
     json!({ "type": "user", "message": { "role": "user", "content": content }, "parent_tool_use_id": null, "session_id": "" })
+}
+
+/// T3 entrega Ultrathink como prefixo da mensagem, exceto comandos `/...` do Claude.
+pub fn prompt_with_effort(text: &str, effort: Option<&str>) -> String {
+    let trimmed = text.trim();
+    let command = trimmed.strip_prefix('/').and_then(|rest| rest.split_whitespace().next());
+    if trimmed.is_empty() || effort != Some("ultrathink") || command.is_some_and(|name| !name.contains('/')) {
+        return trimmed.to_string();
+    }
+    if trimmed.starts_with("Ultrathink:") { return trimmed.to_string(); }
+    format!("Ultrathink:\n{trimmed}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(effort: Option<&str>) -> ThreadRow {
+        ThreadRow {
+            id: "thread".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/tmp".into(),
+            title: "tarefa".into(), model: Some("claude-opus-5-5".into()), effort: effort.map(str::to_string),
+            access: "ask".into(), account_id: None, memory: None, parent_ref: None, parent_turn_id: None,
+            is_side_chat: false, state: "active".into(), created_at: 1, updated_at: 1,
+            fork_mode: None, fork_reason: None,
+        }
+    }
+
+    #[test]
+    fn ultrathink_vira_prefixo_de_prompt_sem_interferir_em_comandos() {
+        assert_eq!(prompt_with_effort(" revisar isso ", Some("ultrathink")), "Ultrathink:\nrevisar isso");
+        assert_eq!(prompt_with_effort("/compact", Some("ultrathink")), "/compact");
+    }
+
+    #[test]
+    fn ultracode_entrega_xhigh_e_settings_da_cli() {
+        let args = launch_args(&row(Some("ultracode")), Start::New("sessao"));
+        assert!(args.windows(2).any(|pair| pair == ["--effort", "xhigh"]));
+        let settings = args.windows(2).find(|pair| pair[0] == "--settings").unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&settings[1]).unwrap(), json!({"ultracode": true}));
+    }
 }
 
 /// O que uma linha da saída significa para a conversa.
@@ -173,9 +262,17 @@ pub struct Mapper {
     /// As ferramentas que a pessoa negou.
     denied: HashSet<String>,
     interrupted: bool,
+    /// O `uuid` da última mensagem do agente do turno (a linha `assistant` do fio principal, nunca a de um subagente):
+    /// o ponto em que o fork da pergunta lateral corta a transcrição. `take_end_uuid` o entrega no fim do turno.
+    end_uuid: Option<String>,
 }
 
 impl Mapper {
+    /// O uuid da última mensagem do agente do turno que acabou, uma vez só (o próximo turno começa sem ele).
+    pub fn take_end_uuid(&mut self) -> Option<String> {
+        self.end_uuid.take()
+    }
+
     /// A pessoa negou esta ferramenta: o resultado dela aparece como negado.
     pub fn deny(&mut self, tool_use_id: &str) {
         self.denied.insert(tool_use_id.to_string());
@@ -197,7 +294,12 @@ impl Mapper {
         let at = Some(str_of(line, "timestamp").and_then(parse_ts_ms).unwrap_or(now));
         match str_of(line, "type").unwrap_or("") {
             "system" => self.system(line),
-            "assistant" => self.assistant(line, at),
+            "assistant" => {
+                if let Some(uuid) = str_of(line, "uuid").filter(|uuid| !uuid.is_empty()) {
+                    self.end_uuid = Some(uuid.to_string());
+                }
+                self.assistant(line, at)
+            }
             "user" => self.user(line),
             "stream_event" => delta_of(line).into_iter().collect(),
             "result" => {

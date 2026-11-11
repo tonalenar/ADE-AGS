@@ -56,6 +56,8 @@ pub struct EngineCapabilities {
     pub automatic_compaction: bool,
     pub persistent_goal: bool,
     pub goal_pause_resume: bool,
+    /// A pergunta lateral pode nascer como fork nativo da sessão da origem (`conversa::fork`); sem isso, vale o recorte.
+    pub session_fork: bool,
 }
 
 #[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,6 +92,8 @@ impl Engine {
             )
                 .is_some_and(|support| support != crate::harness::capability::Support::Unsupported)
         };
+        let fork = crate::harness::matrix::find(crate::harness::capability::Surface::Chat, provider)
+            .is_some_and(|column| column.fork.promises());
         let mid_turn = if supported(crate::harness::capability::Capability::Steer) {
             MidTurnBehavior::Steer
         } else {
@@ -106,6 +110,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: true,
+                session_fork: fork,
             },
             Engine::Claude => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
@@ -115,6 +120,7 @@ impl Engine {
                 automatic_compaction: true,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
             Engine::OpenCode => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
@@ -124,6 +130,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
             Engine::Antigravity => EngineCapabilities {
                 access_modes: &["ask", "edits", "safe", "full", "plan"],
@@ -133,6 +140,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
             Engine::Cursor => EngineCapabilities {
                 access_modes: &["ask", "full", "plan"],
@@ -142,6 +150,7 @@ impl Engine {
                 automatic_compaction: false,
                 persistent_goal: supported(crate::harness::capability::Capability::Goal),
                 goal_pause_resume: false,
+                session_fork: fork,
             },
         }
     }
@@ -697,12 +706,23 @@ pub(super) fn codex_error(failure: RequestFailure) -> SendError {
 /// de a mensagem chegar ao agente (a sessão não abre, o processo já fechou, o canal de escrita fechou) é
 /// `NotSent`; um pedido que saiu e perdeu a resposta é `Unknown`.
 pub async fn send_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str, mode: SendMode, images: &[String]) -> Result<(), SendError> {
+    // Uma mensagem nova (da pessoa, de um agente ou da fila) já continua a conversa: a retomada agendada depois do
+    // limite não tem mais o que fazer. A retomada em si apaga o plano antes de enviar, então não se cancela sozinha.
+    super::limite::cancel_resume(db, thread_id);
     // Conversa que acabou de trocar de agente: o resumo do contexto vai na frente desta mensagem e só sai da fila
     // de pendências quando a mensagem foi de fato enviada (uma recusa não o perde).
     let (framed, carries_summary) = super::troca::before_send(db, thread_id, text);
+    // Pergunta lateral recém-forkada: o contexto portátil (ou o digest da origem) vai na frente da primeira mensagem, com
+    // a mesma regra: só sai da fila quando a mensagem foi de fato enviada.
+    let (framed, carries_fork) = super::fork_portatil::before_send(db, thread_id, &framed);
     let sent = send_framed(app, db, thread_id, &framed, mode, images).await;
-    if carries_summary && sent.is_ok() {
-        super::troca::summary_sent(db, thread_id);
+    if sent.is_ok() {
+        if carries_summary {
+            super::troca::summary_sent(db, thread_id);
+        }
+        if carries_fork {
+            super::fork_portatil::sent(db, thread_id);
+        }
     }
     sent
 }
@@ -1194,6 +1214,8 @@ pub async fn stop_with_request(
 /// Devolve o que aconteceu (`Sent`, `Pending` ou `NoTurn`).
 async fn stop_now(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Interrupted, String> {
     let row = thread(db, thread_id)?;
+    // Parar a conversa também cancela a retomada agendada depois do limite de uso.
+    super::limite::cancel_resume(db, thread_id);
     // A matriz só barra a interrupção de um turno vivo: fechar no banco um turno órfão não depende do motor.
     if live_turn(thread_id).is_some() {
         if let Some(error) = unsupported_capability_error(&row.agent_id, crate::harness::capability::Capability::Interrupt) {
@@ -1440,8 +1462,13 @@ pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort:
 }
 
 pub fn rename(db: &DbConnection, thread_id: &str, title: &str) -> Result<(), String> {
-    let conn = db.lock().map_err(db_err)?;
-    store::set_title(&conn, thread_id, title.trim()).map_err(db_err)
+    {
+        let conn = db.lock().map_err(db_err)?;
+        store::set_title(&conn, thread_id, title.trim()).map_err(db_err)?;
+    }
+    // O título agora é da pessoa: o gerador por modelo não o sobrescreve.
+    super::titulo::mark_manual(db, thread_id);
+    Ok(())
 }
 
 /// Conclui (fecha o processo do agente; dá para reabrir: a próxima mensagem retoma a thread) ou reabre.
@@ -1455,6 +1482,8 @@ pub fn settle(db: &DbConnection, thread_id: &str, settled: bool) -> Result<(), S
         }
     }
     if settled {
+        // Concluída, a conversa não é mais retomada sozinha depois do limite.
+        super::limite::cancel_resume(db, thread_id);
         close(thread_id);
     }
     Ok(())

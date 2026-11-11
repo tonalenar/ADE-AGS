@@ -19,6 +19,7 @@ import { isWorking } from "./stalled";
 import { prematureClosing } from "./vigiaClosing";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { contextDue, contextNudge, contextPressure, contextStuck, REPEAT_DONE, repeatKey, repeatStuck } from "./vigiaSignals";
+import { vigiaToast } from "./vigiaToast";
 import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
 import { repeatAfterEach } from "./repeatAfterEach";
 import { vigiaActive } from "./vigiaSwitch";
@@ -341,7 +342,7 @@ function watchLoops(team: readonly { id: string; title: string; agentId: string 
     else loops.delete(tab.id);
     if (step.stuckMs === undefined) continue;
     const stuck = loopStuck(tab.title, step.stuckMs);
-    showBotToast({ title: VIGIA_NAME, text: stuck, tone: "warning", ms: 12_000 });
+    showBotToast(vigiaToast(VIGIA_NAME, stuck, tab.id));
     reportToChat(leadId, reportLine(stuck, LOOP_DONE, "possível laço"));
   }
 }
@@ -365,7 +366,7 @@ function watchSignals(team: readonly Tab[], lead: Tab, now: number): void {
     if (key && !repeats.has(key)) {
       repeats.add(key);
       const stuck = repeatStuck(name, snapshot);
-      showBotToast({ title: VIGIA_NAME, text: stuck, tone: "warning", ms: 12_000 });
+      showBotToast(vigiaToast(VIGIA_NAME, stuck, tab.id));
       reportToChat(lead.id, reportLine(stuck, REPEAT_DONE, "possível laço"));
     }
     if (tab.id === lead.id) continue;
@@ -518,7 +519,7 @@ export function vigiaTick(now = Date.now()): Promise<void> {
     if (closing) {
       const before = closingOf(mission.id);
       if ((!before || now - before.at >= CLOSING_COOLDOWN_MS) && (before?.count ?? 0) < NUDGE_LIMIT && mayPoke(lead.id, now)) {
-        showBotToast({ title: VIGIA_NAME, text: closing.stuck, tone: "warning", ms: 12_000 });
+        showBotToast(vigiaToast(VIGIA_NAME, closing.stuck, lead.id));
         poke(lead.id, `[${VIGIA_NAME}] ${closing.nudge}`, now, () => {
           patchWatch(mission, { closingAt: Date.now(), closingCount: (closingOf(mission.id)?.count ?? 0) + 1 });
           reportToChat(lead.id, reportLine(closing.stuck, `lembrei o ${lead.title.split(" — ")[0]} de esperar a entrega.`, "fechamento antecipado"));
@@ -593,7 +594,7 @@ export function vigiaTick(now = Date.now()): Promise<void> {
             const round = latestTask(mission);
             if (!userDecisionAllowed(mission.kind, watches.get(mission.id)?.decisionRound, round)) continue;
             patchWatch(mission, { decisionRound: round ?? 0 });
-            showBotToast({ title: VIGIA_NAME, text: action.message, tone: "warning", ms: 12_000 });
+            showBotToast(vigiaToast(VIGIA_NAME, action.message, lead.id));
             notifyUser(mission.id, mission.title, "user_decision", action.message);
             reportToChat(lead.id, reportLine(action.message, "avisei você na tela: a decisão é sua.", "aviso"));
             continue;

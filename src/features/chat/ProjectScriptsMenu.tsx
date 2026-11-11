@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { useShortcutPreferences } from "@/app/shortcutPrefs";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
 
-import { usePopover } from "./usePopover";
+import { useAnchoredPopover } from "./anchoredPopover";
 import { GlobeIcon, PlayIcon, PlusIcon, SettingsIcon, TerminalIcon, WrenchIcon, XIcon } from "./chatIcons";
 import { runProjectScript } from "./shellTerminal";
 import { setRightPanel, useChatStore } from "./store";
@@ -33,7 +34,7 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
   // trocar de idioma (ou um `t` novo a cada render) zerava o editor aberto e recarregava tudo em laço.
   const tRef = useRef(t);
   tRef.current = t;
-  const { open, setOpen, ref } = usePopover<HTMLSpanElement>();
+  const { open, setOpen, close, triggerRef, panelRef, style } = useAnchoredPopover();
   const [scripts, setScripts] = useState<ChatProjectScript[]>(() => loadChatProjectScripts(cwd));
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [candidates, setCandidates] = useState<T3ProjectScriptCandidate[] | null>(null);
@@ -200,7 +201,7 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
         return;
       }
       await runProjectScript(cwd, script.name, command);
-      setOpen(false);
+      close();
     } catch (cause) {
       setError(t("chat.projectScripts.runError", { error: String(cause) }));
     } finally {
@@ -225,7 +226,7 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
     if (current) state.updateView(current.id, { url, title: new URL(url).host });
     const chat = useChatStore.getState();
     if (!chat.browserFloating || chat.browser?.viewId !== viewId) setRightPanel("browser");
-    setOpen(false);
+    close();
   };
 
   const edit = async (script: ChatProjectScript) => {
@@ -261,8 +262,9 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
   };
 
   return (
-    <span ref={ref} className="relative">
+    <span className="relative">
       <button
+        ref={triggerRef}
         type="button"
         aria-label={t("chat.projectScripts.open")}
         aria-haspopup="dialog"
@@ -273,13 +275,17 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
       >
         <WrenchIcon className="w-3.5 h-3.5" />
       </button>
-      {open && (
-        <section role="dialog" aria-label={t("chat.projectScripts.title")} className="absolute right-0 bottom-full z-40 mb-2 w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-surface-raised">
-          <header className="flex items-center justify-between gap-2 px-2 pb-1.5">
-            <span className="text-[12px] font-medium text-gray-800 dark:text-white/85">{t("chat.projectScripts.title")}</span>
-            <button type="button" aria-label={t("chat.projectScripts.close")} onClick={() => setOpen(false)} className="rounded p-1 text-gray-500 hover:bg-gray-100 dark:text-white/50 dark:hover:bg-white/8"><XIcon className="h-3.5 w-3.5" /></button>
+      {open && createPortal(
+        <section ref={panelRef} popover="manual" role="dialog" aria-label={t("chat.projectScripts.title")} tabIndex={-1} style={style}
+          className="w-[min(25rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-surface-raised">
+          <header className="flex items-start justify-between gap-3 px-2 pb-2">
+            <div className="min-w-0">
+              <h2 className="m-0 text-[13px] font-semibold text-gray-900 dark:text-white">{t("chat.projectScripts.title")}</h2>
+              <p className="mt-1 mb-0 text-[10px] leading-4 text-gray-500 dark:text-white/50">{t("chat.projectScripts.description")}</p>
+            </div>
+            <button type="button" aria-label={t("chat.projectScripts.close")} onClick={() => close()} className="shrink-0 rounded p-1 text-gray-500 hover:bg-gray-100 dark:text-white/50 dark:hover:bg-white/8"><XIcon className="h-3.5 w-3.5" /></button>
           </header>
-          <div className="max-h-[min(24rem,60vh)] overflow-y-auto">
+          <div className="min-h-0 overflow-y-auto overscroll-contain" style={{ maxHeight: "min(28rem, calc(100vh - 4.5rem))" }}>
             {error && <p role="alert" className="mx-2 my-1 rounded-md bg-red-50 px-2 py-1.5 text-[10px] text-red-700 dark:bg-red-400/10 dark:text-red-300">{error}</p>}
             {editor ? (
               <form onSubmit={(event) => void saveEditor(event)} className="space-y-2 p-2">
@@ -341,7 +347,7 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
               </div>
             ) : (
               <>
-                {scripts.length === 0 ? <p className="m-0 px-2 py-3 text-[10px] text-gray-500 dark:text-white/45">{t("chat.projectScripts.empty")}</p> : (
+                {scripts.length === 0 ? null : (
                   <ul className="m-0 max-h-48 list-none space-y-1 overflow-y-auto p-0">
                     {scripts.map((script) => (
                       <li key={script.id} className="flex items-center gap-1 rounded-md px-1.5 py-1 hover:bg-gray-50 dark:hover:bg-white/5">
@@ -363,15 +369,21 @@ export function ProjectScriptsMenu({ cwd, owner = null }: { cwd: string; owner?:
                     ))}
                   </ul>
                 )}
-                <p className="m-0 px-2 pb-1 text-[9px] leading-4 text-gray-500 dark:text-white/40">{t("chat.projectScripts.manualOnly")}</p>
+                {scripts.length > 0 && <p className="m-0 px-2 pb-1 text-[9px] leading-4 text-gray-500 dark:text-white/40">{t("chat.projectScripts.manualOnly")}</p>}
                 <div className="mt-1 border-t border-gray-200 pt-1.5 dark:border-white/8">
-                  <button type="button" disabled={scripts.length >= 32 || busySave} onClick={() => { setEditor({ id: null, name: "", command: "", setup: false, onSettle: false, previewUrl: "" }); setError(""); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[10px] text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-white/70 dark:hover:bg-white/8"><PlusIcon className="h-3 w-3" />{t("chat.projectScripts.add")}</button>
+                  {scripts.length === 0 ? (
+                    <div className="mx-2 mb-1 rounded-lg border border-dashed border-gray-200 px-3 py-3 dark:border-white/10">
+                      <p className="m-0 text-[11px] font-medium text-gray-800 dark:text-white/80">{t("chat.projectScripts.emptyTitle")}</p>
+                      <p className="mt-1 mb-2 text-[10px] leading-4 text-gray-500 dark:text-white/45">{t("chat.projectScripts.emptyDescription")}</p>
+                      <button type="button" disabled={busySave} onClick={() => { setEditor({ id: null, name: "", command: "", setup: false, onSettle: false, previewUrl: "" }); setError(""); }} className="flex items-center gap-1.5 rounded-md bg-accent-600 px-2.5 py-1.5 text-[10px] font-medium text-white hover:bg-accent-700 disabled:opacity-40"><PlusIcon className="h-3 w-3" />{t("chat.projectScripts.add")}</button>
+                    </div>
+                  ) : <button type="button" disabled={scripts.length >= 32 || busySave} onClick={() => { setEditor({ id: null, name: "", command: "", setup: false, onSettle: false, previewUrl: "" }); setError(""); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[10px] text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-white/70 dark:hover:bg-white/8"><PlusIcon className="h-3 w-3" />{t("chat.projectScripts.add")}</button>}
                   <button type="button" disabled={busyImport || busySave || scripts.length >= 32} onClick={() => void importFromT3()} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[10px] text-gray-700 hover:bg-gray-100 disabled:opacity-40 dark:text-white/70 dark:hover:bg-white/8"><TerminalIcon className="h-3 w-3" />{busyImport ? t("chat.projectScripts.importing") : t("chat.projectScripts.import")}</button>
                 </div>
               </>
             )}
           </div>
-        </section>
+        </section>, document.body
       )}
     </span>
   );

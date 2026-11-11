@@ -9,8 +9,9 @@ import { closeDiff, useCompareStore } from "./store";
 import type { DiffView } from "./types";
 
 const LINE: Record<ReturnType<typeof diffLines>[number]["kind"], string> = {
-  add: "text-green-700 dark:text-green-300 bg-green-500/10",
-  del: "text-red-700 dark:text-red-300 bg-red-500/10",
+  // As cores vêm de `App.css` (Configurações → Diffs): vermelho e verde, ou azul e laranja.
+  add: "text-[var(--cc-diff-add-fg)] bg-[var(--cc-diff-add-bg)]",
+  del: "text-[var(--cc-diff-del-fg)] bg-[var(--cc-diff-del-bg)]",
   hunk: "text-accent-600 dark:text-accent-300",
   meta: "text-gray-500 dark:text-gray-400 font-semibold",
   ctx: "text-gray-700 dark:text-gray-300",
@@ -45,7 +46,7 @@ export function DiffDialog({ comparisonId, pick }: { comparisonId: string; pick:
             {view.untracked.length > 0 && (
               <div>
                 <p className="font-medium text-gray-600 dark:text-gray-300">{t("compare.diff.untracked", { count: view.untracked.length })}</p>
-                <ul className="font-mono text-[11px] text-green-700 dark:text-green-300">
+                <ul className="font-mono text-[11px] text-[var(--cc-diff-add-fg)]">
                   {view.untracked.slice(0, 50).map((f) => <li key={f}>+ {f}</li>)}
                 </ul>
               </div>

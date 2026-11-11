@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { modelIsUnverified, modelSelectionMode, modelSelectionPatch, modelsForAccount } from "../modelSelection";
-import { fastModeSupport, reasoningOptions, withModelEffort } from "../modelSelection";
+import { claudeEffortLevels, effectiveModelForEffort, fastModeSupport, findModel, reasoningOptions, withModelEffort } from "../modelSelection";
 
 describe("Squad Fast mode support", () => {
   const catalog = [{ id: "luna", fastSupported: true }, { id: "plain", fastSupported: false }, { id: "silent" }];
@@ -56,5 +56,33 @@ describe("Squad model selection", () => {
     expect(modelIsUnverified("old/custom", catalog)).toBe(true);
     expect(modelIsUnverified("future/custom", catalog)).toBe(true);
     expect(modelIsUnverified("sonnet", catalog)).toBe(false);
+  });
+});
+
+describe("aliases de Claude no catálogo", () => {
+  const catalog = [
+    { id: "claude-opus-5-5", label: "Claude Opus 5.5", aliases: ["opus"], reasoningLevels: ["low", "medium", "high", "xhigh", "max"] },
+    { id: "claude-haiku-4-5", label: "Claude Haiku 4.5", aliases: [], reasoningLevels: [] },
+  ];
+  it("acha a linha pelo id completo ou pelo alias, e não acha nada sem modelo", () => {
+    expect(findModel(catalog, "opus")?.label).toBe("Claude Opus 5.5");
+    expect(findModel(catalog, "claude-opus-5-5")?.label).toBe("Claude Opus 5.5");
+    expect(findModel(catalog, null)).toBeUndefined();
+  });
+  it("o esforço segue a linha que o alias resolve", () => {
+    expect(reasoningOptions("opus", catalog)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+  });
+  it("Claude: modelo sem níveis não oferece esforço; o padrão (sem modelo) deixa a lista ao chamador", () => {
+    expect(claudeEffortLevels("claude-haiku-4-5", catalog)).toEqual([]);
+    expect(claudeEffortLevels("custom/model", catalog)).toEqual([]);
+    expect(claudeEffortLevels("opus", catalog)).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(claudeEffortLevels(null, catalog)).toBeNull();
+  });
+  it("o esforço do modelo padrão Claude resolve para Opus, igual à rota do backend", () => {
+    expect(effectiveModelForEffort(null, catalog)).toBe("claude-opus-5-5");
+  });
+  it("preserva um esforço permitido ao mudar a seleção para o modelo padrão Claude", () => {
+    const defaults = [{ ...catalog[0]!, reasoningLevels: [...catalog[0]!.reasoningLevels, "ultracode"] }];
+    expect(withModelEffort({ model: null, complexity: null }, "ultracode", defaults).reasoningEffort).toBe("ultracode");
   });
 });

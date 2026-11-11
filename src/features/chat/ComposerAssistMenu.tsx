@@ -6,8 +6,9 @@ import { useTabsStore } from "@/features/tabs/store";
 import { repoInfo } from "@/features/explorer/ipc";
 import { useSkillsStore } from "@/features/skills/store";
 import { alwaysOnSkills } from "@/features/skills/ipc";
+import { useAgentSkillsStore } from "@/features/skills/agentSkillsStore";
 import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
-import type { SkillSummary } from "@/features/skills/types";
+import type { AgentSkillScan, SkillSummary } from "@/features/skills/types";
 import { forgePulls } from "@/features/forge/ipc";
 import type { ForgeItem } from "@/features/forge/types";
 
@@ -15,6 +16,10 @@ import { addSurface, setRightPanel } from "./store";
 import { PROTOCOL_AGENTS, type ProviderSlashCommand } from "./chatModel";
 import { legacyComposerCapabilityAvailable, matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { useChatPrefs } from "./chatPrefs";
+import {
+  AGENTS_WITH_SKILL_SCAN, agentNameKey, agentSlashInvocation, buildAgentSlashEntries, searchAgentSlashEntries, threadIdOfConversation,
+  type AgentSlashEntry,
+} from "./agentSlashModel";
 import type { ComposerAddonContext } from "./ChatComposer";
 import { AgentMono } from "./team/TeamParts";
 import { mentionOptions, mentionSlug, type MentionOption } from "./team/teamModel";
@@ -35,10 +40,16 @@ interface AssistItem {
   group: "agents" | "files" | "commands" | "provider" | "skills" | "pullRequests";
   title: string;
   detail?: string;
+  /** Rótulo curto à direita do título: o prefixo do plugin, ou o escopo da skill. */
+  badge?: string;
   disabled?: boolean;
   icon: React.ReactNode;
   run: () => void;
 }
+
+/** Teto de comandos e skills do agente no menu, para a lista não tomar a tela. */
+const AGENT_ENTRIES_MAX = 30;
+const NO_SKILLS: AgentSkillScan[] = [];
 
 export const COMMANDS = [
   { id: "model", label: "chat.composer.assist.command.model", detail: "chat.composer.assist.command.modelDetail" },
@@ -107,7 +118,8 @@ function attachSelectedFile(context: ComposerAddonContext, path: string): void {
 /**
  * Autocomplete do composer no estilo T3, conectado aos recursos da ADE:
  * - `@` sugere agentes do time e arquivos com mudanças; escolher um arquivo o anexa como contexto revisável;
- * - `/` abre superfícies da conversa, o seletor de agente/modelo ou a gestão de skills;
+ * - `/` abre superfícies da conversa, o seletor de agente/modelo ou a gestão de skills, e lista os comandos e
+ *   skills que o agente anuncia (ou que a varredura do disco acha antes disso);
  * - `$` sugere skills instaladas e disponíveis para o agente atual.
  */
 export function ComposerAssistMenu({
@@ -117,6 +129,7 @@ export function ComposerAssistMenu({
   teamOptions = [],
   providerCommands = [],
   onPlan,
+  allowSideChat = true,
   context,
 }: {
   cwd: string | null;
@@ -128,6 +141,8 @@ export function ComposerAssistMenu({
   providerCommands?: ProviderSlashCommand[];
   /** Alterna o modo Plano da conversa; omitido quando o agente não oferece esse modo ou está ocupado. */
   onPlan?: () => void;
+  /** `false` numa pergunta lateral: ela não abre outra (o T3 também não deixa). */
+  allowSideChat?: boolean;
   context: ComposerAddonContext;
 }) {
   const { t } = useTranslation();
@@ -139,6 +154,10 @@ export function ComposerAssistMenu({
   const [alwaysOn, setAlwaysOn] = useState<Set<string>>(() => new Set());
   const [changedFiles, setChangedFiles] = useState<{ root: string; rel: string }[]>([]);
   const [pullRequests, setPullRequests] = useState<ForgeItem[]>([]);
+  // Skills que o agente acha no disco (varredura cacheada), usadas enquanto o `/` está aberto.
+  const [scanned, setScanned] = useState<AgentSkillScan[]>([]);
+  const loadAgentSkills = useAgentSkillsStore((s) => s.load);
+  const agentScanned = agentId && AGENTS_WITH_SKILL_SCAN.has(agentId) ? scanned : NO_SKILLS;
   const [manageSkills, setManageSkills] = useState(false);
   const [cursor, setCursor] = useState(0);
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -160,6 +179,16 @@ export function ComposerAssistMenu({
       void loadSkills().catch(() => undefined);
     }
   }, [skills.length, skillsLoading, loadSkills]);
+
+  // Varre as skills do agente só quando o `/` abre; o cache cobre as aberturas seguidas na mesma pasta.
+  useEffect(() => {
+    if (!cwd || !agentId || token?.trigger !== "/" || !AGENTS_WITH_SKILL_SCAN.has(agentId)) return;
+    let current = true;
+    void loadAgentSkills(cwd, agentId, threadIdOfConversation(conversationKey))
+      .then((found) => { if (current) setScanned(found); })
+      .catch(() => { if (current) setScanned([]); });
+    return () => { current = false; };
+  }, [cwd, agentId, conversationKey, token?.trigger, loadAgentSkills]);
 
   useEffect(() => {
     let current = true;
@@ -302,7 +331,7 @@ export function ComposerAssistMenu({
     if (token.trigger === "$" ) return [...skillsForToken, manage];
 
     const commandItems: AssistItem[] = COMMANDS
-      .filter((command) => (command.id !== "side" || (!!conversationKey && !!agentId && (!!PROTOCOL_AGENTS[agentId] || agentId.startsWith("local-acp-"))))
+      .filter((command) => (command.id !== "side" || (allowSideChat && !!conversationKey && !!agentId && (!!PROTOCOL_AGENTS[agentId] || agentId.startsWith("local-acp-"))))
         && (command.id !== "plan" || (!!onPlan && planAvailability.support === "supported"))
         && (command.id !== "clear" || !!conversationKey?.startsWith("thread:"))
         && (command.id !== "compact" || (!!conversationKey && compactAvailability.available))
@@ -359,30 +388,49 @@ export function ComposerAssistMenu({
           }
         },
       }));
-    const reservedCommands = new Set([
-      ...commandItems.map((command) => normalized(command.key.slice("command:".length))),
-      ...(showSkillsInSlashMenu ? compatibleSkills.map((skill) => normalized(skillSlug(skill))) : []),
+    // Comandos e skills do agente valem no começo da mensagem, onde `/nome` é expandido. Com o agente
+    // informado, a lista é a dele; antes disso, a varredura do disco completa (ver `buildAgentSlashEntries`).
+    const reservedNames = new Set([
+      ...COMMANDS.map((command) => agentNameKey(command.id)),
+      ...(showSkillsInSlashMenu ? compatibleSkills.map((skill) => agentNameKey(skillSlug(skill))) : []),
     ]);
-    const providerItems: AssistItem[] = token.trigger === "/" && token.start === 0 && conversationKey?.startsWith("thread:") && providerCommands.length > 0
-      ? providerCommands
-        .filter((command) => !reservedCommands.has(normalized(command.name)))
-        .filter((command) => matches(command.name, command.description, command.inputHint))
-        .map((command): AssistItem => ({
-          key: `provider:${normalized(command.name)}`,
-          group: "provider",
-          title: `/${command.name}`,
-          detail: [command.inputHint, command.description].filter(Boolean).join(" · ") || undefined,
-          icon: <AgentMono agentId={agentId ?? "opencode"} label={agentId === "opencode" ? "OpenCode" : "ACP"} size={16} />,
-          run: () => {
-            const found = activeToken(context.text, context.caret);
-            if (!found || found.trigger !== "/" || found.start !== 0) return;
-            const next = replaceToken(context.text, context.caret, found, `/${command.name} `);
-            context.apply(next.text, next.caret);
-          },
-        }))
+    const agentEntries = token.start === 0
+      ? searchAgentSlashEntries(buildAgentSlashEntries({ reported: providerCommands, scanned: agentScanned, reservedNames }), token.query)
+        .filter((entry) => entry.kind === "command" || showSkillsInSlashMenu)
+        .slice(0, AGENT_ENTRIES_MAX)
       : [];
-    return [...commandItems, ...providerItems, ...skillsForToken, ...(showSkillsInSlashMenu ? [manage] : [])];
-  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, providerCommands, conversationKey, agentId, compactAvailability.available, compactAvailability.reason, goalAvailability.available, goalAvailability.reason, planAvailability.support]);
+    const insertAgentEntry = (entry: AgentSlashEntry) => {
+      const found = activeToken(context.text, context.caret);
+      if (!found || found.trigger !== "/" || found.start !== 0) return;
+      const next = replaceToken(context.text, context.caret, found, agentSlashInvocation(entry, agentId));
+      context.apply(next.text, next.caret);
+    };
+    const agentSkillItems: AssistItem[] = agentEntries
+      .filter((entry) => entry.kind === "skill")
+      .map((entry): AssistItem => ({
+        key: `agent-skill:${agentNameKey(entry.name)}`,
+        group: "skills",
+        title: `${agentId === "cursor" ? "$" : "/"}${entry.name}`,
+        detail: [entry.displayName, entry.description].filter(Boolean).join(" · ") || undefined,
+        badge: entry.plugin
+          ?? (entry.scope === "user" ? t("chat.composer.assist.skillScope.user")
+            : entry.scope === "project" ? t("chat.composer.assist.skillScope.project") : undefined),
+        icon: <WrenchIcon className="w-4 h-4" />,
+        run: () => insertAgentEntry(entry),
+      }));
+    const agentLabel = agentId === "opencode" ? "OpenCode" : agentId === "claude-code" ? "Claude" : "ACP";
+    const agentCommandItems: AssistItem[] = agentEntries
+      .filter((entry) => entry.kind === "command")
+      .map((entry): AssistItem => ({
+        key: `agent-command:${agentNameKey(entry.name)}`,
+        group: "provider",
+        title: `/${entry.name}`,
+        detail: [entry.inputHint, entry.description].filter(Boolean).join(" · ") || undefined,
+        icon: <AgentMono agentId={agentId ?? "opencode"} label={agentLabel} size={16} />,
+        run: () => insertAgentEntry(entry),
+      }));
+    return [...commandItems, ...skillsForToken, ...agentSkillItems, ...(showSkillsInSlashMenu ? [manage] : []), ...agentCommandItems];
+  }, [token, tokenKey, dismissed, teamOptions, changedFiles, pullRequests, compatibleSkills, context, cwd, t, showSkillsInSlashMenu, onPlan, allowSideChat, providerCommands, agentScanned, conversationKey, agentId, compactAvailability.available, compactAvailability.reason, goalAvailability.available, goalAvailability.reason, planAvailability.support]);
 
   const groups = useMemo(() => {
     const result: { group: AssistItem["group"]; label: string; items: AssistItem[] }[] = [];
@@ -449,7 +497,8 @@ export function ComposerAssistMenu({
                       ${item.disabled ? "cursor-not-allowed opacity-45" : selected ? "bg-accent-500/12 text-gray-900 dark:bg-accent-400/15 dark:text-white" : "text-gray-700 dark:text-white/75 hover:bg-gray-100 dark:hover:bg-white/[0.06]"}`}>
                     <span className="w-5 h-5 shrink-0 flex items-center justify-center text-gray-500 dark:text-white/50">{item.icon}</span>
                     <span className="min-w-0 flex-1 truncate text-[12px] font-medium" title={item.title}>{item.title}</span>
-                    {item.detail && <span className="max-w-[48%] truncate text-[10.5px] text-gray-400 dark:text-white/35" title={item.detail}>{item.detail}</span>}
+                    {item.badge && <span className="shrink-0 max-w-[30%] truncate rounded px-1.5 py-px text-[9.5px] font-semibold bg-gray-200/70 text-gray-500 dark:bg-white/[0.08] dark:text-white/50" title={item.badge}>{item.badge}</span>}
+                    {item.detail &&<span className="max-w-[48%] truncate text-[10.5px] text-gray-400 dark:text-white/35" title={item.detail}>{item.detail}</span>}
                     {selected && <kbd className="shrink-0 rounded px-1.5 py-0.5 text-[10px] bg-gray-200/80 dark:bg-white/[0.08]">↵</kbd>}
                   </button>
                 );

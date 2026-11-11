@@ -57,9 +57,6 @@ pub trait AgentAdapter: Send + Sync {
     fn supports_api_key_account(&self) -> bool { false }
     /// Se o fluxo de conta por credencial permite usar endpoint compatível próprio.
     fn supports_custom_api_base_url(&self) -> bool { false }
-    /// Se o seletor e a Frota podem usar a faixa de serviço rápida.
-    fn supports_fast_mode(&self) -> bool { false }
-
     /// The headless launcher can receive the ADE MCP orchestration tools.
     fn supports_orchestration(&self) -> bool { false }
     /// The task launcher can inject ADE MCP independently of terminal/Lead support.
@@ -156,7 +153,6 @@ struct Codex;
 impl AgentAdapter for Codex {
     fn read_only_priority(&self) -> Option<u8> { Some(1) }
     fn supports_api_key_account(&self) -> bool { true }
-    fn supports_fast_mode(&self) -> bool { true }
     fn supports_orchestration(&self) -> bool { true }
     fn has_task_mcp(&self) -> bool { true }
     fn def(&self) -> &'static AgentDef {
@@ -252,6 +248,22 @@ impl AgentAdapter for Antigravity {
     fn has_headless(&self) -> bool { true }
     fn headless(&self) -> Option<Box<dyn crate::runs::HeadlessAgent + Send + Sync>> {
         Some(Box::new(crate::runs::Antigravity::default()))
+    }
+    /// As contas por HOME valem para terminais e conversas. A Frota roda o `agy` num home temporário
+    /// próprio (`runs/antigravity.rs`) e não aplica o da conta: oferecê-las ali atribuiria o gasto à
+    /// conta errada.
+    fn capabilities(&self) -> Capabilities {
+        let def = self.def();
+        Capabilities {
+            accounts: false,
+            sessions: def.sessions != SessionSource::None,
+            resume: def.resume.is_some(),
+            skills: def.skills_dir.is_some(),
+            mcp: def.mcp != McpStyle::None || self.has_task_mcp(),
+            models: !matches!(def.models, ModelSource::Unknown),
+            headless: self.has_headless(),
+            orchestration: self.supports_orchestration(),
+        }
     }
 }
 static ANTIGRAVITY: Antigravity = Antigravity;

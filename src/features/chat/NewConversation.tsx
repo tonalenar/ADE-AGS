@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { homeDir } from "@tauri-apps/api/path";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -38,6 +39,8 @@ import {
   type ChatProjectDefaults,
   type ChatProjectPrefsSnapshot,
 } from "./chatProjectPrefs";
+import { chatProjectDefaultsEffective } from "./projectChatDefaults";
+import { useProjectDefaultsVersion } from "./projectDefaultsStore";
 import { clearProjectChatAgentPolicy, getProjectChatAgentPolicy, saveProjectChatAgentPolicy, type ProjectChatAgentPolicy } from "./projectChatPolicy";
 import { loadOrMigrateChatThreadEnvMode, readT3WorkspacePrefs, resolveChatThreadEnvMode, resolveChatWorktreeSubmodules, type ChatThreadEnvMode, type ChatWorkspaceModeSource } from "./chatWorkspacePrefs";
 import { showBotToast } from "@/shared/brand/botToastStore";
@@ -48,6 +51,7 @@ import { runProjectScriptsOnWorktreeCreate } from "./projectScriptAutomation";
 import { registerProjectScriptWorktree } from "./projectScripts";
 import { useColumnGutter } from "./ComposerColumn";
 import { usePopover } from "./usePopover";
+import { useAnchoredPopover } from "./anchoredPopover";
 import type { MentionOption } from "./team/teamModel";
 
 /** O agente que o composer sugere quando não há escolha lembrada. */
@@ -123,6 +127,8 @@ export function NewConversation({ projects, folder, onFolder }: {
   };
 
   const cwd = folder ?? prefs.cwd ?? activeCwd ?? projects[0]?.cwd ?? null;
+  // Muda quando os padrões do projeto mudam por fora do composer (a carga do banco e a página Projetos).
+  const defaultsVersion = useProjectDefaultsVersion(cwd);
   const project: ChatProject | null = projects.find((p) => p.cwd === cwd) ?? (cwd ? { cwd, name: baseName(cwd), branch: null } : null);
   const inheritedWorkspaceMode = resolveChatThreadEnvMode({
     projectOverride: projectDefaults?.worktree ?? null,
@@ -204,7 +210,27 @@ export function NewConversation({ projects, folder, onFolder }: {
       .catch((cause: unknown) => { if (alive) setWorkspaceSettingsError(String(cause)); })
       .finally(() => { if (alive) setWorkspaceSettingsLoadedCwd(cwd); });
     return () => { alive = false; };
-  }, [cwd]);
+  }, [cwd, defaultsVersion]);
+  // O modelo reserva do projeto: se o agente principal está sem limite de uso, a conversa nova já abre no reserva.
+  // É só o ponto de partida desta tela (não grava nada); trocar de agente depois vale.
+  const [fallbackNotice, setFallbackNotice] = useState<{ agent: string; until: number | null } | null>(null);
+  const accountForFallback = prefs.accountId;
+  useEffect(() => {
+    let alive = true;
+    setFallbackNotice(null);
+    if (!cwd) return () => { alive = false; };
+    chatProjectDefaultsEffective(cwd, accountForFallback)
+      .then(({ selection }) => {
+        if (!alive || !selection?.usedFallback) return;
+        const chosen = agents.find((candidate) => candidate.id === selection.agentId);
+        if (!chosen) return;
+        setPrefs((previous) => ({ ...previous, agentId: selection.agentId, model: selection.model }));
+        setFallbackNotice({ agent: chosen.label, until: selection.limitedUntil });
+      })
+      .catch(() => undefined);
+    return () => { alive = false; };
+    // `agents` entra só para esperar o catálogo carregar; mudar de agente à mão não refaz a escolha.
+  }, [cwd, defaultsVersion, accountForFallback, agents.length]);
   const agent = projectAgents.find((a) => a.id === prefs.agentId) ?? projectAgents.find((a) => a.id === PREFERRED_AGENT) ?? projectAgents[0] ?? null;
   const mine = !!agent && prefs.agentId === agent.id;
   // Por protocolo (sem TUI) o agente tem os acessos e o Plano do motor dele; na TUI, os flags dela.
@@ -520,7 +546,7 @@ export function NewConversation({ projects, folder, onFolder }: {
               <AgentModelPicker agents={projectAgents} showAccount={!isLocalAcpAgent(agent?.id ?? "")} disabled={!projectPolicyLoaded || projectPolicySaving}
                 value={{ agentId: agent?.id ?? null, model: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.model : null, effort: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.effort : null, account: mine && !isLocalAcpAgent(agent?.id ?? "") ? prefs.accountId : null }}
                 permission={{ value: access, modes, onChange: (next) => update({ access: next, plan: false }) }}
-                speed={fastModeSupported(agent?.id) && !viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}
+                speed={!viaProtocol ? { fast: prefs.fastMode, onChange: (fastMode) => update({ fastMode }) } : undefined}
                 onCompare={(picks) => openCompareDialog(project?.cwd ?? "", { prompt: text, picks, attachments })}
                 compareDisabled={hasQuotes}
                 onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId) ? prefs.fastMode : false })} />
@@ -568,6 +594,13 @@ export function NewConversation({ projects, folder, onFolder }: {
         {workspaceSettingsError && <p role="alert" className="mt-3 px-2 text-chat-note text-amber-700 dark:text-amber-300">{t("chat.workspace.configError")}</p>}
         {projectSettingsError && <p role="alert" className="mt-3 px-2 text-chat-note text-red-600 dark:text-red-400">{t(projectSettings.storageError ? "chat.projectDefaults.storageUnreadable" : "chat.projectDefaults.storageError")}</p>}
         {projectPolicyError && <p role="alert" className="mt-3 px-2 text-chat-note text-red-600 dark:text-red-400">{t("chat.projectDefaults.policyError", { error: projectPolicyError })}</p>}
+        {fallbackNotice && prefs.agentId === agents.find((candidate) => candidate.label === fallbackNotice.agent)?.id && (
+          <p role="status" className="mt-3 px-2 text-chat-note text-amber-700 dark:text-amber-300">
+            {fallbackNotice.until
+              ? t("chat.projectDefaults.fallbackActive", { agent: fallbackNotice.agent, time: new Date(fallbackNotice.until * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) })
+              : t("chat.projectDefaults.fallbackActiveNoTime", { agent: fallbackNotice.agent })}
+          </p>
+        )}
         {projectPolicyLoaded && agents.length > 0 && projectAgents.length === 0 && <p role="status" className="mt-3 px-2 text-chat-note text-amber-700 dark:text-amber-300">{t("chat.projectDefaults.noEnabledAgents")}</p>}
       </div>
     </section>
@@ -594,7 +627,7 @@ function ProjectDefaultsMenu({ agents, hasDefaults, projectFields, currentDefaul
   onClearAgentPolicy: () => void;
 }) {
   const { t } = useTranslation();
-  const { open, setOpen, ref } = usePopover<HTMLSpanElement>();
+  const { open, setOpen, close, triggerRef, panelRef, style } = useAnchoredPopover();
   const currentAgentLabel = agents.find((candidate) => candidate.id === currentDefaults.agentId)?.label ?? currentDefaults.agentId;
   const rows: Array<{ field: ChatProjectDefaultField; label: string; value: string }> = [
     { field: "agentId", label: t("chat.projectDefaults.field.agent"), value: currentAgentLabel || t("chat.projectDefaults.value.automatic") },
@@ -608,15 +641,18 @@ function ProjectDefaultsMenu({ agents, hasDefaults, projectFields, currentDefaul
     { field: "worktreeSubmodules", label: t("chat.projectDefaults.field.worktreeSubmodules"), value: t(`chat.workspace.submodules.${currentDefaults.worktreeSubmodules === "top-level" ? "topLevel" : currentDefaults.worktreeSubmodules}`) },
   ];
   return (
-    <span ref={ref} className="relative">
-      <button type="button" aria-label={t("chat.projectDefaults.open")} aria-haspopup="menu" aria-expanded={open} disabled={disabled}
+    <span className="relative">
+      <button ref={triggerRef} type="button" aria-label={t("chat.projectDefaults.open")} aria-haspopup="dialog" aria-expanded={open} disabled={disabled}
         title={t("chat.projectDefaults.open")} onClick={() => setOpen(!open)}
         className={`flex items-center justify-center w-7 h-7 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-45 ${hasDefaults || hasAgentPolicy ? "text-accent-600 dark:text-accent-400" : "text-gray-500 dark:text-white/45"}`}>
         <SettingsIcon className="w-3.5 h-3.5" />
       </button>
-      {open && <div role="menu" aria-label={t("chat.projectDefaults.open")}
-        className="absolute right-0 bottom-full z-40 mb-2 w-[min(22rem,calc(100vw-2rem))] max-h-[min(70vh,32rem)] overflow-y-auto p-2 rounded-xl border border-gray-200 dark:border-white/10 bg-white dark:bg-surface-raised shadow-xl">
-        <p className="m-0 px-2 py-1.5 text-[11px] leading-4 text-gray-500 dark:text-white/50">{t("chat.projectDefaults.description")}</p>
+      {open && createPortal(<section ref={panelRef} popover="manual" role="dialog" aria-label={t("chat.projectDefaults.open")} tabIndex={-1} style={style}
+        className="w-[min(24rem,calc(100vw-1.5rem))] overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-surface-raised">
+        <header className="px-2 pb-2">
+          <h2 className="m-0 text-[13px] font-semibold text-gray-900 dark:text-white">{t("chat.projectDefaults.open")}</h2>
+          <p className="mt-1 mb-0 text-[10px] leading-4 text-gray-500 dark:text-white/50">{t("chat.projectDefaults.description")}</p>
+        </header>
         {storageError && <p role="alert" className="m-0 px-2 pb-1.5 text-[10px] leading-4 text-amber-700 dark:text-amber-300">{t("chat.projectDefaults.storageUnreadable")}</p>}
         <div className="my-1 border-t border-gray-200 dark:border-white/10" />
         <p className="m-0 px-2 pt-1.5 text-[11px] font-medium text-gray-700 dark:text-white/75">{t("chat.projectDefaults.allowedAgents")}</p>
@@ -625,14 +661,14 @@ function ProjectDefaultsMenu({ agents, hasDefaults, projectFields, currentDefaul
           : agents.length === 0 ? <p className="m-0 px-2 py-2 text-[11px] text-gray-500 dark:text-white/50">{t("chat.projectDefaults.noAgents")}</p>
             : agents.map((agent) => {
               const enabled = !disabledAgentIds.includes(agent.id);
-              return <button key={agent.id} type="button" role="menuitemcheckbox" aria-checked={enabled} disabled={!policyLoaded || policySaving}
+              return <button key={agent.id} type="button" role="checkbox" aria-checked={enabled} disabled={!policyLoaded || policySaving}
                 onClick={() => onAgentEnabledChange(agent.id, !enabled)}
                 className="flex w-full items-center gap-2 px-2 py-1.5 rounded-lg text-left text-[11px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">
                 <span aria-hidden="true" className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${enabled ? "border-accent-500 bg-accent-500 text-white" : "border-gray-300 dark:border-white/20"}`}>{enabled && <CheckIcon className="h-3 w-3" />}</span>
                 <span className="min-w-0 truncate">{agent.label}</span>
               </button>;
             })}
-        {hasAgentPolicy && <button type="button" role="menuitem" disabled={!policyLoaded || policySaving} onClick={() => { onClearAgentPolicy(); setOpen(false); }}
+        {hasAgentPolicy && <button type="button" disabled={!policyLoaded || policySaving} onClick={() => { onClearAgentPolicy(); close(); }}
           className="mt-1 w-full px-2 py-2 rounded-lg text-left text-[11px] text-gray-600 dark:text-white/65 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">{t("chat.projectDefaults.resetAgents")}</button>}
         <div className="my-1 border-t border-gray-200 dark:border-white/10" />
         <p className="m-0 px-2 pt-1.5 text-[11px] font-medium text-gray-700 dark:text-white/75">{t("chat.projectDefaults.fieldsTitle")}</p>
@@ -647,12 +683,12 @@ function ProjectDefaultsMenu({ agents, hasDefaults, projectFields, currentDefaul
                 <span className="min-w-0 truncate text-right text-gray-500 dark:text-white/45" title={value}>{value}</span>
               </div>
               <div className="mt-1 flex justify-end gap-3">
-                <button type="button" role="menuitem" disabled={disabled || storageError || sameValue}
+                <button type="button" disabled={disabled || storageError || sameValue}
                   onClick={() => onSaveField(field)}
                   className="text-[10px] text-accent-700 dark:text-accent-300 hover:underline disabled:opacity-45 disabled:no-underline">
                   {t("chat.projectDefaults.useCurrent")}
                 </button>
-                {saved && <button type="button" role="menuitem" disabled={disabled || storageError} onClick={() => onInheritField(field)}
+                {saved && <button type="button" disabled={disabled || storageError} onClick={() => onInheritField(field)}
                   className="text-[10px] text-gray-500 dark:text-white/50 hover:underline">
                   {t(field === "worktree" || field === "worktreeSubmodules" ? "chat.projectDefaults.inheritWorkspace" : "chat.projectDefaults.inheritMachine")}
                 </button>}
@@ -661,22 +697,24 @@ function ProjectDefaultsMenu({ agents, hasDefaults, projectFields, currentDefaul
           })}
         </div>
         <div className="my-1 border-t border-gray-200 dark:border-white/10" />
-        <button type="button" role="menuitem" disabled={disabled || storageError} onClick={() => { onSave(); setOpen(false); }}
+        <button type="button" disabled={disabled || storageError} onClick={() => { onSave(); close(); }}
           className="w-full px-2 py-2 rounded-lg text-left text-[12px] text-gray-800 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50 disabled:hover:bg-transparent">
           {t(hasDefaults ? "chat.projectDefaults.update" : "chat.projectDefaults.save")}
         </button>
-        {hasDefaults && <button type="button" role="menuitem" disabled={disabled || storageError} onClick={() => { onClear(); setOpen(false); }}
+        {hasDefaults && <button type="button" disabled={disabled || storageError} onClick={() => { onClear(); close(); }}
           className="w-full px-2 py-2 rounded-lg text-left text-[12px] text-gray-600 dark:text-white/65 hover:bg-gray-100 dark:hover:bg-white/[0.07]">
           {t("chat.projectDefaults.clear")}
         </button>}
-      </div>}
+      </section>, document.body)}
     </span>
   );
 }
 
 /** A faixa embaixo do composer: o workspace e a branch. Agente, modelo e acesso ficam juntos no seletor. */
-export function ContextStrip({ branch, workspace, worktree = false, children }: {
+export function ContextStrip({ branch, workspace, worktree = false, showContext = true, children }: {
   branch: string | null;
+  /** Mostra o workspace e a branch. Desligado (o contexto do composer), sobra só o que `children` traz. */
+  showContext?: boolean;
   /** O seletor de workspace (conversa nova); sem ele, só o rótulo. */
   workspace?: React.ReactNode;
   /** A conversa roda num worktree. */
@@ -686,14 +724,14 @@ export function ContextStrip({ branch, workspace, worktree = false, children }: 
   const { t } = useTranslation();
   return (
     <div className="flex flex-nowrap items-center gap-0.5 px-3 pt-1.5 text-chat-note text-gray-500 dark:text-white/45">
-      {workspace ?? (
+      {showContext && (workspace ?? (
         <span title={worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")} className="flex shrink-0 items-center gap-1.5 h-7 px-1.5 whitespace-nowrap">
           {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
           {/* Coluna estreita (`ComposerColumn`): só o ícone, numa linha com o branch e o acesso. */}
           <span className="@max-[28rem]/composer:sr-only">{worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")}</span>
         </span>
-      )}
-      {branch && <span className="flex min-w-0 items-center gap-1.5 h-7 px-1.5 font-mono text-[11.5px]" title={branch}><BranchIcon className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{branch}</span></span>}
+      ))}
+      {showContext && branch && <span className="flex min-w-0 items-center gap-1.5 h-7 px-1.5 font-mono text-[11.5px]" title={branch}><BranchIcon className="w-3.5 h-3.5 shrink-0" /><span className="truncate">{branch}</span></span>}
       <span className="flex-1" />
       {children && <span className="flex shrink-0 items-center">{children}</span>}
     </div>

@@ -11,7 +11,7 @@ import type { SubagentDefault } from "./types";
 /**
  * O LLM que os subagentes recrutados usam por padrão. "Automático" (valor `null`) deixa a
  * orquestradora escolher e justificar; um agente concreto traz as mesmas opções de modelo
- * (catálogo da conta principal), esforço e, só no Codex, o modo Fast.
+ * (catálogo da conta principal), esforço e o modo Fast quando estiver disponível.
  */
 export function SubagentDefaultSection({ roster, onRoster, value, onChange }: {
   roster: Roster | null;
@@ -44,10 +44,10 @@ export function SubagentDefaultSection({ roster, onRoster, value, onChange }: {
             <ModelSelector roster={roster} agentId={value.agentId} accountId={null} autoAccount allowComplexity={false}
               model={value.model} complexity={null} reasoningEffort={value.reasoningEffort ?? null} onRoster={onRoster}
               onChange={(patch) => onChange({ ...value, model: patch.model, reasoningEffort: patch.reasoningEffort ?? null })} />
-            {value.agentId === "codex" && (
-              <FastSwitch checked={value.fastMode === true} model={value.model} catalog={catalog}
+            {
+              <FastSwitch agentId={value.agentId} surface="fleet" checked={value.fastMode === true} model={value.model} catalog={catalog}
                 onChange={(fastMode) => onChange({ ...value, fastMode })} />
-            )}
+            }
           </>
         )}
       </div>

@@ -275,6 +275,8 @@ fn every_claim() -> Vec<(String, Claim)> {
             claims.push((format!("{}/{}/{}", column.surface.id(), column.provider, cell.capability.id()), cell.claim));
         }
         claims.push((format!("{}/{}/ags_mcp", column.surface.id(), column.provider), column.ags_mcp));
+        claims.push((format!("{}/{}/fork", column.surface.id(), column.provider), column.fork));
+        claims.push((format!("{}/{}/comandos", column.surface.id(), column.provider), column.comandos));
     }
     claims
 }
@@ -300,8 +302,8 @@ fn a_matriz_tem_as_22_colunas_esperadas() {
 }
 
 #[test]
-fn todo_provider_cobre_as_19_capabilities_na_ordem_do_enum() {
-    assert_eq!(Capability::ALL.len(), 19);
+fn todo_provider_cobre_as_20_capabilities_na_ordem_do_enum() {
+    assert_eq!(Capability::ALL.len(), 20);
     for column in matrix() {
         let listed: Vec<Capability> = column.cells.iter().map(|cell| cell.capability).collect();
         assert_eq!(listed, Capability::ALL, "{}/{}", column.surface.id(), column.provider);
@@ -316,7 +318,7 @@ fn os_ids_das_capabilities_sao_unicos() {
     let mut ids: Vec<&str> = Capability::ALL.iter().map(|capability| capability.id()).collect();
     ids.sort_unstable();
     ids.dedup();
-    assert_eq!(ids.len(), 19);
+    assert_eq!(ids.len(), 20);
 }
 
 #[test]
@@ -348,7 +350,7 @@ fn frota_recusa_start_unsupported_antes_de_tentar_lancar() {
 
 #[test]
 fn plan_e_uma_capability_com_prova_em_todas_as_superficies() {
-    assert_eq!(Capability::ALL.len(), 19);
+    assert_eq!(Capability::ALL.len(), 20);
     assert_eq!(supports("claude-code", Surface::Chat, Capability::Plan), Some(Support::Supported));
     assert_eq!(supports("codex", Surface::Chat, Capability::Plan), Some(Support::Unsupported));
     assert_eq!(supports("claude-code", Surface::Fleet, Capability::Plan), Some(Support::Unsupported));
@@ -501,6 +503,15 @@ fn a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor() {
         let goal = column.claim(Capability::Goal).support;
         assert_eq!(declared.persistent_goal, goal != Support::Unsupported, "{}: goal", column.provider);
         assert_eq!(declared.plan, column.claim(Capability::Plan).support != Support::Unsupported, "{}: plan", column.provider);
+        assert_eq!(declared.session_fork, column.fork.promises(), "{}: fork", column.provider);
+    }
+}
+
+#[test]
+fn o_fork_da_pergunta_lateral_so_existe_no_chat_do_claude_e_do_codex() {
+    for column in matrix() {
+        let esperado = column.surface == Surface::Chat && matches!(column.provider, "claude-code" | "codex");
+        assert_eq!(column.fork.promises(), esperado, "{}/{}: fork", column.surface.id(), column.provider);
     }
 }
 
@@ -548,10 +559,10 @@ fn cada_provider_aparece_uma_vez_por_superficie() {
 
 #[test]
 fn escopos_de_instancia_so_nas_capabilities_que_o_adapter_decide_sozinho() {
-    // `Scope::Model` só faz sentido onde o modelo muda a resposta: compactar e uso.
+    // `Scope::Model` só faz sentido quando o modelo muda a resposta: compactar, uso ou Fast.
     for (key, claim) in every_claim() {
         if claim.scope == Scope::Model {
-            assert!(key.ends_with("/compact") || key.ends_with("/usage"), "{key}: escopo de modelo fora de compact e usage");
+            assert!(key.ends_with("/compact") || key.ends_with("/usage") || key.ends_with("/fast_mode"), "{key}: escopo de modelo sem variação por modelo");
         }
     }
 }
@@ -775,4 +786,41 @@ mod fase1 {
         assert_eq!(state(from_fleet_run("done")), NodeState::Completed);
         assert!(NodeState::Cancelled.is_terminal() && !NodeState::Waiting.is_terminal());
     }
+}
+
+#[test]
+fn comandos_do_chat_declara_so_as_fontes_que_existem() {
+    // A lista do `/` vem do protocolo (initialize, skills/list, ACP) ou da varredura de pastas; fora do chat não há composer.
+    let chat_with = |support: Support| -> Vec<&'static str> {
+        matrix().iter().filter(|column| column.surface == Surface::Chat && column.comandos.support == support).map(|column| column.provider).collect()
+    };
+    assert_eq!(chat_with(Support::Supported), ["claude-code", "codex", "opencode", "antigravity", "cursor", "local-acp"]);
+    assert!(chat_with(Support::Unknown).is_empty());
+    assert!(
+        matrix().iter().filter(|column| column.surface != Surface::Chat).all(|column| column.comandos.support == Support::Unsupported),
+        "fora do chat não há composer, então o menu do `/` não existe"
+    );
+}
+
+#[test]
+fn comandos_do_doc_concorda_com_a_matriz() {
+    let start = DOC.find("<!-- comandos:inicio -->").expect("marca de início da tabela de comandos no doc");
+    let end = DOC.find("<!-- comandos:fim -->").expect("marca de fim da tabela de comandos no doc");
+    let mut seen = 0;
+    for line in DOC[start..end].lines() {
+        let cells: Vec<&str> = line.trim().trim_matches('|').split('|').map(str::trim).collect();
+        let [surface, provider, support] = cells.as_slice() else { continue };
+        if !surface.eq_ignore_ascii_case("chat") {
+            continue;
+        }
+        let column = find(Surface::Chat, provider).unwrap_or_else(|| panic!("o doc lista {provider}, que não está na matriz"));
+        let declared = match column.comandos.support {
+            Support::Supported => "Supported",
+            Support::Unknown => "Unknown",
+            Support::Unsupported => "Unsupported",
+        };
+        assert_eq!(*support, declared, "chat/{provider}: comandos do doc e da matriz divergem");
+        seen += 1;
+    }
+    assert_eq!(seen, 6, "o doc lista as 6 colunas de chat");
 }

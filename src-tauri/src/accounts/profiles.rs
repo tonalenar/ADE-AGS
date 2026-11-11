@@ -17,6 +17,7 @@ pub(super) struct ProfileSpec {
     pub(super) label_path: &'static [&'static str],
     pub(super) default_home: DefaultHome,
     pub(super) system_marker: SystemMarkerRoot,
+    pub(super) presence_markers: &'static [&'static str],
 }
 
 lazy_static::lazy_static! {
@@ -37,6 +38,7 @@ lazy_static::lazy_static! {
                 label_path: p.label_path,
                 default_home: p.default_home,
                 system_marker: p.system_marker,
+                presence_markers: p.presence_markers,
             })
         })
         .collect();
@@ -57,6 +59,7 @@ pub(super) fn default_dir(spec: &ProfileSpec) -> Option<std::path::PathBuf> {
     Some(match spec.default_home {
         DefaultHome::HomeDot(name) => home.join(name),
         // Se lee al llamar, igual que antes: un test o un proceso puede haberla cambiado.
+        DefaultHome::UserHome => home,
         DefaultHome::XdgDataHome => std::env::var_os("XDG_DATA_HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| home.join(".local/share")),
@@ -84,6 +87,14 @@ pub(super) fn system_marker_root(spec: &ProfileSpec, home: &Path, default_dir: &
 /// dentro de la TUI, fuera del alcance de la app, y puede caducar o rehacerse sin que nos
 /// enteremos. El disco es la única fuente que no puede quedar desactualizada.
 pub(super) fn read_identity(dir: &Path, spec: &ProfileSpec) -> (bool, Option<String>) {
+    // Marcadores que são a própria credencial (Antigravity): só se confere se existem e têm
+    // conteúdo, pelos metadados. O arquivo nunca é aberto.
+    if !spec.presence_markers.is_empty() {
+        let found = spec.presence_markers.iter().any(|m| {
+            std::fs::metadata(dir.join(m)).map(|meta| meta.is_file() && meta.len() > 2).unwrap_or(false)
+        });
+        return (found, None);
+    }
     let marker = dir.join(spec.marker);
     let Ok(raw) = std::fs::read_to_string(&marker) else {
         return (false, None);

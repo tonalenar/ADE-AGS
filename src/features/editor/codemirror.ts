@@ -18,7 +18,8 @@ import { TERMINAL_FONT } from "@/features/terminal/theme";
 const FONT = TERMINAL_FONT;
 
 const base = EditorView.theme({
-  "&": { height: "100%", fontSize: "13px", backgroundColor: "transparent" },
+  // O mesmo tamanho do código no chat e nos diffs: segue a preferência de Tipografia.
+  "&": { height: "100%", fontSize: "var(--text-chat-code)", backgroundColor: "transparent" },
   "&.cm-focused": { outline: "none" },
   ".cm-scroller": { fontFamily: FONT, lineHeight: "1.6" },
   ".cm-gutters": { backgroundColor: "transparent", border: "none" },
@@ -63,6 +64,14 @@ const light = [
 
 export function editorTheme(isDark: boolean): Extension {
   return [base, isDark ? dark : light];
+}
+
+/**
+ * A quebra de linha do editor de arquivos: a mesma preferência de código (Aparência → Texto) que já quebra
+ * os blocos do chat e os diffs. Desligada, a extensão nem entra e o editor rola na horizontal. Pura.
+ */
+export function wrapLines(on: boolean): Extension {
+  return on ? EditorView.lineWrapping : [];
 }
 
 /** El soporte de lenguaje para un archivo. Se carga bajo demanda: son decenas de

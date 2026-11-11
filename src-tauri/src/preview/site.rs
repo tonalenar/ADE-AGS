@@ -208,20 +208,28 @@ fn service_for(data_dir: &Path) -> String {
 /// la última en escribir se llevaba la sesión de la otra.
 static SITES: LazyLock<Mutex<HashMap<String, Arc<Site>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// El sitio de `origin`, abriéndolo (y empezando a guardarlo) la primera vez. Tiene que
-/// llamarse desde el runtime de tokio: el guardado corre ahí.
-pub(crate) fn site_for(origin: &str) -> Arc<Site> {
+/// El sitio de `origin` dentro de un perfil del navegador, abriéndolo (y empezando a guardarlo) la
+/// primera vez. Tiene que llamarse desde el runtime de tokio: el guardado corre ahí.
+/// Jar do site dentro de um perfil do navegador. O perfil padrão conserva a identidade antiga
+/// para manter as sessões cifradas existentes; os demais perfis recebem outra identidade e arquivo.
+pub(crate) fn site_for_profile(origin: &str, profile_id: &str) -> Arc<Site> {
+    let private = profile_id == "incognito";
+    let identity = profile_storage_identity(origin, profile_id);
     let mut sites = SITES.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(site) = sites.get(origin) {
+    if let Some(site) = sites.get(&identity) {
         return site.clone();
     }
     // La clave solo se pide al keyring cuando hay carpeta de estado (en la app): los tests nunca la piden.
-    let dir = state_dir();
+    let dir = if private { None } else { state_dir() };
     let key = dir.as_ref().and_then(|_| os_state_key().ok());
-    let site = Site::open(origin, dir.as_deref(), key);
+    let site = Site::open(&identity, dir.as_deref(), key);
     site.spawn_saver();
-    sites.insert(origin.to_string(), site.clone());
+    sites.insert(identity, site.clone());
     site
+}
+
+fn profile_storage_identity(origin: &str, profile_id: &str) -> String {
+    if profile_id == "default" { origin.to_string() } else { format!("{profile_id}\u{1f}{origin}") }
 }
 
 /// Los sitios abiertos, con su origen: al cerrar la app se guardan los que tengan cambios.
@@ -738,4 +746,27 @@ fn write_private(file: &Path, bytes: &[u8]) -> Result<(), String> {
     out.write_all(bytes).and_then(|_| out.sync_all()).map_err(|e| e.to_string())?;
     drop(out);
     std::fs::rename(&tmp, file).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod profile_tests {
+    use super::profile_storage_identity;
+
+    #[test]
+    fn perfil_padrao_preserva_a_identidade_dos_dados_atuais() {
+        let origin = "http://localhost:5173";
+        assert_eq!(profile_storage_identity(origin, "default"), origin);
+    }
+
+    #[test]
+    fn perfis_nomeados_e_anonimo_usam_jars_distintos() {
+        let origin = "http://localhost:5173";
+        let default = profile_storage_identity(origin, "default");
+        let first = profile_storage_identity(origin, "profile-11111111-1111-4111-8111-111111111111");
+        let second = profile_storage_identity(origin, "profile-22222222-2222-4222-8222-222222222222");
+        let private = profile_storage_identity(origin, "incognito");
+        assert_ne!(default, first);
+        assert_ne!(first, second);
+        assert_ne!(second, private);
+    }
 }

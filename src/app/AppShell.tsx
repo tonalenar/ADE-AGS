@@ -39,6 +39,7 @@ import { useFileDropToTerminal } from "@/features/terminal/useFileDropToTerminal
 import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
+import { InAppNotices } from "@/features/chat/InAppNotices";
 import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
 import { BotToastHost } from "@/shared/brand/BotToastHost";
@@ -99,6 +100,9 @@ export function AppShell() {
   // Todas as telas (Missões, Histórico, Squads, Skills…) são TELA CHEIA: cobrem tudo à
   // direita do riel (prancheta 2). Ficam de fora a inicial e o workspace, que são o fundo.
   const fullPage = !isWorkspace && location.pathname !== "/";
+  // Configurações abrem como modal, como no T3 Code: por cima do chat ou do workspace, que continuam
+  // montados por baixo. Assim a conversa (e o terminal dela) não sai da tela ao abrir a configuração.
+  const settingsRoute = location.pathname.startsWith("/settings");
   const [isMaximized, setIsMaximized] = useState(false);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
@@ -281,6 +285,7 @@ export function AppShell() {
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 pointer-events-none
         [&>*]:pointer-events-auto">
         <ApprovalToast />
+        <InAppNotices />
         <UpdateNotifier />
       </div>
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
@@ -330,7 +335,7 @@ export function AppShell() {
               el medio). Un scroll acá afuera además reservaría su carril a la derecha de
               TODAS las páginas, incluidas las que no lo necesitan. */}
           {/* No chat as telas cheias (Configurações, Missões…) abrem dentro da casca, no lugar da conversa. */}
-          {chat && <ChatShell groups={groups} page={fullPage ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} />}
+          {chat && <ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} />}
 
           {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
@@ -338,7 +343,7 @@ export function AppShell() {
             </div>
           )}
 
-          {fullPage && !chat && (
+          {fullPage && (!chat || settingsRoute) && (
             <RouteModal onClose={() => navigate(tabs.length > 0 ? "/workspace" : "/")}>
               <Outlet context={{ groups } satisfies ShellOutletContext} />
             </RouteModal>

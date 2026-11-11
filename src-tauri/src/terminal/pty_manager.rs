@@ -125,6 +125,27 @@ pub fn live_update_tabs() -> Vec<Option<String>> {
     registry().values().map(|s|s.tab_id.clone()).collect()
 }
 
+/// Um terminal vivo, para a tela de Diagnóstico (só leitura): o id, a aba e o total de saída.
+#[derive(Clone, Debug, serde::Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PtySessionInfo {
+    pub id: u32,
+    pub tab_id: Option<String>,
+    pub output_bytes: u64,
+}
+
+/// Os terminais vivos, por id. Lê o registro e o total de saída em separado: um lock de cada vez, nunca os dois
+/// juntos (o `output_total` também pega o próprio mutex).
+pub fn pty_sessions_snapshot() -> Vec<PtySessionInfo> {
+    let rows: Vec<(u32, Option<String>)> = registry().iter().map(|(id, s)| (*id, s.tab_id.clone())).collect();
+    let mut out: Vec<PtySessionInfo> = rows
+        .into_iter()
+        .map(|(id, tab_id)| PtySessionInfo { id, tab_id, output_bytes: output_total(id).unwrap_or(0) })
+        .collect();
+    out.sort_by_key(|s| s.id);
+    out
+}
+
 /// Cuántos PTYs vivos hay. Para probar que algo NO abrió una terminal.
 #[cfg(test)]
 pub(crate) fn live_pty_count() -> usize {

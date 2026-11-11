@@ -171,6 +171,8 @@ pub fn start_scheduler(app: AppHandle) {
                 });
             }
             super::scheduled_task::scheduler_tick(&app, gate, Local::now().timestamp());
+            // Retomadas de conversa agendadas para depois do limite de uso (ver `conversa::limite`).
+            crate::conversa::limite::tick(&app, gate, Local::now().timestamp());
         }
     });
 }

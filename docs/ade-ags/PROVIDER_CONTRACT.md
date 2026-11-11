@@ -46,8 +46,12 @@ runtime           detecção, contas, sessões, MCP, roster, frota
 | `profile` | `Some` só com isolamento verificado. `None` = sem multi-conta |
 | `resume` | Argumentos com `{session}`. `None` = não reabre por id |
 | `sessions` | Qual parser de `session/title.rs` usar |
-| `models` | Lista fixa, pergunta ao CLI, ou `Unknown` |
+| `models` | Lista fixa, pergunta ao CLI, ou `Unknown`. No Claude: catálogo nativo da CLI, com tabela embutida quando ele não responde. Alias de família (`opus`, `haiku`…) nunca vira linha: vai em `aliases` da linha do modelo completo |
 | `mcp` | Como o servidor `ade-ags` entra. O nome do servidor não muda |
+
+### Modelos e modos especiais do Claude
+
+O catálogo nativo recebe os níveis especiais do T3 só nos perfis correspondentes: Ultrathink em Fable 5.0/5.1/5.2, Opus 5/5.5/4.6/4.7/4.8, Sonnet 4.6/5/5.5 e Haiku 5.5; Ultracode em Fable 5.0/5.1/5.2, Opus 4.8/5/5.5, Sonnet 5.5 e Haiku 5.5. Eles aparecem junto aos níveis normais de esforço dos respectivos modelos no seletor; Opus é o modelo efetivo quando a escolha é “Modelo padrão”. Ultracode mantém o rótulo e o aviso de custo do T3: esforço `xhigh` mais orquestração multiagente, que pode gastar muitos tokens. No Chat e na Frota, Ultrathink prefixa cada mensagem comum com `Ultrathink:\n` e deixa comandos `/...` intactos; na TUI, a opção chega por `--append-system-prompt Ultrathink:`. Ultracode entrega `--effort xhigh` e `--settings {"ultracode":true}`. Fast usa `--settings {"fastMode":true}` em Opus 5.5/5/4.8/4.7/4.6/4.5; a matriz habilita o controle só nas superfícies com suporte e o catálogo limita cada modelo. Nenhum desses modos é selecionado por padrão.
 
 A fila não ganha métodos. Ícone continua no React, escolhido pelo mesmo `id`.
 

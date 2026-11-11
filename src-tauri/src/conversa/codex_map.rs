@@ -348,3 +348,45 @@ pub fn answer_of(kind: &str, choice: &str, options: &Value) -> Value {
     };
     json!({ "decision": decision })
 }
+
+/// Limites da lista de skills do Codex: o texto vem do agente, então não é confiável (mesmos da lista do Claude).
+const SKILLS_MAX: usize = 256;
+const SKILL_DESCRIPTION_MAX: usize = 500;
+
+/// Os skills que o `skills/list` do Codex anuncia para o cwd da conversa, no formato da lista do `/`
+/// (`name`, `description`, `inputHint`, `kind: "skill"`). Só os habilitados: um skill desligado na
+/// configuração do Codex não é aceito com `$nome`, então não aparece. Nome que o composer não consegue
+/// inserir, repetido (sem diferenciar caixa) ou longo demais sai. Como o T3: se nenhuma entrada traz o
+/// cwd da conversa, usam-se as entradas que vieram (só se pediu um cwd). Puro.
+pub fn skills_list_commands(response: &Value, cwd: &str) -> Vec<Value> {
+    let Some(entries) = response.get("data").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let own: Vec<&Value> = entries.iter().filter(|entry| str_of(entry, "cwd") == Some(cwd)).collect();
+    let chosen: Vec<&Value> = if own.is_empty() { entries.iter().collect() } else { own };
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    let skills = chosen.iter().filter_map(|entry| entry.get("skills").and_then(Value::as_array)).flatten();
+    for skill in skills.take(SKILLS_MAX) {
+        if skill.get("enabled").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        let Some(name) = str_of(skill, "name").map(str::trim) else { continue };
+        if !crate::skills::is_agent_command_name(name) || !seen.insert(name.to_lowercase()) {
+            continue;
+        }
+        let description = [
+            str_of(skill, "description"),
+            str_of(skill, "shortDescription"),
+            skill.get("interface").and_then(|interface| str_of(interface, "shortDescription")),
+        ]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|text| !text.is_empty())
+        .unwrap_or("");
+        let description: String = description.chars().take(SKILL_DESCRIPTION_MAX).collect();
+        out.push(json!({ "name": name, "description": description, "inputHint": null, "kind": "skill" }));
+    }
+    out
+}

@@ -18,7 +18,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, isLocalUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
-import { useChatStore } from "@/features/chat/store";
+import { setChatBrowser, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { chatShellOn, useUiStore } from "@/app/uiStore";
 import { useStructured } from "@/features/chat/structured/store";
 
 import {
@@ -45,6 +46,7 @@ import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type Par
 import { bareUrl, createLedger, forgetLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
 import { backendSink, withProgress } from "./actProgress";
 import { beginWindowMeasure } from "./windowBeat";
+import { readBrowserPreferences } from "./browserPreferences";
 
 export interface BrowserHost {
   viewId: string;
@@ -161,6 +163,22 @@ async function openPortalFor(owner: ViewOwner, url: string): Promise<string | nu
   const created = canvasActions.addPortal(key, { name: undefined, url, near: owner.id, size: { ...AGENT_PORTAL_SIZE } });
   await flushSave(key);
   return created.id;
+}
+
+/** Mostra sobre o chat a página que o agente acabou de abrir, quando a conversa é a atual. */
+function autoShowAgentBrowser(viewId: string, owner: ViewOwner | null): void {
+  if (!owner || !readBrowserPreferences().autoShowFloatingPreview || !chatShellOn(useUiStore.getState())) return;
+  const chat = useChatStore.getState();
+  const activeTabId = useTabsStore.getState().activeTabId;
+  const belongsToCurrentChat = owner.kind === "thread"
+    ? owner.id === `thread:${chat.thread}`
+    : owner.kind === "tab" && owner.id === activeTabId;
+  if (!belongsToCurrentChat) return;
+  setChatBrowser({
+    viewId,
+    rect: chat.browser?.rect ?? { left: 0, top: 0, width: 560, height: 400 },
+  });
+  if (!chat.browserFloating) toggleChatBrowserFloating();
 }
 
 /**
@@ -773,6 +791,9 @@ export async function runBrowserRequest(
   owner: ViewOwner | null = null
 ): Promise<string> {
   const { host, opened } = await hostFor(cwd, request, owner);
+  // A troca de viewport é a entrada do aparelho emulado; manter essa prévia visível também
+  // evita que a pessoa perca o layout móvel que o agente acabou de abrir.
+  if (request.op === "navigate" || request.op === "resize") autoShowAgentBrowser(host.viewId, owner);
   // Una tab que se acaba de montar (restaurada, nunca mirada) todavía está cargando su
   // página: leerla ya diría "no hay página" cuando en un segundo la hay.
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {

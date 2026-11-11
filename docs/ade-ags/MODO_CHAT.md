@@ -77,12 +77,12 @@ Uma terceira forma de ver o trabalho, ao lado das abas e do canvas: uma sidebar 
 - **Seletor (prancheta 3):**
   - painel amplo de três colunas com trilho de agentes, favoritos (no `localStorage`), modelos com busca e raciocínio à direita; conta da conversa fica no rodapé;
   - em conversas novas e por protocolo, o trilho permite escolher entre os agentes disponíveis; numa conversa por TUI ele fica no agente da sessão, porque trocar o executável do PTY não preserva a sessão. Nas conversas por protocolo, trocar de agente pede confirmação e só acontece entre turnos;
-  - esforço, modos de acesso e, quando o catálogo confirma suporte no modelo Codex, Standard/Fast ficam reunidos no painel; um esforço incompatível com o modelo selecionado é limpo;
+  - esforço, modos de acesso e, quando a matriz e o catálogo confirmam suporte para a superfície e o modelo selecionados, Standard/Fast ficam reunidos no painel; um esforço incompatível com o modelo selecionado é limpo;
   - o painel reduz o esforço a um seletor compacto em janelas estreitas; `Configurações > Aparência` também permite escolher as famílias de fonte da interface e do código, inclusive um nome instalado localmente;
   - o modo Plano continua como controle próprio, pois altera o lançamento ou o estado da conversa.
 - **Sugestões no composer (estilo T3):** `@` sugere agentes do time e arquivos com mudanças no Git, além de abrir o seletor de arquivo; `/` abre as superfícies e ações ADE; `$` sugere skills compatíveis e anexadas à conversa, com acesso à gestão de skills. Setas, Enter e Escape navegam o menu. As ações usam os painéis e serviços existentes da ADE.
 - **Contexto e objetivos:** `/compact` usa `thread/compact/start` no Codex estruturado e o comando nativo no Claude Code estruturado; nas TUIs, o comando segue para o CLI compatível. Claude Code aceita `/compact [instruções]`; Codex pelo app-server não aceita instruções customizadas. `/goal` do Codex é persistido pelo app-server e na ADE, com pausar/retomar; no Claude Code é encaminhado ao comando nativo, e o espelho local permanece até limpar porque o protocolo não informa conclusão confiável. `/autocompact` encaminha o ajuste nativo do Claude Code. `/clear` reinicia a sessão do provedor em conversas estruturadas, encerra o processo ocioso, limpa o objetivo ligado à sessão e conserva a timeline local; a ação aguarda o turno terminar e não passa com pedidos pendentes. Nas conversas estruturadas do Claude Code, Configurações permite ajustar o limite por perfil usando `--settings` apenas naquela sessão; isso não altera configurações globais nem as TUIs. O ajuste do limite ainda não se aplica às sessões TUI. Outros motores não mostram comandos sem suporte.
-- **Conversa lateral:** `/side` ou o painel “Pergunta lateral” cria uma conversa independente para as conversas por protocolo (Codex, Claude Code, OpenCode, Antigravity e Cursor). Ela recebe um recorte recente do histórico como contexto citado e começa em Supervisionado; não desmonta o PTY nem envia nada pela conversa principal. “Trazer à conversa” preenche o composer de origem sem enviar automaticamente. A lista lateral permite retomar ou remover conversas ociosas sem pedidos pendentes. Ainda não há vínculo persistente para conversas TUI.
+- **Conversa lateral:** `/side` ou o painel “Pergunta lateral” cria uma conversa independente para as conversas por protocolo (Codex, Claude Code, OpenCode, Antigravity e Cursor). Como no Side chat do T3 Code, a tela mostra o histórico da conversa de origem na mesma timeline do chat principal (com o mesmo estado de trabalho), o cabeçalho é enxuto (título, “Trazer para conversa”, excluir e nova) e o composer é compacto: o seletor de agente, modelo e permissão fica na barra; anexo e microfone ficam à vista; arquivo, câmera e gravação vão para “Mais ações”. A pergunta lateral nasce como **cópia da conversa de origem** (fork nativo da sessão do agente, `conversa/fork.rs`), no último ponto estável, e a primeira mensagem vai só com a pergunta: o Claude Code usa `--resume <sessão> --fork-session --session-id <nova>` e o Codex usa `thread/fork` com `lastTurnId` (o último turno terminado da origem, mesmo com ela trabalhando). Com a origem **no meio de um turno**, o Claude corta a cópia no último ponto estável: `--resume-session-at <uuid>`, o uuid da última mensagem do agente no último turno **concluído** (a ADE o guarda em `chat_run.end_uuid` no fim de cada turno concluído); a pergunta também recebe um pequeno digest do que a origem fez depois desse ponto. Quando a **sessão não abre** na pergunta (outro agente ou outra conta que a da origem, motor sem fork nativo como OpenCode, Antigravity, Cursor e agente ACP local, sem ponto estável, ou se a abertura do fork falhar), a pergunta leva o **contexto portátil**, como o T3 faz num fork entre provedores (`fork_mode = portable`): o histórico da origem como texto (falas, arquivos alterados e lidos, comandos recentes sem a saída, plano), sob o teto de 64 000 bytes, sem o raciocínio, as saídas, os anexos nem segredos (`conversa/redacao.rs` esconde tokens, chaves e senhas e não nomeia `.env`, chaves e credenciais). O backend o põe na frente da primeira mensagem (uma vez só, e só depois de enviada); a tela esconde o bloco e mostra só a pergunta. Só com a origem em terminal (ou sem nenhuma fala) a pergunta cai no **recorte** que a tela monta (um trecho recente do histórico como contexto citado). Nada disso é silencioso: um aviso no topo da pergunta diz o motivo (`chat.sideChat.portableNote` ou `chat.sideChat.forkNote`). Detalhes e limites em [HARNESS_CONTRATO](HARNESS_CONTRATO.md) (`fork`). O fork nunca altera nem interrompe a sessão da origem: só lê o que ela gravou e abre outro processo, com outra sessão. A pergunta começa com o **modo de permissão da origem** (o Plano da origem vale como Supervisionado), e o seletor da barra só oferece modos até o dela: dá para baixar antes de enviar, nunca passar do da origem (o envio também traz o modo para dentro do teto). Modelo e esforço começam nos da origem e mudam no próprio composer. Não desmonta o PTY, não interrompe o turno da origem e não envia nada pela conversa principal. Perguntas laterais não abrem outras. “Trazer à conversa” preenche o composer de origem sem enviar automaticamente. A lista lateral permite retomar ou remover conversas ociosas sem pedidos pendentes. Ainda não há vínculo persistente para conversas TUI.
 - **Painel direito (540 px):**
   - **Diff:** o `git diff HEAD` da pasta, pelo comando `scm_working_diff`, relido quando o agente trabalha;
   - **Arquivos:** o `FilesView`;
@@ -474,16 +474,33 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   `@container/studiobar`. Abaixo de 36rem, só Seleção e Mão ficam à vista, e o resto (Texto, Prancheta, Nota, desenho,
   formas, Comentar) vai para o menu de excesso (⋯). O seletor de página encolhe e trunca, e o grupo do zoom não
   encolhe.
-- **Time na fileira do cabeçalho.** O Time é um ícone da fileira, com os demais (`ROW_CHOICES`). O ⋯ fica com Design,
-  Emulador Android, Pull request e Maximizar o painel.
-- **Pull requests no chat.** Com uma pasta aberta, a entrada Pull request do ⋯ abre o Forge no painel lateral. A lista
+- **Barra de abas da coluna direita (estilo T3 Code).** A coluna tem a própria barra no topo (`ColumnTabBar.tsx`): as abas
+  abertas (ícone + nome, "×" e clique do meio fecham), o "+" com o menu **Abrir uma superfície** e, à direita, expandir,
+  painel inferior (a gaveta do terminal do agente) e recolher a coluna. Coluna vazia mostra "Abrir uma superfície" com a
+  mesma lista. O menu (`SurfaceMenu.tsx`, `panelMenu.ts`) tem uma letra por linha, valendo com o menu aberto: B Navegador
+  (submenu com os perfis, se houver mais de um), T Terminal, F Arquivos, D Diff, P Pull request, M Aparelho (submenu iOS e
+  Android), S Pergunta lateral, E Design, O Time. As letras são as do T3; E e O são do ADE. Navegador e terminal aceitam
+  várias abas (o "+" abre sempre uma nova); as demais superfícies têm uma só (abrir foca a que existe).
+- **Estado das abas** (`columnTabs.ts` puro + `useChatStore.columnTabs/columnActive`). `panel` continua sendo a superfície da
+  aba ativa (atalhos, comandos e `setRightPanel`/`addSurface` seguem iguais): um subscriber (`reconcileColumn`) cria/ativa a
+  aba que corresponde. As abas não persistem entre aberturas do app (só `panel`, como antes).
+- **Terminal e navegador não remontam ao trocar de aba.** Como antes, só o slot da aba ativa mede o espaço e publica
+  (`setChatBrowser`/`setChatShell`); `ViewTabsHost`/`TerminalPanel` mantêm as instâncias montadas e escondidas. Cada aba
+  guarda o recurso que mostra por escopo (conversa + pasta no navegador, pasta no shell), para que duas abas nunca mostrem
+  a mesma página/shell. **Fechar uma aba só tira o assento da barra: a página e o PTY continuam vivos** (o próximo "+"
+  reaproveita os que sobraram). A limpeza do slot só despublica o que ele mesmo publicou, para a troca entre duas abas do
+  mesmo tipo não apagar o slot novo.
+- **O que ficou no cabeçalho da conversa** (`PanelToolbar.tsx`): Resumo (o "thread details" do T3) e Tarefas; com a coluna
+  fechada, também o painel inferior e o abrir da coluna. Com ela aberta, esses dois moram na barra da coluna. Time, Diff,
+  Arquivos, Navegador e Aparelho saíram da fileira e abrem pelo "+" (a fileira e o ⋯ deixaram de existir). Com a coluna
+  maximizada, o cabeçalho some, então Resumo e Tarefas só voltam ao restaurar.
+- **Pull requests no chat.** Com uma pasta aberta, a entrada Pull request do menu "+" abre o Forge no painel lateral. A lista
   mantém os filtros, atualização, criação e detalhe existentes. “Vinculados à branch” filtra pela branch de origem e
   fica desativado sem branch; trocar de pasta ou branch limpa a seleção de PR aberto. A sessão reaproveita a conta do
   Forge já conectado (`PullRequestPane`), sem credenciais próprias.
-- **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Com a
-  conversa abaixo de 36rem (`@container/main`), Diff, Navegador e Arquivos saem da fileira do cabeçalho e vão para o ⋯
-  (menos o que está à vista). Antes, numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de
-  fechar o painel.
+- **Painel numa janela estreita.** Toda coluna do painel encolhe até 280 px, e a conversa fica com 440 px no mínimo. Antes,
+  numa janela de ~1000 px, o painel passava da borda e o cabeçalho cortava o ícone de fechar o painel; agora o cabeçalho só
+  leva Resumo e Tarefas, e as abas da coluna rolam na horizontal.
 - **A fala depois de trocar de agente.** A primeira mensagem depois da troca leva o resumo da conversa anterior na frente
   (até ~64 KB). A gravação cortava em 20 000 caracteres pelo fim: perdia a marca de fim do resumo e a fala da pessoa. A
   tela escondia o item, e o balão otimista ficava «Na fila» no fim da timeline até sumir. Agora `handoff::clip_user`
@@ -585,3 +602,7 @@ Um time de conversas por protocolo não tem terminal para o Vigia das missões o
 ## Pool de contas na conversa
 
 Com «pool:Nome» como conta e o interruptor ligado (Contas → Pools → «Pool de contas no chat»: desligado, avisar e perguntar ou automático), uma conversa por protocolo cujo turno falha por limite segue em outra conta do mesmo pool, com o resumo das últimas falas, e volta à original quando ela renova. Detalhes, tetos e a ressalva de política em [POOL_FAILOVER.md](./POOL_FAILOVER.md#pool-de-contas-no-chat-conversas-por-protocolo).
+
+## Limite de uso, modelo reserva e título por modelo
+
+Um turno que para por limite de uso pode (1) perguntar se a conversa segue com o **modelo reserva do projeto** (Configurações → Projetos), sem trocar sozinha, e (2) agendar a **retomada** para a hora de renovação que o agente informou, se «Retomar depois do limite de uso» estiver ligado (Threads). Os avisos da timeline são `fallbackOffer`, `fallbackSwitched`, `limitResume`, `limitResumed` e `limitResumeFailed`; a pergunta do reserva é o `chat_pool_pending` com `kind: "fallback"` (e `agentId`/`model`, opcionais), aceita e dispensada pelos mesmos `chat_pool_accept`/`chat_pool_dismiss` do pool de contas. O título da conversa pode ser escrito por um modelo (uma chamada curta e somente leitura, desligada por padrão) e ganhar «Regerar título» no menu. Comandos novos: `chat_project_defaults_*`, `chat_limit_resume_*`, `chat_title_settings_*`, `chat_title_writers` e `chat_thread_regenerate_title`. Detalhes e limites em [T3_CODE_INTEGRACAO.md](./T3_CODE_INTEGRACAO.md#padrões-por-projeto-título-por-modelo-e-limite-de-uso-backend).

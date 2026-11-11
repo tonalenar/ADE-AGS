@@ -1,3 +1,5 @@
+import { formatClock } from "@/shared/timeFormat";
+import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -18,6 +20,8 @@ export function MessageActions({ text, at, editable = false, align = "start", co
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const when = relativeTime(at, now, i18n.language);
+  const timeFormat = useDisplayPrefs().timeFormat;
+  const clock = at !== undefined && Number.isFinite(at) ? formatClock(at, timeFormat, i18n.language) : null;
   if (!text.trim() && !when) return null;
 
   const copy = () => {
@@ -31,7 +35,7 @@ export function MessageActions({ text, at, editable = false, align = "start", co
   return (
     <div data-message-actions="" onPointerEnter={() => setNow(Date.now())} onFocusCapture={() => setNow(Date.now())}
       className={`flex items-center gap-0.5 min-h-7 text-chat-caption text-gray-500 dark:text-white/45 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity ${align === "end" ? "justify-end" : ""}`}>
-      {when && <span className="px-1 whitespace-nowrap">{when}</span>}
+      {when && <span className="px-1 whitespace-nowrap">{[clock, when].filter(Boolean).join(" · ")}</span>}
       {text.trim() && (
         <button type="button" onClick={copy} aria-label={t("chat.message.copy")} title={copied ? t("chat.message.copied") : t("chat.message.copy")} className={button}>
           {copied ? <CheckIcon className="w-4 h-4" /> : <CopyIcon className="w-4 h-4" />}

@@ -288,7 +288,7 @@ mod claude {
         ThreadRow {
             id: "t".into(), agent_id: "claude-code".into(), remote_id: None, cwd: "/p".into(), title: String::new(),
             model: Some("haiku".into()), effort: Some("low".into()), access: access.into(), account_id: None, memory: None,
-            parent_ref: None, parent_turn_id: None, is_side_chat: false,
+            parent_ref: None, parent_turn_id: None, is_side_chat: false, fork_mode: None, fork_reason: None,
             state: "active".into(), created_at: 1, updated_at: 1,
         }
     }
@@ -2136,5 +2136,74 @@ mod harness_fase4 {
     fn conversa_inexistente_nao_passa_no_escopo_de_agente() {
         let conn = conversas();
         assert!(check_stop_scope(&conn, Some("tab:thread:raiz"), "nao-existe").is_err());
+    }
+}
+
+/// O `initialize` do Claude traz os comandos que o composer lista (nome, descrição e dica do argumento).
+#[test]
+fn os_comandos_do_initialize_do_claude_viram_a_lista_do_composer() {
+    let response = json!({
+        "commands": [
+            { "name": "design:design-critique", "description": "Critica o design de uma tela", "argumentHint": "<arquivo>" },
+            { "name": "compact", "description": "Compacta a conversa", "argumentHint": "" },
+            { "name": "nome com espaço", "description": "não é invocável", "argumentHint": "" },
+            { "name": "Compact", "description": "repetido em outra caixa", "argumentHint": "" },
+            { "name": "x".repeat(81), "description": "nome longo demais", "argumentHint": "" },
+            { "description": "sem nome" }
+        ]
+    });
+
+    let out = super::claude_map::initialize_commands(&response);
+
+    let names: Vec<&str> = out.iter().filter_map(|c| c["name"].as_str()).collect();
+    assert_eq!(names, ["design:design-critique", "compact"]);
+    assert_eq!(out[0]["inputHint"], json!("<arquivo>"));
+    assert!(out[1]["inputHint"].is_null());
+}
+
+/// A descrição vem do agente como texto não confiável: entra limitada, e sem `commands` não há lista.
+#[test]
+fn a_descricao_do_comando_do_claude_vem_limitada_e_sem_commands_nao_ha_lista() {
+    let response = json!({ "commands": [{ "name": "cost", "description": "d".repeat(900), "argumentHint": null }] });
+
+    let out = super::claude_map::initialize_commands(&response);
+
+    assert_eq!(out[0]["description"].as_str().map(|d| d.chars().count()), Some(500));
+    assert!(out[0]["inputHint"].is_null());
+    assert!(super::claude_map::initialize_commands(&json!({})).is_empty());
+}
+
+/// O `skills/list` do Codex vira a lista do `/`: só as habilitadas, do cwd da conversa, sem repetir.
+mod comandos_codex {
+    use serde_json::json;
+
+    use super::super::codex_map::skills_list_commands;
+
+    #[test]
+    fn skills_list_vira_comandos_so_das_habilitadas_do_cwd_sem_repetir() {
+        let response = json!({"data": [
+            {"cwd": "/outro", "skills": [{"name": "de-outro", "description": "Outro cwd", "path": "/outro/SKILL.md", "enabled": true}], "errors": []},
+            {"cwd": "/projeto", "skills": [
+                {"name": "deploy", "description": "Publica o app", "path": "/projeto/.agents/skills/deploy/SKILL.md", "enabled": true, "scope": "repo", "interface": {"displayName": "Deploy"}},
+                {"name": "desligada", "description": "Desligada na config", "path": "/p/d/SKILL.md", "enabled": false},
+                {"name": "Deploy", "description": "Repetida sem diferenciar caixa", "path": "/p/x/SKILL.md", "enabled": true},
+                {"name": "nome com espaço", "description": "Não cabe no composer", "path": "/p/e/SKILL.md", "enabled": true}
+            ], "errors": []}
+        ]});
+
+        let commands = skills_list_commands(&response, "/projeto");
+
+        assert_eq!(commands, vec![json!({"name": "deploy", "description": "Publica o app", "inputHint": null, "kind": "skill"})]);
+    }
+
+    #[test]
+    fn descricao_vazia_cai_para_a_curta_e_cwd_que_nao_bate_usa_as_entradas_que_vieram() {
+        let response = json!({"data": [
+            {"cwd": "/projeto/", "skills": [{"name": "resumo", "description": "", "shortDescription": "Curta", "enabled": true}], "errors": []}
+        ]});
+
+        let commands = skills_list_commands(&response, "/projeto");
+
+        assert_eq!(commands, vec![json!({"name": "resumo", "description": "Curta", "inputHint": null, "kind": "skill"})]);
     }
 }

@@ -1,3 +1,5 @@
+import { formatTimestamp } from "@/shared/timeFormat";
+import { readDisplayPrefs } from "@/features/settings/displayPreferences";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -21,6 +23,8 @@ import { addQuoteFor } from "./quotes/quoteStore";
 import { selectConversation } from "./unified/selectionActions";
 import { ArchiveIcon, BotIcon, BranchIcon, CheckIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, DesignIcon, EyeIcon, FilterIcon, FolderPlusIcon, GlobeIcon, ListIcon, MoreHorizontalIcon, NewChatIcon, PenIcon, PlusIcon, PullRequestIcon, PushPinIcon, SearchIcon, SettingsIcon, SidebarIcon, UndoIcon, UsageIcon, UsersIcon, WarnIcon, WrenchIcon, XIcon } from "./chatIcons";
 import { type ChatProject, type ConversationCard } from "./chatModel";
+import { useConfirmPrefs, type ConfirmPrefs } from "@/features/settings/confirmPreferences";
+import { appConfirm } from "@/shared/ui/appConfirm";
 import { useLiveSummary } from "./liveSummary";
 import { useChatLive } from "./liveStore";
 import { INBOX_SHORTCUT } from "./permissions/PermissionCard";
@@ -29,11 +33,16 @@ import { toggleInbox, usePendingAsks } from "./permissions/permissionsStore";
 import { archiveConversation, expireSnoozed, moveConversation, moveConversationToSection, reopenSettled, restoreArchivedConversation, setCollapsed, setUnread, settleConversation, snoozeConversation, togglePinned, toggleSection, undoMoveConversation, unsnoozeConversation, useArchived, useShelf } from "./shelf";
 import { SnoozeDialog } from "./SnoozeDialog";
 import { addSurface, openArchivedMessagePreview, requestTabSearchJump, requestThreadSearchJump } from "./store";
-import { buildSections, cleanTitle, countStates, initialOf, stepFocus, toggleAllProjects, visibleIds, type SessionSection } from "./sidebar/sessionsModel";
+import { buildSections, cleanTitle, countStates, initialOf, stepFocus, toggleAllProjects, visibleIds, type SessionSection, type WorkingShelf } from "./sidebar/sessionsModel";
+import { noticeStatesOf } from "./noticeRules";
+import { useWorkingShelf } from "@/features/settings/sidebarPreferences";
 import { closeWorkspaceFolder, forgetWorkspaceFolder } from "./sidebar/workspaceActions";
 import { useAutoUnread } from "./sidebar/useAutoUnread";
+import { recordProjectsFirstSeen, useProjectOrderPrefs } from "./sidebar/projectOrderPrefs";
+import { useAutoSettle } from "./sidebar/useAutoSettle";
 import { folderName, threadIdOf, threadKey } from "./structured/model";
 import { chatThreadRename, chatThreadSearch, type MessageSearchHit } from "./structured/ipc";
+import { chatThreadRegenerateTitle } from "./threadTextIpc";
 import { searchArchivedSessionMessages, type ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
 import { reloadThreads, settleThread, startStructured, useStructured } from "./structured/store";
 import { invalidateSearchableTimeline, searchableTimeline, searchTuiConversation, type TuiMessageSearchHit } from "./timeline/search";
@@ -124,6 +133,46 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   const snoozedUntil = useShelf((s) => s.snoozedUntil);
   const settled = useShelf((s) => s.settled);
   const pinned = useShelf((s) => s.pinned);
+  const confirmPrefs = useConfirmPrefs();
+  const workingShelfOn = useWorkingShelf();
+  // A seção Trabalhando e o último pedido seu: as fases vêm do canal (abas) e do protocolo, as mesmas que o aviso usa.
+  const tabPhase = useChatLive((s) => s.phase);
+  const tabQuestion = useChatLive((s) => s.question);
+  const tabAwaiting = useChatLive((s) => s.awaiting);
+  const tabTurn = useChatLive((s) => s.turn);
+  const threadLive = useStructured((s) => s.live);
+  const liveStates = useMemo(
+    () => noticeStatesOf(cards.map((c) => c.tabId), { phase: tabPhase, question: tabQuestion, awaiting: tabAwaiting }, threadLive),
+    [cards, tabPhase, tabQuestion, tabAwaiting, threadLive],
+  );
+  // Quem precisa de você (aprovação ou pergunta pendente) sobe; quem só trabalha vai para a seção Trabalhando.
+  const shelf = useMemo<WorkingShelf>(() => {
+    const needs: string[] = [];
+    const working: string[] = [];
+    for (const card of cards) {
+      const state = liveStates[card.tabId];
+      if (!state) continue;
+      if (state.awaiting || state.question) needs.push(card.tabId);
+      else if (state.phase === "working") working.push(card.tabId);
+    }
+    return { enabled: workingShelfOn, needs, working };
+  }, [cards, liveStates, workingShelfOn]);
+  // O canal guarda o começo do turno em milissegundos; a barra compara em segundos, como a hora da abertura.
+  const lastUserAt = useMemo(() => {
+    const out: Record<string, number> = {};
+    for (const card of cards) {
+      const started = tabTurn[card.tabId]?.startedAt;
+      if (started) out[card.tabId] = started / 1000;
+    }
+    return out;
+  }, [cards, tabTurn]);
+  // Ordem dos projetos (Configurações → Projetos) e o concluir sozinho: as duas leem o que a barra já sabe.
+  const projectOrder = useProjectOrderPrefs();
+  const tabIds = useMemo(() => cards.map((c) => c.tabId), [cards]);
+  const busyIds = useMemo(() => [...shelf.needs, ...shelf.working], [shelf]);
+  const projectCwds = useMemo(() => [...new Set(cards.map((c) => c.cwd))], [cards]);
+  useAutoSettle({ tabIds, busy: busyIds, pinned, selectedId, lastUserAt });
+  useEffect(() => recordProjectsFirstSeen(projectCwds), [projectCwds]);
   const orderBySection = useShelf((s) => s.orderBySection);
   const unread = useShelf((s) => s.unread);
   const collapsed = useShelf((s) => s.collapsed);
@@ -175,8 +224,8 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   // O time fica sob a conversa do orquestrador: os integrantes saem da lista e aparecem indentados (prancheta 15).
   const grouping = useTeamGrouping(cards);
   const sections = useMemo(
-    () => buildSections(cards, { query, folder, pinned, archived: archivedIds, snoozed: snoozedIds, nested: grouping.nested, collapsed, orderBySection }),
-    [cards, query, folder, pinned, archivedIds, snoozedIds, grouping.nested, collapsed, orderBySection],
+    () => buildSections(cards, { query, folder, pinned, archived: archivedIds, snoozed: snoozedIds, nested: grouping.nested, collapsed, orderBySection, lastUserAt, shelf, projectOrder }),
+    [cards, query, folder, pinned, archivedIds, snoozedIds, grouping.nested, collapsed, orderBySection, lastUserAt, shelf, projectOrder],
   );
 
   useEffect(() => {
@@ -305,12 +354,38 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     if (thread) void chatThreadRename(thread, title).then(() => reloadThreads()).catch(() => undefined);
     else useTabsStore.getState().renameTab(card.tabId, title);
   };
-  const settle = (card: ConversationCard) => {
+  // «Regerar título»: o modelo escreve de novo o título de uma conversa por protocolo. Uma por vez, e o erro aparece.
+  const [titling, setTitling] = useState<string[]>([]);
+  const regenerateTitle = (thread: string) => {
+    if (titling.includes(thread)) return;
+    setTitling((list) => [...list, thread]);
+    chatThreadRegenerateTitle(thread)
+      .then(() => reloadThreads())
+      .catch((cause: unknown) => showBotToast({ title: t("chat.sidebar.regenerateTitleFailed"), text: String(cause), tone: "error" }))
+      .finally(() => setTitling((list) => list.filter((id) => id !== thread)));
+  };
+  /** Roda a ação já, ou depois de confirmar, se a preferência de Configurações → Geral → Confirmações pedir. */
+  const confirmFirst = (action: keyof ConfirmPrefs, run: () => void) => {
+    if (!confirmPrefs[action]) {
+      run();
+      return;
+    }
+    void appConfirm({
+      title: t(`chat.sidebar.confirm.${action}.title`),
+      lead: t(`chat.sidebar.confirm.${action}.lead`),
+      confirmLabel: t(`chat.sidebar.confirm.${action}.confirm`),
+      cancelLabel: t("btn.cancel"),
+      tone: action === "delete" ? "danger" : "warning",
+    }).then((ok) => {
+      if (ok) run();
+    });
+  };
+  const settle = (card: ConversationCard) => confirmFirst("delete", () => {
     const thread = threadIdOf(card.tabId);
     if (thread) settleThread(thread, true);
     else void settleConversation(card.tabId);
-  };
-  const archive = (card: ConversationCard) => {
+  });
+  const archive = (card: ConversationCard) => confirmFirst("archive", () => {
     archiveConversation(card.tabId);
     showBotToast({
       title: t("chat.sidebar.archivedToastTitle"),
@@ -320,7 +395,7 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
       undoable: true,
       ms: 5000,
     });
-  };
+  });
   const showUndo = (card: ConversationCard, message: string, onAction: () => void) => {
     showBotToast({
       title: t("chat.sidebar.actionToastTitle"),
@@ -333,7 +408,8 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
   };
   const canDropInSection = (sourceId: string, target: SessionSection) => {
     const source = cards.find((item) => item.tabId === sourceId);
-    return !!source && !query.trim() && !folder && (target.kind === "pinned" || source.project === target.label);
+    // Com a seção Trabalhando ligada, a lista ativa não se reordena à mão: só as fixadas aceitam soltar.
+    return !!source && !query.trim() && !folder && (target.kind === "pinned" || (target.kind === "project" && !workingShelfOn && source.project === target.label));
   };
   const dropInSection = (sourceId: string, target: SessionSection, targetIndex: number) => {
     const source = cards.find((item) => item.tabId === sourceId);
@@ -351,14 +427,21 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
     const section = sections.find((candidate) => candidate.items.some((item) => item.tabId === card.tabId));
     const sectionIds = section?.items.map((item) => item.tabId) ?? [];
     const index = sectionIds.indexOf(card.tabId);
-    const canMove = !!section && !query.trim() && !folder;
+    const canMove = !!section && !query.trim() && !folder && (section.kind === "pinned" || (section.kind === "project" && !workingShelfOn));
     return [
     { key: "pin", label: pinned.includes(card.tabId) ? t("chat.sidebar.unpin") : t("chat.sidebar.pin"), icon: <PushPinIcon className="w-4 h-4" />, onSelect: () => {
       const wasPinned = pinned.includes(card.tabId);
-      togglePinned(card.tabId);
-      showUndo(card, wasPinned ? "chat.sidebar.actionUnpinned" : "chat.sidebar.actionPinned", () => togglePinned(card.tabId));
+      const toggle = () => {
+        togglePinned(card.tabId);
+        showUndo(card, wasPinned ? "chat.sidebar.actionUnpinned" : "chat.sidebar.actionPinned", () => togglePinned(card.tabId));
+      };
+      // Fixar não pede nada; só desafixar passa pela confirmação.
+      if (wasPinned) confirmFirst("unpin", toggle);
+      else toggle();
     } },
     { key: "rename", label: t("chat.sidebar.rename"), icon: <PenIcon className="w-4 h-4" />, hint: "F2", onSelect: () => setRenaming(card.tabId) },
+    ...(threadIdOf(card.tabId) ? [{ key: "regenerate-title", label: t("chat.sidebar.regenerateTitle"), icon: <PenIcon className="w-4 h-4" />, disabled: titling.includes(threadIdOf(card.tabId)!),
+      onSelect: () => regenerateTitle(threadIdOf(card.tabId)!) }] : []),
     { key: "read", label: unread.includes(card.tabId) ? t("chat.sidebar.markRead") : t("chat.sidebar.markUnread"), icon: <EyeIcon className="w-4 h-4" />, onSelect: () => {
       const wasUnread = unread.includes(card.tabId);
       setUnread(card.tabId, !wasUnread);
@@ -716,7 +799,7 @@ export function ChatSidebar({ cards, projects = [], closed, diffs, selectedId, o
               {snoozed.map((c) => (
                 <SlimRow key={c.tabId} name={c.project} title={c.title} agentId={c.agentId}
                   subtitle={typeof snoozedUntil?.[c.tabId] === "number"
-                    ? t("chat.sidebar.snoozeAt", { time: new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(snoozedUntil[c.tabId]!) })
+                    ? t("chat.sidebar.snoozeAt", { time: formatTimestamp(snoozedUntil[c.tabId]!, readDisplayPrefs().timeFormat, undefined, Date.now()) })
                     : undefined}
                   onOpen={() => { unsnoozeConversation(c.tabId); openCard(c.tabId); onOpened?.(); }}
                   onMenu={(x, y) => setMenu({ x, y, items: [
@@ -845,7 +928,10 @@ function SectionBlock({ section, onMenu, onNew, children, dropActive = false, on
   projectCwd?: string;
 }) {
   const { t } = useTranslation();
-  const label = section.kind === "pinned" ? t("chat.sidebar.pinned") : section.label;
+  const label = section.kind === "pinned" ? t("chat.sidebar.pinned")
+    : section.kind === "needs" ? t("chat.sidebar.needsYou")
+      : section.kind === "working" ? t("chat.sidebar.workingSection")
+        : section.label;
   return (
     <section aria-label={label} onDragOver={onDragOver} onDrop={onDrop}
       className={`flex flex-col gap-0.5 rounded-lg ${dropActive ? "ring-1 ring-inset ring-accent-500/70" : ""}`}>

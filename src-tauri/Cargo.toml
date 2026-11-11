@@ -105,6 +105,11 @@ sha2 = "0.10"
 # AES-256-GCM do estado de cada site do preview (preview/site.rs). Já vinha no lock, via rustls;
 # aqui só ganha a declaração direta, sem crate nova.
 ring = "0.17"
+# AES-128-CBC dos cookies do Chromium no macOS (preview/importer/chromium.rs). Já estavam no lock
+# (Secret Service do keyring, no Linux): nenhuma crate nova no Cargo.lock, mas passam a compilar também
+# no macOS e no Windows. O PBKDF2 sai do `ring`.
+aes = "0.8"
+cbc = { version = "0.1", features = ["block-padding"] }
 unicode-normalization = "0.1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
@@ -122,6 +127,10 @@ libc = "0.2"
 webkit2gtk = "2.0"
 # `png`: la captura llega como superficie de cairo y se escribe como PNG sin otro crate.
 cairo-rs = { version = "0.18", features = ["png"] }
+# Importação de sessões do Chromium no Linux (preview/importer/libsecret.rs): o `v11` guarda a senha no Secret
+# Service com o atributo `application`, que o `keyring` não busca (ele só casa `service` + `username`). É a
+# mesma biblioteca que o `keyring` já usa por baixo (já está no Cargo.lock, mesma versão e mesmos recursos).
+secret-service = { version = "4", features = ["rt-async-io-crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"

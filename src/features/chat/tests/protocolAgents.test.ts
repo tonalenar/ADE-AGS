@@ -9,9 +9,9 @@ describe("agentes por protocolo (espelho de conversa::api::Engine)", () => {
     expect(STRUCTURED_AGENTS.has("gemini-cli")).toBe(false);
   });
 
-  it("as opções Fast e raciocínio vêm do registro de adapters de chat", () => {
+  it("Fast desconhecido conserva o caminho legado até a matriz carregar; raciocínio segue a TUI", () => {
     expect(fastModeSupported("codex")).toBe(true);
-    expect(fastModeSupported("claude-code")).toBe(false);
+    expect(fastModeSupported("claude-code")).toBe(true);
     expect(reasoningEffortSupported("antigravity")).toBe(true);
     expect(reasoningEffortSupported("opencode")).toBe(false);
   });

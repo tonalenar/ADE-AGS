@@ -28,6 +28,7 @@ import { useTeamComposer } from "../team/TeamComposer";
 import { TeamThreadFeed } from "../team/TeamThreadFeed";
 import { HarnessRunFeed } from "./HarnessRunFeed";
 import { TimelineView, type ApprovalNote } from "../timeline/ConversationTimeline";
+import type { TimelineItem } from "../timeline/types";
 import { addPending, dropPending, usePending } from "../timeline/pending";
 import { withDrafts } from "../timeline/streaming";
 import type { RequestRow, ThreadRow } from "./ipc";
@@ -44,12 +45,18 @@ import { showBotToast } from "@/shared/brand/botToastStore";
  * pedidos do agente e se respondem aqui; parar interrompe o turno; modelo, esforço e acesso valem a
  * partir do próximo turno. No Claude, o Plano liga e desliga aqui, e sair dele é um pedido do agente
  * (aprovar o plano).
+ *
+ * Na pergunta lateral (`side`), a mesma timeline e o composer em layout compacto: o histórico da conversa de origem
+ * vem antes das falas dela, e não há time, contexto do branch nem a aba de equipe.
  */
-export function StructuredConversationView({ card, thread, cards = [] }: { card: ConversationCard; thread: ThreadRow; cards?: ConversationCard[] }) {
+export function StructuredConversationView({ card, thread, cards = [], side }: { card: ConversationCard; thread: ThreadRow; cards?: ConversationCard[];
+  /** A pergunta lateral: o histórico da conversa de origem (já limitado) e se o começo ficou de fora. */
+  side?: { history: TimelineItem[]; truncated: boolean } }) {
   const { t } = useTranslation();
   const followUpBehavior = useChatPrefs().followUpBehavior;
-  // Orquestrador de um time: "Time | Só o orquestrador", o @agente e o resumo do time (prancheta 15).
-  const team = useTeamComposer(card, cards);
+  // Orquestrador de um time: "Time | Só o orquestrador", o @agente e o resumo do time (prancheta 15). A pergunta lateral não tem time.
+  const teamOfThread = useTeamComposer(card, cards);
+  const team = side ? null : teamOfThread;
   const live = useStructured((s) => s.live[thread.id]) ?? EMPTY_LIVE;
   const hydrated = useStructured((s) => !!s.hydrated[thread.id]);
   const goal = useStructured((s) => s.goals[thread.id] ?? null);
@@ -89,6 +96,8 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
   // O texto chegando entra na timeline como item (o mesmo id do item final), e o raciocínio
   // chegando alimenta a linha viva.
   const items = useMemo(() => withDrafts(live.items, live.drafts), [live.items, live.drafts]);
+  // Na pergunta lateral, o histórico da origem vem antes das falas dela; turno, fila e busca seguem só com as dela.
+  const shownItems = useMemo(() => (side?.history.length ? [...side.history, ...items] : items), [side?.history, items]);
   const quoteSourceIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
   const promptHistory = useMemo(() => items.flatMap((item) => item.kind === "user" && item.text?.trim() ? [item.text] : []), [items]);
   // Com o agente trabalhando, a mensagem na fila dele só entra no fio quando o turno dela começa: o envio otimista espera.
@@ -138,14 +147,14 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
       {/* O trilho de agentes: escolher outro agente troca quem responde NESTA conversa (com confirmação, só entre turnos). */}
       {/* A conta da conversa mora dentro do seletor de agente/modelo (no rodapé do popover), não solta no composer. */}
       <AgentModelPicker agents={switchable} harnessSurface="chat" showAccount={false} disabled={locked} providerConfig={live.providerConfig}
-        accountSlot={isLocalAcpAgent(thread.agentId) ? null : <ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />}
+        accountSlot={side || isLocalAcpAgent(thread.agentId) ? null : <ThreadAccountMenu threadId={thread.id} agentId={thread.agentId} accountId={thread.accountId} disabled={locked} />}
         value={{ agentId: thread.agentId, model: thread.model, effort: thread.effort, account: null }}
         permission={{ value: menuAccess(thread.access), modes: accessModesFor(thread.agentId, true), onChange: locked ? undefined : (next) => retuneThread(thread.id, thread.model, thread.effort, next) }}
         onChange={(v) => {
           if (v.agentId && v.agentId !== thread.agentId) { setSwitchError(null); setSwitchTo({ agentId: v.agentId, model: v.model }); return; }
           retuneThread(thread.id, v.model, v.effort, thread.access);
         }} />
-      {planCapability.support === "supported" && (
+      {!side && planCapability.support === "supported" && (
         <button type="button" disabled={locked} aria-pressed={plan} onClick={() => retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access))}
           title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
           className="flex shrink-0 items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50 disabled:hover:bg-transparent">
@@ -185,7 +194,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           turnActive={working} forceSend={!!request}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working
             ? t(queueHintKey(thread.agentId, followUpBehavior, steerCapability.support, interruptCapability.support), { key: QUEUE_KEY })
-            : team?.placeholder ?? t("chat.composer.reply")}
+            : team?.placeholder ?? (side ? t("chat.sideChat.placeholder") : t("chat.composer.reply"))}
           onSubmit={async (text, attachments) => {
             if (question) { answer(text); return; }
             const planCommand = extractSlashCommand(text, "plan");
@@ -229,7 +238,7 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
             // (aparece acima da caixa até sair). As imagens em linha só existem no Claude, que entra no turno.
             if (sendNow(key, sent.text, midTurn, deliver) === "interrupting") prepared.onSent();
           }}
-          onSendAndNewThread={newConversationLocal}
+          onSendAndNewThread={side ? undefined : newConversationLocal}
           onQueue={question ? null : (text, attachments) => {
             const planCommand = extractSlashCommand(text, "plan");
             if (planCommand.found && text.trim().toLowerCase() === "/plan" && attachments.length === 0) {
@@ -256,27 +265,27 @@ export function StructuredConversationView({ card, thread, cards = [] }: { card:
           }} queue={queue} onUnqueue={(id) => unqueueMessage(key, id)} onUpdateQueued={(id, text) => updateQueuedMessage(key, id, text)}
           leading={question ? null : team?.controls}
           addon={(context) => <ComposerAssistMenu cwd={thread.cwd} agentId={thread.agentId} conversationKey={key}
-            teamOptions={team?.mentions}
+            teamOptions={team?.mentions} allowSideChat={!side}
             providerCommands={live.providerCommands}
             onPlan={!locked && planCapability.support === "supported" ? () => { void retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access)); } : undefined}
             context={context} />}
           onStop={working && !request && interruptCapability.available ? () => interruptThread(thread.id) : null}
           stopUnavailableReason={working && !request && !interruptCapability.available ? interruptCapability.reason : null}
-          controls={controls} />
-        {isLocalAcpAgent(thread.agentId) && <p className="mx-2 mt-2 mb-0 text-[11px] leading-4 text-amber-700 dark:text-amber-300">{t("chat.localAcp.permissionWarning")}</p>}
-        <ContextStrip branch={card.branch} worktree={card.isWorktree} />
+          controls={controls} compact={!!side} />
+        {isLocalAcpAgent(thread.agentId) &&<p className="mx-2 mt-2 mb-0 text-[11px] leading-4 text-amber-700 dark:text-amber-300">{t("chat.localAcp.permissionWarning")}</p>}
+        {!side && <ContextStrip branch={card.branch} worktree={card.isWorktree} />}
       </ComposerColumn>
   );
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       <ChatFrame composer={composer} list={(bottomInset) => (
-        <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={items} loaded={hydrated} working={working || !!request} live
+        <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={shownItems} loaded={hydrated || (side?.history.length ?? 0) > 0} truncated={side?.truncated ?? false} working={working || !!request} live
           approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
           streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} threadId={thread.id}
           conversationKey={key} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearThreadSearchJump}
           onAnswer={question ? answer : undefined} onResend={resend}
-          after={<><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>} />
+          after={side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>} />
       )} />
       {switchTo && (
         <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError} noApproval={lacksApproval(switchApprovalCapability.support, thread.access, isLocalAcpAgent(switchTo.agentId))}

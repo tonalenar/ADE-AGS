@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import type { Rect } from "@/features/tabs/layout/layoutStore";
+import { closeTab, moveTab, openTab, panelOfActive, reconcileColumn, type ColumnKind, type ColumnTab } from "./columnTabs";
 import type { ArchivedMessageSearchHit } from "@/features/sessions/ipc.conversations";
 
 /**
@@ -39,12 +40,21 @@ interface ChatState {
   panelFocus: number;
   /** O painel ocupa a área toda (a conversa some), como o "Maximizar" do T3. */
   panelMaximized: boolean;
+  /**
+   * As abas da coluna (a barra de abas do T3) e a que está à vista. `panel` continua sendo a superfície da aba ativa
+   * (ou `"empty"`/`null`): o resto do app lê e escreve `panel`, e o `reconcileColumn` (no fim deste arquivo) mantém as
+   * abas coerentes com ele. Não persistem entre aberturas do app; só `panel`.
+   */
+  columnTabs: ColumnTab[];
+  columnActive: string | null;
   /** O navegador da aba Navegador e onde desenhá-lo (como o terminal: por slot, sem remontar). */
   browser: { viewId: string; rect: Rect } | null;
   /** O navegador está destacado como mini preview sobre a conversa. */
   browserFloating: boolean;
   /** Posição e tamanho do mini preview, relativos à casca do chat. */
   browserFloatRect: Rect | null;
+  /** Um aparelho (iOS ou Android) flutuando sobre a conversa, como o navegador: um preview por vez. `null` = nenhum. */
+  deviceFloat: DeviceKind | null;
   /** O terminal da aba Terminal do painel (uma aba de shell na pasta da conversa) e onde desenhá-lo, como o navegador. */
   shell: { tabId: string; rect: Rect } | null;
   /** A conversa por protocolo aberta (ver `structured/`); `null` = a da aba ativa. */
@@ -85,7 +95,7 @@ export interface DesignOpenRequest { designId: string; artboardId?: string | nul
 
 /** O que se abre no painel direito pelo "+" (o Resumo e o Diff estão sempre lá; "empty" não é aba). */
 export type Surface = Exclude<RightPanelTab, "diff" | "shell" | "empty" | "tasks">;
-export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android", "pr", "side"];
+export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios", "android", "pr", "side", "renders", "snapshots"];
 
 /**
  * As abas do painel direito. O Resumo não é uma delas: sem painel ele é a coluna fixa da conversa (`summaryPinned`),
@@ -93,13 +103,13 @@ export const SURFACES: Surface[] = ["team", "browser", "files", "design", "ios",
  * `team/TeamPanel.tsx`). `tasks`: as tarefas em segundo plano da conversa (`tasks/TasksPanel.tsx`; não volta sozinha ao
  * reabrir o app). `empty`: o estado vazio do T3.
  */
-export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "pr" | "side" | "empty";
+export type RightPanelTab = "diff" | "shell" | "files" | "browser" | "design" | "ios" | "android" | "team" | "tasks" | "pr" | "side" | "renders" | "snapshots" | "empty";
 
 /** Um aparelho no painel: o simulador iOS ou o Android (pranchetas 9 e 10). */
 export type DeviceKind = "ios" | "android";
 
 const PANEL_KEY = "ags.chat.panel";
-const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team", "pr", "side"];
+const PANELS: readonly string[] = ["diff", "files", "browser", "design", "ios", "android", "team", "pr", "side", "renders", "snapshots"];
 
 /**
  * O painel lembrado: a superfície que estava à vista, ou `"none"` (a pessoa o fechou). Sem nada
@@ -179,9 +189,14 @@ function readControl(): boolean {
 }
 
 const initialPanel = readPanel();
+/** A coluna ao abrir o app: uma aba da superfície lembrada (se houver). */
+const initialColumn = ((): { tabs: ColumnTab[]; active: string | null } => {
+  const first = reconcileColumn(initialPanel, { tabs: [], active: null });
+  return first ?? { tabs: [], active: null };
+})();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, browser: null, browserFloating: false, browserFloatRect: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -374,13 +389,92 @@ export function openTeamPanelFocused(): void {
 
 /** Abre uma superfície no painel (e mostra). */
 export function addSurface(surface: Surface): void {
+  // Abrir a aba de um aparelho na coluna dispensa o flutuante dele: o mesmo aparelho não pode ter duas telas.
   useChatStore.setState((s) => ({ surfaces: s.surfaces.includes(surface) ? s.surfaces : [...s.surfaces, surface], panel: surface,
-    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null } : {}) }));
+    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+    deviceFloat: s.deviceFloat === surface ? null : s.deviceFloat }));
 }
 
 /** Fecha uma superfície; se era a que estava à vista, volta ao Diff. */
 export function removeSurface(surface: Surface): void {
-  useChatStore.setState((s) => ({ surfaces: s.surfaces.filter((x) => x !== surface), panel: s.panel === surface ? "diff" : s.panel }));
+  useChatStore.setState((s) => {
+    const dropped = s.columnTabs.filter((tab) => tab.kind === surface).map((tab) => tab.id);
+    return {
+      surfaces: s.surfaces.filter((x) => x !== surface), panel: s.panel === surface ? "diff" : s.panel,
+      columnTabs: s.columnTabs.filter((tab) => tab.kind !== surface),
+      columnActive: s.columnActive && dropped.includes(s.columnActive) ? null : s.columnActive,
+    };
+  });
+}
+
+/** O `surfaces` legado acompanha as abas: a superfície entra ao abrir a primeira aba dela. */
+const withSurface = (surfaces: Surface[], kind: ColumnKind): Surface[] =>
+  (SURFACES as ColumnKind[]).includes(kind) && !surfaces.includes(kind as Surface) ? [...surfaces, kind as Surface] : surfaces;
+
+/**
+ * Abre uma aba na coluna e a mostra. Superfície de uma aba só (ou sem `forceNew`) foca a que já existe; o "+" do T3
+ * abre sempre uma nova de navegador/terminal (`forceNew`), com `profileId` se o submenu do Browser escolheu um.
+ */
+export function openColumnTab(kind: ColumnKind, opts: { forceNew?: boolean; profileId?: string } = {}): string {
+  let id = "";
+  useChatStore.setState((s) => {
+    const next = openTab({ tabs: s.columnTabs, active: s.columnActive }, kind, opts);
+    id = next.id;
+    return {
+      columnTabs: next.tabs, columnActive: next.active, panel: kind, surfaces: withSurface(s.surfaces, kind),
+      ...(kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+      // Abrir a aba de um aparelho dispensa o flutuante dele: o mesmo aparelho não pode ter duas telas.
+      deviceFloat: s.deviceFloat === kind ? null : s.deviceFloat,
+    };
+  });
+  return id;
+}
+
+/** Mostra uma aba já aberta. Nenhuma instância (terminal, navegador) é desmontada: só muda quem publica o slot. */
+export function activateColumnTab(id: string): void {
+  useChatStore.setState((s) => {
+    const tab = s.columnTabs.find((candidate) => candidate.id === id);
+    if (!tab) return s;
+    return { columnActive: id, panel: tab.kind, ...(tab.kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}), deviceFloat: s.deviceFloat === tab.kind ? null : s.deviceFloat };
+  });
+}
+
+/**
+ * Fecha a aba (a vizinha assume; sem nenhuma, o estado vazio). Só tira o assento da barra: o navegador e o shell que ela
+ * mostrava continuam vivos (escondidos), e o próximo "+" os reaproveita. Nunca mata um PTY.
+ */
+export function closeColumnTab(id: string): void {
+  useChatStore.setState((s) => {
+    const closed = s.columnTabs.find((tab) => tab.id === id);
+    if (!closed) return s;
+    const next = closeTab({ tabs: s.columnTabs, active: s.columnActive }, id);
+    const stillHas = next.tabs.some((tab) => tab.kind === closed.kind);
+    const patch: Partial<ChatState> = {
+      columnTabs: next.tabs, columnActive: next.active,
+      surfaces: stillHas ? s.surfaces : s.surfaces.filter((x) => x !== closed.kind),
+    };
+    // Com o painel aberto, a aba nova (ou o vazio) vira a vista; fechado, só a lembrança.
+    if (s.panel !== null && s.columnActive === id) patch.panel = panelOfActive(next);
+    else if (s.panel === null && s.columnActive === id) patch.lastPanel = next.active ? panelOfActive(next) as Exclude<RightPanelTab, "empty"> : null;
+    return patch;
+  });
+}
+
+/** Reordena as abas: `id` vai para o índice `to`. */
+export function moveColumnTab(id: string, to: number): void {
+  useChatStore.setState((s) => {
+    const tabs = moveTab(s.columnTabs, id, to);
+    return tabs === s.columnTabs ? s : { columnTabs: tabs };
+  });
+}
+
+/** Guarda o recurso (id de `ViewTab`/aba de shell) que a aba mostra neste escopo (conversa/pasta). */
+export function setColumnTabResource(id: string, scope: string, resourceId: string): void {
+  useChatStore.setState((s) => {
+    const tab = s.columnTabs.find((candidate) => candidate.id === id);
+    if (!tab || tab.resources?.[scope] === resourceId) return s;
+    return { columnTabs: s.columnTabs.map((candidate) => (candidate.id === id ? { ...candidate, resources: { ...candidate.resources, [scope]: resourceId } } : candidate)) };
+  });
 }
 
 /** O nome de uma aba de navegador: o host com a porta (`localhost:1420`); `null` sem endereço. Pura. */
@@ -443,11 +537,35 @@ export function toggleChatBrowserFloating(): void {
   useChatStore.setState({
     browserFloating: true,
     browserFloatRect: null,
+    deviceFloat: null,
     panel: null,
     panelMaximized: false,
     lastPanel: "browser",
     summaryOpen: false,
   });
+}
+
+/**
+ * Faz um aparelho (iOS ou Android) flutuar sobre a conversa. Um preview por vez, como no T3: o navegador flutuante
+ * sai de cena (a página segue na aba dele) e a tela nativa dele é solta da conversa.
+ */
+export function openDeviceFloat(kind: DeviceKind): void {
+  const s = useChatStore.getState();
+  if (s.deviceFloat === kind) return;
+  if (s.browserFloating) setChatBrowser(null);
+  // O aparelho entra nas superfícies da conversa mesmo sem aba no painel: é isso que o deixa com os agentes (`sharedDevices`).
+  useChatStore.setState({
+    deviceFloat: kind,
+    browserFloating: false,
+    browserFloatRect: null,
+    summaryOpen: false,
+    surfaces: s.surfaces.includes(kind) ? s.surfaces : [...s.surfaces, kind],
+  });
+}
+
+/** Fecha o aparelho flutuante. O aparelho segue ligado: fechar a janela não o desliga. */
+export function closeDeviceFloat(): void {
+  if (useChatStore.getState().deviceFloat !== null) useChatStore.setState({ deviceFloat: null });
 }
 
 /** Publica o retângulo do mini preview sem trocar o id/página do navegador. */
@@ -546,4 +664,11 @@ useChatStore.subscribe((state, prev) => {
   } catch {
     /* sem lembrar, vale só nesta abertura */
   }
+});
+
+// A barra de abas segue o `panel`: quem só muda `panel` (atalhos, comandos, `addSurface`) ganha a aba correspondente.
+useChatStore.subscribe((state, prev) => {
+  if (state.panel === prev.panel && state.columnActive === prev.columnActive && state.columnTabs === prev.columnTabs) return;
+  const patch = reconcileColumn(state.panel, { tabs: state.columnTabs, active: state.columnActive });
+  if (patch) useChatStore.setState({ columnTabs: patch.tabs, columnActive: patch.active });
 });

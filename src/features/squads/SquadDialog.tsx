@@ -300,10 +300,10 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
       </Field>
       {agentId === "gemini-desktop" ? <p className="text-xs text-blue-600 dark:text-blue-300">{t("geminiDesktop.squadHint")}</p> : <ModelSelector roster={roster} agentId={agentId} accountId={accountId} autoAccount={autoAccount}
         model={model} reasoningEffort={reasoningEffort} complexity={complexity} onChange={onChange} onRoster={onRoster} />}
-      {agentId === "codex" && (
-        <FastSwitch checked={fastMode === true} model={model} catalog={modelsForAccount(selectedAgent, accountId, autoAccount)}
+      {
+        <FastSwitch agentId={agentId} surface="fleet" checked={fastMode === true} model={model} catalog={modelsForAccount(selectedAgent, accountId, autoAccount)}
           onChange={(fast) => onChange({ fastMode: fast })} />
-      )}
+      }
       <Field group label={t("squads.form.account")}>
         {agentId === "gemini-desktop" ? <span className="text-xs">{t("geminiDesktop.appAccount")}</span> : agentId ? (
           <AccountPickerStep agentId={agentId} value={accountValue}

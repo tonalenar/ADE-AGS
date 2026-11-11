@@ -20,6 +20,7 @@ describe("regiões geradas (scripts/check-catalogs.ts)", () => {
       'const PEER_TOOLS: &[(&str, &str)] = &[\n    ("peer_tell", "peer.tell"),\n];',
       'const CHAT_TOOLS: &[ChatTool] = &[\n    ChatTool { name: "chat_list", ipc: "chat.list" },\n];',
       'const DESIGN_TOOLS: &[DesignTool] = &[\n];',
+      'const RENDER_TOOLS: &[RenderTool] = &[\n    RenderTool { name: "render_publish", cli: "render.publish", read_only: false },\n];',
       'const COMPUTER_USE_TOOLS: &[ComputerUseTool] = &[\n    ComputerUseTool { name: "sim_act", dispatch: "sim.act" },\n];',
       'const DEVICE_TOOLS: &[DeviceTool] = &[\n    DeviceTool { name: "device_list", dispatch: "device.list", read_only: true },\n    DeviceTool { name: "device_shot", dispatch: "device.shot", read_only: true },\n    DeviceTool { name: "device_action", dispatch: "device.act", read_only: false },\n];',
     ].join("\n");
@@ -28,7 +29,7 @@ describe("regiões geradas (scripts/check-catalogs.ts)", () => {
     expect(families.map((f) => [f.family, f.tools])).toEqual([
       ["Browser", ["browser_click"]], ["Fleet orchestration", ["run_plan"]], ["Fleet memory", ["memory_get"]],
       ["Git account", ["git_push"]], ["Peers and team", ["peer_tell"]], ["Chat-mode conversations", ["chat_list"]],
-      ["Computer use", ["sim_act"]], ["Devices", ["device_list", "device_shot", "device_action"]],
+      ["HTML pages", ["render_publish"]], ["Computer use", ["sim_act"]], ["Devices", ["device_list", "device_shot", "device_action"]],
       ["Questions to the person", ["ask_user"]], ["Permission", ["approve_tool_use"]],
     ]);
     expect(() => rustBlock(mcp, "NOPE")).toThrow();

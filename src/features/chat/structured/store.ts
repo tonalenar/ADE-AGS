@@ -3,12 +3,14 @@ import { listen } from "@tauri-apps/api/event";
 
 import { setComposing, useChatStore } from "../store";
 import {
-  chatAccountSet, chatRequestAnswer, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
-  chatThreadSettle, chatThreads, chatThreadStatus, type ThreadAccess, type ThreadRow,
+  chatAccountSet, chatRequestAnswer, chatSideChatFork, chatThreadAutoCompactOnReturn, chatThreadClearContext, chatThreadCompactContext, chatThreadCreate, chatThreadGoalAction, chatThreadGoalGet, chatThreadInterrupt, chatThreadItems, chatThreadProviderConfig, chatThreadRequests, chatThreadRetune, chatThreadSend, chatThreadSwitchAgent,
+  chatThreadSettle, chatThreads, chatThreadStatus, type SideChatForkOutcome, type ThreadAccess, type ThreadRow,
 } from "./ipc";
 import type { ThreadGoal } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
 import { unsnoozeConversation } from "../shelf";
+import { dispatchSkillMentions } from "../skillMentions";
+import { useAgentSkillsStore } from "@/features/skills/agentSkillsStore";
 import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
 import { addLogFailure, dismissLogFailure, parseLogFailure, type LogFailure } from "./logFailureModel";
 
@@ -180,15 +182,39 @@ export async function createThread(input: NewThread): Promise<string> {
   return row.id;
 }
 
+/**
+ * Faz a pergunta lateral `id` nascer como cópia da conversa de origem (fork nativo do agente, num ponto estável) antes
+ * da primeira mensagem. Sem fork (motor sem suporte, origem em terminal, falha), devolve `excerpt` e o motivo: quem
+ * chama manda o recorte do histórico. Nunca lança: uma falha do comando é o recorte com o motivo `failed`.
+ */
+export async function forkSideChat(id: string): Promise<SideChatForkOutcome> {
+  const outcome = await chatSideChatFork(id).catch((): SideChatForkOutcome => ({ mode: "excerpt", reason: "failed" }));
+  useStructured.setState((s) => ({
+    threads: s.threads.map((row) => row.id === id ? { ...row, forkMode: outcome.mode, forkReason: outcome.reason } : row),
+  }));
+  return outcome;
+}
+
 /** Manda uma mensagem (começa um turno, ou entra no que está em andamento). */
 export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[]): void {
   if (text.trim() || images?.length) unsnoozeConversation(threadKey(id));
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
-  // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
-  chatThreadSend(id, text, images).then(() => onSent?.(), (e) => {
-    onError?.(String(e));
-    patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
-  });
+  const send = (outgoing: string) => {
+    // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
+    chatThreadSend(id, outgoing, images).then(() => onSent?.(), (e) => {
+      onError?.(String(e));
+      patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
+    });
+  };
+  const row = useStructured.getState().threads.find((thread) => thread.id === id);
+  // Claude e Cursor precisam receber `/nome`; no composer os dois usam a menção portátil `$nome`.
+  if ((row?.agentId === "claude-code" || row?.agentId === "cursor") && text.includes("$")) {
+    void useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)
+      .catch(() => [])
+      .then((skills) => send(dispatchSkillMentions(row.agentId, text, skills.map((skill) => skill.name))));
+    return;
+  }
+  send(text);
 }
 
 export function interruptThread(id: string): void {

@@ -239,3 +239,48 @@ fn codex_guarda_la_key_en_el_perfil_de_la_cuenta() {
     assert_eq!(health.status, super::health::HealthStatus::Ok, "{}", health.detail);
     assert!(health.detail.contains("API key"), "{}", health.detail);
 }
+
+
+// ── Antigravity: conta por HOME isolado ──────────────────────────
+
+/// O marcador do Antigravity é a própria credencial: só se confere que existe, não se abre.
+#[cfg(target_os = "macos")]
+#[test]
+fn antigravity_reconhece_o_login_pela_presenca_do_arquivo() {
+    let tmp = TempDir::new();
+    let spec = spec("antigravity");
+    assert_eq!(spec.env_var, "HOME");
+    assert_eq!(read_identity(tmp.path(), spec), (false, None));
+    tmp.write(".gemini/antigravity-acp/antigravity-oauth-token", "");
+    assert_eq!(read_identity(tmp.path(), spec), (false, None), "vazio não prova login");
+    tmp.write(".gemini/antigravity-acp/acp_token.json", "{\"x\":1}");
+    // Sem rótulo: o e-mail só existiria abrindo a credencial.
+    assert_eq!(read_identity(tmp.path(), spec), (true, None));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_conta_do_sistema_do_antigravity_e_o_proprio_home() {
+    let spec = spec("antigravity");
+    assert_eq!(default_dir(spec), dirs::home_dir());
+}
+
+#[test]
+fn saude_do_antigravity_le_a_resposta_do_agy_models() {
+    use super::health::{parse_antigravity_models, HealthStatus};
+    let ok = parse_antigravity_models(true, "Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-opus-5-5-low\tClaude Opus 5.5 (Low)\n");
+    assert_eq!(ok.status, HealthStatus::Ok);
+    assert_eq!(ok.detail, "2 models");
+    let off = parse_antigravity_models(true, "Fetching available models...\nError: Please sign in to view available models. Launch the CLI without arguments to sign in.\n");
+    assert_eq!(off.status, HealthStatus::NotLoggedIn);
+    let unknown = parse_antigravity_models(false, "dial tcp: lookup failed\n");
+    assert_eq!(unknown.status, HealthStatus::Unknown);
+}
+
+/// A Frota roda o `agy` num home temporário e não aplica o da conta: não pode oferecer contas.
+#[test]
+fn a_frota_nao_oferece_contas_do_antigravity() {
+    let caps = crate::agents::adapter_for("antigravity").unwrap().capabilities();
+    assert!(!caps.accounts);
+    assert!(caps.headless);
+}

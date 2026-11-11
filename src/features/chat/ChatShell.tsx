@@ -10,10 +10,11 @@ import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { AttachCwdContext } from "./attachments/AttachmentStrip";
 import { DropOverlay } from "./attachments/DropOverlay";
+import { DeviceFloatHost } from "./DeviceFloatCard";
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
-import { chatProjects, conversationCards, PROTOCOL_AGENTS, type ChatProject, type ConversationCard } from "./chatModel";
+import { chatProjects, conversationCards, type ChatProject, type ConversationCard } from "./chatModel";
 import { ProjectBadge } from "./ChatProjectBadge";
 import { useChatProjectIdentityList } from "./chatProjectIdentity";
 import { normalizeProjectPath } from "./chatProjectPrefs";
@@ -41,6 +42,8 @@ import { NewConversation, pickProjectFolder } from "./NewConversation";
 import { RightPanel } from "./RightPanel";
 import { runInShell } from "./shellTerminal";
 import { startProjectScriptSettleWatcher } from "./projectScriptAutomation";
+import { syncProjectDefaults } from "./projectDefaultsSync";
+import { applyProjectGrouping, buildRepoIndex, useProjectGrouping } from "./sidebar/projectGrouping";
 import { RunCodeContext } from "./timeline/CodeBlockFrame";
 import { PanelToolbar } from "./PanelToolbar";
 import { ShellModeSwitch } from "./ShellModeSwitch";
@@ -72,10 +75,12 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   const localProvidersLoaded = useLocalAcpStore((s) => s.loaded);
   const loadLocalProviders = useLocalAcpStore((s) => s.load);
   useEffect(() => { if (!localProvidersLoaded) void loadLocalProviders().catch(console.error); }, [localProvidersLoaded, loadLocalProviders]);
+  const projectGrouping = useProjectGrouping();
   const cards = useMemo(() => {
     const labelOf = (id: string) => detected.find((a) => a.id === id)?.label ?? localProviders.find((a) => a.id === id)?.label ?? id;
-    return [...threadCards(threads, groups, labelOf, selectedThread), ...conversationCards(groups)].sort((a, b) => b.openedAt - a.openedAt);
-  }, [groups, threads, detected, localProviders, selectedThread]);
+    const all = [...threadCards(threads, groups, labelOf, selectedThread), ...conversationCards(groups)].sort((a, b) => b.openedAt - a.openedAt);
+    return applyProjectGrouping(all, projectGrouping, buildRepoIndex(groups));
+  }, [groups, threads, detected, localProviders, selectedThread, projectGrouping]);
   const projects = useMemo(() => chatProjects(groups), [groups]);
   const projectIdentities = useChatProjectIdentityList();
   const knownProjects = useMemo(() => {
@@ -129,6 +134,8 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
   useEffect(() => startStructured(), []);
   useEffect(() => startQueueRunner(), []);
   useEffect(() => startProjectScriptSettleWatcher(), []);
+  // Concilia os padrões por projeto do aparelho com os do banco (ver `projectDefaultsSync.ts`).
+  useEffect(() => { void syncProjectDefaults().catch(() => undefined); }, []);
   // Uma conversa nova esquece a aba lembrada do painel: a próxima abertura mostra o estado vazio.
   useEffect(() => { if (composing) forgetLastPanel(); }, [composing]);
   // A caixa de permissões e o painel direito dividem o lado direito: abrir um fecha o outro.
@@ -206,10 +213,11 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
             {active && <ActiveLive cardKey={active.tabId} />}
             {/* O seletor fica aqui (não cabe no cabeçalho da barra lateral) e nunca encolhe: o breadcrumb é que cede. */}
             <ShellModeSwitch className="shrink-0" />
-            {/* A fileira de ícones do painel, como no Claude Code: Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e ⋯. */}
-            {/* O >_ alterna a gaveta do agente (TUI com timeline) ou abre a aba Terminal do painel (um shell na pasta). */}
-            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} prAvailable={!!(active?.cwd ?? folder)} sideAvailable={!!active && (!!PROTOCOL_AGENTS[active.agentId] || active.agentId.startsWith("local-acp-"))} />
-            <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={panelOpen}><PanelRightIcon className="w-4 h-4" /></IconButton>
+            {/* O cabeçalho guarda só o que é da conversa (Resumo e Tarefas; com a coluna fechada, também o painel inferior).
+                As superfícies abrem pelo "+" da barra de abas da coluna direita, como no T3 Code. */}
+            <PanelToolbar drawerTabId={active && !activeThread && hasTimeline(active.agentId) ? active.tabId : null} terminalAvailable={!!active} />
+            {/* Com a coluna aberta, o recolher mora na barra dela (como no T3); aqui só o que a abre. */}
+            {!panelOpen && <IconButton label={t("chat.panel.toggle")} onClick={toggleRightPanel} active={false}><PanelRightIcon className="w-4 h-4" /></IconButton>}
             {/* Windows e Linux: os botões da janela ficam no canto direito (com o painel aberto, no dele). */}
             {!panelOpen && <WindowControls className="-mr-3" />}
           </header>
@@ -246,6 +254,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
       {!page && <RightPanel tabId={activeThread ? null : active?.tabId ?? null} cwd={active?.cwd ?? folder ?? projects[0]?.cwd ?? null} project={project ?? ""}
         conversation={active} cards={cards} />}
       <BrowserFloatHost hidden={!!page} />
+      <DeviceFloatHost hidden={!!page} />
       {!page && inboxOpen && <PermissionsInbox />}
       <PermissionsManager />
     </div>

@@ -1,3 +1,4 @@
+import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,7 +13,7 @@ import { AgentModelPicker } from "./AgentModelPicker";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu";
 import { newConversationLocal, retuneConversationTab, sendToConversation, startConversation } from "./chatActions";
 import { BotIcon } from "./chatIcons";
-import { accessModesFor, extractSlashCommand, fastModeSupported, hasTimeline, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
+import { accessModesFor, extractSlashCommand, hasTimeline, readAccess, type ChatAccess, type ConversationCard } from "./chatModel";
 import { matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { messageFor } from "./attachments/send";
 import { ChatComposer } from "./ChatComposer";
@@ -83,6 +84,8 @@ function rectIn(el: HTMLElement | null) {
 export function ConversationView({ card, cards = [] }: { card: ConversationCard; cards?: ConversationCard[] }) {
   const { t } = useTranslation();
   const followUpBehavior = useChatPrefs().followUpBehavior;
+  // "Contexto do composer": a branch e o worktree só ficam abaixo do composer se a preferência pedir.
+  const composerContext = useDisplayPrefs().composerContext;
   const planCapability = useHarnessCapability("tui", matrixProviderForAgent(card.agentId), "plan");
   const hasPlan = planCapability.support === "supported";
   const timeline = hasTimeline(card.agentId);
@@ -150,7 +153,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       <AgentModelPicker agents={switchableAgents} showAccount={false} disabled={locked}
         value={{ agentId: card.agentId, model: tuning.model, effort: tuning.effort, account: null }}
         permission={{ value: access.plan ? "ask" : access.access, modes: accessModesFor(card.agentId), onChange: locked ? undefined : (next) => retune({ access: next, plan: false }) }}
-        speed={fastModeSupported(card.agentId) ? { fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) } : undefined}
+        speed={{ fast: tuning.fast, onChange: (fastMode) => retune({ fastMode }) }}
         onChange={(v) => {
           if (v.agentId && v.agentId !== card.agentId) {
             const target = switchableAgents.find((candidate) => candidate.id === v.agentId);
@@ -239,7 +242,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           teamOptions={team?.mentions} onPlan={!locked && hasPlan ? () => retune({ plan: !access.plan }) : undefined}
           context={context} />}
         controls={controls} />
-      <ContextStrip branch={card.branch} worktree={card.isWorktree}>
+      <ContextStrip branch={card.branch} worktree={card.isWorktree} showContext={composerContext}>
         <ProjectScriptsMenu key={card.tabId} cwd={card.cwd} owner={{
           kind: card.tabId.startsWith("thread:") ? "thread" : "tab",
           id: card.tabId,

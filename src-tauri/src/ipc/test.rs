@@ -1958,7 +1958,7 @@ mod provas {
         for comando in ["peer.answer", "tab.send", "tab.create", "fix.decide"] {
             assert!(cli.contains(&format!("\"{comando}\"")), "{comando} não está entre os que mandam a sessão");
         }
-        assert!(cli.contains("const GROUPS: [&str; 20]") && cli.contains("\"fix.\""), "o grupo fix. não leva quem chama");
+        assert!(cli.contains("const GROUPS: [&str; 21]") && cli.contains("\"fix.\""), "o grupo fix. não leva quem chama");
     }
 }
 
@@ -2367,7 +2367,7 @@ mod autorizacao {
         assert_eq!((livre, escopo, pessoa, papel), (LIVRE, ESCOPO, PESSOA, PAPEL), "atualize o HOST_REMOTO.md junto com a tabela");
     }
     const LIVRE: usize = 27;
-    const ESCOPO: usize = 188;
+    const ESCOPO: usize = 190;
     const PESSOA: usize = 4;
     const PAPEL: usize = 2;
 
@@ -2892,7 +2892,7 @@ mod autorizacao {
         let cli = include_str!("../bin/cli.rs");
         assert!(cli.contains("Autorização por método:") && cli.contains("`mission create|run|start`, `worktrees prune`"), "o USAGE não diz o alcance por método");
         let docs = include_str!("../../../docs/decisoes/HOST_REMOTO.md");
-        assert!(docs.contains("F-09 (completo)") && docs.contains("Anexo A: inventário dos 221 métodos e a classe de cada um"));
+        assert!(docs.contains("F-09 (completo)") && docs.contains("Anexo A: inventário dos 223 métodos e a classe de cada um"));
     }
 
     #[test]

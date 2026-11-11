@@ -4,8 +4,12 @@ import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "neogestify-ui-components";
 
+import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 import { openExternalUrl } from "@/shared/openExternalUrl";
 import { htmlImagesToMarkdown } from "./htmlImages";
+import { MATH_REHYPE_PLUGINS, MATH_REMARK_PLUGINS } from "./markdownMath";
+// O CSS do KaTeX vem do próprio pacote (empacotado com o app): nada vai à rede para desenhar fórmulas.
+import "katex/dist/katex.min.css";
 
 /** Trae una imagen y devuelve algo que un `<img>` puede mostrar (un `data:`). */
 export type ImageLoader = (src: string) => Promise<string>;
@@ -130,8 +134,15 @@ export function codeOfPre(node: HastNode | undefined): { code: string; className
   return { code: hastText(code ?? node), className };
 }
 
+/** Os plugins de cada modo, fixos no módulo: recriá-los a cada render faz o react-markdown reprocessar tudo. */
+const REMARK = [remarkGfm];
+const REMARK_MATH = [remarkGfm, ...MATH_REMARK_PLUGINS];
+const REHYPE_MATH = MATH_REHYPE_PLUGINS;
+
 export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
   const size = TONE[tone];
+  // A matemática é uma preferência do aparelho (Aparência → Texto). Desligada, o `$` é só texto.
+  const { renderMath } = useDisplayPrefs();
   // El frontmatter no es prosa: sin sacarlo, los `---` se renderizan como una línea
   // horizontal y los campos como un párrafo suelto arriba de todo. Los datos que trae ya
   // se muestran aparte, en la cabecera.
@@ -195,7 +206,7 @@ export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock
     td: (p) => <td className="px-2 py-1 border-b border-gray-100 dark:border-white/5" {...p} />,
     a: ({ href, children }) => (
         <Button variant="custom"
-          onClick={() => { if (href) openExternalUrl(href).catch(console.error); }}
+          onClick={(event) => { if (href) openExternalUrl(href, { modifier: event.metaKey || event.ctrlKey }).catch(console.error); }}
           className="text-accent-600 dark:text-accent-400 hover:underline text-left inline-block"
         >
           {children}
@@ -213,7 +224,8 @@ export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock
   return (
     <div className={`flex flex-col gap-3 ${size.root}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={renderMath ? REMARK_MATH : REMARK}
+        rehypePlugins={renderMath ? REHYPE_MATH : undefined}
         components={components}
       >
         {body}

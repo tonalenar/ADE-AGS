@@ -33,7 +33,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ## 1. Matriz capability × provider/superfície
 
-### 1.1 As 19 capabilities
+### 1.1 As 20 capabilities
 
 | Capability | Pergunta que a célula responde | O que **não** conta |
 |---|---|---|
@@ -56,12 +56,13 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 | `rollback` | Dá para voltar ao estado de uma foto? | reverter a conversa do provider (nenhuma superfície faz) |
 | `usage` | Há uso de tokens, custo ou limite por sessão? | medidor por conta |
 | `event_source` | Há fonte contínua de eventos que o ADE lê? | qualidade da fonte (vai na observação) |
+| `fast_mode` | O adapter entrega Fast quando a superfície e o modelo selecionados declaram suporte? | controle oferecido sem consultar a capability da matriz |
 
 **Escopo** (`instance`, `session`, `model`): onde o estado é decidido. A tabela estática traz o valor padrão por instância. O valor por sessão e por modelo é resolvido na execução (Fase 3). O caso mais claro é o ACP local: a retomada só existe se o agente anunciar `resume` ou `loadSession` no `initialize` (`conversa/opencode.rs:283-287`), então a coluna `local-acp` marca `Unknown` até o descritor de sessão ler `agentCapabilities`.
 
 ### 1.2 A matriz
 
-`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 19 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
+`S` = `Supported`, `?` = `Unknown`, `U` = `Unsupported`. A última linha de cada tabela, `ags_mcp`, não é uma das 20 (ver §1.5). Evidência, escopo, prova e observação de **cada célula** estão em `src-tauri/src/harness/matrix.rs`.
 
 **Conversa estruturada (`conversa/`)**
 
@@ -140,34 +141,34 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 19 capabilities = **418 células**: **167 `Supported`, 32 `Unknown`, 219 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 418): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`. O teste `a_contagem_do_doc_concorda_com_a_matriz` falha se esta tabela e `matrix.rs` divergirem.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 20 capabilities = **440 células**: **171 `Supported`, 32 `Unknown`, 237 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 440): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`; `fork` (pergunta lateral) e `comandos` (menu do `/`, §1.9) também ficam fora das 440. O Fast é capability por superfície; a disponibilidade concreta continua dependendo do modelo no roster.
 
 <!-- contagem-matriz:inicio -->
 | Superfície | Provider | Supported | Unknown | Unsupported | `ags_mcp` |
 |---|---|---:|---:|---:|---|
-| Chat | claude-code | 14 | 2 | 3 | Supported |
-| Chat | codex | 14 | 0 | 5 | Supported |
-| Chat | opencode | 9 | 1 | 9 | Supported |
-| Chat | antigravity | 9 | 0 | 10 | Supported |
-| Chat | cursor | 8 | 0 | 11 | Unsupported |
-| Chat | local-acp | 6 | 3 | 10 | Unknown |
-| Fleet | claude-code | 10 | 0 | 9 | Supported |
-| Fleet | gemini-cli | 8 | 0 | 11 | Unsupported |
-| Fleet | codex | 9 | 0 | 10 | Supported |
-| Fleet | opencode | 9 | 0 | 10 | Supported |
-| Fleet | kimi-code | 7 | 0 | 12 | Unsupported |
-| Fleet | hermes | 0 | 0 | 19 | Unsupported |
-| Fleet | antigravity | 8 | 2 | 9 | Unknown |
-| Fleet | cursor | 0 | 0 | 19 | Unsupported |
-| Tui | claude-code | 11 | 3 | 5 | Supported |
-| Tui | gemini-cli | 6 | 3 | 10 | Unsupported |
-| Tui | codex | 10 | 2 | 7 | Supported |
-| Tui | opencode | 8 | 2 | 9 | Supported |
-| Tui | kimi-code | 5 | 4 | 10 | Unsupported |
-| Tui | hermes | 6 | 3 | 10 | Unknown |
-| Tui | antigravity | 5 | 4 | 10 | Unsupported |
-| Tui | cursor | 5 | 3 | 11 | Unsupported |
-| **Total** | 22 colunas × 19 = 418 células | 167 | 32 | 219 | |
+| Chat | claude-code | 14 | 2 | 4 | Supported |
+| Chat | codex | 14 | 0 | 6 | Supported |
+| Chat | opencode | 9 | 1 | 10 | Supported |
+| Chat | antigravity | 9 | 0 | 11 | Supported |
+| Chat | cursor | 8 | 0 | 12 | Unsupported |
+| Chat | local-acp | 6 | 3 | 11 | Unknown |
+| Fleet | claude-code | 11 | 0 | 9 | Supported |
+| Fleet | gemini-cli | 8 | 0 | 12 | Unsupported |
+| Fleet | codex | 10 | 0 | 10 | Supported |
+| Fleet | opencode | 9 | 0 | 11 | Supported |
+| Fleet | kimi-code | 7 | 0 | 13 | Unsupported |
+| Fleet | hermes | 0 | 0 | 20 | Unsupported |
+| Fleet | antigravity | 8 | 2 | 10 | Unknown |
+| Fleet | cursor | 0 | 0 | 20 | Unsupported |
+| Tui | claude-code | 12 | 3 | 5 | Supported |
+| Tui | gemini-cli | 6 | 3 | 11 | Unsupported |
+| Tui | codex | 11 | 2 | 7 | Supported |
+| Tui | opencode | 8 | 2 | 10 | Supported |
+| Tui | kimi-code | 5 | 4 | 11 | Unsupported |
+| Tui | hermes | 6 | 3 | 11 | Unknown |
+| Tui | antigravity | 5 | 4 | 11 | Unsupported |
+| Tui | cursor | 5 | 3 | 12 | Unsupported |
+| **Total** | 22 colunas × 20 = 440 células | 171 | 32 | 237 | |
 <!-- contagem-matriz:fim -->
 
 Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
@@ -207,6 +208,32 @@ Cada linha é uma pendência de prova, não uma promessa. Colunas iguais estão 
 | tarefa da Frota (`fleet_task`) | `delegate_task`, `run_plan`, `task_add` (`runs/orchestration.rs`) | `run.result`, `await_run` (`runs/orchestration.rs:971-1027`, `:1071-1181`) | `cancel_task`: subárvore dentro do run; nunca o lead, nunca filhos de chat (`runs/orchestration.rs:1278-1330`) |
 
 Nenhuma das duas rotas entrega o resultado ao pai de forma durável: é consulta ou aviso. A entrega durável é da Fase 4.
+
+**`fork` (extra, fora das 20): a conversa nasce como cópia de outra.** Como `ags_mcp`, `ProviderMatrix::fork` não conta nas 440 células: só o chat usa (a pergunta lateral, `conversa/fork.rs`), e o contrato do motor (`EngineCapabilities::session_fork`) lê a matriz, como o `steer` e o `plan`. Um teste confere que os dois concordam.
+
+| Coluna | `fork` | Mecanismo | Ponto estável |
+|---|---|---|---|
+| chat/claude-code | `Supported` (prova: teste) | `--resume <sessão> --fork-session --session-id <nova>` (`claude_map::Start::Fork`); com a origem no meio de um turno, `--resume-session-at <uuid>` | a sessão inteira com a origem **ociosa**; no meio de um turno, a última mensagem do agente do último turno **concluído** (`chat_run.end_uuid`, o `uuid` da última linha `assistant` do fio principal, gravado no fim de cada turno concluído); sem esse uuid (turnos de antes deste recurso), cai no contexto portátil (`origin-working`, ou `no-stable-turn` no primeiro turno) |
+| chat/codex | `Supported` (prova: teste) | `thread/fork` com `threadId`, `lastTurnId`, `cwd`, `approvalPolicy`, `sandbox`, `model` e `excludeTurns` (`codex::fork_params`) | o último turno **terminado** (`chat_run.status != inProgress`), mesmo com a origem trabalhando; sem turno terminado, contexto portátil (`no-stable-turn`) |
+| demais colunas do chat, Frota e TUI | `Unsupported` | sem caminho no ADE | a pergunta lateral leva o contexto portátil (`unsupported`) |
+
+**Três desfechos, gravados em `chat_thread.fork_mode`/`fork_reason`:**
+
+| `fork_mode` | Quando | O que a pergunta recebe |
+|---|---|---|
+| `native` | mesmo agente **e** mesma conta da origem, motor com fork, ponto estável conhecido | a sessão copiada; a pergunta vai sozinha. Com a origem trabalhando, também um digest (≤ 8 000 caracteres) do que ela fez depois do ponto da cópia, como o `prepareSideChatContext` do T3 |
+| `portable` | outro agente (`other-agent`), outra conta (`other-account`), motor sem fork (`unsupported`), origem sem sessão (`origin-no-session`), sem ponto estável (`no-stable-turn`, `origin-working`) ou o fork falhou (`failed`) | o histórico da origem como **contexto portátil** (`conversa/fork_portatil.rs`), gravado no fork e posto pelo backend na frente da primeira mensagem |
+| `excerpt` | a origem é uma aba de terminal (`origin-terminal`), ou não tem nenhuma fala para levar | o recorte de até 12 000 caracteres que a tela monta (`sideChatContext`) |
+
+**O contexto portátil (formato do T3, `docs/user/portable-handoffs.md`).** É o `handoff::resumo_as(Frame::SideChat, …)`, o mesmo resumo determinístico da troca de agente (nenhum modelo escreve o texto, então não gasta cota), com o enquadramento de pergunta lateral: *responda só à pergunta, não continue a tarefa da origem*. Entra: as falas inteiras da pessoa e do agente (as mais antigas saem primeiro sob o teto de 64 000 bytes, o `HANDOFF_BYTE_CAP` do T3, e o corte é dito), o pedido original e o corrente, o último turno, o plano, os arquivos alterados e **lidos**, e os **comandos recentes** (até 12, com «falhou»/«negado»). Não entra: o raciocínio, o estado das ferramentas, os anexos e a **saída** dos comandos (o T3 leva a saída; a ADE não, por tamanho e por segredo). É DADO, nunca instrução (`untrusted_data`, mensagem `[ADE AGS]` que a tela esconde). A conversa completa fica em `ags chat show <origem>`, que o agente pode ler.
+
+**Segredos e conteúdo sensível (`conversa/redacao.rs`).** O T3 não leva o ambiente nem o raciocínio, mas também não filtra o texto; a ADE filtra, porque o texto pode ir a **outro provedor ou conta**: chave privada (PEM), `Bearer`/`Basic`, tokens de prefixo conhecido (`sk-`, `ghp_`, `github_pat_`, `xox*-`, `AKIA…`, `AIza…`, JWT), usuário e senha em URL, `NOME_DO_SEGREDO=valor`, `--token valor` e, por último, o detector `looks_like_user_secret` do app (a linha inteira sai). Arquivos de nome sensível (`.env`, `*.pem`, `*.key`, `id_rsa`, `credentials`, `.ssh/`, `.aws/`…) não são nomeados. **Nenhum valor vem do ambiente do processo**: o contexto sai só do que a conversa gravou. É rede de segurança, não garantia: o texto da pessoa continua sendo dela.
+
+**Entrega.** O contexto é uma foto da origem no instante do fork (`settings` `chat.fork.pending.<pergunta>`, sem coluna nova) e só sai da fila quando a mensagem foi de fato enviada (`api::send_mode`): um envio recusado não o perde, e a segunda mensagem não o leva de novo.
+
+**Ponto estável do Claude.** O `--resume-session-at <message id>` existe no binário instalado (Claude Code 2.1.322, conferido em `strings` e com `claude -p --resume <id inexistente> --resume-session-at <x> --fork-session --session-id <y>`, que recusa com «No conversation found» **antes** de qualquer chamada ao modelo; sem `--resume` a recusa é «--resume-session-at requires --resume»). Só vale em modo `-p`, que é o que a ADE usa. O uuid é o da mensagem do agente no transcript (o T3 usa os mesmos uuids no rollback e no fork do Claude). Um uuid que não está no transcript faz o processo sair com «No message found with message.uuid of: …»: o fork falha e a pergunta cai no contexto portátil (`failed`), sem tocar a origem. **Não foi exercitado com uma sessão real do Claude** (rodar uma sessão gasta cota e abriria um processo de agente), então a célula segue `Proof::Test` e não alega `RealCapture`. Risco conhecido: a cópia lê a transcrição enquanto a origem ainda escreve nela; a linha final, ainda incompleta, fica depois do ponto de corte.
+
+Fallback explícito: o motivo (`unsupported`, `origin-terminal`, `origin-no-session`, `other-agent`, `other-account`, `origin-working`, `no-stable-turn`, `failed`) fica em `chat_thread.fork_reason` e a tela o mostra (`chat.sideChat.forkNote` no recorte, `chat.sideChat.portableNote` no contexto portátil). A sessão só abre no mesmo agente e na mesma conta da origem (a sessão vive no perfil da conta). Nenhum dos caminhos toca a origem: o fork só lê o banco e abre outro processo com outra sessão. A prova é de teste com fixtures (`conversa/fork_test.rs`, `conversa/fork_portatil_test.rs`); **nenhum fork foi exercitado com um agente real**.
 
 **Retomada automática de tarefa na Frota × Hand-off manual para aba (`resume`).** O §1.1 define `resume` como: a sessão nativa volta depois de reiniciar o app. Na Frota, o boot do app faz varredura (`store.rs:1256-1300`) e marca tarefas `ready`/`running` como `failed`, não havendo relançamento ou retomada automática da tarefa (`Unsupported`). Há, contudo, uma tensão com essa definição: `run_hand_off_task` (`runs/mod.rs:1116-1157`) reabre a sessão nativa numa aba com `--resume`, o que é hand-off manual ao usuário em terminal interativo, e não retomada da tarefa depois de reiniciar o app.
 
@@ -269,6 +296,29 @@ Lacunas reais, em ordem de risco:
 - **A declaração `MidTurnBehavior::Steer` (`api.rs:88`) e a cópia `PROTOCOL_AGENTS` (`chatModel.ts:76`) ficam como estão.** Esta tarefa não muda comportamento nem UI.
 - Um teste (`o_steer_do_claude_fica_unknown_ate_haver_captura_real`) fixa o texto da observação. Outro (`a_matriz_do_chat_concorda_com_o_contrato_declarado_do_motor`) amarra a tabela a `Engine::capabilities()`: `mid_turn = Steer` exige `steer != Unsupported`; `Interrupt` exige `Unsupported`; o mesmo para `compact` e `goal`.
 - A cópia da tela, que promete só "entra no turno em andamento", continua decisão de produto (§8): a captura sem ferramenta mostra o outro destino.
+
+### 1.9 Comandos e skills no `/` (`comandos`)
+
+Linha fora das 20, como `ags_mcp` (não entra na contagem da §1.3). Diz se o menu do `/` do chat lista comandos e skills que o agente **aceita**, e de onde vem a lista. Quando a célula é `Unknown` ou `Unsupported`, o menu não mostra skill nenhuma daquele agente.
+
+<!-- comandos:inicio -->
+| Superfície | Provider | `comandos` |
+|---|---|---|
+| chat | claude-code | Supported |
+| chat | codex | Supported |
+| chat | opencode | Supported |
+| chat | antigravity | Supported |
+| chat | cursor | Supported |
+| chat | local-acp | Supported |
+| fleet, tui | (todos) | Unsupported |
+<!-- comandos:fim -->
+
+- **Fonte nativa do protocolo:** Claude (`initialize.commands`), Codex (`skills/list`) e OpenCode/local-acp (ACP `available_commands_update`). Quando Antigravity estiver numa sessão ACP, o evento alimenta a lista; o adapter Antigravity `agy --print` não abre ACP.
+- **Varredura de pastas** (`skills/agent_scan.rs`): Claude (`CLAUDE_CONFIG_DIR`, `.claude/skills`, plugins), Codex (`.agents/skills`, `~/.agents/skills`, `CODEX_HOME/skills`), Cursor (`.cursor/skills` e `.agents/skills`, globais e do projeto) e Antigravity (`GEMINI_HOME/config/skills`, `GEMINI_HOME/antigravity-cli/skills`, mais `.agents/skills` só do projeto). Cursor e Antigravity respeitam limites de bytes/entradas e leem somente o frontmatter; nada é executado e o corpo não é lido. Antigravity ignora `~/.agents/skills`.
+- **Conta da aba:** a varredura usa a conta associada à conversa (`chat_thread.account_id` → `agent_accounts.dir`); Cursor e Antigravity tratam esse diretório como `HOME`. Não lê o keyring nem secrets. Sem conta associada, usam o `HOME` do processo.
+- **Fora do chat (Fleet e TUI):** não há composer estruturado, então não há menu.
+- **Inserção:** `/nome` para Claude, Antigravity, OpenCode e local-acp; `$nome` para Codex e Cursor. O Cursor recebe `/nome` no envio para skills conhecidas. O Claude também recebe a última menção conhecida do texto como `/nome` inicial e o restante como argumento.
+- **Provas e limites:** fixture ACP gravada, árvores temporárias sintéticas e vitest. Cursor e Antigravity não foram testados com agente real nesta rodada; comandos nativos do Antigravity ACP dependem de uma sessão ACP que anuncie `available_commands_update`.
 
 ## 2. Modelo de identidade
 
@@ -621,7 +671,7 @@ O guarda anterior tinha baseline de **102 comparações diretas**. O guarda ampl
 
 **Fechado nesta rodada:** nenhuma capability é inferida por comparação de nome fora do adapter/registro. O guarda indireto passa com baseline vazio (**0**); as comparações de identidade que restam escolhem implementação, parser, executável, conta ou apresentação, sem declarar suporte.
 
-**Plano e prova.** `plan` é uma das 19 capabilities em cada coluna. As 22 células de `plan` têm evidência não vazia e prova diferente de `None`, conferidas por teste. Nenhuma delas afirma `RealCapture`; a prova é de código/tabela. O compositor consulta a matriz e só oferece a ação Plano quando a célula é `Supported`.
+**Plano e prova.** `plan` é uma das 20 capabilities em cada coluna. As 22 células de `plan` têm evidência não vazia e prova diferente de `None`, conferidas por teste. Nenhuma delas afirma `RealCapture`; a prova é de código/tabela. O compositor consulta a matriz e só oferece a ação Plano quando a célula é `Supported`.
 
 **Divergência da TUI.** O composer legado ainda aceita `/compact` de Claude/Codex e `/goal` de Claude, mas o contrato não tem captura que prove execução e resposta observável. As três células ficam `Unknown`; a disponibilidade legada não reclassifica a matriz como `Supported`. `Unknown` significa que o ADE não promete o efeito. O seletor de Plano não usa esse fallback.
 
@@ -703,7 +753,7 @@ Só o que é decisão de produto ou de autorização.
 
 **Verificado nesta rodada**
 - `cd src-tauri && cargo test --lib --bin ags`: biblioteca **2.933 aprovados, 0 falhas, 29 ignorados**; binário `ags`: **53 aprovados, 0 falhas**.
-- `cargo test --lib --bin ags harness::test::`: **28 aprovados, 0 falhas**. Confere as 22 colunas e 19 capabilities, todas as provas e citações, a contagem documentada, os estados `Unknown` da TUI, as provas de `plan` e o guarda de padrões indiretos.
+- `cargo test --lib --bin ags harness::test::`: **28 aprovados, 0 falhas**. Confere as 22 colunas e 20 capabilities, todas as provas e citações, a contagem documentada, os estados `Unknown` da TUI, as provas de `plan` e o guarda de padrões indiretos.
 - `bunx tsc --noEmit`: passou.
 - `bun run check:i18n`: passou; 0 chaves ausentes ou divergentes.
 - `bun run check:test-lint`: passou; 40 violações antigas no baseline e nenhuma nova.
@@ -763,7 +813,7 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `tui/cursor`: `resume` corrigido para `registry.rs:398`.
 
 4. **Contrato e documentação**:
-   - §1.2 e §1.3: na auditoria original, a matriz tinha 18 capabilities e 163 `Supported`, 29 `Unknown` e 204 `Unsupported`; a extensão `plan` e a contagem atual de 19 capabilities estão em §1.3.
+   - §1.2 e §1.3: na auditoria original, a matriz tinha 18 capabilities e 163 `Supported`, 29 `Unknown` e 204 `Unsupported`; a extensão `plan` elevou a matriz para 19 capabilities naquela revisão; `fast_mode` agora eleva o total atual para 20 em §1.3.
    - §1.5: documentada a tensão entre retomada automática de tarefa na Frota e hand-off manual.
    - §1.7: citação de `close_orphan_runs` corrigida para `conversa/store.rs:1068-1082`.
    - §3.2: citação do Codex corrigida para `codex.rs:573-574` e frase de `SWEPT_RUNNING_ERROR` corrigida para esclarecer que `end_reason` não existe na projeção atual.

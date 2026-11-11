@@ -290,10 +290,44 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     Ok(session)
 }
 
+/// Abre a sessão da conversa `thread_id` como **fork** da sessão `from` (a da conversa de origem): a pergunta lateral
+/// nasce como cópia dela. A origem não é tocada (outro processo, outra sessão), e o id novo é escolhido aqui. Falhou:
+/// nada muda na conversa (quem chama cai no recorte do histórico).
+/// `at`: o uuid do último turno concluído da origem, quando ela está no meio de outro turno (a cópia termina nele).
+pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, from: &str, at: Option<&str>) -> Result<(), String> {
+    let gate = resume::start_gate("claude", thread_id);
+    let _guard = gate.lock().await;
+    if get(thread_id).is_some() {
+        return Err("A conversa já tem sessão".into());
+    }
+    let row = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
+    };
+    let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
+    let id = uuid::Uuid::new_v4().to_string();
+    let session = open(app, db, &row, env, Start::Fork { from, id: &id, at }).await?;
+    if let Ok(conn) = db.lock() {
+        let _ = store::set_remote_id(&conn, thread_id, &id);
+    }
+    if let Ok(mut r) = session.remote.lock() {
+        *r = Some(id);
+    }
+    if let Ok(mut map) = sessions().lock() {
+        map.insert(thread_id.to_string(), session);
+    }
+    Ok(())
+}
+
 async fn open(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option<HashMap<String, String>>, start: Start<'_>) -> Result<Arc<Session>, String> {
     let session = spawn(app, db, row, env, start)?;
     // O `--resume` de uma sessão que não existe fecha o processo antes de responder.
-    if let Err(e) = session.control("initialize", json!({})).await {
+    let init = session.control("initialize", json!({})).await;
+    if let Ok(response) = &init {
+        // Os comandos que o Claude anuncia viram a lista do composer, como o ACP faz com `available_commands_update`.
+        emit(app, &row.id, "commands", json!({ "commands": claude_map::initialize_commands(response) }));
+    }
+    if let Err(e) = init {
         // O que o processo escreveu antes de fechar diz se a sessão sumiu ("No conversation found…").
         let tail = session.stderr.lock().ok().map(|t| t.iter().rev().take(2).rev().cloned().collect::<Vec<_>>().join(" | ")).unwrap_or_default();
         session.kill();
@@ -529,7 +563,7 @@ fn finish_turn(app: &AppHandle, db: &DbConnection, thread_id: &str, turn: &str, 
         emit(app, thread_id, "item", json!({ "item": item }));
     }
     save_items(app, db, thread_id, Some(turn), vec![claude_map::turn_end(turn, result, Some(now))]);
-    super::pool::after_turn(app, db, thread_id, result);
+    super::turn::after_turn_hooks(app, db, thread_id, result);
 }
 
 /// O que o banco guarda quando o turno do Claude acaba: o status, os pedidos pendentes que expiram (devolve os ids) e as
@@ -611,7 +645,14 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
             }
             // Com o processo vivo, as tarefas em segundo plano seguem depois do fim do turno: o desfecho delas não é deste turno.
             let legit = session.background.lock().map(|background| background.clone()).unwrap_or_default();
+            // O uuid da última fala do agente neste turno: só um turno concluído o guarda (ponto estável do fork).
+            let end_uuid = session.mapper.lock().ok().and_then(|mut mapper| mapper.take_end_uuid());
             finish_turn(app, db, thread_id, &turn, &result, &legit);
+            if let Some(uuid) = end_uuid.filter(|_| claude_map::run_status(&result) == "completed")
+                && let Ok(conn) = db.lock()
+            {
+                let _ = store::set_run_end_uuid(&conn, thread_id, &turn, &uuid);
+            }
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
             if session.stale.load(Ordering::SeqCst) {
                 close(thread_id);
@@ -694,7 +735,12 @@ fn resolve_rpc(app: &AppHandle, db: &DbConnection, session: &Session, request_id
 /// no meio dele (ou logo depois, na fila).
 pub fn send_user(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, text: &str, images: Vec<Value>) -> Result<(), String> {
     // O turno, se a mensagem o abre, existe antes da escrita (ver `Session::ensure_turn`): nenhum Parar vê a conversa sem turno.
-    let (turn, opened) = session.send_message(&claude_map::user_message_with(text, images))?;
+    let effort = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        store::thread(&conn, &session.thread_id).map_err(|error| error.to_string())?.and_then(|row| row.effort)
+    };
+    let prompt = claude_map::prompt_with_effort(text, effort.as_deref());
+    let (turn, opened) = session.send_message(&claude_map::user_message_with(&prompt, images))?;
     if opened {
         open_turn_rows(app, db, session, &turn);
     }

@@ -13,7 +13,9 @@
 //! - [`sessions`] — recuperar las skills de una sesión archivada.
 //! - [`bundled`] — las que viajan con la app y se instalan solas.
 //! - [`always`] — "Ativa em todos os agentes": o liga/desliga por skill do painel.
+//! - [`agent_scan`] — as skills que o Claude Code acha no disco (usuário, projeto, plugins), só metadados.
 
+mod agent_scan;
 mod always;
 mod authoring;
 mod bundled;
@@ -27,8 +29,11 @@ mod settings;
 mod store;
 mod types;
 #[cfg(test)]
+mod agent_scan_test;
+#[cfg(test)]
 mod test;
 
+pub use agent_scan::*;
 pub use always::*;
 pub use authoring::*;
 pub use bundled::{ensure_bundled_skills, migrate_legacy_skill};

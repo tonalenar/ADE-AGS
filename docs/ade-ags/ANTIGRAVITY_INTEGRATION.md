@@ -66,6 +66,26 @@ Prices and context limits remain unknown rather than being fabricated.
 
 ## Multiple OAuth accounts — experimental/incomplete
 
+**Update (macOS, `agy 1.5.5`, medido só com diretórios temporários):** a ADE agora oferece contas do
+Antigravity por **HOME isolado** (Configurações → Provedores e Contas). Resultado das sondas:
+
+| Isolamento | Efeito |
+|---|---|
+| `GEMINI_HOME` + `AGY_ACP_FORCE_FILE_STORAGE=1` | o `agy` segue no login do sistema |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` (+ Vertex) por variável | ignoradas; o `agy` pede login Google |
+| HOME vazio | pede login |
+| HOME com o home real ligado por link, menos `.gemini` | usa o login do sistema (vem do Keychain, via `Library`) |
+| o mesmo, menos `.gemini` e `Library` | pede login (isolado) |
+
+Por isso a conta é um HOME próprio (`accounts/antigravity_home.rs`): o resto do home real entra por link
+(git, ssh, npm continuam funcionando) e `.gemini`/`Library` ficam de fora. O login é o fluxo oficial do
+`agy` num terminal da ADE; a ADE não lê nem guarda credencial (o marcador de login é só conferido por
+existência). Vale para terminais e conversas; a Frota continua no login do sistema (home temporário
+próprio). **Não verificado:** que um login feito dentro desse HOME persista (sem `Library/Keychains` não há
+chaveiro padrão; testar exige uma conta Google real) — a tela marca como experimental e "Verificar" roda
+`agy models` no ambiente da conta. Chave de API (Gemini / Vertex) não existe no `agy`: só no runtime ACP do
+T3. Windows/Linux: sem perfil (cofre diferente, não verificado).
+
 The current CLI's documented login uses the OS keyring and exposes a system
 session, not named OAuth profiles or a per-process account selector. A separate
 configuration home successfully reads the native permission file and queries

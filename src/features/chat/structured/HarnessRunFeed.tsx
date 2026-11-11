@@ -1,3 +1,5 @@
+import { formatClock, type TimeFormat } from "@/shared/timeFormat";
+import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
@@ -98,10 +100,11 @@ function nodeColor(node: HarnessExecutionNode, childStatus?: string): string {
 }
 
 /** Hora curta de um evento ou nó. */
-const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+const clock = (ms: number, format: TimeFormat) => formatClock(ms, format, undefined);
 
 /** Árvore comum do harness: threads, turnos estruturados e tarefas headless da Frota. */
 export function HarnessRunFeed({ threadId }: { threadId: string }) {
+  const timeFormat = useDisplayPrefs().timeFormat;
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [childSnapshots, setChildSnapshots] = useState<Record<string, ChildSnapshot>>({});
@@ -277,7 +280,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
         className="flex min-w-0 items-baseline gap-2 border-b border-gray-200 py-1 last:border-0 dark:border-white/[0.06]"
       >
         <span className="w-12 shrink-0 text-right text-[10px] text-gray-400">
-          {new Date(event.createdAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+          {formatClock(event.createdAt, timeFormat, undefined, true)}
         </span>
         <span className="shrink-0 text-chat-note text-gray-500 dark:text-white/50">
           {t(`chat.harness.semantic.${event.kind}`, { defaultValue: event.kind })}
@@ -347,7 +350,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
       >
         {finalLabel !== null
           ? <div className="font-medium text-gray-700 dark:text-white/75">{t("chat.harness.detail.finalState", { state: finalLabel })}</div>
-          : <div>{t("chat.harness.detail.running", { time: clock(node.startedAt ?? node.createdAt) })}</div>}
+          : <div>{t("chat.harness.detail.running", { time: clock(node.startedAt ?? node.createdAt, timeFormat) })}</div>}
         {node.interruptionReason && <div>{t("chat.harness.detail.interruption", { reason: node.interruptionReason })}</div>}
         {node.outcomeUnknown && <div className="text-amber-700 dark:text-amber-400">{t("chat.harness.detail.unknownHint")}</div>}
         {node.result && renderResult(node.result)}
@@ -382,7 +385,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
       ? t(`chat.harness.blocked.${node.blocked.kind}`)
       : pending > 0 ? t("chat.harness.childStatus.waiting") : null;
     const label = node.kind === "turn"
-      ? `${t("chat.harness.turnTitle")} · ${clock(node.createdAt)}`
+      ? `${t("chat.harness.turnTitle")} · ${clock(node.createdAt, timeFormat)}`
       : node.kind === "fleetAttempt"
         ? t("chat.harness.attemptTitle", { count: node.attempt ?? 1 })
         : node.kind === "fleetTask" ? node.planKey || node.title : node.title;

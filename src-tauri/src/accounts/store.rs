@@ -200,6 +200,13 @@ fn account_env_from_row(
     // La variable sale del provider. Sin perfil (Gemini, Kimi, una TUI desconocida) no hay
     // mapa: no se hereda el de otra.
     let mut env = crate::agents::adapter_for(agent_id)?.account_env(dir)?;
+    // Antigravity: a conta é um HOME inteiro; é montado aqui, uma vez por lançamento, e nunca
+    // apaga nada (ver `antigravity_home`). Sem isso o PTY abriria num HOME sem git nem ssh.
+    if agent_id == "antigravity" {
+        if let Some(home) = dirs::home_dir() {
+            let _ = super::antigravity_home::prepare(&home, std::path::Path::new(dir));
+        }
+    }
     // El llavero se lee FUERA del lock de la base: puede tardar (D-Bus, Keychain).
     if AccountKind::parse(kind) == AccountKind::ApiKey && agent_id == "claude-code" {
         // Sin la key (borrada del llavero por fuera) la cuenta no se lanza: arrancaría con

@@ -309,10 +309,24 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     if let Ok(mut map) = sessions().lock() {
         map.insert(thread_id.to_string(), session.clone());
     }
+    announce_skills(app, &session, thread_id, &row.cwd);
     if let Some(reason) = opened.lost {
         turn::save_notice(app, db, thread_id, "resumeLost", &resume::lost_notice(&reason));
     }
     Ok(session)
+}
+
+/// Pede ao app-server os skills que valem para o cwd e manda a lista ao composer (`commands`). Só leitura, em
+/// segundo plano: a conversa não espera por isso. Se falhar, a varredura do disco cobre o intervalo.
+fn announce_skills(app: &AppHandle, session: &Arc<Session>, thread_id: &str, cwd: &str) {
+    let (app, session) = (app.clone(), Arc::clone(session));
+    let (thread_id, cwd) = (thread_id.to_string(), cwd.to_string());
+    tauri::async_runtime::spawn(async move {
+        if let Ok(response) = session.request("skills/list", json!({ "cwds": [cwd] })).await {
+            let commands = codex_map::skills_list_commands(&response, &cwd);
+            emit(&app, &thread_id, "commands", json!({ "commands": commands }));
+        }
+    });
 }
 
 /// Um processo novo com o `initialize` feito. Fecha o processo se o `initialize` falha.
@@ -363,6 +377,56 @@ fn resume_failure(failure: RequestFailure) -> resume::ResumeFailure {
         RequestFailure::NotSent(m) => resume::ResumeFailure::Transient(m),
         RequestFailure::Lost(m) => resume::classify(&m),
     }
+}
+
+/// Os parâmetros do `thread/fork`: a thread de origem, o ponto estável (`lastTurnId`, inclusivo, de um turno já
+/// terminado; sem ele, o fim da thread) e a configuração da thread nova (pasta, permissão, modelo). `excludeTurns`:
+/// a tela já tem o histórico. Pura.
+pub(super) fn fork_params(row: &store::ThreadRow, from: &str, last_turn_id: Option<&str>) -> Value {
+    let (approval, sandbox) = codex_map::access_policy(&row.access);
+    let mut params = json!({ "threadId": from, "cwd": row.cwd, "approvalPolicy": approval, "sandbox": sandbox, "excludeTurns": true });
+    if let Some(turn) = last_turn_id.filter(|t| !t.is_empty()) {
+        params["lastTurnId"] = json!(turn);
+    }
+    if let Some(model) = &row.model {
+        params["model"] = json!(model);
+    }
+    params
+}
+
+/// Abre a conversa `thread_id` como **fork** da thread `from` (a da conversa de origem) até `last_turn_id`: a
+/// pergunta lateral nasce como cópia dela num ponto estável. A origem não é tocada (o `thread/fork` lê a thread do
+/// disco e cria outra). Falhou: nada muda na conversa (quem chama cai no recorte do histórico).
+pub async fn open_forked(app: &AppHandle, db: &DbConnection, thread_id: &str, from: &str, last_turn_id: Option<&str>) -> Result<(), String> {
+    let gate = resume::start_gate("codex", thread_id);
+    let _guard = gate.lock().await;
+    if get(thread_id).is_some() {
+        return Err("A conversa já tem sessão".into());
+    }
+    let row = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
+    };
+    let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
+    let session = started(app, db, &row, env).await?;
+    let result = session.request("thread/fork", fork_params(&row, from, last_turn_id)).await.inspect_err(|_| session.kill())?;
+    let id = match thread_id_of(&result) {
+        Ok(id) => id,
+        Err(e) => {
+            session.kill();
+            return Err(e);
+        }
+    };
+    if let Ok(conn) = db.lock() {
+        let _ = store::set_remote_id(&conn, thread_id, &id);
+    }
+    if let Ok(mut r) = session.remote.lock() {
+        *r = Some(id);
+    }
+    if let Ok(mut map) = sessions().lock() {
+        map.insert(thread_id.to_string(), session);
+    }
+    Ok(())
 }
 
 /// Um processo novo com uma thread nova.

@@ -1,7 +1,5 @@
-//! O perfil do Firefox: onde ficam os perfis e como ler os cookies sem tocar no original.
-//!
-//! Só o Firefox entra nesta fatia. O Chromium cifra os cookies com uma chave amarrada ao app
-//! (App-Bound Encryption no Windows) e o Safari exige Acesso Total ao Disco: nenhum dos dois é lido aqui.
+//! Os perfis do Firefox (e do Zen, que usa o mesmo formato) e a leitura dos cookies sem tocar no original.
+//! O Chromium está em `chromium.rs` e o Safari em `safari.rs`.
 //!
 //! Leitura: o `cookies.sqlite` (e o `-wal`, se existir) é copiado para uma pasta temporária
 //! privada, e só a cópia é aberta, em modo somente leitura. O original não recebe nada: nem `-wal`,
@@ -12,7 +10,8 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags};
 
 use super::super::log::SetCookie;
-use super::{normalize_domain, ImportError};
+use super::copy::{copy_file, TempCopy};
+use super::{normalize_domain, Candidate, ImportError, Reading};
 
 /// Os arquivos de bloqueio do Firefox dentro da pasta do perfil. `parent.lock` aparece no Windows
 /// e no macOS; `.parentlock`, no Linux. A conferência olha os dois, em qualquer sistema.
@@ -30,22 +29,6 @@ pub(crate) struct Profile {
     pub id: String,
     pub name: String,
     pub dir: PathBuf,
-}
-
-/// Um cookie que pode entrar: o domínio e o cookie, ainda sem origem nem momento de importação.
-#[derive(Clone, Debug)]
-pub(crate) struct Candidate {
-    pub domain: String,
-    pub secure: bool,
-    pub cookie: SetCookie,
-}
-
-/// O que se leu de um perfil: os cookies que podem entrar e quantos ficaram de fora (particionados
-/// ou de outro contêiner).
-#[derive(Debug)]
-pub(crate) struct Reading {
-    pub cookies: Vec<Candidate>,
-    pub ignored: usize,
 }
 
 /// Uma fila crua de `moz_cookies`, antes da classificação.
@@ -69,22 +52,6 @@ pub(crate) enum Classified {
     Dropped,
 }
 
-/// A pasta padrão dos perfis do Firefox neste sistema.
-#[cfg(target_os = "macos")]
-pub(crate) fn firefox_root() -> Option<PathBuf> {
-    dirs::data_dir().map(|dir| dir.join("Firefox"))
-}
-
-#[cfg(windows)]
-pub(crate) fn firefox_root() -> Option<PathBuf> {
-    dirs::data_dir().map(|dir| dir.join("Mozilla").join("Firefox"))
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-pub(crate) fn firefox_root() -> Option<PathBuf> {
-    dirs::home_dir().map(|dir| dir.join(".mozilla").join("firefox"))
-}
-
 /// Os perfis que o `profiles.ini` da raiz declara. Sem o arquivo, não há perfis (e não é erro).
 pub(crate) fn profiles(root: &Path) -> Result<Vec<Profile>, ImportError> {
     let text = match std::fs::read_to_string(root.join("profiles.ini")) {
@@ -98,6 +65,10 @@ pub(crate) fn profiles(root: &Path) -> Result<Vec<Profile>, ImportError> {
         .filter_map(|(section, pairs)| {
             let path = value(&pairs, "Path")?;
             let relative = value(&pairs, "IsRelative") != Some("0");
+            // Um caminho relativo com `..` escaparia da pasta do navegador.
+            if relative && !super::sources::stays_inside(Path::new(path)) {
+                return None;
+            }
             let dir = if relative { root.join(path) } else { PathBuf::from(path) };
             let name = value(&pairs, "Name").filter(|n| !n.is_empty()).unwrap_or(&section).to_string();
             Some(Profile { id: section, name, dir })
@@ -105,6 +76,7 @@ pub(crate) fn profiles(root: &Path) -> Result<Vec<Profile>, ImportError> {
         .collect())
 }
 
+#[cfg(test)]
 /// O perfil com esse id. Só aceita um id que o `profiles.ini` declara: o caminho nunca vem do chamador.
 pub(crate) fn find_profile(root: &Path, id: &str) -> Result<Profile, ImportError> {
     profiles(root)?
@@ -178,7 +150,6 @@ pub(crate) fn read_profile_cookies(
         return Err(ImportError::new("no-cookies"));
     }
     confirm_closed(dir, in_use)?;
-    std::fs::create_dir_all(tmp_root).map_err(|e| ImportError::new("unreadable").with(e.to_string()))?;
     let copy = TempCopy::create(tmp_root)?;
     copy_file(&dir.join(COOKIES), &copy.path().join(COOKIES))?;
     if dir.join(COOKIES_WAL).is_file() {
@@ -195,48 +166,6 @@ fn confirm_closed(dir: &Path, in_use: &dyn Fn(&Path) -> Result<bool, String>) ->
         Ok(true) => Err(ImportError::new("browser-running")),
         Err(detail) => Err(ImportError::new("lock-unknown").with(detail)),
     }
-}
-
-/// Uma pasta temporária privada, que se apaga ao sair de escopo, também quando algo falha.
-struct TempCopy(PathBuf);
-
-impl TempCopy {
-    fn create(root: &Path) -> Result<Self, ImportError> {
-        let path = root.join(format!("ade-ags-importar-{}", uuid::Uuid::new_v4()));
-        let mut builder = std::fs::DirBuilder::new();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
-        }
-        builder.create(&path).map_err(|e| ImportError::new("unreadable").with(e.to_string()))?;
-        Ok(Self(path))
-    }
-
-    fn path(&self) -> &Path {
-        &self.0
-    }
-}
-
-impl Drop for TempCopy {
-    fn drop(&mut self) {
-        if let Err(e) = std::fs::remove_dir_all(&self.0)
-            && e.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!("[preview] não foi possível apagar a cópia temporária da importação: {e}");
-        }
-    }
-}
-
-fn copy_file(from: &Path, to: &Path) -> Result<(), ImportError> {
-    std::fs::copy(from, to).map_err(|e| ImportError::new("unreadable").with(e.to_string()))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(to, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| ImportError::new("unreadable").with(e.to_string()))?;
-    }
-    Ok(())
 }
 
 /// Lê `moz_cookies` da cópia, em modo somente leitura. Usa `isPartitionedAttributeSet` só se a
@@ -287,7 +216,7 @@ fn text(row: &rusqlite::Row<'_>, index: usize) -> rusqlite::Result<String> {
 }
 
 fn classify_all(rows: Vec<RawRow>, now_secs: i64) -> Reading {
-    let mut reading = Reading { cookies: Vec::new(), ignored: 0 };
+    let mut reading = Reading::default();
     for row in rows {
         match classify(row, now_secs) {
             Classified::Keep(candidate) => reading.cookies.push(candidate),

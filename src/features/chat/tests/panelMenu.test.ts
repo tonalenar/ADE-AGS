@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { entryForKey, matchTeamShortcut, MORE_ENTRIES, PANEL_ENTRIES, ROW_CHOICES, type Chord } from "@/features/chat/panelMenu";
+import { entryForKey, matchTeamShortcut, MENU_ENTRIES, PANEL_ENTRIES, type Chord } from "@/features/chat/panelMenu";
 
 const ALL = { terminal: true, pr: false };
 const key = (k: string, mods: object = {}) => ({ key: k, ...mods });
@@ -12,7 +12,10 @@ describe("o menu Abrir uma superfície", () => {
     expect(entryForKey(key("b"), ALL)?.id).toBe("browser");
     expect(entryForKey(key("D"), ALL)?.id).toBe("diff");
     expect(entryForKey(key("o"), ALL)?.id).toBe("team");
-    expect(entryForKey(key("i"), ALL)?.id).toBe("ios");
+    // As letras do T3: M é o Device (iOS por padrão), S o Side chat.
+    expect(entryForKey(key("m"), ALL)?.id).toBe("ios");
+    expect(entryForKey(key("s"), { ...ALL, side: true })?.id).toBe("side");
+    expect(entryForKey(key("e"), ALL)?.id).toBe("design");
   });
 
   it("linha esmaecida e tecla com modificador não fazem nada", () => {
@@ -39,14 +42,14 @@ describe("o atalho do painel Time", () => {
   });
 });
 
-describe("a fileira de ícones do painel", () => {
-  it("tem Resumo, Terminal, Diff, Navegador, Aparelho, Arquivos e Time; o resto vai para o ⋯", () => {
-    // O Time fica à mostra com os demais (antes ficava escondido no ⋯).
-    expect(ROW_CHOICES).toEqual(["summary", "terminal", "diff", "browser", "ios", "files", "team"]);
-    expect(MORE_ENTRIES.map((e) => e.id)).toEqual(["design", "android", "pr", "side"]);
+describe("as linhas do menu do + da coluna", () => {
+  it("seguem a ordem e as letras do T3 (B T F D P M S) e as do ADE (E, O, H, G); sem Resumo nem Android (submenu)", () => {
+    expect(MENU_ENTRIES.map((e) => `${e.id}:${e.key}`)).toEqual(["browser:b", "terminal:t", "files:f", "diff:d", "pr:p", "ios:m", "side:s", "design:e", "team:o", "renders:h", "snapshots:g"]);
   });
-  it("nada some: fileira e ⋯ juntos são todas as linhas do menu, sem repetir", () => {
-    const all = [...ROW_CHOICES, ...MORE_ENTRIES.map((e) => e.id)].sort();
-    expect(all).toEqual(PANEL_ENTRIES.map((e) => e.id).sort());
+  it("o Android e o Resumo ficam fora do menu mas existem (o Resumo no cabeçalho, o Android no submenu do Device)", () => {
+    expect(MENU_ENTRIES.some((e) => e.id === "android" || e.id === "summary")).toBe(false);
+    expect(PANEL_ENTRIES.map((e) => e.id)).toEqual(expect.arrayContaining(["summary", "android"]));
+    expect(entryForKey(key("a"), ALL)).toBeNull();
+    expect(entryForKey(key("r"), ALL)).toBeNull();
   });
 });

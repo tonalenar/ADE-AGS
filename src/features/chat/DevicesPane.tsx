@@ -37,8 +37,8 @@ import { usePopover } from "./usePopover";
 
 /*
  * As abas de aparelho do painel direito (pranchetas 9 e 10): o simulador iOS e o Android ao lado da
- * conversa, os mesmos do canvas. Em cima, o aparelho e o estado; no meio, o aparelho numa moldura com
- * os controles à direita; embaixo, a chave que libera os agentes (`ags device`). O iOS é a tela nativa
+ * conversa, os mesmos do canvas. Em cima, o aparelho e o estado; no meio, o aparelho numa moldura; abaixo,
+ * uma barra única de controles e a chave que libera os agentes (`ags device`). O iOS é a tela nativa
  * (`SimulatorScreen`, sem copiar quadros); o Android, quadros do `adb` com toque e deslizar.
  */
 
@@ -187,6 +187,9 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
   const [bundle, setBundle] = useState<string | null>(null);
   const [landscape, setLandscape] = useState(false);
   const [dark, setDark] = useState<boolean | null>(null);
+  const [zoom, setZoom] = useState<number | "actual">(1);
+  const [fullscreen, setFullscreen] = useState(false);
+  const paneRef = useRef<HTMLDivElement>(null);
   const { ref, size } = useBoxSize();
   const probeSimulator = shouldProbeDevices(true, DESKTOP_OS, "ios-simulator");
   useEffect(() => { if (probeSimulator) void refreshDevices(); }, [probeSimulator]);
@@ -197,6 +200,11 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
   useEffect(() => { setPanelDevice("ios", udid, current?.name ?? null); }, [udid, current?.name]);
 
   const fail = useCallback((e: unknown) => { void AlertaToast(current?.name ?? t("chat.panel.ios"), String(e), "error", 5000); }, [current?.name, t]);
+  useEffect(() => {
+    const update = () => setFullscreen(document.fullscreenElement === paneRef.current);
+    document.addEventListener("fullscreenchange", update);
+    return () => document.removeEventListener("fullscreenchange", update);
+  }, []);
 
   // Consulta o app ao abrir, trocar aparelho, reabrir app e devolver foco à janela.
   useEffect(() => {
@@ -231,10 +239,37 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
 
   const screen: Size = current && current.width > 0 ? { w: current.width, h: current.height } : { w: DEFAULT_SCREEN.width, h: DEFAULT_SCREEN.height };
   const shown = landscape ? { w: screen.h, h: screen.w } : screen;
-  const frame = deviceFrame(current?.family === "ipad" ? "ipad" : "ios", shown, { w: size.w - 40, h: size.h - 40 });
+  const look = current?.family === "ipad" ? "ipad" : "ios";
+  const fitFrame = deviceFrame(look, shown, { w: size.w - 40, h: size.h - 24 });
+  const frame = zoom === "actual" ? (() => {
+    const padRatio = fitFrame.outerW > 0 ? fitFrame.pad / fitFrame.outerW : 0;
+    const bezelRatio = padRatio / Math.max(0.01, 1 - 2 * padRatio);
+    const pad = shown.w * bezelRatio;
+    const width = shown.w + 2 * pad;
+    const height = shown.h + 2 * pad;
+    const roundRatio = (value: number) => fitFrame.outerW > 0 ? value / fitFrame.outerW : 0;
+    return { outerW: width, outerH: height, pad, outerRadius: width * roundRatio(fitFrame.outerRadius), screenRadius: width * roundRatio(fitFrame.screenRadius) };
+  })() : {
+    ...fitFrame,
+    outerW: fitFrame.outerW * zoom,
+    outerH: fitFrame.outerH * zoom,
+    pad: fitFrame.pad * zoom,
+    outerRadius: fitFrame.outerRadius * zoom,
+    screenRadius: fitFrame.screenRadius * zoom,
+  };
+  const toggleFullscreen = () => {
+    const pane = paneRef.current;
+    if (!pane) return;
+    if (document.fullscreenElement === pane) void document.exitFullscreen().catch(fail);
+    else void pane.requestFullscreen().catch(fail);
+  };
+  const scaleZoom = (direction: 1 | -1) => setZoom((value) => {
+    const currentZoom = value === "actual" ? 1 : value;
+    return Math.round(Math.min(2, Math.max(0.25, currentZoom + direction * 0.1)) * 100) / 100;
+  });
 
   return (
-    <div className="h-full flex flex-col">
+    <div ref={paneRef} className="h-full flex flex-col bg-white dark:bg-surface-deep">
       <PaneToolbar>
         <IosPicker devices={devices} current={current} loaded={loaded} />
         {current && <StatusDot on={booted} label={booting ? t("simulator.booting") : booted ? t("chat.devices.on") : t("chat.devices.off")} />}
@@ -249,10 +284,11 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
       </PaneToolbar>
 
       <div className="flex-1 min-h-0 flex bg-gray-100 dark:bg-white/[0.02]">
-        <div ref={ref} className="flex-1 min-w-0 flex items-center justify-center p-5">
+        <div ref={ref} className="flex-1 min-w-0 overflow-auto cc-scroll">
           {error ? <p className="text-chat-note text-gray-500 dark:text-white/45">{error}</p> : !current ? (
             <p className="max-w-[260px] text-center text-chat-note text-gray-500 dark:text-white/45">{!probeSimulator ? t("chat.devices.unsupported.iosHost") : loaded ? t("chat.devices.noIos") : t("chat.panel.loading")}</p>
-          ) : frame.outerW > 0 && (
+          ) : size.w > 0 && size.h > 0 && frame.outerW > 0 && (
+            <div className="flex min-h-full min-w-full w-max items-center justify-center p-5">
             <div className="shrink-0 box-border bg-gray-900 shadow-[0_0_0_2px_rgba(58,58,60,1),0_24px_48px_-20px_rgba(0,0,0,0.45)]"
               style={{ width: frame.outerW, height: frame.outerH, padding: frame.pad, borderRadius: frame.outerRadius }}>
               <div className={`relative h-full w-full overflow-hidden ${booted ? "bg-black" : "bg-gray-100 dark:bg-black"}`} style={{ borderRadius: frame.screenRadius }}>
@@ -273,10 +309,13 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
                 )}
               </div>
             </div>
+            </div>
           )}
         </div>
+      </div>
 
-        <DeviceNav label={t("chat.devices.controls")}>
+      <div className="shrink-0 border-t border-gray-200 bg-white px-2 py-2 dark:border-white/[0.08] dark:bg-surface-deep">
+        <nav role="toolbar" aria-label={t("chat.devices.controls")} className="flex max-w-full flex-wrap items-center justify-center gap-0.5 rounded-2xl">
           <NavButton label={deviceAction("ios-simulator", "home", booted, t("chat.devices.home"), t).label} disabled={deviceAction("ios-simulator", "home", booted, t("chat.devices.home"), t).disabled} onClick={() => udid && run(simulatorButton(udid, "home"))}><HomeIcon className="w-[17px] h-[17px]" /></NavButton>
           <NavButton label={deviceAction("ios-simulator", "rotate", booted, t("chat.devices.rotate"), t).label} disabled={deviceAction("ios-simulator", "rotate", booted, t("chat.devices.rotate"), t).disabled}
             onClick={() => udid && simulatorRotate(udid, landscape ? "right" : "left").then((o) => setLandscape(o.startsWith("landscape"))).catch(fail)}>
@@ -299,13 +338,21 @@ function SimulatorPane({ composerTarget }: { composerTarget?: string | null }) {
           <NavButton label={deviceAction("ios-simulator", "keyboard", booted, t("chat.devices.keyboard"), t).label} disabled={deviceAction("ios-simulator", "keyboard", booted, t("chat.devices.keyboard"), t).disabled} pop={(close) => udid && <TypePop udid={udid} onDone={close} onError={fail} />}>
             <KeyboardIcon className="w-[17px] h-[17px]" />
           </NavButton>
-          <span className="flex-1" />
-          <NavButton anchor="bottom" label={t("chat.devices.more")} disabled={!current} pop={(close) => current && (
+          <span aria-hidden="true" className="mx-1 h-5 w-px bg-gray-200 dark:bg-white/10" />
+          <button type="button" className={ibCls} title={t("iphone.zoom.out")} aria-label={t("iphone.zoom.out")} onClick={() => scaleZoom(-1)}>−</button>
+          <span className="min-w-9 text-center font-mono text-[10.5px] tabular-nums text-gray-500 dark:text-white/50">{zoom === "actual" ? "1:1" : `${Math.round(zoom * 100)}%`}</span>
+          <button type="button" className={ibCls} title={t("iphone.zoom.in")} aria-label={t("iphone.zoom.in")} onClick={() => scaleZoom(1)}>+</button>
+          <button type="button" className={`${ibCls} ${zoom === 1 ? "bg-gray-100 dark:bg-white/[0.06] text-gray-900 dark:text-white" : ""}`} aria-pressed={zoom === 1} title={t("iphone.zoom.fit")} aria-label={t("iphone.zoom.fit")} onClick={() => setZoom(1)}>{t("iphone.zoom.fitShort")}</button>
+          <button type="button" className={`${ibCls} ${zoom === "actual" ? "bg-gray-100 dark:bg-white/[0.06] text-gray-900 dark:text-white" : ""}`} aria-pressed={zoom === "actual"} title={t("iphone.zoom.actual")} aria-label={t("iphone.zoom.actual")} onClick={() => setZoom("actual")}>1:1</button>
+          <button type="button" className={ibCls} title={t(fullscreen ? "iphone.fullscreen.exit" : "iphone.fullscreen.enter")} aria-label={t(fullscreen ? "iphone.fullscreen.exit" : "iphone.fullscreen.enter")} aria-pressed={fullscreen} onClick={toggleFullscreen}>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3" /></svg>
+          </button>
+          <NavButton label={t("chat.devices.more")} disabled={!current} pop={(close) => current && (
             <IosMore device={current} booted={booted} onBoot={() => { close(); void boot(); }} onDone={close} onError={fail} />
           )}>
             <MoreVerticalIcon className="w-[17px] h-[17px]" />
           </NavButton>
-        </DeviceNav>
+        </nav>
       </div>
       <AgentControlFooter hint="ios" />
     </div>

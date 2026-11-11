@@ -14,8 +14,8 @@ use super::{apply_profile, normalize_domain, origins_for, review_profile, Domain
 use crate::preview::site::{key_result_from, KeyStore, SealKey, Site};
 
 /// "Agora", em segundos. As datas das filas são relativas a este instante.
-const AHORA: i64 = 1_900_000_000;
-const AHORA_MS: i64 = AHORA * 1000;
+pub(super) const AHORA: i64 = 1_900_000_000;
+pub(super) const AHORA_MS: i64 = AHORA * 1000;
 
 /// Valores que nunca podem aparecer fora do estado cifrado.
 const SECRETO_GITHUB: &str = "sessao-github-SEGREDO-7f3a";
@@ -58,7 +58,7 @@ fn insertar(conn: &Connection, filas: &[Fila]) {
 }
 
 /// Un directorio temporario único para esta prueba.
-fn lugar(tag: &str) -> PathBuf {
+pub(super) fn lugar(tag: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("ade-ags-importar-{tag}-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&dir).unwrap();
     dir
@@ -77,12 +77,12 @@ fn perfil(tag: &str, filas: &[Fila]) -> (PathBuf, PathBuf) {
     (raiz, dir)
 }
 
-fn vacio(dir: &Path) -> bool {
+pub(super) fn vacio(dir: &Path) -> bool {
     std::fs::read_dir(dir).unwrap().next().is_none()
 }
 
 /// Nombre y contenido de cada archivo de un directorio, para comparar antes y después.
-fn retrato(dir: &Path) -> Vec<(String, Vec<u8>)> {
+pub(super) fn retrato(dir: &Path) -> Vec<(String, Vec<u8>)> {
     let mut archivos: Vec<(String, Vec<u8>)> = std::fs::read_dir(dir)
         .unwrap()
         .map(|entrada| {
@@ -94,15 +94,15 @@ fn retrato(dir: &Path) -> Vec<(String, Vec<u8>)> {
     archivos
 }
 
-fn contiene(bytes: &[u8], texto: &str) -> bool {
+pub(super) fn contiene(bytes: &[u8], texto: &str) -> bool {
     bytes.windows(texto.len()).any(|w| w == texto.as_bytes())
 }
 
-fn cerrado(_: &Path) -> Result<bool, String> {
+pub(super) fn cerrado(_: &Path) -> Result<bool, String> {
     Ok(false)
 }
 
-fn abierto(_: &Path) -> Result<bool, String> {
+pub(super) fn abierto(_: &Path) -> Result<bool, String> {
     Ok(true)
 }
 
@@ -128,19 +128,19 @@ impl KeyStore for LlaveroFalso {
 }
 
 /// Los sitios de una prueba: uno por origen, abiertos en `dir` con la misma clave. Se recuerdan para mirarlos.
-struct Sitios {
+pub(super) struct Sitios {
     dir: PathBuf,
-    clave: Arc<SealKey>,
+    pub(super) clave: Arc<SealKey>,
     mapa: RefCell<HashMap<String, Arc<Site>>>,
 }
 
 impl Sitios {
-    fn nuevo(dir: PathBuf) -> Self {
+    pub(super) fn nuevo(dir: PathBuf) -> Self {
         let clave = key_result_from(&LlaveroFalso::default()).unwrap();
         Self { dir, clave, mapa: RefCell::new(HashMap::new()) }
     }
 
-    fn sitio(&self, origen: &str) -> Arc<Site> {
+    pub(super) fn sitio(&self, origen: &str) -> Arc<Site> {
         self.mapa
             .borrow_mut()
             .entry(origen.to_string())
@@ -148,13 +148,13 @@ impl Sitios {
             .clone()
     }
 
-    fn origenes(&self) -> Vec<String> {
+    pub(super) fn origenes(&self) -> Vec<String> {
         let mut origenes: Vec<String> = self.mapa.borrow().keys().cloned().collect();
         origenes.sort();
         origenes
     }
 
-    fn nombres(&self, origen: &str, ahora: i64) -> Vec<String> {
+    pub(super) fn nombres(&self, origen: &str, ahora: i64) -> Vec<String> {
         let mut nombres: Vec<String> = self.sitio(origen).cookies(ahora).into_iter().map(|c| c.name).collect();
         nombres.sort();
         nombres

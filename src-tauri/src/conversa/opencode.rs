@@ -906,3 +906,19 @@ pub fn answer(session: &Session, rpc_id: &Value, item_id: Option<&str>, options:
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod slash_command_tests {
+    use super::provider_commands;
+    use serde_json::json;
+
+    #[test]
+    fn evento_acp_available_commands_do_antigravity_alimenta_o_menu() {
+        let event: serde_json::Value = serde_json::from_str(include_str!("fixtures/acp/antigravity-available-commands.json")).unwrap();
+        let update = event.pointer("/params/update").unwrap();
+        assert_eq!(provider_commands(update), Some(vec![
+            json!({"name":"review","description":"Review changes","inputHint":"files or diff"}),
+            json!({"name":"explain","description":"Explain a concept","inputHint":null}),
+        ]));
+    }
+}

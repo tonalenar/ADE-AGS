@@ -14,23 +14,26 @@ const MAX_EXTRA_MEMBERS: usize = 24;
 const SQUAD_COLUMNS: &str = "id, name, description, lead_agent_id, lead_model, lead_account_id, \
                              lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort, fast_mode, \n                             subagent_agent_id, subagent_model, subagent_effort, subagent_fast, extra_members";
 
-pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Complexity>, effort: Option<&str>) -> Result<(), String> {
+pub(crate) fn validate_effort_input(agent_id: Option<&str>, model: Option<&str>, complexity: Option<Complexity>, effort: Option<&str>) -> Result<(), String> {
     if let Some(effort) = effort {
-        if model.is_none() || complexity.is_some() {
+        if (model.is_none() && agent_id != Some("claude-code")) || complexity.is_some() {
             return Err("Explicit reasoning effort requires a specific model; complexity routing uses Automatic effort".into());
         }
-        if !matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra") {
+        if !matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra" | "ultrathink" | "ultracode") {
             return Err("Unknown reasoning effort".into());
         }
     }
     Ok(())
 }
 
-/// El modo Fast es un `service_tier` de Codex: en otro agente no existe y se rechaza en vez
-/// de guardarlo y que quede sin efecto.
+/// Fast só pode ser salvo nas superfícies em que a matriz declara suporte.
 pub(crate) fn validate_fast_input(agent_id: &str, fast: bool) -> Result<(), String> {
-    if fast && !crate::agents::adapter_for(agent_id).is_some_and(|adapter| adapter.supports_fast_mode()) {
-        return Err("Fast mode is only available for the Codex agent".into());
+    if fast && crate::harness::matrix::supports(
+        agent_id,
+        crate::harness::capability::Surface::Fleet,
+        crate::harness::capability::Capability::FastMode,
+    ) != Some(crate::harness::capability::Support::Supported) {
+        return Err("O modo Fast não é suportado para este provider nesta superfície".into());
     }
     Ok(())
 }
@@ -105,7 +108,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
     validate_fast_input(&lead.agent_id, lead.fast_mode).map_err(|error| format!("lead: {error}"))?;
     lead.model = clean(&lead.model);
     validate_desktop(&lead.agent_id, &lead.model, lead.complexity, &lead.reasoning_effort)?;
-    validate_effort_input(lead.model.as_deref(), lead.complexity, lead.reasoning_effort.as_deref())?;
+    validate_effort_input(Some(&lead.agent_id), lead.model.as_deref(), lead.complexity, lead.reasoning_effort.as_deref())?;
     if lead.model.is_some() && lead.complexity.is_some() {
         return Err("lead: specific model and complexity cannot be selected together".into());
     }
@@ -131,7 +134,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
         validate_fast_input(&member.agent_id, member.fast_mode).map_err(|error| format!("role '{}': {error}", member.role_id))?;
         member.model = clean(&member.model);
         validate_desktop(&member.agent_id, &member.model, member.complexity, &member.reasoning_effort)?;
-        validate_effort_input(member.model.as_deref(), member.complexity, member.reasoning_effort.as_deref())?;
+        validate_effort_input(Some(&member.agent_id), member.model.as_deref(), member.complexity, member.reasoning_effort.as_deref())?;
         if member.model.is_some() && member.complexity.is_some() {
             return Err(format!("role '{}': specific model and complexity cannot be selected together", member.role_id));
         }
@@ -199,7 +202,7 @@ fn validate_extra_members(
         }
         validate_fast_input(&agent_id, input.fast_mode).map_err(fail)?;
         let model = clean(&input.model);
-        validate_effort_input(model.as_deref(), input.complexity, input.reasoning_effort.as_deref())
+        validate_effort_input(Some(&agent_id), model.as_deref(), input.complexity, input.reasoning_effort.as_deref())
             .map_err(fail)?;
         if model.is_some() && input.complexity.is_some() {
             return Err(fail("specific model and complexity cannot be selected together".into()));
@@ -225,8 +228,8 @@ fn validate_extra_members(
     Ok(out)
 }
 
-/// El subagente padrão: un agente registrado, modelo opcional, esfuerzo solo con modelo
-/// explícito y Fast solo en Codex. `None` (Automático) es válido y es el valor por defecto.
+/// El subagente padrão: un agente registrado, modelo opcional y esfuerzo compatible con el
+/// modelo efectivo. `None` (Automático) es válido y es el valor por defecto.
 fn validate_subagent(input: Option<&SubagentDefault>) -> Result<Option<SubagentDefault>, String> {
     let Some(input) = input else { return Ok(None) };
     let agent_id = input.agent_id.trim().to_string();
@@ -238,7 +241,7 @@ fn validate_subagent(input: Option<&SubagentDefault>) -> Result<Option<SubagentD
     }
     let model = clean(&input.model);
     let reasoning_effort = clean(&input.reasoning_effort);
-    validate_effort_input(model.as_deref(), None, reasoning_effort.as_deref())
+    validate_effort_input(Some(&agent_id), model.as_deref(), None, reasoning_effort.as_deref())
         .map_err(|error| format!("default subagent: {error}"))?;
     validate_fast_input(&agent_id, input.fast_mode).map_err(|error| format!("default subagent: {error}"))?;
     Ok(Some(SubagentDefault { agent_id, model, reasoning_effort, fast_mode: input.fast_mode }))

@@ -9,7 +9,7 @@ import { hasOpenDialog } from "@/shared/ui/openDialog";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
 
 import { MinimizeIcon, SidebarIcon } from "./chatIcons";
-import { settingsLabelKey } from "./chatSettingsNav";
+import { SETTINGS_PAGE_LABEL_KEYS } from "@/features/settings/settingsNav";
 import { IconButton } from "./ChatSidebar";
 import { isSettingsRoute, spaceForPath } from "./chatSpaces";
 
@@ -46,7 +46,7 @@ export function ChatPage({ onClose, sidebarOpen, onExpandSidebar, fullscreen = f
 
   const settings = isSettingsRoute(pathname);
   const space = spaceForPath(pathname);
-  const title = settings ? t(settingsLabelKey(section)) : space ? t(space.labelKey) : null;
+  const title = settings ? t(SETTINGS_PAGE_LABEL_KEYS[section]) : space ? t(space.labelKey) : null;
 
   return (
     <main ref={frameRef} tabIndex={-1} className="relative flex-1 min-w-[360px] flex flex-col outline-none cc-fade">

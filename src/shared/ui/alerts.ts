@@ -20,16 +20,30 @@ function colors() {
   };
 }
 
-/** Um aviso curto no canto, que some sozinho. */
+/** Um botão no aviso: o clique roda `onClick` (o aviso fecha). */
+export interface AlertaToastAction {
+  label: string;
+  onClick: () => void;
+}
+
+/** Um aviso curto no canto, que some sozinho. Com `action`, ganha um botão (ex.: "Abrir conversa"). */
 export function AlertaToast(
   title: string,
   text: string,
   icon: SweetAlertIcon = "info",
   timer = 3000,
   position: SweetAlertPosition = "top-end",
+  action?: AlertaToastAction,
 ): Promise<SweetAlertResult> {
   return swal().then((Swal) =>
-    Swal.fire({ ...colors(), title, text, icon, toast: true, timer, position, showConfirmButton: false, timerProgressBar: true }),
+    Swal.fire({
+      ...colors(), title, text, icon, toast: true, timer, position, timerProgressBar: true,
+      showConfirmButton: !!action,
+      ...(action ? { confirmButtonText: action.label } : {}),
+    }).then((result) => {
+      if (action && result.isConfirmed) action.onClick();
+      return result;
+    }),
   );
 }
 
