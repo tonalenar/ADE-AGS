@@ -8,6 +8,7 @@ import { agentIcon } from "@/features/agents/agentIcons";
 import { ModelSearch } from "@/features/runs/ModelSearch";
 import { repoInfo } from "@/features/explorer/ipc";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
+import { findModel } from "@/features/squads/modelSelection";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { getRoster, previewRoute, type RouteInput, type StartOrchestrationInput, type StartTaskInput } from "./ipc";
@@ -91,8 +92,9 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
   );
 
   useEffect(() => {
-    if (models.length > 0 && !models.some((m) => m.id === fixedModel)) {
-      setFixedModel(models.find((m) => m.id === "sonnet")?.id ?? models[0].id);
+    // O padrão é o Sonnet vigente: a linha dele (`claude-sonnet-…`) leva o alias `sonnet`.
+    if (models.length > 0 && !findModel(models, fixedModel)) {
+      setFixedModel(findModel(models, "sonnet")?.id ?? models[0].id);
     }
   }, [models, fixedModel]);
 

@@ -8,7 +8,7 @@ import { DEFAULT_EFFORTS } from "@/features/canvas/tabTuning";
 import type { PickDraft } from "@/features/compare/types";
 import { getRoster, refreshRosterModels } from "@/features/runs/ipc";
 import type { Roster, RosterModel } from "@/features/runs/types";
-import { modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
+import { claudeEffortLevels, findModel, modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
 import type { AgentInfo } from "@/features/tabs/types";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { matrixProviderForAgent, readHarnessCapability, useHarnessCapability, type HarnessSurface } from "./harnessCapabilities";
@@ -107,13 +107,22 @@ function pickerCatalogOf(roster: Roster | null, agentId: string | null, account:
   return catalogOf(roster, agentId, account);
 }
 
+/**
+ * Os níveis que o seletor oferece para o modelo. No Claude vêm da linha do próprio modelo, o mesmo critério que o
+ * backend usa para aceitar o esforço: um modelo sem níveis não oferece esforço. O modelo padrão (sem linha) usa a lista padrão.
+ */
+function effortChoices(agentId: string | null, model: string | null, catalog: RosterModel[]): string[] {
+  if (agentId === "claude-code") return claudeEffortLevels(model, catalog) ?? DEFAULT_EFFORTS;
+  const supported = reasoningOptions(model, catalog);
+  return supported.length > 0 ? supported : DEFAULT_EFFORTS;
+}
+
 function effortsOf(agentId: string, model: string | null, catalog: RosterModel[], currentAgentId: string | null, providerConfig?: ProviderRuntimeConfig | null): string[] {
   if (agentId.startsWith("local-acp-")) {
     return agentId === currentAgentId ? (providerConfig?.effort?.options ?? []).map((option) => option.value) : [];
   }
   if (!hasEffort(agentId)) return [];
-  const supported = reasoningOptions(model, catalog);
-  return supported.length > 0 ? supported : DEFAULT_EFFORTS;
+  return effortChoices(agentId, model, catalog);
 }
 
 // ── Favoritos (preferência desta máquina) ─────────────────────────────
@@ -191,8 +200,9 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
   useHarnessCapability(harnessSurface, matrixProviderForAgent(tabAgent?.id), "start");
   const pools = usePools(tabAgent?.id ?? null);
   const current = pickerCatalogOf(roster, agent?.id ?? null, value.account, value.agentId, providerConfig);
-  const modelLabel = value.model ? current.find((m) => m.id === value.model)?.label || value.model : t("chat.model.default");
-  const selectedModel = current.find((m) => m.id === value.model) ?? null;
+  // O modelo salvo pode ser um alias (`opus`): a tela mostra a linha que ele resolve, com o nome e a versão dela.
+  const selectedModel = findModel(current, value.model) ?? null;
+  const modelLabel = value.model ? selectedModel?.label || value.model : t("chat.model.default");
   const efforts = agent ? effortsOf(agent.id, value.model, current, value.agentId, providerConfig) : [];
   const showReasoning = (!!permission || !!speed) && efforts.length > 0;
   const showFast = !!speed && fastModeSupported(agent?.id) && selectedModel?.fastSupported === true;
@@ -441,7 +451,7 @@ export function AgentModelPicker({ agents, value, onChange, shortcutHint, showAc
                 const prevGroup = i > 0 && rows[i - 1].agent.id === "opencode" ? rows[i - 1].model?.split("/")[0] : undefined;
                 const showGroup = !!group && (i === 0 || prevGroup !== group || !rows[i - 1].model?.includes("/"));
                 const RIcon = agentIcon(r.agent.id, r.agent.command);
-                const selected = r.agent.id === agent.id && r.model === value.model;
+                const selected = r.agent.id === agent.id && r.model === (selectedModel?.id ?? value.model);
                 const startAvailability = readHarnessCapability(harnessSurface, matrixProviderForAgent(r.agent.id) ?? "", "start");
                 const fav = !!r.model && favorites.includes(favKey(r.agent.id, r.model));
                 const compareIndex = comparePicks.findIndex((pick) => pick.agentId === r.agent.id && pick.model === r.model);
@@ -598,8 +608,7 @@ export function EffortMenu({ agentId, model, account, value, onChange, disabled 
   const { open, setOpen, ref } = usePopover();
   const { roster } = useRoster(reasoningEffortSupported(agentId), open);
   if (!reasoningEffortSupported(agentId)) return null;
-  const levels = reasoningOptions(model, catalogOf(roster, agentId, account));
-  const efforts = levels.length > 0 ? levels : DEFAULT_EFFORTS;
+  const efforts = effortChoices(agentId, model, catalogOf(roster, agentId, account));
   const label = (e: string) => t(`chat.effort.${e}`, { defaultValue: e });
   return (
     <div ref={ref} className="relative -ml-1.5">

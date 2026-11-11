@@ -296,6 +296,8 @@ export interface RosterModel {
   defaultReasoning: string | null;
   /** El modelo ofrece el modo Fast de Codex. `null` = el catálogo no lo informa. */
   fastSupported?: boolean | null;
+  /** Nombres de chamada que esta linha atende (Claude: `opus` → o Opus vigente). Vazio = nenhum. */
+  aliases?: string[] | null;
   unavailable: string | null;
 }
 

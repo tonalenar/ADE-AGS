@@ -2,6 +2,7 @@
  * Cómo se muestra el ruteo: las piezas puras que usan el diálogo de lanzar y los tramos de
  * Ajustes. Sin React, para poder probarlas.
  */
+import { findModel } from "@/features/squads/modelSelection";
 import type { Assignment, Complexity, ModelRef, Quota, Roster, RosterAgent, RosterModel } from "./types";
 
 export const COMPLEXITIES: Complexity[] = ["trivial", "standard", "hard"];
@@ -40,7 +41,7 @@ export interface AssignmentView {
 export function describeAssignment(roster: Roster | null, a: Assignment, now: number): AssignmentView {
   const agent = roster?.agents.find((x) => x.agentId === a.agentId);
   const account = agent?.accounts.find((x) => x.accountId === a.accountId);
-  const model = a.model === null ? null : (agent?.models.find((m) => m.id === a.model)?.label ?? a.model);
+  const model = a.model === null ? null : (findModel(agent?.models ?? [], a.model)?.label ?? a.model);
   return {
     agentLabel: agent?.label ?? a.agentId,
     model,

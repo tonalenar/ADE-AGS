@@ -8,7 +8,7 @@ import type { Roster } from "@/features/runs/types";
 import { isWorking } from "@/features/missions/stalled";
 import { FastSwitch } from "@/features/squads/FastSwitch";
 import { useSquadAccountLabel } from "@/features/squads/accountLabel";
-import { modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
+import { claudeEffortLevels, modelsForAccount, reasoningOptions } from "@/features/squads/modelSelection";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type Tab } from "@/features/tabs/types";
 import { screenOf } from "@/features/terminal/terminalRegistry";
@@ -66,8 +66,11 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
     [roster, tab.agentId, tab.accountId],
   );
   const efforts = useMemo(() => {
+    // Claude: os níveis vêm da linha do modelo (sem nível = sem esforço); sem modelo escolhido, a lista padrão.
     const known = reasoningOptions(before.model, catalog);
-    const base = known.length > 0 ? known : DEFAULT_EFFORTS;
+    const base = tab.agentId === "claude-code"
+      ? (claudeEffortLevels(before.model, catalog) ?? DEFAULT_EFFORTS)
+      : known.length > 0 ? known : DEFAULT_EFFORTS;
     return effort && !base.includes(effort) ? [...base, effort] : base;
   }, [before.model, catalog, effort]);
 
