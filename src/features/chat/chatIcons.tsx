@@ -75,18 +75,31 @@ export const PhoneIcon = (p: IconProps) => <Svg {...p}><rect x="7" y="2.5" width
 export const XIcon = (p: IconProps) => <Svg {...p}><path d="M18 6 6 18M6 6l12 12" /></Svg>;
 
 // Os controles dos aparelhos do painel (pranchetas 9 e 10).
-export const HomeIcon = (p: IconProps) => <Svg {...p}><path d="M3 11 12 4l9 7v9H5v-9" /></Svg>;
-export const ReloadIcon = (p: IconProps) => <Svg {...p}><path d="M20 11a8 8 0 0 0-14.5-4M4 4v3.5h3.5M4 13a8 8 0 0 0 14.5 4M20 20v-3.5h-3.5" /></Svg>;
-export const RotateIcon = (p: IconProps) => <Svg {...p}><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5" /></Svg>;
-export const CameraIcon = (p: IconProps) => <Svg {...p}><path d="M4 8h3l2-3h6l2 3h3v11H4Z" /><circle cx="12" cy="13" r="3.5" /></Svg>;
-export const ContrastIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="8" /><path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" /></Svg>;
-export const PinIcon = (p: IconProps) => <Svg {...p}><path d="M12 22s7-6.5 7-12a7 7 0 0 0-14 0c0 5.5 7 12 7 12Z" /><circle cx="12" cy="10" r="2.5" /></Svg>;
-export const FaceIdIcon = (p: IconProps) => <Svg {...p}><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M9 9v1M15 9v1M12 9v4h-1M9 16c1.5 1 4.5 1 6 0" /></Svg>;
-export const KeyboardIcon = (p: IconProps) => <Svg {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Svg>;
-export const BackTriangleIcon = (p: IconProps) => <Svg {...p}><path d="M17 5v14L6 12Z" /></Svg>;
-export const CircleIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="7" /></Svg>;
-export const SquareIcon = (p: IconProps) => <Svg {...p}><rect x="5" y="5" width="14" height="14" rx="2" /></Svg>;
-export const VolumeIcon = (p: IconProps) => <Svg {...p}><path d="M4 9h4l5-4v14l-5-4H4Z" /><path d="M17 9a4 4 0 0 1 0 6" /></Svg>;
+// Ícones dos aparelhos: desenhados no mesmo grid de 24 e traço dos demais, com cantos arredondados e proporções
+// alinhadas (a casa tem porta, a câmera tem lente centrada, os cantos de "ajustar" e "tela cheia" são simétricos).
+export const HomeIcon = (p: IconProps) => <Svg {...p}><path d="M3.5 10.2a1.5 1.5 0 0 1 .55-1.16l7-5.7a1.5 1.5 0 0 1 1.9 0l7 5.7a1.5 1.5 0 0 1 .55 1.16V19a2 2 0 0 1-2 2h-3.5v-6.5a1 1 0 0 0-1-1h-3a1 1 0 0 0-1 1V21H5.5a2 2 0 0 1-2-2Z" /></Svg>;
+export const ReloadIcon = (p: IconProps) => <Svg {...p}><path d="M3 12a9 9 0 0 1 15.4-6.3L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-15.4 6.3L3 16" /><path d="M8 16H3v5" /></Svg>;
+export const RotateIcon = (p: IconProps) => <Svg {...p}><path d="M21 12a9 9 0 1 1-2.64-6.36L21 8" /><path d="M21 3v5h-5" /></Svg>;
+export const CameraIcon = (p: IconProps) => <Svg {...p}><path d="M14.5 4h-5L7.5 7H4.5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h15a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3Z" /><circle cx="12" cy="13" r="3.25" /></Svg>;
+export const ContrastIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="9" /><path d="M12 3a9 9 0 0 1 0 18Z" fill="currentColor" stroke="none" /></Svg>;
+export const PinIcon = (p: IconProps) => <Svg {...p}><path d="M19.5 10c0 4.9-5.3 9.9-7 11.4a.8.8 0 0 1-1 0c-1.7-1.5-7-6.5-7-11.4a7.5 7.5 0 0 1 15 0Z" /><circle cx="12" cy="10" r="2.75" /></Svg>;
+export const FaceIdIcon = (p: IconProps) => <Svg {...p}><path d="M3 7.5V5.5a2.5 2.5 0 0 1 2.5-2.5h2M16.5 3h2A2.5 2.5 0 0 1 21 5.5v2M21 16.5v2a2.5 2.5 0 0 1-2.5 2.5h-2M7.5 21h-2A2.5 2.5 0 0 1 3 18.5v-2" /><path d="M9 9v1.25M15 9v1.25M12 9v3.75h-.75M9 15.5s1 1.25 3 1.25 3-1.25 3-1.25" /></Svg>;
+export const KeyboardIcon = (p: IconProps) => <Svg {...p}><rect x="2.5" y="5" width="19" height="14" rx="2.5" /><path d="M6.5 9h.01M10 9h.01M14 9h.01M17.5 9h.01M6.5 12.5h.01M10 12.5h.01M14 12.5h.01M17.5 12.5h.01M8 16h8" /></Svg>;
+export const BackTriangleIcon = (p: IconProps) => <Svg {...p}><path d="M16.5 5.3v13.4a1 1 0 0 1-1.55.83L5.9 13.08a1.3 1.3 0 0 1 0-2.16l9.05-6.45a1 1 0 0 1 1.55.83Z" /></Svg>;
+export const CircleIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="7.5" /></Svg>;
+export const SquareIcon = (p: IconProps) => <Svg {...p}><rect x="5" y="5" width="14" height="14" rx="2.5" /></Svg>;
+export const VolumeIcon = (p: IconProps) => <Svg {...p}><path d="M11 5.3a.6.6 0 0 0-1-.45L6.4 8H4a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2.4l3.6 3.15a.6.6 0 0 0 1-.45Z" /><path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /></Svg>;
+/** A troca de apps: o app da frente e os de trás, empilhados. */
+export const AppSwitcherIcon = (p: IconProps) => <Svg {...p}><rect x="9" y="3.5" width="12" height="17" rx="2.5" /><path d="M6 6v12M3 8v8" /></Svg>;
+export const RecordIcon = (p: IconProps) => <Svg {...p}><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="3.75" fill="currentColor" stroke="none" /></Svg>;
+export const PauseIcon = (p: IconProps) => <Svg {...p}><rect x="6.5" y="5" width="3.5" height="14" rx="1" /><rect x="14" y="5" width="3.5" height="14" rx="1" /></Svg>;
+export const PowerIcon = (p: IconProps) => <Svg {...p}><path d="M12 3v8.5" /><path d="M17.7 6.8a8 8 0 1 1-11.4 0" /></Svg>;
+export const ZoomInIcon = (p: IconProps) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20.5 20.5-4.5-4.5M11 8v6M8 11h6" /></Svg>;
+export const ZoomOutIcon = (p: IconProps) => <Svg {...p}><circle cx="11" cy="11" r="7" /><path d="m20.5 20.5-4.5-4.5M8 11h6" /></Svg>;
+/** "Ajustar ao painel": os quatro cantos com o aparelho no meio. */
+export const FitIcon = (p: IconProps) => <Svg {...p}><path d="M3 7.5v-2A2.5 2.5 0 0 1 5.5 3h2M16.5 3h2A2.5 2.5 0 0 1 21 5.5v2M21 16.5v2a2.5 2.5 0 0 1-2.5 2.5h-2M7.5 21h-2A2.5 2.5 0 0 1 3 18.5v-2" /><rect x="9" y="7" width="6" height="10" rx="1.5" /></Svg>;
+export const ExpandIcon = (p: IconProps) => <Svg {...p}><path d="M8 3H5.5A2.5 2.5 0 0 0 3 5.5V8M21 8V5.5A2.5 2.5 0 0 0 18.5 3H16M3 16v2.5A2.5 2.5 0 0 0 5.5 21H8M16 21h2.5a2.5 2.5 0 0 0 2.5-2.5V16" /></Svg>;
+export const ShrinkIcon = (p: IconProps) => <Svg {...p}><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" /></Svg>;
 export const LogIcon = (p: IconProps) => <Svg {...p}><path d="M4 6h16M4 10h10M4 14h16M4 18h8" /></Svg>;
 export function MoreVerticalIcon({ className = "w-4 h-4" }: IconProps) {
   return (
