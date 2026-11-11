@@ -4271,6 +4271,8 @@
   "chat.composer.assist.group.provider": "Provider",
   "chat.composer.assist.group.skills": "Skills",
   "chat.composer.assist.group.pullRequests": "Pull requests",
+  "chat.composer.assist.skillScope.user": "Personal",
+  "chat.composer.assist.skillScope.project": "Project",
   "chat.composer.assist.command.model": "Agent and model",
   "chat.composer.assist.command.modelDetail": "Open the agent, model, and reasoning picker",
   "chat.composer.assist.command.terminal": "Terminal",
