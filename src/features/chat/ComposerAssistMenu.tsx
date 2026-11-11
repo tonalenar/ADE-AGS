@@ -17,7 +17,8 @@ import { PROTOCOL_AGENTS, type ProviderSlashCommand } from "./chatModel";
 import { legacyComposerCapabilityAvailable, matrixProviderForAgent, useHarnessCapability } from "./harnessCapabilities";
 import { useChatPrefs } from "./chatPrefs";
 import {
-  AGENTS_WITH_SKILL_SCAN, agentNameKey, agentSlashInvocation, buildAgentSlashEntries, searchAgentSlashEntries, type AgentSlashEntry,
+  AGENTS_WITH_SKILL_SCAN, agentNameKey, agentSlashInvocation, buildAgentSlashEntries, searchAgentSlashEntries, threadIdOfConversation,
+  type AgentSlashEntry,
 } from "./agentSlashModel";
 import type { ComposerAddonContext } from "./ChatComposer";
 import { AgentMono } from "./team/TeamParts";
@@ -180,11 +181,11 @@ export function ComposerAssistMenu({
   useEffect(() => {
     if (!cwd || !agentId || token?.trigger !== "/" || !AGENTS_WITH_SKILL_SCAN.has(agentId)) return;
     let current = true;
-    void loadAgentSkills(cwd, agentId)
+    void loadAgentSkills(cwd, agentId, threadIdOfConversation(conversationKey))
       .then((found) => { if (current) setScanned(found); })
       .catch(() => { if (current) setScanned([]); });
     return () => { current = false; };
-  }, [cwd, agentId, token?.trigger, loadAgentSkills]);
+  }, [cwd, agentId, conversationKey, token?.trigger, loadAgentSkills]);
 
   useEffect(() => {
     let current = true;
@@ -398,7 +399,7 @@ export function ComposerAssistMenu({
     const insertAgentEntry = (entry: AgentSlashEntry) => {
       const found = activeToken(context.text, context.caret);
       if (!found || found.trigger !== "/" || found.start !== 0) return;
-      const next = replaceToken(context.text, context.caret, found, agentSlashInvocation(entry));
+      const next = replaceToken(context.text, context.caret, found, agentSlashInvocation(entry, agentId));
       context.apply(next.text, next.caret);
     };
     const agentSkillItems: AssistItem[] = agentEntries

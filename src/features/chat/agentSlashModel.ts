@@ -20,7 +20,12 @@ export interface AgentSlashEntry {
 }
 
 /** Agentes cuja lista de skills a varredura do disco cobre (ver `agent_skills_scan`). */
-export const AGENTS_WITH_SKILL_SCAN: ReadonlySet<string> = new Set(["claude-code"]);
+export const AGENTS_WITH_SKILL_SCAN: ReadonlySet<string> = new Set(["claude-code", "codex"]);
+
+/** Id da conversa por protocolo a partir da chave do composer (`thread:<id>`); abas e outras chaves dão `null`. */
+export function threadIdOfConversation(key: string | null): string | null {
+  return key?.startsWith("thread:") ? key.slice("thread:".length) || null : null;
+}
 
 /** Chave de comparação de nomes: sem diferenciar caixa nem espaços das bordas. */
 export function agentNameKey(name: string): string {
@@ -57,24 +62,17 @@ export function buildAgentSlashEntries(input: {
       if (!key || input.reservedNames.has(key) || seen.has(key)) continue;
       seen.add(key);
       const name = command.name.trim();
+      // Skill: a varredura a achou no disco, ou o próprio agente a anunciou como skill (o `skills/list` do Codex).
       const skill = scannedByKey.get(key);
-      entries.push(skill
-        ? {
-          name,
-          description: command.description || skill.description || "",
-          inputHint: command.inputHint,
-          plugin: skill.plugin ?? pluginOf(name),
-          scope: skill.scope,
-          kind: "skill",
-        }
-        : {
-          name,
-          description: command.description,
-          inputHint: command.inputHint,
-          plugin: pluginOf(name),
-          scope: null,
-          kind: "command",
-        });
+      const isSkill = skill !== undefined || command.kind === "skill";
+      entries.push({
+        name,
+        description: command.description || skill?.description || "",
+        inputHint: command.inputHint,
+        plugin: skill?.plugin ?? pluginOf(name),
+        scope: skill?.scope ?? null,
+        kind: isSkill ? "skill" : "command",
+      });
     }
   } else {
     for (const skill of input.scanned) {
@@ -128,7 +126,10 @@ export function searchAgentSlashEntries(entries: ReadonlyArray<AgentSlashEntry>,
   return ranked.sort((a, b) => a.rank - b.rank).map(({ entry }) => entry);
 }
 
-/** Texto que o composer insere ao escolher a entrada: a barra, o nome e um espaço, como o Claude espera. */
-export function agentSlashInvocation(entry: Pick<AgentSlashEntry, "name">): string {
-  return `/${entry.name} `;
+/**
+ * Texto que o composer insere ao escolher a entrada, com um espaço no fim. O Codex invoca a skill com `$nome`;
+ * os outros agentes com `/nome`, como o Claude e o ACP esperam.
+ */
+export function agentSlashInvocation(entry: Pick<AgentSlashEntry, "name">, agentId?: string | null): string {
+  return agentId === "codex" ? `$${entry.name} ` : `/${entry.name} `;
 }

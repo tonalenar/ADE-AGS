@@ -9,6 +9,8 @@ import {
 import type { ThreadGoal } from "./ipc";
 import { createFrameBatcher } from "../timeline/streaming";
 import { unsnoozeConversation } from "../shelf";
+import { dispatchSkillMentions } from "../skillMentions";
+import { useAgentSkillsStore } from "@/features/skills/agentSkillsStore";
 import { applyDeltas, applyThreadEvent, applyThreadMeta, EMPTY_LIVE, isLocalAcpAgent, threadKey, type ThreadEvent, type ThreadLive } from "./model";
 import { addLogFailure, dismissLogFailure, parseLogFailure, type LogFailure } from "./logFailureModel";
 
@@ -184,11 +186,22 @@ export async function createThread(input: NewThread): Promise<string> {
 export function sendToThread(id: string, text: string, onError?: (message: string) => void, onSent?: () => void, images?: string[]): void {
   if (text.trim() || images?.length) unsnoozeConversation(threadKey(id));
   patchLive(id, (live) => ({ ...live, phase: "working", error: null }));
-  // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
-  chatThreadSend(id, text, images).then(() => onSent?.(), (e) => {
-    onError?.(String(e));
-    patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
-  });
+  const send = (outgoing: string) => {
+    // `onSent` só depois de o backend aceitar a mensagem; `onError` só se ele a recusar.
+    chatThreadSend(id, outgoing, images).then(() => onSent?.(), (e) => {
+      onError?.(String(e));
+      patchLive(id, (live) => ({ ...live, phase: "idle", error: String(e) }));
+    });
+  };
+  const row = useStructured.getState().threads.find((thread) => thread.id === id);
+  // `$nome` no meio do texto: o Claude só expande a skill com `/nome` no início. As skills vêm da varredura da conta.
+  if (row?.agentId === "claude-code" && text.includes("$")) {
+    void useAgentSkillsStore.getState().load(row.cwd, row.agentId, id)
+      .catch(() => [])
+      .then((skills) => send(dispatchSkillMentions(row.agentId, text, skills.map((skill) => skill.name))));
+    return;
+  }
+  send(text);
 }
 
 export function interruptThread(id: string): void {
