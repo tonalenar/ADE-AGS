@@ -345,9 +345,13 @@ mod claude {
     #[test]
     fn fast_do_chat_chega_ao_codex_e_a_sessao_claude() {
         let mut codex = json!({ "threadId": "remote", "input": [] });
-        api::apply_codex_fast_mode(&mut codex, true);
+        api::apply_codex_fast_mode(&mut codex, Some(true));
         assert_eq!(codex["serviceTier"], "fast");
-        api::apply_codex_fast_mode(&mut codex, false);
+        // O nível do `turn/start` persiste nos turnos seguintes: desligar manda `null`, que limpa.
+        api::apply_codex_fast_mode(&mut codex, Some(false));
+        assert!(codex["serviceTier"].is_null() && codex.get("serviceTier").is_some());
+        // Envio interno (fila, retomada, comando) não mexe no nível da conversa.
+        api::apply_codex_fast_mode(&mut codex, None);
         assert!(codex.get("serviceTier").is_none());
 
         let row = row("safe");

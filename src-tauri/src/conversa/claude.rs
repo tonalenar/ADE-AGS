@@ -239,13 +239,15 @@ pub fn close(thread_id: &str) {
 /// aviso de que o agente recomeçou sem o histórico (ver `resume`). O id da sessão anterior só é trocado depois de
 /// a nova abrir.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
-    session_with_fast_mode(app, db, thread_id, false).await
+    session_with_fast_mode(app, db, thread_id, None).await
 }
 
-/// Abre ou retoma a conversa com a preferência Fast isolada nesta execução.
-pub async fn session_with_fast_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, fast_mode: bool) -> Result<Arc<Session>, String> {
+/// Abre ou retoma a conversa com a preferência Fast isolada nesta execução. O `--settings` só vale ao nascer o
+/// processo: uma preferência diferente da do processo aberto, com a conversa parada, reabre a sessão (retomando).
+/// `None` (comandos, fila, retomada) usa o processo que já está aberto, sem fechá-lo.
+pub async fn session_with_fast_mode(app: &AppHandle, db: &DbConnection, thread_id: &str, fast_mode: Option<bool>) -> Result<Arc<Session>, String> {
     if let Some(session) = get(thread_id) {
-        if session.fast_mode == fast_mode || session.turn().is_some() {
+        if fast_mode.is_none_or(|fast| fast == session.fast_mode) || session.turn().is_some() {
             return Ok(session);
         }
         close(thread_id);
@@ -254,11 +256,13 @@ pub async fn session_with_fast_mode(app: &AppHandle, db: &DbConnection, thread_i
     let gate = resume::start_gate("claude", thread_id);
     let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
-        if s.fast_mode == fast_mode || s.turn().is_some() {
+        if fast_mode.is_none_or(|fast| fast == s.fast_mode) || s.turn().is_some() {
             return Ok(s);
         }
         close(thread_id);
     }
+    // Sem preferência e sem processo aberto: nasce no padrão (sem Fast).
+    let fast_mode = fast_mode.unwrap_or(false);
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
