@@ -561,15 +561,18 @@ fn recorte_da_foto_tira_as_bordas_do_video() {
 #[test]
 fn agente_no_aparelho_fisico_pede_a_pessoa_menos_quando_ela_disse_sempre() {
     // Olhar nunca pede.
-    assert!(!agent_asks("shot", false));
+    assert!(!agent_asks("shot", false, false));
     // Tocar, deslizar, tecla e botão: pedem até a pessoa dizer "sempre neste aparelho".
     for action in ["tap", "swipe", "key", "button", "launch", "close", "open"] {
-        assert!(agent_asks(action, false), "{action}");
-        assert!(!agent_asks(action, true), "{action}");
+        assert!(agent_asks(action, false, false), "{action}");
+        assert!(!agent_asks(action, true, false), "{action}");
+        // O "sempre digitar" não libera toque.
+        assert!(agent_asks(action, false, true), "{action}");
     }
-    assert!(!agent_asks("apps", false));
-    // Digitar texto no celular de verdade pede sempre: não se sabe onde o texto cai.
-    assert!(agent_asks("type", true));
+    assert!(!agent_asks("apps", false, false));
+    // Digitar texto no celular de verdade tem confiança própria: o "sempre" dos toques não vale, o "sempre digitar" sim.
+    assert!(agent_asks("type", true, false));
+    assert!(!agent_asks("type", false, true));
     // O CoreDevice agora cobre apps e URLs; ligar simulador, girar e clipboard seguem fora do iPhone físico.
     assert!(!agent_unsupported("open") && !agent_unsupported("launch") && !agent_unsupported("close"));
     assert!(agent_unsupported("start") && agent_unsupported("rotate") && agent_unsupported("clipboard"));

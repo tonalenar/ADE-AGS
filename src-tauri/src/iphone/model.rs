@@ -954,15 +954,15 @@ pub fn agent_unsupported(action: &str) -> bool {
 }
 
 /// Um agente no celular de verdade: olhar (`shot`) e listar apps passam; ações pedem à pessoa até ela dizer
-/// "sempre neste aparelho"; digitar texto pede sempre (não se sabe em que campo o texto cai).
-pub fn agent_asks(action: &str, trusted: bool) -> bool {
+/// "sempre neste aparelho". Digitar texto tem a sua própria confiança (`type_trusted`): não se sabe em que campo o
+/// texto cai, então o "sempre" dos toques NÃO a cobre; só o "sempre digitar neste aparelho" a dispensa.
+pub fn agent_asks(action: &str, trusted: bool, type_trusted: bool) -> bool {
     match action {
         "shot" | "apps" => false,
-        "type" => true,
+        "type" => !type_trusted,
         _ => !trusted,
     }
 }
-
 
 // ── Rolagem do trackpad e pinça: viram dedos no digitalizador ──
 // O HID de rolagem do CoreDevice é do dial e da Digital Crown (`ScrollTarget.dial/digitalCrown`), não do conteúdo
