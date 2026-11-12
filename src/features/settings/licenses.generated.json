@@ -5,9 +5,9 @@
     "src-tauri/Cargo.lock (cargo metadata --locked --offline)"
   ],
   "contagem": {
-    "total": 1083,
+    "total": 1119,
     "npm": 453,
-    "crates": 630,
+    "crates": 666,
     "naoLidas": 6,
     "semLicenca": 6
   },
@@ -52,6 +52,36 @@
       "ecosystem": "crates",
       "name": "android_system_properties",
       "version": "0.1.6",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "anstream",
+      "version": "1.0.0",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "anstyle",
+      "version": "1.0.14",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "anstyle-parse",
+      "version": "1.0.0",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "anstyle-query",
+      "version": "1.1.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "anstyle-wincon",
+      "version": "3.0.11",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -272,6 +302,12 @@
     },
     {
       "ecosystem": "crates",
+      "name": "bzip2",
+      "version": "0.6.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
       "name": "cairo-rs",
       "version": "0.18.5",
       "license": "MIT"
@@ -296,6 +332,12 @@
     },
     {
       "ecosystem": "crates",
+      "name": "cargo_metadata",
+      "version": "0.23.1",
+      "license": "MIT"
+    },
+    {
+      "ecosystem": "crates",
       "name": "cargo_toml",
       "version": "1.0.1",
       "license": "Apache-2.0 OR MIT"
@@ -304,6 +346,12 @@
       "ecosystem": "crates",
       "name": "cargo-platform",
       "version": "0.1.9",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "cargo-platform",
+      "version": "0.3.3",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -317,6 +365,18 @@
       "name": "cc",
       "version": "1.5.1",
       "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "cef",
+      "version": "156.4.0+156.0.26",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "cef-dll-sys",
+      "version": "156.4.0+156.0.26",
+      "license": "Apache-2.0 OR MIT"
     },
     {
       "ecosystem": "crates",
@@ -374,6 +434,42 @@
     },
     {
       "ecosystem": "crates",
+      "name": "clap",
+      "version": "4.6.7",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "clap_builder",
+      "version": "4.6.7",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "clap_derive",
+      "version": "4.6.7",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "clap_lex",
+      "version": "1.1.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "cmake",
+      "version": "0.1.58",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "colorchoice",
+      "version": "1.0.5",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
       "name": "combine",
       "version": "4.6.8",
       "license": "MIT"
@@ -386,8 +482,20 @@
     },
     {
       "ecosystem": "crates",
+      "name": "console",
+      "version": "0.16.6",
+      "license": "MIT"
+    },
+    {
+      "ecosystem": "crates",
       "name": "cookie",
       "version": "0.18.2",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "cookie_store",
+      "version": "0.22.1",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -626,6 +734,12 @@
     },
     {
       "ecosystem": "crates",
+      "name": "document-features",
+      "version": "0.2.12",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
       "name": "dom_query",
       "version": "0.28.0",
       "license": "MIT"
@@ -635,6 +749,12 @@
       "name": "downcast-rs",
       "version": "1.2.1",
       "license": "MIT/Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "download-cef",
+      "version": "3.0.0",
+      "license": "Apache-2.0 OR MIT"
     },
     {
       "ecosystem": "crates",
@@ -677,6 +797,12 @@
       "name": "embed-resource",
       "version": "3.0.11",
       "license": "MIT"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "encode_unicode",
+      "version": "1.0.0",
+      "license": "Apache-2.0 OR MIT"
     },
     {
       "ecosystem": "crates",
@@ -814,6 +940,12 @@
       "ecosystem": "crates",
       "name": "form_urlencoded",
       "version": "1.2.2",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "fs-err",
+      "version": "3.3.2",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -1220,6 +1352,12 @@
     },
     {
       "ecosystem": "crates",
+      "name": "indicatif",
+      "version": "0.18.6",
+      "license": "MIT"
+    },
+    {
+      "ecosystem": "crates",
       "name": "infer",
       "version": "0.19.0",
       "license": "MIT"
@@ -1246,6 +1384,12 @@
       "ecosystem": "crates",
       "name": "ipnet",
       "version": "2.12.2",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "is_terminal_polyfill",
+      "version": "1.70.2",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -1394,6 +1538,12 @@
     },
     {
       "ecosystem": "crates",
+      "name": "libbz2-rs-sys",
+      "version": "0.2.6",
+      "license": "bzip2-1.0.6"
+    },
+    {
+      "ecosystem": "crates",
       "name": "libc",
       "version": "0.2.189",
       "license": "MIT OR Apache-2.0"
@@ -1408,6 +1558,12 @@
       "ecosystem": "crates",
       "name": "libloading",
       "version": "0.7.4",
+      "license": "ISC"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "libloading",
+      "version": "0.9.0",
       "license": "ISC"
     },
     {
@@ -1433,6 +1589,12 @@
       "name": "litemap",
       "version": "0.8.3",
       "license": "Unicode-3.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "litrs",
+      "version": "1.0.1",
+      "license": "MIT OR Apache-2.0"
     },
     {
       "ecosystem": "crates",
@@ -1732,6 +1894,12 @@
       "ecosystem": "crates",
       "name": "once_cell",
       "version": "1.21.4",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "once_cell_polyfill",
+      "version": "1.70.2",
       "license": "MIT OR Apache-2.0"
     },
     {
@@ -2414,6 +2582,12 @@
     },
     {
       "ecosystem": "crates",
+      "name": "sha1_smol",
+      "version": "1.0.1",
+      "license": "BSD-3-Clause"
+    },
+    {
+      "ecosystem": "crates",
       "name": "sha2",
       "version": "0.10.9",
       "license": "MIT OR Apache-2.0"
@@ -2483,6 +2657,12 @@
       "name": "socket2",
       "version": "0.6.5",
       "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "socks",
+      "version": "0.3.4",
+      "license": "MIT/Apache-2.0"
     },
     {
       "ecosystem": "crates",
@@ -2966,6 +3146,18 @@
     },
     {
       "ecosystem": "crates",
+      "name": "unicode-width",
+      "version": "0.2.3",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "unit-prefix",
+      "version": "0.5.2",
+      "license": "MIT"
+    },
+    {
+      "ecosystem": "crates",
       "name": "unsafe-libyaml",
       "version": "0.2.11",
       "license": "MIT"
@@ -2975,6 +3167,18 @@
       "name": "untrusted",
       "version": "0.9.0",
       "license": "ISC"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "ureq",
+      "version": "3.4.2",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "ureq-proto",
+      "version": "0.6.5",
+      "license": "MIT OR Apache-2.0"
     },
     {
       "ecosystem": "crates",
@@ -3004,6 +3208,18 @@
       "ecosystem": "crates",
       "name": "utf8_iter",
       "version": "1.0.4",
+      "license": "Apache-2.0 OR MIT"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "utf8-zero",
+      "version": "0.8.1",
+      "license": "MIT OR Apache-2.0"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "utf8parse",
+      "version": "0.2.2",
       "license": "Apache-2.0 OR MIT"
     },
     {
