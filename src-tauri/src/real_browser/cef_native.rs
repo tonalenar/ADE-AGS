@@ -494,6 +494,7 @@ wrap_dev_tools_message_observer! {
             if method.map(ToString::to_string).as_deref() != Some("Runtime.bindingCalled") { return; }
             let Some(params) = params.and_then(|bytes| serde_json::from_slice::<JsonValue>(bytes).ok()) else { return; };
             if params["name"].as_str() == Some("__agsCdpBridge") && let Some(payload) = params["payload"].as_str() {
+                cef_trace!("binding {} {}", self.id, payload.chars().take(80).collect::<String>());
                 on_binding(&self.app, &self.id, payload);
             }
         }
@@ -1018,7 +1019,10 @@ pub async fn release_profile(app: &AppHandle, profile: &std::path::Path) -> Resu
     }).await
 }
 
+/// O piloto em todo documento novo. Sem `Page.enable` o Chromium aceita o script e nunca o roda: o
+/// agente de Page só instrumenta a criação de documentos depois de ligado.
 pub async fn add_script(app: &AppHandle, id: &str, script: String) -> Result<(), String> {
+    cdp(app, id, "Page.enable", json!({})).await?;
     cdp(app, id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": script })).await.map(|_| ())
 }
 

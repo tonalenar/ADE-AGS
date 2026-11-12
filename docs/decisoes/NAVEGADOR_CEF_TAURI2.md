@@ -35,20 +35,22 @@ Os defeitos que vieram depois não derrubavam o app, mas impediam o navegador de
 
 | Sintoma | Causa | Correção |
 |---|---|---|
-| `Sandbox setup failed`, GPU e rede não sobem | Com `browser_subprocess_path` vazio, o CEF deduz `ade-ags Helper (GPU).app` pelo nome do executável; os helpers se chamam `ADE AGS Helper…`. O `NSBundle` do helper sai nil | O caminho do helper base é passado explicitamente; o Chromium deriva GPU, Renderer, Plugin e Alerts dele |
+| `Sandbox setup failed`, GPU e rede não sobem | Com `browser_subprocess_path` vazio, o CEF deduz `ade-ags Helper (GPU).app` pelo nome do executável; os helpers se chamam `ADE AGS Helper…`. O `NSBundle` do helper sai nil | O caminho do helper base é passado explicitamente. Com ele, o CEF roda **todos** os subprocessos (GPU, Renderer, rede) no helper base: as variantes com sufixo ficam no bundle, mas não foram vistas em uso |
 | `Cannot create profile at path …/profiles/x/projects/y` | O runtime Chrome só cria perfis filhos diretos do `root_cache_path`; caía num perfil anônimo, sem persistência | Raiz `app-data/portal-chromium`, partição `<perfil>-<hash>` |
 | `create_browser_sync` devolve nulo | O perfil persistente inicializa de forma assíncrona | `create_browser` assíncrono; `create` espera o `on_after_created` |
 | A página não carrega, o CDP não responde | Com bomba externa, o CEF pediu trabalho uma vez e parou de pedir. O `run_on_main_thread` do tao também não roda em menus e janelas modais | Bomba na fila principal do GCD (*common modes*) com teto de 33 ms entre chamadas, como o `cefclient` |
 | `Keychain lookup failed (userCanceledErr)` e espera longa | O Chromium guarda a chave dos cookies no Keychain. A assinatura ad-hoc do debug muda a cada build e o macOS pede permissão a cada execução | `--use-mock-keychain` só em debug; o build assinado usa o Keychain do sistema |
 | Fechar uma aba mandaria fechar a janela da ADE | `DoClose` no padrão (`false`) faz o CEF enviar `performClose:` à janela de topo | `DoClose` devolve `true` e desmonta a vista; o browser é destruído no `dealloc` |
 | O browser não fecha ao sair do app | Autoreleases do fechamento seguravam a vista dentro de um único callback | Pool de autorelease próprio no fechamento; `CefShutdown` só depois do `on_before_close` |
+| Release assinado: `V8 process OOM (Failed to reserve virtual memory for CodeRange)` no log, o CDP não responde ("O CEF não respondeu ao comando CDP a tempo") | O renderer roda no helper base, que estava sem `allow-jit`. Com hardened runtime o V8 não reserva a memória de JIT. O debug não tem hardened runtime e não mostrava isso | O helper base também é assinado com `CefHelperJitEntitlements.plist` |
+| O piloto da página nunca conecta (os agentes ouvem "no page loaded") | Sem `Page.enable`, o Chromium aceita o `Page.addScriptToEvaluateOnNewDocument` e não roda o script | `add_script` liga o domínio Page antes de registrar o piloto |
 | Cmd+tecla sem `keyUp` | A classe de `NSApplication` do CEF substitui a `TaoApp` | O `sendEvent:` repete o ajuste do tao |
 
 ## Consequências
 
 - O framework CEF e cinco helpers (`ADE AGS Helper`, `(GPU)`, `(Renderer)`, `(Plugin)`, `(Alerts)`) entram em `Contents/Frameworks`.
   - Cada helper tem um identificador próprio (`com.luis.controlcode.helper[.gpu|.renderer|…]`).
-  - GPU e Renderer levam o entitlement de JIT.
+  - O helper base, o GPU e o Renderer levam o entitlement de JIT; Plugin e Alerts só o de validação de biblioteca.
   - O staging (`scripts/stage-cef-macos.mjs`) respeita `CC_CLI_TARGET` para o build cruzado do release.
 - O processo principal carrega o framework na partida para registrar a classe de `NSApplication` exigida pelo CEF (`CrAppControlProtocol`). O `CefInitialize` só roda quando o primeiro navegador abre. O custo na partida não foi medido.
 - CDP só pelo objeto do motor: `remote_debugging_port = 0`, sem listener. Os agentes chegam pelo IPC local (socket com PID e token).

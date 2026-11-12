@@ -83,7 +83,10 @@ for (const helper of helpers) {
   // O bundler Tauri não cria o selo de recursos dos .app adicionados por bundle.macOS.files.
   if (process.env.APPLE_SIGNING_IDENTITY) {
     const signingArgs = ["--force", "--options", "runtime", "--timestamp", "--sign", process.env.APPLE_SIGNING_IDENTITY];
-    if (helper.endsWith("(GPU)") || helper.endsWith("(Renderer)")) {
+    // O CEF roda GPU e Renderer no helper base (o caminho de `browser_subprocess_path` vale para todos os tipos),
+    // então ele também precisa de JIT: sem `allow-jit` com hardened runtime o V8 não reserva a CodeRange e o
+    // renderer morre com "V8 process OOM". Os helpers com sufixo ficam iguais caso uma versão passe a usá-los.
+    if (helper === "ADE AGS Helper" || helper.endsWith("(GPU)") || helper.endsWith("(Renderer)")) {
       signingArgs.push("--entitlements", join(tauriDir, "CefHelperJitEntitlements.plist"));
     } else {
       signingArgs.push("--entitlements", join(tauriDir, "CefHelperLibEntitlements.plist"));
