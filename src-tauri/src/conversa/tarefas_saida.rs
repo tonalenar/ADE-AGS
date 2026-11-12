@@ -48,3 +48,73 @@ fn safe_component(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
+
+/// Os arquivos para onde um comando manda a saída (`> f`, `>> f`, `&> f`, `2> f`, `| tee [-a] f`), na ordem em que
+/// aparecem. Caminhos relativos partem de `cwd`; `~/` vira a pasta pessoal. Ignora `/dev/*` e descritores (`>&2`).
+pub fn redirect_targets(command: &str, cwd: &Path) -> Vec<PathBuf> {
+    let tokens = shell_words(command);
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < tokens.len() {
+        let tok = tokens[i].as_str();
+        let mut target: Option<&str> = None;
+        let op = tok.trim_start_matches(|c: char| c.is_ascii_digit() || c == '&');
+        if op == ">" || op == ">>" || op == ">|" {
+            target = tokens.get(i + 1).map(String::as_str);
+            i += 1;
+        } else if let Some(rest) = op.strip_prefix(">>").or_else(|| op.strip_prefix('>')) {
+            if !rest.is_empty() && !rest.starts_with('&') { target = Some(rest); }
+        } else if tok == "tee" {
+            let mut j = i + 1;
+            while tokens.get(j).is_some_and(|t| t.starts_with('-')) { j += 1; }
+            target = tokens.get(j).map(String::as_str);
+            i = j;
+        }
+        if let Some(t) = target.filter(|t| !t.is_empty() && !t.starts_with("/dev/") && !t.starts_with('&')) {
+            let path = if let Some(rest) = t.strip_prefix("~/") {
+                dirs::home_dir().map(|h| h.join(rest)).unwrap_or_else(|| PathBuf::from(t))
+            } else {
+                let p = PathBuf::from(t);
+                if p.is_absolute() { p } else { cwd.join(p) }
+            };
+            if !out.contains(&path) { out.push(path); }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// A saída de um comando que redirecionou para um log: o arquivo de destino mais recente que existe.
+pub fn read_redirected_output(command: &str, cwd: &Path) -> Option<Value> {
+    let newest = redirect_targets(command, cwd)
+        .into_iter()
+        .filter_map(|p| {
+            let meta = std::fs::metadata(&p).ok().filter(|m| m.is_file())?;
+            Some((meta.modified().ok(), p))
+        })
+        .max_by_key(|(modified, _)| *modified)?
+        .1;
+    let mut value = read_task_output(&newest)?;
+    value["source"] = Value::String(newest.to_string_lossy().into_owned());
+    Some(value)
+}
+
+/// Palavras de um comando de shell, com aspas simples e duplas e `;`, `|`, `&&` como separadores próprios.
+fn shell_words(command: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut quote: Option<char> = None;
+    let flush = |cur: &mut String, words: &mut Vec<String>| if !cur.is_empty() { words.push(std::mem::take(cur)); };
+    for c in command.chars() {
+        match quote {
+            Some(q) if c == q => quote = None,
+            Some(_) => cur.push(c),
+            None if c == '\'' || c == '"' => quote = Some(c),
+            None if c.is_whitespace() => flush(&mut cur, &mut words),
+            None if c == ';' || c == '|' || c == '(' || c == ')' => { flush(&mut cur, &mut words); words.push(c.to_string()); }
+            None => cur.push(c),
+        }
+    }
+    flush(&mut cur, &mut words);
+    words
+}

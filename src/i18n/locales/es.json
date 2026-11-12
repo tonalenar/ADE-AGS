@@ -5946,6 +5946,7 @@
   "chat.tasks.back": "Volver a la lista",
   "chat.tasks.prompt": "Pedido",
   "chat.tasks.output": "Salida",
+  "chat.tasks.outputFrom": "Del log {{path}}",
   "chat.tasks.outputEmpty": "Sin salida todavía.",
   "chat.tasks.outputUnavailable": "La salida de este comando no llega a la app.",
   "chat.tasks.outputTruncated": "Solo el final de la salida (los últimos 8 KiB).",

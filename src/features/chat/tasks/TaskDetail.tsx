@@ -80,6 +80,7 @@ export function TaskDetail({ task, threadId, transcript, now, onBack, onStop }: 
           <Block label={t("chat.tasks.output")}>
             {output && output.output ? (
               <>
+                {output.source && <p className="m-0 mb-1 text-chat-caption text-gray-500 dark:text-white/45 break-all">{t("chat.tasks.outputFrom", { path: output.source })}</p>}
                 {output.truncated && <p className="m-0 mb-1 text-chat-caption text-gray-500 dark:text-white/45">{t("chat.tasks.outputTruncated")}</p>}
                 <pre className="m-0 p-2.5 rounded-lg bg-gray-50 dark:bg-black/40 font-mono text-chat-caption whitespace-pre-wrap break-all text-gray-800 dark:text-white/80">{output.output}</pre>
               </>

@@ -5946,6 +5946,7 @@
   "chat.tasks.back": "Back to the list",
   "chat.tasks.prompt": "Prompt",
   "chat.tasks.output": "Output",
+  "chat.tasks.outputFrom": "From log {{path}}",
   "chat.tasks.outputEmpty": "No output yet.",
   "chat.tasks.outputUnavailable": "This command's output doesn't reach the app.",
   "chat.tasks.outputTruncated": "Only the end of the output (the last 8 KiB).",

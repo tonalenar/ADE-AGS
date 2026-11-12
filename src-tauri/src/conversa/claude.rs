@@ -55,6 +55,12 @@ pub struct Session {
     task_output_root: Option<PathBuf>,
     /// Caminhos anunciados no fim da tarefa, limitados à raiz privada acima.
     task_output_files: Mutex<HashMap<String, PathBuf>>,
+    /// Pasta da conversa: base dos caminhos relativos que um comando redireciona.
+    cwd: PathBuf,
+    /// Comando de cada `Bash` lançado em segundo plano, pelo `tool_use_id`.
+    bash_commands: Mutex<HashMap<String, String>>,
+    /// O comando de cada tarefa (`task_started` liga a tarefa ao `tool_use_id`).
+    task_commands: Mutex<HashMap<String, String>>,
     /// O turno em andamento (o id é do app: o Claude não numera os turnos).
     turn: Mutex<Option<String>>,
     /// O Parar que chega antes de o turno mostrar que roda (ver `codex_parar`). Trava antes da do `turn`.
@@ -90,11 +96,48 @@ impl Session {
         let root = self.task_output_root.as_deref()?;
         let cached = self.task_output_files.lock().ok()?.get(task_id).cloned();
         let path = cached.or_else(|| self.remote().and_then(|remote| super::tarefas_saida::find_task_output(root, &remote, task_id)));
-        let Some(path) = path else { return Some(json!({ "output": "", "total_bytes": 0, "truncated": false })) };
-        if let Ok(mut files) = self.task_output_files.lock() {
-            files.insert(task_id.to_string(), path.clone());
+        let empty = || json!({ "output": "", "total_bytes": 0, "truncated": false });
+        let own = path.and_then(|path| {
+            if let Ok(mut files) = self.task_output_files.lock() {
+                files.insert(task_id.to_string(), path.clone());
+            }
+            super::tarefas_saida::read_task_output(&path)
+        });
+        if own.as_ref().is_some_and(|o| o["total_bytes"].as_u64().unwrap_or(0) > 0) {
+            return own;
         }
-        Some(super::tarefas_saida::read_task_output(&path).unwrap_or_else(|| json!({ "output": "", "total_bytes": 0, "truncated": false })))
+        // O agente costuma mandar a saída para um log próprio (`> /tmp/build.log 2>&1`): o arquivo da tarefa fica
+        // vazio e a saída de verdade está lá.
+        let command = self.task_commands.lock().ok().and_then(|c| c.get(task_id).cloned());
+        if let Some(found) = command.and_then(|c| super::tarefas_saida::read_redirected_output(&c, &self.cwd)) {
+            return Some(found);
+        }
+        Some(own.unwrap_or_else(empty))
+    }
+
+    /// Guarda o comando dos `Bash` em segundo plano e liga cada tarefa ao comando que a lançou.
+    fn remember_task_command(&self, msg: &Value) {
+        match msg.get("type").and_then(Value::as_str) {
+            Some("assistant") => {
+                let Some(blocks) = msg.pointer("/message/content").and_then(Value::as_array) else { return };
+                for block in blocks {
+                    if block.get("type").and_then(Value::as_str) != Some("tool_use") || block.get("name").and_then(Value::as_str) != Some("Bash") {
+                        continue;
+                    }
+                    let input = block.get("input").unwrap_or(&Value::Null);
+                    if input.get("run_in_background").and_then(Value::as_bool) != Some(true) { continue; }
+                    if let (Some(id), Some(command)) = (block.get("id").and_then(Value::as_str), input.get("command").and_then(Value::as_str)) {
+                        if let Ok(mut map) = self.bash_commands.lock() { map.insert(id.to_string(), command.to_string()); }
+                    }
+                }
+            }
+            Some("system") if msg.get("subtype").and_then(Value::as_str) == Some("task_started") => {
+                let (Some(task), Some(tool)) = (msg.get("task_id").and_then(Value::as_str), msg.get("tool_use_id").and_then(Value::as_str)) else { return };
+                let command = self.bash_commands.lock().ok().and_then(|m| m.get(tool).cloned());
+                if let (Some(command), Ok(mut map)) = (command, self.task_commands.lock()) { map.insert(task.to_string(), command); }
+            }
+            _ => {}
+        }
     }
 
     /// Guarda o arquivo final informado pelo Claude, sem aceitar caminhos fora da árvore temporária da sessão.
@@ -447,6 +490,9 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
         remote: Mutex::new(None),
         task_output_root,
         task_output_files: Mutex::new(HashMap::new()),
+        cwd: PathBuf::from(&row.cwd),
+        bash_commands: Mutex::new(HashMap::new()),
+        task_commands: Mutex::new(HashMap::new()),
         turn: Mutex::new(None),
         stop: Mutex::new(StopGate::default()),
         background: Mutex::new(HashSet::new()),
@@ -567,6 +613,7 @@ fn dispatch(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, msg: Val
         }
         _ => {
             session.remember_task_output(&msg);
+            session.remember_task_command(&msg);
             let outs = session.mapper.lock().map(|mut m| m.feed(&msg, crate::util::now_ts_ms())).unwrap_or_default();
             for out in outs {
                 on_out(app, db, session, out);
@@ -880,6 +927,9 @@ pub(crate) fn session_for_test(thread_id: &str) -> (Arc<Session>, mpsc::Unbounde
         remote: Mutex::new(Some("remoto-1".to_string())),
         task_output_root: None,
         task_output_files: Mutex::new(HashMap::new()),
+        cwd: PathBuf::new(),
+        bash_commands: Mutex::new(HashMap::new()),
+        task_commands: Mutex::new(HashMap::new()),
         turn: Mutex::new(None),
         stop: Mutex::new(StopGate::default()),
         background: Mutex::new(HashSet::new()),
