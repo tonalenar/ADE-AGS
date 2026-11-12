@@ -23,6 +23,7 @@ describe("«Comentar» está ligado às duas conversas (protocolo e TUI)", () =>
     expect(composer).toContain("send(withQuotes(text, quotes), attachments.list)");
     expect(composer).toContain("onQueue(withQuotes(text, quotes), attachments.list)");
     const attach = read("../attachments/send.ts");
-    expect(attach).toContain("withAttachmentBlock(text, attachments)");
+    expect(attach).toContain("const context = takeImageContext");
+    expect(attach).toContain("withAttachmentBlock(`${text}${context}`, attachments)");
   });
 });
