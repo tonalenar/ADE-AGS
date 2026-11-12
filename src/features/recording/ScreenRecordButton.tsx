@@ -4,9 +4,13 @@ import { useTranslation } from "react-i18next";
 import { MAX_PENDING_CAPTURES, rememberPendingCapture } from "@/features/chat/attachments/pendingCaptures";
 import { RecordIcon } from "@/features/chat/chatIcons";
 import { attachToComposer } from "@/features/chat/store";
+import { showBotToast } from "@/shared/brand/botToastStore";
 import { AlertaToast } from "@/shared/ui/alerts";
 
-import { screenRecordingStart, screenRecordingStatus, screenRecordingStop, type RecordingSource } from "./ipc";
+import { openPrivacySettings, screenRecordingStart, screenRecordingStatus, screenRecordingStop, type RecordingSource } from "./ipc";
+
+/** Prefixo que o backend (`screen_recording.rs`) põe no erro quando o macOS nega a Gravação de Tela. */
+const PERMISSION_MARKER = "SCREEN_CAPTURE_PERMISSION_REQUIRED:";
 
 const composerTargetsByRecording = new Map<string, string | null | undefined>();
 
@@ -51,7 +55,23 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
         void AlertaToast(t("screenRecording.title"), t("screenRecording.started", { label }), "success", 2500);
       }
     } catch (error) {
-      void AlertaToast(t("screenRecording.title"), String(error), "error", 5000);
+      const raw = String(error);
+      if (raw.includes(PERMISSION_MARKER)) {
+        showBotToast({
+          title: t("screenRecording.title"),
+          text: t("screenRecording.permissionRequired"),
+          tone: "error",
+          ms: 15_000,
+          actionLabel: t("screenRecording.openSettings"),
+          onAction: () => {
+            void openPrivacySettings("screen_capture").catch((openError) => {
+              void AlertaToast(t("screenRecording.title"), String(openError), "error", 6000);
+            });
+          },
+        });
+      } else {
+        void AlertaToast(t("screenRecording.title"), raw, "error", 5000);
+      }
       if (!recording) composerTargetsByRecording.delete(id);
       if (recording) {
         screenRecordingStatus().then((active) => setRecording(active === id)).catch(() => undefined);

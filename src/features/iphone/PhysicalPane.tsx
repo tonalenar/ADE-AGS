@@ -13,6 +13,7 @@ import { DeviceFrame, screenRadiusOf } from "./DeviceFrame";
 import { iphoneMirrorConnect, iphoneMirrorDisconnect } from "./ipc";
 import { canTouch, fitScale, frameLayout, isReady, physicalScreen, statusView } from "./model";
 import { PhysicalMirror } from "./PhysicalParts";
+import { RevokeTrust } from "./RevokeTrust";
 import { refreshPhysical, setMirrorDisconnected, useIphoneStore, useMirrorStatus, usePhysicalDevices } from "./store";
 
 function useBoxSize() {
@@ -151,6 +152,7 @@ export function PhysicalPane({ device, picker, composerTarget }: { device: strin
           <div className="text-chat-caption text-gray-500 dark:text-white/50">
             {t("iphone.agentHint.before")}<span className="font-mono">ags device</span>{t("iphone.agentHint.after")}
           </div>
+          <RevokeTrust />
         </div>
         <ChatSwitch label={t("chat.devices.agentControl")} checked={control} onChange={setDeviceControl} />
       </div>

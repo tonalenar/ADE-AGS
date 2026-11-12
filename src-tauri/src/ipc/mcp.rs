@@ -696,7 +696,7 @@ fn device_schemas() -> Vec<Value> {
         }),
         json!({
             "name": "device_action",
-            "description": "Perform one `ags device` action on a reachable device. Use this native ADE tool path for a physical iPhone in the chat panel; external `sim-use ios-device tap` can report success while App Store apps ignore the tap. On physical iPhones, list apps, launch/close by bundle ID, open URLs, tap, swipe, key and button are supported; mutating actions ask for confirmation until trusted for that phone, and typing always asks. Use `device_shot` first for coordinate-based taps (iOS points). The chat-panel control switch and per-device trust still apply.",
+            "description": "Perform one `ags device` action on a reachable device. Use this native ADE tool path for a physical iPhone in the chat panel; external `sim-use ios-device tap` can report success while App Store apps ignore the tap. On physical iPhones, list apps, launch/close by bundle ID, open URLs, tap, swipe, key and button are supported; mutating actions ask for confirmation until the person trusts that phone; typing has its own \"always type on this device\" choice and, after one approval, the same agent's next `type` calls within about a minute reuse it. Send the WHOLE text in ONE `type` call, never character by character: each call can raise a confirmation dialog. Use `device_shot` first for coordinate-based taps (iOS points). The chat-panel control switch and per-device trust still apply.",
             "inputSchema": { "type": "object", "properties": {
                 "name": { "type": "string", "description": "The device name or stable id from `device_list`." },
                 "action": { "type": "string", "enum": ["apps", "launch", "close", "open", "tap", "swipe", "type", "key", "button"], "description": "The one-step device action; `apps` lists installed iPhone apps, `launch`/`close` take a bundle ID, and `open` takes a URL." },
@@ -710,7 +710,7 @@ fn device_schemas() -> Vec<Value> {
                 "y2": { "type": "number", "description": "Swipe end y in iOS points." },
                 "dir": { "type": "string", "enum": ["up", "down", "left", "right"], "description": "A named swipe direction; alternatively provide x1, y1, x2, y2." },
                 "ms": { "type": "integer", "description": "Swipe duration in milliseconds (default 300)." },
-                "text": { "type": "string", "description": "Text for the focused field; the phone asks every time." },
+                "text": { "type": "string", "description": "The whole text for the focused field, in one call (US ASCII); the person confirms in the ADE (one dialog per approval window, or never after \"always type on this device\")." },
                 "key": { "type": "string", "description": "A supported keyboard key." },
                 "button": { "type": "string", "description": "A supported physical button or iOS system gesture." }
             }, "required": ["name", "action"] },

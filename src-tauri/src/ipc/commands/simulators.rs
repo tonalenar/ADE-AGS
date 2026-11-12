@@ -168,7 +168,7 @@ pub(super) fn action(app: &AppHandle, from: &str, id: &str, portal: &Portal, arg
 
 /// Uma ação de `ags device` num iPhone ou iPad físico (`device:<id>`). O alcance já foi conferido (corda no canvas, ou
 /// a chave do painel do chat); por ser o aparelho de verdade, ações que mudam o estado perguntam à pessoa até ela
-/// dizer "sempre neste aparelho", e digitar texto pergunta sempre (`computer_use::ios::confirm_physical`).
+/// dizer "sempre neste aparelho"; digitar texto tem o seu "sempre digitar" e uma janela curta (`computer_use::ios::confirm_physical`).
 #[allow(clippy::too_many_arguments)]
 fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, device: &str, args: &Value, action: &str, shots: std::path::PathBuf) -> Result<Value, String> {
     use crate::iphone::{model as phone, ops as po};
@@ -194,8 +194,10 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
         }
         if ok { Ok(()) } else { Err("A pessoa não autorizou esta ação no iPhone físico.".into()) }
     };
-    let asks = |trusted: bool| phone::agent_asks(action, trusted);
-    let trusted = crate::computer_use::ios::trusted_device(&db, device)?;
+    // O "sempre" dos toques e o "sempre digitar" são confianças separadas; o portão decide por ambos (`physical_gate`).
+    let asks = || -> Result<bool, String> {
+        Ok(matches!(crate::computer_use::ios::physical_gate(&db, from, device, action, std::time::Instant::now())?, crate::computer_use::ios::Gate::Ask(_)))
+    };
     let result = match action {
         "tap" => {
             if arg_str_opt(args, "text").is_some_and(|t| !t.trim().is_empty()) {
@@ -203,7 +205,7 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
             }
             let (x, y) = (need(args, "x", action)?, need(args, "y", action)?);
             let ratio = phone::point_ratio(x, y, po::points(app, device)?)?;
-            if asks(trusted) {
+            if asks()? {
                 ask(&format!("Tocar em ({x:.0}, {y:.0}) pontos"), Some(ratio))?;
             }
             po::tap(app, device, x, y)?;
@@ -219,7 +221,7 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
                 None => ((need(args, "x1", action)?, need(args, "y1", action)?), (need(args, "x2", action)?, need(args, "y2", action)?)),
             };
             let ms = num(args, "ms")?.unwrap_or(300.0).max(50.0) as u64;
-            if asks(trusted) {
+            if asks()? {
                 let start = phone::point_ratio(from_pt.0, from_pt.1, size)?;
                 ask(&format!("Deslizar de ({:.0}, {:.0}) a ({:.0}, {:.0}) pontos", from_pt.0, from_pt.1, to_pt.0, to_pt.1), Some(start))?;
             }
@@ -229,13 +231,21 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
         "type" => {
             let text = arg_str(args, "text")?;
             phone::text_lines(&text)?;
-            ask(&format!("Digitar {} caracteres no campo que estiver em foco", text.chars().count()), None)?;
+            // Uma digitação = um pedido, qualquer que seja o tamanho do texto; o portão ainda reaproveita a aprovação.
+            let chars = text.chars().count();
+            if asks()? {
+                ask(&crate::computer_use::ios::type_what(chars), None)?;
+            }
             po::type_text(app, device, &text)?;
-            json!({ "device": who, "typed": text.chars().count() })
+            let mut typed = json!({ "device": who, "typed": chars });
+            if chars <= 1 {
+                typed["hint"] = json!("Mande o texto inteiro numa única chamada `type` (letra a letra é lento e cada chamada pode pedir confirmação).");
+            }
+            typed
         }
         "launch" => {
             let bundle = arg_str(args, "package")?;
-            if asks(trusted) {
+            if asks()? {
                 ask(&format!("Abrir o app {bundle}"), None)?;
             }
             po::launch(device, &bundle)?;
@@ -243,7 +253,7 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
         }
         "close" => {
             let bundle = arg_str(args, "package")?;
-            if asks(trusted) {
+            if asks()? {
                 ask(&format!("Fechar o app {bundle}"), None)?;
             }
             let processes = po::close(device, &bundle)?;
@@ -256,7 +266,7 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
             } else {
                 crate::simulator::model::normalize_url(&raw_url)?
             };
-            if asks(trusted) {
+            if asks()? {
                 let destination = url::Url::parse(&url).ok().and_then(|parsed| parsed.host_str().map(str::to_string));
                 ask(&destination.map(|host| format!("Abrir uma URL no domínio {host}")).unwrap_or_else(|| "Abrir uma URL no iPhone".into()), None)?;
             }
@@ -266,7 +276,7 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
         "key" => {
             let key = arg_str(args, "key")?;
             phone::key_lines(&key)?;
-            if asks(trusted) {
+            if asks()? {
                 ask(&format!("Apertar a tecla «{key}»"), None)?;
             }
             po::key(app, device, &key)?;
@@ -278,7 +288,7 @@ fn physical(app: &AppHandle, from: &str, id: &str, who: &Value, agent: &str, dev
             if !gesture && phone::button_usage(&button).is_none() {
                 return Err(format!("Botão desconhecido: \"{button}\". Use home, lock, volumeUp, volumeDown, mute, siri, controlCenter, notificationCenter ou spotlight."));
             }
-            if asks(trusted) {
+            if asks()? {
                 ask(&format!("Apertar «{button}»"), None)?;
             }
             if gesture { po::gesture(app, device, &button)? } else { po::button(app, device, &button)? }

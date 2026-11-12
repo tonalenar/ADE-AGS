@@ -10,7 +10,7 @@ use crate::{
 };
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
@@ -64,6 +64,7 @@ pub(super) fn marked_key(db: &DbConnection, key: &str) -> Result<bool, String> {
 }
 pub(super) const ALLOW: &str = "Autorizar esta ação";
 pub(super) const ALWAYS: &str = "Autorizar sempre neste aparelho";
+pub(super) const ALWAYS_TYPE: &str = "Autorizar sempre digitar neste aparelho";
 pub(super) const DENY: &str = "Recusar";
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum Answer {
@@ -80,15 +81,48 @@ fn trusted(db: &DbConnection, udid: &str) -> Result<bool, String> {
 fn trust(db: &DbConnection, udid: &str, on: bool) -> Result<(), String> {
     mark_key(db, &format!("{TRUST_PREFIX}{udid}"), on)
 }
-/// A pessoa já disse "sempre neste aparelho" para `udid` (simulador ou físico)?
-pub(crate) fn trusted_device(db: &DbConnection, udid: &str) -> Result<bool, String> {
-    trusted(db, udid)
+/// "Sempre digitar neste aparelho" (só o iPhone físico por `ags device type`): confiança separada da dos toques, porque
+/// não se sabe em que campo o texto cai. Mesmo ciclo de vida: vale até a pessoa revogar no painel.
+const TYPE_TRUST_PREFIX: &str = "computer_use.ios.trusttype.";
+fn type_trusted(db: &DbConnection, udid: &str) -> Result<bool, String> {
+    marked_key(db, &format!("{TYPE_TRUST_PREFIX}{udid}"))
 }
+fn trust_type(db: &DbConnection, udid: &str, on: bool) -> Result<(), String> {
+    mark_key(db, &format!("{TYPE_TRUST_PREFIX}{udid}"), on)
+}
+/// Depois de uma digitação aprovada ("Autorizar esta ação"), as seguintes do MESMO agente no MESMO aparelho passam sem
+/// novo pedido enquanto ele não parar por mais que isto. É deslizante: cada uso renova. Fica só em memória, então
+/// fechar o app a apaga, e revogar no painel também.
+pub(super) const TYPE_GRACE: Duration = Duration::from_secs(60);
+fn type_grace() -> &'static Mutex<HashMap<(String, String), Instant>> {
+    static GRACE: OnceLock<Mutex<HashMap<(String, String), Instant>>> = OnceLock::new();
+    GRACE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+/// A janela ainda vale em `now`? Quem chama renova o instante se sim.
+fn grace_valid(last: Option<Instant>, now: Instant) -> bool {
+    last.is_some_and(|at| now.saturating_duration_since(at) <= TYPE_GRACE)
+}
+fn grace_touch(from: &str, udid: &str, now: Instant) {
+    if let Ok(mut map) = type_grace().lock() {
+        map.retain(|_, at| grace_valid(Some(*at), now));
+        map.insert((udid.to_string(), from.to_string()), now);
+    }
+}
+
 /// Esquece o "sempre" de todos os aparelhos. Devolve quantos estavam marcados.
+/// Apaga também o "sempre digitar" e as janelas de digitação recentes.
 pub(crate) fn forget_trust(db: &DbConnection) -> Result<usize, String> {
+    if let Ok(mut map) = type_grace().lock() {
+        map.clear();
+    }
     let conn = db.lock().map_err(|_| "Estado indisponível.")?;
-    conn.execute("DELETE FROM settings WHERE key LIKE ?1", [format!("{TRUST_PREFIX}%")])
-        .map_err(|_| "Não consegui esquecer as autorizações.".to_string())
+    let mut forgotten = 0;
+    for prefix in [TRUST_PREFIX, TYPE_TRUST_PREFIX] {
+        forgotten += conn
+            .execute("DELETE FROM settings WHERE key LIKE ?1", [format!("{prefix}%")])
+            .map_err(|_| "Não consegui esquecer as autorizações.".to_string())?;
+    }
+    Ok(forgotten)
 }
 /// O que pergunta mesmo com "sempre": tocar num controle de pagar, apagar, senha, sair, enviar…, e tocar
 /// num controle SEM texto (um ícone) que o próprio Jev não deu como claramente seguro (`jev_unsure`): sem
@@ -830,9 +864,62 @@ fn place_of(udid: &str) -> &'static str {
     if crate::iphone::model::is_physical(udid) { "no iPhone físico" } else { "no simulador iOS" }
 }
 
+/// A decisão antes de perguntar: passa direto ou pergunta com estes botões.
+#[derive(Debug)]
+pub(crate) enum Gate {
+    Allowed,
+    Ask(&'static [&'static str]),
+}
+/// A pergunta de digitar, com a contagem no singular quando é 1: um texto inteiro é UMA ação.
+pub(crate) fn type_what(chars: usize) -> String {
+    match chars {
+        0 => "Digitar texto vazio no campo que estiver em foco".into(),
+        1 => "Digitar 1 caractere no campo que estiver em foco".into(),
+        n => format!("Digitar {n} caracteres no campo que estiver em foco"),
+    }
+}
+/// Precisa perguntar à pessoa antes de `action` no iPhone físico `udid`, pedida por `from`? Quem decide é só o
+/// que a pessoa respondeu no painel (o "sempre" gravado ou a janela recém-aberta): nada vem do agente.
+pub(crate) fn physical_gate(db: &DbConnection, from: &str, udid: &str, action: &str, now: Instant) -> Result<Gate, String> {
+    if !crate::iphone::model::agent_asks(action, trusted(db, udid)?, type_trusted(db, udid)?) {
+        return Ok(Gate::Allowed);
+    }
+    if action == "type" {
+        let last = type_grace().lock().ok().and_then(|map| map.get(&(udid.to_string(), from.to_string())).copied());
+        if grace_valid(last, now) {
+            grace_touch(from, udid, now);
+            return Ok(Gate::Allowed);
+        }
+        return Ok(Gate::Ask(&[ALLOW, ALWAYS_TYPE, DENY]));
+    }
+    Ok(Gate::Ask(&[ALLOW, ALWAYS, DENY]))
+}
+/// Aplica a resposta da pessoa (o texto do botão; `None` = sem resposta) e diz se a ação pode seguir.
+pub(crate) fn physical_answer(db: &DbConnection, from: &str, udid: &str, action: &str, answer: Option<&str>, now: Instant) -> Result<bool, String> {
+    let typing = action == "type";
+    Ok(match answer {
+        Some(ALLOW) => {
+            if typing {
+                grace_touch(from, udid, now);
+            }
+            true
+        }
+        Some(ALWAYS) if !typing => {
+            trust(db, udid, true)?;
+            true
+        }
+        Some(ALWAYS_TYPE) if typing => {
+            trust_type(db, udid, true)?;
+            true
+        }
+        _ => false,
+    })
+}
+
 /// Um agente quer mexer no iPhone físico por `ags device` (fora do `sim act`). Olhar passa; tocar, deslizar, tecla e
 /// botão perguntam à pessoa até ela dizer "sempre neste aparelho" (o mesmo `computer_use.ios.trust.<id>` do `sim act`);
-/// digitar texto pergunta sempre. `photo`/`point` vão ao diálogo para a pessoa ver onde. Sem resposta = recusa.
+/// digitar texto pergunta também, com o seu próprio "sempre digitar neste aparelho" e uma janela curta que reaproveita
+/// a aprovação para as digitações seguintes do mesmo agente. `photo`/`point` vão ao diálogo. Sem resposta = recusa.
 pub(crate) fn confirm_physical(
     app: &AppHandle,
     db: &DbConnection,
@@ -843,28 +930,30 @@ pub(crate) fn confirm_physical(
     photo: Option<&std::path::Path>,
     point: Option<(f64, f64)>,
 ) -> Result<bool, String> {
-    if !crate::iphone::model::agent_asks(action, trusted(db, udid)?) {
+    let Gate::Ask(options) = physical_gate(db, from, udid, action, Instant::now())? else {
         return Ok(true);
-    }
+    };
     const SECONDS: u64 = 300;
-    let options: &[&str] = if action == "type" { &[ALLOW, DENY] } else { &[ALLOW, ALWAYS, DENY] };
+    let scope = if action == "type" {
+        format!(
+            " e as digitações seguintes deste agente por {} s (ou todas neste aparelho, com \"sempre digitar\")",
+            TYPE_GRACE.as_secs()
+        )
+    } else {
+        " (ou para todas neste aparelho, com \"sempre\")".to_string()
+    };
     let question = format!(
-        "Confirma esta ação no iPhone físico?\n{what}.\nÉ o aparelho de verdade: a aprovação vale só para esta ação{}.",
-        if options.contains(&ALWAYS) { " (ou para todas neste aparelho, com \"sempre\")" } else { "" }
+        "Confirma esta ação no iPhone físico?\n{what}.\nÉ o aparelho de verdade: a aprovação vale para esta ação{scope}. Você revoga no painel do aparelho."
     );
     let review = photo.map(|p| super::desktop::review("iphone", what, p, point));
     let payload = super::desktop::ask_payload(&question, options, from, SECONDS, review);
-    let Ok(out) = ask_frontend_within(app, "user.ask", &payload, None, Duration::from_secs(SECONDS + 1)).and_then(unwrap_frontend_result) else {
-        return Ok(false);
-    };
-    Ok(match out["text"].as_str() {
-        Some(ALLOW) => true,
-        Some(ALWAYS) if options.contains(&ALWAYS) => {
-            trust(db, udid, true)?;
-            true
-        }
-        _ => false,
-    })
+    let answer = ask_frontend_within(app, "user.ask", &payload, None, Duration::from_secs(SECONDS + 1))
+        .and_then(unwrap_frontend_result)
+        .ok()
+        .and_then(|out| out["text"].as_str().map(str::to_string))
+        // Só os botões que esta pergunta ofereceu valem.
+        .filter(|text| options.contains(&text.as_str()));
+    physical_answer(db, from, udid, action, answer.as_deref(), Instant::now())
 }
 
 /// O nome do alvo `reveal` na observação. Sem palavra de risco (um "sair" aqui faria o núcleo pedir confirmação para
@@ -1598,3 +1687,125 @@ mod flow_test {
     }
 }
 
+
+#[cfg(test)]
+mod physical_gate_test {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    fn db() -> DbConnection {
+        Arc::new(Mutex::new(crate::database::test_db()))
+    }
+    /// A janela de digitação é global e `forget_trust` a esvazia: os testes dela andam um de cada vez.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+    fn ask_options(gate: Gate) -> Vec<&'static str> {
+        match gate {
+            Gate::Ask(options) => options.to_vec(),
+            Gate::Allowed => panic!("devia perguntar"),
+        }
+    }
+
+    #[test]
+    fn digitar_pergunta_com_a_opcao_de_autorizar_sempre_digitar() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        let options = ask_options(physical_gate(&db, "tab-a", "ud-1", "type", t0).unwrap());
+        assert_eq!(options, [ALLOW, ALWAYS_TYPE, DENY]);
+    }
+
+    #[test]
+    fn digitacoes_seguidas_do_mesmo_agente_reaproveitam_a_aprovacao_recente() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        assert!(physical_answer(&db, "tab-g", "ud-g", "type", Some(ALLOW), t0).unwrap());
+        // Dentro da janela: sem novo pedido, mesmo para "1 caractere".
+        let t1 = t0 + Duration::from_secs(20);
+        assert!(matches!(physical_gate(&db, "tab-g", "ud-g", "type", t1).unwrap(), Gate::Allowed));
+        // A janela é deslizante: cada uso a renova.
+        let t2 = t1 + TYPE_GRACE - Duration::from_secs(1);
+        assert!(matches!(physical_gate(&db, "tab-g", "ud-g", "type", t2).unwrap(), Gate::Allowed));
+        // Parada além da janela: volta a perguntar.
+        let t3 = t2 + TYPE_GRACE + Duration::from_secs(1);
+        assert!(matches!(physical_gate(&db, "tab-g", "ud-g", "type", t3).unwrap(), Gate::Ask(_)));
+    }
+
+    #[test]
+    fn a_janela_nao_vaza_para_outro_agente_nem_outro_aparelho_nem_outras_acoes() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        assert!(physical_answer(&db, "tab-h", "ud-h", "type", Some(ALLOW), t0).unwrap());
+        let t1 = t0 + Duration::from_secs(5);
+        assert!(matches!(physical_gate(&db, "tab-outro", "ud-h", "type", t1).unwrap(), Gate::Ask(_)));
+        assert!(matches!(physical_gate(&db, "tab-h", "ud-outro", "type", t1).unwrap(), Gate::Ask(_)));
+        assert!(matches!(physical_gate(&db, "tab-h", "ud-h", "tap", t1).unwrap(), Gate::Ask(_)));
+    }
+
+    #[test]
+    fn recusar_nao_abre_janela() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        assert!(!physical_answer(&db, "tab-r", "ud-r", "type", Some(DENY), t0).unwrap());
+        assert!(!physical_answer(&db, "tab-r", "ud-r", "type", None, t0).unwrap());
+        assert!(matches!(physical_gate(&db, "tab-r", "ud-r", "type", t0).unwrap(), Gate::Ask(_)));
+    }
+
+    #[test]
+    fn autorizar_sempre_digitar_dispensa_o_pedido_e_revogar_volta_a_pedir() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        assert!(physical_answer(&db, "tab-s", "ud-s", "type", Some(ALWAYS_TYPE), t0).unwrap());
+        // Vale para qualquer agente e a qualquer hora naquele aparelho, sem depender da janela.
+        let later = t0 + Duration::from_secs(3600);
+        assert!(matches!(physical_gate(&db, "tab-s", "ud-s", "type", later).unwrap(), Gate::Allowed));
+        assert!(matches!(physical_gate(&db, "tab-outro", "ud-s", "type", later).unwrap(), Gate::Allowed));
+        // Outro aparelho não herda.
+        assert!(matches!(physical_gate(&db, "tab-s", "ud-outro", "type", later).unwrap(), Gate::Ask(_)));
+        // Revogar pelo painel apaga o "sempre" e a janela.
+        assert_eq!(forget_trust(&db).unwrap(), 1);
+        assert!(matches!(physical_gate(&db, "tab-s", "ud-s", "type", later).unwrap(), Gate::Ask(_)));
+    }
+
+    #[test]
+    fn revogar_tambem_fecha_a_janela_recente() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        assert!(physical_answer(&db, "tab-w", "ud-w", "type", Some(ALLOW), t0).unwrap());
+        forget_trust(&db).unwrap();
+        assert!(matches!(physical_gate(&db, "tab-w", "ud-w", "type", t0).unwrap(), Gate::Ask(_)));
+    }
+
+    #[test]
+    fn o_sempre_dos_toques_nao_cobre_digitar_e_o_de_digitar_nao_cobre_tocar() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        assert!(physical_answer(&db, "tab-t", "ud-t", "tap", Some(ALWAYS), t0).unwrap());
+        assert!(matches!(physical_gate(&db, "tab-t", "ud-t", "tap", t0).unwrap(), Gate::Allowed));
+        assert!(matches!(physical_gate(&db, "tab-t", "ud-t", "type", t0).unwrap(), Gate::Ask(_)));
+        assert_eq!(forget_trust(&db).unwrap(), 1);
+
+        assert!(physical_answer(&db, "tab-t", "ud-t", "type", Some(ALWAYS_TYPE), t0).unwrap());
+        assert!(matches!(physical_gate(&db, "tab-t", "ud-t", "tap", t0).unwrap(), Gate::Ask(_)));
+    }
+
+    #[test]
+    fn toque_segue_oferecendo_o_sempre_de_antes_e_olhar_nunca_pergunta() {
+        let _serial = serial();
+        let (db, t0) = (db(), Instant::now());
+        assert_eq!(ask_options(physical_gate(&db, "tab-a", "ud-9", "tap", t0).unwrap()), [ALLOW, ALWAYS, DENY]);
+        assert!(matches!(physical_gate(&db, "tab-a", "ud-9", "shot", t0).unwrap(), Gate::Allowed));
+        // Só os botões exatos valem: qualquer outro texto é recusa.
+        assert!(!physical_answer(&db, "tab-a", "ud-9", "tap", Some(ALWAYS_TYPE), t0).unwrap());
+        assert!(!physical_answer(&db, "tab-a", "ud-9", "type", Some(ALWAYS), t0).unwrap());
+    }
+
+    #[test]
+    fn um_texto_inteiro_e_uma_unica_confirmacao() {
+        // O pedido descreve o texto todo numa pergunta só; a janela cobre as chamadas seguintes.
+        assert_eq!(type_what(0), "Digitar texto vazio no campo que estiver em foco");
+        assert_eq!(type_what(1), "Digitar 1 caractere no campo que estiver em foco");
+        assert_eq!(type_what(30), "Digitar 30 caracteres no campo que estiver em foco");
+    }
+}
