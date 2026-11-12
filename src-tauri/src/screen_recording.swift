@@ -54,7 +54,9 @@ Task {
         fflush(stdout)
         exit(0)
     } catch {
-        print("ERROR:\(error.localizedDescription)")
+        // O domínio e o código deixam o Rust reconhecer a permissão negada (SCStreamError -3801).
+        let nsError = error as NSError
+        print("ERROR:\(error.localizedDescription) [\(nsError.domain) \(nsError.code)]")
         fflush(stdout)
         exit(2)
     }

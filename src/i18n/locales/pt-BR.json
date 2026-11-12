@@ -4181,6 +4181,8 @@
   "screenRecording.stop": "Parar e anexar gravação",
   "screenRecording.started": "Gravando {{label}}. A captura fica local até você anexá-la à conversa.",
   "screenRecording.attached": "Vídeo anexado ao rascunho. Revise e envie quando quiser.",
+  "screenRecording.permissionRequired": "O macOS não autorizou a Gravação de Tela. Abra Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema e habilite ADE AGS. Se ela já estiver na lista, remova e adicione de novo (a troca de assinatura do app invalida a autorização antiga) e reabra a ADE.",
+  "screenRecording.openSettings": "Abrir Gravação de Tela",
   "screenRecording.pendingRestored_one": "Uma captura pendente voltou ao rascunho. Revise antes de enviar.",
   "screenRecording.pendingRestored_other": "{{count}} capturas pendentes voltaram ao rascunho. Revise antes de enviar.",
   "screenRecording.pendingMissing_one": "Uma captura pendente não existe mais no disco e saiu da lista.",
