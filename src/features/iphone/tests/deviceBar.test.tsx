@@ -55,6 +55,12 @@ describe("barra de controles físicos", () => {
     }
   });
 
+  it("no modo ajustar não mostra rótulo solto de zoom na coluna", () => {
+    render();
+    expect(host.textContent).not.toContain("iphone.zoom.fitShort");
+    expect(host.querySelector('[aria-label="iphone.zoom.fit"]')?.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("mantém Sistema e Botões acessíveis no menu agrupado", () => {
     render();
     act(() => host.querySelector<HTMLButtonElement>('[aria-label="chat.devices.more"]')?.click());
