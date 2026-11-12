@@ -18,6 +18,7 @@ use tauri::{AppHandle, Emitter};
 use super::model::{self, GateAction, HelperEvent, HelperMsg, Link, LinkState, Transport};
 use super::native::decoder::Decoder;
 use super::native::view::{debug_on, now_ns, Presenter, Sink};
+use super::recording::{Frame, Tap};
 
 pub const STATUS_EVENT: &str = "iphone-mirror-status";
 const HELPER: &str = "ade-iphone-mirror";
@@ -71,6 +72,8 @@ enum Msg {
     Closed(u64),
     /// Linhas de entrada (toque, botão, tecla) para o helper, na ordem.
     Input(Vec<String>),
+    /// Liga (`Some`) ou desliga (`None`) a cópia dos quadros para o gravador de vídeo.
+    Record(Option<Tap>),
 }
 
 /// O estado compartilhado e o aviso de mudança (quem espera o aparelho ficar pronto dorme no `Condvar`).
@@ -85,6 +88,16 @@ impl InputTx {
         if !lines.is_empty() {
             let _ = self.0.send(Msg::Input(lines));
         }
+    }
+}
+
+/// Por onde o gravador liga e desliga a cópia dos quadros da sessão.
+#[derive(Clone)]
+pub struct RecordTx(Sender<Msg>);
+
+impl RecordTx {
+    pub fn set(&self, tap: Option<Tap>) {
+        let _ = self.0.send(Msg::Record(tap));
     }
 }
 
@@ -110,6 +123,10 @@ impl Session {
 
     pub fn input(&self) -> InputTx {
         InputTx(self.tx.clone())
+    }
+
+    pub fn recorder(&self) -> RecordTx {
+        RecordTx(self.tx.clone())
     }
 
     /// Quem espera o aparelho ficar pronto, sem segurar nada da sessão.
@@ -167,7 +184,7 @@ pub fn start(app: AppHandle, device: String, identifier: String, tunnel: Option<
     let presenter = Presenter::new();
     let status: Shared = Arc::new((Mutex::new(Status::of(&device, &Link::default(), false, None)), Condvar::new()));
     let session = Session { tx: tx.clone(), presenter: presenter.clone(), status: status.clone() };
-    let worker = Worker { app, device, identifier, tunnel, tx, rx, presenter, status, link: Link::default(), wanted: visible, generation: 0, input: false, fps: None };
+    let worker = Worker { app, device, identifier, tunnel, tx, rx, presenter, status, link: Link::default(), wanted: visible, generation: 0, input: false, fps: None, record: None };
     let _ = std::thread::Builder::new().name("ade-iphone-mirror".into()).spawn(move || worker.run());
     session
 }
@@ -187,6 +204,8 @@ struct Worker {
     /// O helper desta vida abriu o toque.
     input: bool,
     fps: Option<u32>,
+    /// Quem grava o vídeo (os quadros decodificáveis também vão para ele). Sobrevive às reconexões.
+    record: Option<Tap>,
 }
 
 /// O helper aberto. O `std::process::Child` fica aqui até o `wait`: assim o `kill`, se preciso, nunca pega um PID
@@ -229,9 +248,10 @@ impl Worker {
     fn run(mut self) {
         loop {
             // Ninguém olhando: espera alguém olhar.
-            while !self.wanted {
+            while !self.wanted && self.record.is_none() {
                 match self.rx.recv() {
                     Ok(Msg::Wanted(w)) => self.wanted = w,
+                    Ok(Msg::Record(tap)) => self.record = tap,
                     Ok(Msg::Stop) | Err(_) => return,
                     Ok(_) => {}
                 }
@@ -265,6 +285,7 @@ impl Worker {
             }
             match self.rx.recv_timeout(left) {
                 Ok(Msg::Wanted(w)) => self.wanted = w,
+                Ok(Msg::Record(tap)) => self.record = tap,
                 Ok(Msg::Stop) | Err(RecvTimeoutError::Disconnected) => return false,
                 Ok(_) => {}
                 Err(RecvTimeoutError::Timeout) => return true,
@@ -323,7 +344,12 @@ impl Worker {
         self.presenter.invalidate_capture();
         let mut started = false;
         let mut last_packet = Instant::now();
-        let mut idle_since: Option<Instant> = if self.wanted { None } else { Some(Instant::now()) };
+        // Gravando, a sessão não fica ociosa: o vídeo continua mesmo sem tela à vista.
+        let mut idle_since: Option<Instant> = if self.wanted || self.record.is_some() { None } else { Some(Instant::now()) };
+        // O relógio do RTP recomeça a cada vida do helper: o primeiro quadro gravado avisa o gravador.
+        let mut discontinuity = true;
+        // A gravação só começa num quadro-chave; os quadros que o portão descarta nunca entram.
+        let mut record_synced = false;
         let mut depacketizer = model::Depacketizer::default();
         let mut gate = model::KeyframeGate::default();
         let mut decoder: Option<Decoder> = None;
@@ -374,7 +400,7 @@ impl Worker {
                 Err(RecvTimeoutError::Disconnected) => return Ended::Stop,
                 Err(RecvTimeoutError::Timeout) => {
                     let now = Instant::now();
-                    if idle_since.is_some_and(|since| now >= since + model::IDLE_GRACE) {
+                    if self.record.is_none() && idle_since.is_some_and(|since| now >= since + model::IDLE_GRACE) {
                         return Ended::Idle;
                     }
                     if !started && now >= born + model::START_TIMEOUT {
@@ -399,7 +425,22 @@ impl Worker {
             match msg {
                 Msg::Wanted(w) => {
                     self.wanted = w;
-                    idle_since = if w { None } else { idle_since.or(Some(Instant::now())) };
+                    idle_since = if w || self.record.is_some() { None } else { idle_since.or(Some(Instant::now())) };
+                }
+                Msg::Record(tap) => {
+                    let on = tap.is_some();
+                    self.record = tap;
+                    record_synced = false;
+                    discontinuity = false;
+                    if on {
+                        idle_since = None;
+                        // Sem esperar o próximo quadro-chave periódico (até 10 s): pede um agora.
+                        if started {
+                            send(child, "keyframe");
+                        }
+                    } else if !self.wanted {
+                        idle_since = idle_since.or(Some(Instant::now()));
+                    }
                 }
                 Msg::Stop => return Ended::Stop,
                 Msg::Input(lines) => {
@@ -542,6 +583,27 @@ impl Worker {
                                     eprintln!("[iphone] {e}");
                                     gate.on_gap(ms(now));
                                     self.presenter.invalidate_capture();
+                                } else {
+                                    let ended = match &self.record {
+                                        Some(tap) => {
+                                            record_synced |= unit.irap;
+                                            record_synced
+                                                && !tap.push(Frame {
+                                                    ts: unit.ts,
+                                                    irap: unit.irap,
+                                                    data: unit.avcc(),
+                                                    params: d.params().clone(),
+                                                    display: self.link.display,
+                                                    arrived: now,
+                                                    discontinuity: std::mem::take(&mut discontinuity),
+                                                })
+                                        }
+                                        None => false,
+                                    };
+                                    if ended {
+                                        // O gravador acabou (parou ou falhou): a sessão larga a ponta.
+                                        self.record = None;
+                                    }
                                 }
                             }
                         }
@@ -574,6 +636,7 @@ impl Worker {
             match self.rx.recv_timeout(until.saturating_duration_since(Instant::now())) {
                 Ok(Msg::Closed(g)) if g == child.generation => child.closed = true,
                 Ok(Msg::Wanted(w)) => self.wanted = w,
+                Ok(Msg::Record(tap)) => self.record = tap,
                 Ok(Msg::Stop) => stopping = true,
                 Ok(_) => {}
                 Err(_) => break,

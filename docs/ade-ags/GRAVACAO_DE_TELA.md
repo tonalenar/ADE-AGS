@@ -45,7 +45,8 @@ O registro guarda só caminhos e ids de alvo, nunca conteúdo de tela (`src/feat
 
 | Fonte | Como gravamos | Formato e limite |
 |---|---|---|
-| iPhone/iPad físico | `xcrun devicectl` | MP4 H.264; máximo de 120 s |
+| iPhone/iPad físico, com o espelho ligado | os quadros HEVC do próprio espelho, empacotados em MP4 sem recodificar (`iphone/recording.rs`, `iphone/mp4.rs`) | MP4 HEVC; parada manual, sem limite de tempo |
+| iPhone/iPad físico, sem o espelho | `xcrun devicectl` (alternativa) | MP4 H.264; máximo de 120 s. Neste aparelho o CoreDevice não oferece a capacidade, e o erro manda ligar o espelho |
 | Simulador iOS | `xcrun simctl io recordVideo` | MP4 H.264; parada manual |
 | Android físico ou emulador | `adb shell screenrecord` e `adb pull` | MP4; máximo de 120 s |
 | Tela do Mac | ScreenCaptureKit, display principal | MOV H.264, 30 fps, sem áudio; parada manual; macOS 15 ou posterior |
@@ -68,12 +69,52 @@ Agora (`src-tauri/src/screen_recording.rs`):
 | macOS negou a Gravação de Tela (tela do Mac) | aviso com botão **Abrir Gravação de Tela**, o caminho Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema e a dica de remover e adicionar a ADE de novo depois de trocar a assinatura. O backend marca o erro com `SCREEN_CAPTURE_PERMISSION_REQUIRED:` |
 | Sem permissão de escrita na pasta de vídeos | caminho Arquivos e Pastas / Acesso Total ao Disco |
 | Simulador desligado | "O simulador iOS não está ligado" |
+| iPhone sem espelho e o `devicectl` sem a capacidade de gravação de tela (`CapabilityFeatureIdentifier = com.apple.coredevice.feature.screenrecording`) | "O iPhone não aceita gravação de tela pelo devicectl. Ligue o espelho do aparelho na ADE para gravar." O backend marca o erro com `IPHONE_MIRROR_REQUIRED:` e o botão mostra a frase traduzida (`screenRecording.iphoneNeedsMirror`, nos 3 catálogos), sem o texto cru do `devicectl` |
+| Espelho do iPhone ainda conectando ou reconectando | "O espelho do iPhone ainda está conectando…" (não tenta o `devicectl`) |
 | iPhone bloqueado, sem Modo de Desenvolvedor ou desconectado | o que fazer em cada caso |
 | Outra falha | código de saída (ou sinal) e as últimas linhas que a ferramenta escreveu |
 
 A permissão de Gravação de Tela só vale para a **tela do Mac** (ScreenCaptureKit). `devicectl` e `simctl` não dependem dela.
 
-**Espelho do iPhone físico.** Gravar os próprios quadros do espelho (HEVC já recebido pelo app) evitaria depender do `devicectl`, mas exige empacotar o HEVC em MP4 (AVAssetWriter ou muxer próprio) e foi deixado de fora: sem um iPhone para validar, não há como provar que o arquivo sai tocável. Se o `devicectl screen-record` falhar de forma recorrente com o espelho aberto, o registro agora mostra por quê, e essa decisão pode ser revista com o texto real do erro em mãos.
+## Espelho do iPhone físico
+
+O botão de gravar do espelho (`ScreenRecordButton kind="iphone"`) grava **os quadros que a ADE já recebe do aparelho**, sem passar pelo `devicectl` e sem a permissão de Gravação de Tela do macOS (é o stream do iPhone, não a tela do Mac). O `devicectl screen-record` falhava na hora neste aparelho com `CapabilityName = Screen Recording`: o CoreDevice dele não oferece essa capacidade.
+
+### Como os quadros chegam
+
+```
+helper ade-iphone-mirror ── datagramas RTP (HEVC, 24 kHz) ──► iphone/session.rs
+        model::Depacketizer (RFC 7798) ─► AccessUnit { ts, nals, irap }      ← o quadro completo, ainda HEVC
+              │ KeyframeGate: só passa o que dá para decodificar
+              ├─► Decoder (VideoToolbox) ─► CVPixelBuffer/IOSurface ─► tela
+              └─► (gravando) Frame { ts, irap, avcc, params, display } ─► canal ─► thread ade-iphone-record ─► MP4
+```
+
+A cópia sai do mesmo ponto que alimenta o VideoToolbox, depois do portão de quadros-chave: quadro perdido ou sem referência nunca entra no arquivo. Nada é decodificado nem recodificado para gravar: os bytes do HEVC que o aparelho mandou são os do `mdat`, então não há custo de codificador e a qualidade é a do espelho.
+
+### O desenho
+
+- **`iphone/mp4.rs`** (puro, sem macOS): `parse_sps` lê o SPS (perfil, nível, formato de cor, profundidade, tamanho codificado e a janela de conformidade) e `Mp4Writer` escreve um MP4 `hvc1` em fluxo. O `mdat` (cabeçalho de 64 bits) cresce no disco e só o índice dos quadros (~12 bytes cada) fica na memória; ao parar, o `moov` vai depois do `mdat` e o tamanho do `mdat` é corrigido. Escolhi um muxer próprio no lugar do `AVAssetWriter`: não há dependência nova, não há ponte Objective-C, e dá para testar a estrutura do arquivo em qualquer sistema e conferir byte a byte que os quadros são os originais.
+- **Duração**: a de cada quadro é a diferença entre os horários RTP (24 kHz), não um fps suposto. O aparelho manda menos quadros com a tela parada (já foram 11 s calados); o quadro segura o tempo real. O último quadro fica o tempo desde que chegou até a parada. Se o RTP recomeça (o helper caiu e voltou), o salto é medido pelo relógio do Mac.
+- **Tamanho e orientação**: a trilha tem o tamanho da **tela** (`Status.display`, sem as bordas de alinhamento à direita e embaixo): o `tkhd` guarda esse tamanho e a entrada `hvc1` leva uma abertura limpa (`clap`) ancorada no canto superior esquerdo. A orientação vem do próprio tamanho (sem matriz de rotação). Se o aparelho girar durante a gravação, o espelho já troca de resolução com um SPS novo; o arquivo ganha uma segunda entrada de amostras para o novo tamanho, e o AVFoundation decodifica os dois tamanhos.
+- **Thread própria** (`iphone/recording.rs`): a sessão só entrega o quadro por um canal; escrever em disco nunca segura a thread do vídeo nem a da interface, e nenhum mutex fica travado durante I/O. Parar manda `Finish` pelo mesmo canal (os quadros anteriores já estão na fila) e espera a resposta por até 30 s.
+- **Começa num quadro-chave**: ao iniciar, a sessão pede um IDR ao aparelho (30–150 ms) em vez de esperar o periódico de 10 s. O `start` só volta depois que o primeiro quadro está no arquivo (até 6 s): um espelho que não entrega vídeo ou um disco com erro aparece ao iniciar, não ao parar.
+- **Arquivo**: escrito em `<destino>.mp4.part` e renomeado só quando o `moov` está gravado. Qualquer outro fim (erro de disco, cancelamento, a ADE cair no meio) apaga o `.part`: nunca sobra um `.mp4` sem `moov`. O destino e o fluxo depois de parar são os de sempre (pasta de vídeos, toast, anexo ao rascunho).
+- **A sessão não fica ociosa gravando**: sem tela à vista a sessão normalmente pausa em 15 s; com gravação ativa ela continua. Reconectar (túnel que cai) não interrompe a gravação; a volta recomeça num IDR.
+- **Escolha do caminho** (`screen_recording::iphone_route`, testada): espelho `live` → quadros do espelho; `connecting`/`reconnecting` → pede para esperar; sem espelho (`offline`, `paused`, sem sessão) → `devicectl`, que neste aparelho falha com o erro traduzido acima.
+
+### Limites conhecidos
+
+- Se a ADE morrer no meio, o `.part` é perdido (o `moov` só existe ao parar). Um MP4 fragmentado sobreviveria, mas abre pior fora do ecossistema Apple.
+- Fechar a tela do espelho com a gravação ativa não finaliza o arquivo: o botão volta a mostrar "gravando" quando o espelho reabre e é ele que para.
+- Sem limite de duração (o `devicectl` tinha 120 s). O HEVC é pequeno (1 a 6 Mbit/s: ~45 MB em 10 min), mas o disco é da pessoa.
+- Só se conferiu com quadros sintéticos do codificador de hardware do macOS e com o AVFoundation; ainda não com um iPhone de verdade (ver "Como foi conferido").
+
+### Como foi conferido
+
+- `cargo test --lib iphone::test_gravacao` (22 testes): o SPS real, o leitor de caixas confere `stsz`/`stco`/`stsc`/`stts`/`stss`, os bytes de cada quadro no `mdat`, o `hvcC`, a abertura limpa, a troca de tamanho, o horário RTP que dá a volta no `u32`, o salto de tela parada, o ciclo iniciar/parar com um escritor falso e os arquivos `.part`.
+- `cargo test --lib screen_recording` (26 testes): a escolha do caminho por estado do espelho, a tradução do erro do `devicectl` e o ciclo iniciar/parar/limpar do registro com um ambiente falso.
+- Um `.mp4` de verdade: `scripts/gerar-fixture-hevc.swift` codifica quadros sintéticos com o VideoToolbox (os de `src-tauri/src/iphone/testdata/`); a sonda `cargo test --lib iphone::test_gravacao::sonda -- --ignored` os empacota em `ADE_MP4_OUT`; `scripts/verificar-mp4.swift` abre cada arquivo com o AVFoundation (toca, duração, tamanho, decodifica todos os quadros, miniatura). `avconvert` também o transcodificou sem erro.
 
 ## Arquivo e envio
 

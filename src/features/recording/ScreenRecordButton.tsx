@@ -11,6 +11,8 @@ import { openPrivacySettings, screenRecordingStart, screenRecordingStatus, scree
 
 /** Prefixo que o backend (`screen_recording.rs`) põe no erro quando o macOS nega a Gravação de Tela. */
 const PERMISSION_MARKER = "SCREEN_CAPTURE_PERMISSION_REQUIRED:";
+/** Prefixo do erro em que o `devicectl` não oferece a gravação de tela deste iPhone: só o espelho grava. */
+const IPHONE_MIRROR_MARKER = "IPHONE_MIRROR_REQUIRED:";
 
 const composerTargetsByRecording = new Map<string, string | null | undefined>();
 
@@ -69,6 +71,8 @@ export function ScreenRecordButton({ kind, target, label, composerTarget, disabl
             });
           },
         });
+      } else if (raw.includes(IPHONE_MIRROR_MARKER)) {
+        void AlertaToast(t("screenRecording.title"), t("screenRecording.iphoneNeedsMirror"), "error", 6000);
       } else {
         void AlertaToast(t("screenRecording.title"), raw, "error", 5000);
       }
