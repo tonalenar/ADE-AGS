@@ -162,7 +162,7 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   device start <dispositivo> [--avd <avd>]    Liga o emulador e espera terminar de iniciar
   device tap <dispositivo> --x N --y N        Toca · ou --text \"Entrar\" (procura o elemento na tela)
   device swipe <dispositivo> --dir up|down|left|right   · ou --x1 --y1 --x2 --y2 [--ms 300]
-  device type <dispositivo> \"texto\"          Digita (só ASCII) · device key <d> back|home|enter|...
+  device type <dispositivo> \"texto\"          Digita o texto INTEIRO numa chamada (só ASCII; nunca letra a letra) · device key <d> back|home|enter|...
   device apps <iPhone>                        Lista nome e bundle id dos apps instalados
   device launch <dispositivo> <pacote>        Abre um app (com.android.settings)
   device close <dispositivo> <pacote>         Fecha o app (com.apple.mobilesafari no iOS)
@@ -174,7 +174,8 @@ DISPOSITIVOS DO CANVAS — um Android (emulador ou telefone, por adb) ou um simu
   device clipboard <dispositivo> [\"texto\"]   Sem texto, mostra o que o iPhone copiou; com texto, põe na área de transferência dele
   device say <dispositivo> \"mensagem\"         Responde na conversa do simulador (a pessoa e os outros agentes veem)
   iPhone/iPad físicos do painel do chat também aparecem em `devices`; apps, launch, close, open, toque, gesto e digitação
-  usam o CoreDevice do Xcode pelo USB ou Wi-Fi e respeitam a chave de controle e a confirmação por aparelho.
+  usam o CoreDevice do Xcode pelo USB ou Wi-Fi e respeitam a chave de controle e a confirmação por aparelho. Um `type` é uma
+  confirmação, qualquer que seja o tamanho do texto; a pessoa pode autorizar \"sempre digitar neste aparelho\" ou revogar no painel.
   Sem a chave \"Permitir que agentes controlem dispositivos\" da pessoa, o painel só libera shot e tree.
 
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)

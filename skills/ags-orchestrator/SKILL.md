@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.76.0
+version: 1.77.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -916,7 +916,7 @@ ags device close iPhone com.apple.mobilesafari  # close an app (like swiping it 
 ags device shot iPhone                        # PNG path + screen size in points; read it before tapping
 ags device tap iPhone --x 201 --y 610         # points; `--text` is not available on iOS yet
 ags device swipe iPhone --dir up              # or --x1 --y1 --x2 --y2 [--ms 300]
-ags device type iPhone "ton@example.com"      # US keyboard ASCII only
+ags device type iPhone "ton@example.com"      # US keyboard ASCII only; the WHOLE text in ONE call, never letter by letter
 ags device key iPhone enter                   # enter, escape, delete, tab, space, up/down/left/right
 ags device button iPhone home                 # home, lock, side, siri
 ags device rotate iPhone left                 # a quarter turn (left = counter-clockwise, right); on Android it toggles portrait/landscape
@@ -924,6 +924,10 @@ ags device clipboard iPhone                   # what the device copied (check a 
 ags device say iPhone "Login fixed: the button no longer hides under the keyboard."
 ```
 
+- **Typing on a physical iPhone**: send the entire string in a single `ags device type` / `device_action type` call.
+  Each call can raise a confirmation dialog for the person, so one call per character is unusable. One approval
+  covers your next `type` calls for about a minute of activity; the person can pick "Autorizar sempre digitar
+  neste aparelho" or revoke it in the device panel. You can never approve for yourself: only the person's answer in the ADE counts.
 - The node has a **chat**: what the user writes there reaches every agent connected to it (with
   the current screen attached). Answer there with `ags device say`, not in your terminal only;
   the other connected agents and the user see it, together with the actions you took.
