@@ -218,6 +218,7 @@ fn live_turn(thread_id: &str) -> Option<Option<String>> {
 
 /// Fecha o processo do agente da conversa, qualquer que seja.
 fn close(thread_id: &str) {
+    super::autocompact::on_closed(thread_id);
     codex::close(thread_id);
     claude::close(thread_id);
     opencode::close(thread_id);
@@ -794,6 +795,11 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
     if !admits(mode, status(thread_id).working) {
         return Err(SendError::Busy);
     }
+    // Compactando o contexto (autocompact): a mensagem espera. A fila do composer e a fila entre agentes a seguram e
+    // a soltam quando o aviso «Contexto compactado» fecha.
+    if super::autocompact::is_compacting(thread_id) {
+        return Err(SendError::Busy);
+    }
     // O turno anterior caiu com ferramenta sem resultado: o agente fica sabendo antes da mensagem nova.
     let noted = {
         let conn = db.lock().map_err(|e| SendError::NotSent(db_err(e)))?;
@@ -968,14 +974,15 @@ pub async fn compact_context(app: &AppHandle, db: &DbConnection, thread_id: &str
     compact_context_inner(app, db, thread_id, instructions, false).await
 }
 
-async fn compact_context_inner(
+pub(super) async fn compact_context_inner(
     app: &AppHandle,
     db: &DbConnection,
     thread_id: &str,
     instructions: Option<&str>,
     automatic: bool,
 ) -> Result<(), String> {
-    if status(thread_id).working {
+    // A compactação automática já está registrada como «em curso» (a fila espera): só um turno aberto a impede.
+    if if automatic { turn_open(thread_id) } else { status(thread_id).working } {
         return Err("Espere o turno terminar antes de compactar o contexto".into());
     }
     {
@@ -1001,17 +1008,27 @@ async fn compact_context_inner(
             if instructions.is_some() {
                 return Err("O app-server do Codex não aceita instruções personalizadas para compactar".into());
             }
+            // A compactação automática decide e pede sob a trava de envio: um envio que chegou no meio não abre turno junto.
+            let gate = send_gate(thread_id);
+            let _held = if automatic { Some(gate.lock().await) } else { None };
+            if automatic && turn_open(thread_id) {
+                return Err("Um turno começou antes da compactação automática".into());
+            }
             let session = codex::session(app, db, thread_id).await?;
             let remote = session.remote().ok_or("A conversa ainda não abriu no Codex")?;
             session.request("thread/compact/start", json!({ "threadId": remote })).await?;
             Ok(())
         }
         Engine::Claude => {
-            let command = instructions.map_or_else(|| "/compact".to_string(), |text| format!("/compact {text}"));
+            let slash = match super::autocompact::command_for(&row.agent_id) {
+                Some(super::autocompact::Command::Slash(slash)) => slash,
+                _ => "/compact",
+            };
+            let command = instructions.map_or_else(|| slash.to_string(), |text| format!("{slash} {text}"));
             if automatic {
                 let gate = send_gate(thread_id);
                 let _held = gate.lock().await;
-                if status(thread_id).working {
+                if turn_open(thread_id) {
                     return Err("Um turno começou antes da compactação automática".into());
                 }
                 {
@@ -1236,9 +1253,15 @@ pub struct ThreadStatus {
     pub working: bool,
 }
 
+/// Há turno aberto no motor (sem contar a compactação de contexto, que também deixa a conversa ocupada em `status`).
+pub(super) fn turn_open(thread_id: &str) -> bool {
+    live_turn(thread_id).is_some_and(|turn| turn.is_some())
+}
+
 pub fn status(thread_id: &str) -> ThreadStatus {
     match live_turn(thread_id) {
-        Some(turn) => ThreadStatus { alive: true, working: turn.is_some() },
+        // Compactando o contexto também é estar ocupado: `ags chat wait` e a fila entre agentes esperam.
+        Some(turn) => ThreadStatus { alive: true, working: turn.is_some() || super::autocompact::is_compacting(thread_id) },
         None => ThreadStatus { alive: false, working: false },
     }
 }

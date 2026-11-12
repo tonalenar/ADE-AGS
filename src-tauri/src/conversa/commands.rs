@@ -124,6 +124,12 @@ pub async fn chat_thread_auto_compact_on_return(
     api::auto_compact_on_return(&app, &db, &thread_id).await
 }
 
+/// O mapa «agente → medida de contexto → mecanismo → suportado» do autocompact, para a tela de Personalização.
+#[tauri::command]
+pub fn chat_autocompact_plans() -> Vec<super::autocompact::PlanRow> {
+    super::autocompact::plan_table()
+}
+
 #[tauri::command]
 pub async fn chat_thread_clear_context(
     app: AppHandle,

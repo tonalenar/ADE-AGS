@@ -290,6 +290,10 @@ pub struct Item {
     /// Entrada de contexto do Claude nesta chamada, sem tokens de saída. Ausente nos demais motores.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u64>,
+    /// A janela de contexto do modelo (tokens), quando o motor a informa (`result.modelUsage` do Claude,
+    /// `modelContextWindow` do Codex). Com `context_tokens`, é o medidor de contexto da conversa.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
     /// Evita repetir a compactação automática ao reabrir a mesma ponta de contexto.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auto_compact_attempted: Option<bool>,
@@ -303,7 +307,7 @@ impl Item {
         Item {
             kind, id, at, text: None, name: None, tool: None, label: None, path: None, added: None, removed: None,
             status: None, output: None, question: None, interrupted: None, duration_ms: None, plan: None, tokens: None, usage_breakdown: None,
-            context_tokens: None, auto_compact_attempted: None, app_resource: None,
+            context_tokens: None, context_window: None, auto_compact_attempted: None, app_resource: None,
         }
     }
 

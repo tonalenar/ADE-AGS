@@ -658,11 +658,29 @@ fn on_notification(app: &AppHandle, db: &DbConnection, session: &Session, method
                 emit(app, thread_id, "item", json!({ "item": item }));
             }
             save_items(app, db, thread_id, Some(id), codex_map::turn_end(turn, Some(now)).into_iter().collect());
+            let ok = turn.get("status").and_then(Value::as_str).unwrap_or("completed") == "completed";
+            super::autocompact::on_event(app, db, thread_id, super::autocompact::Event::TurnEnded { ok });
+            // Fim de turno: o autocompact decide ANTES de a conversa ficar ociosa para a tela (a fila só solta a próxima
+            // mensagem depois da compactação). Nunca no meio de um turno.
+            let compaction = ok.then(|| super::autocompact::plan(app, db, thread_id)).flatten();
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
+            if let Some(planned) = compaction {
+                super::autocompact::execute(app, db, thread_id, planned);
+            }
         }
         "item/started" | "item/completed" => {
             let at = params.get("startedAtMs").or_else(|| params.get("completedAtMs")).and_then(Value::as_i64);
             let item = params.get("item").unwrap_or(&Value::Null);
+            // A compactação de contexto (a do Codex ou a pedida pela ADE) vira o aviso da timeline e segura a fila.
+            if item.get("type").and_then(Value::as_str) == Some("contextCompaction") {
+                use super::autocompact::{Event, Trigger};
+                let event = if method == "item/started" {
+                    Event::Started { trigger: Some(Trigger::Auto), before: None }
+                } else {
+                    Event::Finished { trigger: Some(Trigger::Auto), before: None, after: None, ok: true }
+                };
+                super::autocompact::on_event(app, db, thread_id, event);
+            }
             save_items(app, db, thread_id, turn_id, codex_map::items_of(item, at));
             // Os agentes que o Codex cria (e o estado deles) vão ao painel de tarefas, só na janela.
             for task in super::tarefas::codex_tasks(item, at.unwrap_or_else(crate::util::now_ts_ms)) {

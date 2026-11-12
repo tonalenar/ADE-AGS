@@ -24,6 +24,8 @@ import { PermissionCard } from "../permissions/PermissionCard";
 import { usePendingAsks } from "../permissions/permissionsStore";
 import { unsnoozeConversation } from "../shelf";
 import { queueOrSend, sendNow } from "../queueRunner";
+import { ContextMeter } from "../autocompact/ContextMeter";
+import { contextUsageOf, isCompacting } from "../autocompact/model";
 import { clearThreadSearchJump, unqueueMessage, updateQueuedMessage, useChatStore } from "../store";
 import { useTeamComposer } from "../team/TeamComposer";
 import { TeamThreadFeed } from "../team/TeamThreadFeed";
@@ -79,7 +81,10 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   }, [thread.id, thread.agentId, thread.cwd, chatPrefs.fastMode, fastModeCapability.support]);
 
   const request: RequestRow | null = live.requests[0] ?? null;
-  const working = live.phase === "working";
+  // Compactando o contexto (autocompact, ou a do próprio agente) também ocupa a conversa: a fila segura as mensagens.
+  const compacting = useMemo(() => isCompacting(live.items, Date.now()), [live.items]);
+  const working = live.phase === "working" || compacting;
+  const contextUsage = useMemo(() => contextUsageOf(live.items, thread.agentId, thread.model), [live.items, thread.agentId, thread.model]);
   // O pedido de permissão vira o cartão do fio (prancheta 14); perguntas e a saída do Plano seguem no composer.
   const asks = usePendingAsks();
   const ask = useMemo(() => (request ? asks.find((a) => a.ref.source === "thread" && a.ref.requestId === request.id) ?? null : null), [asks, request]);
@@ -244,7 +249,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             if (request) { deliver(); return; }
             // «Enviar agora»: no motor que não aceita entrada no meio do turno, o turno para e ela sai em seguida
             // (aparece acima da caixa até sair). As imagens em linha só existem no Claude, que entra no turno.
-            if (sendNow(key, sent.text, midTurn, deliver) === "interrupting") prepared.onSent();
+            if (sendNow(key, sent.text, midTurn, deliver) !== "sent") prepared.onSent();
           }}
           onSendAndNewThread={side ? undefined : newConversationLocal}
           onQueue={question ? null : (text, attachments) => {
@@ -279,7 +284,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             context={context} />}
           onStop={working && !request && interruptCapability.available ? () => interruptThread(thread.id) : null}
           stopUnavailableReason={working && !request && !interruptCapability.available ? interruptCapability.reason : null}
-          controls={controls} />
+          controls={<>{contextUsage && <ContextMeter usage={contextUsage} agentId={thread.agentId} />}{controls}</>} />
         {isLocalAcpAgent(thread.agentId) &&<p className="mx-2 mt-2 mb-0 text-[11px] leading-4 text-amber-700 dark:text-amber-300">{t("chat.localAcp.permissionWarning")}</p>}
         {!side && <ContextStrip branch={card.branch} worktree={card.isWorktree} />}
       </ComposerColumn>

@@ -24,6 +24,7 @@ import { PermissionsSection } from "@/features/chat/permissions/PermissionsSecti
 import { ChatModeSetting } from "@/features/chat/ChatModeSetting";
 import { SendShortcutSetting } from "@/features/chat/SendShortcutSetting";
 import { ToolCallsSetting } from "@/features/chat/ToolCallsSetting";
+import { AutoCompactSetting } from "@/features/chat/autocompact/AutoCompactSetting";
 import { ClaudeAutoCompactSetting } from "@/features/chat/ClaudeAutoCompactSetting";
 import { SnoozeOptionsSetting } from "@/features/chat/SnoozeOptionsSetting";
 import { BrowserAdvancedSection, BrowserBehaviorSetting, BrowserRecordingSetting } from "@/features/browser/BrowserSettingsSection";
@@ -141,6 +142,7 @@ function ChatSettingsPage() {
       <SettingsAnchor id="chat-mode"><ChatModeSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-composer"><SendShortcutSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-activity"><ToolCallsSetting /></SettingsAnchor>
+      <SettingsAnchor id="chat-autocompact"><AutoCompactSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-compact"><ClaudeAutoCompactSetting /></SettingsAnchor>
       <SettingsAnchor id="chat-snooze"><SnoozeOptionsSetting /></SettingsAnchor>
     </>

@@ -2,7 +2,8 @@
 
 /**
  * `reasoning`: o trecho de raciocínio que o agente expõe. `usage`: os tokens de uma chamada (só para a conta do turno).
- * `notice`: um aviso do próprio app no fio (`label` = o código: `resumeLost`, `queueDropped`, `optionIgnored`, `toolOutcomeUnknown`, `turnTimeout`).
+ * `notice`: um aviso do próprio app no fio (`label` = o código: `resumeLost`, `queueDropped`, `optionIgnored`, `toolOutcomeUnknown`, `turnTimeout`;
+ * `compaction` = a compactação de contexto: `status` running/done/error, `text` = o gatilho, `contextTokens` = antes, `tokens` = depois).
  */
 export type TimelineItemKind = "user" | "assistant" | "tool" | "turnEnd" | "reasoning" | "usage" | "notice";
 export type ToolKind = "read" | "edit" | "write" | "command" | "search" | "web" | "task" | "question" | "todo" | "other";
@@ -60,6 +61,8 @@ export interface TimelineItem {
   usageBreakdown?: UsageBreakdown;
   /** Entrada de contexto informada pelo Claude, sem tokens de saída. */
   contextTokens?: number;
+  /** A janela de contexto do modelo, quando o provedor a informa (com `contextTokens`, é o medidor da conversa). */
+  contextWindow?: number;
   /** A ADE já tentou compactar automaticamente a ponta deste contexto. */
   autoCompactAttempted?: boolean;
   /** O app MCP que a ferramenta devolveu. A tela o mostra isolado no lugar do resultado. */

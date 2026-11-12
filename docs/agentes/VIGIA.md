@@ -139,6 +139,7 @@ Só com o Vigia ligado, para as abas Claude Code e Codex da equipe (o canal estr
 - **Contexto quase cheio** (`canal/context.rs`): o integrante (não o lead) passou de 80% da janela (`usage` real + 4 caracteres/token do que veio depois). No máximo uma vez por hora por terminal. Cutuca o lead (se `mayPoke`) pedindo um resumo do estado ou um handoff; com o lead ocupado, só registra no chat (rótulo `atenção`).
 - Estado volátil (`repeats`, `contextReports`): reabrir o app pode repetir um aviso.
 - O degrau 3/5/8 e o limiar 0,8 vêm do deepseek-harness e **não foram calibrados em uso real** aqui.
+- **Autocompact da ADE** (`conversa/autocompact.rs`, [AUTOCOMPACT.md](../decisoes/AUTOCOMPACT.md)): nas conversas por protocolo, o contexto acima do limiar do usuário (83% por padrão) é compactado pelo comando nativo do agente ao fim do turno, e o aviso de contexto do Vigia (80%) segue só informando. **A ADE nunca digita `/compact` em terminal**, então o Vigia e as cutucadas não mudam: o terminal do Claude Code e do Codex compactam sozinhos.
 
 ## Camada 2: modelo barato (`vigia_check`)
 - **Roda só se**:

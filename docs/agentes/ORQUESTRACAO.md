@@ -17,6 +17,7 @@
 - **QA**: valide cada entrega no mesmo commit com `ags test affected`.
 - **Memória**: o Orquestrador sugere até 3 notas e cada integrante até 1 (`ags memory suggest`), sem segredos. Quem aprova é o usuário.
 - Fechar agentes, apagar andares, compactar memória e o Dreaming são decisões do usuário. Andar é pesado: não crie um para tarefa pequena.
+- O **autocompact de contexto** das conversas por protocolo (inclusive as dos times e as filhas) é da ADE e da configuração do usuário: ao fim do turno, acima do limiar, a ADE pede o `/compact` nativo do agente. Não ligue, desligue nem mude o limiar por agente; mensagem enviada durante a compactação espera na fila. Terminais e missões em terminais nunca recebem digitação da ADE para isso. Ver [AUTOCOMPACT.md](../decisoes/AUTOCOMPACT.md).
 
 ## Regras para quem mexe no código
 - O status de missão headless só muda por `refresh_run_status → missions::store::refresh_for_run`. O de missão em terminais, só por `mark_started_terminals`/`finish_terminals`.
