@@ -85,6 +85,10 @@ export const realBrowserClose = (id: string) => invoke<void>("real_browser_close
 export const realBrowserDeleteProfile = (profileId: string) =>
   invoke<void>("real_browser_delete_profile", { profileId });
 
+/** Faz a página se passar por um iPhone, um Android ou o navegador de mesa (`null`) e recarrega. */
+export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null) =>
+  invoke<void>("real_browser_emulate", { id, platform });
+
 export const realBrowserFocus = (id: string) => invoke<void>("real_browser_focus", { id });
 
 /** Uma mensagem do app para o piloto da página (`page:run`, `connect`…). */

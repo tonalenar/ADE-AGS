@@ -554,6 +554,60 @@ pub async fn real_browser_screenshot(app: AppHandle, id: String) -> Result<Value
     Ok(json!({ "data": shot["data"], "width": viewport["clientWidth"], "height": viewport["clientHeight"] }))
 }
 
+/// Identidade de aparelho para testes de web mobile: user agent, densidade, `mobile` e toque.
+/// `platform` `None` volta ao navegador de mesa. O tamanho da página continua sendo o da vista
+/// (o quadro que a interface desenha); aqui só muda quem a página acha que é.
+fn emulation_profile(platform: Option<&str>) -> Option<(Value, f64)> {
+    match platform {
+        Some("ios") => Some((json!({
+            "userAgent": IOS_UA,
+            "platform": "iPhone",
+            "acceptLanguage": "",
+        }), 3.0)),
+        Some("android") => Some((json!({
+            "userAgent": ANDROID_UA,
+            "platform": "Linux armv81",
+            "userAgentMetadata": {
+                "brands": [{ "brand": "Chromium", "version": "156" }, { "brand": "Google Chrome", "version": "156" }],
+                "fullVersion": "156.0.0.0",
+                "platform": "Android",
+                "platformVersion": "15.0.0",
+                "architecture": "",
+                "model": "Pixel 9",
+                "mobile": true,
+            },
+        }), 2.625)),
+        _ => None,
+    }
+}
+
+const IOS_UA: &str = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/604.1";
+const ANDROID_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Mobile Safari/537.36";
+
+/// Faz a página do navegador `id` se comportar como um iPhone (`"ios"`), um Android (`"android"`) ou o
+/// navegador de mesa (`None`), e recarrega para o servidor também ver o aparelho novo.
+#[tauri::command]
+pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<String>) -> Result<(), String> {
+    let profile = emulation_profile(platform.as_deref());
+    let mobile = profile.is_some();
+    match &profile {
+        Some((ua, scale)) => {
+            native::cdp(&app, &id, "Emulation.setUserAgentOverride", ua.clone()).await?;
+            native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", json!({
+                "width": 0, "height": 0, "deviceScaleFactor": scale, "mobile": true,
+            })).await?;
+        }
+        None => {
+            native::cdp(&app, &id, "Emulation.setUserAgentOverride", json!({ "userAgent": "" })).await?;
+            native::cdp(&app, &id, "Emulation.clearDeviceMetricsOverride", json!({})).await?;
+        }
+    }
+    native::cdp(&app, &id, "Emulation.setTouchEmulationEnabled", json!({ "enabled": mobile, "maxTouchPoints": if mobile { 5 } else { 1 } })).await?;
+    native::cdp(&app, &id, "Emulation.setEmitTouchEventsForMouse", json!({ "enabled": mobile, "configuration": "mobile" })).await?;
+    native::cdp(&app, &id, "Page.reload", json!({ "ignoreCache": false })).await?;
+    Ok(())
+}
+
 /// O nome do canal da página para o app (`Runtime.addBinding`).
 // Não pode ser `__agsPage`: é a marca de "piloto já instalado" do `runtime.ts`.
 const BINDING: &str = "__agsCdpBridge";
@@ -759,8 +813,20 @@ fn finish_selftest(app: &AppHandle, code: i32) {
 
 #[cfg(test)]
 mod test {
-    use super::{adopt_popup, adopted, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, mini_click_request, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
+    use super::{adopt_popup, adopted, emulation_profile, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, mini_click_request, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
     use serde_json::json;
+
+    #[test]
+    fn emulacao_mobile_tem_identidade_de_cada_aparelho() {
+        let (ios, ios_scale) = emulation_profile(Some("ios")).unwrap();
+        assert!(ios["userAgent"].as_str().unwrap().contains("iPhone"));
+        assert_eq!(ios_scale, 3.0);
+        let (android, _) = emulation_profile(Some("android")).unwrap();
+        assert!(android["userAgent"].as_str().unwrap().contains("Android"));
+        assert_eq!(android["userAgentMetadata"]["mobile"], true);
+        assert!(emulation_profile(None).is_none());
+        assert!(emulation_profile(Some("palm")).is_none());
+    }
 
     fn r(x: f64, y: f64, width: f64, height: f64) -> Rect {
         Rect { x, y, width, height }

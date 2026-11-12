@@ -46,9 +46,9 @@ import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { shouldOpenInRealChrome, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
+import { shouldOpenInRealChrome, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
-import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
+import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
 import { cropForJev, resizeCanvas, visualSize } from "./visualSize";
@@ -157,6 +157,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const [recentPages, setRecentPages] = useState<RecentBrowserPage[]>(() => browserProfileId === "incognito" ? [] : readRecentBrowserPages(browserProfileId));
   const [viewport, setViewportState] = useState<Viewport | null>(view.viewport ?? null);
   const [touch, setTouchState] = useState(view.touch ?? false);
+  const [mobile, setMobileState] = useState<"ios" | "android" | null>(view.mobile ?? null);
   const [debugOpen, setDebugOpen] = useState(false);
   /** Lo lee un agente o un mensaje de la página, por fuera del render. */
   const debugOpenRef = useRef(false);
@@ -165,7 +166,6 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const [debugHeight, setDebugHeight] = useState(savedPanelHeight);
   const [docId, setDocId] = useState<string | null>(null);
   const [compact, setCompact] = useState(false);
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [frozen, setFrozen] = useState<(FrozenPage & { url: string }) | null>(null);
   const [freezing, setFreezing] = useState(false);
@@ -329,6 +329,23 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     updateView(view.id, { touch: next });
     return channel.run({ op: "touch", on: next }, 8000);
   }, [channel, updateView, view.id]);
+
+  /** A vista nativa já existe (avisou a primeira URL): só então dá para mandar a emulação por CDP. */
+  const [realReady, setRealReady] = useState(false);
+  /** O que já foi aplicado na vista nativa; começa como mesa, que é o padrão dela. */
+  const emulated = useRef<"ios" | "android" | null>(null);
+  useEffect(() => {
+    if (!real || !realReady || emulated.current === mobile) return;
+    emulated.current = mobile;
+    realBrowserEmulate(view.id, mobile).catch((e) => setError(String(e)));
+  }, [real, realReady, mobile, view.id]);
+
+  /** Escolhe o aparelho emulado. Celular é toque; mesa é mouse. */
+  const setMobile = useCallback((next: "ios" | "android" | null) => {
+    setMobileState(next);
+    updateView(view.id, { mobile: next });
+    setTouch(next !== null).catch(() => undefined);
+  }, [setTouch, updateView, view.id]);
 
   // No celular solto a página mede a tela do aparelho e recebe toque, como num celular de verdade. A resolução fica
   // guardada: voltando para a janela, o quadro continua no mesmo tamanho.
@@ -802,8 +819,6 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     postToPage(next ? "pick:on" : "pick:off");
   };
 
-  /** Las acciones estaban desplegadas al empezar a anotar: se vuelven a desplegar al terminar. */
-  const reopenActions = useRef(false);
 
   const startAnnotating = async () => {
     if (!target || freezing || frozen || !iframe.current || !column.current) return;
@@ -811,11 +826,6 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       setPicking(false);
       postToPage("pick:off");
     }
-    // La barra de anotación es de una fila. Si la foto se sacara con las acciones abiertas
-    // (dos filas), al congelar la página subiría esa diferencia y abajo asomaría la viva.
-    // `freezePage` espera a que se dibuje esto antes de medir.
-    reopenActions.current = compact && actionsOpen;
-    if (reopenActions.current) setActionsOpen(false);
     setFreezing(true);
     setError(null);
     try {
@@ -832,8 +842,6 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
 
   const stopAnnotating = useCallback(() => {
     setFrozen(null);
-    if (reopenActions.current) setActionsOpen(true);
-    reopenActions.current = false;
   }, []);
 
   const cancelAnnotating = stopAnnotating;
@@ -1049,110 +1057,60 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     </form>
   );
 
-  const pageActions = (
-    <>
-      <ActionButton
-        hint={picking ? t("browser.pick.stop") : t("browser.pick.start")}
-        disabled={!target}
-        active={picking}
-        onClick={togglePicking}
-      >
-        <PickIcon className="w-4 h-4 stroke-2" />
-        {t("browser.pick.label")}
-      </ActionButton>
-      {/* Sin el tooltip de la app: se dibujaría encima de la página y saldría en la foto. */}
-      <ActionButton plain hint={t("browser.annotate.start")} disabled={!target || freezing} active={freezing} onClick={startAnnotating}>
-        <PenIcon className="w-4 h-4" />
-        {freezing ? t("browser.annotate.capturing") : t("browser.annotate.label")}
-      </ActionButton>
-      <ActionButton plain hint={t(visualRecording ? "browser.recording.stop" : "browser.capture.screenshot")} disabled={(!target && !real) || freezing} active={visualRecording} onClick={() => visualRecording ? toggleVisualRecording() : void captureScreenshot()}>
-        <CameraIcon className={`w-4 h-4 ${visualRecording ? "text-red-600 dark:text-red-400" : ""}`} />
-        {visualRecording && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-600" />}
-      </ActionButton>
-      <ActionButton
-        hint={t("browser.composer")}
-        active={composerOpen}
-        onClick={() => setComposerOpen((v) => !v)}
-      >
-        <SendIcon className="w-4 h-4 stroke-2" />
-        {t("browser.composer.label")}
-        {attachments > 0 && (
-          <span className={`min-w-4.5 h-4.5 px-1 rounded-full text-[10px] font-bold leading-[18px] text-center tabular-nums
-            ${composerOpen ? "bg-white text-accent-600" : "bg-accent-600 text-white"}`}>
-            {attachments}
-          </span>
-        )}
-      </ActionButton>
-    </>
-  );
+  const closeMenu = () => setMenuOpen(false);
+  const menuAction = (fn: () => void) => () => { fn(); closeMenu(); };
+  const toggleDeviceMode = () => {
+    const next = viewport ? null : (presetById("phone") ?? null);
+    setViewport(next);
+    setMobile(next ? "ios" : null);
+  };
 
-  // Só ícones: com texto, os botões do Chrome real espremiam a barra de endereço a 21 px.
-  const tabTools = (
-    <>
-      <BrowserProfilesControl
-        profileId={browserProfileId}
-        agentProfile={agentProfile}
-        onSelect={(browserProfileId) => updateView(view.id, { browserProfileId })}
-      />
-      {DESKTOP_OS === "windows" && (
-        <ToolButton label={t("browser.real.hint")} active={real}
-          onClick={() => updateView(view.id, { realChrome: !real })}>
-          <GlobeIcon className="w-4 h-4" />
-        </ToolButton>
-      )}
-      <ZoomControl zoom={zoom} disabled={(!target && !real) || !!frozen}
-        onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
-      <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
-        onClick={() => {
-          const next = viewport ? null : (presetById("phone") ?? null);
-          setViewport(next);
-          // Un teléfono es táctil. Entrar en modo teléfono con hover sería probar algo que
-          // no existe; se apaga con el botón de al lado cuando se quiere comparar.
-          setTouch(next !== null).catch(console.error);
-        }}>
-        <DevicesIcon className="w-4 h-4" />
-      </ToolButton>
-      <ToolButton label={t("browser.debug.toggle")} active={debugOpen} onClick={() => setDebugOpen((v) => !v)}>
-        <BugIcon className="w-4 h-4" />
-        {errors > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-red-600 text-white
-            text-[9.5px] font-bold leading-4 text-center tabular-nums">
-            {errors > 99 ? "99+" : errors}
-          </span>
-        )}
-      </ToolButton>
-      <ToolButton label={t("browser.openExternal")} disabled={!target}
-        onClick={() => openUrl(address).catch(console.error)}>
-        <ExternalIcon className="w-4 h-4 stroke-2" />
-      </ToolButton>
-      {inChatPanel && (
-        <ToolButton label={t(browserFloating ? "browser.float.dock" : "browser.float.open")} active={browserFloating}
-          onClick={toggleChatBrowserFloating}>
-          <WindowOpenIcon className="w-4 h-4" />
-        </ToolButton>
-      )}
-    </>
-  );
-
+  // Uma linha só, como no T3: navegação, endereço, as três ações de uso constante e o "⋯".
+  // O resto mora no menu, com rótulo; nada aparece duas vezes.
   const browserMenu = (
     <div ref={menuRoot} className="relative shrink-0">
       <ToolButton label={t("browser.menu")} active={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
         <DotsIcon className="w-4 h-4" />
+        {!menuOpen && errors > 0 && <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-red-600" />}
       </ToolButton>
       {menuOpen && (
-        <div data-over-webview role="menu" aria-label={t("browser.menu")} className="absolute right-0 top-full z-[10000] mt-1 w-48 rounded-lg border border-gray-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-gray-900">
-          <button type="button" role="menuitem" onClick={() => { if (real) realBrowserHistory(view.id, 0).catch(console.error); else reload(); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-white/10">{t("browser.menu.hardReload")}</button>
-          <button type="button" role="menuitem" onClick={() => { setDebugOpen(true); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-white/10">{t("browser.menu.devTools")}</button>
-          <button type="button" role="menuitem" onClick={() => { setZoom(1); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 dark:text-gray-100 dark:hover:bg-white/10">{t("browser.zoom.reset")}</button>
-          <button type="button" role="menuitem" disabled={(!target && !real) || freezing || savingCapture} onClick={() => { toggleVisualRecording(); setMenuOpen(false); }} className="w-full rounded-md px-2.5 py-2 text-left text-[12px] text-gray-800 hover:bg-gray-100 disabled:opacity-45 dark:text-gray-100 dark:hover:bg-white/10">{t(visualRecording ? "browser.recording.stop" : "browser.recording.start")}</button>
+        <div data-over-webview role="menu" aria-label={t("browser.menu")}
+          className="absolute right-0 top-full z-[10000] mt-1 w-64 rounded-xl border border-gray-200 bg-white p-1 shadow-xl dark:border-white/10 dark:bg-gray-900">
+          <MenuRow icon={<PenIcon className="w-4 h-4" />} label={t("browser.annotate.label")}
+            disabled={!target || freezing} onClick={menuAction(() => void startAnnotating())} />
+          <MenuRow icon={<CameraIcon className="w-4 h-4" />}
+            label={t(visualRecording ? "browser.recording.stop" : "browser.recording.start")}
+            disabled={(!target && !real) || freezing || savingCapture} onClick={menuAction(toggleVisualRecording)} />
+          <MenuDivider />
+          <MenuRow icon={<DevicesIcon className="w-4 h-4" />} label={t("browser.menu.device")} checked={!!viewport}
+            onClick={menuAction(toggleDeviceMode)} />
+          <MenuRow icon={<BugIcon className="w-4 h-4" />} label={t("browser.menu.console")} checked={debugOpen}
+            onClick={menuAction(() => setDebugOpen((v) => !v))}
+            trailing={errors > 0 ? (
+              <span className="min-w-4 h-4 px-1 rounded-full bg-red-600 text-white text-[9.5px] font-bold leading-4 text-center tabular-nums">
+                {errors > 99 ? "99+" : errors}
+              </span>
+            ) : undefined} />
+          <MenuRow icon={<ExternalIcon className="w-4 h-4 stroke-2" />} label={t("browser.menu.openExternal")}
+            disabled={!target && !real} onClick={menuAction(() => openUrl(address).catch(console.error))} />
+          {DESKTOP_OS === "windows" && (
+            <MenuRow icon={<GlobeIcon className="w-4 h-4" />} label={t("browser.real.hint")} checked={real}
+              onClick={menuAction(() => updateView(view.id, { realChrome: !real }))} />
+          )}
+          <MenuDivider />
+          <div className="flex items-center gap-2.5 px-2 py-1 text-[12.5px] text-gray-800 dark:text-gray-100">
+            <span className="w-4 shrink-0" />
+            <span className="flex-1">{t("browser.menu.zoom")}</span>
+            <ZoomControl zoom={zoom} disabled={(!target && !real) || !!frozen}
+              onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
+          </div>
+          <MenuDivider />
+          <MenuRow icon={<RefreshIcon className="w-4 h-4 stroke-2" />} label={t("browser.menu.hardReload")}
+            onClick={menuAction(() => { if (real) realBrowserHistory(view.id, 0).catch(console.error); else reload(); })} />
         </div>
       )}
     </div>
   );
-
-  // Con las acciones plegadas, lo que pide atención (algo esperando en el mensaje, errores
-  // en la consola) se avisa en el botón que las despliega.
-  const pendingAttention = !actionsOpen && (attachments > 0 || errors > 0);
 
   const toolbar = frozen ? (
     <AnnotationBar
@@ -1162,50 +1120,38 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       onCancel={cancelAnnotating}
       onDone={finishAnnotating}
     />
-  ) : compact ? (
-    <>
-      <div className="flex items-center gap-0.5 h-8 shrink-0 px-1.5">
-        {navButtons}
-        {addressBar}
-        <ActionButton plain hint={t("browser.pick.label")} disabled={!target} active={picking} onClick={togglePicking}>
-          <PickIcon className="w-4 h-4 stroke-2" />
-        </ActionButton>
-        <ActionButton plain hint={t(visualRecording ? "browser.recording.stop" : "browser.capture.screenshot")} disabled={(!target && !real) || freezing} active={visualRecording} onClick={() => visualRecording ? toggleVisualRecording() : void captureScreenshot()}>
-          <CameraIcon className={`w-4 h-4 ${visualRecording ? "text-red-600 dark:text-red-400" : ""}`} />
-          {visualRecording && <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-red-600" />}
-        </ActionButton>
-        {inChatPanel && (
-          <ToolButton label={t(browserFloating ? "browser.float.dock" : "browser.float.open")} active={browserFloating}
-            onClick={toggleChatBrowserFloating}>
-            <WindowOpenIcon className="w-4 h-4" />
-          </ToolButton>
-        )}
-        <ToolButton label={actionsOpen ? t("browser.actions.less") : t("browser.actions.more")} active={actionsOpen}
-          onClick={() => setActionsOpen((v) => !v)}>
-          <DotsIcon className="w-4 h-4" />
-          {pendingAttention && (
-            <span className={`absolute top-1 right-1 w-2 h-2 rounded-full ${errors > 0 ? "bg-red-600" : "bg-accent-600"}`} />
-          )}
-        </ToolButton>
-      </div>
-      {actionsOpen && (
-        <div className="flex flex-wrap items-center gap-1 shrink-0 px-2 py-1.5 border-b border-gray-200 dark:border-white/7">
-          {navButtons}
-          <ToolbarSeparator />
-          {pageActions}
-          <ToolbarSeparator />
-          {tabTools}
-          {browserMenu}
-        </div>
-      )}
-    </>
   ) : (
-    <div className="flex items-center gap-0.5 h-8 shrink-0 px-1.5">
+    <div className="flex items-center gap-0.5 h-9 shrink-0 px-1.5 border-b border-gray-200 dark:border-white/7">
       {navButtons}
       {addressBar}
-      {pageActions}
-      <ToolbarSeparator />
-      {tabTools}
+      <ToolButton label={picking ? t("browser.pick.stop") : t("browser.pick.start")} disabled={!target} active={picking} onClick={togglePicking}>
+        <PickIcon className="w-4 h-4 stroke-2" />
+      </ToolButton>
+      <ToolButton plain label={t(visualRecording ? "browser.recording.stop" : "browser.capture.screenshot")} disabled={(!target && !real) || freezing} active={visualRecording}
+        onClick={() => visualRecording ? toggleVisualRecording() : void captureScreenshot()}>
+        <CameraIcon className={`w-4 h-4 ${visualRecording ? "text-red-600 dark:text-red-400" : ""}`} />
+      </ToolButton>
+      <ToolButton label={t("browser.composer")} active={composerOpen} onClick={() => setComposerOpen((v) => !v)}>
+        <SendIcon className="w-4 h-4 stroke-2" />
+        {attachments > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-4 h-4 px-1 rounded-full bg-accent-600 text-white text-[9.5px] font-bold leading-4 text-center tabular-nums">
+            {attachments}
+          </span>
+        )}
+      </ToolButton>
+      {!compact && (
+        <BrowserProfilesControl
+          profileId={browserProfileId}
+          agentProfile={agentProfile}
+          onSelect={(browserProfileId) => updateView(view.id, { browserProfileId })}
+        />
+      )}
+      {inChatPanel && (
+        <ToolButton label={t(browserFloating ? "browser.float.dock" : "browser.float.open")} active={browserFloating}
+          onClick={toggleChatBrowserFloating}>
+          <WindowOpenIcon className="w-4 h-4" />
+        </ToolButton>
+      )}
       {browserMenu}
     </div>
   );
@@ -1233,10 +1179,10 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
           <DeviceBar
             viewport={viewport}
-            touch={touch}
+            mobile={mobile}
             onChange={setViewport}
-            onTouch={(on) => { setTouch(on).catch(console.error); }}
-            onClose={() => { setViewport(null); setTouch(false).catch(console.error); }}
+            onMobile={setMobile}
+            onClose={() => { setViewport(null); setMobile(null); }}
           />
         </div>
       )}
@@ -1253,9 +1199,15 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
           {shownError}
           {real ? (
             <>
-            <RealBrowserView viewId={view.id} url={view.url} zoom={zoom} script={INJECTED}
+            {/* O mesmo palco do iframe: com tamanho de celular, a vista nativa ocupa só o quadro do aparelho.
+                Sempre montado, com ou sem tamanho, para a página não recarregar ao alternar. O zoom fica com
+                o palco quando há quadro (ele já entra na escala medida pela vista). */}
+            <ResponsiveStage viewport={floatingPreview ? null : viewport} onResize={setViewport}
+              zoom={viewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}>
+            <RealBrowserView viewId={view.id} url={view.url} zoom={viewport && !floatingPreview ? 1 : zoom} script={INJECTED}
               profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} onError={setError}
               onUrl={(u) => {
+                setRealReady(true);
                 setAddress(u);
                 try {
                   const title = new URL(u).host || u;
@@ -1271,6 +1223,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
                 useViewTabsStore.getState().openBrowser(view.cwd, popup.url, { id: popup.id, browserProfileId, owner: view.owner });
               }}
               onClosedByPage={() => useViewTabsStore.getState().closeView(view.id)} />
+            </ResponsiveStage>
             {isBlankUrl(view.url) && (
               <div className="absolute inset-0 z-10 flex min-h-0 bg-gray-50 dark:bg-surface">
                 <StartStage device={device} viewport={viewport} onResize={setViewport} zoom={zoom}>{startPage}</StartStage>

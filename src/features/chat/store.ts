@@ -493,6 +493,11 @@ export function hostLabel(url: string | null | undefined): string | null {
 /** Abre ou fecha o painel: aberto sem nada antes, mostra o Resumo; com uma aba já aberta, volta nela. */
 export function toggleRightPanel(): void {
   const s = useChatStore.getState();
+  // Como no T3: recolher o painel com o navegador à vista não o some, vira a miniatura (PiP).
+  if (s.panel === "browser" && s.browser && !s.browserFloating) {
+    toggleChatBrowserFloating();
+    return;
+  }
   setRightPanel(s.panel ? null : s.lastPanel ?? "empty");
 }
 

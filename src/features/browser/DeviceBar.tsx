@@ -40,13 +40,21 @@ function SideInput({ value, label, onCommit }: { value: number; label: string; o
   );
 }
 
-/** La barra del modo responsive: tamaño exacto, presets, orientación y breakpoints. */
-export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
+/** Os aparelhos que a página pode achar que é. `null` = navegador de mesa. */
+const PLATFORMS: { id: "ios" | "android" | null; key: string }[] = [
+  { id: "ios", key: "browser.viewport.ios" },
+  { id: "android", key: "browser.viewport.android" },
+  { id: null, key: "browser.viewport.desktop" },
+];
+
+/** A barra do modo celular, numa linha: tamanho, girar, aparelho emulado e fechar. Os breakpoints do
+ *  Tailwind ficam no próprio seletor de tamanho, e o atual aparece ao lado das medidas. */
+export function DeviceBar({ viewport, mobile, onChange, onMobile, onClose }: {
   viewport: Viewport;
-  /** Está emulando una pantalla táctil. */
-  touch: boolean;
+  /** Aparelho emulado (user agent, densidade e toque); `null` = mesa. */
+  mobile: "ios" | "android" | null;
   onChange: (viewport: Viewport) => void;
-  onTouch: (on: boolean) => void;
+  onMobile: (platform: "ios" | "android" | null) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -55,17 +63,21 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
   const set = (v: Viewport) => onChange(clampViewport(v));
 
   return (
-    <div className="flex items-center gap-2 h-10 shrink-0 px-2.5 overflow-x-auto
+    <div className="flex items-center gap-2 h-9 shrink-0 px-2 overflow-hidden
       border-b border-gray-200 dark:border-white/7 bg-white/60 dark:bg-white/2">
-      <div className="w-52 shrink-0">
+      <div className="w-44 min-w-0 shrink">
         <PopupSelect
           value={match?.preset.id ?? "custom"}
           onChange={(e) => {
-            const preset = VIEWPORT_PRESETS.find((p) => p.id === e.target.value);
+            const value = e.target.value;
+            const bp = BREAKPOINT_WIDTHS.find(([name]) => `bp:${name}` === value);
+            if (bp) { set({ ...viewport, width: bp[1] }); return; }
+            const preset = VIEWPORT_PRESETS.find((p) => p.id === value);
             if (preset) set(match?.rotated ? rotate(preset) : preset);
           }}>
           <option value="custom">{t("browser.viewport.custom")}</option>
           {VIEWPORT_PRESETS.map((p) => <option key={p.id} value={p.id}>{`${t(`browser.viewport.preset.${p.id}`)} · ${p.width}×${p.height}`}</option>)}
+          {BREAKPOINT_WIDTHS.map(([name, width]) => <option key={name} value={`bp:${name}`}>{t("browser.viewport.jumpTo", { name, width })}</option>)}
         </PopupSelect>
       </div>
 
@@ -73,6 +85,10 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
         <SideInput value={viewport.width} label={t("browser.viewport.width")} onCommit={(width) => set({ ...viewport, width })} />
         <span className="text-[11px] text-gray-400 dark:text-white/30">×</span>
         <SideInput value={viewport.height} label={t("browser.viewport.height")} onCommit={(height) => set({ ...viewport, height })} />
+        {current && (
+          <span title={t("browser.viewport.breakpoints")}
+            className="ml-0.5 px-1 rounded font-mono text-[10px] text-gray-500 dark:text-white/45 bg-gray-100 dark:bg-white/6">{current}</span>
+        )}
       </div>
 
       <Tooltip content={t("browser.viewport.rotate")} placement="bottom">
@@ -83,42 +99,20 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
         </Button>
       </Tooltip>
 
-      {/* El táctil aparte del tamaño: lo más útil es prenderlo y apagarlo SIN mover el
-          ancho, que es como se ve qué se rompe por el dedo y no por el espacio. */}
-      <Tooltip content={t(touch ? "browser.viewport.touchOff" : "browser.viewport.touchOn")} placement="bottom">
-        <Button variant="custom" onClick={() => onTouch(!touch)} aria-pressed={touch}
-          className={`cc-t inline-block h-6 px-2 rounded-md shrink-0 text-[10.5px] border
-            ${touch
-              ? "bg-accent-600 border-accent-600 text-white"
-              : "border-gray-200 dark:border-white/10 text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/8"}`}>
-          {t("browser.viewport.touch")}
-        </Button>
-      </Tooltip>
+      <div className="flex-1" />
 
-      <div className="w-px h-5 shrink-0 bg-gray-200 dark:bg-white/10" />
-
-      {/* Los breakpoints como tira: se ve en cuál cae el ancho actual y con un click se
-          salta al borde de otro, que es donde un layout suele romperse. */}
-      <div role="group" aria-label={t("browser.viewport.breakpoints")} className="flex items-center shrink-0 rounded-md
-        border border-gray-200 dark:border-white/10 overflow-hidden">
-        {BREAKPOINT_WIDTHS.map(([name, width]) => (
-          <Tooltip key={name} content={t("browser.viewport.jumpTo", { name, width })} placement="bottom">
-            <Button
-              variant="custom"
-              onClick={() => set({ ...viewport, width })}
-              aria-pressed={current === name}
-              className={`cc-t inline-block h-6 px-2 font-mono text-[10.5px] border-r last:border-r-0 border-gray-200 dark:border-white/10
-                ${current === name
-                  ? "bg-accent-600 text-white"
-                  : "text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/8 hover:text-gray-900 dark:hover:text-white"}`}
-            >
-              {name}
-            </Button>
-          </Tooltip>
+      <div role="radiogroup" aria-label={t("browser.viewport.platform")}
+        className="flex items-center shrink-0 rounded-md p-0.5 bg-gray-100 dark:bg-white/6">
+        {PLATFORMS.map((p) => (
+          <button key={p.key} type="button" role="radio" aria-checked={mobile === p.id} onClick={() => onMobile(p.id)}
+            className={`cc-t h-6 px-2 rounded text-[11px] font-medium
+              ${mobile === p.id
+                ? "bg-white text-gray-900 shadow-sm dark:bg-white/15 dark:text-white"
+                : "text-gray-500 hover:text-gray-900 dark:text-white/50 dark:hover:text-white"}`}>
+            {t(p.key)}
+          </button>
         ))}
       </div>
-
-      <div className="flex-1" />
 
       <Tooltip content={t("browser.viewport.exit")} placement="bottom">
         <Button variant="icon" onClick={onClose} aria-label={t("browser.viewport.exit")}
