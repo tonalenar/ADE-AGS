@@ -56,6 +56,8 @@ export const MaximizeIcon = (p: IconProps) => <Svg {...p}><path d="M15 3h6v6M9 2
 /** Sair da tela cheia: as setas apontando para dentro. */
 export const MinimizeIcon = (p: IconProps) => <Svg {...p}><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></Svg>;
 export const PlusIcon = (p: IconProps) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>;
+export const MinusIcon = (p: IconProps) => <Svg {...p}><path d="M5 12h14" /></Svg>;
+export const DownloadIcon = (p: IconProps) => <Svg {...p}><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></Svg>;
 export const ShieldOffIcon = (p: IconProps) => <Svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m3 3 18 18" /></Svg>;
 export const ZapIcon = (p: IconProps) => <Svg {...p}><path d="M13 2 4 14h7l-1 8 9-12h-7Z" /></Svg>;
 export function StarIcon({ className = "w-4 h-4", filled = false }: IconProps & { filled?: boolean }) {

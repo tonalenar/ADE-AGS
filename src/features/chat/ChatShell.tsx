@@ -9,6 +9,7 @@ import { useLocalAcpStore } from "@/features/agents/localAcpStore";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
 import { AttachCwdContext } from "./attachments/AttachmentStrip";
+import { MediaViewerProvider } from "./attachments/MediaViewerContext";
 import { DropOverlay } from "./attachments/DropOverlay";
 import { DeviceFloatHost } from "./DeviceFloatCard";
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
@@ -226,6 +227,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
               (como no Claude Code). A conversa é sempre o primeiro filho, então ligar o Resumo não a remonta. */}
           <div className="flex-1 min-h-0 flex">
           <div className="flex-1 min-w-[320px] min-h-0 flex flex-col">
+            <MediaViewerProvider>
             <AttachCwdContext.Provider value={active?.cwd ?? null}>
               {/* O «Rodar» dos blocos de código vai ao terminal da pasta da conversa aberta. */}
               <RunCodeContext.Provider value={runCode}>
@@ -233,6 +235,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
                 : active ? <ConversationView key={active.tabId} card={active} cards={cards} /> : <NewConversation projects={selectableProjects} folder={folder} onFolder={setFolder} />}
               </RunCodeContext.Provider>
             </AttachCwdContext.Provider>
+            </MediaViewerProvider>
           </div>
           {summaryPinned && !panelOpen && (
             <aside aria-label={t("chat.panel.open.summary")} data-summary-column=""
