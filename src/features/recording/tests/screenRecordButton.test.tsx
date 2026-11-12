@@ -22,6 +22,7 @@ vi.mock("../ipc", () => ({
 
 const MAC_UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5)";
 const PERMISSAO = "SCREEN_CAPTURE_PERMISSION_REQUIRED: O macOS não autorizou a Gravação de Tela.";
+const ESPELHO = "IPHONE_MIRROR_REQUIRED: O iPhone não aceita gravação de tela pelo devicectl. Ligue o espelho do aparelho na ADE para gravar.";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -66,6 +67,18 @@ describe("ScreenRecordButton: erros de gravação", () => {
     expect(AlertaToast).not.toHaveBeenCalledWith("screenRecording.title", expect.stringContaining("SCREEN_CAPTURE"), "error", expect.anything());
     await act(async () => { toast.onAction?.(); await Promise.resolve(); });
     expect(openPrivacySettings).toHaveBeenCalledWith("screen_capture");
+  });
+
+  it("iPhone sem capacidade de gravar pelo devicectl: diz para ligar o espelho, traduzido, sem o marcador nem o texto cru", async () => {
+    vi.mocked(screenRecordingStart).mockRejectedValueOnce(ESPELHO);
+    const button = await renderButton("iphone");
+
+    await act(async () => { button.click(); });
+
+    expect(AlertaToast).toHaveBeenCalledWith("screenRecording.title", "screenRecording.iphoneNeedsMirror", "error", 6000);
+    expect(AlertaToast).not.toHaveBeenCalledWith("screenRecording.title", expect.stringContaining("IPHONE_MIRROR"), "error", expect.anything());
+    expect(useBotToastStore.getState().toasts).toHaveLength(0);
+    expect(button.getAttribute("aria-pressed")).toBe("false");
   });
 
   it("ao parar, o motivo real da ferramenta aparece no aviso e o botão sai do estado gravando", async () => {

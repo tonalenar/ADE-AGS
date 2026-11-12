@@ -4187,6 +4187,7 @@
   "screenRecording.attached": "Video attached to the draft. Review and send it when ready.",
   "screenRecording.permissionRequired": "macOS did not authorize Screen Recording. Open System Settings → Privacy & Security → Screen & System Audio Recording and enable ADE AGS. If it is already listed, remove it and add it again (changing the app signature invalidates the old authorization), then reopen ADE.",
   "screenRecording.openSettings": "Open Screen Recording settings",
+  "screenRecording.iphoneNeedsMirror": "This iPhone doesn't support screen recording through devicectl. Turn on the device mirror in ADE to record.",
   "screenRecording.pendingRestored_one": "One pending capture is back in the draft. Review it before sending.",
   "screenRecording.pendingRestored_other": "{{count}} pending captures are back in the draft. Review them before sending.",
   "screenRecording.pendingMissing_one": "One pending capture no longer exists on disk and was removed from the list.",

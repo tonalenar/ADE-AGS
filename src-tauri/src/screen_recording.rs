@@ -1,7 +1,8 @@
 //! Gravações locais de telas de aparelhos para o agente inspecionar os quadros depois.
 //!
-//! O vídeo é codificado pela ferramenta nativa do aparelho (H.264); nenhum quadro é enviado a um serviço.
-//! Só há uma gravação ativa para evitar competir pelo codificador e pelo disco.
+//! O vídeo é codificado pela ferramenta nativa do aparelho (H.264) ou, no iPhone físico com o espelho ligado, é o
+//! próprio HEVC do espelho empacotado num MP4 (`iphone::recording`, sem recodificar); nenhum quadro é enviado a um
+//! serviço. Só há uma gravação ativa para evitar competir pelo codificador e pelo disco.
 //!
 //! A ferramenta de captura (`devicectl`, `simctl`, o helper do ScreenCaptureKit, `adb`) roda como processo filho.
 //! Tudo o que ela escreve (stdout e stderr) fica num registro curto, e é ele que explica a falha: antes a saída era
@@ -11,7 +12,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, ExitStatus, Stdio};
 use std::sync::{
-    Arc, Condvar, Mutex, OnceLock,
+    Arc, Condvar, Mutex,
     atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
@@ -25,6 +26,8 @@ const MESSAGE_TAIL: usize = 300;
 
 /// Marcador que o frontend reconhece para oferecer o painel de Gravação de Tela.
 pub(crate) const PERMISSION_MARKER: &str = "SCREEN_CAPTURE_PERMISSION_REQUIRED:";
+/// Marcador que o frontend traduz: este iPhone não grava pelo `devicectl`; só pelo espelho.
+pub(crate) const IPHONE_MIRROR_MARKER: &str = "IPHONE_MIRROR_REQUIRED:";
 
 /// Prazo para uma ferramenta de aparelho falhar logo ao iniciar (aparelho bloqueado, desconectado, simulador desligado…).
 const EARLY_FAILURE_WINDOW: Duration = Duration::from_secs(3);
@@ -122,6 +125,13 @@ fn explain_failure(kind: &str, exit: ExitInfo, log: &str) -> String {
         return "O simulador iOS não está ligado (ou foi desligado durante a gravação). Ligue-o e grave de novo.".into();
     }
     if kind == "iphone" {
+        // O CoreDevice deste aparelho não oferece a capacidade de gravação de tela ao `devicectl`
+        // (`CapabilityFeatureIdentifier = com.apple.coredevice.feature.screenrecording`).
+        if has(&["feature.screenrecording"]) || (has(&["capabilityname"]) && has(&["screen recording"])) {
+            return format!(
+                "{IPHONE_MIRROR_MARKER} O iPhone não aceita gravação de tela pelo devicectl. Ligue o espelho do aparelho na ADE para gravar."
+            );
+        }
         if has(&["locked"]) {
             return format!(
                 "O iPhone está bloqueado. Desbloqueie a tela e grave de novo. Detalhe: {}",
@@ -373,37 +383,119 @@ impl Supervised {
 
 // ── Estado da gravação ativa ────────────────────────────────────────────────
 
+/// A gravação do espelho do iPhone (quadros do espelho num MP4). O de verdade é `iphone::MirrorRecording`; os testes
+/// usam um falso.
+pub(crate) trait MirrorHandle: Send {
+    /// Finaliza o arquivo.
+    fn stop(self: Box<Self>) -> Result<(), String>;
+}
+
+/// Como a gravação em andamento está sendo feita.
+pub(crate) enum Backend {
+    /// Uma ferramenta externa (`devicectl`, `simctl`, `adb`, o helper do ScreenCaptureKit).
+    Process {
+        process: Supervised,
+        stop_stdin: Option<ChildStdin>,
+        android: Option<AndroidRecording>,
+    },
+    /// Os quadros do espelho do iPhone, empacotados por nós.
+    Mirror(Box<dyn MirrorHandle>),
+}
+
 struct ActiveRecording {
     id: String,
     kind: String,
-    process: Supervised,
-    stop_stdin: Option<ChildStdin>,
+    backend: Backend,
     path: PathBuf,
-    android: Option<AndroidRecording>,
 }
 
-struct StartedRecording {
-    process: Supervised,
-    stop_stdin: Option<ChildStdin>,
-    android: Option<AndroidRecording>,
-}
-
-struct AndroidRecording {
+pub(crate) struct AndroidRecording {
     serial: String,
     remote_video: String,
     remote_pid_file: String,
 }
 
-fn active() -> &'static Mutex<Option<ActiveRecording>> {
-    static ACTIVE: OnceLock<Mutex<Option<ActiveRecording>>> = OnceLock::new();
-    ACTIVE.get_or_init(|| Mutex::new(None))
+/// Por onde o iPhone físico é gravado.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IphoneRoute {
+    /// O espelho está ligado: grava os quadros dele (não depende do `devicectl` nem da permissão do macOS).
+    Mirror,
+    /// O espelho ainda está abrindo ou reconectando: espera, em vez de tentar um caminho que não existe.
+    MirrorConnecting,
+    /// Sem espelho: o `devicectl`. Neste aparelho ele não oferece a gravação e o erro diz para ligar o espelho.
+    Devicectl,
 }
 
-static STARTING: AtomicBool = AtomicBool::new(false);
-static STOPPING: AtomicBool = AtomicBool::new(false);
+pub(crate) fn iphone_route(mirror: Option<crate::iphone::model::LinkState>) -> IphoneRoute {
+    use crate::iphone::model::LinkState;
+    match mirror {
+        Some(LinkState::Live) => IphoneRoute::Mirror,
+        Some(LinkState::Connecting | LinkState::Reconnecting) => IphoneRoute::MirrorConnecting,
+        Some(LinkState::Offline | LinkState::Paused) | None => IphoneRoute::Devicectl,
+    }
+}
 
-struct FlagGuard(&'static AtomicBool);
-impl Drop for FlagGuard {
+/// O que a gravação pede ao resto do app (separado para os testes não tocarem em disco, aparelho nem processos).
+pub(crate) trait Env {
+    fn recording_path(&self, label: &str, extension: &str) -> Result<PathBuf, String>;
+    fn mirror_state(&self, device: &str) -> Option<crate::iphone::model::LinkState>;
+    fn start_mirror(&self, device: &str, path: &Path) -> Result<Box<dyn MirrorHandle>, String>;
+    fn start_devicectl(&self, device: &str, path: &Path) -> Result<Backend, String>;
+}
+
+struct SystemEnv;
+
+impl Env for SystemEnv {
+    fn recording_path(&self, label: &str, extension: &str) -> Result<PathBuf, String> {
+        video_path(label, extension)
+    }
+
+    fn mirror_state(&self, device: &str) -> Option<crate::iphone::model::LinkState> {
+        #[cfg(target_os = "macos")]
+        {
+            crate::iphone::mirror_link_state(device)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = device;
+            None
+        }
+    }
+
+    fn start_mirror(&self, device: &str, path: &Path) -> Result<Box<dyn MirrorHandle>, String> {
+        #[cfg(target_os = "macos")]
+        {
+            struct Mirror(crate::iphone::MirrorRecording);
+            impl MirrorHandle for Mirror {
+                fn stop(self: Box<Self>) -> Result<(), String> {
+                    self.0.stop().map(|_| ())
+                }
+            }
+            crate::iphone::start_mirror_recording(device, path).map(|recording| Box::new(Mirror(recording)) as Box<dyn MirrorHandle>)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = (device, path);
+            Err("A gravação do espelho do iPhone exige o macOS.".into())
+        }
+    }
+
+    fn start_devicectl(&self, device: &str, path: &Path) -> Result<Backend, String> {
+        start_iphone(device, path)
+    }
+}
+
+/// As gravações em andamento. Uma só por vez; `start` e `stop` nunca seguram a trava durante I/O.
+pub(crate) struct Registry {
+    active: Mutex<Option<ActiveRecording>>,
+    starting: AtomicBool,
+    stopping: AtomicBool,
+}
+
+static REGISTRY: Registry = Registry::new();
+
+struct FlagGuard<'a>(&'a AtomicBool);
+impl Drop for FlagGuard<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
     }
@@ -451,74 +543,125 @@ fn ensure_started(
     }
 }
 
-/// Começa a gravar uma fonte identificada por `kind` e pelo identificador estável do aparelho.
-pub fn start(kind: &str, target: &str) -> Result<String, String> {
-    STARTING
-        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        .map_err(|_| "Outra gravação está começando agora.".to_string())?;
-    let _starting = FlagGuard(&STARTING);
-    if STOPPING.load(Ordering::Acquire) {
-        return Err("A gravação anterior ainda está sendo finalizada.".into());
-    }
-    let id = format!("{kind}:{target}");
-    if let Some(recording) = active()
-        .lock()
-        .map_err(|_| "O estado de gravação ficou indisponível.")?
-        .as_ref()
-    {
-        return Err(format!(
-            "Já existe uma gravação ativa ({}) — pare-a antes de iniciar outra.",
-            recording.id
-        ));
-    }
-    let label = match kind {
-        "iphone" => "iPhone",
-        "simulator" => "simulator",
-        "android" => "android",
-        "desktop" => "desktop",
-        _ => return Err("Tipo de tela desconhecido para gravação.".into()),
-    };
-    let safe_target = safe_name(target);
-    let target_label = if kind == "desktop" {
-        "tela-principal"
-    } else {
-        &safe_target[..safe_target.len().min(16)]
-    };
-    let extension = if kind == "desktop" { "mov" } else { "mp4" };
-    let path = video_path(&format!("{label}_{target_label}"), extension)?;
-    if path.exists() {
-        return Err("O arquivo desta gravação já existe; tente novamente.".into());
+impl Registry {
+    pub(crate) const fn new() -> Self {
+        Self {
+            active: Mutex::new(None),
+            starting: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
+        }
     }
 
-    let started = match kind {
-        "iphone" => start_iphone(target, &path),
-        "simulator" => start_simulator(target, &path),
-        "android" => start_android(target, &path),
-        "desktop" => start_desktop(&path),
-        _ => unreachable!(),
-    };
-    let StartedRecording {
-        process,
-        stop_stdin,
-        android,
-    } = match started {
-        Ok(started) => started,
-        Err(error) => {
-            let _ = std::fs::remove_file(&path);
-            return Err(error);
+    /// Começa a gravar uma fonte identificada por `kind` e pelo identificador estável do aparelho.
+    pub(crate) fn start(&self, env: &dyn Env, kind: &str, target: &str) -> Result<String, String> {
+        self.starting
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "Outra gravação está começando agora.".to_string())?;
+        let _starting = FlagGuard(&self.starting);
+        if self.stopping.load(Ordering::Acquire) {
+            return Err("A gravação anterior ainda está sendo finalizada.".into());
         }
-    };
-    *active()
-        .lock()
-        .map_err(|_| "O estado de gravação ficou indisponível.")? = Some(ActiveRecording {
-        id: id.clone(),
-        kind: kind.to_string(),
-        process,
-        stop_stdin,
-        path,
-        android,
-    });
-    Ok(id)
+        let id = format!("{kind}:{target}");
+        if let Some(recording) = self
+            .active
+            .lock()
+            .map_err(|_| "O estado de gravação ficou indisponível.")?
+            .as_ref()
+        {
+            return Err(format!(
+                "Já existe uma gravação ativa ({}) — pare-a antes de iniciar outra.",
+                recording.id
+            ));
+        }
+        let label = match kind {
+            "iphone" => "iPhone",
+            "simulator" => "simulator",
+            "android" => "android",
+            "desktop" => "desktop",
+            _ => return Err("Tipo de tela desconhecido para gravação.".into()),
+        };
+        let safe_target = safe_name(target);
+        let target_label = if kind == "desktop" {
+            "tela-principal"
+        } else {
+            &safe_target[..safe_target.len().min(16)]
+        };
+        let extension = if kind == "desktop" { "mov" } else { "mp4" };
+        let path = env.recording_path(&format!("{label}_{target_label}"), extension)?;
+        if path.exists() {
+            return Err("O arquivo desta gravação já existe; tente novamente.".into());
+        }
+
+        let started = match kind {
+            "iphone" => start_iphone_routed(env, target, &path),
+            "simulator" => start_simulator(target, &path),
+            "android" => start_android(target, &path),
+            "desktop" => start_desktop(&path),
+            _ => unreachable!(),
+        };
+        let backend = match started {
+            Ok(backend) => backend,
+            Err(error) => {
+                let _ = std::fs::remove_file(&path);
+                return Err(error);
+            }
+        };
+        let mut active = self.active.lock().unwrap_or_else(|e| e.into_inner());
+        *active = Some(ActiveRecording {
+            id: id.clone(),
+            kind: kind.to_string(),
+            backend,
+            path,
+        });
+        Ok(id)
+    }
+
+    /// O estado atual para restaurar o controle ao reabrir o painel.
+    pub(crate) fn status(&self) -> Option<String> {
+        self.active
+            .lock()
+            .ok()?
+            .as_ref()
+            .map(|recording| recording.id.clone())
+    }
+
+    /// Para a gravação, finaliza o MP4 e devolve o caminho local. Qualquer que seja o resultado, a gravação deixa
+    /// de estar ativa: antes, uma falha deixava o botão preso em "gravando" até reiniciar a ADE.
+    pub(crate) fn stop(&self, id: &str) -> Result<String, String> {
+        let recording = {
+            let mut current = self
+                .active
+                .lock()
+                .map_err(|_| "O estado de gravação ficou indisponível.")?;
+            match current.as_ref() {
+                None => return Err("Não há gravação ativa.".into()),
+                Some(recording) if recording.id != id => {
+                    return Err("A gravação ativa pertence a outra tela.".into());
+                }
+                Some(_) => current.take().expect("gravação ativa conferida acima"),
+            }
+        };
+        // O mutex já foi solto: esperar a ferramenta fechar o arquivo não trava o `status` (que roda na thread da UI).
+        self.stopping.store(true, Ordering::Release);
+        let _stopping = FlagGuard(&self.stopping);
+        finish(recording)
+    }
+}
+
+/// O iPhone físico: com o espelho ligado, os quadros dele; sem espelho, o `devicectl` (ver `IphoneRoute`).
+fn start_iphone_routed(env: &dyn Env, device: &str, path: &Path) -> Result<Backend, String> {
+    match iphone_route(env.mirror_state(device)) {
+        IphoneRoute::Mirror => env.start_mirror(device, path).map(Backend::Mirror),
+        IphoneRoute::MirrorConnecting => Err(
+            "O espelho do iPhone ainda está conectando. Espere a tela do aparelho aparecer na ADE e grave de novo.".into(),
+        ),
+        IphoneRoute::Devicectl => env.start_devicectl(device, path),
+    }
+}
+
+/// Começa a gravar uma fonte identificada por `kind` e pelo identificador estável do aparelho.
+pub fn start(kind: &str, target: &str) -> Result<String, String> {
+    REGISTRY.start(&SystemEnv, kind, target)
 }
 
 /// Abre a ferramenta com a saída capturada, para que o motivo de uma falha não se perca.
@@ -527,7 +670,7 @@ fn capture_output(command: &mut std::process::Command) {
 }
 
 #[cfg(target_os = "macos")]
-fn start_iphone(device: &str, path: &Path) -> Result<StartedRecording, String> {
+fn start_iphone(device: &str, path: &Path) -> Result<Backend, String> {
     let identifier = crate::iphone::model::physical_identifier(device)
         .ok_or("Selecione um iPhone ou iPad físico conectado à ADE.")?;
     let mut command = crate::util::spawn::hidden_command("xcrun");
@@ -556,7 +699,7 @@ fn start_iphone(device: &str, path: &Path) -> Result<StartedRecording, String> {
         .map_err(|e| format!("Não consegui abrir a gravação do iPhone: {e}"))?;
     let process = Supervised::new(child);
     ensure_started("iphone", &process, None, EARLY_FAILURE_WINDOW)?;
-    Ok(StartedRecording {
+    Ok(Backend::Process {
         process,
         stop_stdin: None,
         android: None,
@@ -564,12 +707,12 @@ fn start_iphone(device: &str, path: &Path) -> Result<StartedRecording, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn start_iphone(_: &str, _: &Path) -> Result<StartedRecording, String> {
+fn start_iphone(_: &str, _: &Path) -> Result<Backend, String> {
     Err("A gravação do iPhone físico exige o devicectl no macOS.".into())
 }
 
 #[cfg(target_os = "macos")]
-fn start_simulator(udid: &str, path: &Path) -> Result<StartedRecording, String> {
+fn start_simulator(udid: &str, path: &Path) -> Result<Backend, String> {
     let known = crate::simulator::ops::devices()?
         .iter()
         .any(|device| device.udid == udid && device.state == "booted");
@@ -599,7 +742,7 @@ fn start_simulator(udid: &str, path: &Path) -> Result<StartedRecording, String> 
         Some("Recording started"),
         SIMULATOR_START_WINDOW,
     )?;
-    Ok(StartedRecording {
+    Ok(Backend::Process {
         process,
         stop_stdin: None,
         android: None,
@@ -607,11 +750,11 @@ fn start_simulator(udid: &str, path: &Path) -> Result<StartedRecording, String> 
 }
 
 #[cfg(not(target_os = "macos"))]
-fn start_simulator(_: &str, _: &Path) -> Result<StartedRecording, String> {
+fn start_simulator(_: &str, _: &Path) -> Result<Backend, String> {
     Err("A gravação do simulador iOS exige o Xcode no macOS.".into())
 }
 
-fn start_android(serial: &str, _path: &Path) -> Result<StartedRecording, String> {
+fn start_android(serial: &str, _path: &Path) -> Result<Backend, String> {
     let device = crate::android::devices()?
         .into_iter()
         .any(|device| device.serial == serial && device.state == "device");
@@ -631,7 +774,7 @@ fn start_android(serial: &str, _path: &Path) -> Result<StartedRecording, String>
         .map_err(|e| format!("Não consegui iniciar a gravação do Android: {e}"))?;
     let process = Supervised::new(child);
     ensure_started("android", &process, None, Duration::from_secs(2))?;
-    Ok(StartedRecording {
+    Ok(Backend::Process {
         process,
         stop_stdin: None,
         android: Some(AndroidRecording {
@@ -643,7 +786,7 @@ fn start_android(serial: &str, _path: &Path) -> Result<StartedRecording, String>
 }
 
 #[cfg(target_os = "macos")]
-fn start_desktop(path: &Path) -> Result<StartedRecording, String> {
+fn start_desktop(path: &Path) -> Result<Backend, String> {
     let mut command = crate::util::spawn::hidden_command("/usr/bin/swift");
     command
         .arg("-e")
@@ -671,7 +814,7 @@ fn start_desktop(path: &Path) -> Result<StartedRecording, String> {
         Wait::Matched => {
             let log = process.log();
             if log.lines().any(|line| line.trim() == "READY") {
-                return Ok(StartedRecording {
+                return Ok(Backend::Process {
                     process,
                     stop_stdin,
                     android: None,
@@ -689,73 +832,75 @@ fn start_desktop(path: &Path) -> Result<StartedRecording, String> {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn start_desktop(_: &Path) -> Result<StartedRecording, String> {
+fn start_desktop(_: &Path) -> Result<Backend, String> {
     Err("A gravação da tela do computador está disponível no macOS nesta versão.".into())
 }
 
 /// O estado atual para restaurar o controle ao reabrir o painel.
 pub fn status() -> Option<String> {
-    active()
-        .lock()
-        .ok()?
-        .as_ref()
-        .map(|recording| recording.id.clone())
+    REGISTRY.status()
 }
 
-/// Para a gravação, finaliza o MP4 e devolve o caminho local. Qualquer que seja o resultado, a gravação deixa
-/// de estar ativa: antes, uma falha deixava o botão preso em "gravando" até reiniciar a ADE.
+/// Para a gravação, finaliza o MP4 e devolve o caminho local.
 pub fn stop(id: &str) -> Result<String, String> {
-    let recording = {
-        let mut current = active()
-            .lock()
-            .map_err(|_| "O estado de gravação ficou indisponível.")?;
-        match current.as_ref() {
-            None => return Err("Não há gravação ativa.".into()),
-            Some(recording) if recording.id != id => {
-                return Err("A gravação ativa pertence a outra tela.".into());
-            }
-            Some(_) => current.take().expect("gravação ativa conferida acima"),
-        }
-    };
-    // O mutex já foi solto: esperar a ferramenta fechar o arquivo não trava o `status` (que roda na thread da UI).
-    STOPPING.store(true, Ordering::Release);
-    let _stopping = FlagGuard(&STOPPING);
-    finish(recording)
+    REGISTRY.stop(id)
 }
 
-fn finish(mut recording: ActiveRecording) -> Result<String, String> {
-    let (exit, killed) = if let Some(android) = &recording.android {
-        if let Err(error) = crate::android::stop_screen_record(
-            &android.serial,
-            &android.remote_video,
-            &android.remote_pid_file,
-        ) {
-            recording.process.kill();
+fn finish(recording: ActiveRecording) -> Result<String, String> {
+    let ActiveRecording {
+        kind, backend, path, ..
+    } = recording;
+    match backend {
+        Backend::Mirror(handle) => {
+            // O escritor já tirou o `.part` do caminho em qualquer falha; o arquivo só existe se foi finalizado.
+            handle.stop()?;
+            let len = std::fs::metadata(&path).ok().map(|m| m.len());
+            check_output(&kind, ExitInfo { code: Some(0), signal: None }, false, len, "")?;
+            Ok(path.to_string_lossy().into_owned())
+        }
+        Backend::Process {
+            process,
+            stop_stdin,
+            android,
+        } => finish_process(&kind, process, stop_stdin, android, &path),
+    }
+}
+
+fn finish_process(
+    kind: &str,
+    process: Supervised,
+    stop_stdin: Option<ChildStdin>,
+    android: Option<AndroidRecording>,
+    path: &Path,
+) -> Result<String, String> {
+    let (exit, killed) = if let Some(android) = &android {
+        if let Err(error) =
+            crate::android::stop_screen_record(&android.serial, &android.remote_video, &android.remote_pid_file)
+        {
+            process.kill();
             return Err(error);
         }
-        recording.process.await_exit(FINISH_WINDOW)
-    } else if let Some(mut input) = recording.stop_stdin.take() {
+        process.await_exit(FINISH_WINDOW)
+    } else if let Some(mut input) = stop_stdin {
         // Se o helper já morreu, a escrita falha; o motivo está no registro e sai da conferência abaixo.
         let _ = input.write_all(b"stop\n");
         drop(input);
-        recording.process.await_exit(FINISH_WINDOW)
+        process.await_exit(FINISH_WINDOW)
     } else {
-        recording
-            .process
-            .stop_with_interrupt(Duration::from_secs(6), 4)
+        process.stop_with_interrupt(Duration::from_secs(6), 4)
     };
-    let log = recording.process.log();
-    if let (Some(android), false) = (&recording.android, killed) {
+    let log = process.log();
+    if let (Some(android), false) = (&android, killed) {
         crate::android::pull_screen_record(
             &android.serial,
             &android.remote_video,
             &android.remote_pid_file,
-            &recording.path,
+            path,
         )?;
     }
-    let len = std::fs::metadata(&recording.path).ok().map(|m| m.len());
+    let len = std::fs::metadata(path).ok().map(|m| m.len());
     // O Android não tem o código de saída do `screenrecord` (o `adb shell` devolve o do `wait`): vale o arquivo.
-    let exit = if recording.android.is_some() {
+    let exit = if android.is_some() {
         ExitInfo {
             code: Some(0),
             signal: None,
@@ -763,11 +908,11 @@ fn finish(mut recording: ActiveRecording) -> Result<String, String> {
     } else {
         exit
     };
-    match check_output(&recording.kind, exit, killed, len, &log) {
-        Ok(()) => Ok(recording.path.to_string_lossy().into_owned()),
+    match check_output(kind, exit, killed, len, &log) {
+        Ok(()) => Ok(path.to_string_lossy().into_owned()),
         Err(error) => {
             if len == Some(0) {
-                let _ = std::fs::remove_file(&recording.path);
+                let _ = std::fs::remove_file(path);
             }
             Err(error)
         }

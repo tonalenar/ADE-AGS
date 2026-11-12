@@ -22,12 +22,15 @@ pub struct DeviceList {
 #[cfg(target_os = "macos")]
 pub(crate) mod mac {
     use std::collections::{HashMap, HashSet};
+    use std::path::Path;
     use std::sync::{Mutex, OnceLock};
     use std::time::Duration;
 
     use tauri::AppHandle;
 
     use super::super::model::{self, PhysicalDevice};
+    use super::super::mp4::Summary;
+    use super::super::recording::{FileWriter, Recording, FIRST_FRAME_WAIT};
     use super::super::session::{self, Session, Status};
 
     #[derive(Default)]
@@ -174,6 +177,51 @@ pub(crate) mod mac {
     pub fn status(device: &str) -> Option<Status> {
         state().lock().ok()?.sessions.get(device).map(Session::status)
     }
+
+    /// A conexão do espelho deste aparelho (`None`: não há sessão aberta).
+    pub fn link_state(device: &str) -> Option<model::LinkState> {
+        status(device).map(|status| status.state)
+    }
+
+    /// Uma gravação do vídeo do espelho: os quadros que a sessão já recebe vão para o MP4, sem recodificar.
+    pub struct MirrorRecording {
+        recording: Recording,
+        link: session::RecordTx,
+    }
+
+    impl MirrorRecording {
+        /// Finaliza o arquivo (o `moov` é escrito e o `.part` vira o destino).
+        pub fn stop(self) -> Result<Summary, String> {
+            self.link.set(None);
+            self.recording.stop()
+        }
+    }
+
+    /// Começa a gravar o espelho de `device` em `dest`. Só com o espelho ligado (`live`). Volta depois do primeiro
+    /// quadro-chave no arquivo, então um erro de vídeo ou de disco aparece aqui e não só ao parar.
+    pub fn start_recording(device: &str, dest: &Path) -> Result<MirrorRecording, String> {
+        // A trava do estado só é segurada para ler o estado e copiar o canal; o arquivo é aberto depois.
+        let link = {
+            let s = state().lock().unwrap_or_else(|e| e.into_inner());
+            let session = s.sessions.get(device).ok_or(NOT_LIVE)?;
+            if session.status().state != model::LinkState::Live {
+                return Err(NOT_LIVE.into());
+            }
+            session.recorder()
+        };
+        let recording = Recording::start(FileWriter::create(dest)?);
+        link.set(Some(recording.tap()));
+        match recording.wait_first_frame(FIRST_FRAME_WAIT) {
+            Ok(()) => Ok(MirrorRecording { recording, link }),
+            Err(error) => {
+                link.set(None);
+                recording.abort();
+                Err(error)
+            }
+        }
+    }
+
+    const NOT_LIVE: &str = "O espelho do iPhone não está ligado. Abra a tela do aparelho na ADE, espere ela aparecer e grave de novo.";
 
     pub fn is_disconnected(device: &str) -> bool {
         state().lock().is_ok_and(|s| s.disconnected.contains(device))

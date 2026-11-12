@@ -8,8 +8,15 @@
 //! Como funciona e o que foi medido: `docs/ade-ags/ESPELHAMENTO_IPHONE.md`.
 
 pub mod model;
+// O gravador do espelho só é usado no macOS; nos testes compila em qualquer sistema.
+#[cfg(any(target_os = "macos", test))]
+pub mod mp4;
+#[cfg(any(target_os = "macos", test))]
+pub mod recording;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod test_gravacao;
 pub(crate) mod commands;
 pub(crate) mod ops;
 #[cfg(target_os = "macos")]
@@ -18,3 +25,7 @@ pub(crate) mod native;
 pub(crate) mod session;
 
 pub use commands::*;
+#[cfg(target_os = "macos")]
+pub(crate) use commands::mac::{
+    MirrorRecording, link_state as mirror_link_state, start_recording as start_mirror_recording,
+};
