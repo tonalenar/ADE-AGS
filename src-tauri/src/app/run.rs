@@ -454,6 +454,7 @@ pub fn run() {
             crate::conversa::chat_thread_compact_context,
             crate::harness::commands::harness_capability_matrix,
             crate::conversa::chat_thread_auto_compact_on_return,
+            crate::conversa::chat_autocompact_plans,
             crate::conversa::chat_thread_clear_context,
             crate::conversa::chat_thread_interrupt,
             crate::conversa::chat_task_stop,

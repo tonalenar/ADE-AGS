@@ -528,9 +528,14 @@ fn spawn(app: &AppHandle, db: &DbConnection, row: &store::ThreadRow, env: Option
 /// O mapa contém apenas números, nunca credenciais nem configuração global da TUI.
 pub(super) fn auto_compact_window(db: &DbConnection, row: &store::ThreadRow) -> Option<u32> {
     let key = row.account_id.as_deref().unwrap_or("system:claude-code");
-    let raw = crate::database::get_setting(db, AUTO_COMPACT_WINDOWS_SETTING).ok()??;
-    let settings: HashMap<String, u32> = serde_json::from_str(&raw).ok()?;
-    settings.get(key).copied().filter(|n| (100_000..=1_000_000).contains(n))
+    // Os tokens que a pessoa fixou para o perfil valem primeiro; sem eles, o limiar em % do autocompact da ADE.
+    let fixed = crate::database::get_setting(db, AUTO_COMPACT_WINDOWS_SETTING)
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<HashMap<String, u32>>(&raw).ok())
+        .and_then(|settings| settings.get(key).copied())
+        .filter(|n| (100_000..=1_000_000).contains(n));
+    fixed.or_else(|| super::autocompact::claude_launch_window(db, row))
 }
 
 async fn write_loop(mut rx: mpsc::UnboundedReceiver<String>, mut stdin: tokio::process::ChildStdin) {
@@ -770,8 +775,11 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
             emit(app, thread_id, "task", json!({ "task": task }));
         }
         Out::SubItem { parent, item } => emit(app, thread_id, "taskItem", json!({ "parentToolUseId": parent, "item": item })),
+        // O Claude começou ou terminou de compactar (a dele ou a pedida pela ADE): o aviso da timeline e a fila do composer.
+        Out::Compaction(event) => super::autocompact::on_event(app, db, thread_id, event),
         Out::Done(result) => {
             let Some(turn) = session.close_turn() else { return };
+            super::autocompact::on_event(app, db, thread_id, super::autocompact::Event::TurnEnded { ok: result.error.is_none() });
             session.auto_compacting.store(false, Ordering::SeqCst);
             if let Ok(mut asks) = session.asks.lock() {
                 asks.clear();
@@ -786,9 +794,16 @@ fn on_out(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, out: Out) 
             {
                 let _ = store::set_run_end_uuid(&conn, thread_id, &turn, &uuid);
             }
+            // Fim de turno: o autocompact decide ANTES de a conversa ficar ociosa para a tela (a fila só solta a próxima
+            // mensagem depois da compactação). Nunca no meio de um turno.
+            let compaction = (!session.stale.load(Ordering::SeqCst) && result.error.is_none() && !result.interrupted)
+                .then(|| super::autocompact::plan(app, db, thread_id))
+                .flatten();
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
             if session.stale.load(Ordering::SeqCst) {
                 close(thread_id);
+            } else if let Some(planned) = compaction {
+                super::autocompact::execute(app, db, thread_id, planned);
             }
         }
     }

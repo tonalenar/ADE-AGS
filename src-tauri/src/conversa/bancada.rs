@@ -797,6 +797,8 @@ impl Motor {
                 ClaudeOut::SubItem { parent, item } => self.out.filhos.push(Filho { tipo: "subitem".into(), parent: Some(parent), task: None, item: Some(*item) }),
                 // O modo de permissão não entra na timeline nem no filho.
                 ClaudeOut::Mode(_) => {}
+                // A compactação vai ao aviso da timeline (`autocompact::on_event`), que a bancada não reproduz.
+                ClaudeOut::Compaction(_) => {}
                 ClaudeOut::Done(result) => {
                     // O resultado antes do `init` é a abertura que falhou (o `--resume` de uma sessão que não existe).
                     if self.out.abertura.is_none() {

@@ -4,6 +4,9 @@ import { useTranslation } from "react-i18next";
 import { chatPoolAccept, chatPoolDismiss, chatPoolPending, type ChatPoolPending } from "@/features/accounts/chatPool";
 import { chatLimitResumeCancel, chatLimitResumeGet, type LimitResumePlan } from "@/features/chat/threadTextIpc";
 
+import { CompactionRow } from "@/features/chat/autocompact/CompactionRow";
+import { isCompactionItem } from "@/features/chat/autocompact/model";
+
 import { agentSwitchOf } from "./agentSwitch";
 import { noticeDetail } from "./timelineModel";
 import type { TimelineItem } from "./types";
@@ -32,6 +35,7 @@ export function NoticeRow({ item, onResend, threadId }: { item: TimelineItem; on
       </div>
     );
   }
+  if (isCompactionItem(item)) return <CompactionRow item={item} />;
   const code = item.label ?? "";
   if (code.startsWith("pool") || code.startsWith("fallback")) return <PoolNotice item={item} threadId={threadId} />;
   if (code.startsWith("limit")) return <LimitNotice item={item} threadId={threadId} />;

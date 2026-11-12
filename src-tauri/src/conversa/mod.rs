@@ -23,6 +23,7 @@ pub mod agy_map;
 pub mod answer;
 pub mod api;
 pub mod attach;
+pub mod autocompact;
 pub mod claude;
 pub mod claude_map;
 pub mod codex;
@@ -55,6 +56,8 @@ pub mod turn;
 pub mod worktree;
 #[cfg(test)]
 mod attach_test;
+#[cfg(test)]
+mod autocompact_test;
 #[cfg(test)]
 mod bancada;
 #[cfg(test)]

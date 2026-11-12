@@ -33,6 +33,7 @@
       {
         "at": 1794270104411,
         "contextTokens": 26780,
+        "contextWindow": 1000000,
         "id": "usage:{{session:6}}",
         "kind": "usage",
         "tokens": 26782,
@@ -52,6 +53,7 @@
       {
         "at": 1794270105440,
         "contextTokens": 35146,
+        "contextWindow": 1000000,
         "id": "usage:{{session:30}}",
         "kind": "usage",
         "tokens": 35149,

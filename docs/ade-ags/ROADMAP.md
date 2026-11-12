@@ -95,6 +95,10 @@ entrega de mensagens e as cutucadas do Vigia com o turno aberto (modo `veto`, pa
 e aprovações e perguntas dos integrantes como pendências no SQLite (`ags peer pending`/`answer`).
 Achados por agente, desenho e limites em [CANAL_ESTRUTURADO.md](./CANAL_ESTRUTURADO.md).
 
+## Autocompact de contexto
+
+O contexto acima do limiar do usuário (83% por padrão, configurável por agente) é compactado ao fim do turno pelo comando nativo do agente, com «Compactando contexto…» e «Contexto compactado antes → depois» na linha do tempo, o medidor de contexto no composer e as mensagens da fila esperando a compactação. O Claude Code compacta sozinho (a ADE garante o limite e reflete os eventos); o Codex é compactado pela ADE; agentes sem medida de contexto ou sem compactação pelo protocolo ficam desligados com o motivo na tela; a ADE nunca digita em terminal. Detalhes em [AUTOCOMPACT.md](./AUTOCOMPACT.md) e na decisão [AUTOCOMPACT.md](../decisoes/AUTOCOMPACT.md).
+
 ## Fila de mensagens entre agentes durável e editável
 
 Toda mensagem entre agentes tem id e registro no SQLite (`peer_messages`), a entrega sobrevive ao

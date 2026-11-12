@@ -253,6 +253,8 @@ pub enum Out {
     Task(Value),
     /// Um item do que um subagente faz, dentro da tarefa dele (`parent` = o `tool_use_id` que o lançou).
     SubItem { parent: String, item: Box<Item> },
+    /// O Claude começou (`status: compacting`) ou terminou (`compact_boundary`) de compactar o contexto.
+    Compaction(super::autocompact::Event),
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -292,6 +294,10 @@ pub struct Mapper {
     /// O `uuid` da última mensagem do agente do turno (a linha `assistant` do fio principal, nunca a de um subagente):
     /// o ponto em que o fork da pergunta lateral corta a transcrição. `take_end_uuid` o entrega no fim do turno.
     end_uuid: Option<String>,
+    /// A janela de contexto que o último `result` informou (`modelUsage.<modelo>.contextWindow`).
+    window: Option<u64>,
+    /// O último item `usage` do turno, para o `result` gravar a janela nele (a janela só chega no fim do turno).
+    last_usage: Option<Item>,
 }
 
 impl Mapper {
@@ -334,7 +340,18 @@ impl Mapper {
                     || str_of(line, "terminal_reason").is_some_and(|r| r.starts_with("aborted"));
                 let failed = line.get("is_error").and_then(Value::as_bool) == Some(true) && !interrupted;
                 let error = failed.then(|| error_of(line));
-                vec![Out::Done(TurnResult { interrupted, error, duration_ms: line.get("duration_ms").and_then(Value::as_i64) })]
+                let mut out = Vec::new();
+                // A janela de contexto só chega no `result`: o último `usage` do turno a recebe (o medidor da conversa).
+                if let Some(window) = context_window_of(line) {
+                    self.window = Some(window);
+                    if let Some(mut usage) = self.last_usage.take() {
+                        usage.context_window = Some(window);
+                        out.push(Out::Item(Box::new(usage)));
+                    }
+                }
+                self.last_usage = None;
+                out.push(Out::Done(TurnResult { interrupted, error, duration_ms: line.get("duration_ms").and_then(Value::as_i64) }));
+                out
             }
             _ => Vec::new(),
         }
@@ -370,6 +387,7 @@ impl Mapper {
         if let Some(mode) = str_of(line, "permissionMode") {
             out.push(Out::Mode(mode.to_string()));
         }
+        out.extend(compaction_event(line).map(Out::Compaction));
         out
     }
 
@@ -382,7 +400,9 @@ impl Mapper {
         if let Some(tokens) = claude_tokens(usage).filter(|_| !message_id.is_empty()) {
             let mut item = Item::usage(format!("usage:{message_id}"), at, tokens);
             item.context_tokens = claude_context_tokens(usage);
+            item.context_window = self.window;
             item.usage_breakdown = UsageBreakdown::from_claude(usage);
+            self.last_usage = Some(item.clone());
             out.push(Out::Item(Box::new(item)));
         }
         for block in &blocks {
@@ -470,6 +490,32 @@ impl Mapper {
         self.closed.insert(item.id.clone());
         item
     }
+}
+
+/// O evento de compactação de uma linha `system`: `status: compacting` (começou) e `compact_boundary` (terminou, com o
+/// gatilho `auto`/`manual` e os tokens antes e depois, quando o Claude os informa). Pura.
+pub fn compaction_event(line: &Value) -> Option<super::autocompact::Event> {
+    use super::autocompact::{Event, Trigger};
+    match str_of(line, "subtype")? {
+        "status" if str_of(line, "status") == Some("compacting") => Some(Event::Started { trigger: None, before: None }),
+        "compact_boundary" => {
+            let meta = line.get("compact_metadata").or_else(|| line.get("compactMetadata"));
+            let trigger = match meta.and_then(|m| str_of(m, "trigger")) {
+                Some("manual") => Some(Trigger::Manual),
+                Some("auto") => Some(Trigger::Auto),
+                _ => None,
+            };
+            let n = |keys: [&str; 2]| meta.and_then(|m| keys.iter().find_map(|k| m.get(*k)).and_then(Value::as_u64));
+            Some(Event::Finished { trigger, before: n(["pre_tokens", "preTokens"]), after: n(["post_tokens", "postTokens"]), ok: true })
+        }
+        _ => None,
+    }
+}
+
+/// A janela de contexto do `result`: a maior entre os modelos de `modelUsage` (o do fio principal; um subagente menor
+/// não rebaixa a janela). `None` sem a informação. Pura.
+pub fn context_window_of(result: &Value) -> Option<u64> {
+    result.get("modelUsage")?.as_object()?.values().filter_map(|m| m.get("contextWindow").and_then(Value::as_u64)).filter(|w| *w > 0).max()
 }
 
 /// O id de um bloco de texto: o mesmo para os pedaços (`stream_event`) e para o item final.

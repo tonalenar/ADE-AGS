@@ -3,6 +3,7 @@ import { sendToConversation } from "./chatActions";
 import { useChatLive } from "./liveStore";
 import { usePermissions } from "./permissions/permissionsStore";
 import { dequeueMessage, enqueueMessage, useChatStore } from "./store";
+import { isCompacting } from "./autocompact/model";
 import { threadIdOf } from "./structured/model";
 import { interruptThread, sendToThread, useStructured } from "./structured/store";
 import type { MidTurn } from "./chatModel";
@@ -20,12 +21,13 @@ function send(key: string, text: string): void {
   else sendToConversation(key, text);
 }
 
-function stateOf(key: string): { working: boolean; waiting: boolean } {
+function stateOf(key: string): { working: boolean; waiting: boolean; compacting?: boolean } {
   const threadId = threadIdOf(key);
   if (threadId) {
     const live = useStructured.getState().live[threadId];
     const waiting = (live?.requests.length ?? 0) > 0;
-    return { working: live?.phase === "working", waiting };
+    // Compactando o contexto (autocompact) também é estar ocupado: a mensagem espera e sai quando o aviso fecha.
+    return { working: live?.phase === "working" || isCompacting(live?.items ?? [], Date.now()), waiting, compacting: isCompacting(live?.items ?? [], Date.now()) };
   }
   const live = useChatLive.getState();
   const waiting = !!live.question[key] || key in live.awaiting || usePermissions.getState().tui.some((p) => p.tabId === key);
@@ -45,9 +47,14 @@ export function queueOrSend(key: string, text: string): void {
  * assim que o turno parar, como o próximo, na mesma sessão. Antes, no Cursor e no Antigravity ela esperava atrás de um
  * turno que podia não acabar, e o Parar a descartava. Devolve o que fez.
  */
-export function sendNow(key: string, text: string, midTurn: MidTurn, deliver: () => void): "sent" | "interrupting" {
+export function sendNow(key: string, text: string, midTurn: MidTurn, deliver: () => void): "sent" | "interrupting" | "queued" {
   const threadId = threadIdOf(key);
-  const { working } = stateOf(key);
+  const { working, compacting } = stateOf(key);
+  // Compactando o contexto: a compactação não é um turno que se guia nem se interrompe; a mensagem espera e sai depois.
+  if (threadId && compacting) {
+    enqueueMessage(key, text);
+    return "queued";
+  }
   if (!threadId || !working || midTurn === "steer") {
     deliver();
     return "sent";

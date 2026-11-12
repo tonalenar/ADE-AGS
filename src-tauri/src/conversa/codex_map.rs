@@ -253,6 +253,9 @@ pub fn usage_item(tokens: &mut TurnTokens, params: &Value, at: Option<i64>) -> O
     let n = tokens.update(turn, total, last);
     (n > 0).then(|| {
         let mut item = Item::usage(format!("usage:{turn}"), at, n);
+        // O contexto é o da última chamada (entrada + saída dela, o que a próxima carrega); a janela é a do modelo.
+        item.context_tokens = Some(last).filter(|n| *n > 0);
+        item.context_window = params.pointer("/tokenUsage/modelContextWindow").and_then(Value::as_u64).filter(|w| *w > 0);
         if let (Some(total), Some(last)) = (
             params.pointer("/tokenUsage/total").and_then(usage_breakdown),
             params.pointer("/tokenUsage/last").and_then(usage_breakdown),
