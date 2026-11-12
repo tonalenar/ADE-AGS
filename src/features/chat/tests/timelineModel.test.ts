@@ -137,14 +137,15 @@ describe("noticeDetail", () => {
 const think = (id: string, text = "Vou deixar o controle mais fácil de achar"): TimelineItem => ({ kind: "reasoning", id, text });
 
 describe("o raciocínio do agente na timeline", () => {
-  it("raciocínio de turno concluído ou substituído só aparece ao expandir o log", () => {
+  it("raciocínio de turno concluído ou substituído sai da conversa e só volta ao abrir o log", () => {
     const complete = timelineTurns([user("u1"), think("r1"), end("e1")])[0]!;
     const superseded = timelineTurns([user("u2"), think("r2"), user("u3")])[0]!;
 
     expect(visibleTurnBody(complete, false)).toEqual([]);
     expect(visibleTurnBody(superseded, false)).toEqual([]);
-    expect(visibleTurnBody(complete, true).map((row) => row.key)).toContain("r1");
-    expect(visibleTurnBody(superseded, true).map((row) => row.key)).toContain("r2");
+    expect(visibleTurnBody(complete, true).map((row) => row.key)).not.toContain("r1");
+    expect(visibleTurnBody(complete, true, true).map((row) => row.key)).toContain("r1");
+    expect(visibleTurnBody(superseded, true, true).map((row) => row.key)).toContain("r2");
   });
 
   it("durante o turno mantém só o resumo mais recente, inclusive quando já começou outra atividade", () => {

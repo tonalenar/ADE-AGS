@@ -68,10 +68,14 @@ export interface Turn {
   notice?: TimelineItem;
 }
 
-/** O corpo encerrado só aparece quando a pessoa abre o log de trabalho. */
-export function visibleTurnBody(turn: Turn, expanded: boolean): BodyRow[] {
-  if (expanded) return turn.body;
-  if (turn.end !== null) return [];
+/**
+ * Linhas do corpo que aparecem, como o work log do T3: durante o turno, só o raciocínio mais recente;
+ * no turno encerrado, o raciocínio sai da conversa e volta só quando a pessoa abre o log (`full`).
+ */
+export function visibleTurnBody(turn: Turn, open: boolean, full = false): BodyRow[] {
+  if (turn.end !== null && !open) return [];
+  if (full) return turn.body;
+  if (turn.end !== null) return turn.body.filter((row) => row.type !== "reasoning");
   const latestReasoning = [...turn.body].reverse().find((row) => row.type === "reasoning");
   return latestReasoning
     ? turn.body.filter((row) => row.type !== "reasoning" || row.key === latestReasoning.key)
