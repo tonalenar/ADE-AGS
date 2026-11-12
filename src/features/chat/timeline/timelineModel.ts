@@ -68,6 +68,20 @@ export interface Turn {
   notice?: TimelineItem;
 }
 
+/**
+ * Linhas do corpo que aparecem, como o work log do T3: durante o turno, só o raciocínio mais recente;
+ * no turno encerrado, o raciocínio sai da conversa e volta só quando a pessoa abre o log (`full`).
+ */
+export function visibleTurnBody(turn: Turn, open: boolean, full = false): BodyRow[] {
+  if (turn.end !== null && !open) return [];
+  if (full) return turn.body;
+  if (turn.end !== null) return turn.body.filter((row) => row.type !== "reasoning");
+  const latestReasoning = [...turn.body].reverse().find((row) => row.type === "reasoning");
+  return latestReasoning
+    ? turn.body.filter((row) => row.type !== "reasoning" || row.key === latestReasoning.key)
+    : turn.body;
+}
+
 /** Soma as edições por arquivo, na ordem em que apareceram. */
 export function changedFiles(tools: TimelineItem[]): ChangedFile[] {
   const byPath = new Map<string, ChangedFile>();

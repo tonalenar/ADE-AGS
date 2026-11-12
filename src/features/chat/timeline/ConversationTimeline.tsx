@@ -27,7 +27,7 @@ import { SelectionComment } from "../quotes/SelectionComment";
 import { voicesByItem } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
-import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurns, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
+import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurns, visibleTurnBody, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
@@ -346,10 +346,12 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
 
 function TurnView({ turn, thinking = false, latest, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */ thinking?: boolean; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
   const { t } = useTranslation();
-  // Os turnos antigos começam recolhidos; o último (ou o em aberto), aberto.
-  const containsSearchTarget = !!searchTargetId && (turn.user?.id === searchTargetId || turn.final?.id === searchTargetId || turn.planItemId === searchTargetId || turn.body.some((row) => row.type === "assistant" && row.item.id === searchTargetId));
+  // Os turnos antigos começam recolhidos; o último (ou o em aberto), aberto. O raciocínio de turno encerrado só volta
+  // quando a pessoa abre o log pelo cabeçalho (`full`), como no T3.
+  const containsSearchTarget = !!searchTargetId && (turn.user?.id === searchTargetId || turn.final?.id === searchTargetId || turn.planItemId === searchTargetId || turn.body.some((row) => (row.type === "assistant" || row.type === "reasoning") && row.item.id === searchTargetId));
   const [open, setOpen] = useState(latest || turn.end === null || containsSearchTarget);
-  useEffect(() => { if (containsSearchTarget) setOpen(true); }, [containsSearchTarget]);
+  const [full, setFull] = useState(containsSearchTarget);
+  useEffect(() => { if (containsSearchTarget) { setOpen(true); setFull(true); } }, [containsSearchTarget]);
   const foldable = turn.end !== null && turn.body.length > 0;
   // No zen, um turno cujas ferramentas foram todas ocultas e que acabou bem não mostra o cabeçalho "Trabalhou por …".
   const quiet = quietWhenEmpty && turn.body.length === 0 && turn.end !== null && !turn.end.superseded && endOutcome(turn.end) === "done";
@@ -359,7 +361,7 @@ function TurnView({ turn, thinking = false, latest, onOpenTerminal, searchTarget
       {turn.plan && (turn.end === null || turn.planItemId === searchTargetId) &&
         <PlanCard plan={turn.plan} itemId={turn.planItemId ?? undefined} searchHit={turn.planItemId === searchTargetId} />}
       {turn.end && !quiet && (
-        <button type="button" onClick={() => foldable && setOpen(!open)} aria-expanded={foldable ? open : undefined}
+        <button type="button" onClick={() => { if (!foldable) return; setOpen(!open); setFull(!open); }} aria-expanded={foldable ? open : undefined}
           className={`flex items-center gap-1.5 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
             ${foldable ? "hover:text-gray-800 dark:hover:text-white/75" : "cursor-default"}`}>
           {turn.end.superseded
@@ -374,8 +376,8 @@ function TurnView({ turn, thinking = false, latest, onOpenTerminal, searchTarget
           {foldable && <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />}
         </button>
       )}
-      {(open || turn.end === null) && turn.body.map((row, i) => (
-        <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && i === turn.body.length - 1} searchTargetId={searchTargetId} />
+      {visibleTurnBody(turn, open, full).map((row) => (
+        <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && row.key === turn.body[turn.body.length - 1]?.key} searchTargetId={searchTargetId} />
       ))}
       {thinking && <ThinkingRow />}
       {turn.final && <AgentText item={turn.final} searchHit={turn.final.id === searchTargetId} />}
@@ -493,7 +495,7 @@ function ReasoningRow({ item }: { item: TimelineItem }) {
       <BrainIcon className="mt-[3px] w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
       {open
         ? <div className="min-w-0 flex-1 text-chat-ui text-gray-500 dark:text-white/50"><Markdown content={text} tone="chat" renderCodeBlock={renderChatCodeBlock} /></div>
-        : <span className="min-w-0 flex-1 line-clamp-3 text-left text-chat-ui text-gray-500 dark:text-white/50">{flat}</span>}
+        : <span className="min-w-0 flex-1 line-clamp-4 text-left text-chat-ui text-gray-500 dark:text-white/50">{flat}</span>}
       {expandable && <ChevronRightIcon className={`mt-[3px] w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
     </>
   );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changedFiles, endOutcome, fileName, formatDuration, noticeDetail, openTurnStart, thinkingTurnKey, timelineTurns } from "@/features/chat/timeline/timelineModel";
+import { changedFiles, endOutcome, fileName, formatDuration, noticeDetail, openTurnStart, thinkingTurnKey, timelineTurns, visibleTurnBody } from "@/features/chat/timeline/timelineModel";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
 const user = (id: string, at?: number): TimelineItem => ({ kind: "user", id, at, text: `msg ${id}` });
@@ -137,6 +137,24 @@ describe("noticeDetail", () => {
 const think = (id: string, text = "Vou deixar o controle mais fácil de achar"): TimelineItem => ({ kind: "reasoning", id, text });
 
 describe("o raciocínio do agente na timeline", () => {
+  it("raciocínio de turno concluído ou substituído sai da conversa e só volta ao abrir o log", () => {
+    const complete = timelineTurns([user("u1"), think("r1"), end("e1")])[0]!;
+    const superseded = timelineTurns([user("u2"), think("r2"), user("u3")])[0]!;
+
+    expect(visibleTurnBody(complete, false)).toEqual([]);
+    expect(visibleTurnBody(superseded, false)).toEqual([]);
+    expect(visibleTurnBody(complete, true).map((row) => row.key)).not.toContain("r1");
+    expect(visibleTurnBody(complete, true, true).map((row) => row.key)).toContain("r1");
+    expect(visibleTurnBody(superseded, true, true).map((row) => row.key)).toContain("r2");
+  });
+
+  it("durante o turno mantém só o resumo mais recente, inclusive quando já começou outra atividade", () => {
+    const turn = timelineTurns([user("u1"), think("r1"), tool("t1"), think("r2"), tool("t2")])[0]!;
+    expect(visibleTurnBody(turn, false).filter((row) => row.type === "reasoning").map((row) => row.key)).toEqual(["r2"]);
+    expect(visibleTurnBody(turn, false).map((row) => row.key)).toContain("t1");
+    expect(visibleTurnBody(turn, false).map((row) => row.key)).toContain("t2");
+  });
+
   it("vira uma linha do corpo, na ordem em que chegou, e não tira a resposta final do lugar", () => {
     const [turn] = timelineTurns([user("u1", 1000), think("r1"), tool("t1"), think("r2", "Agora os testes"), say("a1"), end("e1", { durationMs: 10 })]);
     expect(turn!.body.map((r) => r.type)).toEqual(["reasoning", "work", "reasoning"]);
