@@ -69,17 +69,24 @@ export interface Turn {
 }
 
 /**
- * Linhas do corpo que aparecem, como o work log do T3: durante o turno, só o raciocínio mais recente;
- * no turno encerrado, o raciocínio sai da conversa e volta só quando a pessoa abre o log (`full`).
+ * Linhas do corpo que aparecem, como o work log do T3: o raciocínio só aparece enquanto é a última coisa do turno
+ * (o pensamento ao vivo). Quando chega outra atividade, ou o turno acaba, ele sai da conversa e só volta quando a
+ * pessoa abre o log (`full`). As ferramentas que o raciocínio separava voltam a ser uma linha-resumo só.
  */
 export function visibleTurnBody(turn: Turn, open: boolean, full = false): BodyRow[] {
   if (turn.end !== null && !open) return [];
   if (full) return turn.body;
-  if (turn.end !== null) return turn.body.filter((row) => row.type !== "reasoning");
-  const latestReasoning = [...turn.body].reverse().find((row) => row.type === "reasoning");
-  return latestReasoning
-    ? turn.body.filter((row) => row.type !== "reasoning" || row.key === latestReasoning.key)
-    : turn.body;
+  const last = turn.body[turn.body.length - 1];
+  const live = turn.end === null && last?.type === "reasoning" ? last.key : null;
+  const shown: BodyRow[] = [];
+  for (const row of turn.body) {
+    if (row.type === "reasoning" && row.key !== live) continue;
+    const prev = shown[shown.length - 1];
+    if ((row.type === "work" || row.type === "infra") && prev?.type === row.type) {
+      shown[shown.length - 1] = { ...prev, tools: [...prev.tools, ...row.tools] };
+    } else shown.push(row);
+  }
+  return shown;
 }
 
 /** Soma as edições por arquivo, na ordem em que apareceram. */
