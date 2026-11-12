@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
-import { placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
+import { miniBrowserZoom, placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
+import { setChatBrowserMiniHover, setRightPanel, useChatStore } from "@/features/chat/store";
 
 /**
  * O lugar do navegador nativo do Portal. A página é um WebView2 por cima da janela (ver `real_browser`): este
@@ -12,7 +13,7 @@ import { placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace
  * `url` só vale na abertura: depois quem navega é `realBrowserNavigate` (a barra, os botões, os agentes). A URL que
  * a página informa vai para `onUrl` e nunca volta como navegação.
  */
-export function RealBrowserView({ viewId, url, zoom, script, profileId = "default", onUrl, onTitle, onLoading, onHistory, onError }: {
+export function RealBrowserView({ viewId, url, zoom, script, profileId = "default", projectPath = "", floatingPreview = false, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError }: {
   viewId: string;
   url: string;
   /** O zoom da página (1 = 100%), o mesmo dos botões de zoom do navegador. */
@@ -21,15 +22,36 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
   script?: string;
   /** Perfil isolado, compartilhado somente entre vistas que escolherem o mesmo id. */
   profileId?: string;
+  /** Caminho usado só para derivar uma chave de partição sem gravá-lo no nome do diretório. */
+  projectPath?: string;
+  /** A vista continua montada e o host nativo habilita clique para reabrir o painel. */
+  floatingPreview?: boolean;
   onUrl: (url: string) => void;
   onTitle?: (title: string) => void;
   onLoading?: (loading: boolean) => void;
   onHistory?: (state: { back: boolean; forward: boolean }) => void;
+  /** A página abriu um pop-up (OAuth, `window.open`, `target=_blank`): o motor já o criou com `opener`; falta a aba. */
+  onPopup?: (popup: { id: string; url: string }) => void;
+  /** A própria página se fechou (`window.close()`, o fim de um OAuth). */
+  onClosedByPage?: () => void;
   onError: (message: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onError });
-  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onError };
+  const chatBrowser = useChatStore((state) => state.browser);
+  const floatingRect = useChatStore((state) => state.browserFloatRect);
+  const sourceRect = chatBrowser?.viewId === viewId ? chatBrowser.rect : null;
+  const miniZoom = miniBrowserZoom(
+    zoom,
+    sourceRect ? { x: sourceRect.left, y: sourceRect.top, width: sourceRect.width, height: sourceRect.height } : null,
+    floatingRect ? { x: floatingRect.left, y: floatingRect.top, width: floatingRect.width, height: floatingRect.height } : null,
+  );
+  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom });
+  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom };
+
+  // A pílula da miniatura não fica presa visível de uma miniatura para a próxima.
+  useEffect(() => {
+    if (!floatingPreview) setChatBrowserMiniHover(false);
+  }, [floatingPreview]);
 
   useEffect(() => {
     const el = box.current;
@@ -55,7 +77,11 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
         covers = coversOf(el, rect);
       }
       const windowBox = { x: 0, y: 0, width: innerWidth, height: innerHeight };
-      return placeOf(rect, el.offsetWidth, latest.current.zoom, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown);
+      return {
+        ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown),
+        clickToExpand: latest.current.floatingPreview,
+        cornerRadius: latest.current.floatingPreview ? 16 : 0,
+      };
     };
 
     const tick = () => {
@@ -70,7 +96,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     };
 
     sent = measure();
-    realBrowserOpen(viewId, url || "about:blank", sent, script, profileId)
+    realBrowserOpen(viewId, url || "about:blank", sent, script, profileId, projectPath)
       .then(() => {
         if (closed) realBrowserClose(viewId).catch(() => undefined);
         opened = true;
@@ -86,6 +112,14 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       listen<{ id: string; title: string }>("real-browser-title", mine((p) => latest.current.onTitle?.(p.title))),
       listen<{ id: string; loading: boolean }>("real-browser-load", mine((p) => latest.current.onLoading?.(p.loading))),
       listen<{ id: string; back: boolean; forward: boolean }>("real-browser-history", mine((p) => latest.current.onHistory?.(p))),
+      listen<{ id: string }>("real-browser-mini-click", mine(() => {
+        if (latest.current.floatingPreview) setRightPanel("browser");
+      })),
+      listen<{ id: string; inside: boolean }>("real-browser-mini-hover", mine((p) => {
+        if (latest.current.floatingPreview) setChatBrowserMiniHover(p.inside);
+      })),
+      listen<{ id: string; popup: string; url: string }>("real-browser-popup", mine((p) => latest.current.onPopup?.({ id: p.popup, url: p.url }))),
+      listen<{ id: string }>("real-browser-closed", mine(() => latest.current.onClosedByPage?.())),
     ];
     return () => {
       closed = true;
@@ -93,7 +127,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       offs.forEach((p) => p.then((off) => off()));
       realBrowserClose(viewId).catch(() => undefined);
     };
-  }, [viewId, profileId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [viewId, profileId, projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return <div ref={box} data-real-browser className="relative flex-1 h-full min-h-0 bg-white" />;
 }

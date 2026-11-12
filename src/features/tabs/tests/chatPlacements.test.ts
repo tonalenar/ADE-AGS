@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { CHAT_GROUP, chatPlacements, placementsFrom } from "@/features/tabs/layout/layoutStore";
+import { browserForChatPlacement, CHAT_GROUP, chatPlacements, placementsFrom } from "@/features/tabs/layout/layoutStore";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 
 const slot = { left: 280, top: 60, width: 900, height: 600 };
@@ -45,5 +45,16 @@ describe("navegador do painel direito no chat", () => {
     const onlyBrowser = chatPlacements(null, "a", { viewId: "b1", rect });
     expect([...onlyBrowser.visible.keys()]).toEqual([viewKey("b1")]);
     expect(onlyBrowser.focusedItem).toBe(viewKey("b1"));
+  });
+
+  it("posiciona a mesma vista no mini sem perder o tamanho de origem do painel", async () => {
+    const { viewKey } = await import("@/features/tabs/layout/layoutTree");
+    const source = { viewId: "b1", rect };
+    const miniRect = { left: 100, top: 300, width: 480, height: 360 };
+    const placed = browserForChatPlacement(source, true, miniRect);
+    expect(placed).toEqual({ viewId: "b1", rect: miniRect });
+    expect(source.rect).toBe(rect);
+    expect(browserForChatPlacement(source, false, miniRect)).toBe(source);
+    expect(chatPlacements(slot, "a", placed).visible.get(viewKey("b1"))).toEqual({ groupId: CHAT_GROUP, rect: miniRect });
   });
 });

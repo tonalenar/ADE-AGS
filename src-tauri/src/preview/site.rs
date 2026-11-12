@@ -228,6 +228,37 @@ pub(crate) fn site_for_profile(origin: &str, profile_id: &str) -> Arc<Site> {
     site
 }
 
+/// Os cookies importados ficam no frasco cifrado do perfil ADE. A vista Chromium os recebe
+/// uma vez por origem e partição pelo CDP interno; o arquivo antigo continua intacto.
+pub(crate) fn chromium_cookie_snapshot(origin: &str, profile_id: &str) -> (Vec<serde_json::Value>, u64) {
+    let site = site_for_profile(origin, profile_id);
+    let version = site.version();
+    let cookies = site.cookies(now_secs()).into_iter().filter_map(|cookie| {
+        let mut value = serde_json::json!({
+            "name": cookie.name,
+            "value": cookie.value,
+            "url": cookie.url,
+            "path": cookie.path.unwrap_or_else(|| "/".to_string()),
+            "secure": cookie.secure,
+            "httpOnly": cookie.http_only,
+        });
+        if let Some(expires) = cookie.expires_at {
+            value["expires"] = serde_json::json!(expires);
+        }
+        if let Some(same_site) = cookie.same_site {
+            let same_site = match same_site.to_ascii_lowercase().as_str() {
+                "strict" => "Strict",
+                "lax" => "Lax",
+                "none" => "None",
+                _ => return None,
+            };
+            value["sameSite"] = serde_json::json!(same_site);
+        }
+        Some(value)
+    }).collect();
+    (cookies, version)
+}
+
 fn profile_storage_identity(origin: &str, profile_id: &str) -> String {
     if profile_id == "default" { origin.to_string() } else { format!("{profile_id}\u{1f}{origin}") }
 }

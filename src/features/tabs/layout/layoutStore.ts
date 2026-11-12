@@ -387,6 +387,15 @@ export function canvasPlacements(liveRects: Record<string, Rect>, activeTabId: s
 /** O "grupo" do terminal da conversa aberta no modo chat: também não há árvore. */
 export const CHAT_GROUP = "chat";
 
+/** A miniatura usa seu retângulo próprio; `browser.rect` preserva o tamanho original do painel. */
+export function browserForChatPlacement(
+  browser: { viewId: string; rect: Rect } | null,
+  floating: boolean,
+  floatingRect: Rect | null,
+): { viewId: string; rect: Rect } | null {
+  return floating && browser && floatingRect ? { viewId: browser.viewId, rect: floatingRect } : browser;
+}
+
 /**
  * Modo chat. Só o terminal da conversa aberta (a aba ativa) se vê, no espaço que a tela da conversa
  * reservou; sem espaço (a tela de conversa nova, por exemplo) nenhum. Arquivos, diffs e navegadores
@@ -468,7 +477,7 @@ export function usePlacements(): Placements {
   const grid = useMissionGrid();
   const chatOn = useUiStore(chatShellOn);
   const chatSlot = useChatStore((s) => s.slot);
-  const chatBrowser = useChatStore((s) => s.browser);
+  const chatBrowser = useChatStore((s) => browserForChatPlacement(s.browser, s.browserFloating, s.browserFloatRect));
   const chatShell = useChatStore((s) => s.shell);
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat: chatOn ? { slot: chatSlot, browser: chatBrowser, shell: chatShell } : null });
 }
@@ -490,8 +499,9 @@ export function currentPlacements(): Placements {
   const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
   const team = teamGridRefs(selectConversations({ tabs, threads: useStructured.getState().threads, teams: useTeamIndex.getState().teams, boards: canvas.boards }), activeTabId);
   const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), team, mode, tabIds });
-  const { slot, browser, shell } = useChatStore.getState();
-  const chat = chatShellOn(useUiStore.getState()) ? { slot, browser, shell } : null;
+  const { slot, browser, browserFloating, browserFloatRect, shell } = useChatStore.getState();
+  const placedBrowser = browserForChatPlacement(browser, browserFloating, browserFloatRect);
+  const chat = chatShellOn(useUiStore.getState()) ? { slot, browser: placedBrowser, shell } : null;
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects: canvas.liveRects, grid, chat });
 }
 

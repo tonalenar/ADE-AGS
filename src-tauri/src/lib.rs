@@ -49,6 +49,15 @@ mod prelaunch;
 mod privacy_settings;
 mod preview;
 mod real_browser;
+#[cfg(target_os = "macos")]
+pub fn cef_helper_entry() -> Option<i32> {
+    real_browser::cef_helper_entry()
+}
+#[cfg(all(target_os = "macos", debug_assertions))]
+#[doc(hidden)]
+pub fn cef_initialize_probe() -> Result<(), String> {
+    real_browser::cef_initialize_probe()
+}
 mod roles;
 mod simulator;
 pub(crate) mod iphone;

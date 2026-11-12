@@ -279,9 +279,13 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
     const current = state.browser;
     if (!current || current.viewId !== viewId) return;
     const maxWidth = Math.max(280, mainRect.width - 24);
-    const width = Math.round(Math.min(state.browserFloatRect?.width ?? Math.min(560, Math.max(320, mainRect.width * 0.48)), maxWidth));
+    const sourceRect = current.rect;
+    const ratio = sourceRect.width > 0 && sourceRect.height > 0 ? sourceRect.width / sourceRect.height : 4 / 3;
+    const defaultWidth = Math.min(480, Math.max(320, mainRect.width * 0.48));
+    const width = Math.round(Math.min(state.browserFloatRect?.width ?? defaultWidth, maxWidth));
     const maxHeight = Math.max(220, mainRect.height - 72);
-    const height = Math.round(Math.min(state.browserFloatRect?.height ?? Math.min(400, Math.max(240, mainRect.height * 0.42)), maxHeight));
+    const defaultHeight = width / ratio;
+    const height = Math.round(Math.min(state.browserFloatRect?.height ?? defaultHeight, maxHeight));
     setChatBrowserFloatRect({
       left: Math.round(mainRect.right - shellRect.left - width - 18),
       top: Math.round(mainRect.bottom - shellRect.top - height - 18),

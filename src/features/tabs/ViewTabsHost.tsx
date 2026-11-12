@@ -12,6 +12,7 @@ import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tab
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { setChatBrowserFloatRect, useChatStore } from "@/features/chat/store";
+import { BrowserMiniControls } from "@/features/browser/BrowserMiniControls";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
 import { useChatShell } from "@/app/uiStore";
@@ -109,7 +110,7 @@ export function ViewTabsHost() {
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
-            className={floatingPreview ? "resize flex flex-col overflow-hidden rounded-xl border border-gray-200 dark:border-white/12 bg-white dark:bg-surface shadow-2xl" : undefined}
+            className={floatingPreview ? "resize flex flex-col overflow-hidden rounded-2xl border border-gray-200 dark:border-white/12 bg-white dark:bg-surface shadow-2xl" : undefined}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
           >
             {floatingPreview && <BrowserFloatGrip />}
@@ -128,6 +129,8 @@ export function ViewTabsHost() {
 
 /** Faixa estreita para mover o mini preview sem interceptar os controles da página. */
 function BrowserFloatGrip() {
+  // O mouse sobre a página nativa não chega ao DOM: quem avisa é o motor (`real-browser-mini-hover`).
+  const hover = useChatStore((state) => state.browserMiniHover);
   const drag = useRef<{ pointerId: number; x: number; y: number; rect: Rect } | null>(null);
   const begin = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -159,8 +162,15 @@ function BrowserFloatGrip() {
     drag.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  return <div aria-hidden="true" onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
-    className="h-3 shrink-0 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none bg-white dark:bg-surface">
-    <span className="w-9 h-1 rounded-full bg-gray-300 dark:bg-white/20" />
-  </div>;
+  return (
+    // Só abre o buraco na página enquanto a pílula aparece; fora disso a miniatura mostra a página inteira.
+    <div className="group absolute right-2.5 top-2.5 z-40 pointer-events-auto" data-browser-mini-controls data-hover={hover}
+      {...(hover ? { "data-over-webview": "" } : {})}>
+      <div aria-hidden="true" onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+        className="absolute -right-0.5 -top-0.5 z-10 size-3 cursor-grab touch-none active:cursor-grabbing">
+        <span className="absolute right-0.5 top-0.5 size-2 rounded-full bg-gray-400/70 shadow-sm ring-1 ring-white/70 transition-opacity group-hover:opacity-0 group-focus-within:opacity-0 dark:bg-white/35 dark:ring-black/30" />
+      </div>
+      <BrowserMiniControls />
+    </div>
+  );
 }

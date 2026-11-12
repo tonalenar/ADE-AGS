@@ -4,10 +4,11 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, TrashIcon } from "neogestify-ui-components";
 
 import {
-  BugIcon, CameraIcon, DevicesIcon, DotsIcon, ExternalIcon, FloatPreviewIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
+  BugIcon, CameraIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
 import { DESKTOP_OS } from "@/app/platform";
 import { setChatBrowserFloatRect, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { WindowOpenIcon } from "@/features/chat/chatIcons";
 import { neighbors } from "@/features/canvas/board";
 import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
@@ -24,6 +25,7 @@ import { newMarkId, rememberMarks } from "./markStore";
 import { highlightAgent } from "./agentHighlight";
 import { AgentPicker } from "./AgentPicker";
 import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession } from "./annotate/Annotator";
+import { BrowserStartPage } from "./BrowserStartPage";
 import { resolveBrowserAddress } from "./searchPreferences";
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
 import { hideCovers, hideElement, overlayRootOf } from "./annotate/cover";
@@ -52,8 +54,7 @@ import { ZoomControl } from "./ZoomControl";
 import { cropForJev, resizeCanvas, visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
 
-/** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
- *  captura de debug). Dos scripts sueltos en un solo archivo, así es un único pedido. */
+/** Scripts del navegador en cada documento: selector, control del agente y captura de debug. */
 const INJECTED = `${pickerScript}\n;${runtimeScript}`;
 
 const PANEL_HEIGHT_KEY = "cc-browser-debug-height";
@@ -85,10 +86,9 @@ const bare = (c: PendingCapture): AnnotatedCapture => ({ id: c.id, path: c.path,
 /**
  * Un navegador en una tab, para probar el proyecto al lado del agente que lo construye.
  *
- * La página se carga a través de un proxy local (ver `src-tauri/src/preview`) que le
- * agrega el selector de elementos. Con él se marcan partes de la página —un botón, una
- * tarjeta— y se le mandan a un agente con una nota: lo que llega es lo que el agente
- * necesita para encontrarlo en el código (componente, selector, HTML).
+ * No macOS e no Windows, a página abre diretamente no Chromium; nas outras plataformas, o
+ * proxy local segue como fallback. O seletor e o runtime do agente chegam por CDP ou pelo
+ * proxy e deixam marcar partes da página para enviar uma nota ao agente.
  *
  * Y cuando lo que hay que mostrar es cómo se VE, se anota encima: la página se congela en
  * una foto, se dibuja sobre ella, y la foto con los dibujos va en el mismo mensaje.
@@ -139,7 +139,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     name: t("browser.profile.agentSession", { name: view.owner.label }),
   } : undefined;
   const browserProfileId = view.browserProfileId ?? agentProfile?.id ?? DEFAULT_BROWSER_PROFILE_ID;
-  const real = DESKTOP_OS === "windows" && !!view.realChrome && browserProfileId !== "incognito";
+  // macOS usa CEF e Windows mantém WebView2; os dois atendem a barra do Browser diretamente.
+  const real = DESKTOP_OS === "macos" || DESKTOP_OS === "windows";
   const realRef = useRef(real);
   realRef.current = real;
   const viewRealRef = useRef(view.realChrome);
@@ -191,7 +192,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const column = useRef<HTMLDivElement>(null);
   const iframe = useRef<HTMLIFrameElement>(null);
   const addressRef = useRef<HTMLInputElement>(null);
-  /** Dónde está parada la página, en la URL del proxy: es lo que se recarga. */
+  /** URL intermediária do fallback por proxy, usada para recarregar páginas nesse caminho. */
   const pageUrl = useRef<string | null>(null);
   /** Lo que el agente lee sin esperar a un render: la última versión de cada cosa. */
   const targetRef = useRef<PreviewTarget | null>(null);
@@ -348,11 +349,10 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       return t("browser.invalidUrl");
     }
     requestedUrl.current = url;
-    if (DESKTOP_OS === "windows" && browserProfileId !== "incognito"
+    if ((DESKTOP_OS === "windows" || DESKTOP_OS === "macos")
       && (realRef.current || shouldOpenInRealChrome(url, viewRealRef.current))) {
-      // No navegador nativo só isto navega (como a barra do T3): a URL que a página informa nunca volta como
-      // navegação. Ainda fechado, ele abre já nesta URL. Um site de fora liga o navegador nativo sozinho (ver
-      // `shouldOpenInRealChrome`): a pessoa pode desligar no botão.
+      // O Chromium macOS e o WebView2 recebem a URL diretamente, inclusive loopback. O proxy segue
+      // disponível somente no fallback Linux desta fatia.
       setAddress(url);
       setError(null);
       if (realRef.current) {
@@ -705,7 +705,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       // tocar, así que sin esto la emulación se apagaría sola al navegar.
       if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
     } else if (msg.type === "nav:open") {
-      // Un enlace a otro sitio: se abre acá mismo, con el proxy de ese sitio.
+      // Um link para outro site navega na mesma vista; a plataforma escolhe o motor.
       if (typeof msg.payload?.url === "string" && /^https?:\/\//i.test(msg.payload.url)) {
         void goRef.current(msg.payload.url);
       }
@@ -1128,7 +1128,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       {inChatPanel && (
         <ToolButton label={t(browserFloating ? "browser.float.dock" : "browser.float.open")} active={browserFloating}
           onClick={toggleChatBrowserFloating}>
-          <FloatPreviewIcon className="w-4 h-4" />
+          <WindowOpenIcon className="w-4 h-4" />
         </ToolButton>
       )}
     </>
@@ -1177,7 +1177,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
         {inChatPanel && (
           <ToolButton label={t(browserFloating ? "browser.float.dock" : "browser.float.open")} active={browserFloating}
             onClick={toggleChatBrowserFloating}>
-            <FloatPreviewIcon className="w-4 h-4" />
+            <WindowOpenIcon className="w-4 h-4" />
           </ToolButton>
         )}
         <ToolButton label={actionsOpen ? t("browser.actions.less") : t("browser.actions.more")} active={actionsOpen}
@@ -1215,71 +1215,20 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     .filter(Boolean)
     .join(" · ");
   const startPage = (
-    <div className="flex flex-1 h-full items-center justify-center overflow-y-auto p-6 bg-gray-50 dark:bg-surface">
-      <div className="flex w-full max-w-lg flex-col items-center gap-4 py-6 text-center">
-        <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-accent-500/10 text-accent-600 dark:text-accent-400">
-          <GlobeIcon className="w-6 h-6" />
-        </span>
-        <div>
-          <p className="text-[14px] font-semibold text-gray-800 dark:text-gray-100">{t("browser.start.title")}</p>
-          <p className="mt-1 text-[12px] text-gray-500 dark:text-white/40">{t("browser.start.desc")}</p>
-        </div>
-        {recentPages.length > 0 && (
-          <section className="w-full text-left">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="m-0 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-white/45">
-                {t("browser.start.recent")}
-              </h2>
-              <Button variant="custom" onClick={() => {
-                clearRecentBrowserPages(browserProfileId);
-                setRecentPages([]);
-              }} className="cc-t rounded px-1.5 py-1 text-[11px] text-gray-500 hover:bg-gray-200/70 dark:text-white/45 dark:hover:bg-white/8">
-                {t("browser.start.clearRecent")}
-              </Button>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              {recentPages.map((page) => (
-                <Button variant="custom" key={page.url} onClick={() => go(page.url)}
-                  className="cc-t flex w-full min-w-0 flex-col items-start rounded-lg border border-gray-200 bg-white px-3 py-2 text-left hover:border-accent-500 dark:border-white/10 dark:bg-white/4 dark:hover:border-accent-400">
-                  <span className="w-full truncate text-[12px] font-medium text-gray-800 dark:text-gray-100">{page.title}</span>
-                  <span className="w-full truncate font-mono text-[10px] text-gray-400 dark:text-white/35">
-                    {page.url.replace(/^https?:\/\//, "")}
-                  </span>
-                </Button>
-              ))}
-            </div>
-          </section>
-        )}
-        <section className="w-full text-left">
-          <h2 className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500 dark:text-white/45">
-            {t("browser.start.servers")}
-          </h2>
-          {servers === null ? (
-            <p className="m-0 text-center text-[11px] text-gray-400 dark:text-white/30">{t("browser.start.detecting")}</p>
-          ) : servers.length > 0 ? (
-            <div className="flex flex-wrap justify-center gap-1.5">
-              {servers.map((url) => (
-                <Button variant="custom" key={url} onClick={() => go(url)}
-                  className="cc-t inline-block h-7 rounded-full border border-gray-200 bg-white px-3 font-mono text-[11.5px]
-                    text-gray-700 hover:border-accent-500 dark:border-white/10 dark:bg-white/5 dark:text-gray-300 dark:hover:border-accent-400">
-                  {url.replace("http://", "")}
-                </Button>
-              ))}
-            </div>
-          ) : (
-            <p className="m-0 text-center text-[11px] text-gray-400 dark:text-white/30">{t("browser.start.none")}</p>
-          )}
-        </section>
-      </div>
-    </div>
+    <BrowserStartPage
+      recentPages={recentPages}
+      servers={servers}
+      onClearRecent={() => { clearRecentBrowserPages(browserProfileId); setRecentPages([]); }}
+      onNavigate={(url) => go(url)}
+    />
   );
 
   return (
     <div ref={root} className={`flex flex-col ${floatingPreview ? "flex-1" : "h-full"} min-h-0 transition-colors duration-300 ${device ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
       {/* No login, a barra que vale é a da janela do Chrome (é nela que se confere o endereço): a do Portal some. */}
-      {device ? null : toolbar}
+      {device || floatingPreview ? null : toolbar}
 
-      {viewport && !device && (
+      {viewport && !device && !floatingPreview && (
         // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
           <DeviceBar
@@ -1292,7 +1241,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
         </div>
       )}
 
-      {picking && (
+      {picking && !floatingPreview && (
         <div className={`shrink-0 px-3 py-1 text-[11px] text-center text-white
           ${agentAsking ? "bg-violet-600 dark:bg-violet-700" : "bg-accent-500 dark:bg-accent-600"}`}>
           {agentAsking ? t("browser.pick.agentAsking") : t("browser.pick.hint")}
@@ -1305,7 +1254,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
           {real ? (
             <>
             <RealBrowserView viewId={view.id} url={view.url} zoom={zoom} script={INJECTED}
-              profileId={browserProfileId} onError={setError}
+              profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} onError={setError}
               onUrl={(u) => {
                 setAddress(u);
                 try {
@@ -1317,7 +1266,11 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
               onTitle={(title) => {
                 updateView(view.id, { title });
                 if (!isBlankUrl(view.url)) rememberPage(view.url, title);
-              }} />
+              }}
+              onPopup={(popup) => {
+                useViewTabsStore.getState().openBrowser(view.cwd, popup.url, { id: popup.id, browserProfileId, owner: view.owner });
+              }}
+              onClosedByPage={() => useViewTabsStore.getState().closeView(view.id)} />
             {isBlankUrl(view.url) && (
               <div className="absolute inset-0 z-10 flex min-h-0 bg-gray-50 dark:bg-surface">
                 <StartStage device={device} viewport={viewport} onResize={setViewport} zoom={zoom}>{startPage}</StartStage>
@@ -1345,7 +1298,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
           ) : (
             <StartStage device={device} viewport={viewport} onResize={setViewport} zoom={zoom}>{startPage}</StartStage>
           )}
-          {debugOpen && target && (
+          {debugOpen && target && !floatingPreview && (
             <DebugPanel
               viewId={view.id}
               channel={channel}
@@ -1362,12 +1315,12 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
               onClose={() => setDebugOpen(false)}
             />
           )}
-          {frozen && (
+          {frozen && !floatingPreview && (
             <AnnotationCanvas frozen={frozen} session={annotation} active={active} onCancel={cancelAnnotating} />
           )}
         </div>
 
-        {composerOpen && (
+        {composerOpen && !floatingPreview && (
           // Angosta, el mensaje va abajo: al costado le quitaría a la página casi todo el ancho.
           <aside className={compact
             ? "flex flex-col shrink-0 max-h-[55%] min-h-0 border-t border-gray-200 dark:border-white/7"

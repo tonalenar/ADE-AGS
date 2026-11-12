@@ -1,2 +1,5 @@
 "NSMicrophoneUsageDescription" = "ADE AGS usa el micrófono solo cuando inicias el dictado en el composer.";
+"NSCameraUsageDescription" = "ADE AGS permite que las páginas usen la cámara después de que apruebes el acceso.";
+"NSLocationWhenInUseUsageDescription" = "ADE AGS permite que las páginas usen tu ubicación después de que apruebes el acceso.";
+"NSWebBrowserPublicKeyCredentialUsageDescription" = "ADE AGS usa passkeys cuando el sitio y el sistema ofrecen soporte.";
 "NSSpeechRecognitionUsageDescription" = "ADE AGS transcribe tu voz localmente e inserta el texto en el composer para que lo revises.";

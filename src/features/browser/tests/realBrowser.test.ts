@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { intersect, placeOf, relativeTo, samePlace, shouldOpenInRealChrome } from "../realBrowser";
+import { intersect, miniBrowserZoom, placeOf, relativeTo, samePlace, shouldOpenInRealChrome } from "../realBrowser";
 
 describe("shouldOpenInRealChrome", () => {
-  it("site de fora abre no Chrome real; servidor local fica no proxy", () => {
+  it("sites externos e servidores locais abrem direto no Chromium", () => {
     expect(shouldOpenInRealChrome("https://www.google.com/search?q=x", undefined)).toBe(true);
     expect(shouldOpenInRealChrome("https://gestaoautovale.com.br/mapa", undefined)).toBe(true);
-    expect(shouldOpenInRealChrome("http://127.0.0.1:8790/mapa", undefined)).toBe(false);
-    expect(shouldOpenInRealChrome("http://localhost:3000", undefined)).toBe(false);
-    expect(shouldOpenInRealChrome("http://app.local/", undefined)).toBe(false);
+    expect(shouldOpenInRealChrome("http://127.0.0.1:8790/mapa", undefined)).toBe(true);
+    expect(shouldOpenInRealChrome("http://localhost:3000", undefined)).toBe(true);
+    expect(shouldOpenInRealChrome("http://app.local/", undefined)).toBe(true);
   });
   it("a escolha explícita da pessoa sempre vale", () => {
     expect(shouldOpenInRealChrome("https://www.google.com", false)).toBe(false);
@@ -63,5 +63,15 @@ describe("lugar do navegador nativo no Portal", () => {
     expect(samePlace(a, placeOf(portal, 800, 1, [window], [], true))).toBe(true);
     expect(samePlace(a, placeOf({ ...portal, x: 101 }, 800, 1, [window], [], true))).toBe(false);
     expect(samePlace(null, a)).toBe(false);
+  });
+});
+
+describe("zoom da miniatura viva", () => {
+  it("reduz a página com a miniatura preservando a viewport da origem", () => {
+    expect(miniBrowserZoom(1, { x: 0, y: 0, width: 960, height: 720 }, { x: 0, y: 0, width: 480, height: 360 })).toBe(0.5);
+  });
+
+  it("mantém o zoom escolhido quando não há retângulo de miniatura", () => {
+    expect(miniBrowserZoom(1.25, { x: 0, y: 0, width: 960, height: 720 }, null)).toBe(1.25);
   });
 });

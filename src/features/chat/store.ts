@@ -53,6 +53,8 @@ interface ChatState {
   browserFloating: boolean;
   /** Posição e tamanho do mini preview, relativos à casca do chat. */
   browserFloatRect: Rect | null;
+  /** O mouse está sobre a página da miniatura (o motor nativo avisa): mostra a pílula de controles. */
+  browserMiniHover: boolean;
   /** Um aparelho (iOS ou Android) flutuando sobre a conversa, como o navegador: um preview por vez. `null` = nenhum. */
   deviceFloat: DeviceKind | null;
   /** O terminal da aba Terminal do painel (uma aba de shell na pasta da conversa) e onde desenhá-lo, como o navegador. */
@@ -196,7 +198,7 @@ const initialColumn = ((): { tabs: ColumnTab[]; active: string | null } => {
 })();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserMiniHover: false, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -545,6 +547,18 @@ export function toggleChatBrowserFloating(): void {
   });
 }
 
+/** O motor nativo avisa a entrada e a saída do mouse na página da miniatura. */
+export function setChatBrowserMiniHover(inside: boolean): void {
+  if (useChatStore.getState().browserMiniHover !== inside) useChatStore.setState({ browserMiniHover: inside });
+}
+
+/** Fecha apenas a miniatura; a aba de navegador segue montada em segundo plano. */
+export function closeChatBrowserFloating(): void {
+  const state = useChatStore.getState();
+  if (!state.browserFloating) return;
+  useChatStore.setState({ browserFloating: false, browserFloatRect: null, browser: null, panel: null, panelMaximized: false });
+}
+
 /**
  * Faz um aparelho (iOS ou Android) flutuar sobre a conversa. Um preview por vez, como no T3: o navegador flutuante
  * sai de cena (a página segue na aba dele) e a tela nativa dele é solta da conversa.
@@ -572,10 +586,11 @@ export function closeDeviceFloat(): void {
 export function setChatBrowserFloatRect(rect: Rect): void {
   const state = useChatStore.getState();
   if (!state.browser) return;
-  const browserChanged = !sameRect(state.browser.rect, rect);
   const floatChanged = !sameRect(state.browserFloatRect, rect);
-  if (!browserChanged && !floatChanged) return;
-  useChatStore.setState({ browser: browserChanged ? { viewId: state.browser.viewId, rect } : state.browser, browserFloatRect: rect });
+  if (!floatChanged) return;
+  // Guarda a origem do painel em `browser.rect`; a miniatura usa um retângulo próprio para
+  // poder calcular o zoom sem perder a proporção da página original.
+  useChatStore.setState({ browserFloatRect: rect });
 }
 
 /** Escolhe o aparelho de uma aba de dispositivo e guarda o nome curto (o da aba). */

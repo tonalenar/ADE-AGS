@@ -1,45 +1,33 @@
-//! O navegador do Portal: um WebView2 de verdade dentro da janela do app, como o navegador do T3 Code.
+//! Motor nativo do navegador ADE, separado do runtime Tauri 2.
 //!
-//! O T3 Code (Electron) mostra sites numa `<webview>`: um Chromium embutido, com perfil próprio
-//! (`persist:t3code-preview-…`), o user agent padrão e o controle do agente pelo `webContents.debugger` — o CDP de
-//! dentro do processo, sem porta de depuração, então a página nunca se vê automatizada (`navigator.webdriver`
-//! falso). O Google aceita o login nele sem nada especial: não há troca de user agent nem cópia de cookies.
-//! O equivalente aqui é um WebView2 numa janela filha dentro da janela do app, criado direto pela API do WebView2
-//! (ver `native`: um `Webview` filho do Tauri faz a janela principal deixar de ser achada pelo nome):
+//! No macOS, `cef_native` carrega CEF via `cef-rs` e cria uma `NSView` filha na janela Tauri.
+//! No Windows, `native` hospeda WebView2 numa janela filha própria. Os dois usam CDP no objeto
+//! interno do motor, sem porta DevTools exposta. Linux conserva o preview atual como fallback.
 //!
-//! - **Perfis isolados**: o perfil padrão preserva `<dados>/portal-webview`; perfis nomeados usam
-//!   `<dados>/portal-webview/profiles/<id>`. Agentes e conversas recebem ids estáveis próprios.
-//!   Todos ficam separados do WebView principal e do perfil pessoal do navegador do sistema.
-//! - **CDP de dentro**: `ICoreWebView2::CallDevToolsProtocolMethod` e `GetDevToolsProtocolEventReceiver`, o
-//!   mesmo papel do `webContents.debugger`. Por ele passam o piloto dos agentes (o script em todo documento, o
-//!   canal `Runtime.addBinding`), as fotos e os toques de verdade que o piloto pede.
-//! - **Pop-ups de verdade**: um `window.open` com tamanho (o login do Google, OAuth) abre a janela do próprio
-//!   WebView2, com o `opener` vivo, como a `BrowserWindow` filha do T3. Um link para aba nova abre no mesmo Portal.
-//! - **Nada navega sozinho**: só a barra de endereço (`real_browser_navigate`), os botões e o agente mandam
-//!   navegar. A URL que a página informa vai para a barra e para o estado salvo, e nunca volta como navegação —
-//!   no T3 o `src` da `<webview>` é fixado na criação pelo mesmo motivo.
-//!
-//! A página é uma janela nativa por cima do app: quem decide onde ela fica é o Portal (`real_browser_place`),
-//! que manda o retângulo dele, a parte à vista e os buracos onde há algo do app por cima (menus, diálogos,
-//! painéis). Aqui isso vira a região da janela (`SetWindowRgn`): fora dela a página não aparece nem recebe
-//! clique, e o app por baixo aparece. Fora de vista a região fica vazia, sem esconder a página: ela continua
-//! desenhando, e as fotos dos agentes saem mesmo com o Portal em outra aba.
+//! A interface envia `real_browser_place` com retângulo, região visível e buracos da UI. O motor
+//! move e redimensiona a mesma vista sem recriar a página; assim menus continuam clicáveis e o
+//! mini preview preserva a sessão e a proporção. Partições ADE ficam sob os dados próprios do app,
+//! por perfil e hash do projeto; na primeira abertura, uma cópia não destrutiva leva os dados da
+//! partição antiga para o novo caminho, ignorando caches e locks.
 
 #[cfg(windows)]
 mod native;
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+#[path = "cef_native.rs"]
+mod native;
+#[cfg(not(any(windows, target_os = "macos")))]
 mod native {
-    //! Fora do Windows ainda não há navegador nativo no Portal.
+    //! Linux mantém o caminho de preview já existente nesta fatia.
     use serde_json::Value;
     use tauri::AppHandle;
-    const NO: &str = "O navegador do Portal por enquanto só existe no Windows.";
+    const NO: &str = "O navegador nativo do Portal não está disponível nesta plataforma.";
     pub async fn create(_: &AppHandle, _: isize, _: &str, _: std::path::PathBuf, _: String, _: [i32; 4]) -> Result<(), String> {
         Err(NO.into())
     }
     pub async fn cdp(_: &AppHandle, _: &str, _: &str, _: Value) -> Result<Value, String> {
         Err(NO.into())
     }
-    pub fn place(_: &AppHandle, _: &str, _: [i32; 4], _: f64, _: Vec<[i32; 4]>) {}
+    pub fn place(_: &AppHandle, _: &str, _: [i32; 4], _: f64, _: Vec<[i32; 4]>, _: f64, _: bool) {}
     pub async fn navigate(_: &AppHandle, _: &str, _: String) -> Result<(), String> {
         Err(NO.into())
     }
@@ -56,11 +44,17 @@ mod native {
     }
 }
 
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn cef_initialize_probe() -> Result<(), String> {
+    native::initialize_probe()
+}
+
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
 /// Um retângulo em pixels CSS do app.
@@ -83,11 +77,23 @@ pub struct Place {
     /// O que do app está por cima da página, dentro da parte à vista.
     #[serde(default)]
     pub holes: Vec<Rect>,
+    /// No mini player, um clique sobre a página reabre o painel lateral.
+    #[serde(default)]
+    pub click_to_expand: bool,
+    /// Raio do cartão em pontos lógicos do macOS.
+    #[serde(default)]
+    pub corner_radius: f64,
 }
 
 /// Os Portais abertos.
-fn portals() -> &'static Mutex<HashMap<String, String>> {
-    static P: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PortalProfile {
+    id: String,
+    path: std::path::PathBuf,
+}
+
+fn portals() -> &'static Mutex<HashMap<String, PortalProfile>> {
+    static P: OnceLock<Mutex<HashMap<String, PortalProfile>>> = OnceLock::new();
     P.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -114,6 +120,27 @@ fn checked_managed_profile_id(id: &str) -> Result<String, String> {
 
 /// O último endereço pedido para um Portal que ainda está abrindo: a aba manda navegar logo ao montar, antes de o
 /// navegador existir. Quem abre consome isto no lugar da URL inicial.
+/// Pop-ups que o motor já criou e esperam a aba que vai adotá-los, com o perfil do opener.
+fn adopted() -> &'static Mutex<HashMap<String, PortalProfile>> {
+    static P: OnceLock<Mutex<HashMap<String, PortalProfile>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Reserva `popup` com o perfil de `opener`: o pop-up precisa da mesma partição para manter o `opener`.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn adopt_popup(opener: &str, popup: &str) -> Option<()> {
+    let profile = lock(portals()).get(opener).cloned()?;
+    lock(adopted()).insert(popup.to_string(), profile);
+    Some(())
+}
+
+/// A página fechou a si mesma: o registro sai junto.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn forget_portal(id: &str) {
+    lock(portals()).remove(id);
+    lock(adopted()).remove(id);
+}
+
 fn pending() -> &'static Mutex<HashMap<String, String>> {
     static P: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     P.get_or_init(|| Mutex::new(HashMap::new()))
@@ -143,7 +170,104 @@ fn navigable(url: &str) -> Option<tauri::Url> {
     }
 }
 
+fn popup_allowed(url: &str) -> bool {
+    navigable(url).is_some()
+}
+
+fn project_digest(project_path: &str) -> String {
+    let digest = Sha256::digest(project_path.as_bytes());
+    digest.iter().take(16).map(|byte| format!("{byte:02x}")).collect::<String>()
+}
+
+/// Um diretório do WebView2 por perfil ADE e projeto, sem incorporar o caminho do projeto no disco.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn project_profile_path(root: &std::path::Path, profile_id: &str, project_path: &str) -> std::path::PathBuf {
+    root.join("profiles").join(profile_id).join("projects").join(format!("project-{}", project_digest(project_path)))
+}
+
+/// Pasta raiz do Chromium (CEF) da ADE, sob os dados do app: `root_cache_path` do CEF.
+pub(crate) const CHROMIUM_ROOT: &str = "portal-chromium";
+
+/// A partição Chromium de um perfil ADE num projeto. O runtime Chrome do CEF só cria perfis que sejam
+/// filhos diretos do `root_cache_path`; um caminho aninhado cai num perfil anônimo, sem persistência.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn chromium_partition_path(root: &std::path::Path, profile_id: &str, project_path: &str) -> std::path::PathBuf {
+    root.join(format!("{profile_id}-{}", project_digest(project_path)))
+}
+
+/// Copia a sessão já guardada pela ADE para a primeira partição do projeto, sem apagar a origem.
+fn migrate_legacy_partition(root: &std::path::Path, profile_id: &str, target: &std::path::Path) -> std::io::Result<bool> {
+    let source = if profile_id == "default" { root.to_path_buf() } else { root.join("profiles").join(profile_id) };
+    if !source.is_dir() { return Ok(false); }
+    let marker = target.join(".ade-legacy-copy-complete");
+    // Uma interrupção no processo pode deixar um marcador vazio; só um marcador completo encerra a migração.
+    if std::fs::read(&marker).is_ok_and(|contents| contents == b"1") { return Ok(false); }
+    copy_legacy_tree(&source, target, true)?;
+    std::fs::create_dir_all(target)?;
+    std::fs::write(marker, b"1")?;
+    Ok(true)
+}
+
+fn copy_legacy_tree(source: &std::path::Path, target: &std::path::Path, root: bool) -> std::io::Result<()> {
+    std::fs::create_dir_all(target)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        // Ignora caches e locks ativos. `profiles` e `projects` pertencem ao novo particionamento e
+        // não devem ser aninhados numa segunda partição durante a cópia de compatibilidade.
+        if matches!(name.as_ref(), "Cache" | "Code Cache" | "GPUCache" | "ShaderCache" | "DawnCache" | "GrShaderCache" | "Crashpad" | "SingletonLock" | "SingletonSocket" | "SingletonCookie" | "lockfile")
+            || (root && name == "profiles")
+            || (!root && name == "projects")
+        {
+            continue;
+        }
+        let source_path = entry.path();
+        let destination = target.join(entry.file_name());
+        let kind = entry.file_type()?;
+        if kind.is_symlink() { continue; }
+        if kind.is_dir() {
+            copy_legacy_tree(&source_path, &destination, false)?;
+        } else if kind.is_file() && !destination.exists() {
+            std::fs::copy(source_path, destination)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn incognito_partition_path(id: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join("ade-ags-browser-incognito").join(std::process::id().to_string()).join(id)
+}
+
+async fn import_saved_cookies(app: &AppHandle, id: &str, profile_id: &str, partition: &std::path::Path, url: &str) -> Result<(), String> {
+    if profile_id == "incognito" || partition.as_os_str().is_empty() { return Ok(()); }
+    let Some(parsed) = navigable(url) else { return Ok(()) };
+    if parsed.scheme() != "http" && parsed.scheme() != "https" { return Ok(()); }
+    let origin = parsed.origin().ascii_serialization();
+    let profile = profile_id.to_string();
+    let cookie_origin = origin.clone();
+    let (cookies, version) = tokio::task::spawn_blocking(move || crate::preview::chromium_cookie_snapshot(&cookie_origin, &profile))
+        .await.map_err(|error| error.to_string())?;
+    if cookies.is_empty() { return Ok(()); }
+
+    let origin_hash: String = Sha256::digest(origin.as_bytes()).iter().map(|byte| format!("{byte:02x}")).collect();
+    let marker = partition.join("imported-sites").join(origin_hash);
+    let previous = std::fs::read_to_string(&marker).ok().and_then(|value| value.parse::<u64>().ok()).unwrap_or(0);
+    if previous >= version { return Ok(()); }
+    // Mantém as importações já feitas em Settings → Navegador acessíveis no motor novo.
+    // Os valores nunca passam pelo frontend; o CDP continua interno ao Chromium.
+    if native::cdp(app, id, "Network.setCookies", json!({ "cookies": cookies })).await.is_err() { return Ok(()); }
+    let marker_copy = marker.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        if let Some(parent) = marker_copy.parent() { std::fs::create_dir_all(parent)?; }
+        std::fs::write(marker_copy, version.to_string())
+    }).await;
+    Ok(())
+}
+
 /// `r` (px CSS) em px físicos: `[x, y, largura, altura]`, cobrindo o retângulo inteiro.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn physical(r: Rect, scale: f64) -> [i32; 4] {
     let (x, y) = ((r.x * scale).floor() as i32, (r.y * scale).floor() as i32);
     [x, y, ((r.x + r.width) * scale).ceil() as i32 - x, ((r.y + r.height) * scale).ceil() as i32 - y]
@@ -152,6 +276,7 @@ fn physical(r: Rect, scale: f64) -> [i32; 4] {
 /// Abre o navegador do Portal `id` em cima dele, já com o piloto dos agentes, e carrega `url`. Aberto, só
 /// reposiciona: navegar é com `real_browser_navigate`.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn real_browser_open(
     app: AppHandle,
     window: tauri::Window,
@@ -160,26 +285,67 @@ pub async fn real_browser_open(
     place: Place,
     script: Option<String>,
     profile_id: String,
+    project_path: String,
 ) -> Result<(), String> {
     let _one_at_a_time = opening().lock().await;
     let profile_id = checked_profile_id(&profile_id)?;
+    let app_data = crate::util::datadir::app_data_dir(&app)?;
+    let profile_root = app_data.join("portal-webview");
+    // O anônimo não grava sessão em disco nem herda cookies importados.
+    let profile = if profile_id == "incognito" {
+        #[cfg(target_os = "macos")]
+        { std::path::PathBuf::new() }
+        #[cfg(windows)]
+        { incognito_partition_path(&id) }
+        #[cfg(not(any(target_os = "macos", windows)))]
+        { std::path::PathBuf::new() }
+    } else if cfg!(target_os = "macos") {
+        chromium_partition_path(&app_data.join(CHROMIUM_ROOT), &profile_id, &project_path)
+    } else { project_profile_path(&profile_root, &profile_id, &project_path) };
+    let requested_profile = PortalProfile { id: profile_id.clone(), path: profile.clone() };
+    // Um pop-up criado pelo motor: a aba nova só o adota (mesma partição do opener) e injeta o piloto.
+    let adopted_profile = lock(adopted()).remove(&id);
+    if let Some(adopted_profile) = adopted_profile {
+        lock(portals()).insert(id.clone(), adopted_profile);
+        #[cfg(target_os = "macos")]
+        native::wait_ready(&app, &id).await?;
+        if let Some(script) = script {
+            native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
+            native::cdp(&app, &id, "Runtime.enable", json!({})).await?;
+            native::add_script(&app, &id, format!("{BRIDGE}\n;{script}")).await?;
+        }
+        return real_browser_place(app, window, id, place);
+    }
     let existing_profile = lock(portals()).get(&id).cloned();
-    if existing_profile.as_deref() != Some(&profile_id) {
-        if existing_profile.is_some() {
-            lock(portals()).remove(&id);
+    if existing_profile.as_ref() != Some(&requested_profile) {
+        let previous = { lock(portals()).remove(&id) };
+        if let Some(previous) = previous {
             native::close(&app, &id);
+            if previous.id == "incognito" && !previous.path.as_os_str().is_empty() {
+                native::release_profile(&app, &previous.path).await?;
+                let _ = tokio::task::spawn_blocking(move || std::fs::remove_dir_all(previous.path)).await;
+            }
         }
         let parent = window_handle(&window)?;
-        let profile_root = crate::util::datadir::app_data_dir(&app)?.join("portal-webview");
-        // Mantém a pasta antiga para o perfil padrão, preservando as sessões já existentes.
-        let profile = if profile_id == "default" { profile_root } else { profile_root.join("profiles").join(&profile_id) };
-        std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+        // Os dados antigos ficam intactos; as novas sessões ficam isoladas por perfil e projeto.
+        if !profile.as_os_str().is_empty() {
+            // A cópia de compatibilidade só faz sentido entre WebView2 e WebView2; o WKWebView antigo do
+            // macOS guardava outro formato, que fica intacto em `portal-webview`.
+            if profile_id != "incognito" && cfg!(windows) {
+                let migration_root = profile_root.clone();
+                let migration_target = profile.clone();
+                let migration_profile = profile_id.clone();
+                tokio::task::spawn_blocking(move || migrate_legacy_partition(&migration_root, &migration_profile, &migration_target))
+                    .await.map_err(|error| error.to_string())?.map_err(|error| error.to_string())?;
+            }
+            std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+        }
         // As mesmas flags do WebView do app (`tauri.conf.json`): também mantêm a página desenhando encoberta ou
         // recortada (`CalculateNativeWinOcclusion` desligado).
         let args = app.config().app.windows.first().and_then(|w| w.additional_browser_args.clone()).unwrap_or_default();
         let scale = window.scale_factor().unwrap_or(1.0);
-        native::create(&app, parent, &id, profile, args, physical(place.rect, scale)).await?;
-        lock(portals()).insert(id.clone(), profile_id);
+        native::create(&app, parent, &id, profile.clone(), args, native_rect(place.rect, scale)).await?;
+        lock(portals()).insert(id.clone(), requested_profile);
         // O piloto antes da primeira página: o canal (binding) e o script em todo documento novo.
         if let Some(script) = script {
             native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
@@ -190,6 +356,7 @@ pub async fn real_browser_open(
         let _ = native::cdp(&app, &id, "Emulation.setDefaultBackgroundColorOverride", white).await;
         let url = lock(pending()).remove(&id).unwrap_or(url);
         if navigable(&url).is_some() {
+            import_saved_cookies(&app, &id, &profile_id, &profile, &url).await?;
             native::navigate(&app, &id, url).await?;
         }
     }
@@ -199,7 +366,9 @@ pub async fn real_browser_open(
 fn window_handle(window: &tauri::Window) -> Result<isize, String> {
     #[cfg(windows)]
     return window.hwnd().map(|h| h.0 as isize).map_err(|e| e.to_string());
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    return window.ns_view().map(|view| view as isize).map_err(|e| e.to_string());
+    #[cfg(not(any(windows, target_os = "macos")))]
     {
         let _ = window;
         Ok(0)
@@ -245,20 +414,46 @@ fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
 #[tauri::command]
 pub fn real_browser_place(app: AppHandle, window: tauri::Window, id: String, place: Place) -> Result<(), String> {
     let scale = window.scale_factor().unwrap_or(1.0);
-    let parts = region(&place).into_iter().map(|r| physical(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect();
-    native::place(&app, &id, physical(place.rect, scale), place.zoom, parts);
+    let parts = region(&place).into_iter().map(|r| native_rect(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect();
+    let radius = if cfg!(windows) { place.corner_radius * scale } else { place.corner_radius };
+    native::place(&app, &id, native_rect(place.rect, scale), place.zoom, parts, radius, place.click_to_expand);
     Ok(())
+}
+
+/// O WebView2 recebe pixels físicos; o AppKit recebe pontos lógicos da janela.
+fn native_rect(rect: Rect, scale: f64) -> [i32; 4] {
+    #[cfg(windows)]
+    { physical(rect, scale) }
+    #[cfg(not(windows))]
+    {
+        let _ = scale;
+        [rect.x.floor() as i32, rect.y.floor() as i32, rect.width.ceil() as i32, rect.height.ceil() as i32]
+    }
+}
+
+/// Entry point dos helpers Chromium no mesmo binário. Só a configuração macOS tem CEF.
+#[cfg(target_os = "macos")]
+pub fn cef_helper_entry() -> Option<i32> {
+    native::cef_helper_entry()
+}
+
+#[cfg(target_os = "macos")]
+pub fn cef_shutdown() {
+    native::shutdown();
 }
 
 /// A barra de endereço (ou um agente) mandou ir para `url`. A mesma URL de novo é recarregar, como no T3.
 #[tauri::command]
 pub async fn real_browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
     navigable(&url).ok_or("Endereço que o navegador não abre.")?;
-    if !lock(portals()).contains_key(&id) {
+    let profile = lock(portals()).get(&id).cloned();
+    if profile.is_none() {
         // Ainda abrindo: vai direto para cá quando abrir.
         lock(pending()).insert(id, url);
         return Ok(());
     }
+    let profile = profile.expect("profile checked above");
+    import_saved_cookies(&app, &id, &profile.id, &profile.path, &url).await?;
     native::navigate(&app, &id, url).await
 }
 
@@ -270,10 +465,19 @@ pub async fn real_browser_history(app: AppHandle, id: String, delta: i32) -> Res
 
 /// Fecha o navegador do Portal.
 #[tauri::command]
-pub fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
+pub async fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
     lock(pending()).remove(&id);
-    if lock(portals()).remove(&id).is_some() {
+    let profile = { lock(portals()).remove(&id) };
+    if let Some(profile) = profile {
         native::close(&app, &id);
+        if profile.id == "incognito" && !profile.path.as_os_str().is_empty() {
+            native::release_profile(&app, &profile.path).await?;
+            tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(profile.path) {
+                Ok(()) => Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(error) => Err(error.to_string()),
+            }).await.map_err(|error| error.to_string())??;
+        }
     }
     Ok(())
 }
@@ -283,23 +487,47 @@ pub fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
 pub async fn real_browser_delete_profile(app: AppHandle, profile_id: String) -> Result<(), String> {
     let profile_id = checked_managed_profile_id(&profile_id)?;
     let _one_at_a_time = opening().lock().await;
-    if lock(portals()).values().any(|opened| opened == &profile_id) {
+    if lock(portals()).values().any(|opened| opened.id == profile_id) {
         return Err("browser_profile_in_use".into());
     }
 
-    let profile_path = crate::util::datadir::app_data_dir(&app)?
-        .join("portal-webview")
-        .join("profiles")
-        .join(&profile_id);
+    let app_data = crate::util::datadir::app_data_dir(&app)?;
+    let profile_path = app_data.join("portal-webview").join("profiles").join(&profile_id);
     // O ambiente WebView2 é cacheado na thread da interface; soltá-lo antes de tentar apagar a pasta.
     native::release_profile(&app, &profile_path).await?;
-    tokio::task::spawn_blocking(move || match std::fs::remove_dir_all(&profile_path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("browser_profile_delete_failed:{error}")),
+    // No macOS, as partições Chromium do perfil (uma por projeto) também saem.
+    let partitions = chromium_partitions_of(&app_data.join(CHROMIUM_ROOT), &profile_id);
+    for partition in &partitions {
+        native::release_profile(&app, partition).await?;
+    }
+    tokio::task::spawn_blocking(move || {
+        for path in std::iter::once(profile_path).chain(partitions) {
+            match std::fs::remove_dir_all(&path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(format!("browser_profile_delete_failed:{error}")),
+            }
+        }
+        Ok(())
     })
     .await
     .map_err(|error| format!("Não foi possível concluir a remoção do perfil: {error}"))?
+}
+
+/// As partições Chromium de um perfil: `<perfil>-<32 hex>`, nunca as de um perfil com prefixo igual.
+fn chromium_partitions_of(root: &std::path::Path, profile_id: &str) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(root) else { return Vec::new() };
+    let prefix = format!("{profile_id}-");
+    entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter(|entry| {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            name.strip_prefix(&prefix).is_some_and(|hash| hash.len() == 32 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        })
+        .map(|entry| entry.path())
+        .collect()
 }
 
 /// O foco do teclado vai para a página.
@@ -330,6 +558,10 @@ pub async fn real_browser_screenshot(app: AppHandle, id: String) -> Result<Value
 // Não pode ser `__agsPage`: é a marca de "piloto já instalado" do `runtime.ts`.
 const BINDING: &str = "__agsCdpBridge";
 
+fn mini_click_request(message: &Value) -> bool {
+    message["source"] == "ags-preview" && message["type"] == "mini:open"
+}
+
 /// Roda antes do piloto em cada documento. A página é a janela principal: o piloto manda para `window.parent`, que
 /// é ela mesma, e a ponte repassa ao app pelo binding. A função do binding é guardada e tirada do `window` antes de
 /// qualquer script da página rodar. `__ags_trusted_input` liga os toques e teclas pelo CDP.
@@ -345,6 +577,9 @@ const BRIDGE: &str = r#"(() => {
       try { send(JSON.stringify(d)); } catch (_) {}
     }
   });
+  document.addEventListener("mousedown", () => {
+    try { send(JSON.stringify({ source: "ags-preview", type: "mini:open" })); } catch (_) {}
+  }, true);
 })();"#;
 
 /// Uma mensagem que o piloto mandou pelo binding: `input:request` é com o Rust (toque ou tecla de verdade), o resto
@@ -352,6 +587,10 @@ const BRIDGE: &str = r#"(() => {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn on_binding(app: &AppHandle, id: &str, payload: &str) {
     let Ok(message) = serde_json::from_str::<Value>(payload) else { return };
+    if mini_click_request(&message) {
+        emit(app, "real-browser-mini-click", json!({ "id": id }));
+        return;
+    }
     if message["type"] == "input:request" {
         let (app, id) = (app.clone(), id.to_string());
         tauri::async_runtime::spawn(async move { native_input(&app, &id, message["payload"].clone()).await });
@@ -408,9 +647,120 @@ async fn run_native_input(app: &AppHandle, id: &str, r: &Value) -> Result<(), St
     Ok(())
 }
 
+/// Autoteste de desenvolvimento (só debug, só macOS): com `ADE_CEF_SELFTEST=<url>[,<url>…]`, cria o
+/// Chromium na janela principal sem passar pela interface, abre cada URL e grava um PNG por CDP em
+/// `ADE_CEF_SELFTEST_OUT`. Serve para provar o motor com a tela bloqueada ou a interface pausada.
+#[cfg(all(target_os = "macos", debug_assertions))]
+pub fn spawn_selftest(app: &AppHandle) {
+    use base64::Engine;
+    use tauri::{Listener, Manager};
+    let Ok(urls) = std::env::var("ADE_CEF_SELFTEST") else { return };
+    let out = std::path::PathBuf::from(std::env::var("ADE_CEF_SELFTEST_OUT").unwrap_or_else(|_| ".".into()));
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let report = |line: String| eprintln!("[cef-selftest] {line}");
+        let Some(window) = app.get_webview_window("main").map(|w| w.as_ref().window()) else {
+            return report("janela principal ausente".into());
+        };
+        let parent = match window_handle(&window) { Ok(parent) => parent, Err(error) => return report(error) };
+        let root = match crate::util::datadir::app_data_dir(&app) { Ok(dir) => dir.join(CHROMIUM_ROOT), Err(error) => return report(error) };
+        let profile = chromium_partition_path(&root, "default", "/selftest");
+        let _ = std::fs::create_dir_all(&profile);
+        let (loads, mut loaded) = tokio::sync::mpsc::unbounded_channel::<bool>();
+        app.listen_any("real-browser-load", move |event| {
+            let loading = serde_json::from_str::<Value>(event.payload()).ok().and_then(|v| v["loading"].as_bool()).unwrap_or(true);
+            let _ = loads.send(loading);
+        });
+        lock(portals()).insert("selftest".into(), PortalProfile { id: "default".into(), path: profile.clone() });
+        if let Err(error) = native::create(&app, parent, "selftest", profile, String::new(), [40, 60, 1100, 760]).await {
+            report(format!("create falhou: {error}"));
+            return finish_selftest(&app, 1);
+        }
+        report("vista Chromium criada".into());
+        for (index, url) in urls.split(',').enumerate() {
+            while loaded.try_recv().is_ok() {}
+            if let Err(error) = native::navigate(&app, "selftest", url.to_string()).await { report(format!("{url}: {error}")); continue; }
+            let wait = async { while let Some(loading) = loaded.recv().await { if !loading { break; } } };
+            if tokio::time::timeout(std::time::Duration::from_secs(45), wait).await.is_err() { report(format!("{url}: sem fim de carga em 45 s")); }
+            let probe = json!({ "expression": "JSON.stringify({href: location.href, title: document.title, ua: navigator.userAgent, webdriver: navigator.webdriver})", "returnByValue": true });
+            match native::cdp(&app, "selftest", "Runtime.evaluate", probe).await {
+                Ok(value) => report(format!("{url} -> {}", value["result"]["value"].as_str().unwrap_or("?"))),
+                Err(error) => report(format!("{url}: evaluate falhou: {error}")),
+            }
+            match native::cdp(&app, "selftest", "Page.captureScreenshot", json!({ "format": "png" })).await {
+                Ok(value) => {
+                    let bytes = base64::engine::general_purpose::STANDARD.decode(value["data"].as_str().unwrap_or_default()).unwrap_or_default();
+                    let file = out.join(format!("cef-selftest-{index}.png"));
+                    let _ = std::fs::write(&file, &bytes);
+                    report(format!("{url}: captura {} bytes em {}", bytes.len(), file.display()));
+                }
+                Err(error) => report(format!("{url}: captura falhou: {error}")),
+            }
+        }
+        // Pop-up com gesto do usuário, como um OAuth: vira aba nova com o `opener` vivo.
+        let (popups, mut popped) = tokio::sync::mpsc::unbounded_channel::<String>();
+        app.listen_any("real-browser-popup", move |event| {
+            if let Some(popup) = serde_json::from_str::<Value>(event.payload()).ok().and_then(|v| v["popup"].as_str().map(String::from)) {
+                let _ = popups.send(popup);
+            }
+        });
+        let (closes, mut closed) = tokio::sync::mpsc::unbounded_channel::<String>();
+        app.listen_any("real-browser-closed", move |event| {
+            if let Some(id) = serde_json::from_str::<Value>(event.payload()).ok().and_then(|v| v["id"].as_str().map(String::from)) {
+                let _ = closes.send(id);
+            }
+        });
+        let button = json!({ "expression": "(() => { const b = document.createElement('button'); b.textContent = 'oauth'; b.style.cssText = 'position:fixed;left:0;top:0;width:120px;height:60px;z-index:99999'; b.onclick = () => { window.__popup = window.open('https://example.com/?popup=1', 'oauth', 'width=480,height=640') ? 'aberto' : 'bloqueado'; }; document.body.append(b); return 'ok'; })()", "returnByValue": true });
+        let _ = native::cdp(&app, "selftest", "Runtime.evaluate", button).await;
+        for kind in ["mousePressed", "mouseReleased"] {
+            let click = json!({ "type": kind, "x": 30, "y": 30, "button": "left", "clickCount": 1 });
+            if let Err(error) = native::cdp(&app, "selftest", "Input.dispatchMouseEvent", click).await { report(format!("clique falhou: {error}")); }
+        }
+        let state = json!({ "expression": "String(window.__popup)", "returnByValue": true });
+        match native::cdp(&app, "selftest", "Runtime.evaluate", state).await {
+            Ok(value) => report(format!("window.open -> {}", value["result"]["value"])),
+            Err(error) => report(format!("window.open falhou: {error}")),
+        }
+        match tokio::time::timeout(std::time::Duration::from_secs(10), popped.recv()).await {
+            Ok(Some(popup)) => {
+                report(format!("pop-up anunciado: {popup}"));
+                match native::wait_ready(&app, &popup).await {
+                    Ok(()) => {
+                        let check = json!({ "expression": "new Promise(r => { const go = () => r(JSON.stringify({href: location.href, opener: !!window.opener})); document.readyState === 'complete' ? go() : addEventListener('load', go); })", "awaitPromise": true, "returnByValue": true });
+                        match native::cdp(&app, &popup, "Runtime.evaluate", check).await {
+                            Ok(value) => report(format!("pop-up -> {}", value["result"]["value"].as_str().unwrap_or("?"))),
+                            Err(error) => report(format!("pop-up evaluate falhou: {error}")),
+                        }
+                        let _ = native::cdp(&app, &popup, "Runtime.evaluate", json!({ "expression": "setTimeout(() => window.close(), 50); 1" })).await;
+                        match tokio::time::timeout(std::time::Duration::from_secs(10), closed.recv()).await {
+                            Ok(Some(id)) => report(format!("pop-up fechou pela página: {}", id == popup)),
+                            _ => report("pop-up não avisou o fechamento".into()),
+                        }
+                    }
+                    Err(error) => report(format!("pop-up não ficou pronto: {error}")),
+                }
+            }
+            _ => report("nenhum pop-up anunciado".into()),
+        }
+        report("fim".into());
+        finish_selftest(&app, 0);
+    });
+}
+
+/// O mesmo encerramento do `RunEvent::Exit`, sem esperar a interface salvar (ela pode estar pausada).
+#[cfg(all(target_os = "macos", debug_assertions))]
+fn finish_selftest(app: &AppHandle, code: i32) {
+    let _ = app.run_on_main_thread(move || {
+        native::shutdown();
+        eprintln!("[cef-selftest] encerrado ({code})");
+        std::process::exit(code);
+    });
+}
+
 #[cfg(test)]
 mod test {
-    use super::{navigable, physical, region, subtract, Place, Rect};
+    use super::{adopt_popup, adopted, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, mini_click_request, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
+    use serde_json::json;
 
     fn r(x: f64, y: f64, width: f64, height: f64) -> Rect {
         Rect { x, y, width, height }
@@ -433,9 +783,10 @@ mod test {
         assert!(subtract(r(10.0, 10.0, 10.0, 10.0), r(0.0, 0.0, 50.0, 50.0)).is_empty());
     }
 
+
     #[test]
     fn regiao_e_a_parte_a_vista_menos_o_que_esta_por_cima() {
-        let place = |visible, holes| Place { rect: r(0.0, 0.0, 800.0, 600.0), zoom: 1.0, visible, holes };
+        let place = |visible, holes| Place { rect: r(0.0, 0.0, 800.0, 600.0), zoom: 1.0, visible, holes, click_to_expand: false, corner_radius: 0.0 };
         assert!(region(&place(None, vec![])).is_empty(), "fora de vista não aparece nada");
         assert_eq!(region(&place(Some(r(0.0, 0.0, 800.0, 300.0)), vec![])), vec![r(0.0, 0.0, 800.0, 300.0)]);
         // Um menu de 200×100 no canto de cima à direita.
@@ -451,6 +802,125 @@ mod test {
         for bad in ["javascript:alert(1)", "file:///C:/Windows/win.ini", "mailto:a@b.c", "about:config", "nada"] {
             assert!(navigable(bad).is_none(), "{bad}");
         }
+    }
+
+    #[test]
+    fn popup_handler_permite_oauth_web_e_bloqueia_esquemas_externos() {
+        assert!(popup_allowed("https://accounts.google.com/o/oauth2/"));
+        assert!(popup_allowed("http://localhost:3000/callback"));
+        assert!(popup_allowed("about:blank"));
+        assert!(!popup_allowed("file:///Users/alguem/.ssh/id_rsa"));
+        assert!(!popup_allowed("javascript:alert(1)"));
+        assert!(!popup_allowed("mailto:login@example.com"));
+    }
+
+    #[test]
+    fn clique_da_pagina_sinaliza_reabertura_somente_pelo_canal_interno() {
+        assert!(mini_click_request(&json!({ "source": "ags-preview", "type": "mini:open" })));
+        assert!(!mini_click_request(&json!({ "source": "site", "type": "mini:open" })));
+        assert!(!mini_click_request(&json!({ "source": "ags-preview", "type": "input:request" })));
+    }
+
+    #[test]
+    fn particao_persistente_separa_projetos_e_fica_sob_os_dados_da_ade() {
+        let root = std::path::Path::new("/dados-isolados/portal-webview");
+        let one = project_profile_path(root, "default", "/projetos/um");
+        let same = project_profile_path(root, "default", "/projetos/um");
+        let other = project_profile_path(root, "default", "/projetos/dois");
+        assert_eq!(one, same);
+        assert_ne!(one, other);
+        assert!(one.starts_with(root.join("profiles/default/projects")));
+        assert!(!one.to_string_lossy().contains("/projetos/um"));
+        assert!(!one.to_string_lossy().contains("Google"));
+    }
+
+    #[test]
+    fn migra_a_sessao_antiga_sem_apagar_a_origem_nem_caches() {
+        let root = std::env::temp_dir().join(format!("ade-ags-browser-migration-{}-{}", std::process::id(), std::thread::current().name().unwrap_or("teste")));
+        let _ = std::fs::remove_dir_all(&root);
+        let old = root.join("portal-webview");
+        let target = super::project_profile_path(&old, "default", "/projeto-de-teste");
+        std::fs::create_dir_all(old.join("Default")).unwrap();
+        std::fs::create_dir_all(old.join("Cache")).unwrap();
+        std::fs::write(old.join("Default/Cookies"), b"fixture-cookie-db").unwrap();
+        std::fs::write(old.join("Cache/cache.bin"), b"cache").unwrap();
+        assert!(migrate_legacy_partition(&old, "default", &target).unwrap());
+        assert_eq!(std::fs::read(target.join("Default/Cookies")).unwrap(), b"fixture-cookie-db");
+        assert!(!target.join("Cache").exists());
+        assert_eq!(std::fs::read(old.join("Default/Cookies")).unwrap(), b"fixture-cookie-db");
+        assert!(!migrate_legacy_partition(&old, "default", &target).unwrap());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn perfil_anonimo_vai_para_pasta_temporaria_da_instancia() {
+        let path = incognito_partition_path("view-123");
+        assert!(path.starts_with(std::env::temp_dir().join("ade-ags-browser-incognito")));
+        assert!(!path.starts_with(std::path::Path::new("/Applications")));
+        assert!(path.ends_with("view-123"));
+    }
+
+    #[test]
+    fn cdp_nao_publica_porta_nem_endereco_de_rede() {
+        // O canal executa BrowserHost::execute_dev_tools_method dentro do processo CEF.
+        // Não existe listener TCP nem DevTools remoto a partir desta interface.
+        let source = include_str!("cef_native.rs");
+        assert!(source.contains("execute_dev_tools_method"));
+        assert!(!source.contains("TcpListener"));
+        // A porta zerada nas `Settings` é provada no teste do módulo nativo.
+        assert!(!source.contains("--remote-debugging-port"));
+    }
+
+    #[test]
+    fn particao_chromium_e_filha_direta_da_raiz_por_perfil_e_projeto() {
+        // O runtime Chrome do CEF só cria perfis filhos diretos do `root_cache_path`.
+        let root = std::path::Path::new("/dados-isolados/app-data/portal-chromium");
+        let one = chromium_partition_path(root, "default", "/projetos/um");
+        let other_project = chromium_partition_path(root, "default", "/projetos/dois");
+        let other_profile = chromium_partition_path(root, "trabalho", "/projetos/um");
+        assert_eq!(one.parent(), Some(root));
+        assert_eq!(one, chromium_partition_path(root, "default", "/projetos/um"));
+        assert_ne!(one, other_project);
+        assert_ne!(one, other_profile);
+        assert!(one.file_name().unwrap().to_string_lossy().starts_with("default-"));
+        let text = one.to_string_lossy();
+        assert!(!text.contains("projetos"), "o caminho do projeto não vai para o disco: {text}");
+        for real in ["Google/Chrome", "Chromium", "BraveSoftware", "Microsoft Edge", "Safari", "Firefox"] {
+            assert!(!text.contains(real), "partição dentro de um perfil real: {text}");
+        }
+    }
+
+    #[test]
+    fn excluir_perfil_so_leva_as_particoes_dele() {
+        let root = std::env::temp_dir().join(format!("ade-ags-chromium-partitions-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mine = chromium_partition_path(&root, "work", "/projetos/um");
+        let mine_too = chromium_partition_path(&root, "work", "/projetos/dois");
+        let neighbor = chromium_partition_path(&root, "work-2", "/projetos/um");
+        for dir in [&mine, &mine_too, &neighbor, &root.join("Default"), &root.join("work-notas")] {
+            std::fs::create_dir_all(dir).unwrap();
+        }
+        let mut found = chromium_partitions_of(&root, "work");
+        found.sort();
+        let mut expected = vec![mine, mine_too];
+        expected.sort();
+        assert_eq!(found, expected);
+        assert!(chromium_partitions_of(&root.join("nao-existe"), "work").is_empty());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn popup_adotado_herda_o_perfil_do_opener_e_sai_ao_fechar() {
+        let profile = PortalProfile { id: "default".into(), path: "/dados/portal-chromium/default-abc".into() };
+        lock(portals()).insert("opener-teste-popup".into(), profile.clone());
+        assert!(adopt_popup("opener-teste-popup", "popup-teste").is_some());
+        assert_eq!(lock(adopted()).get("popup-teste"), Some(&profile));
+        assert!(adopt_popup("opener-que-nao-existe", "popup-orfao").is_none());
+        assert!(!lock(adopted()).contains_key("popup-orfao"));
+        forget_portal("popup-teste");
+        forget_portal("opener-teste-popup");
+        assert!(!lock(adopted()).contains_key("popup-teste"));
+        assert!(!lock(portals()).contains_key("opener-teste-popup"));
     }
 
     #[test]

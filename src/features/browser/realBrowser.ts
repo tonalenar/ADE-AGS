@@ -1,24 +1,32 @@
 // O navegador nativo do Portal (um WebView2 dentro da janela, como o `<webview>` do T3 Code): ver
 // `src-tauri/src/real_browser/mod.rs`. O flag `realChrome` da vista continua com esse nome por ser o estado salvo.
-import { isLocalUrl } from "@/features/tabs/viewTabs";
 import { invoke } from "@tauri-apps/api/core";
 
-/**
- * Um site de fora (Google, Trello, um painel na nuvem) abre no navegador nativo; só o servidor desta máquina vai
- * pelo proxy (selector, mocks e rede ficam à mão). Pelo proxy o site vê um cliente estranho (o Google responde
- * `/sorry`) e a página roda na origem do proxy. `realChrome` explícito (a pessoa ligou ou desligou o botão) sempre
- * vale. Pura.
- */
+/** Sites externos e servidores locais abrem diretamente no Chromium/WebView2. */
 export function shouldOpenInRealChrome(url: string, realChrome: boolean | undefined): boolean {
   if (realChrome !== undefined) return realChrome;
-  return /^https?:\/\//i.test(url) && !isLocalUrl(url);
+  return /^https?:\/\//i.test(url);
 }
 
 /** Um retângulo em pixels CSS. */
 export type Box = { x: number; y: number; width: number; height: number };
 
+/** Mantém a página inteira visível no cartão reduzido sem recriar a superfície nativa. */
+export function miniBrowserZoom(baseZoom: number, source: Box | null, mini: Box | null): number {
+  if (!source || !mini || source.width <= 0 || source.height <= 0 || mini.width <= 0 || mini.height <= 0) return baseZoom;
+  const scale = Math.max(0.1, Math.min(1, mini.width / source.width, mini.height / source.height));
+  return Math.round(baseZoom * scale * 1000) / 1000;
+}
+
 /** Onde o Portal está: `rect` na janela; `visible` e `holes` relativos ao próprio Portal (ver `real_browser::Place`). */
-export type Place = { rect: Box; zoom: number; visible: Box | null; holes: Box[] };
+export type Place = {
+  rect: Box;
+  zoom: number;
+  visible: Box | null;
+  holes: Box[];
+  clickToExpand?: boolean;
+  cornerRadius?: number;
+};
 
 /** A interseção de dois retângulos, ou `null` se não se tocam. */
 export function intersect(a: Box, b: Box): Box | null {
@@ -50,6 +58,8 @@ export function placeOf(rect: Box, layoutWidth: number, pageZoom: number, clips:
     zoom: Math.round(canvasZoom * (pageZoom > 0 ? pageZoom : 1) * 1000) / 1000,
     visible: visible && relativeTo(visible, rect),
     holes,
+    clickToExpand: false,
+    cornerRadius: 0,
   };
 }
 
@@ -58,8 +68,8 @@ export function samePlace(a: Place | null, b: Place): boolean {
 }
 
 /** `script`: o piloto dos agentes, que o navegador roda em todo documento (o mesmo que o proxy injeta no outro). */
-export const realBrowserOpen = (id: string, url: string, place: Place, script?: string, profileId = "default") =>
-  invoke<void>("real_browser_open", { id, url, place, script, profileId });
+export const realBrowserOpen = (id: string, url: string, place: Place, script?: string, profileId = "default", projectPath = "") =>
+  invoke<void>("real_browser_open", { id, url, place, script, profileId, projectPath });
 
 export const realBrowserPlace = (id: string, place: Place) => invoke<void>("real_browser_place", { id, place });
 

@@ -865,6 +865,8 @@ pub fn run() {
 
             // Avisos del sistema para lo que pasa con la app en segundo plano (ver `notifier`).
             crate::notifier::start(app.handle().clone());
+            #[cfg(all(target_os = "macos", debug_assertions))]
+            crate::real_browser::spawn_selftest(app.handle());
             // Abre a conexão com o Jev (se o piloto está ligado) antes do primeiro `act`.
             crate::decisions::browse::preconnect_at_start(app.handle().clone());
             // O modelo do Jev fixado numa versão sobe sozinho: confere ao abrir e uma vez por dia (ver `jev_models`).
@@ -911,6 +913,8 @@ pub fn run() {
             if let tauri::RunEvent::Exit = event {
                 crate::screen_recording::stop_all();
                 crate::voice_input::cancel_all();
+                #[cfg(target_os = "macos")]
+                crate::real_browser::cef_shutdown();
                 // Handshake do IPC e sessões PTY: a mesma limpeza do "fechar tudo" e dos
                 // sinais, uma vez só. Ver `app/shutdown.rs`.
                 super::shutdown_once();

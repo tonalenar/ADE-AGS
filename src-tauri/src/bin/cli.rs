@@ -387,7 +387,8 @@ NAVEGADOR
   browser run --json-args '{\"cwd\":\"...\",     Uma ordem ao navegador de um projeto:
               \"request\":{\"op\":\"snapshot\"}}'   snapshot, click, type, resize, console…
                                               É o mesmo caminho que as 26
-                                              ferramentas browser_* do MCP usam.
+                                              ferramentas browser_* do MCP usam. No macOS usa CEF; no Windows, WebView2.
+                                              Ambos abrem localhost direto e usam CDP interno, sem porta remota.
 
 AGENTES, CONTAS E SKILLS
   agents                                      O que pôr em --agent (inclui os personalizados)

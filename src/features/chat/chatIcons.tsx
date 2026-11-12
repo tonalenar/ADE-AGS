@@ -53,6 +53,8 @@ export const PullRequestIcon = (p: IconProps) => <Svg {...p}><circle cx="6" cy="
 export const UsageIcon = (p: IconProps) => <Svg {...p}><path d="M6 20v-6M12 20V4M18 20v-9" /></Svg>;
 export const DetailsIcon = (p: IconProps) => <Svg {...p}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M7 8h10M7 12h10M7 16h6" /></Svg>;
 export const PanelRightIcon = (p: IconProps) => <Svg {...p}><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M15 3v18" /></Svg>;
+/** Janela com uma segunda vista pequena, para destacar uma superfície. */
+export const WindowOpenIcon = (p: IconProps) => <Svg {...p}><rect x="3" y="4" width="18" height="16" rx="2" /><rect x="12.5" y="11.5" width="7" height="5.5" rx="1" /></Svg>;
 export const MaximizeIcon = (p: IconProps) => <Svg {...p}><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></Svg>;
 /** Sair da tela cheia: as setas apontando para dentro. */
 export const MinimizeIcon = (p: IconProps) => <Svg {...p}><path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7" /></Svg>;

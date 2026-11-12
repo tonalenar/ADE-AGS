@@ -35,3 +35,6 @@ bench-results/
 # Planos e rascunhos de agentes não entram no repositório (AGENTS.md §6.3)
 /plan*.md
 .plans/
+
+# Distribuição CEF preparada somente durante o build macOS (framework e helpers assináveis).
+src-tauri/cef-bundle-staging/

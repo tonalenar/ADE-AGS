@@ -27,3 +27,4 @@ pub use capture::*;
 pub use importer::*;
 pub use proxy::*;
 pub use site::set_state_dir;
+pub(crate) use site::chromium_cookie_snapshot;

@@ -1249,7 +1249,7 @@ function NoteIcon({ className }: { className?: string }) {
 
 /**
  * Un portal: un navegador dentro del canvas. Es el mismo `BrowserTab` de las tabs de
- * navegador — con su barra, su inspector y su proxy —, pero dibujado en el nodo y manejado
+ * navegador — con su barra e inspector —, dibujado en el nodo y manejado
  * por los agentes conectados con `ags portal …`. Se escala con el zoom: una página, a
  * diferencia de una terminal, aguanta bien un `transform`.
  */

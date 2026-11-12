@@ -4,7 +4,7 @@
   "version": "1.14.0",
   "identifier": "com.luis.controlcode",
   "build": {
-    "beforeDevCommand": "bun run dev",
+    "beforeDevCommand": "bun scripts/stage-cef-dev.mjs && bun run dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build && bun run stage-cli",
     "frontendDist": "../dist"
@@ -48,7 +48,15 @@
     "active": true,
     "targets": "all",
     "macOS": {
-      "entitlements": "./Entitlements.plist"
+      "entitlements": "./Entitlements.plist",
+      "files": {
+        "Frameworks/Chromium Embedded Framework.framework": "./cef-bundle-staging/Frameworks/Chromium Embedded Framework.framework",
+        "Frameworks/ADE AGS Helper.app": "./cef-bundle-staging/Frameworks/ADE AGS Helper.app",
+        "Frameworks/ADE AGS Helper (GPU).app": "./cef-bundle-staging/Frameworks/ADE AGS Helper (GPU).app",
+        "Frameworks/ADE AGS Helper (Renderer).app": "./cef-bundle-staging/Frameworks/ADE AGS Helper (Renderer).app",
+        "Frameworks/ADE AGS Helper (Plugin).app": "./cef-bundle-staging/Frameworks/ADE AGS Helper (Plugin).app",
+        "Frameworks/ADE AGS Helper (Alerts).app": "./cef-bundle-staging/Frameworks/ADE AGS Helper (Alerts).app"
+      }
     },
     "icon": [
       "icons/32x32.png",

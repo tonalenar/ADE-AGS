@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, manage windows, workspaces, skills and background fleet tasks, and let Jev do computer use on the canvas browser, an iOS simulator, a real iPhone or the Mac screen. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, send input to a running agent, or reach a goal by clicking through a web page, a simulator app or a Mac app.
-version: 1.77.0
+version: 1.78.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code, cursor, antigravity]
 license: MIT
@@ -1474,10 +1474,7 @@ automatic fix rounds of runs created before the restart) waits until the user pr
 
 ## The project browser
 
-Each project has a browser inside the app, loaded through a local proxy, that the user sees
-too. Agents drive it through the `browser_*` MCP tools (navigate, snapshot, click, type,
-console, network…). `ags browser run --json-args '{"cwd":"...","request":{"op":"snapshot"}}'`
-is the same path, for when you don't have those tools.
+Each project has a browser inside the app that the user sees too. macOS embeds Chromium through CEF in a native child view; Windows uses WebView2; Linux keeps the current preview fallback. External sites and local development servers go directly to the browser engine. Persistent sessions are isolated by ADE profile and project, with existing imported cookies copied from ADE's encrypted store without deleting it. Agents drive the same page through the `browser_*` MCP tools (navigate, snapshot, click, type, console, network…). CDP stays inside the engine process; there is no remote debugging port. Pop-ups and OAuth windows open as a new browser tab that keeps `window.opener`; when the page closes itself, that tab closes. `ags browser run --json-args '{"cwd":"...","request":{"op":"snapshot"}}'` is the same path, for when you don't have those tools.
 
 ## Working rules
 
