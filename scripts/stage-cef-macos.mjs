@@ -85,6 +85,8 @@ for (const helper of helpers) {
     const signingArgs = ["--force", "--options", "runtime", "--timestamp", "--sign", process.env.APPLE_SIGNING_IDENTITY];
     if (helper.endsWith("(GPU)") || helper.endsWith("(Renderer)")) {
       signingArgs.push("--entitlements", join(tauriDir, "CefHelperJitEntitlements.plist"));
+    } else {
+      signingArgs.push("--entitlements", join(tauriDir, "CefHelperLibEntitlements.plist"));
     }
     signingArgs.push(join(staging, `${helper}.app`));
     execFileSync("codesign", signingArgs, { stdio: "inherit" });
