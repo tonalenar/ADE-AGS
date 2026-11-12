@@ -73,13 +73,14 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   };
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
+    else if (["INPUT", "TEXTAREA", "SELECT"].includes((e.target as HTMLElement).tagName) && e.key.startsWith("Arrow")) return;
     else if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); go(-1); }
     else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); go(1); }
     else if ((e.metaKey || e.ctrlKey) && e.key === "z") { e.preventDefault(); undo(); }
     else if (e.key === "+" || e.key === "=") { e.preventDefault(); setZoom((value) => Math.min(4, value + 0.1)); }
     else if (e.key === "-") { e.preventDefault(); setZoom((value) => Math.max(0.2, value - 0.1)); }
     else if (e.key === "Tab") {
-      const buttons = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled])")];
+      const buttons = [...e.currentTarget.querySelectorAll<HTMLElement>("button:not([disabled]), input:not([disabled]), select:not([disabled]), summary")];
       const first = buttons[0]; const last = buttons[buttons.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
