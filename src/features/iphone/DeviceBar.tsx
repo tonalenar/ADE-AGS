@@ -83,7 +83,8 @@ export function DeviceBar({ device, name, status, ready, disconnected, composerT
       <KeyboardButton device={device} name={name} ready={!keyboard.disabled} title={keyboard.label} />
       {sep}
       <button type="button" className={btn} title={t("iphone.zoom.in")} aria-label={t("iphone.zoom.in")} onClick={() => onZoom(typeof zoom === "number" ? stepZoom(zoom, 1) : 1.1)}><ZoomInIcon className={ic} /></button>
-      <span className="shrink-0 text-center font-mono text-[10px] tabular-nums text-gray-500 dark:text-white/50">{zoom === "fit" ? t("iphone.zoom.fitShort") : `${Math.round(zoom * 100)}%`}</span>
+      {/* No modo ajustar o botão destacado já diz o estado; o número só aparece com zoom manual. */}
+      {zoom !== "fit" && <span className="shrink-0 text-center text-[10px] tabular-nums text-gray-500 dark:text-white/50">{Math.round(zoom * 100)}%</span>}
       <button type="button" className={btn} title={t("iphone.zoom.out")} aria-label={t("iphone.zoom.out")} onClick={() => onZoom(typeof zoom === "number" ? stepZoom(zoom, -1) : 0.9)}><ZoomOutIcon className={ic} /></button>
       <button type="button" className={`${btn} ${zoom === "fit" ? "bg-gray-100 text-gray-900 dark:bg-white/[0.08] dark:text-white" : ""}`} aria-pressed={zoom === "fit"} title={t("iphone.zoom.fit")} aria-label={t("iphone.zoom.fit")} onClick={() => onZoom("fit")}><FitIcon className={ic} /></button>
       <button type="button" className={`${btn} font-mono text-[10.5px] ${zoom === 1 ? "bg-gray-100 text-gray-900 dark:bg-white/[0.08] dark:text-white" : ""}`} aria-pressed={zoom === 1} title={t("iphone.zoom.actual")} aria-label={t("iphone.zoom.actual")} onClick={() => onZoom(1)}>1:1</button>
