@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { captureVideoFrame, commentsForMessage, filterMedia, nextMediaIndex, resizeDimensions, undoStroke, type ConversationMedia } from "../attachments/mediaViewerModel";
+import { captureVideoFrame, commentFromSelection, commentsForMessage, filterMedia, markdownImages, nextMediaIndex, resizeDimensions, undoStroke, type ConversationMedia } from "../attachments/mediaViewerModel";
 import { setImageContext } from "../attachments/imageContext";
 import { threadMessage } from "../attachments/send";
 
@@ -31,6 +31,17 @@ describe("modelo do visualizador de mídia", () => {
     expect(sent.images).toEqual(["/a.png"]);
   });
 
+  it("transforma arrasto em região numerada e preserva suas coordenadas no contexto", () => {
+    const comment = commentFromSelection({ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.6 }, "Revisar trecho");
+    expect(comment.x).toBeCloseTo(0.25);
+    expect(comment.y).toBeCloseTo(0.4);
+    expect(comment.region?.x).toBeCloseTo(0.1);
+    expect(comment.region?.y).toBeCloseTo(0.2);
+    expect(comment.region?.width).toBeCloseTo(0.3);
+    expect(comment.region?.height).toBeCloseTo(0.4);
+    expect(commentsForMessage([comment])).toContain("região 10%, 20%–40%, 60%");
+  });
+
   it("desfaz a última marcação", () => {
     expect(undoStroke([[[0, 0], [1, 1]], [[0.2, 0.2]]].map((stroke) => stroke.map(([x, y]) => ({ x, y })))).strokes).toHaveLength(1);
   });
@@ -39,5 +50,21 @@ describe("modelo do visualizador de mídia", () => {
     expect(captureVideoFrame(media[1]!, "data:image/png;base64,abc")).toMatchObject({
       kind: "image", name: "b.png", preview: "data:image/png;base64,abc",
     });
+  });
+
+  it("coleta imagens locais de Markdown da conversa, mas ignora URLs e caminhos fora do projeto", () => {
+    const images = markdownImages([
+      "![captura](/repo/screens/captura.png)",
+      "![relativa](assets/segunda.webp)",
+      "![remota](https://exemplo.invalid/terceira.png)",
+      "![fora](/Users/tonalencar/privada.png)",
+      "```md\n![código](/repo/nao-carregar.png)\n```",
+    ].join("\n"), "/repo");
+    expect(images.map((image) => image.path)).toEqual(["/repo/screens/captura.png", "/repo/assets/segunda.webp"]);
+  });
+
+  it("mantém imagens data URL no visualizador sem fazer requisição externa", () => {
+    const source = "data:image/png;base64,aGVsbG8=";
+    expect(markdownImages(`![gerada](${source})`, null)).toMatchObject([{ path: source, preview: source, name: "gerada.png" }]);
   });
 });

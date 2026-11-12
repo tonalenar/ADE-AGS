@@ -5815,6 +5815,7 @@
   "chat.attach.lightbox.markLayer": "Camada de marcação",
   "chat.attach.lightbox.tools": "Ferramentas de imagem",
   "chat.attach.lightbox.mark": "Marcação à mão livre",
+  "chat.attach.lightbox.strokeWidth": "Espessura do traço",
   "chat.attach.lightbox.comment": "Comentar",
   "chat.attach.lightbox.removeBackground": "Remover fundo",
   "chat.attach.lightbox.removeBackgroundUnavailable": "Remoção de fundo não disponível neste momento",

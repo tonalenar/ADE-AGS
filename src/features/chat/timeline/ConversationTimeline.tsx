@@ -3,7 +3,7 @@ import { useChatPrefs } from "../chatPrefs";
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Markdown } from "@/shared/ui/LazyMarkdown";
+import { ChatMarkdownImageStrip, ChatMarkdownMediaIndex, ChatMessageMarkdown } from "../attachments/ChatMessageMarkdown";
 
 import {
   BotIcon, BrainIcon, ChevronDownIcon, ChevronRightIcon, EyeIcon, FilePlusIcon, GlobeIcon, ListIcon, PenIcon, QuestionIcon, SearchIcon, ShieldIcon, TerminalIcon, WrenchIcon, XIcon,
@@ -115,6 +115,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   // "Chamadas de ferramenta no chat" (Configurações → Chat): o fold mostra só o que o modo deixa.
   const toolVisibility = useChatPrefs().toolCallVisibility;
   const allTurns = useMemo(() => timelineTurns(items), [items]);
+  const markdownMediaContent = useMemo(() => items.flatMap((item) => [item.text ?? "", item.output ?? ""]).filter(Boolean), [items]);
   const turns = useMemo(() => applyToolCallVisibility(allTurns, toolVisibility), [allTurns, toolVisibility]);
   // O «Pensando…» com brilho: só enquanto o agente trabalha, sem pedido de aprovação esperando (aí ninguém está pensando).
   const thinkingKey = working && approval === null && !approvalCard ? thinkingTurnKey(allTurns) : null;
@@ -304,6 +305,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         {truncated && (
           <p className="text-center text-chat-caption text-gray-400 dark:text-white/35">{t("chat.timeline.truncated")}</p>
         )}
+        <ChatMarkdownMediaIndex contents={markdownMediaContent} />
         {!loaded && <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.loading")}</p>}
         {missing && onOpenTerminal && (
           <div className="py-10 flex flex-col items-center gap-3 text-center text-chat-note text-gray-400 dark:text-white/40">
@@ -400,7 +402,7 @@ function UserMessage({ item, searchHit = false, composerTarget }: { item: Timeli
   if (!peer) return <PersonBubble text={text} at={item.at} itemId={item.id} searchHit={searchHit} composerTarget={composerTarget} />;
   return (
     <AgentBubble agentId="" command={senderAgent(peer.sender)} label={peer.sender} sender={peer.sender} receipt={peer.id} header={reveal.headers.has(item.id)} entering={entering} at={item.at} copyText={peer.body} itemId={item.id} searchHit={searchHit}>
-      <Markdown content={peer.body} tone="chat" renderCodeBlock={renderChatCodeBlock} />
+      <ChatMessageMarkdown content={peer.body} renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
@@ -416,7 +418,7 @@ function AgentText({ item, searchHit = false }: { item: TimelineItem; searchHit?
   const [entering] = useState(() => reveal.entering(item.id));
   return (
     <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""} itemId={item.id} searchHit={searchHit}>
-      <Markdown content={text} tone="chat" renderCodeBlock={renderChatCodeBlock} />
+      <ChatMessageMarkdown content={text} renderCodeBlock={renderChatCodeBlock} />
     </AgentBubble>
   );
 }
@@ -494,7 +496,7 @@ function ReasoningRow({ item }: { item: TimelineItem }) {
     <>
       <BrainIcon className="mt-[3px] w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
       {open
-        ? <div className="min-w-0 flex-1 text-chat-ui text-gray-500 dark:text-white/50"><Markdown content={text} tone="chat" renderCodeBlock={renderChatCodeBlock} /></div>
+        ? <div className="min-w-0 flex-1 text-chat-ui text-gray-500 dark:text-white/50"><ChatMessageMarkdown content={text} renderCodeBlock={renderChatCodeBlock} /></div>
         : <span className="min-w-0 flex-1 line-clamp-4 text-left text-chat-ui text-gray-500 dark:text-white/50">{flat}</span>}
       {expandable && <ChevronRightIcon className={`mt-[3px] w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
     </>
@@ -646,10 +648,13 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
         </div>
       )}
       {open && tool.output && !app && (
+        <>
         <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-white/70">
           {tool.output}
         </pre>
+        <ChatMarkdownImageStrip content={tool.output} className="ml-[26px]" />
+        </>
       )}
     </div>
   );

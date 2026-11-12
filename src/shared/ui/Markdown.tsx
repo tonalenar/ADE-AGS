@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button } from "neogestify-ui-components";
@@ -16,7 +16,7 @@ export type ImageLoader = (src: string) => Promise<string>;
 
 /** Una imagen que se pide recién al dibujarse. Mientras llega, o si falla, queda el texto
  *  alternativo — un hueco en blanco no dice que ahí había algo. */
-function LoadedImage({ src, alt, load }: { src: string; alt: string; load: ImageLoader }) {
+function LoadedImage({ src, alt, load, onOpen }: { src: string; alt: string; load: ImageLoader; onOpen?: (src: string) => void }) {
   const [data, setData] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   // Por ref: quien lo usa puede pasar una función nueva en cada render, y eso no es
@@ -37,7 +37,7 @@ function LoadedImage({ src, alt, load }: { src: string; alt: string; load: Image
   if (!data) {
     return (
       <Button variant="custom"
-        onClick={() => openUrl(src).catch(console.error)}
+        onClick={() => onOpen ? onOpen(src) : openUrl(src).catch(console.error)}
         title={src}
         className={`text-[11px] italic text-gray-400 dark:text-white/30 hover:underline
           ${failed ? "" : "animate-pulse"} inline-block`}
@@ -50,7 +50,7 @@ function LoadedImage({ src, alt, load }: { src: string; alt: string; load: Image
     <img
       src={data}
       alt={alt}
-      onClick={() => openUrl(src).catch(console.error)}
+      onClick={() => onOpen ? onOpen(src) : openUrl(src).catch(console.error)}
       className="inline-block max-w-full h-auto my-1 rounded-md cursor-zoom-in
         border border-gray-200 dark:border-white/10"
     />
@@ -139,7 +139,7 @@ const REMARK = [remarkGfm];
 const REMARK_MATH = [remarkGfm, ...MATH_REMARK_PLUGINS];
 const REHYPE_MATH = MATH_REHYPE_PLUGINS;
 
-export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
+export function Markdown({ content, loadImage, onImageClick, tone = "compact", renderCodeBlock }: { content: string; loadImage?: ImageLoader; onImageClick?: (src: string) => void; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
   const size = TONE[tone];
   // A matemática é uma preferência do aparelho (Aparência → Texto). Desligada, o `$` é só texto.
   const { renderMath } = useDisplayPrefs();
@@ -147,6 +147,7 @@ export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock
   // horizontal y los campos como un párrafo suelto arriba de todo. Los datos que trae ya
   // se muestran aparte, en la cabecera.
   const body = useMemo(() => htmlImagesToMarkdown(stripFrontmatter(content)), [content]);
+  const transformUrl = useCallback((value: string, key: string, node: { tagName: string }) => key === "src" && node.tagName === "img" && onImageClick && /^(?:data:image\/(?:png|jpe?g|webp|gif);base64,|file:\/\/)/i.test(value) ? value : defaultUrlTransform(value), [onImageClick]);
 
   // Os componentes ficam os mesmos entre um render e outro. Funções novas a cada render fazem o React desmontar e
   // remontar o markdown de todas as falas da conversa a cada mensagem nova: a rolagem e o estado dos blocos de código se perdem.
@@ -213,13 +214,13 @@ export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock
         </Button>
     ),
     img: ({ alt, src }) => (loadImage && typeof src === "string" && src ? (
-        <LoadedImage src={src} alt={alt ?? ""} load={loadImage} />
+        <LoadedImage src={src} alt={alt ?? ""} load={loadImage} onOpen={onImageClick} />
     ) : (
         <span className="text-[11px] italic text-gray-400 dark:text-white/30">
           {alt ? `🖼 ${alt}` : null}
         </span>
     )),
-  }), [size, renderCodeBlock]);
+  }), [size, renderCodeBlock, onImageClick]);
 
   return (
     <div className={`flex flex-col gap-3 ${size.root}`}>
@@ -227,6 +228,7 @@ export function Markdown({ content, loadImage, tone = "compact", renderCodeBlock
         remarkPlugins={renderMath ? REMARK_MATH : REMARK}
         rehypePlugins={renderMath ? REHYPE_MATH : undefined}
         components={components}
+        urlTransform={transformUrl}
       >
         {body}
       </ReactMarkdown>

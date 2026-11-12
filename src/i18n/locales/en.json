@@ -5815,6 +5815,7 @@
   "chat.attach.lightbox.markLayer": "Markup layer",
   "chat.attach.lightbox.tools": "Image tools",
   "chat.attach.lightbox.mark": "Freehand markup",
+  "chat.attach.lightbox.strokeWidth": "Stroke thickness",
   "chat.attach.lightbox.comment": "Comment",
   "chat.attach.lightbox.removeBackground": "Remove background",
   "chat.attach.lightbox.removeBackgroundUnavailable": "Background removal is unavailable right now",
