@@ -14,7 +14,7 @@ export function useMediaViewer(): MediaViewerApi | null {
 }
 
 /** Compartilha a galeria entre anexos do composer e de todas as mensagens montadas da conversa. */
-export function MediaViewerProvider({ children }: { children: React.ReactNode }) {
+export function MediaViewerProvider({ children, target, cwd }: { children: React.ReactNode; target: string | null; cwd: string | null }) {
   const [sources, setSources] = useState<Record<string, LightboxImage[]>>({});
   const [activePath, setActivePath] = useState<string | null>(null);
   const media = useMemo(() => Object.values(sources).flat().filter((item, index, all) => all.findIndex((candidate) => candidate.path === item.path) === index), [sources]);
@@ -26,6 +26,6 @@ export function MediaViewerProvider({ children }: { children: React.ReactNode })
 
   return <MediaViewerContext.Provider value={api}>
     {children}
-    {index >= 0 && <Lightbox images={media} index={index} onIndex={(next) => setActivePath(media[next]?.path ?? null)} onClose={() => setActivePath(null)} />}
+    {index >= 0 && <Lightbox images={media} index={index} composerTarget={target} cwd={cwd} onIndex={(next) => setActivePath(media[next]?.path ?? null)} onClose={() => setActivePath(null)} />}
   </MediaViewerContext.Provider>;
 }

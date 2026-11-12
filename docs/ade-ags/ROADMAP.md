@@ -176,7 +176,7 @@ Depende de: 5.
 
 **Etapa 21 concluída:** (a) "Limpar worktrees" no detalhe da missão encerrada (dry-run primeiro; recusa alterações não commitadas ou commits fora do master e mostra o bloqueio; junction de `node_modules` removida antes, pela API do SO); (b) `ags mission cleanup <id> [--dry-run]` e `ags worktrees list|prune` (órfãos, tamanho e o que impede a limpeza); (c) conflitos de integração resolvidos na app, com as duas versões lado a lado e "manter o meu / o do master / os dois" (fusão pura testada; ROADMAP e locales JSON mantêm os dois lados). Código não trivial segue para o agente/usuário. Detalhes em [MISSION_CLEANUP.md](./MISSION_CLEANUP.md).
 
-**Visualizador de mídia do chat — entrega inicial:** diálogo sobreposto com navegação pela galeria de anexos montados, zoom, marcação, comentários com coordenadas, redimensionamento em proporção, player para anexos de vídeo e captura de quadro. Limites e itens pendentes estão em [VISUALIZADOR_MIDIA.md](./VISUALIZADOR_MIDIA.md).
+**Visualizador de mídia do chat — entrega inicial:** diálogo sobreposto com navegação pela galeria de anexos montados, zoom, marcação achatada e anexável, comentários com coordenadas, redimensionamento em proporção, player para anexos de vídeo e captura de quadro anexável. Limites e itens pendentes estão em [VISUALIZADOR_MIDIA.md](./VISUALIZADOR_MIDIA.md).
 
 ## 8. MCP interno da ADE
 

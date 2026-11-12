@@ -227,7 +227,7 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
               (como no Claude Code). A conversa é sempre o primeiro filho, então ligar o Resumo não a remonta. */}
           <div className="flex-1 min-h-0 flex">
           <div className="flex-1 min-w-[320px] min-h-0 flex flex-col">
-            <MediaViewerProvider>
+            <MediaViewerProvider target={active?.tabId ?? null} cwd={active?.cwd ?? null}>
             <AttachCwdContext.Provider value={active?.cwd ?? null}>
               {/* O «Rodar» dos blocos de código vai ao terminal da pasta da conversa aberta. */}
               <RunCodeContext.Provider value={runCode}>

@@ -2,8 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { savePastedImage } from "@/features/terminal/ipc";
 
-import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, FitIcon, MinusIcon, PanelRightIcon, PenIcon, PlusIcon, TrashIcon, UndoIcon, XIcon } from "../chatIcons";
+import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, FitIcon, MinusIcon, PanelRightIcon, PenIcon, PlayIcon, PlusIcon, TrashIcon, UndoIcon, XIcon, FilePlusIcon } from "../chatIcons";
+import { attachToComposer } from "../store";
+import { setRightPanel } from "../store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { insideCwd } from "./openAttachment";
 import { commentsForMessage, filterMedia, nextMediaIndex, resizeDimensions, undoStroke, type ImageComment, type MarkPoint, type MarkStroke, type MediaFilter } from "./mediaViewerModel";
 import { setImageContext } from "./imageContext";
 import { useImagePreview } from "./useImagePreview";
@@ -21,7 +27,7 @@ export function stepIndex(index: number, step: 1 | -1, count: number): number {
 }
 
 /** Visualizador em portal: o conteúdo por trás segue montado, inclusive terminais e navegadores. */
-export function Lightbox({ images, index, onIndex, onClose }: { images: LightboxImage[]; index: number; onIndex: (next: number) => void; onClose: () => void }) {
+export function Lightbox({ images, index, composerTarget = null, cwd = null, onIndex, onClose }: { images: LightboxImage[]; index: number; composerTarget?: string | null; cwd?: string | null; onIndex: (next: number) => void; onClose: () => void }) {
   const { t } = useTranslation();
   const closeRef = useRef<HTMLButtonElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
@@ -43,7 +49,8 @@ export function Lightbox({ images, index, onIndex, onClose }: { images: Lightbox
   const [resizeHeight, setResizeHeight] = useState("");
   const [dockPosition, setDockPosition] = useState({ x: 0, y: 0 });
   const [dragDock, setDragDock] = useState(false);
-  const [filter, setFilter] = useState<MediaFilter>("all");
+  const [filter, setFilter] = useState<MediaFilter>(current.kind === "video" ? "video" : "image");
+  const [saveError, setSaveError] = useState<string | null>(null);
   const dockStart = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
 
   useEffect(() => {
@@ -54,8 +61,8 @@ export function Lightbox({ images, index, onIndex, onClose }: { images: Lightbox
 
   useEffect(() => {
     setEditedSrc(null); setZoom(1); setOffset({ x: 0, y: 0 }); setStrokes([]); setRedo([]); setComments([]);
-    setTool("view"); setCommentDraft(null);
-  }, [current.path]);
+    setTool("view"); setCommentDraft(null); setFilter(current.kind === "video" ? "video" : "image");
+  }, [current.path, current.kind]);
 
   const go = (step: 1 | -1) => onIndex(stepIndex(index, step, images.length));
   const visibleMedia = filterMedia(images.map((image) => ({ ...image, kind: image.kind ?? "image" })), filter);
@@ -125,6 +132,27 @@ export function Lightbox({ images, index, onIndex, onClose }: { images: Lightbox
     if (!src) return;
     const link = document.createElement("a"); link.href = strokes.length > 0 || comments.length > 0 ? flattenMarks() ?? src : src; link.download = current.name; link.click();
   };
+  const saveToComposer = async () => {
+    if (!src) return;
+    setSaveError(null);
+    if (!editedSrc && strokes.length === 0 && comments.length === 0) {
+      setImageContext(current.path, comments);
+      attachToComposer([current.path], composerTarget);
+      return;
+    }
+    const dataUrl = strokes.length > 0 || comments.length > 0 ? flattenMarks() ?? src : src;
+    const encoded = dataUrl.slice(dataUrl.indexOf(",") + 1);
+    const binary = atob(encoded);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    try {
+      const path = await savePastedImage(bytes, "image/png");
+      setImageContext(path, comments);
+      attachToComposer([path], composerTarget);
+    } catch (error) {
+      setSaveError(String(error));
+      throw error;
+    }
+  };
   const captureFrame = () => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
@@ -134,6 +162,11 @@ export function Lightbox({ images, index, onIndex, onClose }: { images: Lightbox
   };
   const currentComments = commentsForMessage(comments);
   const surfaceButton = "rounded-lg px-3 py-2 text-sm text-gray-700 dark:text-gray-100 hover:bg-gray-200/80 dark:hover:bg-white/10 disabled:opacity-40";
+  const openInSidePanel = () => {
+    if (!insideCwd(cwd, current.path)) return;
+    useViewTabsStore.getState().openFile(cwd!, current.path);
+    setRightPanel("files");
+  };
 
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label={t("chat.attach.lightbox.label", { index: index + 1, count: images.length, name: current.name })}
@@ -153,7 +186,15 @@ export function Lightbox({ images, index, onIndex, onClose }: { images: Lightbox
           <button type="button" className={surfaceButton} aria-label={t("chat.attach.lightbox.zoomIn")} onClick={() => setZoom((value) => Math.min(4, value + 0.1))}><PlusIcon className="h-4 w-4" /></button>
           <button type="button" className={surfaceButton} onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }); }} aria-label={t("chat.attach.lightbox.fit")}><FitIcon className="h-4 w-4" /></button>
           <button type="button" className={surfaceButton} onClick={download} aria-label={t("chat.attach.lightbox.download")}><DownloadIcon className="h-4 w-4" /></button>
-          <button type="button" className={surfaceButton} aria-label={t("chat.attach.lightbox.sidePanel")}><PanelRightIcon className="h-4 w-4" /></button>
+          <button type="button" className={surfaceButton} onClick={() => { void saveToComposer().catch(console.error); }} aria-label={t("chat.attach.lightbox.attachResult")}><FilePlusIcon className="h-4 w-4" /></button>
+          <details className="relative">
+            <summary className={`${surfaceButton} list-none cursor-pointer`}>{t("chat.attach.lightbox.open")} <ChevronDownIcon className="ml-1 inline h-4 w-4" /></summary>
+            <div className="absolute right-0 top-full z-30 mt-1 flex min-w-48 flex-col rounded-lg border border-gray-200 bg-surface-1 p-1 shadow-xl dark:border-white/10 dark:bg-gray-900">
+              <button type="button" className="rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-white/10" onClick={() => { void openPath(current.path).catch(console.error); }}>{t("chat.attach.lightbox.openDefault")}</button>
+              <button type="button" className="rounded-md px-3 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-white/10" onClick={() => { void revealItemInDir(current.path).catch(console.error); }}>{t("chat.attach.lightbox.reveal")}</button>
+            </div>
+          </details>
+          <button type="button" className={surfaceButton} disabled={!insideCwd(cwd, current.path)} onClick={openInSidePanel} aria-label={t("chat.attach.lightbox.sidePanel")}><PanelRightIcon className="h-4 w-4" /></button>
           <button ref={closeRef} type="button" onClick={onClose} aria-label={t("chat.attach.lightbox.close")} className={surfaceButton}><XIcon className="h-4 w-4" /></button>
         </div>
       </header>
@@ -161,7 +202,7 @@ export function Lightbox({ images, index, onIndex, onClose }: { images: Lightbox
         {visibleMedia.length > 1 && <aside aria-label={t("chat.attach.lightbox.gallery")} className="z-10 flex w-[4.5rem] shrink-0 flex-col gap-2 overflow-y-auto border-r border-gray-200/60 p-2 dark:border-white/10">
           {visibleMedia.map((image) => { const i = images.findIndex((item) => item.path === image.path); return <button key={image.path} type="button" onClick={() => onIndex(i)} aria-label={t("chat.attach.lightbox.goTo", { name: image.name })} aria-current={i === index ? "true" : undefined}
             className={`h-14 w-14 overflow-hidden rounded-lg ring-2 ${i === index ? "ring-accent-500" : "ring-transparent opacity-70 hover:opacity-100"}`}>
-            {image.preview ? <img src={image.preview} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center bg-gray-200 text-xs dark:bg-white/10">{image.kind === "video" ? "▶" : i + 1}</span>}
+            {image.preview ? <img src={image.preview} alt="" className="h-full w-full object-cover" /> : <span className="flex h-full items-center justify-center bg-gray-200 text-xs dark:bg-white/10">{image.kind === "video" ? <PlayIcon className="h-5 w-5" /> : i + 1}</span>}
           </button>; })}
         </aside>}
         <main className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden p-6" onPointerDown={(event) => { if (zoom > 1 && tool === "view") { const start = { x: event.clientX, y: event.clientY, offset }; const move = (e: PointerEvent) => setOffset({ x: start.offset.x + e.clientX - start.x, y: start.offset.y + e.clientY - start.y }); const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, { once: true }); } }}>
@@ -194,11 +235,12 @@ export function Lightbox({ images, index, onIndex, onClose }: { images: Lightbox
           <button className="rounded-md bg-accent-500 px-3 py-2 text-sm text-white" type="submit">{t("chat.attach.lightbox.saveComment")}</button>
         </form>}
         {showResize && <form className="flex items-end gap-2 rounded-xl bg-surface-1 p-3 shadow-xl dark:bg-gray-900" onSubmit={(e) => { e.preventDefault(); resizeImage("width"); }}>
-          <label className="text-xs">{t("chat.attach.lightbox.width")}<input type="number" min="1" value={resizeWidth} onChange={(e) => setResizeWidth(e.target.value)} className="mt-1 block w-24 rounded bg-gray-100 p-2 text-sm dark:bg-white/10" /></label>
-          <label className="text-xs">{t("chat.attach.lightbox.height")}<input type="number" min="1" value={resizeHeight} onChange={(e) => setResizeHeight(e.target.value)} className="mt-1 block w-24 rounded bg-gray-100 p-2 text-sm dark:bg-white/10" /></label>
+          <label className="text-xs">{t("chat.attach.lightbox.width")}<input type="number" min="1" value={resizeWidth} onChange={(e) => { const width = e.target.value; setResizeWidth(width); const image = imageRef.current; if (image && Number(width) > 0) setResizeHeight(String(Math.round(Number(width) * image.naturalHeight / image.naturalWidth))); }} className="mt-1 block w-24 rounded bg-gray-100 p-2 text-sm dark:bg-white/10" /></label>
+          <label className="text-xs">{t("chat.attach.lightbox.height")}<input type="number" min="1" value={resizeHeight} onChange={(e) => { const height = e.target.value; setResizeHeight(height); const image = imageRef.current; if (image && Number(height) > 0) setResizeWidth(String(Math.round(Number(height) * image.naturalWidth / image.naturalHeight))); }} className="mt-1 block w-24 rounded bg-gray-100 p-2 text-sm dark:bg-white/10" /></label>
           <button type="submit" className="rounded bg-accent-500 px-3 py-2 text-sm text-white">{t("chat.attach.lightbox.applyResize")}</button>
         </form>}
         {currentComments && <p className="max-w-[70vw] whitespace-pre-line rounded-lg bg-surface-1/90 px-3 py-2 text-xs shadow dark:bg-gray-900/90">{currentComments}</p>}
+        {saveError && <p role="alert" className="max-w-[70vw] rounded-lg bg-surface-1/90 px-3 py-2 text-xs text-red-700 shadow dark:bg-gray-900/90 dark:text-red-300">{t("chat.attach.lightbox.saveError", { error: saveError })}</p>}
         <button type="button" onClick={flattenMarks} className="sr-only" aria-label={t("chat.attach.lightbox.flattenMarks")}>{t("chat.attach.lightbox.flattenMarks")}</button>
       </div>
     </div>,
