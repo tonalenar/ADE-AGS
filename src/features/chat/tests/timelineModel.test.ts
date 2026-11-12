@@ -148,11 +148,17 @@ describe("o raciocínio do agente na timeline", () => {
     expect(visibleTurnBody(superseded, true, true).map((row) => row.key)).toContain("r2");
   });
 
-  it("durante o turno mantém só o resumo mais recente, inclusive quando já começou outra atividade", () => {
-    const turn = timelineTurns([user("u1"), think("r1"), tool("t1"), think("r2"), tool("t2")])[0]!;
-    expect(visibleTurnBody(turn, false).filter((row) => row.type === "reasoning").map((row) => row.key)).toEqual(["r2"]);
-    expect(visibleTurnBody(turn, false).map((row) => row.key)).toContain("t1");
-    expect(visibleTurnBody(turn, false).map((row) => row.key)).toContain("t2");
+  it("durante o turno o raciocínio só aparece enquanto é a última atividade", () => {
+    const pensando = timelineTurns([user("u1"), tool("t1"), think("r1")])[0]!;
+    expect(visibleTurnBody(pensando, true).map((row) => row.key)).toEqual(["t1", "r1"]);
+
+    const seguiu = timelineTurns([user("u1"), think("r1"), tool("t1"), think("r2"), tool("t2")])[0]!;
+    const rows = visibleTurnBody(seguiu, true);
+    expect(rows.filter((row) => row.type === "reasoning")).toEqual([]);
+    // As ferramentas que o raciocínio separava viram uma linha-resumo só.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.type === "work" && rows[0]!.tools.map((t) => t.id)).toEqual(["t1", "t2"]);
+    expect(visibleTurnBody(seguiu, true, true).filter((row) => row.type === "reasoning").map((row) => row.key)).toEqual(["r1", "r2"]);
   });
 
   it("vira uma linha do corpo, na ordem em que chegou, e não tira a resposta final do lugar", () => {
