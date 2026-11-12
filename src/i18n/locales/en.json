@@ -5123,6 +5123,8 @@
   "chat.permission.allow": "Allow",
   "chat.permission.noteTerminal": "The agent waits until you answer. Answering in the chat or in the terminal is the same: both see the same request.",
   "chat.permission.note": "The agent waits until you answer.",
+  "chat.permission.expand": "Expand command",
+  "chat.permission.collapse": "Collapse command",
   "chat.inbox.label": "Permissions inbox",
   "chat.inbox.title": "Permissions",
   "chat.inbox.subtitle": "from all agents",

@@ -50,6 +50,8 @@ const graph = (turn: Partial<HarnessExecutionNode>): HarnessExecutionGraph => ({
   nodes: [
     node({ id: "thread:raiz", kind: "thread", status: "active" }),
     node({ id: "turn:raiz:t1", kind: "turn", status: "completed", parentId: "thread:raiz", chatRunId: "t1", runId: "t1", ...turn }),
+    // A linha «Trabalho delegado» só existe com algo delegado: uma tarefa da Frota basta.
+    node({ id: "task:k1", kind: "fleetTask", status: "completed", parentId: "turn:raiz:t1", depth: 2, childType: "fleet_task" }),
   ],
 });
 

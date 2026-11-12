@@ -215,7 +215,10 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
     }
     return { byParent, unattached };
   }, [graphEvents, rows]);
-  if (rows.length === 0 && childCount === 0) return null;
+  // Sem nada delegado (zero tarefas, zero conversas filhas e nenhum filho no grafo, como a sessão conectada)
+  // a linha não aparece, mesmo com turnos no grafo.
+  const delegated = tasks.length > 0 || childCount > 0 || graphNodes.some((node) => node.childType);
+  if (!delegated) return null;
 
   const setExpanded = (row: TreeRow, expanded: boolean) => {
     setToggles((current) => ({ ...current, [row.node.id]: expanded }));

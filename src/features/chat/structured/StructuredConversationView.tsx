@@ -181,6 +181,8 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
 
   const composer = (
       <ComposerColumn>
+        {/* O pedido de permissão vai colado ao composer, sempre à vista. */}
+        {ask && <PermissionCard ask={ask} terminal={false} />}
         {(goal || goalNotice === "none") && (
           <div className="mb-2 flex min-w-0 items-center gap-2 rounded-lg border border-gray-200/80 dark:border-white/10 bg-gray-50/80 dark:bg-white/[0.03] px-3 py-2 text-chat-caption">
             {goal ? (
@@ -294,7 +296,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
     <div className="flex-1 min-h-0 flex flex-col">
       <ChatFrame composer={composer} list={(bottomInset) => (
         <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={shownItems} loaded={hydrated || (side?.history.length ?? 0) > 0} truncated={side?.truncated ?? false} working={working || !!request} live
-          approval={note} approvalCard={ask ? <PermissionCard ask={ask} terminal={false} /> : null}
+          approval={ask ? null : note} approvalDocked={!!ask}
           streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} threadId={thread.id}
           conversationKey={key} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearThreadSearchJump}
           onAnswer={question ? answer : undefined} onResend={resend}
