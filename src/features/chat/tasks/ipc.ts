@@ -9,6 +9,8 @@ export interface TaskOutput {
   output: string;
   total_bytes: number;
   truncated: boolean;
+  /** O log para onde o comando mandou a saída, quando o arquivo da própria tarefa ficou vazio. */
+  source?: string;
 }
 
 /** O fim da saída de um shell em segundo plano (os últimos 8 KiB; só leitura, sem turno de modelo). */

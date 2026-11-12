@@ -110,6 +110,17 @@ describe("o painel de tarefas", () => {
     expect(host.textContent).not.toContain("Achei dois problemas");
   });
 
+  it("mostra de qual log veio a saída quando o comando redirecionou", async () => {
+    seed();
+    invokeMock.on("chat_task_output", () => ({ output: "Metro waiting", total_bytes: 13, truncated: false, source: "/tmp/metro.log" }));
+    await mount(<TasksPanel conversation={card("th-1")} />);
+    await click([...host.querySelectorAll("button")].find((b) => b.textContent?.includes("chat.tasks.children"))!);
+    await click(byLabel('chat.tasks.openDetail:{"title":"Rodar testes"}'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(host.textContent).toContain("Metro waiting");
+    expect(host.textContent).toContain("chat.tasks.outputFrom");
+  });
+
   it("o detalhe de um shell lê a saída pelo chat_task_output", async () => {
     seed();
     invokeMock.on("chat_task_output", () => ({ output: "PASS 12 testes", total_bytes: 14, truncated: false }));
