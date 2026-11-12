@@ -68,6 +68,16 @@ export interface Turn {
   notice?: TimelineItem;
 }
 
+/** O corpo encerrado só aparece quando a pessoa abre o log de trabalho. */
+export function visibleTurnBody(turn: Turn, expanded: boolean): BodyRow[] {
+  if (expanded) return turn.body;
+  if (turn.end !== null) return [];
+  const latestReasoning = [...turn.body].reverse().find((row) => row.type === "reasoning");
+  return latestReasoning
+    ? turn.body.filter((row) => row.type !== "reasoning" || row.key === latestReasoning.key)
+    : turn.body;
+}
+
 /** Soma as edições por arquivo, na ordem em que apareceram. */
 export function changedFiles(tools: TimelineItem[]): ChangedFile[] {
   const byPath = new Map<string, ChangedFile>();
