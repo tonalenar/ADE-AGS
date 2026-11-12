@@ -10,11 +10,17 @@
 //!   imagem deles (`localImage` do app-server, `promptCapabilities.image` do ACP).
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::time::Duration;
 
 use base64::Engine as _;
 use serde::Serialize;
 use serde_json::{Value, json};
+#[cfg(target_os = "macos")]
+use crate::util::spawn;
+
+const MEDIA_TOOLS_HELPER: &str = "ade-image-tools";
 
 /// Uma imagem enviada em linha (base64) passa disto para o caminho no texto: o limite da API do Claude.
 pub const INLINE_IMAGE_MAX: u64 = 5 * 1024 * 1024;
@@ -94,6 +100,55 @@ pub fn read_preview(path: &str) -> Result<ImageData, String> {
     Ok(ImageData { mime, data_url: format!("data:{mime};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)) })
 }
 
+fn media_tools_helper_path() -> Option<PathBuf> {
+    let executable = std::env::current_exe().ok()?;
+    let directory = executable.parent()?;
+    let mut candidates = vec![
+        directory.join("../Resources/binaries").join(MEDIA_TOOLS_HELPER),
+        directory.join("binaries").join(MEDIA_TOOLS_HELPER),
+        directory.join(MEDIA_TOOLS_HELPER),
+    ];
+    if cfg!(debug_assertions) {
+        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("binaries").join(MEDIA_TOOLS_HELPER));
+    }
+    candidates.into_iter().find(|path| path.is_file())
+}
+
+pub fn background_removal_available() -> bool {
+    cfg!(target_os = "macos") && media_tools_helper_path().is_some()
+}
+
+pub fn remove_background(path: &str) -> Result<String, String> {
+    let input = Path::new(path);
+    if !input.is_absolute() {
+        return Err("caminho não absoluto".into());
+    }
+    // Confere caminho, tipo e limite antes de entregar o arquivo ao helper.
+    read_image(path, PREVIEW_IMAGE_MAX)?;
+    #[cfg(not(target_os = "macos"))]
+    {
+        return Err("remoção de fundo disponível só no macOS".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let helper = media_tools_helper_path().ok_or("helper de imagem não disponível")?;
+        let input = input.canonicalize().map_err(|error| error.to_string())?;
+        let output = std::env::temp_dir().join(format!("ade-sem-fundo-{}.png", uuid::Uuid::new_v4()));
+        let mut command = spawn::hidden_command(helper);
+        command.arg("remove-background").arg(input).arg(&output);
+        let result = spawn::output(&mut command, Duration::from_secs(120)).map_err(|error| error.to_string())?;
+        if !result.status.success() {
+            let _ = fs::remove_file(&output);
+            let error = String::from_utf8_lossy(&result.stderr).trim().to_string();
+            return Err(if error.is_empty() { "não foi possível remover o fundo".into() } else { error });
+        }
+        if !output.is_file() {
+            return Err("o helper não gerou uma imagem".into());
+        }
+        Ok(output.to_string_lossy().into_owned())
+    }
+}
+
 /// Os blocos `image` (base64) do Claude para estes caminhos. Uma imagem que não cabe nos limites, ou
 /// que não se lê, NÃO derruba a mensagem: segue só pelo caminho que já está no texto. Devolve também
 /// os caminhos que ficaram de fora, para quem chama avisar.
@@ -124,4 +179,14 @@ pub fn chat_attachment_inspect(paths: Vec<String>) -> Vec<Inspected> {
 #[tauri::command]
 pub fn chat_attachment_read(path: String) -> Result<ImageData, String> {
     read_preview(&path)
+}
+
+#[tauri::command]
+pub fn chat_attachment_remove_background_available() -> bool {
+    background_removal_available()
+}
+
+#[tauri::command]
+pub fn chat_attachment_remove_background(path: String) -> Result<String, String> {
+    remove_background(&path)
 }

@@ -58,6 +58,7 @@ export const MinimizeIcon = (p: IconProps) => <Svg {...p}><path d="M4 14h6v6M20 
 export const PlusIcon = (p: IconProps) => <Svg {...p}><path d="M12 5v14M5 12h14" /></Svg>;
 export const MinusIcon = (p: IconProps) => <Svg {...p}><path d="M5 12h14" /></Svg>;
 export const DownloadIcon = (p: IconProps) => <Svg {...p}><path d="M12 3v12M7 10l5 5 5-5M4 20h16" /></Svg>;
+export const CutoutIcon = (p: IconProps) => <Svg {...p}><rect x="3" y="3" width="18" height="18" rx="3" /><path d="M7 17 17 7M7 7h.01M17 17h.01" /></Svg>;
 export const ShieldOffIcon = (p: IconProps) => <Svg {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" /><path d="m3 3 18 18" /></Svg>;
 export const ZapIcon = (p: IconProps) => <Svg {...p}><path d="M13 2 4 14h7l-1 8 9-12h-7Z" /></Svg>;
 export function StarIcon({ className = "w-4 h-4", filled = false }: IconProps & { filled?: boolean }) {

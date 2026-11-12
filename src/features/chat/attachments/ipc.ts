@@ -16,3 +16,7 @@ export const inspectPaths = (paths: string[]) => invoke<Inspected[]>("chat_attac
 
 /** Uma imagem de um caminho que a pessoa anexou, como URL de dados (miniatura e visualizador). */
 export const readImage = (path: string) => invoke<{ mime: string; dataUrl: string }>("chat_attachment_read", { path });
+
+/** Remove o fundo localmente pelo Vision no macOS quando o helper está empacotado. */
+export const backgroundRemovalAvailable = () => invoke<boolean>("chat_attachment_remove_background_available");
+export const removeImageBackground = (path: string) => invoke<string>("chat_attachment_remove_background", { path });
