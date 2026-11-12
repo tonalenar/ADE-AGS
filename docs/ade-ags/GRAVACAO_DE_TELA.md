@@ -52,6 +52,29 @@ O registro guarda só caminhos e ids de alvo, nunca conteúdo de tela (`src/feat
 
 O botão circular fica na barra inferior do espelho de iPhone e nos painéis iOS/Android. No composer, o botão de câmera faz o SnapShot (com o seletor de tela ou janela ao lado) e o botão **Tela principal** grava vídeo. A gravação de vídeo do Mac ainda grava só o display principal, inteiro — ADE, navegador, espelho e outras janelas — e não tem seletor. Windows e Linux ainda não têm captura nem gravação da tela do computador.
 
+## Quando a gravação falha
+
+Antes, a ferramenta de captura rodava com a saída descartada, e qualquer falha (o processo morrer, o arquivo não existir) virava "A gravação não gerou um vídeo finalizado". Além de esconder o motivo, a falha só aparecia ao parar: a ferramenta podia morrer um segundo depois de iniciar (aparelho bloqueado, iPhone desconectado, simulador desligado) e a ADE seguia dizendo "Gravando". Ao parar com erro, a gravação também continuava "ativa", e o botão ficava preso até reiniciar a ADE.
+
+Agora (`src-tauri/src/screen_recording.rs`):
+
+- **Saída capturada.** stdout e stderr da ferramenta ficam num registro curto (os últimos 8 KiB). `explain_failure` reconhece as causas que a pessoa resolve e, nas demais, mostra o código de saída e o fim da saída.
+- **Falha logo ao iniciar.** O `simctl` é aguardado até imprimir "Recording started" (10 s); o `devicectl` e o `adb` têm uma janela de 3 s e 2 s para morrer cedo. Se saírem, o erro aparece ao iniciar, com o motivo.
+- **Parar sem travar.** O Ctrl+C (SIGINT) enviado antes de a ferramenta instalar o tratador se perde: o `simctl` ignora o sinal e segue gravando (reproduzido num simulador). A parada repete o sinal 4 vezes (6 s cada) e só então encerra o processo à força, dizendo que o vídeo pode estar incompleto. Antes, `wait()` ficava preso para sempre, com o mutex da gravação travado, e o `screen_recording_status` (que roda na thread da interface) congelava junto.
+- **Sempre solta o estado.** Depois de parar, com sucesso ou erro, não há mais gravação ativa.
+
+| Situação | O que a pessoa vê |
+|---|---|
+| macOS negou a Gravação de Tela (tela do Mac) | aviso com botão **Abrir Gravação de Tela**, o caminho Ajustes do Sistema → Privacidade e Segurança → Gravação de Tela e Áudio do Sistema e a dica de remover e adicionar a ADE de novo depois de trocar a assinatura. O backend marca o erro com `SCREEN_CAPTURE_PERMISSION_REQUIRED:` |
+| Sem permissão de escrita na pasta de vídeos | caminho Arquivos e Pastas / Acesso Total ao Disco |
+| Simulador desligado | "O simulador iOS não está ligado" |
+| iPhone bloqueado, sem Modo de Desenvolvedor ou desconectado | o que fazer em cada caso |
+| Outra falha | código de saída (ou sinal) e as últimas linhas que a ferramenta escreveu |
+
+A permissão de Gravação de Tela só vale para a **tela do Mac** (ScreenCaptureKit). `devicectl` e `simctl` não dependem dela.
+
+**Espelho do iPhone físico.** Gravar os próprios quadros do espelho (HEVC já recebido pelo app) evitaria depender do `devicectl`, mas exige empacotar o HEVC em MP4 (AVAssetWriter ou muxer próprio) e foi deixado de fora: sem um iPhone para validar, não há como provar que o arquivo sai tocável. Se o `devicectl screen-record` falhar de forma recorrente com o espelho aberto, o registro agora mostra por quê, e essa decisão pode ser revista com o texto real do erro em mãos.
+
 ## Arquivo e envio
 
 Os arquivos ficam na pasta de vídeos reconhecida pelo sistema operacional, dentro de `ADE AGS`. Ao parar a gravação, a ADE anexa o caminho ao rascunho da conversa aberta. Nada é enviado automaticamente: a pessoa pode revisar o vídeo e decidir se envia.
