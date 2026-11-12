@@ -442,6 +442,8 @@ pub fn run() {
             crate::conversa::chat_thread_switch_agent,
             crate::conversa::chat_attachment_inspect,
             crate::conversa::chat_attachment_read,
+            crate::conversa::chat_attachment_remove_background_available,
+            crate::conversa::chat_attachment_remove_background,
             crate::conversa::chat_thread_items,
             crate::conversa::chat_thread_search,
             crate::conversa::chat_thread_requests,

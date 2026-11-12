@@ -2,6 +2,7 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { threadIdOf } from "../structured/model";
 import { mentionsFor, withAttachmentBlock, type Attachment } from "./attachModel";
+import { takeImageContext } from "./imageContext";
 
 /**
  * O texto (e as imagens em linha) de uma mensagem com anexos para a conversa `ref`. O caminho de cada
@@ -20,12 +21,15 @@ export function messageFor(ref: string, text: string, attachments: Attachment[])
 /** Para uma conversa por protocolo (que pode ainda nem existir, na tela "Nova conversa"). Pura. */
 export function threadMessage(text: string, attachments: Attachment[]): { text: string; images: string[] } {
   if (attachments.length === 0) return { text, images: [] };
-  return { text: withAttachmentBlock(text, attachments), images: attachments.filter((a) => a.kind === "image").map((a) => a.path) };
+  const context = takeImageContext(attachments.map((a) => a.path));
+  return { text: withAttachmentBlock(`${text}${context}`, attachments), images: attachments.filter((a) => a.kind === "image").map((a) => a.path) };
 }
 
 /** Para uma aba com TUI: `@caminho` no fim do texto (o resumo do time continua abrindo a mensagem). Pura. */
 export function tuiMessage(agentId: string | undefined, text: string, attachments: Attachment[]): string {
   if (attachments.length === 0) return text;
   const mentions = mentionsFor(agentId, attachments).trimEnd();
-  return text.trim() ? `${text.trimEnd()} ${mentions}` : mentions;
+  const context = takeImageContext(attachments.map((a) => a.path));
+  const message = `${text}${context}`.trimEnd();
+  return message ? `${message} ${mentions}` : mentions;
 }

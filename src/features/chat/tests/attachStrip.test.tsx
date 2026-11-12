@@ -4,9 +4,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ revealed: [] as string[], dragHandler: null as null | ((e: { payload: unknown }) => void), terminalAt: null as string | null }));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]), convertFileSrc: (path: string) => path }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
-vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: (p: string) => { mocks.revealed.push(p); return Promise.resolve(); } }));
+vi.mock("@tauri-apps/plugin-opener", () => ({ revealItemInDir: (p: string) => { mocks.revealed.push(p); return Promise.resolve(); }, openPath: (p: string) => { mocks.revealed.push(p); return Promise.resolve(); }, openUrl: () => Promise.resolve() }));
 vi.mock("@tauri-apps/api/webviewWindow", () => ({
   getCurrentWebviewWindow: () => ({ onDragDropEvent: (h: (e: { payload: unknown }) => void) => { mocks.dragHandler = h; return Promise.resolve(() => undefined); } }),
 }));
@@ -17,9 +17,14 @@ vi.mock("react-i18next", () => ({
 vi.mock("../attachments/ipc", () => ({
   inspectPaths: () => Promise.resolve([]),
   readImage: (path: string) => (path.includes("sumiu") ? Promise.reject(new Error("não existe")) : Promise.resolve({ mime: "image/png", dataUrl: `data:image/png;base64,${path.length}` })),
+  backgroundRemovalAvailable: () => Promise.resolve(false),
+  removeImageBackground: (path: string) => Promise.resolve(`${path}.sem-fundo.png`),
 }));
+vi.mock("@/features/terminal/ipc", () => ({ savePastedImage: () => Promise.resolve("/tmp/marked.png") }));
 
-import { AttachmentStrip, type ShownAttachment } from "../attachments/AttachmentStrip";
+import { AttachCwdContext, AttachmentStrip, type ShownAttachment } from "../attachments/AttachmentStrip";
+import { ChatMessageMarkdown } from "../attachments/ChatMessageMarkdown";
+import { MediaViewerProvider } from "../attachments/MediaViewerContext";
 import { activeDropSink, insideRect, registerDropSink, useDropHighlight } from "../attachments/dropRegistry";
 import { DropOverlay } from "../attachments/DropOverlay";
 import { insideCwd } from "../attachments/openAttachment";
@@ -136,6 +141,33 @@ describe("o visualizador (lightbox)", () => {
     await act(async () => { root.render(<AttachmentStrip items={[IMAGES[0]!]} />); });
     await click(host.querySelector("[aria-label='chat.attach.zoom{\"name\":\"a.png\"}']"));
     expect(dialog()!.querySelector("[aria-label='chat.attach.lightbox.next']")).toBeNull();
+  });
+
+  it("compartilha a galeria entre as faixas da conversa e mistura vídeo e imagem", async () => {
+    const video: ShownAttachment = { path: "/p/clip.mp4", name: "clip.mp4", kind: "file", size: 100 };
+    await act(async () => { root.render(<MediaViewerProvider target="tab-1" cwd="/p">
+      <AttachmentStrip items={[IMAGES[0]!]} /><AttachmentStrip items={[IMAGES[1]!, video]} />
+    </MediaViewerProvider>); });
+    await click(host.querySelector("[aria-label='chat.attach.zoom{\"name\":\"a.png\"}']"));
+    expect(dialog()!.getAttribute("aria-label")).toContain('"count":3');
+    await act(async () => { const select = dialog()!.querySelector("select") as HTMLSelectElement; select.value = "all"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+    await key("ArrowRight");
+    await key("ArrowRight");
+    expect(dialog()!.querySelector("video")).not.toBeNull();
+  });
+
+  it("abre pelo clique uma imagem local do Markdown de uma resposta e inclui as demais no carrossel", async () => {
+    await act(async () => {
+      root.render(<MediaViewerProvider target="tab-1" cwd="/p"><AttachCwdContext.Provider value="/p">
+        <ChatMessageMarkdown content={"![a.png](/p/a.png)\n\n![b.png](b.png)"} />
+      </AttachCwdContext.Provider></MediaViewerProvider>);
+      await Promise.resolve(); await Promise.resolve();
+    });
+    const image = host.querySelector('img[alt="a.png"]');
+    expect(image).not.toBeNull();
+    await click(image);
+    expect(dialog()).not.toBeNull();
+    expect(document.querySelectorAll('[aria-label="chat.attach.lightbox.gallery"] button')).toHaveLength(2);
   });
 
   it("stepIndex não passa das pontas", () => {

@@ -1,5 +1,6 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PlayIcon } from "../chatIcons";
 
 import { useSnapshotCaption } from "@/features/recording/snapshotInfo";
 import { windowLabel } from "@/features/recording/snapshotTargets";
@@ -7,6 +8,8 @@ import { windowLabel } from "@/features/recording/snapshotTargets";
 import { FilesIcon, FolderIcon, XIcon } from "../chatIcons";
 import { formatSize, type AttachmentKind } from "./attachModel";
 import { Lightbox } from "./Lightbox";
+import type { LightboxImage } from "./Lightbox";
+import { useMediaViewer } from "./MediaViewerContext";
 import { openAttachment } from "./openAttachment";
 import { useImagePreview } from "./useImagePreview";
 
@@ -38,17 +41,35 @@ export function AttachmentStrip({ items, onRemove, cwd = null, className = "" }:
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState<number | null>(null);
+  const viewer = useMediaViewer();
+  const owner = useId();
   const inherited = useContext(AttachCwdContext);
   const folder = cwd ?? inherited;
+  const images: LightboxImage[] = useMemo(() => items.filter((i) => i.kind === "image" || isVideoName(i.name)).map((item) => ({
+    path: item.path, name: item.name, preview: item.preview ?? null, kind: isVideoName(item.name) ? "video" : "image",
+  })), [items]);
+  useEffect(() => {
+    if (!viewer) return;
+    viewer.register(owner, images);
+    return () => viewer.unregister(owner);
+  }, [viewer, owner, images]);
   if (items.length === 0) return null;
-  const images = items.filter((i) => i.kind === "image");
+  const onOpen = (path: string) => {
+    if (viewer) viewer.open(path);
+    else setOpen(images.findIndex((item) => item.path === path));
+  };
   return (
     <>
       <ul aria-label={t("chat.attach.label")} className={`list-none m-0 p-0 flex flex-wrap gap-2 ${className}`}>
         {items.map((item) => (
           <li key={item.path} className="group relative">
             {item.kind === "image" ? (
-              <ImageCard item={item} onOpen={() => setOpen(images.findIndex((i) => i.path === item.path))} />
+              <ImageCard item={item} onOpen={() => onOpen(item.path)} />
+            ) : isVideoName(item.name) ? (
+              <button type="button" onClick={() => onOpen(item.path)} aria-label={t("chat.attach.lightbox.openVideo", { name: item.name })} title={item.name}
+                className="flex h-16 max-w-[220px] items-center gap-2 rounded-xl bg-gray-100 px-3 text-left text-gray-800 hover:bg-gray-200/70 dark:bg-white/[0.07] dark:text-gray-100 dark:hover:bg-white/[0.11]">
+                <PlayIcon className="h-5 w-5 shrink-0 text-accent-500" /><span className="truncate text-chat-note font-medium">{item.name}</span>
+              </button>
             ) : (
               <button type="button" onClick={() => openAttachment(item.path, item.kind, folder)} title={item.path}
                 aria-label={t("chat.attach.openFile", { name: item.name })}
@@ -70,11 +91,15 @@ export function AttachmentStrip({ items, onRemove, cwd = null, className = "" }:
           </li>
         ))}
       </ul>
-      {open !== null && images.length > 0 && (
+      {!viewer && open !== null && images.length > 0 && (
         <Lightbox images={images.map((i) => ({ path: i.path, name: i.name, preview: i.preview ?? null }))} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
       )}
     </>
   );
+}
+
+function isVideoName(name: string): boolean {
+  return /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(name);
 }
 
 function ImageCard({ item, onOpen }: { item: ShownAttachment; onOpen: () => void }) {
