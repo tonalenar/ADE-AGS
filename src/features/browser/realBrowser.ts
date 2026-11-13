@@ -8,6 +8,11 @@ export function shouldOpenInRealChrome(url: string, realChrome: boolean | undefi
   return /^https?:\/\//i.test(url);
 }
 
+/** O seletor usa o proxy no Linux e o transporte nativo no CEF/WebView2. */
+export function pickerDisabled(realBrowser: boolean, hasPreviewTarget: boolean): boolean {
+  return !realBrowser && !hasPreviewTarget;
+}
+
 /** Um retângulo em pixels CSS. */
 export type Box = { x: number; y: number; width: number; height: number };
 

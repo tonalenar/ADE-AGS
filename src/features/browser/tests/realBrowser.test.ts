@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { intersect, miniBrowserZoom, placeOf, relativeTo, samePlace, shouldOpenInRealChrome } from "../realBrowser";
+import { intersect, miniBrowserZoom, pickerDisabled, placeOf, relativeTo, samePlace, shouldOpenInRealChrome } from "../realBrowser";
 
 describe("shouldOpenInRealChrome", () => {
   it("sites externos e servidores locais abrem direto no Chromium", () => {
@@ -16,6 +16,17 @@ describe("shouldOpenInRealChrome", () => {
   it("só http(s) conta", () => {
     expect(shouldOpenInRealChrome("about:blank", undefined)).toBe(false);
     expect(shouldOpenInRealChrome("file:///c:/x.html", undefined)).toBe(false);
+  });
+});
+
+describe("botão de selecionar elementos", () => {
+  it("fica disponível no navegador nativo CEF sem target de proxy", () => {
+    expect(pickerDisabled(true, false)).toBe(false);
+  });
+
+  it("continua indisponível no iframe enquanto o proxy não carregou", () => {
+    expect(pickerDisabled(false, false)).toBe(true);
+    expect(pickerDisabled(false, true)).toBe(false);
   });
 });
 

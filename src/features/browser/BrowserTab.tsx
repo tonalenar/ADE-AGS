@@ -47,7 +47,7 @@ import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, t
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
 import { RealBrowserView } from "./RealBrowserView";
-import { shouldOpenInRealChrome, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
+import { shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
 import { FILL_VIEWPORT, isFillViewport, isPhoneViewport, rotate, type Viewport } from "./viewport";
@@ -1176,7 +1176,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     <div className="flex items-center gap-1 h-10 shrink-0 px-2 border-b border-gray-200 dark:border-white/7">
       {navButtons}
       {addressBar}
-      <ToolButton label={picking ? t("browser.pick.stop") : t("browser.pick.start")} disabled={!target} active={picking} onClick={togglePicking}>
+      <ToolButton label={picking ? t("browser.pick.stop") : t("browser.pick.start")} disabled={pickerDisabled(real, !!target)} active={picking} onClick={togglePicking}>
         <PickIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
       <ToolButton plain label={t(visualRecording ? "browser.recording.stop" : "browser.capture.screenshot")} disabled={(!target && !real) || freezing} active={visualRecording}
