@@ -602,10 +602,46 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
             native::cdp(&app, &id, "Emulation.clearDeviceMetricsOverride", json!({})).await?;
         }
     }
+    set_device_chrome(&app, &id, platform.as_deref().filter(|_| mobile)).await;
     native::cdp(&app, &id, "Emulation.setTouchEmulationEnabled", json!({ "enabled": mobile, "maxTouchPoints": if mobile { 5 } else { 1 } })).await?;
     native::cdp(&app, &id, "Emulation.setEmitTouchEventsForMouse", json!({ "enabled": mobile, "configuration": "mobile" })).await?;
     native::cdp(&app, &id, "Page.reload", json!({ "ignoreCache": false })).await?;
     Ok(())
+}
+
+/// A moldura do aparelho desenhada dentro da página (barra de status e navegador do sistema). Ver `device_chrome.js`.
+const DEVICE_CHROME: &str = include_str!("device_chrome.js");
+
+/// A área que a moldura ocupa, para `env(safe-area-inset-*)` da página (retrato).
+fn device_safe_area(platform: &str) -> Value {
+    if platform == "ios" {
+        json!({ "top": 54, "topMax": 54, "bottom": 34, "bottomMax": 34, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
+    } else {
+        json!({ "top": 36, "topMax": 36, "bottom": 24, "bottomMax": 24, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
+    }
+}
+
+/// Liga a moldura de `platform` em todo documento novo da vista `id` e desliga a anterior; `None` só desliga.
+/// Erros são ignorados: sem moldura a página continua funcionando.
+async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>) {
+    static SCRIPTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    let scripts = SCRIPTS.get_or_init(Default::default);
+    let previous = scripts.lock().ok().and_then(|mut m| m.remove(id));
+    if let Some(identifier) = previous {
+        let _ = native::cdp(app, id, "Page.removeScriptToEvaluateOnNewDocument", json!({ "identifier": identifier })).await;
+    }
+    let Some(platform) = platform else {
+        let _ = native::cdp(app, id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": {} })).await;
+        return;
+    };
+    let _ = native::cdp(app, id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": device_safe_area(platform) })).await;
+    let _ = native::cdp(app, id, "Page.enable", json!({})).await;
+    let source = DEVICE_CHROME.replace("__AGS_PLATFORM__", platform);
+    if let Ok(reply) = native::cdp(app, id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": source })).await {
+        if let (Some(identifier), Ok(mut m)) = (reply["identifier"].as_str(), scripts.lock()) {
+            m.insert(id.to_string(), identifier.to_string());
+        }
+    }
 }
 
 /// O nome do canal da página para o app (`Runtime.addBinding`).
