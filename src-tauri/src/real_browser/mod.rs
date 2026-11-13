@@ -312,7 +312,7 @@ pub async fn real_browser_open(
         if let Some(script) = script {
             native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
             native::cdp(&app, &id, "Runtime.enable", json!({})).await?;
-            native::add_script(&app, &id, format!("{BRIDGE}\n;{script}")).await?;
+            native::add_script(&app, &id, page_script(&script)).await?;
         }
         return real_browser_place(app, window, id, place);
     }
@@ -350,7 +350,7 @@ pub async fn real_browser_open(
         if let Some(script) = script {
             native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
             native::cdp(&app, &id, "Runtime.enable", json!({})).await?;
-            native::add_script(&app, &id, format!("{BRIDGE}\n;{script}")).await?;
+            native::add_script(&app, &id, page_script(&script)).await?;
         }
         let white = json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } });
         let _ = native::cdp(&app, &id, "Emulation.setDefaultBackgroundColorOverride", white).await;
@@ -513,6 +513,19 @@ pub async fn real_browser_navigate(app: AppHandle, id: String, url: String) -> R
 #[tauri::command]
 pub async fn real_browser_history(app: AppHandle, id: String, delta: i32) -> Result<(), String> {
     native::history(&app, &id, delta).await
+}
+
+/// Recarrega a página; com `ignore_cache`, sem o cache (⇧⌘R / "Recarregar sem cache").
+#[tauri::command]
+pub async fn real_browser_reload(app: AppHandle, id: String, ignore_cache: bool) -> Result<(), String> {
+    native::cdp(&app, &id, "Page.reload", json!({ "ignoreCache": ignore_cache })).await.map(|_| ())
+}
+
+/// A ponte e o piloto, só no documento principal e em frames da MESMA origem. Num frame de outra origem (o login
+/// da Apple em `idmsa.apple.com` dentro do App Store Connect, por exemplo) os shims de cookie e storage do piloto
+/// quebravam o formulário; lá a página fica intocada. O bloco `if` mantém o script como estava no topo.
+fn page_script(script: &str) -> String {
+    format!("if (window.top === window || (() => {{ try {{ return window.top.location.origin === location.origin; }} catch (_) {{ return false; }} }})()) {{\n{BRIDGE}\n;{script}\n}}")
 }
 
 /// Fecha o navegador do Portal.
@@ -1001,6 +1014,15 @@ mod test {
         assert!(!popup_allowed("file:///Users/alguem/.ssh/id_rsa"));
         assert!(!popup_allowed("javascript:alert(1)"));
         assert!(!popup_allowed("mailto:login@example.com"));
+    }
+
+    #[test]
+    fn piloto_so_no_topo_e_em_frames_da_mesma_origem() {
+        let s = super::page_script("PILOTO()");
+        assert!(s.starts_with("if (window.top === window ||"));
+        assert!(s.contains("window.top.location.origin === location.origin"));
+        assert!(s.contains("__agsCdpBridge") && s.contains("PILOTO()"));
+        assert!(s.trim_end().ends_with('}'));
     }
 
     #[test]
