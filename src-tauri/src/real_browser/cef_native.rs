@@ -1061,9 +1061,23 @@ mod tests {
     use super::{browser_switches, cef_resources_dir, cef_settings, helper_executable, is_helper_switch, main_bundle_path, visible_at, CefPaths, CEF_FRAMEWORK_BUNDLE};
     use std::{ffi::OsStr, fs, path::{Path, PathBuf}};
 
+    const CHILD_ENV: &str = "ADE_CEF_SETTINGS_TEST_CHILD";
+
     #[test]
     fn configuracao_sem_porta_devtools_com_sandbox_e_helper_da_ade() {
-        // `CefString` usa funções da libcef: o framework precisa estar carregado.
+        // `CefString` usa funções da libcef: o framework precisa estar carregado. Carregar o Chromium
+        // no processo da suíte, com outros testes alocando em paralelo, derruba tudo com SIGSEGV;
+        // por isso a checagem roda num processo filho só dela.
+        if std::env::var_os(CHILD_ENV).is_none() {
+            let exe = std::env::current_exe().unwrap();
+            let status = crate::util::program(exe.to_str().unwrap())
+                .args(["--exact", "real_browser::native::tests::configuracao_sem_porta_devtools_com_sandbox_e_helper_da_ade", "--test-threads=1"])
+                .env(CHILD_ENV, "1")
+                .status()
+                .unwrap();
+            assert!(status.success(), "a checagem da configuração do CEF falhou no processo filho");
+            return;
+        }
         super::load_cef(false).expect("framework CEF do pacote do Cargo");
         let bundle = PathBuf::from("/Applications/ADE AGS.app");
         let settings = cef_settings(&CefPaths {
