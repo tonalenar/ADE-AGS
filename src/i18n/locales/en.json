@@ -3810,6 +3810,8 @@
   "browser.float.dock": "Return preview to the side panel",
   "browser.mini.controls": "Browser thumbnail controls",
   "browser.mini.openPanel": "Open in side panel",
+  "browser.mini.move": "Drag to move",
+  "browser.mini.resize": "Drag to resize",
   "browser.mini.openWindow": "Open in expanded panel",
   "browser.mini.close": "Close thumbnail",
   "terminal.excerpt.header": "[Excerpt from «{{source}}», lines {{from}}–{{to}}]",

@@ -12,6 +12,7 @@ import { AttachCwdContext } from "./attachments/AttachmentStrip";
 import { MediaViewerProvider } from "./attachments/MediaViewerContext";
 import { DropOverlay } from "./attachments/DropOverlay";
 import { DeviceFloatHost } from "./DeviceFloatCard";
+import { clampFloatRect } from "./floatRect";
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
@@ -278,6 +279,15 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
     const state = useChatStore.getState();
     const current = state.browser;
     if (!current || current.viewId !== viewId) return;
+    const bounds = {
+      left: mainRect.left - shellRect.left, top: mainRect.top - shellRect.top,
+      right: mainRect.right - shellRect.left, bottom: mainRect.bottom - shellRect.top,
+    };
+    // Depois que o usuário moveu ou redimensionou, só prende dentro da conversa; não volta ao canto.
+    if (state.browserFloatPinned && state.browserFloatRect) {
+      setChatBrowserFloatRect(clampFloatRect(state.browserFloatRect, bounds));
+      return;
+    }
     const maxWidth = Math.max(280, mainRect.width - 24);
     const sourceRect = current.rect;
     const ratio = sourceRect.width > 0 && sourceRect.height > 0 ? sourceRect.width / sourceRect.height : 4 / 3;

@@ -3810,6 +3810,8 @@
   "browser.float.dock": "Volver con la vista previa al panel lateral",
   "browser.mini.controls": "Controles de la miniatura del navegador",
   "browser.mini.openPanel": "Abrir en el panel lateral",
+  "browser.mini.move": "Arrastrar para mover",
+  "browser.mini.resize": "Arrastrar para redimensionar",
   "browser.mini.openWindow": "Abrir en el panel ampliado",
   "browser.mini.close": "Cerrar miniatura",
   "terminal.excerpt.header": "[Fragmento de «{{source}}», líneas {{from}}–{{to}}]",

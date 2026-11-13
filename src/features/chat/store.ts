@@ -53,6 +53,8 @@ interface ChatState {
   browserFloating: boolean;
   /** Posição e tamanho do mini preview, relativos à casca do chat. */
   browserFloatRect: Rect | null;
+  /** O usuário moveu ou redimensionou a miniatura: não reancorar no canto. */
+  browserFloatPinned: boolean;
   /** O mouse está sobre a página da miniatura (o motor nativo avisa): mostra a pílula de controles. */
   browserMiniHover: boolean;
   /** Um aparelho (iOS ou Android) flutuando sobre a conversa, como o navegador: um preview por vez. `null` = nenhum. */
@@ -198,7 +200,7 @@ const initialColumn = ((): { tabs: ColumnTab[]; active: string | null } => {
 })();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserMiniHover: false, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browserMiniHover: false, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -365,7 +367,7 @@ export function setTerminalOpen(tabId: string, open: boolean): void {
 /** Abre o painel direito nesta aba; `null` fecha. */
 export function setRightPanel(panel: RightPanelTab | null): void {
   useChatStore.setState((s) => {
-    if (panel) return { panel, ...(panel === "browser" ? { browserFloating: false, browserFloatRect: null } : {}) };
+    if (panel) return { panel, ...(panel === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}) };
     // Ao fechar, lembra a aba à vista (o vazio não conta); fechar de novo, já fechado, não apaga a lembrança.
     const last = s.panel && s.panel !== "empty" ? s.panel : s.lastPanel;
     // O cartão flutuante do Resumo só existe com painel; sem ele, volta a coluna (se o Resumo estiver ligado).
@@ -393,7 +395,7 @@ export function openTeamPanelFocused(): void {
 export function addSurface(surface: Surface): void {
   // Abrir a aba de um aparelho na coluna dispensa o flutuante dele: o mesmo aparelho não pode ter duas telas.
   useChatStore.setState((s) => ({ surfaces: s.surfaces.includes(surface) ? s.surfaces : [...s.surfaces, surface], panel: surface,
-    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}),
     deviceFloat: s.deviceFloat === surface ? null : s.deviceFloat }));
 }
 
@@ -424,7 +426,7 @@ export function openColumnTab(kind: ColumnKind, opts: { forceNew?: boolean; prof
     id = next.id;
     return {
       columnTabs: next.tabs, columnActive: next.active, panel: kind, surfaces: withSurface(s.surfaces, kind),
-      ...(kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+      ...(kind === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}),
       // Abrir a aba de um aparelho dispensa o flutuante dele: o mesmo aparelho não pode ter duas telas.
       deviceFloat: s.deviceFloat === kind ? null : s.deviceFloat,
     };
@@ -437,7 +439,7 @@ export function activateColumnTab(id: string): void {
   useChatStore.setState((s) => {
     const tab = s.columnTabs.find((candidate) => candidate.id === id);
     if (!tab) return s;
-    return { columnActive: id, panel: tab.kind, ...(tab.kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}), deviceFloat: s.deviceFloat === tab.kind ? null : s.deviceFloat };
+    return { columnActive: id, panel: tab.kind, ...(tab.kind === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}), deviceFloat: s.deviceFloat === tab.kind ? null : s.deviceFloat };
   });
 }
 
@@ -538,12 +540,12 @@ export function toggleChatBrowserFloating(): void {
   const state = useChatStore.getState();
   if (!state.browser) return;
   if (state.browserFloating) {
-    useChatStore.setState({ browserFloating: false, browserFloatRect: null, panel: "browser", panelMaximized: false });
+    useChatStore.setState({ browserFloating: false, browserFloatRect: null, browserFloatPinned: false, panel: "browser", panelMaximized: false });
     return;
   }
   useChatStore.setState({
     browserFloating: true,
-    browserFloatRect: null,
+    browserFloatRect: null, browserFloatPinned: false,
     deviceFloat: null,
     panel: null,
     panelMaximized: false,
@@ -561,7 +563,7 @@ export function setChatBrowserMiniHover(inside: boolean): void {
 export function closeChatBrowserFloating(): void {
   const state = useChatStore.getState();
   if (!state.browserFloating) return;
-  useChatStore.setState({ browserFloating: false, browserFloatRect: null, browser: null, panel: null, panelMaximized: false });
+  useChatStore.setState({ browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browser: null, panel: null, panelMaximized: false });
 }
 
 /**
@@ -576,7 +578,7 @@ export function openDeviceFloat(kind: DeviceKind): void {
   useChatStore.setState({
     deviceFloat: kind,
     browserFloating: false,
-    browserFloatRect: null,
+    browserFloatRect: null, browserFloatPinned: false,
     summaryOpen: false,
     surfaces: s.surfaces.includes(kind) ? s.surfaces : [...s.surfaces, kind],
   });
@@ -692,3 +694,9 @@ useChatStore.subscribe((state, prev) => {
   const patch = reconcileColumn(state.panel, { tabs: state.columnTabs, active: state.columnActive });
   if (patch) useChatStore.setState({ columnTabs: patch.tabs, columnActive: patch.active });
 });
+
+/** O usuário moveu ou redimensionou a miniatura: guarda o retângulo e para de reancorar no canto. */
+export function placeChatBrowserFloat(rect: Rect): void {
+  if (!useChatStore.getState().browser) return;
+  useChatStore.setState({ browserFloatRect: rect, browserFloatPinned: true });
+}
