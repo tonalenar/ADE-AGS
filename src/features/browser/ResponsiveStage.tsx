@@ -4,6 +4,7 @@ import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, isPh
 import { clampZoom, stageSize } from "./zoom";
 import { DEVICE_BEZEL, type DeviceSpec } from "./devices";
 import { PhoneChrome, type Platform } from "./PhoneChrome";
+import { NativeCornerRadius } from "./nativeCorner";
 
 type Edge = "x" | "y" | "xy";
 
@@ -68,6 +69,8 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
   // No celular solto a escala é a que cabe o aparelho inteiro (com a moldura) no espaço do palco.
   const pad = (DEVICE_BEZEL + 10) * 2;
   const deviceScale = device ? Math.max(0.1, Math.min((box.width - pad) / device.width, (box.height - pad) / device.height)) : 1;
+  // Os cantos da tela, em px da janela, para a vista nativa não vazar pelos cantos arredondados.
+  const cornerRadius = device ? device.radius * deviceScale : phone ? (chrome === "android" ? 34 : SCREEN_RADIUS) * scale : 0;
 
   const startDrag = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
     if (!viewport || e.button !== 0) return;
@@ -141,7 +144,9 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
               : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
           className={device || phone ? "relative bg-white" : shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
-          <PhoneChrome platform={chrome} landscape={landscape} url={url}>{children}</PhoneChrome>
+          <NativeCornerRadius.Provider value={Math.round(cornerRadius * 10) / 10}>
+            <PhoneChrome platform={chrome} landscape={landscape} url={url}>{children}</PhoneChrome>
+          </NativeCornerRadius.Provider>
           {(device || (phone && !chrome)) && <PhoneOverlay landscape={!device && landscape} cutout={device?.cutout ?? "island"} />}
         </div>
         {(device || phone) && <PhoneButtons landscape={!device && landscape} />}

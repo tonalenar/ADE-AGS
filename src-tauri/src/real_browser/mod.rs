@@ -414,10 +414,62 @@ fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
 #[tauri::command]
 pub fn real_browser_place(app: AppHandle, window: tauri::Window, id: String, place: Place) -> Result<(), String> {
     let scale = window.scale_factor().unwrap_or(1.0);
-    let parts = region(&place).into_iter().map(|r| native_rect(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect();
+    let parts: Vec<[i32; 4]> = region(&place).into_iter().map(|r| native_rect(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect();
     let radius = if cfg!(windows) { place.corner_radius * scale } else { place.corner_radius };
-    native::place(&app, &id, native_rect(place.rect, scale), place.zoom, parts, radius, place.click_to_expand);
+    let rect = native_rect(place.rect, scale);
+    let zoom = emulated_place(&app, &id, &place, (rect, parts.clone(), radius, place.click_to_expand));
+    native::place(&app, &id, rect, zoom, parts, radius, place.click_to_expand);
     Ok(())
+}
+
+/// Aparelho emulado por vista: a densidade (`deviceScaleFactor`) e o último tamanho mandado ao CDP.
+#[derive(Default)]
+struct Emulated {
+    density: Option<f64>,
+    /// Largura e altura da tela em px CSS da página, e a escala até a tela, em milésimos.
+    sent: Option<(i64, i64, i64)>,
+    /// O último lugar visto (vale também antes da emulação ligar).
+    last: Option<(f64, f64, f64)>,
+    /// O último `native::place`, para reaplicar o zoom certo quando a emulação liga ou desliga.
+    native: Option<NativePlace>,
+}
+
+type NativePlace = ([i32; 4], Vec<[i32; 4]>, f64, bool);
+
+fn emulated() -> &'static Mutex<HashMap<String, Emulated>> {
+    static E: OnceLock<Mutex<HashMap<String, Emulated>>> = OnceLock::new();
+    E.get_or_init(Default::default)
+}
+
+/// As medidas do aparelho para `Emulation.setDeviceMetricsOverride`: com o zoom do CEF, a página móvel calcula
+/// `device-width` sobre a vista já encolhida e o layout fica maior que a tela (o site saía cortado). Por isso, no
+/// modo aparelho a vista fica sem zoom e a página é desenhada no tamanho do aparelho, escalada por `scale`. Pura.
+fn device_metrics(width: f64, height: f64, zoom: f64, density: f64) -> (Value, (i64, i64, i64)) {
+    let zoom = if zoom > 0.0 { zoom } else { 1.0 };
+    let w = (width / zoom).round().max(1.0) as i64;
+    let h = (height / zoom).round().max(1.0) as i64;
+    let key = (w, h, (zoom * 1000.0).round() as i64);
+    (json!({ "width": w, "height": h, "deviceScaleFactor": density, "mobile": true, "scale": zoom }), key)
+}
+
+/// Guarda o lugar de `id`; com aparelho emulado, reenvia as medidas se mudaram e devolve o zoom que a vista nativa
+/// deve usar (1: a escala vem do CDP). Sem emulação, o zoom pedido.
+fn emulated_place(app: &AppHandle, id: &str, place: &Place, native: NativePlace) -> f64 {
+    let Ok(mut map) = emulated().lock() else { return place.zoom };
+    let entry = map.entry(id.to_string()).or_default();
+    entry.last = Some((place.rect.width, place.rect.height, place.zoom));
+    entry.native = Some(native);
+    let Some(density) = entry.density else { return place.zoom };
+    if place.rect.width <= 0.0 || place.rect.height <= 0.0 { return 1.0; }
+    let (metrics, key) = device_metrics(place.rect.width, place.rect.height, place.zoom, density);
+    if entry.sent != Some(key) {
+        entry.sent = Some(key);
+        let (app, id) = (app.clone(), id.to_string());
+        tauri::async_runtime::spawn(async move {
+            let _ = native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", metrics).await;
+        });
+    }
+    1.0
 }
 
 /// O WebView2 recebe pixels físicos; o AppKit recebe pontos lógicos da janela.
@@ -467,6 +519,7 @@ pub async fn real_browser_history(app: AppHandle, id: String, delta: i32) -> Res
 #[tauri::command]
 pub async fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
     lock(pending()).remove(&id);
+    lock(emulated()).remove(&id);
     let profile = { lock(portals()).remove(&id) };
     if let Some(profile) = profile {
         native::close(&app, &id);
@@ -593,11 +646,30 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
     match &profile {
         Some((ua, scale)) => {
             native::cdp(&app, &id, "Emulation.setUserAgentOverride", ua.clone()).await?;
-            native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", json!({
-                "width": 0, "height": 0, "deviceScaleFactor": scale, "mobile": true,
-            })).await?;
+            let (last, placed) = emulated().lock().ok().map(|mut map| {
+                let entry = map.entry(id.clone()).or_default();
+                entry.density = Some(*scale);
+                entry.sent = None;
+                let last = entry.last;
+                if let Some((w, h, z)) = last { entry.sent = Some(device_metrics(w, h, z, *scale).1); }
+                (last, entry.native.clone())
+            }).unwrap_or((None, None));
+            let metrics = match last {
+                Some((w, h, z)) if w > 0.0 && h > 0.0 => device_metrics(w, h, z, *scale).0,
+                _ => json!({ "width": 0, "height": 0, "deviceScaleFactor": scale, "mobile": true }),
+            };
+            native::cdp(&app, &id, "Emulation.setDeviceMetricsOverride", metrics).await?;
+            // A vista sai do zoom: a escala agora vem do CDP.
+            if let Some((rect, parts, radius, click)) = placed { native::place(&app, &id, rect, 1.0, parts, radius, click); }
         }
         None => {
+            let restore = emulated().lock().ok().and_then(|mut map| {
+                let entry = map.get_mut(&id)?;
+                entry.density = None;
+                entry.sent = None;
+                Some((entry.native.clone()?, entry.last?.2))
+            });
+            if let Some(((rect, parts, radius, click), zoom)) = restore { native::place(&app, &id, rect, zoom, parts, radius, click); }
             native::cdp(&app, &id, "Emulation.setUserAgentOverride", json!({ "userAgent": "" })).await?;
             native::cdp(&app, &id, "Emulation.clearDeviceMetricsOverride", json!({})).await?;
         }
@@ -615,9 +687,10 @@ const DEVICE_CHROME: &str = include_str!("device_chrome.js");
 /// A área que a moldura ocupa, para `env(safe-area-inset-*)` da página (retrato).
 fn device_safe_area(platform: &str) -> Value {
     if platform == "ios" {
-        json!({ "top": 54, "topMax": 54, "bottom": 34, "bottomMax": 34, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
+        // A barra de status fica fora da página (PhoneChrome.tsx); só a barra de início e o vidro ficam dentro.
+        json!({ "top": 0, "topMax": 0, "bottom": 34, "bottomMax": 34, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
     } else {
-        json!({ "top": 36, "topMax": 36, "bottom": 24, "bottomMax": 24, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
+        json!({ "top": 0, "topMax": 0, "bottom": 0, "bottomMax": 0, "left": 0, "leftMax": 0, "right": 0, "rightMax": 0 })
     }
 }
 
@@ -849,8 +922,19 @@ fn finish_selftest(app: &AppHandle, code: i32) {
 
 #[cfg(test)]
 mod test {
-    use super::{adopt_popup, adopted, emulation_profile, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, mini_click_request, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
+    use super::{adopt_popup, adopted, device_metrics, emulation_profile, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, mini_click_request, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
     use serde_json::json;
+
+    #[test]
+    fn aparelho_escalado_mede_o_tamanho_do_aparelho_e_nao_o_da_vista() {
+        // 430×932 mostrado a 68%: a vista tem 292×634, mas a página tem de medir 430×932.
+        let (metrics, key) = device_metrics(292.4, 633.76, 0.68, 3.0);
+        assert_eq!(metrics["width"], 430);
+        assert_eq!(metrics["height"], 932);
+        assert_eq!(metrics["scale"], 0.68);
+        assert_eq!(metrics["mobile"], true);
+        assert_eq!(key, (430, 932, 680));
+    }
 
     #[test]
     fn emulacao_mobile_tem_identidade_de_cada_aparelho() {

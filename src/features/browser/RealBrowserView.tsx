@@ -1,5 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { NativeCornerRadius } from "./nativeCorner";
 import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
 import { miniBrowserZoom, placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
 import { setChatBrowserMiniHover, setRightPanel, useChatStore } from "@/features/chat/store";
@@ -45,8 +46,9 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     sourceRect ? { x: sourceRect.left, y: sourceRect.top, width: sourceRect.width, height: sourceRect.height } : null,
     floatingRect ? { x: floatingRect.left, y: floatingRect.top, width: floatingRect.width, height: floatingRect.height } : null,
   );
-  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom });
-  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom };
+  const screenRadius = useContext(NativeCornerRadius);
+  const latest = useRef({ zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius });
+  latest.current = { zoom, onUrl, onTitle, onLoading, onHistory, onPopup, onClosedByPage, onError, floatingPreview, miniZoom, screenRadius };
 
   // A pílula da miniatura não fica presa visível de uma miniatura para a próxima.
   useEffect(() => {
@@ -80,7 +82,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       return {
         ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown),
         clickToExpand: latest.current.floatingPreview,
-        cornerRadius: latest.current.floatingPreview ? 16 : 0,
+        cornerRadius: latest.current.floatingPreview ? 16 : latest.current.screenRadius,
       };
     };
 
