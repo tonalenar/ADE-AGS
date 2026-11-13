@@ -915,31 +915,42 @@ fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], r
         return;
     }
     view.setHidden(false);
+    let (w, h) = (width.max(1) as f64, height.max(1) as f64);
+    let whole = parts.len() == 1 && parts[0][0] <= 0 && parts[0][1] <= 0 && parts[0][2] >= width - 1 && parts[0][3] >= height - 1;
+    let radius = radius.min(w / 2.0).min(h / 2.0).max(0.0);
     let path = unsafe { CGPathCreateMutable() };
     if path.is_null() { return; }
-    for [left, top, right, bottom] in parts {
-        unsafe { CGPathAddRect(path, ptr::null(), cg_rect(*left as f64, *top as f64, (right-left).max(0) as f64, (bottom-top).max(0) as f64)); }
+    if radius > 0.0 && whole {
+        // Caso comum (tela do celular, miniatura sem nada por cima): a própria forma da máscara é arredondada.
+        unsafe { CGPathAddRoundedRect(path, ptr::null(), cg_rect(0.0, 0.0, w, h), radius, radius); }
+    } else {
+        for [left, top, right, bottom] in parts {
+            unsafe { CGPathAddRect(path, ptr::null(), cg_rect(*left as f64, *top as f64, (right-left).max(0) as f64, (bottom-top).max(0) as f64)); }
+        }
     }
     let class = objc2::runtime::AnyClass::get(c"CAShapeLayer").expect("CAShapeLayer disponível no macOS");
     let mask: *mut AnyObject = unsafe { msg_send![class, layer] };
     let layer: *mut AnyObject = unsafe { msg_send![view, layer] };
     unsafe {
-        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(width.max(1) as f64, height.max(1) as f64));
+        let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, h));
         let _: () = msg_send![mask, setFrame: frame];
         let _: () = msg_send![mask, setGeometryFlipped: Bool::YES];
         let _: () = msg_send![mask, setPath: path];
-        if radius > 0.0 {
-            // A máscara de fato é um contêiner de cantos redondos com a forma das partes dentro.
-            let plain = objc2::runtime::AnyClass::get(c"CALayer").expect("CALayer disponível no macOS");
-            let rounded: *mut AnyObject = msg_send![plain, layer];
-            let _: () = msg_send![rounded, setFrame: frame];
-            let _: () = msg_send![rounded, setCornerRadius: radius];
-            let _: () = msg_send![rounded, setMasksToBounds: Bool::YES];
-            let _: () = msg_send![rounded, addSublayer: mask];
-            let _: () = msg_send![layer, setMask: rounded];
-        } else {
-            let _: () = msg_send![layer, setMask: mask];
+        if radius > 0.0 && !whole {
+            // Com partes escondidas (um menu por cima), as partes recortam e uma segunda forma arredondada recorta
+            // a primeira: a máscara da máscara. Um `cornerRadius` de CALayer não recorta a vista do CEF.
+            let rounded: *mut AnyObject = msg_send![class, layer];
+            let round_path = CGPathCreateMutable();
+            if !round_path.is_null() {
+                CGPathAddRoundedRect(round_path, ptr::null(), cg_rect(0.0, 0.0, w, h), radius, radius);
+                let _: () = msg_send![rounded, setFrame: frame];
+                let _: () = msg_send![rounded, setGeometryFlipped: Bool::YES];
+                let _: () = msg_send![rounded, setPath: round_path];
+                let _: () = msg_send![mask, setMask: rounded];
+                CGPathRelease(round_path);
+            }
         }
+        let _: () = msg_send![layer, setMask: mask];
         CGPathRelease(path);
     }
 }
@@ -959,6 +970,7 @@ fn cg_rect(x: f64, y: f64, width: f64, height: f64) -> CGRect { CGRect { origin:
 unsafe extern "C" {
     fn CGPathCreateMutable() -> *mut std::ffi::c_void;
     fn CGPathAddRect(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, rect: CGRect);
+    fn CGPathAddRoundedRect(path: *mut std::ffi::c_void, transform: *const std::ffi::c_void, rect: CGRect, corner_width: f64, corner_height: f64);
     fn CGPathRelease(path: *mut std::ffi::c_void);
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
 import { clampZoom, stageSize } from "./zoom";
@@ -46,9 +46,17 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
    *  escala se recalculara con cada movimiento, el borde se escaparía del puntero. */
   const [drag, setDrag] = useState<{ draft: Viewport; scale: number } | null>(null);
 
-  useEffect(() => {
+  // Mede antes de pintar: sem isso o primeiro quadro saía com o palco 0×0, a escala caía em 1 e o celular aparecia
+  // gigante por um instante (e a vista nativa ia junto).
+  useLayoutEffect(() => {
     const el = stage.current;
     if (!el) return;
+    const style = getComputedStyle(el);
+    const px = (v: string) => parseFloat(v) || 0;
+    setBox({
+      width: Math.max(0, el.clientWidth - px(style.paddingLeft) - px(style.paddingRight)),
+      height: Math.max(0, el.clientHeight - px(style.paddingTop) - px(style.paddingBottom)),
+    });
     const observer = new ResizeObserver(([entry]) => {
       setBox({ width: entry.contentRect.width, height: entry.contentRect.height });
     });
