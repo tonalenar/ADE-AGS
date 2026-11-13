@@ -1269,23 +1269,25 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
             {(() => {
               const stageViewport = floatingPreview && isFillViewport(viewport) ? null : viewport;
               const stageFramed = isFramedViewport(stageViewport);
-              const miniScale = floatingPreview && stageFramed && chatBrowser?.viewId === view.id && browserFloatRect
+              // Celular na miniatura: o palco já escala o aparelho e a vista usa o zoom dele (1), sem compensar.
+              // Outro quadro na miniatura: a vista aplica o zoom da miniatura, então o palco é compensado.
+              const phoneMini = floatingPreview && stageFramed && !!stageViewport && isPhoneViewport(stageViewport);
+              const miniScale = floatingPreview && stageFramed && !phoneMini && chatBrowser?.viewId === view.id && browserFloatRect
                 ? miniBrowserZoom(
                   1,
                   { x: chatBrowser.rect.left, y: chatBrowser.rect.top, width: chatBrowser.rect.width, height: chatBrowser.rect.height },
                   { x: browserFloatRect.left, y: browserFloatRect.top, width: browserFloatRect.width, height: browserFloatRect.height },
                 )
                 : 1;
-              // Quando o ResponsiveStage já aplica a escala do aparelho na miniatura, compensamos o miniBrowserZoom de RealBrowserView.
-              const realZoom = floatingPreview && stageFramed
-                ? (miniScale > 0 ? 1 / miniScale : 1)
+              const realZoom = phoneMini ? 1
+                : floatingPreview && stageFramed ? (miniScale > 0 ? 1 / miniScale : 1)
                 : (stageViewport && !floatingPreview ? 1 : zoom);
               return (
                 <>
             <div className={`flex flex-1 min-h-0 ${isBlankUrl(view.url) ? "opacity-0" : ""}`}>
             <ResponsiveStage viewport={stageViewport} onResize={setViewport}
               zoom={stageViewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}
-              platform={mobile} url={address} actions={phoneActions.current}>
+              platform={mobile} url={address} actions={phoneActions.current} floatingPreview={floatingPreview}>
             <RealBrowserView viewId={view.id} url={view.url} zoom={realZoom} script={INJECTED}
               profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} onError={setError}
               onUrl={(u) => {

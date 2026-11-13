@@ -81,9 +81,11 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       }
       const windowBox = { x: 0, y: 0, width: innerWidth, height: innerHeight };
       return {
-        ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown),
+        // Com o aparelho emoldurado na miniatura, o palco já escala a página: vale o zoom dele, não o da miniatura.
+        ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview && latest.current.screenRadius <= 0 ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown),
         clickToExpand: latest.current.floatingPreview,
-        cornerRadius: latest.current.floatingPreview ? FLOATING_PREVIEW_CORNER_RADIUS : latest.current.screenRadius,
+        // A tela do aparelho manda nos cantos, também na miniatura.
+        cornerRadius: latest.current.screenRadius > 0 ? latest.current.screenRadius : latest.current.floatingPreview ? FLOATING_PREVIEW_CORNER_RADIUS : 0,
       };
     };
 

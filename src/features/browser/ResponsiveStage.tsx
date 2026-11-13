@@ -20,7 +20,7 @@ type Edge = "x" | "y" | "xy";
  * Un tamaño más grande que el espacio se muestra achicado, pero la página sigue midiendo
  * lo que se pidió: las media queries ven 1440 px aunque en pantalla ocupe la mitad.
  */
-export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, platform = null, url = "", actions, children }: {
+export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, platform = null, url = "", actions, floatingPreview = false, children }: {
   viewport: Viewport | null;
   /** "Celular solto": só o aparelho, centrado no espaço, sem o quadro, as alças nem o rótulo. A árvore é a mesma
    *  dos outros modos, para o iframe não recarregar ao trocar. */
@@ -34,10 +34,12 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
   actions?: PhoneActions;
   /** O zoom da página. Sem marco, a página é desenhada maior/menor e escalada de volta; com marco, multiplica a escala. */
   zoom?: number;
+  /** Na miniatura flutuante: só o aparelho, centrado, sem o pontilhado, as alças nem o rótulo, com a margem mínima
+   *  para a moldura. */
+  floatingPreview?: boolean;
   children: ReactNode;
 }) {
   const stage = useRef<HTMLDivElement>(null);
-  const [available, setAvailable] = useState<Viewport>({ width: 0, height: 0 });
   /** O espaço inteiro do palco (sem a margem do quadro): é o que a página ocupa no modo de preencher. */
   const [box, setBox] = useState<Viewport>({ width: 0, height: 0 });
   /** Mientras se arrastra: el tamaño en curso y la escala congelada al empezar. Si la
@@ -48,8 +50,6 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
     const el = stage.current;
     if (!el) return;
     const observer = new ResizeObserver(([entry]) => {
-      // El padding del escenario y el rótulo de abajo no son espacio para el marco.
-      setAvailable({ width: entry.contentRect.width - 56, height: entry.contentRect.height - 64 });
       setBox({ width: entry.contentRect.width, height: entry.contentRect.height });
     });
     observer.observe(el);
@@ -58,6 +58,13 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
 
   const shown = drag?.draft ?? viewport;
   const z = clampZoom(zoom);
+  const phoneShown = !!shown && isPhoneViewport(shown);
+  const mini = floatingPreview && !!shown && !isFillViewport(shown) && !device;
+  // El padding del escenario y el rótulo de abajo no son espacio para el marco. Na miniatura, só a moldura do celular.
+  const stagePad = mini ? (phoneShown ? (BEZEL + 4) * 2 : 0) : null;
+  const available: Viewport = stagePad === null
+    ? { width: box.width - 56, height: box.height - 64 }
+    : { width: box.width - stagePad, height: box.height - stagePad };
   // `overflow: clip` (não `hidden`): `hidden` ainda é um contêiner de rolagem, e o navegador o rola sozinho (foco ou scrollIntoView
   // dentro do iframe), deslocando a página para fora da coluna; `clip` não rola.
   // 1920×1080 preenche a janela inteira, sem margem (ver `FILL_VIEWPORT`); arrastar o quadro sai desse modo.
@@ -114,6 +121,8 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
         ? "relative flex-1 min-h-0 flex items-center justify-center bg-transparent"
         : fill
         ? "relative flex-1 min-h-0 overflow-clip bg-white"
+        : mini
+        ? "relative flex-1 min-h-0 flex items-center justify-center overflow-visible bg-transparent"
         : shown
           ? "relative flex-1 min-h-0 overflow-auto px-7 pt-5 pb-11 bg-gray-100 dark:bg-surface-deep bg-[radial-gradient(circle,rgba(120,130,150,0.22)_1px,transparent_1px)] [background-size:16px_16px]"
           : "relative flex-1 min-h-0 bg-white"}
@@ -154,7 +163,7 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
         </div>
         {(device || phone) && <PhoneButtons landscape={!device && landscape} />}
 
-        {shown && !fill && !device && (
+        {shown && !fill && !device && !mini && (
           <>
             <Handle edge="x" onPointerDown={startDrag("x")} />
             <Handle edge="y" onPointerDown={startDrag("y")} />
