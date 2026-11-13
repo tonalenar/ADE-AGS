@@ -47,7 +47,7 @@ import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, t
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
 import { RealBrowserView } from "./RealBrowserView";
-import { shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
+import { shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserReloadNoCache, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
 import { FILL_VIEWPORT, isFillViewport, isPhoneViewport, rotate, type Viewport } from "./viewport";
@@ -1157,8 +1157,10 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
               onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
           </div>
           <MenuDivider />
-          <MenuRow icon={<RefreshIcon className="w-4 h-4 stroke-2" />} label={t("browser.menu.hardReload")}
+          <MenuRow icon={<RefreshIcon className="w-4 h-4 stroke-2" />} label={t("browser.menu.reload")}
             onClick={menuAction(() => { if (real) realBrowserHistory(view.id, 0).catch(console.error); else reload(); })} />
+          <MenuRow icon={<RefreshIcon className="w-4 h-4 stroke-2" />} label={t("browser.menu.hardReload")}
+            onClick={menuAction(() => { if (real) realBrowserReloadNoCache(view.id).catch(console.error); else reload(); })} />
         </div>
       )}
     </div>

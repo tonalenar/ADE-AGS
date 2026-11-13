@@ -170,7 +170,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           }
           retune({ model: v.model, effort: v.effort });
         }} />
-      {hasPlan && (
+      {hasPlan && access.plan && (
         <button type="button" disabled={locked} onClick={() => retune({ plan: !access.plan })} aria-pressed={access.plan}
           title={access.plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
           className="flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">

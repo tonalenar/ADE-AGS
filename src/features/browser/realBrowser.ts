@@ -84,6 +84,9 @@ export const realBrowserNavigate = (id: string, url: string) => invoke<void>("re
 /** Voltar (-1), avançar (+1) ou recarregar (0). */
 export const realBrowserHistory = (id: string, delta: number) => invoke<void>("real_browser_history", { id, delta });
 
+/** Recarrega sem cache HTTP, pelo comando CDP `Page.reload`. */
+export const realBrowserReloadNoCache = (id: string) => invoke<void>("real_browser_reload", { id });
+
 export const realBrowserClose = (id: string) => invoke<void>("real_browser_close", { id });
 
 /** Apaga os dados locais de um perfil gerenciado, somente depois da confirmação na interface. */

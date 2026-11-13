@@ -167,7 +167,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
           if (v.agentId && v.agentId !== thread.agentId) { setSwitchError(null); setSwitchTo({ agentId: v.agentId, model: v.model }); return; }
           retuneThread(thread.id, v.model, v.effort, thread.access);
         }} />
-      {!side && planCapability.support === "supported" && (
+      {!side && plan && planCapability.support === "supported" && (
         <button type="button" disabled={locked} aria-pressed={plan} onClick={() => retuneThread(thread.id, thread.model, thread.effort, togglePlan(thread.access))}
           title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
           className="flex shrink-0 items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50 disabled:hover:bg-transparent">
