@@ -8,6 +8,9 @@ edition = "2024"
 # cargo/tauri necesitan saber cuál es el principal para empaquetar.
 default-run = "ade-ags"
 
+[package.metadata.cef.bundle]
+helper_name = "ade-ags-helper"
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
@@ -33,6 +36,10 @@ path = "src/bin/cli.rs"
 [[bin]]
 name = "ccode"
 path = "src/bin/ccode.rs"
+
+[[bin]]
+name = "ade-ags-helper"
+path = "src/bin/cef_helper.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
@@ -133,9 +140,11 @@ cairo-rs = { version = "0.18", features = ["png"] }
 secret-service = { version = "4", features = ["rt-async-io-crypto-rust"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Motor do navegador embutido no macOS. O CEF fica restrito ao Portal; o app segue no runtime Tauri 2/Wry.
+cef = { version = "=156.4.0", features = ["build-util"] }
 block2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSError", "NSGeometry", "NSString", "NSUUID", "NSValue"] }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSButton", "NSImage", "NSImageRep", "NSBitmapImageRep", "NSEvent", "NSResponder", "NSView", "NSWindow"] }
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "block2", "objc2-app-kit", "WKWebView", "WKSnapshotConfiguration"] }
 # Simulador iOS (ver simulator::native): as classes privadas do CoreSimulator/SimulatorKit se chamam pelo runtime
 # (`msg_send!`) e a tela é uma NSView nossa. Mesmas versões que o tauri/wry já trazem no lock.

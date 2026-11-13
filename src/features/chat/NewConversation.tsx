@@ -551,7 +551,7 @@ export function NewConversation({ projects, folder, onFolder }: {
                 onCompare={(picks) => openCompareDialog(project?.cwd ?? "", { prompt: text, picks, attachments })}
                 compareDisabled={hasQuotes}
                 onChange={(v) => update({ agentId: v.agentId, model: v.model, effort: v.effort, accountId: v.account, fastMode: fastModeSupported(v.agentId, fastSurface) ? prefs.fastMode : false })} />
-              {agent && hasPlan && (
+              {agent && hasPlan && plan && (
                 <button type="button" onClick={() => update({ plan: !prefs.plan })} aria-pressed={plan}
                   title={plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
                   className="flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07]">
@@ -724,7 +724,7 @@ export function ContextStrip({ branch, workspace, worktree = false, showContext 
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-nowrap items-center gap-0.5 px-3 pt-1.5 text-chat-note text-gray-500 dark:text-white/45">
+    <div className="flex flex-nowrap items-center gap-2 px-2 pt-2 text-chat-note text-gray-500 dark:text-white/45">
       {showContext && (workspace ?? (
         <span title={worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")} className="flex shrink-0 items-center gap-1.5 h-7 px-1.5 whitespace-nowrap">
           {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}

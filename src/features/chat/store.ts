@@ -53,6 +53,10 @@ interface ChatState {
   browserFloating: boolean;
   /** Posição e tamanho do mini preview, relativos à casca do chat. */
   browserFloatRect: Rect | null;
+  /** O usuário moveu ou redimensionou a miniatura: não reancorar no canto. */
+  browserFloatPinned: boolean;
+  /** O mouse está sobre a página da miniatura (o motor nativo avisa): mostra a pílula de controles. */
+  browserMiniHover: boolean;
   /** Um aparelho (iOS ou Android) flutuando sobre a conversa, como o navegador: um preview por vez. `null` = nenhum. */
   deviceFloat: DeviceKind | null;
   /** O terminal da aba Terminal do painel (uma aba de shell na pasta da conversa) e onde desenhá-lo, como o navegador. */
@@ -196,7 +200,7 @@ const initialColumn = ((): { tabs: ColumnTab[]; active: string | null } => {
 })();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browserMiniHover: false, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -363,7 +367,7 @@ export function setTerminalOpen(tabId: string, open: boolean): void {
 /** Abre o painel direito nesta aba; `null` fecha. */
 export function setRightPanel(panel: RightPanelTab | null): void {
   useChatStore.setState((s) => {
-    if (panel) return { panel, ...(panel === "browser" ? { browserFloating: false, browserFloatRect: null } : {}) };
+    if (panel) return { panel, ...(panel === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}) };
     // Ao fechar, lembra a aba à vista (o vazio não conta); fechar de novo, já fechado, não apaga a lembrança.
     const last = s.panel && s.panel !== "empty" ? s.panel : s.lastPanel;
     // O cartão flutuante do Resumo só existe com painel; sem ele, volta a coluna (se o Resumo estiver ligado).
@@ -391,7 +395,7 @@ export function openTeamPanelFocused(): void {
 export function addSurface(surface: Surface): void {
   // Abrir a aba de um aparelho na coluna dispensa o flutuante dele: o mesmo aparelho não pode ter duas telas.
   useChatStore.setState((s) => ({ surfaces: s.surfaces.includes(surface) ? s.surfaces : [...s.surfaces, surface], panel: surface,
-    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+    ...(surface === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}),
     deviceFloat: s.deviceFloat === surface ? null : s.deviceFloat }));
 }
 
@@ -422,7 +426,7 @@ export function openColumnTab(kind: ColumnKind, opts: { forceNew?: boolean; prof
     id = next.id;
     return {
       columnTabs: next.tabs, columnActive: next.active, panel: kind, surfaces: withSurface(s.surfaces, kind),
-      ...(kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}),
+      ...(kind === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}),
       // Abrir a aba de um aparelho dispensa o flutuante dele: o mesmo aparelho não pode ter duas telas.
       deviceFloat: s.deviceFloat === kind ? null : s.deviceFloat,
     };
@@ -435,7 +439,7 @@ export function activateColumnTab(id: string): void {
   useChatStore.setState((s) => {
     const tab = s.columnTabs.find((candidate) => candidate.id === id);
     if (!tab) return s;
-    return { columnActive: id, panel: tab.kind, ...(tab.kind === "browser" ? { browserFloating: false, browserFloatRect: null } : {}), deviceFloat: s.deviceFloat === tab.kind ? null : s.deviceFloat };
+    return { columnActive: id, panel: tab.kind, ...(tab.kind === "browser" ? { browserFloating: false, browserFloatRect: null, browserFloatPinned: false } : {}), deviceFloat: s.deviceFloat === tab.kind ? null : s.deviceFloat };
   });
 }
 
@@ -491,6 +495,11 @@ export function hostLabel(url: string | null | undefined): string | null {
 /** Abre ou fecha o painel: aberto sem nada antes, mostra o Resumo; com uma aba já aberta, volta nela. */
 export function toggleRightPanel(): void {
   const s = useChatStore.getState();
+  // Como no T3: recolher o painel com o navegador à vista não o some, vira a miniatura (PiP).
+  if (s.panel === "browser" && s.browser && !s.browserFloating) {
+    toggleChatBrowserFloating();
+    return;
+  }
   setRightPanel(s.panel ? null : s.lastPanel ?? "empty");
 }
 
@@ -531,18 +540,30 @@ export function toggleChatBrowserFloating(): void {
   const state = useChatStore.getState();
   if (!state.browser) return;
   if (state.browserFloating) {
-    useChatStore.setState({ browserFloating: false, browserFloatRect: null, panel: "browser", panelMaximized: false });
+    useChatStore.setState({ browserFloating: false, browserFloatRect: null, browserFloatPinned: false, panel: "browser", panelMaximized: false });
     return;
   }
   useChatStore.setState({
     browserFloating: true,
-    browserFloatRect: null,
+    browserFloatRect: null, browserFloatPinned: false,
     deviceFloat: null,
     panel: null,
     panelMaximized: false,
     lastPanel: "browser",
     summaryOpen: false,
   });
+}
+
+/** O motor nativo avisa a entrada e a saída do mouse na página da miniatura. */
+export function setChatBrowserMiniHover(inside: boolean): void {
+  if (useChatStore.getState().browserMiniHover !== inside) useChatStore.setState({ browserMiniHover: inside });
+}
+
+/** Fecha apenas a miniatura; a aba de navegador segue montada em segundo plano. */
+export function closeChatBrowserFloating(): void {
+  const state = useChatStore.getState();
+  if (!state.browserFloating) return;
+  useChatStore.setState({ browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browser: null, panel: null, panelMaximized: false });
 }
 
 /**
@@ -557,7 +578,7 @@ export function openDeviceFloat(kind: DeviceKind): void {
   useChatStore.setState({
     deviceFloat: kind,
     browserFloating: false,
-    browserFloatRect: null,
+    browserFloatRect: null, browserFloatPinned: false,
     summaryOpen: false,
     surfaces: s.surfaces.includes(kind) ? s.surfaces : [...s.surfaces, kind],
   });
@@ -572,10 +593,11 @@ export function closeDeviceFloat(): void {
 export function setChatBrowserFloatRect(rect: Rect): void {
   const state = useChatStore.getState();
   if (!state.browser) return;
-  const browserChanged = !sameRect(state.browser.rect, rect);
   const floatChanged = !sameRect(state.browserFloatRect, rect);
-  if (!browserChanged && !floatChanged) return;
-  useChatStore.setState({ browser: browserChanged ? { viewId: state.browser.viewId, rect } : state.browser, browserFloatRect: rect });
+  if (!floatChanged) return;
+  // Guarda a origem do painel em `browser.rect`; a miniatura usa um retângulo próprio para
+  // poder calcular o zoom sem perder a proporção da página original.
+  useChatStore.setState({ browserFloatRect: rect });
 }
 
 /** Escolhe o aparelho de uma aba de dispositivo e guarda o nome curto (o da aba). */
@@ -672,3 +694,9 @@ useChatStore.subscribe((state, prev) => {
   const patch = reconcileColumn(state.panel, { tabs: state.columnTabs, active: state.columnActive });
   if (patch) useChatStore.setState({ columnTabs: patch.tabs, columnActive: patch.active });
 });
+
+/** O usuário moveu ou redimensionou a miniatura: guarda o retângulo e para de reancorar no canto. */
+export function placeChatBrowserFloat(rect: Rect): void {
+  if (!useChatStore.getState().browser) return;
+  useChatStore.setState({ browserFloatRect: rect, browserFloatPinned: true });
+}

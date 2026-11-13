@@ -64,6 +64,9 @@ export interface BrowserView extends ViewBase {
    *  Se persiste por lo mismo que el tamaño, y se vuelve a aplicar en cada carga —una
    *  página nueva trae sus hojas de estilo sin tocar. */
   touch?: boolean;
+  /** Aparelho emulado no modo celular: identidade (user agent), densidade e toque de um iPhone ou de um
+   *  Android. Ausente = navegador de mesa. */
+  mobile?: "ios" | "android" | null;
   /** O zoom da página (1 = 100%). Ausente = 100%. Não muda o tamanho do navegador, só o da página. */
   zoom?: number;
   /** Mostra um Chrome de verdade (perfil próprio do app) em vez da página pelo proxy: é onde

@@ -350,7 +350,9 @@ Mesmo formato de `profiles.ini` e `cookies.sqlite` (seção 9), em pastas própr
 
 ### 10.7 Limites e riscos
 
-- **O destino ainda é o estado do preview.** Os cookies importados valem para o proxy de preview (por origem), como na seção 9, e **não** alcançam os perfis do WebView2 do Windows, que persistem cookies fora do chaveiro. Subdomínios continuam não cobertos (o estado é por origem).
+- **Destino Chromium na ADE:** o estado cifrado criado pela importação continua sendo a fonte dos cookies importados. Na primeira navegação por origem, esses cookies são copiados para a partição nativa CEF/WebView2 por CDP interno; a origem cifrada não é removida. Perfis nativos ADE anteriores são copiados uma única vez para a partição do projeto, sem caches ou locks, e a pasta antiga é mantida para recuperação. O modo anônimo não importa cookies.
+
+- **Escopo por origem:** a importação e a reaplicação para CEF/WebView2 continuam limitadas à origem selecionada; subdomínios não entram automaticamente. O conteúdo cifrado original permanece disponível em Configurações → Navegador.
 - **Linux:** o Firefox só é dado como aberto pelo `.parentlock` (`fcntl`); o T3 também lê o link simbólico `lock` (`ip:pid`). O `SingletonLock` do Chromium confere só o pid, não o host.
 - **Windows:** o T3 não importa Chromium além do Helium; a ADE mostra Chrome, Edge, Brave, Vivaldi e Opera como indisponíveis (`app-bound`) em vez de escondê-los. O caminho do DPAPI e a conferência de bloqueio por `share_mode(0)` só rodam no Windows (testes em `windows_real`, que o CI do Windows apenas compila). O Chromium com `app_bound_encrypted_key` (Chrome, Edge, Brave, Vivaldi, Opera) não é importável, como no T3.
 - **`SingletonLock`:** só o pid é conferido (não o nome do host), então um perfil em home compartilhado entre máquinas pode ser lido como fechado.

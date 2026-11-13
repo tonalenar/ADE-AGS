@@ -50,7 +50,9 @@ declare global {
 
 (() => {
   // Fora de um iframe só roda no Chrome real, onde a ponte do CDP faz o papel do app (`real_browser::BRIDGE`).
-  const realChrome = (self as { __ags_trusted_input?: boolean }).__ags_trusted_input === true;
+  // O binding de entrada pode faltar num frame OOPIF; a marca da ponte distingue o CEF do proxy sem depender dele.
+  const bridge = self as { __ags_bridge?: boolean; __ags_trusted_input?: boolean };
+  const realChrome = bridge.__ags_bridge === true || bridge.__ags_trusted_input === true;
   if (window.__agsPage || (window.parent === window && !realChrome)) return;
   window.__agsPage = true;
 
@@ -76,7 +78,9 @@ declare global {
   /** El origen real de la página (`http://localhost:5173`): lo antepone el proxy al servir
    *  este script. Sin él (una versión vieja del proxy) no se reescribe nada. */
   const targetOrigin: string | null = (self as { __ags_target?: string }).__ags_target ?? null;
-  const route = (raw: string): Routed | null => routeRequest(raw, location.href, targetOrigin);
+  // No Chrome real não há proxy: reescrever um `fetch` de outra origem para `/__ags__/fwd` devolvia o HTML do próprio
+  // site no lugar do JSON (o login do App Store Connect parava no logo). Lá o pedido segue como a página mandou.
+  const route = (raw: string): Routed | null => realChrome ? null : routeRequest(raw, location.href, targetOrigin);
 
   const doc = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let parentOrigin: string | null = null;

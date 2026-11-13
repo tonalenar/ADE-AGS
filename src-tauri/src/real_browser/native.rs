@@ -27,7 +27,7 @@ use webview2_com::{
 };
 use windows::core::{BOOL, HSTRING, PWSTR};
 use windows::Win32::Foundation::{HWND, RECT};
-use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, DeleteObject, SetWindowRgn, RGN_OR};
+use windows::Win32::Graphics::Gdi::{CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_AND, RGN_OR};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DestroyWindow, SetWindowPos, HWND_TOP, SWP_NOACTIVATE, WINDOW_EX_STYLE, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
     WS_VISIBLE,
@@ -290,7 +290,7 @@ pub async fn add_script(app: &AppHandle, id: &str, source: String) -> Result<(),
 
 /// Onde a janela do Portal fica (px físicos, relativos à janela do app), o zoom da página e o que dela aparece
 /// (retângulos em px físicos, relativos ao Portal; vazio = nada aparece, mas a página continua desenhando).
-pub fn place(app: &AppHandle, id: &str, bounds: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>) {
+pub fn place(app: &AppHandle, id: &str, bounds: [i32; 4], zoom: f64, parts: Vec<[i32; 4]>, corner_radius: f64, _click_to_expand: bool) {
     with_portal_now(app, id, move |portal| unsafe {
         let [x, y, w, h] = bounds;
         let _ = SetWindowPos(portal.host, Some(HWND_TOP), x, y, w.max(1), h.max(1), SWP_NOACTIVATE);
@@ -303,6 +303,12 @@ pub fn place(app: &AppHandle, id: &str, bounds: [i32; 4], zoom: f64, parts: Vec<
             let part = CreateRectRgn(x1, y1, x2, y2);
             CombineRgn(Some(region), Some(region), Some(part), RGN_OR);
             let _ = DeleteObject(part.into());
+        }
+        if corner_radius > 0.0 {
+            let radius = (corner_radius.round() as i32).max(1);
+            let rounded = CreateRoundRectRgn(0, 0, w.max(1) + 1, h.max(1) + 1, radius * 2, radius * 2);
+            CombineRgn(Some(region), Some(region), Some(rounded), RGN_AND);
+            let _ = DeleteObject(rounded.into());
         }
         // A janela fica dona da região (não se apaga depois).
         SetWindowRgn(portal.host, Some(region), true);

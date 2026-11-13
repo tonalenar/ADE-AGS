@@ -14,16 +14,16 @@ export function ZoomControl({ zoom, disabled, onStep, onReset }: {
   onReset: () => void;
 }) {
   const { t } = useTranslation();
-  const small = "cc-t flex items-center justify-center w-6 h-7 p-0 rounded-md text-[15px] leading-none shrink-0 " +
-    "text-gray-700 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent";
+  const small = "cc-t flex size-6 items-center justify-center rounded-md border border-gray-300 p-0 text-sm leading-none shrink-0 " +
+    "text-gray-700 dark:border-white/15 dark:text-gray-200 hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent";
   return (
-    <div className="flex items-center shrink-0 h-8 rounded-lg border border-gray-300 dark:border-white/15 px-0.5">
+    <div className="flex shrink-0 items-center gap-1">
       <Tooltip content={t("browser.zoom.out")} placement="bottom">
         <Button variant="custom" className={small} disabled={disabled || zoom <= MIN_ZOOM} onClick={() => onStep(-1)} aria-label={t("browser.zoom.out")}>−</Button>
       </Tooltip>
       <Tooltip content={t("browser.zoom.reset")} placement="bottom">
         <Button variant="custom" disabled={disabled || zoom === 1} onClick={onReset} aria-label={t("browser.zoom.reset")}
-          className="cc-t h-7 min-w-11 px-1 rounded-md font-mono text-[11px] tabular-nums shrink-0 text-gray-700 dark:text-gray-200
+          className="cc-t h-6 min-w-12 shrink-0 rounded-md px-1 font-sans text-xs tabular-nums text-gray-600 dark:text-gray-300
             hover:bg-gray-200 dark:hover:bg-white/10 disabled:opacity-100 disabled:hover:bg-transparent">
           {zoomLabel(zoom)}
         </Button>

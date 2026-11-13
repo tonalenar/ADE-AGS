@@ -5,7 +5,7 @@ import { Button, CloseIcon, Tooltip } from "neogestify-ui-components";
 
 import { RotateIcon } from "@/app/icons";
 
-import { breakpointOf, clampViewport, presetOf, rotate, VIEWPORT_PRESETS, type Viewport } from "./viewport";
+import { clampViewport, isFillViewport, presetOf, rotate, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 
 /** Los cortes de Tailwind, con el ancho al que salta cada uno. `xs` no tiene mínimo: se
  *  prueba en el teléfono chico, que es el caso real por debajo de `sm`. */
@@ -33,96 +33,116 @@ function SideInput({ value, label, onCommit }: { value: number; label: string; o
           onCommit(value + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1));
         }
       }}
-      className="w-14 h-6 px-1.5 rounded-md text-center font-mono text-[11.5px] tabular-nums outline-none
+      className="w-14 h-7 px-1.5 rounded-md text-center font-mono text-xs tabular-nums outline-none
         bg-white dark:bg-white/6 border border-gray-300 dark:border-white/12
         focus:border-accent-500 dark:focus:border-accent-400 text-gray-900 dark:text-gray-100"
     />
   );
 }
 
-/** La barra del modo responsive: tamaño exacto, presets, orientación y breakpoints. */
-export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
-  viewport: Viewport;
-  /** Está emulando una pantalla táctil. */
-  touch: boolean;
+/** Quem a página acha que é: iPhone, Android ou o navegador de mesa (computador). */
+const PLATFORMS: { id: "ios" | "android" | null; key: string }[] = [
+  { id: "ios", key: "browser.viewport.ios" },
+  { id: "android", key: "browser.viewport.android" },
+  { id: null, key: "browser.viewport.desktop" },
+];
+
+function Segmented<T extends string | null>({ label, value, options, onPick }: {
+  label: string;
+  value: T;
+  options: { id: T; node: React.ReactNode; title?: string }[];
+  onPick: (id: T) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex items-center shrink-0 rounded-md p-0.5 bg-gray-100 dark:bg-white/6">
+      {options.map((o) => (
+        <button key={String(o.id)} type="button" role="radio" aria-checked={value === o.id} title={o.title} onClick={() => onPick(o.id)}
+          className={`cc-t h-6 px-2 rounded text-[11px] font-medium flex items-center justify-center
+            ${value === o.id
+              ? "bg-white text-gray-900 shadow-sm dark:bg-white/15 dark:text-white"
+              : "text-gray-500 hover:text-gray-900 dark:text-white/50 dark:hover:text-white"}`}>
+          {o.node}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A barra do modo aparelho: plataforma, enquadramento e, quando há moldura, tamanho e rotação. */
+export function DeviceBar({ viewport, mobile, onChange, onMobile, onFull, onClose }: {
+  viewport: Viewport | null;
+  /** Aparelho emulado (user agent, densidade e toque); `null` = mesa. */
+  mobile: "ios" | "android" | null;
   onChange: (viewport: Viewport) => void;
-  onTouch: (on: boolean) => void;
+  onMobile: (platform: "ios" | "android" | null) => void;
+  /** `true` = preencher a coluna; `false` = voltar ao mockup do aparelho. */
+  onFull: (full: boolean) => void;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const match = presetOf(viewport);
-  const current = breakpointOf(viewport.width);
+  const framed = !!viewport && !isFillViewport(viewport);
+  const match = viewport ? presetOf(viewport) : undefined;
   const set = (v: Viewport) => onChange(clampViewport(v));
 
   return (
-    <div className="flex items-center gap-2 h-10 shrink-0 px-2.5 overflow-x-auto
-      border-b border-gray-200 dark:border-white/7 bg-white/60 dark:bg-white/2">
-      <div className="w-52 shrink-0">
-        <PopupSelect
-          value={match?.preset.id ?? "custom"}
-          onChange={(e) => {
-            const preset = VIEWPORT_PRESETS.find((p) => p.id === e.target.value);
-            if (preset) set(match?.rotated ? rotate(preset) : preset);
-          }}>
-          <option value="custom">{t("browser.viewport.custom")}</option>
-          {VIEWPORT_PRESETS.map((p) => <option key={p.id} value={p.id}>{`${t(`browser.viewport.preset.${p.id}`)} · ${p.width}×${p.height}`}</option>)}
-        </PopupSelect>
-      </div>
+    <div
+      className="flex h-[38px] shrink-0 items-center gap-1 overflow-x-auto border-b border-gray-200 bg-gray-50/95 px-1.5 shadow-sm backdrop-blur-md dark:border-white/7 dark:bg-surface/95 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      role="toolbar"
+      aria-label={t("browser.menu.device")}
+    >
+      <Segmented
+        label={t("browser.viewport.platform")}
+        value={mobile}
+        options={PLATFORMS.map((p) => ({ id: p.id, node: t(p.key) }))}
+        onPick={onMobile}
+      />
+      <Segmented
+        label={t("browser.viewport.layout")}
+        value={framed ? "frame" : "full"}
+        options={[
+          { id: "frame", node: t("browser.viewport.frame"), title: t("browser.viewport.frameHint") },
+          { id: "full", node: t("browser.viewport.full"), title: t("browser.viewport.fullHint") },
+        ]}
+        onPick={(id) => onFull(id === "full")}
+      />
 
-      <div className="flex items-center gap-1 shrink-0">
-        <SideInput value={viewport.width} label={t("browser.viewport.width")} onCommit={(width) => set({ ...viewport, width })} />
-        <span className="text-[11px] text-gray-400 dark:text-white/30">×</span>
-        <SideInput value={viewport.height} label={t("browser.viewport.height")} onCommit={(height) => set({ ...viewport, height })} />
-      </div>
-
-      <Tooltip content={t("browser.viewport.rotate")} placement="bottom">
-        <Button variant="icon" onClick={() => set(rotate(viewport))} aria-label={t("browser.viewport.rotate")}
-          className="cc-t flex items-center justify-center w-7 h-7 p-0 rounded-md shrink-0
-            text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10">
-          <RotateIcon className="w-4 h-4" />
-        </Button>
-      </Tooltip>
-
-      {/* El táctil aparte del tamaño: lo más útil es prenderlo y apagarlo SIN mover el
-          ancho, que es como se ve qué se rompe por el dedo y no por el espacio. */}
-      <Tooltip content={t(touch ? "browser.viewport.touchOff" : "browser.viewport.touchOn")} placement="bottom">
-        <Button variant="custom" onClick={() => onTouch(!touch)} aria-pressed={touch}
-          className={`cc-t inline-block h-6 px-2 rounded-md shrink-0 text-[10.5px] border
-            ${touch
-              ? "bg-accent-600 border-accent-600 text-white"
-              : "border-gray-200 dark:border-white/10 text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/8"}`}>
-          {t("browser.viewport.touch")}
-        </Button>
-      </Tooltip>
-
-      <div className="w-px h-5 shrink-0 bg-gray-200 dark:bg-white/10" />
-
-      {/* Los breakpoints como tira: se ve en cuál cae el ancho actual y con un click se
-          salta al borde de otro, que es donde un layout suele romperse. */}
-      <div role="group" aria-label={t("browser.viewport.breakpoints")} className="flex items-center shrink-0 rounded-md
-        border border-gray-200 dark:border-white/10 overflow-hidden">
-        {BREAKPOINT_WIDTHS.map(([name, width]) => (
-          <Tooltip key={name} content={t("browser.viewport.jumpTo", { name, width })} placement="bottom">
-            <Button
-              variant="custom"
-              onClick={() => set({ ...viewport, width })}
-              aria-pressed={current === name}
-              className={`cc-t inline-block h-6 px-2 font-mono text-[10.5px] border-r last:border-r-0 border-gray-200 dark:border-white/10
-                ${current === name
-                  ? "bg-accent-600 text-white"
-                  : "text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/8 hover:text-gray-900 dark:hover:text-white"}`}
-            >
-              {name}
+      {framed && viewport && (
+        <>
+          <div className="w-32 shrink-0">
+            <PopupSelect
+              className="w-full h-7 text-[12px]"
+              value={match?.preset.id ?? "custom"}
+              onChange={(e) => {
+                const value = e.target.value;
+                const bp = BREAKPOINT_WIDTHS.find(([name]) => `bp:${name}` === value);
+                if (bp) { set({ ...viewport, width: bp[1] }); return; }
+                const preset = VIEWPORT_PRESETS.find((p) => p.id === value);
+                if (preset) set(match?.rotated ? rotate(preset) : preset);
+              }}>
+              <option value="custom">{t("browser.viewport.custom")}</option>
+              {VIEWPORT_PRESETS.map((p) => <option key={p.id} value={p.id}>{t(`browser.viewport.preset.${p.id}`)}</option>)}
+              {BREAKPOINT_WIDTHS.map(([name, width]) => <option key={name} value={`bp:${name}`}>{t("browser.viewport.jumpTo", { name, width })}</option>)}
+            </PopupSelect>
+          </div>
+          <div className="flex items-center gap-1 shrink-0">
+            <SideInput value={viewport.width} label={t("browser.viewport.width")} onCommit={(width) => set({ ...viewport, width })} />
+            <span className="text-[11px] text-gray-400 dark:text-white/30">×</span>
+            <SideInput value={viewport.height} label={t("browser.viewport.height")} onCommit={(height) => set({ ...viewport, height })} />
+          </div>
+          <Tooltip content={t("browser.viewport.rotate")} placement="bottom">
+            <Button variant="icon" onClick={() => set(rotate(viewport))} aria-label={t("browser.viewport.rotate")}
+              className="cc-t flex items-center justify-center w-7 h-7 p-0 rounded-md shrink-0
+                text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10">
+              <RotateIcon className="w-4 h-4" />
             </Button>
           </Tooltip>
-        ))}
-      </div>
+        </>
+      )}
 
       <div className="flex-1" />
-
       <Tooltip content={t("browser.viewport.exit")} placement="bottom">
         <Button variant="icon" onClick={onClose} aria-label={t("browser.viewport.exit")}
-          className="cc-t flex items-center justify-center w-7 h-7 p-0 rounded-md shrink-0
+          className="cc-t flex items-center justify-center size-7 p-0 rounded-md shrink-0
             text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
           <CloseIcon className="w-3.5 h-3.5" />
         </Button>

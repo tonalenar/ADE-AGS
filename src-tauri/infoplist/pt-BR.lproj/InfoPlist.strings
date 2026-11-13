@@ -1,2 +1,5 @@
 "NSMicrophoneUsageDescription" = "A ADE AGS usa o microfone somente quando você inicia o ditado no composer.";
+"NSCameraUsageDescription" = "A ADE AGS permite que páginas usem a câmera depois que você autoriza o acesso.";
+"NSLocationWhenInUseUsageDescription" = "A ADE AGS permite que páginas usem sua localização depois que você autoriza o acesso.";
+"NSWebBrowserPublicKeyCredentialUsageDescription" = "A ADE AGS usa passkeys quando o site e o sistema oferecem suporte.";
 "NSSpeechRecognitionUsageDescription" = "A ADE AGS transcreve sua fala localmente para inserir o texto no composer para revisão.";

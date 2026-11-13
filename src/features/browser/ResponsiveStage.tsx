@@ -1,8 +1,11 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
 import { clampZoom, stageSize } from "./zoom";
 import { DEVICE_BEZEL, type DeviceSpec } from "./devices";
+import { PhoneChrome, type Platform } from "./PhoneChrome";
+import type { PhoneActions } from "./deviceActions";
+import { NativeCornerRadius } from "./nativeCorner";
 
 type Edge = "x" | "y" | "xy";
 
@@ -17,30 +20,44 @@ type Edge = "x" | "y" | "xy";
  * Un tamaño más grande que el espacio se muestra achicado, pero la página sigue midiendo
  * lo que se pidió: las media queries ven 1440 px aunque en pantalla ocupe la mitad.
  */
-export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, children }: {
+export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, platform = null, url = "", actions, floatingPreview = false, children }: {
   viewport: Viewport | null;
   /** "Celular solto": só o aparelho, centrado no espaço, sem o quadro, as alças nem o rótulo. A árvore é a mesma
    *  dos outros modos, para o iframe não recarregar ao trocar. */
   device?: DeviceSpec | null;
   onResize: (viewport: Viewport) => void;
+  /** Num tamanho de celular, o sistema que o aparelho imita: desenha a barra de status e o Safari/Chrome em volta da página. */
+  platform?: Platform | null;
+  /** O endereço mostrado na barra do Safari/Chrome do mockup. */
+  url?: string;
+  /** Os botões da moldura do celular (barra do Chrome do Android). */
+  actions?: PhoneActions;
   /** O zoom da página. Sem marco, a página é desenhada maior/menor e escalada de volta; com marco, multiplica a escala. */
   zoom?: number;
+  /** Na miniatura flutuante: só o aparelho, centrado, sem o pontilhado, as alças nem o rótulo, com a margem mínima
+   *  para a moldura. */
+  floatingPreview?: boolean;
   children: ReactNode;
 }) {
   const stage = useRef<HTMLDivElement>(null);
-  const [available, setAvailable] = useState<Viewport>({ width: 0, height: 0 });
   /** O espaço inteiro do palco (sem a margem do quadro): é o que a página ocupa no modo de preencher. */
   const [box, setBox] = useState<Viewport>({ width: 0, height: 0 });
   /** Mientras se arrastra: el tamaño en curso y la escala congelada al empezar. Si la
    *  escala se recalculara con cada movimiento, el borde se escaparía del puntero. */
   const [drag, setDrag] = useState<{ draft: Viewport; scale: number } | null>(null);
 
-  useEffect(() => {
+  // Mede antes de pintar: sem isso o primeiro quadro saía com o palco 0×0, a escala caía em 1 e o celular aparecia
+  // gigante por um instante (e a vista nativa ia junto).
+  useLayoutEffect(() => {
     const el = stage.current;
     if (!el) return;
+    const style = getComputedStyle(el);
+    const px = (v: string) => parseFloat(v) || 0;
+    setBox({
+      width: Math.max(0, el.clientWidth - px(style.paddingLeft) - px(style.paddingRight)),
+      height: Math.max(0, el.clientHeight - px(style.paddingTop) - px(style.paddingBottom)),
+    });
     const observer = new ResizeObserver(([entry]) => {
-      // El padding del escenario y el rótulo de abajo no son espacio para el marco.
-      setAvailable({ width: entry.contentRect.width - 56, height: entry.contentRect.height - 64 });
       setBox({ width: entry.contentRect.width, height: entry.contentRect.height });
     });
     observer.observe(el);
@@ -49,6 +66,13 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, c
 
   const shown = drag?.draft ?? viewport;
   const z = clampZoom(zoom);
+  const phoneShown = !!shown && isPhoneViewport(shown);
+  const mini = floatingPreview && !!shown && !isFillViewport(shown) && !device;
+  // El padding del escenario y el rótulo de abajo no son espacio para el marco. Na miniatura, só a moldura do celular.
+  const stagePad = mini ? (phoneShown ? (BEZEL + 4) * 2 : 0) : null;
+  const available: Viewport = stagePad === null
+    ? { width: box.width - 56, height: box.height - 64 }
+    : { width: box.width - stagePad, height: box.height - stagePad };
   // `overflow: clip` (não `hidden`): `hidden` ainda é um contêiner de rolagem, e o navegador o rola sozinho (foco ou scrollIntoView
   // dentro do iframe), deslocando a página para fora da coluna; `clip` não rola.
   // 1920×1080 preenche a janela inteira, sem margem (ver `FILL_VIEWPORT`); arrastar o quadro sai desse modo.
@@ -58,9 +82,13 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, c
   // Num tamanho de celular o quadro vira o aparelho (moldura, cantos, ilha, botões), como num mockup.
   const phone = !!shown && !fill && isPhoneViewport(shown);
   const landscape = !!shown && shown.width > shown.height;
+  // Com o sistema escolhido, o aparelho desenha o próprio topo e rodapé (a ilha vai dentro da barra de status).
+  const chrome: Platform | null = phone && !device ? platform : null;
   // No celular solto a escala é a que cabe o aparelho inteiro (com a moldura) no espaço do palco.
   const pad = (DEVICE_BEZEL + 10) * 2;
   const deviceScale = device ? Math.max(0.1, Math.min((box.width - pad) / device.width, (box.height - pad) / device.height)) : 1;
+  // Os cantos da tela, em px da janela, para a vista nativa não vazar pelos cantos arredondados.
+  const cornerRadius = device ? device.radius * deviceScale : phone ? (chrome === "android" ? 34 : SCREEN_RADIUS) * scale : 0;
 
   const startDrag = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
     if (!viewport || e.button !== 0) return;
@@ -101,6 +129,8 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, c
         ? "relative flex-1 min-h-0 flex items-center justify-center bg-transparent"
         : fill
         ? "relative flex-1 min-h-0 overflow-clip bg-white"
+        : mini
+        ? "relative flex-1 min-h-0 flex items-center justify-center overflow-visible bg-transparent"
         : shown
           ? "relative flex-1 min-h-0 overflow-auto px-7 pt-5 pb-11 bg-gray-100 dark:bg-surface-deep bg-[radial-gradient(circle,rgba(120,130,150,0.22)_1px,transparent_1px)] [background-size:16px_16px]"
           : "relative flex-1 min-h-0 bg-white"}
@@ -129,17 +159,19 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, c
             : shown
               ? {
                 width: shown.width, height: shown.height, transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: "0 0",
-                ...(phone ? phoneScreen(scale) : {}),
+                ...(phone ? phoneScreen(scale, chrome === "android" ? 34 : undefined) : {}),
               }
               : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
           className={device || phone ? "relative bg-white" : shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
-          {children}
-          {(device || phone) && <PhoneOverlay landscape={!device && landscape} cutout={device?.cutout ?? "island"} />}
+          <NativeCornerRadius.Provider value={Math.round(cornerRadius * 10) / 10}>
+            <PhoneChrome platform={chrome} landscape={landscape} url={url} actions={actions}>{children}</PhoneChrome>
+          </NativeCornerRadius.Provider>
+          {(device || (phone && !chrome)) && <PhoneOverlay landscape={!device && landscape} cutout={device?.cutout ?? "island"} />}
         </div>
         {(device || phone) && <PhoneButtons landscape={!device && landscape} />}
 
-        {shown && !fill && !device && (
+        {shown && !fill && !device && !mini && (
           <>
             <Handle edge="x" onPointerDown={startDrag("x")} />
             <Handle edge="y" onPointerDown={startDrag("y")} />

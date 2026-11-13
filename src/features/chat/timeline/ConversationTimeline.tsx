@@ -71,7 +71,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
+export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** Identidade local usada para abrir a busca apenas na timeline visível. */
@@ -87,6 +87,8 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   approval: ApprovalNote | null;
   /** O cartão do pedido de permissão (prancheta 14), no lugar da nota. */
   approvalCard?: React.ReactNode;
+  /** O pedido de permissão está no composer (`PermissionCard` acima da caixa): a timeline não o repete, só sabe que o agente espera. */
+  approvalDocked?: boolean;
   /** A linha viva fica acima do composer (prancheta 13): aqui não se repete o "Trabalhando há…". */
   live?: boolean;
   /** Os itens cujo texto ainda está chegando (rascunhos do protocolo): aparecem aos poucos, com o cursor. */
@@ -118,7 +120,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   const markdownMediaContent = useMemo(() => items.flatMap((item) => [item.text ?? "", item.output ?? ""]).filter(Boolean), [items]);
   const turns = useMemo(() => applyToolCallVisibility(allTurns, toolVisibility), [allTurns, toolVisibility]);
   // O «Pensando…» com brilho: só enquanto o agente trabalha, sem pedido de aprovação esperando (aí ninguém está pensando).
-  const thinkingKey = working && approval === null && !approvalCard ? thinkingTurnKey(allTurns) : null;
+  const thinkingKey = working && approval === null && !approvalCard && !approvalDocked ? thinkingTurnKey(allTurns) : null;
   const width = useChatWidthClass();
   const startedAt = useMemo(() => openTurnStart(items), [items]);
 
@@ -336,7 +338,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
             )}
           </div>
         )}
-        {working && !live && <WorkingLine since={startedAt} waiting={approval !== null} />}
+        {working && !live && <WorkingLine since={startedAt} waiting={approval !== null || approvalDocked} />}
         {after}
       </div>
       </AnswerContext.Provider>

@@ -392,3 +392,28 @@ describe("árvore do harness: estados que a pessoa precisa ver", () => {
     expect(host.querySelector('[data-detail="turn:raiz:t9"]')?.textContent).toContain("Estado final");
   });
 });
+
+describe("linha «Trabalho delegado»", () => {
+  const lineage = () => host.querySelector('section[aria-label="Trabalho delegado"]');
+
+  it("some com zero tarefas e zero conversas filhas, mesmo com turnos no grafo", async () => {
+    mocks.list.mockResolvedValue(graph({
+      nodes: [
+        node({ id: "thread:raiz", kind: "thread", status: "active", title: "Raiz" }),
+        node({ id: "turn:raiz:t1", kind: "turn", status: "completed", parentId: "thread:raiz", depth: 1, chatRunId: "t1", runId: "t1" }),
+      ],
+    }));
+    await act(async () => { root.render(<HarnessRunFeed threadId="raiz" />); });
+    await flush();
+    expect(lineage()).toBeNull();
+    expect(host.textContent).not.toContain("0 tarefa");
+  });
+
+  it("aparece com uma tarefa delegada", async () => {
+    mocks.list.mockResolvedValue(graph());
+    await act(async () => { root.render(<HarnessRunFeed threadId="raiz" />); });
+    await flush();
+    expect(lineage()).not.toBeNull();
+    expect(lineage()?.textContent).toContain("1 tarefa");
+  });
+});

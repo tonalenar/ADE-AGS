@@ -170,7 +170,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           }
           retune({ model: v.model, effort: v.effort });
         }} />
-      {hasPlan && (
+      {hasPlan && access.plan && (
         <button type="button" disabled={locked} onClick={() => retune({ plan: !access.plan })} aria-pressed={access.plan}
           title={access.plan ? t("chat.plan.onHint") : t("chat.plan.offHint")}
           className="flex items-center gap-1.5 h-7 px-2 rounded-lg whitespace-nowrap text-chat-ui font-medium text-gray-900/85 dark:text-white/85 hover:bg-gray-100 dark:hover:bg-white/[0.07] disabled:opacity-50">
@@ -183,6 +183,8 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
 
   const composer = (
     <ComposerColumn>
+      {/* O pedido de permissão vai colado ao composer, sempre à vista (o terminal mostra o mesmo diálogo). */}
+      {approval && <PermissionCard ask={approval} terminal />}
       {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
       {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
       <ChatComposer cwd={card.cwd} quoteKey={card.tabId} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
@@ -290,8 +292,6 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
             )}
           </div>
         </div>
-        {/* Sem timeline, o pedido fica logo acima do composer (o terminal mostra o mesmo diálogo). */}
-        {approval && <ComposerColumn><PermissionCard ask={approval} terminal /></ComposerColumn>}
         {composer}
         {switchDialog}
       </div>
@@ -303,7 +303,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
     <ChatFrame composer={composer} list={(bottomInset) => (
       <TimelineView quoteKey={card.tabId} bottomInset={bottomInset} items={items} loaded={loaded} missing={loaded && !read} truncated={!!read?.truncated}
         working={busy || approval !== null} approval={null} live
-        approvalCard={approval ? <PermissionCard ask={approval} terminal /> : null}
+        approvalDocked={approval !== null}
         agentLabel={card.agentLabel} agentId={card.agentId} pending={pending} onOpenTerminal={() => setTerminalOpen(card.tabId, true)}
         conversationKey={`tab:${card.tabId}`} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearTabSearchJump}
         after={<TeamThreadFeed conversation={card} cards={cards} />} />

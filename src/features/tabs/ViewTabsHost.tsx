@@ -11,7 +11,12 @@ const GeminiDesktopTab = lazy(() => import("@/features/desktopApps/GeminiDesktop
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { setChatBrowserFloatRect, useChatStore } from "@/features/chat/store";
+import { placeChatBrowserFloat, useChatStore } from "@/features/chat/store";
+import { chatFloatBounds, dragFloatRect, FLOAT_RING, type FloatEdges } from "@/features/chat/floatRect";
+import { useTranslation } from "react-i18next";
+import { BrowserMiniControls, BrowserMiniDock } from "@/features/browser/BrowserMiniControls";
+import { floatAspectRatioOf, isFramedViewport } from "@/features/browser/deviceMode";
+import { FLOATING_PREVIEW_CORNER_RADIUS } from "@/features/browser/nativeCorner";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
 import { useChatShell } from "@/app/uiStore";
@@ -57,6 +62,16 @@ export function ViewTabsHost() {
   // No chat só aparece o navegador do painel direito (nunca o Gemini Desktop do canvas).
   const chat = chatOn;
   const floatingBrowserId = chatOn && floating ? chatBrowser?.viewId ?? null : null;
+  const floatRect = useChatStore((s) => s.browserFloatRect);
+  const floatView = floatingBrowserId ? views.find((v) => v.id === floatingBrowserId) : undefined;
+  const floatViewport = floatView?.kind === "browser" ? floatView.viewport : null;
+  const floatAspectRatio = floatAspectRatioOf(floatViewport);
+  const framedFloat = isFramedViewport(floatViewport);
+  const bodyDrag = useFloatBodyDrag(floatAspectRatio);
+  const [floatDomHover, setFloatDomHover] = useState(false);
+  useEffect(() => {
+    if (!floatingBrowserId) setFloatDomHover(false);
+  }, [floatingBrowserId]);
   const placementOf = (view: ViewTab) => {
     if (view.kind === "browser" && view.id === floatingBrowserId && isPageRoute(pathname)) return undefined;
     return view.kind === "desktop" && mode === "canvas" && !chat
@@ -105,12 +120,17 @@ export function ViewTabsHost() {
             data-view-key={key}
             style={{
               ...placeStyle(lastRect.current.get(key) ?? null),
-              ...(floatingPreview ? { zIndex: 30 } : {}),
+              ...(floatingPreview ? { zIndex: 30, borderRadius: FLOATING_PREVIEW_CORNER_RADIUS } : {}),
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
-            className={floatingPreview ? "resize flex flex-col overflow-hidden rounded-xl border border-gray-200 dark:border-white/12 bg-white dark:bg-surface shadow-2xl" : undefined}
+            className={floatingPreview ? `flex flex-col overflow-hidden rounded-2xl ${framedFloat ? "bg-transparent" : "bg-white dark:bg-surface"}` : undefined}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
+            {...(floatingPreview ? {
+              ...bodyDrag,
+              onPointerEnter: () => setFloatDomHover(true),
+              onPointerLeave: () => setFloatDomHover(false),
+            } : {})}
           >
             {floatingPreview && <BrowserFloatGrip />}
             <Suspense fallback={null}>
@@ -122,45 +142,148 @@ export function ViewTabsHost() {
           </div>
         );
       })}
+      {floatView && floatRect && placementOf(floatView) !== undefined && (
+        <BrowserFloatFrame rect={floatRect} viewId={floatView.id} aspectRatio={floatAspectRatio} hover={floatDomHover} />
+      )}
     </div>
   );
 }
 
-/** Faixa estreita para mover o mini preview sem interceptar os controles da página. */
+/** Controles da miniatura, no canto da página (abrem um buraco na vista nativa só enquanto aparecem). */
 function BrowserFloatGrip() {
-  const drag = useRef<{ pointerId: number; x: number; y: number; rect: Rect } | null>(null);
-  const begin = (event: React.PointerEvent<HTMLDivElement>) => {
+  // O mouse sobre a página nativa não chega ao DOM: quem avisa é o motor (`real-browser-mini-hover`).
+  const hover = useChatStore((state) => state.browserMiniHover);
+  return (
+    <div className="group absolute right-2.5 top-2.5 z-40 pointer-events-auto" data-browser-mini-controls data-hover={hover}
+      {...(hover ? { "data-over-webview": "" } : {})}>
+      <BrowserMiniControls />
+    </div>
+  );
+}
+
+type FloatDrag = { pointerId: number; x: number; y: number; rect: Rect; edges: FloatEdges };
+
+/** Arraste da miniatura: sem lados move, com lados redimensiona. Usa pointer capture no elemento que recebeu o toque. */
+function useFloatDrag(aspectRatio: number | null = null) {
+  const drag = useRef<FloatDrag | null>(null);
+  const ratioRef = useRef(aspectRatio);
+  ratioRef.current = aspectRatio;
+  const begin = (event: React.PointerEvent<HTMLElement>, edges: FloatEdges) => {
     if (event.button !== 0) return;
-    const state = useChatStore.getState();
-    const rect = state.browserFloatRect ?? state.browser?.rect;
-    if (!state.browserFloating || !rect) return;
+    const current = useChatStore.getState().browserFloatRect;
+    if (!current) return;
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
-    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, rect };
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, rect: current, edges };
   };
-  const move = (event: React.PointerEvent<HTMLDivElement>) => {
+  const move = (event: React.PointerEvent<HTMLElement>) => {
     const start = drag.current;
     if (!start || start.pointerId !== event.pointerId) return;
-    const shell = event.currentTarget.closest<HTMLElement>("[data-chat-shell]");
-    const main = shell?.querySelector<HTMLElement>("main");
-    if (!shell || !main) return;
-    const shellRect = shell.getBoundingClientRect();
-    const mainRect = main.getBoundingClientRect();
-    const minLeft = Math.round(mainRect.left - shellRect.left + 8);
-    const minTop = Math.round(mainRect.top - shellRect.top + 8);
-    const maxLeft = Math.round(mainRect.right - shellRect.left - start.rect.width - 8);
-    const maxTop = Math.round(mainRect.bottom - shellRect.top - start.rect.height - 8);
-    const left = Math.max(minLeft, Math.min(maxLeft, start.rect.left + event.clientX - start.x));
-    const top = Math.max(minTop, Math.min(maxTop, start.rect.top + event.clientY - start.y));
-    setChatBrowserFloatRect({ ...start.rect, left: Math.round(left), top: Math.round(top) });
+    const bounds = chatFloatBounds();
+    if (!bounds) return;
+    placeChatBrowserFloat(dragFloatRect(start.rect, start.edges, event.clientX - start.x, event.clientY - start.y, bounds, ratioRef.current));
   };
-  const end = (event: React.PointerEvent<HTMLDivElement>) => {
+  const end = (event: React.PointerEvent<HTMLElement>) => {
     if (drag.current?.pointerId !== event.pointerId) return;
     drag.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  return <div aria-hidden="true" onPointerDown={begin} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
-    className="h-3 shrink-0 flex items-center justify-center cursor-grab active:cursor-grabbing touch-none bg-white dark:bg-surface">
-    <span className="w-9 h-1 rounded-full bg-gray-300 dark:bg-white/20" />
-  </div>;
+  return { begin, move, end };
+}
+
+/** O que, dentro da página em DOM (página inicial), continua sendo clique e não arraste. */
+const INTERACTIVE = "a,button,input,textarea,select,label,[role=button],[role=link],[contenteditable],[data-browser-mini-controls],[data-browser-mini-dock]";
+
+/** Com a página em DOM, arrastar qualquer ponto que não seja controle move a miniatura. */
+export function useFloatBodyDrag(aspectRatio: number | null = null) {
+  const { begin, move, end } = useFloatDrag(aspectRatio);
+  return {
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      if ((event.target as Element).closest?.(INTERACTIVE)) return;
+      begin(event, {});
+    },
+    onPointerMove: move, onPointerUp: end, onPointerCancel: end,
+  };
+}
+
+const RING_PARTS: { key: string; edges: FloatEdges; cursor: string; style: (r: number) => React.CSSProperties }[] = [
+  // Os cantos vêm antes: ficam por cima das faixas das bordas.
+  { key: "nw", edges: { left: true, top: true }, cursor: "nwse-resize", style: (r) => ({ left: 0, top: 0, width: 2 * r, height: 2 * r }) },
+  { key: "ne", edges: { right: true, top: true }, cursor: "nesw-resize", style: (r) => ({ right: 0, top: 0, width: 2 * r, height: 2 * r }) },
+  { key: "sw", edges: { left: true, bottom: true }, cursor: "nesw-resize", style: (r) => ({ left: 0, bottom: 0, width: 2 * r, height: 2 * r }) },
+  { key: "se", edges: { right: true, bottom: true }, cursor: "nwse-resize", style: (r) => ({ right: 0, bottom: 0, width: 2 * r, height: 2 * r }) },
+  // Topo: mover. Laterais e base: redimensionar.
+  { key: "top", edges: {}, cursor: "move", style: (r) => ({ left: 2 * r, right: 2 * r, top: 0, height: r }) },
+  { key: "left", edges: { left: true }, cursor: "ew-resize", style: (r) => ({ left: 0, top: 2 * r, bottom: 2 * r, width: r }) },
+  { key: "right", edges: { right: true }, cursor: "ew-resize", style: (r) => ({ right: 0, top: 2 * r, bottom: 2 * r, width: r }) },
+  { key: "bottom", edges: { bottom: true }, cursor: "ns-resize", style: (r) => ({ left: 2 * r, right: 2 * r, bottom: 0, height: r }) },
+];
+
+/**
+ * Anel invisível em volta da miniatura: a borda de cima move, as laterais, a base e os cantos redimensionam.
+ * Fica FORA do retângulo da página: a vista nativa é desenhada por cima do DOM, então nada dentro dela recebe o mouse.
+ */
+export function BrowserFloatFrame({
+  rect,
+  viewId,
+  aspectRatio: explicitAspectRatio,
+  hover = false,
+}: {
+  rect: Rect;
+  viewId?: string;
+  aspectRatio?: number | null;
+  hover?: boolean;
+}) {
+  const { t } = useTranslation();
+  const view = useViewTabsStore((state) => (viewId ? state.views.find((v) => v.id === viewId) : undefined));
+  const aspectRatio = explicitAspectRatio !== undefined
+    ? explicitAspectRatio
+    : floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
+  const { begin, move, end } = useFloatDrag(aspectRatio);
+  const miniHover = useChatStore((state) => state.browserMiniHover);
+  const [frameHover, setFrameHover] = useState(false);
+  const r = FLOAT_RING;
+  const dockVisible = hover || frameHover || miniHover;
+  const bounds = typeof document !== "undefined" ? chatFloatBounds() : null;
+  const dockPlacement: "top" | "bottom" = bounds && rect.top + rect.height + 50 > bounds.bottom && rect.top - 50 >= bounds.top
+    ? "top"
+    : "bottom";
+
+  return (
+    <div
+      data-browser-float-frame
+      onPointerEnter={() => setFrameHover(true)}
+      onPointerLeave={() => setFrameHover(false)}
+      className="absolute z-30 pointer-events-none"
+      style={{ left: rect.left - r, top: rect.top - r, width: rect.width + 2 * r, height: rect.height + 2 * r }}
+    >
+      <div data-browser-float-surface
+        className="absolute pointer-events-none border border-gray-200 dark:border-white/12 shadow-md shadow-gray-950/20"
+        style={{
+          left: r - 1,
+          top: r - 1,
+          width: rect.width + 2,
+          height: rect.height + 2,
+          borderRadius: FLOATING_PREVIEW_CORNER_RADIUS + 1,
+        }} />
+      {RING_PARTS.map((part) => (
+        <div key={part.key} data-float-ring={part.key} role="separator"
+          aria-label={t(part.key === "top" ? "browser.mini.move" : "browser.mini.resize")}
+          title={t(part.key === "top" ? "browser.mini.move" : "browser.mini.resize")}
+          onPointerDown={(event) => begin(event, part.edges)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+          className="absolute touch-none"
+          style={{ ...part.style(r), cursor: part.cursor, pointerEvents: "auto" }} />
+      ))}
+      {viewId && (
+        <div
+          data-browser-mini-dock-slot={dockPlacement}
+          className={`absolute left-1/2 -translate-x-1/2 ${dockVisible ? "pointer-events-auto" : "pointer-events-none focus-within:pointer-events-auto"} ${dockPlacement === "top" ? "pb-1.5" : "pt-1.5"}`}
+          style={dockPlacement === "top" ? { bottom: rect.height + 2 * r - 4 } : { top: rect.height + 2 * r - 4 }}
+        >
+          <BrowserMiniDock viewId={viewId} visible={dockVisible} placement={dockPlacement} />
+        </div>
+      )}
+    </div>
+  );
 }

@@ -28,7 +28,7 @@ interface ViewTabsState {
   openDiff: (cwd: string, root: string, path: string, staged: boolean, commit?: { hash: string; short: string; origPath?: string | null }) => void;
   /** Devuelve el id de la tab. `activate: false` la abre sin sacar al usuario de lo que mira;
    *  `owner` la marca como manejada por un agente. */
-  openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean; owner?: ViewOwner }) => string;
+  openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean; owner?: ViewOwner; id?: string; browserProfileId?: string }) => string;
   openGemini: (cwd: string) => string;
   keepMounted: (id: string) => void;
   activateView: (id: string) => void;
@@ -97,8 +97,10 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
   openBrowser: (cwd, url = "", opts) => {
     // Um navegador que um agente abre nasce em 1920×1080, como o do canvas (ver `AGENT_BROWSER_VIEWPORT`).
     const view: BrowserView = {
-      kind: "browser", cwd, url, id: crypto.randomUUID(), title: "", owner: opts?.owner,
+      kind: "browser", cwd, url, id: opts?.id ?? crypto.randomUUID(), title: "", owner: opts?.owner,
       ...(opts?.owner ? { viewport: { ...AGENT_BROWSER_VIEWPORT } } : {}),
+      // Um pop-up adotado fica na partição do opener (o motor já o criou nela).
+      ...(opts?.browserProfileId ? { browserProfileId: opts.browserProfileId } : {}),
     };
     const activate = opts?.activate ?? true;
     set((s) => ({

@@ -77,9 +77,9 @@ describe("a linha de controles do composer", () => {
     expect((host.querySelector("[data-composer-right]") as HTMLElement).textContent).toContain("modelo");
   });
 
-  it("o alvo do anexar e do enviar tem pelo menos 28 px (w-7/h-7 e w-8/h-8)", async () => {
+  it("os alvos do anexar e do enviar têm 32 px (w-8/h-8)", async () => {
     await mount(null);
-    expect(host.querySelector("button[aria-label='chat.composer.attach']")!.className).toMatch(/w-7 h-7/);
+    expect(host.querySelector("button[aria-label='chat.composer.attach']")!.className).toMatch(/w-8 h-8/);
     expect(host.querySelector("button[type=submit]")!.className).toMatch(/w-8 h-8/);
   });
 });

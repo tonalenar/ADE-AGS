@@ -149,6 +149,47 @@ pub fn remove_background(path: &str) -> Result<String, String> {
     }
 }
 
+/// O caminho livre para a cópia anotada de `original`: `nome-anotado.png` na mesma pasta, ou
+/// `nome-anotado-2.png`, `-3`… se já existir. Nunca sobrescreve nada.
+pub fn annotated_path(original: &Path) -> Option<PathBuf> {
+    let dir = original.parent()?;
+    let stem = original.file_stem()?.to_string_lossy().into_owned();
+    (1..1000).map(|n| if n == 1 { format!("{stem}-anotado.png") } else { format!("{stem}-anotado-{n}.png") })
+        .map(|name| dir.join(name))
+        .find(|candidate| !candidate.exists())
+}
+
+/// Grava a cópia anotada (PNG em base64) AO LADO de uma imagem ou vídeo que o app já mostra (o quadro
+/// anotado de um vídeo). Só aceita original absoluto que seja imagem legível ou arquivo de vídeo, e
+/// conteúdo PNG dentro do limite; cria um arquivo novo, nunca sobrescreve. Devolve o caminho novo.
+pub fn save_annotated(original: &str, png_base64: &str) -> Result<String, String> {
+    let source = Path::new(original);
+    if !source.is_absolute() {
+        return Err("caminho não absoluto".into());
+    }
+    let video = source.extension().and_then(|e| e.to_str()).map(|e| e.to_ascii_lowercase())
+        .is_some_and(|e| matches!(e.as_str(), "mp4" | "mov" | "m4v" | "webm" | "mkv"));
+    if video {
+        if !source.is_file() {
+            return Err("não é um arquivo".into());
+        }
+    } else {
+        read_image(original, PREVIEW_IMAGE_MAX)?;
+    }
+    let bytes = base64::engine::general_purpose::STANDARD.decode(png_base64.trim()).map_err(|_| "PNG inválido".to_string())?;
+    if !bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("o conteúdo não é PNG".into());
+    }
+    if bytes.len() as u64 > PREVIEW_IMAGE_MAX * 2 {
+        return Err("imagem anotada grande demais".into());
+    }
+    let target = annotated_path(Path::new(original)).ok_or("não há nome livre para a cópia anotada")?;
+    fs::OpenOptions::new().write(true).create_new(true).open(&target)
+        .and_then(|mut file| std::io::Write::write_all(&mut file, &bytes))
+        .map_err(|e| e.to_string())?;
+    Ok(target.to_string_lossy().into_owned())
+}
+
 /// Os blocos `image` (base64) do Claude para estes caminhos. Uma imagem que não cabe nos limites, ou
 /// que não se lê, NÃO derruba a mensagem: segue só pelo caminho que já está no texto. Devolve também
 /// os caminhos que ficaram de fora, para quem chama avisar.
@@ -189,4 +230,9 @@ pub fn chat_attachment_remove_background_available() -> bool {
 #[tauri::command]
 pub fn chat_attachment_remove_background(path: String) -> Result<String, String> {
     remove_background(&path)
+}
+
+#[tauri::command]
+pub fn chat_attachment_save_annotated(path: String, png_base64: String) -> Result<String, String> {
+    save_annotated(&path, &png_base64)
 }
