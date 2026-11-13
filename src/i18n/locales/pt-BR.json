@@ -3817,6 +3817,7 @@
   "browser.float.open": "Destacar a prévia sobre a conversa",
   "browser.float.dock": "Voltar com a prévia para o painel lateral",
   "browser.mini.controls": "Controles da miniatura do navegador",
+  "browser.mini.deviceDock": "Controles de formato da miniatura",
   "browser.mini.openPanel": "Abrir no painel lateral",
   "browser.mini.move": "Arrastar para mover",
   "browser.mini.resize": "Arrastar para redimensionar",

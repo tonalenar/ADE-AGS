@@ -4,7 +4,9 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 
 import { WindowControls, WindowLights } from "@/app/WindowLights";
+import { floatAspectRatioOf } from "@/features/browser/deviceMode";
 import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { useLocalAcpStore } from "@/features/agents/localAcpStore";
 import type { RepoGroup } from "@/features/workspaces/workspaceTree";
 
@@ -12,7 +14,7 @@ import { AttachCwdContext } from "./attachments/AttachmentStrip";
 import { MediaViewerProvider } from "./attachments/MediaViewerContext";
 import { DropOverlay } from "./attachments/DropOverlay";
 import { DeviceFloatHost } from "./DeviceFloatCard";
-import { clampFloatRect } from "./floatRect";
+import { clampFloatRect, defaultFloatRect, fitFloatRectToRatio } from "./floatRect";
 import { useChatFileDrop } from "./attachments/useChatFileDrop";
 import { newConversation, reopenFolder } from "./chatActions";
 import { PanelRightIcon, SidebarIcon } from "./chatIcons";
@@ -269,6 +271,14 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
 function BrowserFloatHost({ hidden }: { hidden: boolean }) {
   const floating = useChatStore((s) => s.browserFloating);
   const viewId = useChatStore((s) => s.browser?.viewId ?? null);
+  const viewport = useViewTabsStore((s) => {
+    if (!viewId) return null;
+    const view = s.views.find((v) => v.id === viewId);
+    return view?.kind === "browser" ? (view.viewport ?? null) : null;
+  });
+  const aspectRatio = floatAspectRatioOf(viewport);
+  const prevRatioRef = useRef<{ viewId: string | null; ratio: number | null }>({ viewId: null, ratio: null });
+
   const measure = useCallback(() => {
     if (!floating || hidden || !viewId) return;
     const shell = document.querySelector<HTMLElement>(`[${CHAT_SHELL_ATTR}]`);
@@ -283,26 +293,25 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
       left: mainRect.left - shellRect.left, top: mainRect.top - shellRect.top,
       right: mainRect.right - shellRect.left, bottom: mainRect.bottom - shellRect.top,
     };
-    // Depois que o usuário moveu ou redimensionou, só prende dentro da conversa; não volta ao canto.
+    const ratioChanged = prevRatioRef.current.viewId === viewId && prevRatioRef.current.ratio !== aspectRatio;
+    prevRatioRef.current = { viewId, ratio: aspectRatio };
+    const ratioMismatch = aspectRatio !== null && state.browserFloatRect
+      ? Math.abs(state.browserFloatRect.width / Math.max(1, state.browserFloatRect.height) - aspectRatio) > 0.04
+      : false;
+    // Depois que o usuário moveu ou redimensionou, só prende dentro da conversa; se girou/trocou de aparelho, ajusta à nova proporção.
     if (state.browserFloatPinned && state.browserFloatRect) {
-      setChatBrowserFloatRect(clampFloatRect(state.browserFloatRect, bounds));
+      const next = ratioChanged || ratioMismatch
+        ? fitFloatRectToRatio(state.browserFloatRect, bounds, aspectRatio)
+        : clampFloatRect(state.browserFloatRect, bounds, aspectRatio);
+      setChatBrowserFloatRect(next);
       return;
     }
-    const maxWidth = Math.max(280, mainRect.width - 24);
-    const sourceRect = current.rect;
-    const ratio = sourceRect.width > 0 && sourceRect.height > 0 ? sourceRect.width / sourceRect.height : 4 / 3;
-    const defaultWidth = Math.min(480, Math.max(320, mainRect.width * 0.48));
-    const width = Math.round(Math.min(state.browserFloatRect?.width ?? defaultWidth, maxWidth));
-    const maxHeight = Math.max(220, mainRect.height - 72);
-    const defaultHeight = width / ratio;
-    const height = Math.round(Math.min(state.browserFloatRect?.height ?? defaultHeight, maxHeight));
-    setChatBrowserFloatRect({
-      left: Math.round(mainRect.right - shellRect.left - width - 18),
-      top: Math.round(mainRect.bottom - shellRect.top - height - 18),
-      width,
-      height,
-    });
-  }, [floating, hidden, viewId]);
+    setChatBrowserFloatRect(defaultFloatRect(bounds, {
+      sourceRect: current.rect,
+      aspectRatio,
+      currentRect: ratioChanged || ratioMismatch ? null : state.browserFloatRect,
+    }));
+  }, [aspectRatio, floating, hidden, viewId]);
 
   useLayoutEffect(() => {
     if (!floating || hidden || !viewId) return;

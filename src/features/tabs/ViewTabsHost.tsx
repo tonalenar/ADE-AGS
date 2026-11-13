@@ -14,7 +14,8 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { placeChatBrowserFloat, useChatStore } from "@/features/chat/store";
 import { chatFloatBounds, dragFloatRect, FLOAT_RING, type FloatEdges } from "@/features/chat/floatRect";
 import { useTranslation } from "react-i18next";
-import { BrowserMiniControls } from "@/features/browser/BrowserMiniControls";
+import { BrowserMiniControls, BrowserMiniDock } from "@/features/browser/BrowserMiniControls";
+import { floatAspectRatioOf, isFramedViewport } from "@/features/browser/deviceMode";
 import { FLOATING_PREVIEW_CORNER_RADIUS } from "@/features/browser/nativeCorner";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
@@ -62,8 +63,15 @@ export function ViewTabsHost() {
   const chat = chatOn;
   const floatingBrowserId = chatOn && floating ? chatBrowser?.viewId ?? null : null;
   const floatRect = useChatStore((s) => s.browserFloatRect);
-  const bodyDrag = useFloatBodyDrag();
   const floatView = floatingBrowserId ? views.find((v) => v.id === floatingBrowserId) : undefined;
+  const floatViewport = floatView?.kind === "browser" ? floatView.viewport : null;
+  const floatAspectRatio = floatAspectRatioOf(floatViewport);
+  const framedFloat = isFramedViewport(floatViewport);
+  const bodyDrag = useFloatBodyDrag(floatAspectRatio);
+  const [floatDomHover, setFloatDomHover] = useState(false);
+  useEffect(() => {
+    if (!floatingBrowserId) setFloatDomHover(false);
+  }, [floatingBrowserId]);
   const placementOf = (view: ViewTab) => {
     if (view.kind === "browser" && view.id === floatingBrowserId && isPageRoute(pathname)) return undefined;
     return view.kind === "desktop" && mode === "canvas" && !chat
@@ -116,9 +124,13 @@ export function ViewTabsHost() {
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
-            className={floatingPreview ? "flex flex-col overflow-hidden rounded-2xl bg-white dark:bg-surface" : undefined}
+            className={floatingPreview ? `flex flex-col overflow-hidden rounded-2xl ${framedFloat ? "bg-transparent" : "bg-white dark:bg-surface"}` : undefined}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
-            {...(floatingPreview ? bodyDrag : {})}
+            {...(floatingPreview ? {
+              ...bodyDrag,
+              onPointerEnter: () => setFloatDomHover(true),
+              onPointerLeave: () => setFloatDomHover(false),
+            } : {})}
           >
             {floatingPreview && <BrowserFloatGrip />}
             <Suspense fallback={null}>
@@ -130,7 +142,9 @@ export function ViewTabsHost() {
           </div>
         );
       })}
-      {floatView && floatRect && placementOf(floatView) !== undefined && <BrowserFloatFrame rect={floatRect} />}
+      {floatView && floatRect && placementOf(floatView) !== undefined && (
+        <BrowserFloatFrame rect={floatRect} viewId={floatView.id} aspectRatio={floatAspectRatio} hover={floatDomHover} />
+      )}
     </div>
   );
 }
@@ -150,8 +164,10 @@ function BrowserFloatGrip() {
 type FloatDrag = { pointerId: number; x: number; y: number; rect: Rect; edges: FloatEdges };
 
 /** Arraste da miniatura: sem lados move, com lados redimensiona. Usa pointer capture no elemento que recebeu o toque. */
-function useFloatDrag() {
+function useFloatDrag(aspectRatio: number | null = null) {
   const drag = useRef<FloatDrag | null>(null);
+  const ratioRef = useRef(aspectRatio);
+  ratioRef.current = aspectRatio;
   const begin = (event: React.PointerEvent<HTMLElement>, edges: FloatEdges) => {
     if (event.button !== 0) return;
     const current = useChatStore.getState().browserFloatRect;
@@ -166,7 +182,7 @@ function useFloatDrag() {
     if (!start || start.pointerId !== event.pointerId) return;
     const bounds = chatFloatBounds();
     if (!bounds) return;
-    placeChatBrowserFloat(dragFloatRect(start.rect, start.edges, event.clientX - start.x, event.clientY - start.y, bounds));
+    placeChatBrowserFloat(dragFloatRect(start.rect, start.edges, event.clientX - start.x, event.clientY - start.y, bounds, ratioRef.current));
   };
   const end = (event: React.PointerEvent<HTMLElement>) => {
     if (drag.current?.pointerId !== event.pointerId) return;
@@ -177,11 +193,11 @@ function useFloatDrag() {
 }
 
 /** O que, dentro da página em DOM (página inicial), continua sendo clique e não arraste. */
-const INTERACTIVE = "a,button,input,textarea,select,label,[role=button],[role=link],[contenteditable],[data-browser-mini-controls]";
+const INTERACTIVE = "a,button,input,textarea,select,label,[role=button],[role=link],[contenteditable],[data-browser-mini-controls],[data-browser-mini-dock]";
 
 /** Com a página em DOM, arrastar qualquer ponto que não seja controle move a miniatura. */
-export function useFloatBodyDrag() {
-  const { begin, move, end } = useFloatDrag();
+export function useFloatBodyDrag(aspectRatio: number | null = null) {
+  const { begin, move, end } = useFloatDrag(aspectRatio);
   return {
     onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
       if ((event.target as Element).closest?.(INTERACTIVE)) return;
@@ -208,13 +224,40 @@ const RING_PARTS: { key: string; edges: FloatEdges; cursor: string; style: (r: n
  * Anel invisível em volta da miniatura: a borda de cima move, as laterais, a base e os cantos redimensionam.
  * Fica FORA do retângulo da página: a vista nativa é desenhada por cima do DOM, então nada dentro dela recebe o mouse.
  */
-export function BrowserFloatFrame({ rect }: { rect: Rect }) {
+export function BrowserFloatFrame({
+  rect,
+  viewId,
+  aspectRatio: explicitAspectRatio,
+  hover = false,
+}: {
+  rect: Rect;
+  viewId?: string;
+  aspectRatio?: number | null;
+  hover?: boolean;
+}) {
   const { t } = useTranslation();
-  const { begin, move, end } = useFloatDrag();
+  const view = useViewTabsStore((state) => (viewId ? state.views.find((v) => v.id === viewId) : undefined));
+  const aspectRatio = explicitAspectRatio !== undefined
+    ? explicitAspectRatio
+    : floatAspectRatioOf(view?.kind === "browser" ? view.viewport : null);
+  const { begin, move, end } = useFloatDrag(aspectRatio);
+  const miniHover = useChatStore((state) => state.browserMiniHover);
+  const [frameHover, setFrameHover] = useState(false);
   const r = FLOAT_RING;
+  const dockVisible = hover || frameHover || miniHover;
+  const bounds = typeof document !== "undefined" ? chatFloatBounds() : null;
+  const dockPlacement: "top" | "bottom" = bounds && rect.top + rect.height + 50 > bounds.bottom && rect.top - 50 >= bounds.top
+    ? "top"
+    : "bottom";
+
   return (
-    <div data-browser-float-frame className="absolute z-30 pointer-events-none"
-      style={{ left: rect.left - r, top: rect.top - r, width: rect.width + 2 * r, height: rect.height + 2 * r }}>
+    <div
+      data-browser-float-frame
+      onPointerEnter={() => setFrameHover(true)}
+      onPointerLeave={() => setFrameHover(false)}
+      className="absolute z-30 pointer-events-none"
+      style={{ left: rect.left - r, top: rect.top - r, width: rect.width + 2 * r, height: rect.height + 2 * r }}
+    >
       <div data-browser-float-surface
         className="absolute pointer-events-none border border-gray-200 dark:border-white/12 shadow-md shadow-gray-950/20"
         style={{
@@ -232,6 +275,15 @@ export function BrowserFloatFrame({ rect }: { rect: Rect }) {
           className="absolute touch-none"
           style={{ ...part.style(r), cursor: part.cursor, pointerEvents: "auto" }} />
       ))}
+      {viewId && (
+        <div
+          data-browser-mini-dock-slot={dockPlacement}
+          className={`absolute left-1/2 -translate-x-1/2 ${dockVisible ? "pointer-events-auto" : "pointer-events-none focus-within:pointer-events-auto"} ${dockPlacement === "top" ? "pb-1.5" : "pt-1.5"}`}
+          style={dockPlacement === "top" ? { bottom: rect.height + 2 * r - 4 } : { top: rect.height + 2 * r - 4 }}
+        >
+          <BrowserMiniDock viewId={viewId} visible={dockVisible} placement={dockPlacement} />
+        </div>
+      )}
     </div>
   );
 }

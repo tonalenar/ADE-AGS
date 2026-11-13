@@ -3817,6 +3817,7 @@
   "browser.float.open": "Flotar la vista previa sobre el chat",
   "browser.float.dock": "Volver con la vista previa al panel lateral",
   "browser.mini.controls": "Controles de la miniatura del navegador",
+  "browser.mini.deviceDock": "Controles de formato de la miniatura",
   "browser.mini.openPanel": "Abrir en el panel lateral",
   "browser.mini.move": "Arrastrar para mover",
   "browser.mini.resize": "Arrastrar para redimensionar",

@@ -3817,6 +3817,7 @@
   "browser.float.open": "Float preview over chat",
   "browser.float.dock": "Return preview to the side panel",
   "browser.mini.controls": "Browser thumbnail controls",
+  "browser.mini.deviceDock": "Thumbnail format controls",
   "browser.mini.openPanel": "Open in side panel",
   "browser.mini.move": "Drag to move",
   "browser.mini.resize": "Drag to resize",

@@ -37,6 +37,7 @@ import { DebugPanel, MIN_PANEL, type DebugTab } from "./debug/DebugPanel";
 import { appendBatch, clearNetwork, currentCounts, EMPTY_LOG, startDocument } from "./debugLog";
 import { useDebugStore } from "./debugStore";
 import { DeviceBar } from "./DeviceBar";
+import { isFramedViewport, nextFullState, nextPlatformState, nextRotateState, registerBrowserDeviceActions, startViewportFor } from "./deviceMode";
 import { BrowserProfilesControl } from "./BrowserProfilesControl";
 import { browserProfileIdForOwner, DEFAULT_BROWSER_PROFILE_ID } from "./profiles";
 import { readBrowserPreferences } from "./browserPreferences";
@@ -47,10 +48,10 @@ import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, t
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
 import { RealBrowserView } from "./RealBrowserView";
-import { shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserReloadNoCache, realBrowserShot } from "./realBrowser";
+import { miniBrowserZoom, shouldOpenInRealChrome, pickerDisabled, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserReloadNoCache, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
-import { FILL_VIEWPORT, isFillViewport, isPhoneViewport, rotate, type Viewport } from "./viewport";
+import { isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
 import { cropForJev, resizeCanvas, visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
@@ -118,6 +119,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const updateView = useViewTabsStore((s) => s.updateView);
   const chatBrowser = useChatStore((s) => s.browser);
   const browserFloating = useChatStore((s) => s.browserFloating);
+  const browserFloatRect = useChatStore((s) => s.browserFloatRect);
   const inChatPanel = chatBrowser?.viewId === view.id;
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -202,6 +204,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const lastProfileId = useRef(browserProfileId);
   const requestedUrl = useRef("");
   const viewportRef = useRef(viewport);
+  const mobileRef = useRef(mobile);
   const touchRef = useRef(touch);
   /** Cada documento que cargó con el runtime, y si ya llegó a DOMContentLoaded. */
   const doc = useRef<{ id: string | null; count: number; ready: boolean }>({ id: null, count: 0, ready: false });
@@ -350,10 +353,25 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
 
   /** Escolhe o aparelho emulado. Celular é toque; mesa é mouse. */
   const setMobile = useCallback((next: "ios" | "android" | null) => {
+    mobileRef.current = next;
     setMobileState(next);
     updateView(view.id, { mobile: next });
     setTouch(next !== null).catch(() => undefined);
   }, [setTouch, updateView, view.id]);
+
+  useEffect(() => {
+    const nextViewport = view.viewport ?? null;
+    const prev = viewportRef.current;
+    if (nextViewport?.width !== prev?.width || nextViewport?.height !== prev?.height) {
+      viewportRef.current = nextViewport;
+      setViewportState(nextViewport);
+    }
+    const nextMobile = view.mobile ?? null;
+    if (nextMobile !== mobileRef.current) {
+      mobileRef.current = nextMobile;
+      setMobileState(nextMobile);
+    }
+  }, [view.mobile, view.viewport]);
 
   // No celular solto a página mede a tela do aparelho e recebe toque, como num celular de verdade. A resolução fica
   // guardada: voltando para a janela, o quadro continua no mesmo tamanho.
@@ -1075,33 +1093,23 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const menuAction = (fn: () => void) => () => { fn(); closeMenu(); };
   /** O modo celular está ligado: com mockup (`viewport`) ou só emulando um aparelho na coluna inteira (`mobile`). */
   const deviceMode = !!viewport || !!mobile;
-  /** Telas de partida de cada sistema (em pé); o tamanho que o usuário já digitou é mantido. */
-  const screenFor = (platform: "ios" | "android" | null): Viewport => {
-    const base = platform === "android" ? { width: 412, height: 915 } : platform === "ios" ? { width: 390, height: 844 } : { width: 1440, height: 900 };
-    return base;
-  };
-  const choosePlatform = (platform: "ios" | "android" | null) => {
-    const current = viewportRef.current;
-    const framed = current && !isFillViewport(current) ? current : null;
-    setMobile(platform);
-    if (platform === null) {
-      // Desktop: o quadro da mesa, ou a coluna inteira se já era "completo".
-      setViewport(framed ? (isPhoneViewport(framed) ? screenFor(null) : framed) : FILL_VIEWPORT);
-    } else if (framed) {
-      // De um aparelho para outro: se a tela ainda é a de partida de um deles, troca pela do novo; tamanho digitado fica.
-      const landscape = framed.width > framed.height;
-      const isStart = [screenFor("ios"), screenFor("android")].some((d) => (framed.width === d.width && framed.height === d.height) || (framed.width === d.height && framed.height === d.width));
-      setViewport(isPhoneViewport(framed) && !isStart ? framed : (landscape ? rotate(screenFor(platform)) : screenFor(platform)));
-    } else {
-      // "Completo": a coluna inteira, sem quadro, mas com o aparelho emulado.
-      setViewport(null);
-    }
-  };
-  const chooseFull = (full: boolean) => {
-    const platform = mobile;
-    if (full) setViewport(platform ? null : FILL_VIEWPORT);
-    else setViewport(screenFor(platform));
-  };
+  const choosePlatform = useCallback((platform: "ios" | "android" | null) => {
+    const next = nextPlatformState({ viewport: viewportRef.current, mobile: mobileRef.current }, platform);
+    setMobile(next.mobile);
+    setViewport(next.viewport);
+  }, [setMobile, setViewport]);
+  const chooseFull = useCallback((full: boolean) => {
+    setViewport(nextFullState({ mobile: mobileRef.current }, full));
+  }, [setViewport]);
+  const rotateDevice = useCallback(() => {
+    const next = nextRotateState(viewportRef.current);
+    if (next) setViewport(next);
+  }, [setViewport]);
+  useEffect(() => registerBrowserDeviceActions(view.id, {
+    choosePlatform,
+    chooseFull,
+    rotate: rotateDevice,
+  }), [chooseFull, choosePlatform, rotateDevice, view.id]);
   // Os botões da moldura do celular (Chrome do Android no app; Safari do iPhone pela ponte da página).
   phoneActions.current = {
     back: () => { realBrowserHistory(view.id, -1).catch(() => undefined); },
@@ -1113,7 +1121,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   };
   const toggleDeviceMode = () => {
     if (deviceMode) { setViewport(null); setMobile(null); return; }
-    setViewport(screenFor("ios"));
+    setViewport(startViewportFor("ios"));
     setMobile("ios");
   };
 
@@ -1258,11 +1266,27 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
                 Sempre montado, com ou sem tamanho, para a página não recarregar ao alternar. O zoom fica com
                 o palco quando há quadro (ele já entra na escala medida pela vista). */}
             {/* Na página vazia a vista nativa fica invisível (a opacidade a esconde) e a página inicial aparece. */}
+            {(() => {
+              const stageViewport = floatingPreview && isFillViewport(viewport) ? null : viewport;
+              const stageFramed = isFramedViewport(stageViewport);
+              const miniScale = floatingPreview && stageFramed && chatBrowser?.viewId === view.id && browserFloatRect
+                ? miniBrowserZoom(
+                  1,
+                  { x: chatBrowser.rect.left, y: chatBrowser.rect.top, width: chatBrowser.rect.width, height: chatBrowser.rect.height },
+                  { x: browserFloatRect.left, y: browserFloatRect.top, width: browserFloatRect.width, height: browserFloatRect.height },
+                )
+                : 1;
+              // Quando o ResponsiveStage já aplica a escala do aparelho na miniatura, compensamos o miniBrowserZoom de RealBrowserView.
+              const realZoom = floatingPreview && stageFramed
+                ? (miniScale > 0 ? 1 / miniScale : 1)
+                : (stageViewport && !floatingPreview ? 1 : zoom);
+              return (
+                <>
             <div className={`flex flex-1 min-h-0 ${isBlankUrl(view.url) ? "opacity-0" : ""}`}>
-            <ResponsiveStage viewport={floatingPreview ? null : viewport} onResize={setViewport}
-              zoom={viewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}
+            <ResponsiveStage viewport={stageViewport} onResize={setViewport}
+              zoom={stageViewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}
               platform={mobile} url={address} actions={phoneActions.current}>
-            <RealBrowserView viewId={view.id} url={view.url} zoom={viewport && !floatingPreview ? 1 : zoom} script={INJECTED}
+            <RealBrowserView viewId={view.id} url={view.url} zoom={realZoom} script={INJECTED}
               profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} onError={setError}
               onUrl={(u) => {
                 setRealReady(true);
@@ -1285,9 +1309,12 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
             </div>
             {isBlankUrl(view.url) && (
               <div className="absolute inset-0 z-10 flex min-h-0 bg-gray-50 dark:bg-surface">
-                <StartStage device={device} viewport={viewport} onResize={setViewport} zoom={zoom}>{startPage}</StartStage>
+                <StartStage device={floatingPreview ? null : device} viewport={stageViewport} onResize={setViewport} zoom={floatingPreview && stageFramed ? 1 : zoom}>{startPage}</StartStage>
               </div>
             )}
+                </>
+              );
+            })()}
             </>
           ) : target ? (
             <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom} device={device}>
