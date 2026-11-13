@@ -1027,21 +1027,21 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     <>
       <ToolButton label={t("browser.back")} disabled={!target && !real}
         onClick={() => real ? realBrowserHistory(view.id, -1).catch(console.error) : postToPage("history:back")}>
-        <ArrowLeftIcon className="w-4 h-4 stroke-2" />
+        <ArrowLeftIcon className="w-3.5 h-3.5 stroke-2" />
       </ToolButton>
       <ToolButton label={t("browser.forward")} disabled={!target && !real}
         onClick={() => real ? realBrowserHistory(view.id, 1).catch(console.error) : postToPage("history:forward")}>
-        <ArrowRightIcon className="w-4 h-4 stroke-2" />
+        <ArrowRightIcon className="w-3.5 h-3.5 stroke-2" />
       </ToolButton>
       <ToolButton label={t("browser.reload")} disabled={!target && !real}
         onClick={() => real ? realBrowserHistory(view.id, 0).catch(console.error) : reload()}>
-        <RefreshIcon className="w-4 h-4 stroke-2" />
+        <RefreshIcon className="w-3.5 h-3.5 stroke-2" />
       </ToolButton>
     </>
   );
 
   const addressBar = (
-    <form className="flex-1 min-w-0 mx-1.5" onSubmit={(e) => { e.preventDefault(); go(address); }}>
+    <form className="flex-1 min-w-0" onSubmit={(e) => { e.preventDefault(); go(address); }}>
       <input
         ref={addressRef}
         value={address}
@@ -1049,7 +1049,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
         onFocus={(e) => e.target.select()}
         placeholder={t("browser.address")}
         spellCheck={false}
-        className="w-full h-7 px-3 rounded-lg outline-none font-mono text-[12px]
+        className="w-full h-7 px-2 rounded-md outline-none font-sans text-sm
           bg-white/80 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08]
           focus:border-accent-500 dark:focus:border-accent-400
           text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/35"
@@ -1150,7 +1150,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       onDone={finishAnnotating}
     />
   ) : (
-    <div className="flex items-center gap-0.5 h-9 shrink-0 px-1.5 border-b border-gray-200 dark:border-white/7">
+    <div className="flex items-center gap-1 h-10 shrink-0 px-2 border-b border-gray-200 dark:border-white/7">
       {navButtons}
       {addressBar}
       <ToolButton label={picking ? t("browser.pick.stop") : t("browser.pick.start")} disabled={!target} active={picking} onClick={togglePicking}>

@@ -12,14 +12,14 @@ export function BrowserStartPage({ recentPages, servers, onClearRecent, onNaviga
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-1 h-full items-center justify-center overflow-y-auto p-6 bg-gray-50 dark:bg-surface">
-      <div className="flex w-full max-w-lg flex-col items-center gap-4 py-6 text-center">
-        <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-accent-500/10 text-accent-600 dark:text-accent-400">
-          <GlobeIcon className="w-6 h-6" />
+    <div className="flex flex-1 h-full items-center justify-center overflow-y-auto p-6 md:p-12 bg-gray-50 dark:bg-surface">
+      <div className="flex w-full max-w-sm flex-col items-center gap-6 text-center">
+        <span className="flex size-9 items-center justify-center rounded-md border border-gray-200 bg-white text-gray-700 shadow-sm dark:border-white/10 dark:bg-white/4 dark:text-gray-200">
+          <GlobeIcon className="size-4.5" />
         </span>
         <div>
-          <p className="text-[14px] font-semibold text-gray-800 dark:text-gray-100">{t("browser.start.title")}</p>
-          <p className="mt-1 text-[12px] text-gray-500 dark:text-white/40">{t("browser.start.desc")}</p>
+          <p className="text-xl font-semibold leading-6 text-gray-900 dark:text-gray-50">{t("browser.start.title")}</p>
+          <p className="mt-1 text-sm leading-5 text-gray-600 dark:text-gray-300">{t("browser.start.desc")}</p>
         </div>
         {recentPages.length > 0 && (
           <section className="w-full text-left">

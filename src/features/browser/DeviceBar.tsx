@@ -33,7 +33,7 @@ function SideInput({ value, label, onCommit }: { value: number; label: string; o
           onCommit(value + (e.key === "ArrowUp" ? 1 : -1) * (e.shiftKey ? 10 : 1));
         }
       }}
-      className="w-14 h-6 px-1.5 rounded-md text-center font-mono text-[11.5px] tabular-nums outline-none
+      className="w-14 h-7 px-1.5 rounded-md text-center font-mono text-xs tabular-nums outline-none
         bg-white dark:bg-white/6 border border-gray-300 dark:border-white/12
         focus:border-accent-500 dark:focus:border-accent-400 text-gray-900 dark:text-gray-100"
     />
@@ -68,11 +68,7 @@ function Segmented<T extends string | null>({ label, value, options, onPick }: {
   );
 }
 
-/**
- * A barra do modo celular. Linha 1: o aparelho que a página acha que é (iPhone, Android, Desktop), como ele se mostra
- * (num mockup do aparelho ou preenchendo a coluna inteira) e fechar. Linha 2, só com o mockup: o tamanho da tela e girar.
- * `viewport` `null` é o "completo" de um celular: sem quadro, a página ocupa a coluna.
- */
+/** A barra do modo aparelho: plataforma, enquadramento e, quando há moldura, tamanho e rotação. */
 export function DeviceBar({ viewport, mobile, onChange, onMobile, onFull, onClose }: {
   viewport: Viewport | null;
   /** Aparelho emulado (user agent, densidade e toque); `null` = mesa. */
@@ -89,28 +85,29 @@ export function DeviceBar({ viewport, mobile, onChange, onMobile, onFull, onClos
   const set = (v: Viewport) => onChange(clampViewport(v));
 
   return (
-    <div className="shrink-0 border-b border-gray-200 dark:border-white/7 bg-white/60 dark:bg-white/2">
-      <div className="flex items-center gap-2 h-9 px-2">
-        <Segmented label={t("browser.viewport.platform")} value={mobile}
-          options={PLATFORMS.map((p) => ({ id: p.id, node: t(p.key) }))} onPick={onMobile} />
-        <Segmented label={t("browser.viewport.layout")} value={framed ? "frame" : "full"}
-          options={[
-            { id: "frame", node: t("browser.viewport.frame"), title: t("browser.viewport.frameHint") },
-            { id: "full", node: t("browser.viewport.full"), title: t("browser.viewport.fullHint") },
-          ]}
-          onPick={(id) => onFull(id === "full")} />
-        <div className="flex-1" />
-        <Tooltip content={t("browser.viewport.exit")} placement="bottom">
-          <Button variant="icon" onClick={onClose} aria-label={t("browser.viewport.exit")}
-            className="cc-t flex items-center justify-center w-7 h-7 p-0 rounded-md shrink-0
-              text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
-            <CloseIcon className="w-3.5 h-3.5" />
-          </Button>
-        </Tooltip>
-      </div>
+    <div
+      className="flex h-[38px] shrink-0 items-center gap-1 overflow-x-auto border-b border-gray-200 bg-gray-50/95 px-1.5 shadow-sm backdrop-blur-md dark:border-white/7 dark:bg-surface/95 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      role="toolbar"
+      aria-label={t("browser.menu.device")}
+    >
+      <Segmented
+        label={t("browser.viewport.platform")}
+        value={mobile}
+        options={PLATFORMS.map((p) => ({ id: p.id, node: t(p.key) }))}
+        onPick={onMobile}
+      />
+      <Segmented
+        label={t("browser.viewport.layout")}
+        value={framed ? "frame" : "full"}
+        options={[
+          { id: "frame", node: t("browser.viewport.frame"), title: t("browser.viewport.frameHint") },
+          { id: "full", node: t("browser.viewport.full"), title: t("browser.viewport.fullHint") },
+        ]}
+        onPick={(id) => onFull(id === "full")}
+      />
 
       {framed && viewport && (
-        <div className="flex items-center gap-2 h-9 px-2 border-t border-gray-100 dark:border-white/5">
+        <>
           <div className="w-32 shrink-0">
             <PopupSelect
               className="w-full h-7 text-[12px]"
@@ -139,8 +136,17 @@ export function DeviceBar({ viewport, mobile, onChange, onMobile, onFull, onClos
               <RotateIcon className="w-4 h-4" />
             </Button>
           </Tooltip>
-        </div>
+        </>
       )}
+
+      <div className="flex-1" />
+      <Tooltip content={t("browser.viewport.exit")} placement="bottom">
+        <Button variant="icon" onClick={onClose} aria-label={t("browser.viewport.exit")}
+          className="cc-t flex items-center justify-center size-7 p-0 rounded-md shrink-0
+            text-gray-500 dark:text-white/45 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
+          <CloseIcon className="w-3.5 h-3.5" />
+        </Button>
+      </Tooltip>
     </div>
   );
 }

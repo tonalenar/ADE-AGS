@@ -24,7 +24,7 @@ export function ToolButton({ label, onClick, disabled, active, plain, children }
       // Contraste de texto, no de adorno: estos son los controles con los que se usa la
       // tab. Con el gris al 45% sobre el fondo oscuro, y encima atenuados al 35% mientras
       // la página no cargó, prácticamente no se veían.
-      className={`cc-t relative flex items-center justify-center w-8 h-8 p-0 rounded-lg shrink-0
+      className={`cc-t relative flex items-center justify-center size-6 p-0 rounded-md shrink-0
         disabled:opacity-100 disabled:cursor-default disabled:text-gray-400 dark:disabled:text-white/30 disabled:hover:bg-transparent
         ${active
           ? "bg-accent-500/15 text-accent-600 dark:bg-accent-400/20 dark:text-accent-300"
