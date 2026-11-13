@@ -18,6 +18,8 @@ interface HarnessProps {
   list: { path: string }[];
   addPaths: (paths: string[]) => Promise<boolean>;
   notify: (message: string) => void;
+  onRestored?: (paths: string[]) => void;
+  onRemoved?: (paths: string[]) => void;
 }
 
 function Harness(props: HarnessProps) {
@@ -96,6 +98,21 @@ describe("capturas pendentes no composer", () => {
     expect(pendingCapturePaths("thread:1")).toEqual(["/a.png"]);
     await show({ target: "thread:1", list: [], addPaths, notify: vi.fn() });
     expect(pendingCapturePaths("thread:1")).toEqual([]);
+  });
+
+  it("avisa a UI para fechar o aviso quando a captura correspondente é removida", async () => {
+    rememberPendingCapture({ path: "/a.png", target: "thread:1", kind: "snapshot" });
+    vi.mocked(inspectPaths).mockResolvedValue([inspected("/a.png")] as never);
+    const addPaths = vi.fn().mockResolvedValue(true);
+    const onRestored = vi.fn();
+    const onRemoved = vi.fn();
+    await show({ target: "thread:1", list: [], addPaths, notify: vi.fn(), onRestored, onRemoved });
+    await flush();
+    expect(onRestored).toHaveBeenCalledWith(["/a.png"]);
+
+    await show({ target: "thread:1", list: [{ path: "/a.png" }], addPaths, notify: vi.fn(), onRestored, onRemoved });
+    await show({ target: "thread:1", list: [], addPaths, notify: vi.fn(), onRestored, onRemoved });
+    expect(onRemoved).toHaveBeenCalledWith(["/a.png"]);
   });
 
   it("captura que acabou de chegar e ainda não entrou no rascunho não é apagada", async () => {

@@ -132,6 +132,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [stashMenuOpen, setStashMenuOpen] = useState(false);
   const [stashStatus, setStashStatus] = useState("");
+  const [restoredCaptureNotice, setRestoredCaptureNotice] = useState<{ target: string; paths: string[] } | null>(null);
   const [stashBusy, setStashBusy] = useState(false);
   const [stashRestoring, setStashRestoring] = useState(false);
   const [pendingCrossProjectStash, setPendingCrossProjectStash] = useState<PromptStash | null>(null);
@@ -478,7 +479,16 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
 
   // Capturas (SnapShot e gravações) ainda não enviadas voltam ao rascunho deste alvo, depois de trocar de
   // conversa ou recarregar. Quando saem do rascunho (enviadas, removidas ou guardadas), saem do registro.
-  useComposerCaptures({ target: eventTarget, list: attachments.list, addPaths: attachments.addPaths, notify: setStashStatus });
+  useComposerCaptures({
+    target: eventTarget,
+    list: attachments.list,
+    addPaths: attachments.addPaths,
+    notify: setStashStatus,
+    onRestored: (paths) => { if (eventTarget) setRestoredCaptureNotice({ target: eventTarget, paths }); },
+    onRemoved: (removed) => setRestoredCaptureNotice((notice) => notice?.target === eventTarget
+      ? { ...notice, paths: notice.paths.filter((path) => !removed.includes(path)) }
+      : notice),
+  });
 
   // O bloco cresce com o texto e com as miniaturas até 40% da janela; a caixa tem a altura do texto todo
   // e quem rola é o miolo (`scroller`), de modo que o enviar não sai da tela.
@@ -520,6 +530,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
     historyDraft.current = null;
     setHistoryIndex(null);
     setText("");
+    setRestoredCaptureNotice(null);
     forgetPendingCaptures(eventTarget, attachments.list.map((item) => item.path));
     attachments.clear();
     if (quoteKey) clearQuotesFor(quoteKey);
@@ -548,6 +559,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       historyDraft.current = null;
       setHistoryIndex(null);
       setText("");
+      setRestoredCaptureNotice(null);
       // Pode rodar depois de a conversa já ter trocado (o envio cria a conversa): o registro sai aqui, não no efeito.
       forgetPendingCaptures(eventTarget, attachments.list.map((item) => item.path));
       attachments.clear();
@@ -697,9 +709,9 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
           {stashes.length > 0 && <span className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 px-0.5 rounded-full flex items-center justify-center bg-accent-600 text-[9px] leading-none font-semibold text-white">{stashes.length}</span>}
         </button>
   );
-  const snapshotButton = <DesktopSnapshotButton target={eventTarget} disabled={stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40" />;
-  const recordButton = <ScreenRecordButton kind="desktop" target="main-display" composerTarget={eventTarget} label={t("screenRecording.display")} disabled={stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white" />;
-  const voiceButton = <VoiceInputButton onTranscript={insertTranscript} isComposerActive={isComposerActive} disabled={disabled || stashRestoring} className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40" />;
+  const snapshotButton = <DesktopSnapshotButton target={eventTarget} disabled={stashRestoring} className="w-8 h-8 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:cursor-not-allowed disabled:opacity-40" />;
+  const recordButton = <ScreenRecordButton kind="desktop" target="main-display" composerTarget={eventTarget} label={t("screenRecording.display")} disabled={stashRestoring} className="w-8 h-8 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:cursor-not-allowed disabled:opacity-40" />;
+  const voiceButton = <VoiceInputButton onTranscript={insertTranscript} isComposerActive={isComposerActive} disabled={disabled || stashRestoring} className="w-8 h-8 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:cursor-not-allowed disabled:opacity-40" />;
 
   return (
     <>
@@ -707,9 +719,12 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       onEdit={editQueued} onSave={saveQueuedEdit} onCancel={cancelQueuedEdit} onRemove={(id) => { onUnqueue(id); }} />}
     <form ref={formRef}
       onSubmit={(e) => { e.preventDefault(); submitForEnter(); }}
-      className="relative w-full rounded-[20px] border border-black/[0.10] dark:border-white/[0.10]
-        bg-white dark:bg-surface-raised
-        shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-none"
+      className="group relative isolate w-full rounded-2xl border border-gray-200 dark:border-white/5
+        [--composer-glass-surface:var(--color-white)] dark:[--composer-glass-surface:var(--color-surface-raised)]
+        before:pointer-events-none before:absolute before:inset-0 before:-z-1 before:rounded-2xl before:bg-(--composer-glass-surface)/(--glass-opacity) before:backdrop-blur-(--glass-blur) before:backdrop-saturate-(--glass-saturation)
+        not-supports-[((backdrop-filter:blur(1px))_or_(-webkit-backdrop-filter:blur(1px)))]:before:bg-(--composer-glass-surface)
+        shadow-composer dark:shadow-composer-dark transition-[border-color,box-shadow] duration-150
+        focus-within:border-accent-500/50 focus-within:ring-2 focus-within:ring-accent-500/20"
     >
       {stashMenuOpen && stashes.length > 0 && (
         <div role="menu" aria-label={t("chat.stash.menuTitle")}
@@ -767,6 +782,15 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         </div>
       )}
       {stashStatus && <p className="mx-4 mb-2 text-chat-caption text-gray-500 dark:text-white/50" role="status" aria-live="polite">{stashStatus}</p>}
+      {restoredCaptureNotice?.target === eventTarget && restoredCaptureNotice.paths.length > 0 && (
+        <div role="status" aria-live="polite" className="mx-3 mt-3 mb-1 flex items-start gap-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-chat-caption text-gray-600 dark:border-white/10 dark:bg-white/[0.04] dark:text-white/65">
+          <span className="min-w-0 flex-1">{t("screenRecording.pendingRestored", { count: restoredCaptureNotice.paths.length })}</span>
+          <button type="button" onClick={() => setRestoredCaptureNotice(null)} aria-label={t("btn.close")}
+            className="-mr-1 -mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-gray-200 hover:text-gray-800 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-500 dark:text-white/50 dark:hover:bg-white/10 dark:hover:text-white">
+            <XIcon className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      )}
       {addon?.({ text, caret, apply, addPaths: async (paths) => {
         if (stashRestoringRef.current) { setStashStatus(t("chat.stash.retryAttachment")); return false; }
         return attachments.addPaths(paths);
@@ -779,7 +803,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
             {attachments.notices.map((n) => <li key={n}>{n}</li>)}
           </ul>
         )}
-      <label className={`block px-5 pb-2 ${extras > 0 ? "pt-3" : "pt-4"}`}>
+      <label className={`block px-4 pb-2 ${extras > 0 ? "pt-3" : "pt-3.5"}`}>
         <span className="sr-only">{t("chat.composer.label")}</span>
         <textarea ref={ref} rows={1} value={text} autoFocus={autoFocus} data-chat-composer="" data-chat-composer-target={eventTarget ?? undefined}
           data-chat-composer-send-alternate={sendAlternateAvailable ? "true" : undefined}
@@ -853,8 +877,8 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
             }
           }}
           placeholder={placeholder}
-          className="block w-full resize-none bg-transparent outline-none text-chat-prose
-            text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
+          className="block min-h-[calc(2lh+0.5rem)] w-full resize-none bg-transparent outline-none text-chat-ui leading-relaxed
+            text-gray-900 dark:text-white placeholder:text-gray-500 dark:placeholder:text-white/45 disabled:cursor-not-allowed disabled:opacity-50" />
       </label>
       </div>
       {/*
@@ -863,19 +887,19 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         tooltip, ver `ComposerColumn`). Só numa coluna muito estreita (< 28rem) ela volta a quebrar, para nada passar
         da borda do cartão. O enviar é sempre o último, no canto.
       */}
-      <div data-composer-row className="flex flex-nowrap @max-[28rem]/composer:flex-wrap items-center gap-x-1 gap-y-1 px-3 pb-2.5">
-        <div data-composer-left className="flex shrink-0 items-center gap-0.5">
+      <div data-composer-row className="flex flex-nowrap @max-[28rem]/composer:flex-wrap items-center gap-x-2 gap-y-1 px-2 pb-2">
+        <div data-composer-left className="flex shrink-0 items-center gap-1.5">
         <ComposerMoreActions>
           <button type="button" onClick={() => { void attach(); }} aria-label={t("chat.composer.attach")} title={t("chat.composer.attach")} disabled={disabled || stashRestoring}
-            className="w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:opacity-40">
+            className="w-8 h-8 shrink-0 flex items-center justify-center rounded-md text-gray-500 dark:text-white/45 hover:bg-gray-100 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white disabled:cursor-not-allowed disabled:opacity-40">
             <PaperclipIcon className="w-4 h-4" />
           </button>
           {stashButton}{snapshotButton}{recordButton}
         </ComposerMoreActions>
         {leading}
         </div>
-        <div data-composer-right className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-0.5">
-        <div data-composer-controls className="flex min-w-0 flex-nowrap items-center justify-end gap-x-0.5">{controlsContent}</div>
+        <div data-composer-right className="ml-auto flex min-w-0 flex-1 items-center justify-end gap-1">
+        <div data-composer-controls className="flex min-w-0 flex-nowrap items-center justify-end gap-x-1 [&_button]:min-h-8">{controlsContent}</div>
         {voiceButton}
         {stopping ? (
           <button type="button" onClick={() => onStop?.()} disabled={!onStop} aria-label={t("chat.composer.stop")} title={stopUnavailableReason ?? t("chat.composer.stop")}
@@ -885,7 +909,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         ) : (
           <button type="submit" disabled={!canSend} aria-label={enterQueues ? t("chat.composer.queueAction") : t("chat.composer.send")} title={enterQueues ? t("chat.composer.queueAction") : onBackgroundSubmit ? `${t("chat.composer.send")} · ${t("chat.composer.sendBackgroundShortcut")}` : t("chat.composer.send")}
             className={`ml-1 w-8 h-8 shrink-0 rounded-full flex items-center justify-center transition-transform
-              ${canSend ? "bg-accent-600 text-white hover:scale-105" : "bg-gray-900/12 dark:bg-white/12 text-white dark:text-surface-deep cursor-default"}`}>
+              ${canSend ? "bg-accent-600 text-white hover:scale-105" : "bg-gray-200 text-gray-500 dark:bg-white/12 dark:text-white/60 cursor-not-allowed disabled:opacity-65"}`}>
             <ArrowUpIcon className="w-3.5 h-3.5" />
           </button>
         )}

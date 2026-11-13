@@ -13,6 +13,10 @@ interface ComposerCapturesOptions {
   addPaths: (paths: string[]) => Promise<boolean>;
   /** Mostra uma linha de status no composer. */
   notify: (message: string) => void;
+  /** Exibe o aviso vinculado às capturas devolvidas ao rascunho. */
+  onRestored?: (paths: string[]) => void;
+  /** Atualiza ou fecha o aviso quando as capturas correspondentes saem do rascunho. */
+  onRemoved?: (paths: string[]) => void;
 }
 
 /**
@@ -23,7 +27,7 @@ interface ComposerCapturesOptions {
  * - Depois disso, tira do registro só o que saiu do rascunho (enviado, removido ou guardado num stash).
  *   Captura que ainda não entrou na lista (chegou pela fila) nunca é apagada por engano.
  */
-export function useComposerCaptures({ target, list, addPaths, notify }: ComposerCapturesOptions): void {
+export function useComposerCaptures({ target, list, addPaths, notify, onRestored, onRemoved }: ComposerCapturesOptions): void {
   const { t } = useTranslation();
   const tRef = useRef(t);
   tRef.current = t;
@@ -31,6 +35,10 @@ export function useComposerCaptures({ target, list, addPaths, notify }: Composer
   addRef.current = addPaths;
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
+  const onRestoredRef = useRef(onRestored);
+  onRestoredRef.current = onRestored;
+  const onRemovedRef = useRef(onRemoved);
+  onRemovedRef.current = onRemoved;
   const previousRef = useRef<string[] | null>(null);
 
   useEffect(() => {
@@ -50,7 +58,10 @@ export function useComposerCaptures({ target, list, addPaths, notify }: Composer
         }
         if (usable.length > 0) {
           await addRef.current(usable);
-          if (active) notifyRef.current(tRef.current("screenRecording.pendingRestored", { count: usable.length }));
+          if (active) {
+            if (onRestoredRef.current) onRestoredRef.current(usable);
+            else notifyRef.current(tRef.current("screenRecording.pendingRestored", { count: usable.length }));
+          }
         }
       } catch (error) {
         // Sem a inspeção não sabemos o que existe: nada é apagado, e o aviso diz isso.
@@ -66,6 +77,9 @@ export function useComposerCaptures({ target, list, addPaths, notify }: Composer
     previousRef.current = now;
     if (!target || previous === null) return;
     const removed = removedCapturePaths(previous, now);
-    if (removed.length > 0) forgetPendingCaptures(target, removed);
+    if (removed.length > 0) {
+      forgetPendingCaptures(target, removed);
+      onRemovedRef.current?.(removed);
+    }
   }, [list, target]);
 }

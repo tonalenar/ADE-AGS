@@ -724,7 +724,7 @@ export function ContextStrip({ branch, workspace, worktree = false, showContext 
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-nowrap items-center gap-0.5 px-3 pt-1.5 text-chat-note text-gray-500 dark:text-white/45">
+    <div className="flex flex-nowrap items-center gap-2 px-2 pt-2 text-chat-note text-gray-500 dark:text-white/45">
       {showContext && (workspace ?? (
         <span title={worktree ? t("chat.workspace.worktree") : t("chat.new.currentCheckout")} className="flex shrink-0 items-center gap-1.5 h-7 px-1.5 whitespace-nowrap">
           {worktree ? <FolderGitIcon className="w-3.5 h-3.5" /> : <FolderIcon className="w-3.5 h-3.5" />}
