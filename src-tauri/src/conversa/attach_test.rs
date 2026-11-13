@@ -73,3 +73,44 @@ fn passa_do_teto_de_imagens_em_linha_so_o_caminho_no_texto() {
     assert_eq!(blocks.len(), INLINE_IMAGES_PER_MESSAGE);
     assert_eq!(skipped.len(), 2);
 }
+
+#[test]
+fn copia_anotada_fica_ao_lado_e_nunca_sobrescreve() {
+    use base64::Engine as _;
+    let d = dir();
+    let original = d.join("print.png");
+    let png = b"\x89PNG\r\n\x1a\nresto".to_vec();
+    fs::write(&original, &png).unwrap();
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&png);
+    let first = save_annotated(original.to_str().unwrap(), &encoded).unwrap();
+    assert_eq!(std::path::Path::new(&first), d.join("print-anotado.png"));
+    let second = save_annotated(original.to_str().unwrap(), &encoded).unwrap();
+    assert_eq!(std::path::Path::new(&second), d.join("print-anotado-2.png"));
+    assert_eq!(fs::read(&original).unwrap(), png);
+}
+
+#[test]
+fn copia_anotada_recusa_caminho_relativo_e_conteudo_que_nao_e_png() {
+    use base64::Engine as _;
+    let d = dir();
+    let original = d.join("foto.png");
+    fs::write(&original, b"\x89PNG\r\n\x1a\nx").unwrap();
+    let texto = base64::engine::general_purpose::STANDARD.encode(b"#!/bin/sh");
+    assert!(save_annotated(original.to_str().unwrap(), &texto).is_err());
+    assert!(save_annotated("foto.png", &texto).is_err());
+    let notas = d.join("notas.txt");
+    fs::write(&notas, b"oi").unwrap();
+    let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nx");
+    assert!(save_annotated(notas.to_str().unwrap(), &png).is_err());
+}
+
+#[test]
+fn quadro_anotado_de_video_fica_ao_lado_do_video() {
+    use base64::Engine as _;
+    let d = dir();
+    let video = d.join("tela.mov");
+    fs::write(&video, b"nao importa").unwrap();
+    let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nx");
+    let saved = save_annotated(video.to_str().unwrap(), &png).unwrap();
+    assert_eq!(std::path::Path::new(&saved), d.join("tela-anotado.png"));
+}

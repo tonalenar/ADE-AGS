@@ -20,3 +20,6 @@ export const readImage = (path: string) => invoke<{ mime: string; dataUrl: strin
 /** Remove o fundo localmente pelo Vision no macOS quando o helper está empacotado. */
 export const backgroundRemovalAvailable = () => invoke<boolean>("chat_attachment_remove_background_available");
 export const removeImageBackground = (path: string) => invoke<string>("chat_attachment_remove_background", { path });
+
+/** Grava a cópia anotada (PNG em base64, sem o prefixo `data:`) ao lado do original; devolve o caminho novo. */
+export const saveAnnotatedCopy = (path: string, pngBase64: string) => invoke<string>("chat_attachment_save_annotated", { path, pngBase64 });
