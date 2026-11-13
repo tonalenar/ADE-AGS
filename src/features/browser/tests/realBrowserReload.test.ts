@@ -11,6 +11,6 @@ describe("recarregar o navegador sem cache", () => {
   it("pede ao backend um reload CDP sem cache para a vista escolhida", async () => {
     await realBrowserReloadNoCache("portal-1");
 
-    expect(mock.invoke).toHaveBeenCalledWith("real_browser_reload", { id: "portal-1" });
+    expect(mock.invoke).toHaveBeenCalledWith("real_browser_reload", { id: "portal-1", ignoreCache: true });
   });
 });

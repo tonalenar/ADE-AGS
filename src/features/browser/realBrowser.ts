@@ -85,7 +85,7 @@ export const realBrowserNavigate = (id: string, url: string) => invoke<void>("re
 export const realBrowserHistory = (id: string, delta: number) => invoke<void>("real_browser_history", { id, delta });
 
 /** Recarrega sem cache HTTP, pelo comando CDP `Page.reload`. */
-export const realBrowserReloadNoCache = (id: string) => invoke<void>("real_browser_reload", { id });
+export const realBrowserReloadNoCache = (id: string) => invoke<void>("real_browser_reload", { id, ignoreCache: true });
 
 export const realBrowserClose = (id: string) => invoke<void>("real_browser_close", { id });
 
