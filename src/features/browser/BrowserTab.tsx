@@ -45,6 +45,7 @@ import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRec
 import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
+import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
 import { RealBrowserView } from "./RealBrowserView";
 import { shouldOpenInRealChrome, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
@@ -330,15 +331,22 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     return channel.run({ op: "touch", on: next }, 8000);
   }, [channel, updateView, view.id]);
 
+  const phoneActions = useRef<PhoneActions>({ back() {}, reload() {}, navigate() {}, newTab() {}, share() {}, desktop() {} });
   /** A vista nativa já existe (avisou a primeira URL): só então dá para mandar a emulação por CDP. */
   const [realReady, setRealReady] = useState(false);
   /** O que já foi aplicado na vista nativa; começa como mesa, que é o padrão dela. */
-  const emulated = useRef<"ios" | "android" | null>(null);
+  const emulated = useRef<string>("null");
+  /** Com o mockup de celular, a moldura (barra de status, vidro do Safari) vai dentro da página; no Completo, não. */
+  const framedPhone = !!mobile && !!viewport && !isFillViewport(viewport) && isPhoneViewport(viewport) && !device;
   useEffect(() => {
-    if (!real || !realReady || emulated.current === mobile) return;
-    emulated.current = mobile;
-    realBrowserEmulate(view.id, mobile).catch((e) => setError(String(e)));
-  }, [real, realReady, mobile, view.id]);
+    const key = `${mobile}|${framedPhone}`;
+    if (!real || !realReady || emulated.current === key) return;
+    emulated.current = key;
+    const labels = framedPhone
+      ? Object.fromEntries(["back", "reload", "menu", "tabs", "address", "share", "desktop"].map((k) => [k, t(`browser.device.${k}`)]))
+      : null;
+    realBrowserEmulate(view.id, mobile, labels).catch((e) => setError(String(e)));
+  }, [real, realReady, mobile, framedPhone, view.id, t]);
 
   /** Escolhe o aparelho emulado. Celular é toque; mesa é mouse. */
   const setMobile = useCallback((next: "ios" | "android" | null) => {
@@ -764,7 +772,13 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   useEffect(() => {
     if (!real) return;
     const off = listen<{ id: string; message: unknown }>("real-browser-page", (e) => {
-      if (e.payload.id !== view.id || !isPageMessage(e.payload.message)) return;
+      if (e.payload.id !== view.id) return;
+      const action = deviceAction(e.payload.message);
+      if (action) {
+        runDeviceAction(action, phoneActions.current, (text) => { navigator.clipboard?.writeText(text).catch(() => undefined); });
+        return;
+      }
+      if (!isPageMessage(e.payload.message)) return;
       onPageMessage.current(e.payload.message, (message) => { realBrowserPost(view.id, message).catch(() => undefined); }, (url) => url);
     });
     return () => { off.then((f) => f()); };
@@ -1088,6 +1102,15 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     if (full) setViewport(platform ? null : FILL_VIEWPORT);
     else setViewport(screenFor(platform));
   };
+  // Os botões da moldura do celular (Chrome do Android no app; Safari do iPhone pela ponte da página).
+  phoneActions.current = {
+    back: () => { realBrowserHistory(view.id, -1).catch(() => undefined); },
+    reload: () => { realBrowserHistory(view.id, 0).catch(() => undefined); },
+    navigate: (text) => { void go(text); },
+    newTab: () => { useViewTabsStore.getState().openBrowser(view.cwd, "", { browserProfileId, owner: view.owner }); },
+    share: () => { if (address) navigator.clipboard?.writeText(address).catch(() => undefined); },
+    desktop: () => choosePlatform(null),
+  };
   const toggleDeviceMode = () => {
     if (deviceMode) { setViewport(null); setMobile(null); return; }
     setViewport(screenFor("ios"));
@@ -1236,7 +1259,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
             <div className={`flex flex-1 min-h-0 ${isBlankUrl(view.url) ? "opacity-0" : ""}`}>
             <ResponsiveStage viewport={floatingPreview ? null : viewport} onResize={setViewport}
               zoom={viewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}
-              platform={mobile} url={address}>
+              platform={mobile} url={address} actions={phoneActions.current}>
             <RealBrowserView viewId={view.id} url={view.url} zoom={viewport && !floatingPreview ? 1 : zoom} script={INJECTED}
               profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} onError={setError}
               onUrl={(u) => {

@@ -86,8 +86,9 @@ export const realBrowserDeleteProfile = (profileId: string) =>
   invoke<void>("real_browser_delete_profile", { profileId });
 
 /** Faz a página se passar por um iPhone, um Android ou o navegador de mesa (`null`) e recarrega. */
-export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null) =>
-  invoke<void>("real_browser_emulate", { id, platform });
+/** `chrome`: os rótulos da moldura desenhada dentro da página; sem ele (modo Completo) a página fica limpa. */
+export const realBrowserEmulate = (id: string, platform: "ios" | "android" | null, chrome: Record<string, string> | null = null) =>
+  invoke<void>("real_browser_emulate", { id, platform, chrome });
 
 export const realBrowserFocus = (id: string) => invoke<void>("real_browser_focus", { id });
 

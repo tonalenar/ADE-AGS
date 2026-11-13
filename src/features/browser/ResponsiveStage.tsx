@@ -4,6 +4,7 @@ import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, isPh
 import { clampZoom, stageSize } from "./zoom";
 import { DEVICE_BEZEL, type DeviceSpec } from "./devices";
 import { PhoneChrome, type Platform } from "./PhoneChrome";
+import type { PhoneActions } from "./deviceActions";
 import { NativeCornerRadius } from "./nativeCorner";
 
 type Edge = "x" | "y" | "xy";
@@ -19,7 +20,7 @@ type Edge = "x" | "y" | "xy";
  * Un tamaño más grande que el espacio se muestra achicado, pero la página sigue midiendo
  * lo que se pidió: las media queries ven 1440 px aunque en pantalla ocupe la mitad.
  */
-export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, platform = null, url = "", children }: {
+export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, platform = null, url = "", actions, children }: {
   viewport: Viewport | null;
   /** "Celular solto": só o aparelho, centrado no espaço, sem o quadro, as alças nem o rótulo. A árvore é a mesma
    *  dos outros modos, para o iframe não recarregar ao trocar. */
@@ -29,6 +30,8 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
   platform?: Platform | null;
   /** O endereço mostrado na barra do Safari/Chrome do mockup. */
   url?: string;
+  /** Os botões da moldura do celular (barra do Chrome do Android). */
+  actions?: PhoneActions;
   /** O zoom da página. Sem marco, a página é desenhada maior/menor e escalada de volta; com marco, multiplica a escala. */
   zoom?: number;
   children: ReactNode;
@@ -145,7 +148,7 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, p
           className={device || phone ? "relative bg-white" : shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
           <NativeCornerRadius.Provider value={Math.round(cornerRadius * 10) / 10}>
-            <PhoneChrome platform={chrome} landscape={landscape} url={url}>{children}</PhoneChrome>
+            <PhoneChrome platform={chrome} landscape={landscape} url={url} actions={actions}>{children}</PhoneChrome>
           </NativeCornerRadius.Provider>
           {(device || (phone && !chrome)) && <PhoneOverlay landscape={!device && landscape} cutout={device?.cutout ?? "island"} />}
         </div>

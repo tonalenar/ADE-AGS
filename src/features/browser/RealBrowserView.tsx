@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { FLOATING_PREVIEW_CORNER_RADIUS, NativeCornerRadius } from "./nativeCorner";
 import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
 import { miniBrowserZoom, placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
-import { setChatBrowserMiniHover, setRightPanel, useChatStore } from "@/features/chat/store";
+import { setChatBrowserMiniHover, useChatStore } from "@/features/chat/store";
 
 /**
  * O lugar do navegador nativo do Portal. A página é um WebView2 por cima da janela (ver `real_browser`): este
@@ -114,9 +114,6 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       listen<{ id: string; title: string }>("real-browser-title", mine((p) => latest.current.onTitle?.(p.title))),
       listen<{ id: string; loading: boolean }>("real-browser-load", mine((p) => latest.current.onLoading?.(p.loading))),
       listen<{ id: string; back: boolean; forward: boolean }>("real-browser-history", mine((p) => latest.current.onHistory?.(p))),
-      listen<{ id: string }>("real-browser-mini-click", mine(() => {
-        if (latest.current.floatingPreview) setRightPanel("browser");
-      })),
       listen<{ id: string; inside: boolean }>("real-browser-mini-hover", mine((p) => {
         if (latest.current.floatingPreview) setChatBrowserMiniHover(p.inside);
       })),

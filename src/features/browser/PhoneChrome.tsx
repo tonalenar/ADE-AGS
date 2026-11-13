@@ -1,18 +1,23 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+import { useTranslation } from "react-i18next";
+
+import type { PhoneActions } from "./deviceActions";
 
 /**
  * O que o aparelho desenha em volta da página. A vista nativa do navegador é um retângulo por cima da janela e não
- * aceita nada desenhado sobre ela, então a parte OPACA do topo fica aqui, fora dela: a barra de status (hora, rede,
- * bateria, ilha ou câmera) e, no Android, a barra do Chrome. A página começa abaixo dela, como num aparelho de verdade
- * (um `position: fixed; top: 0` do site fica logo abaixo da barra de status). A barra de vidro flutuante do Safari do
- * iOS 26 é desenhada DENTRO da página pelo backend (`device_chrome.js`), para o conteúdo passar por baixo dela.
+ * aceita nada desenhado sobre ela.
+ * - iPhone: a barra de status translúcida e o vidro do Safari ficam DENTRO da página (`device_chrome.js`), para o
+ *   conteúdo passar por baixo deles; aqui só sobram as faixas laterais quando deitado.
+ * - Android: a barra de status e a barra do Chrome são opacas no topo, como no Chrome real, e ficam aqui, fora da
+ *   página, com os botões funcionando direto pelos handlers do navegador.
  */
 export type Platform = "ios" | "android";
 
 /** O tamanho, em px de página, das faixas que o aparelho ocupa em volta da página. Pura. */
 export function chromeInsets(platform: Platform, landscape: boolean): { top: number; bottom: number; left: number; right: number } {
   if (platform === "ios") {
-    return landscape ? { top: 0, bottom: 0, left: 47, right: 47 } : { top: 54, bottom: 0, left: 0, right: 0 };
+    return landscape ? { top: 0, bottom: 0, left: 47, right: 47 } : { top: 0, bottom: 0, left: 0, right: 0 };
   }
   return landscape ? { top: 44, bottom: 0, left: 36, right: 0 } : { top: 92, bottom: 30, left: 0, right: 0 };
 }
@@ -74,24 +79,16 @@ function Battery({ color, percent }: { color: string; percent?: boolean }) {
 
 const stroke = { fill: "none", strokeWidth: 1.7, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
-/** A barra de status do iPhone: hora à esquerda da ilha, rede e bateria à direita. */
-function IosStatusBar({ time, landscape }: { time: string; landscape: boolean }) {
-  if (landscape) return null;
+/** Barra de status e barra do Chrome do Android, no topo, com voltar, endereço editável, recarregar, abas e menu. */
+function AndroidTop({ time, url, address, landscape, actions }: { time: string; url: string; address: string; landscape: boolean; actions?: PhoneActions }) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [menu, setMenu] = useState(false);
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing !== null) input.current?.select(); }, [editing !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  const icon = "flex items-center justify-center rounded-full hover:bg-black/5 active:bg-black/10";
   return (
-    <div className="relative shrink-0 flex items-end justify-between px-8 pb-2 bg-white text-black" style={{ height: 54 }}>
-      <span className="w-[100px] text-center" style={{ fontSize: 17, fontWeight: 600, letterSpacing: -0.3 }}>{time}</span>
-      <span className="absolute left-1/2 -translate-x-1/2 rounded-full bg-black" style={{ top: 11, width: 118, height: 34 }} />
-      <span className="flex w-[100px] items-center justify-center gap-1.5">
-        <Signal color="#000" /><Wifi color="#000" /><Battery color="#000" />
-      </span>
-    </div>
-  );
-}
-
-/** Barra de status e endereço do Chrome do Android, no topo. */
-function AndroidTop({ time, address, landscape }: { time: string; address: string; landscape: boolean }) {
-  return (
-    <div className="shrink-0 bg-white text-[#1f1f1f]">
+    <div className="relative shrink-0 bg-white text-[#1f1f1f]">
       {!landscape && (
         <div className="relative flex items-center justify-between px-6" style={{ height: 36 }}>
           <span style={{ fontSize: 14, fontWeight: 500 }}>{time}</span>
@@ -99,14 +96,47 @@ function AndroidTop({ time, address, landscape }: { time: string; address: strin
           <span className="flex items-center gap-1.5"><Wifi color="#1f1f1f" /><Signal color="#1f1f1f" /><Battery color="#1f1f1f" percent /></span>
         </div>
       )}
-      <div className="flex items-center gap-2 px-3" style={{ height: landscape ? 44 : 56 }}>
-        <div className="flex flex-1 items-center gap-2 rounded-full bg-[#eef0f6] px-3" style={{ height: 40 }}>
-          <svg width="16" height="16" viewBox="0 0 24 24" stroke="#444" {...stroke} aria-hidden><path d="M4 8h10M18 8h2M4 16h2M10 16h10" /><circle cx="16" cy="8" r="2" /><circle cx="8" cy="16" r="2" /></svg>
-          <span className="flex-1 truncate" style={{ fontSize: 15 }}>{address}</span>
+      <div className="flex items-center gap-1.5 px-2" style={{ height: landscape ? 44 : 56 }}>
+        <button type="button" aria-label={t("browser.device.back")} className={icon} style={{ width: 36, height: 36 }} onClick={() => actions?.back()}>
+          <svg width="20" height="20" viewBox="0 0 20 20" stroke="#444" {...stroke} aria-hidden><path d="M12.5 4 6.5 10l6 6" /></svg>
+        </button>
+        <div className="flex flex-1 min-w-0 items-center gap-2 rounded-full bg-[#eef0f6] px-3" style={{ height: 40 }}>
+          {editing === null ? (
+            <button type="button" className="flex-1 min-w-0 truncate text-left" style={{ fontSize: 15 }} aria-label={t("browser.device.address")}
+              onClick={() => setEditing(url)}>{address}</button>
+          ) : (
+            <input ref={input} autoFocus value={editing} aria-label={t("browser.device.address")} enterKeyHint="go"
+              className="flex-1 min-w-0 bg-transparent outline-none" style={{ fontSize: 15 }}
+              onChange={(e) => setEditing(e.target.value)}
+              onBlur={() => setEditing(null)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && editing.trim()) { actions?.navigate(editing.trim()); setEditing(null); }
+                if (e.key === "Escape") setEditing(null);
+              }} />
+          )}
+          <button type="button" aria-label={t("browser.device.reload")} className={icon} style={{ width: 28, height: 28 }} onClick={() => actions?.reload()}>
+            <svg width="16" height="16" viewBox="0 0 20 20" stroke="#444" {...stroke} strokeWidth={2} aria-hidden><path d="M16 10a6 6 0 1 1-1.8-4.3" /><path d="M15.5 2.5v4h-4" /></svg>
+          </button>
         </div>
-        <span className="flex items-center justify-center rounded-md border-2 border-[#444]" style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700 }}>1</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="#444" aria-hidden><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
+        <button type="button" aria-label={t("browser.device.tabs")} className={icon} style={{ width: 36, height: 36 }} onClick={() => actions?.newTab()}>
+          <span className="flex items-center justify-center rounded-md border-2 border-[#444]" style={{ width: 22, height: 22, fontSize: 11, fontWeight: 700 }}>1</span>
+        </button>
+        <button type="button" aria-label={t("browser.device.menu")} aria-expanded={menu} className={icon} style={{ width: 36, height: 36 }} onClick={() => setMenu((open) => !open)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="#444" aria-hidden><circle cx="12" cy="5" r="2" /><circle cx="12" cy="12" r="2" /><circle cx="12" cy="19" r="2" /></svg>
+        </button>
       </div>
+      {menu && (
+        <div data-over-webview role="menu" className="absolute right-2 top-full z-20 mt-1 w-56 rounded-2xl bg-white py-2 shadow-xl" style={{ fontSize: 15 }}>
+          {([
+            ["share", () => actions?.share()],
+            ["desktop", () => actions?.desktop()],
+            ["reload", () => actions?.reload()],
+          ] as const).map(([key, run]) => (
+            <button key={key} type="button" role="menuitem" className="block w-full px-4 py-2.5 text-left hover:bg-black/5"
+              onClick={() => { setMenu(false); run(); }}>{t(`browser.device.${key}`)}</button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -115,10 +145,11 @@ function AndroidTop({ time, address, landscape }: { time: string; address: strin
  * A página dentro do aparelho: faixas em volta e `children` (a vista do navegador) no meio. Sem `platform`, é só um
  * contêiner que ocupa tudo, com a MESMA árvore (a vista nativa não pode remontar ao entrar e sair do modo celular).
  */
-export function PhoneChrome({ platform = null, landscape = false, url = "", children }: {
+export function PhoneChrome({ platform = null, landscape = false, url = "", actions, children }: {
   platform?: Platform | null;
   landscape?: boolean;
   url?: string;
+  actions?: PhoneActions;
   children: ReactNode;
 }) {
   const time = useClock();
@@ -133,8 +164,7 @@ export function PhoneChrome({ platform = null, landscape = false, url = "", chil
   ) : null;
   return (
     <div className="flex flex-col w-full h-full min-h-0">
-      {platform === "ios" && <IosStatusBar time={time} landscape={landscape} />}
-      {platform === "android" && <AndroidTop time={time} address={address} landscape={landscape} />}
+      {platform === "android" && <AndroidTop time={time} url={url} address={address} landscape={landscape} actions={actions} />}
       <div className="flex flex-1 min-h-0 min-w-0">
         {side(inset?.left ?? 0, platform, true)}
         <div className="relative flex flex-col flex-1 min-w-0 min-h-0">{children}</div>

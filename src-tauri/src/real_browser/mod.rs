@@ -77,7 +77,7 @@ pub struct Place {
     /// O que do app está por cima da página, dentro da parte à vista.
     #[serde(default)]
     pub holes: Vec<Rect>,
-    /// No mini player, um clique sobre a página reabre o painel lateral.
+    /// Miniatura: hoje só informa o nativo; o clique continua indo para a página.
     #[serde(default)]
     pub click_to_expand: bool,
     /// Raio do cartão em pontos lógicos do macOS.
@@ -640,7 +640,7 @@ const ANDROID_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 
 /// Faz a página do navegador `id` se comportar como um iPhone (`"ios"`), um Android (`"android"`) ou o
 /// navegador de mesa (`None`), e recarrega para o servidor também ver o aparelho novo.
 #[tauri::command]
-pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<String>) -> Result<(), String> {
+pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<String>, chrome: Option<Value>) -> Result<(), String> {
     let profile = emulation_profile(platform.as_deref());
     let mobile = profile.is_some();
     match &profile {
@@ -674,7 +674,8 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
             native::cdp(&app, &id, "Emulation.clearDeviceMetricsOverride", json!({})).await?;
         }
     }
-    set_device_chrome(&app, &id, platform.as_deref().filter(|_| mobile)).await;
+    // A moldura dentro da página só no mockup; no modo Completo a página fica limpa.
+    set_device_chrome(&app, &id, platform.as_deref().filter(|_| mobile && chrome.is_some()), chrome.as_ref()).await;
     native::cdp(&app, &id, "Emulation.setTouchEmulationEnabled", json!({ "enabled": mobile, "maxTouchPoints": if mobile { 5 } else { 1 } })).await?;
     native::cdp(&app, &id, "Emulation.setEmitTouchEventsForMouse", json!({ "enabled": mobile, "configuration": "mobile" })).await?;
     native::cdp(&app, &id, "Page.reload", json!({ "ignoreCache": false })).await?;
@@ -683,6 +684,19 @@ pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<S
 
 /// A moldura do aparelho desenhada dentro da página (barra de status e navegador do sistema). Ver `device_chrome.js`.
 const DEVICE_CHROME: &str = include_str!("device_chrome.js");
+
+/// O script da moldura com a plataforma e os rótulos (já na língua do app). Só textos curtos entram; o resto vira "".
+fn device_chrome_source(platform: &str, labels: Option<&Value>) -> String {
+    let keys = ["back", "reload", "menu", "tabs", "address", "share", "desktop"];
+    let mut clean = serde_json::Map::new();
+    for key in keys {
+        let text = labels.and_then(|l| l[key].as_str()).unwrap_or("");
+        let text: String = text.chars().filter(|c| !matches!(c, '<' | '>' | '"' | '&' | '`' | '$' | '\\')).take(60).collect();
+        clean.insert(key.to_string(), Value::String(text));
+    }
+    let platform = if platform == "ios" { "ios" } else { "android" };
+    DEVICE_CHROME.replace("__AGS_PLATFORM__", platform).replace("__AGS_LABELS__", &Value::Object(clean).to_string())
+}
 
 /// A área que a moldura ocupa, para `env(safe-area-inset-*)` da página (retrato).
 fn device_safe_area(platform: &str) -> Value {
@@ -696,7 +710,7 @@ fn device_safe_area(platform: &str) -> Value {
 
 /// Liga a moldura de `platform` em todo documento novo da vista `id` e desliga a anterior; `None` só desliga.
 /// Erros são ignorados: sem moldura a página continua funcionando.
-async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>) {
+async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>, labels: Option<&Value>) {
     static SCRIPTS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     let scripts = SCRIPTS.get_or_init(Default::default);
     let previous = scripts.lock().ok().and_then(|mut m| m.remove(id));
@@ -709,7 +723,7 @@ async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>) {
     };
     let _ = native::cdp(app, id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": device_safe_area(platform) })).await;
     let _ = native::cdp(app, id, "Page.enable", json!({})).await;
-    let source = DEVICE_CHROME.replace("__AGS_PLATFORM__", platform);
+    let source = device_chrome_source(platform, labels);
     if let Ok(reply) = native::cdp(app, id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": source })).await {
         if let (Some(identifier), Ok(mut m)) = (reply["identifier"].as_str(), scripts.lock()) {
             m.insert(id.to_string(), identifier.to_string());
@@ -720,10 +734,6 @@ async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>) {
 /// O nome do canal da página para o app (`Runtime.addBinding`).
 // Não pode ser `__agsPage`: é a marca de "piloto já instalado" do `runtime.ts`.
 const BINDING: &str = "__agsCdpBridge";
-
-fn mini_click_request(message: &Value) -> bool {
-    message["source"] == "ags-preview" && message["type"] == "mini:open"
-}
 
 /// Roda antes do piloto em cada documento. A página é a janela principal: o piloto manda para `window.parent`, que
 /// é ela mesma, e a ponte repassa ao app pelo binding. A função do binding é guardada e tirada do `window` antes de
@@ -740,9 +750,6 @@ const BRIDGE: &str = r#"(() => {
       try { send(JSON.stringify(d)); } catch (_) {}
     }
   });
-  document.addEventListener("mousedown", () => {
-    try { send(JSON.stringify({ source: "ags-preview", type: "mini:open" })); } catch (_) {}
-  }, true);
 })();"#;
 
 /// Uma mensagem que o piloto mandou pelo binding: `input:request` é com o Rust (toque ou tecla de verdade), o resto
@@ -750,10 +757,6 @@ const BRIDGE: &str = r#"(() => {
 #[cfg_attr(not(windows), allow(dead_code))]
 fn on_binding(app: &AppHandle, id: &str, payload: &str) {
     let Ok(message) = serde_json::from_str::<Value>(payload) else { return };
-    if mini_click_request(&message) {
-        emit(app, "real-browser-mini-click", json!({ "id": id }));
-        return;
-    }
     if message["type"] == "input:request" {
         let (app, id) = (app.clone(), id.to_string());
         tauri::async_runtime::spawn(async move { native_input(&app, &id, message["payload"].clone()).await });
@@ -922,7 +925,7 @@ fn finish_selftest(app: &AppHandle, code: i32) {
 
 #[cfg(test)]
 mod test {
-    use super::{adopt_popup, adopted, device_metrics, emulation_profile, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, mini_click_request, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
+    use super::{adopt_popup, adopted, device_metrics, emulation_profile, chromium_partition_path, chromium_partitions_of, forget_portal, incognito_partition_path, lock, migrate_legacy_partition, navigable, physical, popup_allowed, portals, project_profile_path, region, subtract, Place, PortalProfile, Rect};
     use serde_json::json;
 
     #[test]
@@ -1001,10 +1004,20 @@ mod test {
     }
 
     #[test]
-    fn clique_da_pagina_sinaliza_reabertura_somente_pelo_canal_interno() {
-        assert!(mini_click_request(&json!({ "source": "ags-preview", "type": "mini:open" })));
-        assert!(!mini_click_request(&json!({ "source": "site", "type": "mini:open" })));
-        assert!(!mini_click_request(&json!({ "source": "ags-preview", "type": "input:request" })));
+    fn moldura_recebe_plataforma_e_rotulos_limpos() {
+        let source = super::device_chrome_source("ios", Some(&json!({ "back": "Voltar", "share": "<img onerror=x>\"" })));
+        assert!(source.contains("const platform = \"ios\""));
+        assert!(source.contains("\"back\":\"Voltar\""));
+        assert!(source.contains("\"share\":\"img onerror=x\""));
+        assert!(!source.contains("__AGS_LABELS__"));
+        assert!(super::device_chrome_source("../x", None).contains("const platform = \"android\""));
+    }
+
+    #[test]
+    fn clique_na_miniatura_fica_na_pagina_e_nao_reabre_o_painel() {
+        // Voltar ao painel é só pelo botão de expandir; a ponte não escuta cliques da página.
+        assert!(!super::BRIDGE.contains("mini:open"));
+        assert!(!super::BRIDGE.contains("mousedown"));
     }
 
     #[test]

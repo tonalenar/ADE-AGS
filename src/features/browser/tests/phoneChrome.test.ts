@@ -9,8 +9,8 @@ describe("PhoneChrome", () => {
     expect(shownAddress("")).toBe("");
   });
 
-  it("a página começa abaixo da barra de status e, no iPhone, vai até o fim da tela (o vidro fica dentro dela)", () => {
-    expect(chromeInsets("ios", false)).toEqual({ top: 54, bottom: 0, left: 0, right: 0 });
+  it("no iPhone a página ocupa a tela inteira (barra de status e vidro ficam dentro dela); no Android o Chrome fica em cima", () => {
+    expect(chromeInsets("ios", false)).toEqual({ top: 0, bottom: 0, left: 0, right: 0 });
     expect(chromeInsets("android", false)).toEqual({ top: 92, bottom: 30, left: 0, right: 0 });
     expect(chromeInsets("ios", true)).toEqual({ top: 0, bottom: 0, left: 47, right: 47 });
   });

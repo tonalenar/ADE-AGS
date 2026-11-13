@@ -198,7 +198,7 @@ struct PortalHostIvars {
     id: RefCell<String>,
     /// Partes à vista, `[esquerda, topo, direita, base]` em pontos com origem no topo do Portal.
     parts: RefCell<Vec<[f64; 4]>>,
-    /// Miniatura: o clique reabre o painel em vez de ir para a página.
+    /// Miniatura (só informativo: o clique continua indo para a página).
     mini: Cell<bool>,
 }
 
@@ -217,7 +217,6 @@ define_class!(
             let local = self.convertPoint_fromView(point, Some(&superview));
             let top = self.bounds().size.height - local.y;
             if !visible_at(&self.ivars().parts.borrow(), local.x, top) { return ptr::null_mut(); }
-            if self.ivars().mini.get() { return self as *const Self as *mut NSView; }
             unsafe { msg_send![super(self), hitTest: point] }
         }
 
@@ -226,11 +225,8 @@ define_class!(
 
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: *mut AnyObject) {
-            if self.ivars().mini.get() {
-                notify(&self.ivars().id.borrow(), "real-browser-mini-click", json!({}));
-            } else {
-                let _: () = unsafe { msg_send![super(self), mouseDown: event] };
-            }
+            // Na miniatura o clique também vai para a página; voltar ao painel é só pelo botão de expandir.
+            let _: () = unsafe { msg_send![super(self), mouseDown: event] };
         }
 
         #[unsafe(method(mouseEntered:))]
@@ -896,14 +892,9 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
             if let Some(portal) = portals.borrow_mut().get_mut(&id) {
                 let parent = unsafe { portal.host_view.superview() };
                 portal.host_view.setFrame(parent.as_deref().map(|parent| frame_in_parent(parent, rect)).unwrap_or_else(|| view_frame(rect)));
-                apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts);
+                apply_rect_mask(&portal.host_view, rect[2], rect[3], &parts, corner_radius);
                 *portal.host_view.ivars().parts.borrow_mut() = parts.iter().map(|[l, t, r, b]| [*l as f64, *t as f64, *r as f64, *b as f64]).collect();
                 portal.host_view.ivars().mini.set(click_to_expand);
-                let layer: *mut AnyObject = unsafe { msg_send![&*portal.host_view, layer] };
-                unsafe {
-                    let _: () = msg_send![layer, setCornerRadius: corner_radius.max(0.0)];
-                    let _: () = msg_send![layer, setMasksToBounds: Bool::YES];
-                }
                 if let Some(host) = portal.browser.as_ref().and_then(Browser::host) {
                     host.set_zoom_level(if zoom > 0.0 { zoom.ln() / 1.2_f64.ln() } else { 0.0 });
                     host.was_resized();
@@ -913,7 +904,10 @@ pub fn place(app: &AppHandle, id: &str, rect: [i32; 4], zoom: f64, parts: Vec<[i
     });
 }
 
-fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]]) {
+/// Recorta a vista às partes visíveis e, com `radius > 0`, arredonda os cantos (tela do celular, miniatura).
+/// O arredondamento fica na própria máscara: o `cornerRadius` da layer de uma NSView do AppKit não recorta a
+/// vista do CEF (o AppKit administra essa layer), e a página saía quadrada para fora da curva da tela.
+fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]], radius: f64) {
     if parts.is_empty() {
         view.setHidden(true);
         return;
@@ -932,7 +926,18 @@ fn apply_rect_mask(view: &NSView, width: i32, height: i32, parts: &[[i32; 4]]) {
         let _: () = msg_send![mask, setFrame: frame];
         let _: () = msg_send![mask, setGeometryFlipped: Bool::YES];
         let _: () = msg_send![mask, setPath: path];
-        let _: () = msg_send![layer, setMask: mask];
+        if radius > 0.0 {
+            // A máscara de fato é um contêiner de cantos redondos com a forma das partes dentro.
+            let plain = objc2::runtime::AnyClass::get(c"CALayer").expect("CALayer disponível no macOS");
+            let rounded: *mut AnyObject = msg_send![plain, layer];
+            let _: () = msg_send![rounded, setFrame: frame];
+            let _: () = msg_send![rounded, setCornerRadius: radius];
+            let _: () = msg_send![rounded, setMasksToBounds: Bool::YES];
+            let _: () = msg_send![rounded, addSublayer: mask];
+            let _: () = msg_send![layer, setMask: rounded];
+        } else {
+            let _: () = msg_send![layer, setMask: mask];
+        }
         CGPathRelease(path);
     }
 }
