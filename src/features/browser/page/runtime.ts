@@ -50,7 +50,9 @@ declare global {
 
 (() => {
   // Fora de um iframe só roda no Chrome real, onde a ponte do CDP faz o papel do app (`real_browser::BRIDGE`).
-  const realChrome = (self as { __ags_trusted_input?: boolean }).__ags_trusted_input === true;
+  // O binding de entrada pode faltar num frame OOPIF; a marca da ponte distingue o CEF do proxy sem depender dele.
+  const bridge = self as { __ags_bridge?: boolean; __ags_trusted_input?: boolean };
+  const realChrome = bridge.__ags_bridge === true || bridge.__ags_trusted_input === true;
   if (window.__agsPage || (window.parent === window && !realChrome)) return;
   window.__agsPage = true;
 
