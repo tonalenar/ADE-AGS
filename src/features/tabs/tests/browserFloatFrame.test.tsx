@@ -48,4 +48,19 @@ describe("anel da miniatura do navegador", () => {
     container.remove();
     shell.remove();
   });
+
+  it("desenha a borda e a sombra fora da superfície nativa", () => {
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    act(() => root.render(<BrowserFloatFrame rect={{ left: 500, top: 300, width: 400, height: 300 }} />));
+    const surface = container.querySelector<HTMLElement>("[data-browser-float-surface]")!;
+    expect(surface.className).toContain("border-gray-200");
+    expect(surface.className).toContain("shadow-md");
+    expect(surface.style.borderRadius).toBe("17px");
+    expect(surface.style.left).toBe("9px");
+    expect(surface.style.top).toBe("9px");
+    act(() => root.unmount());
+    container.remove();
+  });
 });

@@ -1,6 +1,6 @@
 import { useContext, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { NativeCornerRadius } from "./nativeCorner";
+import { FLOATING_PREVIEW_CORNER_RADIUS, NativeCornerRadius } from "./nativeCorner";
 import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
 import { miniBrowserZoom, placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
 import { setChatBrowserMiniHover, setRightPanel, useChatStore } from "@/features/chat/store";
@@ -82,7 +82,7 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       return {
         ...placeOf(rect, el.offsetWidth, latest.current.floatingPreview ? latest.current.miniZoom : latest.current.zoom, [windowBox, ...clips.map(boxOf)], shown ? covers : [], shown),
         clickToExpand: latest.current.floatingPreview,
-        cornerRadius: latest.current.floatingPreview ? 16 : latest.current.screenRadius,
+        cornerRadius: latest.current.floatingPreview ? FLOATING_PREVIEW_CORNER_RADIUS : latest.current.screenRadius,
       };
     };
 

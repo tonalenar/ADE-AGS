@@ -6,3 +6,6 @@ import { createContext } from "react";
  * 0 fora do modo aparelho.
  */
 export const NativeCornerRadius = createContext(0);
+
+/** Raio compartilhado pela máscara nativa e pela moldura DOM da miniatura do navegador. */
+export const FLOATING_PREVIEW_CORNER_RADIUS = 16;

@@ -15,6 +15,7 @@ import { placeChatBrowserFloat, useChatStore } from "@/features/chat/store";
 import { chatFloatBounds, dragFloatRect, FLOAT_RING, type FloatEdges } from "@/features/chat/floatRect";
 import { useTranslation } from "react-i18next";
 import { BrowserMiniControls } from "@/features/browser/BrowserMiniControls";
+import { FLOATING_PREVIEW_CORNER_RADIUS } from "@/features/browser/nativeCorner";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
 import { useChatShell } from "@/app/uiStore";
@@ -111,11 +112,11 @@ export function ViewTabsHost() {
             data-view-key={key}
             style={{
               ...placeStyle(lastRect.current.get(key) ?? null),
-              ...(floatingPreview ? { zIndex: 30 } : {}),
+              ...(floatingPreview ? { zIndex: 30, borderRadius: FLOATING_PREVIEW_CORNER_RADIUS } : {}),
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
-            className={floatingPreview ? "flex flex-col overflow-hidden rounded-2xl border border-gray-200 dark:border-white/12 bg-white dark:bg-surface shadow-2xl" : undefined}
+            className={floatingPreview ? "flex flex-col overflow-hidden rounded-2xl bg-white dark:bg-surface" : undefined}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
             {...(floatingPreview ? bodyDrag : {})}
           >
@@ -214,6 +215,15 @@ export function BrowserFloatFrame({ rect }: { rect: Rect }) {
   return (
     <div data-browser-float-frame className="absolute z-30 pointer-events-none"
       style={{ left: rect.left - r, top: rect.top - r, width: rect.width + 2 * r, height: rect.height + 2 * r }}>
+      <div data-browser-float-surface
+        className="absolute pointer-events-none border border-gray-200 dark:border-white/12 shadow-md shadow-gray-950/20"
+        style={{
+          left: r - 1,
+          top: r - 1,
+          width: rect.width + 2,
+          height: rect.height + 2,
+          borderRadius: FLOATING_PREVIEW_CORNER_RADIUS + 1,
+        }} />
       {RING_PARTS.map((part) => (
         <div key={part.key} data-float-ring={part.key} role="separator"
           aria-label={t(part.key === "top" ? "browser.mini.move" : "browser.mini.resize")}

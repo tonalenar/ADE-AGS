@@ -14,10 +14,11 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 
 const opened: string[] = [];
+const openedPlaces: Array<{ cornerRadius?: number }> = [];
 const closed: string[] = [];
 vi.mock("../realBrowser", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../realBrowser")>()),
-  realBrowserOpen: (id: string) => { opened.push(id); return Promise.resolve(); },
+  realBrowserOpen: (id: string, _url: string, place: { cornerRadius?: number }) => { opened.push(id); openedPlaces.push(place); return Promise.resolve(); },
   realBrowserPlace: () => Promise.resolve(),
   realBrowserClose: (id: string) => { closed.push(id); return Promise.resolve(); },
 }));
@@ -40,6 +41,7 @@ beforeEach(() => {
   }
   handlers.clear();
   opened.length = 0;
+  openedPlaces.length = 0;
   closed.length = 0;
   useChatStore.setState({ browserMiniHover: false });
   useViewTabsStore.setState({ views: [], activeViewId: null, keepMountedIds: [] });
@@ -60,6 +62,12 @@ function render(props: Partial<Parameters<typeof RealBrowserView>[0]> = {}) {
 }
 
 describe("vista do navegador nativo", () => {
+  it("envia o raio da moldura flutuante para a superfície nativa", async () => {
+    render({ floatingPreview: true });
+    await act(async () => undefined);
+    expect(openedPlaces[0]?.cornerRadius).toBe(16);
+  });
+
   it("um pop-up da página (OAuth) chega à aba com o id que o motor já criou", async () => {
     const onPopup = vi.fn();
     render({ onPopup });
