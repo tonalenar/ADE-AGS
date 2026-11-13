@@ -68,7 +68,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const [future, setFuture] = useState<Snapshot[]>([]);
   const [draft, setDraft] = useState<Annotation | null>(null);
   const [eraseDraft, setEraseDraft] = useState<MarkStroke | null>(null);
-  const [textDraft, setTextDraft] = useState<{ at: MarkPoint; text: string } | null>(null);
+  const [textDraft, setTextDraft] = useState<{ at: MarkPoint; text: string; edit?: number } | null>(null);
   const [comments, setComments] = useState<ImageCommentWithRegion[]>([]);
   const [commentDraft, setCommentDraft] = useState<{ point: MarkPoint; text: string } | null>(null);
   const [commentSelection, setCommentSelection] = useState<{ start: MarkPoint; end: MarkPoint } | null>(null);
@@ -189,13 +189,23 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const aspect = natural.height / Math.max(1, natural.width);
   const pointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (tool === "view") return;
+    // Sem isto, o mousedown que vem depois tira o foco do campo de texto recém-aberto (o SVG não é focável),
+    // o blur confirma o rascunho vazio e o campo some na hora: a ferramenta de texto "não fazia nada".
+    event.preventDefault();
+    if (textDraft) { submitText(); return; }
     event.currentTarget.setPointerCapture?.(event.pointerId);
     const point = imagePoint(event);
     switch (tool) {
       case "comment": setCommentDraft({ point, text: "" }); setCommentSelection({ start: point, end: point }); return;
       case "erase": setEraseDraft([point]); return;
       case "eraser": { const result = eraseAt(marks, point, aspect); if (result.removed) commit({ marks: result.marks }); return; }
-      case "text": setTextDraft({ at: point, text: "" }); return;
+      case "text": {
+        // Clicar (ou dar duplo clique) num texto que já existe reabre ele para editar.
+        const hit = textHitIndex(marks, point, aspect);
+        const existing = hit >= 0 ? marks[hit] : undefined;
+        setTextDraft(existing && existing.kind === "text" ? { at: existing.at, text: existing.text, edit: hit } : { at: point, text: "" });
+        return;
+      }
       case "step": commit({ marks: [...marks, { kind: "step", color, width: strokeWidth, at: point, n: nextStepNumber(marks) }] }); return;
       case "pen": case "highlighter": setDraft({ kind: tool, color, width: strokeWidth, points: [point] }); return;
       default: setDraft({ kind: tool, color, width: strokeWidth, from: point, to: point });
@@ -215,7 +225,13 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     if (draft) { if (!isDegenerate(draft)) commit({ marks: [...marks, draft] }); setDraft(null); }
   };
   const submitText = () => {
-    if (textDraft && textDraft.text.trim()) commit({ marks: [...marks, { kind: "text", color, width: strokeWidth, at: textDraft.at, text: textDraft.text.trim() }] });
+    if (!textDraft) return;
+    const text = textDraft.text.trim();
+    const rest = textDraft.edit === undefined ? marks : marks.filter((_, i) => i !== textDraft.edit);
+    const previous = textDraft.edit === undefined ? undefined : marks[textDraft.edit];
+    const style = previous && previous.kind === "text" ? { color: previous.color, width: previous.width } : { color, width: strokeWidth };
+    if (text) commit({ marks: [...rest, { kind: "text", ...style, at: textDraft.at, text }] });
+    else if (textDraft.edit !== undefined) commit({ marks: rest });
     setTextDraft(null);
   };
   const hasMarks = marks.length > 0 || comments.length > 0;
@@ -425,7 +441,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
             </svg>
             {comments.map((comment, i) => <span key={i} className="absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-accent-500 text-xs font-bold text-white shadow" style={{ left: `${comment.x * 100}%`, top: `${comment.y * 100}%` }}>{i + 1}</span>)}
             {textDraft && <form className="absolute" style={{ left: `${textDraft.at.x * 100}%`, top: `${textDraft.at.y * 100}%` }} onSubmit={(e) => { e.preventDefault(); submitText(); }}>
-              <input autoFocus value={textDraft.text} onChange={(e) => setTextDraft({ ...textDraft, text: e.target.value })} onBlur={submitText} aria-label={t("chat.attach.lightbox.textPrompt")} placeholder={t("chat.attach.lightbox.textPrompt")} className="min-w-40 rounded-md border border-white/20 bg-gray-950/80 px-2 py-1 text-sm font-semibold text-white outline-none" style={{ color: colorVar(color) }} />
+              <input autoFocus onFocus={(e) => e.currentTarget.select()} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setTextDraft(null); } }} value={textDraft.text} onChange={(e) => setTextDraft({ ...textDraft, text: e.target.value })} onBlur={submitText} aria-label={t("chat.attach.lightbox.textPrompt")} placeholder={t("chat.attach.lightbox.textPrompt")} className="min-w-40 rounded-md border border-white/20 bg-gray-950/80 px-2 py-1 font-semibold text-white outline-none" style={{ color: colorVar(color), fontSize: `${Math.max(14, Math.round(strokeWidth * (imageRef.current?.getBoundingClientRect().width ?? 600) * 7))}px` }} />
             </form>}
           </div> : isVideo ? <div className="flex max-h-full max-w-full flex-col items-center gap-3"><video ref={videoRef} src={convertFileSrc(current.path)} controls playsInline className="max-h-[calc(100vh-16rem)] max-w-[calc(100vw-12rem)] rounded-lg shadow-2xl" /><div className="flex items-center gap-1 rounded-full border border-gray-200/70 bg-surface-1/80 p-1 shadow dark:border-white/10 dark:bg-gray-900/80"><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(-1)} aria-label={t("chat.attach.lightbox.framePrevious")} title={t("chat.attach.lightbox.framePrevious")}>−1</button><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(1)} aria-label={t("chat.attach.lightbox.frameNext")} title={t("chat.attach.lightbox.frameNext")}>+1</button><label className="flex items-center gap-1 px-2 text-xs">{t("chat.attach.lightbox.speed")}<select aria-label={t("chat.attach.lightbox.speed")} defaultValue="1" className="rounded-md bg-transparent px-1 py-1" onChange={(event) => { if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><button type="button" className={surfaceButton} onClick={toggleVideoFullscreen} aria-label={t("chat.attach.lightbox.fullscreen")} title={t("chat.attach.lightbox.fullscreen")}><MaximizeIcon className="h-4 w-4" /></button><button type="button" className={surfaceButton} onClick={() => { captureFrame(); }}>{t("chat.attach.lightbox.captureFrame")}</button></div></div> : <p className="text-sm text-gray-500 dark:text-white/60">{missing ? t("chat.attach.missing") : t("chat.attach.loading")}</p>}
           {images.length > 1 && <button type="button" onClick={() => goVisible(1)} disabled={visibleMedia.findIndex((item) => item.path === current.path) < 0 || visibleMedia.findIndex((item) => item.path === current.path) === visibleMedia.length - 1} aria-label={t("chat.attach.lightbox.next")} className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-gray-900/10 p-3 hover:bg-gray-900/20 disabled:opacity-30 dark:bg-white/10"><ChevronRightIcon className="h-5 w-5" /></button>}
@@ -530,6 +546,18 @@ function MarkShape({ mark, width, height }: { mark: Annotation; width: number; h
   const at = px(mark.at);
   const ink = mark.color === "white" || mark.color === "yellow-400" ? "var(--color-gray-950)" : "var(--color-white)";
   return <g><circle cx={at.x} cy={at.y} r={radius} fill={stroke} /><text x={at.x} y={at.y} textAnchor="middle" dominantBaseline="central" fontSize={radius * 1.1} fontWeight={700} fill={ink} style={{ fontFamily: "system-ui, sans-serif" }}>{mark.n}</text></g>;
+}
+
+/** O índice do texto de cima que o ponto toca (caixa aproximada do texto), ou -1. */
+function textHitIndex(marks: Annotation[], p: MarkPoint, aspect: number): number {
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const mark = marks[i]!;
+    if (mark.kind !== "text") continue;
+    const height = Math.max(0.02, mark.width * 7);
+    const width = Math.max(0.04, mark.text.length * height * 0.6 * aspect);
+    if (p.x >= mark.at.x - 0.01 && p.x <= mark.at.x + width && p.y >= mark.at.y - 0.01 && p.y <= mark.at.y + height) return i;
+  }
+  return -1;
 }
 
 /** Miniatura real da coluna: só carrega quando aparece na tela; vídeo mostra o primeiro quadro. Rola até a atual. */

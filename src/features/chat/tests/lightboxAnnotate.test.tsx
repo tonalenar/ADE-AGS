@@ -127,6 +127,25 @@ describe("visualizador com marcações", () => {
     expect(dialog().querySelectorAll("svg[aria-label='chat.attach.lightbox.markLayer'] rect")).toHaveLength(1);
   });
 
+  it("a ferramenta de texto abre um campo que continua focado depois do clique e grava o texto", async () => {
+    await open(0, IMAGES.slice(0, 1));
+    await key("T");
+    // Como no navegador: se o pointerdown não for cancelado, o mousedown seguinte tira o foco do campo novo.
+    const layer = dialog().querySelector("svg[aria-label='chat.attach.lightbox.markLayer']")!;
+    const down = new PointerEvent("pointerdown", { clientX: 30, clientY: 40, bubbles: true, cancelable: true, buttons: 1 });
+    await act(async () => { layer.dispatchEvent(down); });
+    if (!down.defaultPrevented) await act(async () => { (document.activeElement as HTMLElement | null)?.blur(); });
+    const input = dialog().querySelector("input[aria-label='chat.attach.lightbox.textPrompt']") as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Olá");
+      input!.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => { input!.form!.requestSubmit(); });
+    expect([...layer.querySelectorAll("text")].map((node) => node.textContent)).toContain("Olá");
+  });
+
   it("a ferramenta de passos numera 1, 2, 3 e a borracha apaga", async () => {
     await open();
     await act(async () => { button("chat.attach.lightbox.tool.step").click(); });
