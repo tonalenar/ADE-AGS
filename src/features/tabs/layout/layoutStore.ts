@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create } from "zustand";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -477,7 +478,11 @@ export function usePlacements(): Placements {
   const grid = useMissionGrid();
   const chatOn = useUiStore(chatShellOn);
   const chatSlot = useChatStore((s) => s.slot);
-  const chatBrowser = useChatStore((s) => browserForChatPlacement(s.browser, s.browserFloating, s.browserFloatRect));
+  // Três seletores simples + useMemo: um seletor que monta o objeto a cada chamada nunca estabiliza (laço "getSnapshot").
+  const rawBrowser = useChatStore((s) => s.browser);
+  const browserFloating = useChatStore((s) => s.browserFloating);
+  const browserFloatRect = useChatStore((s) => s.browserFloatRect);
+  const chatBrowser = useMemo(() => browserForChatPlacement(rawBrowser, browserFloating, browserFloatRect), [rawBrowser, browserFloating, browserFloatRect]);
   const chatShell = useChatStore((s) => s.shell);
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid, chat: chatOn ? { slot: chatSlot, browser: chatBrowser, shell: chatShell } : null });
 }
