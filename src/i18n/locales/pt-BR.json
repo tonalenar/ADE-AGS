@@ -5135,6 +5135,8 @@
   "chat.permission.allow": "Permitir",
   "chat.permission.noteTerminal": "O agente fica parado até você responder. Responder no chat ou no terminal dá no mesmo: os dois veem o mesmo pedido.",
   "chat.permission.note": "O agente fica parado até você responder.",
+  "chat.permission.expand": "Expandir comando",
+  "chat.permission.collapse": "Recolher comando",
   "chat.inbox.label": "Caixa de permissões",
   "chat.inbox.title": "Permissões",
   "chat.inbox.subtitle": "de todos os agentes",
