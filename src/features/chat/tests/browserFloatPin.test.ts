@@ -1,20 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { clampFloatRect, FLOAT_BAR, resizeFromTopLeft } from "../floatRect";
+import { clampFloatRect, dragFloatRect } from "../floatRect";
 import { placeChatBrowserFloat, setChatBrowser, toggleChatBrowserFloating, useChatStore } from "../store";
 
 const bounds = { left: 0, top: 0, right: 1000, bottom: 800 };
 
 describe("miniatura do navegador: mover e redimensionar", () => {
-  it("prende a miniatura e a faixa de arrastar dentro da conversa", () => {
-    expect(clampFloatRect({ left: -50, top: 0, width: 400, height: 300 }, bounds)).toEqual({ left: 8, top: 8 + FLOAT_BAR, width: 400, height: 300 });
+  it("prende a miniatura dentro da conversa", () => {
+    expect(clampFloatRect({ left: -50, top: 0, width: 400, height: 300 }, bounds)).toEqual({ left: 8, top: 8, width: 400, height: 300 });
     expect(clampFloatRect({ left: 900, top: 700, width: 400, height: 300 }, bounds)).toEqual({ left: 592, top: 492, width: 400, height: 300 });
   });
 
-  it("redimensiona pelo canto superior esquerdo mantendo o inferior direito", () => {
-    const r = resizeFromTopLeft({ left: 500, top: 400, width: 400, height: 300 }, -100, -50, bounds);
-    expect(r).toEqual({ left: 400, top: 350, width: 500, height: 350 });
-    expect(r.left + r.width).toBe(900);
-    expect(resizeFromTopLeft({ left: 500, top: 400, width: 400, height: 300 }, 1000, 1000, bounds).width).toBeGreaterThanOrEqual(220);
+  it("sem lados move; com lados redimensiona e o lado oposto fica parado", () => {
+    const start = { left: 500, top: 400, width: 400, height: 300 };
+    expect(dragFloatRect(start, {}, -100, -50, bounds)).toEqual({ left: 400, top: 350, width: 400, height: 300 });
+    expect(dragFloatRect(start, { left: true, top: true }, -100, -50, bounds)).toEqual({ left: 400, top: 350, width: 500, height: 350 });
+    expect(dragFloatRect(start, { right: true, bottom: true }, 50, 40, bounds)).toEqual({ left: 500, top: 400, width: 450, height: 340 });
+    expect(dragFloatRect(start, { right: true }, -1000, 0, bounds).width).toBe(220);
   });
 
   it("depois de mover, guarda a posição e marca para não reancorar; recolher de novo esquece", () => {

@@ -12,7 +12,7 @@ import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tab
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { placeChatBrowserFloat, useChatStore } from "@/features/chat/store";
-import { clampFloatRect, FLOAT_BAR, resizeFromTopLeft, type FloatBounds } from "@/features/chat/floatRect";
+import { chatFloatBounds, dragFloatRect, FLOAT_RING, type FloatEdges } from "@/features/chat/floatRect";
 import { useTranslation } from "react-i18next";
 import { BrowserMiniControls } from "@/features/browser/BrowserMiniControls";
 import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
@@ -61,6 +61,7 @@ export function ViewTabsHost() {
   const chat = chatOn;
   const floatingBrowserId = chatOn && floating ? chatBrowser?.viewId ?? null : null;
   const floatRect = useChatStore((s) => s.browserFloatRect);
+  const bodyDrag = useFloatBodyDrag();
   const floatView = floatingBrowserId ? views.find((v) => v.id === floatingBrowserId) : undefined;
   const placementOf = (view: ViewTab) => {
     if (view.kind === "browser" && view.id === floatingBrowserId && isPageRoute(pathname)) return undefined;
@@ -116,6 +117,7 @@ export function ViewTabsHost() {
             }}
             className={floatingPreview ? "flex flex-col overflow-hidden rounded-2xl border border-gray-200 dark:border-white/12 bg-white dark:bg-surface shadow-2xl" : undefined}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
+            {...(floatingPreview ? bodyDrag : {})}
           >
             {floatingPreview && <BrowserFloatGrip />}
             <Suspense fallback={null}>
@@ -144,64 +146,82 @@ function BrowserFloatGrip() {
   );
 }
 
-/** A caixa da conversa no sistema do shell, para prender a miniatura dentro dela. */
-function floatBounds(el: HTMLElement): FloatBounds | null {
-  const shell = el.closest<HTMLElement>("[data-chat-shell]");
-  const main = shell?.querySelector<HTMLElement>("main");
-  if (!shell || !main) return null;
-  const s = shell.getBoundingClientRect();
-  const m = main.getBoundingClientRect();
-  return { left: m.left - s.left, top: m.top - s.top, right: m.right - s.left, bottom: m.bottom - s.top };
-}
+type FloatDrag = { pointerId: number; x: number; y: number; rect: Rect; edges: FloatEdges };
 
-/**
- * Faixa para mover e alça para redimensionar a miniatura. Ficam ACIMA do retângulo da página: a vista nativa
- * é desenhada por cima do DOM, então nada dentro dela recebe o mouse.
- */
-export function BrowserFloatFrame({ rect }: { rect: Rect }) {
-  const { t } = useTranslation();
-  const drag = useRef<{ pointerId: number; x: number; y: number; rect: Rect; mode: "move" | "resize" } | null>(null);
-  const begin = (mode: "move" | "resize") => (event: React.PointerEvent<HTMLElement>) => {
+/** Arraste da miniatura: sem lados move, com lados redimensiona. Usa pointer capture no elemento que recebeu o toque. */
+function useFloatDrag() {
+  const drag = useRef<FloatDrag | null>(null);
+  const begin = (event: React.PointerEvent<HTMLElement>, edges: FloatEdges) => {
     if (event.button !== 0) return;
     const current = useChatStore.getState().browserFloatRect;
     if (!current) return;
     event.preventDefault();
     event.stopPropagation();
     event.currentTarget.setPointerCapture?.(event.pointerId);
-    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, rect: current, mode };
+    drag.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, rect: current, edges };
   };
   const move = (event: React.PointerEvent<HTMLElement>) => {
     const start = drag.current;
     if (!start || start.pointerId !== event.pointerId) return;
-    const bounds = floatBounds(event.currentTarget);
+    const bounds = chatFloatBounds();
     if (!bounds) return;
-    const dx = event.clientX - start.x;
-    const dy = event.clientY - start.y;
-    placeChatBrowserFloat(start.mode === "move"
-      ? clampFloatRect({ ...start.rect, left: start.rect.left + dx, top: start.rect.top + dy }, bounds)
-      : resizeFromTopLeft(start.rect, dx, dy, bounds));
+    placeChatBrowserFloat(dragFloatRect(start.rect, start.edges, event.clientX - start.x, event.clientY - start.y, bounds));
   };
   const end = (event: React.PointerEvent<HTMLElement>) => {
     if (drag.current?.pointerId !== event.pointerId) return;
     drag.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
+  return { begin, move, end };
+}
+
+/** O que, dentro da página em DOM (página inicial), continua sendo clique e não arraste. */
+const INTERACTIVE = "a,button,input,textarea,select,label,[role=button],[role=link],[contenteditable],[data-browser-mini-controls]";
+
+/** Com a página em DOM, arrastar qualquer ponto que não seja controle move a miniatura. */
+export function useFloatBodyDrag() {
+  const { begin, move, end } = useFloatDrag();
+  return {
+    onPointerDown: (event: React.PointerEvent<HTMLElement>) => {
+      if ((event.target as Element).closest?.(INTERACTIVE)) return;
+      begin(event, {});
+    },
+    onPointerMove: move, onPointerUp: end, onPointerCancel: end,
+  };
+}
+
+const RING_PARTS: { key: string; edges: FloatEdges; cursor: string; style: (r: number) => React.CSSProperties }[] = [
+  // Os cantos vêm antes: ficam por cima das faixas das bordas.
+  { key: "nw", edges: { left: true, top: true }, cursor: "nwse-resize", style: (r) => ({ left: 0, top: 0, width: 2 * r, height: 2 * r }) },
+  { key: "ne", edges: { right: true, top: true }, cursor: "nesw-resize", style: (r) => ({ right: 0, top: 0, width: 2 * r, height: 2 * r }) },
+  { key: "sw", edges: { left: true, bottom: true }, cursor: "nesw-resize", style: (r) => ({ left: 0, bottom: 0, width: 2 * r, height: 2 * r }) },
+  { key: "se", edges: { right: true, bottom: true }, cursor: "nwse-resize", style: (r) => ({ right: 0, bottom: 0, width: 2 * r, height: 2 * r }) },
+  // Topo: mover. Laterais e base: redimensionar.
+  { key: "top", edges: {}, cursor: "move", style: (r) => ({ left: 2 * r, right: 2 * r, top: 0, height: r }) },
+  { key: "left", edges: { left: true }, cursor: "ew-resize", style: (r) => ({ left: 0, top: 2 * r, bottom: 2 * r, width: r }) },
+  { key: "right", edges: { right: true }, cursor: "ew-resize", style: (r) => ({ right: 0, top: 2 * r, bottom: 2 * r, width: r }) },
+  { key: "bottom", edges: { bottom: true }, cursor: "ns-resize", style: (r) => ({ left: 2 * r, right: 2 * r, bottom: 0, height: r }) },
+];
+
+/**
+ * Anel invisível em volta da miniatura: a borda de cima move, as laterais, a base e os cantos redimensionam.
+ * Fica FORA do retângulo da página: a vista nativa é desenhada por cima do DOM, então nada dentro dela recebe o mouse.
+ */
+export function BrowserFloatFrame({ rect }: { rect: Rect }) {
+  const { t } = useTranslation();
+  const { begin, move, end } = useFloatDrag();
+  const r = FLOAT_RING;
   return (
-    <div data-browser-float-frame className="absolute z-30 flex items-center gap-1 rounded-t-xl border border-b-0 border-gray-200 bg-white/95 px-1 shadow-md backdrop-blur dark:border-white/12 dark:bg-gray-900/95"
-      style={{ left: rect.left, top: rect.top - FLOAT_BAR, width: rect.width, height: FLOAT_BAR, pointerEvents: "auto" }}>
-      <button type="button" aria-label={t("browser.mini.resize")} title={t("browser.mini.resize")}
-        onPointerDown={begin("resize")} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
-        className="flex size-6 shrink-0 cursor-nwse-resize touch-none items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-white/10">
-        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
-          <path d="M2 6V2h4M2 2l8 8M10 6v4H6" />
-        </svg>
-      </button>
-      <div role="separator" aria-label={t("browser.mini.move")} title={t("browser.mini.move")}
-        onPointerDown={begin("move")} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
-        className="flex h-full flex-1 cursor-grab touch-none items-center justify-center active:cursor-grabbing">
-        <span aria-hidden="true" className="h-1 w-10 rounded-full bg-gray-300 dark:bg-white/25" />
-      </div>
-      <span className="size-6 shrink-0" aria-hidden="true" />
+    <div data-browser-float-frame className="absolute z-30 pointer-events-none"
+      style={{ left: rect.left - r, top: rect.top - r, width: rect.width + 2 * r, height: rect.height + 2 * r }}>
+      {RING_PARTS.map((part) => (
+        <div key={part.key} data-float-ring={part.key} role="separator"
+          aria-label={t(part.key === "top" ? "browser.mini.move" : "browser.mini.resize")}
+          title={t(part.key === "top" ? "browser.mini.move" : "browser.mini.resize")}
+          onPointerDown={(event) => begin(event, part.edges)} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
+          className="absolute touch-none"
+          style={{ ...part.style(r), cursor: part.cursor, pointerEvents: "auto" }} />
+      ))}
     </div>
   );
 }
