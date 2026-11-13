@@ -18,7 +18,7 @@ vi.mock("../attachments/ipc", () => ({
 vi.mock("@/features/terminal/ipc", () => ({ savePastedImage: () => Promise.resolve("/tmp/marked.png") }));
 
 import { Lightbox, type LightboxImage } from "../attachments/Lightbox";
-import { annotatedName, eraseAt, hitsAnnotation, isDegenerate, nextStepNumber, type Annotation } from "../attachments/annotations";
+import { annotatedName, eraseAt, hitsAnnotation, isDegenerate, moveAnnotation, nextStepNumber, resizeAnnotation, type Annotation } from "../attachments/annotations";
 
 describe("modelo das marcações", () => {
   const arrow: Annotation = { kind: "arrow", color: "red-500", width: 0.004, from: { x: 0.1, y: 0.1 }, to: { x: 0.9, y: 0.9 } };
@@ -50,6 +50,14 @@ describe("modelo das marcações", () => {
     expect(isDegenerate({ kind: "pen", color: "red-500", width: 0.004, points: [{ x: 0, y: 0 }] })).toBe(true);
     expect(isDegenerate({ kind: "text", color: "red-500", width: 0.004, at: { x: 0, y: 0 }, text: "  " })).toBe(true);
     expect(isDegenerate(arrow)).toBe(false);
+  });
+
+  it("move uma marca selecionada e redimensiona sua caixa pela alça", () => {
+    const rect: Annotation = { kind: "rect", color: "red-500", width: 0.004, from: { x: 0.2, y: 0.2 }, to: { x: 0.6, y: 0.6 } };
+    const moved = moveAnnotation(rect, 0.1, -0.05);
+    expect(moved).toMatchObject({ kind: "rect" });
+    if (moved.kind === "rect") { expect(moved.from.x).toBeCloseTo(0.3); expect(moved.from.y).toBeCloseTo(0.15); expect(moved.to.x).toBeCloseTo(0.7); expect(moved.to.y).toBeCloseTo(0.55); }
+    expect(resizeAnnotation(rect, "se", { x: 0.8, y: 0.7 }, 100, 100)).toMatchObject({ from: rect.from, to: { x: 0.8, y: 0.7 } });
   });
 });
 
@@ -127,6 +135,32 @@ describe("visualizador com marcações", () => {
     expect(dialog().querySelectorAll("svg[aria-label='chat.attach.lightbox.markLayer'] rect")).toHaveLength(1);
   });
 
+  it("seleciona e arrasta a marca; desfazer restaura a posição", async () => {
+    await open(0, IMAGES.slice(0, 1));
+    await key("r");
+    await pointer("pointerdown", 10, 10); await pointer("pointermove", 60, 40); await pointer("pointerup", 60, 40);
+    const layer = dialog().querySelector("svg[aria-label='chat.attach.lightbox.markLayer']")!;
+    expect(button("chat.attach.lightbox.tool.select").getAttribute("aria-pressed")).toBe("true");
+    await pointer("pointerdown", 20, 20); await pointer("pointermove", 30, 30); await pointer("pointerup", 30, 30);
+    expect(Number(layer.querySelector("rect")?.getAttribute("x"))).toBeCloseTo(0.2);
+    await act(async () => { button("chat.attach.lightbox.undo").click(); });
+    expect(layer.querySelector("rect")?.getAttribute("x")).toBe("0.1");
+  });
+
+  it("redimensiona a marca pela alça do canto e desfaz a alteração", async () => {
+    await open(0, IMAGES.slice(0, 1));
+    await key("r");
+    await pointer("pointerdown", 10, 10); await pointer("pointermove", 60, 40); await pointer("pointerup", 60, 40);
+    await pointer("pointerdown", 20, 20); await pointer("pointerup", 20, 20);
+    const layer = dialog().querySelector("svg[aria-label='chat.attach.lightbox.markLayer']")!;
+    const handle = layer.querySelector("circle[data-handle='se']")!;
+    const x = Number(handle.getAttribute("cx")) * 100, y = Number(handle.getAttribute("cy")) * 100;
+    await pointer("pointerdown", x, y); await pointer("pointermove", x + 10, y + 10); await pointer("pointerup", x + 10, y + 10);
+    expect(Number(layer.querySelector("rect")?.getAttribute("width"))).toBeCloseTo(0.6);
+    await act(async () => { button("chat.attach.lightbox.undo").click(); });
+    expect(Number(layer.querySelector("rect")?.getAttribute("width"))).toBeCloseTo(0.5);
+  });
+
   it("a ferramenta de texto abre um campo que continua focado depois do clique e grava o texto", async () => {
     await open(0, IMAGES.slice(0, 1));
     await key("T");
@@ -150,6 +184,7 @@ describe("visualizador com marcações", () => {
     await open();
     await act(async () => { button("chat.attach.lightbox.tool.step").click(); });
     await pointer("pointerdown", 20, 20);
+    await act(async () => { button("chat.attach.lightbox.tool.step").click(); });
     await pointer("pointerdown", 80, 80);
     expect([...dialog().querySelectorAll("svg[aria-label='chat.attach.lightbox.markLayer'] text")].map((t) => t.textContent)).toEqual(["1", "2"]);
     await act(async () => { button("chat.attach.lightbox.tool.eraser").click(); });

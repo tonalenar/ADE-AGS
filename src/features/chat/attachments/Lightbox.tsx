@@ -10,7 +10,7 @@ import { attachToComposer, insertIntoComposer, setRightPanel } from "../store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { insideCwd } from "./openAttachment";
 import { commentFromSelection, commentsForMessage, filterMedia, nextMediaIndex, resizeDimensions, type ImageCommentWithRegion, type MarkPoint, type MarkStroke, type MediaFilter } from "./mediaViewerModel";
-import { ANNOTATION_COLORS, arrowHead, boxOf, colorVar, eraseAt, isDegenerate, nextStepNumber, paintAnnotations, type Annotation, type AnnotationColor, type BoxMark, type AnnotationTool } from "./annotations";
+import { ANNOTATION_COLORS, annotationBounds, annotationHandles, arrowHead, boxOf, colorVar, eraseAt, hitsAnnotation, isDegenerate, moveAnnotation, nextStepNumber, paintAnnotations, resizeAnnotation, type Annotation, type AnnotationColor, type BoxMark, type AnnotationTool, type ResizeHandle } from "./annotations";
 import { ArrowToolIcon, BlurToolIcon, ClipboardToolIcon, CommentToolIcon, EllipseToolIcon, EraserToolIcon, HighlighterIcon, MagicEraseIcon, RectToolIcon, RedoIcon, ResizeToolIcon, SaveCopyIcon, StepToolIcon, TextToolIcon, UndoIcon2 } from "./annotateIcons";
 import { setImageContext } from "./imageContext";
 import { backgroundRemovalAvailable, removeImageBackground, saveAnnotatedCopy } from "./ipc";
@@ -28,8 +28,9 @@ export function stepIndex(index: number, step: 1 | -1, count: number): number {
   return nextMediaIndex(index, step, count);
 }
 
-type Tool = "view" | AnnotationTool | "comment" | "erase";
+type Tool = "select" | "view" | AnnotationTool | "comment" | "erase";
 interface Snapshot { marks: Annotation[]; eraseStrokes: MarkStroke[] }
+interface MarkDrag { kind: "move" | "resize"; index: number; start: MarkPoint; original: Annotation; previous: Snapshot; handle?: ResizeHandle }
 
 /** As ferramentas de marcação, na ordem da dock, com o atalho de teclado de cada uma. */
 const DRAW_TOOLS: Array<{ tool: AnnotationTool; key: string; icon: (p: { className?: string }) => ReactNode }> = [
@@ -59,7 +60,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const [natural, setNatural] = useState<{ width: number; height: number }>({ width: 1, height: 1 });
   const [zoom, setZoom] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [tool, setTool] = useState<Tool>("view");
+  const [tool, setTool] = useState<Tool>("select");
   const [color, setColor] = useState<AnnotationColor>("red-500");
   const [strokeWidth, setStrokeWidth] = useState(0.004);
   const [marks, setMarks] = useState<Annotation[]>([]);
@@ -67,6 +68,8 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const [past, setPast] = useState<Snapshot[]>([]);
   const [future, setFuture] = useState<Snapshot[]>([]);
   const [draft, setDraft] = useState<Annotation | null>(null);
+  const [selectedMark, setSelectedMark] = useState<number | null>(null);
+  const [hoverCursor, setHoverCursor] = useState("default");
   const [eraseDraft, setEraseDraft] = useState<MarkStroke | null>(null);
   const [textDraft, setTextDraft] = useState<{ at: MarkPoint; text: string; edit?: number } | null>(null);
   const [comments, setComments] = useState<ImageCommentWithRegion[]>([]);
@@ -85,6 +88,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const [canRemoveBackground, setCanRemoveBackground] = useState(false);
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   const dockStart = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const markDrag = useRef<MarkDrag | null>(null);
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
@@ -106,7 +110,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
 
   useEffect(() => {
     setEditedSrc(null); setZoom(1); setOffset({ x: 0, y: 0 }); setMarks([]); setEraseStrokes([]); setPast([]); setFuture([]); setComments([]); setCommentSelection(null);
-    setTool("view"); setCommentDraft(null); setTextDraft(null); setDraft(null); setNotice(null); setFilter(current.kind === "video" ? "video" : "image");
+    setTool("select"); setSelectedMark(null); setCommentDraft(null); setTextDraft(null); setDraft(null); setNotice(null); setFilter(current.kind === "video" ? "video" : "image");
   }, [current.path, current.kind]);
 
   useEffect(() => {
@@ -121,6 +125,9 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     setFuture([]);
     if (next.marks) setMarks(next.marks);
     if (next.eraseStrokes) setEraseStrokes(next.eraseStrokes);
+  };
+  const finishMarkEdit = (previous: Snapshot, nextMarks: Annotation[]) => {
+    setPast((old) => [...old, previous]); setFuture([]); setMarks(nextMarks);
   };
   const undo = () => {
     const previous = past[past.length - 1];
@@ -141,7 +148,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   /** No vídeo, escolher uma ferramenta congela o quadro atual e passa a anotar sobre ele. */
   const pickTool = (next: Tool) => {
     if (next !== "view" && isVideo && !editedSrc && !captureFrame()) return;
-    setTool((value) => (value === next && next !== "view" ? "view" : next));
+    setTool((value) => (value === next && next !== "select" && next !== "view" ? "select" : next));
     setShowStyle(false); setShowMore(false);
   };
 
@@ -157,10 +164,21 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     if (e.key === "Escape") {
       e.preventDefault(); e.stopPropagation();
       if (textDraft || commentDraft) { setTextDraft(null); setCommentDraft(null); setCommentSelection(null); return; }
-      if (tool !== "view") { setTool("view"); return; }
+      if (tool !== "select") { setTool("select"); return; }
       onClose();
     }
-    else if (typing && (e.key.startsWith("Arrow") || e.key.length === 1)) return;
+    else if (typing && (e.key.startsWith("Arrow") || e.key.length === 1 || e.key === "Delete" || e.key === "Backspace")) return;
+    else if ((e.key === "Delete" || e.key === "Backspace") && selectedMark !== null && marks[selectedMark]) {
+      e.preventDefault(); commit({ marks: marks.filter((_, i) => i !== selectedMark) }); setSelectedMark(null);
+    }
+    else if (selectedMark !== null && marks[selectedMark] && ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) {
+      e.preventDefault(); const rect = imageRef.current?.getBoundingClientRect();
+      const dxStep = (e.shiftKey ? 10 : 1) / Math.max(1, rect?.width ?? natural.width);
+      const dyStep = (e.shiftKey ? 10 : 1) / Math.max(1, rect?.height ?? natural.height);
+      const dx = e.key === "ArrowLeft" ? -dxStep : e.key === "ArrowRight" ? dxStep : 0;
+      const dy = e.key === "ArrowUp" ? -dyStep : e.key === "ArrowDown" ? dyStep : 0;
+      commit({ marks: marks.map((mark, i) => i === selectedMark ? moveAnnotation(mark, dx, dy) : mark) });
+    }
     else if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); go(-1); }
     else if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); go(1); }
     else if (isVideo && !editedSrc && (e.key === "," || e.key === ".")) { e.preventDefault(); stepVideoFrame(e.key === "," ? -1 : 1); }
@@ -172,7 +190,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
       const key = e.key.toUpperCase();
       const draw = DRAW_TOOLS.find((item) => item.key === key);
       if (draw) { e.preventDefault(); pickTool(draw.tool); }
-      else if (key === "V") { e.preventDefault(); pickTool("view"); }
+      else if (key === "V") { e.preventDefault(); pickTool("select"); }
       else if (key === "C") { e.preventDefault(); pickTool("comment"); }
     }
     else if (e.key === "Tab") {
@@ -186,6 +204,26 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     const rect = imageRef.current?.getBoundingClientRect();
     return rect && rect.width > 0 && rect.height > 0 ? { x: Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width)), y: Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height)) } : { x: 0.5, y: 0.5 };
   };
+  const hitHandle = (mark: Annotation, point: MarkPoint): ResizeHandle | null => {
+    const rect = imageRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width || !rect.height) return null;
+    const radiusX = 9 / rect.width, radiusY = 9 / rect.height;
+    return annotationHandles(mark, natural.width, natural.height).find(({ point: handle }) => Math.abs(point.x - handle.x) <= radiusX && Math.abs(point.y - handle.y) <= radiusY)?.id ?? null;
+  };
+  const selected = selectedMark === null ? undefined : marks[selectedMark];
+  const selectionHit = (mark: Annotation, point: MarkPoint) => mark.kind === "text" ? textHitIndex([mark], point, aspect, natural.width) === 0 : hitsAnnotation(mark, point, aspect, 0.01);
+  const selectMark = (index: number) => {
+    const mark = marks[index]; setSelectedMark(index);
+    if (mark) { setColor(mark.color); setStrokeWidth(mark.width); }
+  };
+  const setMarkColor = (nextColor: AnnotationColor) => {
+    setColor(nextColor);
+    if (selectedMark !== null && marks[selectedMark]) commit({ marks: marks.map((mark, i) => i === selectedMark ? { ...mark, color: nextColor } : mark) });
+  };
+  const setMarkWidth = (nextWidth: number) => {
+    setStrokeWidth(nextWidth);
+    if (selectedMark !== null && marks[selectedMark]) commit({ marks: marks.map((mark, i) => i === selectedMark ? { ...mark, width: nextWidth } : mark) });
+  };
   const aspect = natural.height / Math.max(1, natural.width);
   const pointerDown = (event: React.PointerEvent<SVGSVGElement>) => {
     if (tool === "view") return;
@@ -193,36 +231,79 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     // o blur confirma o rascunho vazio e o campo some na hora: a ferramenta de texto "não fazia nada".
     event.preventDefault();
     if (textDraft) { submitText(); return; }
-    event.currentTarget.setPointerCapture?.(event.pointerId);
     const point = imagePoint(event);
+    if (tool === "select") {
+      const handle = selected === undefined ? null : hitHandle(selected, point);
+      if (handle && selectedMark !== null && selected) {
+        event.stopPropagation(); event.currentTarget.setPointerCapture?.(event.pointerId);
+        markDrag.current = { kind: "resize", index: selectedMark, start: point, original: selected, previous: { marks, eraseStrokes }, handle };
+        return;
+      }
+      const hit = [...marks.keys()].reverse().find((i) => selectionHit(marks[i]!, point));
+      if (hit !== undefined) {
+        event.stopPropagation(); event.currentTarget.setPointerCapture?.(event.pointerId); selectMark(hit);
+        markDrag.current = { kind: "move", index: hit, start: point, original: marks[hit]!, previous: { marks, eraseStrokes } };
+      } else setSelectedMark(null);
+      return;
+    }
+    event.stopPropagation(); event.currentTarget.setPointerCapture?.(event.pointerId);
     switch (tool) {
       case "comment": setCommentDraft({ point, text: "" }); setCommentSelection({ start: point, end: point }); return;
       case "erase": setEraseDraft([point]); return;
       case "eraser": { const result = eraseAt(marks, point, aspect); if (result.removed) commit({ marks: result.marks }); return; }
       case "text": {
         // Clicar (ou dar duplo clique) num texto que já existe reabre ele para editar.
-        const hit = textHitIndex(marks, point, aspect);
+        const hit = textHitIndex(marks, point, aspect, natural.width);
         const existing = hit >= 0 ? marks[hit] : undefined;
         setTextDraft(existing && existing.kind === "text" ? { at: existing.at, text: existing.text, edit: hit } : { at: point, text: "" });
         return;
       }
-      case "step": commit({ marks: [...marks, { kind: "step", color, width: strokeWidth, at: point, n: nextStepNumber(marks) }] }); return;
+      case "step": { const next = [...marks, { kind: "step" as const, color, width: strokeWidth, at: point, n: nextStepNumber(marks) }]; commit({ marks: next }); setSelectedMark(next.length - 1); setTool("select"); return; }
       case "pen": case "highlighter": setDraft({ kind: tool, color, width: strokeWidth, points: [point] }); return;
       default: setDraft({ kind: tool, color, width: strokeWidth, from: point, to: point });
     }
   };
+  const pointerDoubleClick = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (tool !== "select") return;
+    const point = imagePoint(event as unknown as React.PointerEvent);
+    const hit = textHitIndex(marks, point, aspect, natural.width);
+    if (hit < 0 || marks[hit]?.kind !== "text") return;
+    const existing = marks[hit];
+    if (existing?.kind === "text") { selectMark(hit); setTextDraft({ at: existing.at, text: existing.text, edit: hit }); }
+  };
   const pointerMove = (event: React.PointerEvent<SVGSVGElement>) => {
+    const point = imagePoint(event);
+    if (tool === "select") {
+      const drag = markDrag.current;
+      if (drag && event.buttons !== 0) {
+        const dx = point.x - drag.start.x, dy = point.y - drag.start.y;
+        const edited = drag.kind === "move" ? moveAnnotation(drag.original, dx, dy) : resizeAnnotation(drag.original, drag.handle!, point, natural.width, natural.height);
+        setMarks((old) => old.map((mark, i) => i === drag.index ? edited : mark));
+        return;
+      }
+      const handle = selected ? hitHandle(selected, point) : null;
+      if (handle) setHoverCursor(handle === "n" || handle === "s" ? "ns-resize" : handle === "e" || handle === "w" ? "ew-resize" : handle === "ne" || handle === "sw" ? "nesw-resize" : "nwse-resize");
+      else setHoverCursor([...marks].reverse().some((mark) => selectionHit(mark, point)) ? "move" : "default");
+      return;
+    }
     if (tool === "comment" && commentDraft) { const point = imagePoint(event); setCommentSelection((selection) => selection ? { ...selection, end: point } : selection); return; }
     if (tool === "eraser" && event.buttons === 1) { const result = eraseAt(marks, imagePoint(event), aspect); if (result.removed) commit({ marks: result.marks }); return; }
     if (eraseDraft) { setEraseDraft((stroke) => stroke ? [...stroke, imagePoint(event)] : stroke); return; }
     if (!draft) return;
-    const point = imagePoint(event);
     setDraft((mark) => !mark ? mark : "points" in mark ? { ...mark, points: [...mark.points, point] } : "to" in mark ? { ...mark, to: point } : mark);
   };
   const pointerUp = (event: React.PointerEvent<SVGSVGElement>) => {
+    if (markDrag.current) {
+      const drag = markDrag.current; markDrag.current = null;
+      const point = imagePoint(event); const dx = point.x - drag.start.x, dy = point.y - drag.start.y;
+      const finalMark = drag.kind === "move" ? moveAnnotation(drag.original, dx, dy) : resizeAnnotation(drag.original, drag.handle!, point, natural.width, natural.height);
+      if (JSON.stringify(finalMark) === JSON.stringify(drag.original)) return;
+      const next = marks.map((mark, i) => i === drag.index ? finalMark : mark);
+      finishMarkEdit(drag.previous, next); return;
+    }
     if (tool === "comment" && commentDraft) { const point = imagePoint(event); setCommentSelection((selection) => selection ? { ...selection, end: point } : selection); return; }
     if (eraseDraft) { commit({ eraseStrokes: [...eraseStrokes, eraseDraft] }); setEraseDraft(null); return; }
-    if (draft) { if (!isDegenerate(draft)) commit({ marks: [...marks, draft] }); setDraft(null); }
+    if (draft) { if (!isDegenerate(draft)) { const next = [...marks, draft]; commit({ marks: next }); setSelectedMark(next.length - 1); setTool("select"); } setDraft(null); }
   };
   const submitText = () => {
     if (!textDraft) return;
@@ -230,8 +311,8 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     const rest = textDraft.edit === undefined ? marks : marks.filter((_, i) => i !== textDraft.edit);
     const previous = textDraft.edit === undefined ? undefined : marks[textDraft.edit];
     const style = previous && previous.kind === "text" ? { color: previous.color, width: previous.width } : { color, width: strokeWidth };
-    if (text) commit({ marks: [...rest, { kind: "text", ...style, at: textDraft.at, text }] });
-    else if (textDraft.edit !== undefined) commit({ marks: rest });
+    if (text) { const next = [...rest, { kind: "text" as const, ...style, at: textDraft.at, text }]; commit({ marks: next }); setSelectedMark(next.length - 1); setTool("select"); }
+    else if (textDraft.edit !== undefined) { commit({ marks: rest }); setSelectedMark(null); setTool("select"); }
     setTextDraft(null);
   };
   const hasMarks = marks.length > 0 || comments.length > 0;
@@ -379,7 +460,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
     useViewTabsStore.getState().openFile(cwd!, current.path);
     setRightPanel("files");
   };
-  const toolLabel = (name: AnnotationTool) => t(`chat.attach.lightbox.tool.${name}`);
+  const toolLabel = (name: string) => t(`chat.attach.lightbox.tool.${name}`);
   const drawing = DRAW_TOOLS.some((item) => item.tool === tool);
 
   const editGroup = (inMenu: boolean) => <>
@@ -428,16 +509,26 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
         </div>
       </header>
       <div className="relative flex min-h-0 flex-1">
-        <main className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden p-6 pb-24" onPointerDown={(event) => { if (zoom > 1 && tool === "view") { const start = { x: event.clientX, y: event.clientY, offset }; const move = (e: PointerEvent) => setOffset({ x: start.offset.x + e.clientX - start.x, y: start.offset.y + e.clientY - start.y }); const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, { once: true }); } }}>
+        <main className="relative flex min-w-0 flex-1 items-center justify-center overflow-hidden p-6 pb-24" onPointerDown={(event) => { if (zoom > 1 && (tool === "view" || tool === "select")) { const start = { x: event.clientX, y: event.clientY, offset }; const move = (e: PointerEvent) => setOffset({ x: start.offset.x + e.clientX - start.x, y: start.offset.y + e.clientY - start.y }); const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); }; window.addEventListener("pointermove", move); window.addEventListener("pointerup", up, { once: true }); } }}>
           {images.length > 1 && <button type="button" onClick={() => goVisible(-1)} disabled={visibleMedia.findIndex((item) => item.path === current.path) <= 0} aria-label={t("chat.attach.lightbox.prev")} className="absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-gray-900/10 p-3 hover:bg-gray-900/20 disabled:opacity-30 dark:bg-white/10"><ChevronLeftIcon className="h-5 w-5" /></button>}
           {showingImage ? <div className="relative flex max-h-full max-w-full items-center justify-center" style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}>
             <img ref={imageRef} src={src!} alt={current.name} draggable={false} onLoad={(event) => setNatural({ width: event.currentTarget.naturalWidth || 1, height: event.currentTarget.naturalHeight || 1 })} className="max-h-[calc(100vh-13rem)] max-w-[calc(100vw-12rem)] select-none rounded-lg object-contain shadow-2xl" />
             {[...marks, ...(draft ? [draft] : [])].filter((mark): mark is BoxMark => "from" in mark && mark.kind === "blur").map((mark, i) => { const box = boxOf(mark.from, mark.to); return <span key={`blur-${i}`} aria-hidden className="pointer-events-none absolute backdrop-blur-md" style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.width * 100}%`, height: `${box.height * 100}%` }} />; })}
-            <svg viewBox={`0 0 ${natural.width} ${natural.height}`} preserveAspectRatio="none" aria-label={t("chat.attach.lightbox.markLayer")} className={`absolute inset-0 h-full w-full touch-none ${tool === "view" ? "pointer-events-none" : tool === "eraser" ? "cursor-cell" : tool === "text" ? "cursor-text" : "cursor-crosshair"}`}
-              onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp}>
+            <svg viewBox={`0 0 ${natural.width} ${natural.height}`} preserveAspectRatio="none" aria-label={t("chat.attach.lightbox.markLayer")} className={`absolute inset-0 h-full w-full touch-none ${tool === "view" ? "pointer-events-none" : tool === "eraser" ? "cursor-cell" : tool === "text" ? "cursor-text" : tool === "select" ? "" : "cursor-crosshair"}`}
+              style={tool === "select" ? { cursor: hoverCursor } : undefined} onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onDoubleClick={pointerDoubleClick}>
               {[...marks, ...(draft ? [draft] : [])].map((mark, i) => <MarkShape key={`mark-${i}`} mark={mark} width={natural.width} height={natural.height} />)}
               {[...eraseStrokes, ...(eraseDraft ? [eraseDraft] : [])].map((stroke, i) => <polyline key={`erase-${i}`} points={stroke.map((p) => `${p.x * natural.width},${p.y * natural.height}`).join(" ")} fill="none" stroke="var(--color-red-500)" strokeOpacity=".55" strokeWidth={Math.max(0.006, strokeWidth * 3) * natural.width} strokeLinecap="round" strokeLinejoin="round" />)}
               {commentSelection && (() => { const box = boxOf(commentSelection.start, commentSelection.end); return <rect x={box.x * natural.width} y={box.y * natural.height} width={box.width * natural.width} height={box.height * natural.height} fill="var(--color-accent-500)" fillOpacity=".16" stroke="var(--color-accent-500)" strokeWidth={0.003 * natural.width} />; })()}
+              {selected && (() => {
+                const box = annotationBounds(selected, natural.width, natural.height);
+                const display = imageRef.current?.getBoundingClientRect();
+                const rx = display?.width ? natural.width * 5 / display.width : natural.width * 0.01;
+                const ry = display?.height ? natural.height * 5 / display.height : natural.height * 0.01;
+                return <g aria-label={t("chat.attach.lightbox.selection")}>
+                  <path d={`M ${box.x * natural.width} ${box.y * natural.height} h ${box.width * natural.width} v ${box.height * natural.height} h ${-box.width * natural.width} Z`} fill="none" stroke="var(--color-accent-500)" strokeWidth={Math.max(1, natural.width * 1.5 / (display?.width || natural.width))} strokeDasharray={`${rx} ${rx}`} pointerEvents="none" />
+                  {annotationHandles(selected, natural.width, natural.height).map(({ id, point }) => <circle key={id} data-handle={id} cx={point.x * natural.width} cy={point.y * natural.height} r={Math.min(rx, ry)} fill="var(--color-white)" stroke="var(--color-accent-500)" strokeWidth={Math.max(1, natural.width * 1.5 / (display?.width || natural.width))} />)}
+                </g>;
+              })()}
             </svg>
             {comments.map((comment, i) => <span key={i} className="absolute flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-accent-500 text-xs font-bold text-white shadow" style={{ left: `${comment.x * 100}%`, top: `${comment.y * 100}%` }}>{i + 1}</span>)}
             {textDraft && <form className="absolute" style={{ left: `${textDraft.at.x * 100}%`, top: `${textDraft.at.y * 100}%` }} onSubmit={(e) => { e.preventDefault(); submitText(); }}>
@@ -455,6 +546,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
         <div role="toolbar" aria-label={t("chat.attach.lightbox.tools")} onPointerDown={(e) => { if ((e.target as HTMLElement).closest("button,input,select")) return; setDragDock(true); dockStart.current = { x: e.clientX, y: e.clientY, left: dockPosition.x, top: dockPosition.y }; e.currentTarget.setPointerCapture?.(e.pointerId); }} onPointerMove={(e) => { if (dragDock && dockStart.current) setDockPosition({ x: dockStart.current.left + e.clientX - dockStart.current.x, y: dockStart.current.top + e.clientY - dockStart.current.y }); }} onPointerUp={() => setDragDock(false)}
           className="pointer-events-auto relative flex h-11 items-center gap-0.5 whitespace-nowrap rounded-full border border-white/10 bg-gray-950/80 px-1.5 text-white shadow-2xl backdrop-blur-xl" style={{ transform: `translate(${dockPosition.x}px, ${dockPosition.y}px)` }}>
           <span className="flex h-8 w-5 cursor-grab items-center justify-center text-white/40 active:cursor-grabbing" aria-hidden><GripIcon className="h-3.5 w-3.5" /></span>
+          <DockButton label={toolLabel("select")} keyHint="V" active={tool === "select"} disabled={!canAnnotate} onClick={() => pickTool("select")}><SelectToolIcon className="h-4 w-4" /></DockButton>
           {DRAW_TOOLS.map((item) => { const Icon = item.icon; return <DockButton key={item.tool} label={toolLabel(item.tool)} keyHint={item.key} active={tool === item.tool} disabled={!canAnnotate} onClick={() => pickTool(item.tool)}><Icon className="h-4 w-4" /></DockButton>; })}
           <div className="relative">
             <DockButton label={t("chat.attach.lightbox.style")} active={showStyle} disabled={!canAnnotate} onClick={() => { setShowStyle((value) => !value); setShowMore(false); }}>
@@ -462,9 +554,9 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
             </DockButton>
             {showStyle && <div className="absolute bottom-full left-1/2 mb-3 flex -translate-x-1/2 flex-col gap-3 rounded-2xl border border-white/10 bg-gray-950/90 p-3 shadow-2xl backdrop-blur-xl">
               <div className="flex gap-1.5" role="radiogroup" aria-label={t("chat.attach.lightbox.color")}>
-                {ANNOTATION_COLORS.map((option) => <button key={option} type="button" role="radio" aria-checked={color === option} aria-label={t(`chat.attach.lightbox.colors.${option}`)} title={t(`chat.attach.lightbox.colors.${option}`)} onClick={() => setColor(option)} className={`h-6 w-6 rounded-full ring-offset-2 ring-offset-gray-950 ${color === option ? "ring-2 ring-white" : "ring-1 ring-white/25"}`} style={{ background: colorVar(option) }} />)}
+                {ANNOTATION_COLORS.map((option) => <button key={option} type="button" role="radio" aria-checked={color === option} aria-label={t(`chat.attach.lightbox.colors.${option}`)} title={t(`chat.attach.lightbox.colors.${option}`)} onClick={() => setMarkColor(option)} className={`h-6 w-6 rounded-full ring-offset-2 ring-offset-gray-950 ${color === option ? "ring-2 ring-white" : "ring-1 ring-white/25"}`} style={{ background: colorVar(option) }} />)}
               </div>
-              <label className="flex items-center gap-2 text-xs text-white/70">{t("chat.attach.lightbox.strokeWidth")}<input type="range" min="0.002" max="0.02" step="0.001" value={strokeWidth} onChange={(event) => setStrokeWidth(Number(event.target.value))} aria-label={t("chat.attach.lightbox.strokeWidth")} className="h-1 w-28 accent-accent-500" /></label>
+              <label className="flex items-center gap-2 text-xs text-white/70">{t("chat.attach.lightbox.strokeWidth")}<input type="range" min="0.002" max="0.02" step="0.001" value={strokeWidth} onChange={(event) => setMarkWidth(Number(event.target.value))} aria-label={t("chat.attach.lightbox.strokeWidth")} className="h-1 w-28 accent-accent-500" /></label>
             </div>}
           </div>
           <Divider />
@@ -515,6 +607,10 @@ function Divider() {
   return <span className="mx-1 h-5 w-px shrink-0 bg-white/15" aria-hidden />;
 }
 
+function SelectToolIcon({ className }: { className?: string }) {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" className={className} aria-hidden><path d="M5 3v15l4-4 3 6 3-1.5-3-6H18L5 3Z" /></svg>;
+}
+
 /** Uma marca desenhada no SVG, em pixels da imagem (o SVG usa o tamanho natural como viewBox). */
 function MarkShape({ mark, width, height }: { mark: Annotation; width: number; height: number }) {
   const stroke = colorVar(mark.color);
@@ -542,19 +638,20 @@ function MarkShape({ mark, width, height }: { mark: Annotation; width: number; h
     return <text x={at.x} y={at.y} dominantBaseline="hanging" fontSize={size} fontWeight={600} fill={stroke} stroke={mark.color === "white" ? "var(--color-gray-950)" : "var(--color-white)"} strokeWidth={Math.max(2, size / 6)} paintOrder="stroke" style={{ fontFamily: "system-ui, sans-serif" }}>{mark.text}</text>;
   }
   if (mark.kind !== "step") return null;
-  const radius = Math.max(14, width / 60);
+  const radius = Math.max(14, mark.width * width * 4.2);
   const at = px(mark.at);
   const ink = mark.color === "white" || mark.color === "yellow-400" ? "var(--color-gray-950)" : "var(--color-white)";
   return <g><circle cx={at.x} cy={at.y} r={radius} fill={stroke} /><text x={at.x} y={at.y} textAnchor="middle" dominantBaseline="central" fontSize={radius * 1.1} fontWeight={700} fill={ink} style={{ fontFamily: "system-ui, sans-serif" }}>{mark.n}</text></g>;
 }
 
 /** O índice do texto de cima que o ponto toca (caixa aproximada do texto), ou -1. */
-function textHitIndex(marks: Annotation[], p: MarkPoint, aspect: number): number {
+function textHitIndex(marks: Annotation[], p: MarkPoint, aspect: number, imageWidth: number): number {
   for (let i = marks.length - 1; i >= 0; i--) {
     const mark = marks[i]!;
     if (mark.kind !== "text") continue;
-    const height = Math.max(0.02, mark.width * 7);
-    const width = Math.max(0.04, mark.text.length * height * 0.6 * aspect);
+    const font = Math.max(14, mark.width * imageWidth * 7);
+    const width = Math.max(font * 0.6, mark.text.length * font * 0.6) / imageWidth;
+    const height = font / Math.max(1, imageWidth * aspect);
     if (p.x >= mark.at.x - 0.01 && p.x <= mark.at.x + width && p.y >= mark.at.y - 0.01 && p.y <= mark.at.y + height) return i;
   }
   return -1;

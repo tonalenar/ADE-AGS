@@ -16,6 +16,71 @@ export type Annotation =
 
 /** As marcas definidas por dois cantos (seta, retângulo, elipse, pixelar). */
 export type BoxMark = Extract<Annotation, { from: MarkPoint }>;
+export type ResizeHandle = "n" | "ne" | "e" | "se" | "s" | "sw" | "w" | "nw" | "from" | "to";
+
+/** Caixa aproximada da marca, em coordenadas normalizadas da imagem. */
+export function annotationBounds(mark: Annotation, width: number, height: number) {
+  if (mark.kind === "pen" || mark.kind === "highlighter") {
+    const xs = mark.points.map((point) => point.x); const ys = mark.points.map((point) => point.y);
+    return { x: Math.min(...xs), y: Math.min(...ys), width: Math.max(0, Math.max(...xs) - Math.min(...xs)), height: Math.max(0, Math.max(...ys) - Math.min(...ys)) };
+  }
+  if ("from" in mark) return boxOf(mark.from, mark.to);
+  if (mark.kind === "text") {
+    const font = Math.max(14, mark.width * width * 7);
+    const w = Math.max(font * 0.6, mark.text.length * font * 0.6);
+    return { x: mark.at.x, y: mark.at.y, width: w / width, height: font / height };
+  }
+  if (mark.kind !== "step") return { x: 0, y: 0, width: 0, height: 0 };
+  const radius = Math.max(14, mark.width * width * 4.2);
+  return { x: mark.at.x - radius / width, y: mark.at.y - radius / height, width: 2 * radius / width, height: 2 * radius / height };
+}
+
+/** Alças de formas/pincel/texto; setas expõem uma alça em cada ponta. */
+export function annotationHandles(mark: Annotation, width: number, height: number): Array<{ id: ResizeHandle; point: MarkPoint }> {
+  if (mark.kind === "arrow") return [{ id: "from", point: mark.from }, { id: "to", point: mark.to }];
+  const box = annotationBounds(mark, width, height);
+  const x = box.x, y = box.y, r = box.x + box.width, b = box.y + box.height, cx = (x + r) / 2, cy = (y + b) / 2;
+  return [
+    { id: "nw", point: { x, y } }, { id: "n", point: { x: cx, y } }, { id: "ne", point: { x: r, y } },
+    { id: "e", point: { x: r, y: cy } }, { id: "se", point: { x: r, y: b } }, { id: "s", point: { x: cx, y: b } },
+    { id: "sw", point: { x, y: b } }, { id: "w", point: { x, y: cy } },
+  ];
+}
+
+/** Arrasta a marca inteira sem perder sua geometria. */
+export function moveAnnotation(mark: Annotation, dx: number, dy: number): Annotation {
+  const move = (point: MarkPoint): MarkPoint => ({ x: point.x + dx, y: point.y + dy });
+  if (mark.kind === "pen" || mark.kind === "highlighter") return { ...mark, points: mark.points.map(move) };
+  if ("from" in mark) return { ...mark, from: move(mark.from), to: move(mark.to) };
+  if (mark.kind === "text" || mark.kind === "step") return { ...mark, at: move(mark.at) };
+  return mark;
+}
+
+/** Redimensiona a marca a partir de uma alça. A fonte do texto acompanha a escala. */
+export function resizeAnnotation(mark: Annotation, handle: ResizeHandle, end: MarkPoint, width: number, height: number): Annotation {
+  if (mark.kind === "arrow") {
+    if (handle === "from") return { ...mark, from: end };
+    if (handle === "to") return { ...mark, to: end };
+    return mark;
+  }
+  const box = annotationBounds(mark, width, height);
+  let left = box.x, right = box.x + box.width, top = box.y, bottom = box.y + box.height;
+  if (handle.includes("w")) left = end.x; if (handle.includes("e")) right = end.x;
+  if (handle.includes("n")) top = end.y; if (handle.includes("s")) bottom = end.y;
+  // Borda sem eixo vertical/horizontal do nome da alça (n/s ou e/w).
+  if (handle === "n") top = end.y; if (handle === "s") bottom = end.y;
+  if (handle === "e") right = end.x; if (handle === "w") left = end.x;
+  const minX = Math.min(left, right), maxX = Math.max(left, right), minY = Math.min(top, bottom), maxY = Math.max(top, bottom);
+  const sx = box.width > 0 ? (maxX - minX) / box.width : 1;
+  const sy = box.height > 0 ? (maxY - minY) / box.height : 1;
+  const scale = Math.max(0.15, Math.max(sx, sy));
+  if (mark.kind === "text") return { ...mark, at: { x: minX, y: minY }, width: Math.max(0.002, mark.width * scale) };
+  if (mark.kind === "step") return { ...mark, at: { x: minX + (maxX - minX) / 2, y: minY + (maxY - minY) / 2 }, width: Math.max(0.002, mark.width * scale) };
+  const map = (point: MarkPoint): MarkPoint => ({ x: minX + (point.x - box.x) * sx, y: minY + (point.y - box.y) * sy });
+  if (mark.kind === "pen" || mark.kind === "highlighter") return { ...mark, points: mark.points.map(map) };
+  if ("from" in mark) return { ...mark, from: map(mark.from), to: map(mark.to) };
+  return mark;
+}
 
 export const colorVar = (color: AnnotationColor) => `var(--color-${color})`;
 
@@ -143,7 +208,7 @@ export function paintAnnotations(context: CanvasRenderingContext2D, marks: Annot
       context.strokeText(mark.text, at.x, at.y);
       context.fillText(mark.text, at.x, at.y);
     } else if (mark.kind === "step") {
-      const radius = Math.max(14, width / 60);
+      const radius = Math.max(14, mark.width * width * 4.2);
       const at = px(mark.at);
       context.beginPath(); context.arc(at.x, at.y, radius, 0, Math.PI * 2); context.fill();
       context.fillStyle = resolveColor(mark.color === "white" || mark.color === "yellow-400" ? "gray-950" : "white");
