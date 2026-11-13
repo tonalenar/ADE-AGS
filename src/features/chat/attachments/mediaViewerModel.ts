@@ -44,6 +44,43 @@ export function markdownImages(content: string, cwd: string | null): MarkdownIma
   return result;
 }
 
+/** Expande chaves simples (`a-{x,y}.png` → `a-x.png`, `a-y.png`); sem chaves ou aninhadas, devolve o próprio texto. */
+export function expandBraces(text: string): string[] {
+  const match = text.match(/^([^{}]*)\{([^{}]+)\}([^{}]*)$/);
+  if (!match) return /[{}]/.test(text) ? [] : [text];
+  const options = match[2]!.split(",").map((part) => part.trim()).filter(Boolean);
+  if (options.length === 0 || options.length > 12) return [];
+  return options.map((option) => `${match[1]}${option}${match[3]}`);
+}
+
+/**
+ * Arquivos de imagem citados no texto, em código inline (`brand/logo.png`) ou como alvo de link
+ * (`[logo](brand/logo.png)`), inclusive em tabelas. Só caminhos dentro da pasta da conversa; URLs remotas e
+ * blocos de código ficam de fora. As imagens já mostradas com `![...]()` não se repetem aqui.
+ */
+export function mentionedImages(content: string, cwd: string | null): ConversationMedia[] {
+  if (!cwd) return [];
+  const body = content.replace(/```[\s\S]*?```/g, "").replace(/~~~[\s\S]*?~~~/g, "");
+  const embedded = new Set(markdownImages(content, cwd).map((image) => image.path));
+  const candidates: string[] = [];
+  for (const match of body.matchAll(/(?<!!)\[[^\]]*\]\((<[^>\r\n]+>|[^)\s]+)[^)]*\)/g)) candidates.push((match[1] ?? "").replace(/^<|>$/g, ""));
+  for (const match of body.matchAll(/`([^`\r\n]+)`/g)) candidates.push(match[1] ?? "");
+  const result: ConversationMedia[] = [];
+  const seen = new Set<string>();
+  for (const raw of candidates) {
+    const text = raw.trim();
+    if (!text || /\s/.test(text) || /^[a-z][a-z0-9+.-]*:\/\//i.test(text) && !/^file:\/\//i.test(text)) continue;
+    for (const expanded of expandBraces(text)) {
+      if (!IMAGE_EXTENSION.test(expanded)) continue;
+      const path = localMarkdownImagePath(expanded, cwd);
+      if (!path || seen.has(path) || embedded.has(path)) continue;
+      seen.add(path);
+      result.push({ path, name: path.split("/").pop() || expanded, kind: "image", preview: null });
+    }
+  }
+  return result;
+}
+
 function localMarkdownImagePath(source: string, cwd: string): string | null {
   let candidate = source;
   if (/^file:\/\//i.test(candidate)) {

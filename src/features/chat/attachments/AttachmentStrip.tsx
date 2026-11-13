@@ -116,7 +116,7 @@ function ImageCard({ item, onOpen }: { item: ShownAttachment; onOpen: () => void
       <button type="button" onClick={onOpen} aria-label={t("chat.attach.zoom", { name: item.name })} title={item.name}
         className="block w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-gray-100 dark:bg-white/[0.07] ring-1 ring-black/10 dark:ring-white/10 hover:ring-2 hover:ring-accent-500/60">
         {src ? (
-          <img src={src} alt={item.name} className="w-full h-full object-cover" draggable={false} />
+          <img src={src} alt={item.name} loading="lazy" decoding="async" className="w-full h-full object-cover" draggable={false} />
         ) : (
           <span className="w-full h-full flex items-center justify-center px-1 text-center text-chat-caption text-gray-400 dark:text-white/35">
             {missing ? t("chat.attach.missing") : ""}
