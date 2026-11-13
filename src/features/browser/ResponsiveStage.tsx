@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
 import { clampZoom, stageSize } from "./zoom";
 import { DEVICE_BEZEL, type DeviceSpec } from "./devices";
+import { PhoneChrome, type Platform } from "./PhoneChrome";
 
 type Edge = "x" | "y" | "xy";
 
@@ -17,12 +18,16 @@ type Edge = "x" | "y" | "xy";
  * Un tamaño más grande que el espacio se muestra achicado, pero la página sigue midiendo
  * lo que se pidió: las media queries ven 1440 px aunque en pantalla ocupe la mitad.
  */
-export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, children }: {
+export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, platform = null, url = "", children }: {
   viewport: Viewport | null;
   /** "Celular solto": só o aparelho, centrado no espaço, sem o quadro, as alças nem o rótulo. A árvore é a mesma
    *  dos outros modos, para o iframe não recarregar ao trocar. */
   device?: DeviceSpec | null;
   onResize: (viewport: Viewport) => void;
+  /** Num tamanho de celular, o sistema que o aparelho imita: desenha a barra de status e o Safari/Chrome em volta da página. */
+  platform?: Platform | null;
+  /** O endereço mostrado na barra do Safari/Chrome do mockup. */
+  url?: string;
   /** O zoom da página. Sem marco, a página é desenhada maior/menor e escalada de volta; com marco, multiplica a escala. */
   zoom?: number;
   children: ReactNode;
@@ -58,6 +63,8 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, c
   // Num tamanho de celular o quadro vira o aparelho (moldura, cantos, ilha, botões), como num mockup.
   const phone = !!shown && !fill && isPhoneViewport(shown);
   const landscape = !!shown && shown.width > shown.height;
+  // Com o sistema escolhido, o aparelho desenha o próprio topo e rodapé (a ilha vai dentro da barra de status).
+  const chrome: Platform | null = phone && !device ? platform : null;
   // No celular solto a escala é a que cabe o aparelho inteiro (com a moldura) no espaço do palco.
   const pad = (DEVICE_BEZEL + 10) * 2;
   const deviceScale = device ? Math.max(0.1, Math.min((box.width - pad) / device.width, (box.height - pad) / device.height)) : 1;
@@ -129,13 +136,13 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, c
             : shown
               ? {
                 width: shown.width, height: shown.height, transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: "0 0",
-                ...(phone ? phoneScreen(scale) : {}),
+                ...(phone ? phoneScreen(scale, chrome === "android" ? 34 : undefined) : {}),
               }
               : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
           className={device || phone ? "relative bg-white" : shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
-          {children}
-          {(device || phone) && <PhoneOverlay landscape={!device && landscape} cutout={device?.cutout ?? "island"} />}
+          <PhoneChrome platform={chrome} landscape={landscape} url={url}>{children}</PhoneChrome>
+          {(device || (phone && !chrome)) && <PhoneOverlay landscape={!device && landscape} cutout={device?.cutout ?? "island"} />}
         </div>
         {(device || phone) && <PhoneButtons landscape={!device && landscape} />}
 

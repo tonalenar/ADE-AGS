@@ -49,7 +49,7 @@ import { RealBrowserView } from "./RealBrowserView";
 import { shouldOpenInRealChrome, realBrowserEmulate, realBrowserHistory, realBrowserNavigate, realBrowserPost, realBrowserShot } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { MenuDivider, MenuRow, ToolButton } from "./toolbarButtons";
-import { presetById, type Viewport } from "./viewport";
+import { FILL_VIEWPORT, isFillViewport, isPhoneViewport, rotate, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
 import { cropForJev, resizeCanvas, visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
@@ -1059,10 +1059,39 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
 
   const closeMenu = () => setMenuOpen(false);
   const menuAction = (fn: () => void) => () => { fn(); closeMenu(); };
+  /** O modo celular está ligado: com mockup (`viewport`) ou só emulando um aparelho na coluna inteira (`mobile`). */
+  const deviceMode = !!viewport || !!mobile;
+  /** Telas de partida de cada sistema (em pé); o tamanho que o usuário já digitou é mantido. */
+  const screenFor = (platform: "ios" | "android" | null): Viewport => {
+    const base = platform === "android" ? { width: 412, height: 915 } : platform === "ios" ? { width: 390, height: 844 } : { width: 1440, height: 900 };
+    return base;
+  };
+  const choosePlatform = (platform: "ios" | "android" | null) => {
+    const current = viewportRef.current;
+    const framed = current && !isFillViewport(current) ? current : null;
+    setMobile(platform);
+    if (platform === null) {
+      // Desktop: o quadro da mesa, ou a coluna inteira se já era "completo".
+      setViewport(framed ? (isPhoneViewport(framed) ? screenFor(null) : framed) : FILL_VIEWPORT);
+    } else if (framed) {
+      // De um aparelho para outro: se a tela ainda é a de partida de um deles, troca pela do novo; tamanho digitado fica.
+      const landscape = framed.width > framed.height;
+      const isStart = [screenFor("ios"), screenFor("android")].some((d) => (framed.width === d.width && framed.height === d.height) || (framed.width === d.height && framed.height === d.width));
+      setViewport(isPhoneViewport(framed) && !isStart ? framed : (landscape ? rotate(screenFor(platform)) : screenFor(platform)));
+    } else {
+      // "Completo": a coluna inteira, sem quadro, mas com o aparelho emulado.
+      setViewport(null);
+    }
+  };
+  const chooseFull = (full: boolean) => {
+    const platform = mobile;
+    if (full) setViewport(platform ? null : FILL_VIEWPORT);
+    else setViewport(screenFor(platform));
+  };
   const toggleDeviceMode = () => {
-    const next = viewport ? null : (presetById("phone") ?? null);
-    setViewport(next);
-    setMobile(next ? "ios" : null);
+    if (deviceMode) { setViewport(null); setMobile(null); return; }
+    setViewport(screenFor("ios"));
+    setMobile("ios");
   };
 
   // Uma linha só, como no T3: navegação, endereço, as três ações de uso constante e o "⋯".
@@ -1082,7 +1111,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
             label={t(visualRecording ? "browser.recording.stop" : "browser.recording.start")}
             disabled={(!target && !real) || freezing || savingCapture} onClick={menuAction(toggleVisualRecording)} />
           <MenuDivider />
-          <MenuRow icon={<DevicesIcon className="w-4 h-4" />} label={t("browser.menu.device")} checked={!!viewport}
+          <MenuRow icon={<DevicesIcon className="w-4 h-4" />} label={t("browser.menu.device")} checked={deviceMode}
             onClick={menuAction(toggleDeviceMode)} />
           <MenuRow icon={<BugIcon className="w-4 h-4" />} label={t("browser.menu.console")} checked={debugOpen}
             onClick={menuAction(() => setDebugOpen((v) => !v))}
@@ -1174,14 +1203,15 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       {/* No login, a barra que vale é a da janela do Chrome (é nela que se confere o endereço): a do Portal some. */}
       {device || floatingPreview ? null : toolbar}
 
-      {viewport && !device && !floatingPreview && (
+      {deviceMode && !device && !floatingPreview && (
         // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
           <DeviceBar
             viewport={viewport}
             mobile={mobile}
             onChange={setViewport}
-            onMobile={setMobile}
+            onMobile={choosePlatform}
+            onFull={chooseFull}
             onClose={() => { setViewport(null); setMobile(null); }}
           />
         </div>
@@ -1205,7 +1235,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
             {/* Na página vazia a vista nativa fica invisível (a opacidade a esconde) e a página inicial aparece. */}
             <div className={`flex flex-1 min-h-0 ${isBlankUrl(view.url) ? "opacity-0" : ""}`}>
             <ResponsiveStage viewport={floatingPreview ? null : viewport} onResize={setViewport}
-              zoom={viewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}>
+              zoom={viewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}
+              platform={mobile} url={address}>
             <RealBrowserView viewId={view.id} url={view.url} zoom={viewport && !floatingPreview ? 1 : zoom} script={INJECTED}
               profileId={browserProfileId} projectPath={view.cwd} floatingPreview={floatingPreview} onError={setError}
               onUrl={(u) => {
