@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { FLOATING_PREVIEW_CORNER_RADIUS, NativeCornerRadius } from "./nativeCorner";
+import { closeAppPopovers } from "./outsidePointer";
 import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
 import { miniBrowserZoom, placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
 import { setChatBrowserMiniHover, useChatStore } from "@/features/chat/store";
@@ -114,13 +115,17 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
       listen<{ id: string; title: string }>("real-browser-title", mine((p) => latest.current.onTitle?.(p.title))),
       listen<{ id: string; loading: boolean }>("real-browser-load", mine((p) => latest.current.onLoading?.(p.loading))),
       listen<{ id: string; back: boolean; forward: boolean }>("real-browser-history", mine((p) => latest.current.onHistory?.(p))),
+      listen<{ id: string }>("real-browser-pointer", mine(() => closeAppPopovers())),
       listen<{ id: string; inside: boolean }>("real-browser-mini-hover", mine((p) => {
         if (latest.current.floatingPreview) setChatBrowserMiniHover(p.inside);
       })),
       listen<{ id: string; popup: string; url: string }>("real-browser-popup", mine((p) => latest.current.onPopup?.({ id: p.popup, url: p.url }))),
       listen<{ id: string }>("real-browser-closed", mine(() => latest.current.onClosedByPage?.())),
     ];
+    const onBlur = () => closeAppPopovers();
+    window.addEventListener("blur", onBlur);
     return () => {
+      window.removeEventListener("blur", onBlur);
       closed = true;
       cancelAnimationFrame(frame);
       offs.forEach((p) => p.then((off) => off()));

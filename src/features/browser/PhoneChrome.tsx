@@ -85,10 +85,17 @@ function AndroidTop({ time, url, address, landscape, actions }: { time: string; 
   const [editing, setEditing] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menu) return;
+    const outside = (e: PointerEvent) => { if (!root.current?.contains(e.target as Node)) setMenu(false); };
+    window.addEventListener("pointerdown", outside);
+    return () => window.removeEventListener("pointerdown", outside);
+  }, [menu]);
   useEffect(() => { if (editing !== null) input.current?.select(); }, [editing !== null]); // eslint-disable-line react-hooks/exhaustive-deps
   const icon = "flex items-center justify-center rounded-full hover:bg-black/5 active:bg-black/10";
   return (
-    <div className="relative shrink-0 bg-white text-[#1f1f1f]">
+    <div ref={root} className="relative shrink-0 bg-white text-[#1f1f1f]">
       {!landscape && (
         <div className="relative flex items-center justify-between px-6" style={{ height: 36 }}>
           <span style={{ fontSize: 14, fontWeight: 500 }}>{time}</span>

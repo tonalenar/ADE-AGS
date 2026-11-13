@@ -226,6 +226,8 @@ define_class!(
         #[unsafe(method(mouseDown:))]
         fn mouse_down(&self, event: *mut AnyObject) {
             // Na miniatura o clique também vai para a página; voltar ao painel é só pelo botão de expandir.
+            // O DOM do app não vê cliques na vista nativa: este aviso neutro fecha os menus abertos dele.
+            notify(&self.ivars().id.borrow(), "real-browser-pointer", json!({}));
             let _: () = unsafe { msg_send![super(self), mouseDown: event] };
         }
 
