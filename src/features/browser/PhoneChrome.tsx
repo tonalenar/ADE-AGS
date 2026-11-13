@@ -10,7 +10,8 @@ import type { PhoneActions } from "./deviceActions";
  * - iPhone: a barra de status translúcida e o vidro do Safari ficam DENTRO da página (`device_chrome.js`), para o
  *   conteúdo passar por baixo deles; aqui só sobram as faixas laterais quando deitado.
  * - Android: a barra de status e a barra do Chrome são opacas no topo, como no Chrome real, e ficam aqui, fora da
- *   página, com os botões funcionando direto pelos handlers do navegador.
+ *   página, com os botões funcionando direto pelos handlers do navegador. A página vai até o fim da tela; a alça de
+ *   gestos fica por cima dela (`device_chrome.js`), como no Chrome real.
  */
 export type Platform = "ios" | "android";
 
@@ -19,7 +20,7 @@ export function chromeInsets(platform: Platform, landscape: boolean): { top: num
   if (platform === "ios") {
     return landscape ? { top: 0, bottom: 0, left: 47, right: 47 } : { top: 0, bottom: 0, left: 0, right: 0 };
   }
-  return landscape ? { top: 44, bottom: 0, left: 36, right: 0 } : { top: 92, bottom: 30, left: 0, right: 0 };
+  return landscape ? { top: 44, bottom: 0, left: 36, right: 0 } : { top: 92, bottom: 0, left: 0, right: 0 };
 }
 
 /** O endereço como o navegador do aparelho o mostra: sem protocolo nem `www.`. Pura. */
@@ -177,11 +178,6 @@ export function PhoneChrome({ platform = null, landscape = false, url = "", acti
         <div className="relative flex flex-col flex-1 min-w-0 min-h-0">{children}</div>
         {side(inset?.right ?? 0, null, false)}
       </div>
-      {platform === "android" && !landscape && (
-        <div className="relative shrink-0 bg-white" style={{ height: 30 }}>
-          <span className="absolute left-1/2 -translate-x-1/2 rounded-full bg-black/80" style={{ bottom: 9, width: 108, height: 4 }} />
-        </div>
-      )}
     </div>
   );
 }

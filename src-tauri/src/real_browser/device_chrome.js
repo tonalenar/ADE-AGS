@@ -1,22 +1,55 @@
 // A parte da moldura do aparelho que fica DENTRO da página, para o conteúdo passar por baixo dela:
-// - iPhone (iOS 26): a barra de status translúcida em volta da ilha, a barra de vidro flutuante do Safari e a barra
-//   de início. A página começa abaixo da barra de status (margem no <html>), e os cabeçalhos fixos/grudados no topo
-//   descem a mesma altura, então nada fica embaixo da hora e da ilha; ao rolar, o conteúdo passa por trás do vidro.
-// - Android: nada aqui. A barra de status e a barra do Chrome são opacas no topo, como no Chrome real, e ficam no app
-//   (PhoneChrome.tsx), fora da página.
+// - iPhone (iOS 26): a barra de status quase transparente em volta da ilha, a barra de vidro flutuante do Safari e a
+//   barra de início. A página começa abaixo da barra de status (margem no <html>), e os cabeçalhos fixos/grudados no
+//   topo descem a mesma altura; ao rolar, o conteúdo passa por trás do vidro.
+// - Android: a barra de status e a barra do Chrome são opacas no topo, como no Chrome real, e ficam no app
+//   (PhoneChrome.tsx), fora da página. Aqui só a alça de gestos, por cima da página, que vai até o fim da tela.
+// - Os dois: os cantos arredondados da tela. A vista nativa é retangular e o recorte dela no macOS não pega; os cantos
+//   são desenhados por cima da página, na cor da moldura, e nada vaza pela curva.
 // Os botões funcionam: voltar e recarregar aqui mesmo; o endereço, as abas e o menu vão ao app pela ponte (mensagens
 // `ags-preview` com tipo `device:*`, que o app aceita só desta lista fechada).
+// A moldura entra e sai ao vivo (o app roda este script no documento aberto e `__agsDeviceChromeStop` a tira), sem
+// recarregar a página quando só a moldura muda.
 // `__AGS_PLATFORM__` e `__AGS_LABELS__` são trocados pelo backend.
 (() => {
-  if (window.top !== window || window.__ags_device_chrome) return;
-  Object.defineProperty(window, "__ags_device_chrome", { value: true });
+  if (window.top !== window) return;
+  if (typeof window.__agsDeviceChromeStop === "function") window.__agsDeviceChromeStop();
   const platform = "__AGS_PLATFORM__";
-  if (platform !== "ios") return;
   const L = __AGS_LABELS__;
-  const STATUS = 54;
+  const ios = platform === "ios";
+  // A cor da moldura (`phoneScreen` em ResponsiveStage.tsx) e o raio da tela, em px da página.
+  const BEZEL = "#0b0b0d";
+  const RADIUS = ios ? 52 : 34;
+  const STATUS = ios ? 54 : 0;
+  const cleanup = [];
+  let stopped = false;
+  Object.defineProperty(window, "__agsDeviceChromeStop", {
+    configurable: true,
+    value: () => {
+      stopped = true;
+      for (const fn of cleanup.splice(0)) { try { fn(); } catch (_) {} }
+      try { delete window.__agsDeviceChromeStop; } catch (_) {}
+    },
+  });
+  const on = (target, type, fn, opts) => { target.addEventListener(type, fn, opts); cleanup.push(() => target.removeEventListener(type, fn, opts)); };
+  const every = (fn, ms) => { const t = setInterval(fn, ms); cleanup.push(() => clearInterval(t)); };
+
+  // Página escura (fundo do body ou do html): a barra e a alça ficam claras.
+  const darkPage = () => {
+    for (const node of [document.body, document.documentElement]) {
+      if (!node) continue;
+      const m = getComputedStyle(node).backgroundColor.match(/\d+(\.\d+)?/g);
+      if (!m || (m.length >= 4 && +m[3] < 0.5)) continue;
+      return (0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]) < 110;
+    }
+    return false;
+  };
+  const corner = (v, h) => `<span class="corner" style="${v}:0;${h}:0;background:radial-gradient(circle at ${h === "left" ? RADIUS : 0}px ${v === "top" ? RADIUS : 0}px, transparent ${RADIUS - 0.75}px, ${BEZEL} ${RADIUS}px)"></span>`;
+  const corners = (ios ? corner("top", "left") + corner("top", "right") : "") + corner("bottom", "left") + corner("bottom", "right");
   const send = (type, extra) => window.postMessage(Object.assign({ source: "ags-preview", type }, extra || {}), "*");
   const host = () => (location.hostname || location.href).replace(/^www\./, "");
   const clock = () => { const d = new Date(); return d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0"); };
+  const landscape = () => innerWidth > innerHeight;
   const ic = {
     back: '<svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 4 6.5 10l6 6"/></svg>',
     reload: '<svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 10a6 6 0 1 1-1.8-4.3"/><path d="M15.5 2.5v4h-4"/></svg>',
@@ -31,10 +64,17 @@
     * { box-sizing: border-box; font-family: -apple-system, "SF Pro Text", system-ui, sans-serif; -webkit-tap-highlight-color: transparent; }
     .layer { position: fixed; inset: 0; pointer-events: none; color: #000; }
     .layer.dark { color: #fff; }
+    .corner { position: absolute; width: ${RADIUS}px; height: ${RADIUS}px; pointer-events: none; }
+    .gesture { position: absolute; left: 50%; bottom: 9px; transform: translateX(-50%); width: 108px; height: 4px; border-radius: 2px; background: rgba(0,0,0,.72); }
+    .dark .gesture { background: rgba(255,255,255,.82); }
     button { pointer-events: auto; border: 0; background: none; color: inherit; display: grid; place-items: center; cursor: pointer; padding: 0; }
-    .status { position: absolute; top: 0; left: 0; right: 0; height: ${STATUS}px; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 32px 8px;
-      background: rgba(255,255,255,.55); backdrop-filter: blur(14px) saturate(1.6); -webkit-backdrop-filter: blur(14px) saturate(1.6); }
-    .dark .status { background: rgba(20,20,22,.5); }
+    /* iOS 26: quase transparente. Um desfoque leve que some para baixo e um véu suave, sem tingir a página. */
+    .status { position: absolute; top: 0; left: 0; right: 0; height: ${STATUS}px; display: flex; align-items: flex-end; justify-content: space-between; padding: 0 32px 8px; }
+    .status::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: ${STATUS + 18}px; z-index: -1;
+      background: linear-gradient(to bottom, rgba(255,255,255,.72), rgba(255,255,255,.38) 55%, rgba(255,255,255,0));
+      backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+      -webkit-mask-image: linear-gradient(to bottom, #000 45%, transparent); mask-image: linear-gradient(to bottom, #000 45%, transparent); }
+    .dark .status::before { background: linear-gradient(to bottom, rgba(0,0,0,.6), rgba(0,0,0,.3) 55%, rgba(0,0,0,0)); }
     .status .time { width: 100px; text-align: center; font-size: 17px; font-weight: 600; letter-spacing: -.3px; }
     .status .icons { width: 100px; display: flex; gap: 6px; align-items: center; justify-content: center; }
     .island { position: absolute; top: 11px; left: 50%; transform: translateX(-50%); width: 118px; height: 34px; border-radius: 17px; background: #000; }
@@ -51,56 +91,11 @@
     .sheet.open { display: block; }
     .sheet button { width: 100%; display: flex; justify-content: flex-start; height: 44px; padding: 0 14px; border-radius: 14px; font-size: 16px; }
     .sheet button:active { background: rgba(127,127,127,.18); }
-    .land .status, .land .island, .land .home { display: none; }
+    .land .status, .land .island, .land .home, .land .gesture { display: none; }
     .land .bar { left: 50%; right: auto; width: 420px; transform: translateX(-50%); bottom: 12px; }
     .land .sheet { left: 50%; right: auto; width: 420px; transform: translateX(-50%); bottom: 70px; }
   `;
-
-  // A página começa abaixo da barra de status. A margem no <html> não muda o fundo (o canvas o estende por baixo da
-  // barra translúcida). Só em retrato: deitado, o iPhone esconde a barra de status.
-  const offset = document.createElement("style");
-  offset.textContent = `html { margin-top: ${STATUS}px !important; }`;
-  const landscape = () => innerWidth > innerHeight;
-
-  // Cabeçalhos `fixed`/`sticky` no topo: descem a altura da barra (como no Safari, onde o topo da janela fica abaixo
-  // dela). Varredura limitada e só quando o DOM muda, no máximo a cada 300 ms; overlays de tela inteira ficam.
-  const moved = new WeakMap();
-  let scheduled = 0;
-  const fixTop = () => {
-    scheduled = 0;
-    const shift = landscape() ? 0 : STATUS;
-    const all = document.body ? document.body.getElementsByTagName("*") : [];
-    const limit = Math.min(all.length, 6000);
-    for (let i = 0; i < limit; i++) {
-      const el = all[i];
-      if (el.id === "__ags-device-chrome") continue;
-      const was = moved.get(el);
-      const cs = getComputedStyle(el);
-      const pos = cs.position;
-      if (pos !== "fixed" && pos !== "sticky") {
-        if (was !== undefined) { el.style.removeProperty("top"); moved.delete(el); }
-        continue;
-      }
-      const original = was !== undefined ? was : cs.top;
-      if (original === "auto" || !/px$/.test(original)) continue;
-      const top = parseFloat(original);
-      if (top >= STATUS) continue;
-      const r = el.getBoundingClientRect();
-      if (r.height >= innerHeight * 0.85) continue;
-      if (was === undefined) moved.set(el, original);
-      const want = `${top + shift}px`;
-      if (el.style.getPropertyValue("top") !== want) el.style.setProperty("top", want, "important");
-    }
-  };
-  const schedule = () => { if (!scheduled) scheduled = setTimeout(fixTop, 300); };
-
-  const mount = () => {
-    if (!document.documentElement || document.getElementById("__ags-device-chrome")) return;
-    const el = document.createElement("ags-device-chrome");
-    el.id = "__ags-device-chrome";
-    el.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block";
-    const root = el.attachShadow({ mode: "closed" });
-    root.innerHTML = `<style>${css}</style><div class="layer">
+  const iosParts = `
       <div class="status"><span class="time"></span><span class="icons">${ic.signal}${ic.wifi}${ic.battery}</span></div><span class="island"></span>
       <div class="sheet glass">
         <button data-a="share">${L.share}</button>
@@ -111,74 +106,169 @@
         <button class="round glass" data-a="back" aria-label="${L.back}">${ic.back}</button>
         <div class="pill glass"><button data-a="menu" aria-label="${L.menu}">${ic.menu}</button><span class="addr" data-a="edit"></span><button data-a="reload" aria-label="${L.reload}">${ic.reload}</button></div>
         <button class="round glass" data-a="tabs" aria-label="${L.tabs}">${ic.tabs}</button>
-      </div><span class="home"></span></div>`;
-    const layer = root.querySelector(".layer");
+      </div><span class="home"></span>`;
+
+  // A página começa abaixo da barra de status (só iPhone em retrato). A margem no <html> não muda o fundo.
+  const offset = document.createElement("style");
+  offset.textContent = `html { margin-top: ${STATUS}px !important; }`;
+  cleanup.push(() => offset.remove());
+
+  // Cabeçalhos `fixed`/`sticky` no topo descem a altura da barra (como no Safari). Varredura limitada e só quando o
+  // DOM muda, no máximo a cada 300 ms; overlays de tela inteira ficam.
+  const moved = new Map();
+  cleanup.push(() => { for (const [node] of moved) node.style.removeProperty("top"); moved.clear(); });
+  let scheduled = 0;
+  cleanup.push(() => clearTimeout(scheduled));
+  const fixTop = () => {
+    scheduled = 0;
+    if (stopped || !ios) return;
+    const shift = landscape() ? 0 : STATUS;
+    const all = document.body ? document.body.getElementsByTagName("*") : [];
+    const limit = Math.min(all.length, 6000);
+    for (let i = 0; i < limit; i++) {
+      const node = all[i];
+      if (node.id === "__ags-device-chrome") continue;
+      const was = moved.get(node);
+      const cs = getComputedStyle(node);
+      if (cs.position !== "fixed" && cs.position !== "sticky") {
+        if (was !== undefined) { node.style.removeProperty("top"); moved.delete(node); }
+        continue;
+      }
+      const original = was !== undefined ? was : cs.top;
+      if (original === "auto" || !/px$/.test(original)) continue;
+      const top = parseFloat(original);
+      if (top >= STATUS) continue;
+      if (node.getBoundingClientRect().height >= innerHeight * 0.85) continue;
+      if (was === undefined) moved.set(node, original);
+      const want = `${top + shift}px`;
+      if (node.style.getPropertyValue("top") !== want) node.style.setProperty("top", want, "important");
+    }
+  };
+  const schedule = () => { if (!scheduled && !stopped) scheduled = setTimeout(fixTop, 300); };
+
+  let el = null;
+  let root = null;
+  let addr = null;
+  let pressed = null;
+
+  const edit = () => {
+    if (!addr || addr.tagName === "INPUT") return;
+    const input = document.createElement("input");
+    input.className = "addr";
+    input.value = location.href;
+    input.setAttribute("enterkeyhint", "go");
+    input.setAttribute("aria-label", L.address);
+    addr.replaceWith(input);
+    addr = input;
+    input.focus();
+    input.select();
+    input.addEventListener("blur", () => setTimeout(() => { if (addr === input && root && root.activeElement !== input) closeEdit(); }, 0));
+  };
+  const closeEdit = () => {
+    if (!addr || addr.tagName !== "INPUT") return;
+    const span = document.createElement("span");
+    span.className = "addr";
+    span.dataset.a = "edit";
+    span.textContent = host();
+    addr.replaceWith(span);
+    addr = span;
+  };
+  const act = (a) => {
     const sheet = root.querySelector(".sheet");
-    let addr = root.querySelector(".addr");
+    const what = a.dataset.a;
+    if (what !== "menu") sheet.classList.remove("open");
+    if (what === "back") history.back();
+    else if (what === "reload") location.reload();
+    else if (what === "edit") edit();
+    else if (what === "menu") sheet.classList.toggle("open");
+    else if (what === "tabs") send("device:tabs");
+    else if (what === "share") send("device:share", { url: location.href });
+    else if (what === "desktop") send("device:desktop");
+  };
+  // O que está sob o ponteiro dentro da moldura (o evento chega à janela já reapontado para o hospedeiro).
+  const inner = (e) => (root && typeof e.clientX === "number" ? root.elementFromPoint(e.clientX, e.clientY) : null);
+  const ours = (e) => !!el && (e.target === el || (e.composedPath && e.composedPath()[0] === el));
+
+  // Os eventos da moldura são tratados na janela, em captura, ANTES de qualquer script da página (este script roda
+  // primeiro em todo documento): um site que cancela o `touchstart`, para a propagação no documento ou tem atalhos
+  // de teclado não deixa a barra morta. E nenhum desses eventos chega à página.
+  for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "click", "dblclick", "contextmenu", "touchstart", "touchend", "touchmove"]) {
+    on(window, type, (e) => {
+      if (!ours(e)) return;
+      if (type === "pointerdown") {
+        const node = inner(e);
+        pressed = node && node.closest ? node.closest("[data-a]") : null;
+        if (!(node && node.closest && node.closest("input"))) e.preventDefault();
+      } else if (type === "pointerup") {
+        const node = inner(e);
+        const a = node && node.closest ? node.closest("[data-a]") : null;
+        const was = pressed;
+        pressed = null;
+        if (!a) { if (!(node && node.closest && node.closest(".sheet, .bar"))) root.querySelector(".sheet").classList.remove("open"); }
+        else if (a === was) act(a);
+      } else if (type === "contextmenu" || type === "touchstart" || type === "touchmove") {
+        const node = inner(e);
+        if (!(node && node.closest && node.closest("input"))) e.preventDefault();
+      }
+      e.stopImmediatePropagation();
+    }, { capture: true, passive: false });
+  }
+  for (const type of ["keydown", "keypress", "keyup", "input", "beforeinput"]) {
+    on(window, type, (e) => {
+      if (!addr || addr.tagName !== "INPUT" || !el || document.activeElement !== el) return;
+      e.stopImmediatePropagation();
+      if (type !== "keydown") return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const text = addr.value.trim();
+        closeEdit();
+        if (text) send("device:navigate", { text });
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        closeEdit();
+      }
+    }, { capture: true });
+  }
+
+  const mount = () => {
+    if (stopped || !document.documentElement || (el && el.isConnected)) return;
+    el = document.createElement("ags-device-chrome");
+    el.id = "__ags-device-chrome";
+    el.style.cssText = "position:fixed;inset:0;z-index:2147483647;pointer-events:none;display:block";
+    root = el.attachShadow({ mode: "closed" });
+    root.innerHTML = `<style>${css}</style><div class="layer">${ios ? iosParts : '<span class="gesture"></span>'}${corners}</div>`;
+    addr = root.querySelector(".addr");
+    const layer = root.querySelector(".layer");
     const tick = () => {
+      if (stopped) return;
       const land = landscape();
       layer.classList.toggle("land", land);
-      if (land) offset.remove(); else if (!offset.isConnected) (document.head || document.documentElement).appendChild(offset);
-      // Barra clara ou escura conforme o fundo da página.
-      const bg = getComputedStyle(document.body || document.documentElement).backgroundColor;
-      const m = bg.match(/\d+(\.\d+)?/g);
-      const dark = m && (m.length < 4 || +m[3] > 0.5) && (0.299 * m[0] + 0.587 * m[1] + 0.114 * m[2]) < 110;
-      layer.classList.toggle("dark", !!dark);
-      root.querySelector(".time").textContent = clock();
-      if (addr.tagName === "SPAN") addr.textContent = host();
-      schedule();
+      if (ios) {
+        if (land) offset.remove(); else if (!offset.isConnected) (document.head || document.documentElement).appendChild(offset);
+        root.querySelector(".time").textContent = clock();
+        if (addr && addr.tagName === "SPAN") addr.textContent = host();
+        schedule();
+      }
+      layer.classList.toggle("dark", darkPage());
     };
-    const edit = () => {
-      if (addr.tagName === "INPUT") return;
-      const input = document.createElement("input");
-      input.className = "addr";
-      input.value = location.href;
-      input.setAttribute("enterkeyhint", "go");
-      input.setAttribute("aria-label", L.address);
-      addr.replaceWith(input);
-      addr = input;
-      input.focus();
-      input.select();
-      const done = () => {
-        if (addr !== input) return;
-        const span = document.createElement("span");
-        span.className = "addr";
-        span.dataset.a = "edit";
-        span.textContent = host();
-        input.replaceWith(span);
-        addr = span;
-      };
-      input.addEventListener("keydown", (e) => {
-        e.stopPropagation();
-        if (e.key === "Enter") { const text = input.value.trim(); done(); if (text) send("device:navigate", { text }); }
-        if (e.key === "Escape") done();
-      });
-      input.addEventListener("blur", done);
-    };
-    root.addEventListener("click", (e) => {
-      const a = e.target.closest && e.target.closest("[data-a]");
-      if (!a) { sheet.classList.remove("open"); return; }
-      const act = a.dataset.a;
-      if (act !== "menu") sheet.classList.remove("open");
-      if (act === "back") history.back();
-      else if (act === "reload") location.reload();
-      else if (act === "edit") edit();
-      else if (act === "menu") sheet.classList.toggle("open");
-      else if (act === "tabs") send("device:tabs");
-      else if (act === "share") send("device:share", { url: location.href });
-      else if (act === "desktop") send("device:desktop");
-    });
     document.documentElement.appendChild(el);
+    const node = el;
+    cleanup.push(() => node.remove());
     tick();
-    setInterval(tick, 15000);
-    addEventListener("resize", tick);
-    addEventListener("load", tick);
+    every(tick, 15000);
+    on(window, "resize", tick);
+    on(window, "load", tick);
     // Páginas que reescrevem o <html> inteiro tiram a moldura; põe de volta.
-    new MutationObserver(() => { if (!el.isConnected) document.documentElement.appendChild(el); })
-      .observe(document.documentElement, { childList: true });
-    new MutationObserver(schedule).observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style"] });
-    addEventListener("scroll", schedule, { passive: true });
+    const keep = new MutationObserver(() => { if (!stopped && !node.isConnected) document.documentElement.appendChild(node); });
+    keep.observe(document.documentElement, { childList: true });
+    cleanup.push(() => keep.disconnect());
+    if (ios) {
+      const watch = new MutationObserver(schedule);
+      watch.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ["class", "style"] });
+      cleanup.push(() => watch.disconnect());
+      on(window, "scroll", schedule, { passive: true });
+    }
   };
   if (document.documentElement) mount();
-  document.addEventListener("DOMContentLoaded", mount);
+  on(document, "DOMContentLoaded", mount);
 })();

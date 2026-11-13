@@ -432,6 +432,8 @@ struct Emulated {
     last: Option<(f64, f64, f64)>,
     /// O último `native::place`, para reaplicar o zoom certo quando a emulação liga ou desliga.
     native: Option<NativePlace>,
+    /// O aparelho emulado agora (`None`: mesa). Só uma troca dele recarrega a página.
+    platform: Option<String>,
 }
 
 type NativePlace = ([i32; 4], Vec<[i32; 4]>, f64, bool);
@@ -448,8 +450,11 @@ fn device_metrics(width: f64, height: f64, zoom: f64, density: f64) -> (Value, (
     let zoom = if zoom > 0.0 { zoom } else { 1.0 };
     let w = (width / zoom).round().max(1.0) as i64;
     let h = (height / zoom).round().max(1.0) as i64;
-    let key = (w, h, (zoom * 1000.0).round() as i64);
-    (json!({ "width": w, "height": h, "deviceScaleFactor": density, "mobile": true, "scale": zoom }), key)
+    // A vista nativa tem o tamanho arredondado para cima (`native_rect`); a escala cobre esse retângulo inteiro, senão
+    // sobrava uma linha de 1 px sem página na borda direita e na de baixo da tela do aparelho.
+    let scale = (width.ceil() / w as f64).max(height.ceil() / h as f64).max(zoom);
+    let key = (w, h, (scale * 1000.0).round() as i64);
+    (json!({ "width": w, "height": h, "deviceScaleFactor": density, "mobile": true, "scale": scale }), key)
 }
 
 /// Guarda o lugar de `id`; com aparelho emulado, reenvia as medidas se mudaram e devolve o zoom que a vista nativa
@@ -656,6 +661,16 @@ const ANDROID_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 
 pub async fn real_browser_emulate(app: AppHandle, id: String, platform: Option<String>, chrome: Option<Value>) -> Result<(), String> {
     let profile = emulation_profile(platform.as_deref());
     let mobile = profile.is_some();
+    // Só a moldura mudou (Aparelho ⇄ Completo, ou o mesmo aparelho de novo): troca ao vivo, sem recarregar. Recarregar
+    // só quando o aparelho (o user agent) muda; era isso que fazia a página piscar sem moldura a cada troca.
+    let same_device = emulated().lock().ok()
+        .and_then(|map| map.get(&id).map(|entry| entry.platform.clone()))
+        .is_some_and(|last| last == platform);
+    if same_device {
+        set_device_chrome(&app, &id, platform.as_deref().filter(|_| mobile && chrome.is_some()), chrome.as_ref()).await;
+        return Ok(());
+    }
+    if let Ok(mut map) = emulated().lock() { map.entry(id.clone()).or_default().platform = platform.clone(); }
     match &profile {
         Some((ua, scale)) => {
             native::cdp(&app, &id, "Emulation.setUserAgentOverride", ua.clone()).await?;
@@ -730,6 +745,8 @@ async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>, la
     if let Some(identifier) = previous {
         let _ = native::cdp(app, id, "Page.removeScriptToEvaluateOnNewDocument", json!({ "identifier": identifier })).await;
     }
+    // A moldura do documento aberto sai na hora; a nova (se houver) entra na hora também, sem esperar recarregar.
+    let _ = native::cdp(app, id, "Runtime.evaluate", json!({ "expression": "window.__agsDeviceChromeStop && window.__agsDeviceChromeStop()" })).await;
     let Some(platform) = platform else {
         let _ = native::cdp(app, id, "Emulation.setSafeAreaInsetsOverride", json!({ "insets": {} })).await;
         return;
@@ -742,6 +759,7 @@ async fn set_device_chrome(app: &AppHandle, id: &str, platform: Option<&str>, la
             m.insert(id.to_string(), identifier.to_string());
         }
     }
+    let _ = native::cdp(app, id, "Runtime.evaluate", json!({ "expression": source })).await;
 }
 
 /// O nome do canal da página para o app (`Runtime.addBinding`).
@@ -947,9 +965,12 @@ mod test {
         let (metrics, key) = device_metrics(292.4, 633.76, 0.68, 3.0);
         assert_eq!(metrics["width"], 430);
         assert_eq!(metrics["height"], 932);
-        assert_eq!(metrics["scale"], 0.68);
         assert_eq!(metrics["mobile"], true);
-        assert_eq!(key, (430, 932, 680));
+        // A escala cobre a vista arredondada para cima (293×634): nenhuma linha sem página na borda.
+        let scale = metrics["scale"].as_f64().unwrap();
+        assert!(430.0 * scale >= 293.0 && 932.0 * scale >= 634.0, "{scale}");
+        assert!(scale < 0.69);
+        assert_eq!(key, (430, 932, (scale * 1000.0).round() as i64));
     }
 
     #[test]
