@@ -5,7 +5,7 @@ import { Button, CloseIcon, Tooltip } from "neogestify-ui-components";
 
 import { RotateIcon } from "@/app/icons";
 
-import { breakpointOf, clampViewport, presetOf, rotate, VIEWPORT_PRESETS, type Viewport } from "./viewport";
+import { clampViewport, presetOf, rotate, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 
 /** Los cortes de Tailwind, con el ancho al que salta cada uno. `xs` no tiene mínimo: se
  *  prueba en el teléfono chico, que es el caso real por debajo de `sm`. */
@@ -59,14 +59,14 @@ export function DeviceBar({ viewport, mobile, onChange, onMobile, onClose }: {
 }) {
   const { t } = useTranslation();
   const match = presetOf(viewport);
-  const current = breakpointOf(viewport.width);
   const set = (v: Viewport) => onChange(clampViewport(v));
 
   return (
     <div className="flex items-center gap-2 h-9 shrink-0 px-2 overflow-hidden
       border-b border-gray-200 dark:border-white/7 bg-white/60 dark:bg-white/2">
-      <div className="w-44 min-w-0 shrink">
+      <div className="w-32 shrink-0">
         <PopupSelect
+          className="w-full h-7 text-[12px]"
           value={match?.preset.id ?? "custom"}
           onChange={(e) => {
             const value = e.target.value;
@@ -76,7 +76,7 @@ export function DeviceBar({ viewport, mobile, onChange, onMobile, onClose }: {
             if (preset) set(match?.rotated ? rotate(preset) : preset);
           }}>
           <option value="custom">{t("browser.viewport.custom")}</option>
-          {VIEWPORT_PRESETS.map((p) => <option key={p.id} value={p.id}>{`${t(`browser.viewport.preset.${p.id}`)} · ${p.width}×${p.height}`}</option>)}
+          {VIEWPORT_PRESETS.map((p) => <option key={p.id} value={p.id}>{t(`browser.viewport.preset.${p.id}`)}</option>)}
           {BREAKPOINT_WIDTHS.map(([name, width]) => <option key={name} value={`bp:${name}`}>{t("browser.viewport.jumpTo", { name, width })}</option>)}
         </PopupSelect>
       </div>
@@ -85,10 +85,6 @@ export function DeviceBar({ viewport, mobile, onChange, onMobile, onClose }: {
         <SideInput value={viewport.width} label={t("browser.viewport.width")} onCommit={(width) => set({ ...viewport, width })} />
         <span className="text-[11px] text-gray-400 dark:text-white/30">×</span>
         <SideInput value={viewport.height} label={t("browser.viewport.height")} onCommit={(height) => set({ ...viewport, height })} />
-        {current && (
-          <span title={t("browser.viewport.breakpoints")}
-            className="ml-0.5 px-1 rounded font-mono text-[10px] text-gray-500 dark:text-white/45 bg-gray-100 dark:bg-white/6">{current}</span>
-        )}
       </div>
 
       <Tooltip content={t("browser.viewport.rotate")} placement="bottom">

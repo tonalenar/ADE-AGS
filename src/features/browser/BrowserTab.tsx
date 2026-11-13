@@ -1202,6 +1202,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
             {/* O mesmo palco do iframe: com tamanho de celular, a vista nativa ocupa só o quadro do aparelho.
                 Sempre montado, com ou sem tamanho, para a página não recarregar ao alternar. O zoom fica com
                 o palco quando há quadro (ele já entra na escala medida pela vista). */}
+            {/* Na página vazia a vista nativa fica invisível (a opacidade a esconde) e a página inicial aparece. */}
+            <div className={`flex flex-1 min-h-0 ${isBlankUrl(view.url) ? "opacity-0" : ""}`}>
             <ResponsiveStage viewport={floatingPreview ? null : viewport} onResize={setViewport}
               zoom={viewport && !floatingPreview ? zoom : 1} device={floatingPreview ? null : device}>
             <RealBrowserView viewId={view.id} url={view.url} zoom={viewport && !floatingPreview ? 1 : zoom} script={INJECTED}
@@ -1224,6 +1226,7 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
               }}
               onClosedByPage={() => useViewTabsStore.getState().closeView(view.id)} />
             </ResponsiveStage>
+            </div>
             {isBlankUrl(view.url) && (
               <div className="absolute inset-0 z-10 flex min-h-0 bg-gray-50 dark:bg-surface">
                 <StartStage device={device} viewport={viewport} onResize={setViewport} zoom={zoom}>{startPage}</StartStage>
