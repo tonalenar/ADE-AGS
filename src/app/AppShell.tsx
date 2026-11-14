@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -7,19 +7,13 @@ import type { Tab } from "@/features/tabs/types";
 import { initTabsPersistence, waitForHydration } from "@/features/tabs/persistence";
 import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
-import { CommandPalette } from "@/features/palette/CommandPalette";
-import { CompareHost } from "@/features/compare/CompareHost";
 import { boardKeyOfTab, initCanvasSync, setWorkMode } from "@/features/canvas/store";
 import { startSelectionSync } from "@/features/chat/unified/selectionActions";
 import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
 import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckpointsCapture";
-import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
-import { AppSessionsSidebar } from "@/features/chat/sidebar/AppSessionsSidebar";
-import { ExplorerDrawer } from "@/features/sidePanel/ExplorerDrawer";
 import { PanelButtons } from "@/features/sidePanel/PanelButtons";
-import { SessionPanel } from "@/features/sidePanel/SessionPanel";
 import { RouteModal } from "@/app/RouteModal";
 import { WindowControls } from "@/app/WindowLights";
 import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
@@ -27,7 +21,6 @@ import { EditorArea } from "@/features/tabs/EditorArea";
 import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
 import { initViewTabsPersistence } from "@/features/tabs/viewStore";
 import { useChatShell, useUiStore } from "@/app/uiStore";
-import { ChatShell } from "@/features/chat/ChatShell";
 import { buildWorkspaceTree } from "@/features/workspaces/workspaceTree";
 import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
@@ -44,10 +37,8 @@ import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
 import { BotToastHost } from "@/shared/brand/BotToastHost";
 import { AppConfirmHost } from "@/shared/ui/AppConfirmHost";
-import { ArchivedMessagePreviewHost } from "@/features/sessions/ArchivedMessagePreview";
 import { BotPanel } from "@/features/bot/LazyBotPanel";
 import type { ShellOutletContext } from "@/app/shellContext";
-import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { restoreDeferredWindowsAfterFirstFrame } from "@/app/afterFirstFrame";
@@ -58,6 +49,16 @@ import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
 /** Las rutas cuyas terminales siguen visibles (y vivas) por debajo de la pantalla. */
 const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge", "/settings", "/design"];
+
+const ChatShell = lazy(() => import("@/features/chat/ChatShell").then((module) => ({ default: module.ChatShell })));
+const AppSessionsSidebar = lazy(() => import("@/features/chat/sidebar/AppSessionsSidebar").then((module) => ({ default: module.AppSessionsSidebar })));
+const ExplorerDrawer = lazy(() => import("@/features/sidePanel/ExplorerDrawer").then((module) => ({ default: module.ExplorerDrawer })));
+const SessionPanel = lazy(() => import("@/features/sidePanel/SessionPanel").then((module) => ({ default: module.SessionPanel })));
+const StatusBar = lazy(() => import("@/app/StatusBar").then((module) => ({ default: module.StatusBar })));
+const CommandPalette = lazy(() => import("@/features/palette/CommandPalette").then((module) => ({ default: module.CommandPalette })));
+const CompareHost = lazy(() => import("@/features/compare/CompareHost").then((module) => ({ default: module.CompareHost })));
+const ArchivedMessagePreviewHost = lazy(() => import("@/features/sessions/ArchivedMessagePreview").then((module) => ({ default: module.ArchivedMessagePreviewHost })));
+const AskDialog = lazy(() => import("@/features/ask/AskDialog").then((module) => ({ default: module.AskDialog })));
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -290,7 +291,7 @@ export function AppShell() {
       </div>
       {/* Encima de todo y fuera de las rutas: lo pregunta un agente que está esperando, y
           no puede depender de en qué pantalla esté parado el usuario. */}
-      <AskDialog />
+      <Suspense fallback={null}><AskDialog /></Suspense>
 
       {/* Fila 0: encabezado del lateral (controles de ventana + nombre) y, a partir de
           donde ese lateral termina, las tabs de agente. Nada más — lo que antes vivía a
@@ -309,7 +310,7 @@ export function AppShell() {
             archivos es el panel secundario y va del otro lado. */}
         <div className={chat ? "hidden" : "contents"}>
           <ActivityRail agentCount={tabs.length} width={RAIL_W} />
-          {!workspacesCollapsed && <AppSessionsSidebar groups={groups} width={PANEL_W} />}
+          {!workspacesCollapsed && <Suspense fallback={null}><AppSessionsSidebar groups={groups} width={PANEL_W} /></Suspense>}
         </div>
 
         <div className="relative flex-1 min-w-0 overflow-hidden">
@@ -335,7 +336,7 @@ export function AppShell() {
               el medio). Un scroll acá afuera además reservaría su carril a la derecha de
               TODAS las páginas, incluidas las que no lo necesitan. */}
           {/* No chat as telas cheias (Configurações, Missões…) abrem dentro da casca, no lugar da conversa. */}
-          {chat && <ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} />}
+          {chat && <Suspense fallback={null}><ChatShell groups={groups} page={fullPage && !settingsRoute ? <Outlet context={{ groups } satisfies ShellOutletContext} /> : null} /></Suspense>}
 
           {!chat && !isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
@@ -363,15 +364,15 @@ export function AppShell() {
           />
 
           {/* Arquivos, busca e git: uma gaveta por cima do conteúdo, aberta pelos botões do topo. */}
-          <ExplorerDrawer
+          <Suspense fallback={null}><ExplorerDrawer
             cwd={activeTab?.cwd ?? null}
             repo={activeRepo}
             title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
-          />
+          /></Suspense>
 
           {/* O painel da sessão do agente ativo (ambiente, contexto, conectores, alterações, tarefas):
               cartões flutuando no canto de cima, sem coluna — o conteúdo fica com a largura toda. */}
-          {!chat && !sidePanelHidden && isWorkspace && activeTab && <SessionPanel tab={activeTab} repo={activeRepo} />}
+          {!chat && !sidePanelHidden && isWorkspace && activeTab && <Suspense fallback={null}><SessionPanel tab={activeTab} repo={activeRepo} /></Suspense>}
         </div>
 
         {/* Onde as telas cheias se montam (ver `pageHost`): tudo à direita do riel, por cima
@@ -382,12 +383,12 @@ export function AppShell() {
       </div>
 
       <div className={chat ? "hidden" : "contents"}>
-        <StatusBar repo={activeRepo} />
+        <Suspense fallback={null}><StatusBar repo={activeRepo} /></Suspense>
       </div>
 
-      <CommandPalette />
-      <ArchivedMessagePreviewHost />
-      <CompareHost />
+      <Suspense fallback={null}><CommandPalette /></Suspense>
+      <Suspense fallback={null}><ArchivedMessagePreviewHost /></Suspense>
+      <Suspense fallback={null}><CompareHost /></Suspense>
     </div>
   );
 }
