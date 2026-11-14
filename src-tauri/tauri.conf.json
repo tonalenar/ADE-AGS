@@ -47,8 +47,23 @@
         "enable": true,
         "scope": {
           "allow": [
-            "**",
-            "/**"
+            "**/*.mp4",
+            "/**/*.mp4",
+            "**/*.MP4",
+            "/**/*.MP4",
+            "**/*.mov",
+            "/**/*.mov",
+            "**/*.MOV",
+            "/**/*.MOV",
+            "**/*.m4v",
+            "/**/*.m4v",
+            "**/*.webm",
+            "/**/*.webm"
+          ],
+          "deny": [
+            "$HOME/.ssh/**",
+            "$HOME/.ags/**",
+            "$HOME/.gnupg/**"
           ],
           "requireLiteralLeadingDot": false
         }

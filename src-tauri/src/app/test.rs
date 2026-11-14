@@ -125,8 +125,12 @@ fn o_protocolo_asset_e_a_csp_permitem_reproduzir_videos_locais() {
     assert_eq!(asset["enable"], serde_json::Value::Bool(true));
     assert_eq!(asset["scope"]["requireLiteralLeadingDot"], serde_json::Value::Bool(false));
     let allow = asset["scope"]["allow"].as_array().expect("scope.allow precisa ser lista");
-    assert!(allow.iter().any(|v| v.as_str() == Some("**")));
-    assert!(allow.iter().any(|v| v.as_str() == Some("/**")));
+    // O escopo libera só vídeos: nunca o disco inteiro.
+    assert!(!allow.iter().any(|v| matches!(v.as_str(), Some("**") | Some("/**"))));
+    assert!(allow.iter().any(|v| v.as_str() == Some("/**/*.mp4")));
+    assert!(allow.iter().any(|v| v.as_str() == Some("/**/*.mov")));
+    let deny = asset["scope"]["deny"].as_array().expect("scope.deny precisa ser lista");
+    assert!(deny.iter().any(|v| v.as_str() == Some("$HOME/.ssh/**")));
 
     for directive in ["img-src", "media-src"] {
         let csp = security["csp"][directive].as_str().unwrap_or_default();
