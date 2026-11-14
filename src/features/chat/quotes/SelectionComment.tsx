@@ -6,7 +6,7 @@ import { DESKTOP_OS } from "@/app/platform";
 
 import { QuoteIcon } from "../chatIcons";
 import { MAX_QUOTE_CHARS } from "./quoteModel";
-import { addQuoteFor } from "./quoteStore";
+import { addQuoteAndOpenCommentFor } from "./quoteStore";
 import {
   matchCommentShortcut,
   observeSelectionActions,
@@ -115,11 +115,20 @@ export function SelectionComment({
         ? `${t("chat.quote.source", { source: target.source })}
 ${target.text}`
         : target.text;
-      if (addQuoteFor(quoteKey, { text: quoted, comment: "", originItemId: target.originItemId })) {
+      const sourceAnchor =
+        target.sourceElement && target.range
+          ? { source: target.sourceElement, range: target.range, rect: target.rect }
+          : undefined;
+      if (
+        addQuoteAndOpenCommentFor(
+          quoteKey,
+          { text: quoted, comment: "", originItemId: target.originItemId },
+          { sourceAnchor, removeOnCancel: true },
+        )
+      ) {
         window.getSelection()?.removeAllRanges();
         actionsRef.current?.cancel();
         clear();
-        document.querySelector<HTMLElement>("[data-chat-composer]")?.focus();
       }
     };
 
@@ -162,15 +171,22 @@ ${target.text}`
       ? `${t("chat.quote.source", { source: floating.target.source })}
 ${floating.target.text}`
       : floating.target.text;
-    const added = addQuoteFor(quoteKey, {
-      text: quoted,
-      comment: "",
-      originItemId: floating.target.originItemId,
-    });
+    const sourceAnchor =
+      floating.target.sourceElement && floating.target.range
+        ? { source: floating.target.sourceElement, range: floating.target.range, rect: floating.target.rect }
+        : undefined;
+    const added = addQuoteAndOpenCommentFor(
+      quoteKey,
+      {
+        text: quoted,
+        comment: "",
+        originItemId: floating.target.originItemId,
+      },
+      { sourceAnchor, removeOnCancel: true },
+    );
     if (!added) return;
     window.getSelection()?.removeAllRanges();
     dismiss();
-    document.querySelector<HTMLElement>("[data-chat-composer]")?.focus();
   };
 
   return createPortal(

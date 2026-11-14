@@ -1,15 +1,54 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { ArrowUpRightIcon, PenIcon, QuoteIcon, XIcon } from "../chatIcons";
 import { citationLabel, MAX_COMMENT_CHARS, resolveCommentDismissal } from "./quoteModel";
+import { closeQuoteCommentEditFor, openQuoteCommentEditFor, useQuoteCommentEdit } from "./quoteStore";
+import {
+  citationCommentCoordinates,
+  clampAnchorRectToSource,
+  isSelectionRectVisible,
+  type QuoteSourceAnchor,
+  type Rect,
+} from "./selectionModel";
 
 export interface QuoteCardItem {
   id: string;
   text: string;
   comment: string;
   originItemId?: string;
+}
+
+function toRect(r: DOMRect | Rect): Rect {
+  return {
+    left: r.left,
+    top: r.top,
+    right: r.right,
+    bottom: r.bottom,
+    width: r.width,
+    height: r.height,
+  };
+}
+
+function resolveAnchorRect(anchorEl: HTMLElement | null, sourceAnchor?: QuoteSourceAnchor): Rect | null {
+  if (sourceAnchor && sourceAnchor.source.isConnected) {
+    const rects = sourceAnchor.range.getClientRects?.();
+    const raw =
+      (rects && rects.length > 0 ? rects[rects.length - 1] : undefined) ??
+      sourceAnchor.range.getBoundingClientRect?.() ??
+      sourceAnchor.rect;
+    const rawRect = toRect(raw);
+    const bounds = toRect(sourceAnchor.source.getBoundingClientRect());
+    if (bounds.width > 0 || bounds.height > 0) {
+      return clampAnchorRectToSource(rawRect, bounds);
+    }
+    if (rawRect.width > 0 || rawRect.height > 0) {
+      return rawRect;
+    }
+  }
+  const chipRect = anchorEl?.getBoundingClientRect();
+  return chipRect ? toRect(chipRect) : null;
 }
 
 function popoverCoordinates(anchor: DOMRect | null, width: number, estimatedHeight = 200) {
@@ -27,46 +66,137 @@ function popoverCoordinates(anchor: DOMRect | null, width: number, estimatedHeig
   return { left, top };
 }
 
+function restoreComposerFocus() {
+  document.querySelector<HTMLElement>("[data-chat-composer]")?.focus();
+}
+
 /**
- * Popover do editor de comentário opcional da citação no composer (espelha `AssistantCitationCommentEditor` do T3 Code).
+ * Popover do editor de comentário sobre a citação (espelha `AssistantCitationCommentEditor` +
+ * posicionamento de `AssistantCitationChip` do T3 Code): abre imediatamente sobre o trecho citado
+ * ou acima do chip ao editar pelo lápis, sem blockquote nem barra de dica redundante.
  */
 function CitationCommentPopover({
   item,
   anchorEl,
+  sourceAnchor,
   onSave,
   onSaveAndSend,
+  onCancel,
   onClose,
 }: {
   item: QuoteCardItem;
   anchorEl: HTMLElement | null;
+  sourceAnchor?: QuoteSourceAnchor;
   onSave: (comment: string) => boolean;
   onSaveAndSend?: () => void;
-  onClose: () => void;
+  onCancel: () => void;
+  onClose: (options?: { restoreFocus?: boolean }) => void;
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState(item.comment);
+  const [unavailableSourceAnchor, setUnavailableSourceAnchor] = useState<QuoteSourceAnchor | null>(null);
   const popupRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
 
-  const anchorRect = anchorEl?.getBoundingClientRect() ?? null;
-  const [pos, setPos] = useState(() => popoverCoordinates(anchorRect, 320, 210));
+  const activeSourceAnchor =
+    sourceAnchor && sourceAnchor !== unavailableSourceAnchor ? sourceAnchor : undefined;
+  const preferSide: "bottom" | "top" = activeSourceAnchor ? "bottom" : "top";
+
+  const computePos = useCallback(
+    (popupWidth = 320, popupHeight = 148) => {
+      const rect = resolveAnchorRect(anchorEl, activeSourceAnchor);
+      return citationCommentCoordinates(rect, popupWidth, popupHeight, preferSide, {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      });
+    },
+    [activeSourceAnchor, anchorEl, preferSide],
+  );
+
+  const [pos, setPos] = useState(() => computePos());
+
+  // Foca imediatamente o campo com cursor no fim e rola para o final se o comentário for longo.
+  useLayoutEffect(() => {
+    const input = inputRef.current;
+    if (!input) return;
+    input.focus({ preventScroll: true });
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.scrollTop = input.scrollHeight;
+  }, []);
 
   useLayoutEffect(() => {
     const popup = popupRef.current;
-    const input = inputRef.current;
-    if (input) {
-      input.focus({ preventScroll: true });
-      input.setSelectionRange(input.value.length, input.value.length);
-    }
-    if (!popup || !anchorEl) return;
+    if (!popup) return;
     const rect = popup.getBoundingClientRect();
-    const ar = anchorEl.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0 && (ar.width > 0 || ar.height > 0)) {
-      setPos(popoverCoordinates(ar, rect.width, rect.height));
-    }
-  }, [anchorEl]);
+    const w = rect.width > 0 ? rect.width : 320;
+    const h = rect.height > 0 ? rect.height : 148;
+    setPos(computePos(w, h));
+  }, [computePos]);
+
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  const onCancelRef = useRef(onCancel);
+  onCancelRef.current = onCancel;
+  const savedCommentRef = useRef(item.comment);
+  savedCommentRef.current = item.comment;
+
+  // Monitora a fonte citada na timeline enquanto aberta: se desaparecer ou sair da área visível, tenta
+  // consolidar ou transfere a âncora para o chip do composer (igual ao `observeAssistantCitationCommentSource`).
+  useEffect(() => {
+    if (!activeSourceAnchor) return;
+    const checkSource = () => {
+      const { source, range } = activeSourceAnchor;
+      const connected = source.isConnected;
+      let visible = connected;
+      if (connected) {
+        const bounds = source.getBoundingClientRect();
+        const r = range.getBoundingClientRect?.() ?? activeSourceAnchor.rect;
+        if (bounds.width > 0 && bounds.height > 0 && (r.width > 0 || r.height > 0)) {
+          const clamped = clampAnchorRectToSource(toRect(r), toRect(bounds));
+          visible = isSelectionRectVisible(clamped, [
+            { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight },
+          ]);
+        }
+      }
+      if (!visible) {
+        const decision = resolveCommentDismissal({
+          reason: "none",
+          draft: draftRef.current,
+          savedComment: savedCommentRef.current,
+        });
+        if (decision.kind === "keep-open") {
+          setUnavailableSourceAnchor(activeSourceAnchor);
+        } else if (decision.kind === "commit") {
+          if (onSaveRef.current(decision.comment)) {
+            onCloseRef.current({ restoreFocus: false });
+          } else {
+            setUnavailableSourceAnchor(activeSourceAnchor);
+          }
+        } else {
+          onCloseRef.current({ restoreFocus: false });
+        }
+        return;
+      }
+      const popup = popupRef.current;
+      const pr = popup?.getBoundingClientRect();
+      setPos(computePos(pr && pr.width > 0 ? pr.width : 320, pr && pr.height > 0 ? pr.height : 148));
+    };
+
+    const observer =
+      typeof MutationObserver !== "undefined" ? new MutationObserver(checkSource) : null;
+    observer?.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("scroll", checkSource, true);
+    window.addEventListener("resize", checkSource);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("scroll", checkSource, true);
+      window.removeEventListener("resize", checkSource);
+    };
+  }, [activeSourceAnchor, computePos]);
 
   useEffect(() => {
     const onPointerDown = (event: PointerEvent) => {
@@ -75,16 +205,17 @@ function CitationCommentPopover({
       const decision = resolveCommentDismissal({
         reason: "outside-press",
         draft: draftRef.current,
-        savedComment: item.comment,
+        savedComment: savedCommentRef.current,
       });
       if (decision.kind === "keep-open") return;
-      if (decision.kind === "commit" && !onSave(decision.comment)) return;
-      onClose();
+      if (decision.kind === "commit" && !onSaveRef.current(decision.comment)) return;
+      onCloseRef.current({ restoreFocus: false });
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape" && !event.isComposing) {
         event.preventDefault();
-        onClose();
+        event.stopPropagation();
+        onCancelRef.current();
       }
     };
     document.addEventListener("pointerdown", onPointerDown, true);
@@ -93,19 +224,19 @@ function CitationCommentPopover({
       document.removeEventListener("pointerdown", onPointerDown, true);
       document.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [anchorEl, item.comment, onClose, onSave]);
+  }, [anchorEl]);
 
   const tooLong = draft.length > MAX_COMMENT_CHARS;
 
   const submit = () => {
     if (tooLong) return;
-    if (onSave(draft)) onClose();
+    if (onSave(draft)) onClose({ restoreFocus: true });
   };
 
   const submitAndSend = () => {
     if (tooLong) return;
     if (!onSave(draft)) return;
-    onClose();
+    onClose({ restoreFocus: false });
     onSaveAndSend?.();
   };
 
@@ -117,27 +248,18 @@ function CitationCommentPopover({
       data-citation-comment-editor="true"
       style={{ position: "fixed", left: pos.left, top: pos.top, zIndex: 10050 }}
       onPointerDown={(event) => event.stopPropagation()}
-      onKeyDown={(event) => {
-        event.stopPropagation();
-        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
-          event.preventDefault();
-          onClose();
-        }
-      }}
-      className="cc-surface-glass cc-cite-in w-80 max-w-[calc(100vw-1rem)] rounded-xl p-3
+      onKeyDown={(event) => event.stopPropagation()}
+      className="cc-surface-glass cc-cite-in w-80 max-w-[calc(100vw-2rem)] rounded-lg py-2 px-3
         border border-gray-900/12 dark:border-white/15
-        shadow-[0_12px_32px_-8px_rgba(0,0,0,0.28)] dark:shadow-[0_16px_40px_-8px_rgba(0,0,0,0.6)]
-        flex flex-col gap-2"
+        shadow-[0_16px_40px_-18px_rgb(0_0_0/55%)] dark:shadow-[0_18px_44px_-18px_rgb(0_0_0/80%)]"
     >
-      <blockquote className="m-0 max-h-28 overflow-y-auto border-l-2 border-gray-300 dark:border-white/25 pl-3 text-chat-caption leading-snug text-gray-500 dark:text-white/55 whitespace-pre-wrap break-words">
-        {item.text}
-      </blockquote>
       <textarea
         ref={inputRef}
         data-citation-comment-input=""
         rows={2}
         value={draft}
         aria-label={t("chat.quote.editComment")}
+        aria-description={t("chat.quote.commentHint")}
         aria-invalid={tooLong || undefined}
         placeholder={t("chat.quote.optionalPlaceholder")}
         onChange={(event) => setDraft(event.currentTarget.value)}
@@ -148,21 +270,22 @@ function CitationCommentPopover({
             else submit();
           }
         }}
-        className="w-full resize-none rounded-lg bg-gray-100/80 dark:bg-white/[0.07] px-2.5 py-1.5 outline-none
-          text-chat-note text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35"
+        className="field-sizing-content block max-h-40 min-h-16 w-full resize-none bg-transparent px-1 py-1.5 outline-none
+          text-chat-ui text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/45"
       />
       {tooLong && (
-        <p role="status" className="m-0 text-chat-caption text-red-600 dark:text-red-400">
+        <p role="status" className="m-0 pt-1 text-chat-caption text-red-600 dark:text-red-400">
           {t("chat.quote.commentTooLong", { count: MAX_COMMENT_CHARS })}
         </p>
       )}
-      <div className="flex items-center justify-end gap-2 text-chat-caption">
-        <span className="mr-auto text-gray-500 dark:text-white/45 truncate">{t("chat.quote.commentHint")}</span>
+      <div className="mt-2 flex flex-wrap items-center justify-end gap-2 text-chat-caption">
         <button
           type="button"
           onPointerDown={(event) => event.preventDefault()}
-          onClick={onClose}
-          className="h-7 px-2.5 rounded-md text-gray-700 dark:text-white/75 hover:bg-gray-100 dark:hover:bg-white/10"
+          onClick={onCancel}
+          className="h-6 px-2 rounded-md border border-gray-900/12 dark:border-white/15
+            bg-white/60 dark:bg-white/[0.06] text-gray-700 dark:text-white/80
+            hover:bg-gray-100 dark:hover:bg-white/12 cursor-pointer"
         >
           {t("btn.cancel")}
         </button>
@@ -171,7 +294,7 @@ function CitationCommentPopover({
           disabled={tooLong}
           onPointerDown={(event) => event.preventDefault()}
           onClick={submit}
-          className="h-7 px-2.5 rounded-md bg-accent-600 text-white font-medium hover:bg-accent-700 disabled:opacity-45"
+          className="h-6 px-2 rounded-md bg-accent-600 text-white font-medium hover:bg-accent-700 disabled:opacity-45 cursor-pointer"
         >
           {tooLong ? t("chat.quote.shortenComment") : t("chat.quote.save")}
         </button>
@@ -269,10 +392,12 @@ function CitationDetailPopover({
 /**
  * Chips de citação alinhados ao `AssistantCitationChip` do T3 Code:
  * - No composer (`onRemove` / `onUpdateComment`): chips azuis compactos acima do campo com ícone de aspas,
- *   prévia clicável para ir à origem, lápis para comentário opcional e «×» para remover.
+ *   prévia clicável para ir à origem, lápis para comentário opcional e «×» para remover. Ao clicar em «Citar»,
+ *   o editor de comentário já abre imediatamente ancorado sobre a seleção.
  * - Na bolha enviada (somente leitura): chips compactos clicáveis que abrem o popover com a citação completa.
  */
 export function QuoteCards({
+  quoteKey,
   items,
   onRemove,
   onUpdateComment,
@@ -280,6 +405,7 @@ export function QuoteCards({
   onNavigate,
   className = "",
 }: {
+  quoteKey?: string | null;
   items: QuoteCardItem[];
   onRemove?: (id: string) => void;
   onUpdateComment?: (id: string, comment: string) => boolean;
@@ -288,7 +414,8 @@ export function QuoteCards({
   className?: string;
 }) {
   const { t } = useTranslation();
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const storeEdit = useQuoteCommentEdit(quoteKey);
+  const [localEditingId, setLocalEditingId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
   const chipRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -337,7 +464,19 @@ export function QuoteCards({
     );
   }
 
-  const activeEditing = editingId ? items.find((q) => q.id === editingId) ?? null : null;
+  const activeSession =
+    storeEdit && items.some((q) => q.id === storeEdit.id)
+      ? storeEdit
+      : localEditingId && items.some((q) => q.id === localEditingId)
+        ? { id: localEditingId, removeOnCancel: false, sourceAnchor: undefined }
+        : null;
+  const activeEditing = activeSession ? items.find((q) => q.id === activeSession.id) ?? null : null;
+
+  const closeEditor = (restoreFocus = false) => {
+    if (quoteKey && activeEditing) closeQuoteCommentEditFor(quoteKey, activeEditing.id);
+    setLocalEditingId(null);
+    if (restoreFocus) restoreComposerFocus();
+  };
 
   return (
     <>
@@ -384,7 +523,14 @@ ${q.comment}` : `${t("chat.quote.assistantQuote")}: ${q.text}`}
                 <button
                   type="button"
                   data-citation-comment-trigger=""
-                  onClick={() => setEditingId((cur) => (cur === q.id ? null : q.id))}
+                  onClick={() => {
+                    if (quoteKey) {
+                      if (storeEdit?.id === q.id) closeQuoteCommentEditFor(quoteKey, q.id);
+                      else openQuoteCommentEditFor(quoteKey, { id: q.id, removeOnCancel: false });
+                    } else {
+                      setLocalEditingId((cur) => (cur === q.id ? null : q.id));
+                    }
+                  }}
                   aria-label={q.comment ? t("chat.quote.editComment") : t("chat.quote.addComment")}
                   title={q.comment ? t("chat.quote.editComment") : t("chat.quote.addComment")}
                   className="ml-0.5 inline-flex w-4 h-4 shrink-0 items-center justify-center rounded-sm
@@ -399,7 +545,8 @@ ${q.comment}` : `${t("chat.quote.assistantQuote")}: ${q.text}`}
                   type="button"
                   data-citation-remove=""
                   onClick={() => {
-                    if (editingId === q.id) setEditingId(null);
+                    if (quoteKey) closeQuoteCommentEditFor(quoteKey, q.id);
+                    if (localEditingId === q.id) setLocalEditingId(null);
                     onRemove(q.id);
                   }}
                   aria-label={t("chat.quote.remove")}
@@ -415,14 +562,22 @@ ${q.comment}` : `${t("chat.quote.assistantQuote")}: ${q.text}`}
           );
         })}
       </ul>
-      {activeEditing && onUpdateComment && (
+      {activeEditing && activeSession && onUpdateComment && (
         <CitationCommentPopover
           key={activeEditing.id}
           item={activeEditing}
           anchorEl={chipRefs.current[activeEditing.id] ?? null}
+          sourceAnchor={activeSession.sourceAnchor}
           onSave={(comment) => onUpdateComment(activeEditing.id, comment)}
           onSaveAndSend={onSaveAndSend}
-          onClose={() => setEditingId(null)}
+          onCancel={() => {
+            const shouldRemove = activeSession.removeOnCancel;
+            const id = activeEditing.id;
+            closeEditor(false);
+            if (shouldRemove) onRemove?.(id);
+            restoreComposerFocus();
+          }}
+          onClose={(options) => closeEditor(Boolean(options?.restoreFocus))}
         />
       )}
     </>

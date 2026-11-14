@@ -8,10 +8,10 @@ import type { CodeBlockRenderer, ImageLoader, MarkdownTone } from "./Markdown";
  */
 const Impl = lazy(() => import("./Markdown").then((m) => ({ default: m.Markdown })));
 
-export function Markdown({ content, loadImage, tone, renderCodeBlock }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
+export function Markdown({ content, loadImage, tone, renderCodeBlock, streaming }: { content: string; loadImage?: ImageLoader; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer; streaming?: boolean }) {
   return (
     <Suspense fallback={<div className={`whitespace-pre-wrap break-words ${tone === "chat" ? "text-chat-prose" : "text-[12px]"}`}>{content}</div>}>
-      <Impl content={content} loadImage={loadImage} tone={tone} renderCodeBlock={renderCodeBlock} />
+      <Impl content={content} loadImage={loadImage} tone={tone} renderCodeBlock={renderCodeBlock} streaming={streaming} />
     </Suspense>
   );
 }

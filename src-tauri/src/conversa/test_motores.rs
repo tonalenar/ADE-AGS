@@ -295,7 +295,7 @@ mod opencode {
 
 mod agy {
     use super::*;
-    use crate::conversa::agy_map::{access_flags, error_from_stderr, launch_args, tool_item, Mapper, Out};
+    use crate::conversa::agy_map::{access_flags, error_from_stderr, launch_args, prompt_input, tool_item, Mapper, Out};
     use crate::conversa::claude_map::TurnResult;
 
     fn items(outs: &[Out]) -> Vec<&Item> {
@@ -332,17 +332,20 @@ mod agy {
 
     #[test]
     fn os_argumentos_levam_a_mensagem_o_modelo_e_a_conversa() {
-        let fresh = launch_args(&row("antigravity", "edits"), "olá", None);
-        assert_eq!(&fresh[..2], ["--print", "olá"]);
+        let fresh = launch_args(&row("antigravity", "edits"), None);
+        assert_eq!(&fresh[..4], ["--input-format", "stream-json", "--output-format", "stream-json"]);
         let joined = fresh.join(" ");
         for flag in ["--output-format stream-json", "--disable-slash-commands", "--mode accept-edits", "--model anthropic/claude-sonnet-5-5", "--effort high"] {
             assert!(joined.contains(flag), "{flag} em {joined}");
         }
+        assert!(!joined.contains("--print"));
         assert!(!joined.contains("--conversation"));
-        let resumed = launch_args(&ThreadRow { model: None, effort: None, ..row("antigravity", "ask") }, "e agora?", Some("cv-1")).join(" ");
+        let resumed = launch_args(&ThreadRow { model: None, effort: None, ..row("antigravity", "ask") }, Some("cv-1")).join(" ");
         assert!(resumed.contains("--conversation cv-1") && !resumed.contains("--model") && !resumed.contains("--mode"), "{resumed}");
-        // Uma mensagem que começa com "-" é o valor de --print, não uma flag.
-        assert_eq!(&launch_args(&row("antigravity", "ask"), "--help", None)[..2], ["--print", "--help"]);
+        let prompt = prompt_input("--help\nOlá").unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&prompt).unwrap(), json!({
+            "event": "user", "message": { "content": "--help\nOlá" }
+        }));
     }
 
     #[test]
@@ -519,10 +522,18 @@ mod agy {
         if std::env::var("CC_E2E_AGY").is_err() {
             return;
         }
-        let args = launch_args(&row("antigravity", "ask"), "Responda apenas: OK", None);
+        let args = launch_args(&row("antigravity", "ask"), None);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         let program = crate::util::find_program("agy").expect("agy no PATH");
-        let out = crate::util::external_command(&program, &args).unwrap().current_dir(std::env::temp_dir()).output().expect("agy rodou");
+        use std::io::Write;
+        let mut child = crate::util::external_command(&program, &args).unwrap()
+            .current_dir(std::env::temp_dir())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn().expect("agy rodou");
+        writeln!(child.stdin.take().unwrap(), "{}", prompt_input("Responda apenas: OK").unwrap()).unwrap();
+        let out = child.wait_with_output().expect("agy terminou");
         let mut mapper = Mapper::new("e2e");
         let mut said = String::new();
         let mut done = false;

@@ -25,7 +25,7 @@ beforeEach(() => {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  useQuoteStore.setState({ byKey: {} });
+  useQuoteStore.setState({ byKey: {}, openEditByKey: {} });
 });
 
 afterEach(() => {
@@ -51,7 +51,7 @@ describe("selectionTarget e posicionamento/visibilidade (modelo puro)", () => {
       toString: () => text,
       getRangeAt: () => ({ getBoundingClientRect: () => rect }),
     });
-    expect(selectionTarget(sel(textNode, textNode), container)).toEqual({ text: "fala", originItemId: "m-1", rect });
+    expect(selectionTarget(sel(textNode, textNode), container)).toMatchObject({ text: "fala", originItemId: "m-1", rect });
     expect(selectionTarget(sel(outside, outside), container)).toBeNull();
     expect(selectionTarget(sel(textNode, outside), container)).toBeNull();
     expect(selectionTarget(sel(btnText, btnText, "copiar"), container)).toBeNull();
@@ -157,7 +157,7 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
     expect(citeButton()!.textContent).toContain("chat.quote.shortenSelection");
   });
 
-  it("clicar em «Citar» insere imediatamente a citação no composer (sem exigir diálogo), limpa a seleção e foca o composer", async () => {
+  it("clicar em «Citar» insere o chip e abre IMEDIATAMENTE o popover de comentário com foco e cursor no fim (sem blockquote)", async () => {
     await act(async () => { root.render(<Scene />); });
     await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca de agente");
     await act(async () => { citeButton()!.click(); });
@@ -166,7 +166,70 @@ describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
       expect.objectContaining({ text: "troca de agente", comment: "", originItemId: "msg-assist-1" }),
     ]);
     expect(citeButton()).toBeNull();
+
+    const editor = document.querySelector("[data-citation-comment-editor]");
+    expect(editor).not.toBeNull();
+    expect(editor!.querySelector("blockquote")).toBeNull();
+    const input = document.querySelector("textarea[data-citation-comment-input]") as HTMLTextAreaElement;
+    expect(input).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(0);
+
+    // Digitar e pressionar Enter salva o comentário, fecha o editor e foca o composer
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "melhorar aqui");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector("[data-citation-comment-editor]")).toBeNull();
+    expect(useQuoteStore.getState().byKey["conv-1"]![0]!.comment).toBe("melhorar aqui");
     expect(document.activeElement).toBe(document.querySelector("[data-chat-composer]"));
+  });
+
+  it("Esc ou Cancelar logo após clicar em «Citar» remove a citação recém-inserida e devolve o foco ao composer", async () => {
+    await act(async () => { root.render(<Scene />); });
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca de agente");
+    await act(async () => { citeButton()!.click(); });
+    expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);
+
+    const input = document.querySelector("textarea[data-citation-comment-input]") as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(input);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector("[data-citation-comment-editor]")).toBeNull();
+    expect(useQuoteStore.getState().byKey["conv-1"]).toBeUndefined();
+    expect(document.activeElement).toBe(document.querySelector("[data-chat-composer]"));
+  });
+
+  it("atalho Ctrl+Shift+M cita e também abre imediatamente o editor de comentário com foco", async () => {
+    await act(async () => { root.render(<Scene />); });
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "Cursor está pronto");
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "m", ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);
+    const input = document.querySelector("textarea[data-citation-comment-input]") as HTMLTextAreaElement;
+    expect(input).not.toBeNull();
+    expect(document.activeElement).toBe(input);
+  });
+
+  it("ao abrir o editor pelo lápis de um chip já salvo, Esc apenas fecha sem apagar o chip", async () => {
+    addQuoteFor("conv-1", { text: "já salvo", comment: "nota inicial" });
+    await act(async () => { root.render(<Scene />); });
+    const trigger = document.querySelector("button[data-citation-comment-trigger]") as HTMLButtonElement;
+    await act(async () => { trigger.click(); });
+    const input = document.querySelector("textarea[data-citation-comment-input]") as HTMLTextAreaElement;
+    expect(input.value).toBe("nota inicial");
+    expect(input.selectionStart).toBe("nota inicial".length);
+    await act(async () => {
+      input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    expect(document.querySelector("[data-citation-comment-editor]")).toBeNull();
+    expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);
   });
 
   it("fecha o botão ao clicar fora, ao rolar, ao limpar a seleção e com Escape", async () => {

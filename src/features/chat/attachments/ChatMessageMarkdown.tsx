@@ -8,11 +8,11 @@ import { markdownImages, mentionedMedia } from "./mediaViewerModel";
 import { loadImage } from "./useImagePreview";
 
 /** Markdown de conversa com imagens locais da pasta do projeto no visualizador compartilhado. */
-export function ChatMessageMarkdown({ content, tone = "chat", renderCodeBlock }: { content: string; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
+export function ChatMessageMarkdown({ content, tone = "chat", renderCodeBlock, streaming = false }: { content: string; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer; streaming?: boolean }) {
   const { load, open } = useConversationMarkdownImages(content);
   return (
     <>
-      <Markdown content={content} tone={tone} renderCodeBlock={renderCodeBlock} loadImage={load} onImageClick={open} />
+      <Markdown content={content} tone={tone} renderCodeBlock={renderCodeBlock} loadImage={load} onImageClick={open} streaming={streaming} />
       <MentionedImageStrip content={content} />
     </>
   );

@@ -49,8 +49,8 @@ com um consumidor por destino no lugar do entregador do PTY (etapa 2 do harness 
 - **Ordem**: `position, id`. A cabeça com backoff segura as seguintes.
 - **Modos**: `queue_after_active` (padrão: só com a conversa livre; ocupada devolve `Busy`, que não gasta
   tentativa) e `steer_active` (o «enviar agora» e o prazo de 15 min entram no turno em andamento; no Codex um
-  `turn/steer` recusado porque o turno acabou cai para `turn/start`). O Antigravity não tem processo entre
-  turnos: o envio dele entra na fila interna.
+  `turn/steer` recusado porque o turno acabou cai para `turn/start`). O Antigravity mantém o processo entre
+  turnos, mas não aceita steer: a mensagem entra na fila interna e é escrita no stdin após o `result`.
 - **Trava** (`conversa::api::send_gate`): um `tokio::sync::Mutex` por conversa segura a checagem do turno + o
   `turn/start`/`turn/steer`, para todo chamador (tela, `ags chat`, fila de mensagens): fecha o check-then-act.
 - **Erro de envio** (`conversa::envio::SendError`): `Busy` (volta à fila sem gastar tentativa), `NotSent` (nada

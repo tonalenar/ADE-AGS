@@ -2807,7 +2807,7 @@ pub struct ConversationMcp {
 
 /// Um MCP por conversa Antigravity. A pasta entra em `--add-dir`, que o Antigravity trata
 /// como workspace e onde descobre `.agents/mcp_config.json`; o diretório é isolado e removido
-/// assim que o turno termina. Nada é escrito no projeto nem na configuração global do agente.
+/// quando o processo persistente da conversa termina. Nada é escrito no projeto nem na configuração global do agente.
 struct AntigravityConversationProfile {
     root: std::path::PathBuf,
     workspace: std::path::PathBuf,

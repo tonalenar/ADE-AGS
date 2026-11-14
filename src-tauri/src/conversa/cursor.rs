@@ -1,8 +1,7 @@
 //! O Cursor (`cursor-agent`) de cada conversa, sem TUI: um processo `cursor-agent -p --output-format stream-json
 //! --stream-partial-output` POR TURNO (ver `cursor_map` para o protocolo e o que não foi conferido). A conversa continua
-//! com `--resume <session_id>`; o id vem do `system/init` e fica em `chat_thread.remote_id`. É o mesmo desenho do
-//! Antigravity (`agy.rs`): sem processo entre os turnos, parar mata o processo do turno, e uma mensagem que chega com o
-//! turno em andamento fica na fila e começa o turno seguinte.
+//! com `--resume <session_id>`; o id vem do `system/init` e fica em `chat_thread.remote_id`. Ao contrário do Antigravity
+//! (`agy.rs`), o processo fecha ao fim de cada turno e volta com `--resume` na próxima mensagem.
 //!
 //! No modo `-p` o Cursor não pergunta nada: sem `--force`, o que precisaria de aprovação não é aplicado (e vem como
 //! ação recusada), então esta conversa nunca gera pedidos de aprovação. Não há conta por conversa (o login é o do

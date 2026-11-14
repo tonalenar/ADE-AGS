@@ -850,7 +850,7 @@ mod retomada {
     }
 }
 
-// ── Cursor e Antigravity: um processo por turno, a retomada não se repete às cegas ──
+// ── Cursor e Antigravity: a retomada não se repete às cegas ──
 
 mod retomada_por_turno {
     use std::cell::RefCell;
@@ -860,7 +860,7 @@ mod retomada_por_turno {
 
     type Refused = fn(&[String]) -> bool;
 
-    /// Os dois motores de um processo por turno e a frase que cada CLI escreveria para uma sessão inexistente.
+    /// A frase que cada CLI escreveria para uma sessão inexistente.
     fn motores() -> [(&'static str, Refused, &'static str); 2] {
         [
             ("cursor", cursor_map::session_refused, "Error: chat not found: abc"),

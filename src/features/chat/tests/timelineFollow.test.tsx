@@ -20,17 +20,30 @@ import type { TimelineItem } from "../timeline/types";
 const VIEW = 400;
 const SCROLLER = "cc-scroll-hidden";
 let content = 0;
+let view = VIEW;
+let measuredVirtualRows = false;
+let working = false;
+let streaming = new Set<string>();
 let onStep: (() => void) | null = null;
 let steps: Array<() => void> = [];
-let resizeCallbacks: Array<() => void> = [];
+let resizeObservers: Array<{ callback: () => void; targets: Map<Element, number> }> = [];
 const tops = new WeakMap<Element, number>();
 const isScroller = (el: Element) => el.classList.contains(SCROLLER);
-const maxTop = () => Math.max(0, content - VIEW);
+const virtualHeight = () => measuredVirtualRows
+  ? (() => {
+    const turns = host.querySelector<HTMLElement>("[data-chat-turns-host]");
+    if (!turns) return 0;
+    const rows = [...turns.querySelectorAll<HTMLElement>("[data-virtual-turn]")].reduce((sum, row) => sum + (row.getBoundingClientRect().height || 0), 0);
+    const spacers = [...turns.querySelectorAll<HTMLElement>("[data-chat-virtual-spacer]")].reduce((sum, spacer) => sum + (Number.parseFloat(spacer.style.height) || 0), 0);
+    return rows + spacers + Math.max(0, turns.children.length - 1) * 16;
+  })()
+  : 0;
+const maxTop = () => Math.max(0, content + virtualHeight() + 40 - view);
 const scroller = () => host.querySelector(`.${SCROLLER}`) as HTMLElement;
 
 function installLayout(): void {
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return isScroller(this) ? content : 0; } });
-  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return isScroller(this) ? VIEW : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return isScroller(this) ? content + virtualHeight() + 40 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return isScroller(this) ? view : 0; } });
   let smoothSeq = 0;
   let stepping = false;
   Object.defineProperty(HTMLElement.prototype, "scrollTop", {
@@ -65,15 +78,19 @@ function installLayout(): void {
   Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
     configurable: true,
     value(this: HTMLElement) {
-      const top = this.hasAttribute("data-chat-turns-host") ? -scroller().scrollTop : 0;
-      return { left: 0, right: 800, top, bottom: top + 800, width: 800, height: 800, x: 0, y: top, toJSON: () => ({}) };
+      const top = this.hasAttribute("data-chat-turns-host") ? 16 - scroller().scrollTop : 0;
+      const height = isScroller(this) ? view : measuredVirtualRows && this.hasAttribute("data-virtual-turn")
+        ? 80 + Math.ceil((this.textContent?.length ?? 0) / 48) * 20
+        : this === host.querySelector("[data-chat-turns-host]")?.parentElement ? content + virtualHeight() + 40 : 800;
+      return { left: 0, right: 800, top, bottom: top + height, width: 800, height, x: 0, y: top, toJSON: () => ({}) };
     },
   });
   globalThis.ResizeObserver = class {
-    constructor(cb: () => void) { resizeCallbacks.push(cb); }
-    observe() { /* nada */ }
+    private observer = { callback: () => {}, targets: new Map<Element, number>() };
+    constructor(cb: () => void) { this.observer.callback = cb; resizeObservers.push(this.observer); }
+    observe(target: Element) { this.observer.targets.set(target, target.getBoundingClientRect().height); }
     unobserve() { /* nada */ }
-    disconnect() { /* nada */ }
+    disconnect() { resizeObservers = resizeObservers.filter((observer) => observer !== this.observer); }
   } as never;
 }
 
@@ -82,7 +99,7 @@ let host: HTMLDivElement;
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   installLayout();
-  content = 0; onStep = null; steps = []; resizeCallbacks = [];
+  content = 0; view = VIEW; measuredVirtualRows = false; working = false; streaming = new Set(); onStep = null; steps = []; resizeObservers = [];
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -101,7 +118,7 @@ const longHistory: TimelineItem[] = Array.from({ length: 120 }, (_, i) => [
 ]).flat();
 
 const render = (items: TimelineItem[], pending: PendingSend[] = [], conversationKey?: string) => act(async () => {
-  root.render(<TimelineView items={items} pending={pending} conversationKey={conversationKey} loaded working={false} approval={null} live agentLabel="Claude Code" agentId="claude-code" />);
+  root.render(<TimelineView items={items} pending={pending} conversationKey={conversationKey} streaming={streaming} loaded working={working} approval={null} live agentLabel="Claude Code" agentId="claude-code" />);
 });
 /** Roda a animação suave até o fim (cada passo pode fazer o texto crescer, como no navegador). */
 const runAnimation = () => act(async () => {
@@ -110,8 +127,23 @@ const runAnimation = () => act(async () => {
 /** Chega mais texto: a lista cresce e o observador de tamanho avisa. */
 const grow = (px: number) => act(async () => {
   content += px;
-  resizeCallbacks.forEach((cb) => cb());
+  notifyResize();
 });
+const notifyResize = () => {
+  let notified = 0;
+  for (const observer of resizeObservers) {
+    let changed = false;
+    for (const [target, previous] of observer.targets) {
+      const height = target.getBoundingClientRect().height;
+      if (Math.abs(height - previous) >= 1) {
+        observer.targets.set(target, height);
+        changed = true;
+      }
+    }
+    if (changed) { notified += 1; observer.callback(); }
+  }
+  return notified;
+};
 
 describe("a conversa segue o fim enquanto a pessoa está nele", () => {
   it("monta só a janela visível da timeline longa e troca a janela com a rolagem", async () => {
@@ -119,7 +151,7 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     await render(longHistory);
 
     const mounted = () => host.querySelectorAll("[data-virtual-turn]");
-    expect(mounted().length).toBe(11);
+    expect(mounted().length).toBe(12);
     act(() => { scroller().scrollTop = 0; });
     expect(mounted().length).toBe(6);
     expect(mounted()[0]?.getAttribute("data-virtual-turn")).toBe("virtual-u-0");
@@ -141,6 +173,65 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     act(() => { scroller().scrollTop = maxTop(); });
     content += 60;
     await grow(60);
+    expect(scroller().scrollTop).toBe(maxTop());
+  });
+
+  it("permanece no fim quando o turno mais recente recolhe ao terminar na timeline virtualizada", async () => {
+    measuredVirtualRows = true;
+    working = true;
+    const rows: TimelineItem[] = Array.from({ length: 120 }, (_, i) => [
+      msg("user", `fold-u-${i}`, `Pergunta ${i}`),
+      { kind: "reasoning" as const, id: `fold-r-${i}`, text: i === 119 ? "Análise detalhada do último turno. ".repeat(30) : "Analisando." },
+      msg("assistant", `fold-a-${i}`, `Resposta ${i}`),
+      ...(i < 119 ? [{ kind: "turnEnd" as const, id: `fold-e-${i}`, durationMs: 1200 }] : []),
+    ]).flat();
+    await render(rows);
+    await runAnimation();
+    expect(scroller().scrollTop).toBe(maxTop());
+
+    working = false;
+    await render([...rows, { kind: "turnEnd", id: "fold-e-119", durationMs: 1200 }]);
+    const fold = host.querySelector<HTMLButtonElement>('[data-virtual-turn="fold-u-119"] [data-turn-fold] button[aria-expanded]');
+    expect(fold?.getAttribute("aria-expanded")).toBe("false");
+
+    // O browser dispara ResizeObserver quando o fold reduz a altura do conteúdo.
+    await act(async () => { notifyResize(); });
+    expect(scroller().scrollTop).toBe(maxTop());
+  });
+
+  it("acompanha o streaming virtualizado ao redimensionar a janela, solta o fio ao rolar e volta ao enviar", async () => {
+    measuredVirtualRows = true;
+    working = true;
+    streaming = new Set(["virtual-a-119"]);
+    const streamed = [...longHistory];
+    const last = streamed.length - 2;
+    streamed[last] = { ...streamed[last]!, text: "a resposta já passou de uma linha e agora está perto de cruzar a próxima" };
+    await render(streamed, [], "thread:streaming");
+    await runAnimation();
+    expect(scroller().scrollTop).toBe(maxTop());
+    expect(host.querySelector('[data-virtual-turn="virtual-u-119"]')).not.toBeNull();
+
+    // O fim cresce no mesmo DOM virtualizado que o provedor está atualizando.
+    const row = host.querySelector<HTMLElement>('[data-virtual-turn="virtual-u-119"]')!;
+    const charsToNextLine = 48 - (row.textContent!.length % 48) + 1;
+    streamed[last] = { ...streamed[last]!, text: `${streamed[last]!.text}${"x".repeat(charsToNextLine)}` };
+    await render(streamed, [], "thread:streaming");
+    let notified = 0;
+    await act(async () => { notified = notifyResize(); });
+    expect(notified).toBeGreaterThan(0);
+    expect(scroller().scrollTop).toBe(maxTop());
+
+    // Resize do viewport sem novo render de React também precisa manter o fim visível.
+    await act(async () => { view = VIEW - 80; notifyResize(); });
+    expect(scroller().scrollTop).toBe(maxTop());
+
+    act(() => { scroller().scrollTop = 500; });
+    const before = scroller().scrollTop;
+    await act(async () => { view -= 40; notifyResize(); });
+    expect(scroller().scrollTop).toBe(before);
+
+    await act(async () => { requestTimelineFollow("thread:streaming"); });
+    await runAnimation();
     expect(scroller().scrollTop).toBe(maxTop());
   });
 
@@ -188,7 +279,7 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     onStep = () => {
       if (growth-- > 0) {
         content += 180;
-        resizeCallbacks.forEach((cb) => cb());
+        notifyResize();
       }
     };
     await render([...history, ask, reply]);

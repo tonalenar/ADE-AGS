@@ -114,7 +114,7 @@ Hoje não há um gerenciador de servidores MCP de terceiros. O que existe é o s
 
 Ele dá ao agente da tab: browser do projeto, orquestração da frota, conta git, pergunta ao usuário. Numa tarefa de frota ele também é o prompt de permissão (`approve_tool_use`). Se a app não responde, a resposta é não.
 
-Claude Code (`--mcp-config` + `--strict-mcp-config`), Codex TUI (overrides `-c` só no processo), OpenCode (`OPENCODE_CONFIG_CONTENT`, merge) e Hermes (configuração gerenciada) recebem esse servidor. Gemini, Kimi e agentes customizados ainda iniciam sem MCP da ADE na TUI. Conversas por protocolo Codex, Claude Code e OpenCode recebem a ponte por configuração da sessão; Antigravity recebe arquivos temporários por turno. A ADE não altera configurações globais. Segue planejado um gerenciador para servidores MCP de terceiros.
+Claude Code (`--mcp-config` + `--strict-mcp-config`), Codex TUI (overrides `-c` só no processo), OpenCode (`OPENCODE_CONFIG_CONTENT`, merge) e Hermes (configuração gerenciada) recebem esse servidor. Gemini, Kimi e agentes customizados ainda iniciam sem MCP da ADE na TUI. Conversas por protocolo Codex, Claude Code e OpenCode recebem a ponte por configuração da sessão; Antigravity recebe um perfil temporário mantido durante o processo persistente da conversa. A ADE não altera configurações globais. Segue planejado um gerenciador para servidores MCP de terceiros.
 
 ## Orquestrador, frota e CLI
 

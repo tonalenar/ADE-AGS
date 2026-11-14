@@ -55,7 +55,7 @@ pub enum Protocolo {
     /// Agent Client Protocol (`opencode acp`).
     #[serde(rename = "acp")]
     Acp,
-    /// `agy --print --output-format stream-json`. Laço simples, sem prazo de silêncio.
+    /// Stream-json do Antigravity. Cada `result` encerra o turno; em produção o processo continua aberto.
     #[serde(rename = "agy-stream")]
     AgyStream,
     /// `cursor-agent -p --output-format stream-json`. O turno fecha no `result` ou quando o próximo
@@ -585,7 +585,7 @@ pub fn rodar(protocolo: Protocolo, saidas: &[Saida]) -> Resultado {
         ultimo = saida.at_ms;
         motor.out.relogio_ms = saida.at_ms;
         // Abrindo, o silêncio maior que o prazo do pedido é o "não respondeu" do motor.
-        // O Antigravity não tem esse prazo: o processo é o turno e o laço só lê a próxima linha.
+        // O Antigravity fecha cada turno no `result`; o processo de produção continua aberto entre turnos.
         if protocolo != Protocolo::AgyStream && motor.out.abertura.is_none() && silencio > PRAZO_PEDIDO_MS {
             motor.out.abertura = Some(Err(format!("O {} não respondeu a {}", protocolo.nome(), protocolo.pedido_de_abertura())));
             return motor.out;
