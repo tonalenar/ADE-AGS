@@ -58,6 +58,16 @@ describe("paridade visual da timeline com o T3 Code (pensar → ferramentas → 
     expect(row!.querySelector(".animate-pulse")).toBeNull();
   });
 
+  it("exibe um único estado de trabalho e o raciocínio que chega no lugar de Pensando…", async () => {
+    await renderTimeline([
+      { kind: "user", id: "u-thought", text: "Escreva um poema", at: Date.now() - 1000 },
+      { kind: "reasoning", id: "r-thought", text: "Vou construir imagens ligadas à lua." },
+    ], { working: true, streaming: new Set(["r-thought"]) });
+    expect(host.querySelectorAll("[data-working-row]")).toHaveLength(1);
+    expect(host.querySelector("[data-reasoning]")?.textContent).toContain("Vou construir imagens ligadas à lua.");
+    expect(host.querySelector("[data-thinking]")).toBeNull();
+  });
+
   it("texto em streaming marca data-streaming='true' em .chat-markdown (fade @starting-style, sem cc-stream-caret) e remove ao finalizar", async () => {
     vi.useFakeTimers({ toFake: ["requestAnimationFrame", "cancelAnimationFrame", "performance", "Date"] });
     try {

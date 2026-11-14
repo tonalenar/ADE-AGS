@@ -27,7 +27,7 @@ pub enum Engine {
     Claude,
     /// `opencode acp`, o Agent Client Protocol por stdio (`opencode.rs`).
     OpenCode,
-    /// `agy --input-format stream-json`, um processo persistente por conversa (`agy.rs`).
+    /// `agy acp`, o Agent Client Protocol por stdio (`opencode.rs`).
     Antigravity,
     /// `cursor-agent -p --output-format stream-json`, um processo por turno (`cursor.rs`).
     Cursor,
@@ -68,14 +68,13 @@ pub enum MidTurnBehavior {
 }
 
 impl Engine {
-    /// Protocolo usado pelo runtime da conversa. É informativo: cada adapter continua
-    /// preservando seu processo e seu formato nativo.
+    /// Protocolo usado pelo runtime da conversa.
     pub const fn protocol(self) -> &'static str {
         match self {
             Engine::Codex => "codex-app-server",
             Engine::Claude => "claude-stream-json",
             Engine::OpenCode => "agent-client-protocol",
-            Engine::Antigravity => "antigravity-stream-json",
+            Engine::Antigravity => "agent-client-protocol",
             Engine::Cursor => "cursor-stream-json",
         }
     }
@@ -809,9 +808,8 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
     // Por motor, o que um `Err` quer dizer (revisado caso a caso; na dúvida seria `Unknown`):
     // - Claude: `session` só sobe o processo e o `initialize`; `send_user` falha só se o canal de escrita
     //   já fechou, e aí nada foi escrito;
-    // - OpenCode: `send_user` falha antes de qualquer pedido (processo fechado, conversa sem sessão); o
-    //   `session/prompt` roda em outra task e o erro dele vira erro do turno, não retorno daqui;
-    // - Antigravity: `send` aceita a mensagem; spawn e falhas do protocolo são resolvidos na task do turno;
+    // - OpenCode e Antigravity (ACP): `send_user` falha antes de qualquer pedido (processo fechado,
+    //   conversa sem sessão); o `session/prompt` roda em outra task e o erro dele vira erro do turno;
     // - Codex: ver o `RequestFailure` (saiu e perdeu a resposta = `Unknown`).
     match engine {
         Engine::Claude => {
@@ -823,7 +821,10 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
             let session = opencode::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
             return opencode::send_user(app, db, &session, text).map_err(SendError::NotSent);
         }
-        Engine::Antigravity => return agy::send(app, db, thread_id, text).map_err(SendError::NotSent),
+        Engine::Antigravity => {
+            let session = opencode::session(app, db, thread_id).await.map_err(SendError::NotSent)?;
+            return opencode::send_user(app, db, &session, text).map_err(SendError::NotSent);
+        }
         Engine::Cursor => return cursor::send(app, db, thread_id, text).map_err(SendError::NotSent),
         Engine::Codex => {}
     }
@@ -1533,12 +1534,11 @@ pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort:
             }
         }
         // O OpenCode lê as permissões do ambiente e o resto na abertura: qualquer troca reabre.
-        Engine::OpenCode if changed => {
+        Engine::OpenCode | Engine::Antigravity if changed => {
             if let Some(session) = opencode::get(thread_id) {
                 session.retire();
             }
         }
-        // O Antigravity confere a configuração antes de iniciar o próximo turno.
         _ => {}
     }
     Ok(row)

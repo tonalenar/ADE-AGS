@@ -1,14 +1,9 @@
-//! O Antigravity (`agy`) de cada conversa, sem TUI: um processo persistente em `--input-format
-//! stream-json` (ver `agy_map` para o protocolo). A conversa continua com `--conversation <id>`;
-//! o id vem do `init`/`result` e fica em `chat_thread.remote_id`.
+//! Parser e runtime legado do Antigravity (`agy --input-format stream-json`), mantido para replay,
+//! fixtures e compatibilidade com históricos. O chat estruturado atual usa `agy acp` pelo adapter
+//! compartilhado em `opencode.rs`, que recebe eventos ACP incrementais de fala e raciocínio.
 //!
-//! O processo fica aberto entre turnos da conversa: trocar modelo, esforço ou acesso reinicia a
-//! sessão e vale no turno seguinte. Parar mata o processo. No modo headless o agy não pergunta
-//! nada: o que precisaria de aprovação é negado (e vem em `denied_actions`), então esta conversa
-//! nunca gera pedidos de aprovação. Uma mensagem que chega com o turno em andamento fica na fila e
-//! começa o turno seguinte.
-//!
-//! Emite o mesmo evento `cc-chat-thread` dos outros motores. O lock do banco só é pego para gravar.
+//! Este módulo ainda fornece encerramento/interrupção defensivos para sessões antigas em memória.
+//! O lock do banco só é pego para gravar.
 
 use std::collections::{HashMap, VecDeque};
 use std::process::Stdio;

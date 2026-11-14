@@ -289,7 +289,7 @@ CONVERSAS DO MODO CHAT (o agente sem terminal, por protocolo: Codex, Claude Code
            [--client-request-id <id>]          Permite repetir a criação sem duplicar a conversa ou o primeiro envio
            [--access ask|edits|safe|full|plan] · ask (padrão): a pessoa aprova o que o agente roda;
                                               plan: todos menos o Codex (planeja antes de editar);
-                                              antigravity e cursor: sem aprovação (o que pediria é negado);
+                                              antigravity: ACP pode pedir aprovação em ask; cursor: o que pedir é negado;
                                               cursor: só ask|plan|full
   chat send <id> \"...\"                        Manda outra mensagem (Codex e Claude Code: entra no turno; OpenCode e Antigravity: fica na fila)
            [--client-request-id <id>]          Permite repetir o envio sem mandar a mensagem de novo: devolve o recibo (`receipt`)

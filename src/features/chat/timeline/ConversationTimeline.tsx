@@ -28,7 +28,7 @@ import { SelectionComment } from "../quotes/SelectionComment";
 import { voicesByItem } from "./agentSwitch";
 import { NoticeRow } from "./NoticeRow";
 import { TurnEndNotice } from "./TurnEndNotice";
-import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurns, visibleTurnBody, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
+import { clampTimelineRange, endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, thinkingTurnKey, timelineTurns, visibleTurnBody, type BodyRow, type ChangedFile, type Turn } from "./timelineModel";
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
@@ -201,6 +201,10 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const followNonce = useChatStore((s) => (conversationKey ? (s.timelineFollowNonce[conversationKey] ?? 0) : 0));
   // A pessoa está no fim e quer seguir o que chega. A rolagem dela muda isso (ver `onWheel` / `onScroll`).
   const stick = useRef(true);
+  // Ao enviar, deixa o pedido perto do topo como no T3 e segura a âncora enquanto a resposta cabe na janela.
+  const anchorTurn = useRef<string | null>(null);
+  const [anchorSpace, setAnchorSpace] = useState(0);
+  const holdTurnAnchorRef = useRef<(el: HTMLDivElement) => boolean>(() => false);
   // A rolagem suave que esta tela mandou ainda não foi interrompida pela pessoa (ver `onScroll`).
   const following = useRef(false);
   // Topo aplicado programaticamente: ignora o evento assíncrono de scroll do WebKit.
@@ -210,12 +214,69 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const lastPending = useRef(0);
   const lastFollowNonce = useRef(0);
   const snapToBottom = (el: HTMLDivElement) => {
+    anchorTurn.current = null;
+    setAnchorSpace(0);
     const target = Math.max(0, el.scrollHeight - el.clientHeight);
     following.current = false;
     programmaticTop.current = target;
     el.scrollTop = target;
     lastTop.current = el.scrollTop;
   };
+  const holdTurnAnchor = (el: HTMLDivElement): boolean => {
+    const key = anchorTurn.current;
+    if (!key) return false;
+    let waitingForLayout = false;
+    let target = contentRef.current?.querySelector<HTMLElement>(`[data-virtual-turn="${CSS.escape(key)}"], [data-chat-pending-turn="${CSS.escape(key)}"]`) ?? null;
+    if (!target && key.startsWith("pending-")) {
+      // Quando o eco real substitui a bolha otimista, passa a ancorar o turno que ela abriu.
+      const latest = turns[turns.length - 1];
+      if (latest?.end === null && latest.user) {
+        anchorTurn.current = latest.key;
+        const index = turnIndexByItem.get(latest.user.id);
+        if (index !== undefined) {
+          updateVisibleRange(index);
+          waitingForLayout = true;
+        }
+        target = contentRef.current?.querySelector<HTMLElement>(`[data-virtual-turn="${CSS.escape(latest.key)}"]`) ?? null;
+      }
+    }
+    if (!target && !key.startsWith("pending-")) {
+      const index = turnIndexByKey.get(anchorTurn.current ?? key);
+      if (index !== undefined) {
+        updateVisibleRange(index);
+        waitingForLayout = true;
+      }
+      target = contentRef.current?.querySelector<HTMLElement>(`[data-virtual-turn="${CSS.escape(anchorTurn.current ?? key)}"]`) ?? null;
+    }
+    if (!target) return waitingForLayout;
+    const activeKey = anchorTurn.current ?? key;
+    const scrollerTop = el.getBoundingClientRect().top;
+    const targetTop = el.scrollTop + target.getBoundingClientRect().top - scrollerTop;
+    const desiredTop = Math.max(0, targetTop - 24);
+    // Dá espaço no fim para o pedido ficar perto do topo mesmo antes de a resposta ter altura.
+    const maxTopWithoutAnchor = Math.max(0, el.scrollHeight - el.clientHeight - anchorSpace);
+    const requiredSpace = Math.max(0, desiredTop - maxTopWithoutAnchor);
+    if (Math.abs(anchorSpace - requiredSpace) > 2) {
+      setAnchorSpace(requiredSpace);
+      return true;
+    }
+    if (Math.abs(el.scrollTop - desiredTop) > 2) {
+      programmaticTop.current = desiredTop;
+      el.scrollTop = desiredTop;
+      lastTop.current = el.scrollTop;
+    }
+    const turn = turns[turns.length - 1];
+    const row = target.hasAttribute("data-virtual-turn") ? target : null;
+    if (turn?.key === activeKey && turn.body.some((entry) => entry.type === "assistant" || entry.type === "reasoning") && row) {
+      const bottom = row.getBoundingClientRect().bottom - scrollerTop;
+      if (bottom > el.clientHeight - 24) {
+        snapToBottom(el);
+        return false;
+      }
+    }
+    return true;
+  };
+  holdTurnAnchorRef.current = holdTurnAnchor;
   const turnHeights = useRef(new Map<string, number>());
   const visibleRangeRef = useRef({ start: 0, end: 20 });
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 20 });
@@ -240,6 +301,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     });
     return indices;
   }, [turns]);
+  const turnIndexByKey = useMemo(() => new Map(turns.map((turn, index) => [turn.key, index])), [turns]);
   const updateVisibleRange = useCallback((forcedIndex?: number) => {
     const scroller = scrollRef.current;
     const host = turnsHostRef.current;
@@ -273,8 +335,9 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     const hostTop = host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
     scroller.scrollTop = hostTop + turnPrefix[index]! + TURN_GAP * index;
   }, [turnPrefix, updateVisibleRange]);
-  const startIndex = virtualized ? visibleRange.start : 0;
-  const endIndex = virtualized ? Math.max(startIndex, visibleRange.end) : turns.length;
+  const safeRange = clampTimelineRange(visibleRange, turns.length);
+  const startIndex = virtualized ? safeRange.start : 0;
+  const endIndex = virtualized ? Math.max(startIndex, safeRange.end) : turns.length;
   const topSpacer = virtualized && startIndex > 0
     ? turnPrefix[startIndex]! + TURN_GAP * (startIndex - 1)
     : 0;
@@ -305,8 +368,13 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     lastTurns.current = turns.length;
     lastPending.current = pending.length;
     lastFollowNonce.current = followNonce;
-    if (sent) stick.current = true;
+    if (sent) {
+      stick.current = true;
+      const latest = turns[turns.length - 1];
+      anchorTurn.current = pending[pending.length - 1]?.id ?? (latest?.end === null ? latest.key : null);
+    }
     if (!stick.current) return;
+    if (holdTurnAnchor(el)) return;
     // Mensagem nova no fim: rola suave; texto que só cresce: acompanha sem animar.
     if ((grew || sent) && loaded && !prefersReducedMotion() && typeof el.scrollTo === "function") {
       following.current = true;
@@ -315,7 +383,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     } else {
       snapToBottom(el);
     }
-  }, [turns.length, pending.length, working, items, loaded, heightRevision, topSpacer, bottomSpacer, bottomInset, followNonce]);
+  }, [turns.length, pending.length, working, items, loaded, heightRevision, topSpacer, bottomSpacer, bottomInset, followNonce, anchorSpace]);
   // O texto que aparece aos poucos cresce sem redesenhar a lista: a rolagem acompanha o tamanho,
   // se a pessoa estava no fim.
   useEffect(() => {
@@ -324,6 +392,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     if (!el || !content || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (!stick.current) return;
+      if (holdTurnAnchorRef.current(el)) return;
       snapToBottom(el);
     });
     observer.observe(el);
@@ -386,6 +455,8 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     <div ref={scrollRef} className="flex-1 min-h-0 cc-scroll-hidden"
       onWheel={(e) => {
         if (e.deltaY < 0 && !hasInnerScrollableUp(e.target, e.currentTarget) && e.currentTarget.scrollTop > 0) {
+          anchorTurn.current = null;
+          setAnchorSpace(0);
           following.current = false;
           programmaticTop.current = null;
           stick.current = false;
@@ -406,13 +477,21 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
         // Ignora o scroll disparado por snapToBottom e alcança o novo fim se o texto cresceu nesse meio-tempo.
         if (programmaticTop.current !== null && Math.abs(top - programmaticTop.current) <= 2) {
           programmaticTop.current = null;
-          if (stick.current && distance > 2) snapToBottom(el);
+          if (stick.current && distance > 2 && anchorTurn.current === null) snapToBottom(el);
           return;
+        }
+        if (anchorTurn.current && moved !== 0) {
+          anchorTurn.current = null;
+          setAnchorSpace(0);
         }
         // Rolar para cima (a pessoa lendo) solta o fio; voltar ao fim, de novo.
         following.current = false;
         programmaticTop.current = null;
-        if (moved < 0) stick.current = distance <= 2;
+        if (moved < 0) {
+          anchorTurn.current = null;
+          setAnchorSpace(0);
+          stick.current = distance <= 2;
+        }
         else stick.current = distance < STICK_PX;
       }}>
       <RevealContext.Provider value={reveal}>
@@ -475,7 +554,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
           })}
           {bottomSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="bottom" style={{ height: bottomSpacer, flex: "0 0 auto" }} />}
         </div>
-        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} composerTarget={quoteKey} /> : null; })}
+        {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <div key={p.id} data-chat-pending-turn={p.id}><PersonBubble text={shown} sending queued={working} composerTarget={quoteKey} /></div> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
           <div className="flex flex-col gap-1.5">
@@ -491,6 +570,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
         )}
         {working && !compacting && !hasOpenTurn && <WorkingLine since={startedAt} waiting={approval !== null || approvalDocked} />}
         {after}
+        {anchorSpace > 0 && <div aria-hidden="true" data-chat-anchor-space="" style={{ height: anchorSpace, flex: "0 0 auto" }} />}
       </div>
       </AnswerContext.Provider>
       </RevealContext.Provider>

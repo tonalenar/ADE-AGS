@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 
-import { turnLive } from "../activityModel";
 import { AgentModelPicker } from "../AgentModelPicker";
 import { ThreadAccountMenu } from "./ThreadAccountMenu";
 import { BotIcon } from "../chatIcons";
@@ -18,7 +17,6 @@ import { ComposerAssistMenu } from "../ComposerAssistMenu";
 import { ChatFrame } from "../ChatFrame";
 import { ComposerColumn } from "../ComposerColumn";
 import { NO_QUEUE, QUEUE_KEY } from "../ConversationView";
-import { ActivityLine } from "../LiveActivity";
 import { ContextStrip } from "../NewConversation";
 import { PermissionCard } from "../permissions/PermissionCard";
 import { usePendingAsks } from "../permissions/permissionsStore";
@@ -115,7 +113,6 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
   // Com o agente trabalhando, a mensagem na fila dele só entra no fio quando o turno dela começa: o envio otimista espera.
   const pending = usePending(key, items, working);
   const streaming = useMemo(() => new Set(live.drafts.map((d) => d.itemId)), [live.drafts]);
-  const turn = useMemo(() => turnLive(items, !!request), [items, request]);
   const locked = working || !!request;
   const question = questionOf(request);
   const planExit = isPlanExit(request);
@@ -205,7 +202,6 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
         )}
         {(live.error ?? team?.error) && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{live.error ?? team?.error}</p>}
         <LogFailureNotice threadId={thread.id} />
-        {working && !request && <ActivityLine live={turn} startedAt={null} />}
         <ChatComposer cwd={thread.cwd} quoteKey={card.tabId} quoteThreadId={thread.id} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
           turnActive={working} forceSend={!!request}
           placeholder={question ? t("chat.structured.answer") : request ? t("chat.composer.redirect") : working

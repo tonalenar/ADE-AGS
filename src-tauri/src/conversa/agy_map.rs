@@ -1,8 +1,9 @@
-//! O que vem do Antigravity (`agy`) em `--input-format stream-json --output-format stream-json` virando o que a
-//! timeline do chat já desenha (`canal::timeline::Item`), e o que o chat escolhe virando flags.
-//! Puro.
+//! Parser legado do Antigravity (`agy --input-format stream-json --output-format stream-json`):
+//! converte eventos antigos no que a timeline desenha (`canal::timeline::Item`) e no que o chat
+//! escolhe como flags. O chat estruturado atual usa ACP via `opencode_map`; este módulo permanece
+//! para replay, fixtures e compatibilidade com históricos. Puro.
 //!
-//! A entrada persistente foi conferida na documentação oficial do CLI. O formato de saída e os
+//! A antiga entrada persistente foi conferida na documentação oficial do CLI. O formato de saída e os
 //! campos das ferramentas (`tool_info`, `parameters`) vêm do parser de `--print` já usado pelo app
 //! e do changelog embutido; o mapeamento é tolerante a nomes desconhecidos.
 //! - Uma linha JSON por evento, com `event`: `init` (`conversation_id`), `step_update`

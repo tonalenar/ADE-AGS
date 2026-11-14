@@ -70,6 +70,13 @@ export interface Turn {
   notice?: TimelineItem;
 }
 
+/** Mantém o intervalo virtualizado dentro da quantidade atual de turnos durante uma reconciliação. */
+export function clampTimelineRange(range: { start: number; end: number }, count: number): { start: number; end: number } {
+  if (count <= 0) return { start: 0, end: 0 };
+  const start = Math.max(0, Math.min(range.start, count - 1));
+  return { start, end: Math.max(start, Math.min(range.end, count)) };
+}
+
 /**
  * Linhas do corpo que aparecem, como o work log do T3: o raciocínio só aparece enquanto é a última coisa do turno
  * (o pensamento ao vivo). Quando chega outra atividade, ou o turno acaba, ele sai da conversa e só volta quando a
@@ -186,15 +193,15 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
 }
 
 /**
- * A chave do turno em que o modelo ainda está pensando (a timeline desenha o «Pensando…» com brilho nele): o último
- * turno de verdade, em aberto, sem nada depois do raciocínio (nem ferramenta, nem fala). `null` = ninguém pensando.
+ * A chave do turno em que ainda não chegou conteúdo do provedor: a timeline desenha o «Pensando…» com brilho só
+ * enquanto o turno aberto não tem raciocínio, ferramenta nem fala. `null` = já há conteúdo ou ninguém pensando.
  * Olha os turnos inteiros, antes de o modo de chamadas de ferramenta esconder linhas. Pura.
  */
 export function thinkingTurnKey(turns: Turn[]): string | null {
   const turn = [...turns].reverse().find((t) => !t.notice);
   if (!turn || turn.end !== null) return null;
   const last = turn.body[turn.body.length - 1];
-  return last === undefined || last.type === "reasoning" ? turn.key : null;
+  return last === undefined ? turn.key : null;
 }
 
 /**

@@ -132,7 +132,7 @@ Com o Codex, a conversa nova fala direto com o agente pelo `codex app-server`, s
 
   Trocar o acesso fecha o processo; a próxima mensagem retoma a thread com o sandbox novo. Modelo e esforço valem no próximo turno.
 - **Front (`src/features/chat/structured/`):** o store ao vivo, os cartões (chave `thread:<id>`) e a `StructuredConversationView`. A tela usa a mesma `TimelineView`, o mesmo composer e os mesmos menus da conversa por TUI. Aprovações e perguntas se respondem nos botões do composer; parar interrompe o turno.
-- **CLI e MCP:** `ags chat list|new|send|wait|show|stop|pending|open|settle` e as tools `chat_*` nas abas. Codex, Claude Code e OpenCode por protocolo também recebem o MCP local da ADE, escopado à pasta e à conversa; podem consultar `agent_roster` e delegar trabalho separável com `run_plan` ao scheduler da frota. Antigravity recebe o MCP por perfil temporário, mantido enquanto o processo persistente da conversa estiver aberto e também pode delegar. O worker/modelo pode ser escolhido entre os disponíveis no roster, ou roteado pela ADE por complexidade. Essa integração não altera configuração global do provider nem cria um segundo scheduler. No Antigravity, tools que exigiriam aprovação interativa só podem executar em Acesso total.
+- **CLI e MCP:** `ags chat list|new|send|wait|show|stop|pending|open|settle` e as tools `chat_*` nas abas. Codex, Claude Code e OpenCode por protocolo também recebem o MCP local da ADE, escopado à pasta e à conversa; podem consultar `agent_roster` e delegar trabalho separável com `run_plan` ao scheduler da frota. Antigravity recebe o MCP por perfil temporário, mantido enquanto o processo persistente da conversa estiver aberto e também pode delegar. O worker/modelo pode ser escolhido entre os disponíveis no roster, ou roteado pela ADE por complexidade. Essa integração não altera configuração global do provider nem cria um segundo scheduler. No Antigravity ACP, pedidos de permissão seguem para a aprovação da conversa; Acesso total pré-aprova ferramentas.
   - Uma conversa aberta por agente começa **supervisionada** (`access: ask`).
   - `chat wait` dorme no barramento (`chat.changed`), sem polling, até o turno acabar ou o agente pedir algo à pessoa. `reply` é a última fala DEPOIS da última mensagem da pessoa; terminou sem fala nova (erro, interrompido, processo caído), `reply` vem `null` e `stopped` traz o motivo (lido do `turnEnd`).
   - Responder às aprovações e perguntas do agente da conversa **não** tem comando: é da pessoa, na tela.
@@ -205,8 +205,8 @@ PATH do shell de login e a pasta do instalador do Cursor).
   `thinking` e o desfecho de uma ação recusada são lidos de forma tolerante (o que não conheço vira ferramenta genérica).
 - **Fala.** Com `--stream-partial-output`, os pedaços são os `assistant` COM `timestamp_ms` e SEM `model_call_id`; os outros
   repetem o texto e são ignorados. A ferramenta (`tool_call` started/completed) fecha a fala antes dela, na ordem do fio.
-- **Acesso.** `ask`: sem flag; no `-p` o que mudaria arquivos ou rodaria comandos não é aplicado (a mesma advertência
-  `noApproval` do Antigravity). `plan`: `--mode plan`. `full`: `--force`. Aceitar edições e Auto não têm flag documentada:
+- **Acesso.** `ask`: sem flag; no `-p` o que mudaria arquivos ou rodaria comandos não é aplicado (a advertência
+  `noApproval` do Cursor). `plan`: `--mode plan`. `full`: `--force`. Aceitar edições e Auto não têm flag documentada:
   o motor não os aceita (`Engine::accepts`), e a troca de agente os converte para Supervisionado dizendo isso.
 - **Modelo e esforço.** O modelo é o id da variante de `cursor-agent --list-models`; o esforço faz parte dele (`…-high`), por
   isso o controle de esforço fica escondido. Sem conta por conversa (login único do `cursor-agent login`) e sem ai-memory.
@@ -231,23 +231,21 @@ PATH do shell de login e a pasta do instalador do Cursor).
 - **Parar do Claude e do OpenCode durante a abertura do turno** (`codex_parar.rs`, o mesmo guarda): a mensagem já saiu, mas o agente ainda não mostrou que o turno roda. O Parar fica pendente e sai no primeiro aviso do turno (`system/status`, `stream_event`, `assistant` ou `user` no Claude; `session/update` de conteúdo no OpenCode); o fim do turno ou um envio que não saiu o descartam. Enquanto isso, o Parar não fecha no banco o turno que está abrindo (`api::close_idle_orphans`). A resposta do recibo é `deferred`, como no Codex (contrato §11.13).
 - **Parar do Codex antes do `turn/started`** (`codex_parar.rs`): o app-server só aceita `turn/interrupt` depois do aviso e antes recusa com `-32600`, então o turno seguia rodando e o Parar sumia. Agora o Parar recebido entre o `turn/start` e o `turn/started` fica **pendente na sessão** e sai quando o aviso chega; se o turno acaba antes (ou o `turn/start` falha), a pendência é descartada. Sem turno aberto nem `turn/start` a caminho, o Parar cai no fechamento do turno órfão acima.
 
-### Antigravity por protocolo (`agy` em stream-json)
+### Antigravity por protocolo (`agy acp`)
 
-O Antigravity recebe um processo persistente por conversa (`conversa/agy.rs` e `conversa/agy_map.rs`): `agy --input-format stream-json --output-format stream-json`. Cada mensagem é enviada como uma linha NDJSON `{"event":"user","message":{"content":"…"}}`; `result` fecha o turno, e o processo continua aberto para a próxima mensagem. Uma conversa restaurada abre com `--conversation <id>`; o `conversation_id` do `init`/`result` fica em `chat_thread.remote_id`. Não há ACP no `agy`.
+O Antigravity usa ACP v1 pela mesma camada de sessão que o T3 Code (`conversa/opencode.rs` e `conversa/opencode_map.rs`), com um processo `agy acp` por conversa. A sessão recebe `session/new`/`session/resume`, as mensagens chegam por `session/prompt` e as atualizações pelo canal JSON-RPC do ACP. O perfil temporário de MCP da ADE é mantido durante a sessão; `--dangerously-skip-permissions` só é passado para Acesso total.
 
-- **Latência:** o primeiro turno ainda paga o spawn e o handshake do CLI; os próximos reutilizam o processo e dispensam esse custo. Se a conversa for retunada, parada ou fechada, o processo termina; o próximo envio inicia outro com o modelo, esforço e acesso atuais.
-- **Protocolo:** o envelope de entrada persistente é documentado pelo CLI. As linhas de saída e os campos das ferramentas (`tool_info`, `parameters`) usam o formato que o app já mapeava de `--print`; o parser é tolerante a nomes desconhecidos. A fixture `antigravity-feliz` cobre os deltas, ferramentas e `result`; o teste `e2e_agy_um_turno_real` permanece disponível para validar uma chamada real com cota.
-- **Itens:** `step_type: agent_response` com `text_delta` vira os `delta` e a fala; passos de pensamento viram `reasoning`; os outros viram ferramentas (`run_command` → comando, `view_file` → leitura, `edit_file`/`write_to_file` → edição, `grep_search` → busca, `read_url_content` → web, `call_mcp_tool` → "servidor: ferramenta"); o `usage` do `result` vira os tokens; `finished_reason` (`interrupted`, `print_timeout`, `error`) decide o fim do turno.
-- **Sem aprovação:** no modo `-p` o agy não pergunta. O que precisaria de aprovação é negado e vem em `denied_actions`, que a conversa mostra como ferramentas negadas. Por isso esta conversa **nunca gera pedidos de aprovação**.
-- **Acesso:** Supervisionado = nenhuma flag (o que pede aprovação é negado, então é quase só leitura); Aceitar edições = `--mode accept-edits`; Auto = `--mode auto`; Plano = `--mode plan`; Acesso total = `--dangerously-skip-permissions`. As barras da mensagem não viram comandos do CLI (`--disable-slash-commands`).
-- **Modelo e esforço:** `--model` (os ids de `agy models`) e `--effort`; valem no turno seguinte, sem fechar nada.
-- **Fila e parar:** a mensagem que chega com o turno em andamento fica na fila; depois do `result`, ela entra no stdin do mesmo processo. Parar mata o processo persistente e descarta a fila.
+- **Texto e raciocínio:** `agent_message_chunk` e `agent_thought_chunk` viram deltas ACP da mesma sessão. O mapper agrupa cada sequência com um id estável, fecha o segmento ao mudar de tipo ou ao encerrar o turno, e grava o item completo no banco. `agent_message` e `agent_thought` continuam sendo atualizações completas, conforme o ACP.
+- **Sessão e opções:** `session/resume` retoma o `remote_id`; modelo e nível de raciocínio usam as categorias ACP `model` e `thought_level` anunciadas pelo agente. Variantes antigas do `agy` como `gemini-4-hydrogen-medium` são enviadas como alias legado quando a sessão anuncia somente a família `gemini-4-hydrogen`. O modo Plano só é aplicado se a sessão anunciar uma opção `mode` que aceite `plan`; caso contrário, a conversa falha fechada.
+- **Interrupção e fila:** Parar envia `session/cancel`; uma nova mensagem durante um turno entra na fila da ADE e é enviada depois do resultado ACP.
+- **Compatibilidade:** `agy_map.rs` continua como parser legado para fixtures e histórico do stream-json. Ele não é o caminho de envio das conversas novas.
 
 ## Texto chegando e tipografia
 
 - **Por protocolo, os pedaços reais.** O evento `delta` do `cc-chat-thread` leva `itemId`, `delta` e `kind` (`assistant` ou `reasoning`) e vai só à janela: o banco grava o item completo, como antes.
   - **Codex:** `item/agentMessage/delta` (a resposta) e `item/reasoning/summaryTextDelta` (o resumo do raciocínio); `item/reasoning/summaryPartAdded` com índice > 0 vira a linha em branco entre as partes, como no item final. O `item/reasoning/textDelta` (raciocínio cru) fica de fora. Mapeamento puro em `codex_map::delta_of`.
   - **Claude Code:** com `--include-partial-messages`, os `stream_event` `content_block_delta` de `text_delta` e `thinking_delta`, com o id do bloco (`api_message_id` + `index`), o mesmo do item final (`claude_map::delta_of`). O CLI já junta pedaços seguidos do mesmo bloco antes de mandar, então chegam em rajadas.
+  - **Antigravity:** no ACP, `agent_message_chunk` e `agent_thought_chunk` chegam à mesma fila de deltas do OpenCode; o T3 Code usa esses mesmos eventos no adapter ACP.
   - **Na janela:** os pedaços de um quadro viram uma atualização só do store (`createFrameBatcher` com `requestAnimationFrame`); qualquer outro evento entrega os pendentes antes, para manter a ordem. Os rascunhos ficam por item (`ThreadLive.drafts`) e entram na timeline como itens comuns (`withDrafts`); o raciocínio chegando alimenta a linha viva.
 - **Revelar (`timeline/streaming.ts`, `useRevealedText`):** respostas estruturadas com deltas aparecem no ritmo em que os eventos chegam; o front só junta atualizações do mesmo quadro (`createFrameBatcher` + `requestAnimationFrame`). O rascunho transmitido não passa por uma segunda animação de texto, e o conteúdo final mantém o mesmo texto sem recomeçar. Mensagens inteiras recentes de transcript TUI ainda podem aparecer palavra a palavra, a ~160 caracteres por segundo e com teto de 1,5 s. O histórico aparece inteiro; `prefers-reduced-motion` desliga a animação.
   - **TUI:** Claude Code e Codex gravam o bloco inteiro no transcript; hooks e statusline não trazem texto parcial. Por isso a TUI usa o revelar.
@@ -348,7 +346,7 @@ A conversa escolhida é a **mesma** nos três modos, e trocar de conversa em qua
 
 - **Retomar uma sessão que falha não esquece em silêncio** (`conversa/resume.rs`): o erro de `--resume`/`thread/resume`/`session/resume` é `Gone` (a sessão não existe: abre outra), `Transient` (2 retentativas com pausa curta; se persistir, abre outra), `Timeout` (NÃO abre outra: a sessão pode existir; falha e a pessoa tenta de novo) ou `Fatal` (o processo não sobe, ou modelo/modo não aplicam: falha). Ao abrir outra, a timeline recebe um item `notice` (`resumeLost`) e a tela diz que o agente recomeçou sem o histórico; o id da sessão anterior só é trocado depois de a nova abrir.
 - **OpenCode falha fechado** em modelo, esforço e MODO: um erro ao aplicar recusa a abertura (as permissões nunca divergem do que a tela mostra). O esforço que o modelo não oferece fica no padrão, mas vira um `notice` (`optionIgnored`). Um OpenCode que nem lista a opção `mode` não tem o que mostrar errado (as permissões valem pelo ambiente do processo).
-- **A fila do agy e do OpenCode** (`turn::Lane`: turno + fila sob UMA trava) só grava o item `User` quando o turno da mensagem começa; a tela a mostra como pendente até lá (sem o prazo de 2 min enquanto o agente trabalha). Se interromper ou fechar descarta a fila, cada mensagem vira um `notice` `queueDropped` («não enviada», com o texto e «Reenviar»).
+- **A fila ACP do Antigravity e do OpenCode** (`turn::Lane`: turno + fila sob UMA trava) só grava o item `User` quando o turno da mensagem começa; a tela a mostra como pendente até lá (sem o prazo de 2 min enquanto o agente trabalha). Se interromper ou fechar descarta a fila, cada mensagem vira um `notice` `queueDropped` («não enviada», com o texto e «Reenviar»).
 - **Uma trava de abertura por conversa** (`resume::start_gate`), não uma por motor: um agente lento no `initialize` não segura as outras conversas.
 - **Item `notice`** (`ItemKind::Notice`; `label` = código): linha própria no fio, fora dos turnos. A mensagem da pessoa no meio de um turno (steer, fila) fecha o turno anterior como «superado» (`TurnEnd.superseded`), e o fim de verdade vai para o turno que tem a resposta.
 - **@menção do orquestrador**: a mensagem aparece como pendente na conversa que a pessoa olha, o erro de envio aparece ali, e, numa conversa por protocolo, o resumo do time só conta como entregue depois de o backend aceitar o envio (na fila do composer e numa aba, não há resposta a esperar: conta ao enfileirar/entregar).
@@ -395,7 +393,7 @@ soma de 200 MB. O que passa do limite fica de fora COM aviso; erro de leitura vi
 | Claude Code (stream-json) | bloco `[Anexos]` | sim: blocos `image` base64 antes do texto (≤ 5 MB, ≤ 8) |
 | Codex (`app-server`) | bloco `[Anexos]` | não: o item `localImage` do `turn/start` não foi verificado neste app |
 | OpenCode (ACP) | bloco `[Anexos]` | não: `promptCapabilities.image` ainda não é lida |
-| Antigravity (`agy -p`) | bloco `[Anexos]` | não |
+| Antigravity (ACP) | bloco `[Anexos]` | não |
 | Abas com TUI | `@caminho` no fim do texto | não (a TUI lê pelo caminho, como ao soltar no terminal) |
 
 O bloco é `[Anexos]` + uma linha `- imagem|arquivo|pasta | nome | bytes | caminho` por anexo, no fim do texto.
@@ -520,8 +518,7 @@ para o orquestrador e os integrantes de um time. Abas com TUI ficam de fora (o t
   credencial de outro app. Opções (a decisão é do usuário): (a) deixar assim; (b) `cursor-agent status --format json` para
   mostrar a conta/e-mail (comando do próprio CLI, não mede cota; não verificado aqui); (c) a Admin API do Cursor, só para
   times, com uma chave que o usuário cadastre no keyring do ADE.
-- **Trocar de agente e aprovação.** O Antigravity e o Cursor por `-p` não têm tela de aprovação: em Supervisionado ele NEGA o que pediria
-  aprovação. A confirmação da troca e o aviso do fio dizem isso (`noApproval`); para liberar, mude o acesso.
+- **Trocar de agente e aprovação.** Nas conversas estruturadas, o Antigravity ACP envia pedidos de permissão para a aprovação da ADE; Acesso total pré-aprova as ferramentas. O Cursor em `-p` não tem diálogo interativo e nega o que pediria aprovação. Abas TUI do Antigravity continuam seguindo as regras próprias do terminal.
 
 ## Tarefas em segundo plano (como no Claude Code)
 

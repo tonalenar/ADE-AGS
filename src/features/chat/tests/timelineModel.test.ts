@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { changedFiles, endOutcome, fileName, formatDuration, noticeDetail, openTurnStart, thinkingTurnKey, timelineTurns, visibleTurnBody } from "@/features/chat/timeline/timelineModel";
+import { changedFiles, clampTimelineRange, endOutcome, fileName, formatDuration, noticeDetail, openTurnStart, thinkingTurnKey, timelineTurns, visibleTurnBody } from "@/features/chat/timeline/timelineModel";
 import type { TimelineItem } from "@/features/chat/timeline/types";
 
 const user = (id: string, at?: number): TimelineItem => ({ kind: "user", id, at, text: `msg ${id}` });
@@ -68,6 +68,18 @@ describe("openTurnStart", () => {
   it("o turno em aberto começa na última mensagem sem fim depois", () => {
     expect(openTurnStart([user("u1", 10), end("e1"), user("u2", 50), say("a")])).toBe(50);
     expect(openTurnStart([user("u1", 10), end("e1")])).toBeNull();
+  });
+});
+
+describe("timeline virtualizada", () => {
+  it("limita imediatamente um intervalo antigo quando os turnos encolhem", () => {
+    expect(clampTimelineRange({ start: 109, end: 120 }, 60)).toEqual({ start: 59, end: 60 });
+    expect(clampTimelineRange({ start: 10, end: 20 }, 0)).toEqual({ start: 0, end: 0 });
+  });
+
+  it("mostra raciocínio ao vivo sem repetir o indicador Pensando…", () => {
+    const turns = timelineTurns([user("u1"), { kind: "reasoning", id: "r1", text: "Vou analisar o pedido." }]);
+    expect(thinkingTurnKey(turns)).toBeNull();
   });
 });
 
@@ -180,9 +192,9 @@ describe("o raciocínio do agente na timeline", () => {
 });
 
 describe("thinkingTurnKey: quando a timeline mostra o «Pensando…»", () => {
-  it("turno aberto sem nada ainda, ou cuja última linha é raciocínio, está pensando", () => {
+  it("turno aberto sem itens está pensando; raciocínio ao vivo aparece como texto", () => {
     expect(thinkingTurnKey(timelineTurns([user("u1")]))).toBe("u1");
-    expect(thinkingTurnKey(timelineTurns([user("u1"), tool("t1"), think("r1")]))).toBe("u1");
+    expect(thinkingTurnKey(timelineTurns([user("u1"), tool("t1"), think("r1")]))).toBeNull();
   });
 
   it("depois de uma ferramenta, de uma fala ou do fim do turno, não está mais", () => {
@@ -194,6 +206,6 @@ describe("thinkingTurnKey: quando a timeline mostra o «Pensando…»", () => {
 
   it("um aviso do app no fim não esconde o turno em andamento", () => {
     const notice: TimelineItem = { kind: "notice", id: "n1", label: "optionIgnored", text: "x" };
-    expect(thinkingTurnKey(timelineTurns([user("u1"), think("r1"), notice]))).toBe("u1");
+    expect(thinkingTurnKey(timelineTurns([user("u1"), notice]))).toBe("u1");
   });
 });

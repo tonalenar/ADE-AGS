@@ -8,7 +8,6 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { AgentInfo } from "@/features/tabs/types";
 import { sendKeysToTab } from "@/features/terminal/terminalRegistry";
 
-import { turnLive } from "./activityModel";
 import { AgentModelPicker } from "./AgentModelPicker";
 import { ProjectScriptsMenu } from "./ProjectScriptsMenu";
 import { newConversationLocal, retuneConversationTab, sendToConversation, startConversation } from "./chatActions";
@@ -21,7 +20,6 @@ import { useChatPrefs } from "./chatPrefs";
 import { ComposerAssistMenu } from "./ComposerAssistMenu";
 import { ChatFrame } from "./ChatFrame";
 import { ComposerColumn } from "./ComposerColumn";
-import { ActivityLine } from "./LiveActivity";
 import { useChatLive } from "./liveStore";
 import { ContextStrip } from "./NewConversation";
 import { PermissionCard } from "./permissions/PermissionCard";
@@ -103,7 +101,6 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const tuning = useMemo(() => readTuning(card.agentId, command), [card.agentId, command]);
   const access = useMemo(() => readAccess(card.agentId, command), [card.agentId, command]);
   const working = useChatLive((s) => s.phase[card.tabId] === "working");
-  const turnStart = useChatLive((s) => s.turn[card.tabId]?.startedAt ?? null);
   // O pedido da TUI vem do store único das permissões (o `PermissionsManager` lê a tela).
   const asks = usePendingAsks();
   const approval = useMemo(() => asks.find((a) => a.conversation === card.tabId) ?? null, [asks, card.tabId]);
@@ -112,7 +109,6 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
   const items = useMemo(() => read?.items ?? [], [read]);
   const quoteSourceIds = useMemo(() => new Set(items.map((item) => item.id)), [items]);
   const promptHistory = useMemo(() => items.flatMap((item) => item.kind === "user" && item.text?.trim() ? [item.text] : []), [items]);
-  const live = useMemo(() => turnLive(items, !!approval), [items, approval]);
   // O que a pessoa acabou de enviar aparece já, até o transcript devolver a mensagem.
   const pending = usePending(card.tabId, items);
   const searchTarget = useChatStore((s) => s.tabSearchTarget?.tabId === card.tabId ? s.tabSearchTarget : null);
@@ -188,7 +184,6 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
       {/* O pedido de permissão vai colado ao composer, sempre à vista (o terminal mostra o mesmo diálogo). */}
       {approval && <PermissionCard ask={approval} terminal />}
       {team?.error && <p role="alert" className="mb-2 px-1 text-chat-note text-red-600 dark:text-red-400 break-words">{team.error}</p>}
-      {busy && !approval && <ActivityLine live={live} startedAt={turnStart} />}
       <ChatComposer cwd={card.cwd} quoteKey={card.tabId} quoteSourceIds={quoteSourceIds} promptHistory={promptHistory}
         turnActive={busy} forceSend={!!approval}
         placeholder={approval ? t("chat.composer.redirect") : busy ? t(followUpBehavior === "queue" ? "chat.composer.queueHintQueue" : "chat.composer.queueHint", { key: QUEUE_KEY }) : team?.placeholder ?? t("chat.composer.reply")}

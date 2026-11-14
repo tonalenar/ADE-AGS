@@ -37,12 +37,11 @@ describe("o raciocínio do agente aparece na conversa", () => {
     expect(row.getAttribute("aria-label")).toBe("chat.timeline.reasoning");
   });
 
-  it("enquanto o modelo ainda pensa, mostra «Pensando…» com o brilho (e só nele)", async () => {
+  it("quando o provedor já envia raciocínio, mostra o texto sem repetir «Pensando…»", async () => {
     await mount([asking, thought], true);
-    const live = host.querySelector("[data-thinking]") as HTMLElement;
-    expect(live.textContent).toContain("chat.live.thinking");
-    expect(live.querySelector(".cc-shimmer")).not.toBeNull();
-    expect(host.querySelectorAll(".cc-shimmer")).toHaveLength(1);
+    expect(host.querySelector("[data-reasoning]")?.textContent).toContain(THOUGHT);
+    expect(host.querySelector("[data-thinking]")).toBeNull();
+    expect(host.querySelector(".cc-shimmer")).toBeNull();
   });
 
   it("sem o turno rodando, ou com um pedido de aprovação esperando, não há «Pensando…», mas o resumo continua", async () => {
