@@ -5904,6 +5904,7 @@
   "chat.attach.lightbox.applyResize": "Apply and keep proportions",
   "chat.attach.lightbox.flattenMarks": "Flatten markup",
   "chat.attach.lightbox.openVideo": "Play {{name}}",
+  "chat.attach.lightbox.videoError": "Could not play this video here.",
   "chat.attach.lightbox.captureFrame": "Capture frame as image",
   "chat.attach.lightbox.attachResult": "Attach resulting image to composer",
   "chat.attach.lightbox.open": "Open",

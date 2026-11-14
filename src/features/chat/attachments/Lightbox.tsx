@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { savePastedImage } from "@/features/terminal/ipc";
 
@@ -15,6 +14,7 @@ import { ArrowToolIcon, BlurToolIcon, ClipboardToolIcon, CommentToolIcon, Ellips
 import { setImageContext } from "./imageContext";
 import { backgroundRemovalAvailable, removeImageBackground, saveAnnotatedCopy } from "./ipc";
 import { useImagePreview } from "./useImagePreview";
+import { isVideoFile, prepareVideoFirstFrame, videoMediaSrc } from "./videoMedia";
 
 export interface LightboxImage {
   path: string;
@@ -54,7 +54,9 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const imageRef = useRef<HTMLImageElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const current = images[index]!;
-  const { src: loadedSrc, missing } = useImagePreview(current.path, current.preview);
+  const isVideo = current.kind === "video" || isVideoFile(current.name) || isVideoFile(current.path);
+  const { src: loadedSrc, missing } = useImagePreview(current.path, isVideo ? (current.preview ?? current.path) : current.preview);
+  const [videoError, setVideoError] = useState(false);
   const [editedSrc, setEditedSrc] = useState<string | null>(null);
   const src = editedSrc ?? loadedSrc;
   const [natural, setNatural] = useState<{ width: number; height: number }>({ width: 1, height: 1 });
@@ -82,7 +84,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const [resizeHeight, setResizeHeight] = useState("");
   const [dockPosition, setDockPosition] = useState({ x: 0, y: 0 });
   const [dragDock, setDragDock] = useState(false);
-  const [filter, setFilter] = useState<MediaFilter>(current.kind === "video" ? "video" : "image");
+  const [filter, setFilter] = useState<MediaFilter>(isVideo ? "video" : "image");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [canRemoveBackground, setCanRemoveBackground] = useState(false);
@@ -109,9 +111,9 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   }, []);
 
   useEffect(() => {
-    setEditedSrc(null); setZoom(1); setOffset({ x: 0, y: 0 }); setMarks([]); setEraseStrokes([]); setPast([]); setFuture([]); setComments([]); setCommentSelection(null);
-    setTool("select"); setSelectedMark(null); setCommentDraft(null); setTextDraft(null); setDraft(null); setNotice(null); setFilter(current.kind === "video" ? "video" : "image");
-  }, [current.path, current.kind]);
+    setEditedSrc(null); setVideoError(false); setZoom(1); setOffset({ x: 0, y: 0 }); setMarks([]); setEraseStrokes([]); setPast([]); setFuture([]); setComments([]); setCommentSelection(null);
+    setTool("select"); setSelectedMark(null); setCommentDraft(null); setTextDraft(null); setDraft(null); setNotice(null); setFilter(isVideo ? "video" : "image");
+  }, [current.path, isVideo]);
 
   useEffect(() => {
     if (!notice) return;
@@ -143,7 +145,6 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   };
   const clearAll = () => { commit({ marks: [], eraseStrokes: [] }); setComments([]); setCommentSelection(null); };
 
-  const isVideo = current.kind === "video";
   const showingImage = Boolean(src) && (!isVideo || Boolean(editedSrc));
   /** No vídeo, escolher uma ferramenta congela o quadro atual e passa a anotar sobre ele. */
   const pickTool = (next: Tool) => {
@@ -153,7 +154,8 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   };
 
   const go = (step: 1 | -1) => onIndex(stepIndex(index, step, images.length));
-  const visibleMedia = filterMedia(images.map((image) => ({ ...image, kind: image.kind ?? "image" })), filter);
+  const mediaKind = (image: LightboxImage): "image" | "video" => image.kind ?? (isVideoFile(image.name) || isVideoFile(image.path) ? "video" : "image");
+  const visibleMedia = filterMedia(images.map((image) => ({ ...image, kind: mediaKind(image) })), filter);
   const goVisible = (step: 1 | -1) => {
     const currentVisibleIndex = visibleMedia.findIndex((item) => item.path === current.path);
     const next = visibleMedia[nextMediaIndex(Math.max(0, currentVisibleIndex), step, visibleMedia.length)];
@@ -354,7 +356,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
   const resultDataUrl = (): string | null => (hasMarks ? flattenMarks() : null) ?? src;
   const download = () => {
     const link = document.createElement("a");
-    link.href = isVideo && !editedSrc ? convertFileSrc(current.path) : resultDataUrl() ?? "";
+    link.href = isVideo && !editedSrc ? videoMediaSrc(current.path) : resultDataUrl() ?? "";
     link.download = isVideo && !editedSrc ? current.name : current.name.replace(/\.[^.]+$/, ".png");
     link.click();
   };
@@ -484,7 +486,7 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
           <select className={`${surfaceButton} cursor-pointer bg-transparent`} value={filter} onChange={(event) => {
             const nextFilter = event.target.value as MediaFilter;
             setFilter(nextFilter);
-            const matching = filterMedia(images.map((image) => ({ ...image, kind: image.kind ?? "image" })), nextFilter);
+            const matching = filterMedia(images.map((image) => ({ ...image, kind: mediaKind(image) })), nextFilter);
             if (!matching.some((image) => image.path === current.path) && matching[0]) onIndex(images.findIndex((image) => image.path === matching[0]!.path));
           }}>
             <option value="image">{t("chat.attach.lightbox.images")}</option><option value="video">{t("chat.attach.lightbox.videos")}</option><option value="all">{t("chat.attach.lightbox.all")}</option>
@@ -534,7 +536,20 @@ export function Lightbox({ images, index, composerTarget = null, cwd = null, onI
             {textDraft && <form className="absolute" style={{ left: `${textDraft.at.x * 100}%`, top: `${textDraft.at.y * 100}%` }} onSubmit={(e) => { e.preventDefault(); submitText(); }}>
               <input autoFocus onFocus={(e) => e.currentTarget.select()} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setTextDraft(null); } }} value={textDraft.text} onChange={(e) => setTextDraft({ ...textDraft, text: e.target.value })} onBlur={submitText} aria-label={t("chat.attach.lightbox.textPrompt")} placeholder={t("chat.attach.lightbox.textPrompt")} className="min-w-40 rounded-md border border-white/20 bg-gray-950/80 px-2 py-1 font-semibold text-white outline-none" style={{ color: colorVar(color), fontSize: `${Math.max(14, Math.round(strokeWidth * (imageRef.current?.getBoundingClientRect().width ?? 600) * 7))}px` }} />
             </form>}
-          </div> : isVideo ? <div className="flex max-h-full max-w-full flex-col items-center gap-3"><video ref={videoRef} src={convertFileSrc(current.path)} controls playsInline className="max-h-[calc(100vh-16rem)] max-w-[calc(100vw-12rem)] rounded-lg shadow-2xl" /><div className="flex items-center gap-1 rounded-full border border-gray-200/70 bg-surface-1/80 p-1 shadow dark:border-white/10 dark:bg-gray-900/80"><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(-1)} aria-label={t("chat.attach.lightbox.framePrevious")} title={t("chat.attach.lightbox.framePrevious")}>−1</button><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(1)} aria-label={t("chat.attach.lightbox.frameNext")} title={t("chat.attach.lightbox.frameNext")}>+1</button><label className="flex items-center gap-1 px-2 text-xs">{t("chat.attach.lightbox.speed")}<select aria-label={t("chat.attach.lightbox.speed")} defaultValue="1" className="rounded-md bg-transparent px-1 py-1" onChange={(event) => { if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><button type="button" className={surfaceButton} onClick={toggleVideoFullscreen} aria-label={t("chat.attach.lightbox.fullscreen")} title={t("chat.attach.lightbox.fullscreen")}><MaximizeIcon className="h-4 w-4" /></button><button type="button" className={surfaceButton} onClick={() => { captureFrame(); }}>{t("chat.attach.lightbox.captureFrame")}</button></div></div> : <p className="text-sm text-gray-500 dark:text-white/60">{missing ? t("chat.attach.missing") : t("chat.attach.loading")}</p>}
+          </div> : isVideo ? <div className="flex max-h-full max-w-full flex-col items-center gap-3">{videoError ? (
+            <div role="alert" className="flex max-w-md flex-col items-center gap-3 rounded-2xl border border-gray-200/70 bg-surface-1/90 px-6 py-5 text-center shadow-xl dark:border-white/10 dark:bg-gray-900/90">
+              <p className="m-0 text-sm text-gray-800 dark:text-gray-100">{t("chat.attach.lightbox.videoError")}</p>
+              {!isInlineImage(current.path) && (
+                <button type="button" className={surfaceButton} onClick={() => { void openPath(current.path).catch(console.error); }}>
+                  {t("chat.attach.lightbox.openDefault")}
+                </button>
+              )}
+            </div>
+          ) : (
+            <video key={current.path} ref={videoRef} src={videoMediaSrc(current.path)} controls playsInline preload="metadata"
+              onLoadedMetadata={() => setVideoError(false)} onError={() => setVideoError(true)}
+              className="max-h-[calc(100vh-16rem)] max-w-[calc(100vw-12rem)] rounded-lg shadow-2xl" />
+          )}<div className="flex items-center gap-1 rounded-full border border-gray-200/70 bg-surface-1/80 p-1 shadow dark:border-white/10 dark:bg-gray-900/80"><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(-1)} aria-label={t("chat.attach.lightbox.framePrevious")} title={t("chat.attach.lightbox.framePrevious")}>−1</button><button type="button" className={surfaceButton} onClick={() => stepVideoFrame(1)} aria-label={t("chat.attach.lightbox.frameNext")} title={t("chat.attach.lightbox.frameNext")}>+1</button><label className="flex items-center gap-1 px-2 text-xs">{t("chat.attach.lightbox.speed")}<select aria-label={t("chat.attach.lightbox.speed")} defaultValue="1" className="rounded-md bg-transparent px-1 py-1" onChange={(event) => { if (videoRef.current) videoRef.current.playbackRate = Number(event.target.value); }}><option value="0.5">0.5×</option><option value="1">1×</option><option value="1.5">1.5×</option><option value="2">2×</option></select></label><button type="button" className={surfaceButton} onClick={toggleVideoFullscreen} aria-label={t("chat.attach.lightbox.fullscreen")} title={t("chat.attach.lightbox.fullscreen")}><MaximizeIcon className="h-4 w-4" /></button><button type="button" className={surfaceButton} onClick={() => { captureFrame(); }}>{t("chat.attach.lightbox.captureFrame")}</button></div></div> : <p className="text-sm text-gray-500 dark:text-white/60">{missing ? t("chat.attach.missing") : t("chat.attach.loading")}</p>}
           {images.length > 1 && <button type="button" onClick={() => goVisible(1)} disabled={visibleMedia.findIndex((item) => item.path === current.path) < 0 || visibleMedia.findIndex((item) => item.path === current.path) === visibleMedia.length - 1} aria-label={t("chat.attach.lightbox.next")} className="absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full bg-gray-900/10 p-3 hover:bg-gray-900/20 disabled:opacity-30 dark:bg-white/10"><ChevronRightIcon className="h-5 w-5" /></button>}
         </main>
         {/* Depois do <main> no DOM (a primeira <img> do diálogo é a imagem aberta), mas à esquerda na tela. */}
@@ -672,8 +687,10 @@ function GalleryThumb({ image, active, label, onClick }: { image: LightboxImage;
   }, []);
   return <button ref={ref} type="button" onClick={onClick} aria-label={label} title={image.name} aria-current={active ? "true" : undefined}
     className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-gray-200 ring-2 ring-offset-2 ring-offset-surface-1 transition dark:bg-white/10 dark:ring-offset-gray-950 ${active ? "ring-accent-500" : "ring-transparent opacity-60 hover:opacity-100"}`}>
-    {visible ? image.kind === "video" ? <>
-      <video src={`${convertFileSrc(image.path)}#t=0.1`} preload="metadata" muted playsInline className="pointer-events-none h-full w-full object-cover" />
+    {visible ? (image.kind === "video" || isVideoFile(image.name) || isVideoFile(image.path)) ? <>
+      <video src={`${videoMediaSrc(image.path)}#t=0.1`} preload="metadata" muted playsInline aria-hidden="true"
+        onLoadedMetadata={(e) => prepareVideoFirstFrame(e.currentTarget)}
+        className="pointer-events-none h-full w-full object-cover" />
       <span className="absolute inset-0 flex items-center justify-center"><span className="rounded-full bg-gray-950/60 p-1 text-white"><PlayIcon className="h-3.5 w-3.5" /></span></span>
     </> : <ThumbImage path={image.path} preview={image.preview} /> : null}
   </button>;

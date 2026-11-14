@@ -12,6 +12,7 @@ import type { LightboxImage } from "./Lightbox";
 import { useMediaViewer } from "./MediaViewerContext";
 import { openAttachment } from "./openAttachment";
 import { useImagePreview } from "./useImagePreview";
+import { isVideoFile, prepareVideoFirstFrame, videoMediaSrc } from "./videoMedia";
 
 /** O que a fileira mostra: o anexo do composer ou o lido do texto de uma mensagem enviada. */
 export interface ShownAttachment {
@@ -45,8 +46,8 @@ export function AttachmentStrip({ items, onRemove, cwd = null, className = "" }:
   const owner = useId();
   const inherited = useContext(AttachCwdContext);
   const folder = cwd ?? inherited;
-  const images: LightboxImage[] = useMemo(() => items.filter((i) => i.kind === "image" || isVideoName(i.name)).map((item) => ({
-    path: item.path, name: item.name, preview: item.preview ?? null, kind: isVideoName(item.name) ? "video" : "image",
+  const images: LightboxImage[] = useMemo(() => items.filter((i) => i.kind === "image" || isVideoFile(i.name) || isVideoFile(i.path)).map((item) => ({
+    path: item.path, name: item.name, preview: item.preview ?? null, kind: isVideoFile(item.name) || isVideoFile(item.path) ? "video" : "image",
   })), [items]);
   useEffect(() => {
     if (!viewer) return;
@@ -65,11 +66,8 @@ export function AttachmentStrip({ items, onRemove, cwd = null, className = "" }:
           <li key={item.path} className="group relative">
             {item.kind === "image" ? (
               <ImageCard item={item} onOpen={() => onOpen(item.path)} />
-            ) : isVideoName(item.name) ? (
-              <button type="button" onClick={() => onOpen(item.path)} aria-label={t("chat.attach.lightbox.openVideo", { name: item.name })} title={item.name}
-                className="flex h-16 max-w-[220px] items-center gap-2 rounded-xl bg-gray-100 px-3 text-left text-gray-800 hover:bg-gray-200/70 dark:bg-white/[0.07] dark:text-gray-100 dark:hover:bg-white/[0.11]">
-                <PlayIcon className="h-5 w-5 shrink-0 text-accent-500" /><span className="truncate text-chat-note font-medium">{item.name}</span>
-              </button>
+            ) : isVideoFile(item.name) || isVideoFile(item.path) ? (
+              <VideoCard item={item} onOpen={() => onOpen(item.path)} />
             ) : (
               <button type="button" onClick={() => openAttachment(item.path, item.kind, folder)} title={item.path}
                 aria-label={t("chat.attach.openFile", { name: item.name })}
@@ -92,14 +90,38 @@ export function AttachmentStrip({ items, onRemove, cwd = null, className = "" }:
         ))}
       </ul>
       {!viewer && open !== null && images.length > 0 && (
-        <Lightbox images={images.map((i) => ({ path: i.path, name: i.name, preview: i.preview ?? null }))} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
+        <Lightbox images={images} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
       )}
     </>
   );
 }
 
-function isVideoName(name: string): boolean {
-  return /\.(mp4|mov|m4v|webm|mkv|avi)$/i.test(name);
+function VideoCard({ item, onOpen }: { item: ShownAttachment; onOpen: () => void }) {
+  const { t } = useTranslation();
+  const [broken, setBroken] = useState(false);
+  const src = useMemo(() => videoMediaSrc(item.path), [item.path]);
+  return (
+    <span className="flex max-w-[7.5rem] flex-col items-start gap-1">
+      <button type="button" onClick={onOpen} aria-label={t("chat.attach.lightbox.openVideo", { name: item.name })} title={item.name}
+        className="relative block w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden bg-gray-950/10 dark:bg-white/[0.07] ring-1 ring-black/10 dark:ring-white/10 hover:ring-2 hover:ring-accent-500/60">
+        {src && !broken ? (
+          <video src={src} preload="metadata" muted playsInline aria-hidden="true"
+            onLoadedMetadata={(e) => { setBroken(false); prepareVideoFirstFrame(e.currentTarget); }}
+            onError={() => setBroken(true)}
+            className="pointer-events-none h-full w-full object-cover" />
+        ) : (
+          <span className="flex h-full w-full items-center justify-center px-1 text-center text-chat-caption text-gray-500 dark:text-white/45">
+            {item.name}
+          </span>
+        )}
+        <span aria-hidden="true" className="pointer-events-none absolute inset-0 flex items-center justify-center">
+          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-gray-950/60 text-white shadow">
+            <PlayIcon className="h-3.5 w-3.5" />
+          </span>
+        </span>
+      </button>
+    </span>
+  );
 }
 
 function ImageCard({ item, onOpen }: { item: ShownAttachment; onOpen: () => void }) {

@@ -65,4 +65,11 @@ describe("o raciocínio do agente aparece na conversa", () => {
     await act(async () => { button.click(); });
     expect(button.getAttribute("aria-expanded")).toBe("true");
   });
+
+  it("durante a compactação de contexto, oculta o indicador «Pensando…»", async () => {
+    const compacting: TimelineItem = { kind: "notice", id: "n-comp", label: "compaction", status: "running", text: "auto", at: Date.now() };
+    await mount([asking, compacting], true);
+    expect(host.querySelector("[data-thinking]")).toBeNull();
+    expect(host.querySelector("[data-compaction='running']")).not.toBeNull();
+  });
 });
