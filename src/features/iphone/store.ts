@@ -71,7 +71,9 @@ export function refreshPhysical(force = false): Promise<void> {
 }
 
 /** De quanto em quanto relê a lista enquanto alguém mostra os aparelhos (um iPhone demora a aparecer no Wi-Fi). */
-const LIST_EVERY_MS = 4000;
+// A varredura via devicectl leva cerca de 0,3 s neste Mac; 2 s reduz a espera para aparelhos
+// que acabam de surgir no Wi-Fi sem manter consultas mais frequentes que o próprio comando.
+const LIST_EVERY_MS = 2000;
 let watchers = 0;
 let timer: number | undefined;
 

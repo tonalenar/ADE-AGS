@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  appendDelta, createFrameBatcher, FRESH_SLACK_MS, isFresh, REVEAL_BASE_CPS, REVEAL_MAX_MS, revealAdvance, revealCut, revealDone, revealStart,
+  appendDelta, appendDeltas, createFrameBatcher, FRESH_SLACK_MS, isFresh, REVEAL_BASE_CPS, REVEAL_MAX_MS, revealAdvance, revealCut, revealDone, revealStart,
   revealTarget, withDrafts, type Reveal,
 } from "@/features/chat/timeline/streaming";
 import type { TimelineItem } from "@/features/chat/timeline/types";
@@ -23,6 +23,19 @@ describe("texto chegando: rascunhos", () => {
     drafts = appendDelta(drafts, { itemId: "a", delta: ", tudo" });
     expect(appendDelta(drafts, { itemId: "a", delta: "" })).toBe(drafts);
     expect(drafts).toEqual([{ itemId: "a", kind: "assistant", text: "Oi, tudo" }, { itemId: "b", kind: "reasoning", text: "hm" }]);
+  });
+
+  it("junta todos os pedaços do mesmo quadro uma vez por item, mantendo a ordem dos itens", () => {
+    const initial = [{ itemId: "a", kind: "assistant" as const, text: "Oi" }];
+    expect(appendDeltas(initial, [
+      { itemId: "a", delta: ", " },
+      { itemId: "b", delta: "pensando", kind: "reasoning" },
+      { itemId: "a", delta: "mundo" },
+      { itemId: "b", delta: "...", kind: "assistant" },
+    ])).toEqual([
+      { itemId: "a", kind: "assistant", text: "Oi, mundo" },
+      { itemId: "b", kind: "reasoning", text: "pensando..." },
+    ]);
   });
 
   it("o rascunho entra na timeline como item com o id do item final, até o item chegar", () => {
