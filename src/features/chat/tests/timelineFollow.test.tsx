@@ -53,6 +53,13 @@ function installLayout(): void {
       steps.push(step);
     },
   });
+  Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
+    configurable: true,
+    value(this: HTMLElement) {
+      const top = this.hasAttribute("data-chat-turns-host") ? -scroller().scrollTop : 0;
+      return { left: 0, right: 800, top, bottom: top + 800, width: 800, height: 800, x: 0, y: top, toJSON: () => ({}) };
+    },
+  });
   globalThis.ResizeObserver = class {
     constructor(cb: () => void) { resizeCallbacks.push(cb); }
     observe() { /* nada */ }
@@ -78,6 +85,11 @@ const history: TimelineItem[] = Array.from({ length: 10 }, (_, i) => [msg("user"
 // A pessoa pede algo (abre um turno) e o agente responde com uma fala comprida: é o caso que rola suave até o fim.
 const ask = msg("user", "u-nova", "Pode continuar?");
 const reply = msg("assistant", "a-nova", "Uma resposta comprida, do tipo que ocupa a tela toda do agente.");
+const longHistory: TimelineItem[] = Array.from({ length: 120 }, (_, i) => [
+  msg("user", `virtual-u-${i}`, `Pergunta ${i}`),
+  msg("assistant", `virtual-a-${i}`, `Resposta ${i}`),
+  { kind: "turnEnd" as const, id: `virtual-e-${i}`, durationMs: 1200 },
+]).flat();
 
 const render = (items: TimelineItem[]) => act(async () => {
   root.render(<TimelineView items={items} loaded working={false} approval={null} live agentLabel="Claude Code" agentId="claude-code" />);
@@ -93,6 +105,36 @@ const grow = (px: number) => act(async () => {
 });
 
 describe("a conversa segue o fim enquanto a pessoa está nele", () => {
+  it("monta só a janela visível da timeline longa e troca a janela com a rolagem", async () => {
+    content = 30_000;
+    await render(longHistory);
+
+    const mounted = () => host.querySelectorAll("[data-virtual-turn]");
+    expect(mounted().length).toBe(11);
+    act(() => { scroller().scrollTop = 0; });
+    expect(mounted().length).toBe(6);
+    expect(mounted()[0]?.getAttribute("data-virtual-turn")).toBe("virtual-u-0");
+    expect(host.querySelector('[data-chat-virtual-spacer="bottom"]')).not.toBeNull();
+  });
+
+  it("acompanha novas respostas no fim virtualizado e preserva a posição quando a pessoa lê acima", async () => {
+    content = 30_000;
+    await render(longHistory);
+    await runAnimation();
+    expect(scroller().scrollTop).toBe(maxTop());
+
+    act(() => { scroller().scrollTop = 500; });
+    content += 580;
+    await render([...longHistory, ask, reply]);
+    await runAnimation();
+    expect(scroller().scrollTop).toBe(500);
+
+    act(() => { scroller().scrollTop = maxTop(); });
+    content += 60;
+    await grow(60);
+    expect(scroller().scrollTop).toBe(maxTop());
+  });
+
   it("uma mensagem longa do agente no fim não tira o fio do fim: o texto que chega depois continua sendo acompanhado", async () => {
     content = 2000;
     await render(history);

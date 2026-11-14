@@ -1,6 +1,6 @@
 import { applyToolCallVisibility } from "./toolCallVisibility";
 import { useChatPrefs } from "../chatPrefs";
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ChatMarkdownImageStrip, ChatMarkdownMediaIndex, ChatMessageMarkdown } from "../attachments/ChatMessageMarkdown";
@@ -39,6 +39,21 @@ const TOOL_ICON: Record<ToolKind, (p: { className?: string }) => React.JSX.Eleme
 
 /** Quanto do fim da lista conta como "estou lendo o fim": aí uma resposta nova rola sozinha. */
 const STICK_PX = 120;
+const VIRTUALIZE_AFTER_TURNS = 40;
+const VIRTUAL_OVERSCAN = 5;
+const ESTIMATED_TURN_HEIGHT = 180;
+const TURN_GAP = 16;
+
+function indexAtOffset(prefix: number[], offset: number): number {
+  let low = 0;
+  let high = Math.max(0, prefix.length - 1);
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if ((prefix[middle] ?? 0) <= offset) low = middle;
+    else high = middle - 1;
+  }
+  return Math.min(low, Math.max(0, prefix.length - 2));
+}
 
 /** Como cada fala do agente aparece: aos poucos (chegou agora) e com o cursor (ainda chegando). */
 interface RevealOf {
@@ -71,7 +86,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
+export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** Identidade local usada para abrir a busca apenas na timeline visível. */
@@ -147,6 +162,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const turnsHostRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const appliedSearchTokenRef = useRef<number | null>(null);
   const [appliedSearchToken, setAppliedSearchToken] = useState<number | null>(null);
@@ -170,6 +186,71 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
   const lastTop = useRef(0);
   const lastTurns = useRef(0);
   const lastPending = useRef(0);
+  const turnHeights = useRef(new Map<string, number>());
+  const visibleRangeRef = useRef({ start: 0, end: 20 });
+  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 20 });
+  const [heightRevision, setHeightRevision] = useState(0);
+  const virtualized = turns.length > VIRTUALIZE_AFTER_TURNS;
+  const turnPrefix = useMemo(() => {
+    const prefix = [0];
+    for (const turn of turns) prefix.push(prefix[prefix.length - 1]! + (turnHeights.current.get(turn.key) ?? ESTIMATED_TURN_HEIGHT));
+    return prefix;
+  }, [turns, heightRevision]);
+  const turnIndexByItem = useMemo(() => {
+    const indices = new Map<string, number>();
+    turns.forEach((turn, index) => {
+      if (turn.notice) indices.set(turn.notice.id, index);
+      if (turn.user) indices.set(turn.user.id, index);
+      if (turn.final) indices.set(turn.final.id, index);
+      if (turn.planItemId) indices.set(turn.planItemId, index);
+      for (const row of turn.body) {
+        if ("item" in row) indices.set(row.item.id, index);
+        if ("tools" in row) for (const item of row.tools) indices.set(item.id, index);
+      }
+    });
+    return indices;
+  }, [turns]);
+  const updateVisibleRange = useCallback((forcedIndex?: number) => {
+    const scroller = scrollRef.current;
+    const host = turnsHostRef.current;
+    if (!virtualized || !scroller || !host) return;
+    const first = forcedIndex ?? indexAtOffset(turnPrefix, Math.max(0,
+      scroller.scrollTop - (host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop)));
+    const viewport = Math.max(scroller.clientHeight, 720);
+    const last = forcedIndex ?? indexAtOffset(turnPrefix, Math.max(0,
+      scroller.scrollTop - (host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop) + viewport));
+    const next = forcedIndex === undefined
+      ? { start: Math.max(0, first - VIRTUAL_OVERSCAN), end: Math.min(turns.length, last + VIRTUAL_OVERSCAN + 1) }
+      : { start: Math.max(0, forcedIndex - VIRTUAL_OVERSCAN), end: Math.min(turns.length, forcedIndex + VIRTUAL_OVERSCAN + 1) };
+    if (next.start === visibleRangeRef.current.start && next.end === visibleRangeRef.current.end) return;
+    visibleRangeRef.current = next;
+    setVisibleRange(next);
+  }, [turnPrefix, turns.length, virtualized]);
+  const measureTurn = useCallback((index: number, key: string, height: number) => {
+    if (height <= 0) return;
+    const previous = turnHeights.current.get(key) ?? ESTIMATED_TURN_HEIGHT;
+    if (Math.abs(previous - height) < 1) return;
+    turnHeights.current.set(key, height);
+    const scroller = scrollRef.current;
+    if (scroller && index < visibleRangeRef.current.start && !stick.current) scroller.scrollTop += height - previous;
+    setHeightRevision((revision) => revision + 1);
+  }, []);
+  const scrollToTurn = useCallback((index: number) => {
+    updateVisibleRange(index);
+    const scroller = scrollRef.current;
+    const host = turnsHostRef.current;
+    if (!scroller || !host) return;
+    const hostTop = host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    scroller.scrollTop = hostTop + turnPrefix[index]! + TURN_GAP * index;
+  }, [turnPrefix, updateVisibleRange]);
+  const startIndex = virtualized ? visibleRange.start : 0;
+  const endIndex = virtualized ? Math.max(startIndex, visibleRange.end) : turns.length;
+  const topSpacer = virtualized && startIndex > 0
+    ? turnPrefix[startIndex]! + TURN_GAP * (startIndex - 1)
+    : 0;
+  const bottomSpacer = virtualized && endIndex < turns.length
+    ? turnPrefix[turns.length]! - turnPrefix[endIndex]! + TURN_GAP * (turns.length - endIndex - 1)
+    : 0;
   useEffect(() => {
     if (findToken !== null) findInputRef.current?.focus();
   }, [findToken]);
@@ -184,6 +265,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
     setFindIndex(0);
   }, [conversationKey]);
   useEffect(() => { setFindIndex(0); }, [findQuery]);
+  useLayoutEffect(() => { updateVisibleRange(); }, [updateVisibleRange, turns.length]);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -200,7 +282,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
       following.current = false;
       el.scrollTop = el.scrollHeight;
     }
-  }, [turns.length, pending.length, working, items, loaded]);
+  }, [turns.length, pending.length, working, items, loaded, heightRevision, topSpacer, bottomSpacer]);
   // O texto que aparece aos poucos cresce sem redesenhar a lista: a rolagem acompanha o tamanho,
   // se a pessoa estava no fim.
   useEffect(() => {
@@ -221,7 +303,11 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
     if (appliedSearchTokenRef.current === searchTargetToken) return;
     const frame = window.requestAnimationFrame(() => {
       const target = contentRef.current?.querySelector<HTMLElement>(`[data-chat-item-id="${CSS.escape(searchTargetId)}"]`);
-      if (!target) return;
+      if (!target) {
+        const index = turnIndexByItem.get(searchTargetId);
+        if (index !== undefined) scrollToTurn(index);
+        return;
+      }
       appliedSearchTokenRef.current = searchTargetToken;
       setAppliedSearchToken(searchTargetToken);
       stick.current = false;
@@ -229,7 +315,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
       target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [searchTargetId, searchTargetToken, loaded, turns, onSearchTargetApplied]);
+  }, [searchTargetId, searchTargetToken, loaded, turns, turnIndexByItem, scrollToTurn, visibleRange.start, visibleRange.end, onSearchTargetApplied]);
 
   useEffect(() => {
     if (!searchTargetId || searchTargetToken === null || searchTargetToken === undefined || appliedSearchToken !== searchTargetToken) return;
@@ -241,13 +327,17 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
     if (findToken === null || !activeFindId || !loaded) return;
     const frame = window.requestAnimationFrame(() => {
       const target = contentRef.current?.querySelector<HTMLElement>(`[data-chat-item-id="${CSS.escape(activeFindId)}"]`);
-      if (!target) return;
+      if (!target) {
+        const index = turnIndexByItem.get(activeFindId);
+        if (index !== undefined) scrollToTurn(index);
+        return;
+      }
       stick.current = false;
       following.current = false;
       target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [findToken, activeFindId, loaded, turns]);
+  }, [findToken, activeFindId, loaded, turns, turnIndexByItem, scrollToTurn, visibleRange.start, visibleRange.end]);
 
   const stepFind = (delta: -1 | 1) => {
     if (findMatches.length === 0) return;
@@ -266,6 +356,7 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         const top = el.scrollTop;
         const moved = top - lastTop.current;
         lastTop.current = top;
+        updateVisibleRange();
         // Enquanto a rolagem suave da própria tela desce, os eventos dela não decidem nada: com um texto alto chegando,
         // a distância do fim passa de STICK_PX no meio da animação (e ao chegar), e o fio deixava de seguir o que chega.
         if (following.current && moved >= 0) return;
@@ -321,9 +412,18 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
         {loaded && !missing && turns.length === 0 && !working && (
           <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.empty", { agent: agentLabel })}</p>
         )}
-        {turns.map((turn, i) => turn.notice
-          ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
-          : <TurnView key={turn.key} turn={turn} thinking={turn.key === thinkingKey} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />)}
+        <div ref={turnsHostRef} data-chat-turns-host="" className="flex flex-col gap-4">
+          {topSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="top" style={{ height: topSpacer, flex: "0 0 auto" }} />}
+          {turns.slice(startIndex, endIndex).map((turn, offset) => {
+            const index = startIndex + offset;
+            return <VirtualTurn key={turn.key} turnKey={turn.key} index={index} onMeasure={measureTurn}>
+              {turn.notice
+                ? <NoticeRow item={turn.notice} onResend={onResend} threadId={threadId} />
+                : <TurnView turn={turn} thinking={turn.key === thinkingKey} latest={index === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />}
+            </VirtualTurn>;
+          })}
+          {bottomSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="bottom" style={{ height: bottomSpacer, flex: "0 0 auto" }} />}
+        </div>
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} composerTarget={quoteKey} /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
@@ -346,6 +446,26 @@ export function TimelineView({ bottomInset = 0, items, loaded, missing = false, 
       {quoteKey && <SelectionComment container={() => scrollRef.current} quoteKey={quoteKey} />}
     </div>
   );
+});
+
+function VirtualTurn({ turnKey, index, onMeasure, children }: {
+  turnKey: string;
+  index: number;
+  onMeasure: (index: number, key: string, height: number) => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => onMeasure(index, turnKey, element.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [index, onMeasure, turnKey]);
+  return <div ref={ref} data-virtual-turn={turnKey}>{children}</div>;
 }
 
 function TurnView({ turn, thinking = false, latest, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */ thinking?: boolean; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
