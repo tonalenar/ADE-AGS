@@ -4,23 +4,26 @@ import { composerGutter } from "./composerLayout";
 import { useChatWidthClass } from "./chatLook";
 
 /**
- * A largura medida de um elemento (a caixa inteira, margens incluídas, que não depende do que o
- * próprio elemento põe de margem: sem laço) e a margem lateral que cabe nela.
+ * A margem lateral por faixa de largura do elemento (caixa inteira, sem depender da margem que ele
+ * próprio põe). Só muda o estado quando cruza uma das faixas do composer.
  */
 export function useColumnGutter<T extends HTMLElement>() {
   const ref = useRef<T>(null);
-  const [width, setWidth] = useState<number | null>(null);
+  const [gutter, setGutter] = useState(16);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const measure = () => setWidth(el.offsetWidth);
+    const measure = () => {
+      const next = composerGutter(el.offsetWidth);
+      setGutter((current) => current === next ? current : next);
+    };
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  return { ref, style: { paddingInline: composerGutter(width) } };
+  return { ref, style: { paddingInline: gutter } };
 }
 
 /** A largura de um elemento, medida (caixa inteira) e acompanhada por `ResizeObserver`; `null` até a primeira medida. */

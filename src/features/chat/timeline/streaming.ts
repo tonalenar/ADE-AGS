@@ -38,7 +38,33 @@ export function appendDelta(drafts: Draft[], input: DeltaInput): Draft[] {
 
 /** Vários pedaços de uma vez (um quadro). */
 export function appendDeltas(drafts: Draft[], inputs: DeltaInput[]): Draft[] {
-  return inputs.reduce(appendDelta, drafts);
+  if (inputs.length === 0) return drafts;
+
+  // Um lote pode trazer dezenas de pedaços do mesmo item. Acumular um por um copia o array e a
+  // string a cada token; primeiro juntamos por id e só copiamos cada rascunho uma vez por quadro.
+  const positions = new Map(drafts.map((draft, index) => [draft.itemId, index]));
+  const merged = new Map<string, { kind: DraftKind; chunks: string[] }>();
+  for (const input of inputs) {
+    if (!input.itemId || !input.delta) continue;
+    const current = merged.get(input.itemId);
+    if (current) current.chunks.push(input.delta);
+    else merged.set(input.itemId, { kind: input.kind ?? "assistant", chunks: [input.delta] });
+  }
+  if (merged.size === 0) return drafts;
+
+  const next = drafts.slice();
+  for (const [itemId, update] of merged) {
+    const text = update.chunks.join("");
+    const at = positions.get(itemId);
+    if (at === undefined) {
+      positions.set(itemId, next.length);
+      next.push({ itemId, kind: update.kind, text });
+    } else {
+      const previous = next[at]!;
+      next[at] = { ...previous, text: previous.text + text };
+    }
+  }
+  return next;
 }
 
 /**

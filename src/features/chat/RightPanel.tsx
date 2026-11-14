@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FilesView } from "@/features/explorer/FilesView";
@@ -65,6 +65,7 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   // A aba à vista: o `panel` é a superfície dela (o `reconcileColumn` garante que existe uma aba para ele).
   const activeTab = useChatStore((s) => s.columnTabs.find((tab) => tab.id === s.columnActive && tab.kind === s.panel) ?? null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
   useShareDevices();
   // O atalho do Time (e quem mais pedir) leva o foco para dentro do painel.
   useEffect(() => { if (panelFocus > 0) contentRef.current?.focus(); }, [panelFocus]);
@@ -80,11 +81,12 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
   const winControls = DESKTOP_OS === "windows" || DESKTOP_OS === "linux";
   return (
     <aside aria-label={t("chat.panel.label")}
-      style={maximized ? undefined : { width: panelWidth }}
+      ref={panelRef}
+      style={maximized ? undefined : ({ width: "var(--chat-panel-width)", "--chat-panel-width": `${panelWidth}px` } as CSSProperties)}
       // A coluna encolhe até 280 px: numa janela de ~1000 px, sidebar, conversa (440 px no mínimo, com o cabeçalho
       // inteiro) e painel cabem sem nada passar da borda da janela (com 360 px, o terminal e o simulador eram cortados).
       className={`${maximized ? "flex-1" : "shrink"} relative min-w-[280px] h-full flex flex-col border-l border-gray-200 dark:border-white/[0.08] bg-white dark:bg-surface-deep`}>
-      {!maximized && <ResizeHandle />}
+      {!maximized && <ResizeHandle panelRef={panelRef} />}
       {winControls && <div className="absolute top-0 right-0 z-20"><WindowControls /></div>}
       {/* A barra de abas da coluna (como a do T3 Code): abas, "+", expandir, painel inferior e recolher. */}
       <ColumnTabBar available={available} drawerTabId={drawerTabId} reserveWindowControls={winControls}
@@ -118,13 +120,18 @@ export function RightPanel({ tabId, cwd, project, conversation = null, cards = [
 }
 
 /**
- * A borda esquerda do painel: arrastar muda a largura (como a divisória do Claude Code); duplo clique
- * volta à padrão. O arrasto segue o ponteiro capturado, então passar por cima do simulador ou do
- * navegador (que são nativos) não o interrompe.
+ * A borda esquerda do painel: durante o arrasto, a largura muda pela variável CSS no máximo uma vez
+ * por quadro; Zustand e a preferência só recebem o valor final. O ponteiro capturado continua valendo
+ * sobre o simulador e o navegador nativos.
  */
-function ResizeHandle() {
+export function ResizeHandle({ panelRef }: { panelRef: RefObject<HTMLElement | null> }) {
   const { t } = useTranslation();
-  const [dragging, setDragging] = useState(false);
+  const dragging = useRef(false);
+  const pendingWidth = useRef<number | null>(null);
+  const frame = useRef<number | null>(null);
+  useEffect(() => () => {
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+  }, []);
   // O espaço que painel e conversa dividem: da borda esquerda da conversa (o vizinho do painel; a
   // sidebar de conversas fica de fora) até a direita do painel.
   const room = (el: Element) => {
@@ -139,21 +146,48 @@ function ResizeHandle() {
     if (e.button !== 0) return;
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
-    setDragging(true);
+    dragging.current = true;
+    e.currentTarget.dataset.resizing = "true";
   };
   const widthAt = (e: React.PointerEvent<HTMLDivElement>) => {
     const r = room(e.currentTarget);
     return r ? clampPanelWidth(r.right - e.clientX, r.width) : null;
   };
+  const applyWidth = (width: number) => panelRef.current?.style.setProperty("--chat-panel-width", `${width}px`);
+  const onMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    const width = widthAt(e);
+    if (width === null) return;
+    pendingWidth.current = width;
+    if (frame.current !== null) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      const next = pendingWidth.current;
+      if (next !== null) applyWidth(next);
+    });
+  };
+  const onUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging.current) return;
+    dragging.current = false;
+    e.currentTarget.removeAttribute("data-resizing");
+    if (frame.current !== null) cancelAnimationFrame(frame.current);
+    frame.current = null;
+    const width = widthAt(e) ?? pendingWidth.current;
+    pendingWidth.current = null;
+    if (width !== null) {
+      applyWidth(width);
+      setPanelWidth(width, true);
+    }
+  };
   return (
     <div role="separator" aria-orientation="vertical" aria-label={t("chat.panel.resize")} title={t("chat.panel.resize")}
       onPointerDown={onDown}
-      onPointerMove={(e) => { if (!dragging) return; const w = widthAt(e); if (w !== null) setPanelWidth(w); }}
-      onPointerUp={(e) => { if (!dragging) return; setDragging(false); const w = widthAt(e); if (w !== null) setPanelWidth(w, true); }}
+      onPointerMove={onMove}
+      onPointerUp={onUp}
+      onPointerCancel={onUp}
       onDoubleClick={(e) => { const r = room(e.currentTarget); setPanelWidth(clampPanelWidth(PANEL_W.initial, r?.width ?? Infinity), true); }}
       className="group absolute -left-[3px] top-0 bottom-0 z-30 w-[6px] cursor-col-resize">
-      <span aria-hidden="true" className={`absolute left-[2px] top-0 bottom-0 w-[2px] transition-colors
-        ${dragging ? "bg-accent-500" : "bg-transparent group-hover:bg-accent-500/60"}`} />
+      <span aria-hidden="true" className="absolute left-[2px] top-0 bottom-0 w-[2px] bg-transparent transition-colors group-hover:bg-accent-500/60 group-data-[resizing=true]:bg-accent-500" />
     </div>
   );
 }

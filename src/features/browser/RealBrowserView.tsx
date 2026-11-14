@@ -6,10 +6,12 @@ import { boxOf, clippingAncestors, COVER_MS, coversOf } from "./nativeSurface";
 import { miniBrowserZoom, placeOf, realBrowserClose, realBrowserOpen, realBrowserPlace, samePlace, type Box, type Place } from "./realBrowser";
 import { setChatBrowserMiniHover, useChatStore } from "@/features/chat/store";
 
+const PLACE_SYNC_INTERVAL_MS = 32;
+
 /**
  * O lugar do navegador nativo do Portal. A página é um WebView2 por cima da janela (ver `real_browser`): este
- * elemento só reserva o espaço e, a cada quadro, diz ao navegador onde o Portal está, o que dele está à vista e o
- * que do app está por cima — o mesmo que o T3 Code faz com o `[data-browser-surface-slot]`. Mouse e teclado vão
+ * elemento só reserva o espaço e acompanha onde o Portal está, o que dele está à vista e o que do app está por
+ * cima; durante redimensionamentos, as mudanças nativas são coalescidas em até uma chamada a cada 32 ms. Mouse e teclado vão
  * direto para a página.
  *
  * `url` só vale na abertura: depois quem navega é `realBrowserNavigate` (a barra, os botões, os agentes). A URL que
@@ -39,8 +41,8 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
   onError: (message: string) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
-  const chatBrowser = useChatStore((state) => state.browser);
-  const floatingRect = useChatStore((state) => state.browserFloatRect);
+  const chatBrowser = useChatStore((state) => floatingPreview ? state.browser : null);
+  const floatingRect = useChatStore((state) => floatingPreview ? state.browserFloatRect : null);
   const sourceRect = chatBrowser?.viewId === viewId ? chatBrowser.rect : null;
   const miniZoom = miniBrowserZoom(
     zoom,
@@ -66,6 +68,8 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     let covers: Box[] = [];
     let coveredAt = 0;
     let frame = 0;
+    let placeInFlight = false;
+    let lastPlaceAt = Number.NEGATIVE_INFINITY;
 
     const measure = (): Place => {
       const rect = boxOf(el);
@@ -92,9 +96,12 @@ export function RealBrowserView({ viewId, url, zoom, script, profileId = "defaul
     const tick = () => {
       if (opened) {
         const place = measure();
-        if (!samePlace(sent, place)) {
+        const now = performance.now();
+        if (!samePlace(sent, place) && !placeInFlight && now - lastPlaceAt >= PLACE_SYNC_INTERVAL_MS) {
           sent = place;
-          realBrowserPlace(viewId, place).catch(() => undefined);
+          lastPlaceAt = now;
+          placeInFlight = true;
+          realBrowserPlace(viewId, place).catch(() => undefined).finally(() => { placeInFlight = false; });
         }
       }
       frame = requestAnimationFrame(tick);
