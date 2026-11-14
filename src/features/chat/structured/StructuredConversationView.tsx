@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
@@ -129,11 +129,12 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
     }
     : null;
   // «Reenviar» uma mensagem que saiu da fila do agente sem ser enviada.
-  const resend = (text: string) => {
+  const resend = useCallback((text: string) => {
     const mark = addPending(key, text, items);
     sendToThread(thread.id, text, () => dropPending(key, mark));
-  };
-  const answer = (choice: string) => { if (request) answerRequest(thread.id, request.id, choice); };
+  }, [items, key, thread.id]);
+  const answer = useCallback((choice: string) => { if (request) answerRequest(thread.id, request.id, choice); }, [request, thread.id]);
+  const timelineAfter = useMemo(() => side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>, [side, card, cards, thread.id]);
   const handleGoalAction = (action: "show" | "set" | "pause" | "resume" | "clear", objective?: string) => {
     void runThreadGoalAction(thread.id, action, objective);
   };
@@ -300,7 +301,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
           streaming={streaming} agentLabel={card.agentLabel} agentId={thread.agentId} pending={pending} threadId={thread.id}
           conversationKey={key} searchTargetId={searchTarget?.itemId} searchTargetToken={searchTarget?.token} onSearchTargetApplied={clearThreadSearchJump}
           onAnswer={question ? answer : undefined} onResend={resend}
-          after={side ? null : <><TeamThreadFeed conversation={card} cards={cards} /><HarnessRunFeed threadId={thread.id} /></>} />
+          after={timelineAfter} />
       )} />
       {switchTo && (
         <AgentSwitchDialog from={card.agentLabel} to={switchable.find((a) => a.id === switchTo.agentId)?.label ?? switchTo.agentId} busy={switching} error={switchError} noApproval={lacksApproval(switchApprovalCapability.support, thread.access, isLocalAcpAgent(switchTo.agentId))}
