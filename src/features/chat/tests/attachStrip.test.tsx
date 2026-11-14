@@ -302,3 +302,45 @@ describe("o arrasto nativo para a coluna do chat", () => {
     expect([insideRect(r, 0, 0), insideRect(r, 10, 10), insideRect(r, 11, 5)]).toEqual([true, true, false]);
   });
 });
+
+describe("vídeos no chat e no visualizador", () => {
+  const VIDEO: ShownAttachment = { path: "/p/demo.mov", name: "demo.mov", kind: "file", size: 2048 };
+
+  it("anexo de vídeo aparece como miniatura com elemento <video> (primeiro quadro) e abre no Lightbox ao clicar", async () => {
+    await act(async () => { root.render(<AttachmentStrip items={[VIDEO]} />); });
+    const thumbVideo = host.querySelector("video") as HTMLVideoElement | null;
+    expect(thumbVideo).not.toBeNull();
+    Object.defineProperty(thumbVideo, "duration", { configurable: true, value: 8 });
+    let time = 0;
+    Object.defineProperty(thumbVideo, "currentTime", { configurable: true, get: () => time, set: (v: number) => { time = v; } });
+    await act(async () => { thumbVideo!.dispatchEvent(new Event("loadedmetadata")); });
+    expect(time).toBeCloseTo(0.1);
+
+    await click(Array.from(host.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === 'chat.attach.lightbox.openVideo{"name":"demo.mov"}') ?? null);
+    expect(dialog()).not.toBeNull();
+    expect(dialog()!.querySelector("video")).not.toBeNull();
+  });
+
+  it("vídeo citado em Markdown na conversa ganha miniatura e abre no Lightbox", async () => {
+    await act(async () => {
+      root.render(<MediaViewerProvider target="tab-1" cwd="/p"><AttachCwdContext.Provider value="/p">
+        <ChatMessageMarkdown content={"Veja a gravação em `videos/demo.mp4`."} />
+      </AttachCwdContext.Provider></MediaViewerProvider>);
+      await Promise.resolve();
+    });
+    const thumbVideo = host.querySelector("video");
+    expect(thumbVideo).not.toBeNull();
+    await click(Array.from(host.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === 'chat.attach.lightbox.openVideo{"name":"demo.mp4"}') ?? null);
+    expect(dialog()).not.toBeNull();
+    expect(dialog()!.querySelector("video")).not.toBeNull();
+  });
+
+  it("Lightbox mostra aviso e ação para abrir no app padrão se o vídeo falhar ao carregar", async () => {
+    await act(async () => { root.render(<AttachmentStrip items={[VIDEO]} />); });
+    await click(Array.from(host.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === 'chat.attach.lightbox.openVideo{"name":"demo.mov"}') ?? null);
+    const player = dialog()!.querySelector("video") as HTMLVideoElement;
+    expect(player).not.toBeNull();
+    await act(async () => { player.dispatchEvent(new Event("error")); });
+    expect(dialog()!.querySelector("[role=alert]")?.textContent).toContain("chat.attach.lightbox.videoError");
+  });
+});

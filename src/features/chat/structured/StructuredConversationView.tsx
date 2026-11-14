@@ -26,7 +26,7 @@ import { unsnoozeConversation } from "../shelf";
 import { queueOrSend, sendNow } from "../queueRunner";
 import { ContextMeter } from "../autocompact/ContextMeter";
 import { contextUsageOf, isCompacting } from "../autocompact/model";
-import { clearThreadSearchJump, unqueueMessage, updateQueuedMessage, useChatStore } from "../store";
+import { clearThreadSearchJump, requestTimelineFollow, unqueueMessage, updateQueuedMessage, useChatStore } from "../store";
 import { useTeamComposer } from "../team/TeamComposer";
 import { TeamThreadFeed } from "../team/TeamThreadFeed";
 import { HarnessRunFeed } from "./HarnessRunFeed";
@@ -212,7 +212,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             ? t(queueHintKey(thread.agentId, followUpBehavior, steerCapability.support, interruptCapability.support), { key: QUEUE_KEY })
             : team?.placeholder ?? (side ? t("chat.sideChat.placeholder") : t("chat.composer.reply"))}
           onSubmit={async (text, attachments) => {
-            if (question) { answer(text); return; }
+            if (question) { requestTimelineFollow(key); answer(text); return; }
             const planCommand = extractSlashCommand(text, "plan");
             if (planCommand.found && text.trim().toLowerCase() === "/plan" && attachments.length === 0) {
               if (locked) {
@@ -228,7 +228,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             if (attachments.length === 0 && /^\/clear\s*$/i.test(text.trim())) { void clearThreadContext(thread.id); return; }
             if (attachments.length === 0) {
               const command = /^\/(compact|goal)(?:\s+([\s\S]*))?\s*$/i.exec(text.trim());
-              if (command?.[1]?.toLowerCase() === "compact" && compactCapability.available) { void compactThread(thread.id, command[2]?.trim() || undefined); return; }
+              if (command?.[1]?.toLowerCase() === "compact" && compactCapability.available) { requestTimelineFollow(key); void compactThread(thread.id, command[2]?.trim() || undefined); return; }
               if (command?.[1]?.toLowerCase() === "goal" && goalCapability.available) {
                 const argument = command[2]?.trim() ?? "";
                 if (!argument || /^edit$/i.test(argument)) { handleGoalAction("show"); return; }
@@ -243,6 +243,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             if (prepared === null) return;
             // O caminho de cada anexo vai no texto (bloco `[Anexos]`) e as imagens também em linha, onde o motor aceita.
             const sent = messageFor(key, prepared.text, attachments);
+            requestTimelineFollow(key);
             const deliver = () => {
               // A mensagem aparece na hora; se o backend recusar, sai do fio e o erro aparece no aviso.
               const mark = sent.text.trim() ? addPending(key, sent.text.trim(), items) : null;
@@ -274,6 +275,7 @@ export function StructuredConversationView({ card, thread, cards = [], side }: {
             if (prepared !== null) {
               const queued = messageFor(key, prepared.text, attachments).text;
               if (queued.trim()) unsnoozeConversation(key);
+              requestTimelineFollow(key);
               queueOrSend(key, queued);
               prepared.onSent();
             }

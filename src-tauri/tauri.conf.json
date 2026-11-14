@@ -29,9 +29,9 @@
         "default-src": "'self'",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data: blob: https: http://localhost:* http://127.0.0.1:*",
+        "img-src": "'self' data: blob: asset: http://asset.localhost https://asset.localhost https: http://localhost:* http://127.0.0.1:*",
         "font-src": "'self' data:",
-        "media-src": "'self' data: blob:",
+        "media-src": "'self' data: blob: asset: http://asset.localhost https://asset.localhost",
         "connect-src": "'self' ipc: http://ipc.localhost",
         "frame-src": "http:",
         "worker-src": "'self' blob:",
@@ -40,7 +40,34 @@
         "form-action": "'none'"
       },
       "devCsp": null,
-      "dangerousDisableAssetCspModification": ["style-src"]
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ],
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": [
+            "**/*.mp4",
+            "/**/*.mp4",
+            "**/*.MP4",
+            "/**/*.MP4",
+            "**/*.mov",
+            "/**/*.mov",
+            "**/*.MOV",
+            "/**/*.MOV",
+            "**/*.m4v",
+            "/**/*.m4v",
+            "**/*.webm",
+            "/**/*.webm"
+          ],
+          "deny": [
+            "$HOME/.ssh/**",
+            "$HOME/.ags/**",
+            "$HOME/.gnupg/**"
+          ],
+          "requireLiteralLeadingDot": false
+        }
+      }
     },
     "macOSPrivateApi": true
   },

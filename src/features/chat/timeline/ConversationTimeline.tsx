@@ -13,6 +13,7 @@ import { useChatWidthClass } from "../chatLook";
 import { PlanCard } from "../LiveActivity";
 import { McpAppFrame } from "../mcpApps/McpAppFrame";
 import { appResourceOf, mcpAppServerOf } from "../mcpApps/mcpAppResource";
+import { isCompacting } from "../autocompact/model";
 import { clearTimelineFind, setRightPanel, useChatStore } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
 import { renderChatCodeBlock } from "./CodeBlockFrame";
@@ -37,8 +38,21 @@ const TOOL_ICON: Record<ToolKind, (p: { className?: string }) => React.JSX.Eleme
   web: GlobeIcon, task: BotIcon, question: QuestionIcon, todo: ListIcon, other: WrenchIcon,
 };
 
-/** Quanto do fim da lista conta como "estou lendo o fim": aí uma resposta nova rola sozinha. */
-const STICK_PX = 120;
+/** Quanto do fim da lista conta como "estou lendo o fim": alinhado ao limiar do T3 Code (40 px). */
+const STICK_PX = 40;
+
+/** Rolar para cima dentro de um bloco interno (código ou saída longa) não solta o auto-scroll da conversa. */
+function hasInnerScrollableUp(target: EventTarget | null, scroller: HTMLElement): boolean {
+  let node = target instanceof Element ? target : null;
+  while (node && node !== scroller) {
+    if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight + 1 && node.scrollTop > 0) {
+      const overflowY = getComputedStyle(node).overflowY;
+      if (overflowY === "auto" || overflowY === "scroll") return true;
+    }
+    node = node.parentElement;
+  }
+  return false;
+}
 
 /** Como cada fala do agente aparece: aos poucos (chegou agora) e com o cursor (ainda chegando). */
 interface RevealOf {
@@ -119,8 +133,9 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const allTurns = useMemo(() => timelineTurns(items), [items]);
   const markdownMediaContent = useMemo(() => items.flatMap((item) => [item.text ?? "", item.output ?? ""]).filter(Boolean), [items]);
   const turns = useMemo(() => applyToolCallVisibility(allTurns, toolVisibility), [allTurns, toolVisibility]);
-  // O «Pensando…» com brilho: só enquanto o agente trabalha, sem pedido de aprovação esperando (aí ninguém está pensando).
-  const thinkingKey = working && approval === null && !approvalCard && !approvalDocked ? thinkingTurnKey(allTurns) : null;
+  const compacting = useMemo(() => isCompacting(items, Date.now()), [items]);
+  // O «Pensando…» com brilho: só enquanto o agente trabalha, fora de compactação e sem pedido de aprovação esperando.
+  const thinkingKey = working && !compacting && approval === null && !approvalCard && !approvalDocked ? thinkingTurnKey(allTurns) : null;
   const width = useChatWidthClass();
   const startedAt = useMemo(() => openTurnStart(items), [items]);
 
@@ -163,13 +178,24 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const activeFindIndex = findMatches.length > 0 ? Math.min(findIndex, findMatches.length - 1) : 0;
   const activeFindId = findMatches[activeFindIndex]?.id ?? null;
   const highlightId = activeFindId ?? searchTargetId;
-  // A pessoa está no fim e quer seguir o que chega. Só a rolagem dela muda isso (ver `onScroll`).
+  const followNonce = useChatStore((s) => (conversationKey ? (s.timelineFollowNonce[conversationKey] ?? 0) : 0));
+  // A pessoa está no fim e quer seguir o que chega. Só a rolagem dela muda isso (ver `onWheel` / `onScroll`).
   const stick = useRef(true);
   // A rolagem suave que esta tela mandou ainda não foi interrompida pela pessoa (ver `onScroll`).
   const following = useRef(false);
+  // Topo aplicado programaticamente por `snapToBottom`: evita que o `scroll` assíncrono no WebKit solte o fio se o texto crescer antes do evento.
+  const programmaticTop = useRef<number | null>(null);
   const lastTop = useRef(0);
   const lastTurns = useRef(0);
   const lastPending = useRef(0);
+  const lastFollowNonce = useRef(0);
+  const snapToBottom = (el: HTMLDivElement) => {
+    const target = Math.max(0, el.scrollHeight - el.clientHeight);
+    following.current = false;
+    programmaticTop.current = target;
+    el.scrollTop = target;
+    lastTop.current = el.scrollTop;
+  };
   useEffect(() => {
     if (findToken !== null) findInputRef.current?.focus();
   }, [findToken]);
@@ -189,18 +215,21 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     if (!el) return;
     // Conta o que já foi visto mesmo quando a pessoa está lendo lá em cima: ao voltar ao fim, só o que chegou depois é novo.
     const grew = turns.length > lastTurns.current || pending.length > lastPending.current;
+    const sent = pending.length > lastPending.current || followNonce > lastFollowNonce.current;
     lastTurns.current = turns.length;
     lastPending.current = pending.length;
+    lastFollowNonce.current = followNonce;
+    if (sent) stick.current = true;
     if (!stick.current) return;
     // Mensagem nova no fim: rola suave; texto que só cresce: acompanha sem animar.
-    if (grew && loaded && !prefersReducedMotion() && typeof el.scrollTo === "function") {
+    if ((grew || sent) && loaded && !prefersReducedMotion() && typeof el.scrollTo === "function") {
       following.current = true;
+      programmaticTop.current = null;
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     } else {
-      following.current = false;
-      el.scrollTop = el.scrollHeight;
+      snapToBottom(el);
     }
-  }, [turns.length, pending.length, working, items, loaded]);
+  }, [turns.length, pending.length, working, items, loaded, bottomInset, followNonce]);
   // O texto que aparece aos poucos cresce sem redesenhar a lista: a rolagem acompanha o tamanho,
   // se a pessoa estava no fim.
   useEffect(() => {
@@ -209,8 +238,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     if (!el || !content || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
       if (!stick.current) return;
-      following.current = false;
-      el.scrollTop = el.scrollHeight;
+      snapToBottom(el);
     });
     observer.observe(content);
     return () => observer.disconnect();
@@ -261,17 +289,35 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
 
   return (
     <div ref={scrollRef} className="flex-1 min-h-0 cc-scroll-hidden"
+      onWheel={(e) => {
+        if (e.deltaY < 0 && !hasInnerScrollableUp(e.target, e.currentTarget) && e.currentTarget.scrollTop > 0) {
+          following.current = false;
+          programmaticTop.current = null;
+          stick.current = false;
+        }
+      }}
       onScroll={(e) => {
         const el = e.currentTarget;
         const top = el.scrollTop;
         const moved = top - lastTop.current;
         lastTop.current = top;
-        // Enquanto a rolagem suave da própria tela desce, os eventos dela não decidem nada: com um texto alto chegando,
-        // a distância do fim passa de STICK_PX no meio da animação (e ao chegar), e o fio deixava de seguir o que chega.
-        if (following.current && moved >= 0) return;
+        const distance = el.scrollHeight - top - el.clientHeight;
+        // Enquanto a rolagem suave da própria tela desce, os eventos dela não decidem nada até encostar no fim.
+        if (following.current && moved >= 0) {
+          if (distance <= 2) following.current = false;
+          return;
+        }
+        // Ignora o `scroll` disparado pelo próprio `snapToBottom` e alcança o novo fim se o texto já cresceu nesse meio-tempo.
+        if (programmaticTop.current !== null && Math.abs(top - programmaticTop.current) <= 2) {
+          programmaticTop.current = null;
+          if (stick.current && distance > 2) snapToBottom(el);
+          return;
+        }
         // Rolar para cima (a pessoa lendo) solta o fio; voltar ao fim, de novo.
         following.current = false;
-        stick.current = el.scrollHeight - top - el.clientHeight < STICK_PX;
+        programmaticTop.current = null;
+        if (moved < 0) stick.current = distance <= 2;
+        else stick.current = distance < STICK_PX;
       }}>
       <RevealContext.Provider value={reveal}>
       <AnswerContext.Provider value={onAnswer ?? null}>
@@ -338,7 +384,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
             )}
           </div>
         )}
-        {working && !live && <WorkingLine since={startedAt} waiting={approval !== null || approvalDocked} />}
+        {working && !compacting && !live && <WorkingLine since={startedAt} waiting={approval !== null || approvalDocked} />}
         {after}
       </div>
       </AnswerContext.Provider>
