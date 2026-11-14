@@ -49,18 +49,17 @@ fn blocks_open_arg(arg: &str) -> bool {
         || lower.contains("devicehub.app")
 }
 
-/// `ps -ax -o pid=,command=`. Só o executável de dentro do `DeviceHub.app`.
-/// O chamariz em `bin/DeviceHub` não entra.
-pub fn apple_device_hub_pids(ps: &str) -> Vec<i32> {
-    ps.lines()
-        .filter_map(|line| {
-            let line = line.trim();
-            if !line.contains("DeviceHub.app/Contents/MacOS/DeviceHub") {
-                return None;
-            }
-            let pid = line.split_whitespace().next()?.parse::<i32>().ok()?;
-            (pid > 1).then_some(pid)
-        })
+/// Reconhece só o executável dentro do bundle da Apple; o chamariz da ADE não entra.
+fn is_apple_device_hub_path(path: &str) -> bool {
+    path.ends_with("/DeviceHub.app/Contents/MacOS/DeviceHub")
+}
+
+fn apple_device_hub_pids_from_paths(
+    processes: impl IntoIterator<Item = (i32, String)>,
+) -> Vec<i32> {
+    processes
+        .into_iter()
+        .filter_map(|(pid, path)| (pid > 1 && is_apple_device_hub_path(&path)).then_some(pid))
         .collect()
 }
 
@@ -309,22 +308,59 @@ fn spawn_watcher() {
 
 #[cfg(target_os = "macos")]
 fn dismiss_apple_device_hub() {
-    let mut cmd = crate::util::spawn::hidden_command("ps");
-    cmd.args(["-ax", "-o", "pid=,command="]);
-    let Ok(output) = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(3)) else {
-        return;
-    };
-    if !output.status.success() {
-        return;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    for pid in apple_device_hub_pids(&text) {
+    for pid in apple_device_hub_pids() {
         // SIGKILL, não SIGTERM: ao sair de forma limpa o Device Hub desliga os simuladores.
         let rc = unsafe { libc::kill(pid, libc::SIGKILL) };
         if rc == 0 {
             eprintln!("[ade-ags] fechei o Device Hub (pid {pid}); o simulador continua ligado");
         }
     }
+}
+
+/// Consulta os processos pelo libproc do macOS, sem criar um `ps` a cada ciclo do watcher.
+#[cfg(target_os = "macos")]
+fn apple_device_hub_pids() -> Vec<i32> {
+    use std::mem::size_of;
+
+    // PROC_ALL_PIDS em <libproc.h>.
+    const PROC_ALL_PIDS: u32 = 1;
+    let required = unsafe { libc::proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
+    if required <= 0 {
+        return Vec::new();
+    }
+
+    // Reserva espaço extra para processos iniciados entre as duas chamadas.
+    let pid_size = size_of::<libc::pid_t>();
+    let capacity = (required as usize).saturating_add(1024 * pid_size);
+    let mut pids = vec![0 as libc::pid_t; capacity / pid_size];
+    let byte_count = unsafe {
+        libc::proc_listpids(
+            PROC_ALL_PIDS,
+            0,
+            pids.as_mut_ptr().cast(),
+            capacity.min(i32::MAX as usize) as i32,
+        )
+    };
+    if byte_count <= 0 {
+        return Vec::new();
+    }
+    pids.truncate((byte_count as usize / pid_size).min(pids.len()));
+
+    let processes = pids.into_iter().filter_map(|pid| {
+        if pid <= 1 {
+            return None;
+        }
+        let mut path = [0_u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let length =
+            unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+        (length > 0).then(|| {
+            (
+                pid,
+                String::from_utf8_lossy(&path[..length as usize]).into_owned(),
+            )
+        })
+    });
+    apple_device_hub_pids_from_paths(processes)
 }
 
 #[cfg(target_os = "macos")]
@@ -376,13 +412,37 @@ mod tests {
 
     #[test]
     fn o_pid_do_app_nao_pega_o_chamariz() {
-        let ps = "\
-  12 /Applications/Xcode.app/Contents/Applications/DeviceHub.app/Contents/MacOS/DeviceHub
-  99 /Users/x/.ags/bin/DeviceHub
-  1 /Applications/Xcode.app/Contents/Applications/DeviceHub.app/Contents/MacOS/DeviceHub
-  sem-pid /Applications/Xcode.app/Contents/Applications/DeviceHub.app/Contents/MacOS/DeviceHub
-";
-        assert_eq!(apple_device_hub_pids(ps), vec![12]);
+        let processes = [
+            (
+                12,
+                "/Applications/Xcode.app/Contents/Applications/DeviceHub.app/Contents/MacOS/DeviceHub",
+            ),
+            (99, "/Users/x/.ags/bin/DeviceHub"),
+            (
+                1,
+                "/Applications/Xcode.app/Contents/Applications/DeviceHub.app/Contents/MacOS/DeviceHub",
+            ),
+            (23, "/tmp/DeviceHub.app/Contents/MacOS/DeviceHub-helper"),
+        ];
+        let paths = processes
+            .into_iter()
+            .map(|(pid, path)| (pid, path.to_string()));
+        assert_eq!(apple_device_hub_pids_from_paths(paths), vec![12]);
+    }
+
+    #[test]
+    fn watcher_varre_processos_sem_criar_um_ps() {
+        let source = include_str!("mod.rs");
+        let watcher_scan = source
+            .split("fn dismiss_apple_device_hub()")
+            .nth(1)
+            .unwrap()
+            .split("#[cfg(target_os = \"macos\")]\nfn apple_device_hub_pids()")
+            .next()
+            .unwrap();
+        assert!(watcher_scan.contains("apple_device_hub_pids()"));
+        assert!(!watcher_scan.contains("hidden_command(\"ps\")"));
+        assert!(source.contains("libc::proc_listpids("));
     }
 
     #[test]
