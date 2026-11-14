@@ -28,7 +28,15 @@ export interface SelectionLike {
   getRangeAt: (index: number) => {
     getBoundingClientRect: () => Rect | DOMRect;
     getClientRects?: () => DOMRectList | ArrayLike<Rect | DOMRect>;
+    cloneRange?: () => Range;
   };
+}
+
+/** Referência ao trecho original na DOM para ancorar o popover de comentário ao lado da seleção. */
+export interface QuoteSourceAnchor {
+  source: Element;
+  range: Range;
+  rect: Rect;
 }
 
 export interface SelectionTarget {
@@ -38,6 +46,10 @@ export interface SelectionTarget {
   source?: string;
   /** Item da timeline onde a seleção começou e terminou; só vale dentro da mesma mensagem. */
   originItemId?: string;
+  /** Elemento citável `[data-quotable]` onde a seleção foi feita. */
+  sourceElement?: Element;
+  /** Intervalo clonado da seleção para reposicionar o editor enquanto a fonte existir. */
+  range?: Range;
 }
 
 const asElement = (node: Node | null): Element | null =>
@@ -71,6 +83,57 @@ export function isSelectionRectVisible(rect: ClipRect, clips: readonly ClipRect[
     bottom = Math.min(bottom, clip.bottom);
   }
   return right > left && bottom > top;
+}
+
+/**
+ * Restringe o retângulo da seleção à largura da mensagem fonte (ex.: blocos de código ou tabelas
+ * com rolagem horizontal, onde o texto citado pode terminar além da borda visível). Pura.
+ */
+export function clampAnchorRectToSource(rect: Rect, sourceBounds: Rect): Rect {
+  const left = Math.min(Math.max(rect.left, sourceBounds.left), sourceBounds.right);
+  const right = Math.max(Math.min(rect.right, sourceBounds.right), left);
+  return {
+    left,
+    top: rect.top,
+    right,
+    bottom: rect.bottom,
+    width: right - left,
+    height: rect.height,
+  };
+}
+
+/**
+ * Calcula as coordenadas do popover de comentário alinhado à borda direita (`align="end"`)
+ * abaixo da seleção (`preferSide="bottom"`) ou acima do chip (`preferSide="top"`), espelhando o T3 Code. Pura.
+ */
+export function citationCommentCoordinates(
+  anchor: Rect | null,
+  width: number,
+  height: number,
+  preferSide: "bottom" | "top",
+  viewport: { width: number; height: number },
+): { left: number; top: number } {
+  const margin = 8;
+  const sideOffset = 6;
+  if (!anchor || (anchor.width === 0 && anchor.height === 0)) {
+    return {
+      left: Math.max(margin, (viewport.width - width) / 2),
+      top: Math.max(margin, Math.min(140, viewport.height - height - margin)),
+    };
+  }
+  const left = Math.max(margin, Math.min(anchor.right - width, viewport.width - width - margin));
+  const fitsBottom = anchor.bottom + sideOffset + height <= viewport.height - margin;
+  const fitsTop = anchor.top - sideOffset - height >= margin;
+  const rawTop =
+    preferSide === "bottom"
+      ? fitsBottom || !fitsTop
+        ? anchor.bottom + sideOffset
+        : anchor.top - sideOffset - height
+      : fitsTop || !fitsBottom
+        ? anchor.top - sideOffset - height
+        : anchor.bottom + sideOffset;
+  const top = Math.max(margin, Math.min(rawTop, viewport.height - height - margin));
+  return { left, top };
 }
 
 /** Calcula a posição do botão flutuante logo abaixo do fim da seleção, limitada ao contêiner e à janela. Pura. */
@@ -171,7 +234,17 @@ export function selectionTarget(selection: SelectionLike | null, container: Elem
   const anchorItemId = quoteItemId(anchorNode);
   const focusItemId = quoteItemId(focusNode);
   const originItemId = anchorItemId && anchorItemId === focusItemId ? anchorItemId : undefined;
-  return { text, source, ...(originItemId ? { originItemId } : {}), rect: lastRect };
+  const sourceElement = asElement(anchorNode)?.closest("[data-quotable]") ?? undefined;
+  const clonedRange =
+    typeof range.cloneRange === "function" ? range.cloneRange() : (range as unknown as Range);
+  return {
+    text,
+    source,
+    ...(originItemId ? { originItemId } : {}),
+    ...(sourceElement ? { sourceElement } : {}),
+    range: clonedRange,
+    rect: lastRect,
+  };
 }
 
 /** Observa gestos de seleção, rolagem, cliques externos, foco e Esc (espelha `observeSelectionActions` do T3 Code). */

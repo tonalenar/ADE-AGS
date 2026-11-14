@@ -32,6 +32,8 @@ import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, 
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
+import { formatClock } from "@/shared/timeFormat";
+import { useDisplayPrefs } from "@/features/settings/displayPreferences";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 const TOOL_ICON: Record<ToolKind, (p: { className?: string }) => React.JSX.Element> = {
@@ -101,7 +103,7 @@ export interface ApprovalNote {
  * transcript (`ConversationView`, por `useConversationTimeline`) ou os que o agente manda pelo
  * protocolo (`StructuredConversationView`).
  */
-export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
+export const TimelineView = memo(function TimelineView({ bottomInset = 0, items, loaded, missing = false, truncated = false, working, approval, approvalCard = null, approvalDocked = false, live: _live = false, streaming, agentLabel, agentId = "", pending = [], onOpenTerminal, onResend, onAnswer, quoteKey, after = null, threadId, conversationKey, searchTargetId = null, searchTargetToken = null, onSearchTargetApplied }: {
   /** A conversa por protocolo (os avisos do pool de contas pedem a resposta dela). */
   threadId?: string;
   /** Identidade local usada para abrir a busca apenas na timeline visível. */
@@ -152,6 +154,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const compacting = useMemo(() => isCompacting(items, Date.now()), [items]);
   // O «Pensando…» com brilho: só enquanto o agente trabalha, fora de compactação e sem pedido de aprovação esperando.
   const thinkingKey = working && !compacting && approval === null && !approvalCard && !approvalDocked ? thinkingTurnKey(allTurns) : null;
+  const hasOpenTurn = useMemo(() => turns.some((turn) => !turn.notice && turn.end === null), [turns]);
   const width = useChatWidthClass();
   const startedAt = useMemo(() => openTurnStart(items), [items]);
 
@@ -165,7 +168,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const voices = useMemo(() => voicesByItem(items), [items]);
   const reveal = useMemo<RevealOf>(() => ({
     animate: (item) => !!streaming?.has(item.id) || (baseline.current !== null && isFresh(item, baseline.current, mountedAt)),
-    live: (id) => working && !!streaming?.has(id),
+    live: (id) => !!streaming?.has(id),
     entering: (id) => {
       if (baseline.current === null || baseline.current.has(id) || entered.current.has(id)) return false;
       entered.current.add(id);
@@ -174,7 +177,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     agent: { id: agentId, label: agentLabel },
     voiceOf: (itemId) => voices.get(itemId) ?? { id: agentId, label: agentLabel },
     headers,
-  }), [streaming, mountedAt, working, agentId, agentLabel, headers, voices]);
+  }), [streaming, mountedAt, agentId, agentLabel, headers, voices]);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -467,7 +470,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
             return <VirtualTurn key={turn.key} turnKey={turn.key} index={index} onMeasure={measureTurn}>
               {turn.notice
                 ? <NoticeRow item={turn.notice} onResend={onResend} threadId={threadId} />
-                : <TurnView turn={turn} thinking={turn.key === thinkingKey} latest={index === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />}
+                : <TurnView turn={turn} thinking={turn.key === thinkingKey} working={working && !compacting && turn.end === null} waiting={approval !== null || approvalDocked} workingSince={turn.user?.at ?? startedAt} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />}
             </VirtualTurn>;
           })}
           {bottomSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="bottom" style={{ height: bottomSpacer, flex: "0 0 auto" }} />}
@@ -486,7 +489,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
             )}
           </div>
         )}
-        {working && !compacting && !live && <WorkingLine since={startedAt} waiting={approval !== null || approvalDocked} />}
+        {working && !compacting && !hasOpenTurn && <WorkingLine since={startedAt} waiting={approval !== null || approvalDocked} />}
         {after}
       </div>
       </AnswerContext.Provider>
@@ -516,37 +519,80 @@ function VirtualTurn({ turnKey, index, onMeasure, children }: {
   return <div ref={ref} data-virtual-turn={turnKey}>{children}</div>;
 }
 
-function TurnView({ turn, thinking = false, latest, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */ thinking?: boolean; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
-  const { t } = useTranslation();
-  // Os turnos antigos começam recolhidos; o último (ou o em aberto), aberto. O raciocínio de turno encerrado só volta
-  // quando a pessoa abre o log pelo cabeçalho (`full`), como no T3.
+function TurnView({ turn, thinking = false, working = false, waiting = false, workingSince = null, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */ thinking?: boolean; working?: boolean; waiting?: boolean; workingSince?: number | null; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
+  const { t, i18n } = useTranslation();
+  const timeFormat = useDisplayPrefs().timeFormat;
+  // Como no T3 Code: turnos concluídos sem erro nem interrupção recolhem automaticamente atrás de
+  // «Trabalhou por Xs» (a menos que a pessoa tenha aberto manualmente ou seja alvo de busca); erro e
+  // interrupção ficam abertos para mostrar o ponto em que parou.
   const containsSearchTarget = !!searchTargetId && (turn.user?.id === searchTargetId || turn.final?.id === searchTargetId || turn.planItemId === searchTargetId || turn.body.some((row) => (row.type === "assistant" || row.type === "reasoning") && row.item.id === searchTargetId));
-  const [open, setOpen] = useState(latest || turn.end === null || containsSearchTarget);
+  const outcome = turn.end ? endOutcome(turn.end) : null;
+  const cleanDone = turn.end !== null && !turn.end.superseded && outcome === "done";
+  const userToggledRef = useRef(false);
+  const prevEndedRef = useRef(turn.end !== null);
+  const [open, setOpen] = useState(() => (turn.end === null ? true : !cleanDone || containsSearchTarget));
   const [full, setFull] = useState(containsSearchTarget);
+  useEffect(() => {
+    const ended = turn.end !== null;
+    if (ended && !prevEndedRef.current && cleanDone && !userToggledRef.current && !containsSearchTarget) {
+      setOpen(false);
+      setFull(false);
+    }
+    prevEndedRef.current = ended;
+  }, [cleanDone, containsSearchTarget, turn.end]);
   useEffect(() => { if (containsSearchTarget) { setOpen(true); setFull(true); } }, [containsSearchTarget]);
   const foldable = turn.end !== null && turn.body.length > 0;
   // No zen, um turno cujas ferramentas foram todas ocultas e que acabou bem não mostra o cabeçalho "Trabalhou por …".
-  const quiet = quietWhenEmpty && turn.body.length === 0 && turn.end !== null && !turn.end.superseded && endOutcome(turn.end) === "done";
+  const quiet = quietWhenEmpty && turn.body.length === 0 && turn.end !== null && !turn.end.superseded && outcome === "done";
+  const endAt = turn.end?.at ?? turn.final?.at;
+  const turnClock = endAt !== undefined && Number.isFinite(endAt) ? formatClock(endAt, timeFormat, i18n.language) : null;
   return (
     <>
       {turn.user && <UserMessage item={turn.user} searchHit={turn.user.id === searchTargetId} composerTarget={composerTarget} />}
       {turn.plan && (turn.end === null || turn.planItemId === searchTargetId) &&
         <PlanCard plan={turn.plan} itemId={turn.planItemId ?? undefined} searchHit={turn.planItemId === searchTargetId} />}
+      {turn.end === null && working && <WorkingLine since={workingSince} waiting={waiting} />}
       {turn.end && !quiet && (
-        <button type="button" onClick={() => { if (!foldable) return; setOpen(!open); setFull(!open); }} aria-expanded={foldable ? open : undefined}
-          className={`flex items-center gap-1.5 pb-2 border-b border-gray-200 dark:border-white/[0.08] text-left text-chat-ui text-gray-500 dark:text-white/45
-            ${foldable ? "hover:text-gray-800 dark:hover:text-white/75" : "cursor-default"}`}>
-          {turn.end.superseded
-            ? t("chat.timeline.continued")
-            : endOutcome(turn.end) === "error"
-            ? t("chat.timeline.notDone")
-            : endOutcome(turn.end) === "interrupted"
-            ? t("chat.timeline.interruptedByYou")
-            : turn.end.durationMs !== null
-              ? t("chat.timeline.workedFor", { duration: formatDuration(turn.end.durationMs) })
-              : t("chat.timeline.done")}
-          {foldable && <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />}
-        </button>
+        <div data-turn-fold="" className="group/timeline-row border-b border-gray-200 dark:border-white/[0.08] pb-2 pe-0.5 pt-1">
+          <div className="relative flex items-center gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                if (!foldable) return;
+                userToggledRef.current = true;
+                const next = !open;
+                setOpen(next);
+                setFull(next);
+              }}
+              aria-expanded={foldable ? open : undefined}
+              className={`flex items-center gap-1 rounded-md px-1 text-left text-chat-ui leading-relaxed text-gray-500 dark:text-white/45 tabular-nums transition-colors ${
+                foldable
+                  ? "cursor-pointer select-none hover:text-gray-900 dark:hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50"
+                  : "cursor-default"
+              }`}
+            >
+              <span>
+                {turn.end.superseded
+                  ? t("chat.timeline.continued")
+                  : outcome === "error"
+                  ? t("chat.timeline.notDone")
+                  : outcome === "interrupted"
+                  ? (turn.end.durationMs !== null
+                      ? t("chat.timeline.stoppedAfter", { duration: formatDuration(turn.end.durationMs) })
+                      : t("chat.timeline.interruptedByYou"))
+                  : turn.end.durationMs !== null
+                    ? t("chat.timeline.workedFor", { duration: formatDuration(turn.end.durationMs) })
+                    : t("chat.timeline.done")}
+              </span>
+              {foldable && <ChevronDownIcon className={`w-3.5 h-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />}
+            </button>
+            {turnClock && (
+              <span className="pointer-events-none ms-auto shrink-0 whitespace-nowrap rounded-md text-chat-caption text-gray-500 dark:text-white/45 tabular-nums opacity-0 group-hover/timeline-row:opacity-100 group-focus-within/timeline-row:opacity-100 transition-opacity">
+                {turnClock}
+              </span>
+            )}
+          </div>
+        </div>
       )}
       {visibleTurnBody(turn, open, full).map((row) => (
         <BodyRowView key={row.key} row={row} onOpenTerminal={onOpenTerminal} active={turn.end === null && row.key === turn.body[turn.body.length - 1]?.key} searchTargetId={searchTargetId} />
@@ -578,18 +624,19 @@ function UserMessage({ item, searchHit = false, composerTarget }: { item: Timeli
 }
 
 /**
- * Uma fala do agente em markdown. A que chegou agora aparece palavra a palavra; enquanto o texto
- * ainda chega (ou ainda está aparecendo), um cursor discreto fica no fim (`cc-stream-caret`).
+ * Uma fala do agente em markdown. A que chegou agora entra com transição suave por bloco
+ * (`.chat-markdown[data-streaming]`, igual ao T3 Code) sem cursor piscante no fim.
  */
 function AgentText({ item, searchHit = false }: { item: TimelineItem; searchHit?: boolean }) {
   const reveal = useContext(RevealContext);
   const live = reveal.live(item.id);
+  // O delta do provedor já chega no ritmo real; revela direto e reserva o fade para nós Markdown novos.
   const { text, revealing } = useRevealedText(item.id, item.text ?? "", reveal.animate(item), live);
-  const caret = revealing || live;
+  const isStreaming = revealing || live;
   const [entering] = useState(() => reveal.entering(item.id));
   return (
-    <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""} itemId={item.id} searchHit={searchHit}>
-      <ChatMessageMarkdown content={text} renderCodeBlock={renderChatCodeBlock} />
+    <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} streaming={isStreaming} at={item.at} copyText={item.text ?? ""} itemId={item.id} searchHit={searchHit}>
+      <ChatMessageMarkdown content={text} renderCodeBlock={renderChatCodeBlock} streaming={isStreaming} />
     </AgentBubble>
   );
 }
@@ -663,20 +710,27 @@ function ReasoningRow({ item }: { item: TimelineItem }) {
   const text = (item.text ?? "").trim();
   const flat = flatThought(text);
   const expandable = flat.length > THOUGHT_CLAMP_CHARS || /\n\s*\n/.test(text);
-  const body = (
+  const headerContent = (
     <>
-      <BrainIcon className="mt-[3px] w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+      <span className="w-6 shrink-0 flex items-center justify-center mt-0.5 text-gray-400 dark:text-white/40">
+        <BrainIcon className="w-4 h-4 shrink-0" />
+      </span>
       {open
-        ? <div className="min-w-0 flex-1 text-chat-ui text-gray-500 dark:text-white/50"><ChatMessageMarkdown content={text} renderCodeBlock={renderChatCodeBlock} /></div>
+        ? <span className="min-w-0 flex-1 text-left text-chat-ui font-medium text-gray-600 dark:text-white/70">{t("chat.timeline.reasoning")}</span>
         : <span className="min-w-0 flex-1 line-clamp-4 text-left text-chat-ui text-gray-500 dark:text-white/50">{flat}</span>}
-      {expandable && <ChevronRightIcon className={`mt-[3px] w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
+      {expandable && <ChevronRightIcon className={`mt-1 w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />}
     </>
   );
   return (
     <div data-reasoning data-chat-item-id={item.id} role="note" aria-label={t("chat.timeline.reasoning")} className="flex flex-col">
       {expandable
-        ? <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-start gap-2.5 min-h-[26px] w-full text-left hover:text-gray-700 dark:hover:text-white/70">{body}</button>
-        : <div className="flex items-start gap-2.5 min-h-[26px]">{body}</div>}
+        ? <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} className="flex items-start gap-1.5 min-h-6 w-full rounded-md px-0.5 py-0.5 text-left leading-relaxed cursor-pointer hover:text-gray-700 dark:hover:text-white/75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50">{headerContent}</button>
+        : <div className="flex items-start gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 leading-relaxed">{headerContent}</div>}
+      {open && (
+        <div className="ms-7 flex max-h-96 flex-col gap-3 overflow-auto px-0.5 py-1 text-chat-ui text-gray-500 dark:text-white/50 select-text">
+          <ChatMessageMarkdown content={text} renderCodeBlock={renderChatCodeBlock} />
+        </div>
+      )}
     </div>
   );
 }
@@ -685,8 +739,10 @@ function ReasoningRow({ item }: { item: TimelineItem }) {
 function ThinkingRow() {
   const { t } = useTranslation();
   return (
-    <div data-thinking className="flex items-center gap-2.5 min-h-[26px] text-chat-ui">
-      <BrainIcon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+    <div data-thinking className="flex items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 text-chat-ui leading-relaxed">
+      <span className="w-6 shrink-0 flex items-center justify-center text-gray-400 dark:text-white/40">
+        <BrainIcon className="w-4 h-4 shrink-0" />
+      </span>
       <span className="cc-shimmer">{t("chat.live.thinking")}</span>
     </div>
   );
@@ -699,9 +755,8 @@ const VERB: Record<ToolKind, string> = {
 
 /**
  * Ferramentas em sequência numa linha só, recolhida ("Leu 1 arquivo, rodou 13 comandos · 1 falhou"),
- * como o Claude Code. O chevron abre a lista (cada uma como sempre, uma linha). Com o turno rodando,
- * a linha mostra também, discreta, a atividade atual e o ponto pulsante. Quem abriu o grupo o mantém
- * aberto: o estado é do componente e a chave da linha não muda quando chegam itens novos.
+ * com o trilho de ícone `w-6` e o brilho `.cc-live-tool-shine` quando ativo (como o `WorkGroupSection`
+ * no T3 Code, sem pontos pulsantes; lista expandida limitada com rolagem interna).
  */
 function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }) {
   const { t } = useTranslation();
@@ -713,16 +768,17 @@ function WorkGroup({ tools, active }: { tools: TimelineItem[]; active: boolean }
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open} title={activity || title}
-        className="flex min-w-0 items-center gap-2.5 min-h-[26px] whitespace-nowrap text-left text-chat-ui text-gray-600 dark:text-white/60 hover:text-gray-900 dark:hover:text-white/85">
-        <Icon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
-        <span className="shrink-0 whitespace-nowrap">{title}</span>
+        className="flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-600 dark:text-white/60 hover:text-gray-900 dark:hover:text-white/85 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50">
+        <span className="w-6 shrink-0 flex items-center justify-center text-gray-400 dark:text-white/40">
+          <Icon className="w-4 h-4 shrink-0" />
+        </span>
+        <span className={`shrink-0 whitespace-nowrap ${active ? "cc-live-tool-shine" : ""}`}>{title}</span>
         {summary.failed > 0 && <span className="shrink-0 whitespace-nowrap text-chat-caption text-red-600 dark:text-red-400">· {t("chat.work.failed", { count: summary.failed })}</span>}
         {activity && <span className="min-w-0 flex-1 truncate font-mono text-chat-code text-gray-400 dark:text-white/35">{activity}</span>}
         {!activity && <span className="flex-1" />}
-        {active && <span aria-hidden="true" className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-500 animate-pulse" />}
-        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />
+        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
       </button>
-      {open && <div className="ml-[26px] flex flex-col">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
+      {open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
     </div>
   );
 }
@@ -734,12 +790,14 @@ function InfraRow({ tools }: { tools: TimelineItem[] }) {
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
-        className="flex min-w-0 items-center gap-2.5 min-h-[26px] whitespace-nowrap text-left text-chat-ui text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75">
-        <TerminalIcon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+        className="flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white/75 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/50">
+        <span className="w-6 shrink-0 flex items-center justify-center text-gray-400 dark:text-white/40">
+          <TerminalIcon className="w-4 h-4 shrink-0" />
+        </span>
         <span>{t("chat.tool.infra", { count: tools.length })}</span>
-        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />
+        <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
       </button>
-      {open && <div className="ml-[26px] flex flex-col">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
+      {open && <div className="ms-7 flex flex-col max-h-72 overflow-y-auto overflow-x-hidden rounded-md">{tools.map((tool) => <ToolRow key={tool.id} tool={tool} />)}</div>}
     </div>
   );
 }
@@ -761,15 +819,19 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
     <div className="flex flex-col">
       <button type="button" onClick={() => canOpen && setOpen(!open)} aria-expanded={canOpen ? open : undefined}
         title={command?.full || tool.path || tool.label}
-        className={`group flex min-w-0 items-center gap-2.5 min-h-[26px] whitespace-nowrap text-left text-chat-ui text-gray-600 dark:text-white/60 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
-        <Icon className={`w-4 h-4 shrink-0 ${
+        className={`group flex min-w-0 items-center gap-1.5 min-h-6 rounded-md px-0.5 py-0.5 whitespace-nowrap text-left text-chat-ui leading-relaxed text-gray-600 dark:text-white/60 ${canOpen ? "cursor-pointer hover:text-gray-900 dark:hover:text-white/85" : "cursor-default"}`}>
+        <span className={`w-6 shrink-0 flex items-center justify-center ${
           unknownOutcome
             ? "text-amber-500 dark:text-amber-400"
             : tool.status === "error" || tool.status === "denied"
             ? "text-red-500 dark:text-red-400"
             : "text-gray-400 dark:text-white/40"
-        }`} />
-        <span className="shrink-0">{t(VERB[kind])}</span>
+        }`}>
+          <Icon className="w-4 h-4 shrink-0" />
+        </span>
+        <span className={`shrink-0 ${tool.status === "running" ? "cc-live-tool-shine" : ""}`} aria-label={tool.status === "running" ? t("chat.tool.running") : undefined}>
+          {t(VERB[kind])}
+        </span>
         {command && (
           <span className="min-w-0 flex-1 truncate whitespace-nowrap font-mono text-chat-code text-gray-500 dark:text-white/50">
             <span className="font-medium text-gray-800 dark:text-white/85">{command.program}</span>
@@ -784,7 +846,6 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
             <span className="text-red-600 dark:text-red-400">−{tool.removed ?? 0}</span>
           </span>
         )}
-        {tool.status === "running" && <span aria-label={t("chat.tool.running")} className="shrink-0 w-1.5 h-1.5 rounded-full bg-accent-500 animate-pulse" />}
         {unknownOutcome ? (
           <span role="status" aria-label={t("chat.tool.outcomeUnknown")} className="shrink-0 text-chat-caption text-amber-600 dark:text-amber-400 font-medium">
             {t("chat.tool.outcomeUnknown")}
@@ -795,17 +856,17 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
             {tool.status === "denied" && <span className="shrink-0 text-chat-caption text-red-600 dark:text-red-400">{t("chat.tool.denied")}</span>}
           </>
         )}
-        {canOpen && <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform ${open ? "rotate-90" : ""}`} />}
+        {canOpen && <ChevronRightIcon className={`w-3.5 h-3.5 shrink-0 text-gray-300 dark:text-white/25 transition-transform duration-200 ${open ? "rotate-90" : ""}`} />}
       </button>
       {open && command && longCommand && (
-        <pre className="m-0 ml-[26px] mt-1 max-h-48 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
+        <pre className="m-0 ms-7 mt-1 max-h-48 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-800 dark:text-white/80">
           {command.full}
         </pre>
       )}
       {open && unknownOutcome && (
         <div role="status" aria-label={t("chat.tool.outcomeUnknown")}
-          className="m-0 ml-[26px] mt-1 mb-2 rounded-lg px-3 py-2 text-chat-note leading-snug
+          className="m-0 ms-7 mt-1 mb-2 rounded-lg px-3 py-2 text-chat-note leading-snug
           bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200">
           <p className="m-0 font-medium">{t("chat.tool.outcomeUnknown")}</p>
           <p className="m-0 mt-0.5 text-gray-700 dark:text-white/70">
@@ -814,17 +875,17 @@ export function ToolRow({ tool }: { tool: TimelineItem }) {
         </div>
       )}
       {app && (
-        <div className="ml-[26px] mt-1 mb-2 overflow-hidden rounded-lg border border-gray-200 dark:border-white/[0.08]">
+        <div className="ms-7 mt-1 mb-2 overflow-hidden rounded-lg border border-gray-200 dark:border-white/[0.08]">
           <McpAppFrame html={app.html} server={mcpAppServerOf(tool.name, app.uri)} />
         </div>
       )}
       {open && tool.output && !app && (
         <>
-        <pre className="m-0 ml-[26px] mt-1 mb-2 max-h-72 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
+        <pre className="m-0 ms-7 mt-1 mb-2 max-h-72 overflow-auto cc-no-bar rounded-lg px-3 py-2 font-mono text-chat-code leading-snug whitespace-pre-wrap break-words
           bg-gray-50 dark:bg-white/[0.04] border border-gray-200 dark:border-white/[0.08] text-gray-700 dark:text-white/70">
           {tool.output}
         </pre>
-        <ChatMarkdownImageStrip content={tool.output} className="ml-[26px]" />
+        <ChatMarkdownImageStrip content={tool.output} className="ms-7" />
         </>
       )}
     </div>
@@ -862,7 +923,7 @@ function ChangedFilesCard({ files }: { files: ChangedFile[] }) {
   );
 }
 
-/** "Trabalhando há 12s", contando a partir da última mensagem da pessoa. */
+/** «Trabalhando há 12s» com linha divisória inferior e sem ponto pulsante (paridade com `WorkingTimelineRow` do T3 Code). */
 function WorkingLine({ since, waiting }: { since: number | null; waiting: boolean }) {
   const { t } = useTranslation();
   const [now, setNow] = useState(() => Date.now());
@@ -873,9 +934,16 @@ function WorkingLine({ since, waiting }: { since: number | null; waiting: boolea
     return () => window.clearInterval(id);
   }, [visible]);
   return (
-    <div className="flex items-center gap-2 text-chat-ui text-gray-500 dark:text-white/45">
-      <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />
-      {waiting ? t("chat.timeline.waitingApproval") : since !== null ? t("chat.timeline.workingFor", { duration: formatDuration(now - since) }) : t("chat.timeline.working")}
+    <div data-working-row="" className="border-b border-gray-200 dark:border-white/[0.08] pb-2 pt-1">
+      <div className="flex h-6 min-w-0 items-baseline gap-2 px-1 text-chat-ui leading-relaxed text-gray-500 dark:text-white/45 tabular-nums">
+        <span className="shrink-0 whitespace-nowrap">
+          {waiting
+            ? t("chat.timeline.waitingApproval")
+            : since !== null
+              ? t("chat.timeline.workingFor", { duration: formatDuration(now - since) })
+              : t("chat.timeline.working")}
+        </span>
+      </div>
     </div>
   );
 }

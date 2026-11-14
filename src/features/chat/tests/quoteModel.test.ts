@@ -14,6 +14,7 @@ import {
   withQuotes,
   type Quote,
 } from "../quotes/quoteModel";
+import { clampAnchorRectToSource, citationCommentCoordinates } from "../quotes/selectionModel";
 
 const q = (text: string, comment = "", originItemId?: string): Quote => ({
   id: `${text}|${comment}`,
@@ -148,5 +149,38 @@ describe("limites, comentário opcional, edição e rótulo", () => {
         savedComment: "",
       }),
     ).toEqual({ kind: "keep-open" });
+  });
+});
+
+describe("posicionamento do popover de comentário sobre a seleção (T3 Code)", () => {
+  it("restringe o retângulo da seleção à largura da mensagem fonte (blocos de código/tabelas)", () => {
+    const clamped = clampAnchorRectToSource(
+      { left: 50, top: 100, right: 900, bottom: 120, width: 850, height: 20 },
+      { left: 40, top: 80, right: 440, bottom: 300, width: 400, height: 220 },
+    );
+    expect(clamped).toEqual({ left: 50, top: 100, right: 440, bottom: 120, width: 390, height: 20 });
+  });
+
+  it("alinha o editor abaixo e pela borda direita da seleção (side=bottom, align=end)", () => {
+    const pos = citationCommentCoordinates(
+      { left: 100, top: 180, right: 480, bottom: 200, width: 380, height: 20 },
+      320,
+      140,
+      "bottom",
+      { width: 1024, height: 768 },
+    );
+    expect(pos).toEqual({ left: 160, top: 206 });
+  });
+
+  it("quando não cabe abaixo da seleção, vira para cima sem sair da viewport", () => {
+    const pos = citationCommentCoordinates(
+      { left: 100, top: 680, right: 350, bottom: 700, width: 250, height: 20 },
+      320,
+      140,
+      "bottom",
+      { width: 1024, height: 768 },
+    );
+    expect(pos.top).toBe(534);
+    expect(pos.left).toBe(30);
   });
 });

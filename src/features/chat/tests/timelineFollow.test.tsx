@@ -176,6 +176,29 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     expect(scroller().scrollTop).toBe(maxTop());
   });
 
+  it("permanece no fim quando o turno mais recente recolhe ao terminar na timeline virtualizada", async () => {
+    measuredVirtualRows = true;
+    working = true;
+    const rows: TimelineItem[] = Array.from({ length: 120 }, (_, i) => [
+      msg("user", `fold-u-${i}`, `Pergunta ${i}`),
+      { kind: "reasoning" as const, id: `fold-r-${i}`, text: i === 119 ? "Análise detalhada do último turno. ".repeat(30) : "Analisando." },
+      msg("assistant", `fold-a-${i}`, `Resposta ${i}`),
+      ...(i < 119 ? [{ kind: "turnEnd" as const, id: `fold-e-${i}`, durationMs: 1200 }] : []),
+    ]).flat();
+    await render(rows);
+    await runAnimation();
+    expect(scroller().scrollTop).toBe(maxTop());
+
+    working = false;
+    await render([...rows, { kind: "turnEnd", id: "fold-e-119", durationMs: 1200 }]);
+    const fold = host.querySelector<HTMLButtonElement>('[data-virtual-turn="fold-u-119"] [data-turn-fold] button[aria-expanded]');
+    expect(fold?.getAttribute("aria-expanded")).toBe("false");
+
+    // O browser dispara ResizeObserver quando o fold reduz a altura do conteúdo.
+    await act(async () => { notifyResize(); });
+    expect(scroller().scrollTop).toBe(maxTop());
+  });
+
   it("acompanha o streaming virtualizado ao redimensionar a janela, solta o fio ao rolar e volta ao enviar", async () => {
     measuredVirtualRows = true;
     working = true;

@@ -139,7 +139,7 @@ const REMARK = [remarkGfm];
 const REMARK_MATH = [remarkGfm, ...MATH_REMARK_PLUGINS];
 const REHYPE_MATH = MATH_REHYPE_PLUGINS;
 
-export function Markdown({ content, loadImage, onImageClick, tone = "compact", renderCodeBlock }: { content: string; loadImage?: ImageLoader; onImageClick?: (src: string) => void; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer }) {
+export function Markdown({ content, loadImage, onImageClick, tone = "compact", renderCodeBlock, streaming = false }: { content: string; loadImage?: ImageLoader; onImageClick?: (src: string) => void; tone?: MarkdownTone; renderCodeBlock?: CodeBlockRenderer; /** Marca blocos recém-inseridos durante streaming com `data-streaming` para fade em `@starting-style`. */ streaming?: boolean }) {
   const size = TONE[tone];
   // A matemática é uma preferência do aparelho (Aparência → Texto). Desligada, o `$` é só texto.
   const { renderMath } = useDisplayPrefs();
@@ -223,7 +223,7 @@ export function Markdown({ content, loadImage, onImageClick, tone = "compact", r
   }), [size, renderCodeBlock, onImageClick]);
 
   return (
-    <div className={`flex flex-col gap-3 ${size.root}`}>
+    <div className={`chat-markdown flex flex-col gap-3 ${size.root}`} data-streaming={streaming ? "true" : undefined}>
       <ReactMarkdown
         remarkPlugins={renderMath ? REMARK_MATH : REMARK}
         rehypePlugins={renderMath ? REHYPE_MATH : undefined}

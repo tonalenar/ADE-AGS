@@ -26,7 +26,8 @@ let host: HTMLDivElement;
 const render = (items: TimelineItem[], working = true) => act(async () => {
   root.render(<TimelineView items={items} loaded working={working} approval={null} agentLabel="Claude" agentId="claude-code" live />);
 });
-const groupButton = () => [...host.querySelectorAll("button[aria-expanded]")].find((b) => /^(Leu|Rodou|Editou) \d/.test(b.textContent ?? "")) as HTMLButtonElement;
+const groupButton = () => [...host.querySelectorAll("button[aria-expanded]")].find((b) => /^(Leu|Rodou|Editou) \d/.test(b.textContent ?? "")) as HTMLButtonElement | undefined;
+const foldButton = () => host.querySelector("[data-turn-fold] button[aria-expanded]") as HTMLButtonElement | undefined;
 
 beforeEach(() => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -37,52 +38,65 @@ beforeEach(() => {
 afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); });
 
 describe("as ferramentas em uma linha-resumo", () => {
-  it("o print: 1 leitura que falhou e 14 comandos viram uma linha só, recolhida", async () => {
-    await render([user, read(), ...Array.from({ length: 14 }, (_, i) => cmd(i + 1)), end], false);
-    const group = groupButton();
+  it("o print: 1 leitura que falhou e 14 comandos viram uma linha só, recolhida durante o turno e dentro do fold ao concluir", async () => {
+    await render([user, read(), ...Array.from({ length: 14 }, (_, i) => cmd(i + 1))], true);
+    const group = groupButton()!;
+    expect(group).toBeDefined();
     expect(group.textContent).toContain("Leu 1 arquivo, rodou 14 comandos");
     expect(group.textContent).toContain("1 falhou");
     expect(group.getAttribute("aria-expanded")).toBe("false");
     expect(host.textContent).not.toContain("git log -n 3");
+
+    // Ao concluir o turno sem erro de turno, recolhe atrás de "Trabalhou por 4s" (como no T3 Code)
+    await render([user, read(), ...Array.from({ length: 14 }, (_, i) => cmd(i + 1)), end], false);
+    expect(groupButton()).toBeUndefined();
+    const fold = foldButton()!;
+    expect(fold.textContent).toContain("Trabalhou por 4s");
+    expect(fold.getAttribute("aria-expanded")).toBe("false");
+    await act(async () => { fold.click(); });
+    expect(groupButton()!.textContent).toContain("Leu 1 arquivo, rodou 14 comandos");
   });
 
   it("abrir mostra a lista, uma linha por comando", async () => {
-    await render([user, read(), ...Array.from({ length: 14 }, (_, i) => cmd(i + 1)), end], false);
-    await act(async () => { groupButton().click(); });
-    expect(groupButton().getAttribute("aria-expanded")).toBe("true");
+    await render([user, read(), ...Array.from({ length: 14 }, (_, i) => cmd(i + 1))], true);
+    await act(async () => { groupButton()!.click(); });
+    expect(groupButton()!.getAttribute("aria-expanded")).toBe("true");
     expect(host.textContent).toContain("git");
     expect([...host.querySelectorAll("button")].filter((b) => b.textContent?.startsWith("Rodou")).length).toBe(14);
   });
 
   it("uma ferramenta só continua aparecendo como linha, sem resumo", async () => {
-    await render([user, cmd(1), end], false);
+    await render([user, cmd(1)], true);
     expect(groupButton()).toBeUndefined();
     expect(host.textContent).toContain("Rodou");
   });
 
-  it("com o turno rodando mostra a atividade atual e o ponto; depois de terminar, só o resumo", async () => {
-    await render([user, cmd(1), cmd(2, { status: "running" })]);
-    const group = groupButton();
+  it("com o turno rodando mostra a atividade atual e brilho T3 (sem ponto laranja); depois de terminar, recolhe no fold", async () => {
+    await render([user, cmd(1), cmd(2, { status: "running" })], true);
+    const group = groupButton()!;
     expect(group.textContent).toContain("Rodou 2 comandos");
     expect(group.textContent).toContain("git log -n 2 --oneline");
-    expect(group.querySelector(".animate-pulse")).not.toBeNull();
+    expect(group.querySelector(".cc-live-tool-shine")).not.toBeNull();
+    expect(group.querySelector(".animate-pulse")).toBeNull();
     await render([user, cmd(1), cmd(2), end], false);
-    expect(groupButton().textContent).not.toContain("git log -n 2");
-    expect(groupButton().querySelector(".animate-pulse")).toBeNull();
+    expect(foldButton()!.textContent).toContain("Trabalhou por 4s");
+    await act(async () => { foldButton()!.click(); });
+    expect(groupButton()!.textContent).not.toContain("git log -n 2");
+    expect(groupButton()!.querySelector(".cc-live-tool-shine")).toBeNull();
   });
 
   it("quem abriu o grupo não o vê fechar quando chegam itens novos", async () => {
     await render([user, cmd(1), cmd(2)]);
-    await act(async () => { groupButton().click(); });
+    await act(async () => { groupButton()!.click(); });
     await render([user, cmd(1), cmd(2), cmd(3), cmd(4)]);
-    expect(groupButton().getAttribute("aria-expanded")).toBe("true");
-    expect(groupButton().textContent).toContain("Rodou 4 comandos");
+    expect(groupButton()!.getAttribute("aria-expanded")).toBe("true");
+    expect(groupButton()!.textContent).toContain("Rodou 4 comandos");
   });
 
   it("o texto de exemplo com vários tipos, na ordem e no plural certo", async () => {
     const edit: TimelineItem = { kind: "tool", id: "e1", tool: "edit", path: "/r/a.ts", status: "done" };
     const search: TimelineItem = { kind: "tool", id: "s1", tool: "search", label: "TODO", status: "done" };
-    await render([user, edit, { ...edit, id: "e2", path: "/r/b.ts" }, cmd(1), search, end], false);
-    expect(groupButton().textContent).toContain("Editou 2 arquivos, rodou 1 comando, buscou 1 vez");
+    await render([user, edit, { ...edit, id: "e2", path: "/r/b.ts" }, cmd(1), search], true);
+    expect(groupButton()!.textContent).toContain("Editou 2 arquivos, rodou 1 comando, buscou 1 vez");
   });
 });

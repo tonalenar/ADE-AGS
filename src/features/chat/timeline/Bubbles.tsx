@@ -95,7 +95,7 @@ export function PersonBubble({ text, sending = false, queued = false, at, itemId
  * põe acima do texto o logo e o nome de quem fala (na primeira fala depois da pessoa e quando a voz muda;
  * ver `speakers.ts`). `sender` é o nome de quem fala por `ags peer`.
  */
-export function AgentBubble({ agentId, command, label, sender, receipt = null, header = false, entering = false, caret = false, at, copyText, itemId, searchHit = false, children }: {
+export function AgentBubble({ agentId, command, label, sender, receipt = null, header = false, entering = false, streaming = false, at, copyText, itemId, searchHit = false, children }: {
   agentId: string;
   command?: string;
   label: string;
@@ -105,7 +105,8 @@ export function AgentBubble({ agentId, command, label, sender, receipt = null, h
   /** Mostra o logo e o nome acima do texto. */
   header?: boolean;
   entering?: boolean;
-  caret?: boolean;
+  /** Indica resposta ainda em streaming (`aria-busy`); o fade de chegada é via `.chat-markdown[data-streaming]`. */
+  streaming?: boolean;
   /** Quando a fala saiu e o texto que «Copiar» leva (sem os dois, não há ações sob a fala). */
   at?: number;
   copyText?: string;
@@ -123,10 +124,10 @@ export function AgentBubble({ agentId, command, label, sender, receipt = null, h
           <span className="truncate">{name}</span>
         </div>
       )}
-      <div className="min-w-0 break-words" aria-busy={caret || undefined}>
-        <div data-quotable="" className={caret ? "cc-stream-caret" : undefined}>{children}</div>
+      <div className="min-w-0 break-words" aria-busy={streaming || undefined}>
+        <div data-quotable="">{children}</div>
       </div>
-      {copyText !== undefined && !caret && <MessageActions text={copyText} at={at} />}
+      {copyText !== undefined && !streaming && <MessageActions text={copyText} at={at} />}
     </div>
   );
 }
