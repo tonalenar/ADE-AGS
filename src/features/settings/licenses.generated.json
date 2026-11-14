@@ -5,9 +5,9 @@
     "src-tauri/Cargo.lock (cargo metadata --locked --offline)"
   ],
   "contagem": {
-    "total": 1119,
+    "total": 1120,
     "npm": 453,
-    "crates": 666,
+    "crates": 667,
     "naoLidas": 6,
     "semLicenca": 6
   },
@@ -1222,6 +1222,12 @@
       "ecosystem": "crates",
       "name": "http-body-util",
       "version": "0.1.5",
+      "license": "MIT"
+    },
+    {
+      "ecosystem": "crates",
+      "name": "http-range",
+      "version": "0.1.6",
       "license": "MIT"
     },
     {
