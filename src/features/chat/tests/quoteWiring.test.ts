@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), "utf-8");
 
-describe("«Comentar» está ligado às duas conversas (protocolo e TUI)", () => {
+describe("«Citar» está ligado às duas conversas (protocolo e TUI) igual ao T3 Code", () => {
   it("o composer e a lista de cada conversa usam a mesma chave (o cartão da sidebar)", () => {
     for (const file of ["../ConversationView.tsx", "../structured/StructuredConversationView.tsx"]) {
       const source = read(file);
@@ -12,14 +12,13 @@ describe("«Comentar» está ligado às duas conversas (protocolo e TUI)", () =>
     }
   });
 
-  it("as falas do agente e da pessoa são citáveis; o composer não (a seleção ali não vira comentário)", () => {
-    expect(read("../timeline/Bubbles.tsx").match(/data-quotable=""/g)?.length).toBe(2);
+  it("apenas as falas do assistente são citáveis no chat (como no T3 Code); o composer e as falas do usuário não", () => {
+    expect(read("../timeline/Bubbles.tsx").match(/data-quotable=""/g)?.length).toBe(1);
     expect(read("../ChatComposer.tsx")).not.toContain("data-quotable");
   });
 
   it("o texto que vai ao agente leva as citações depois do texto e antes dos anexos", () => {
     const composer = read("../ChatComposer.tsx");
-    // O envio escolhe `onSubmit` ou `onBackgroundSubmit` (`send`); a fila usa `onQueue`: os três levam o mesmo par.
     expect(composer).toContain("send(withQuotes(text, quotes), attachments.list)");
     expect(composer).toContain("onQueue(withQuotes(text, quotes), attachments.list)");
     const attach = read("../attachments/send.ts");

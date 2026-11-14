@@ -1,101 +1,208 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { DESKTOP_OS } from "@/app/platform";
 
+import { QuoteIcon } from "../chatIcons";
+import { MAX_QUOTE_CHARS } from "./quoteModel";
 import { addQuoteFor } from "./quoteStore";
-import { matchCommentShortcut, selectionTarget, type SelectionTarget } from "./selectionModel";
+import {
+  matchCommentShortcut,
+  observeSelectionActions,
+  resolveSelectionActionPosition,
+  selectionTarget,
+  type SelectionActionPoint,
+  type SelectionTarget,
+} from "./selectionModel";
 
-/** Quanto do trecho a caixinha mostra (o resto fica de fora; o texto inteiro vai na citação). */
-const PREVIEW_CHARS = 280;
+type FloatingCite = {
+  target: SelectionTarget;
+  position: SelectionActionPoint;
+};
 
 /**
- * «Comentar», como no Claude: ao selecionar um trecho de uma fala da conversa aparece um botão junto da seleção; ele
- * abre uma caixinha que cita o trecho (em cinza) com um campo para o comentário. Enter adiciona a citação ao composer
- * da conversa (um cartão acima do campo, removível), Esc fecha. Pelo teclado: o atalho (⌥⌘M / Ctrl+Shift+M) abre a
- * caixinha para a seleção que já existe. `container` é a lista da conversa; só seleções dentro das falas valem.
+ * Botão flutuante «Citar» estilo T3 Code (`AssistantSelectionToolbar.tsx`):
+ * aparece como uma pílula translúcida logo abaixo do fim da seleção dentro de áreas citáveis
+ * (`[data-quotable]`), fecha ao clicar fora, rolar, limpar seleção ou apertar Esc, e aceita `Tab`
+ * para foco por teclado. Clicar insere imediatamente o chip no composer (comentário opcional).
  */
-export function SelectionComment({ container, quoteKey }: { container: () => Element | null; quoteKey: string }) {
+export function SelectionComment({
+  container,
+  quoteKey,
+}: {
+  container: () => Element | null;
+  quoteKey: string;
+}) {
   const { t } = useTranslation();
-  const [target, setTarget] = useState<SelectionTarget | null>(null);
-  const [open, setOpen] = useState(false);
-  const [comment, setComment] = useState("");
-  // Com a caixinha aberta a seleção some (o foco vai ao campo): o trecho guardado é o que vale.
-  const openRef = useRef(false);
-  openRef.current = open;
-  const targetRef = useRef<SelectionTarget | null>(null);
-  targetRef.current = target;
+  const [floating, setFloating] = useState<FloatingCite | null>(null);
+  const toolbarRef = useRef<HTMLButtonElement>(null);
+  const actionsRef = useRef<ReturnType<typeof observeSelectionActions> | null>(null);
+  const floatingRef = useRef<FloatingCite | null>(null);
+  floatingRef.current = floating;
 
   useEffect(() => {
-    const refresh = () => {
-      if (openRef.current) return;
-      setTarget(selectionTarget(window.getSelection(), container()));
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (!targetRef.current || openRef.current || !matchCommentShortcut(e, DESKTOP_OS === "macos")) return;
-      e.preventDefault();
-      setOpen(true);
-    };
-    document.addEventListener("selectionchange", refresh);
-    document.addEventListener("mouseup", refresh);
-    document.addEventListener("keyup", refresh);
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("selectionchange", refresh);
-      document.removeEventListener("mouseup", refresh);
-      document.removeEventListener("keyup", refresh);
-      document.removeEventListener("keydown", onKey, true);
-    };
-  }, [container]);
+    const element = container();
+    if (!element) {
+      setFloating(null);
+      return;
+    }
 
-  if (!target) return null;
-  const close = () => { setOpen(false); setComment(""); setTarget(null); };
-  const submit = () => {
-    const text = comment.trim();
-    if (!text) return;
-    const quoted = target.source
-      ? `${t("chat.quote.source", { source: target.source })}\n${target.text}`
-      : target.text;
-    addQuoteFor(quoteKey, { text: quoted, comment: text, originItemId: target.originItemId });
+    const clear = () => setFloating(null);
+
+    const update = (pointer: SelectionActionPoint | null) => {
+      const target = selectionTarget(window.getSelection(), element);
+      if (!target) {
+        clear();
+        return;
+      }
+      const bounds = element.getBoundingClientRect();
+      const effectiveBounds =
+        bounds.width > 0 && bounds.height > 0
+          ? bounds
+          : { left: 0, top: 0, width: window.innerWidth, height: window.innerHeight };
+      const position = resolveSelectionActionPosition({
+        bounds: effectiveBounds,
+        selectionRect: { right: target.rect.right, bottom: target.rect.bottom },
+        pointer:
+          pointer &&
+          pointer.x >= target.rect.left - 8 &&
+          pointer.x <= target.rect.right + 8 &&
+          pointer.y >= target.rect.top - 8 &&
+          pointer.y <= target.rect.bottom + 8
+            ? pointer
+            : null,
+        viewport: { width: window.innerWidth, height: window.innerHeight },
+      });
+      setFloating({ target, position });
+    };
+
+    const actions = observeSelectionActions({
+      element,
+      getActionElement: () => toolbarRef.current,
+      onSelection: update,
+      onDismiss: clear,
+    });
+    actionsRef.current = actions;
+
+    const focusActions = (event: KeyboardEvent) => {
+      const toolbar = toolbarRef.current;
+      if (
+        event.key !== "Tab" ||
+        event.shiftKey ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.isComposing ||
+        event.defaultPrevented ||
+        !toolbar ||
+        toolbar.contains(event.target as Node)
+      ) {
+        return;
+      }
+      if (toolbar.disabled) return;
+      event.preventDefault();
+      event.stopPropagation();
+      toolbar.focus({ preventScroll: true });
+    };
+
+    const onShortcut = (event: KeyboardEvent) => {
+      if (!matchCommentShortcut(event, DESKTOP_OS === "macos")) return;
+      const target = floatingRef.current?.target ?? selectionTarget(window.getSelection(), element);
+      if (!target || target.text.length > MAX_QUOTE_CHARS) return;
+      event.preventDefault();
+      const quoted = target.source
+        ? `${t("chat.quote.source", { source: target.source })}
+${target.text}`
+        : target.text;
+      if (addQuoteFor(quoteKey, { text: quoted, comment: "", originItemId: target.originItemId })) {
+        window.getSelection()?.removeAllRanges();
+        actionsRef.current?.cancel();
+        clear();
+        document.querySelector<HTMLElement>("[data-chat-composer]")?.focus();
+      }
+    };
+
+    document.addEventListener("keydown", focusActions, true);
+    document.addEventListener("keydown", onShortcut, true);
+    document.addEventListener("selectionchange", actions.selectionChanged);
+
+    return () => {
+      document.removeEventListener("keydown", focusActions, true);
+      document.removeEventListener("keydown", onShortcut, true);
+      document.removeEventListener("selectionchange", actions.selectionChanged);
+      actions.dispose();
+      actionsRef.current = null;
+    };
+  }, [container, quoteKey, t]);
+
+  useLayoutEffect(() => {
+    const toolbar = toolbarRef.current;
+    if (!floating || !toolbar) return;
+    const rect = toolbar.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const left = Math.max(8, Math.min(floating.position.x, window.innerWidth - rect.width - 8));
+    const top = Math.max(8, Math.min(floating.position.y, window.innerHeight - rect.height - 8));
+    toolbar.style.left = `${left}px`;
+    toolbar.style.top = `${top}px`;
+  }, [floating]);
+
+  if (!floating) return null;
+
+  const tooLong = floating.target.text.length > MAX_QUOTE_CHARS;
+
+  const dismiss = () => {
+    actionsRef.current?.cancel();
+    setFloating(null);
+  };
+
+  const cite = () => {
+    if (tooLong) return;
+    const quoted = floating.target.source
+      ? `${t("chat.quote.source", { source: floating.target.source })}
+${floating.target.text}`
+      : floating.target.text;
+    const added = addQuoteFor(quoteKey, {
+      text: quoted,
+      comment: "",
+      originItemId: floating.target.originItemId,
+    });
+    if (!added) return;
     window.getSelection()?.removeAllRanges();
-    close();
-    // O foco volta ao campo de mensagem, onde o cartão acabou de aparecer.
+    dismiss();
     document.querySelector<HTMLElement>("[data-chat-composer]")?.focus();
   };
-  const left = Math.max(8, Math.min(target.rect.right, window.innerWidth - 130));
-  const top = Math.min(target.rect.bottom + 6, window.innerHeight - 48);
 
-  if (!open) {
-    return createPortal(
-      <button type="button" aria-label={t("chat.quote.comment")} title={`${t("chat.quote.comment")} (${DESKTOP_OS === "macos" ? "⌥⌘M" : "Ctrl+Shift+M"})`}
-        onMouseDown={(e) => e.preventDefault()} onClick={() => setOpen(true)}
-        style={{ position: "fixed", left, top, zIndex: 10040 }}
-        className="h-8 px-3 rounded-lg flex items-center gap-1.5 text-chat-ui font-medium bg-white dark:bg-surface-raised text-gray-900 dark:text-white
-          shadow-[0_0_0_1px_rgba(24,24,27,0.12),0_8px_24px_-8px_rgba(0,0,0,0.4)] hover:bg-gray-50 dark:hover:bg-white/10">
-        {t("chat.quote.comment")}
-      </button>,
-      document.body,
-    );
-  }
-  const preview = target.text.length > PREVIEW_CHARS ? `${target.text.slice(0, PREVIEW_CHARS).trimEnd()}…` : target.text;
   return createPortal(
-    <div role="dialog" aria-label={t("chat.quote.title")} onKeyDown={(e) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); close(); } }}
-      style={{ position: "fixed", left: Math.max(8, Math.min(target.rect.left, window.innerWidth - 348)), top: Math.min(target.rect.bottom + 8, window.innerHeight - 220), width: 340, zIndex: 10040 }}
-      className="rounded-xl p-3 flex flex-col gap-2 bg-white dark:bg-surface-raised shadow-[0_0_0_1px_rgba(24,24,27,0.12),0_16px_40px_-12px_rgba(0,0,0,0.5)]">
-      <p className="m-0 border-l-[3px] border-gray-300 dark:border-white/25 pl-2.5 text-chat-caption leading-snug text-gray-500 dark:text-white/50 line-clamp-4 whitespace-pre-wrap break-words">{preview}</p>
-      <textarea autoFocus rows={2} value={comment} aria-label={t("chat.quote.field")} placeholder={t("chat.quote.placeholder")}
-        onChange={(e) => setComment(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(); }
-        }}
-        className="w-full resize-none rounded-lg bg-gray-100 dark:bg-white/[0.07] px-2.5 py-2 outline-none text-chat-note text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-white/35" />
-      <div className="flex items-center gap-2 text-chat-caption text-gray-500 dark:text-white/45">
-        <span className="flex-1">{t("chat.quote.hint")}</span>
-        <button type="button" onClick={close} className="h-7 px-2 rounded-md hover:bg-gray-100 dark:hover:bg-white/10">{t("btn.cancel")}</button>
-        <button type="button" onClick={submit} disabled={!comment.trim()} className="h-7 px-2.5 rounded-md bg-accent-600 text-white font-medium disabled:opacity-40">{t("chat.quote.add")}</button>
-      </div>
-    </div>,
+    <button
+      ref={toolbarRef}
+      type="button"
+      data-cite-toolbar=""
+      disabled={tooLong}
+      aria-label={tooLong ? t("chat.quote.tooLongAria") : t("chat.quote.citeAria")}
+      title={`${t("chat.quote.cite")} (${DESKTOP_OS === "macos" ? "⌥⌘M" : "Ctrl+Shift+M"})`}
+      style={{ position: "fixed", left: floating.position.x, top: floating.position.y, zIndex: 10040 }}
+      onPointerDown={(event) => event.preventDefault()}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={cite}
+      onKeyDown={(event) => {
+        event.stopPropagation();
+        if (event.key === "Escape" && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          dismiss();
+        }
+      }}
+      className="cc-surface-glass cc-cite-in inline-flex h-6 max-w-[calc(100vw-1rem)] items-center gap-1 rounded-full px-2
+        border border-gray-900/12 dark:border-white/15 hover:border-gray-900/22 dark:hover:border-white/25
+        text-chat-caption font-medium whitespace-nowrap text-gray-900 dark:text-white
+        shadow-[0_1px_2px_rgba(0,0,0,0.06),0_2px_6px_-1px_rgba(0,0,0,0.06)] dark:shadow-[0_1px_3px_rgba(0,0,0,0.35)]
+        active:scale-[0.97] transition-[box-shadow,transform,border-color] cursor-pointer
+        disabled:cursor-not-allowed disabled:opacity-50
+        focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-500"
+    >
+      <QuoteIcon aria-hidden="true" className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-white/60" />
+      <span>{tooLong ? t("chat.quote.shortenSelection") : t("chat.quote.cite")}</span>
+    </button>,
     document.body,
   );
 }
