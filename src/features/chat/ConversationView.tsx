@@ -28,7 +28,7 @@ import { PermissionCard } from "./permissions/PermissionCard";
 import { usePendingAsks } from "./permissions/permissionsStore";
 import { unsnoozeConversation } from "./shelf";
 import { queueOrSend } from "./queueRunner";
-import { clearTabSearchJump, setChatSlot, setTerminalOpen, unqueueMessage, updateQueuedMessage, useChatStore, type QueuedMessage } from "./store";
+import { clearTabSearchJump, requestTimelineFollow, setChatSlot, setTerminalOpen, unqueueMessage, updateQueuedMessage, useChatStore, type QueuedMessage } from "./store";
 import { AgentSwitchDialog } from "./structured/AgentSwitchDialog";
 import { useTeamComposer } from "./team/TeamComposer";
 import { TeamThreadFeed } from "./team/TeamThreadFeed";
@@ -209,6 +209,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           // Os anexos vão como `@caminho` no fim do texto (a TUI os lê pelo caminho).
           const sent = messageFor(card.tabId, prepared.text, attachments).text;
           if (sent.trim()) unsnoozeConversation(card.tabId);
+          requestTimelineFollow(`tab:${card.tabId}`);
           if (timeline && sent.trim()) addPending(card.tabId, sent.trim(), items);
           sendToConversation(card.tabId, sent);
           // Numa aba não há resposta do backend a esperar: o resumo do time conta como entregue ao enviar.
@@ -233,6 +234,7 @@ export function ConversationView({ card, cards = [] }: { card: ConversationCard;
           if (prepared !== null) {
             const queued = messageFor(card.tabId, prepared.text, attachments).text;
             if (queued.trim()) unsnoozeConversation(card.tabId);
+            requestTimelineFollow(`tab:${card.tabId}`);
             queueOrSend(card.tabId, queued);
             prepared.onSent();
           }

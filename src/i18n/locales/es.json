@@ -5904,6 +5904,7 @@
   "chat.attach.lightbox.applyResize": "Aplicar manteniendo la proporción",
   "chat.attach.lightbox.flattenMarks": "Aplanar marcas",
   "chat.attach.lightbox.openVideo": "Reproducir {{name}}",
+  "chat.attach.lightbox.videoError": "No se pudo reproducir este vídeo aquí.",
   "chat.attach.lightbox.captureFrame": "Capturar fotograma como imagen",
   "chat.attach.lightbox.attachResult": "Adjuntar imagen resultante al compositor",
   "chat.attach.lightbox.open": "Abrir",

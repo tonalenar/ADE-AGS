@@ -69,6 +69,7 @@ interface ChatState {
   tabSearchTarget: { tabId: string; itemId: string; token: number } | null;
   /** Pedido local para abrir a busca na timeline desta conversa. */
   timelineFind: { conversationKey: string; token: number } | null;
+  timelineFollowNonce: Record<string, number>;
   /** As superfícies abertas no painel direito, além do Diff, na ordem em que foram abertas (prancheta 8). */
   surfaces: Surface[];
   /** O aparelho escolhido em cada aba de dispositivo (pranchetas 9 e 10) e o nome curto dele, que vira o da aba. */
@@ -200,7 +201,7 @@ const initialColumn = ((): { tabs: ColumnTab[]; active: string | null } => {
 })();
 
 export const useChatStore = create<ChatState>(() => ({
-  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browserMiniHover: false, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null,
+  slot: null, composing: false, composeFolder: null, terminalOpen: {}, panel: initialPanel, summaryPinned: readSummaryPinned(), summaryOpen: false, lastPanel: null, panelFocus: 0, panelMaximized: false, columnTabs: initialColumn.tabs, columnActive: initialColumn.active, browser: null, browserFloating: false, browserFloatRect: null, browserFloatPinned: false, browserMiniHover: false, deviceFloat: null, shell: null, thread: null, threadSearchTarget: null, tabSearchTarget: null, timelineFind: null, timelineFollowNonce: {},
   surfaces: initialSurfaces(initialPanel),
   devices: { ios: null, android: null }, deviceNames: { ios: null, android: null }, deviceControl: readControl(), composerInsert: null, composerInsertQueue: [], composerAttach: null, composerAttachQueue: [], designOpen: null, panelWidth: readWidth(),
   queues: {}, archivedMessagePreview: null,
@@ -219,6 +220,16 @@ export function requestTimelineFind(conversationKey: string): number {
 /** Fecha somente o pedido que esta instância da busca ainda possui. */
 export function clearTimelineFind(token: number): void {
   if (useChatStore.getState().timelineFind?.token === token) useChatStore.setState({ timelineFind: null });
+}
+
+/** Pede para a timeline da conversa voltar a acompanhar o fim (ex.: ao enviar mensagem). */
+export function requestTimelineFollow(conversationKey: string): void {
+  useChatStore.setState((s) => ({
+    timelineFollowNonce: {
+      ...s.timelineFollowNonce,
+      [conversationKey]: (s.timelineFollowNonce[conversationKey] ?? 0) + 1,
+    },
+  }));
 }
 
 /** Abre uma conversa por resultado de mensagem e pede à timeline que mostre o item encontrado. */

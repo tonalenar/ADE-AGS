@@ -4,7 +4,7 @@ import { Markdown, type CodeBlockRenderer, type MarkdownTone } from "@/shared/ui
 import { htmlImagesToMarkdown } from "@/shared/ui/htmlImages";
 import { AttachCwdContext, AttachmentStrip, type ShownAttachment } from "./AttachmentStrip";
 import { useMediaViewer } from "./MediaViewerContext";
-import { markdownImages, mentionedImages } from "./mediaViewerModel";
+import { markdownImages, mentionedMedia } from "./mediaViewerModel";
 import { loadImage } from "./useImagePreview";
 
 /** Markdown de conversa com imagens locais da pasta do projeto no visualizador compartilhado. */
@@ -21,8 +21,8 @@ export function ChatMessageMarkdown({ content, tone = "chat", renderCodeBlock }:
 /** As imagens citadas por caminho na resposta viram miniaturas abaixo dela; clicar abre o visualizador da ADE. */
 function MentionedImageStrip({ content }: { content: string }) {
   const cwd = useContext(AttachCwdContext);
-  const items: ShownAttachment[] = useMemo(() => mentionedImages(content, cwd).slice(0, 24)
-    .map((image) => ({ path: image.path, name: image.name, kind: "image", size: null })), [content, cwd]);
+  const items: ShownAttachment[] = useMemo(() => mentionedMedia(content, cwd).slice(0, 24)
+    .map((media) => ({ path: media.path, name: media.name, kind: media.kind === "video" ? "file" : "image", size: null })), [content, cwd]);
   return items.length > 0 ? <AttachmentStrip items={items} className="mt-3" /> : null;
 }
 

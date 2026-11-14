@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { captureVideoFrame, commentFromSelection, commentsForMessage, filterMedia, markdownImages, nextMediaIndex, resizeDimensions, undoStroke, type ConversationMedia } from "../attachments/mediaViewerModel";
+vi.mock("@tauri-apps/api/core", () => ({ convertFileSrc: (path: string) => `asset://localhost/${path}` }));
+
+import { captureVideoFrame, commentFromSelection, commentsForMessage, filterMedia, markdownImages, mentionedMedia, nextMediaIndex, resizeDimensions, undoStroke, type ConversationMedia } from "../attachments/mediaViewerModel";
+import { isVideoFile, videoMediaSrc } from "../attachments/videoMedia";
 import { setImageContext } from "../attachments/imageContext";
 import { threadMessage } from "../attachments/send";
 
@@ -66,5 +69,21 @@ describe("modelo do visualizador de mídia", () => {
   it("mantém imagens data URL no visualizador sem fazer requisição externa", () => {
     const source = "data:image/png;base64,aGVsbG8=";
     expect(markdownImages(`![gerada](${source})`, null)).toMatchObject([{ path: source, preview: source, name: "gerada.png" }]);
+  });
+
+  it("detecta extensões de vídeo e converte URIs file:// para URL reproduzível", () => {
+    expect(isVideoFile("/tmp/gravacao.MOV")).toBe(true);
+    expect(isVideoFile("foto.png")).toBe(false);
+    expect(videoMediaSrc("file:///Users/teste/meu%20video.mp4")).toBe("/Users/teste/meu video.mp4");
+    expect(videoMediaSrc("asset://localhost/demo.mp4")).toBe("asset://localhost/demo.mp4");
+    expect(videoMediaSrc("https://exemplo.invalid/demo.webm")).toBe("https://exemplo.invalid/demo.webm");
+  });
+
+  it("extrai vídeos citados no Markdown da conversa dentro da pasta", () => {
+    const items = mentionedMedia("Confira `clips/demo.mov`, [tela](clips/a.png) e `../../fora.mp4`.", "/repo");
+    expect(items).toEqual([
+      { path: "/repo/clips/a.png", name: "a.png", kind: "image", preview: null },
+      { path: "/repo/clips/demo.mov", name: "demo.mov", kind: "video", preview: null },
+    ]);
   });
 });

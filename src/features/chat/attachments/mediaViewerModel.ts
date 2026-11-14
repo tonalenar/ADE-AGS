@@ -11,6 +11,7 @@ export interface MarkdownImageMedia extends ConversationMedia {
 }
 
 const IMAGE_EXTENSION = /\.(png|jpe?g|webp|gif)$/i;
+const VIDEO_EXTENSION = /\.(mp4|mov|m4v|webm|mkv|avi)$/i;
 
 /**
  * Extrai imagens locais mencionadas em Markdown de conversa, sem buscar URLs remotas.
@@ -58,7 +59,11 @@ export function expandBraces(text: string): string[] {
  * (`[logo](brand/logo.png)`), inclusive em tabelas. Só caminhos dentro da pasta da conversa; URLs remotas e
  * blocos de código ficam de fora. As imagens já mostradas com `![...]()` não se repetem aqui.
  */
-export function mentionedImages(content: string, cwd: string | null): ConversationMedia[] {
+/**
+ * Arquivos de imagem e vídeo citados no texto, em código inline (`videos/demo.mp4`) ou como alvo de link,
+ * restritos à pasta da conversa. Itens já mostrados com `![...]()` não se repetem aqui.
+ */
+export function mentionedMedia(content: string, cwd: string | null): ConversationMedia[] {
   if (!cwd) return [];
   const body = content.replace(/```[\s\S]*?```/g, "").replace(/~~~[\s\S]*?~~~/g, "");
   const embedded = new Set(markdownImages(content, cwd).map((image) => image.path));
@@ -71,14 +76,19 @@ export function mentionedImages(content: string, cwd: string | null): Conversati
     const text = raw.trim();
     if (!text || /\s/.test(text) || /^[a-z][a-z0-9+.-]*:\/\//i.test(text) && !/^file:\/\//i.test(text)) continue;
     for (const expanded of expandBraces(text)) {
-      if (!IMAGE_EXTENSION.test(expanded)) continue;
+      const isVideo = VIDEO_EXTENSION.test(expanded);
+      if (!IMAGE_EXTENSION.test(expanded) && !isVideo) continue;
       const path = localMarkdownImagePath(expanded, cwd);
       if (!path || seen.has(path) || embedded.has(path)) continue;
       seen.add(path);
-      result.push({ path, name: path.split("/").pop() || expanded, kind: "image", preview: null });
+      result.push({ path, name: path.split("/").pop() || expanded, kind: isVideo ? "video" : "image", preview: null });
     }
   }
   return result;
+}
+
+export function mentionedImages(content: string, cwd: string | null): ConversationMedia[] {
+  return mentionedMedia(content, cwd).filter((item) => item.kind === "image");
 }
 
 function localMarkdownImagePath(source: string, cwd: string): string | null {

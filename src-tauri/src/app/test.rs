@@ -108,3 +108,29 @@ fn nenhum_thread_nasce_antes_das_chamadas_que_mexem_no_ambiente() {
         );
     }
 }
+
+/// Vídeos anexados no chat usam `convertFileSrc` (`asset://` / `http://asset.localhost`). Sem a feature
+/// `protocol-asset`, o escopo liberado (inclusive pastas com ponto como `~/.t3`) e a CSP, o `<video>` falha.
+#[test]
+fn o_protocolo_asset_e_a_csp_permitem_reproduzir_videos_locais() {
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let cargo = std::fs::read_to_string(root.join("Cargo.toml")).unwrap();
+    assert!(cargo.contains("protocol-asset"), "tauri precisa da feature protocol-asset");
+
+    let conf: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(root.join("tauri.conf.json")).unwrap())
+            .unwrap();
+    let security = &conf["app"]["security"];
+    let asset = &security["assetProtocol"];
+    assert_eq!(asset["enable"], serde_json::Value::Bool(true));
+    assert_eq!(asset["scope"]["requireLiteralLeadingDot"], serde_json::Value::Bool(false));
+    let allow = asset["scope"]["allow"].as_array().expect("scope.allow precisa ser lista");
+    assert!(allow.iter().any(|v| v.as_str() == Some("**")));
+    assert!(allow.iter().any(|v| v.as_str() == Some("/**")));
+
+    for directive in ["img-src", "media-src"] {
+        let csp = security["csp"][directive].as_str().unwrap_or_default();
+        assert!(csp.contains("asset:"), "{directive} deve liberar asset:");
+        assert!(csp.contains("http://asset.localhost"), "{directive} deve liberar http://asset.localhost");
+    }
+}
