@@ -1,6 +1,7 @@
 import { applyToolCallVisibility } from "./toolCallVisibility";
+import { isCompacting } from "../autocompact/model";
 import { useChatPrefs } from "../chatPrefs";
-import { createContext, memo, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ChatMarkdownImageStrip, ChatMarkdownMediaIndex, ChatMessageMarkdown } from "../attachments/ChatMessageMarkdown";
@@ -13,7 +14,6 @@ import { useChatWidthClass } from "../chatLook";
 import { PlanCard } from "../LiveActivity";
 import { McpAppFrame } from "../mcpApps/McpAppFrame";
 import { appResourceOf, mcpAppServerOf } from "../mcpApps/mcpAppResource";
-import { isCompacting } from "../autocompact/model";
 import { clearTimelineFind, setRightPanel, useChatStore } from "../store";
 import { AgentBubble, PersonBubble } from "./Bubbles";
 import { renderChatCodeBlock } from "./CodeBlockFrame";
@@ -32,6 +32,7 @@ import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, 
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 const TOOL_ICON: Record<ToolKind, (p: { className?: string }) => React.JSX.Element> = {
   read: EyeIcon, edit: PenIcon, write: FilePlusIcon, command: TerminalIcon, search: SearchIcon,
@@ -40,8 +41,23 @@ const TOOL_ICON: Record<ToolKind, (p: { className?: string }) => React.JSX.Eleme
 
 /** Quanto do fim da lista conta como "estou lendo o fim": alinhado ao limiar do T3 Code (40 px). */
 const STICK_PX = 40;
+const VIRTUALIZE_AFTER_TURNS = 40;
+const VIRTUAL_OVERSCAN = 5;
+const ESTIMATED_TURN_HEIGHT = 180;
+const TURN_GAP = 16;
 
-/** Rolar para cima dentro de um bloco interno (código ou saída longa) não solta o auto-scroll da conversa. */
+function indexAtOffset(prefix: number[], offset: number): number {
+  let low = 0;
+  let high = Math.max(0, prefix.length - 1);
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if ((prefix[middle] ?? 0) <= offset) low = middle;
+    else high = middle - 1;
+  }
+  return Math.min(low, Math.max(0, prefix.length - 2));
+}
+
+/** Rolar para cima dentro de um bloco interno não solta o auto-scroll da conversa. */
 function hasInnerScrollableUp(target: EventTarget | null, scroller: HTMLElement): boolean {
   let node = target instanceof Element ? target : null;
   while (node && node !== scroller) {
@@ -162,6 +178,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const turnsHostRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const appliedSearchTokenRef = useRef<number | null>(null);
   const [appliedSearchToken, setAppliedSearchToken] = useState<number | null>(null);
@@ -179,11 +196,11 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   const activeFindId = findMatches[activeFindIndex]?.id ?? null;
   const highlightId = activeFindId ?? searchTargetId;
   const followNonce = useChatStore((s) => (conversationKey ? (s.timelineFollowNonce[conversationKey] ?? 0) : 0));
-  // A pessoa está no fim e quer seguir o que chega. Só a rolagem dela muda isso (ver `onWheel` / `onScroll`).
+  // A pessoa está no fim e quer seguir o que chega. A rolagem dela muda isso (ver `onWheel` / `onScroll`).
   const stick = useRef(true);
   // A rolagem suave que esta tela mandou ainda não foi interrompida pela pessoa (ver `onScroll`).
   const following = useRef(false);
-  // Topo aplicado programaticamente por `snapToBottom`: evita que o `scroll` assíncrono no WebKit solte o fio se o texto crescer antes do evento.
+  // Topo aplicado programaticamente: ignora o evento assíncrono de scroll do WebKit.
   const programmaticTop = useRef<number | null>(null);
   const lastTop = useRef(0);
   const lastTurns = useRef(0);
@@ -196,6 +213,71 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     el.scrollTop = target;
     lastTop.current = el.scrollTop;
   };
+  const turnHeights = useRef(new Map<string, number>());
+  const visibleRangeRef = useRef({ start: 0, end: 20 });
+  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 20 });
+  const [heightRevision, setHeightRevision] = useState(0);
+  const virtualized = turns.length > VIRTUALIZE_AFTER_TURNS;
+  const turnPrefix = useMemo(() => {
+    const prefix = [0];
+    for (const turn of turns) prefix.push(prefix[prefix.length - 1]! + (turnHeights.current.get(turn.key) ?? ESTIMATED_TURN_HEIGHT));
+    return prefix;
+  }, [turns, heightRevision]);
+  const turnIndexByItem = useMemo(() => {
+    const indices = new Map<string, number>();
+    turns.forEach((turn, index) => {
+      if (turn.notice) indices.set(turn.notice.id, index);
+      if (turn.user) indices.set(turn.user.id, index);
+      if (turn.final) indices.set(turn.final.id, index);
+      if (turn.planItemId) indices.set(turn.planItemId, index);
+      for (const row of turn.body) {
+        if ("item" in row) indices.set(row.item.id, index);
+        if ("tools" in row) for (const item of row.tools) indices.set(item.id, index);
+      }
+    });
+    return indices;
+  }, [turns]);
+  const updateVisibleRange = useCallback((forcedIndex?: number) => {
+    const scroller = scrollRef.current;
+    const host = turnsHostRef.current;
+    if (!virtualized || !scroller || !host) return;
+    const first = forcedIndex ?? indexAtOffset(turnPrefix, Math.max(0,
+      scroller.scrollTop - (host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop)));
+    const viewport = Math.max(scroller.clientHeight, 720);
+    const last = forcedIndex ?? indexAtOffset(turnPrefix, Math.max(0,
+      scroller.scrollTop - (host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop) + viewport));
+    const next = forcedIndex === undefined
+      ? { start: Math.max(0, first - VIRTUAL_OVERSCAN), end: Math.min(turns.length, last + VIRTUAL_OVERSCAN + 1) }
+      : { start: Math.max(0, forcedIndex - VIRTUAL_OVERSCAN), end: Math.min(turns.length, forcedIndex + VIRTUAL_OVERSCAN + 1) };
+    if (next.start === visibleRangeRef.current.start && next.end === visibleRangeRef.current.end) return;
+    visibleRangeRef.current = next;
+    setVisibleRange(next);
+  }, [turnPrefix, turns.length, virtualized]);
+  const measureTurn = useCallback((index: number, key: string, height: number) => {
+    if (height <= 0) return;
+    const previous = turnHeights.current.get(key) ?? ESTIMATED_TURN_HEIGHT;
+    if (Math.abs(previous - height) < 1) return;
+    turnHeights.current.set(key, height);
+    const scroller = scrollRef.current;
+    if (scroller && index < visibleRangeRef.current.start && !stick.current) scroller.scrollTop += height - previous;
+    setHeightRevision((revision) => revision + 1);
+  }, []);
+  const scrollToTurn = useCallback((index: number) => {
+    updateVisibleRange(index);
+    const scroller = scrollRef.current;
+    const host = turnsHostRef.current;
+    if (!scroller || !host) return;
+    const hostTop = host.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    scroller.scrollTop = hostTop + turnPrefix[index]! + TURN_GAP * index;
+  }, [turnPrefix, updateVisibleRange]);
+  const startIndex = virtualized ? visibleRange.start : 0;
+  const endIndex = virtualized ? Math.max(startIndex, visibleRange.end) : turns.length;
+  const topSpacer = virtualized && startIndex > 0
+    ? turnPrefix[startIndex]! + TURN_GAP * (startIndex - 1)
+    : 0;
+  const bottomSpacer = virtualized && endIndex < turns.length
+    ? turnPrefix[turns.length]! - turnPrefix[endIndex]! + TURN_GAP * (turns.length - endIndex - 1)
+    : 0;
   useEffect(() => {
     if (findToken !== null) findInputRef.current?.focus();
   }, [findToken]);
@@ -210,6 +292,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     setFindIndex(0);
   }, [conversationKey]);
   useEffect(() => { setFindIndex(0); }, [findQuery]);
+  useLayoutEffect(() => { updateVisibleRange(); }, [updateVisibleRange, turns.length]);
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
@@ -229,7 +312,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     } else {
       snapToBottom(el);
     }
-  }, [turns.length, pending.length, working, items, loaded, bottomInset, followNonce]);
+  }, [turns.length, pending.length, working, items, loaded, heightRevision, topSpacer, bottomSpacer, bottomInset, followNonce]);
   // O texto que aparece aos poucos cresce sem redesenhar a lista: a rolagem acompanha o tamanho,
   // se a pessoa estava no fim.
   useEffect(() => {
@@ -249,7 +332,11 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     if (appliedSearchTokenRef.current === searchTargetToken) return;
     const frame = window.requestAnimationFrame(() => {
       const target = contentRef.current?.querySelector<HTMLElement>(`[data-chat-item-id="${CSS.escape(searchTargetId)}"]`);
-      if (!target) return;
+      if (!target) {
+        const index = turnIndexByItem.get(searchTargetId);
+        if (index !== undefined) scrollToTurn(index);
+        return;
+      }
       appliedSearchTokenRef.current = searchTargetToken;
       setAppliedSearchToken(searchTargetToken);
       stick.current = false;
@@ -257,7 +344,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
       target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [searchTargetId, searchTargetToken, loaded, turns, onSearchTargetApplied]);
+  }, [searchTargetId, searchTargetToken, loaded, turns, turnIndexByItem, scrollToTurn, visibleRange.start, visibleRange.end, onSearchTargetApplied]);
 
   useEffect(() => {
     if (!searchTargetId || searchTargetToken === null || searchTargetToken === undefined || appliedSearchToken !== searchTargetToken) return;
@@ -269,13 +356,17 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     if (findToken === null || !activeFindId || !loaded) return;
     const frame = window.requestAnimationFrame(() => {
       const target = contentRef.current?.querySelector<HTMLElement>(`[data-chat-item-id="${CSS.escape(activeFindId)}"]`);
-      if (!target) return;
+      if (!target) {
+        const index = turnIndexByItem.get(activeFindId);
+        if (index !== undefined) scrollToTurn(index);
+        return;
+      }
       stick.current = false;
       following.current = false;
       target.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "center" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [findToken, activeFindId, loaded, turns]);
+  }, [findToken, activeFindId, loaded, turns, turnIndexByItem, scrollToTurn, visibleRange.start, visibleRange.end]);
 
   const stepFind = (delta: -1 | 1) => {
     if (findMatches.length === 0) return;
@@ -302,12 +393,13 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
         const moved = top - lastTop.current;
         lastTop.current = top;
         const distance = el.scrollHeight - top - el.clientHeight;
+        updateVisibleRange();
         // Enquanto a rolagem suave da própria tela desce, os eventos dela não decidem nada até encostar no fim.
         if (following.current && moved >= 0) {
           if (distance <= 2) following.current = false;
           return;
         }
-        // Ignora o `scroll` disparado pelo próprio `snapToBottom` e alcança o novo fim se o texto já cresceu nesse meio-tempo.
+        // Ignora o scroll disparado por snapToBottom e alcança o novo fim se o texto cresceu nesse meio-tempo.
         if (programmaticTop.current !== null && Math.abs(top - programmaticTop.current) <= 2) {
           programmaticTop.current = null;
           if (stick.current && distance > 2) snapToBottom(el);
@@ -367,9 +459,18 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
         {loaded && !missing && turns.length === 0 && !working && (
           <p className="py-10 text-center text-chat-note text-gray-400 dark:text-white/40">{t("chat.timeline.empty", { agent: agentLabel })}</p>
         )}
-        {turns.map((turn, i) => turn.notice
-          ? <NoticeRow key={turn.key} item={turn.notice} onResend={onResend} threadId={threadId} />
-          : <TurnView key={turn.key} turn={turn} thinking={turn.key === thinkingKey} latest={i === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />)}
+        <div ref={turnsHostRef} data-chat-turns-host="" className="flex flex-col gap-4">
+          {topSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="top" style={{ height: topSpacer, flex: "0 0 auto" }} />}
+          {turns.slice(startIndex, endIndex).map((turn, offset) => {
+            const index = startIndex + offset;
+            return <VirtualTurn key={turn.key} turnKey={turn.key} index={index} onMeasure={measureTurn}>
+              {turn.notice
+                ? <NoticeRow item={turn.notice} onResend={onResend} threadId={threadId} />
+                : <TurnView turn={turn} thinking={turn.key === thinkingKey} latest={index === turns.length - 1} onOpenTerminal={onOpenTerminal} searchTargetId={highlightId} composerTarget={quoteKey} quietWhenEmpty={toolVisibility === "zen"} />}
+            </VirtualTurn>;
+          })}
+          {bottomSpacer > 0 && <div aria-hidden="true" data-chat-virtual-spacer="bottom" style={{ height: bottomSpacer, flex: "0 0 auto" }} />}
+        </div>
         {pending.map((p) => { const shown = displayUserText(p.text); return shown ? <PersonBubble key={p.id} text={shown} sending queued={working} composerTarget={quoteKey} /> : null; })}
         {approvalCard}
         {!approvalCard && approval && (
@@ -393,6 +494,26 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
     </div>
   );
 });
+
+function VirtualTurn({ turnKey, index, onMeasure, children }: {
+  turnKey: string;
+  index: number;
+  onMeasure: (index: number, key: string, height: number) => void;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const measure = () => onMeasure(index, turnKey, element.getBoundingClientRect().height);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [index, onMeasure, turnKey]);
+  return <div ref={ref} data-virtual-turn={turnKey}>{children}</div>;
+}
 
 function TurnView({ turn, thinking = false, latest, onOpenTerminal, searchTargetId, composerTarget, quietWhenEmpty = false }: { turn: Turn; /** O modelo ainda está pensando neste turno: o «Pensando…» com brilho vai depois das linhas. */ thinking?: boolean; latest: boolean; onOpenTerminal?: () => void; searchTargetId?: string | null; composerTarget?: string; quietWhenEmpty?: boolean }) {
   const { t } = useTranslation();
@@ -743,10 +864,12 @@ function ChangedFilesCard({ files }: { files: ChangedFile[] }) {
 function WorkingLine({ since, waiting }: { since: number | null; waiting: boolean }) {
   const { t } = useTranslation();
   const [now, setNow] = useState(() => Date.now());
+  const visible = useDocumentVisible();
   useEffect(() => {
+    if (!visible) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [visible]);
   return (
     <div className="flex items-center gap-2 text-chat-ui text-gray-500 dark:text-white/45">
       <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />

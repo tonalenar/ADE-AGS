@@ -12,6 +12,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { SignInButton } from "@/features/forge/SignInButton";
 import { useRepoTarget } from "@/features/forge/useRepoTarget";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 import { BranchMenu } from "./BranchMenu";
 import { CommitGraph } from "./CommitGraph";
@@ -100,6 +101,7 @@ type Group = "conflicted" | "staged" | "changes";
  * Un click en un archivo abre su diff como tab.
  */
 export function ScmPanel({ cwd }: { cwd: string | null }) {
+  const documentVisible = useDocumentVisible();
   const { t } = useTranslation();
   const openDiff = useViewTabsStore((s) => s.openDiff);
   const openFile = useViewTabsStore((s) => s.openFile);
@@ -154,13 +156,14 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   }, [load]);
 
   useEffect(() => {
+    if (!documentVisible) return;
     const id = setInterval(() => {
       // Mientras corre una operación, el estado va a cambiar al terminar: leerlo a mitad
       // mostraría un estado intermedio que parpadea.
       if (document.visibilityState === "visible" && !busyRef.current) load();
     }, POLL_MS);
     return () => clearInterval(id);
-  }, [load]);
+  }, [load, documentVisible]);
 
   const root = status?.root ?? null;
   const [graphRefs, setGraphRefs] = useGraphRefs(root);

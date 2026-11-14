@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "neogestify-ui-components";
 
@@ -7,22 +6,14 @@ import { accountProblemText } from "@/features/accounts/problem";
 
 import { canRollback } from "./checkpoints";
 import { isLive } from "./fleetOrder";
+import { useFleetClock } from "./fleetClock";
 import { PermissionCard } from "./PermissionCard";
 import type { PendingApproval, Task, TaskStatus } from "./types";
 
 /** Segundos transcurridos, refrescados solo mientras la tarea sigue viva. */
 function useElapsed(task: Task): number {
   const live = isLive(task.status);
-  const [now, setNow] = useState(() => Date.now() / 1000);
-
-  useEffect(() => {
-    if (!live) return;
-    // Un intervalo por tarjeta viva. Con la flota entera terminada no queda ninguno
-    // corriendo, que es lo que evita que la consola abierta en segundo plano despierte el
-    // proceso una vez por segundo para siempre.
-    const id = setInterval(() => setNow(Date.now() / 1000), 1000);
-    return () => clearInterval(id);
-  }, [live]);
+  const now = useFleetClock(live);
 
   const from = task.startedAt ?? task.createdAt;
   const to = live ? now : (task.endedAt ?? from);

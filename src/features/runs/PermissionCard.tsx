@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Kbd } from "neogestify-ui-components";
 
 import type { PendingApproval } from "./types";
+import { useFleetClock } from "./fleetClock";
 
 /**
  * Lo que el agente quiere hacer, en la forma en que se puede decidir de un vistazo.
@@ -224,12 +225,7 @@ const BTN = `cc-t flex items-center gap-1.5 px-2 h-6 rounded text-[10.5px]
  */
 function BlockedFor({ since }: { since: number }) {
   const { t } = useTranslation();
-  const [now, setNow] = useState(() => Date.now() / 1000);
-
-  useEffect(() => {
-    const id = setInterval(() => setNow(Date.now() / 1000), 1000);
-    return () => clearInterval(id);
-  }, []);
+  const now = useFleetClock(true);
 
   const secs = Math.max(0, Math.floor(now - since));
   const mm = Math.floor(secs / 60);

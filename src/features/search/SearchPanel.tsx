@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { Button, ChevronDownIcon, ChevronRightIcon, DocumentIcon, Input, Tooltip } from "neogestify-ui-components";
 
 import { DotsIcon } from "@/app/icons";
@@ -58,7 +59,10 @@ function Preview({ text, start, end }: { text: string; start: number; end: numbe
 export function SearchPanel({ cwd }: { cwd: string | null }) {
   const { t } = useTranslation();
   const openFile = useViewTabsStore((s) => s.openFile);
-  const { query, options, showFilters, result, resultRoot, collapsed } = useSearchStore();
+  const { query, options, showFilters, result, resultRoot, collapsed } = useSearchStore(useShallow((state) => ({
+    query: state.query, options: state.options, showFilters: state.showFilters, result: state.result,
+    resultRoot: state.resultRoot, collapsed: state.collapsed,
+  })));
   const { setQuery, setOption, toggleFilters, setResult, toggleFile } = useSearchStore.getState();
   const [searching, setSearching] = useState(false);
   const [error, setError] = useState<string | null>(null);

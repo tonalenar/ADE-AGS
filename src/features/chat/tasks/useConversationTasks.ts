@@ -5,6 +5,7 @@ import { threadIdOf } from "../structured/model";
 import type { TimelineItem } from "../timeline/types";
 import { runningCount, tasksFromItems, visibleTasks, EMPTY_TASKS, type BgTask } from "./tasksModel";
 import { useTasks } from "./tasksStore";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 /** Os motores que não mandam evento de tarefa: o subagente só aparece como a ferramenta `task` da timeline. */
 export const ITEM_ENGINES = new Set(["opencode", "antigravity", "cursor"]);
@@ -38,11 +39,12 @@ export function useConversationTasks(key: string | null): ConversationTasks {
 /** O relógio da tela: muda a cada `ms` enquanto `on` (para o tempo decorrido das que rodam). */
 export function useNow(on: boolean, ms = 1_000): number {
   const [now, setNow] = useState(() => Date.now());
+  const visible = useDocumentVisible();
   useEffect(() => {
-    if (!on) return;
+    if (!on || !visible) return;
     setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(id);
-  }, [on, ms]);
+  }, [on, ms, visible]);
   return now;
 }

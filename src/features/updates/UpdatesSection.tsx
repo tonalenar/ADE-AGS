@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { getVersion } from "@tauri-apps/api/app";
 import { AnimateSpin, Button } from "neogestify-ui-components";
 
@@ -10,7 +11,9 @@ import { useUpdatesStore } from "./store";
 /** Configuración → Actualizaciones: qué versión hay y buscar una nueva a mano. */
 export function UpdatesSection() {
   const { t } = useTranslation();
-  const { info, phase, error, check } = useUpdatesStore();
+  const { info, phase, error, check } = useUpdatesStore(useShallow((state) => ({
+    info: state.info, phase: state.phase, error: state.error, check: state.check,
+  })));
   const [version, setVersion] = useState("");
 
   useEffect(() => { getVersion().then(setVersion).catch(() => {}); }, []);

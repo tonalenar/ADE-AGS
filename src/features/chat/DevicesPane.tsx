@@ -33,6 +33,7 @@ import {
 } from "./devicesIpc";
 import { androidLabel, deviceFrame, iosLabel, LOCATION_PRESETS, parseCoord, type AndroidInfo, type Size } from "./devicesModel";
 import { insertIntoComposer, setDeviceControl, setPanelDevice, useChatStore } from "./store";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 import { usePopover } from "./usePopover";
 
 /*
@@ -529,14 +530,16 @@ export function AndroidPane({ composerTarget }: { composerTarget?: string | null
   const img = useRef<HTMLImageElement>(null);
   const down = useRef<{ x: number; y: number } | null>(null);
   const { ref, size } = useBoxSize();
+  const documentVisible = useDocumentVisible();
 
   useEffect(() => {
+    if (!documentVisible) return;
     let alive = true;
     const load = () => invoke<AndroidList>("android_list").then((l) => alive && setList(l)).catch(() => undefined);
     void load();
     const timer = window.setInterval(load, LIST_EVERY_MS);
     return () => { alive = false; window.clearInterval(timer); };
-  }, []);
+  }, [documentVisible]);
 
   const ready = useMemo(() => (list?.devices ?? []).filter((d) => d.state === "device"), [list]);
   const chosen = picked && ready.some((d) => d.serial === picked) ? picked : ready[0]?.serial ?? null;

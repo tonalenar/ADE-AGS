@@ -7,6 +7,7 @@ import { chatTaskOutput, type TaskOutput } from "./ipc";
 import { ArrowLeftIcon } from "./taskIcons";
 import { elapsedMs, formatElapsed, type BgTask } from "./tasksModel";
 import { STATUS_TONE, stopLabel } from "./taskView";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 /** De quanto em quanto ler a saída de um shell que roda (o `get_task_output` do Claude: só leitura, sem turno). */
 export const OUTPUT_POLL_MS = 2_000;
@@ -15,17 +16,18 @@ export const OUTPUT_POLL_MS = 2_000;
 function useShellOutput(task: BgTask, threadId: string | null): { output: TaskOutput | null; error: string | null } {
   const [output, setOutput] = useState<TaskOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const visible = useDocumentVisible();
   const readable = task.kind === "shell" && task.source === "events" && task.stoppable && !!threadId;
   const running = task.status === "running";
   useEffect(() => {
-    if (!readable || !threadId) return;
+    if (!readable || !threadId || !visible) return;
     let alive = true;
     const read = () => chatTaskOutput(threadId, task.id).then((o) => { if (alive) { setOutput(o); setError(null); } }, (e) => { if (alive) setError(String(e)); });
     void read();
     if (!running) return () => { alive = false; };
     const id = setInterval(() => { void read(); }, OUTPUT_POLL_MS);
     return () => { alive = false; clearInterval(id); };
-  }, [readable, running, threadId, task.id]);
+  }, [readable, running, threadId, task.id, visible]);
   return { output, error: readable ? error : null };
 }
 
