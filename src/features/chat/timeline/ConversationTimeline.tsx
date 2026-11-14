@@ -121,7 +121,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
   approvalDocked?: boolean;
   /** A linha viva fica acima do composer (prancheta 13): aqui não se repete o "Trabalhando há…". */
   live?: boolean;
-  /** Os itens cujo texto ainda está chegando (rascunhos do protocolo): aparecem aos poucos, com o cursor. */
+  /** Os itens cujo texto ainda está chegando (rascunhos do protocolo). */
   streaming?: ReadonlySet<string>;
   agentLabel: string;
   /** O agente da conversa (o logo ao lado das falas dele). */
@@ -323,6 +323,7 @@ export const TimelineView = memo(function TimelineView({ bottomInset = 0, items,
       if (!stick.current) return;
       snapToBottom(el);
     });
+    observer.observe(el);
     observer.observe(content);
     return () => observer.disconnect();
   }, []);
@@ -582,8 +583,9 @@ function UserMessage({ item, searchHit = false, composerTarget }: { item: Timeli
  */
 function AgentText({ item, searchHit = false }: { item: TimelineItem; searchHit?: boolean }) {
   const reveal = useContext(RevealContext);
-  const { text, revealing } = useRevealedText(item.id, item.text ?? "", reveal.animate(item));
-  const caret = revealing || reveal.live(item.id);
+  const live = reveal.live(item.id);
+  const { text, revealing } = useRevealedText(item.id, item.text ?? "", reveal.animate(item), live);
+  const caret = revealing || live;
   const [entering] = useState(() => reveal.entering(item.id));
   return (
     <AgentBubble agentId={reveal.voiceOf(item.id).id} label={reveal.voiceOf(item.id).label} header={reveal.headers.has(item.id)} entering={entering} caret={caret} at={item.at} copyText={item.text ?? ""} itemId={item.id} searchHit={searchHit}>

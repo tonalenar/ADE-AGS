@@ -1,14 +1,14 @@
 //! As conversas do modo chat que falam com o agente por protocolo, sem TUI (etapa 4 do modo chat,
 //! ver `docs/ade-ags/MODO_CHAT.md`). Hoje: o Codex pelo `codex app-server`, o Claude Code pelo
-//! `claude -p` em stream-json, o OpenCode pelo `opencode acp` e o Antigravity pelo `agy -p` em
-//! stream-json (um processo por turno) e o Cursor pelo `cursor-agent -p`, também um processo por turno.
+//! `claude -p` em stream-json, o OpenCode pelo `opencode acp`, o Antigravity pelo `agy` persistente
+//! em stream-json (um processo por conversa) e o Cursor pelo `cursor-agent -p` (um processo por turno).
 //!
 //! - `store`: as tabelas (`chat_thread`, `chat_run`, `chat_item`, `chat_request`), só aditivas;
 //! - `codex_map`: o item do Codex virando o `canal::timeline::Item` da timeline (puro);
 //! - `codex`: o processo `app-server` de cada conversa (JSON por linha no stdio);
 //! - `claude_map` e `claude`: o mesmo para o Claude Code (`claude -p`, stream-json no stdio);
 //! - `opencode_map` e `opencode`: o mesmo para o OpenCode (Agent Client Protocol, JSON-RPC no stdio);
-//! - `agy_map` e `agy`: o mesmo para o Antigravity (`agy --print --output-format stream-json`);
+//! - `agy_map` e `agy`: o mesmo para o Antigravity (`agy --input-format stream-json`);
 //! - `cursor_map` e `cursor`: o mesmo para o Cursor (`cursor-agent -p --output-format stream-json`);
 //! - `turn`: abrir e fechar o turno no banco, comum aos motores mais novos;
 //! - `attach`: os anexos das mensagens (conferir caminhos, miniaturas e imagens em linha do Claude);

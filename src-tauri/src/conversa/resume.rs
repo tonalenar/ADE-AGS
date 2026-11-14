@@ -173,7 +173,7 @@ pub struct TurnAttempt<T> {
     pub stderr: Vec<String>,
 }
 
-/// Motores de UM processo por turno (Cursor, Antigravity): o `--resume`/`--conversation` vai junto com o prompt, então
+/// Motores que precisam validar `--resume`/`--conversation` junto ao primeiro prompt (Cursor e o boot do Antigravity):
 /// **não** se usa [`open_resuming`] (feito para abrir a sessão antes de qualquer mensagem sair). Repetir o turno só é
 /// seguro com PROVA de que o processo recusou a sessão antes de o turno começar:
 /// 1. havia id remoto (`remote`) e o turno acabou em erro (`Err`);

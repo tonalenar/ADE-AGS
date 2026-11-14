@@ -27,7 +27,7 @@ pub enum Engine {
     Claude,
     /// `opencode acp`, o Agent Client Protocol por stdio (`opencode.rs`).
     OpenCode,
-    /// `agy --print --output-format stream-json`, um processo por turno (`agy.rs`).
+    /// `agy --input-format stream-json`, um processo persistente por conversa (`agy.rs`).
     Antigravity,
     /// `cursor-agent -p --output-format stream-json`, um processo por turno (`cursor.rs`).
     Cursor,
@@ -811,7 +811,7 @@ async fn send_framed(app: &AppHandle, db: &DbConnection, thread_id: &str, text: 
     //   já fechou, e aí nada foi escrito;
     // - OpenCode: `send_user` falha antes de qualquer pedido (processo fechado, conversa sem sessão); o
     //   `session/prompt` roda em outra task e o erro dele vira erro do turno, não retorno daqui;
-    // - Antigravity: `send` só falha antes de criar o processo do turno;
+    // - Antigravity: `send` aceita a mensagem; spawn e falhas do protocolo são resolvidos na task do turno;
     // - Codex: ver o `RequestFailure` (saiu e perdeu a resposta = `Unknown`).
     match engine {
         Engine::Claude => {
@@ -1503,7 +1503,8 @@ fn send_answer(app: &AppHandle, db: &DbConnection, row: &store::RequestRow, choi
 /// - OpenCode: o acesso vira política de permissões no ambiente do processo, e modelo e esforço
 ///   são opções da sessão: qualquer troca fecha a sessão (no fim do turno) e a próxima mensagem a
 ///   retoma (`session/resume`).
-/// - Antigravity: cada turno é um processo; a troca vale no turno seguinte.
+/// - Antigravity: a sessão persistente lê o ajuste salvo antes de abrir o próximo turno; se mudou,
+///   encerra e reabre o processo com a configuração nova.
 /// - Claude: tudo é flag do processo, então qualquer troca fecha a sessão (no fim do turno, se há
 ///   um) e a próxima mensagem a retoma (`--resume`) com as flags novas.
 pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort: Option<String>, access: String) -> Result<ThreadRow, String> {
@@ -1537,7 +1538,7 @@ pub fn retune(db: &DbConnection, thread_id: &str, model: Option<String>, effort:
                 session.retire();
             }
         }
-        // O Antigravity não tem processo entre os turnos: o turno seguinte lê a conversa do banco.
+        // O Antigravity confere a configuração antes de iniciar o próximo turno.
         _ => {}
     }
     Ok(row)

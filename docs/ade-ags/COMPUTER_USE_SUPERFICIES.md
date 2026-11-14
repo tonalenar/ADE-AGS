@@ -76,7 +76,7 @@ Conclusão: a liberação estreita (só a pasta `~/.ags/ipc`, rede fechada) exis
 | OpenCode | ok | ok (`OPENCODE_CONFIG_CONTENT`) | ok (MCP + CLI) | `.agents/skills` |
 | Kimi | ok | — | sem motor | `.agents/skills` |
 | Hermes | ok | MCP gerenciado; herança de `ADE_SESSION` não verificada | sem motor | não recebe: as skills dele ficam em `~/.hermes/skills`, fora do projeto |
-| Antigravity | ok | — | ok (MCP por turno + CLI) | `.agents/skills` (o `agy` 1.5.0 lê essa pasta) |
+| Antigravity | ok | — | ok (MCP + CLI; perfil temporário por conversa) | `.agents/skills` (o `agy` 1.5.0 lê essa pasta) |
 | Cursor | ok | — | ok (CLI) | `.cursor/skills` |
 
 Estado pelo código e pelos testes com fakes (`ipc/test.rs`, `agents/contract.rs`, `terminal/session.rs`, `ipc/transport.rs`). O percurso real com Jev em cada CLI **não foi medido**: custa cota e exige OK.

@@ -1,9 +1,9 @@
-//! O Antigravity (`agy`) de cada conversa, sem TUI: um processo `agy --print … --output-format
-//! stream-json` POR TURNO (ver `agy_map` para o protocolo e o que não foi conferido). A conversa
-//! continua com `--conversation <id>`; o id vem do `init`/`result` e fica em `chat_thread.remote_id`.
+//! O Antigravity (`agy`) de cada conversa, sem TUI: um processo persistente em `--input-format
+//! stream-json` (ver `agy_map` para o protocolo). A conversa continua com `--conversation <id>`;
+//! o id vem do `init`/`result` e fica em `chat_thread.remote_id`.
 //!
-//! Não há processo entre os turnos: trocar modelo, esforço ou acesso vale no turno seguinte (cada
-//! turno lê a conversa do banco). Parar mata o processo do turno. No modo `-p` o agy não pergunta
+//! O processo fica aberto entre turnos da conversa: trocar modelo, esforço ou acesso reinicia a
+//! sessão e vale no turno seguinte. Parar mata o processo. No modo headless o agy não pergunta
 //! nada: o que precisaria de aprovação é negado (e vem em `denied_actions`), então esta conversa
 //! nunca gera pedidos de aprovação. Uma mensagem que chega com o turno em andamento fica na fila e
 //! começa o turno seguinte.
@@ -17,18 +17,39 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::json;
 use tauri::AppHandle;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::{Mutex as AsyncMutex, mpsc};
 
 use crate::database::DbConnection;
 
 use super::agy_map::{self as map, Mapper, Out};
 use super::claude_map::TurnResult;
 use super::events::emit;
-use super::resume::{run_turn_resuming, Observed, TurnAttempt};
+use super::resume::{Observed, TurnAttempt, run_turn_resuming};
 use super::{store, turn};
 
 /// Linhas finais do stderr guardadas para explicar um processo que fechou sem `result`.
 const STDERR_TAIL: usize = 20;
+
+enum ProcessEvent {
+    Line(serde_json::Value),
+    Unparsed,
+    Closed,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ProcessConfig {
+    model: Option<String>,
+    effort: Option<String>,
+    access: String,
+    account_id: Option<String>,
+}
+
+impl From<&store::ThreadRow> for ProcessConfig {
+    fn from(row: &store::ThreadRow) -> Self {
+        Self { model: row.model.clone(), effort: row.effort.clone(), access: row.access.clone(), account_id: row.account_id.clone() }
+    }
+}
 
 pub struct Session {
     thread_id: String,
@@ -43,6 +64,13 @@ pub struct Session {
     /// A pessoa parou o turno (ou fechou a conversa): o processo foi morto de propósito.
     killed: AtomicBool,
     alive: AtomicBool,
+    stdin: AsyncMutex<Option<tokio::process::ChildStdin>>,
+    events: AsyncMutex<Option<mpsc::UnboundedReceiver<ProcessEvent>>>,
+    stderr: Arc<Mutex<Vec<String>>>,
+    stderr_task: AsyncMutex<Option<tauri::async_runtime::JoinHandle<()>>>,
+    /// Mantém o perfil MCP temporário até o processo persistente terminar.
+    mcp_profile: Mutex<Option<crate::ipc::mcp::ConversationMcp>>,
+    process_config: Mutex<Option<ProcessConfig>>,
     child: Mutex<Option<tokio::process::Child>>,
 }
 
@@ -61,23 +89,35 @@ impl Session {
         }
     }
 
-    fn kill_child(&self) {
+    fn kill_child(self: &Arc<Self>) {
         if let Ok(mut slot) = self.child.lock()
-            && let Some(child) = slot.as_mut()
+            && let Some(mut child) = slot.take()
         {
             let _ = child.start_kill();
+            let session = Arc::clone(self);
+            tauri::async_runtime::spawn(async move {
+                let _ = child.wait().await;
+                if let Ok(mut profile) = session.mcp_profile.lock() {
+                    profile.take();
+                }
+            });
         }
     }
 
     /// Esvazia a fila e marca cada mensagem como «não enviada» na timeline.
     fn discard_queue(&self) {
-        let dropped: Vec<String> = self.queue.lock().map(|mut q| q.drain(..).collect()).unwrap_or_default();
+        let dropped: Vec<String> = self
+            .queue
+            .lock()
+            .map(|mut q| q.drain(..).collect())
+            .unwrap_or_default();
         turn::discard_queue(&self.app, &self.db, &self.thread_id, dropped);
     }
 
-    /// Mata o processo do turno e descarta a fila (visivelmente).
-    pub fn kill(&self) {
+    /// Mata o processo da conversa e descarta a fila (visivelmente).
+    pub fn kill(self: &Arc<Self>) {
         self.killed.store(true, Ordering::SeqCst);
+        self.alive.store(false, Ordering::SeqCst);
         self.discard_queue();
         self.kill_child();
     }
@@ -90,13 +130,30 @@ fn sessions() -> &'static Mutex<HashMap<String, Arc<Session>>> {
 
 /// A sessão de uma conversa com turno em andamento, se houver.
 pub fn get(thread_id: &str) -> Option<Arc<Session>> {
-    sessions().lock().ok()?.get(thread_id).filter(|s| s.alive()).cloned()
+    sessions()
+        .lock()
+        .ok()?
+        .get(thread_id)
+        .filter(|s| s.alive())
+        .cloned()
 }
 
 /// Para o turno e fecha a sessão de uma conversa, se houver.
 pub fn close(thread_id: &str) {
     if let Some(s) = get(thread_id) {
         s.kill();
+        if s.turn().is_none() {
+            if let Ok(mut map) = sessions().lock() {
+                if map
+                    .get(thread_id)
+                    .is_some_and(|current| Arc::ptr_eq(current, &s))
+                {
+                    map.remove(thread_id);
+                }
+            }
+            emit(&s.app, thread_id, "phase", json!({ "phase": "idle" }));
+            emit(&s.app, thread_id, "closed", json!({}));
+        }
     }
 }
 
@@ -110,37 +167,65 @@ pub fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> 
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let _ = store::touch(&conn, thread_id, crate::util::now_ts_ms());
-        store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
+        store::thread(&conn, thread_id)
+            .map_err(|e| e.to_string())?
+            .ok_or("Conversa não encontrada")?
     };
     let turn_id = uuid::Uuid::new_v4().to_string();
-    let session = {
+    let (session, start_runner) = {
         let mut map = sessions().lock().map_err(|e| e.to_string())?;
-        if let Some(running) = map.get(thread_id).filter(|s| s.alive() && !s.killed.load(Ordering::SeqCst)).cloned() {
-            // Entra na fila sob o mesmo lock do fim do laço: não se perde entre o último `pop` e a saída.
-            if let Ok(mut queue) = running.queue.lock() {
-                queue.push_back(text.to_string());
+        if let Some(running) = map
+            .get(thread_id)
+            .filter(|s| s.alive() && !s.killed.load(Ordering::SeqCst))
+            .cloned()
+        {
+            if running.turn().is_some() {
+                // Entra na fila sob o mesmo lock do fim do laço: não se perde entre o último `pop` e a saída.
+                if let Ok(mut queue) = running.queue.lock() {
+                    queue.push_back(text.to_string());
+                }
+                return Ok(());
             }
-            drop(map);
-            // Só entra no fio quando o turno dela começar (`next_turn`).
-            return Ok(());
+            // O processo ocioso permanece aberto entre os envios da conversa.
+            running.set_turn(Some(turn_id.clone()));
+            (running, true)
+        } else {
+            let session = Arc::new(Session {
+                thread_id: thread_id.to_string(),
+                turn: Mutex::new(Some(turn_id.clone())),
+                queue: Mutex::new(VecDeque::new()),
+                app: app.clone(),
+                db: db.clone(),
+                conversation: Mutex::new(row.remote_id.clone()),
+                killed: AtomicBool::new(false),
+                alive: AtomicBool::new(true),
+                stdin: AsyncMutex::new(None),
+                events: AsyncMutex::new(None),
+                stderr: Arc::new(Mutex::new(Vec::new())),
+                stderr_task: AsyncMutex::new(None),
+                mcp_profile: Mutex::new(None),
+                process_config: Mutex::new(None),
+                child: Mutex::new(None),
+            });
+            map.insert(thread_id.to_string(), session.clone());
+            (session, true)
         }
-        let session = Arc::new(Session {
-            thread_id: thread_id.to_string(),
-            turn: Mutex::new(Some(turn_id.clone())),
-            queue: Mutex::new(VecDeque::new()),
-            app: app.clone(),
-            db: db.clone(),
-            conversation: Mutex::new(row.remote_id.clone()),
-            killed: AtomicBool::new(false),
-            alive: AtomicBool::new(true),
-            child: Mutex::new(None),
-        });
-        map.insert(thread_id.to_string(), session.clone());
-        session
     };
     turn::begin(app, db, thread_id, &turn_id);
     turn::save_user(app, db, thread_id, &turn_id, text);
-    let (app, db, text) = (app.clone(), db.clone(), text.to_string());
+    if start_runner {
+        start_runner_task(app.clone(), db.clone(), session, turn_id, text.to_string());
+    }
+    Ok(())
+}
+
+fn start_runner_task(
+    app: AppHandle,
+    db: DbConnection,
+    session: Arc<Session>,
+    turn_id: String,
+    text: String,
+) {
     tauri::async_runtime::spawn(async move {
         let mut next = Some((turn_id, text));
         while let Some((turn_id, text)) = next.take() {
@@ -148,25 +233,29 @@ pub fn send(app: &AppHandle, db: &DbConnection, thread_id: &str, text: &str) -> 
             next = next_turn(&app, &db, &session);
         }
     });
-    Ok(())
 }
 
-/// O turno seguinte da fila, já aberto no banco; sem fila, a sessão fecha.
-fn next_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) -> Option<(String, String)> {
+/// O turno seguinte da fila, já aberto no banco; sem fila, o processo fica ocioso na sessão.
+fn next_turn(
+    app: &AppHandle,
+    db: &DbConnection,
+    session: &Arc<Session>,
+) -> Option<(String, String)> {
     let thread_id = session.thread_id.as_str();
     let next = {
-        // O mesmo lock do `send`: ou a mensagem entrou na fila antes, ou acha a sessão fechada.
+        // O mesmo lock do `send`: ou a mensagem entrou na fila antes, ou acha a sessão ociosa.
         let mut map = sessions().lock().ok()?;
         let next = session.queue.lock().ok().and_then(|mut q| q.pop_front());
-        if next.is_none() || session.killed.load(Ordering::SeqCst) {
+        if next.is_some() && !session.killed.load(Ordering::SeqCst) {
+            next
+        } else {
             session.set_turn(None);
-            session.alive.store(false, Ordering::SeqCst);
-            if map.get(thread_id).is_some_and(|s| Arc::ptr_eq(s, session)) {
+            if (!session.alive() || session.killed.load(Ordering::SeqCst))
+                && map.get(thread_id).is_some_and(|s| Arc::ptr_eq(s, session))
+            {
                 map.remove(thread_id);
             }
             None
-        } else {
-            next
         }
     };
     match next {
@@ -174,13 +263,15 @@ fn next_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>) -> Opti
             let turn_id = uuid::Uuid::new_v4().to_string();
             session.set_turn(Some(turn_id.clone()));
             turn::begin(app, db, thread_id, &turn_id);
-            // A mensagem que esperava a vez entra no fio agora, que é quando o turno dela começa.
+            // A mensagem que esperava a vez entra no fio agora, que é quando o turno começa.
             turn::save_user(app, db, thread_id, &turn_id, &text);
             Some((turn_id, text))
         }
         None => {
             emit(app, thread_id, "phase", json!({ "phase": "idle" }));
-            emit(app, thread_id, "closed", json!({}));
+            if !session.alive() || session.killed.load(Ordering::SeqCst) {
+                emit(app, thread_id, "closed", json!({}));
+            }
             None
         }
     }
@@ -196,20 +287,41 @@ pub fn pick_duration(reported_ms: Option<i64>, elapsed_ms: i64) -> i64 {
     }
 }
 
-/// Um turno: sobe o `agy`, lê a saída até o fim e fecha o turno no banco.
-async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) {
+/// Um turno: escreve no processo persistente, lê até o `result` e fecha o turno no banco.
+async fn run_turn(
+    app: &AppHandle,
+    db: &DbConnection,
+    session: &Arc<Session>,
+    turn_id: &str,
+    text: &str,
+) {
     let thread_id = session.thread_id.as_str();
     let started = std::time::Instant::now();
     let result = match drive(app, db, session, turn_id, text).await {
         Ok(Some(result)) => result,
         // O processo acabou sem `result`.
-        Ok(None) => TurnResult { interrupted: session.killed.load(Ordering::SeqCst), error: None, duration_ms: None },
-        Err(message) => TurnResult { interrupted: false, error: Some(message), duration_ms: None },
+        Ok(None) => TurnResult {
+            interrupted: session.killed.load(Ordering::SeqCst),
+            error: None,
+            duration_ms: None,
+        },
+        Err(message) => TurnResult {
+            interrupted: false,
+            error: Some(message),
+            duration_ms: None,
+        },
     };
     let mut result = result;
-    result.duration_ms = Some(pick_duration(result.duration_ms, started.elapsed().as_millis() as i64));
+    result.duration_ms = Some(pick_duration(
+        result.duration_ms,
+        started.elapsed().as_millis() as i64,
+    ));
     if session.killed.load(Ordering::SeqCst) {
-        result = TurnResult { interrupted: true, error: None, duration_ms: result.duration_ms };
+        result = TurnResult {
+            interrupted: true,
+            error: None,
+            duration_ms: result.duration_ms,
+        };
     }
     turn::finish(app, db, thread_id, turn_id, &result);
     if let Some(error) = result.error.as_deref().filter(|_| !result.interrupted) {
@@ -217,11 +329,18 @@ async fn run_turn(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, tu
     }
 }
 
-/// O turno com a retomada guardada: um processo por turno, então o prompt sai junto com o `--conversation`. Só cai
+/// O turno com a retomada guardada: um processo por conversa, então o prompt entra no stdin e o `--conversation` só
+/// aparece quando a sessão nasce. Só cai
 /// numa conversa nova com PROVA de que o `agy` recusou a conversa antes de o turno começar (nenhuma linha do stdout e
 /// o stderr de conversa inexistente: `agy_map::session_refused`); qualquer outro erro falha o turno e mantém o id.
 /// Ver `resume::run_turn_resuming`.
-async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str) -> Result<Option<TurnResult>, String> {
+async fn drive(
+    app: &AppHandle,
+    db: &DbConnection,
+    session: &Arc<Session>,
+    turn_id: &str,
+    text: &str,
+) -> Result<Option<TurnResult>, String> {
     let remote = session.conversation.lock().ok().and_then(|c| c.clone());
     run_turn_resuming(
         remote.as_deref(),
@@ -230,8 +349,21 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
             let conversation = conversation.map(str::to_string);
             async move {
                 let mut seen = Observed::default();
-                let result = run_process(app, db, session, turn_id, text, conversation.as_deref(), &mut seen).await;
-                TurnAttempt { result, began: seen.began, stderr: seen.stderr }
+                let result = run_process(
+                    app,
+                    db,
+                    session,
+                    turn_id,
+                    text,
+                    conversation.as_deref(),
+                    &mut seen,
+                )
+                .await;
+                TurnAttempt {
+                    result,
+                    began: seen.began,
+                    stderr: seen.stderr,
+                }
             }
         },
         || {
@@ -247,26 +379,176 @@ async fn drive(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_
     .await
 }
 
-/// Roda o processo do turno. `Ok(Some)` = o `result` chegou; `Ok(None)` = o processo acabou sem ele
+/// Roda um turno no processo persistente. `Ok(Some)` = o `result` chegou; `Ok(None)` = o processo acabou sem ele
 /// (parado de propósito); `Err` = não subiu, ou caiu com erro. `seen` recebe o que o processo mostrou.
-async fn run_process(app: &AppHandle, db: &DbConnection, session: &Arc<Session>, turn_id: &str, text: &str, conversation: Option<&str>, seen: &mut Observed) -> Result<Option<TurnResult>, String> {
-    let thread_id = session.thread_id.as_str();
+async fn run_process(
+    app: &AppHandle,
+    db: &DbConnection,
+    session: &Arc<Session>,
+    turn_id: &str,
+    text: &str,
+    conversation: Option<&str>,
+    seen: &mut Observed,
+) -> Result<Option<TurnResult>, String> {
+    ensure_process(app, db, session, conversation).await?;
+    if let Ok(mut tail) = session.stderr.lock() {
+        tail.clear();
+    }
+    let input = map::prompt_input(text)
+        .map_err(|e| format!("Não consegui preparar a mensagem do Antigravity: {e}"))?;
+    {
+        let mut stdin = session.stdin.lock().await;
+        let input_pipe = stdin.as_mut().ok_or("O Antigravity fechou a entrada")?;
+        input_pipe
+            .write_all(input.as_bytes())
+            .await
+            .map_err(|e| format!("Não consegui enviar ao Antigravity: {e}"))?;
+        input_pipe
+            .write_all(b"\n")
+            .await
+            .map_err(|e| format!("Não consegui enviar ao Antigravity: {e}"))?;
+        input_pipe
+            .flush()
+            .await
+            .map_err(|e| format!("Não consegui enviar ao Antigravity: {e}"))?;
+    }
+
+    let mut events = session
+        .events
+        .lock()
+        .await
+        .take()
+        .ok_or("O leitor do Antigravity não está disponível")?;
+    let mut mapper = Mapper::new(turn_id);
+    let mut done: Option<TurnResult> = None;
+    loop {
+        match events.recv().await {
+            Some(ProcessEvent::Line(value)) => {
+                // O `init` é um handshake de processo persistente, não prova que o prompt foi aceito.
+                if value.get("event").and_then(serde_json::Value::as_str) != Some("init") {
+                    seen.began = true;
+                }
+                for out in mapper.feed(&value, crate::util::now_ts_ms()) {
+                    match out {
+                        Out::Item(item) => turn::save_items(
+                            app,
+                            db,
+                            &session.thread_id,
+                            Some(turn_id),
+                            vec![*item],
+                        ),
+                        // O texto chegando vai só à janela: o banco grava o item completo.
+                        Out::Delta {
+                            item_id,
+                            delta,
+                            kind,
+                        } => emit(
+                            app,
+                            &session.thread_id,
+                            "delta",
+                            json!({ "itemId": item_id, "delta": delta, "kind": kind.as_str() }),
+                        ),
+                        Out::Session(id) => remember(db, session, &id),
+                        Out::Done(result) => done = Some(result),
+                    }
+                }
+                if done.is_some() {
+                    break;
+                }
+            }
+            Some(ProcessEvent::Unparsed) => seen.began = true,
+            Some(ProcessEvent::Closed) | None => {
+                let _ = session.stdin.lock().await.take();
+                let child = session.child.lock().ok().and_then(|mut slot| slot.take());
+                if let Some(mut child) = child {
+                    let _ = child.wait().await;
+                }
+                if let Ok(mut config) = session.process_config.lock() {
+                    *config = None;
+                }
+                if let Some(task) = session.stderr_task.lock().await.take() {
+                    let _ = task.await;
+                }
+                if let Ok(mut profile) = session.mcp_profile.lock() {
+                    profile.take();
+                }
+                seen.stderr = session.stderr.lock().map(|t| t.clone()).unwrap_or_default();
+                if session.killed.load(Ordering::SeqCst) {
+                    return Ok(None);
+                }
+                return Err(if seen.stderr.is_empty() {
+                    "O Antigravity terminou sem responder".into()
+                } else {
+                    map::error_from_stderr(&seen.stderr)
+                });
+            }
+        }
+    }
+    *session.events.lock().await = Some(events);
+    seen.stderr = session.stderr.lock().map(|t| t.clone()).unwrap_or_default();
+    Ok(done)
+}
+
+/// Abre um processo por conversa, em vez de subir `agy --print` a cada mensagem.
+async fn ensure_process(
+    app: &AppHandle,
+    db: &DbConnection,
+    session: &Arc<Session>,
+    conversation: Option<&str>,
+) -> Result<(), String> {
     let row = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::thread(&conn, thread_id).map_err(|e| e.to_string())?.ok_or("Conversa não encontrada")?
+        store::thread(&conn, &session.thread_id)
+            .map_err(|e| e.to_string())?
+            .ok_or("Conversa não encontrada")?
     };
-    let env = row.account_id.as_deref().and_then(|a| crate::accounts::env_for_account(db, a));
+    let config = ProcessConfig::from(&row);
+    let old_child = if let Ok(mut slot) = session.child.lock() {
+        let running = match slot.as_mut() {
+            Some(child) => child.try_wait().map_err(|e| e.to_string())?.is_none(),
+            None => false,
+        };
+        let matches = session.process_config.lock().ok().is_some_and(|current| current.as_ref() == Some(&config));
+        if running && matches {
+            return Ok(());
+        }
+        slot.take()
+    } else {
+        None
+    };
+    if let Some(mut child) = old_child {
+        let _ = child.start_kill();
+        let _ = child.wait().await;
+    }
+    let _ = session.stdin.lock().await.take();
+    let _ = session.events.lock().await.take();
+    if let Some(task) = session.stderr_task.lock().await.take() {
+        let _ = task.await;
+    }
+    if let Ok(mut profile) = session.mcp_profile.lock() {
+        profile.take();
+    }
+    if let Ok(mut current) = session.process_config.lock() {
+        *current = None;
+    }
+    if let Ok(mut tail) = session.stderr.lock() {
+        tail.clear();
+    }
+    let env = row
+        .account_id
+        .as_deref()
+        .and_then(|a| crate::accounts::env_for_account(db, a));
     let name = crate::agents::agent_command("antigravity").unwrap_or("agy");
     let program = crate::util::find_program(name).ok_or("Não achei o Antigravity (agy) no PATH")?;
+    let mut args = map::launch_args(&row, conversation);
     let conversation_mcp = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "antigravity");
-    let mut args = map::launch_args(&row, text, conversation);
     if let Some(mcp) = conversation_mcp.as_ref() {
         args.extend(mcp.antigravity_args.iter().cloned());
     }
     let args: Vec<&str> = args.iter().map(String::as_str).collect();
     let mut cmd = crate::util::external_command(&program, &args).map_err(|e| e.to_string())?;
     cmd.current_dir(crate::util::external_path(std::path::Path::new(&row.cwd)))
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(env) = env {
@@ -276,23 +558,30 @@ async fn run_process(app: &AppHandle, db: &DbConnection, session: &Arc<Session>,
     cmd.envs(crate::chat_team::env::thread_env(&row.id));
     let mut cmd = crate::util::spawn::into_tokio(cmd);
     cmd.kill_on_drop(true);
-    let mut child = cmd.spawn().map_err(|e| format!("Não consegui abrir o Antigravity: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Não consegui abrir o Antigravity: {e}"))?;
     crate::chat_team::env::register_process(&row.id, child.id());
     super::memoria::record_unsupported(app, db, &row);
+    let stdin = child.stdin.take().ok_or("sem stdin")?;
     let stdout = child.stdout.take().ok_or("sem stdout")?;
     let stderr = child.stderr.take();
     if let Ok(mut slot) = session.child.lock() {
         *slot = Some(child);
     }
-    // Parado antes de o processo existir no mapa: não deixa rodar.
-    if session.killed.load(Ordering::SeqCst) {
-        session.kill_child();
+    if let Ok(mut profile) = session.mcp_profile.lock() {
+        *profile = conversation_mcp;
+    }
+    if let Ok(mut current) = session.process_config.lock() {
+        *current = Some(config);
     }
 
-    let tail = Arc::new(Mutex::new(Vec::<String>::new()));
-    let stderr_task = stderr.map(|stderr| {
-        let tail = tail.clone();
-        tauri::async_runtime::spawn(async move {
+    let (tx, rx) = mpsc::unbounded_channel();
+    *session.events.lock().await = Some(rx);
+    *session.stdin.lock().await = Some(stdin);
+    if let Some(stderr) = stderr {
+        let tail = session.stderr.clone();
+        *session.stderr_task.lock().await = Some(tauri::async_runtime::spawn(async move {
             let mut lines = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(mut t) = tail.lock() {
@@ -302,48 +591,32 @@ async fn run_process(app: &AppHandle, db: &DbConnection, session: &Arc<Session>,
                     t.push(line);
                 }
             }
-        })
-    });
-
-    let mut mapper = Mapper::new(turn_id);
-    let mut done: Option<TurnResult> = None;
-    let mut lines = BufReader::new(stdout).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        // Qualquer linha (mesmo ilegível) prova que o processo aceitou a sessão e o turno começou.
-        seen.began = true;
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
-        for out in mapper.feed(&value, crate::util::now_ts_ms()) {
-            match out {
-                Out::Item(item) => turn::save_items(app, db, thread_id, Some(turn_id), vec![*item]),
-                // O texto chegando vai só à janela: o banco grava o item completo.
-                Out::Delta { item_id, delta, kind } => emit(app, thread_id, "delta", json!({ "itemId": item_id, "delta": delta, "kind": kind.as_str() })),
-                Out::Session(id) => remember(db, session, &id),
-                Out::Done(result) => done = Some(result),
+        }));
+    }
+    tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let event = match serde_json::from_str::<serde_json::Value>(&line) {
+                Ok(value) => ProcessEvent::Line(value),
+                Err(_) => ProcessEvent::Unparsed,
+            };
+            if tx.send(event).is_err() {
+                return;
             }
         }
-    }
-    // O processo acabou: espera sair (sem segurar o lock) e junta o stderr.
-    let child = session.child.lock().ok().and_then(|mut c| c.take());
-    let status = match child {
-        Some(mut child) => child.wait().await.ok(),
-        None => None,
-    };
-    if let Some(task) = stderr_task {
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), task).await;
-    }
-    let lines = tail.lock().map(|t| t.clone()).unwrap_or_default();
-    seen.stderr = lines.clone();
-    if done.is_some() || session.killed.load(Ordering::SeqCst) {
-        return Ok(done);
-    }
-    let code = status.map(|s| s.code().unwrap_or(-1));
-    // Saiu sem `result` e sem ninguém parar: o erro é o do stderr.
-    Err(if code == Some(0) && lines.is_empty() { "O Antigravity terminou sem responder".into() } else { map::error_from_stderr(&lines) })
+        let _ = tx.send(ProcessEvent::Closed);
+    });
+    Ok(())
 }
 
 /// Guarda o id da conversa no `agy`: o próximo turno continua com `--conversation`.
 fn remember(db: &DbConnection, session: &Arc<Session>, id: &str) {
-    if session.conversation.lock().ok().is_some_and(|c| c.as_deref() == Some(id)) {
+    if session
+        .conversation
+        .lock()
+        .ok()
+        .is_some_and(|c| c.as_deref() == Some(id))
+    {
         return;
     }
     if let Ok(mut c) = session.conversation.lock() {

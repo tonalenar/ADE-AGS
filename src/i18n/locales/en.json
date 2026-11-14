@@ -4662,7 +4662,7 @@
   "chat.structured.fileChange": "The agent wants to edit files",
   "chat.structured.answer": "Answer the agent's question",
   "chat.settings.structured": "Codex, Claude Code, OpenCode, Antigravity, and local ACP without a terminal",
-  "chat.settings.structuredHint": "New conversations with Codex (app-server) and Claude Code (stream-json) talk to them directly: approvals, questions and leaving Plan mode arrive in the chat, and stopping interrupts the turn. Off, they run in their TUI, like the other agents. OpenCode and local ACP providers use structured chat; local ACP always uses Supervised mode and depends on permission requests the provider sends. Antigravity runs one process per turn and, without a terminal, cannot ask: whatever would need approval is denied and shown in the turn.",
+  "chat.settings.structuredHint": "New conversations with Codex (app-server) and Claude Code (stream-json) talk to them directly: approvals, questions and leaving Plan mode arrive in the chat, and stopping interrupts the turn. Off, they run in their TUI, like the other agents. OpenCode and local ACP providers use structured chat; local ACP always uses Supervised mode and depends on permission requests the provider sends. Antigravity keeps one process per conversation and, without a terminal, cannot ask: whatever would need approval is denied and shown in the turn.",
   "chat.settings.claudeCompact.title": "Claude Code auto-compaction",
   "chat.settings.claudeCompact.description": "Set the context threshold for automatic compaction in Claude Code conversations and terminals.",
   "chat.settings.claudeCompact.account": "Claude Code profile",
