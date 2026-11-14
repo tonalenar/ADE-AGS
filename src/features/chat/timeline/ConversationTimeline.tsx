@@ -553,7 +553,7 @@ function TurnView({ turn, thinking = false, working = false, waiting = false, wo
         <PlanCard plan={turn.plan} itemId={turn.planItemId ?? undefined} searchHit={turn.planItemId === searchTargetId} />}
       {turn.end === null && working && <WorkingLine since={workingSince} waiting={waiting} />}
       {turn.end && !quiet && (
-        <div data-turn-fold="" className="group/timeline-row border-b border-gray-200 dark:border-white/[0.08] pb-2 pe-0.5 pt-1">
+        <div data-turn-fold="" className="group/timeline-row border-b border-gray-200 dark:border-white/[0.08] pb-3.5 pe-0.5 pt-1">
           <div className="relative flex items-center gap-1">
             <button
               type="button"

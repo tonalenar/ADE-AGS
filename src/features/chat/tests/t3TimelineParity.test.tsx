@@ -94,6 +94,8 @@ describe("paridade visual da timeline com o T3 Code (pensar → ferramentas → 
     expect(fold).not.toBeNull();
     expect(fold.textContent).toContain("Trabalhou por 4s");
     expect(fold.getAttribute("aria-expanded")).toBe("false");
+    expect(fold.closest("[data-turn-fold]")?.classList.contains("pb-3.5")).toBe(true);
+    expect(host.querySelector('[data-chat-item-id="a-fold"]')?.className).not.toMatch(/(?:^|\s)mt-/);
     expect(host.querySelector("[data-reasoning]")).toBeNull();
     expect(host.textContent).toContain("Tudo certo.");
 
