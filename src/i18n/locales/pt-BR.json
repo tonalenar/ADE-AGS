@@ -4435,6 +4435,7 @@
   "chat.timeline.answerInTerminal": "Responder no terminal",
   "chat.timeline.interrupted": "Interrompido",
   "chat.timeline.workedFor": "Trabalhou por {{duration}}",
+  "chat.timeline.stoppedAfter": "Você parou após {{duration}}",
   "chat.timeline.done": "Concluído",
   "chat.timeline.changedFiles_one": "{{count}} arquivo alterado",
   "chat.timeline.changedFiles_other": "{{count}} arquivos alterados",

@@ -30,6 +30,8 @@ export interface TurnEnd {
   interrupted: boolean;
   error: string | null;
   files: ChangedFile[];
+  /** Carimbo de tempo do encerramento do turno (ms), quando disponível. */
+  at?: number;
   /** O turno não acabou: chegou outra mensagem da pessoa no meio dele (steer, fila) e o trabalho segue no turno dela. */
   superseded?: boolean;
 }
@@ -175,7 +177,7 @@ export function timelineTurns(items: TimelineItem[]): Turn[] {
       // Sem a duração no arquivo, a conta é do prompt até o fim.
       const start = current.user?.at ?? current.startedAt;
       const durationMs = item.durationMs ?? (start !== undefined && item.at !== undefined ? item.at - start : null);
-      close(current, { durationMs, interrupted: !!item.interrupted, error: item.text?.trim() || null, files: changedFiles(tools) });
+      close(current, { durationMs, interrupted: !!item.interrupted, error: item.text?.trim() || null, files: changedFiles(tools), ...(item.at !== undefined ? { at: item.at } : {}) });
       turn = null;
       tools = [];
     }

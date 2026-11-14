@@ -803,6 +803,7 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
       }, registerKeyHandler })}
       <div ref={scroller} style={{ maxHeight }} className="cc-scroll-hidden">
         <QuoteCards
+          quoteKey={quoteKey}
           items={quoteCards}
           onRemove={(id) => { if (!stashRestoringRef.current && quoteKey) removeQuoteFor(quoteKey, id); }}
           onUpdateComment={(id, comment) => (!stashRestoringRef.current && quoteKey ? updateQuoteCommentFor(quoteKey, id, comment) : false)}

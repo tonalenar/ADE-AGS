@@ -39,25 +39,17 @@
   line-height: var(--text-chat-ui--line-height);
 }
 
-/* O cursor no fim da fala enquanto o texto chega (`AgentText`): depois do último bloco do markdown. */
-@keyframes cc-caret-blink {
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 0.15; }
-}
-.cc-stream-caret > :last-child > :last-child::after {
-  content: "";
-  display: inline-block;
-  width: 0.45em;
-  height: 1em;
-  margin-left: 0.15em;
-  vertical-align: -0.12em;
-  border-radius: 2px;
-  background: currentColor;
-  opacity: 0.6;
-  animation: cc-caret-blink 1.1s ease-in-out infinite;
-}
-@media (prefers-reduced-motion: reduce) {
-  .cc-stream-caret > :last-child > :last-child::after { animation: none; }
+/* Entrada suave em cascata para blocos recém-chegados durante o streaming (paridade com `.chat-markdown[data-streaming]` do T3 Code). */
+@media (prefers-reduced-motion: no-preference) {
+  .chat-markdown[data-streaming] > *,
+  .chat-markdown[data-streaming] pre,
+  .chat-markdown[data-streaming] table {
+    transition: opacity 600ms ease-out;
+
+    @starting-style {
+      opacity: 0;
+    }
+  }
 }
 
 /* ── Identidade ADE AGS ────────────────────────────────────────────────────
@@ -1044,7 +1036,7 @@ button[class*="hover:bg-[var(--nui-danger-hover"]:not(:disabled):hover { backgro
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: cc-shimmer-slide 2.2s linear infinite;
+  animation: cc-shimmer-slide 2.2s steps(30) infinite;
 }
 html.dark .cc-shimmer {
   --cc-shimmer-base: color-mix(in srgb, var(--color-white) 45%, transparent);
@@ -1052,6 +1044,32 @@ html.dark .cc-shimmer {
 }
 @media (prefers-reduced-motion: reduce) {
   .cc-shimmer { animation: none; background-image: none; -webkit-text-fill-color: currentColor; }
+}
+
+/* Brilho discreto em `2.2s steps(30)` nas linhas de ferramenta/grupo em andamento (substitui pontos pulsantes, como `live-tool-shine` no T3 Code). */
+@keyframes cc-live-tool-shine {
+  from { background-position: 110% 0; }
+  to { background-position: -10% 0; }
+}
+.cc-live-tool-shine {
+  --cc-tool-shine-base: var(--color-gray-500);
+  --cc-tool-shine-peak: var(--color-gray-900);
+  color: var(--cc-tool-shine-base);
+  background-color: var(--cc-tool-shine-base);
+  background-image: linear-gradient(100deg, var(--cc-tool-shine-base) 0%, var(--cc-tool-shine-base) 38%, var(--cc-tool-shine-peak) 50%, var(--cc-tool-shine-base) 62%, var(--cc-tool-shine-base) 100%);
+  background-size: 250% 100%;
+  background-repeat: repeat-x;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: cc-live-tool-shine 2.2s steps(30) infinite;
+}
+html.dark .cc-live-tool-shine {
+  --cc-tool-shine-base: color-mix(in srgb, var(--color-white) 55%, transparent);
+  --cc-tool-shine-peak: var(--color-white);
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-live-tool-shine { animation: none; background-image: none; -webkit-text-fill-color: currentColor; }
 }
 
 /* ── Modo chat: balões das mensagens ────────────────────────────────────────
