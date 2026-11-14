@@ -16,7 +16,7 @@ import { ScreenRecordButton } from "@/features/recording/ScreenRecordButton";
 import { DesktopSnapshotButton } from "@/features/recording/DesktopSnapshotButton";
 import { VoiceInputButton } from "@/features/recording/VoiceInputButton";
 import { QuoteCards } from "./quotes/QuoteCards";
-import { addQuoteFor, clearQuotesFor, removeQuoteFor, useQuotes } from "./quotes/quoteStore";
+import { addQuoteFor, clearQuotesFor, removeQuoteFor, updateQuoteCommentFor, useQuoteStore, useQuotes } from "./quotes/quoteStore";
 import { QueueList } from "./QueueList";
 import { ComposerMoreActions } from "./ComposerMoreActions";
 import { useChatPrefs } from "./chatPrefs";
@@ -525,7 +525,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   }, [fit]);
 
   const queue = (): boolean => {
-    if (submitInFlightRef.current || stashRestoringRef.current || editingQueueId || !onQueue || !canSubmit(text, extras, disabled, false)) return false;
+    // Lê direto do store para capturar edições síncronas feitas no mesmo ciclo (ex.: Ctrl+Enter no editor de comentário).
+    const quotes = quoteKey ? (useQuoteStore.getState().byKey[quoteKey] ?? []) : [];
+    const currentExtras = attachments.list.length + quotes.length;
+    if (submitInFlightRef.current || stashRestoringRef.current || editingQueueId || !onQueue || !canSubmit(text, currentExtras, disabled, false)) return false;
     if (onQueue(withQuotes(text, quotes), attachments.list) === false) return false;
     historyDraft.current = null;
     setHistoryIndex(null);
@@ -549,7 +552,10 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
   };
 
   const submit = async (background = false) => {
-    if (submitInFlightRef.current || editingQueueId || !canSend) return false;
+    // Lê direto do store para capturar edições síncronas feitas no mesmo ciclo (ex.: Ctrl+Enter no editor de comentário).
+    const quotes = quoteKey ? (useQuoteStore.getState().byKey[quoteKey] ?? []) : [];
+    const currentCanSend = canSubmit(text, attachments.list.length + quotes.length, disabled || !!editingQueueId || stashRestoring, busy);
+    if (submitInFlightRef.current || editingQueueId || !currentCanSend) return false;
     submitInFlightRef.current = true;
     setBusy(true);
     try {
@@ -796,7 +802,14 @@ export function ChatComposer({ placeholder, controls, leading = null, addon, onS
         return attachments.addPaths(paths);
       }, registerKeyHandler })}
       <div ref={scroller} style={{ maxHeight }} className="cc-scroll-hidden">
-        <QuoteCards items={quoteCards} onRemove={(id) => { if (!stashRestoringRef.current && quoteKey) removeQuoteFor(quoteKey, id); }} onNavigate={navigateToQuoteSource} className="px-4 pt-3.5" />
+        <QuoteCards
+          items={quoteCards}
+          onRemove={(id) => { if (!stashRestoringRef.current && quoteKey) removeQuoteFor(quoteKey, id); }}
+          onUpdateComment={(id, comment) => (!stashRestoringRef.current && quoteKey ? updateQuoteCommentFor(quoteKey, id, comment) : false)}
+          onSaveAndSend={() => { submitForEnter(); }}
+          onNavigate={navigateToQuoteSource}
+          className="px-4 pt-3.5"
+        />
         <AttachmentStrip items={attachments.list} onRemove={stashRestoring ? undefined : attachments.remove} cwd={cwd} className={`px-4 ${quotes.length > 0 ? "pt-2" : "pt-3.5"}`} />
         {attachments.notices.length > 0 && (
           <ul role="status" className="list-none m-0 px-5 pt-2 flex flex-col gap-0.5 text-chat-caption text-amber-700 dark:text-amber-400">

@@ -3,171 +3,299 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: () => Promise.resolve([]) }));
-vi.mock("@tauri-apps/api/event", () => ({ listen: () => Promise.resolve(() => undefined) }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: () => Promise.resolve([]) }));
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string, o?: Record<string, unknown>) => (o ? `${key}${JSON.stringify(o)}` : key), i18n: { language: "pt-BR" } }),
-}));
+// @ts-expect-error Flag global do React para act em happy-dom
+globalThis.IS_REACT_ACT_ENVIRONMENT = true;
+
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (k: string) => k, i18n: { language: "pt-BR" } }) }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
+vi.mock("@/features/agents/agentIcons", () => ({ agentIcon: () => () => null }));
+vi.mock("@/app/platform", async (importOriginal) => { const actual = await importOriginal<typeof import("@/app/platform")>(); return { ...actual, DESKTOP_OS: "linux", MOD_LABEL: "Ctrl" }; });
 
 import { ChatComposer } from "../ChatComposer";
 import { SelectionComment } from "../quotes/SelectionComment";
 import { addQuoteFor, useQuoteStore } from "../quotes/quoteStore";
-import { matchCommentShortcut, selectionTarget, type SelectionLike } from "../quotes/selectionModel";
-import { PersonBubble } from "../timeline/Bubbles";
-import { withQuotes } from "../quotes/quoteModel";
+import { MAX_QUOTE_CHARS, withQuotes } from "../quotes/quoteModel";
+import { isSelectionRectVisible, matchCommentShortcut, resolveSelectionActionPosition, selectionTarget, type SelectionLike } from "../quotes/selectionModel";
+import { AgentBubble, PersonBubble } from "../timeline/Bubbles";
 
-const RECT = { left: 100, top: 200, right: 180, bottom: 220, width: 80, height: 20 };
-function fakeSelection(text: string, anchor: Node | null, focus: Node | null = anchor, collapsed = false): SelectionLike & { removeAllRanges: () => void } {
-  return { removeAllRanges: () => undefined, isCollapsed: collapsed, rangeCount: 1, anchorNode: anchor, focusNode: focus, toString: () => text, getRangeAt: () => ({ getBoundingClientRect: () => RECT as DOMRect }) };
-}
-
-let root: Root;
 let host: HTMLDivElement;
+let root: Root;
+
 beforeEach(() => {
-  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-  useQuoteStore.setState({ byKey: {} });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
+  useQuoteStore.setState({ byKey: {} });
 });
-afterEach(async () => { await act(async () => { root.unmount(); }); host.remove(); document.body.innerHTML = ""; vi.restoreAllMocks(); });
 
-describe("a seleção que pode virar comentário", () => {
-  const container = document.createElement("div");
-  container.innerHTML = '<p data-quotable>fala do agente</p><p>fora</p>';
-  const inside = container.querySelector("[data-quotable]")!.firstChild!;
-  const outsideNode = container.querySelectorAll("p")[1]!.firstChild!;
+afterEach(() => {
+  act(() => root.unmount());
+  host.remove();
+  vi.restoreAllMocks();
+});
 
-  it("vale a seleção dentro de uma fala (agente ou pessoa), com o trecho e onde ela está", () => {
-    expect(selectionTarget(fakeSelection("agente", inside), container)).toEqual({ text: "agente", rect: RECT });
-  });
-
-  it("não vale: seleção vazia, em branco, fora das falas ou de outro lugar da tela", () => {
-    expect(selectionTarget(fakeSelection("", inside, inside, true), container)).toBeNull();
-    expect(selectionTarget(fakeSelection("   ", inside), container)).toBeNull();
-    expect(selectionTarget(fakeSelection("fora", outsideNode), container)).toBeNull();
-    expect(selectionTarget(fakeSelection("x", inside, document.body), container)).toBeNull();
+describe("selectionTarget e posicionamento/visibilidade (modelo puro)", () => {
+  it("aceita seleção dentro de area citável, rejeita fora e rejeita elementos excluídos (botão, aria-hidden)", () => {
+    const container = document.createElement("div");
+    container.innerHTML = '<div data-chat-item-id="m-1"><p data-quotable>fala do agente <button>copiar</button><span aria-hidden="true">oculto</span></p></div><p>fora</p>';
+    const textNode = container.querySelector("[data-quotable]")!.firstChild!;
+    const btnText = container.querySelector("button")!.firstChild!;
+    const hiddenText = container.querySelector("[aria-hidden='true']")!.firstChild!;
+    const outside = container.lastChild!.firstChild!;
+    const rect = { left: 10, top: 20, right: 100, bottom: 40, width: 90, height: 20 };
+    const sel = (a: Node, f: Node, text = "fala"): SelectionLike => ({
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: a,
+      focusNode: f,
+      toString: () => text,
+      getRangeAt: () => ({ getBoundingClientRect: () => rect }),
+    });
+    expect(selectionTarget(sel(textNode, textNode), container)).toEqual({ text: "fala", originItemId: "m-1", rect });
+    expect(selectionTarget(sel(outside, outside), container)).toBeNull();
+    expect(selectionTarget(sel(textNode, outside), container)).toBeNull();
+    expect(selectionTarget(sel(btnText, btnText, "copiar"), container)).toBeNull();
+    expect(selectionTarget(sel(hiddenText, hiddenText, "oculto"), container)).toBeNull();
+    expect(selectionTarget(sel(textNode, textNode, "   "), container)).toBeNull();
     expect(selectionTarget(null, container)).toBeNull();
   });
 
-  it("o atalho: ⌥⌘M no macOS, Ctrl+Shift+M nos outros", () => {
-    const key = (init: KeyboardEventInit) => new KeyboardEvent("keydown", { key: "m", ...init });
-    expect(matchCommentShortcut(key({ altKey: true, metaKey: true }), true)).toBe(true);
-    expect(matchCommentShortcut(key({ ctrlKey: true, shiftKey: true }), false)).toBe(true);
-    expect(matchCommentShortcut(key({ ctrlKey: true }), false)).toBe(false);
-    expect(matchCommentShortcut(key({ altKey: true, metaKey: true }), false)).toBe(false);
+  it("resolveSelectionActionPosition posiciona abaixo do fim da seleção dentro dos limites da viewport", () => {
+    expect(
+      resolveSelectionActionPosition({
+        bounds: { left: 20, top: 40, width: 600, height: 400 },
+        selectionRect: { right: 320, bottom: 150 },
+        pointer: null,
+        viewport: { width: 1024, height: 768 },
+      }),
+    ).toEqual({ x: 320, y: 154 });
+
+    expect(
+      resolveSelectionActionPosition({
+        bounds: { left: 20, top: 40, width: 600, height: 400 },
+        selectionRect: { right: 999, bottom: 900 },
+        pointer: null,
+        viewport: { width: 800, height: 600 },
+      }),
+    ).toEqual({ x: 620, y: 440 });
+  });
+
+  it("isSelectionRectVisible verifica se ao menos parte da seleção está visível nos clipes", () => {
+    expect(isSelectionRectVisible({ left: 10, top: 10, right: 80, bottom: 30 }, [{ left: 0, top: 0, right: 200, bottom: 200 }])).toBe(true);
+    expect(isSelectionRectVisible({ left: 10, top: 220, right: 80, bottom: 240 }, [{ left: 0, top: 0, right: 200, bottom: 200 }])).toBe(false);
+  });
+
+  it("atalho de teclado respeita SO", () => {
+    expect(matchCommentShortcut({ key: "m", altKey: true, metaKey: true, ctrlKey: false, shiftKey: false }, true)).toBe(true);
+    expect(matchCommentShortcut({ key: "m", altKey: false, metaKey: false, ctrlKey: true, shiftKey: true }, false)).toBe(true);
+    expect(matchCommentShortcut({ key: "k", altKey: false, metaKey: false, ctrlKey: true, shiftKey: true }, false)).toBe(false);
   });
 });
 
-describe("Comentar: botão, caixinha e a citação no composer", () => {
-  function Scene() {
+describe("Citar: botão flutuante pílula (T3 Code) e fechamento", () => {
+  function Scene({ includeUserBubble = false }: { includeUserBubble?: boolean }) {
     return (
-      <div>
-        <div data-testid="timeline"><p data-quotable>Cursor está pronto e a troca de agente também.</p></div>
+      <>
+        <div data-testid="timeline">
+          <AgentBubble agentId="claude" label="Claude" itemId="msg-assist-1">
+            <p>Cursor está pronto e a troca de agente também.</p>
+          </AgentBubble>
+          {includeUserBubble && <PersonBubble text="mensagem do usuário" itemId="msg-user-1" />}
+        </div>
         <SelectionComment container={() => document.querySelector("[data-testid=timeline]")} quoteKey="conv-1" />
-      </div>
+        <ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={() => true} />
+      </>
     );
   }
-  const select = async (text: string) => {
-    const node = document.querySelector("[data-quotable]")!.firstChild!;
-    vi.spyOn(window, "getSelection").mockReturnValue(fakeSelection(text, node) as unknown as Selection);
+
+  const selectIn = async (selector: string, text: string, rect = { left: 100, top: 200, right: 180, bottom: 220, width: 80, height: 20 }) => {
+    const el = document.querySelector(selector)!;
+    const node = el.firstChild!;
+    vi.spyOn(window, "getSelection").mockReturnValue({
+      isCollapsed: false,
+      rangeCount: 1,
+      anchorNode: node,
+      focusNode: node,
+      toString: () => text,
+      removeAllRanges: vi.fn(),
+      getRangeAt: () => ({
+        startContainer: node,
+        endContainer: node,
+        startOffset: 0,
+        endOffset: Math.min(text.length, (node.textContent ?? "").length),
+        collapsed: false,
+        getBoundingClientRect: () => rect,
+        getClientRects: () => [rect],
+      }),
+    } as unknown as Selection);
     await act(async () => { document.dispatchEvent(new Event("selectionchange")); });
   };
-  const button = () => document.querySelector("[aria-label='chat.quote.comment']") as HTMLButtonElement | null;
-  const field = () => document.querySelector("textarea[aria-label='chat.quote.field']") as HTMLTextAreaElement | null;
-  const type = (el: HTMLTextAreaElement, value: string) => act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(el, value);
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
-  const key = (el: Element, k: string, init: KeyboardEventInit = {}) => act(async () => { el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true, ...init })); });
+  const citeButton = () => document.querySelector("button[data-cite-toolbar]") as HTMLButtonElement | null;
 
-  it("selecionar um trecho mostra o botão «Comentar» junto à seleção; limpar a seleção o esconde", async () => {
+  it("selecionar texto numa fala do assistente mostra o botão pílula «Citar» com ícone de aspas; na fala do usuário não mostra", async () => {
+    await act(async () => { root.render(<Scene includeUserBubble />); });
+    expect(citeButton()).toBeNull();
+
+    // Mensagem do usuário NÃO mostra botão de citar (como no T3 Code).
+    await selectIn("[data-chat-item-id='msg-user-1'] .whitespace-pre-wrap", "mensagem do usuário");
+    expect(citeButton()).toBeNull();
+
+    // Mensagem do assistente mostra botão pílula "Citar" com ícone de aspas logo abaixo da seleção.
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca de agente");
+    expect(citeButton()).not.toBeNull();
+    expect(citeButton()!.textContent).toContain("chat.quote.cite");
+    expect(citeButton()!.querySelector("svg")).not.toBeNull();
+    expect(citeButton()!.className).toContain("rounded-full");
+    expect(citeButton()!.style.top).toBe("224px");
+  });
+
+  it("seleção acima do limite desabilita o botão e exibe «Encurtar seleção»", async () => {
     await act(async () => { root.render(<Scene />); });
-    expect(button()).toBeNull();
-    await select("troca de agente");
-    expect(button()).not.toBeNull();
-    expect(button()!.style.left).toBe("180px");
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "a".repeat(MAX_QUOTE_CHARS + 10));
+    expect(citeButton()).not.toBeNull();
+    expect(citeButton()!.disabled).toBe(true);
+    expect(citeButton()!.textContent).toContain("chat.quote.shortenSelection");
+  });
+
+  it("clicar em «Citar» insere imediatamente a citação no composer (sem exigir diálogo), limpa a seleção e foca o composer", async () => {
+    await act(async () => { root.render(<Scene />); });
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca de agente");
+    await act(async () => { citeButton()!.click(); });
+
+    expect(useQuoteStore.getState().byKey["conv-1"]).toEqual([
+      expect.objectContaining({ text: "troca de agente", comment: "", originItemId: "msg-assist-1" }),
+    ]);
+    expect(citeButton()).toBeNull();
+    expect(document.activeElement).toBe(document.querySelector("[data-chat-composer]"));
+  });
+
+  it("fecha o botão ao clicar fora, ao rolar, ao limpar a seleção e com Escape", async () => {
+    await act(async () => { root.render(<Scene />); });
+
+    // Fecha ao clicar fora
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca");
+    expect(citeButton()).not.toBeNull();
+    await act(async () => { document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, isPrimary: true })); });
+    expect(citeButton()).toBeNull();
+
+    // Fecha ao rolar
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca");
+    expect(citeButton()).not.toBeNull();
+    await act(async () => { document.querySelector("[data-testid=timeline]")!.dispatchEvent(new Event("scroll", { bubbles: false })); });
+    expect(citeButton()).toBeNull();
+
+    // Fecha ao limpar seleção
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca");
+    expect(citeButton()).not.toBeNull();
     vi.spyOn(window, "getSelection").mockReturnValue(null);
     await act(async () => { document.dispatchEvent(new Event("selectionchange")); });
-    expect(button()).toBeNull();
+    expect(citeButton()).toBeNull();
+
+    // Fecha com Escape
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca");
+    expect(citeButton()).not.toBeNull();
+    await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(citeButton()).toBeNull();
   });
 
-  it("o botão não rouba a seleção do mouse (mousedown cancelado)", async () => {
+  it("acessível por teclado: Tab move o foco ao botão Citar e Enter/clique insere a citação", async () => {
     await act(async () => { root.render(<Scene />); });
-    await select("troca");
-    const down = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
-    await act(async () => { button()!.dispatchEvent(down); });
-    expect(down.defaultPrevented).toBe(true);
-  });
-
-  it("a caixinha cita o trecho e Enter adiciona a citação com o comentário; a seleção e a caixa se vão", async () => {
-    await act(async () => { root.render(<Scene />); });
-    await select("troca de agente");
-    await act(async () => { button()!.click(); });
-    expect(document.body.textContent).toContain("troca de agente");
-    await type(field()!, "e o resumo?");
-    await key(field()!, "Enter");
-    expect(useQuoteStore.getState().byKey["conv-1"]).toEqual([expect.objectContaining({ text: "troca de agente", comment: "e o resumo?" })]);
-    expect(field()).toBeNull();
-    expect(button()).toBeNull();
-  });
-
-  it("Shift+Enter quebra a linha (não envia); Enter sem comentário não adiciona; Esc fecha sem adicionar", async () => {
-    await act(async () => { root.render(<Scene />); });
-    await select("troca");
-    await act(async () => { button()!.click(); });
-    await key(field()!, "Enter", { shiftKey: true });
-    await key(field()!, "Enter");
-    expect(useQuoteStore.getState().byKey["conv-1"]).toBeUndefined();
-    await key(field()!, "Escape");
-    expect(field()).toBeNull();
-    expect(useQuoteStore.getState().byKey["conv-1"]).toBeUndefined();
-  });
-
-  it("pelo teclado: o atalho abre a caixinha com o trecho selecionado", async () => {
-    await act(async () => { root.render(<Scene />); });
-    await select("troca");
-    await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "m", ctrlKey: true, shiftKey: true, bubbles: true })); });
-    expect(field()).not.toBeNull();
-  });
-
-  it("as citações são da conversa: a de outra conversa não aparece", async () => {
-    addQuoteFor("conv-1", { text: "a", comment: "b" });
-    expect(useQuoteStore.getState().byKey["conv-2"]).toBeUndefined();
+    await selectIn("[data-chat-item-id='msg-assist-1'] p", "troca de agente");
+    const btn = citeButton()!;
+    await act(async () => { document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })); });
+    expect(document.activeElement).toBe(btn);
+    await act(async () => { btn.click(); });
+    expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);
   });
 });
 
-describe("o composer leva as citações", () => {
+describe("o composer leva as citações como chip estilo T3, com comentário opcional e remoção", () => {
   let submitted: [string, number][] = [];
-  const mount = (key: string | null = "conv-1") => act(async () => { root.render(<ChatComposer placeholder="p" quoteKey={key} onSubmit={(text, atts) => { submitted.push([text, atts.length]); }} />); });
+  const mount = (key: string | null = "conv-1") =>
+    act(async () => { root.render(<ChatComposer placeholder="p" quoteKey={key} onSubmit={(text, atts) => { submitted.push([text, atts.length]); }} />); });
   const chips = () => [...document.querySelectorAll("ul[aria-label='chat.quote.list'] > li")];
 
   beforeEach(() => { submitted = []; });
 
-  it("cada citação vira um chip acima do campo, com o trecho e o comentário, removível por «×»", async () => {
-    addQuoteFor("conv-1", { text: "trecho longo citado", comment: "meu comentário" });
+  it("cada citação vira um chip acima do campo, permite adicionar/editar comentário no popover e remover por «×»", async () => {
+    addQuoteFor("conv-1", { text: "trecho longo citado", originItemId: "msg-1" });
     addQuoteFor("conv-1", { text: "outro", comment: "segundo" });
     await mount();
     expect(chips()).toHaveLength(2);
     expect(chips()[0]!.textContent).toContain("trecho longo citado");
-    expect(chips()[0]!.textContent).toContain("meu comentário");
-    await act(async () => { (chips()[0]!.querySelector("button") as HTMLElement).click(); });
+    expect(chips()[1]!.textContent).toContain("segundo");
+
+    // Abre editor de comentário opcional no primeiro chip e salva com Enter
+    const editBtn = chips()[0]!.querySelector("button[data-citation-comment-trigger]") as HTMLButtonElement;
+    expect(editBtn).not.toBeNull();
+    await act(async () => { editBtn.click(); });
+    const commentField = document.querySelector("textarea[data-citation-comment-input]") as HTMLTextAreaElement;
+    expect(commentField).not.toBeNull();
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(commentField, "meu comentário");
+      commentField.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      commentField.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    });
+    expect(useQuoteStore.getState().byKey["conv-1"]![0]!.comment).toBe("meu comentário");
+
+    // Remove o primeiro chip pelo ×
+    const removeBtn = chips()[0]!.querySelector("button[data-citation-remove]") as HTMLButtonElement;
+    await act(async () => { removeBtn.click(); });
     expect(chips()).toHaveLength(1);
     expect(useQuoteStore.getState().byKey["conv-1"]).toHaveLength(1);
   });
 
-  it("enviar leva o texto + o bloco de citações; só a citação (sem texto) também vale; e o composer limpa", async () => {
-    addQuoteFor("conv-1", { text: "trecho", comment: "ok?" });
+
+  it("Ctrl+Enter no popover de comentário salva e dispara o envio da mensagem", async () => {
+    addQuoteFor("conv-1", { text: "trecho para envio", originItemId: "msg-1" });
+    await mount();
+    const editBtn = chips()[0]!.querySelector("button[data-citation-comment-trigger]") as HTMLButtonElement;
+    await act(async () => { editBtn.click(); });
+    const commentField = document.querySelector("textarea[data-citation-comment-input]") as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(commentField, "enviar junto");
+      commentField.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      commentField.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    // Submissão assíncrona limpa a lista e entrega o payload com o comentário salvo
+    await act(async () => { await Promise.resolve(); });
+    expect(submitted).toHaveLength(1);
+    expect(submitted[0]![0]).toContain('"comment": "enviar junto"');
+    expect(chips()).toHaveLength(0);
+  });
+
+  it("clicar fora do popover de comentário grava o rascunho válido e fecha", async () => {
+    addQuoteFor("conv-1", { text: "trecho", originItemId: "msg-1" });
+    await mount();
+    const editBtn = chips()[0]!.querySelector("button[data-citation-comment-trigger]") as HTMLButtonElement;
+    await act(async () => { editBtn.click(); });
+    const commentField = document.querySelector("textarea[data-citation-comment-input]") as HTMLTextAreaElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(commentField, "rascunho salvo fora");
+      commentField.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, isPrimary: true }));
+    });
+    expect(document.querySelector("textarea[data-citation-comment-input]")).toBeNull();
+    expect(useQuoteStore.getState().byKey["conv-1"]![0]!.comment).toBe("rascunho salvo fora");
+  });
+
+  it("enviar leva o texto + payload estruturado <assistant_citations>; só citação também vale e limpa", async () => {
+    addQuoteFor("conv-1", { text: "trecho", comment: "ok?", originItemId: "msg-1" });
     await mount();
     expect((document.querySelector("button[type=submit]") as HTMLButtonElement).disabled).toBe(false);
     await act(async () => { (document.querySelector("button[type=submit]") as HTMLElement).click(); });
-    expect(submitted).toEqual([[withQuotes("", [{ text: "trecho", comment: "ok?" }]), 0]]);
+    expect(submitted).toEqual([[withQuotes("", [{ text: "trecho", comment: "ok?", originItemId: "msg-1" }]), 0]]);
     expect(chips()).toHaveLength(0);
   });
 
   it("se o envio falha, as citações ficam", async () => {
-    addQuoteFor("conv-1", { text: "trecho", comment: "ok?" });
+    addQuoteFor("conv-1", { text: "trecho" });
     await act(async () => { root.render(<ChatComposer placeholder="p" quoteKey="conv-1" onSubmit={() => false} />); });
     await act(async () => { (document.querySelector("button[type=submit]") as HTMLElement).click(); });
     expect(chips()).toHaveLength(1);
@@ -179,23 +307,27 @@ describe("o composer leva as citações", () => {
   });
 });
 
-describe("a bolha enviada mostra a citação como cartão, sem o texto cru", () => {
-  it("o bloco sai do balão: sobram o cartão (trecho + comentário) e a fala da pessoa", async () => {
-    const text = withQuotes("o que acha?", [{ text: "Cursor está pronto", comment: "troque o título" }]);
+describe("a bolha enviada mostra a citação renderizada como no T3, sem o payload cru", () => {
+  it("exibe o chip dentro do balão com blockquote no popover ao clicar, sem <assistant_citations> cru", async () => {
+    const text = withQuotes("o que acha?", [{ text: "Cursor está pronto", comment: "troque o título", originItemId: "m-1" }]);
     await act(async () => { root.render(<PersonBubble text={text} />); });
-    expect(host.textContent).toContain("Cursor está pronto");
     expect(host.textContent).toContain("troque o título");
     expect(host.textContent).toContain("o que acha?");
-    expect(host.textContent).not.toContain("[Citação]");
-    expect(host.textContent).not.toContain("> Cursor");
-    const cards = host.querySelector("ul[aria-label='chat.quote.list']")!;
-    const bubble = [...host.querySelectorAll("div")].filter((d) => d.textContent === "o que acha?").pop()!;
-    expect(cards.compareDocumentPosition(bubble) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(host.textContent).not.toContain("<assistant_citations>");
+    expect(host.textContent).not.toContain("[assistant-quote-1]");
+
+    // Ao clicar no chip da citação, abre o popover com o trecho citado em blockquote + comentário
+    const chipTrigger = host.querySelector("button[data-citation-bubble-chip]") as HTMLButtonElement;
+    expect(chipTrigger).not.toBeNull();
+    await act(async () => { chipTrigger.click(); });
+    const bq = document.querySelector("blockquote");
+    expect(bq?.textContent).toContain("Cursor está pronto");
   });
 
-  it("só a citação, sem texto: não sobra balão vazio", async () => {
-    await act(async () => { root.render(<PersonBubble text={withQuotes("", [{ text: "a", comment: "b" }])} />); });
-    expect(host.querySelector(".rounded-2xl")).toBeNull();
-    expect(host.textContent).toContain("b");
+  it("só a citação, sem texto: mostra o chip dentro do balão sem vazar o payload cru", async () => {
+    await act(async () => { root.render(<PersonBubble text={withQuotes("", [{ text: "trecho único", comment: "" }])} />); });
+    expect(host.querySelector(".rounded-2xl")).not.toBeNull();
+    expect(host.textContent).toContain("trecho único");
+    expect(host.textContent).not.toContain("<assistant_citations>");
   });
 });

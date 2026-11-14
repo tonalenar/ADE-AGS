@@ -8,6 +8,8 @@ import { splitAttachmentBlock } from "../attachments/attachModel";
 import { AttachmentStrip } from "../attachments/AttachmentStrip";
 import { splitQuotes } from "../quotes/quoteModel";
 import { QuoteCards } from "../quotes/QuoteCards";
+import { requestTabSearchJump, requestThreadSearchJump } from "../store";
+import { threadIdOf } from "../structured/model";
 import { COLLAPSED_PX, overflowsLimit } from "./bubbleModel";
 import { prefersReducedMotion } from "./useRevealedText";
 
@@ -58,15 +60,28 @@ export function PersonBubble({ text, sending = false, queued = false, at, itemId
   const { t } = useTranslation();
   // Os anexos (bloco `[Anexos]` do fim do texto) viram miniaturas ACIMA do texto, como no Claude Code.
   const { text: withQuoted, attachments } = useMemo(() => splitAttachmentBlock(text), [text]);
-  // As citações («Comentar») viram cartões; o texto cru (`[Citação]`, `> trecho`) não aparece.
+  // As citações («Citar») viram chips dentro do balão (como no T3 Code); a marcação crua não aparece.
   const { text: body, quotes } = useMemo(() => splitQuotes(withQuoted), [withQuoted]);
+  const navigateToQuoteSource = (originItemId: string) => {
+    if (!composerTarget) return;
+    const threadId = threadIdOf(composerTarget);
+    if (threadId) requestThreadSearchJump(threadId, originItemId);
+    else if (composerTarget.startsWith("thread:")) requestThreadSearchJump(composerTarget.slice("thread:".length), originItemId);
+    else requestTabSearchJump(composerTarget, originItemId);
+  };
   return (
     <div data-chat-item-id={itemId} className={`group flex flex-col items-end gap-1 ${searchHit ? "rounded-2xl ring-2 ring-accent-500/60 ring-offset-2 ring-offset-white dark:ring-offset-surface-deep" : ""}`} aria-busy={sending || undefined}>
       {attachments.length > 0 && <AttachmentStrip items={attachments} className="justify-end max-w-[85%]" />}
-      {quotes.length > 0 && <QuoteCards items={quotes.map((q, i) => ({ id: String(i), ...q }))} className="max-w-[85%] self-end w-full sm:w-auto" />}
-      {body && (
+      {(quotes.length > 0 || body) && (
       <div className={`max-w-[85%] rounded-2xl px-4 py-2.5 bg-gray-200/60 dark:bg-white/[0.08] break-words ${sending ? "opacity-70" : ""}`}>
-        <Collapsible><div data-quotable="" className="whitespace-pre-wrap">{body}</div></Collapsible>
+        {quotes.length > 0 && (
+          <QuoteCards
+            items={quotes.map((q, i) => ({ id: String(i), ...q }))}
+            onNavigate={composerTarget ? navigateToQuoteSource : undefined}
+            className={body ? "mb-1.5" : ""}
+          />
+        )}
+        {body && <Collapsible><div className="whitespace-pre-wrap">{body}</div></Collapsible>}
       </div>
       )}
       {sending && <span className="px-2 text-chat-caption text-gray-400 dark:text-white/35">{t(queued ? "chat.timeline.queued" : "chat.timeline.sending")}</span>}
