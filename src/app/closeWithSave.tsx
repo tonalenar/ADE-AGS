@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
 import { getAllWebviewWindows } from "@tauri-apps/api/webviewWindow";
@@ -83,7 +84,9 @@ class SaveAlert {
  * No se puede cerrar —ni X, ni Esc, ni click afuera—: se va con la ventana.
  */
 export function ClosingProgress() {
-  const { open, done, total, label } = useClosingStore();
+  const { open, done, total, label } = useClosingStore(useShallow((state) => ({
+    open: state.open, done: state.done, total: state.total, label: state.label,
+  })));
   if (!open) return null;
   const value = total > 0 ? Math.round((done / total) * 100) : 0;
   return (

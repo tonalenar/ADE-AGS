@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Button, CloseIcon, Progress } from "neogestify-ui-components";
 
@@ -26,7 +27,10 @@ function mb(bytes: number): string {
  */
 export function UpdateNotifier() {
   const { t } = useTranslation();
-  const { info, phase, progress, error, open, check, install, restart, skip, dismiss } = useUpdatesStore();
+  const { info, phase, progress, error, open, check, install, restart, skip, dismiss } = useUpdatesStore(useShallow((state) => ({
+    info: state.info, phase: state.phase, progress: state.progress, error: state.error, open: state.open,
+    check: state.check, install: state.install, restart: state.restart, skip: state.skip, dismiss: state.dismiss,
+  })));
   const [notesOpen, setNotesOpen] = useState(false);
 
   useEffect(() => {

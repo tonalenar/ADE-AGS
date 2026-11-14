@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { listen } from "@tauri-apps/api/event";
 import {
   BoxIcon, ClockIcon, CloudIcon, CopyIcon, DocumentIcon, GearIcon, HomeIcon, LocationIcon, MoonIcon, NetworkIcon,
@@ -125,7 +126,20 @@ function PaletteDialog() {
   const location = useLocation();
   const { theme, setTheme } = useTheme();
   const shortcutBindings = useShortcutPreferences((s) => s.bindings);
-  const ui = useUiStore();
+  const ui = useUiStore(useShallow((state) => ({
+    chatMode: state.chatMode,
+    shellMode: state.shellMode,
+    workspacesCollapsed: state.workspacesCollapsed,
+    sidePanelHidden: state.sidePanelHidden,
+    railExpanded: state.railExpanded,
+    setPaletteOpen: state.setPaletteOpen,
+    toggleWorkspaces: state.toggleWorkspaces,
+    toggleSidePanel: state.toggleSidePanel,
+    openDrawer: state.openDrawer,
+    toggleRail: state.toggleRail,
+    setAccountsOpen: state.setAccountsOpen,
+    setSettingsOpen: state.setSettingsOpen,
+  })));
   const currentThread = useChatStore((s) => s.thread);
   const selectedConversationRef = useSelectedRef();
   const pinnedConversationIds = useShelf((s) => s.pinned);
