@@ -7,6 +7,6 @@ describe("a conversa por protocolo liga a resposta ao cartão da pergunta", () =
   it("só passa `onAnswer` ao fio enquanto há pergunta esperando, e ele responde o pedido aberto", () => {
     const source = read("../structured/StructuredConversationView.tsx");
     expect(source).toMatch(/onAnswer=\{question \? answer : undefined\}/);
-    expect(source).toMatch(/const answer = \(choice: string\) => \{ if \(request\) answerRequest\(thread\.id, request\.id, choice\); \};/);
+    expect(source).toMatch(/const answer = (?:useCallback\()?\(choice: string\) => \{ if \(request\) answerRequest\(thread\.id, request\.id, choice\); \}/);
   });
 });
