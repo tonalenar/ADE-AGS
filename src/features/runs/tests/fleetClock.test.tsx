@@ -7,6 +7,7 @@ import { useFleetClock } from "../fleetClock";
 
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
+const visibilityDescriptor = Object.getOwnPropertyDescriptor(document, "visibilityState");
 
 function ClockProbe({ onRender }: { onRender: () => void }) {
   useFleetClock(true);
@@ -19,6 +20,8 @@ afterEach(async () => {
   host?.remove();
   root = undefined;
   host = undefined;
+  if (visibilityDescriptor) Object.defineProperty(document, "visibilityState", visibilityDescriptor);
+  else Reflect.deleteProperty(document, "visibilityState");
   vi.useRealTimers();
 });
 
@@ -42,5 +45,33 @@ describe("relógio compartilhado da frota", () => {
     await act(async () => root?.unmount());
     root = undefined;
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("pausa ao ocultar a janela e retoma um único timer quando ela volta", async () => {
+    vi.useFakeTimers();
+    Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    root = createRoot(host);
+    let renders = 0;
+    await act(async () => root?.render(<ClockProbe onRender={() => { renders += 1; }} />));
+    expect(vi.getTimerCount()).toBe(1);
+    const initialRenders = renders;
+
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    await act(async () => { vi.advanceTimersByTime(5000); });
+    expect(renders).toBe(initialRenders);
+
+    await act(async () => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(vi.getTimerCount()).toBe(1);
+    await act(async () => { vi.advanceTimersByTime(1000); });
+    expect(renders).toBe(initialRenders + 1);
   });
 });

@@ -8,6 +8,7 @@ import { ExternalIcon } from "@/app/icons";
 import { Markdown } from "@/shared/ui/LazyMarkdown";
 
 import { useUpdatesStore } from "./store";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 /** Primera búsqueda un rato después de abrir: que la app termine de levantar primero. */
 const FIRST_CHECK_MS = 20_000;
@@ -31,13 +32,15 @@ export function UpdateNotifier() {
     info: state.info, phase: state.phase, progress: state.progress, error: state.error, open: state.open,
     check: state.check, install: state.install, restart: state.restart, skip: state.skip, dismiss: state.dismiss,
   })));
+  const visible = useDocumentVisible();
   const [notesOpen, setNotesOpen] = useState(false);
 
   useEffect(() => {
+    if (!visible) return;
     const first = setTimeout(() => check().catch(() => {}), FIRST_CHECK_MS);
     const every = setInterval(() => check().catch(() => {}), EVERY_MS);
     return () => { clearTimeout(first); clearInterval(every); };
-  }, [check]);
+  }, [check, visible]);
 
   if (!open || !info?.newer) return null;
 

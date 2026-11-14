@@ -31,6 +31,7 @@ import { endOutcome, fileName, formatDuration, isUnknownOutcome, openTurnStart, 
 import type { TimelineItem, ToolKind } from "./types";
 import { prefersReducedMotion, useRevealedText } from "./useRevealedText";
 import { searchTimelineItems } from "./searchUtils";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 const TOOL_ICON: Record<ToolKind, (p: { className?: string }) => React.JSX.Element> = {
   read: EyeIcon, edit: PenIcon, write: FilePlusIcon, command: TerminalIcon, search: SearchIcon,
@@ -817,10 +818,12 @@ function ChangedFilesCard({ files }: { files: ChangedFile[] }) {
 function WorkingLine({ since, waiting }: { since: number | null; waiting: boolean }) {
   const { t } = useTranslation();
   const [now, setNow] = useState(() => Date.now());
+  const visible = useDocumentVisible();
   useEffect(() => {
+    if (!visible) return;
     const id = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(id);
-  }, []);
+  }, [visible]);
   return (
     <div className="flex items-center gap-2 text-chat-ui text-gray-500 dark:text-white/45">
       <span className="w-2 h-2 rounded-full bg-accent-500 animate-pulse" />

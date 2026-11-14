@@ -14,6 +14,7 @@ import { CodeEditor, type EditorHandle } from "./CodeEditor";
 import { bannerForConflict, expectedVersionForSave } from "./fileVersion";
 import { fileStat, readFile, writeFile, type FileContent, type FileVersion } from "./ipc";
 import { isMarkdownPath, rememberMarkdownPreview } from "./markdown";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 // Diferida: el render de Markdown (con su parser de HTML) solo se baja la primera vez que
 // alguien pide una vista previa, no en el arranque de la app.
@@ -42,6 +43,7 @@ function formatBytes(n: number): string {
  * la que recibe el teclado — con la pantalla dividida se ven varias y el foco va a una.
  */
 export function FileTab({ view, active, focused = active }: { view: FileView; active: boolean; focused?: boolean }) {
+  const documentVisible = useDocumentVisible();
   const { t } = useTranslation();
   const updateView = useViewTabsStore((s) => s.updateView);
   const [content, setContent] = useState<FileContent | null>(null);
@@ -141,7 +143,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
   }, [saving, banner, view.path, setDirty]);
 
   useEffect(() => {
-    if (!active || content?.kind !== "text") return;
+    if (!active || !documentVisible || content?.kind !== "text") return;
     // O `git show :arquivo` da linha de base é um processo novo: antes rodava a cada 2 s, mesmo
     // sem mudança. Agora só quando o arquivo muda, ou a cada ~30 s (pega commits e `git add`).
     let ticks = 0;
@@ -163,7 +165,7 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
       else load(true).catch((e) => setError(String(e)));
     }, WATCH_MS);
     return () => clearInterval(id);
-  }, [active, content?.kind, view.path, load, loadBaseline]);
+  }, [active, documentVisible, content?.kind, view.path, load, loadBaseline]);
 
   // Volver a la tab es para escribir en ella. En vista previa no: el editor está debajo, y
   // lo que se tipeara iría a un documento que no se ve.

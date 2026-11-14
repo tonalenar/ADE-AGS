@@ -5,16 +5,18 @@ import { useChatLive } from "./liveStore";
 import { usePermissions } from "./permissions/permissionsStore";
 import { threadIdOf } from "./structured/model";
 import { useStructured } from "./structured/store";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 /** O "agora" que avança de segundo em segundo enquanto `active` (o tempo do turno na tela). */
 export function useNow(active: boolean, stepMs = 1000): number {
   const [now, setNow] = useState(() => Date.now());
+  const visible = useDocumentVisible();
   useEffect(() => {
-    if (!active) return;
+    if (!active || !visible) return;
     setNow(Date.now());
     const id = window.setInterval(() => setNow(Date.now()), stepMs);
     return () => window.clearInterval(id);
-  }, [active, stepMs]);
+  }, [active, stepMs, visible]);
   return now;
 }
 

@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useTheme } from "neogestify-ui-components";
 
 import { useSyncStore } from "./store";
+import { useDocumentVisible } from "@/shared/useDocumentVisible";
 
 /** Cada cuánto se sincroniza solo mientras la app está abierta. */
 const EVERY_MS = 5 * 60_000;
@@ -18,19 +19,22 @@ const ON_START_MS = 8_000;
 export function SyncRunner() {
   const { setTheme } = useTheme();
   const load = useSyncStore((s) => s.load);
+  const visible = useDocumentVisible();
+  const lastSyncAt = useRef(0);
 
   useEffect(() => { useSyncStore.setState({ setTheme }); }, [setTheme]);
 
   useEffect(() => {
-    let last = 0;
     const maybeSync = (minGap: number) => {
+      if (document.visibilityState !== "visible") return;
       const { status, running, sync } = useSyncStore.getState();
       if (!status?.configured || !status.auto || running) return;
-      if (Date.now() - last < minGap) return;
-      last = Date.now();
+      if (Date.now() - lastSyncAt.current < minGap) return;
+      lastSyncAt.current = Date.now();
       sync().catch(() => {});
     };
     load().catch(() => {});
+    if (!visible) return;
     const start = setTimeout(() => maybeSync(0), ON_START_MS);
     const every = setInterval(() => maybeSync(0), EVERY_MS);
     const onFocus = () => maybeSync(ON_FOCUS_MIN_MS);
@@ -40,7 +44,7 @@ export function SyncRunner() {
       clearInterval(every);
       window.removeEventListener("focus", onFocus);
     };
-  }, [load]);
+  }, [load, visible]);
 
   return null;
 }
