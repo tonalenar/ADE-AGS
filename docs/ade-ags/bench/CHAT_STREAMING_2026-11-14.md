@@ -44,3 +44,14 @@ As fixtures registradas em 2026-11-09 são capturas reais anteriores, mas não s
 | Cursor | 2.605 ms entre mensagem e primeiro texto; 31 deltas; intervalo mediano 0 ms e p95 297 ms (resolução de 1 ms; há um intervalo de 2.130 ms durante a rodada de ferramenta) | Sem delta em 20.176 ms, limite semanal | Falha de cota, sem comparação de resposta |
 
 O turno real confirma que Antigravity entrega deltas em streaming e a UI os comita logo depois; não foi possível medir o benefício da sessão persistente no segundo turno sem ultrapassar o teto autorizado. O primeiro turno do Antigravity não ficou mais rápido nesta amostra.
+
+## Depois: chat Antigravity por ACP
+
+Na correção do chat, Antigravity passou para `agy acp`, que entrega `agent_message_chunk` e `agent_thought_chunk` pelo adapter ACP compartilhado com OpenCode. A mesma instrumentação temporária marcou `phase=working` e cada delta do backend. Foram usadas duas respostas curtas reais do modelo `gemini-4-hydrogen-medium`, no diretório isolado descrito no relatório da execução; nenhuma resposta adicional foi enviada após estas duas.
+
+| Prompt | 1º delta após `phase=working` | Deltas de texto | Cadência dos deltas de texto |
+|---|---:|---:|---|
+| Uma frase curta | 2.795 ms | 1 | n/a (um delta) |
+| Poema de quatro versos | 2.420 ms | 3 | intervalos 75,1 e 13,8 ms; mediana 44,4 ms e p95 75,1 ms |
+
+No poema, o raciocínio chegou em dois deltas antes da fala, que também chegou em blocos incrementais. O comparativo anterior em stream-json marcou 5.329 ms até o primeiro delta, 3 deltas de texto e intervalo mediano/p95 de 25 ms. As respostas são diferentes e as condições não formam um A/B controlado; os dois TTFTs ACP ficaram entre 2,4 e 2,8 s nesta amostra. A medição termina nos eventos do backend: commit React e paint da tela não foram coletados nesta rodada.

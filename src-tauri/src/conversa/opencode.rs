@@ -60,6 +60,9 @@ pub struct Session {
     /// Durante o `session/load` o OpenCode reenvia o histórico todo: não vira nada.
     quiet: AtomicBool,
     mapper: Mutex<Mapper>,
+    /// MCP e perfil temporário da conversa Antigravity; o arquivo precisa existir até o fim da sessão.
+    mcp_servers: Value,
+    _mcp_profile: Mutex<Option<crate::ipc::mcp::ConversationMcp>>,
     app: AppHandle,
     db: DbConnection,
     /// Os `session/request_permission` esperando a pessoa (o id do JSON-RPC, como veio).
@@ -174,7 +177,7 @@ pub fn get(thread_id: &str) -> Option<Arc<Session>> {
 
 /// Configuração anunciada pela sessão ACP local ativa, se houver.
 pub fn provider_config(thread_id: &str) -> Option<Value> {
-    let session = get(thread_id).filter(|s| crate::local_acp::is_local_acp_id(&s.agent_id))?;
+    let session = get(thread_id).filter(|s| crate::local_acp::is_local_acp_id(&s.agent_id) || s.agent_id == "antigravity")?;
     Some(map::provider_config(&session.config_snapshot()))
 }
 
@@ -194,7 +197,7 @@ pub fn close(thread_id: &str) {
 /// que a tela mostra.
 pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Result<Arc<Session>, String> {
     if let Some(s) = get(thread_id) {
-        if crate::local_acp::is_local_acp_id(&s.agent_id) {
+        if crate::local_acp::is_local_acp_id(&s.agent_id) || s.agent_id == "antigravity" {
             emit(app, thread_id, "providerConfig", json!({ "config": map::provider_config(&s.config_snapshot()) }));
         }
         return Ok(s);
@@ -203,7 +206,7 @@ pub async fn session(app: &AppHandle, db: &DbConnection, thread_id: &str) -> Res
     let gate = resume::start_gate("opencode", thread_id);
     let _guard = gate.lock().await;
     if let Some(s) = get(thread_id) {
-        if crate::local_acp::is_local_acp_id(&s.agent_id) {
+        if crate::local_acp::is_local_acp_id(&s.agent_id) || s.agent_id == "antigravity" {
             emit(app, thread_id, "providerConfig", json!({ "config": map::provider_config(&s.config_snapshot()) }));
         }
         return Ok(s);
@@ -284,11 +287,13 @@ async fn open_session(app: &AppHandle, session: &Session, row: &store::ThreadRow
     use resume::ResumeFailure as Failure;
     let initialized = session.request("initialize", map::initialize_params(), Some(REQUEST_TIMEOUT)).await.map_err(|e| resume::classify(&e))?;
     let cwd = row.cwd.as_str();
-    let mcp_servers = if crate::local_acp::is_local_acp_id(&row.agent_id) { local_acp_mcp_servers(app, row) } else { json!([]) };
+    let local = crate::local_acp::is_local_acp_id(&row.agent_id);
+    let antigravity = row.agent_id == "antigravity";
+    let mcp_servers = if local { local_acp_mcp_servers(app, row) } else if antigravity { session.mcp_servers.clone() } else { json!([]) };
+    let mcp_session = local || antigravity;
     let (remote, mut config) = match resume {
         Some(remote) => {
             // `session/resume` não reenvia o histórico; `session/load` sim (ignorado enquanto carrega).
-            let local = crate::local_acp::is_local_acp_id(&row.agent_id);
             let supports_resume = initialized.pointer("/agentCapabilities/sessionCapabilities/resume").and_then(Value::as_bool).unwrap_or(false);
             let supports_load = initialized.pointer("/agentCapabilities/loadSession").and_then(Value::as_bool).unwrap_or(false);
             if local && !supports_resume && !supports_load {
@@ -300,7 +305,7 @@ async fn open_session(app: &AppHandle, session: &Session, row: &store::ThreadRow
                 session.quiet.store(false, Ordering::SeqCst);
                 loaded
             } else {
-                session.request("session/resume", if local { map::resume_params_with_mcp(remote, cwd, mcp_servers.clone()) } else { map::resume_params(remote, cwd) }, Some(REQUEST_TIMEOUT)).await
+                session.request("session/resume", if mcp_session { map::resume_params_with_mcp(remote, cwd, mcp_servers.clone()) } else { map::resume_params(remote, cwd) }, Some(REQUEST_TIMEOUT)).await
             };
             let found = match resumed {
                 Ok(result) => result,
@@ -315,7 +320,7 @@ async fn open_session(app: &AppHandle, session: &Session, row: &store::ThreadRow
                 Err(e) if !matches!(resume::classify(&e), Failure::Gone(_) | Failure::Transient(_)) || !session.alive() => return Err(resume::classify(&e)),
                 Err(first) => {
                     session.quiet.store(true, Ordering::SeqCst);
-                    let loaded = session.request("session/load", map::resume_params(remote, cwd), Some(REQUEST_TIMEOUT)).await;
+                    let loaded = session.request("session/load", if mcp_session { map::resume_params_with_mcp(remote, cwd, mcp_servers.clone()) } else { map::resume_params(remote, cwd) }, Some(REQUEST_TIMEOUT)).await;
                     session.quiet.store(false, Ordering::SeqCst);
                     // O OpenCode respondendo com erro às duas = a sessão não existe mais.
                     loaded.map_err(|second| if session.alive() { Failure::Gone(second) } else { resume::classify(&first) })?
@@ -324,7 +329,7 @@ async fn open_session(app: &AppHandle, session: &Session, row: &store::ThreadRow
             (remote.to_string(), found)
         }
         None => {
-            let params = if crate::local_acp::is_local_acp_id(&row.agent_id) {
+            let params = if mcp_session {
                 map::new_session_params_with_mcp(cwd, mcp_servers)
             } else {
                 map::new_session_params(cwd)
@@ -335,7 +340,7 @@ async fn open_session(app: &AppHandle, session: &Session, row: &store::ThreadRow
         }
     };
     let ignored = apply_options(session, &remote, row, &mut config).await.map_err(Failure::Fatal)?;
-    if crate::local_acp::is_local_acp_id(&row.agent_id) {
+    if crate::local_acp::is_local_acp_id(&row.agent_id) || antigravity {
         if let Ok(mut snapshot) = session.provider_config.lock() {
             *snapshot = config.clone();
         }
@@ -355,6 +360,23 @@ fn local_acp_mcp_servers(app: &AppHandle, row: &store::ThreadRow) -> Value {
         "args": ["mcp", "--cwd", row.cwd, "--tab", tab],
         "env": []
     }])
+}
+
+/// Converte o MCP temporário da conversa Antigravity para a lista padrão do `session/new` ACP.
+fn antigravity_mcp_servers(profile: &crate::ipc::mcp::ConversationMcp) -> Value {
+    let Some(workspace) = profile.antigravity_args.windows(2)
+        .find(|pair| pair[0] == "--add-dir")
+        .map(|pair| std::path::PathBuf::from(&pair[1])) else { return json!([]) };
+    let path = workspace.join(".agents").join("mcp_config.json");
+    let Ok(bytes) = std::fs::read(path) else { return json!([]) };
+    let Ok(config) = serde_json::from_slice::<Value>(&bytes) else { return json!([]) };
+    let Some(servers) = config.get("mcpServers").and_then(Value::as_object) else { return json!([]) };
+    let result: Vec<Value> = servers.iter().filter_map(|(name, server)| {
+        let command = server.get("command").and_then(Value::as_str)?;
+        let args = server.get("args").and_then(Value::as_array).cloned().unwrap_or_default();
+        Some(json!({ "name": name, "command": command, "args": args, "env": [] }))
+    }).collect();
+    json!(result)
 }
 
 /// O que fazer com uma opção da sessão (`model`, `effort`, `mode`), dada a configuração que o OpenCode mostra.
@@ -415,6 +437,52 @@ async fn apply_options(session: &Session, remote: &str, row: &store::ThreadRow, 
         }
         return Ok(Vec::new());
     }
+    if row.agent_id == "antigravity" {
+        let mut ignored = Vec::new();
+        for (category, fallback_ids, want) in [
+            ("model", & ["model"][..], row.model.as_deref()),
+            ("thought_level", & ["effort", "reasoning_effort"][..], row.effort.as_deref()),
+        ] {
+            let Some(want) = want.filter(|value| !value.is_empty()) else { continue };
+            let Some((id, _, values)) = map::config_option_for_category(config, category, fallback_ids) else {
+                if category == "model" {
+                    return Err("O Antigravity não anunciou uma opção de modelo selecionável".into());
+                }
+                ignored.push(format!("O Antigravity não anunciou a opção de raciocínio {want}; usou o padrão."));
+                continue;
+            };
+            if !values.iter().any(|value| value == want) {
+                if category == "model" {
+                    if map::antigravity_legacy_model_family(config, want).is_some() {
+                        // O agy 1.5 lista a família ACP (`gemini-4-hydrogen`), mas ainda aceita
+                        // variantes legadas (`...-medium`) que o ADE persiste como modelo + esforço.
+                        // O T3 envia essa variante à opção ACP mesmo sem ela aparecer no catálogo.
+                        let result = session
+                            .request("session/set_config_option", map::set_option_params(remote, &id, want), Some(REQUEST_TIMEOUT))
+                            .await?;
+                        if result.get("configOptions").is_some() {
+                            *config = result;
+                        }
+                        continue;
+                    }
+                    return Err(format!("O modelo {want} não está mais disponível no Antigravity ({id})"));
+                }
+                ignored.push(format!("O nível de raciocínio {want} não está disponível no Antigravity ({id}); usou o padrão."));
+                continue;
+            }
+            set_option(session, remote, config, &id, want).await?;
+        }
+        if row.access == "plan" {
+            let Some((id, _, values)) = map::config_option_for_category(config, "mode", &["mode"]) else {
+                return Err("O Antigravity não anunciou modo Plano na sessão ACP".into());
+            };
+            if !values.iter().any(|value| value == "plan") {
+                return Err("O modo Plano não está disponível no Antigravity".into());
+            }
+            set_option(session, remote, config, &id, "plan").await?;
+        }
+        return Ok(ignored);
+    }
     let mut ignored = Vec::new();
     if let Some(model) = row.model.as_deref().filter(|m| !m.is_empty()) {
         set_option(session, remote, config, "model", model).await?;
@@ -460,11 +528,25 @@ fn spawn(
     env: Option<HashMap<String, String>>,
     local_config: Option<crate::local_acp::LocalAcpConfig>,
 ) -> Result<Arc<Session>, String> {
+    let mut antigravity_mcp_profile = None;
+    let mcp_servers = if row.agent_id == "antigravity" {
+        antigravity_mcp_profile = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "antigravity");
+        antigravity_mcp_profile.as_ref().map(antigravity_mcp_servers).unwrap_or_else(|| json!([]))
+    } else {
+        json!([])
+    };
     let (program, args, provider_label) = match local_config {
         Some(config) => {
             let program = crate::util::find_program(&config.command)
                 .ok_or_else(|| format!("Não encontrei o executável configurado para {}", config.label))?;
             (program, config.args, config.label)
+        }
+        None if row.agent_id == "antigravity" => {
+            let name = crate::agents::agent_command("antigravity").unwrap_or("agy");
+            let program = crate::util::find_program(name).ok_or("Não achei o Antigravity (agy) no PATH")?;
+            let mut args = vec!["acp".into()];
+            if row.access == "full" { args.push("--dangerously-skip-permissions".into()); }
+            (program, args, "Antigravity".into())
         }
         None => {
             let name = crate::agents::agent_command("opencode").unwrap_or("opencode");
@@ -480,7 +562,7 @@ fn spawn(
     if let Some(env) = env {
         cmd.envs(env);
     }
-    if !crate::local_acp::is_local_acp_id(&row.agent_id) {
+    if !crate::local_acp::is_local_acp_id(&row.agent_id) && row.agent_id != "antigravity" {
         let mut launch_env: HashMap<String, String> = map::launch_env(row).into_iter().collect();
         if let Some(mcp) = crate::ipc::mcp::conversation_mcp(app, &row.cwd, &row.id, "opencode") {
             for (key, value) in mcp.tab.env {
@@ -525,6 +607,8 @@ fn spawn(
         stale: AtomicBool::new(false),
         quiet: AtomicBool::new(false),
         mapper: Mutex::new(Mapper::new("")),
+        mcp_servers,
+        _mcp_profile: Mutex::new(antigravity_mcp_profile),
         app: app.clone(),
         db: db.clone(),
         asks: Mutex::new(Vec::new()),

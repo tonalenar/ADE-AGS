@@ -33,10 +33,8 @@ import { hasTimeline } from "./chatModel";
 import { parseUnifiedDiff } from "./diffModel";
 import { scmWorkingDiff } from "./ipc";
 import { startChatLive } from "./liveStore";
-import { useLiveSummary } from "./liveSummary";
 import { SummaryPane } from "./summary/SummaryPane";
 import { SUMMARY_POPOVER_W, SummaryPopover } from "./summary/SummaryPopover";
-import { HeaderLive } from "./LiveActivity";
 import { PermissionsInbox } from "./permissions/PermissionsInbox";
 import { TeamHeaderBadge } from "./team/TeamThreadFeed";
 import { PermissionsManager } from "./permissions/PermissionsManager";
@@ -214,7 +212,6 @@ export function ChatShell({ groups, page = null }: { groups: RepoGroup[]; page?:
               <span className="font-medium truncate">{active ? active.title : t("chat.new.title")}</span>
               <TeamHeaderBadge conversation={active} />
             </span>
-            {active && <ActiveLive cardKey={active.tabId} />}
             {/* O seletor fica aqui (não cabe no cabeçalho da barra lateral) e nunca encolhe: o breadcrumb é que cede. */}
             <ShellModeSwitch className="shrink-0" />
             {/* O cabeçalho guarda só o que é da conversa (Resumo e Tarefas; com a coluna fechada, também o painel inferior).
@@ -330,12 +327,6 @@ function BrowserFloatHost({ hidden }: { hidden: boolean }) {
   }, [floating, hidden, measure, viewId]);
 
   return null;
-}
-
-/** "Trabalhando · 52 s" no cabeçalho da conversa aberta (prancheta 13). */
-function ActiveLive({ cardKey }: { cardKey: string }) {
-  const live = useLiveSummary(cardKey);
-  return <HeaderLive live={live} />;
 }
 
 /** Quanto esperar depois do último "a conversa cresceu" de uma pasta para reler o diff dela. */

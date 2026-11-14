@@ -10,6 +10,8 @@ Este documento fecha o contrato da Fase 0 do harness comum. Ele não muda compor
 | Plano de origem | auditoria T3 × ADE (anexo externo, fora do repositório: planos não entram no git, ver `AGENTS.md` §6.3) |
 | Fontes de apoio | quatro inventários de colegas, lidos como **dado a conferir**, não como verdade (§1.6 lista o que foi corrigido) |
 
+**Atualização do chat estruturado (14/11/2026).** O inventário e os replays históricos de Antigravity abaixo descrevem o adapter legado `agy --input-format stream-json`. O chat estruturado agora abre `agy acp` pelo adapter ACP de `opencode.rs`; para essa superfície, os deltas de fala/raciocínio, aprovação e retomada seguem o protocolo ACP. A Frota continua usando o caminho headless legado.
+
 ## 0. Como ler
 
 **Vocabulário.** A palavra "run" tem três donos no código. Use sempre o nome completo.
@@ -144,7 +146,7 @@ Há fixtures `recorded` em `conversa/fixtures/protocolo/` (Claude, Codex, Antigr
 
 ### 1.3 Contagem
 
-São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 20 capabilities = **440 células**: **173 `Supported`, 32 `Unknown`, 235 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 440): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`; `fork` (pergunta lateral) e `comandos` (menu do `/`, §1.9) também ficam fora das 440. Fast tem suporte em Chat para Claude e Codex; a disponibilidade concreta continua dependendo do modelo no roster.
+São 22 colunas (6 de conversa, 8 da Frota, 8 de TUI) × 20 capabilities = **440 células**: **174 `Supported`, 32 `Unknown`, 234 `Unsupported`**. Há ainda 22 células `ags_mcp` (fora das 440): 10 `Supported`, 3 `Unknown` e 9 `Unsupported`; `fork` (pergunta lateral) e `comandos` (menu do `/`, §1.9) também ficam fora das 440. Fast tem suporte em Chat para Claude e Codex; a disponibilidade concreta continua dependendo do modelo no roster.
 
 No chat estruturado, as preferências do composer chegam ao turno pelo IPC: Codex usa o nível `serviceTier` compartilhado com a Frota, e Claude abre a sessão com `fastMode` somado aos hooks temporários do ai-memory. Ultrathink e Ultracode já são resolvidos pelo catálogo e adapter comuns ao chat.
 
@@ -154,7 +156,7 @@ No chat estruturado, as preferências do composer chegam ao turno pelo IPC: Code
 | Chat | claude-code | 15 | 2 | 3 | Supported |
 | Chat | codex | 15 | 0 | 5 | Supported |
 | Chat | opencode | 9 | 1 | 10 | Supported |
-| Chat | antigravity | 9 | 0 | 11 | Supported |
+| Chat | antigravity | 10 | 0 | 10 | Supported |
 | Chat | cursor | 8 | 0 | 12 | Unsupported |
 | Chat | local-acp | 6 | 3 | 11 | Unknown |
 | Fleet | claude-code | 11 | 0 | 9 | Supported |
@@ -173,7 +175,7 @@ No chat estruturado, as preferências do composer chegam ao turno pelo IPC: Code
 | Tui | hermes | 6 | 3 | 11 | Unknown |
 | Tui | antigravity | 5 | 4 | 11 | Unsupported |
 | Tui | cursor | 5 | 3 | 12 | Unsupported |
-| **Total** | 22 colunas × 20 = 440 células | 171 | 32 | 237 | |
+| **Total** | 22 colunas × 20 = 440 células | 174 | 32 | 234 | |
 <!-- contagem-matriz:fim -->
 
 Fora da tabela estática: TUI custom e ACP custom herdam só o que a pessoa declarou (`agents/adapter.rs:262-274`); `bash` não é agente.
@@ -248,7 +250,7 @@ Fallback explícito: o motivo (`unsupported`, `origin-terminal`, `origin-no-sess
 
 | # | Inventário | Afirmação | O que o código mostra | Efeito na matriz |
 |---|---|---|---|---|
-| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também o OpenCode: `claude.rs:190`, `codex.rs:285`, `opencode.rs:231`. Cursor e Antigravity **não** usam `open_resuming` e não devem: o Cursor tem um processo por turno; o Antigravity mantém um por conversa e só passa `--conversation` ao abrir esse processo. Ambos usam `resume::run_turn_resuming` (`cursor.rs:243-267`, `agy.rs:224-248`, `resume.rs:176-199`), que só recai numa sessão nova com prova de recusa antes do turno (§11.12) | Inventário errado no ponto. A célula de `resume` de cursor e agy cita o guarda e os testes dele |
+| D1 | `cursor-replay` §1.1 #12 | `resume::open_resuming` "só Claude e Codex" | Também OpenCode e Antigravity no chat estruturado (`opencode.rs:243-260`): ambos abrem o processo ACP, tentam `session/resume`/`session/load` antes de enviar o prompt e só então aplicam as opções. Cursor continua com um processo por turno. O runtime legado Antigravity (`agy.rs:340-362`) ainda usa `resume::run_turn_resuming`, mas não é o caminho do chat estruturado atual | Inventário errado no ponto. A célula de `resume` de Cursor e Antigravity deve distinguir os dois protocolos; o chat ACP cita `open_resuming` |
 | D2 | `claude-codex` §1 #3 e plano §3 | `mark_unknown_outcomes` "não roda no fim normal" | **Parcialmente certo**, depende do motor: tabela em §1.7 | Registrado em §1.7. Corrigido depois da Fase 3 para OpenCode, Antigravity e Cursor (o fim normal também marca); as células `tool_events` desses motores citam a correção. As de Claude (`tool_events`) e de Codex (`turn_completion`) seguem citando a correção anterior; o estado delas não muda |
 | D3 | UI `chatModel.ts:74-80` × inventário | A UI anuncia `midTurn: steer` para o Claude; o inventário diz `unknown` | O Claude só escreve a linha `user` no stdin com o turno aberto (`claude.rs:570-578`) e não observa o desfecho. O comentário da própria UI admite "ou logo depois" (`chatModel.ts:66-67`) | `chat/claude-code` `steer` = `Unknown`; decisão em §1.8 |
 | D4 | `claude-codex` §2.1 #9-#11, §2.2 #9-#11 | `child_spawn`/`child_result` `supported` pela rota do ADE (`chat_new`, `chat_wait`) e `child_stop` pela rota nativa (`stop_task`) | Duas rotas misturadas na mesma capability | Separadas (§1.5). Claude: `child_spawn` fica `S` (nativo observado: `tarefas.rs:1-20`), `child_result` vira `U` (o resumo só vai à janela; o log só guarda id, título e status, `execution_log.rs:228-230`), `child_stop` fica `S`. Codex: `child_spawn` `S`, `child_result` `U`, `child_stop` `U` |
@@ -273,15 +275,15 @@ A função marca como "desfecho desconhecido" as ferramentas `Running` de um tur
 |---|---|---|---|
 | Claude | `Out::Done` → `finish_turn` (`claude.rs:440-453`) → `gravar_fim`: **marca** em `result` normal, interrompido ou com erro, **exceto** as tarefas em segundo plano com o processo vivo | `closed()` → `finish_turn` (`claude.rs:368`), sem exceção: **marca tudo** | marca |
 | Codex | `turn/completed` → `gravar_fim` (`codex.rs:539-549`): **marca em qualquer `status`**. Não roda `pool::after_turn`, como antes | `closed()` → `turn::finish` (`codex.rs:480`): marca (queda é erro; fechar de propósito é interrupção) | marca |
-| OpenCode | `turn::finish` (`opencode.rs:814`): **marca em qualquer fim** (normal, interrompido ou com erro), sem exceção (critério abaixo) | `turn::finish` (`opencode.rs:589`): marca | marca |
-| Antigravity | `turn::finish` (`agy.rs:214`): **marca em qualquer fim**, como o OpenCode | idem (EOF sem `result` vira erro) | marca |
+| OpenCode | `turn::finish` (`opencode.rs`): **marca em qualquer fim** (normal, interrompido ou com erro), sem exceção (critério abaixo) | `turn::finish` (`opencode.rs`): marca | marca |
+| Antigravity (chat ACP) | `turn::finish` (`opencode.rs`, adapter ACP compartilhado): **marca em qualquer fim**, como o OpenCode | idem (queda/EOF do processo ACP vira erro) | marca |
 | Cursor | `turn::finish` (`cursor.rs:233`): **marca em qualquer fim**, como o OpenCode | idem | marca |
 
 **Exceção das tarefas em segundo plano (Claude).** O evento `task` de começo com `is_backgrounded: true` diz qual `tool_use` a lançou (`tool_use_id`). `tarefa_em_segundo_plano` (`claude.rs:473-480`) guarda esse id em `Session.background`. Com o processo vivo, o fim do turno não marca esse item: o desfecho dele vem pelo canal de tarefas (`task_notification`, ou o `stop_task` que encerra a tarefa). A exceção vale para a tarefa viva e para a já encerrada, porque nos dois casos o desfecho já chega pelo canal. Se o processo cai ou é fechado, nenhuma exceção vale: o canal morre com ele, e o item fica marcado. O Codex não precisa dessa exceção: `collabAgentToolCall` e `subAgentActivity` não viram item da timeline, só vão ao painel de tarefas.
 
 **Exceções por motor (critério).** Uma ferramenta só fica de fora da marcação se o motor garante que ela segue depois do fim do turno pelo próprio canal. Só o Claude tem esse canal (a tarefa em segundo plano com o processo vivo, acima). Para OpenCode/ACP, Antigravity e Cursor a lista de exceções é vazia, com estas citações do `record_end` (`turn.rs:56-74`):
-- **OpenCode (ACP):** `session/prompt` só responde no fim do turno (`opencode_map.rs:10-11`), e o mapeador não tem tarefa em segundo plano (nenhuma ocorrência de `background` em `opencode_map.rs`). Um `tool_call` sem atualização final nessa hora não tem quem o feche depois (`opencode.rs:789-826`).
-- **Antigravity:** o `result` fecha cada turno; o processo da conversa permanece aberto e aguarda outra linha NDJSON (`agy.rs`, `agy_map.rs`). O mapeador também não tem tarefa em segundo plano.
+- **OpenCode (ACP):** `session/prompt` só responde no fim do turno (`opencode_map.rs:10-11`), e o mapeador não tem tarefa em segundo plano (nenhuma ocorrência de `background` em `opencode_map.rs`). Um `tool_call` sem atualização final nessa hora não tem quem o feche depois (`opencode.rs`).
+- **Antigravity (chat ACP):** `session/prompt` só responde no fim do turno; o processo ACP permanece aberto para o próximo prompt, sem tarefa em segundo plano (`opencode.rs`, `opencode_map.rs`). O parser legado `agy_map.rs` segue sendo usado nas fixtures/replays antigos.
 - **Cursor:** o turno fecha no `result`, que o `cursor-agent` só manda depois dos shells em segundo plano (`cursor_map.rs:13-15`), ou por silêncio, que não vence com ferramenta `Running` (`cursor_map.rs:155-158`). Um sinal depois do fim de uma chamada desfaz esse fim (`cursor_map.rs:126-127`), então o turno segue até o `result`.
 - **Codex:** `collabAgentToolCall` e `subAgentActivity` não viram item da timeline (ver acima): lista vazia, como antes.
 
@@ -318,7 +320,7 @@ Linha fora das 20, como `ags_mcp` (não entra na contagem da §1.3). Diz se o me
 | fleet, tui | (todos) | Unsupported |
 <!-- comandos:fim -->
 
-- **Fonte nativa do protocolo:** Claude (`initialize.commands`), Codex (`skills/list`) e OpenCode/local-acp (ACP `available_commands_update`). Quando Antigravity estiver numa sessão ACP, o evento alimenta a lista; o adapter Antigravity em stream-json não abre ACP.
+- **Fonte nativa do protocolo:** Claude (`initialize.commands`), Codex (`skills/list`), OpenCode/local-acp e Antigravity (ACP `available_commands_update`). O fallback do parser legado Antigravity continua disponível para sessões de histórico.
 - **Varredura de pastas** (`skills/agent_scan.rs`): Claude (`CLAUDE_CONFIG_DIR`, `.claude/skills`, plugins), Codex (`.agents/skills`, `~/.agents/skills`, `CODEX_HOME/skills`), Cursor (`.cursor/skills` e `.agents/skills`, globais e do projeto) e Antigravity (`GEMINI_HOME/config/skills`, `GEMINI_HOME/antigravity-cli/skills`, mais `.agents/skills` só do projeto). Cursor e Antigravity respeitam limites de bytes/entradas e leem somente o frontmatter; nada é executado e o corpo não é lido. Antigravity ignora `~/.agents/skills`.
 - **Conta da aba:** a varredura usa a conta associada à conversa (`chat_thread.account_id` → `agent_accounts.dir`); Cursor e Antigravity tratam esse diretório como `HOME`. Não lê o keyring nem secrets. Sem conta associada, usam o `HOME` do processo.
 - **Fora do chat (Fleet e TUI):** não há composer estruturado, então não há menu.
@@ -607,7 +609,7 @@ Prioridade: **P0** protege efeito colateral e fato perdido (é pré-requisito da
 |---|---|---|---|---|---|---|
 | **P0** ferramenta sem resultado ao fim | **feito** (§1.7): fixture `claude-tool-sem-resultado` + teste de banco do `finish_turn` (`gravar_fim`) | **feito**: fixture `codex-tool-sem-resultado` + teste de banco do `turn/completed` (`gravar_fim`) | **feito** (§1.7): sequência ACP sintetizada, sem arquivo de fixture (`replay_derivado_acp_fim_normal_marca_ferramenta_sem_resultado`); não há captura real de ACP | derivado de `antigravity-feliz` (`replay_derivado_agy_fim_normal_marca_ferramenta_sem_resultado`); `requer captura real` da CLI | derivado de `cursor-feliz` (`replay_derivado_cursor_fim_normal_marca_ferramenta_sem_resultado`); `requer captura real` da CLI | Claude e Codex marcam no fim (a fixture fixa a entrada; o teste de banco, o efeito). OpenCode, Antigravity e Cursor marcam também no fim normal (§1.7); as provas deles são derivadas, e a CLI real só se prova com captura |
 | **P0** frame final ausente (EOF) | fixture `claude-sem-result-fecha-no-eof` | fixture `codex-sem-turn-completed` | fixture `acp-sem-result-fecha-no-eof` | **gravada** `antigravity-queda` (kill sem `result`) | **gravada** `cursor-queda` (kill sem `result`) | bancada |
-| **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | teste do guarda `run_turn_resuming` com fakes (`test.rs:779-901`): recusa antes do turno → turno novo com aviso; o resto não repete | idem (`--resume`, mesmo guarda) | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
+| **P0** reinício no meio do turno | teste de banco: `sweep_orphans` + retomada (`--resume`) | idem (`thread/resume`) | idem (`session/resume`, hoje `Unknown`) | chat ACP usa `session/resume`/`session/load` antes de enviar o prompt (`opencode.rs`); `resume::open_resuming` tem testes genéricos. O guarda `run_turn_resuming` com fakes (`test.rs:779-901`) cobre somente o parser legado | idem (`--resume`, mesmo guarda) | teste de banco por motor (o agnóstico já existe: `test.rs:565-597`) |
 | **P1** queda no meio com stderr | fixture `claude-queda-com-stderr` | **já há** `codex-comando-falha-e-queda` | fixture `acp-queda-com-stderr` | `requer captura real` | `requer captura real` | bancada |
 | **P1** interrupção | **gravada** `claude-interrompido` | **gravada** `codex-interrompido-real` (e `codex-interrupt-antes-do-started`: `-32600` antes de `turn/started`; o ADE segura o Parar e o manda no aviso: `codex_parar.rs`, `test_codex_parar.rs`) | fixture `acp-interrompido` | o kill gravado não separa interrupt de queda | o interrupt é kill, sem mensagem; ver `cursor-queda` | bancada |
 | **P1** pedido pendente no fim do turno | fixture `claude-pedido-pendente-no-fim` | parcial: o pedido existe, mas a fixture termina em queda | parcial: o pedido é respondido | não se aplica (sem pedido) | não se aplica | bancada + teste de banco de `expire_requests` |
@@ -622,7 +624,7 @@ Contagem da grade (11 cenários × 5 motores = 55 células): **11 com fixture ex
 ### 5.4 O que exige captura real (nunca sintetizar)
 
 - **Queda com stderr** de Cursor e Antigravity. O que há é kill sem `result` e sem stderr (`cursor-queda`, `antigravity-queda`).
-- **Interrupt de protocolo** do Cursor e do Antigravity. Os dois matam o processo; a captura não separa isso de uma queda.
+- **Interrupt de protocolo** do Cursor e do Antigravity legado. Esses caminhos matam o processo; as capturas não separam isso de uma queda. O chat Antigravity ACP envia `session/cancel`, mas o contrato histórico não tem captura desse pedido.
 - **O que o ADE escreve e o motor não lê** (`/compact`, `/goal`, `turn/steer`): a bancada ignora `in`. O steer do Claude e o `turn/interrupt` do Codex estão no transcript como `in`, e o efeito está nos frames `out`.
 - **OpenCode com turno de modelo**, e um replay que leia `session/resume` / `session/load` pelo id que o ADE enviou. A captura de handshake já mostra `-32602` para sessão inexistente e `configOptions` para a sessão nova; não foi importada.
 - Capturas gastam a conta e a cota da pessoa e **exigem OK explícito e teto** (§8).
@@ -802,7 +804,7 @@ Auditoria completa das citações e afirmações da matriz de capabilities e do 
    - `antigravity/usage`: adicionada citação de teste `test_motores.rs:347-377`.
    - `cursor/interrupt`: esclarecido na nota que a fixture prova fim de turno por SIGKILL/queda de processo (`cursor.rs:217-223`), e não parada cooperativa pelo ADE.
    - `cursor/child_result`: citação corrigida para `cursor_map.rs:129-140`.
-   - `antigravity/resume`: `Proof::Test` com `agy.rs:224-248`, `agy_map.rs:376-389`, `resume.rs:176-199` e os testes `test.rs:779-901` e `test_motores.rs:465-489` (guarda de retomada por turno, §11.12). Não passa por `open_resuming`.
+   - `antigravity/resume`: no chat ACP, `Proof::Code` com `opencode.rs:241-260`, `opencode.rs:294-340` e `resume::open_resuming`; os testes genéricos desse helper cobrem sua regra de fallback. Os testes `agy.rs`/`agy_map.rs` citados abaixo continuam provando somente o runtime legado.
    - `cursor/resume`: `Proof::Test` com `cursor.rs:243-267`, `cursor_map.rs:390-392`, `resume.rs:176-199` e os testes `test.rs:779-901` e `test_motores.rs:907-920` (guarda de retomada por turno, §11.12). Não passa por `open_resuming`.
    - `local-acp/steer`: adicionada citação de `queueRunner.ts:48-58`.
 
@@ -1098,13 +1100,13 @@ Os testes usam fake de envio com contador e instantes numéricos. Não executam 
 - Replay só roda na primeira fila do processo, não no boot (§13). Falhas da Frota não são repetidas.
 - Desempenho não medido. `ags test affected` e `cargo clippy` não foram rodados.
 
-### 11.12 Retomada defensiva no Cursor e no Antigravity: não repetir às cegas
+### 11.12 Retomada defensiva no Cursor e no Antigravity legado: não repetir às cegas
 
-O Cursor (`--resume <id>`) abre um processo por turno. O Antigravity (`--conversation <id>`) abre um processo persistente por conversa e envia mensagens subsequentes em NDJSON pelo stdin. Ao reiniciar a sessão Antigravity, o primeiro prompt sai junto com `--conversation`. Por isso esses fluxos **não** usam `resume::open_resuming`, que abre a sessão antes de qualquer mensagem sair e pode repeti-la: repetir é rodar o prompt de novo depois de o agente ter editado arquivos ou rodado comandos. A tentativa que envolveu o turno inteiro em `open_resuming` foi rejeitada por isso (retentativa em erro transitório, e um `not found` genérico, de uma ferramenta, virando "sessão perdida").
+Esta seção documenta o parser/runtime legado `agy --input-format stream-json` e o Cursor por turno. O chat estruturado Antigravity usa `agy acp` e segue a retomada de sessão ACP em `opencode.rs:241-260`: ele abre/retoma a sessão antes de mandar o prompt, então uma tentativa de retomada não repete a mensagem nem comandos do turno.
 
 `resume::run_turn_resuming` (`resume.rs:176-199`) só repete o turno quando **as três** condições valem:
 1. havia id remoto e o turno acabou em erro;
-2. **nenhum evento do turno chegou** (`began == false`): no Antigravity, o `init` de handshake não conta; `step_update`, `result`, item ou texto contam;
+2. **nenhum evento do turno chegou** (`began == false`): no Antigravity legado, o `init` de handshake não conta; `step_update`, `result`, item ou texto contam;
 3. o classificador **do motor** reconhece, no stderr, a frase de sessão ou conversa inexistente.
 
 Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.remote_id`), grava o aviso `resumeLost` (`lost_notice`) e roda o turno **uma vez** sem retomada. Se o turno novo também falhar, o erro é devolvido, sem terceira tentativa. Qualquer outro desfecho é o de antes: o turno falha (ou termina) e o id é mantido. Em particular: sem retentativa em erro transitório, sem repetição depois de qualquer evento do turno, sem repetição quando o stderr é um `file not found` ou `model not found` de outra coisa, e sem repetição de turno parado ou concluído.
@@ -1112,15 +1114,15 @@ Então, e só então: limpa o id remoto (`session.conversation` e `chat_thread.r
 | Motor | Classificador | Critério (conservador) |
 |---|---|---|
 | Cursor | `cursor_map::session_refused` (`cursor_map.rs:390-392`) | alguma linha do stderr tem «chat», «session» ou «conversation» **colado** a um marcador de inexistência (`not found`, `no … found`, `no such …`, `does not exist`, `invalid …`, `unknown …`, `could not find …`, `expired`); `_` vale como espaço |
-| Antigravity | `agy_map::session_refused` (`agy_map.rs:376-389`) | o mesmo, com «conversation» ou «session», **ou** um `AGY_ERROR: {...}` (o formato que `error_from_stderr` já lê) com `status = NOT_FOUND` e «conversation»/«session» na mensagem |
+| Antigravity legado | `agy_map::session_refused` (`agy_map.rs:376-389`) | o mesmo, com «conversation» ou «session», **ou** um `AGY_ERROR: {...}` (o formato que `error_from_stderr` já lê) com `status = NOT_FOUND` e «conversation»/«session» na mensagem |
 
-**Evidência da frase: não há captura.** Nenhuma fixture (`cursor-*`, `antigravity-*`) recusa a sessão: `cursor-queda` e `antigravity-queda` são kill sem stderr. O único «Session not found» do repositório é o do Hermes (`agents/registry.rs:358`) e o «No conversation found» é o do Claude (`claude.rs:226`); nenhum dos dois prova o que o `cursor-agent` ou o `agy` escrevem. As frases acima são hipóteses, e o critério as exige **coladas ao nome da sessão**, mais o stdout vazio: um falso positivo é improvável, e um falso negativo só devolve o comportamento de antes (o turno falha, o id fica). O `NOT_FOUND` do `AGY_ERROR` vem do vocabulário gRPC que o próprio `AGY_ERROR` já usa (`RESOURCE_EXHAUSTED`, `test_motores.rs:459`), também sem captura da conversa inexistente.
+**Evidência da frase: não há captura.** Nenhuma fixture do runtime legado (`cursor-*`, `antigravity-*`) recusa a sessão: `cursor-queda` e `antigravity-queda` são kill sem stderr. O chat ACP não usa esse classificador: retomada e fallback de sessão estão cobertos por `resume::open_resuming`, sem repetir prompt. O único «Session not found» do repositório é o do Hermes (`agents/registry.rs:358`) e o «No conversation found» é o do Claude (`claude.rs:226`); nenhum dos dois prova o que o `cursor-agent` ou o `agy` legado escrevem.
 
 **Lacuna conhecida:** se o CLI recusar a sessão por um frame de stdout (um `result` com `is_error`, por exemplo) em vez de stderr, o turno conta como iniciado e não é repetido. É o lado seguro; só uma captura real decide se vale cobrir.
 
 **Provado** (`cargo test --lib conversa`): `test.rs:779-901` (o guarda, com closures e sem processo nem relógio: recusa antes de qualquer evento → turno novo e aviso, na ordem `run:<id>`, `forget`, `notice`, `run:-`; falha depois de eventos → nenhuma repetição e id mantido; `file not found` de ferramenta → nenhuma repetição; retomada que funciona → nenhuma sessão nova e nenhum aviso; turno novo que falha → não repete; sem id remoto; erro sem explicação; turno concluído) e `test_motores.rs:465-489` e `:907-920` (os classificadores, com frases positivas e negativas).
 
-**Não verificado:** nenhum CLI real foi executado. A ligação em `cursor.rs`/`agy.rs` (contagem das linhas do stdout, captura do stderr, limpeza do banco e gravação do aviso) não tem teste de ponta a ponta; só o guarda e os classificadores têm. O aviso não foi visto na tela.
+**Não verificado neste contrato histórico:** a ligação do Cursor e do `agy` legado (contagem das linhas do stdout, captura do stderr, limpeza do banco e gravação do aviso) não tem teste de ponta a ponta; só o guarda e os classificadores têm. O aviso não foi visto na tela.
 
 ### 11.13 Fase 2, terceira fatia: núcleo comum, Parar na abertura do turno e aviso do log na tela
 

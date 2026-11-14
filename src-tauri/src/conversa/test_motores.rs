@@ -1,7 +1,7 @@
-//! Os motores de protocolo do OpenCode (ACP) e do Antigravity (`agy` em stream-json): o
-//! mapeamento puro e o fluxo até o banco, sem processo real. As linhas são as do protocolo
-//! conferido (ver `opencode_map` e `agy_map`); os campos das ferramentas do agy vêm do changelog
-//! e do parser das tarefas, não de um turno real.
+//! Os motores de protocolo do OpenCode e Antigravity (ACP), além do parser legado do `agy`:
+//! o mapeamento puro e o fluxo até o banco, sem processo real. As linhas são as do protocolo
+//! conferido (ver `opencode_map` e `agy_map`); os campos legados das ferramentas do agy vêm do
+//! changelog e do parser das tarefas, não de um turno real.
 
 use std::sync::{Arc, Mutex};
 
@@ -20,6 +20,24 @@ fn row(agent: &str, access: &str) -> ThreadRow {
         parent_ref: None, parent_turn_id: None, is_side_chat: false, fork_mode: None, fork_reason: None,
         state: "active".into(), created_at: 1, updated_at: 1,
     }
+}
+
+#[test]
+fn antigravity_usa_acp_para_receber_deltas_de_texto_e_pensamento() {
+    assert_eq!(Engine::Antigravity.protocol(), "agent-client-protocol");
+}
+
+#[test]
+fn antigravity_mantem_variantes_legadas_de_modelo_no_acp() {
+    let config = json!({ "configOptions": [{
+        "id": "model", "category": "model", "type": "select",
+        "options": [{ "value": "gemini-4-hydrogen" }, { "value": "gemini-4-argon" }]
+    }] });
+    assert_eq!(
+        crate::conversa::opencode_map::antigravity_legacy_model_family(&config, "gemini-4-hydrogen-medium").as_deref(),
+        Some("gemini-4-hydrogen")
+    );
+    assert_eq!(crate::conversa::opencode_map::antigravity_legacy_model_family(&config, "unknown-model-medium"), None);
 }
 
 mod opencode {
@@ -84,6 +102,26 @@ mod opencode {
         assert_eq!((closed[0].id.as_str(), closed[0].text.as_deref()), (first.as_str(), Some("Olá, mundo")));
         assert_eq!(closed[1].tool, Some(ToolKind::Command));
         assert_eq!(closed[1].label.as_deref(), Some("ls"));
+    }
+
+    #[test]
+    fn antigravity_acp_entrega_pensamento_e_fala_em_deltas() {
+        let updates: Vec<Value> = serde_json::from_str(include_str!("fixtures/acp/antigravity-incremental.json")).unwrap();
+        let mut mapper = Mapper::new("agy-acp");
+        let mut deltas = Vec::new();
+        for update in updates {
+            deltas.extend(mapper.feed(&update, 1));
+        }
+        let deltas: Vec<_> = deltas.iter().filter_map(|out| match out {
+            Out::Delta { item_id, delta, kind } => Some((item_id.as_str(), delta.as_str(), *kind)),
+            _ => None,
+        }).collect();
+        assert_eq!(deltas, [
+            ("oc:agy-acp:t1", "Vou organizar as ideias. ", DeltaKind::Reasoning),
+            ("oc:agy-acp:t1", "Depois escrevo o poema.", DeltaKind::Reasoning),
+            ("oc:agy-acp:m2", "A lua borda ", DeltaKind::Assistant),
+            ("oc:agy-acp:m2", "prata no mar.", DeltaKind::Assistant),
+        ]);
     }
 
     #[test]

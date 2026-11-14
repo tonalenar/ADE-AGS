@@ -56,8 +56,8 @@ pub struct Applied {
     pub to_label: Option<String>,
     /// O acesso pedido não existe no agente novo (o Plano no Codex) e virou Supervisionado.
     pub access_changed: bool,
-    /// O agente novo não tem tela de aprovação (o Antigravity em `-p`) e o acesso é Supervisionado: ele nega o que
-    /// pediria aprovação. A tela avisa para a pessoa trocar o acesso.
+    /// O agente novo não implementa aprovação no Chat e o acesso é Supervisionado: ele nega o que pediria aprovação.
+    /// A tela avisa para a pessoa trocar o acesso.
     pub no_approval: bool,
 }
 

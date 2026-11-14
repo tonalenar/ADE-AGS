@@ -68,8 +68,9 @@ pub fn after_turn_hooks(app: &AppHandle, db: &DbConnection, thread_id: &str, res
 /// A marcação vale em **qualquer** fim: normal, interrompido ou com erro. A lista de exceções é vazia porque nenhum
 /// destes motores tem ferramenta que siga depois do fim do turno (critério no `HARNESS_CONTRATO.md` §1.7):
 /// - OpenCode (ACP): `session/prompt` só responde no fim do turno (`opencode_map.rs:10-11`); uma ferramenta sem
-///   atualização final nessa hora não tem canal que a feche depois (`opencode.rs:789-826`).
-/// - Antigravity: o `result` é o último evento do turno; o processo fica aberto para a próxima mensagem (`agy.rs`, `agy_map.rs`).
+///   atualização final nessa hora não tem canal que a feche depois (`opencode.rs`).
+/// - Antigravity no chat estruturado: o adapter ACP encerra o turno com `session/prompt` completo;
+///   o processo fica aberto e recebe os próximos prompts por `session/prompt` (`opencode.rs`).
 /// - Cursor: o turno fecha no `result`, que o `cursor-agent` só manda depois dos shells em segundo plano
 ///   (`cursor_map.rs:13-15`), ou por silêncio, que não vence com ferramenta `Running` (`cursor_map.rs:155-158`).
 pub fn record_end(conn: &rusqlite::Connection, thread_id: &str, turn: &str, result: &TurnResult, now: i64) -> (Vec<String>, Vec<Item>) {

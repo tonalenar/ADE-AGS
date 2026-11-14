@@ -29,6 +29,7 @@ let steps: Array<() => void> = [];
 let resizeObservers: Array<{ callback: () => void; targets: Map<Element, number> }> = [];
 const tops = new WeakMap<Element, number>();
 const isScroller = (el: Element) => el.classList.contains(SCROLLER);
+const anchorSpaceHeight = () => Number.parseFloat(host.querySelector<HTMLElement>("[data-chat-anchor-space]")?.style.height ?? "0") || 0;
 const virtualHeight = () => measuredVirtualRows
   ? (() => {
     const turns = host.querySelector<HTMLElement>("[data-chat-turns-host]");
@@ -38,11 +39,11 @@ const virtualHeight = () => measuredVirtualRows
     return rows + spacers + Math.max(0, turns.children.length - 1) * 16;
   })()
   : 0;
-const maxTop = () => Math.max(0, content + virtualHeight() + 40 - view);
+const maxTop = () => Math.max(0, content + virtualHeight() + anchorSpaceHeight() + 40 - view);
 const scroller = () => host.querySelector(`.${SCROLLER}`) as HTMLElement;
 
 function installLayout(): void {
-  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return isScroller(this) ? content + virtualHeight() + 40 : 0; } });
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return isScroller(this) ? content + virtualHeight() + anchorSpaceHeight() + 40 : 0; } });
   Object.defineProperty(HTMLElement.prototype, "clientHeight", { configurable: true, get() { return isScroller(this) ? view : 0; } });
   let smoothSeq = 0;
   let stepping = false;
@@ -78,10 +79,15 @@ function installLayout(): void {
   Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", {
     configurable: true,
     value(this: HTMLElement) {
-      const top = this.hasAttribute("data-chat-turns-host") ? 16 - scroller().scrollTop : 0;
-      const height = isScroller(this) ? view : measuredVirtualRows && this.hasAttribute("data-virtual-turn")
-        ? 80 + Math.ceil((this.textContent?.length ?? 0) / 48) * 20
-        : this === host.querySelector("[data-chat-turns-host]")?.parentElement ? content + virtualHeight() + 40 : 800;
+      const currentTop = tops.get(scroller()) ?? 0;
+      const anchoredRow = this.hasAttribute("data-virtual-turn") || this.hasAttribute("data-chat-pending-turn");
+      const height = isScroller(this) ? view
+        : measuredVirtualRows && this.hasAttribute("data-virtual-turn")
+          ? 80 + Math.ceil((this.textContent?.length ?? 0) / 48) * 20
+          : this.hasAttribute("data-chat-pending-turn") ? 80
+            : this === host.querySelector("[data-chat-turns-host]")?.parentElement ? content + virtualHeight() + anchorSpaceHeight() + 40 : 800;
+      const top = this.hasAttribute("data-chat-turns-host") ? 16 - currentTop
+        : anchoredRow ? content - 80 - currentTop : 0;
       return { left: 0, right: 800, top, bottom: top + height, width: 800, height, x: 0, y: top, toJSON: () => ({}) };
     },
   });
@@ -156,6 +162,18 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     expect(mounted().length).toBe(6);
     expect(mounted()[0]?.getAttribute("data-virtual-turn")).toBe("virtual-u-0");
     expect(host.querySelector('[data-chat-virtual-spacer="bottom"]')).not.toBeNull();
+  });
+
+  it("mantém um turno visível no mesmo commit em que a lista virtualizada encolhe", async () => {
+    content = 30_000;
+    await render(longHistory);
+    await runAnimation();
+    expect(host.querySelectorAll("[data-virtual-turn]").length).toBeGreaterThan(0);
+
+    const shorter = longHistory.slice(0, 180); // 60 turnos: ainda virtualizada, com o intervalo antigo no fim.
+    await render(shorter);
+    expect(host.querySelectorAll("[data-virtual-turn]").length).toBeGreaterThan(0);
+    expect(host.querySelector('[data-virtual-turn="virtual-u-59"]')).not.toBeNull();
   });
 
   it("acompanha novas respostas no fim virtualizado e preserva a posição quando a pessoa lê acima", async () => {
@@ -290,7 +308,7 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     expect(scroller().scrollTop).toBe(maxTop());
   });
 
-  it("ao enviar mensagem enquanto lia acima, volta a seguir o fim da conversa", async () => {
+  it("ao enviar enquanto lia acima, ancora a mensagem otimista sem saltar para o fim", async () => {
     content = 2000;
     await render(history);
     await runAnimation();
@@ -299,12 +317,14 @@ describe("a conversa segue o fim enquanto a pessoa está nele", () => {
     expect(scroller().scrollTop).toBe(500);
 
     content += 240;
-    await render(history, [{ id: "p1", text: "Nova mensagem enviada", at: 1, baseline: 0 }]);
-    await runAnimation();
-    expect(scroller().scrollTop).toBe(maxTop());
+    await render(history, [{ id: "pending-1", text: "Nova mensagem enviada", at: 1, baseline: 0 }]);
+    expect(host.querySelector('[data-chat-pending-turn="pending-1"]')).not.toBeNull();
+    expect(Number.parseFloat(host.querySelector<HTMLElement>("[data-chat-anchor-space]")?.style.height ?? "0")).toBeGreaterThan(0);
+    expect(host.querySelector<HTMLElement>('[data-chat-pending-turn="pending-1"]')!.getBoundingClientRect().top).toBe(24);
 
-    await grow(160);
-    expect(scroller().scrollTop).toBe(maxTop());
+    await render([...history, ask], []);
+    expect(host.querySelector('[data-virtual-turn="u-nova"]')).not.toBeNull();
+    expect(host.querySelector<HTMLElement>('[data-virtual-turn="u-nova"]')!.getBoundingClientRect().top).toBe(24);
   });
 
   it("rolar para cima com a roda do mouse solta o auto-scroll imediatamente", async () => {

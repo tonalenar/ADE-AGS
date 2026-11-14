@@ -85,7 +85,7 @@ describe("a confirmação da troca", () => {
   });
 });
 
-describe("o Antigravity não tem tela de aprovação", () => {
+describe("o aviso de troca para agentes sem tela de aprovação", () => {
   it("só ele, e só no acesso Supervisionado", () => {
     expect(lacksApproval("unsupported", "ask")).toBe(true);
     expect(lacksApproval("unsupported", "edits")).toBe(false);
@@ -97,9 +97,9 @@ describe("o Antigravity não tem tela de aprovação", () => {
   it("a confirmação avisa antes de trocar, e o aviso do fio repete depois", async () => {
     const root = createRoot(document.body.appendChild(document.createElement("div")));
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
-    await act(async () => { root.render(<AgentSwitchDialog from="Claude Code" to="Antigravity" busy={false} error={null} noApproval onConfirm={() => undefined} onClose={() => undefined} />); });
-    expect(document.body.textContent).toContain('chat.agentSwitch.noApproval{"agent":"Antigravity"}');
-    await act(async () => { root.render(<NoticeRow item={{ kind: "notice", id: "n", label: "agentSwitch", text: JSON.stringify({ from: "claude-code", to: "antigravity", fromLabel: "Claude Code", toLabel: "Antigravity", model: null, strategy: "full", accessChanged: false, noApproval: true }) }} />); });
+    await act(async () => { root.render(<AgentSwitchDialog from="Claude Code" to="Cursor" busy={false} error={null} noApproval onConfirm={() => undefined} onClose={() => undefined} />); });
+    expect(document.body.textContent).toContain('chat.agentSwitch.noApproval{"agent":"Cursor"}');
+    await act(async () => { root.render(<NoticeRow item={{ kind: "notice", id: "n", label: "agentSwitch", text: JSON.stringify({ from: "claude-code", to: "cursor", fromLabel: "Claude Code", toLabel: "Cursor", model: null, strategy: "full", accessChanged: false, noApproval: true }) }} />); });
     expect(document.body.textContent).toContain("chat.timeline.notice.agentSwitchNoApproval");
     await act(async () => { root.unmount(); });
   });

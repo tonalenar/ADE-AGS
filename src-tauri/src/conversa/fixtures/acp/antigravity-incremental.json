@@ -1,0 +1,6 @@
+[
+  {"sessionUpdate":"agent_thought_chunk","messageId":"thought-1","content":{"type":"text","text":"Vou organizar as ideias. "}},
+  {"sessionUpdate":"agent_thought_chunk","messageId":"thought-1","content":{"type":"text","text":"Depois escrevo o poema."}},
+  {"sessionUpdate":"agent_message_chunk","messageId":"answer-1","content":{"type":"text","text":"A lua borda "}},
+  {"sessionUpdate":"agent_message_chunk","messageId":"answer-1","content":{"type":"text","text":"prata no mar."}}
+]

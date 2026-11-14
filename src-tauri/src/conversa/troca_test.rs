@@ -48,13 +48,11 @@ fn o_plano_que_o_codex_nao_tem_vira_supervisionado_e_o_aviso_diz() {
 }
 
 #[test]
-fn o_antigravity_nao_tem_tela_de_aprovacao_e_a_troca_avisa_quando_o_acesso_e_supervisionado() {
-    // `agy -p` não pergunta: no modo Supervisionado ele NEGA o que pediria aprovação (ver `agy_map::mode_args`).
+fn antigravity_acp_tem_fluxo_de_aprovacao_no_chat_supervisionado() {
     let conn = conn();
     let applied = apply_switch(&conn, "t1", &to("antigravity", "ask"), 100).unwrap();
-    assert!(applied.no_approval);
-    assert!(super::troca::notice_text(&applied).contains("\"noApproval\":true"));
-    // com o acesso que libera o que ele faz, não há o que avisar
+    assert!(!applied.no_approval);
+    assert!(super::troca::notice_text(&applied).contains("\"noApproval\":false"));
     let conn = self::conn();
     assert!(!apply_switch(&conn, "t1", &to("antigravity", "edits"), 100).unwrap().no_approval);
     let conn = self::conn();

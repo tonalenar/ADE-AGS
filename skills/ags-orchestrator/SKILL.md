@@ -1211,8 +1211,7 @@ Don't create or edit skills unasked: they change how every agent the user runs b
 In chat mode the app can run an agent **by protocol**, without a terminal: Codex (through
 `codex app-server`), Claude Code (through `claude -p` in stream-json; `--agent claude-code`),
 OpenCode (through `opencode acp`, the Agent Client Protocol; `--agent opencode`) or
-Antigravity (through `agy --input-format stream-json`, one persistent process per conversation;
-`--agent antigravity`) or
+Antigravity (through `agy acp`, the Agent Client Protocol; `--agent antigravity`) or
 Cursor (through `cursor-agent -p` in stream-json, one process per turn; `--agent cursor`).
 Each conversation has an id, a timeline in the app's database and
 its own agent process. Use it when you want a second agent to do a piece of work and you need

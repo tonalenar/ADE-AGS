@@ -124,6 +124,17 @@ pub fn config_option_for_category(result: &Value, category: &str, fallback_ids: 
     Some((id, current, values))
 }
 
+/// Família ACP correspondente a um ID antigo do `agy` que ainda carrega o nível de raciocínio
+/// (`gemini-4-hydrogen-medium`). O ACP 1.4+ anuncia a família (`gemini-4-hydrogen`) e aceita o
+/// ID antigo em `session/set_config_option`, apesar de ele não aparecer na lista de opções.
+pub fn antigravity_legacy_model_family(result: &Value, model: &str) -> Option<String> {
+    let (_, _, families) = config_option_for_category(result, "model", &["model"])?;
+    families
+        .into_iter()
+        .filter(|family| model.starts_with(&format!("{family}-")))
+        .max_by_key(String::len)
+}
+
 fn select_values(option: &Value) -> Vec<&Value> {
     fn collect<'a>(items: &'a [Value], out: &mut Vec<&'a Value>) {
         for item in items {
