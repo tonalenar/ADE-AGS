@@ -7,7 +7,7 @@ import {
   BugIcon, CameraIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
 import { DESKTOP_OS } from "@/app/platform";
-import { setChatBrowserFloatRect, toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
+import { toggleChatBrowserFloating, useChatStore } from "@/features/chat/store";
 import { WindowOpenIcon } from "@/features/chat/chatIcons";
 import { neighbors } from "@/features/canvas/board";
 import { useCanvasStore } from "@/features/canvas/store";
@@ -268,27 +268,6 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     };
   }, [menuOpen]);
 
-  useEffect(() => {
-    if (!floatingPreview) return;
-    const frame = root.current?.parentElement;
-    const shell = frame?.closest<HTMLElement>("[data-chat-shell]");
-    if (!frame || !shell) return;
-    const measure = () => {
-      const r = frame.getBoundingClientRect();
-      const b = shell.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) return;
-      setChatBrowserFloatRect({
-        left: Math.round(r.left - b.left),
-        top: Math.round(r.top - b.top),
-        width: Math.round(r.width),
-        height: Math.round(r.height),
-      });
-    };
-    const observer = new ResizeObserver(measure);
-    observer.observe(frame);
-    measure();
-    return () => observer.disconnect();
-  }, [floatingPreview, view.id]);
 
   const postToPage = useCallback((type: SimpleAppMessage["type"]) => {
     if (realRef.current) {
@@ -1231,8 +1210,11 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     />
   );
 
+  const stageViewport = floatingPreview && isFillViewport(viewport) ? null : viewport;
+  const stageFramed = isFramedViewport(stageViewport);
+
   return (
-    <div ref={root} className={`flex flex-col ${floatingPreview ? "flex-1" : "h-full"} min-h-0 transition-colors duration-300 ${device ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
+    <div ref={root} className={`flex flex-col ${floatingPreview ? "flex-1" : "h-full"} min-h-0 ${floatingPreview ? "" : "transition-colors duration-300"} ${(device || (floatingPreview && stageFramed)) ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
       {/* No login, a barra que vale é a da janela do Chrome (é nela que se confere o endereço): a do Portal some. */}
       {device || floatingPreview ? null : toolbar}
 

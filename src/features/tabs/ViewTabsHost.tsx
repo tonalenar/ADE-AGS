@@ -113,14 +113,16 @@ export function ViewTabsHost() {
         const floatingPreview = view.kind === "browser" && view.id === floatingBrowserId;
         if (!shown && !seen.has(view.id) && !keepMountedIds.includes(view.id)) return null;
         if (placement) lastRect.current.set(key, placement.rect);
+        if (floatingPreview && floatRect) lastRect.current.set(key, floatRect);
+        const rectToPlace = floatingPreview ? (floatRect ?? lastRect.current.get(key) ?? null) : (lastRect.current.get(key) ?? null);
         const focused = key === focusedItem && onWorkspace;
         return (
           <div
             key={view.id}
             data-view-key={key}
             style={{
-              ...placeStyle(lastRect.current.get(key) ?? null),
-              ...(floatingPreview ? { zIndex: 30, borderRadius: FLOATING_PREVIEW_CORNER_RADIUS } : {}),
+              ...placeStyle(rectToPlace),
+              ...(floatingPreview ? { zIndex: 35, borderRadius: FLOATING_PREVIEW_CORNER_RADIUS } : {}),
               visibility: shown ? undefined : "hidden",
               pointerEvents: shown ? "auto" : "none",
             }}
@@ -152,10 +154,19 @@ export function ViewTabsHost() {
 /** Controles da miniatura, no canto da página (abrem um buraco na vista nativa só enquanto aparecem). */
 function BrowserFloatGrip() {
   // O mouse sobre a página nativa não chega ao DOM: quem avisa é o motor (`real-browser-mini-hover`).
-  const hover = useChatStore((state) => state.browserMiniHover);
+  // Mantém hover em DOM para que, ao entrar no buraco dos botões, os controles não sumam quando o CEF avisar saída.
+  const miniHover = useChatStore((state) => state.browserMiniHover);
+  const [domHover, setDomHover] = useState(false);
+  const hover = miniHover || domHover;
   return (
-    <div className="group absolute right-2.5 top-2.5 z-40 pointer-events-auto" data-browser-mini-controls data-hover={hover}
-      {...(hover ? { "data-over-webview": "" } : {})}>
+    <div
+      className="group absolute right-2.5 top-2.5 z-40 pointer-events-auto"
+      data-browser-mini-controls
+      data-hover={hover}
+      onPointerEnter={() => setDomHover(true)}
+      onPointerLeave={() => setDomHover(false)}
+      {...(hover ? { "data-over-webview": "" } : {})}
+    >
       <BrowserMiniControls />
     </div>
   );
