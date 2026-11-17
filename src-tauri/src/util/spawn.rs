@@ -657,10 +657,10 @@ mod tests {
         assert!(started.elapsed() < Duration::from_secs(5), "{:?}", started.elapsed());
     }
 
-    // quarantine: processo real (espera o prazo de 300 ms e um neto de 5 s; roda com `cargo test -- --ignored`).
     // A regra do prazo sem relógio está nos testes `pipe_*` abaixo.
     #[cfg(unix)]
     #[test]
+    // quarantine: processo real (espera o prazo de 300 ms e um neto de 5 s; roda com `cargo test -- --ignored`).
     #[ignore]
     fn neto_que_herda_o_pipe_nao_trava_a_chamada_alem_do_prazo() {
         // O filho sai logo, mas um neto que herdou o stdout o mantém aberto por 5 s. A chamada volta no prazo com o

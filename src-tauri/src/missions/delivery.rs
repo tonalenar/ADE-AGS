@@ -434,8 +434,8 @@ mod tests {
         assert_eq!(parse_pr_status(&stdout).0, PrState::Open);
     }
 
-    // quarantine: processo real (roda um `sh` que escreve 300 KB pelo pipe; roda com `cargo test -- --ignored`).
     #[test]
+    // quarantine: processo real (roda um `sh` que escreve 300 KB pelo pipe; roda com `cargo test -- --ignored`).
     #[ignore]
     fn stdout_maior_que_o_pipe_nao_trava_o_gh() {
         // O comando escreve bem mais que o buffer de um pipe antes de sair: um `gh` com muitos checks faz isso.
