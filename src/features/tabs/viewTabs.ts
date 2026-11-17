@@ -10,6 +10,17 @@
  * Este archivo es la lógica pura (probada en `tests/viewTabs.test.ts`); el store la usa.
  */
 
+import { isLocalOrigin } from "./localOrigin";
+
+function bareHost(text: string): string {
+  const first = text.split(/[/?#]/)[0];
+  if (first.startsWith("[")) {
+    const end = first.indexOf("]");
+    return end >= 0 ? first.slice(1, end) : first;
+  }
+  return first.replace(/:\d+$/, "");
+}
+
 interface ViewBase {
   id: string;
   /** El workspace al que pertenece. La barra solo muestra las del workspace activo. */
@@ -184,7 +195,7 @@ export function normalizeUrl(input: string): string | null {
   if (/^:\d+/.test(text)) return `http://localhost${text}`;
   if (/^\d+$/.test(text)) return `http://localhost:${text}`;
   const host = text.split(/[/?#]/)[0];
-  const local = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/i.test(host) || /\.(localhost|local)(:\d+)?$/i.test(host);
+  const local = isLocalOrigin(bareHost(text));
   if (local) return `http://${text}`;
   // Algo que no parece un host (sin punto ni puerto) no es una dirección.
   if (!host.includes(".") && !host.includes(":")) return null;
@@ -195,9 +206,7 @@ export function normalizeUrl(input: string): string | null {
  *  sistema al hacer click en un link de la terminal. */
 export function isLocalUrl(url: string): boolean {
   try {
-    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-    return host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0"
-      || host === "::1" || host.startsWith("127.") || host.endsWith(".local");
+    return isLocalOrigin(new URL(url).hostname);
   } catch {
     return false;
   }
