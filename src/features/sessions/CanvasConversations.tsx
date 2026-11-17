@@ -13,6 +13,7 @@ import { hibernateConversation, openConversation, tabsOfConversation, type FlowC
 import { sameProject, useConversationsStore } from "./conversationsStore";
 import { deleteConversation, updateConversation } from "./ipc.projectConversations";
 import { sessionTitle } from "./ipc";
+import { noteTitlePollFailure } from "./titlePollFailure";
 
 /** O ícone de uma conversa-canvas: quatro quadros, como o canvas. */
 function CanvasIcon({ className }: { className?: string }) {
@@ -58,6 +59,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
   // Relido de tempos em tempos: o título acompanha o contexto do orquestrador enquanto a conversa está ativa.
   useEffect(() => {
     let alive = true;
+    let titleFails = 0;
     const refresh = async () => {
       const { rows: all } = useConversationsStore.getState();
       for (const row of all.filter((r) => sameProject(r.projectKey, projectKey) && r.state === "active" && !r.customTitle)) {
@@ -71,8 +73,15 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
             if (title !== row.title) {
               try {
                 upsert(await updateConversation(row.id, { title }));
-              } catch {
-                /* o próximo tick tenta de novo */
+                titleFails = 0;
+              } catch (error) {
+                console.warn("conversations.title.poll", error);
+                const noted = noteTitlePollFailure(titleFails);
+                titleFails = noted.consecutive;
+                if (noted.notify) {
+                  AlertaToast(t("conversations.title"), t("conversations.titlePollFailed"), "warning", 6000);
+                  titleFails = 0;
+                }
               }
             }
             break;
@@ -83,7 +92,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
     void refresh();
     const timer = window.setInterval(() => void refresh(), 45_000);
     return () => { alive = false; window.clearInterval(timer); };
-  }, [projectKey, upsert]);
+  }, [projectKey, upsert, t]);
 
   const mine = useMemo(
     () => rows
