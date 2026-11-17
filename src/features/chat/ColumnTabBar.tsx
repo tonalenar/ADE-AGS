@@ -60,7 +60,10 @@ function TabItem({ tab, tabs, active, scope, onClose }: { tab: ColumnTab; tabs: 
 function AddSurface({ available }: { available: PanelAvailability }) {
   const { t } = useTranslation();
   const { open, setOpen, ref } = usePopover();
+  const menuRef = useRef<HTMLDivElement>(null);
   const pick = (choice: SurfacePick) => { openSurface(choice); setOpen(false); };
+  // Só ao abrir: um ref de linha refocava o menu a cada render da barra (e roubava o foco de quem digitava).
+  useEffect(() => { if (open) menuRef.current?.focus(); }, [open]);
   return (
     <div ref={ref} className="relative shrink-0">
       <button type="button" onClick={() => setOpen(!open)} aria-label={t("chat.panel.addTab")} title={t("chat.panel.addTab")}
@@ -68,7 +71,7 @@ function AddSurface({ available }: { available: PanelAvailability }) {
         <PlusIcon className="w-3.5 h-3.5" />
       </button>
       {open && (
-        <div role="presentation" tabIndex={-1} ref={(el) => el?.focus()} onKeyDown={(e) => onEntryKey(e, available, pick)}
+        <div role="presentation" tabIndex={-1} ref={menuRef} onKeyDown={(e) => onEntryKey(e, available, pick)}
           className="absolute left-0 top-full mt-1 z-50 w-[260px] p-1 rounded-lg bg-white dark:bg-surface-raised outline-none
           shadow-[0_0_0_1px_rgba(24,24,27,0.1),0_16px_40px_-18px_rgba(0,0,0,0.55)]">
           <SurfaceList available={available} onPick={pick} />
