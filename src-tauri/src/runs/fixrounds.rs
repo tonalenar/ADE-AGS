@@ -1262,6 +1262,31 @@ mod tests {
     }
 
     #[test]
+    fn gate_completo_nao_roda_git_com_o_banco_travado() {
+        let conn = db();
+        let run = open_run(&conn);
+        let task = worker(&conn, &run.id, "API de login");
+        conn.execute(
+            "UPDATE tasks SET status = 'running', full_gate = 1, session_id = 's' WHERE id = ?1",
+            [&task.id],
+        )
+        .unwrap();
+        let banco: crate::database::DbConnection = std::sync::Arc::new(std::sync::Mutex::new(conn));
+        let chamou_git = std::cell::Cell::new(false);
+        let travado_no_git = std::cell::Cell::new(false);
+        let probe = || {
+            chamou_git.set(true);
+            if banco.try_lock().is_err() {
+                travado_no_git.set(true);
+            }
+        };
+        let outcome = TaskOutcome { ok: true, result: Some("ags test affected passou".into()), ..Default::default() };
+        store::finish_task_db_with(&banco, &task.id, &outcome, &probe).unwrap();
+        assert!(chamou_git.get(), "o gate completo não foi avaliado");
+        assert!(!travado_no_git.get(), "git do gate completo rodou com o banco travado");
+    }
+
+    #[test]
     fn finishing_the_last_round_without_the_full_suite_is_not_green() {
         let conn = db();
         let run = open_run(&conn);

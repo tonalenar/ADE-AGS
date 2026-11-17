@@ -320,8 +320,7 @@ fn run_start_task_now(
     // no está, una cuenta borrada, una carpeta que no es un repo) es justo lo que hay que
     // mostrar.
     let fail = |task_id: &str, e: String| -> Result<Task, String> {
-        let conn = db.lock().map_err(|err| err.to_string())?;
-        store::finish_task(&conn, task_id, &types::TaskOutcome::failed(e.clone()))?;
+        store::finish_task_db(&db, task_id, &types::TaskOutcome::failed(e.clone()))?;
         Err(e)
     };
 
@@ -519,8 +518,8 @@ pub(crate) fn start_orchestration(
     };
 
     if let Err(e) = launch(&task) {
+        store::finish_task_db(&db, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         let conn = db.lock().map_err(|err| err.to_string())?;
-        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         store::refresh_run_status(&conn, &task.run_id)?;
         return Err(e);
     }
@@ -642,13 +641,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
     match launched {
         Ok(()) => true,
         Err(e) => {
-            if let Ok(conn) = db.lock() {
-                store::persist_finish(&conn, &task_id, &types::TaskOutcome::failed(e));
-            } else {
-                eprintln!(
-                    "[harness] erro recuperável ao gravar o fim da tarefa {task_id}: o banco não pôde ser travado"
-                );
-            }
+            store::persist_finish_db(&db, &task_id, &types::TaskOutcome::failed(e));
             supervisor::notify_changed(app, &task_id);
             false
         }
@@ -1569,8 +1562,8 @@ pub async fn start_memory_dream(
         (task, id)
     };
     if let Err(e) = launch_memory_dream(app, &task) {
+        store::finish_task_db(&db, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
         store::refresh_run_status(&conn, &task.run_id)?;
         crate::memory::notify_changed(app);
         return Err(e);

@@ -1415,13 +1415,13 @@ fn persist_finish_inner(
     outcome: &TaskOutcome,
     cache_green: Option<bool>,
 ) -> TaskOutcome {
-    match finish_task_with_gate(conn, task_id, outcome, cache_green) {
+    match finish_task_with_gate(conn, task_id, outcome, cache_green, &|| {}) {
         Ok(()) => outcome.clone(),
         Err(error) => {
             let message = format!("erro recuperável ao gravar o fim da tarefa {task_id}: {error}");
             log_recoverable(&message);
             let failed = TaskOutcome::failed(message);
-            if let Err(again) = finish_task_with_gate(conn, task_id, &failed, cache_green) {
+            if let Err(again) = finish_task_with_gate(conn, task_id, &failed, cache_green, &|| {}) {
                 log_recoverable(&format!(
                     "erro recuperável ao gravar o fim da tarefa {task_id}: a tarefa segue aberta ({again})"
                 ));
@@ -1439,7 +1439,7 @@ fn persist_finish_inner(
 /// tarea que falla AL LANZARSE (un binario que no está, una cuenta borrada) nunca llegó a
 /// correr, y sin eso se quedaría en `ready` para siempre.
 pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
-    finish_task_with_gate(conn, task_id, outcome, None)
+    finish_task_with_gate(conn, task_id, outcome, None, &|| {})
 }
 
 pub fn finish_task_with_cached_gate(
@@ -1448,7 +1448,34 @@ pub fn finish_task_with_cached_gate(
     outcome: &TaskOutcome,
     cache_green: bool,
 ) -> Result<(), String> {
-    finish_task_with_gate(conn, task_id, outcome, Some(cache_green))
+    finish_task_with_gate(conn, task_id, outcome, Some(cache_green), &|| {})
+}
+
+/// Grava o fim da tarefa a partir do banco. Quem chama não pode ter o lock: o gate completo
+/// (git) é avaliado antes de travar.
+pub fn finish_task_db(db: &DbConnection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
+    finish_task_db_with(db, task_id, outcome, &|| {})
+}
+
+/// Como `persist_finish`, a partir do banco: o gate completo sai do lock.
+pub fn persist_finish_db(db: &DbConnection, task_id: &str, outcome: &TaskOutcome) -> TaskOutcome {
+    let cache_green = full_gate_cache_green_for_outcome(db, task_id, outcome).unwrap_or(false);
+    let Ok(conn) = db.lock() else {
+        eprintln!("[harness] erro recuperável ao gravar o fim da tarefa {task_id}: o banco não pôde ser travado");
+        return outcome.clone();
+    };
+    persist_finish_with_gate(&conn, task_id, outcome, cache_green)
+}
+
+pub(crate) fn finish_task_db_with(
+    db: &DbConnection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    antes_do_io: &dyn Fn(),
+) -> Result<(), String> {
+    let cache_green = full_gate_cache_green_for_outcome_with(db, task_id, outcome, antes_do_io)?;
+    let conn = db.lock().map_err(|error| error.to_string())?;
+    finish_task_with_gate(&conn, task_id, outcome, Some(cache_green), antes_do_io)
 }
 
 fn finish_task_with_gate(
@@ -1456,6 +1483,7 @@ fn finish_task_with_gate(
     task_id: &str,
     outcome: &TaskOutcome,
     cache_green: Option<bool>,
+    antes_do_io: &dyn Fn(),
 ) -> Result<(), String> {
     // Central finalization also covers IPC/runtime callers; no model-text heuristics.
     let mut outcome = outcome.clone();
@@ -1465,6 +1493,7 @@ fn finish_task_with_gate(
             if task.full_gate
                 && !super::fixrounds::full_gate_satisfied(outcome.result.as_deref().unwrap_or(""), task.structured_handoff.as_ref())
                 && !cache_green.unwrap_or_else(|| {
+                    antes_do_io();
                     let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
                     crate::testspeed::run::full_gate_green(conn, std::path::Path::new(dir))
                 })
@@ -1540,6 +1569,16 @@ pub fn full_gate_cache_green_for_outcome(
     task_id: &str,
     outcome: &TaskOutcome,
 ) -> Result<bool, String> {
+    full_gate_cache_green_for_outcome_with(db, task_id, outcome, &|| {})
+}
+
+// `antes_do_io` roda logo antes do git do gate, com o banco solto.
+fn full_gate_cache_green_for_outcome_with(
+    db: &DbConnection,
+    task_id: &str,
+    outcome: &TaskOutcome,
+    antes_do_io: &dyn Fn(),
+) -> Result<bool, String> {
     if !outcome.ok {
         return Ok(false);
     }
@@ -1557,6 +1596,7 @@ pub fn full_gate_cache_green_for_outcome(
         return Ok(false);
     }
     let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
+    antes_do_io();
     Ok(crate::testspeed::run::full_gate_green_db(db, std::path::Path::new(dir)))
 }
 
