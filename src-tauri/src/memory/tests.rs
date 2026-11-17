@@ -239,7 +239,7 @@ fn measure_entry_select_before_optimizing_it() {
     let start=std::time::Instant::now();let mut old=Vec::new();
     for _ in 0..20 {old=search::legacy_load_docs_at(&conn,"w1",None,now()).unwrap();}
     let before=start.elapsed();let start=std::time::Instant::now();let mut new=Vec::new();
-    for _ in 0..20 {let mut stmt=conn.prepare(search::DOCS_AT_SQL).unwrap();new=stmt.query_map(params!["w1",Option::<String>::None,now(),Option::<String>::None],|r|Ok(search::Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();}
+    for _ in 0..20 {let mut stmt=conn.prepare(&search::docs_at_sql(false)).unwrap();new=stmt.query_map(params!["w1",Option::<String>::None,now(),Option::<String>::None],|r|Ok(search::Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();}
     let after=start.elapsed();assert_eq!(old,new);
     println!("load_docs_at N+1 baseline {before:?}; batched window query {after:?} (128 entries x20)");
 }
@@ -2230,4 +2230,35 @@ fn memory_list_get_e_historico_isolam_por_repo_key() {
     assert!(history::history_for_entry(&conn, "w1", Some("m1"), &theirs.entry_id).unwrap().is_empty());
     let _ = std::fs::remove_dir_all(&mine);
     let _ = std::fs::remove_dir_all(&other);
+}
+
+#[test]
+fn missao_sem_git_nao_ve_memoria_com_repo_key_de_outro_projeto() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let no_git = std::env::temp_dir().join(format!("ags-mem-nogit-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&no_git).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at) VALUES('m-plain','w1','M','o',?1,'draft',2,1,0,0)", [no_git.to_string_lossy().as_ref()]).unwrap();
+    seed_run(&conn, "r-plain", "w1", Some("m-plain"));
+    seed_task(&conn, "lead-plain", "r-plain", Some("lead"));
+    let foreign = activate(&conn, "workspace", None, "foreign-repo", "from another git project");
+    let unscoped = activate(&conn, "workspace", None, "unscoped", "no repo");
+    conn.execute("UPDATE memory_entries SET repo_key='github.com/acme/other' WHERE id=?1", [&foreign.entry_id]).unwrap();
+    let listed = task_tool(&conn, "lead-plain", "memory.list", json!({"scope":"workspace"})).unwrap();
+    let page: MemoryPage = serde_json::from_str(agent_json(&listed)).unwrap();
+    let keys: Vec<_> = page.items.iter().map(|e| e.key.as_str()).collect();
+    assert!(keys.contains(&"unscoped"), "{keys:?}");
+    assert!(!keys.contains(&"foreign-repo"), "{keys:?}");
+    assert!(task_tool(&conn, "lead-plain", "memory.get", json!({"entry_id": foreign.entry_id})).is_err());
+    assert!(task_tool(&conn, "lead-plain", "memory.get", json!({"entry_id": unscoped.entry_id})).is_ok());
+    snapshot_run(&conn, "r-plain", "w1", Some("m-plain")).unwrap();
+    let snap = snapshot_for_run(&conn, "r-plain").unwrap();
+    assert!(!snap.meta.memory_index.contains("foreign-repo"));
+    assert!(snap.meta.memory_index.contains("unscoped"));
+    assert!(history::history_for_entry(&conn, "w1", Some("m-plain"), &foreign.entry_id).unwrap().is_empty());
+    let at = crate::util::now_ts();
+    let docs = search::load_docs_at(&conn, "w1", Some("m-plain"), at).unwrap();
+    assert!(docs.iter().all(|d| d.key != "foreign-repo"), "{docs:?}");
+    assert!(docs.iter().any(|d| d.key == "unscoped"));
+    let _ = std::fs::remove_dir_all(&no_git);
 }

@@ -86,16 +86,34 @@ pub fn history_for_entry(
     mission_id: Option<&str>,
     entry_id: &str,
 ) -> Result<Vec<MemoryValidityInterval>, String> {
-    let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
+    history_for_entry_with_repo(
+        conn,
+        workspace_id,
+        mission_id,
+        entry_id,
+        mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m)),
+    )
+}
+
+pub fn history_for_entry_with_repo(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    entry_id: &str,
+    repo: Option<String>,
+) -> Result<Vec<MemoryValidityInterval>, String> {
     let mut statement = conn
         .prepare(
+            &format!(
             "SELECT r.entry_id,r.revision,r.status,r.operation,r.kind,r.priority,r.body,r.content_hash,r.actor_kind,r.source_run_id,r.source_task_id,r.source_fact_id,r.reason,r.expected_revision,r.created_at,r.decided_at
                FROM memory_entries e
                JOIN memory_revisions r ON r.entry_id=e.id
               WHERE e.id=?1 AND e.workspace_id=?2 AND r.status='approved'
                 AND (e.scope='workspace' OR (e.scope='mission' AND ?3 IS NOT NULL AND e.mission_id=?3))
-                AND (?4 IS NULL OR e.repo_key IS NULL OR e.repo_key=?4)
+                AND {}
               ORDER BY r.decided_at ASC, r.revision ASC",
+                super::repo_scope::sql_match("?4", mission_id.is_some() && repo.is_none()),
+            ),
         )
         .map_err(|_| "could not read memory history".to_string())?;
     let revisions = statement

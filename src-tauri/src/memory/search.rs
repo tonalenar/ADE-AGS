@@ -50,14 +50,19 @@ pub struct Doc {
     pub body: String,
 }
 
-pub(crate) const DOCS_AT_SQL:&str="WITH valid AS (
+pub(crate) fn docs_at_sql(fail_closed: bool) -> String {
+    format!(
+        "WITH valid AS (
  SELECT e.id,e.scope,e.key,r.kind,r.priority,r.body,r.operation,
  ROW_NUMBER() OVER (PARTITION BY e.id ORDER BY r.decided_at DESC,r.revision DESC) AS n
  FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id
  WHERE e.workspace_id=?1 AND (e.scope='workspace' OR (e.scope='mission' AND e.mission_id=?2))
- AND (?4 IS NULL OR e.repo_key IS NULL OR e.repo_key=?4)
+ AND {}
  AND r.status='approved' AND r.decided_at IS NOT NULL AND r.decided_at<=?3)
- SELECT id,scope,key,kind,priority,body FROM valid WHERE n=1 AND operation IN ('create','update') ORDER BY scope,key COLLATE BINARY,id";
+ SELECT id,scope,key,kind,priority,body FROM valid WHERE n=1 AND operation IN ('create','update') ORDER BY scope,key COLLATE BINARY,id",
+        super::repo_scope::sql_match("?4", fail_closed)
+    )
+}
 
 // ── Texto ───────────────────────────────────────────────────────────
 
@@ -218,14 +223,15 @@ fn snippet_of(body: &str) -> (String, bool) {
 pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>) -> Result<Vec<Doc>, String> {
     let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
     let mut stmt = conn
-        .prepare(
+        .prepare(&format!(
             "SELECT e.id, e.scope, e.key, r.kind, e.priority, r.body
                FROM memory_entries e
                JOIN memory_revisions r ON r.entry_id = e.id AND r.revision = e.current_revision
               WHERE e.status = 'active' AND r.status='approved' AND e.workspace_id = ?1
                 AND (e.scope = 'workspace' OR (e.scope = 'mission' AND e.mission_id = ?2))
-                AND (?3 IS NULL OR e.repo_key IS NULL OR e.repo_key = ?3)",
-        )
+                AND {}",
+            super::repo_scope::sql_match("?3", mission_id.is_some() && repo.is_none())
+        ))
         .map_err(|_| "não foi possível ler as memórias".to_string())?;
     let rows = stmt
         .query_map(params![workspace_id, mission_id, repo], |r| {
@@ -239,7 +245,7 @@ pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>
 /// includes entries that have since been deleted because their earlier intervals may apply.
 pub fn load_docs_at(conn:&Connection,workspace_id:&str,mission_id:Option<&str>,at:i64)->Result<Vec<Doc>,String> {
     let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
-    let mut stmt=conn.prepare(DOCS_AT_SQL).map_err(|_|"could not read historical memory")?;
+    let mut stmt=conn.prepare(&docs_at_sql(mission_id.is_some() && repo.is_none())).map_err(|_|"could not read historical memory")?;
     stmt.query_map(params![workspace_id,mission_id,at,repo],|r|Ok(Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).map_err(|_|"could not read historical memory")?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|"could not read historical memory".into())
 }
 

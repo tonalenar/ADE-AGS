@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 
 use rusqlite::{params, Connection};
 
+use crate::database::DbConnection;
+
 /// O `.git` comum do repositório que contém `cwd` (o de um worktree aponta para o principal).
 fn common_git_dir(cwd: &Path) -> Option<PathBuf> {
     let mut dir = Some(cwd);
@@ -94,10 +96,43 @@ pub fn repo_key(cwd: &Path) -> Option<String> {
     Some(normalize_url(&root.to_string_lossy()))
 }
 
-/// A chave do repositório de uma missão (pela pasta dela).
+/// A pasta da missão, sem ler o `.git`.
+pub fn mission_cwd(conn: &Connection, mission_id: &str) -> Option<String> {
+    conn.query_row("SELECT cwd FROM missions WHERE id = ?1", [mission_id], |r| r.get(0)).ok()
+}
+
+/// A chave do repositório de uma missão (pela pasta dela). Lê o `.git` com o `conn` já aberto.
 pub fn mission_repo_key(conn: &Connection, mission_id: &str) -> Option<String> {
-    let cwd: String = conn.query_row("SELECT cwd FROM missions WHERE id = ?1", [mission_id], |r| r.get(0)).ok()?;
-    repo_key(Path::new(&cwd))
+    repo_key(Path::new(&mission_cwd(conn, mission_id)?))
+}
+
+/// Predicado SQL: falha fechada só com missão sem chave.
+pub fn sql_match(placeholder: &str, fail_closed: bool) -> String {
+    if fail_closed {
+        format!("(e.repo_key IS NULL OR e.repo_key={placeholder})")
+    } else {
+        format!("({placeholder} IS NULL OR e.repo_key IS NULL OR e.repo_key={placeholder})")
+    }
+}
+
+pub fn sql_match_bare(placeholder: &str, fail_closed: bool) -> String {
+    if fail_closed {
+        format!("(repo_key IS NULL OR repo_key={placeholder})")
+    } else {
+        format!("({placeholder} IS NULL OR repo_key IS NULL OR repo_key={placeholder})")
+    }
+}
+
+/// Lê o `cwd` sob o mutex e o `.git/config` com o lock solto.
+pub fn mission_repo_key_unlocked(db: &DbConnection, mission_id: Option<&str>) -> Result<Option<String>, String> {
+    let Some(id) = mission_id else {
+        return Ok(None);
+    };
+    let cwd = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        mission_cwd(&conn, id)
+    };
+    Ok(cwd.as_deref().and_then(|c| repo_key(Path::new(c))))
 }
 
 /// Marca uma memória recém-criada por uma missão com o repositório dela. Correção de uma memória

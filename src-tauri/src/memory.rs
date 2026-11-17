@@ -671,11 +671,18 @@ pub struct MemoryFilter {
     pub duplicate_of: Option<bool>, pub contradicts: Option<bool>, pub verification_expired: Option<bool>,
     #[serde(default)]
     pub repo_key: Option<String>,
+    #[serde(default)]
+    pub repo_fail_closed: bool,
+}
+
+fn apply_repo_filter(filter: &mut MemoryFilter, mission_id: Option<&str>, conn: &Connection) {
+    filter.repo_key = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
+    filter.repo_fail_closed = mission_id.is_some() && filter.repo_key.is_none();
 }
 
 pub fn list_for_owner(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, cursor: Option<&str>, limit: usize) -> Result<MemoryPage,String> {
     let mut filter = MemoryFilter::default();
-    filter.repo_key = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
+    apply_repo_filter(&mut filter, mission_id, conn);
     list_filtered(conn,workspace_id,mission_id,cursor,limit,&filter)
 }
 
@@ -727,7 +734,7 @@ pub fn list_filtered(
     let sql = format!(
         "{ENTRY_SELECT} WHERE e.scope=?1 AND e.workspace_id=?2 AND (?3 IS NULL OR e.mission_id=?3) AND (?9 IS NULL OR COALESCE(p.kind,e.kind)=?9) AND (?10 IS NULL OR CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END=?10) AND (?11 IS NULL OR instr(lower(e.key||' '||COALESCE(p.body,a.body,(SELECT body FROM memory_revisions WHERE entry_id=e.id AND status='rejected' ORDER BY revision DESC LIMIT 1),'')),lower(?11))>0) AND (?12 IS NULL OR EXISTS(SELECT 1 FROM run_memory_snapshot WHERE entry_id=e.id)=?12) AND (?5 IS NULL OR (CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,-e.priority,e.key COLLATE BINARY,e.id)>(?5,?6,?7,?8)) ORDER BY CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.priority DESC,e.key COLLATE BINARY,e.id LIMIT ?4"
     );
-    let sql = sql.replace(" ORDER BY CASE", &format!(" AND ({decision_predicate}) AND (?15 IS NULL OR (e.id IN (SELECT value FROM json_each(?13)))=?15) AND (?16 IS NULL OR (e.id IN (SELECT value FROM json_each(?14)))=?16) AND (?17 IS NULL OR (e.ttl_days IS NOT NULL AND (e.last_verified IS NULL OR e.last_verified<=?18-e.ttl_days*86400))=?17) AND (?19 IS NULL OR e.repo_key IS NULL OR e.repo_key=?19) ORDER BY CASE"));
+    let sql = sql.replace(" ORDER BY CASE", &format!(" AND ({decision_predicate}) AND (?15 IS NULL OR (e.id IN (SELECT value FROM json_each(?13)))=?15) AND (?16 IS NULL OR (e.id IN (SELECT value FROM json_each(?14)))=?16) AND (?17 IS NULL OR (e.ttl_days IS NOT NULL AND (e.last_verified IS NULL OR e.last_verified<=?18-e.ttl_days*86400))=?17) AND {} ORDER BY CASE", repo_scope::sql_match("?19", filter.repo_fail_closed)));
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|_| "could not list memories".to_string())?;
@@ -800,8 +807,19 @@ pub fn detail_for_owner(
     };
     validate_owner(conn, scope, workspace_id, mission_id)?;
     let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
+    detail_with_repo(conn, entry_id, workspace_id, mission_id, scope, repo)
+}
+
+fn detail_with_repo(
+    conn: &Connection,
+    entry_id: &str,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    scope: &str,
+    repo: Option<String>,
+) -> Result<MemoryDetail, String> {
     let sql = format!(
-        "{ENTRY_SELECT} WHERE e.id=?1 AND e.workspace_id=?2 AND e.scope=?3 AND (?4 IS NULL OR e.mission_id=?4) AND (?5 IS NULL OR e.repo_key IS NULL OR e.repo_key=?5)"
+        "{ENTRY_SELECT} WHERE e.id=?1 AND e.workspace_id=?2 AND e.scope=?3 AND (?4 IS NULL OR e.mission_id=?4) AND {}", repo_scope::sql_match("?5", mission_id.is_some() && repo.is_none())
     );
     let entry = conn
         .query_row(
@@ -878,7 +896,8 @@ pub fn snapshot_run_with_commit(
         return Err("Run memory scope does not match the Run owner".into());
     }
     let repo = mission_id.and_then(|m| repo_scope::mission_repo_key(conn, m));
-    let mut stmt=conn.prepare("SELECT e.id,r.revision,e.scope,e.key,r.kind,r.body,e.priority,r.content_hash FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND e.current_revision IS NOT NULL AND (e.scope='workspace' OR (?2 IS NOT NULL AND e.scope='mission' AND e.mission_id=?2)) AND (?3 IS NULL OR e.repo_key IS NULL OR e.repo_key=?3) ORDER BY e.priority DESC,CASE WHEN e.scope='mission' THEN 0 ELSE 1 END,e.key COLLATE BINARY,e.id").map_err(|_|"could not select run memory".to_string())?;
+    let fail_closed = mission_id.is_some() && repo.is_none();
+    let mut stmt=conn.prepare(&format!("SELECT e.id,r.revision,e.scope,e.key,r.kind,r.body,e.priority,r.content_hash FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id AND r.revision=e.current_revision AND r.status='approved' WHERE e.workspace_id=?1 AND e.status='active' AND e.current_revision IS NOT NULL AND (e.scope='workspace' OR (?2 IS NOT NULL AND e.scope='mission' AND e.mission_id=?2)) AND {} ORDER BY e.priority DESC,CASE WHEN e.scope='mission' THEN 0 ELSE 1 END,e.key COLLATE BINARY,e.id", repo_scope::sql_match("?3", fail_closed))).map_err(|_|"could not select run memory".to_string())?;
     let candidates = stmt
         .query_map(params![workspace_id, mission_id, repo], |r| {
             Ok((
@@ -1243,7 +1262,7 @@ fn task_authorized_entry(
     }
     let repo = mission_id.as_deref().and_then(|m| repo_scope::mission_repo_key(conn, m));
     let scope:Option<String>=conn.query_row(
-        "SELECT scope FROM memory_entries WHERE id=?1 AND workspace_id=?2 AND ((scope='workspace' AND mission_id IS NULL) OR (scope='mission' AND ?3 IS NOT NULL AND mission_id=?3)) AND (?4 IS NULL OR repo_key IS NULL OR repo_key=?4)",
+        &format!("SELECT scope FROM memory_entries WHERE id=?1 AND workspace_id=?2 AND ((scope='workspace' AND mission_id IS NULL) OR (scope='mission' AND ?3 IS NOT NULL AND mission_id=?3)) AND {}", repo_scope::sql_match_bare("?4", mission_id.is_some() && repo.is_none())),
         params![entry_id,workspace_id,mission_id,repo],|r|r.get(0),
     ).optional().map_err(|_|"could not authorize memory entry".to_string())?;
     let scope = scope.ok_or("memory entry is outside the caller's Run")?;
@@ -1327,7 +1346,7 @@ pub fn task_tool(
                 _ => return Err("scope must be workspace or mission".into()),
             };
             let mut filter = MemoryFilter::default();
-            filter.repo_key = mission_id.as_deref().and_then(|m| repo_scope::mission_repo_key(conn, m));
+            apply_repo_filter(&mut filter, mission_id.as_deref(), conn);
             let mut page = list_filtered(
                 conn,
                 &workspace_id,
@@ -1359,7 +1378,8 @@ pub fn task_tool(
                 .map_err(|_| "invalid memory.get arguments".to_string())?;
             let (owner, mission, _, _, scope) =
                 task_authorized_entry(conn, task_id, &input.entry_id)?;
-            let detail = detail_for_owner(
+            let repo = mission.as_deref().and_then(|m| repo_scope::mission_repo_key(conn, m));
+            let detail = detail_with_repo(
                 conn,
                 &input.entry_id,
                 &owner,
@@ -1368,6 +1388,8 @@ pub fn task_tool(
                 } else {
                     None
                 },
+                &scope,
+                repo,
             )?;
             let read_key = vec![detail.entry.key.clone()];
             usage::record(conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: Some(task_id), action: "open", query: None, hits: 1, entry_keys: &read_key });
@@ -1619,13 +1641,18 @@ pub async fn memory_list(
 ) -> Result<MemoryPage, String> {
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let repo_key = repo_scope::mission_repo_key_unlocked(&db, mission_id.as_deref())?;
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        list_for_owner(
+        let mut filter = MemoryFilter::default();
+        filter.repo_key = repo_key;
+        filter.repo_fail_closed = mission_id.is_some() && filter.repo_key.is_none();
+        list_filtered(
             &conn,
             &workspace_id,
             mission_id.as_deref(),
             cursor.as_deref(),
             limit.unwrap_or(LIST_LIMIT),
+            &filter,
         )
     })
     .await
@@ -1640,8 +1667,15 @@ pub async fn memory_get(
 ) -> Result<MemoryDetail, String> {
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let repo = repo_scope::mission_repo_key_unlocked(&db, mission_id.as_deref())?;
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        detail_for_owner(&conn, &entry_id, &workspace_id, mission_id.as_deref())
+        let scope = if mission_id.is_some() {
+            "mission"
+        } else {
+            "workspace"
+        };
+        validate_owner(&conn, scope, &workspace_id, mission_id.as_deref())?;
+        detail_with_repo(&conn, &entry_id, &workspace_id, mission_id.as_deref(), scope, repo)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -1656,8 +1690,9 @@ pub async fn memory_history(
 ) -> Result<Vec<history::MemoryValidityInterval>, String> {
     let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let repo = repo_scope::mission_repo_key_unlocked(&db, mission_id.as_deref())?;
         let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-        history::history_for_entry(&conn, &workspace_id, mission_id.as_deref(), &entry_id)
+        history::history_for_entry_with_repo(&conn, &workspace_id, mission_id.as_deref(), &entry_id, repo)
     })
     .await
     .map_err(|e| e.to_string())?
