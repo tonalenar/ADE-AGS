@@ -159,12 +159,14 @@ pub fn truncate_utf8(text: &str, limit: usize) -> (&str, bool) {
     (&text[..end], true)
 }
 
-pub fn read_registry(path: &Path) -> Vec<Comparison> {
-    std::fs::read_to_string(path)
-        .ok()
-        .and_then(|raw| serde_json::from_str::<RegistryFile>(&raw).ok())
-        .map(|f| f.comparisons)
-        .unwrap_or_default()
+pub fn read_registry(path: &Path) -> Result<Vec<Comparison>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => serde_json::from_str::<RegistryFile>(&raw)
+            .map(|f| f.comparisons)
+            .map_err(|e| format!("O arquivo de comparações está ilegível e não foi regravado: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 pub fn write_registry(path: &Path, comparisons: &[Comparison]) -> Result<(), String> {

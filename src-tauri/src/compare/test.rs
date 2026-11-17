@@ -61,6 +61,19 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn registro_ilegivel_nao_e_regravado() {
+    let dir = std::env::temp_dir().join(format!("ags-compare-bad-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let registry = dir.join("comparisons.json");
+    std::fs::write(&registry, "{\"comparisons\":").unwrap();
+    let original = std::fs::read(&registry).unwrap();
+    let err = read_registry(&registry).unwrap_err();
+    assert!(err.contains("ilegível"), "{err}");
+    assert_eq!(std::fs::read(&registry).unwrap(), original);
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn os_nomes_de_branch_seguem_as_regras_de_ref() {
     assert!(valid_pick("claude-opus"));
     assert!(valid_pick("codex-gpt-5.1-high"));
@@ -116,7 +129,7 @@ fn preparar_cria_um_worktree_e_uma_branch_por_modelo_a_partir_do_head() {
         assert_eq!(git(&root, &["rev-parse", "HEAD"]), head);
         assert_eq!(git(&root, &["config", "--get", &format!("branch.{branch}.agsbase")]), head);
     }
-    assert_eq!(read_registry(&f.registry), vec![cmp]);
+    assert_eq!(read_registry(&f.registry).unwrap(), vec![cmp]);
 }
 
 #[test]
@@ -128,7 +141,7 @@ fn sem_repositorio_isolar_falha_e_sem_isolamento_todos_usam_a_pasta() {
     let picks = Fixture::picks(&["a", "b"]);
     assert!(prepare_in(&registry, &base, &dir, "pergunta", &picks, true, "id0001").is_err());
     assert!(prepare_in(&registry, &base, &dir.join("nao-existe"), "pergunta", &picks, false, "id0003").is_err());
-    assert!(read_registry(&registry).is_empty(), "uma falha não registra nada");
+    assert!(read_registry(&registry).unwrap().is_empty(), "uma falha não registra nada");
     let shared = prepare_in(&registry, &base, &dir, "pergunta", &picks, false, "id0002").unwrap();
     assert!(!shared.comparison.isolated);
     assert!(shared.comparison.entries.iter().all(|e| e.root.is_none() && e.cwd == dir.to_string_lossy()));
@@ -144,7 +157,7 @@ fn se_um_worktree_falha_os_outros_sao_desfeitos() {
     assert!(err.is_err());
     assert!(!f.branch_exists("cmp/corrigir-o-login-abc123/a"), "a branch criada foi desfeita");
     assert!(f.branch_exists("cmp/corrigir-o-login-abc123/b"), "a branch que já existia não é tocada");
-    assert!(read_registry(&f.registry).is_empty());
+    assert!(read_registry(&f.registry).unwrap().is_empty());
     assert_eq!(std::fs::read_dir(&f.base).unwrap().count(), 0);
 }
 
@@ -192,7 +205,7 @@ fn remover_sem_confirmar_nunca_apaga_trabalho() {
     assert!(a.exists() && b.exists());
     assert!(!f.branch_exists("cmp/corrigir-o-login-abc123/c"));
     assert!(f.branch_exists("cmp/corrigir-o-login-abc123/b"));
-    let left = read_registry(&f.registry);
+    let left = read_registry(&f.registry).unwrap();
     assert_eq!(left[0].entries.iter().map(|e| e.pick.as_str()).collect::<Vec<_>>(), ["a", "b"]);
 }
 
@@ -221,7 +234,7 @@ fn descartar_confirmado_guarda_o_trabalho_numa_ref_recuperavel() {
     assert_eq!(git(&f.repo, &["show", &format!("{saved}:app.txt")]), "mudou");
     assert_eq!(git(&f.repo, &["show", &format!("{saved}:novo.txt")]), "novo");
     assert!(report.entries[1].saved_ref.is_none(), "o limpo não precisa de ref");
-    assert!(read_registry(&f.registry).is_empty());
+    assert!(read_registry(&f.registry).unwrap().is_empty());
 }
 
 #[test]
@@ -259,7 +272,7 @@ fn manter_um_e_encerrar_deixa_a_branch_com_o_trabalho() {
     let branch = "cmp/corrigir-o-login-abc123/a";
     assert!(f.branch_exists(branch));
     assert_eq!(git(&f.repo, &["show", &format!("{branch}:app.txt")]), "resultado");
-    assert!(read_registry(&f.registry).is_empty());
+    assert!(read_registry(&f.registry).unwrap().is_empty());
 }
 
 #[test]

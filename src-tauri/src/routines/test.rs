@@ -34,7 +34,7 @@ fn le_duraciones_y_rechaza_lo_que_no_lo_es() {
     assert_eq!(parse_duration("2h").unwrap(), 7200);
     assert_eq!(parse_duration(" 1D ").unwrap(), 86_400);
     assert_eq!(parse_duration("90s").unwrap(), 90);
-    for bad in ["", "m", "10", "10x", "-5m", "0m", "1.5h"] {
+    for bad in ["", "m", "10", "10x", "-5m", "0m", "1.5h", "9223372036854775807s"] {
         assert!(parse_duration(bad).is_err(), "{bad}");
     }
 }
