@@ -149,3 +149,27 @@ describe("resposta a pedidos", () => {
     expect(mocks.alerta).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("IPC que devolve false é falha (rodada 1)", () => {
+  // O backend devolve `false` quando a regra não existe (chat_team/store.rs). Isso não é sucesso: a tela não muda.
+  it("remover_regra_com_ipc_retornando_false_mantem_regra", async () => {
+    mocks.ruleRemove.mockResolvedValue(false);
+    mocks.rules.mockResolvedValue([{ ...rule }]);
+
+    await removeRule("r1");
+
+    expect(usePermissions.getState().rules.map((r) => r.id)).toEqual(["r1"]);
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+    expect(mocks.rules).toHaveBeenCalled();
+  });
+
+  it("editar_regra_com_ipc_retornando_false_mantem_padrao", async () => {
+    mocks.ruleUpdate.mockResolvedValue(false);
+    mocks.rules.mockResolvedValue([{ ...rule }]);
+
+    await updateRule("r1", { pattern: "*" });
+
+    expect(usePermissions.getState().rules[0]?.pattern).toBe("bun *");
+    expect(mocks.alerta).toHaveBeenCalledTimes(1);
+  });
+});

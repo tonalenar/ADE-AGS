@@ -119,9 +119,9 @@ export async function updateRule(id: string, patch: Partial<Omit<PermissionRule,
     if (patch.agentId === null) body.anyAgent = true;
     else body.agentId = patch.agentId;
   }
-  try {
-    await chatPermissionRuleUpdate(id, body);
-  } catch {
+  // `false` do backend é falha (a regra não existe, ou não foi gravada): não é sucesso.
+  const saved = await chatPermissionRuleUpdate(id, body).catch(() => false);
+  if (saved !== true) {
     avisoDeFalha("chat.permission.ruleSaveFailed");
     await loadRules();
     return;
@@ -135,9 +135,9 @@ export async function updateRule(id: string, patch: Partial<Omit<PermissionRule,
  * fica na tela e a pessoa é avisada.
  */
 export async function removeRule(id: string): Promise<void> {
-  try {
-    await chatPermissionRuleRemove(id);
-  } catch {
+  // `false` do backend é falha: a regra não saiu do banco, então não sai da tela.
+  const removed = await chatPermissionRuleRemove(id).catch(() => false);
+  if (removed !== true) {
     avisoDeFalha("chat.permission.ruleSaveFailed");
     await loadRules();
     return;
