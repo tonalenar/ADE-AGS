@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { AnimateSpin, Button, CheckCircleIcon, Input } from "neogestify-ui-components";
 
 import { openExternalUrl } from "@/shared/openExternalUrl";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { graphifyRequirements, type GraphifyRequirement, type GraphifyRun } from "./ipc";
 
 /**
@@ -49,7 +50,7 @@ export function RequirementsBlock({ onRun, running }: {
       setRunNote((prev) => ({ ...prev, [id]: result.output.trim() || (result.ok ? t("settings.graphify.run") : t("settings.graphify.req.missing")) }));
       await refresh();
     } catch (e) {
-      setRunNote((prev) => ({ ...prev, [id]: String(e) }));
+      setRunNote((prev) => ({ ...prev, [id]: uiErrorText(e) }));
     } finally {
       setBusy(null);
     }

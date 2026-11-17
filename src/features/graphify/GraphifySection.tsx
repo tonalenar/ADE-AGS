@@ -5,6 +5,7 @@ import {
 } from "neogestify-ui-components";
 
 import { SettingsSection } from "@/features/settings/SettingsSection";
+import { uiErrorText } from "@/shared/uiErrorText";
 import { useTabsStore } from "@/features/tabs/store";
 
 import { CommandCatalog } from "./CommandCatalog";
@@ -179,7 +180,7 @@ export function GraphifySection() {
       setError("");
     } catch (e) {
       if (gen !== loadGen.current) return;
-      setError(String(e));
+      setError(uiErrorText(e));
     }
   }, [cwd, scope]);
 
@@ -205,7 +206,7 @@ export function GraphifySection() {
     try {
       setCommand("skill", await graphifyInstallCommand(platform, forScope));
     } catch (e) {
-      setError(String(e));
+      setError(uiErrorText(e));
     }
   };
 
@@ -229,7 +230,7 @@ export function GraphifySection() {
       refreshStatus();
       return result;
     } catch (e) {
-      return { ok: false, code: null, output: String(e) };
+      return { ok: false, code: null, output: uiErrorText(e) };
     }
   }, [cwd, refreshStatus]);
 
@@ -240,7 +241,7 @@ export function GraphifySection() {
     try {
       setCommand("cli", await graphifyPackageCommand(commands.cli ?? "", next));
     } catch (e) {
-      setError(String(e));
+      setError(uiErrorText(e));
     }
   };
 
@@ -257,7 +258,7 @@ export function GraphifySection() {
       refreshStatus();
       load();
     } catch (e) {
-      setRuns((prev) => ({ ...prev, [id]: { running: false, result: { ok: false, code: null, output: String(e) } } }));
+      setRuns((prev) => ({ ...prev, [id]: { running: false, result: { ok: false, code: null, output: uiErrorText(e) } } }));
     }
   };
 
