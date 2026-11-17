@@ -354,12 +354,15 @@ export function observeSelectionActions({
     else if (!pointerDown && getActionElement?.()) dismiss();
   };
   const onScroll = () => {
-    // A rolagem que o streaming faz sozinha não tira a seleção de quem ainda a vê: a pílula «Citar» fica.
-    const selection = doc.getSelection?.();
+    // A rolagem que o streaming faz sozinha não tira a seleção de quem ainda a vê: a pílula «Citar» fica enquanto o
+    // trecho está na janela e na área do fio. Sem caixa do fio (sem layout), só a janela decide.
+    const selection = view.getSelection?.();
     if (selection && !selection.isCollapsed && selection.rangeCount > 0) {
       const rect = selection.getRangeAt(0).getBoundingClientRect();
       const box = element.getBoundingClientRect();
-      if (rect.width + rect.height > 0 && rect.bottom > box.top && rect.top < box.bottom) return;
+      const inViewport = rect.bottom > 0 && rect.top < view.innerHeight;
+      const inBox = box.bottom <= box.top || (rect.bottom > box.top && rect.top < box.bottom);
+      if (rect.width + rect.height > 0 && inViewport && inBox) return;
     }
     cancelPending();
     if (!pointerDown) {
