@@ -118,7 +118,8 @@ pub(super) fn booted_entry(now: Instant, from_screen: bool) -> Usage {
 /// quem chegar antes do desligamento cancela a marca (ver `seen_in` e `used`).
 pub(super) fn claim_due(map: &mut HashMap<String, Usage>, udid: &str, now: Instant, after: Option<Duration>) -> bool {
     let Some(u) = map.get_mut(udid) else { return false };
-    if !due(now, u.last_seen, u.visible, after) {
+    // Já marcado: o shutdown anterior ainda corre. Remarcar faria o monitor desligar em paralelo.
+    if u.hibernating || !due(now, u.last_seen, u.visible, after) {
         return false;
     }
     u.hibernating = true;

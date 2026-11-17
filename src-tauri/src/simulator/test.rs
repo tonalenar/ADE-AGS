@@ -425,6 +425,24 @@ fn desligamento_concluido_sai_do_ciclo_e_falha_mantem_o_aparelho() {
 }
 
 #[test]
+fn claim_due_nao_reivindica_quem_ja_esta_hibernando() {
+    // O monitor passa de 20 em 20 s: quem já foi marcado continua `due` e no mapa até o shutdown.
+    // O segundo ciclo não pode reivindicar de novo (senão entra em hibernate_marked em paralelo).
+    use super::lifecycle::{booted_entry, claim_due, confirm_hibernation};
+    use std::collections::HashMap;
+    use std::time::{Duration, Instant};
+    let now = Instant::now();
+    let depois = now + Duration::from_secs(600);
+    let prazo = Some(Duration::from_secs(600));
+    let mut mapa = HashMap::new();
+    mapa.insert("a".to_string(), booted_entry(now, false));
+    assert!(claim_due(&mut mapa, "a", depois, prazo), "primeiro ciclo marca");
+    assert!(confirm_hibernation(&mapa, "a"));
+    assert!(!claim_due(&mut mapa, "a", depois, prazo), "já hibernando: o segundo ciclo não reivindica");
+    assert!(confirm_hibernation(&mapa, "a"), "a marca segue de pé");
+}
+
+#[test]
 fn entrega_que_falhou_no_hid_vira_erro() {
     // Uma falha de entrega desde a marca vira erro para o agente: nunca um "ok" para um toque que não chegou.
     assert!(delivery_check(3, 3).is_ok());
