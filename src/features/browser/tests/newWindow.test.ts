@@ -3,7 +3,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { loadRuntime } from "./runtimeHarness";
 
-afterEach(() => vi.restoreAllMocks());
+// `window.location` e `window.open` são trocados por alguns testes: guarda-se o original para não vazar para o seguinte (A200).
+const realOpen = window.open;
+const realLocation = Object.getOwnPropertyDescriptor(window, "location");
+afterEach(() => {
+  vi.restoreAllMocks();
+  window.open = realOpen;
+  if (realLocation) Object.defineProperty(window, "location", realLocation);
+});
 
 /** O clique de um link não pode navegar de verdade no teste: o ouvinte cancela depois da captura do runtime. */
 function stopNavigation(el: Element): void {

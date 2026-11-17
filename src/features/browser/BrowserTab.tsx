@@ -44,6 +44,7 @@ import { readBrowserPreferences } from "./browserPreferences";
 import { clearRecentBrowserPages, readRecentBrowserPages, rememberRecentBrowserPage, type RecentBrowserPage } from "./recentPages";
 import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
 import { PageChannel, type LoadState } from "./pageChannel";
+import { askPersonAboutDialog } from "./dialogPolicy";
 import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { deviceAction, runDeviceAction, type PhoneActions } from "./deviceActions";
@@ -215,6 +216,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
   const recordingStreamRef = useRef<MediaStream | null>(null);
   const recordingChunksRef = useRef<Blob[]>([]);
   const recordingTimerRef = useRef<number | null>(null);
+  /** A aba foi desmontada: a gravação que ainda esperava a captura inicial não pode começar. */
+  const recordingDisposedRef = useRef(false);
 
   /** Quién espera a que la persona marque algo, cuando lo pidió un agente. */
   const pickWaiter = useRef<((element: PickedElement | null) => void) | null>(null);
@@ -754,6 +757,9 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       }
     } else if (msg.type === "page:reply") {
       channel.reply(msg.payload);
+    } else if (msg.type === "dialog:asked") {
+      // Um `alert`, `confirm` ou `prompt` que disparou um agente: a persona decide na app (ver `dialogPolicy.ts`).
+      void askPersonAboutDialog(msg.payload, (key) => channel.run({ op: "dialogs", allow: key }, 8000).then(() => undefined, () => undefined));
     } else if (msg.type === "debug:batch") {
       const batch = { ...msg.payload, url: display(msg.payload.url) };
       useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
@@ -938,6 +944,8 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
       const initial = real
         ? (await realBrowserShot(view.id)).canvas
         : (await freezePage(iframe.current!, column.current)).canvas;
+      // A aba pode ter sido desmontada durante a captura (o cleanup já rodou e não viu gravador): não se cria nada.
+      if (recordingDisposedRef.current) return;
       const canvas = document.createElement("canvas");
       canvas.width = initial.width;
       canvas.height = initial.height;
@@ -1000,12 +1008,17 @@ export function BrowserTab({ view, active, device = null, floatingPreview = fals
     else void startVisualRecording();
   };
 
-  useEffect(() => () => {
-    if (recordingTimerRef.current !== null) window.clearTimeout(recordingTimerRef.current);
-    const recorder = recorderRef.current;
-    recorderRef.current = null;
-    if (recorder && recorder.state !== "inactive") recorder.stop();
-    recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+  // `disposed` marca a desmontagem para a gravação que ainda está no `await` da captura inicial.
+  useEffect(() => {
+    recordingDisposedRef.current = false;
+    return () => {
+      recordingDisposedRef.current = true;
+      if (recordingTimerRef.current !== null) window.clearTimeout(recordingTimerRef.current);
+      const recorder = recorderRef.current;
+      recorderRef.current = null;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
   }, []);
 
   const attachments = picks.length + captures.length;
