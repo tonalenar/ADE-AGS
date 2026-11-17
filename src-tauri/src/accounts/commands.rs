@@ -231,14 +231,17 @@ pub async fn create_agent_api_key_account(
     .await
     .map_err(|e| e.to_string())??;
 
-    let inserted = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let row = (id.clone(), agent_id.clone(), name.clone(), dir_str.clone(), base_url.clone(), hint.clone());
+    let inserted = crate::database::blocking_db(&db, move |conn| {
+        let (id, agent_id, name, dir_str, base_url, hint) = row;
         conn.execute(
             "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at, kind, base_url, key_hint)
              VALUES (?1, ?2, ?3, ?4, ?5, 'api_key', ?6, ?7)",
             rusqlite::params![id, agent_id, name, dir_str, created_at, base_url, hint],
         )
-    };
+        .map_err(|e| e.to_string())
+    })
+    .await;
     if let Err(e) = inserted {
         super::secrets::delete(&id);
         return Err(if e.to_string().contains("UNIQUE") {
