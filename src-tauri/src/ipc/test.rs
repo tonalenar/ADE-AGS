@@ -1167,6 +1167,72 @@ fn frame_mcp_grande_recusado() {
     assert_eq!(out[1], json!({ "jsonrpc": "2.0", "id": 2, "result": {} }), "a conexão tem de seguir viva depois do quadro recusado");
 }
 
+/// Cabo de entrada que só abre o portão quando acaba: as chamadas aceitas ficam em voo até o servidor ler tudo.
+struct CaboComPortao {
+    dados: std::io::Cursor<Vec<u8>>,
+    portao: std::sync::Arc<(std::sync::Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl std::io::Read for CaboComPortao {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = std::io::Read::read(&mut self.dados, buf)?;
+        if n == 0 {
+            let (aberto, sinal) = &*self.portao;
+            *aberto.lock().unwrap_or_else(|e| e.into_inner()) = true;
+            sinal.notify_all();
+        }
+        Ok(n)
+    }
+}
+
+/// Uma sessão MCP em que cada `tools/call` fica em voo até o cabo acabar. Devolve as respostas na ordem em que saíram.
+fn sessao_com_chamadas_presas(context: &McpContext, chamadas: Vec<serde_json::Value>) -> Vec<serde_json::Value> {
+    let portao = std::sync::Arc::new((std::sync::Mutex::new(false), std::sync::Condvar::new()));
+    let cabo: String = chamadas.iter().map(|c| format!("{c}\n")).collect();
+    let entrada = std::io::BufReader::new(CaboComPortao { dados: std::io::Cursor::new(cabo.into_bytes()), portao: portao.clone() });
+    let espera = move |_: &str, _: serde_json::Value| {
+        let (aberto, sinal) = &*portao;
+        let mut aberto = aberto.lock().unwrap_or_else(|e| e.into_inner());
+        while !*aberto {
+            aberto = sinal.wait(aberto).unwrap_or_else(|e| e.into_inner());
+        }
+        Ok(json!({ "text": "ok" }))
+    };
+    let mut saida = Vec::new();
+    serve(context, "", entrada, &mut saida, espera).unwrap();
+    String::from_utf8(saida).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect()
+}
+
+/// A227: um `id` já em voo não pode ser reaproveitado. O `insert` substituiria a chamada que ainda roda e a conta do
+/// limite de 32 deixaria de bater: a repetição sai logo com erro JSON-RPC, e a chamada em voo segue e responde.
+#[test]
+fn id_repetido_com_a_chamada_em_voo_e_recusado() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let chamada = |id: u64| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "facts_read", "arguments": {} } });
+    let out = sessao_com_chamadas_presas(&cwd, vec![chamada(1), chamada(1)]);
+    assert_eq!(out.len(), 2, "{out:?}");
+    assert_eq!(out[0]["id"], 1, "{}", out[0]);
+    assert_eq!(out[0]["error"]["code"], -32600, "a repetição tem de sair logo, com erro: {}", out[0]);
+    assert!(out[1].get("result").is_some(), "a chamada em voo tem de seguir e responder: {}", out[1]);
+}
+
+/// A227: no máximo 32 `tools/call` em voo por conexão. A 33ª sai logo, com a mensagem em português, e as 32 que já
+/// estavam em voo respondem.
+#[test]
+fn trinta_e_duas_chamadas_em_voo_e_a_trigesima_terceira_recusada() {
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
+    let chamada = |id: u64| json!({ "jsonrpc": "2.0", "id": id, "method": "tools/call", "params": { "name": "facts_read", "arguments": {} } });
+    let out = sessao_com_chamadas_presas(&cwd, (1..=33).map(chamada).collect());
+    assert_eq!(out.len(), 33, "{out:?}");
+    assert_eq!(out[0]["id"], 33, "a 33ª sai antes das respostas das 32 presas: {}", out[0]);
+    assert_eq!(out[0]["error"]["code"], -32603, "{}", out[0]);
+    let msg = out[0]["error"]["message"].as_str().unwrap_or_default();
+    assert!(msg.starts_with("Chamadas demais em voo") && msg.contains("32"), "mensagem em PT-BR, com o teto: {msg}");
+    let mut respondidas: Vec<u64> = out[1..].iter().map(|r| r["id"].as_u64().unwrap_or_default()).collect();
+    respondidas.sort();
+    assert_eq!(respondidas, (1..=32).collect::<Vec<u64>>(), "as 32 em voo seguem e respondem");
+}
+
 /// Con `progressToken`, una llamada larga avisa que sigue viva; sin él, no se manda nada.
 #[test]
 fn una_llamada_larga_avisa_su_progreso_si_se_lo_piden() {

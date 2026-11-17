@@ -1413,13 +1413,16 @@ where
                     let cancelled = Arc::new(AtomicBool::new(false));
                     {
                         let mut map = inflight.lock().unwrap_or_else(|e| e.into_inner());
-                        if map.len() >= MAX_INFLIGHT_CALLS {
+                        // Um id repetido trocaria a chamada que ainda roda e a conta do teto deixaria de bater.
+                        let repetido = map.contains_key(&key);
+                        if repetido || map.len() >= MAX_INFLIGHT_CALLS {
                             drop(map);
-                            write(&json!({
-                                "jsonrpc": "2.0",
-                                "id": id,
-                                "error": { "code": -32603, "message": "Demasiadas chamadas em voo (máximo 32)" },
-                            }))?;
+                            let erro = if repetido {
+                                json!({ "code": -32600, "message": "Já há uma chamada em voo com este id: espere a resposta antes de repetir o id" })
+                            } else {
+                                json!({ "code": -32603, "message": "Chamadas demais em voo (máximo 32): espere uma terminar" })
+                            };
+                            write(&json!({ "jsonrpc": "2.0", "id": id, "error": erro }))?;
                             continue;
                         }
                         map.insert(key.clone(), (call_id.clone(), cancelled.clone()));
