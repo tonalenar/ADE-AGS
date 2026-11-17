@@ -391,6 +391,11 @@ export function nameTokens(v: string): string[] {
 export const stripOrdinal = (title: string) => title.replace(/^\s*\d+\s*[·.\-–—:)]\s*/, "");
 /** O número da frente do título, se houver ("2 · Conversa…" → 2). */
 const ordinalOf = (title: string) => { const m = /^\s*(\d+)\s*[·.\-–—:)]/.exec(title); return m ? Number(m[1]) : null; };
+/** O conteúdo do `<head>` (estilos, folhas): quando muda, o documento precisa ser recarregado. */
+export function htmlHead(html: string): string {
+  const m = /<head\b[^>]*>([\s\S]*?)<\/head>/i.exec(html);
+  return m ? m[1] : "";
+}
 /** O `<title>` do HTML da prancheta, se houver. */
 export function htmlTitle(html: string | undefined): string | null {
   const m = html ? /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html) : null;

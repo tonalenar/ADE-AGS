@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { DESIGN_SANDBOX } from "@/features/canvas/design/srcdoc";
 
-import { postToFrame, studioSrcdoc } from "./frameBridge";
+import { htmlHead, postToFrame, studioSrcdoc } from "./frameBridge";
 import { iframeSrcIdentity } from "./iframeSrc";
 import type { Corner } from "./snap";
 import { AgentCursorIcon, ExpandIcon, PlayIcon, StopIcon } from "./studioIcons";
@@ -61,14 +61,17 @@ export const ArtboardFrame = memo(function ArtboardFrame({ board, live, selected
   const [name, setName] = useState(board.title);
   useEffect(() => { if (renaming) setName(board.title); }, [renaming]); // eslint-disable-line react-hooks/exhaustive-deps -- só ao abrir
   const srcIdentity = iframeSrcIdentity(board.id, live);
-  const srcDoc = useMemo(() => (live ? studioSrcdoc(board.html) : ""), [srcIdentity]); // eslint-disable-line react-hooks/exhaustive-deps
-  const htmlRef = useRef(board.html);
+  // O `replaceHtml` troca só o corpo. Se o <head> mudou (estilos), o documento é outro: o srcdoc recarrega.
+  const head = htmlHead(board.html);
+  const srcDoc = useMemo(() => (live ? studioSrcdoc(board.html) : ""), [srcIdentity, head]); // eslint-disable-line react-hooks/exhaustive-deps
+  const htmlRef = useRef({ html: board.html, head });
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   useEffect(() => {
-    if (!live || htmlRef.current === board.html) { htmlRef.current = board.html; return; }
-    htmlRef.current = board.html;
+    const prev = htmlRef.current;
+    htmlRef.current = { html: board.html, head };
+    if (!live || prev.html === board.html || prev.head !== head) return;
     postToFrame(iframeRef.current, { kind: "replaceHtml", html: board.html });
-  }, [board.html, live]);
+  }, [board.html, head, live]);
   const commit = () => {
     const next = name.trim();
     h.onRename(board.id, next && next !== board.title ? next : null);
