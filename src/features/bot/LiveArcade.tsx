@@ -13,6 +13,7 @@ import { sustainedTabIds } from "@/features/terminal/activity";
 import { useTabsStore } from "@/features/tabs/store";
 
 import { getPendingCounts } from "@/features/memory/ipc";
+import { canvasBufferSize, needsCanvasResize } from "./canvasSize";
 
 import { PlatformLogo } from "./PlatformLogo";
 import { useArcadeSignals } from "./arcadeSignals";
@@ -221,10 +222,13 @@ export function LiveArcade({
     const draw = (dt: number, now: number) => {
       const bounds = canvas.getBoundingClientRect();
       if (!bounds.width) return;
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.round(bounds.width * ratio);
-      canvas.height = Math.round((bounds.width * ARCADE_H / ARCADE_W) * ratio);
+      const nextSize = canvasBufferSize(bounds.width, bounds.width * ARCADE_H / ARCADE_W, window.devicePixelRatio || 1);
+      if (needsCanvasResize(canvas, nextSize)) {
+        canvas.width = nextSize.w;
+        canvas.height = nextSize.h;
+      }
       const scale = bounds.width / ARCADE_W;
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
       context.setTransform(scale * ratio, 0, 0, scale * ratio, 0, 0);
       const carrying = carryRef.current;
       const rolling = placeBarrels(barrels, slots, now, !reducedMotion);
