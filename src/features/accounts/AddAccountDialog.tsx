@@ -84,7 +84,14 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
   if (created) {
     return (
       <AppDialog
-        title={t("settings.accounts.login.title", { name: created.name })}
+        // O título é um nó dentro de fronteira: um erro nele cai no nome da conta (texto simples), e não sobe até
+        // a página. O nome acessível do diálogo vem do dado (o nome da conta), não de uma chamada de tradução.
+        title={
+          <PanelBoundary name="login-conta-titulo" fallback={<span>{created.name}</span>}>
+            <LoginStepTitle name={created.name} />
+          </PanelBoundary>
+        }
+        ariaLabel={created.name}
         onClose={onClose}
         size="lg"
         // Cerrar sin querer a mitad de un login (un click fuera, un Esc) deja la cuenta
@@ -230,6 +237,15 @@ export function AddAccountDialog({ agentId, onClose, initialMode = "login" }: Ad
       )}
     </AppDialog>
   );
+}
+
+/**
+ * Título do passo de login. Componente próprio, para que o `t` dele rode dentro da fronteira do título, e não
+ * na função do diálogo.
+ */
+function LoginStepTitle({ name }: { name: string }) {
+  const { t } = useTranslation();
+  return <>{t("settings.accounts.login.title", { name })}</>;
 }
 
 /**

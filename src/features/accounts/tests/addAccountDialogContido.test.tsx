@@ -12,11 +12,18 @@ import type { AgentAccount } from "@/features/accounts/types";
 
 // Os flags fazem o texto ou o rodapé do passo de login lançarem ao renderizar. `montagens`/`desmontagens`
 // contam o terminal de login (um PTY), que é filho do diálogo no passo "criado".
-const estado = vi.hoisted(() => ({ quebrarTexto: false, quebrarRodape: false, montagens: 0, desmontagens: 0 }));
+const estado = vi.hoisted(() => ({
+  quebrarTitulo: false,
+  quebrarTexto: false,
+  quebrarRodape: false,
+  montagens: 0,
+  desmontagens: 0,
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string) => {
+      if (estado.quebrarTitulo && key === "settings.accounts.login.title") throw new Error("título do login quebrou");
       if (estado.quebrarTexto && key === "settings.accounts.login.helper") throw new Error("texto do login quebrou");
       if (estado.quebrarRodape && key === "settings.accounts.login.done") throw new Error("rodapé do login quebrou");
       return key;
@@ -85,6 +92,7 @@ describe("AddAccountDialog: passo de login não derruba o terminal", () => {
 
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
+    estado.quebrarTitulo = false;
     estado.quebrarTexto = false;
     estado.quebrarRodape = false;
     estado.montagens = 0;
@@ -150,6 +158,24 @@ describe("AddAccountDialog: passo de login não derruba o terminal", () => {
     await descarregar();
 
     expect(document.body.textContent).toContain("app.panelError.title");
+    expect(document.querySelector('[data-testid="login-terminal"]')).not.toBeNull();
+    expect(estado.montagens).toBe(1);
+    expect(estado.desmontagens).toBe(0);
+  });
+
+  it("titulo_do_passo_de_login_que_lanca_nao_derruba_o_terminal", async () => {
+    await chegarAoPassoDeLogin();
+
+    // O título do passo de login lança no render em que a conta é criada (o título vai ao cabeçalho do AppDialog).
+    estado.quebrarTitulo = true;
+    act(() => {
+      botao("settings.accounts.add.next").click();
+    });
+    await descarregar();
+
+    // Só o título cai no texto simples (o nome da conta); o terminal de login, filho do diálogo, segue montado.
+    expect(document.body.textContent).toContain("conta-nova");
+    expect(document.body.textContent).not.toContain("app.panelError.title");
     expect(document.querySelector('[data-testid="login-terminal"]')).not.toBeNull();
     expect(estado.montagens).toBe(1);
     expect(estado.desmontagens).toBe(0);
