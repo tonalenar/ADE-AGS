@@ -228,25 +228,32 @@ export async function exitAllWithSave(then: "exit" | "restart" = "exit"): Promis
       alert.render(done, known ? total : 0, lastStep);
     };
 
-    await withTimeout(new Promise<void>((resolve) => {
-      const allDone = () => labels.every((l) => {
-        const s = state.get(l);
-        return s !== undefined && s.done >= s.total;
-      });
-      const unlisten = listen<SaveAllProgress>("cc-save-progress", (e) => {
-        if (e.payload.id !== id) return;
-        state.set(e.payload.label, { done: e.payload.done, total: e.payload.total });
-        lastStep = labels.length > 1
-          ? `${t("app.saving.window", { label: e.payload.label })} · ${e.payload.step}`
-          : e.payload.step;
-        redraw();
-        if (allDone()) {
-          unlisten.then((fn) => fn());
-          resolve();
-        }
-      });
-      unlisten.then(() => emit("cc-save-all", { id }));
-    }));
+    let off: (() => void) | undefined;
+    let cancelled = false;
+    try {
+      await withTimeout(new Promise<void>((resolve) => {
+        const allDone = () => labels.every((l) => {
+          const s = state.get(l);
+          return s !== undefined && s.done >= s.total;
+        });
+        listen<SaveAllProgress>("cc-save-progress", (e) => {
+          if (e.payload.id !== id) return;
+          state.set(e.payload.label, { done: e.payload.done, total: e.payload.total });
+          lastStep = labels.length > 1
+            ? `${t("app.saving.window", { label: e.payload.label })} · ${e.payload.step}`
+            : e.payload.step;
+          redraw();
+          if (allDone()) resolve();
+        }).then((fn) => {
+          if (cancelled) { fn(); return; }
+          off = fn;
+          void emit("cc-save-all", { id });
+        });
+      }));
+    } finally {
+      cancelled = true;
+      off?.();
+    }
 
     await withTimeout(saveSites(sites, (origin) => {
       sitesDone += 1;

@@ -7,6 +7,7 @@ import { useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import { ThemeProvider, useTheme } from "neogestify-ui-components";
 import { Boot } from "@/app/Boot.tsx";
+import { PanelBoundary } from "@/app/PanelBoundary";
 import { whenHomeCanPaint } from "@/app/bootGate";
 import { loadAgentRegistry } from "@/features/agents/registry";
 import "@/features/settings/fontPreferences";
@@ -69,9 +70,11 @@ const appReady = whenHomeCanPaint({ loadAgentRegistry, applyRendering: () => ren
 // tela mostraria as chaves. É um arquivo local; mesmo com falha a tela pinta (com as chaves).
 void i18nReady.finally(() => {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <ThemeProvider>
-      <AppearanceModeSync />
-      <Boot appReady={appReady} />
-    </ThemeProvider>
+    <PanelBoundary name="boot">
+      <ThemeProvider>
+        <AppearanceModeSync />
+        <Boot appReady={appReady} />
+      </ThemeProvider>
+    </PanelBoundary>
   );
 });
