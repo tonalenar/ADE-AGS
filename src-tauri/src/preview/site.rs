@@ -797,6 +797,8 @@ fn now_secs() -> i64 {
 /// sesiones iniciadas adentro.
 fn write_private(file: &Path, bytes: &[u8]) -> Result<(), String> {
     use std::io::Write;
+    static WRITE: Mutex<()> = Mutex::new(());
+    let _guard = WRITE.lock().map_err(|e| e.to_string())?;
     let dir = file.parent().ok_or("el archivo no tiene carpeta")?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let tmp = dir.join(format!(
@@ -859,6 +861,19 @@ mod profile_tests {
             .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("tmp"))
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
+        let dest = dir.join("same.enc");
+        let a = std::thread::spawn({
+            let dest = dest.clone();
+            move || super::write_private(&dest, b"aaaaaaaa")
+        });
+        let b = std::thread::spawn({
+            let dest = dest.clone();
+            move || super::write_private(&dest, b"bbbbbbbb")
+        });
+        a.join().unwrap().unwrap();
+        b.join().unwrap().unwrap();
+        let got = std::fs::read(&dest).unwrap();
+        assert!(got == b"aaaaaaaa" || got == b"bbbbbbbb", "{got:?}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

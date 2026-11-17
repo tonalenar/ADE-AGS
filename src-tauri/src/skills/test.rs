@@ -2353,3 +2353,13 @@ fn atualizar_skill_nao_apaga_o_destino_antes_da_copia() {
     let _ = std::fs::remove_dir_all(&src);
     let _ = std::fs::remove_dir_all(&missing);
 }
+
+#[test]
+fn falha_na_copia_preserva_o_destino() {
+    let dest = temp_dir("skill-keep");
+    std::fs::write(dest.join("keep.txt"), "antigo").unwrap();
+    let missing = std::env::temp_dir().join(format!("skill-src-ausente-{}", uuid::Uuid::new_v4().simple()));
+    assert!(super::install::replace_skill_dir(&missing, &dest).is_err());
+    assert_eq!(std::fs::read_to_string(dest.join("keep.txt")).unwrap(), "antigo");
+    let _ = std::fs::remove_dir_all(&dest);
+}

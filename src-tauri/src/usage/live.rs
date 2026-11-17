@@ -167,15 +167,16 @@ pub(super) fn capture(
 
     let start = Instant::now();
     let mut raw = Vec::new();
+    let mut text = String::new();
     let mut sent = false;
     let mut last_data = Instant::now();
 
     let result = loop {
         if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(200)) {
             raw.extend_from_slice(&chunk);
+            text = String::from_utf8_lossy(&raw).into_owned();
             last_data = Instant::now();
         }
-        let text = String::from_utf8_lossy(&raw);
 
         if let Some(problem) = capture_problem(&text) {
             break Err(problem.to_string());
@@ -204,13 +205,13 @@ pub(super) fn capture(
         // Se corta cuando el panel ya tiene todo, y si no, cuando deja de escribir: son
         // segundos de diferencia y esto corre con el usuario esperando.
         if panel && (complete(&text) || last_data.elapsed() >= QUIET) {
-            break Ok(text.into_owned());
+            break Ok(text);
         }
         if start.elapsed() > TIMEOUT {
             // Con el panel dibujado se devuelve igual: que el desglose de abajo tarde
             // demasiado no es motivo para tirar los porcentajes que ya están.
             break if panel {
-                Ok(text.into_owned())
+                Ok(text)
             } else if sent {
                 Err("accounts.plan.problem.timeout".to_string())
             } else {
