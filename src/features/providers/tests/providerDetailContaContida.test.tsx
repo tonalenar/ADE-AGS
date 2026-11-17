@@ -13,7 +13,8 @@ import { ProviderDetail } from "@/features/providers/ProviderDetail";
 
 // `quebrar` faz uma linha da seção de status lançar no re-render em que o login abre.
 // `montagens`/`desmontagens` contam o terminal de login (um PTY).
-const estado = vi.hoisted(() => ({ quebrar: false, montagens: 0, desmontagens: 0 }));
+// `quebrarAdicao` faz o diálogo "adicionar conta" lançar quando é aberto (com o login já aberto).
+const estado = vi.hoisted(() => ({ quebrar: false, quebrarAdicao: false, montagens: 0, desmontagens: 0 }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -58,9 +59,17 @@ vi.mock("@/features/settings/SettingsSection", async (importOriginal) => {
   };
 });
 
+// O diálogo "adicionar conta": um irmão do login, que lança quando é aberto.
+vi.mock("@/features/accounts/AddAccountDialog", () => ({
+  AddAccountDialog: () => {
+    if (estado.quebrarAdicao) throw new Error("adicionar conta quebrou");
+    return <div data-testid="adicionar-conta" />;
+  },
+}));
+
 const conta: AgentAccount = {
   id: "conta-1",
-  agentId: "claude",
+  agentId: "claude-code",
   name: "pessoal",
   dir: "/tmp/conta",
   envVar: "CLAUDE_CONFIG_DIR",
@@ -73,7 +82,8 @@ const conta: AgentAccount = {
   keyHint: null,
 };
 
-const agente: AgentInfo = { id: "claude", label: "Claude", command: "claude", available: true, version: "1.0.0" };
+// "claude-code" tem métodos de entrada conhecidos (login e chave), e por isso a seção de método e o botão de adicionar aparecem.
+const agente: AgentInfo = { id: "claude-code", label: "Claude Code", command: "claude", available: true, version: "1.0.0" };
 
 /** Deixa as promessas de oferta e atualização resolverem pelas microtarefas. Sem relógio e sem laço de espera. */
 async function descarregar() {
@@ -95,12 +105,13 @@ describe("ProviderDetail: login de conta dentro da página", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     estado.quebrar = false;
+    estado.quebrarAdicao = false;
     estado.montagens = 0;
     estado.desmontagens = 0;
     useAccountsStore.setState({
       accounts: [conta],
       systemAccounts: [],
-      capable: [{ agentId: "claude", label: "Claude", envVar: "CLAUDE_CONFIG_DIR", installed: true }],
+      capable: [{ agentId: "claude-code", label: "Claude Code", envVar: "CLAUDE_CONFIG_DIR", installed: true }],
       health: {},
     });
     host = document.createElement("div");
@@ -136,6 +147,35 @@ describe("ProviderDetail: login de conta dentro da página", () => {
     expect(host.textContent).toContain("app.panelError.title");
     expect(document.querySelector('[data-testid="login-terminal"]')).not.toBeNull();
     expect(estado.montagens).toBe(1);
+    expect(estado.desmontagens).toBe(0);
+  });
+
+  it("adicionar_conta_que_lanca_nao_derruba_o_login_aberto", async () => {
+    act(() => {
+      root.render(
+        <ThemeProvider>
+          <ProviderDetail agent={agente} onBack={() => {}} />
+        </ThemeProvider>,
+      );
+    });
+    await descarregar();
+
+    // O login da conta está aberto (o terminal está montado) quando o "adicionar conta" é aberto e lança.
+    act(() => {
+      botao("providers.account.signIn").click();
+    });
+    await descarregar();
+    expect(estado.montagens).toBe(1);
+
+    estado.quebrarAdicao = true;
+    act(() => {
+      botao("providers.account.add").click();
+    });
+    await descarregar();
+
+    // O erro do diálogo de adicionar fica no próprio aviso; o terminal do login, irmão dele, segue montado.
+    expect(host.textContent).toContain("app.panelError.title");
+    expect(document.querySelector('[data-testid="login-terminal"]')).not.toBeNull();
     expect(estado.desmontagens).toBe(0);
   });
 });

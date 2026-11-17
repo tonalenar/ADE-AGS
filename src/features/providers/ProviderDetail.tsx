@@ -253,7 +253,13 @@ export function ProviderDetail({ agent, onBack }: { agent: AgentInfo; onBack: ()
 
       </PanelBoundary>
 
-      {adding && <AddAccountDialog agentId={agent.id} initialMode={addMode} onClose={() => setAdding(false)} />}
+      {/* Adicionar conta: fronteira própria, irmã do login. Se o diálogo lança, o terminal de login (que pode
+          estar aberto ao mesmo tempo) não sobe com ele até a rota. */}
+      {adding && (
+        <PanelBoundary name="adicionar-conta">
+          <AddAccountDialog agentId={agent.id} initialMode={addMode} onClose={() => setAdding(false)} />
+        </PanelBoundary>
+      )}
 
       {loginFor && (
         <AppDialog title={t("settings.accounts.login.title", { name: loginFor.name })} onClose={closeLogin} size="lg" closeOnBackdrop={false} closeOnEsc={false}

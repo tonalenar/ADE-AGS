@@ -431,8 +431,12 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
 
       </PanelBoundary>
 
+      {/* Adicionar conta: fronteira própria, irmã do login. Se o diálogo lança, o terminal de login (que pode
+          estar aberto ao mesmo tempo) não sobe com ele até a rota. */}
       {adding && (
-        <AddAccountDialog agentId={agent.agentId} onClose={() => setAdding(false)} />
+        <PanelBoundary name="adicionar-conta">
+          <AddAccountDialog agentId={agent.agentId} onClose={() => setAdding(false)} />
+        </PanelBoundary>
       )}
 
       {loginFor && (

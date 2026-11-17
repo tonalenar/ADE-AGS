@@ -12,7 +12,8 @@ import type { AccountCapableAgent, AgentAccount } from "@/features/accounts/type
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // `quebrar` faz o rodapé OAuth lançar no re-render. `montagens`/`desmontagens` contam o terminal de login.
-const estado = vi.hoisted(() => ({ quebrar: false, montagens: 0, desmontagens: 0 }));
+// `quebrarAdicao` faz o diálogo "adicionar conta" lançar quando é aberto (com o login já aberto).
+const estado = vi.hoisted(() => ({ quebrar: false, quebrarAdicao: false, montagens: 0, desmontagens: 0 }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -64,6 +65,13 @@ vi.mock("@/features/accounts/LoginTerminal", async () => {
     },
   };
 });
+// O diálogo "adicionar conta": um irmão do login, que lança quando é aberto.
+vi.mock("@/features/accounts/AddAccountDialog", () => ({
+  AddAccountDialog: () => {
+    if (estado.quebrarAdicao) throw new Error("adicionar conta quebrou");
+    return <div data-testid="adicionar-conta" />;
+  },
+}));
 // Irmão da lista (na mesma fronteira da lista): quebra no re-render em que o login abre.
 vi.mock("@/features/accounts/PoolsSection", () => ({
   PoolsSection: () => {
@@ -74,7 +82,7 @@ vi.mock("@/features/accounts/PoolsSection", () => ({
 
 const conta: AgentAccount = {
   id: "conta-1",
-  agentId: "claude",
+  agentId: "claude-code",
   name: "pessoal",
   dir: "/tmp/conta",
   envVar: "CLAUDE_CONFIG_DIR",
@@ -87,7 +95,8 @@ const conta: AgentAccount = {
   keyHint: null,
 };
 
-const agente: AccountCapableAgent = { agentId: "claude", label: "Claude", envVar: "CLAUDE_CONFIG_DIR", installed: true };
+// "claude-code" aceita cadastro de conta (login e chave), então o botão de adicionar fica habilitado.
+const agente: AccountCapableAgent = { agentId: "claude-code", label: "Claude Code", envVar: "CLAUDE_CONFIG_DIR", installed: true };
 
 /** Deixa a detecção do agy resolver pelas microtarefas. Sem relógio e sem laço de espera. */
 async function descarregar() {
@@ -147,6 +156,13 @@ describe("terminal de conta dentro de uma página", () => {
   });
 });
 
+/** Botão pelo nome acessível (o botão de adicionar, na página de contas, é só ícone). */
+function botaoPorNome(nome: string): HTMLButtonElement {
+  const achado = document.querySelector<HTMLButtonElement>(`button[aria-label="${nome}"]`);
+  if (!achado) throw new Error(`botão "${nome}" não encontrado`);
+  return achado;
+}
+
 describe("AgentAccountsPane: login de conta dentro da página", () => {
   let root: Root;
   let host: HTMLDivElement;
@@ -154,6 +170,7 @@ describe("AgentAccountsPane: login de conta dentro da página", () => {
   beforeEach(() => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     estado.quebrar = false;
+    estado.quebrarAdicao = false;
     estado.montagens = 0;
     estado.desmontagens = 0;
     // A página lê as contas da store (quem as carrega é a tela de contas, não a página).
@@ -191,6 +208,35 @@ describe("AgentAccountsPane: login de conta dentro da página", () => {
     expect(host.textContent).toContain("app.panelError.title");
     expect(document.querySelector('[data-testid="login-terminal"]')).not.toBeNull();
     expect(estado.montagens).toBe(1);
+    expect(estado.desmontagens).toBe(0);
+  });
+
+  it("adicionar_conta_que_lanca_nao_derruba_o_login_aberto", async () => {
+    act(() => {
+      root.render(
+        <ThemeProvider>
+          <AgentAccountsPane agent={agente} />
+        </ThemeProvider>,
+      );
+    });
+    await descarregar();
+
+    // O login da conta está aberto (o terminal está montado) quando o "adicionar conta" é aberto e lança.
+    act(() => {
+      botao("settings.accounts.login.btn").click();
+    });
+    await descarregar();
+    expect(estado.montagens).toBe(1);
+
+    estado.quebrarAdicao = true;
+    act(() => {
+      botaoPorNome("settings.accounts.add").click();
+    });
+    await descarregar();
+
+    // O erro do diálogo de adicionar fica no próprio aviso; o terminal do login, irmão dele, segue montado.
+    expect(host.textContent).toContain("app.panelError.title");
+    expect(document.querySelector('[data-testid="login-terminal"]')).not.toBeNull();
     expect(estado.desmontagens).toBe(0);
   });
 });
