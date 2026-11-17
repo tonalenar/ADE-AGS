@@ -298,6 +298,19 @@ pub struct Mapper {
     window: Option<u64>,
     /// O último item `usage` do turno, para o `result` gravar a janela nele (a janela só chega no fim do turno).
     last_usage: Option<Item>,
+    /// A mensagem do turno parou no limite de saída e o aviso `responseTruncated` já saiu: o `result` não repete.
+    truncated: bool,
+}
+
+/// O código do aviso de resposta cortada pelo limite de tokens na timeline (a frase vem do catálogo da tela).
+pub const RESPONSE_TRUNCATED: &str = "responseTruncated";
+
+/// O aviso de resposta cortada. O id vem da mensagem (ou do resultado): a mesma linha de novo não duplica.
+fn truncated_notice(source: &str, at: Option<i64>) -> Item {
+    Item {
+        label: Some(RESPONSE_TRUNCATED.into()),
+        ..Item::new(ItemKind::Notice, format!("n:{RESPONSE_TRUNCATED}:{source}"), at)
+    }
 }
 
 impl Mapper {
@@ -341,6 +354,11 @@ impl Mapper {
                 let failed = line.get("is_error").and_then(Value::as_bool) == Some(true) && !interrupted;
                 let error = failed.then(|| error_of(line));
                 let mut out = Vec::new();
+                // O limite de saída também pode vir só no resultado. Aviso só se a mensagem do turno ainda não avisou.
+                let cut = std::mem::take(&mut self.truncated);
+                if !cut && str_of(line, "subtype") == Some("error_max_tokens") {
+                    out.push(Out::Item(Box::new(truncated_notice(str_of(line, "uuid").filter(|u| !u.is_empty()).unwrap_or("turno"), at))));
+                }
                 // A janela de contexto só chega no `result`: o último `usage` do turno a recebe (o medidor da conversa).
                 if let Some(window) = context_window_of(line) {
                     self.window = Some(window);
@@ -435,6 +453,14 @@ impl Mapper {
                     out.push(Out::Item(Box::new(item)));
                 }
                 _ => {}
+            }
+        }
+        // O modelo parou no limite de saída: a resposta ficou pela metade. O texto parcial fica na timeline e o turno
+        // acaba sem erro; o aviso diz o que aconteceu. O id é o da mensagem, então repetir a linha não duplica.
+        if line.pointer("/message/stop_reason").and_then(Value::as_str) == Some("max_tokens") {
+            self.truncated = true;
+            if !message_id.is_empty() {
+                out.push(Out::Item(Box::new(truncated_notice(&message_id, at))));
             }
         }
         out
