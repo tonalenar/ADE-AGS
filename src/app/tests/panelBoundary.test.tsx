@@ -1,10 +1,11 @@
 /** @vitest-environment happy-dom */
-import { act, lazy, Suspense, useEffect } from "react";
+import { act, lazy, Suspense, useEffect, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PanelBoundary } from "@/app/PanelBoundary";
+import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { routes } from "@/app/router";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -62,6 +63,13 @@ function botao(rotulo: string): HTMLButtonElement {
   const achado = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.trim() === rotulo);
   if (!achado) throw new Error(`botão "${rotulo}" não encontrado`);
   return achado;
+}
+
+/** Deixa as promessas dos imports resolverem pelas microtarefas. Sem relógio e sem laço de espera. */
+async function descarregar() {
+  await act(async () => {
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  });
 }
 
 describe("PanelBoundary", () => {
@@ -124,6 +132,37 @@ describe("PanelBoundary", () => {
     });
 
     expect(host.textContent).toContain("app.panelError.title");
+  });
+
+  it("retry_recarrega_chunk_lazy_que_falhou", async () => {
+    // O primeiro import rejeita (chunk que não carregou). O "Tentar de novo" precisa buscar o chunk de novo.
+    let importacoes = 0;
+    type Modulo = { default: () => ReactElement };
+    const Chunk = lazyWithRetry(() => {
+      importacoes += 1;
+      if (importacoes === 1) return Promise.reject<Modulo>(new Error("chunk falhou"));
+      return Promise.resolve<Modulo>({ default: () => <p>chunk ok</p> });
+    });
+    act(() => {
+      root.render(
+        <PanelBoundary name="x">
+          <Suspense fallback={null}>
+            <Chunk />
+          </Suspense>
+        </PanelBoundary>,
+      );
+    });
+    await descarregar();
+    expect(host.textContent).toContain("app.panelError.title");
+
+    act(() => {
+      botao("app.panelError.retry").click();
+    });
+    await descarregar();
+
+    expect(importacoes).toBe(2);
+    expect(host.textContent).toContain("chunk ok");
+    expect(host.textContent).not.toContain("app.panelError.title");
   });
 
   it("tentar_de_novo_volta_a_renderizar_o_painel", () => {

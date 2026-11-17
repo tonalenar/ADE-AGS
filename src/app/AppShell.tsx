@@ -1,4 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -51,15 +52,16 @@ import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 /** Las rutas cuyas terminales siguen visibles (y vivas) por debajo de la pantalla. */
 const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge", "/settings", "/design"];
 
-const ChatShell = lazy(() => import("@/features/chat/ChatShell").then((module) => ({ default: module.ChatShell })));
-const AppSessionsSidebar = lazy(() => import("@/features/chat/sidebar/AppSessionsSidebar").then((module) => ({ default: module.AppSessionsSidebar })));
-const ExplorerDrawer = lazy(() => import("@/features/sidePanel/ExplorerDrawer").then((module) => ({ default: module.ExplorerDrawer })));
-const SessionPanel = lazy(() => import("@/features/sidePanel/SessionPanel").then((module) => ({ default: module.SessionPanel })));
-const StatusBar = lazy(() => import("@/app/StatusBar").then((module) => ({ default: module.StatusBar })));
-const CommandPalette = lazy(() => import("@/features/palette/CommandPalette").then((module) => ({ default: module.CommandPalette })));
-const CompareHost = lazy(() => import("@/features/compare/CompareHost").then((module) => ({ default: module.CompareHost })));
-const ArchivedMessagePreviewHost = lazy(() => import("@/features/sessions/ArchivedMessagePreview").then((module) => ({ default: module.ArchivedMessagePreviewHost })));
-const AskDialog = lazy(() => import("@/features/ask/AskDialog").then((module) => ({ default: module.AskDialog })));
+// Lazy com retry: cada painel cercado por PanelBoundary pode buscar o chunk de novo em "Tentar de novo".
+const ChatShell = lazyWithRetry(() => import("@/features/chat/ChatShell").then((module) => ({ default: module.ChatShell })));
+const AppSessionsSidebar = lazyWithRetry(() => import("@/features/chat/sidebar/AppSessionsSidebar").then((module) => ({ default: module.AppSessionsSidebar })));
+const ExplorerDrawer = lazyWithRetry(() => import("@/features/sidePanel/ExplorerDrawer").then((module) => ({ default: module.ExplorerDrawer })));
+const SessionPanel = lazyWithRetry(() => import("@/features/sidePanel/SessionPanel").then((module) => ({ default: module.SessionPanel })));
+const StatusBar = lazyWithRetry(() => import("@/app/StatusBar").then((module) => ({ default: module.StatusBar })));
+const CommandPalette = lazyWithRetry(() => import("@/features/palette/CommandPalette").then((module) => ({ default: module.CommandPalette })));
+const CompareHost = lazyWithRetry(() => import("@/features/compare/CompareHost").then((module) => ({ default: module.CompareHost })));
+const ArchivedMessagePreviewHost = lazyWithRetry(() => import("@/features/sessions/ArchivedMessagePreview").then((module) => ({ default: module.ArchivedMessagePreviewHost })));
+const AskDialog = lazyWithRetry(() => import("@/features/ask/AskDialog").then((module) => ({ default: module.AskDialog })));
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {

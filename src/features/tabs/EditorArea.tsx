@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useChatUnreadWatcher } from "@/features/canvas/chatUnread";
 import { useMissionWatcher } from "@/features/missions/watcher";
 import { createPortal } from "react-dom";
@@ -8,6 +8,7 @@ import { Button, AddIcon, CloseIcon } from "neogestify-ui-components";
 
 import { GlobeIcon, SplitDownIcon, SplitRightIcon } from "@/app/icons";
 import { PanelBoundary } from "@/app/PanelBoundary";
+import { lazyWithRetry } from "@/app/lazyWithRetry";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { focusTab } from "@/features/terminal/terminalRegistry";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
@@ -33,7 +34,7 @@ import { NEW_WORKSPACE_AGENT_EVENT, canOpenWorkspaceAgent } from "@/features/tab
 // @xyflow/react pesa y solo hace falta en la vista canvas. Un import estático lo metía en
 // el arranque aunque `{canvas && …}` no lo montara. El tablero ya está en el store
 // (`initCanvasSync`): al cargar el módulo se pinta el board que había, no uno vacío.
-const CanvasView = lazy(() =>
+const CanvasView = lazyWithRetry(() =>
   import("@/features/canvas/CanvasView").then((m) => ({ default: m.CanvasView })),
 );
 
