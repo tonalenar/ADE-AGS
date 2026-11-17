@@ -49,7 +49,7 @@ export function CloneRepoDialog({ onClose, onCloned }: {
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
 
-  useEffect(() => { if (!loaded) load().catch(console.error); }, [loaded, load]);
+  useEffect(() => { if (!loaded) load().catch((e) => setError(String(e))); }, [loaded, load]);
   useEffect(() => {
     const last = readLastParent();
     if (last) setParent(last);
@@ -89,8 +89,12 @@ export function CloneRepoDialog({ onClose, onCloned }: {
   }, [repos, query]);
 
   const browse = async () => {
-    const dir = await open({ directory: true, multiple: false, title: t("forge.clone.parent") });
-    if (typeof dir === "string" && dir) setParent(dir);
+    try {
+      const dir = await open({ directory: true, multiple: false, title: t("forge.clone.parent") });
+      if (typeof dir === "string" && dir) setParent(dir);
+    } catch (e) {
+      setError(String(e));
+    }
   };
 
   const clone = async () => {

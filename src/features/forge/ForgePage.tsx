@@ -7,6 +7,7 @@ import { ExternalIcon, IssueIcon, PullRequestIcon, TagIcon } from "@/app/icons";
 import { useShellGroups } from "@/app/shellContext";
 import { useTabsStore } from "@/features/tabs/store";
 import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { openExternalUrl } from "@/shared/openExternalUrl";
 
 import { ForgeItemsView, type ItemFilter } from "./ForgeItemsView";
@@ -183,7 +184,7 @@ export function ForgePage() {
 function RepoPane({ repo }: { repo: OpenRepo }) {
   const { t } = useTranslation();
   const cwd = repo.main.cwd;
-  const { target, reload } = useRepoTarget(cwd);
+  const { target, reload, error: targetError } = useRepoTarget(cwd);
   const [section, setSection] = useState<Section>("pulls");
   const [filters, setFilters] = useState<Record<"pulls" | "issues", ItemFilter>>({ pulls: "open", issues: "open" });
   const [opened, setOpened] = useState<Record<"pulls" | "issues", ForgeItem | null>>({ pulls: null, issues: null });
@@ -199,7 +200,14 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
     );
   }
   if (target === null) {
-    return <EmptyState className="m-auto" icon={<PullRequestIcon className="w-8 h-8" />} title={t("forge.page.noRemote")} />;
+    return (
+      <EmptyState
+        className="m-auto"
+        icon={<PullRequestIcon className="w-8 h-8" />}
+        title={targetError ? t("forge.page.remoteError") : t("forge.page.noRemote")}
+        description={targetError?.message}
+      />
+    );
   }
 
   const item = section === "releases" ? null : opened[section];
@@ -213,7 +221,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
         <ForgeIcon kind={target.kind} className="w-4 h-4 shrink-0 text-gray-500 dark:text-white/45" />
         {link ? (
           <button type="button"
-            onClick={() => { openExternalUrl(link).catch(console.error); }}
+            onClick={() => { openExternalUrl(link).catch((e) => { AlertaToast(t("forge.panel.openInBrowser"), String(e), "error", 5000); }); }}
             title={`${t("forge.panel.openInBrowser")} · ${link}`}
             aria-label={`${t("forge.panel.openInBrowser")}: ${target.path}`}
             className="cc-t group min-w-0 flex items-center gap-1.5 rounded-md px-1 -mx-1 py-0.5

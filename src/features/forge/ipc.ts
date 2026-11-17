@@ -121,6 +121,10 @@ export function forgeImage(cwd: string, url: string): Promise<string> {
   const key = `${cwd}\n${url}`;
   let p = imageCache.get(key);
   if (!p) {
+    if (imageCache.size >= 80) {
+      const oldest = imageCache.keys().next().value;
+      if (oldest) imageCache.delete(oldest);
+    }
     p = invoke<string>("forge_image", { cwd, url });
     // Un fallo no se recuerda: puede ser la red, y reabrir tiene que volver a intentar.
     p.catch(() => imageCache.delete(key));

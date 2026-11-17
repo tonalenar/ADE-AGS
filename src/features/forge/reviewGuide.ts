@@ -6,6 +6,7 @@
  * O guia em si sai do backend (`src-tauri/src/forge/guide.rs`).
  */
 import type { ForgeItem, GuideStop, LineRange, ReviewGuide } from "./types";
+import { wrapUntrusted } from "./untrustedPrompt";
 
 /** As TUIs que geram o guia sem terminal e somente leitura. Espelha
  *  `runs::oneshot::READ_ONLY_AGENTS`, na mesma ordem. */
@@ -181,12 +182,13 @@ export function askPrompt(input: {
   headSha: string;
 }): string {
   const { item, stop } = input;
-  const lines: string[] = [
-    `I'm reviewing pull request #${item.number} "${item.title}" (${item.webUrl}).`,
+  const remote: string[] = [
+    `Title: ${item.title}`,
+    `URL: ${item.webUrl}`,
   ];
-  if (item.sourceBranch && item.targetBranch) lines.push(`Branches: ${item.sourceBranch} → ${item.targetBranch}, head ${input.headSha.slice(0, 12)}.`);
-  lines.push(
-    `A review guide split it into ${input.total} stops. PR summary: ${input.summary}`,
+  if (item.sourceBranch && item.targetBranch) remote.push(`Branches: ${item.sourceBranch} → ${item.targetBranch}, head ${input.headSha.slice(0, 12)}.`);
+  remote.push(
+    `PR summary: ${input.summary}`,
     "",
     `## Stop ${input.index + 1} of ${input.total}: ${stop.title}`,
     "",
@@ -195,18 +197,19 @@ export function askPrompt(input: {
     "Files:",
     ...stop.files.map((f) => `- ${f.path}${f.lines ? ` (lines ${f.lines.start}-${f.lines.end})` : ""}`),
   );
-  if (stop.lookClosely.length) lines.push("", "Look closely at:", ...stop.lookClosely.map((l) => `- ${l}`));
+  if (stop.lookClosely.length) remote.push("", "Look closely at:", ...stop.lookClosely.map((l) => `- ${l}`));
   if (stop.excerpt) {
     const excerpt = stop.excerpt.length > MAX_EXCERPT ? `${stop.excerpt.slice(0, MAX_EXCERPT)}\n[… truncated]` : stop.excerpt;
-    lines.push("", "Excerpt from the diff:", "```diff", excerpt, "```");
+    remote.push("", "Excerpt from the diff:", "```diff", excerpt, "```");
   }
-  if (stop.questions?.length) lines.push("", "Open questions from the guide:", ...stop.questions.map((q) => `- ${q}`));
-  lines.push(
+  if (stop.questions?.length) remote.push("", "Open questions from the guide:", ...stop.questions.map((q) => `- ${q}`));
+  return [
+    `I'm reviewing pull request #${item.number} (${item.webUrl}).`,
+    wrapUntrusted("pull-request-review", remote.join("\n")),
     "",
     "Read the code of this stop (the local checkout may not be at the PR head; prefer the PR diff, e.g. via ADE AGS's git_pr_files tool).",
     "Don't change files, push, or comment on the PR unless I ask.",
     "",
     "My question: ",
-  );
-  return lines.join("\n");
+  ].join("\n");
 }

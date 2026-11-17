@@ -7,6 +7,7 @@
  * buscarlo.
  */
 import type { ForgeItemDetail } from "./types";
+import { wrapUntrusted } from "./untrustedPrompt";
 
 /** Más que esto de hilo ya no es contexto, es ruido: un issue con 80 comentarios. */
 const MAX_THREAD = 24_000;
@@ -18,27 +19,23 @@ function clip(text: string, max: number): string {
 
 export function itemPrompt(item: ForgeItemDetail, pr: boolean): string {
   const kind = pr ? "pull request" : "issue";
-  const lines: string[] = [];
+  const remote: string[] = [];
 
-  lines.push(
-    pr
-      ? `Continue work on pull request #${item.number} of this repository and get it ready to merge.`
-      : `Resolve issue #${item.number} of this repository.`,
-    "",
+  remote.push(
     `Title: ${item.title}`,
     `URL: ${item.webUrl}`,
     `State: ${item.state}${item.draft ? " (draft)" : ""}`,
   );
-  if (item.author) lines.push(`Author: @${item.author}`);
-  if (item.labels.length) lines.push(`Labels: ${item.labels.join(", ")}`);
+  if (item.author) remote.push(`Author: @${item.author}`);
+  if (item.labels.length) remote.push(`Labels: ${item.labels.join(", ")}`);
   if (pr && item.sourceBranch && item.targetBranch) {
-    lines.push(`Branches: ${item.sourceBranch} → ${item.targetBranch}`);
+    remote.push(`Branches: ${item.sourceBranch} → ${item.targetBranch}`);
   }
 
-  lines.push("", `## Description`, "", item.body?.trim() ? clip(item.body.trim(), MAX_THREAD) : "(no description)");
+  remote.push("", `## Description`, "", item.body?.trim() ? clip(item.body.trim(), MAX_THREAD) : "(no description)");
 
   if (item.thread.length) {
-    lines.push("", `## Comments`);
+    remote.push("", `## Comments`);
     let used = 0;
     let shown = 0;
     for (const c of item.thread) {
@@ -46,14 +43,19 @@ export function itemPrompt(item: ForgeItemDetail, pr: boolean): string {
       if (used + body.length > MAX_THREAD) break;
       used += body.length;
       shown++;
-      lines.push("", `### @${c.author ?? "unknown"}${c.createdAt ? ` (${c.createdAt})` : ""}`, "", body);
+      remote.push("", `### @${c.author ?? "unknown"}${c.createdAt ? ` (${c.createdAt})` : ""}`, "", body);
     }
     if (shown < item.thread.length) {
-      lines.push("", `[${item.thread.length - shown} more comments omitted: read them at the URL above]`);
+      remote.push("", `[${item.thread.length - shown} more comments omitted: read them at the URL above]`);
     }
   }
 
-  lines.push(
+  const lines: string[] = [
+    pr
+      ? `Continue work on pull request #${item.number} of this repository and get it ready to merge.`
+      : `Resolve issue #${item.number} of this repository.`,
+    "",
+    wrapUntrusted(pr ? "pull-request" : "issue", remote.join("\n")),
     "",
     `## What to do`,
     "",
@@ -68,7 +70,7 @@ export function itemPrompt(item: ForgeItemDetail, pr: boolean): string {
       ]),
     `- If you have ADE AGS's git tools (git_${pr ? "pr" : "issue"}_view${pr ? ", git_pr_files, git_checks" : ""}), use them to read the latest state of this ${kind}.`,
     "- Don't push, comment or open pull requests unless I ask you to.",
-  );
+  ];
 
   return lines.join("\n");
 }

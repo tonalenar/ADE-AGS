@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { DESKTOP_OS } from "@/app/platform";
 import { forgeErrorOf, type ForgeItem, type ForgeKind, type PullCodeFile, type PullFileContent, type PullReviewAction, type PullReviewCommentDraft, type PullReviewThread } from "./types";
 import { forgePullCode, forgePullFileContents, forgePullReviewThreads, forgeReplyPullReviewThread, forgeSetPullReviewThreadResolved, forgeSubmitPullReview } from "./ipc";
+import { searchHitsFromSources, type SearchHit } from "./searchHits";
 
 type FilesState = { status: "loading" } | {
   status: "ready";
@@ -59,12 +60,6 @@ function parseUnifiedDiff(patch: string): { lines: DiffLine[]; truncated: boolea
   return { lines, truncated: offset < patch.length };
 }
 
-interface SearchHit {
-  path: string;
-  line: number;
-  excerpt: string;
-}
-
 function isSnapshotChange(error: unknown): boolean {
   return forgeErrorOf(error).message.startsWith("PR_HEAD_CHANGED:");
 }
@@ -115,7 +110,6 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
   const codeScrollRef = useRef<HTMLDivElement>(null);
   const pendingLineRef = useRef<number | null>(null);
   const pendingThreadLineRef = useRef<{ line: number; side: "LEFT" | "RIGHT" | null } | null>(null);
-  const searchLoadStarted = useRef(false);
 
   const reloadCode = useCallback(async () => {
     setFilesState({ status: "loading" });
@@ -124,7 +118,6 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
     setTruncated(false);
     setSearchError("");
     setSearchState("idle");
-    searchLoadStarted.current = false;
     setDrafts([]);
     setCommentTarget(null);
     setCommentText("");
@@ -199,50 +192,18 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
   }, [searchOpen]);
 
   useEffect(() => {
-    if (!query.trim() || filesState.status !== "ready" || searchLoadStarted.current) return;
-    searchLoadStarted.current = true;
-    setSearchState("loading");
-    setSearchError("");
-    const paths = filesState.files.filter((file) => file.status !== "removed").map((file) => file.path);
-    loadContents(paths)
-      .then(() => setSearchState("ready"))
-      .catch((error) => {
-        searchLoadStarted.current = false;
-        if (isSnapshotChange(error)) return;
-        setSearchState("error");
-        setSearchError(forgeErrorOf(error).message);
-      });
-  }, [contents, filesState, loadContents, query]);
+    if (!query.trim()) {
+      setSearchState("idle");
+      setSearchError("");
+      return;
+    }
+    setSearchState("ready");
+  }, [query]);
 
   const hits = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    if (!needle) return [] as SearchHit[];
-    const result: SearchHit[] = [];
-    for (const file of Object.values(contents)) {
-      if (!file.content) continue;
-      const searchText = file.content.toLowerCase();
-      let from = 0;
-      let line = 1;
-      let lineStart = 0;
-      let lineEnd = file.content.indexOf("\n");
-      while (from < searchText.length && result.length < 500) {
-        const match = searchText.indexOf(needle, from);
-        if (match < 0) break;
-        while (lineEnd >= 0 && lineEnd < match) {
-          line++;
-          lineStart = lineEnd + 1;
-          lineEnd = file.content.indexOf("\n", lineStart);
-        }
-        const lineText = file.content.slice(lineStart, lineEnd < 0 ? file.content.length : lineEnd).replace(/\r$/, "");
-        const column = match - lineStart;
-        const start = Math.max(0, column - 36);
-        result.push({ path: file.path, line, excerpt: `${start ? "…" : ""}${lineText.slice(start, start + 100)}${lineText.length > start + 100 ? "…" : ""}` });
-        from = match + 1;
-      }
-      if (result.length >= 500) break;
-    }
-    return result;
-  }, [contents, query]);
+    if (filesState.status !== "ready") return [];
+    return searchHitsFromSources(query, filesState.files, contents);
+  }, [contents, filesState, query]);
 
   const selectedFile = filesState.status === "ready" ? filesState.files.find((file) => file.path === selectedPath) : undefined;
   const selectedContent = contents[selectedPath];
@@ -404,7 +365,7 @@ export function PullRequestCodeTab({ cwd, item }: { cwd: string; item: ForgeItem
         if (result.actionSubmitted) setReviewSummary("");
       }
     } catch (error) {
-      setReviewFeedback(forgeErrorOf(error).message);
+      setReviewFeedback(`${t("forge.pr.reviewFailed")} ${forgeErrorOf(error).message}`);
     } finally {
       setReviewBusy(false);
     }
