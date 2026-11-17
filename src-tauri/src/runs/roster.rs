@@ -330,8 +330,7 @@ pub fn refresh_models(db: &DbConnection, agent_id: &str, account_id: Option<&str
     let adapter = crate::agents::adapter_for(agent_id).ok_or("provider is not registered")?;
     if matches!(adapter.def().models, ModelSource::Unknown) { return Err("provider does not support model discovery".into()); }
     if let Some(id) = account_id {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        if !crate::accounts::list_accounts(&conn)?.iter().any(|account| account.id == id && account.agent_id == agent_id) {
+        if !crate::accounts::list_accounts(db)?.iter().any(|account| account.id == id && account.agent_id == agent_id) {
             return Err("account does not belong to this provider or is unavailable".into());
         }
     }
@@ -654,12 +653,10 @@ fn include_claude_history(
 
 /// La foto de ahora. Bloquea: la primera vez (o con `refresh`) lanza procesos.
 pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
-    let (created, running) = {
+    let created = crate::accounts::list_accounts(db)?;
+    let running = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        (
-            crate::accounts::list_accounts(&conn)?,
-            running_by_account(&conn)?,
-        )
+        running_by_account(&conn)?
     };
     let probed = probed(refresh, &created);
     let conn = db.lock().map_err(|e| e.to_string())?;

@@ -64,19 +64,32 @@ pub async fn list_agent_accounts(
     .map_err(|e| e.to_string())?
 }
 
-/// Las cuentas creadas en la app, sobre una conexión ya tomada. Es lo que usa también el
-/// roster de la flota, que necesita la lista sin pasar por un comando.
-pub fn list_accounts(conn: &rusqlite::Connection) -> Result<Vec<AgentAccount>, String> {
-    let rows = account_rows(conn)?;
-    let identities = rows
-        .iter()
-        .map(|row| {
-            (
-                row.id.clone(),
-                super::health::load_identity(conn, &row.id).and_then(|identity| identity.email),
-            )
-        })
-        .collect::<std::collections::HashMap<_, _>>();
+/// Las cuentas creadas en la app. Es lo que usa también el roster de la flota, que necesita
+/// la lista sin pasar por un comando.
+pub fn list_accounts(db: &crate::database::DbConnection) -> Result<Vec<AgentAccount>, String> {
+    list_accounts_with(db, &|| {})
+}
+
+// `antes_do_io` roda logo antes de ler disco e Keychain de cada conta (ver `row_to_account`).
+pub(crate) fn list_accounts_with(
+    db: &crate::database::DbConnection,
+    antes_do_io: &dyn Fn(),
+) -> Result<Vec<AgentAccount>, String> {
+    let (rows, identities) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let rows = account_rows(&conn)?;
+        let identities = rows
+            .iter()
+            .map(|row| {
+                (
+                    row.id.clone(),
+                    super::health::load_identity(&conn, &row.id).and_then(|identity| identity.email),
+                )
+            })
+            .collect::<std::collections::HashMap<_, _>>();
+        (rows, identities)
+    };
+    antes_do_io();
     Ok(accounts_from_rows(rows, &identities))
 }
 
