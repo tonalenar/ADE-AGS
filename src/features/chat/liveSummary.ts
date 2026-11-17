@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { snapshotActivity, turnLive, type Activity } from "./activityModel";
 import { useChatLive } from "./liveStore";
+import type { ToolKind } from "./timeline/types";
 import { usePermissions } from "./permissions/permissionsStore";
 import { threadIdOf, type ThreadLive } from "./structured/model";
 import { useStructured } from "./structured/store";
@@ -41,20 +43,48 @@ function threadSummaryOf(thread: ThreadLive | undefined): LiveSummary {
   return { working, waiting, startedAt: live.startedAt, activity: live.activity };
 }
 
+/** O mesmo resumo em campos primitivos: é o que a linha assina, com igualdade rasa (sem serializar nada). */
+interface ThreadSummaryFields {
+  working: boolean;
+  waiting: boolean;
+  startedAt: number | null;
+  kind: Activity["kind"];
+  tool: string;
+  target: string;
+}
+
+function threadSummaryFields(thread: ThreadLive | undefined): ThreadSummaryFields {
+  const summary = threadSummaryOf(thread);
+  const activity = summary.activity;
+  return {
+    working: summary.working,
+    waiting: summary.waiting,
+    startedAt: summary.startedAt,
+    kind: activity.kind,
+    tool: activity.kind === "tool" ? activity.tool : "",
+    target: activity.kind === "tool" ? activity.target : "",
+  };
+}
+
 export function useLiveSummary(key: string): LiveSummary {
   const threadId = threadIdOf(key);
-  // Por conversa, a linha assina só a assinatura do resumo: o texto que chega numa conversa não a re-renderiza.
-  // O resumo é lido do registro quando a assinatura muda.
-  const threadSignature = useStructured((s) => (threadId ? JSON.stringify(threadSummaryOf(s.live[threadId])) : ""));
+  // Por conversa, a linha assina só os campos primitivos do resumo, com igualdade rasa: o texto que chega numa conversa
+  // não a re-renderiza, e nada é serializado no caminho quente (A-custo do seletor).
+  const fields = useStructured(useShallow((s) => (threadId ? threadSummaryFields(s.live[threadId]) : null)));
   const phase = useChatLive((s) => s.phase[key]);
   const turn = useChatLive((s) => s.turn[key]);
   const question = useChatLive((s) => !!s.question[key]);
   const awaiting = useChatLive((s) => key in s.awaiting);
   const prompt = usePermissions((s) => s.tui.some((p) => p.tabId === key));
   return useMemo(() => {
-    if (threadId) return threadSummaryOf(useStructured.getState().live[threadId]);
+    if (threadId && fields) {
+      const activity: Activity = fields.kind === "tool"
+        ? { kind: "tool", tool: fields.tool as ToolKind, target: fields.target }
+        : { kind: fields.kind } as Activity;
+      return { working: fields.working, waiting: fields.waiting, startedAt: fields.startedAt, activity };
+    }
     const waiting = question || awaiting || prompt;
     const working = phase === "working" || waiting;
     return { working, waiting, startedAt: turn?.startedAt ?? null, activity: snapshotActivity(turn?.tools ?? [], waiting) };
-  }, [threadId, threadSignature, phase, turn, question, awaiting, prompt]);
+  }, [threadId, fields, phase, turn, question, awaiting, prompt]);
 }

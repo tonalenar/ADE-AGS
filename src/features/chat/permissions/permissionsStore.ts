@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { create } from "zustand";
+import { useShallow } from "zustand/react/shallow";
 
 import { answerTerminalPrompt } from "@/features/canvas/useTerminalPrompts";
 import type { TerminalPromptItem } from "@/features/canvas/teamFeedModel";
@@ -202,9 +203,25 @@ export function pendingAsksOf(src: AskSources): PendingAsk[] {
  * pedem nada; os respondidos aqui somem na hora. Assina o `live` inteiro: quem mostra a lista (a caixa, o cartão)
  * refaz a lista a cada pedaço de texto; quem só conta pedidos usa `usePendingAskCounts`.
  */
+/**
+ * O que a lista de pedidos lê do estado ao vivo: os pedidos das conversas ativas e os itens com arquivo (as edições, que
+ * dão a lista de arquivos). Cada elemento tem identidade estável enquanto não muda, então o texto do streaming não entra.
+ */
+function askInputsOf(s: { threads: ThreadRow[]; live: Record<string, ThreadLive> }): unknown[] {
+  const out: unknown[] = [];
+  for (const th of s.threads) {
+    if (th.state !== "active") continue;
+    const l = s.live[th.id];
+    if (!l) continue;
+    out.push(l.requests);
+    for (const item of l.items) if (item.path) out.push(item);
+  }
+  return out;
+}
+
 export function usePendingAsks(): PendingAsk[] {
   const threads = useStructured((s) => s.threads);
-  const live = useStructured((s) => s.live);
+  const askInputs = useStructured(useShallow((s) => askInputsOf(s)));
   const tui = usePermissions((s) => s.tui);
   const answered = usePermissions((s) => s.answered);
   const tabs = useTabsStore((s) => s.tabs);
@@ -214,8 +231,8 @@ export function usePendingAsks(): PendingAsk[] {
   const approvals = useRunsStore((s) => s.approvals);
   const tasks = useRunsStore((s) => s.tasks);
   return useMemo(
-    () => pendingAsksOf({ threads, live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks }),
-    [threads, live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks],
+    () => pendingAsksOf({ threads, live: useStructured.getState().live, tui, answered, tabs, detected, turns, awaiting, approvals, tasks }),
+    [threads, askInputs, tui, answered, tabs, detected, turns, awaiting, approvals, tasks],
   );
 }
 

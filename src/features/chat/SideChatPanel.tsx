@@ -77,13 +77,13 @@ export function SideChatPanel({ conversation, cards = [] }: { conversation: Conv
   const [loading, setLoading] = useState(false);
   const parentTuiBusy = useChatLive((s) => conversation ? s.phase[conversation.tabId] === "working" : false);
   const parentBusy = parentTuiBusy || parentStructuredBusy;
-  const live = useStructured((s) => s.live);
   const selected = sideChats.find((row) => row.id === selectedId) ?? null;
   /** O aviso do topo: o recorte ou o contexto portátil (a cópia nativa não avisa). */
   const forkNote = sideChatForkNote(selected);
   const answerItems = useStructured((s) => selectedId ? s.live[selectedId]?.items : undefined) ?? [];
   const answer = [...answerItems].reverse().find((item) => item.kind === "assistant" && item.text?.trim())?.text?.trim() ?? "";
-  const selectedWorking = selectedId ? live[selectedId]?.phase === "working" : false;
+  // Só a fase da conversa selecionada: o texto que chega nas outras não re-renderiza o painel.
+  const selectedWorking = useStructured((s) => (selectedId ? s.live[selectedId]?.phase === "working" : false));
   // O histórico da origem, limitado, é o mesmo que a timeline do chat principal mostra: a pergunta lateral o herda na tela.
   const history = useMemo(() => sideChatHistory(items), [items]);
   const sideView = useMemo(() => ({ history: history.items, truncated: history.truncated }), [history]);

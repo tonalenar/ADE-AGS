@@ -29,7 +29,7 @@ import {
   type EventPhase,
   type TreeRow,
 } from "./harnessTreeModel";
-import { threadKey } from "./model";
+import { threadKey, threadStatusSignature } from "./model";
 import { useStructured } from "./store";
 import { useHarnessGraph } from "./useHarnessGraph";
 
@@ -118,9 +118,12 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
   const [loadingAttempts, setLoadingAttempts] = useState<Record<string, boolean>>({});
   const treeRef = useRef<HTMLDivElement | null>(null);
   const threads = useStructured((state) => state.threads);
-  const live = useStructured((state) => state.live);
   const lineageChats = useMemo(() => descendants(threadId, threads), [threadId, threads]);
   const lineageKey = lineageChats.map(({ thread }) => thread.id).sort().join("|");
+  // Só a fase, os pedidos e a falha das conversas da árvore re-renderizam o painel; o texto que chega numa delas não (A110).
+  const lineageIds = useMemo(() => lineageChats.map(({ thread }) => thread.id), [lineageKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const liveSignature = useStructured((state) => threadStatusSignature(state.live, lineageIds));
+  const live = useStructured.getState().live;
 
   // O escopo do que importa ao painel muda com a árvore; o hook lê pela referência, sem reassinar os avisos.
   const scopeRef = useRef<{ threadIds: Set<string>; taskIds: Set<string> }>({ threadIds: new Set([threadId]), taskIds: new Set() });
@@ -194,7 +197,7 @@ export function HarnessRunFeed({ threadId }: { threadId: string }) {
       live[thread.id]?.requests.filter((request) => request.state === "pending").length ?? 0,
     ) > 0).map(({ thread }) => `thread:${thread.id}`),
     ...graphNodes.filter((node) => node.blocked).map((node) => node.id),
-  ]).size, [childSnapshots, graphNodes, lineageChats, live]);
+  ]).size, [childSnapshots, graphNodes, lineageChats, liveSignature]);
 
   const rows = useMemo(() => buildTreeRows(graphNodes, threadId), [graphNodes, threadId]);
   const expandedOf = (row: TreeRow) => toggles[row.node.id] ?? defaultExpanded(row.node);
