@@ -1,5 +1,5 @@
 /** @vitest-environment happy-dom */
-import { act, useEffect } from "react";
+import { act, lazy, Suspense, useEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { createMemoryRouter, RouterProvider } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,6 +104,26 @@ describe("PanelBoundary", () => {
     // O irmão, fora do boundary, não pode ser desmontado nem remontado pelo erro.
     expect(irmao.montagens).toBe(1);
     expect(irmao.desmontagens).toBe(0);
+  });
+
+  it("chunk_lazy_que_falha_cai_no_boundary", async () => {
+    // Um chunk que não carrega: o import rejeita, e o React.lazy relança o erro ao renderizar.
+    const Chunk = lazy(() => Promise.reject(new Error("chunk falhou")));
+    act(() => {
+      root.render(
+        <PanelBoundary name="x">
+          <Suspense fallback={null}>
+            <Chunk />
+          </Suspense>
+        </PanelBoundary>,
+      );
+    });
+    // A rejeição chega pelas microtarefas; sem relógio e sem laço de espera.
+    await act(async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain("app.panelError.title");
   });
 
   it("tentar_de_novo_volta_a_renderizar_o_painel", () => {
