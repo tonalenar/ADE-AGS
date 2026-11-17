@@ -214,10 +214,7 @@ pub async fn decision_test_connection(
     db: State<'_, DbConnection>,
     slot: Option<String>,
 ) -> Result<ConnectionTest, String> {
-    let settings = {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        config::load(&conn)?
-    };
+    let settings = crate::database::blocking_db(&db, |conn| config::load(conn)).await?;
     let slot = config::KeySlot::parse(slot.as_deref());
     let target = match (slot, &settings.secondary) {
         (config::KeySlot::Secondary, Some(second)) => settings.with_endpoint(second),

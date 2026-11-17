@@ -456,10 +456,8 @@ pub async fn memory_dream_start(
         .ok_or("database unavailable")?
         .inner()
         .clone();
-    {
-        let conn = db.lock().map_err(|_| "database unavailable")?;
-        validate_start(&conn, &workspace_id)?;
-    }
+    let check_id = workspace_id.clone();
+    crate::database::blocking_db(&db, move |conn| validate_start(conn, &check_id)).await?;
     crate::runs::start_memory_dream(&app, &db, &workspace_id).await
 }
 
