@@ -13,12 +13,15 @@ const pending = new Map<string, Promise<string[]>>();
 
 export function registerPendingSkillSetup(tabId: string, setup: Promise<string[]>): void {
   pending.set(tabId, setup);
-  setup.catch(() => {});
-  setup.finally(() => {
-    // Solo se borra si sigue siendo LA MISMA promesa (no pisar un registro más nuevo
-    // por si alguna vez se reintenta el setup de la misma tab).
-    if (pending.get(tabId) === setup) pending.delete(tabId);
-  });
+  // O `.finally` cria uma promessa derivada: se o setup rejeita, ela também rejeita e
+  // precisa de `.catch`, senão vira "Uncaught (in promise)".
+  void setup
+    .finally(() => {
+      // Solo se borra si sigue siendo LA MISMA promesa (no pisar un registro más nuevo
+      // por si alguna vez se reintenta el setup de la misma tab).
+      if (pending.get(tabId) === setup) pending.delete(tabId);
+    })
+    .catch(() => {});
 }
 
 export function awaitSkillSetup(tabId: string): Promise<string[]> {
