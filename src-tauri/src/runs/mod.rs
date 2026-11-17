@@ -84,18 +84,38 @@ fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
 
 /// Las tarjetas de un workspace, más recientes primero.
 #[tauri::command]
-pub fn run_list_tasks(
+pub async fn run_list_tasks(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<Task>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_tasks_now(&db, workspace_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_tasks_now(
+    db: &DbConnection,
+    workspace_id: String,
 ) -> Result<Vec<Task>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_tasks(&conn, &workspace_id)
 }
 
 #[tauri::command]
-pub fn run_list_runs(
+pub async fn run_list_runs(
     workspace_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<Run>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_runs_now(&db, workspace_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_runs_now(
+    db: &DbConnection,
+    workspace_id: String,
 ) -> Result<Vec<Run>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_runs(&conn, &workspace_id)
@@ -105,10 +125,21 @@ pub fn run_list_runs(
 /// `cursor` da resposta anterior), os eventos voltam só como delta; sem ele, ou com um cursor que o banco
 /// não reconhece, voltam inteiros com `reset`. Os nós voltam sempre atuais.
 #[tauri::command]
-pub fn run_list_harness_graph(
+pub async fn run_list_harness_graph(
     thread_id: String,
     after_cursor: Option<i64>,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<HarnessExecutionGraph, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_harness_graph_now(&db, thread_id, after_cursor))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_harness_graph_now(
+    db: &DbConnection,
+    thread_id: String,
+    after_cursor: Option<i64>,
 ) -> Result<HarnessExecutionGraph, String> {
     let conn = db.lock().map_err(|error| error.to_string())?;
     harness::thread_execution_graph_since(&conn, &thread_id, after_cursor)
@@ -118,9 +149,19 @@ pub fn run_list_harness_graph(
 /// Os frames brutos continuam no JSONL; esta resposta aplica o adapter do provider e limita
 /// o histórico para manter a leitura do painel pequena e previsível.
 #[tauri::command]
-pub fn run_read_attempt_events(
+pub async fn run_read_attempt_events(
     attempt_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<types::AgentEvent>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_read_attempt_events_now(&db, attempt_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_read_attempt_events_now(
+    db: &DbConnection,
+    attempt_id: String,
 ) -> Result<Vec<types::AgentEvent>, String> {
     use std::collections::VecDeque;
     use std::io::{Read, Seek, SeekFrom};
@@ -647,7 +688,14 @@ pub(crate) fn cancel_run_with(
 
 /// Lo que se dejaron escrito los agentes de un run.
 #[tauri::command]
-pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<Vec<Fact>, String> {
+pub async fn run_list_facts(run_id: String, db: tauri::State<'_, DbConnection>) -> Result<Vec<Fact>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_facts_now(&db, run_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_facts_now(db: &DbConnection, run_id: String) -> Result<Vec<Fact>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::facts_of_run(&conn, &run_id)
 }
@@ -778,8 +826,17 @@ pub async fn account_usage_summary(
 
 /// Los límites de una cuenta (`account_key` como en `quota::account_key`).
 #[tauri::command]
-pub fn account_limits_get(
+pub async fn account_limits_get(
     app: AppHandle,
+    account_key: String,
+) -> Result<ledger::AccountLimits, String> {
+    tauri::async_runtime::spawn_blocking(move || account_limits_get_now(&app, account_key))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn account_limits_get_now(
+    app: &AppHandle,
     account_key: String,
 ) -> Result<ledger::AccountLimits, String> {
     let db = db_of(&app)?;
@@ -973,7 +1030,13 @@ pub struct DiscardedWorktree {
 /// Nunca con la tarea viva: sería sacarle la carpeta a un agente que está trabajando.
 /// Se niega también si hay cambios sin commitear (ver `worktrees::remove`).
 #[tauri::command]
-pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
+pub async fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
+    tauri::async_runtime::spawn_blocking(move || run_discard_worktree_now(&app, task_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_discard_worktree_now(app: &AppHandle, task_id: String) -> Result<DiscardedWorktree, String> {
     let db = db_of(&app)?;
     let (task, project_cwd, skills_dir) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1200,7 +1263,13 @@ pub async fn run_reroute_task(
 /// Si todavía corre, la para (ver `supervisor::hand_off`). Si ya terminó, no toca nada:
 /// reabrir una conversación cerrada es solo reanudarla.
 #[tauri::command]
-pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String> {
+pub async fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String> {
+    tauri::async_runtime::spawn_blocking(move || run_hand_off_task_now(&app, task_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_hand_off_task_now(app: &AppHandle, task_id: String) -> Result<Task, String> {
     let db = db_of(&app)?;
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
@@ -1330,22 +1399,42 @@ fn remember_rule(
 
 /// Las reglas de una carpeta, en el orden en que se evalúan.
 #[tauri::command]
-pub fn run_list_rules(
+pub async fn run_list_rules(
     cwd: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<store::RuleRow>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_list_rules_now(&db, cwd))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_list_rules_now(db: &DbConnection, cwd: String) -> Result<Vec<store::RuleRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_rules(&conn, &cwd)
 }
 
 /// Agrega una regla escrita a mano, y resuelve con ella lo que estuviera esperando.
 #[tauri::command]
-pub fn run_add_rule(
+pub async fn run_add_rule(
     app: AppHandle,
     cwd: String,
     pattern: String,
     allow: bool,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<store::RuleRow, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_add_rule_now(&app, &db, cwd, pattern, allow))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_add_rule_now(
+    app: &AppHandle,
+    db: &DbConnection,
+    cwd: String,
+    pattern: String,
+    allow: bool,
 ) -> Result<store::RuleRow, String> {
     if !rules::is_valid_pattern(&pattern) {
         return Err(format!(
@@ -1363,7 +1452,14 @@ pub fn run_add_rule(
 }
 
 #[tauri::command]
-pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<bool, String> {
+pub async fn run_delete_rule(id: String, db: tauri::State<'_, DbConnection>) -> Result<bool, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || run_delete_rule_now(&db, id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn run_delete_rule_now(db: &DbConnection, id: String) -> Result<bool, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::delete_rule(&conn, &id)
 }

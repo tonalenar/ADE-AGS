@@ -899,28 +899,38 @@ pub fn max_fix_round_from_detail(detail: &str) -> Option<i64> {
 }
 
 #[tauri::command]
-pub fn run_fix_decide(
+pub async fn run_fix_decide(
     app: tauri::AppHandle,
     scope: String,
     work_key: String,
     action: String,
     task_id: Option<String>,
-    db: tauri::State<crate::database::DbConnection>,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Value, String> {
-    let decision = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        decide(&conn, &scope, &work_key, task_id.as_deref(), &action)?
-    };
-    if let Some(run_id) = &decision.requeue_run {
-        super::scheduler::tick(&app, run_id);
-    }
-    Ok(json!({ "status": decision.status, "message": decision.message, "requeued": decision.requeue_run.is_some() }))
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let decision = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            decide(&conn, &scope, &work_key, task_id.as_deref(), &action)?
+        };
+        if let Some(run_id) = &decision.requeue_run {
+            super::scheduler::tick(&app, run_id);
+        }
+        Ok(json!({ "status": decision.status, "message": decision.message, "requeued": decision.requeue_run.is_some() }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn run_fix_list(scope: String, db: tauri::State<crate::database::DbConnection>) -> Result<Vec<FixView>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    list_scope(&conn, &scope)
+pub async fn run_fix_list(scope: String, db: tauri::State<'_, crate::database::DbConnection>) -> Result<Vec<FixView>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        list_scope(&conn, &scope)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 pub fn cli(app: &tauri::AppHandle, command: &str, args: &Value) -> Result<Value, String> {
