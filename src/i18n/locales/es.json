@@ -6040,6 +6040,7 @@
   "chat.visualReply.open": "Previsualizar respuesta visual",
   "chat.visualReply.title": "Respuesta visual",
   "chat.visualReply.frameTitle": "Vista previa visual aislada",
+  "chat.visualReply.blocked": "La página intentó salir de la vista previa; la navegación hacia afuera fue bloqueada.",
   "chat.visualReply.isolated": "El HTML se ejecuta en un entorno aislado sin acceso a la sesión de ADE. La política de contenido restringe conexiones y recursos externos; previsualizá solo contenido de confianza.",
   "chat.shell.label": "Terminal de la conversación",
   "chat.shell.title": "Terminal",

@@ -6040,6 +6040,7 @@
   "chat.visualReply.open": "Preview visual reply",
   "chat.visualReply.title": "Visual reply",
   "chat.visualReply.frameTitle": "Isolated visual preview",
+  "chat.visualReply.blocked": "The page tried to leave the preview; navigating away was blocked.",
   "chat.visualReply.isolated": "HTML runs in a sandbox without access to the ADE session. Content policy restricts connections and external resources; preview content you trust.",
   "chat.shell.label": "Conversation terminal",
   "chat.shell.title": "Terminal",
