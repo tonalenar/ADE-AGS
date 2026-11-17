@@ -431,7 +431,9 @@ function ShellSurface({ cwd, tab }: { cwd: string; tab: ColumnTab }) {
     setChatShell({ tabId, rect });
   }, [tabId]);
 
-  useLayoutEffect(() => measure());
+  // Mede quando o slot monta ou troca de aba (`measure` muda), e o ResizeObserver cobre o resto: medir a cada render
+  // lia o DOM sem precisar. (A barra de abas do navegador, em `BrowserSurface`, segue como estava.)
+  useLayoutEffect(() => measure(), [measure]);
   useEffect(() => {
     const el = slotRef.current;
     if (!el) return;
