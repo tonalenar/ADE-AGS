@@ -36,10 +36,10 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::Serialize;
 
-use super::types::{status, Task};
+use super::types::{Task, status};
 use crate::util::{external_path, now_ts, output_with_timeout};
 
 const GIT_FAST: Duration = Duration::from_secs(20);
@@ -77,7 +77,12 @@ pub struct Checkpoint {
 
 // ── git ─────────────────────────────────────────────────────────────
 
-fn git(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration) -> Result<String, String> {
+fn git(
+    dir: &Path,
+    args: &[&str],
+    envs: &[(&str, &str)],
+    limit: Duration,
+) -> Result<String, String> {
     let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(external_path(dir)).args(args);
     // Identidad propia: un commit "por fuera" no puede fallar porque la máquina no tenga `user.name`.
@@ -88,12 +93,19 @@ fn git(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration) -> Res
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?;
+    let out = output_with_timeout(&mut cmd, limit)
+        .map_err(|e| format!("não foi possível rodar o git: {e}"))?;
     if out.status.success() {
-        Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
+        Ok(String::from_utf8_lossy(&out.stdout)
+            .trim_end_matches(['\n', '\r'])
+            .to_string())
     } else {
         let err = String::from_utf8_lossy(&out.stderr).trim().to_string();
-        Err(if err.is_empty() { format!("git {} falló", args.join(" ")) } else { err })
+        Err(if err.is_empty() {
+            format!("git {} falló", args.join(" "))
+        } else {
+            err
+        })
     }
 }
 
@@ -112,8 +124,9 @@ pub struct Snapshot {
 /// Toma la foto de `dir` (ver el módulo). No cambia nada del repo salvo agregar objetos y la ref.
 pub fn snapshot(dir: &Path, id: &str, label: &str) -> Result<Snapshot, String> {
     let root = root_of(dir)?;
-    let head = git(&root, &["rev-parse", "--verify", "HEAD"], &[], GIT_FAST)
-        .map_err(|_| "o repositório ainda não tem nenhum commit: não há de onde tirar uma foto".to_string())?;
+    let head = git(&root, &["rev-parse", "--verify", "HEAD"], &[], GIT_FAST).map_err(|_| {
+        "o repositório ainda não tem nenhum commit: não há de onde tirar uma foto".to_string()
+    })?;
     let git_dir = git(&root, &["rev-parse", "--absolute-git-dir"], &[], GIT_FAST)?;
     let index = Path::new(&git_dir).join(format!("cc-checkpoint-{id}.index"));
     let index_s = index.to_string_lossy().to_string();
@@ -124,23 +137,56 @@ pub fn snapshot(dir: &Path, id: &str, label: &str) -> Result<Snapshot, String> {
         // `-A`: lo modificado, lo nuevo y lo borrado; respeta `.gitignore`.
         git(&root, &["add", "-A", "--", "."], &env, GIT_SLOW)?;
         let tree = git(&root, &["write-tree"], &env, GIT_FAST)?;
-        let commit = git(&root, &["commit-tree", &tree, "-p", &head, "-m", label], &[], GIT_FAST)?;
-        git(&root, &["update-ref", &format!("refs/controlcode/checkpoints/{id}"), &commit], &[], GIT_FAST)?;
+        let commit = git(
+            &root,
+            &["commit-tree", &tree, "-p", &head, "-m", label],
+            &[],
+            GIT_FAST,
+        )?;
+        git(
+            &root,
+            &[
+                "update-ref",
+                &format!("refs/controlcode/checkpoints/{id}"),
+                &commit,
+            ],
+            &[],
+            GIT_FAST,
+        )?;
         Ok(commit)
     })();
     let _ = std::fs::remove_file(&index);
-    Ok(Snapshot { root, commit: result?, head })
+    Ok(Snapshot {
+        root,
+        commit: result?,
+        head,
+    })
 }
 
 /// Deja `root` como estaba en la foto (ver el módulo). El que llama ya tomó una foto de seguridad.
 pub fn restore(root: &Path, commit: &str, head: &str) -> Result<(), String> {
     // El árbol de la foto tiene que existir: si alguien corrió un `gc` agresivo, se dice acá y no a medias.
-    git(root, &["cat-file", "-e", &format!("{commit}^{{tree}}")], &[], GIT_FAST)
-        .map_err(|_| "a foto não está mais no repositório (foi limpa com git gc?)".to_string())?;
-    git(root, &["cat-file", "-e", &format!("{head}^{{commit}}")], &[], GIT_FAST)
-        .map_err(|_| "o commit daquele momento não está mais no repositório".to_string())?;
+    git(
+        root,
+        &["cat-file", "-e", &format!("{commit}^{{tree}}")],
+        &[],
+        GIT_FAST,
+    )
+    .map_err(|_| "a foto não está mais no repositório (foi limpa com git gc?)".to_string())?;
+    git(
+        root,
+        &["cat-file", "-e", &format!("{head}^{{commit}}")],
+        &[],
+        GIT_FAST,
+    )
+    .map_err(|_| "o commit daquele momento não está mais no repositório".to_string())?;
     git(root, &["reset", "-q", "--hard", head], &[], GIT_SLOW)?;
-    git(root, &["read-tree", "--reset", "-u", &format!("{commit}^{{tree}}")], &[], GIT_SLOW)?;
+    git(
+        root,
+        &["read-tree", "--reset", "-u", &format!("{commit}^{{tree}}")],
+        &[],
+        GIT_SLOW,
+    )?;
     // Lo que nació después de la foto (no versionado, no ignorado) no está en el índice ahora.
     git(root, &["clean", "-fdq"], &[], GIT_SLOW)?;
     // Los cambios quedan sin commitear y sin preparar, como estaban.
@@ -185,7 +231,9 @@ pub fn insert(conn: &Connection, c: &Checkpoint) -> Result<(), String> {
 
 pub fn list(conn: &Connection, run_id: &str) -> Result<Vec<Checkpoint>, String> {
     let mut stmt = conn
-        .prepare(&format!("SELECT {COLS} FROM run_checkpoints WHERE run_id = ?1 ORDER BY created_at, rowid"))
+        .prepare(&format!(
+            "SELECT {COLS} FROM run_checkpoints WHERE run_id = ?1 ORDER BY created_at, rowid"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt.query_map([run_id], row).map_err(|e| e.to_string())?;
     Ok(rows.filter_map(Result::ok).collect())
@@ -193,9 +241,13 @@ pub fn list(conn: &Connection, run_id: &str) -> Result<Vec<Checkpoint>, String> 
 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Checkpoint>, String> {
     use rusqlite::OptionalExtension;
-    conn.query_row(&format!("SELECT {COLS} FROM run_checkpoints WHERE id = ?1"), [id], row)
-        .optional()
-        .map_err(|e| e.to_string())
+    conn.query_row(
+        &format!("SELECT {COLS} FROM run_checkpoints WHERE id = ?1"),
+        [id],
+        row,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 /// Toma y guarda una foto para `task`/`run`. El `Err` es para quien quiera decirlo; las
@@ -264,8 +316,14 @@ pub fn plan(items: &[Item], root_task: &str) -> Result<Plan, String> {
     if root.before.is_none() {
         return Err("Esta tarefa não tem foto de antes (rodou antes dos checkpoints existirem, ou a foto falhou): não há a que voltar.".into());
     }
-    if let Some(live) = items.iter().find(|i| matches!(i.status.as_str(), status::RUNNING | status::READY)) {
-        return Err(format!("A tarefa '{}' está rodando: pare-a antes de voltar atrás.", live.id));
+    if let Some(live) = items
+        .iter()
+        .find(|i| matches!(i.status.as_str(), status::RUNNING | status::READY))
+    {
+        return Err(format!(
+            "A tarefa '{}' está rodando: pare-a antes de voltar atrás.",
+            live.id
+        ));
     }
 
     let mut affected: HashSet<&str> = HashSet::from([root_task]);
@@ -278,7 +336,10 @@ pub fn plan(items: &[Item], root_task: &str) -> Result<Plan, String> {
                 continue;
             }
             // Depende de una afectada: su resultado ya no vale.
-            let dependent = item.depends_on.iter().any(|d| affected.contains(d.as_str()));
+            let dependent = item
+                .depends_on
+                .iter()
+                .any(|d| affected.contains(d.as_str()));
             // Corrió después en la misma carpeta: la restauración le saca el piso.
             let same_dir_later = item.dir.is_some()
                 && item.dir.as_deref() == root_dir
@@ -294,7 +355,12 @@ pub fn plan(items: &[Item], root_task: &str) -> Result<Plan, String> {
 
     // La pedida primero, después el resto en el orden del plan.
     let mut tasks = vec![root_task.to_string()];
-    tasks.extend(items.iter().filter(|i| i.id != root_task && affected.contains(i.id.as_str())).map(|i| i.id.clone()));
+    tasks.extend(
+        items
+            .iter()
+            .filter(|i| i.id != root_task && affected.contains(i.id.as_str()))
+            .map(|i| i.id.clone()),
+    );
 
     let mut per_dir: Vec<(String, (String, i64))> = Vec::new();
     let mut without = Vec::new();
@@ -312,7 +378,10 @@ pub fn plan(items: &[Item], root_task: &str) -> Result<Plan, String> {
     }
     Ok(Plan {
         tasks,
-        restores: per_dir.into_iter().map(|(dir, (cp, _))| (dir, cp)).collect(),
+        restores: per_dir
+            .into_iter()
+            .map(|(dir, (cp, _))| (dir, cp))
+            .collect(),
         without_checkpoint: without,
     })
 }
@@ -347,7 +416,11 @@ pub fn items_of(conn: &Connection, run_id: &str, tasks: &[Task]) -> Result<Vec<I
 
 /// Ejecuta un rollback ya planeado: foto de seguridad por carpeta, restaurar y poner las tareas
 /// en cola. Devuelve las fotos de seguridad.
-pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -> Result<Vec<Checkpoint>, String> {
+pub fn rollback(
+    db: &crate::database::DbConnection,
+    run_id: &str,
+    plan: &Plan,
+) -> Result<Vec<Checkpoint>, String> {
     let mut safeties = Vec::new();
     // Todo se valida y se fotografía ANTES de tocar nada: si algo no se puede, no queda a medias.
     let mut to_restore = Vec::new();
@@ -356,13 +429,22 @@ pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -
         for (dir, cp_id) in &plan.restores {
             let cp = get(&conn, cp_id)?.ok_or("Uma foto do plano já não existe.")?;
             if !Path::new(dir).exists() {
-                return Err(format!("A pasta {dir} já não existe (worktree descartado?): não dá para restaurá-la."));
+                return Err(format!(
+                    "A pasta {dir} já não existe (worktree descartado?): não dá para restaurá-la."
+                ));
             }
             to_restore.push((dir.clone(), cp));
         }
     }
     for (dir, _) in &to_restore {
-        safeties.push(take(db, run_id, None, Path::new(dir), kind::SAFETY, "antes de voltar atrás")?);
+        safeties.push(take(
+            db,
+            run_id,
+            None,
+            Path::new(dir),
+            kind::SAFETY,
+            "antes de voltar atrás",
+        )?);
     }
     for (dir, cp) in &to_restore {
         let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
@@ -386,14 +468,25 @@ pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -
 
 fn db_of(app: &tauri::AppHandle) -> Result<crate::database::DbConnection, String> {
     use tauri::Manager;
-    Ok(app.try_state::<crate::database::DbConnection>().ok_or("o banco de dados não está disponível")?.inner().clone())
+    Ok(app
+        .try_state::<crate::database::DbConnection>()
+        .ok_or("o banco de dados não está disponível")?
+        .inner()
+        .clone())
 }
 
 #[tauri::command]
-pub fn run_checkpoints(app: tauri::AppHandle, run_id: String) -> Result<Vec<Checkpoint>, String> {
-    let db = db_of(&app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    list(&conn, &run_id)
+pub async fn run_checkpoints(
+    app: tauri::AppHandle,
+    run_id: String,
+) -> Result<Vec<Checkpoint>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = db_of(&app)?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        list(&conn, &run_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Serialize)]
@@ -416,7 +509,10 @@ pub struct RollbackPreview {
 }
 
 /// Lo que haría volver a antes de `task_id`, sin tocar nada: la pantalla lo muestra antes de confirmar.
-fn planned(db: &crate::database::DbConnection, task_id: &str) -> Result<(String, Plan, Vec<Task>), String> {
+fn planned(
+    db: &crate::database::DbConnection,
+    task_id: &str,
+) -> Result<(String, Plan, Vec<Task>), String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let task = super::store::task_by_id(&conn, task_id)?.ok_or("A tarefa não existe mais.")?;
     let tasks = super::store::tasks_of_run(&conn, &task.run_id)?;
@@ -425,9 +521,18 @@ fn planned(db: &crate::database::DbConnection, task_id: &str) -> Result<(String,
 }
 
 #[tauri::command(async)]
-pub fn run_rollback_preview(app: tauri::AppHandle, task_id: String) -> Result<RollbackPreview, String> {
+pub fn run_rollback_preview(
+    app: tauri::AppHandle,
+    task_id: String,
+) -> Result<RollbackPreview, String> {
     let (_, plan, tasks) = planned(&db_of(&app)?, &task_id)?;
-    let shown = |id: &String| tasks.iter().find(|t| &t.id == id).map(|t| PlannedTask { id: t.id.clone(), title: t.title.clone(), status: t.status.clone() });
+    let shown = |id: &String| {
+        tasks.iter().find(|t| &t.id == id).map(|t| PlannedTask {
+            id: t.id.clone(),
+            title: t.title.clone(),
+            status: t.status.clone(),
+        })
+    };
     Ok(RollbackPreview {
         tasks: plan.tasks.iter().filter_map(shown).collect(),
         dirs: plan.restores.iter().map(|(d, _)| d.clone()).collect(),
@@ -451,44 +556,85 @@ pub fn run_rollback(app: tauri::AppHandle, task_id: String) -> Result<Vec<String
 
 /// Una foto a pedido de la carpeta del run.
 #[tauri::command(async)]
-pub fn run_checkpoint_create(app: tauri::AppHandle, run_id: String, label: String) -> Result<Checkpoint, String> {
-    let db = db_of(&app)?;
-    let cwd = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        super::store::run_by_id(&conn, &run_id)?.ok_or("O run não existe mais.")?.cwd
-    };
-    let label = label.trim();
-    take(&db, &run_id, None, Path::new(&cwd), kind::MANUAL, if label.is_empty() { "ponto manual" } else { label })
+pub async fn run_checkpoint_create(
+    app: tauri::AppHandle,
+    run_id: String,
+    label: String,
+) -> Result<Checkpoint, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let db = db_of(&app)?;
+        let cwd = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            super::store::run_by_id(&conn, &run_id)?
+                .ok_or("O run não existe mais.")?
+                .cwd
+        };
+        let label = label.trim();
+        take(
+            &db,
+            &run_id,
+            None,
+            Path::new(&cwd),
+            kind::MANUAL,
+            if label.is_empty() {
+                "ponto manual"
+            } else {
+                label
+            },
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Restaura la carpeta de una foto (la de seguridad que dejó un rollback, o una manual) sin
 /// tocar las tareas. Antes toma otra foto de seguridad.
 #[tauri::command(async)]
-pub fn run_restore_checkpoint(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let db = db_of(&app)?;
-    let (cp, live) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let cp = get(&conn, &id)?.ok_or("A foto não existe mais.")?;
-        let live: i64 = conn
-            .query_row("SELECT COUNT(*) FROM tasks WHERE run_id = ?1 AND status IN ('running','ready')", [&cp.run_id], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-        (cp, live)
-    };
-    if live > 0 {
-        return Err("Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into());
-    }
-    if !Path::new(&cp.dir).exists() {
-        return Err(format!("A pasta {} já não existe.", cp.dir));
-    }
-    let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
-    take(&db, &cp.run_id, None, Path::new(&cp.dir), kind::SAFETY, "antes de restaurar uma foto")?;
-    restore(Path::new(&cp.dir), &cp.commit_sha, head)
+pub async fn run_restore_checkpoint(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+
+            let db = db_of(&app)?;
+            let (cp, live) = {
+                let conn = db.lock().map_err(|e| e.to_string())?;
+                let cp = get(&conn, &id)?.ok_or("A foto não existe mais.")?;
+                let live: i64 = conn
+                    .query_row("SELECT COUNT(*) FROM tasks WHERE run_id = ?1 AND status IN ('running','ready')", [&cp.run_id], |r| r.get(0))
+                    .map_err(|e| e.to_string())?;
+                (cp, live)
+            };
+            if live > 0 {
+                return Err("Há tarefas rodando neste run: pare-as antes de restaurar uma foto.".into());
+            }
+            if !Path::new(&cp.dir).exists() {
+                return Err(format!("A pasta {} já não existe.", cp.dir));
+            }
+            let head = cp.head_sha.as_deref().ok_or("A foto não guardou o HEAD.")?;
+            take(&db, &cp.run_id, None, Path::new(&cp.dir), kind::SAFETY, "antes de restaurar uma foto")?;
+            restore(Path::new(&cp.dir), &cp.commit_sha, head)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Foto automática antes o después de una tarea: nunca rompe nada si falla.
 pub fn auto(db: &crate::database::DbConnection, task: &Task, kind: &str) {
-    let label = format!("{} — {}", if kind == self::kind::BEFORE { "antes" } else { "depois" }, task.title);
-    if let Err(e) = take(db, &task.run_id, Some(&task.id), Path::new(&task.cwd), kind, &label) {
+    let label = format!(
+        "{} — {}",
+        if kind == self::kind::BEFORE {
+            "antes"
+        } else {
+            "depois"
+        },
+        task.title
+    );
+    if let Err(e) = take(
+        db,
+        &task.run_id,
+        Some(&task.id),
+        Path::new(&task.cwd),
+        kind,
+        &label,
+    ) {
         // Sin repo, sin commits o sin git: la tarea corre igual, sin foto.
         eprintln!("checkpoint ({kind}) de '{}': {e}", task.title);
     }
