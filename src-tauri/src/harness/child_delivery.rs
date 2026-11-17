@@ -613,11 +613,6 @@ fn one_line(raw: &str) -> String {
     raw.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Impede que o texto do filho feche ou abra um envelope: `<` e `>` das tags viram parênteses ocos.
-fn defang(raw: &str) -> String {
-    raw.replace("</untrusted_data", "</untrusted-data").replace("<untrusted_data", "<untrusted-data")
-}
-
 /// O texto do aviso: o cabeçalho do sistema, o desfecho e o resultado do filho dentro de um envelope de
 /// dado não confiável. Uma linha só, no máximo `RESULT_MAX_CHARS` do resultado.
 pub fn notice_text(watch: &Watch, end: &End) -> String {
@@ -642,9 +637,9 @@ pub fn notice_text(watch: &Watch, end: &End) -> String {
             text.push_str(&format!(
                 " <untrusted_data source=\"child:{}:{}\"{}>{}</untrusted_data>",
                 watch.kind.as_str(),
-                defang(&one_line(&watch.child_ref)),
+                crate::util::untrusted::clean_source(&watch.child_ref),
                 if truncated { " truncated=\"true\"" } else { "" },
-                defang(&shown),
+                crate::util::untrusted::neutralize(&shown),
             ));
             if truncated {
                 text.push_str(&format!(" (resultado cortado em {RESULT_MAX_CHARS} caracteres; leia o resto em {})", where_to_read(watch)));
