@@ -4222,6 +4222,7 @@
   "screenRecording.pendingMissing_other": "{{count}} capturas pendentes não existem mais no disco e saíram da lista.",
   "screenRecording.pendingInspectFailed": "Não consegui verificar as capturas pendentes ({{error}}). Elas continuam guardadas.",
   "screenRecording.pendingDropped": "Já havia {{max}} capturas pendentes. A mais antiga saiu da lista; o arquivo continua na pasta de capturas.",
+  "screenRecording.stopFailed": "Não foi possível finalizar a gravação de tela: {{error}}",
   "iphone.bar.rotateHint": "Gire o iPhone fisicamente; a ADE acompanha. Se ele não girar, desative o Bloqueio de Orientação no iPhone.",
   "iphone.keyboard": "Digitar no aparelho",
   "iphone.keyboardHint": "Com a tela em foco, o teclado do Mac também digita direto no aparelho.",

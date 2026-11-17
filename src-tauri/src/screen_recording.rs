@@ -636,6 +636,15 @@ impl Registry {
         finish(recording)
     }
 
+    /// Para a gravação ativa, se houver, e devolve `(id, erro)` quando a finalização falha.
+    pub(crate) fn parar_ativa(&self) -> Option<(String, String)> {
+        let id = self.status()?;
+        match self.stop(&id) {
+            Ok(_) => None,
+            Err(erro) => Some((id, erro)),
+        }
+    }
+
     /// Tira a gravação da lista e liga `stopping` no mesmo lock. O guarda devolvido solta a flag só quando a
     /// finalização acaba: não existe instante em que `start` veja "nada ativo e nada parando".
     fn tomar_para_parar(&self, id: &str) -> Result<(ActiveRecording, FlagGuard<'_>), String> {
@@ -927,12 +936,17 @@ fn finish_process(
     }
 }
 
+/// Payload do aviso de falha ao finalizar, para o front (`screen-recording-error`).
+#[derive(Clone, serde::Serialize)]
+struct FalhaDeParada {
+    id: String,
+    erro: String,
+}
+
 /// Para a gravação na saída do app, sem deixar processo ou vídeo aberto.
+#[allow(dead_code)]
 pub fn stop_all() {
-    let id = status();
-    if let Some(id) = id {
-        let _ = stop(&id);
-    }
+    let _ = REGISTRY.parar_ativa();
 }
 
 /// Teto da parada das gravações na saída do app. A thread principal não espera mais que isto: o que não
@@ -941,8 +955,27 @@ pub const STOP_ALL_DEADLINE: Duration = Duration::from_secs(3);
 
 /// Para as gravações na saída, com teto de [`STOP_ALL_DEADLINE`]. Antes, a parada era síncrona no
 /// `RunEvent::Exit` e podia segurar a thread principal por até ~29 s (`finish_process` + `kill_and_wait`).
-pub fn stop_all_with_deadline() {
-    if !encerrar_dentro_do_teto(stop_all, STOP_ALL_DEADLINE) {
+pub fn stop_all_with_deadline(app: &tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
+    let app = app.clone();
+    let terminou = encerrar_dentro_do_teto(
+        move || {
+            let Some((id, erro)) = REGISTRY.parar_ativa() else {
+                return;
+            };
+            eprintln!("[ade-ags] não foi possível finalizar a gravação {id}: {erro}");
+            if let Some(dir) = crate::util::datadir::ags_home() {
+                if let Err(log_err) = registrar_erro_de_parada(&dir, &id, &erro) {
+                    eprintln!("[ade-ags] também não deu para gravar o log da parada: {log_err}");
+                }
+            }
+            if !app.webview_windows().is_empty() {
+                let _ = app.emit("screen-recording-error", FalhaDeParada { id, erro });
+            }
+        },
+        STOP_ALL_DEADLINE,
+    );
+    if !terminou {
         eprintln!("[ade-ags] a gravação de tela ainda estava finalizando ao sair; a saída seguiu sem esperar");
     }
 }
@@ -956,6 +989,12 @@ fn encerrar_dentro_do_teto(acao: impl FnOnce() + Send + 'static, teto: Duration)
         let _ = feito.send(());
     });
     pronto.recv_timeout(teto).is_ok()
+}
+
+/// Registra no log a falha de uma gravação que não finalizou, com o id dela. Sem isso a falha só ia para o
+/// stderr, e num app que fecha isso se perde.
+pub(crate) fn registrar_erro_de_parada(dir: &Path, id: &str, erro: &str) -> std::io::Result<PathBuf> {
+    crate::util::datadir::anexar_log_em(dir, "gravacao-de-tela.log", &format!("parar {id}: {erro}"))
 }
 
 #[tauri::command(async)]

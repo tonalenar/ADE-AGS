@@ -396,15 +396,47 @@ fn parada_que_estoura_o_teto_devolve_o_controle_sem_esperar() {
     let (soltar, preso) = std::sync::mpsc::channel::<()>();
     let terminou = encerrar_dentro_do_teto(
         move || {
-            let _ = preso.recv();
+            // Limitado: a versão síncrona falha aqui em vez de travar o teste. A parada real fica presa até soltada.
+            let _ = preso.recv_timeout(Duration::from_secs(5));
         },
         Duration::ZERO,
     );
-    assert!(!terminou);
+    assert!(!terminou, "a parada presa não pode segurar quem chama além do teto");
     let _ = soltar.send(());
 }
 
 #[test]
 fn parada_que_termina_dentro_do_teto_conta_como_terminada() {
     assert!(encerrar_dentro_do_teto(|| {}, Duration::from_secs(5)));
+}
+
+/// Uma falha ao finalizar tem que chegar ao log com o id da gravação, não só ao stderr.
+#[test]
+fn falha_ao_parar_e_relatada_com_o_id() {
+    struct Falha;
+    impl MirrorHandle for Falha {
+        fn stop(self: Box<Self>) -> Result<(), String> {
+            Err("escritor travado".into())
+        }
+    }
+    let registro = Registry::new();
+    *registro.active.lock().unwrap() = Some(ActiveRecording {
+        id: "iphone:ALVO".into(),
+        kind: "iphone".into(),
+        backend: Backend::Mirror(Box::new(Falha)),
+        path: PathBuf::from("/nao/usado.mp4"),
+    });
+    let (id, erro) = registro.parar_ativa().expect("a falha de parada precisa aparecer");
+    assert_eq!(id, "iphone:ALVO");
+    assert!(erro.contains("escritor travado"), "{erro}");
+    let dir = std::env::temp_dir().join(format!("ade-parada-{}", uuid::Uuid::new_v4()));
+    let caminho = registrar_erro_de_parada(&dir, &id, &erro).unwrap();
+    let texto = std::fs::read_to_string(&caminho).unwrap();
+    assert!(texto.contains("iphone:ALVO") && texto.contains("escritor travado"), "{texto}");
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn parar_sem_gravacao_nao_relata_falha() {
+    assert!(Registry::new().parar_ativa().is_none());
 }

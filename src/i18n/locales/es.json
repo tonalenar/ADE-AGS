@@ -4222,6 +4222,7 @@
   "screenRecording.pendingMissing_other": "{{count}} capturas pendientes ya no existen en el disco y salieron de la lista.",
   "screenRecording.pendingInspectFailed": "No pude verificar las capturas pendientes ({{error}}). Siguen guardadas.",
   "screenRecording.pendingDropped": "Ya había {{max}} capturas pendientes. La más antigua salió de la lista; el archivo sigue en la carpeta de capturas.",
+  "screenRecording.stopFailed": "No se pudo finalizar la grabación de pantalla: {{error}}",
   "iphone.bar.rotateHint": "Gira el iPhone físicamente; ADE seguirá la orientación. Si no gira, desactiva el bloqueo de orientación en el iPhone.",
   "iphone.keyboard": "Escribir en el dispositivo",
   "iphone.keyboardHint": "Con la pantalla enfocada, el teclado del Mac también escribe directo en el dispositivo.",
