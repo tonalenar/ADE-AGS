@@ -71,20 +71,24 @@ describe("superfície nativa do navegador", () => {
   });
 
   it("cwd_muda_sem_recriar_portal", () => {
-    // Trocar a pasta de referência não recria a vista do Portal: ela é criada uma vez e só sai ao desmontar.
+    // Trocar a pasta de referência não recria a vista do Portal: ela é criada uma vez e só sai ao desmontar. A pasta
+    // da vista existente é atualizada.
     const ensure = vi.fn();
     const drop = vi.fn();
-    const mount = (cwd: string) => act(() => root.render(<PortalLifetime id="portal-1" cwd={cwd} ensure={ensure} drop={drop} />));
+    const setCwd = vi.fn();
+    const mount = (cwd: string) => act(() => root.render(<PortalLifetime id="portal-1" cwd={cwd} ensure={ensure} drop={drop} setCwd={setCwd} />));
     mount("/workspace/a");
     mount("/workspace/b");
 
     expect(ensure).toHaveBeenCalledTimes(1);
     expect(ensure).toHaveBeenCalledWith("portal-1", "/workspace/a");
     expect(drop).not.toHaveBeenCalled();
+    expect(setCwd).toHaveBeenCalledTimes(1);
+    expect(setCwd).toHaveBeenCalledWith("portal-1", "/workspace/b");
   });
 });
 
-function PortalLifetime({ id, cwd, ensure, drop }: { id: string; cwd: string; ensure: (id: string, cwd: string) => void; drop: (id: string) => void }) {
-  usePortalViewLifetime(id, cwd, ensure, drop);
+function PortalLifetime({ id, cwd, ensure, drop, setCwd }: { id: string; cwd: string; ensure: (id: string, cwd: string) => void; drop: (id: string) => void; setCwd: (id: string, cwd: string) => void }) {
+  usePortalViewLifetime(id, cwd, ensure, drop, setCwd);
   return null;
 }

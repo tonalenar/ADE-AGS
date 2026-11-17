@@ -1265,11 +1265,11 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const ensure = useViewTabsStore((s) => s.ensurePortalView);
   const drop = useViewTabsStore((s) => s.dropPortalView);
   const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
-  // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador. Cambiar la carpeta de
-  // referencia no recria la vista: a URL inicial só cuenta al crear la vista.
+  // Ao apagar o Portal (ou fechar o canvas), a vista é solta e com ela o navegador. Trocar a pasta de referência não
+  // recria a vista: só atualiza o `cwd` dela. A URL inicial só conta ao criar a vista.
   usePortalViewLifetime(id, cwd, (portalId, currentCwd) => {
     ensure(portalId, currentCwd, portal.url, portal.viewport, portal.realChrome);
-  }, drop);
+  }, drop, (portalId, nextCwd) => useViewTabsStore.getState().updateView(portalId, { cwd: nextCwd }));
 
   // Lo que el navegador va visitando se guarda en el canvas, para reabrir donde estaba.
   const shown = view?.url ?? "";
