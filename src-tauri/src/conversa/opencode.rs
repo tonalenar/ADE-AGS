@@ -162,20 +162,20 @@ impl Session {
     /// Encerra o processo. O laço de leitura vê o fim e limpa.
     pub fn kill(&self) {
         self.alive.store(false, Ordering::SeqCst);
-        let mut child = self.child.lock().ok().and_then(|mut c| c.take());
-        let mut grupo = self.group.lock().unwrap_or_else(|e| e.into_inner());
-        encerrar_arvore(child.as_mut(), &mut grupo);
+        let child = self.child.lock().ok().and_then(|mut c| c.take());
+        let escalada = self.group.lock().unwrap_or_else(|e| e.into_inner()).encerrar_escalando();
+        // SIGTERM já foi a toda a árvore. O SIGKILL do que sobrar vem depois do prazo, numa thread de fundo: o
+        // fechamento não espera. O filho direto só sai quando a thread o solta (ele morre no `drop`, por `kill_on_drop`).
+        let _ = std::thread::Builder::new().name("ags-acp-encerramento".into()).spawn(move || {
+            escalada.concluir(PRAZO_ENCERRAMENTO);
+            drop(child);
+        });
     }
 }
 
-/// Encerra a árvore de uma sessão ACP: o agente e o que ele lançou. Fechar só o filho direto deixa vivo um neto que
-/// herdou o stdout, e aí o laço de leitura da sessão nunca acaba.
-fn encerrar_arvore(child: Option<&mut tokio::process::Child>, grupo: &mut ProcessGroup) {
-    grupo.kill_all();
-    if let Some(child) = child {
-        let _ = child.start_kill();
-    }
-}
+/// Quanto o agente tem entre o SIGTERM e o SIGKILL ao encerrar a sessão ACP. Depois disso, o que ainda viver da árvore
+/// (um neto que ignora HUP e TERM, por exemplo) é morto à força.
+const PRAZO_ENCERRAMENTO: Duration = Duration::from_secs(2);
 
 /// Os ids dos grupos das sessões ACP. Começam numa faixa própria: o nome do grupo (um cgroup no Linux) não pode
 /// colidir com o das tabs nem com o dos agentes de fundo, que contam desde 1.
@@ -1017,23 +1017,40 @@ mod encerramento_tests {
     use std::process::Stdio;
     use tokio::io::AsyncBufReadExt;
 
+    /// Sobe um `sh` com um neto que herda o stdout, e espera o neto estar no ar (o `echo` sai depois do `sleep`).
+    async fn sessao_com_neto(script: &str) -> (tokio::process::Child, ProcessGroup, tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>) {
+        let mut cmd = crate::util::spawn::into_tokio(crate::util::spawn::hidden_command("sh"));
+        cmd.arg("-c").arg(script).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+        let mut grupo = ProcessGroup::new(0x4000_0001);
+        let mut child = cmd.spawn().expect("o sh sobe");
+        grupo.adopt(&child);
+        let mut linhas = tokio::io::BufReader::new(child.stdout.take().expect("stdout")).lines();
+        assert_eq!(linhas.next_line().await.expect("leitura").as_deref(), Some("filho"));
+        (child, grupo, linhas)
+    }
+
     /// O agente (aqui um `sh`) lança um neto que herda o stdout e segue vivo. Matar só o `sh` deixava o pipe aberto:
     /// o laço de leitura da sessão nunca acabava, e o neto continuava rodando.
     #[cfg(unix)]
     #[tokio::test]
     async fn encerrar_a_sessao_leva_os_netos_que_seguram_o_stdout() {
-        let mut cmd = crate::util::spawn::into_tokio(crate::util::spawn::hidden_command("sh"));
-        cmd.arg("-c").arg("sleep 60 & echo filho; wait").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
-        let mut grupo = ProcessGroup::new(0x4000_0001);
-        let mut child = cmd.spawn().expect("o sh sobe");
-        grupo.adopt(&child);
-        let mut linhas = tokio::io::BufReader::new(child.stdout.take().expect("stdout")).lines();
-        // "filho" sai depois de o `sleep` já ter sido lançado: o neto já herdou o pipe.
-        assert_eq!(linhas.next_line().await.expect("leitura").as_deref(), Some("filho"));
-        encerrar_arvore(Some(&mut child), &mut grupo);
+        let (_child, mut grupo, mut linhas) = sessao_com_neto("sleep 60 & echo filho; wait").await;
+        grupo.encerrar_escalando().concluir(Duration::ZERO);
         // Sem o neto, o pipe fecha e a leitura acaba. Com ele vivo, a espera estoura.
         let fim = tokio::time::timeout(Duration::from_secs(10), linhas.next_line()).await;
         assert!(matches!(fim, Ok(Ok(None))), "o neto ainda segura o stdout: {fim:?}");
+    }
+
+    /// O descendente ignora HUP e TERM (o `trap` vale para o neto também, que herda os sinais ignorados). Só o SIGKILL
+    /// do encerramento escalado o derruba. Sem prazo real: o fim do pipe é o sinal de que ele morreu.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn o_encerramento_escala_para_o_que_ignora_hup_e_term() {
+        let (_child, mut grupo, mut linhas) = sessao_com_neto("trap '' HUP TERM; sleep 60 & echo filho; wait").await;
+        let forcados = grupo.encerrar_escalando().concluir(Duration::ZERO);
+        assert!(!forcados.is_empty(), "quem ignora o SIGTERM tem que receber o SIGKILL");
+        let fim = tokio::time::timeout(Duration::from_secs(10), linhas.next_line()).await;
+        assert!(matches!(fim, Ok(Ok(None))), "o que ignora HUP e TERM sobreviveu ao encerramento: {fim:?}");
     }
 }
 

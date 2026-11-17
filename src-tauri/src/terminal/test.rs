@@ -666,3 +666,72 @@ fn la_tab_encuentra_su_terminal_vivo_y_el_mas_nuevo_gana() {
     assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-z"), None);
     assert_eq!(newest_for_tab(sessions.iter().copied(), ""), None);
 }
+
+// ── Encerramento escalado (ACP): SIGTERM agora, SIGKILL depois do prazo, com relógio falso ──
+#[cfg(unix)]
+mod escalada_falsa {
+    use super::super::containment::{Adoptable, ProcessGroup, Sinais};
+    use std::cell::RefCell;
+    use std::time::Duration;
+
+    #[derive(Debug, PartialEq)]
+    enum Evento {
+        Sinal(u32, libc::c_int),
+        Espera(Duration),
+    }
+
+    /// Um mundo sem processos de verdade: a árvore é fixa, quem ignora o SIGTERM continua vivo, e o prazo só é anotado.
+    struct Falso {
+        arvore: Vec<u32>,
+        ignoram_term: Vec<u32>,
+        eventos: RefCell<Vec<Evento>>,
+    }
+
+    impl Sinais for Falso {
+        fn enviar(&self, pid: u32, sinal: libc::c_int) {
+            self.eventos.borrow_mut().push(Evento::Sinal(pid, sinal));
+        }
+        fn vivo(&self, pid: u32) -> bool {
+            // Só quem ignora o SIGTERM sobrevive a ele. Os outros saíram.
+            self.ignoram_term.contains(&pid)
+        }
+        fn arvore(&self, _raiz: u32) -> Vec<u32> {
+            self.arvore.clone()
+        }
+        fn esperar(&self, prazo: Duration) {
+            self.eventos.borrow_mut().push(Evento::Espera(prazo));
+        }
+    }
+
+    /// Um pid que não existe no kernel (acima do teto do Linux): o `adopt` só o anota, e nenhum processo real é tocado.
+    struct PidInexistente;
+    impl Adoptable for PidInexistente {
+        fn pid(&self) -> Option<u32> {
+            Some(0x7FFF_FFF0)
+        }
+    }
+
+    #[test]
+    fn escalada_manda_term_a_arvore_e_kill_so_no_que_sobreviveu_ao_prazo() {
+        let falso = Falso { arvore: vec![30, 20, 10], ignoram_term: vec![30, 10], eventos: RefCell::new(Vec::new()) };
+        let mut grupo = ProcessGroup::new(9_100);
+        grupo.adopt(&PidInexistente);
+        let prazo = Duration::from_secs(2);
+        let escalada = grupo.encerrar_escalando_com(&falso);
+        let forcados = escalada.concluir_com(&falso, prazo);
+
+        assert_eq!(forcados, vec![30, 10], "só quem sobreviveu ao SIGTERM leva o SIGKILL");
+        assert_eq!(
+            *falso.eventos.borrow(),
+            vec![
+                Evento::Sinal(30, libc::SIGTERM),
+                Evento::Sinal(20, libc::SIGTERM),
+                Evento::Sinal(10, libc::SIGTERM),
+                Evento::Espera(prazo),
+                Evento::Sinal(30, libc::SIGKILL),
+                Evento::Sinal(10, libc::SIGKILL),
+            ],
+            "o SIGKILL vem depois do prazo, e nunca antes do SIGTERM de toda a árvore"
+        );
+    }
+}

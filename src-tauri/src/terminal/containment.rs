@@ -145,6 +145,123 @@ impl Drop for ProcessGroup {
     }
 }
 
+/// Como o encerramento escalado fala com o sistema: mandar sinal, perguntar se o pid vive, ler a árvore e esperar o
+/// prazo. Em produção é `Reais`; os testes trocam por um falso, com relógio falso.
+#[cfg(unix)]
+pub(crate) trait Sinais {
+    fn enviar(&self, pid: u32, sinal: libc::c_int);
+    /// O pid ainda existe? Zumbi conta como vivo: um SIGKILL nele não faz mal.
+    fn vivo(&self, pid: u32) -> bool;
+    /// A raiz e os descendentes que ela tem agora, folhas primeiro e a raiz por último.
+    fn arvore(&self, raiz: u32) -> Vec<u32>;
+    fn esperar(&self, prazo: std::time::Duration);
+}
+
+#[cfg(unix)]
+pub(crate) struct Reais;
+
+#[cfg(unix)]
+impl Sinais for Reais {
+    fn enviar(&self, pid: u32, sinal: libc::c_int) {
+        unsafe {
+            libc::kill(pid as i32, sinal);
+        }
+    }
+    fn vivo(&self, pid: u32) -> bool {
+        // Só um teste de existência: EPERM (outro dono) conta como não existente aqui.
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    fn arvore(&self, raiz: u32) -> Vec<u32> {
+        let procs = unix_tree::snapshot();
+        let mut arvore = unix_tree::descendants(raiz, &procs);
+        arvore.reverse();
+        arvore.push(raiz);
+        arvore
+    }
+    fn esperar(&self, prazo: std::time::Duration) {
+        std::thread::sleep(prazo);
+    }
+}
+
+/// O encerramento escalado de um grupo (só para sessões ACP; as abas seguem com `kill_all`, que manda SIGHUP). Em
+/// duas fases: `ProcessGroup::encerrar_escalando` manda SIGTERM a toda a árvore agora, e `concluir` manda SIGKILL no
+/// que ainda vive depois do prazo. Quem chama conta o prazo, numa thread de fundo, para o fechamento não esperar.
+pub struct Escalada {
+    /// Os pids que receberam SIGTERM, folhas primeiro e a raiz por último. Vazio no Windows.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    arvore: Vec<u32>,
+    /// O cgroup do grupo (Linux): depois do prazo, `cgroup.kill` pega o que tiver escapado da árvore.
+    #[cfg_attr(not(unix), allow(dead_code))]
+    cgroup: Option<std::path::PathBuf>,
+}
+
+impl ProcessGroup {
+    /// SIGTERM agora a toda a árvore do grupo. Devolve o plano do SIGKILL.
+    #[cfg(unix)]
+    pub fn encerrar_escalando(&mut self) -> Escalada {
+        self.encerrar_escalando_com(&Reais)
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn encerrar_escalando_com<S: Sinais>(&mut self, sinais: &S) -> Escalada {
+        let (raiz, cgroup) = imp::tirar_alvos(&mut self.imp);
+        let arvore = raiz.map(|raiz| sinais.arvore(raiz)).unwrap_or_default();
+        for &pid in &arvore {
+            sinais.enviar(pid, libc::SIGTERM);
+        }
+        Escalada { arvore, cgroup }
+    }
+
+    /// No Windows o job já é o encerramento imediato: não há sinal intermediário.
+    #[cfg(not(unix))]
+    pub fn encerrar_escalando(&mut self) -> Escalada {
+        self.kill_all();
+        Escalada { arvore: Vec::new(), cgroup: None }
+    }
+}
+
+impl Escalada {
+    /// Depois do prazo. Devolve os pids que precisaram de SIGKILL.
+    #[cfg(unix)]
+    pub fn concluir(self, prazo: std::time::Duration) -> Vec<u32> {
+        self.concluir_com(&Reais, prazo)
+    }
+
+    #[cfg(not(unix))]
+    pub fn concluir(self, _prazo: std::time::Duration) -> Vec<u32> {
+        Vec::new()
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn concluir_com<S: Sinais>(self, sinais: &S, prazo: std::time::Duration) -> Vec<u32> {
+        sinais.esperar(prazo);
+        // O SIGTERM não se pode ignorar para sempre: quem ainda vive depois do prazo leva o SIGKILL, que não tem como
+        // ser ignorado. Só os pids da árvore: um pid que não estava nela não é tocado.
+        let mut a_forca = Vec::new();
+        for pid in self.arvore {
+            if sinais.vivo(pid) {
+                sinais.enviar(pid, libc::SIGKILL);
+                a_forca.push(pid);
+            }
+        }
+        if let Some(dir) = self.cgroup {
+            matar_cgroup(&dir);
+        }
+        a_forca
+    }
+}
+
+/// O cgroup do grupo depois do prazo: `cgroup.kill` e tira o diretório (só existe no Linux).
+#[cfg(target_os = "linux")]
+fn matar_cgroup(dir: &std::path::Path) {
+    let _ = std::fs::write(dir.join("cgroup.kill"), "1");
+    let _ = std::fs::remove_dir(dir);
+}
+
+#[cfg(not(target_os = "linux"))]
+#[cfg_attr(not(unix), allow(dead_code))]
+fn matar_cgroup(_dir: &std::path::Path) {}
+
 // ─────────────────────────────────────────────────────────────────────────────────────
 // Linux — cgroup v2
 // ─────────────────────────────────────────────────────────────────────────────────────
@@ -197,6 +314,11 @@ pub(crate) mod imp {
     #[cfg(test)]
     pub fn is_escape_proof(g: &Group) -> bool {
         g.dir.is_some()
+    }
+
+    /// Tira o líder e o cgroup do grupo, para o encerramento escalado (ver `Escalada`).
+    pub fn tirar_alvos(g: &mut Group) -> (Option<u32>, Option<PathBuf>) {
+        (g.leader.take(), g.dir.take())
     }
 
     pub fn kill_all(g: &mut Group) {
@@ -273,6 +395,11 @@ pub(crate) mod imp {
         false
     }
 
+    /// Tira o líder do grupo, para o encerramento escalado (ver `Escalada`). No macOS não há cgroup.
+    pub fn tirar_alvos(g: &mut Group) -> (Option<u32>, Option<std::path::PathBuf>) {
+        (g.leader.take(), None)
+    }
+
     pub fn kill_all(g: &mut Group) {
         if let Some(pid) = g.leader.take() {
             super::unix_tree::kill_tree(pid);
@@ -289,7 +416,7 @@ pub(crate) mod imp {
 pub(crate) mod unix_tree {
     /// `(pid, ppid)` de todos los procesos del sistema. Se usa `ps` y no `/proc` porque
     /// este camino existe sobre todo para macOS, que no tiene `/proc`.
-    fn snapshot() -> Vec<(u32, u32)> {
+    pub(crate) fn snapshot() -> Vec<(u32, u32)> {
         let out = match crate::util::spawn::hidden_command("ps").args(["-eo", "pid=,ppid="]).output() {
             Ok(o) => o,
             Err(_) => return Vec::new(),
