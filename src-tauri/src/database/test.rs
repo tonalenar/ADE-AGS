@@ -624,6 +624,28 @@ fn la_deduplicacion_conserva_titulo_custom_pin_y_skills() {
     assert!(skills.contains("git"));
 }
 
+#[test]
+fn a_deduplicacao_une_listas_de_skills_distintas() {
+    let conn = setup();
+    conn.execute(
+        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+         VALUES ('h0', 'ws', 'claude-code', 'Claude Code', 'claude', '/proj', 'a', NULL, '[{\"id\":\"s1\",\"name\":\"git\",\"scope\":\"tab\"}]', 100, 200)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+         VALUES ('h1', 'ws', 'claude-code', 'Claude Code', 'claude', '/proj', 'b', NULL, '[{\"id\":\"s2\",\"name\":\"review\",\"scope\":\"tab\"}]', 300, 400)",
+        [],
+    )
+    .unwrap();
+    dedupe_session_history(&conn).unwrap();
+    let skills: String = conn
+        .query_row("SELECT skills FROM session_history WHERE cwd='/proj'", [], |r| r.get(0))
+        .unwrap();
+    assert!(skills.contains("git") && skills.contains("review"), "{skills}");
+}
+
 // ── Guardar un workspace se lleva sus skills ─────────────────────
 
 fn attach_skill_row(conn: &Connection, id: &str, ws: &str, scope: &str, tab: Option<&str>) {
