@@ -13,6 +13,12 @@ import { SignInButton } from "@/features/forge/SignInButton";
 import { useRepoTarget } from "@/features/forge/useRepoTarget";
 import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { useDocumentVisible } from "@/shared/useDocumentVisible";
+import { createGeneration } from "@/shared/generation";
+import { AlertaToast } from "@/shared/ui/alerts";
+import { uiErrorText } from "@/shared/uiErrorText";
+
+const statusGen = createGeneration();
+const logGen = createGeneration();
 
 import { BranchMenu } from "./BranchMenu";
 import { CommitGraph } from "./CommitGraph";
@@ -130,8 +136,10 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
 
   const load = useCallback(async () => {
     if (!cwd) return;
+    const gen = statusGen.next();
     try {
       const next = await scmStatus(cwd);
+      if (!statusGen.isCurrent(gen)) return;
       setStatus(next);
       if (next) {
         const count = next.staged.length + next.unstaged.length + next.untracked.length + next.conflicted.length;
@@ -139,6 +147,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
         lastCount.current = count;
       }
     } catch (e) {
+      if (!statusGen.isCurrent(gen)) return;
       setError(isScmError(e) ? e : { kind: "git", message: String(e) });
     }
   }, [cwd]);
@@ -177,7 +186,11 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
   }, [shownRefs]);
 
   const loadLog = useCallback(() => {
-    if (root) scmLog(root, logLimit, shownRefs).then(setLog).catch(() => setLog([]));
+    if (!root) return;
+    const gen = logGen.next();
+    scmLog(root, logLimit, shownRefs)
+      .then((rows) => { if (logGen.isCurrent(gen)) setLog(rows); })
+      .catch(() => { if (logGen.isCurrent(gen)) setLog([]); });
   }, [root, logLimit, shownRefs]);
 
   useEffect(() => { if (logOpen) loadLog(); }, [logOpen, loadLog]);
@@ -606,7 +619,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
               {remote.name} · {remote.host ?? remote.url}
             </span>
             {remote.webUrl && (
-              <IconAction label={t("scm.openWeb")} onClick={() => openExternalUrl(remote.webUrl!).catch(console.error)}>
+              <IconAction label={t("scm.openWeb")} onClick={() => openExternalUrl(remote.webUrl!).catch((e) => AlertaToast(t("scm.openWeb"), uiErrorText(e), "error", 5000))}>
                 <ExternalIcon className="w-3 h-3" />
               </IconAction>
             )}
