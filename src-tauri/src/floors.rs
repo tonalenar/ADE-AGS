@@ -327,21 +327,21 @@ fn data_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
-fn file_path() -> Result<PathBuf, String> {
-    Ok(data_dir()?.join("floors.json"))
-}
-
-fn read_file() -> Vec<Floor> {
-    let Ok(path) = file_path() else { return Vec::new() };
-    std::fs::read_to_string(path)
+/// `floors.json` dentro da pasta dada. Ausente ou ilegível vira lista vazia, como antes.
+fn read_file_in(dir: &Path) -> Vec<Floor> {
+    std::fs::read_to_string(dir.join("floors.json"))
         .ok()
         .and_then(|raw| serde_json::from_str::<FloorsFile>(&raw).ok())
         .map(|f| f.floors)
         .unwrap_or_default()
 }
 
-fn write_file(floors: &[Floor]) -> Result<(), String> {
-    let path = file_path()?;
+fn read_file() -> Vec<Floor> {
+    data_dir().map(|dir| read_file_in(&dir)).unwrap_or_default()
+}
+
+fn write_file_in(dir: &Path, floors: &[Floor]) -> Result<(), String> {
+    let path = dir.join("floors.json");
     let tmp = path.with_extension("json.tmp");
     let body = serde_json::to_string_pretty(&FloorsFile { floors: floors.to_vec() }).map_err(|e| e.to_string())?;
     std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
@@ -515,9 +515,21 @@ pub fn create(cwd: &str, name: &str, start: Option<&str>) -> Result<Floor, Strin
 /// Como `create`, con las opciones del piso. Sobre una rama existente (`existing_branch`) el
 /// piso no crea rama: la origen (`start`) no tiene sentido ahí y se rechaza.
 pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, String> {
+    create_with_in(&data_dir()?, cwd, name, opts, &|| {})
+}
+
+/// Como `create_with`, com a pasta de dados injetada. `antes_do_io` roda antes de cada passo
+/// de git, com o mutex `LOCK` já solto: os testes usam para provar que o git não o retém.
+fn create_with_in(
+    dir: &Path,
+    cwd: &str,
+    name: &str,
+    opts: CreateOpts,
+    antes_do_io: &dyn Fn(),
+) -> Result<Floor, String> {
     let (ground, name, excluded) = {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let floors = read_file();
+        let floors = read_file_in(dir);
         let ground = ground_for(&floors, cwd);
         let name = check_name(&floors, &ground, name)?;
         // Se valida antes de crear nada: una pasta mala no deja un worktree a medias.
@@ -529,12 +541,13 @@ pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, Str
         (ground, name, excluded)
     };
 
-    let base = data_dir()?.join("floors");
+    let base = dir.join("floors");
     let existing = opts
         .existing_branch
         .as_deref()
         .map(str::trim)
         .filter(|b| !b.is_empty());
+    antes_do_io();
     let wt = match existing {
         Some(branch) => {
             if opts
@@ -553,8 +566,10 @@ pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, Str
         }
     };
 
+    antes_do_io();
     if let Err(error) = apply_exclusions(&wt.root, &excluded) {
         // El piso no llega a existir: se descarta lo recién creado y se devuelve el motivo.
+        antes_do_io();
         let undo = crate::runs::worktrees::remove_with_branch(
             Path::new(&ground),
             &wt,
@@ -603,18 +618,19 @@ pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, Str
     };
     let duplicate_floor = {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut floors = read_file();
+        let mut floors = read_file_in(dir);
         let duplicate = floors
             .iter()
             .any(|existing| existing.ground == floor.ground && existing.name == floor.name);
         if !duplicate {
             floors.push(floor.clone());
-            write_file(&floors)?;
+            write_file_in(dir, &floors)?;
         }
         duplicate
     };
     if duplicate_floor {
         let error = "já existe um andar com esse nome nesse projeto";
+        antes_do_io();
         let undo = crate::runs::worktrees::remove_with_branch(
             Path::new(&ground),
             &wt,
@@ -665,9 +681,20 @@ pub(crate) fn remove_with(
     skills_dir: &Path,
     keep_branch: bool,
 ) -> Result<Dropped, String> {
+    remove_with_in(&data_dir()?, id, skills_dir, keep_branch, &|| {})
+}
+
+/// Como `remove_with`, com a pasta de dados injetada e a sonda `antes_do_io` (ver `create_with_in`).
+fn remove_with_in(
+    dir: &Path,
+    id: &str,
+    skills_dir: &Path,
+    keep_branch: bool,
+    antes_do_io: &dyn Fn(),
+) -> Result<Dropped, String> {
     let floor = {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let floors = read_file();
+        let floors = read_file_in(dir);
         floors
             .iter()
             .find(|f| f.id == id)
@@ -694,6 +721,7 @@ pub(crate) fn remove_with(
         && floor
             .branch
             .starts_with(crate::runs::worktrees::BRANCH_PREFIX);
+    antes_do_io();
     let removed = crate::runs::worktrees::remove_with_branch(
         Path::new(&floor.ground),
         &wt,
@@ -704,7 +732,7 @@ pub(crate) fn remove_with(
 
     {
         let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let mut floors = read_file();
+        let mut floors = read_file_in(dir);
         let current = floors
             .iter()
             .find(|candidate| candidate.id == id)
@@ -713,7 +741,7 @@ pub(crate) fn remove_with(
             return Err("Esse andar foi alterado enquanto era removido.".into());
         }
         take(&mut floors, id)?;
-        write_file(&floors)?;
+        write_file_in(dir, &floors)?;
     }
     Ok(Dropped {
         name: floor.name,
@@ -1141,6 +1169,56 @@ mod test {
         assert!(wt.root.join("README.md").exists(), "la raíz sí");
 
         crate::runs::worktrees::remove(&repo, &wt, Path::new(""), Path::new("")).unwrap();
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+
+    /// Criar e remover um andar não seguram o mutex global `LOCK` durante o git. A pasta de
+    /// dados é injetada: o teste não toca `~/.ags`. A sonda confere `LOCK` na mesma thread,
+    /// no começo de cada passo de git (`try_lock` falha se o mutex estiver preso).
+    #[test]
+    fn andar_nao_segura_o_mutex_global_durante_o_git() {
+        use std::process::Command;
+
+        let scratch = std::env::temp_dir()
+            .join(format!("ags-floor-lock-{}", uuid::Uuid::new_v4().simple()));
+        let repo = scratch.join("repo");
+        let data = scratch.join("dados");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        };
+        git(&["init", "-q", "-b", "main"]);
+        git(&["config", "user.email", "teste@example.com"]);
+        git(&["config", "user.name", "teste"]);
+        std::fs::write(repo.join("a.txt"), "a\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "base"]);
+
+        let passos = std::cell::Cell::new(0);
+        let sonda = || {
+            assert!(LOCK.try_lock().is_ok(), "git do andar rodou com o mutex global preso");
+            passos.set(passos.get() + 1);
+        };
+        let floor = create_with_in(
+            &data,
+            &repo.to_string_lossy(),
+            "andar-teste",
+            CreateOpts::default(),
+            &sonda,
+        )
+        .expect("criar o andar");
+        let depois_de_criar = passos.get();
+        assert!(depois_de_criar >= 1, "a sonda não foi alcançada ao criar");
+
+        let skills = scratch.join("skills");
+        let dropped = remove_with_in(&data, &floor.id, &skills, false, &sonda)
+            .expect("remover o andar");
+        assert!(passos.get() > depois_de_criar, "a sonda não foi alcançada ao remover");
+        assert_eq!(dropped.name, "andar-teste");
+        assert!(read_file_in(&data).is_empty(), "o andar removido continuou na lista");
+
         let _ = std::fs::remove_dir_all(scratch);
     }
 }
