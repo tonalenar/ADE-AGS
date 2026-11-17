@@ -362,6 +362,11 @@ export async function flushSave(key: string): Promise<void> {
   }
 }
 
+/** Grava os canvas com debounce pendente antes de a janela fechar. */
+export async function flushCanvasSavesForClose(): Promise<void> {
+  await Promise.all([...timers.keys()].map((key) => flushSave(key)));
+}
+
 // ── Sincronización con las tabs ─────────────────────────────────────
 
 /** Pone cada canvas de esta ventana al día con sus tabs abiertas. */
