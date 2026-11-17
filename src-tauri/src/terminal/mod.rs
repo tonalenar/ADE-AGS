@@ -32,6 +32,9 @@ pub use session::SESSION_ENV;
 pub(crate) use session::ancestry_required;
 pub(crate) use session::authorize_actor;
 pub(crate) use session::parent_pid;
+pub(crate) use session::ProcessIdentity;
+pub(crate) use session::descends_from_identity;
+pub(crate) use session::process_start_time;
 pub use session::{
     Caller, Principal, authorize_task, classify_caller, principal_of, register_task_process,
     release_task_process,

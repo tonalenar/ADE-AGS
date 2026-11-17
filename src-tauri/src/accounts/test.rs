@@ -315,16 +315,39 @@ fn helper_autoriza_sessoes_vivas_renova_e_revoga_no_fechamento() {
     let conta = format!("conta-{}", uuid::Uuid::new_v4());
     let grant_a = broker.issue_grant(&conta);
     let grant_b = broker.issue_grant(&conta);
-    broker.bind_grant(&grant_a, 42).unwrap();
-    broker.bind_grant(&grant_b, 52).unwrap();
+    broker
+        .bind_grant(
+            &grant_a,
+            crate::terminal::ProcessIdentity {
+                pid: 42,
+                start_time: Some(1_000),
+            },
+        )
+        .unwrap();
+    broker
+        .bind_grant(
+            &grant_b,
+            crate::terminal::ProcessIdentity {
+                pid: 52,
+                start_time: Some(2_000),
+            },
+        )
+        .unwrap();
     let parent = |pid| match pid {
         43 => Some(42),
         53 => Some(52),
         _ => None,
     };
+    let start_of = |pid| match pid {
+        42 => Some(1_000),
+        43 => Some(1_001),
+        52 => Some(2_000),
+        53 => Some(2_001),
+        _ => None,
+    };
     let load = |id: &str| (id == conta).then(|| "sk-teste-nao-real".to_string());
 
-    let recusado = broker.redeem_with_account(&conta, 99, parent, load);
+    let recusado = broker.redeem_with_account(&conta, 99, parent, start_of, load);
     assert!(matches!(
         recusado,
         Err(super::broker::BrokerError::Forbidden)
@@ -332,7 +355,7 @@ fn helper_autoriza_sessoes_vivas_renova_e_revoga_no_fechamento() {
     for _ in 0..2 {
         assert_eq!(
             broker
-                .redeem_with_account(&conta, 43, parent, load)
+                .redeem_with_account(&conta, 43, parent, start_of, load)
                 .unwrap(),
             "sk-teste-nao-real",
             "o helper pode renovar enquanto a sessão autorizada vive"
@@ -342,13 +365,13 @@ fn helper_autoriza_sessoes_vivas_renova_e_revoga_no_fechamento() {
     assert!(broker.has_account_grant(&conta), "a sessão B não revoga A");
     assert_eq!(
         broker
-            .redeem_with_account(&conta, 43, parent, load)
+            .redeem_with_account(&conta, 43, parent, start_of, load)
             .unwrap(),
         "sk-teste-nao-real"
     );
     assert!(
         broker
-            .redeem_with_account(&conta, 53, parent, load)
+            .redeem_with_account(&conta, 53, parent, start_of, load)
             .is_err()
     );
 
@@ -356,10 +379,56 @@ fn helper_autoriza_sessoes_vivas_renova_e_revoga_no_fechamento() {
     assert!(!broker.has_account_grant(&conta));
     assert!(
         broker
-            .redeem_with_account(&conta, 43, parent, load)
+            .redeem_with_account(&conta, 43, parent, start_of, load)
             .is_err(),
         "uma sessão encerrada perde o acesso"
     );
+}
+
+#[test]
+fn redeem_de_pid_com_inicio_adulterado_e_recusado() {
+    let broker = super::broker::Broker::default();
+    let conta = format!("conta-{}", uuid::Uuid::new_v4());
+    let grant = broker.issue_grant(&conta);
+    broker
+        .bind_grant(
+            &grant,
+            crate::terminal::ProcessIdentity {
+                pid: 42,
+                start_time: Some(1_000),
+            },
+        )
+        .unwrap();
+    let parent = |pid| (pid == 43).then_some(42);
+    let start_adulterado = |pid| match pid {
+        42 => Some(9_999),
+        43 => Some(1_001),
+        _ => None,
+    };
+    let load = |id: &str| (id == conta).then(|| "sk-teste-nao-real".to_string());
+    let recusado = broker.redeem_with_account(&conta, 43, parent, start_adulterado, load);
+    assert!(
+        matches!(recusado, Err(super::broker::BrokerError::Forbidden)),
+        "um PID reutilizado com outro horário de início não prova a sessão do broker: {recusado:?}"
+    );
+}
+
+#[test]
+fn bind_sem_horario_de_inicio_e_recusado_com_erro_distinto() {
+    let broker = super::broker::Broker::default();
+    let conta = format!("conta-{}", uuid::Uuid::new_v4());
+    let grant = broker.issue_grant(&conta);
+    let err = broker
+        .bind_grant(
+            &grant,
+            crate::terminal::ProcessIdentity {
+                pid: 42,
+                start_time: None,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(err, super::broker::BrokerError::UnknownStartTime);
+    assert!(err.message().contains("horário de início"));
 }
 
 #[test]

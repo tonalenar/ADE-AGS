@@ -4,14 +4,13 @@ use std::collections::HashMap;
 use std::sync::{Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-const MAX_ANCESTORS: usize = 64;
-
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum BrokerError {
     Forbidden,
     GrantNotReady,
     MissingCredential,
     AccountMismatch,
+    UnknownStartTime,
 }
 
 impl BrokerError {
@@ -25,13 +24,16 @@ impl BrokerError {
             Self::AccountMismatch => {
                 "A conta ou o provedor não corresponde à credencial solicitada."
             }
+            Self::UnknownStartTime => {
+                "Não foi possível ler o horário de início do processo do agente. A credencial não foi autorizada."
+            }
         }
     }
 }
 
 struct Grant {
     account_id: String,
-    agent_pid: u32,
+    agent: Option<crate::terminal::ProcessIdentity>,
 }
 
 #[derive(Default)]
@@ -50,19 +52,30 @@ impl Broker {
                 grant_id.clone(),
                 Grant {
                     account_id: account_id.to_string(),
-                    agent_pid: 0,
+                    agent: None,
                 },
             );
         grant_id
     }
 
-    pub(crate) fn bind_grant(&self, grant_id: &str, agent_pid: u32) -> Result<(), BrokerError> {
-        if agent_pid == 0 {
+    pub(crate) fn bind_grant(
+        &self,
+        grant_id: &str,
+        agent: crate::terminal::ProcessIdentity,
+    ) -> Result<(), BrokerError> {
+        if agent.pid == 0 {
             return Err(BrokerError::Forbidden);
+        }
+        if agent.start_time.is_none() {
+            eprintln!(
+                "[ade-ags] broker: PID {} sem horário de início; a concessão foi recusada",
+                agent.pid
+            );
+            return Err(BrokerError::UnknownStartTime);
         }
         let mut grants = self.grants.lock().unwrap_or_else(|e| e.into_inner());
         let item = grants.get_mut(grant_id).ok_or(BrokerError::Forbidden)?;
-        item.agent_pid = agent_pid;
+        item.agent = Some(agent);
         self.ready.notify_all();
         Ok(())
     }
@@ -96,6 +109,7 @@ impl Broker {
         account_id: &str,
         caller_pid: u32,
         parent: impl FnMut(u32) -> Option<u32> + Copy,
+        start_of: impl FnMut(u32) -> Option<u64> + Copy,
         load_key: impl FnOnce(&str) -> Option<String>,
     ) -> Result<String, BrokerError> {
         let started = Instant::now();
@@ -105,8 +119,14 @@ impl Broker {
                 .iter()
                 .find(|(_, grant)| {
                     grant.account_id == account_id
-                        && grant.agent_pid > 0
-                        && descends_from(caller_pid, grant.agent_pid, parent)
+                        && grant.agent.is_some_and(|agent| {
+                            crate::terminal::descends_from_identity(
+                                caller_pid,
+                                agent,
+                                parent,
+                                start_of,
+                            )
+                        })
                 })
                 .map(|(id, _)| id.clone())
             {
@@ -114,7 +134,7 @@ impl Broker {
             }
             if !grants
                 .values()
-                .any(|grant| grant.account_id == account_id && grant.agent_pid == 0)
+                .any(|grant| grant.account_id == account_id && grant.agent.is_none())
             {
                 return Err(BrokerError::Forbidden);
             }
@@ -141,7 +161,15 @@ impl Broker {
             .unwrap_or_else(|e| e.into_inner())
             .get(&grant_id)
             .is_some_and(|grant| {
-                grant.account_id == account_id && descends_from(caller_pid, grant.agent_pid, parent)
+                grant.account_id == account_id
+                    && grant.agent.is_some_and(|agent| {
+                        crate::terminal::descends_from_identity(
+                            caller_pid,
+                            agent,
+                            parent,
+                            start_of,
+                        )
+                    })
             });
         if !still_authorized {
             wipe_secret(&mut key);
@@ -149,26 +177,6 @@ impl Broker {
         }
         Ok(key)
     }
-}
-
-fn descends_from(caller: u32, agent: u32, mut parent: impl FnMut(u32) -> Option<u32>) -> bool {
-    if caller == 0 || agent == 0 {
-        return false;
-    }
-    let mut current = caller;
-    for _ in 0..MAX_ANCESTORS {
-        if current == agent {
-            return true;
-        }
-        if current <= 1 {
-            return false;
-        }
-        match parent(current) {
-            Some(next) if next != 0 && next != current => current = next,
-            _ => return false,
-        }
-    }
-    false
 }
 
 pub(crate) struct PendingGrant(Option<String>);
@@ -183,7 +191,7 @@ impl PendingGrant {
     }
 
     pub(crate) fn bind(&self, agent_pid: u32) -> Result<(), BrokerError> {
-        global().bind_grant(self.id(), agent_pid)
+        global().bind_grant(self.id(), crate::terminal::ProcessIdentity::current(agent_pid))
     }
 
     pub(crate) fn commit(mut self) -> String {
@@ -235,6 +243,7 @@ pub(crate) fn redeem(
         account_id,
         caller_pid,
         crate::terminal::parent_pid,
+        crate::terminal::process_start_time,
         crate::accounts::secrets::load,
     )
 }
