@@ -41,7 +41,10 @@ pub(super) const SKILL_COLUMNS: &str = "id, name, description, categories, compa
 /// joinean `skills` con `tabs`/`windows`, donde `id`/`name` serían ambiguos.
 pub(super) const SKILL_COLUMNS_QUALIFIED: &str = "s.id, s.name, s.description, s.categories, s.compatible_agents, s.compatible_versions, s.version, s.author, s.license, s.homepage, s.source_path, s.installed_at, s.updated_at, s.registry_id, s.registry_name, s.origin_skill_id";
 
-pub(super) fn fetch_usage_for_skill(conn: &rusqlite::Connection, skill_id: &str) -> Result<Vec<SkillUsageEntry>, String> {
+pub(super) fn fetch_usage_for_skill(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+) -> Result<Vec<SkillUsageEntry>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT ps.workspace_id, w.name, ps.scope, ps.tab_id, t.title, ps.cwd
@@ -70,8 +73,7 @@ pub(super) fn fetch_usage_for_skill(conn: &rusqlite::Connection, skill_id: &str)
     Ok(rows)
 }
 
-#[tauri::command]
-pub fn list_skills(db: tauri::State<DbConnection>) -> Result<Vec<SkillWithUsage>, String> {
+pub(crate) fn list_skills_now(db: &DbConnection) -> Result<Vec<SkillWithUsage>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let query = format!("SELECT {SKILL_COLUMNS} FROM skills ORDER BY name ASC");
     let mut stmt = conn.prepare(&query).map_err(|e| e.to_string())?;
@@ -90,7 +92,19 @@ pub fn list_skills(db: tauri::State<DbConnection>) -> Result<Vec<SkillWithUsage>
 }
 
 #[tauri::command]
-pub fn get_skill_detail(skill_id: String, db: tauri::State<DbConnection>) -> Result<SkillDetail, String> {
+pub async fn list_skills(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<SkillWithUsage>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || list_skills_now(&db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn get_skill_detail_now(
+    skill_id: String,
+    db: &DbConnection,
+) -> Result<SkillDetail, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let query = format!("SELECT {SKILL_COLUMNS} FROM skills WHERE id = ?1");
     let skill = conn
@@ -105,13 +119,63 @@ pub fn get_skill_detail(skill_id: String, db: tauri::State<DbConnection>) -> Res
 }
 
 #[tauri::command]
-pub fn update_skill_content(
+pub async fn get_skill_detail(
+    skill_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<SkillDetail, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || get_skill_detail_now(skill_id, &db))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+pub(crate) fn update_skill_content_now(
     skill_id: String,
     content: String,
-    db: tauri::State<DbConnection>,
+    db: &DbConnection,
 ) -> Result<(), String> {
+    update_skill_content_now_with(skill_id, content, db, &|| {})
+}
+
+/// Lê o caminho sob o mutex, solta, grava `SKILL.md` de forma atômica e só então atualiza o SQL.
+pub(crate) fn update_skill_content_now_with(
+    skill_id: String,
+    content: String,
+    db: &DbConnection,
+    antes_da_escrita: &dyn Fn(),
+) -> Result<(), String> {
+    let source_path: String = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.query_row(
+            "SELECT source_path FROM skills WHERE id = ?1",
+            [&skill_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?
+    };
+    antes_da_escrita();
+    write_skill_md_atomic(Path::new(&source_path), &content)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    update_skill_content_inner(&conn, &skill_id, &content)
+    persist_skill_metadata(&conn, &skill_id, &content)
+}
+
+fn write_skill_md_atomic(dir: &Path, content: &str) -> Result<(), String> {
+    let dest = dir.join("SKILL.md");
+    let tmp = dir.join("SKILL.md.tmp");
+    std::fs::write(&tmp, content).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &dest).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_skill_content(
+    skill_id: String,
+    content: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || update_skill_content_now(skill_id, content, &db))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// El guardado en sí, sobre una conexión ya tomada — lo reusa `authoring::fork_skill`,
@@ -122,11 +186,22 @@ pub(super) fn update_skill_content_inner(
     content: &str,
 ) -> Result<(), String> {
     let source_path: String = conn
-        .query_row("SELECT source_path FROM skills WHERE id = ?1", [skill_id], |r| r.get(0))
+        .query_row(
+            "SELECT source_path FROM skills WHERE id = ?1",
+            [skill_id],
+            |r| r.get(0),
+        )
         .map_err(|e| e.to_string())?;
 
-    std::fs::write(Path::new(&source_path).join("SKILL.md"), content).map_err(|e| e.to_string())?;
+    write_skill_md_atomic(Path::new(&source_path), content)?;
+    persist_skill_metadata(conn, skill_id, content)
+}
 
+fn persist_skill_metadata(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+    content: &str,
+) -> Result<(), String> {
     let meta = parse_frontmatter(content);
     let now = now_ts();
     conn.execute(
@@ -156,10 +231,15 @@ pub(super) fn update_skill_content_inner(
 /// Todas las tabs (cwd, agent_id) que deberían tener un symlink físico de `skill_id`,
 /// resolviendo attachments de scope='tab' (una tab puntual) y scope='workspace'
 /// (todas las tabs del workspace en ese momento) a filas concretas de `tabs`.
-pub(super) fn collect_linked_tabs(conn: &rusqlite::Connection, skill_id: &str) -> Result<Vec<(String, String)>, String> {
+pub(super) fn collect_linked_tabs(
+    conn: &rusqlite::Connection,
+    skill_id: &str,
+) -> Result<Vec<(String, String)>, String> {
     let attachments: Vec<(Option<String>, String, String, String)> = {
         let mut stmt = conn
-            .prepare("SELECT tab_id, scope, workspace_id, cwd FROM project_skills WHERE skill_id = ?1")
+            .prepare(
+                "SELECT tab_id, scope, workspace_id, cwd FROM project_skills WHERE skill_id = ?1",
+            )
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([skill_id], |row| {
@@ -174,9 +254,11 @@ pub(super) fn collect_linked_tabs(conn: &rusqlite::Connection, skill_id: &str) -
         if scope == "tab" {
             if let Some(tab_id) = tab_id {
                 let row: Option<(String, String)> = conn
-                    .query_row("SELECT cwd, agent_id FROM tabs WHERE id = ?1", [&tab_id], |r| {
-                        Ok((r.get(0)?, r.get(1)?))
-                    })
+                    .query_row(
+                        "SELECT cwd, agent_id FROM tabs WHERE id = ?1",
+                        [&tab_id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
                     .optional()
                     .map_err(|e| e.to_string())?;
                 if let Some(pair) = row {
@@ -212,22 +294,28 @@ pub(super) fn collect_linked_tabs(conn: &rusqlite::Connection, skill_id: &str) -
 /// borrar el repo borra sus skills, y eso no puede ser una sorpresa.
 
 #[tauri::command]
-pub fn registry_skills(
+pub async fn registry_skills(
     registry_id: String,
-    db: tauri::State<DbConnection>,
+    db: tauri::State<'_, DbConnection>,
 ) -> Result<Vec<SkillInfo>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let mut stmt = conn
-        .prepare(&format!(
-            "SELECT {SKILL_COLUMNS} FROM skills WHERE registry_id = ?1 ORDER BY name COLLATE NOCASE"
-        ))
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([&registry_id], row_to_skill_info)
-        .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(rows)
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT {SKILL_COLUMNS} FROM skills WHERE registry_id = ?1 ORDER BY name COLLATE NOCASE"
+                ))
+                .map_err(|e| e.to_string())?;
+            let rows = stmt
+                .query_map([&registry_id], row_to_skill_info)
+                .map_err(|e| e.to_string())?
+                .filter_map(|r| r.ok())
+                .collect();
+            Ok(rows)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// El SKILL.md de una copia instalada, tal cual está en disco.
@@ -247,7 +335,11 @@ pub(super) fn skill_content(source_path: &str) -> Result<String, String> {
 /// Corre al refrescar un repositorio: recién ahí hay cache contra el que comparar.
 pub(crate) fn link_orphan_installs(conn: &rusqlite::Connection, registry_id: &str) {
     let cache: Option<String> = conn
-        .query_row("SELECT cache_json FROM registries WHERE id = ?1", [registry_id], |r| r.get(0))
+        .query_row(
+            "SELECT cache_json FROM registries WHERE id = ?1",
+            [registry_id],
+            |r| r.get(0),
+        )
         .optional()
         .ok()
         .flatten();
@@ -285,8 +377,12 @@ pub(crate) fn link_orphan_installs(conn: &rusqlite::Connection, registry_id: &st
     };
 
     for (skill_id, name) in orphans {
-        let mut matches = entries.iter().filter(|e| e.name.eq_ignore_ascii_case(&name));
-        let Some(entry) = matches.next() else { continue };
+        let mut matches = entries
+            .iter()
+            .filter(|e| e.name.eq_ignore_ascii_case(&name));
+        let Some(entry) = matches.next() else {
+            continue;
+        };
         if matches.next().is_some() {
             // Ambigua: hay dos o más entradas con ese nombre en el repositorio.
             continue;

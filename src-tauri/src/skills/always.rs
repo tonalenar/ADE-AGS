@@ -17,12 +17,14 @@ use super::types::SkillInfo;
 pub(crate) const KEY: &str = "skills.always_on";
 
 pub(super) fn ids(conn: &rusqlite::Connection) -> Vec<String> {
-    conn.query_row("SELECT value FROM settings WHERE key = ?1", [KEY], |r| r.get::<_, String>(0))
-        .optional()
-        .ok()
-        .flatten()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+    conn.query_row("SELECT value FROM settings WHERE key = ?1", [KEY], |r| {
+        r.get::<_, String>(0)
+    })
+    .optional()
+    .ok()
+    .flatten()
+    .and_then(|raw| serde_json::from_str(&raw).ok())
+    .unwrap_or_default()
 }
 
 fn write(conn: &rusqlite::Connection, ids: &[String]) -> Result<(), String> {
@@ -70,7 +72,9 @@ pub(super) fn skills_for(conn: &rusqlite::Connection, cwd: &str, agent_id: &str)
     if !open {
         return vec![];
     }
-    list.iter().filter_map(|id| fetch_skill_row(conn, id).ok()).collect()
+    list.iter()
+        .filter_map(|id| fetch_skill_row(conn, id).ok())
+        .collect()
 }
 
 /// (cwd, agente) de todas as abas abertas e conversas ativas: ligar ou desligar mexe em todas as pastas de uma vez.
@@ -81,7 +85,9 @@ fn open_link_dirs(conn: &rusqlite::Connection) -> Vec<(String, String)> {
     ) else {
         return vec![];
     };
-    let Ok(rows) = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))) else { return vec![] };
+    let Ok(rows) = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?))) else {
+        return vec![];
+    };
     rows.filter_map(|r| r.ok()).collect()
 }
 
@@ -99,23 +105,39 @@ pub(super) fn enable_on_install(db: &DbConnection, skill_id: &str) -> Result<(),
 }
 
 #[tauri::command]
-pub fn list_always_on_skills(db: tauri::State<DbConnection>) -> Result<Vec<String>, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    Ok(ids(&conn))
+pub async fn list_always_on_skills(
+    db: tauri::State<'_, DbConnection>,
+) -> Result<Vec<String>, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        Ok(ids(&conn))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn set_skill_always_on(skill_id: String, on: bool, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let pairs = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        if on {
-            // Só uma skill instalada pode ser ligada: um id inventado não entra na lista.
-            fetch_skill_row(&conn, &skill_id)?;
+pub async fn set_skill_always_on(
+    skill_id: String,
+    on: bool,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let pairs = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            if on {
+                // Só uma skill instalada pode ser ligada: um id inventado não entra na lista.
+                fetch_skill_row(&conn, &skill_id)?;
+            }
+            set(&conn, &skill_id, on)?.then(|| open_link_dirs(&conn))
+        };
+        if let Some(pairs) = pairs {
+            reconcile_link_dirs_db(&db, &pairs);
         }
-        set(&conn, &skill_id, on)?.then(|| open_link_dirs(&conn))
-    };
-    if let Some(pairs) = pairs {
-        reconcile_link_dirs_db(&db, &pairs);
-    }
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
