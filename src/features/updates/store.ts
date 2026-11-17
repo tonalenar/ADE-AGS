@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 
 import { exitAllWithSave } from "@/app/closeWithSave";
 
+import { uiErrorText } from "@/shared/uiErrorText";
+
 import { updateCheck, updateInstall } from "./ipc";
 import type { UpdateInfo, UpdateProgress } from "./types";
 
@@ -44,7 +46,7 @@ export const useUpdatesStore = create<UpdatesState>()((set, get) => ({
       const show = info.newer && (manual || skipped() !== info.latest);
       set({ info, phase: "idle", open: show || get().open });
     } catch (e) {
-      set({ phase: manual ? "error" : "idle", error: manual ? String(e) : null });
+      set({ phase: manual ? "error" : "idle", error: manual ? uiErrorText(e) : null });
     }
   },
 
@@ -56,7 +58,7 @@ export const useUpdatesStore = create<UpdatesState>()((set, get) => ({
       await updateInstall();
       set({ phase: "installed" });
     } catch (e) {
-      set({ phase: "error", error: String(e) });
+      set({ phase: "error", error: uiErrorText(e) });
     } finally {
       off?.();
     }
