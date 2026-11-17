@@ -205,6 +205,8 @@ impl RepoSync {
                 self.inner.running.store(false, Ordering::SeqCst);
                 let motivo = erro.to_string();
                 *self.inner.worker_error.lock().unwrap_or_else(|err| err.into_inner()) = Some(motivo.clone());
+                drop(worker);
+                self.emit(&self.status(""));
                 Err(motivo)
             }
         }
@@ -1592,6 +1594,23 @@ mod tests {
         let status = sync.status("w");
         assert_eq!(status.phase, "failed", "{status:?}");
         assert!(status.error.as_deref().unwrap_or_default().contains("sem recurso"), "{status:?}");
+    }
+
+    /// O `install` avisa a UI pelo mesmo evento do toast: spawn falho também emite `cc-memory-repo-sync`.
+    #[test]
+    fn spawn_falho_emite_cc_memory_repo_sync() {
+        let sync = RepoSync::new(fixture(), std::env::temp_dir().join(format!("ade-sync-{}", uuid::Uuid::new_v4())));
+        let (tx, rx) = std::sync::mpsc::channel();
+        sync.set_notifier(Arc::new(move |status: &RepoSyncStatus| {
+            let _ = tx.send(status.clone());
+        }));
+        let _ = sync.spawn_com(|_| Err(std::io::Error::other("sem recurso")));
+        let status = rx.try_recv().expect("cc-memory-repo-sync não saiu na falha do spawn");
+        assert_eq!(status.phase, "failed", "{status:?}");
+        assert!(
+            status.error.as_deref().unwrap_or_default().contains("sem recurso"),
+            "{status:?}"
+        );
     }
 
     /// Com o worker caído, o status mostra o erro e mantém a fila real: a pendência não some da tela.
