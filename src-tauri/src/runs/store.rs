@@ -647,17 +647,6 @@ pub fn update_run_limits(
     Ok(())
 }
 
-/// Cancela una tarea que todavía esperaba turno.
-pub fn cancel_one_pending(conn: &Connection, task_id: &str) -> Result<bool, String> {
-    let n = conn
-        .execute(
-            "UPDATE tasks SET status = ?1, ended_at = ?2 WHERE id = ?3 AND status = ?4",
-            rusqlite::params![status::CANCELLED, now_ts(), task_id, status::PENDING],
-        )
-        .map_err(|e| e.to_string())?;
-    Ok(n > 0)
-}
-
 pub fn set_run_objective(conn: &Connection, run_id: &str, objective: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE runs SET objective = ?1 WHERE id = ?2",
@@ -1176,7 +1165,9 @@ pub fn fact_body_chunk(
 
 // ── Cerrar ──────────────────────────────────────────────────────
 
-/// La tarea corre en un worktree: su `cwd` pasa a ser el de adentro.
+/// La tarea corre en un worktree: su `cwd` pasa a ser el de adentro. Só para teste; a isolação
+/// de produção grava com `set_worktree_if_status`.
+#[cfg(test)]
 pub fn set_worktree(
     conn: &Connection,
     task_id: &str,
@@ -1398,6 +1389,8 @@ pub(crate) fn take_recoverable_logs() -> Vec<String> {
 
 /// Grava o fim. Se a escrita falha, o erro fica no log e a tarefa aberta passa a
 /// `failed` com essa mensagem, em vez de seguir `running` sem rastro.
+/// Só para teste: em produção o gate completo tem que sair do lock (ver `persist_finish_db`).
+#[cfg(test)]
 pub fn persist_finish(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> TaskOutcome {
     persist_finish_inner(conn, task_id, outcome, None)
 }
@@ -1442,15 +1435,6 @@ fn persist_finish_inner(
 /// correr, y sin eso se quedaría en `ready` para siempre.
 pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
     finish_task_with_gate(conn, task_id, outcome, None, &|| {})
-}
-
-pub fn finish_task_with_cached_gate(
-    conn: &Connection,
-    task_id: &str,
-    outcome: &TaskOutcome,
-    cache_green: bool,
-) -> Result<(), String> {
-    finish_task_with_gate(conn, task_id, outcome, Some(cache_green), &|| {})
 }
 
 /// Grava o fim da tarefa a partir do banco. Quem chama não pode ter o lock: o gate completo

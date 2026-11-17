@@ -1376,17 +1376,6 @@ pub(super) fn opencode_invocation() -> (&'static str, &'static str) {
 /// cada agente. A diferencia de `get_session_title`, acá interesa el archivo en sí (para
 /// leer la conversación entera), y se acepta el "más reciente del cwd" cuando no hay
 /// `session_id`: en un export, mostrar la sesión más probable es mejor que no mostrar nada.
-pub fn session_file_for(
-    agent_id: &str,
-    cwd: &str,
-    session_id: Option<&str>,
-    // Directorio de la cuenta con la que corrió la sesión; `None` = la del sistema.
-    profile: Option<&Path>,
-    db: &tauri::State<crate::database::DbConnection>,
-) -> Option<PathBuf> {
-    session_file_for_db(agent_id, cwd, session_id, profile, db.inner())
-}
-
 /// Resolución por ID que también pueden usar los trabajos en segundo plano.
 pub(crate) fn session_file_for_db(
     agent_id: &str,
