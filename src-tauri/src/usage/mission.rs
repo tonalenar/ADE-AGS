@@ -17,7 +17,7 @@ use crate::database::DbConnection;
 
 use super::claude::{parse_ts, UsageRecord};
 use super::pricing;
-use super::terminal::{mission_tokens_for_conn, MissionTabTokens};
+use super::terminal::{mission_tokens_for_conn, mission_tokens_for_db, MissionTabTokens};
 
 const USAGE_MARK: &str = "\"output_tokens\"";
 
@@ -355,10 +355,7 @@ pub async fn mission_tokens(
     db: tauri::State<'_, DbConnection>,
 ) -> Result<MissionTokens, String> {
     let db = db.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        mission_tokens_for_conn(&conn, &mission_id)
-    })
+    tauri::async_runtime::spawn_blocking(move || mission_tokens_for_db(&db, &mission_id))
     .await
     .map_err(|e| e.to_string())?
 }

@@ -638,14 +638,24 @@ pub(super) fn mission_startcheck(app: &AppHandle, args: &Value) -> Result<Value,
 pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let db = db(app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let mut efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
-    efficiency["tokens"] = json!(crate::usage::mission_tokens_for_conn(&conn, &id)?);
-    efficiency["memoryContext"] = crate::memory::context_metrics(&conn, None, Some(&id))?;
-    let status = crate::usage::budget_for_conn(&conn, &id)?;
-    if let Some(message) = crate::usage::claim_warning(&conn, &id, &status)? {
+    let (mut efficiency, memory_context) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
+        let memory_context = crate::memory::context_metrics(&conn, None, Some(&id))?;
+        (efficiency, memory_context)
+    };
+    // Os transcripts são lidos uma vez e sem o mutex do banco preso; o orçamento reusa os tokens.
+    let tokens = crate::usage::mission_tokens_for_db(&db, &id)?;
+    let status = crate::usage::budget_status_from_tokens(&db, &id, &tokens)?;
+    let warning = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::usage::claim_warning(&conn, &id, &status)?
+    };
+    if let Some(message) = warning {
         crate::usage::warn_lead(app, &id, &message);
     }
+    efficiency["tokens"] = json!(tokens);
+    efficiency["memoryContext"] = memory_context;
     efficiency["budget"] = json!(status);
     Ok(efficiency)
 }
