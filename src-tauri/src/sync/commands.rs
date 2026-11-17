@@ -175,25 +175,25 @@ pub async fn sync_setup(
         .await
         .map_err(|e| e.to_string())??;
 
-    let conn = db(&app)?;
-    let conn = conn.lock().map_err(|e| e.to_string())?;
-    set(&conn, "sync.account_id", &account_id)?;
-    set(&conn, "sync.repo", &repo.full_name)?;
-    set(&conn, "sync.url", &repo.clone_url)?;
-    set(&conn, "sync.web_url", &repo.web_url)?;
-    for key in ["sync.base", "sync.pending", "sync.last"] {
-        del(&conn, key);
-    }
-    Ok(status(&conn))
+    let result = crate::database::blocking_db(&db(&app)?, move |conn| {
+        set(conn, "sync.account_id", &account_id)?;
+        set(conn, "sync.repo", &repo.full_name)?;
+        set(conn, "sync.url", &repo.clone_url)?;
+        set(conn, "sync.web_url", &repo.web_url)?;
+        for key in ["sync.base", "sync.pending", "sync.last"] {
+            del(conn, key);
+        }
+        Ok(status(conn))
+    })
+    .await?;
+    Ok(result)
 }
 
 /// Deja de sincronizar. El repo queda como está en la cuenta; el clon local se borra.
 #[tauri::command]
 pub async fn sync_disconnect(app: AppHandle) -> Result<(), String> {
     let _guard = LOCK.lock().await;
-    {
-        let conn = db(&app)?;
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+    crate::database::blocking_db(&db(&app)?, |conn| {
         for key in [
             "sync.account_id",
             "sync.repo",
@@ -203,9 +203,11 @@ pub async fn sync_disconnect(app: AppHandle) -> Result<(), String> {
             "sync.pending",
             "sync.last",
         ] {
-            del(&conn, key);
+            del(conn, key);
         }
-    }
+        Ok(())
+    })
+    .await?;
     let _ = std::fs::remove_dir_all(data_dir(&app)?.join("sync"));
     Ok(())
 }
@@ -229,14 +231,14 @@ pub async fn sync_now(app: AppHandle, prefs: Map<String, Value>) -> Result<SyncR
     let db = db(&app)?;
     let data = data_dir(&app)?;
     let dir = repo::repo_dir(&data);
-    let (account_id, url, base_rev, pending) = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        let (Some(account), Some(url)) = (get(&conn, "sync.account_id"), get(&conn, "sync.url"))
+    let (account_id, url, base_rev, pending) = crate::database::blocking_db(&db, |conn| {
+        let (Some(account), Some(url)) = (get(conn, "sync.account_id"), get(conn, "sync.url"))
         else {
             return Err("A sincronização não está configurada".into());
         };
-        (account, url, get(&conn, "sync.base"), load_pending(&conn))
-    };
+        Ok((account, url, get(conn, "sync.base"), load_pending(conn)))
+    })
+    .await?;
     let env = git_env_for_url(&app, &url, Some(&account_id))
         .await
         .map_err(|e| e.to_string())?;
@@ -311,22 +313,17 @@ pub async fn sync_now(app: AppHandle, prefs: Map<String, Value>) -> Result<SyncR
     report.changes = applied.changes;
     report.failures = applied.failures;
 
-    {
-        let conn = db.lock().map_err(|e| e.to_string())?;
+    let pending_json = serde_json::to_string(&applied.pending).unwrap_or_default();
+    let last_json = serde_json::to_string(&report).unwrap_or_default();
+    crate::database::blocking_db(&db, move |conn| {
         if let Some(head) = repo::head(&dir) {
-            set(&conn, "sync.base", &head)?;
+            set(conn, "sync.base", &head)?;
         }
-        set(
-            &conn,
-            "sync.pending",
-            &serde_json::to_string(&applied.pending).unwrap_or_default(),
-        )?;
-        set(
-            &conn,
-            "sync.last",
-            &serde_json::to_string(&report).unwrap_or_default(),
-        )?;
-    }
+        set(conn, "sync.pending", &pending_json)?;
+        set(conn, "sync.last", &last_json)?;
+        Ok(())
+    })
+    .await?;
     Ok(SyncResult {
         report,
         prefs: applied.prefs,
